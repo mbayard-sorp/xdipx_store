@@ -1,0 +1,200 @@
+import { parse } from 'csv-parse/sync'
+import { kvGet, kvSet, KV_KEYS } from './kv.server'
+import { db } from './db.server'
+import { dealHistory } from '../../db/schema'
+import { sql } from 'drizzle-orm'
+import type { NalpacProduct, ProductScore } from '~/types'
+
+const FEED_URL = process.env['NALPAC_FEED_URL']!
+const FEED_TTL = 23 * 60 * 60 // 23 hours
+
+// ─── Text cleaning ─────────────────────────────────────────────────────────
+
+export function cleanDescription(raw: string): string {
+  // Fix apostrophes: "doesn'ft." -> "doesn't"
+  let clean = raw.replace(/(\w)ft\./g, "$1'")
+  // Fix quotes: `in.` after non-digits -> `"`
+  // IMPORTANT: do NOT replace "in." after digits — those are inches
+  clean = clean.replace(/(?<!\d)in\./g, '"')
+  return clean.replace(/\s+/g, ' ').trim()
+}
+
+// ─── Feed fetch ────────────────────────────────────────────────────────────
+
+export async function fetchNalpacFeed(): Promise<NalpacProduct[]> {
+  // Try cache first
+  const cached = await kvGet<NalpacProduct[]>(KV_KEYS.feedCache)
+  if (cached) return cached
+
+  const res = await fetch(FEED_URL)
+  if (!res.ok) throw new Error(`Feed fetch failed: ${res.status}`)
+  const csv = await res.text()
+
+  const records = parse(csv, {
+    columns:          true,
+    skip_empty_lines: true,
+    trim:             true,
+  }) as NalpacProduct[]
+
+  await kvSet(KV_KEYS.feedCache, records, FEED_TTL)
+  return records
+}
+
+// ─── Category helpers ──────────────────────────────────────────────────────
+
+export function parseCategories(raw: string): string[] {
+  return raw.split(',').map(c => c.trim()).filter(Boolean)
+}
+
+function getImages(product: NalpacProduct): string[] {
+  return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    .map(i => product[`Image ${i}` as keyof NalpacProduct] as string)
+    .filter(Boolean)
+}
+
+const SKU_NEEDS_IMAGEN = new Set<string>()
+function flagForImagenGeneration(sku: string): void { SKU_NEEDS_IMAGEN.add(sku) }
+export function getSKUsNeedingImagen(): string[] { return [...SKU_NEEDS_IMAGEN] }
+
+// ─── Scoring ───────────────────────────────────────────────────────────────
+
+function isEligible(product: NalpacProduct, recentSkus: Set<string>): boolean {
+  const qty      = parseInt(product['Total qty available'] ?? '0')
+  const wholesale = parseFloat(product['Wholesale'] ?? '0')
+  const msrp     = parseFloat(product['MSRP'] ?? '0')
+  return qty >= 20 && wholesale > 0 && msrp > 0 && !recentSkus.has(product.SKU)
+}
+
+export function scoreProduct(
+  product: NalpacProduct,
+  recentSkus: Set<string>,
+  recentCategories: string[][],
+): ProductScore | null {
+  if (!isEligible(product, recentSkus)) return null
+
+  const wholesale   = parseFloat(product['Wholesale'])
+  const msrp        = parseFloat(product['MSRP'])
+  const map         = parseFloat(product['MAP'] ?? '0') || 0
+  const qty         = parseInt(product['Total qty available'])
+  const images      = getImages(product)
+  const categories  = parseCategories(product['Sub-Category'])
+
+  // 1. Profitability (35%) — 65% gross margin = perfect score
+  const profScore = Math.min((msrp - wholesale) / msrp / 0.65, 1.0)
+
+  // 2. Deal-ability (30%)
+  let dealScore: number
+  let dealPrice: number
+  let discountPct: number
+  let mapType: ProductScore['mapType']
+
+  if (map === 0) {
+    dealPrice   = Math.max(wholesale * 1.4, msrp * 0.55)
+    discountPct = ((msrp - dealPrice) / msrp) * 100
+    dealScore   = 1.0
+    mapType     = 'no-map'
+  } else if (map < msrp) {
+    dealPrice   = map
+    discountPct = ((msrp - map) / msrp) * 100
+    dealScore   = Math.min(discountPct / 30, 1.0)
+    mapType     = 'below-msrp'
+  } else {
+    dealPrice   = msrp
+    discountPct = 0
+    dealScore   = 0.05  // MAP = MSRP — accessories only
+    mapType     = 'equals-msrp'
+  }
+
+  // 3. Inventory (20%)
+  const invScore =
+    qty < 50    ? 0.4 :
+    qty <= 250  ? 1.0 :
+    qty <= 600  ? 0.8 : 0.65
+
+  // 4. Image richness (10%)
+  if (images.length < 3) flagForImagenGeneration(product.SKU)
+  const imgScore = Math.min(images.length / 8, 1.0)
+
+  // 5. Category freshness (5%)
+  const overlap = categories.filter(c =>
+    recentCategories.flat().includes(c),
+  ).length
+  const catScore = Math.pow(0.70, overlap)
+
+  const score = (profScore * 0.35) + (dealScore * 0.30) + (invScore * 0.20)
+              + (imgScore * 0.10) + (catScore * 0.05)
+
+  return {
+    sku:         product.SKU,
+    title:       cleanDescription(product['Product Title']),
+    brand:       product.Brand,
+    score,
+    dealPrice:   Math.round(dealPrice * 100) / 100,
+    discountPct: Math.round(discountPct * 10) / 10,
+    profitPerUnit: Math.round((dealPrice - wholesale) * 100) / 100,
+    qty,
+    mapType,
+    images,
+    categories,
+  }
+}
+
+// ─── Main pipeline ─────────────────────────────────────────────────────────
+
+export async function dailyFeedProcessor(): Promise<{
+  topCandidates: ProductScore[]
+  needsImagen: string[]
+}> {
+  const [products, history] = await Promise.all([
+    fetchNalpacFeed(),
+    db.select({
+      sku:        dealHistory.sku,
+      categories: dealHistory.categories,
+    })
+    .from(dealHistory)
+    .orderBy(sql`${dealHistory.dealDate} DESC`)
+    .limit(90),
+  ])
+
+  const recentSkus        = new Set(history.map(h => h.sku))
+  const recentCategories  = history.map(h => (h.categories ?? []) as string[])
+
+  const scores = products
+    .map(p => scoreProduct(p, recentSkus, recentCategories))
+    .filter((s): s is ProductScore => s !== null)
+    .sort((a, b) => b.score - a.score)
+
+  // Store top candidates in KV for admin queue
+  const topCandidates = scores.slice(0, 30)
+  await kvSet('feed:top-candidates', topCandidates, FEED_TTL)
+
+  return {
+    topCandidates,
+    needsImagen: getSKUsNeedingImagen(),
+  }
+}
+
+export function buildTags(product: NalpacProduct): string[] {
+  const cats = parseCategories(product['Sub-Category'])
+  const tags: string[] = cats.map(c => `cat:${c.toLowerCase().replace(/\s+/g, '-')}`)
+
+  const forHimCats  = ['Vagina Strokers', 'Body Molds', 'Prostate Toys', 'Masturbators', 'Hands-Free Masturbators']
+  const forHerCats  = ['Dual Action and Rabbits', 'Finger and Clit', 'Air Pulse and Suction', 'Bullets and Eggs']
+  const coupleCats  = ['Couples and Wearable', 'Remote', 'Top Couples Toys', 'Restraints']
+
+  if (cats.some(c => forHimCats.includes(c)))   tags.push('for-him')
+  if (cats.some(c => forHerCats.includes(c)))   tags.push('for-her')
+  if (cats.some(c => coupleCats.includes(c)))   tags.push('for-couples')
+
+  tags.push(`brand:${product.Brand.toLowerCase().replace(/\s+/g, '-')}`)
+  tags.push(`nalpac-sku-${product.SKU}`)
+
+  const price = parseFloat(product['MSRP'])
+  tags.push(
+    price < 25  ? 'price:under-25'  :
+    price < 50  ? 'price:25-50'     :
+    price < 100 ? 'price:50-100'    : 'price:100-plus',
+  )
+
+  return tags
+}

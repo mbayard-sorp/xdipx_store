@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "server/index.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "server/index.ts"
+    }
+  ],
+  "crons": [
+    { "path": "/cron/daily-feed-processor", "schedule": "45 23 * * *" },
+    { "path": "/cron/deal-activator",       "schedule": "59 23 * * *" },
+    { "path": "/cron/profit-summary",       "schedule": "5 0 * * *"  }
+  ]
+}

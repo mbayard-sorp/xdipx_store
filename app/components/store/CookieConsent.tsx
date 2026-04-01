@@ -1,0 +1,63 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+
+const CONSENT_KEY     = 'xdipx_consent'
+const POLICY_VERSION  = '1.0'
+
+type ConsentChoice = 'all' | 'essential_only' | null
+
+export function CookieConsent() {
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const stored = localStorage.getItem(CONSENT_KEY)
+    if (!stored) setVisible(true)
+  }, [])
+
+  function accept(type: 'all' | 'essential_only') {
+    localStorage.setItem(CONSENT_KEY, JSON.stringify({ type, version: POLICY_VERSION, ts: Date.now() }))
+    setVisible(false)
+
+    // Fire consent log to API (non-blocking)
+    fetch('/api/consent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id:     crypto.randomUUID(),
+        consent_type:   type,
+        policy_version: POLICY_VERSION,
+      }),
+    }).catch(() => {/* non-critical */})
+  }
+
+  if (!visible) return null
+
+  return (
+    <div
+      className="fixed bottom-4 left-4 right-4 md:left-auto md:right-6 md:max-w-sm z-50 bg-brand-charcoal text-white rounded-2xl p-5 shadow-2xl fade-in"
+      role="dialog"
+      aria-label="Cookie consent"
+    >
+      <p className="text-sm leading-relaxed mb-4 text-white/80">
+        We use cookies to remember your preferences and improve your experience.{' '}
+        <a href="/privacy" className="underline text-white/60 hover:text-white">Privacy policy</a>
+      </p>
+      <div className="flex gap-2">
+        <button
+          onClick={() => accept('all')}
+          className="flex-1 bg-brand-gradient text-white text-sm font-bold py-2 rounded-full hover:opacity-90 transition-opacity"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          Accept all
+        </button>
+        <button
+          onClick={() => accept('essential_only')}
+          className="flex-1 bg-white/10 text-white/80 text-sm font-medium py-2 rounded-full hover:bg-white/20 transition-colors"
+        >
+          Essential only
+        </button>
+      </div>
+    </div>
+  )
+}
