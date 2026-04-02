@@ -36,6 +36,44 @@
   background: var(--background-image-brand-gradient);
 }
 
+/* Rich HTML content rendered from AI copy (full story, both ways, specs) */
+.prose {
+  color: inherit;
+  line-height: 1.7;
+}
+.prose p { margin-bottom: 1em; }
+.prose p:last-child { margin-bottom: 0; }
+.prose strong { font-weight: 600; }
+.prose em { font-style: italic; }
+.prose ul {
+  list-style-type: disc;
+  padding-left: 1.5em;
+  margin-bottom: 1em;
+  space-y: 0.5em;
+}
+.prose ol {
+  list-style-type: decimal;
+  padding-left: 1.5em;
+  margin-bottom: 1em;
+}
+.prose li { margin-bottom: 0.35em; }
+.prose li:last-child { margin-bottom: 0; }
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.prose th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-brand-mist);
+}
+.prose td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-brand-mist) 60%, transparent);
+}
+
 /* Animated countdown pulse */
 @keyframes countdown-pulse {
   0%, 100% { opacity: 1; }
@@ -54,6 +92,25 @@
 
 .fade-in {
   animation: fade-in 0.4s ease-out forwards;
+}
+
+/* TrustBar mobile marquee */
+@keyframes marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  animation: marquee 20s linear infinite;
+}
+
+/* Hide scrollbars */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 
 /* Card hover lift */

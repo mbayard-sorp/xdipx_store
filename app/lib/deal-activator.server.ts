@@ -13,9 +13,15 @@ import { kvSet, KV_KEYS } from './kv.server'
  * 3. Trigger Klaviyo daily deal email
  * 4. Update Vercel KV with today's deal handle
  */
+/** Returns YYYY-MM-DD in America/New_York (handles EST/EDT automatically). */
+function estDate(offsetDays = 0): string {
+  const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000)
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+}
+
 export async function dealActivator(): Promise<{ archived: string | null; activated: string | null }> {
-  const today    = new Date().toISOString().split('T')[0]!
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]!
+  const today    = estDate(0)
+  const tomorrow = estDate(1)
 
   // 1. Find + archive today's live deal
   const [liveToday] = await db

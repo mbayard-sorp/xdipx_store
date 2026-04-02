@@ -1,23 +1,28 @@
 import { useState } from 'react'
 
 interface ProductTabsProps {
-  fullStory: string
-  bullets:   string[]
-  forHim:    string
-  forHer:    string
+  fullStory:       string
+  boxContents:     string[]
+  forHim:          string
+  forHer:          string
+  specifications?: string
 }
 
-const TABS = ['The Full Story', "What's In The Box", 'Both Ways ♥'] as const
+const TABS = ['The Full Story', "What's In The Box", 'Both Ways ♥', 'Specs'] as const
 type Tab = typeof TABS[number]
 
-export function ProductTabs({ fullStory, bullets, forHim, forHer }: ProductTabsProps) {
+export function ProductTabs({ fullStory, boxContents, forHim, forHer, specifications }: ProductTabsProps) {
   const [active, setActive] = useState<Tab>('The Full Story')
+
+  const visibleTabs = specifications
+    ? TABS
+    : TABS.filter(t => t !== 'Specs')
 
   return (
     <div className="mt-10">
       {/* Tab nav */}
       <div className="flex gap-1 border-b border-brand-mist overflow-x-auto scrollbar-hide">
-        {TABS.map(tab => (
+        {visibleTabs.map(tab => (
           <button
             key={tab}
             onClick={() => setActive(tab)}
@@ -37,51 +42,65 @@ export function ProductTabs({ fullStory, bullets, forHim, forHer }: ProductTabsP
       {/* Tab content */}
       <div className="py-6">
         {active === 'The Full Story' && (
-          <div className="prose prose-sm max-w-none text-brand-charcoal/80 leading-relaxed">
-            {fullStory.split('\n').map((p, i) => (
-              <p key={i} className="mb-4 last:mb-0">{p}</p>
-            ))}
-          </div>
+          <div
+            className="prose prose-sm max-w-none text-brand-charcoal/80 leading-relaxed"
+            dangerouslySetInnerHTML={{ __html: fullStory }}
+          />
         )}
 
         {active === "What's In The Box" && (
           <ul className="space-y-2">
-            {bullets.length > 0 ? (
-              bullets.map((b, i) => (
+            {boxContents.length > 0 ? (
+              boxContents.map((item, i) => (
                 <li key={i} className="flex items-start gap-3 text-sm text-brand-charcoal/80">
                   <span className="text-brand-purple mt-0.5 shrink-0" aria-hidden="true">♥</span>
-                  {b}
+                  {item}
                 </li>
               ))
             ) : (
               <li className="text-sm text-brand-charcoal/50">
-                Product details not yet available.
+                Box contents not yet available.
               </li>
             )}
           </ul>
         )}
 
         {active === 'Both Ways ♥' && (
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <h3
-                className="font-bold text-brand-charcoal mb-2 flex items-center gap-2"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                <span className="text-brand-purple">♥</span> For Him
-              </h3>
-              <p className="text-sm text-brand-charcoal/80 leading-relaxed">{forHim}</p>
-            </div>
-            <div>
-              <h3
-                className="font-bold text-brand-charcoal mb-2 flex items-center gap-2"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                <span className="text-brand-purple">♥</span> For Her
-              </h3>
-              <p className="text-sm text-brand-charcoal/80 leading-relaxed">{forHer}</p>
+          <div className="space-y-6">
+            <div className="grid md:grid-cols-2 gap-6">
+              <div>
+                <h3
+                  className="font-bold text-brand-charcoal mb-2 flex items-center gap-2"
+                  style={{ fontFamily: 'var(--font-display)' }}
+                >
+                  <span className="text-brand-purple">♥</span> For Him
+                </h3>
+                <div
+                  className="prose prose-sm max-w-none text-brand-charcoal/80 leading-relaxed"
+                  dangerouslySetInnerHTML={{ __html: forHim }}
+                />
+              </div>
+              <div>
+                <h3
+                  className="font-bold text-brand-charcoal mb-2 flex items-center gap-2"
+                  style={{ fontFamily: 'var(--font-display)' }}
+                >
+                  <span className="text-brand-purple">♥</span> For Her
+                </h3>
+                <div
+                  className="prose prose-sm max-w-none text-brand-charcoal/80 leading-relaxed"
+                  dangerouslySetInnerHTML={{ __html: forHer }}
+                />
+              </div>
             </div>
           </div>
+        )}
+
+        {active === 'Specs' && specifications && (
+          <div
+            className="prose prose-sm max-w-none text-brand-charcoal/80 [&_table]:w-full [&_table]:text-sm [&_th]:text-left [&_th]:font-semibold [&_th]:py-2 [&_th]:px-3 [&_th]:bg-brand-mist [&_td]:py-2 [&_td]:px-3 [&_tr]:border-b [&_tr]:border-brand-mist/60"
+            dangerouslySetInnerHTML={{ __html: specifications }}
+          />
         )}
       </div>
     </div>

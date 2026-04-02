@@ -1,11 +1,13 @@
 import { Link, useLocation, Form } from 'react-router'
 
 const NAV_ITEMS = [
-  { to: '/admin',          label: 'Dashboard',  icon: '📊' },
-  { to: '/admin/queue',    label: 'Deal Queue',  icon: '📅' },
-  { to: '/admin/today',    label: "Today's Deal",icon: '⭐' },
-  { to: '/admin/generate', label: 'AI Generate', icon: '✨' },
-  { to: '/admin/emails',   label: 'Emails',      icon: '✉️' },
+  { to: '/admin',            label: 'Dashboard',   icon: '📊' },
+  { to: '/admin/today',      label: "Today's Deal", icon: '⭐' },
+  { to: '/admin/schedule',   label: 'Schedule',     icon: '🗓️' },
+  { to: '/admin/queue',      label: 'Deal Queue',   icon: '📋' },
+  { to: '/admin/generate',   label: 'AI Generate',  icon: '✨' },
+  { to: '/admin/emails',     label: 'Emails',       icon: '✉️' },
+  { to: '/admin/settings',   label: 'Settings',     icon: '⚙️' },
 ]
 
 export function AdminNav() {

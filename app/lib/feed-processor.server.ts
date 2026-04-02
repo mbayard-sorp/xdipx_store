@@ -1,12 +1,24 @@
 import { parse } from 'csv-parse/sync'
 import { kvGet, kvSet, KV_KEYS } from './kv.server'
 import { db } from './db.server'
-import { dealHistory } from '../../db/schema'
-import { sql } from 'drizzle-orm'
+import { dealHistory, pipelineSettings } from '../../db/schema'
+import { sql, eq } from 'drizzle-orm'
 import type { NalpacProduct, ProductScore } from '~/types'
 
-const FEED_URL = process.env['NALPAC_FEED_URL']!
 const FEED_TTL = 23 * 60 * 60 // 23 hours
+
+export async function getPipelineSetting(key: string): Promise<string | null> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, key))
+      .limit(1)
+    return rows[0]?.value ?? null
+  } catch {
+    return null
+  }
+}
 
 // ─── Text cleaning ─────────────────────────────────────────────────────────
 
@@ -26,7 +38,10 @@ export async function fetchNalpacFeed(): Promise<NalpacProduct[]> {
   const cached = await kvGet<NalpacProduct[]>(KV_KEYS.feedCache)
   if (cached) return cached
 
-  const res = await fetch(FEED_URL)
+  const feedUrl = await getPipelineSetting('feedUrl') || process.env['NALPAC_FEED_URL'] || ''
+  if (!feedUrl) throw new Error('No feed URL configured. Set NALPAC_FEED_URL env var or configure in Admin → Settings.')
+
+  const res = await fetch(feedUrl)
   if (!res.ok) throw new Error(`Feed fetch failed: ${res.status}`)
   const csv = await res.text()
 
@@ -37,6 +52,7 @@ export async function fetchNalpacFeed(): Promise<NalpacProduct[]> {
   }) as NalpacProduct[]
 
   await kvSet(KV_KEYS.feedCache, records, FEED_TTL)
+  await kvSet(KV_KEYS.feedCacheTimestamp, new Date().toISOString())
   return records
 }
 
@@ -125,12 +141,15 @@ export function scoreProduct(
               + (imgScore * 0.10) + (catScore * 0.05)
 
   return {
-    sku:         product.SKU,
-    title:       cleanDescription(product['Product Title']),
-    brand:       product.Brand,
+    sku:          product.SKU,
+    title:        cleanDescription(product['Product Title']),
+    brand:        product.Brand,
+    description:  cleanDescription(product['Product Description'] ?? ''),
     score,
-    dealPrice:   Math.round(dealPrice * 100) / 100,
-    discountPct: Math.round(discountPct * 10) / 10,
+    msrp:         Math.round(msrp * 100) / 100,
+    wholesaleCost: Math.round(wholesale * 100) / 100,
+    dealPrice:    Math.round(dealPrice * 100) / 100,
+    discountPct:  Math.round(discountPct * 10) / 10,
     profitPerUnit: Math.round((dealPrice - wholesale) * 100) / 100,
     qty,
     mapType,

@@ -5,66 +5,60 @@ interface TrustItem {
 }
 
 const TRUST_ITEMS: TrustItem[] = [
-  {
-    icon:  <LockIcon />,
-    label: 'Discreet shipping',
-    sub:   'Plain box, no logos',
-  },
-  {
-    icon:  <ShieldIcon />,
-    label: 'Secure checkout',
-    sub:   'SSL encrypted',
-  },
-  {
-    icon:  <PackageIcon />,
-    label: 'Discreet billing',
-    sub:   'Nothing obvious on your statement',
-  },
-  {
-    icon:  <HeartIcon />,
-    label: 'Returns accepted',
-    sub:   'Unopened within 14 days',
-  },
-  {
-    icon:  <TruckIcon />,
-    label: 'Ships in 1–2 days',
-    sub:   '3–7 days to your door',
-  },
+  { icon: <LockIcon />,    label: 'Discreet shipping',  sub: 'Plain box, no logos'              },
+  { icon: <ShieldIcon />,  label: 'Secure checkout',    sub: 'SSL encrypted'                    },
+  { icon: <PackageIcon />, label: 'Discreet billing',   sub: 'Nothing obvious on your statement'},
+  { icon: <HeartIcon />,   label: 'Returns accepted',   sub: 'Unopened within 14 days'          },
+  { icon: <TruckIcon />,   label: 'Ships in 1–2 days',  sub: '3–7 days to your door'            },
 ]
 
 export function TrustBar() {
   return (
-    <div className="bg-white border-y border-brand-mist py-3 px-4">
-      <ul className="max-w-6xl mx-auto flex items-center justify-between gap-2 overflow-x-auto scrollbar-hide">
-        {TRUST_ITEMS.map(({ icon, label, sub }) => (
-          <li
-            key={label}
-            className="flex items-center gap-2 shrink-0 px-2"
-          >
-            <span className="text-brand-purple shrink-0" aria-hidden="true">
-              {icon}
-            </span>
-            <div>
-              <p
-                className="text-brand-charcoal text-xs font-semibold leading-tight whitespace-nowrap"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                {label}
-              </p>
-              {sub && (
-                <p className="text-brand-charcoal/50 text-[11px] leading-tight whitespace-nowrap">
-                  {sub}
-                </p>
-              )}
-            </div>
-          </li>
+    <div className="bg-white border-y border-brand-mist py-3 px-4 overflow-hidden">
+      {/* Desktop: static 5-column row */}
+      <ul className="hidden md:flex max-w-6xl mx-auto items-center justify-between gap-2">
+        {TRUST_ITEMS.map(item => (
+          <TrustItem key={item.label} {...item} />
         ))}
       </ul>
+
+      {/* Mobile: marquee scroll */}
+      <div className="md:hidden relative">
+        <ul className="flex items-center gap-8 w-max animate-marquee">
+          {/* Duplicate for seamless loop */}
+          {[...TRUST_ITEMS, ...TRUST_ITEMS].map((item, i) => (
+            <TrustItem key={`${item.label}-${i}`} {...item} />
+          ))}
+        </ul>
+      </div>
     </div>
   )
 }
 
-// ── Icons (inline SVG — no icon library dependency) ──────────────────────────
+function TrustItem({ icon, label, sub }: TrustItem) {
+  return (
+    <li className="flex items-center gap-2 shrink-0 px-1">
+      <span className="text-brand-purple shrink-0" aria-hidden="true">
+        {icon}
+      </span>
+      <div>
+        <p
+          className="text-brand-charcoal text-xs font-semibold leading-tight whitespace-nowrap"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          {label}
+        </p>
+        {sub && (
+          <p className="text-brand-charcoal/50 text-[11px] leading-tight whitespace-nowrap">
+            {sub}
+          </p>
+        )}
+      </div>
+    </li>
+  )
+}
+
+// ── Icons ────────────────────────────────────────────────────────────────────
 
 function LockIcon() {
   return (

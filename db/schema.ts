@@ -86,3 +86,9 @@ export const dailyProfitSummary = pgTable('daily_profit_summary', {
   featuredSku:   varchar('featured_sku', { length: 20 }),
   adSpend:       decimal('ad_spend', { precision: 10, scale: 2 }).default('0').notNull(),
 })
+
+export const pipelineSettings = pgTable('pipeline_settings', {
+  key:       varchar('key', { length: 50 }).primaryKey(),
+  value:     text('value').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+})

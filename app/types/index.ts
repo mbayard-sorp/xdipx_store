@@ -7,6 +7,8 @@ export interface ProductImage {
 
 export interface ProductVariant {
   id: string
+  title: string
+  selectedOptions: { name: string; value: string }[]
   price: string
   compareAtPrice: string | null
   availableForSale: boolean
@@ -24,6 +26,8 @@ export interface Deal {
   worksForHim: string
   worksForHer: string
   featureBullets: string[]
+  boxContents: string[]
+  specifications?: string
   images: ProductImage[]
   moodImageUrl?: string
   dealPrice: number
@@ -37,9 +41,12 @@ export interface Deal {
   qty: number
   accessoryProductIds: string[]
   metaDescription: string
+  rawDescription?: string
   dealScore?: number
   nalpacSku?: string
   variantId: string
+  variants?: ProductVariant[]
+  options?: { name: string; values: string[] }[]
   rating?: { value: number; count: number }
 }
 
@@ -138,7 +145,10 @@ export interface ProductScore {
   sku: string
   title: string
   brand: string
+  description: string
   score: number
+  msrp: number
+  wholesaleCost: number
   dealPrice: number
   discountPct: number
   profitPerUnit: number
@@ -150,7 +160,7 @@ export interface ProductScore {
 
 // ─── DB / Deals ───────────────────────────────────────────────────────────
 
-export type DealHistoryStatus = 'pending' | 'approved' | 'live' | 'archived'
+export type DealHistoryStatus = 'pending' | 'pending_review' | 'approved' | 'live' | 'archived'
 
 export interface DealHistoryRow {
   id: number
@@ -189,7 +199,7 @@ export interface DailyProfitSummaryRow {
 // ─── Admin ─────────────────────────────────────────────────────────────────
 
 export interface GenerateCopyRequest {
-  type: 'tagline' | 'full_story' | 'both_ways' | 'bullets' | 'email_subjects' | 'seo_meta'
+  type: 'tagline' | 'full_story' | 'both_ways' | 'bullets' | 'box_contents' | 'email_subjects' | 'seo_meta' | 'specifications'
   product: {
     title: string
     brand: string
@@ -202,7 +212,7 @@ export interface GenerateCopyRequest {
 
 export interface GenerateCopyResult {
   type: string
-  content: string | string[]
+  content: string | string[] | { forHim: string; forHer: string }
 }
 
 // ─── Klaviyo ──────────────────────────────────────────────────────────────
