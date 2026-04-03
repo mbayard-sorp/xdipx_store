@@ -1,17 +1,29 @@
 import { Link, useLocation, Form } from 'react-router'
+import { useEffect, useState } from 'react'
 
+// Pending count is loaded client-side from the KV API route
 const NAV_ITEMS = [
-  { to: '/admin',            label: 'Dashboard',   icon: '📊' },
-  { to: '/admin/today',      label: "Today's Deal", icon: '⭐' },
-  { to: '/admin/schedule',   label: 'Schedule',     icon: '🗓️' },
-  { to: '/admin/queue',      label: 'Deal Queue',   icon: '📋' },
-  { to: '/admin/generate',   label: 'AI Generate',  icon: '✨' },
-  { to: '/admin/emails',     label: 'Emails',       icon: '✉️' },
-  { to: '/admin/settings',   label: 'Settings',     icon: '⚙️' },
+  { to: '/admin',              label: 'Dashboard',   icon: '📊' },
+  { to: '/admin/today',        label: "Today's Deal", icon: '⭐' },
+  { to: '/admin/schedule',     label: 'Schedule',     icon: '🗓️' },
+  { to: '/admin/queue',        label: 'Deal Queue',   icon: '📋' },
+  { to: '/admin/reviews',      label: 'Reviews',      icon: '⭐', badgeKey: 'reviews' },
+  { to: '/admin/generate',     label: 'AI Generate',  icon: '✨' },
+  { to: '/admin/emails',       label: 'Emails',       icon: '✉️' },
+  { to: '/admin/settings',     label: 'Settings',     icon: '⚙️' },
 ]
 
 export function AdminNav() {
   const { pathname } = useLocation()
+  const [pendingReviews, setPendingReviews] = useState<number | null>(null)
+
+  useEffect(() => {
+    // Fetch pending count from API (60s cache via KV on server)
+    fetch('/api/reviews/admin/pending-count')
+      .then(r => r.json() as Promise<{ count: number }>)
+      .then(data => setPendingReviews(data.count))
+      .catch(() => {/* non-critical */})
+  }, [pathname])
 
   return (
     <aside className="w-56 bg-brand-charcoal min-h-screen flex flex-col py-6 px-4 shrink-0">
@@ -26,8 +38,9 @@ export function AdminNav() {
       </Link>
 
       <nav className="flex-1 space-y-1">
-        {NAV_ITEMS.map(({ to, label, icon }) => {
+        {NAV_ITEMS.map(({ to, label, icon, badgeKey }) => {
           const active = pathname === to || (to !== '/admin' && pathname.startsWith(to))
+          const badge  = badgeKey === 'reviews' && pendingReviews && pendingReviews > 0 ? pendingReviews : null
           return (
             <Link
               key={to}
@@ -42,6 +55,11 @@ export function AdminNav() {
             >
               <span aria-hidden="true">{icon}</span>
               {label}
+              {badge != null && (
+                <span className="ml-auto bg-brand-coral text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                  {badge > 99 ? '99+' : badge}
+                </span>
+              )}
             </Link>
           )
         })}
