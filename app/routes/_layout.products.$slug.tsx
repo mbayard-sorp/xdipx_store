@@ -7,6 +7,7 @@ import {
 } from '~/lib/shopify.server'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
 import { getProductPageBlocks } from '~/lib/sanity.server'
+import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
 import { ProductTabs }            from '~/components/store/ProductTabs'
 import { SocialProofBar }         from '~/components/store/SocialProofBar'
@@ -15,8 +16,10 @@ import { AccessoryCard }          from '~/components/store/AccessoryCard'
 import { WaitlistButton }         from '~/components/store/WaitlistButton'
 import { EmailSubscribe }         from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }   from '~/components/cms/ContentBlockRenderer'
+import { ReviewList }             from '~/components/reviews/ReviewList'
 import type { Product } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
+import type { ReviewAggregate } from '~/types/reviews'
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
@@ -24,9 +27,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const deal = await getDealByHandle(params['slug']!)
   if (!deal) throw new Response('Product not found', { status: 404 })
 
-  const [accessories, pdpBlocks] = await Promise.all([
+  const url          = new URL(request.url)
+  const reviewPage   = parseInt(url.searchParams.get('reviewPage')   ?? '1', 10)
+  const reviewSort   = url.searchParams.get('reviewSort')   ?? 'newest'
+  const reviewFilter = url.searchParams.get('reviewFilter') ?? 'all'
+
+  const [accessories, pdpBlocks, reviewData, aggregate] = await Promise.all([
     getAccessoryProducts(deal.accessoryProductIds.slice(0, 4)),
     getProductPageBlocks(params['slug']!),
+    getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
+    getProductAggregate(deal.shopifyProductId),
   ])
 
   // Resolve Shopify products for any productCarousel blocks
@@ -42,7 +52,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const cartId = getCartIdFromCookie(request)
-  return { deal, accessories, pdpBlocks, carouselProductMap, cartId }
+  return {
+    deal,
+    accessories,
+    pdpBlocks,
+    carouselProductMap,
+    cartId,
+    reviews:       reviewData.reviews,
+    reviewTotal:   reviewData.total,
+    reviewPage,
+    reviewSort,
+    reviewFilter,
+    aggregate:     aggregate ?? null,
+  }
 }
 
 // ─── Meta ─────────────────────────────────────────────────────────────────────
@@ -81,7 +103,10 @@ export async function action({ request }: ActionFunctionArgs) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ProductPage() {
-  const { deal, accessories, pdpBlocks, carouselProductMap, cartId } = useLoaderData<typeof loader>()
+  const {
+    deal, accessories, pdpBlocks, carouselProductMap, cartId,
+    reviews, reviewTotal, reviewPage, reviewSort, reviewFilter, aggregate,
+  } = useLoaderData<typeof loader>()
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
 
@@ -380,6 +405,41 @@ export default function ProductPage() {
       ))}
 
       <EmailSubscribe />
+
+      {/* Reviews section */}
+      {aggregate ? (
+        <section className="max-w-4xl mx-auto px-4 pb-12">
+          <ReviewList
+            reviews={reviews}
+            aggregate={aggregate as ReviewAggregate}
+            productId={deal.shopifyProductId}
+            total={reviewTotal}
+            page={reviewPage}
+            sort={reviewSort}
+            filter={reviewFilter}
+          />
+        </section>
+      ) : (
+        <section className="max-w-4xl mx-auto px-4 pb-12">
+          <h2
+            className="text-xl font-bold text-brand-charcoal mb-4"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Customer Reviews
+          </h2>
+          <div className="text-center py-12 bg-white rounded-2xl border border-brand-mist">
+            <p className="text-4xl mb-3" aria-hidden="true">♥</p>
+            <p className="text-brand-charcoal/50 mb-4">No reviews yet — be the first!</p>
+            <a
+              href={`/review?productId=${deal.shopifyProductId}`}
+              className="inline-block bg-brand-gradient text-white font-semibold text-sm px-6 py-2.5 rounded-full hover:opacity-90 transition-opacity"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              Write a Review ♥
+            </a>
+          </div>
+        </section>
+      )}
 
       {/* Sticky mobile CTA */}
       {inStock && showSticky && (
