@@ -1,0 +1,80 @@
+/**
+ * /admin/reviews/products — Products with review aggregates.
+ */
+import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
+import { useLoaderData } from 'react-router'
+import { requireAdmin } from '~/lib/session.server'
+import { getProductsWithReviews } from '~/lib/reviews.server'
+import { StarRating } from '~/components/reviews/StarRating'
+
+export const meta: MetaFunction = () => [{ title: 'Reviews by Product — xdipx Admin' }]
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireAdmin(request)
+  const products = await getProductsWithReviews()
+  return { products }
+}
+
+export default function AdminReviewsByProduct() {
+  const { products } = useLoaderData<typeof loader>()
+
+  return (
+    <div>
+      <h1
+        className="text-2xl font-bold text-brand-charcoal mb-8"
+        style={{ fontFamily: 'var(--font-display)' }}
+      >
+        Reviews by Product
+      </h1>
+
+      <div className="bg-white rounded-2xl border border-brand-mist overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-brand-mist text-left">
+              <th className="px-5 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Product ID</th>
+              <th className="px-5 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Rating</th>
+              <th className="px-5 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Approved</th>
+              <th className="px-5 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Total</th>
+              <th className="px-5 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Verified</th>
+              <th className="px-5 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-5 py-12 text-center text-brand-charcoal/40">
+                  No products with reviews yet.
+                </td>
+              </tr>
+            )}
+            {products.map(product => (
+              <tr key={product.shopifyProductId} className="border-b border-brand-mist last:border-0 hover:bg-brand-mist/40 transition-colors">
+                <td className="px-5 py-3">
+                  <p className="font-mono text-xs text-brand-charcoal">{product.shopifyProductId}</p>
+                </td>
+                <td className="px-5 py-3">
+                  <div className="flex items-center gap-2">
+                    <StarRating value={Math.round(product.averageRating)} readonly size="sm" />
+                    <span className="text-xs text-brand-charcoal/60">{product.averageRating.toFixed(1)}</span>
+                  </div>
+                </td>
+                <td className="px-5 py-3 text-sm font-semibold text-brand-charcoal">{product.approvedCount}</td>
+                <td className="px-5 py-3 text-sm text-brand-charcoal/60">{product.totalCount}</td>
+                <td className="px-5 py-3 text-sm text-brand-charcoal/60">{product.verifiedCount}</td>
+                <td className="px-5 py-3">
+                  <a
+                    href={`/admin/reviews/queue?productId=${product.shopifyProductId}`}
+                    className="text-xs font-medium text-brand-purple hover:text-brand-purple-light transition-colors"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
+                    Manage →
+                  </a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
