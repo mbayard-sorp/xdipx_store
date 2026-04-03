@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { dailyFeedProcessor } from '../app/lib/feed-processor.server.js'
 import { dealActivator }       from '../app/lib/deal-activator.server.js'
 import { writeProfitSummary }  from '../app/lib/profit.server.js'
+import { getPendingReminderInvites, markReminderSent, getReviewSettings } from '../app/lib/reviews.server.js'
 
 export function createCronRoutes() {
   const router = Router()
@@ -54,6 +55,47 @@ export function createCronRoutes() {
       res.json({ ok: true })
     } catch (err) {
       console.error('[cron:profit-summary]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
+   * POST /cron/review-reminders
+   * Schedule: 9:00 AM daily — send reminder emails for pending invites
+   */
+  router.post('/review-reminders', guard, async (_req, res) => {
+    try {
+      const settings = await getReviewSettings()
+      if (!settings.remindersEnabled) {
+        res.json({ ok: true, skipped: true, reason: 'reminders disabled' })
+        return
+      }
+
+      const invites = await getPendingReminderInvites()
+      let sent = 0
+
+      for (const invite of invites) {
+        try {
+          const { trackEvent } = await import('../app/lib/klaviyo.server.js')
+
+          await trackEvent(invite.reviewerEmail, 'Review Reminder Sent', {
+            orderId:      invite.shopifyOrderId,
+            productId:    invite.shopifyProductId,
+            inviteToken:  invite.inviteToken,
+            reviewerName: invite.reviewerName,
+            reminderDate: new Date().toISOString(),
+          })
+
+          await markReminderSent(invite.id)
+          sent++
+        } catch (err) {
+          console.error('[cron:review-reminders] Failed for invite', invite.id, err)
+        }
+      }
+
+      res.json({ ok: true, total: invites.length, sent })
+    } catch (err) {
+      console.error('[cron:review-reminders]', err)
       res.status(500).json({ error: String(err) })
     }
   })
