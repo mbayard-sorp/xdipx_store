@@ -96,6 +96,87 @@ export async function trackEvent(
   })
 }
 
+// ─── Review events ─────────────────────────────────────────────────────────
+
+/**
+ * Fire when a new review is submitted.
+ * Triggers the "Review Submitted" Klaviyo flow.
+ */
+export async function trackReviewSubmitted(params: {
+  email: string
+  reviewerName: string
+  shopifyProductId: string
+  rating: number
+  reviewId: string
+  isVerifiedPurchase: boolean
+}): Promise<void> {
+  await trackEvent(params.email, 'Review Submitted', {
+    reviewer_name:        params.reviewerName,
+    shopify_product_id:   params.shopifyProductId,
+    rating:               params.rating,
+    review_id:            params.reviewId,
+    is_verified_purchase: params.isVerifiedPurchase,
+    submitted_at:         new Date().toISOString(),
+  })
+}
+
+/**
+ * Fire when a review is approved and published.
+ * Can trigger a "Your review is live!" email.
+ */
+export async function trackReviewApproved(params: {
+  email: string
+  reviewerName: string
+  shopifyProductId: string
+  reviewId: string
+}): Promise<void> {
+  await trackEvent(params.email, 'Review Approved', {
+    reviewer_name:      params.reviewerName,
+    shopify_product_id: params.shopifyProductId,
+    review_id:          params.reviewId,
+    approved_at:        new Date().toISOString(),
+  })
+}
+
+/**
+ * Fire when a review invite is sent.
+ * Triggers the "Review Request" Klaviyo flow.
+ */
+export async function trackReviewInviteSent(params: {
+  email: string
+  reviewerName: string
+  shopifyProductId: string
+  shopifyOrderId: string
+  inviteToken: string
+}): Promise<void> {
+  await trackEvent(params.email, 'Review Invite Sent', {
+    reviewer_name:      params.reviewerName,
+    shopify_product_id: params.shopifyProductId,
+    shopify_order_id:   params.shopifyOrderId,
+    invite_token:       params.inviteToken,
+    invite_url:         `https://xdipx.com/api/reviews/invite/${params.inviteToken}`,
+    sent_at:            new Date().toISOString(),
+  })
+}
+
+/**
+ * Fire when a review invite reminder is sent.
+ */
+export async function trackReviewReminderSent(params: {
+  email: string
+  reviewerName: string
+  shopifyProductId: string
+  inviteToken: string
+}): Promise<void> {
+  await trackEvent(params.email, 'Review Reminder Sent', {
+    reviewer_name:      params.reviewerName,
+    shopify_product_id: params.shopifyProductId,
+    invite_token:       params.inviteToken,
+    invite_url:         `https://xdipx.com/api/reviews/invite/${params.inviteToken}`,
+    reminder_at:        new Date().toISOString(),
+  })
+}
+
 export async function triggerDailyDealEmail(deal: {
   title: string
   tagline: string
