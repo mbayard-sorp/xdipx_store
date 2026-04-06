@@ -1,4 +1,4 @@
-import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductScore } from '~/types'
+import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore } from '~/types'
 import { toHTML } from '@portabletext/to-html'
 
 type PortableTextBlocks = Parameters<typeof toHTML>[0]
@@ -92,6 +92,17 @@ const PRODUCT_CORE_FRAGMENT = `
   images(first: 10) {
     edges { node { url altText } }
   }
+  media(first: 15) {
+    edges {
+      node {
+        mediaContentType
+        ... on Video {
+          previewImage { url }
+          sources { url mimeType height width }
+        }
+      }
+    }
+  }
   options { name values }
   variants(first: 20) {
     edges {
@@ -99,6 +110,7 @@ const PRODUCT_CORE_FRAGMENT = `
         id
         title
         selectedOptions { name value }
+        image { url altText }
         price { amount currencyCode }
         compareAtPrice { amount currencyCode }
         availableForSale
@@ -125,14 +137,31 @@ function parseImages(edges: { node: { url: string; altText: string | null } }[])
   return edges.map(e => ({ url: e.node.url, altText: e.node.altText ?? '' }))
 }
 
+function parseVideos(media?: { edges: { node: ShopifyMediaNode }[] }): ProductVideo[] {
+  if (!media) return []
+  return media.edges
+    .filter(e => e.node.mediaContentType === 'VIDEO' && e.node.previewImage && e.node.sources?.length)
+    .map(e => ({
+      previewImageUrl: e.node.previewImage!.url,
+      sources: (e.node.sources ?? []).map(s => ({ url: s.url, mimeType: s.mimeType })),
+    }))
+}
+
 interface ShopifyVariantNode {
   id: string
   title: string
   selectedOptions: { name: string; value: string }[]
+  image?: { url: string; altText: string | null }
   price: { amount: string }
   compareAtPrice: { amount: string } | null
   availableForSale: boolean
   quantityAvailable: number
+}
+
+interface ShopifyMediaNode {
+  mediaContentType: string
+  previewImage?: { url: string }
+  sources?: { url: string; mimeType: string; height: number; width: number }[]
 }
 
 interface ShopifyProductNode {
@@ -143,6 +172,7 @@ interface ShopifyProductNode {
   tags: string[]
   description: string
   images: { edges: { node: { url: string; altText: string | null } }[] }
+  media?: { edges: { node: ShopifyMediaNode }[] }
   options: { name: string; values: string[] }[]
   variants: { edges: { node: ShopifyVariantNode }[] }
   metafields: ({ namespace: string; key: string; value: string } | null)[]
@@ -155,10 +185,12 @@ function nodeToProduct(node: ShopifyProductNode): Product {
     handle: node.handle,
     title: node.title,
     images: parseImages(node.images.edges),
+    videos: parseVideos(node.media),
     variants: node.variants.edges.map(e => ({
       id: e.node.id,
       title: e.node.title,
       selectedOptions: e.node.selectedOptions,
+      ...(e.node.image ? { image: { url: e.node.image.url, altText: e.node.image.altText ?? '' } } : {}),
       price: e.node.price.amount,
       compareAtPrice: e.node.compareAtPrice?.amount ?? null,
       availableForSale: e.node.availableForSale,
@@ -188,6 +220,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     featureBullets: parseMetafieldJSON<string[]>(mf, 'feature_bullets', []),
     boxContents: parseMetafieldJSON<string[]>(mf, 'box_contents', []),
     images: parseImages(node.images.edges),
+    videos: parseVideos(node.media),
     ...(parseMetafield(mf, 'mood_image_url') ? { moodImageUrl: parseMetafield(mf, 'mood_image_url') } : {}),
     dealPrice: parseFloat(variant?.price.amount ?? '0'),
     msrp: parseFloat(parseMetafield(mf, 'original_price') || (variant?.compareAtPrice?.amount ?? '0')),
@@ -209,6 +242,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
       id: e.node.id,
       title: e.node.title,
       selectedOptions: e.node.selectedOptions,
+      ...(e.node.image ? { image: { url: e.node.image.url, altText: e.node.image.altText ?? '' } } : {}),
       price: e.node.price.amount,
       compareAtPrice: e.node.compareAtPrice?.amount ?? null,
       availableForSale: e.node.availableForSale,
@@ -287,8 +321,9 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
   interface RestVariant {
     id: number; title: string; price: string; compare_at_price: string | null
     inventory_quantity: number; option1: string | null; option2: string | null; option3: string | null
+    image_id: number | null
   }
-  interface RestImage { src: string; alt: string | null }
+  interface RestImage { id: number; src: string; alt: string | null }
   interface RestOption { name: string; values: string[] }
   interface RestProduct {
     id: number; handle: string; title: string; vendor: string; tags: string
@@ -306,6 +341,37 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
   ])
 
   if (!product) return null
+
+  // Fetch videos via Storefront API (REST API doesn't expose media)
+  interface StorefrontMediaNode {
+    mediaContentType: string
+    previewImage?: { url: string }
+    sources?: { url: string; mimeType: string; height: number; width: number }[]
+  }
+  const storefrontMedia = await storefront<{ product: { media: { edges: { node: StorefrontMediaNode }[] } } | null }>(`
+    query GetProductMedia($handle: String!) {
+      product(handle: $handle) {
+        media(first: 15) {
+          edges {
+            node {
+              mediaContentType
+              ... on Video {
+                previewImage { url }
+                sources { url mimeType height width }
+              }
+            }
+          }
+        }
+      }
+    }
+  `, { handle: product.handle }).catch(() => ({ product: null }))
+
+  const videos: ProductVideo[] = (storefrontMedia.product?.media.edges ?? [])
+    .filter(e => e.node.mediaContentType === 'VIDEO' && e.node.previewImage && e.node.sources?.length)
+    .map(e => ({
+      previewImageUrl: e.node.previewImage!.url,
+      sources: e.node.sources!.map(s => ({ url: s.url, mimeType: s.mimeType })),
+    }))
 
   const mf = [...(xdipxMF ?? []), ...(customMF ?? [])]
   const mfVal = (key: string) => mf.find(m => m.key === key)?.value ?? ''
@@ -331,6 +397,7 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     featureBullets: mfJSON<string[]>('feature_bullets', []),
     boxContents: mfJSON<string[]>('box_contents', []),
     images: product.images.map(img => ({ url: img.src, altText: img.alt ?? '' })),
+    videos,
     ...(mfVal('mood_image_url') ? { moodImageUrl: mfVal('mood_image_url') } : {}),
     dealPrice: parseFloat(variant?.price ?? '0'),
     msrp: parseFloat(mfVal('original_price') || (variant?.compare_at_price ?? '0')),
@@ -348,15 +415,29 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     ...(mfVal('deal_score') ? { dealScore: parseFloat(mfVal('deal_score')) } : {}),
     ...(mfVal('nalpac_sku') ? { nalpacSku: mfVal('nalpac_sku') } : {}),
     variantId: variant ? `gid://shopify/ProductVariant/${variant.id}` : '',
-    variants: product.variants.map(v => ({
-      id: `gid://shopify/ProductVariant/${v.id}`,
-      title: v.title,
-      selectedOptions: [],
-      price: v.price,
-      compareAtPrice: v.compare_at_price,
-      availableForSale: (v.inventory_quantity ?? 0) > 0,
-      quantityAvailable: v.inventory_quantity ?? 0,
-    })),
+    variants: product.variants.map(v => {
+      // Reconstruct selectedOptions from option1/option2/option3 + product.options
+      const selectedOptions: { name: string; value: string }[] = []
+      const optionSlots = [v.option1, v.option2, v.option3]
+      product.options.forEach((opt, i) => {
+        const val = optionSlots[i]
+        if (val) selectedOptions.push({ name: opt.name, value: val })
+      })
+      // Find variant image from product images
+      const variantImage = v.image_id
+        ? product.images.find(img => img.id === v.image_id)
+        : undefined
+      return {
+        id: `gid://shopify/ProductVariant/${v.id}`,
+        title: v.title,
+        selectedOptions,
+        ...(variantImage ? { image: { url: variantImage.src, altText: variantImage.alt ?? '' } } : {}),
+        price: v.price,
+        compareAtPrice: v.compare_at_price,
+        availableForSale: (v.inventory_quantity ?? 0) > 0,
+        quantityAvailable: v.inventory_quantity ?? 0,
+      }
+    }),
     options: product.options,
   }
 }
@@ -397,6 +478,27 @@ export async function getProductsByTag(tag: string, limit = 6): Promise<Product[
     }
   `, { query: `tag:${tag}`, first: limit })
   return data.products.edges.map(e => nodeToProduct(e.node))
+}
+
+export async function getCollectionProducts(handle: string, limit = 8): Promise<Product[]> {
+  const data = await storefront<{
+    collection: { products: { edges: { node: ShopifyProductNode }[] } } | null
+  }>(`
+    query GetCollectionProducts($handle: String!, $first: Int!) {
+      collection(handle: $handle) {
+        products(first: $first, sortKey: MANUAL) {
+          edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+        }
+      }
+    }
+  `, { handle, first: limit })
+  return (data.collection?.products.edges ?? []).map(e => nodeToProduct(e.node))
+}
+
+export async function getProductsByHandles(handles: string[]): Promise<Product[]> {
+  if (handles.length === 0) return []
+  const results = await Promise.all(handles.map(h => getProductByHandle(h)))
+  return results.filter((p): p is Product => p !== null)
 }
 
 export async function getBonusDeal(): Promise<Product | null> {
@@ -472,11 +574,236 @@ export async function getVaultDeals(page = 1, limit = 20): Promise<{ deals: Vaul
   }
 }
 
+export async function getCollectionDeals(
+  handle: string,
+  page = 1,
+  limit = 20,
+): Promise<{ deals: VaultDeal[]; hasNextPage: boolean }> {
+  // Shopify uses opaque cursors — walk through prior pages to get the cursor
+  let after: string | null = null
+  for (let p = 1; p < page; p++) {
+    const skip = await storefront<{
+      collection: {
+        products: { edges: { cursor: string }[] }
+      } | null
+    }>(`
+      query SkipPage($handle: String!, $first: Int!, $after: String) {
+        collection(handle: $handle) {
+          products(first: $first, after: $after, sortKey: MANUAL) {
+            edges { cursor }
+          }
+        }
+      }
+    `, { handle, first: limit, after })
+    const edges = skip.collection?.products.edges
+    if (!edges?.length) return { deals: [], hasNextPage: false }
+    after = edges[edges.length - 1]!.cursor
+  }
+
+  const data = await storefront<{
+    collection: {
+      products: {
+        pageInfo: { hasNextPage: boolean }
+        edges: { cursor: string; node: ShopifyProductNode }[]
+      }
+    } | null
+  }>(`
+    query GetCollectionDeals($handle: String!, $first: Int!, $after: String) {
+      collection(handle: $handle) {
+        products(first: $first, after: $after, sortKey: MANUAL) {
+          pageInfo { hasNextPage }
+          edges { cursor node { ${PRODUCT_CORE_FRAGMENT} } }
+        }
+      }
+    }
+  `, { handle, first: limit, after })
+
+  if (!data.collection) return { deals: [], hasNextPage: false }
+  return {
+    deals: data.collection.products.edges.map(e => {
+      const deal = nodeToDeal(e.node)
+      return { id: deal.id, handle: deal.handle, seoTitle: deal.seoTitle, dealDate: deal.dealDate, dealPrice: deal.dealPrice, msrp: deal.msrp, images: deal.images, brand: deal.brand, category: deal.category, dealStatus: 'archived' as const, qty: deal.qty }
+    }),
+    hasNextPage: data.collection.products.pageInfo.hasNextPage,
+  }
+}
+
+// ─── Navigation Menu ─────────────────────────────────────────────────────
+
+export interface ShopifyMenuItem {
+  title: string
+  url: string
+  items: ShopifyMenuItem[]
+}
+
+export async function getMainMenu(): Promise<ShopifyMenuItem[]> {
+  const data = await storefront<{
+    menu: { items: ShopifyMenuItem[] } | null
+  }>(`
+    query GetMenu {
+      menu(handle: "main-menu") {
+        items {
+          title
+          url
+          items {
+            title
+            url
+            items {
+              title
+              url
+            }
+          }
+        }
+      }
+    }
+  `)
+  return data.menu?.items ?? []
+}
+
+// Fetch all Shopify collections for the admin collection picker.
+export async function getShopifyCollections(): Promise<{ handle: string; title: string }[]> {
+  const data = await adminGraphQL<{
+    collections: { edges: { node: { handle: string; title: string } }[] }
+  }>(`
+    query GetCollections {
+      collections(first: 100, sortKey: TITLE) {
+        edges { node { handle title } }
+      }
+    }
+  `)
+  return data.collections.edges.map(e => e.node)
+}
+
 export async function getAccessoryProducts(ids: string[]): Promise<Product[]> {
   if (!ids.length) return []
   const queries = ids.map((id, i) => `p${i}: product(id: "${id}") { ${PRODUCT_CORE_FRAGMENT} }`).join('\n')
   const data = await storefront<Record<string, ShopifyProductNode | null>>(`query { ${queries} }`)
   return Object.values(data).filter(Boolean).map(n => nodeToProduct(n!))
+}
+
+// ─── Admin Product Search (for admin pickers) ─────────────────────────────
+
+export interface AdminProductSearchResult {
+  id: string
+  title: string
+  handle: string
+  image: string | null
+  price: number
+  compareAtPrice: number | null
+  inventoryQuantity: number
+  sku: string
+  wholesaleCost: number | null
+  mapPrice: number | null
+}
+
+export async function searchAdminProducts(query: string, limit = 20): Promise<AdminProductSearchResult[]> {
+  const gqlQuery = query.trim() ? `title:*${query.trim()}*` : 'status:active'
+  const data = await adminGraphQL<{
+    products: {
+      nodes: Array<{
+        id: string
+        title: string
+        handle: string
+        featuredImage: { url: string } | null
+        variants: { nodes: Array<{ price: string; compareAtPrice: string | null; inventoryQuantity: number; sku: string }> }
+        wholesaleCostMf: { value: string } | null
+        mapPriceMf:      { value: string } | null
+      }>
+    }
+  }>(`
+    query SearchProducts($query: String!, $first: Int!) {
+      products(query: $query, first: $first, sortKey: TITLE) {
+        nodes {
+          id title handle
+          featuredImage { url }
+          variants(first: 1) {
+            nodes { price compareAtPrice inventoryQuantity sku }
+          }
+          wholesaleCostMf: metafield(namespace: "xdipx", key: "wholesale_cost") { value }
+          mapPriceMf:      metafield(namespace: "xdipx", key: "map_price")      { value }
+        }
+      }
+    }
+  `, { query: gqlQuery, first: limit })
+
+  return (data.products.nodes ?? []).map(node => {
+    const variant = node.variants.nodes[0]
+    return {
+      id:                node.id,
+      title:             node.title,
+      handle:            node.handle,
+      image:             node.featuredImage?.url ?? null,
+      price:             parseFloat(variant?.price ?? '0'),
+      compareAtPrice:    variant?.compareAtPrice ? parseFloat(variant.compareAtPrice) : null,
+      inventoryQuantity: variant?.inventoryQuantity ?? 0,
+      sku:               variant?.sku ?? '',
+      wholesaleCost:     node.wholesaleCostMf ? parseFloat(node.wholesaleCostMf.value) : null,
+      mapPrice:          node.mapPriceMf      ? parseFloat(node.mapPriceMf.value)      : null,
+    }
+  })
+}
+
+// Batch-fetch variant prices for a list of numeric product IDs via Admin API.
+// Uses Admin API so draft/unpublished products are included.
+export async function getAdminProductPrices(numericIds: string[]): Promise<Record<string, number>> {
+  if (numericIds.length === 0) return {}
+  const gids = numericIds.map(id => `gid://shopify/Product/${id}`)
+  const data = await adminGraphQL<{
+    nodes: Array<{ id: string; variants: { nodes: Array<{ price: string }> } } | null>
+  }>(`
+    query GetProductPrices($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on Product {
+          id
+          variants(first: 1) { nodes { price } }
+        }
+      }
+    }
+  `, { ids: gids })
+  const result: Record<string, number> = {}
+  for (const node of data.nodes ?? []) {
+    if (!node) continue
+    const numericId = node.id.replace('gid://shopify/Product/', '')
+    const price = node.variants.nodes[0]?.price
+    if (price != null) result[numericId] = parseFloat(price)
+  }
+  return result
+}
+
+// Batch-fetch price + all images for a list of numeric product IDs via Admin API.
+export async function getAdminProductData(
+  numericIds: string[],
+): Promise<Record<string, { price: number | null; images: string[] }>> {
+  if (numericIds.length === 0) return {}
+  const gids = numericIds.map(id => `gid://shopify/Product/${id}`)
+  const data = await adminGraphQL<{
+    nodes: Array<{
+      id: string
+      variants: { nodes: Array<{ price: string }> }
+      images: { nodes: Array<{ url: string }> }
+    } | null>
+  }>(`
+    query GetProductData($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on Product {
+          id
+          variants(first: 1) { nodes { price } }
+          images(first: 12) { nodes { url } }
+        }
+      }
+    }
+  `, { ids: gids })
+  const result: Record<string, { price: number | null; images: string[] }> = {}
+  for (const node of data.nodes ?? []) {
+    if (!node) continue
+    const numericId = node.id.replace('gid://shopify/Product/', '')
+    const price = node.variants.nodes[0]?.price
+    result[numericId] = {
+      price:  price != null ? parseFloat(price) : null,
+      images: node.images.nodes.map(img => img.url),
+    }
+  }
+  return result
 }
 
 // ─── Cart Mutations ───────────────────────────────────────────────────────
@@ -920,6 +1247,504 @@ export async function createShopifyProductFromFeed(product: ProductScore): Promi
   }
 
   return res.product.id
+}
+
+/**
+ * Create a Shopify product (DRAFT) with multiple variants for bulk import.
+ * Each variant maps to one BulkVariantRow. Returns the numeric product ID.
+ * Includes 'deal-status-pending' in initial tags to avoid a separate setDealStatus call.
+ */
+export async function createShopifyProductWithVariants(
+  master: {
+    title: string
+    brand: string
+    sku: string
+    images: string[]
+    msrp: number
+    categories: string[]
+  },
+  variants: import('~/types').BulkVariantRow[],
+  optionName: string,
+): Promise<string> {
+  const handle = master.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 200)
+
+  const tags: string[] = [
+    `brand:${master.brand.toLowerCase().replace(/\s+/g, '-')}`,
+    `nalpac-sku-${master.sku}`,
+    'deal-status-pending',
+    ...(master.msrp < 25  ? ['price:under-25']  :
+        master.msrp < 50  ? ['price:25-50']      :
+        master.msrp < 100 ? ['price:50-100']     : ['price:100-plus']),
+    ...master.categories.map(c => `cat:${c.toLowerCase().replace(/\s+/g, '-')}`),
+  ]
+
+  const res = await shopifyAdmin<{
+    product: {
+      id: string
+      variants: { id: string; sku: string; inventory_item_id: string }[]
+    }
+  }>('/products.json', 'POST', {
+    product: {
+      title:   master.title,
+      handle,
+      vendor:  master.brand,
+      tags:    tags.join(', '),
+      status:  'draft',
+      options: [{ name: optionName, values: variants.map(v => v.optionValue) }],
+      variants: variants.map(v => ({
+        sku:                  v.sku,
+        option1:              v.optionValue,
+        price:                v.price.toFixed(2),
+        compare_at_price:     v.compareAtPrice.toFixed(2),
+        inventory_management: 'shopify',
+        inventory_quantity:   v.qty,
+      })),
+      images: master.images.slice(0, 10).map(src => ({ src })),
+    },
+  })
+
+  // Set wholesale cost on each variant's inventory item
+  for (let i = 0; i < res.product.variants.length; i++) {
+    const shopifyVariant = res.product.variants[i]
+    const bulkVariant    = variants[i]
+    if (shopifyVariant?.inventory_item_id && bulkVariant) {
+      await shopifyAdmin(`/inventory_items/${shopifyVariant.inventory_item_id}.json`, 'PUT', {
+        inventory_item: {
+          id:   shopifyVariant.inventory_item_id,
+          cost: bulkVariant.wholesale.toFixed(2),
+        },
+      })
+      // 250ms delay between inventory item updates to avoid rate limiting
+      if (i < res.product.variants.length - 1) {
+        await new Promise(r => setTimeout(r, 250))
+      }
+    }
+  }
+
+  return res.product.id
+}
+
+// ─── Video / Media upload ─────────────────────────────────────────────────────
+
+interface StagedTarget {
+  url: string
+  resourceUrl: string
+  parameters: { name: string; value: string }[]
+}
+
+/**
+ * Step 1 of Shopify media upload: request a presigned staged upload URL.
+ * Returns the staged target including the upload URL and final resource URL.
+ */
+export async function createStagedVideoUpload(filename: string, fileSizeBytes: number): Promise<StagedTarget> {
+  const data = await adminGraphQL<{
+    stagedUploadsCreate: {
+      stagedTargets: StagedTarget[]
+      userErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation StagedUploadsCreate($input: [StagedUploadInput!]!) {
+      stagedUploadsCreate(input: $input) {
+        stagedTargets {
+          url
+          resourceUrl
+          parameters { name value }
+        }
+        userErrors { field message }
+      }
+    }
+  `, {
+    input: [{
+      filename,
+      mimeType: 'video/mp4',
+      httpMethod: 'POST',
+      resource: 'VIDEO',
+      fileSize: String(fileSizeBytes),
+    }],
+  })
+
+  if (data.stagedUploadsCreate.userErrors.length > 0) {
+    const errs = data.stagedUploadsCreate.userErrors.map(e => e.message).join('; ')
+    throw new Error(`Shopify stagedUploadsCreate error: ${errs}`)
+  }
+
+  const target = data.stagedUploadsCreate.stagedTargets[0]
+  if (!target) throw new Error('Shopify returned no staged upload target')
+  return target
+}
+
+/**
+ * Step 2: attach the staged video to a Shopify product via productCreateMedia.
+ * Returns the new media GID.
+ */
+export async function attachVideoToProduct(
+  shopifyProductGid: string,
+  resourceUrl: string,
+  altText: string,
+): Promise<string> {
+  const data = await adminGraphQL<{
+    productCreateMedia: {
+      media: { id: string; status: string }[]
+      mediaUserErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation ProductCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+      productCreateMedia(productId: $productId, media: $media) {
+        media {
+          ... on Video { id status }
+          ... on ExternalVideo { id status }
+          ... on MediaImage { id status }
+        }
+        mediaUserErrors { field message }
+      }
+    }
+  `, {
+    productId: shopifyProductGid,
+    media: [{
+      originalSource: resourceUrl,
+      alt: altText,
+      mediaContentType: 'VIDEO',
+    }],
+  })
+
+  if (data.productCreateMedia.mediaUserErrors.length > 0) {
+    const errs = data.productCreateMedia.mediaUserErrors.map(e => e.message).join('; ')
+    throw new Error(`Shopify productCreateMedia error: ${errs}`)
+  }
+
+  const mediaId = data.productCreateMedia.media[0]?.id
+  if (!mediaId) throw new Error('Shopify returned no media ID after productCreateMedia')
+  return mediaId
+}
+
+/**
+ * Step 3: poll until the media status is READY (or timeout after 90s).
+ * Returns true if READY, false on timeout (caller should log and continue).
+ */
+export async function pollMediaReady(
+  shopifyProductGid: string,
+  mediaId: string,
+  maxWaitMs = 90_000,
+): Promise<boolean> {
+  const interval = 10_000
+  const deadline = Date.now() + maxWaitMs
+
+  while (Date.now() < deadline) {
+    const data = await adminGraphQL<{
+      product: {
+        media: {
+          edges: {
+            node: { id: string; status: string }
+          }[]
+        }
+      } | null
+    }>(`
+      query PollMediaStatus($productId: ID!) {
+        product(id: $productId) {
+          media(first: 20) {
+            edges {
+              node {
+                ... on Video { id status }
+                ... on ExternalVideo { id status }
+                ... on MediaImage { id status }
+              }
+            }
+          }
+        }
+      }
+    `, { productId: shopifyProductGid })
+
+    const node = data.product?.media.edges.find(e => e.node.id === mediaId)?.node
+    if (node?.status === 'READY') return true
+
+    await new Promise(r => setTimeout(r, interval))
+  }
+
+  return false // timed out
+}
+
+/**
+ * Reorder product media so a specific media ID is first (primary thumbnail).
+ * Shopify uses productReorderMedia for this.
+ */
+export async function setMediaAsPrimary(shopifyProductGid: string, mediaId: string): Promise<void> {
+  await adminGraphQL<unknown>(`
+    mutation ReorderMedia($id: ID!, $moves: [MoveInput!]!) {
+      productReorderMedia(id: $id, moves: $moves) {
+        mediaUserErrors { field message }
+      }
+    }
+  `, {
+    id: shopifyProductGid,
+    moves: [{ id: mediaId, newPosition: '0' }],
+  })
+}
+
+/**
+ * Upload a JPEG thumbnail buffer to Shopify as a product image via staged upload.
+ * Returns the new media GID.
+ */
+export async function uploadThumbnailToProduct(
+  shopifyProductGid: string,
+  imageBuffer: Buffer,
+  filename: string,
+  altText: string,
+): Promise<string> {
+  // 1. Create staged upload target for the image
+  const staged = await adminGraphQL<{
+    stagedUploadsCreate: {
+      stagedTargets: StagedTarget[]
+      userErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation StagedUploadsCreate($input: [StagedUploadInput!]!) {
+      stagedUploadsCreate(input: $input) {
+        stagedTargets { url resourceUrl parameters { name value } }
+        userErrors { field message }
+      }
+    }
+  `, {
+    input: [{
+      filename,
+      mimeType:   'image/jpeg',
+      httpMethod: 'POST',
+      resource:   'IMAGE',
+      fileSize:   String(imageBuffer.length),
+    }],
+  })
+
+  if (staged.stagedUploadsCreate.userErrors.length > 0) {
+    const errs = staged.stagedUploadsCreate.userErrors.map(e => e.message).join('; ')
+    throw new Error(`Shopify stagedUploadsCreate (image) error: ${errs}`)
+  }
+
+  const target = staged.stagedUploadsCreate.stagedTargets[0]
+  if (!target) throw new Error('Shopify returned no staged upload target for image')
+
+  // 2. POST image to staged URL
+  const form = new FormData()
+  for (const param of target.parameters) form.append(param.name, param.value)
+  form.append('file', new Blob([imageBuffer], { type: 'image/jpeg' }), filename)
+
+  const uploadRes = await fetch(target.url, { method: 'POST', body: form })
+  if (!uploadRes.ok) {
+    throw new Error(`Staged image upload failed: ${uploadRes.status} ${await uploadRes.text()}`)
+  }
+
+  // 3. Attach to product as IMAGE media
+  const data = await adminGraphQL<{
+    productCreateMedia: {
+      media: { id: string }[]
+      mediaUserErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation ProductCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+      productCreateMedia(productId: $productId, media: $media) {
+        media { ... on MediaImage { id } }
+        mediaUserErrors { field message }
+      }
+    }
+  `, {
+    productId: shopifyProductGid,
+    media: [{
+      originalSource:   target.resourceUrl,
+      alt:              altText,
+      mediaContentType: 'IMAGE',
+    }],
+  })
+
+  if (data.productCreateMedia.mediaUserErrors.length > 0) {
+    const errs = data.productCreateMedia.mediaUserErrors.map(e => e.message).join('; ')
+    throw new Error(`Shopify productCreateMedia (image) error: ${errs}`)
+  }
+
+  const mediaId = data.productCreateMedia.media[0]?.id
+  if (!mediaId) throw new Error('Shopify returned no media ID after image upload')
+  return mediaId
+}
+
+// ─── Admin Image Management ───────────────────────────────────────────────────
+
+export interface AdminProductImage {
+  id: number
+  position: number
+  src: string
+  alt: string | null
+  width?: number
+  height?: number
+}
+
+export async function getProductAdminImages(numericId: string): Promise<AdminProductImage[]> {
+  const id = numericId.replace('gid://shopify/Product/', '')
+  const data = await shopifyAdmin<{ images: AdminProductImage[] }>(`/products/${id}/images.json?limit=250`)
+  return data.images ?? []
+}
+
+export async function deleteProductImage(numericProductId: string, imageId: number): Promise<void> {
+  const id = numericProductId.replace('gid://shopify/Product/', '')
+  await shopifyAdmin<unknown>(`/products/${id}/images/${imageId}.json`, 'DELETE')
+}
+
+export async function reorderProductImages(
+  numericProductId: string,
+  imagePositions: { id: number; position: number }[],
+): Promise<void> {
+  const id = numericProductId.replace('gid://shopify/Product/', '')
+  await Promise.all(
+    imagePositions.map(img =>
+      shopifyAdmin<unknown>(`/products/${id}/images/${img.id}.json`, 'PUT', {
+        image: { id: img.id, position: img.position },
+      }),
+    ),
+  )
+}
+
+export async function associateImageWithVariant(
+  _numericProductId: string,
+  numericVariantId: string,
+  imageId: number,
+): Promise<void> {
+  const vid = numericVariantId.replace('gid://shopify/ProductVariant/', '')
+  await shopifyAdmin<unknown>(`/variants/${vid}.json`, 'PUT', {
+    variant: { id: parseInt(vid), image_id: imageId },
+  })
+}
+
+// ─── Customer Auth (Storefront API) ──────────────────────────────────────────
+
+export interface StorefrontCustomer {
+  id: string
+  firstName: string
+  lastName: string
+  email: string
+  phone: string | null
+  orders: StorefrontOrder[]
+}
+
+export interface StorefrontOrder {
+  id: string
+  orderNumber: number
+  processedAt: string
+  financialStatus: string
+  fulfillmentStatus: string
+  totalPrice: { amount: string; currencyCode: string }
+  lineItems: {
+    title: string
+    quantity: number
+    imageUrl: string | null
+    price: string
+  }[]
+}
+
+export async function createCustomerAccessToken(
+  email: string,
+  password: string,
+): Promise<{ accessToken: string; expiresAt: string } | { error: string }> {
+  const data = await storefront<{
+    customerAccessTokenCreate: {
+      customerAccessToken: { accessToken: string; expiresAt: string } | null
+      customerUserErrors: { message: string }[]
+    }
+  }>(`
+    mutation CustomerAccessTokenCreate($input: CustomerAccessTokenCreateInput!) {
+      customerAccessTokenCreate(input: $input) {
+        customerAccessToken { accessToken expiresAt }
+        customerUserErrors { message }
+      }
+    }
+  `, { input: { email, password } })
+
+  const { customerAccessToken, customerUserErrors } = data.customerAccessTokenCreate
+  if (customerUserErrors.length > 0) {
+    return { error: customerUserErrors[0]?.message ?? 'Login failed' }
+  }
+  if (!customerAccessToken) return { error: 'Login failed' }
+  return customerAccessToken
+}
+
+export async function getStorefrontCustomer(
+  accessToken: string,
+): Promise<StorefrontCustomer | null> {
+  const data = await storefront<{
+    customer: {
+      id: string; firstName: string; lastName: string
+      email: string; phone: string | null
+      orders: {
+        edges: {
+          node: {
+            id: string; orderNumber: number; processedAt: string
+            financialStatus: string; fulfillmentStatus: string
+            currentTotalPrice: { amount: string; currencyCode: string }
+            lineItems: {
+              edges: {
+                node: {
+                  title: string; quantity: number
+                  variant: {
+                    image: { url: string } | null
+                    price: { amount: string }
+                  } | null
+                }
+              }[]
+            }
+          }
+        }[]
+      }
+    } | null
+  }>(`
+    query GetCustomer($customerAccessToken: String!) {
+      customer(customerAccessToken: $customerAccessToken) {
+        id firstName lastName email phone
+        orders(first: 20, sortKey: PROCESSED_AT, reverse: true) {
+          edges {
+            node {
+              id orderNumber processedAt financialStatus fulfillmentStatus
+              currentTotalPrice { amount currencyCode }
+              lineItems(first: 5) {
+                edges {
+                  node {
+                    title quantity
+                    variant {
+                      image { url }
+                      price { amount }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `, { customerAccessToken: accessToken }).catch(() => ({ customer: null }))
+
+  const c = data?.customer
+  if (!c) return null
+
+  return {
+    id:        c.id,
+    firstName: c.firstName,
+    lastName:  c.lastName,
+    email:     c.email,
+    phone:     c.phone,
+    orders:    c.orders.edges.map(({ node: o }) => ({
+      id:                o.id,
+      orderNumber:       o.orderNumber,
+      processedAt:       o.processedAt,
+      financialStatus:   o.financialStatus,
+      fulfillmentStatus: o.fulfillmentStatus,
+      totalPrice:        o.currentTotalPrice,
+      lineItems:         o.lineItems.edges.map(({ node: li }) => ({
+        title:    li.title,
+        quantity: li.quantity,
+        imageUrl: li.variant?.image?.url ?? null,
+        price:    li.variant?.price.amount ?? '0',
+      })),
+    })),
+  }
 }
 
 function buildProductTags(product: ProductScore): string[] {

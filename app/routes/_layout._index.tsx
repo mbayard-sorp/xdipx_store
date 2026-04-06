@@ -3,6 +3,7 @@ import { useLoaderData, redirect } from 'react-router'
 import {
   getDealByShopifyId, getProductsByTag, getBonusDeal, getRecentVaultDeals,
   getAccessoryProducts, getCart, addToCart, createCart,
+  getCollectionProducts, getProductsByHandles,
 } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
 import { dealHistory } from '../../db/schema'
@@ -10,6 +11,7 @@ import { eq } from 'drizzle-orm'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
 import { kvGet, KV_KEYS }                      from '~/lib/kv.server'
 import { getHomepageSections }                  from '~/lib/sanity.server'
+import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { CountdownTimer }        from '~/components/store/CountdownTimer'
 import { DailyDealHero }         from '~/components/store/DailyDealHero'
 import { AccessoryCard }         from '~/components/store/AccessoryCard'
@@ -50,7 +52,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const carouselProductMap: Record<string, Product[]> = {}
   if (carouselBlocks.length > 0) {
     const results = await Promise.all(
-      carouselBlocks.map(b => getProductsByTag(b.shopifyTag, b.productLimit ?? 8)),
+      carouselBlocks.map(b => {
+        const limit = b.productLimit ?? 8
+        const source = b.source ?? 'tag'
+        if (source === 'collection' && b.collectionHandle) {
+          return getCollectionProducts(b.collectionHandle, limit)
+        }
+        if (source === 'manual' && b.productHandles?.length) {
+          return getProductsByHandles(b.productHandles.map(p => p.handle))
+        }
+        // Default: tag-based (backwards compatible)
+        return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([])
+      }),
     )
     carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
   }
@@ -62,9 +75,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  const [accessories, viewers] = await Promise.all([
+  const [accessories, viewers, reviewData, aggregate] = await Promise.all([
     getAccessoryProducts(deal.accessoryProductIds.slice(0, 4)),
     kvGet<number>(KV_KEYS.viewerCount(deal.handle)).then(n => n ?? 0),
+    getProductReviews(deal.shopifyProductId, { sort: 'newest', page: 1, perPage: 10 }),
+    getProductAggregate(deal.shopifyProductId),
   ])
 
   const cartId = getCartIdFromCookie(request)
@@ -72,6 +87,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     deal, accessories, forHim, forHer, bonusDeal, vaultPreview,
     cartId, viewers, soldToday: 0, cmsData, carouselProductMap,
+    reviews: reviewData.reviews,
+    reviewTotal: reviewData.total,
+    aggregate: aggregate ?? null,
   }
 }
 
@@ -123,6 +141,7 @@ export default function Homepage() {
   const {
     deal, accessories, forHim, forHer, bonusDeal, vaultPreview,
     cartId, viewers, soldToday, cmsData, carouselProductMap,
+    reviews, reviewTotal, aggregate,
   } = useLoaderData<typeof loader>()
 
   // Split CMS sections: those that sit above BonusDeal/Vault vs below
@@ -141,6 +160,9 @@ export default function Homepage() {
             cartId={cartId ?? undefined}
             viewers={viewers}
             soldToday={soldToday}
+            reviews={reviews ?? []}
+            reviewTotal={reviewTotal ?? 0}
+            aggregate={aggregate}
           />
 
           {accessories.length > 0 && (

@@ -20,5 +20,14 @@ export default {
       }],
     },
   ],
-  preview: { select: { title: 'heading' } },
+  preview: {
+    select: { title: 'heading', active: 'active', order: 'order', logos: 'logos' },
+    prepare({ title, active, order, logos }) {
+      const n = Array.isArray(logos) ? logos.length : 0
+      return {
+        title: title ?? '(no heading)',
+        subtitle: `${n} brand${n !== 1 ? 's' : ''} · Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+      }
+    },
+  },
 }

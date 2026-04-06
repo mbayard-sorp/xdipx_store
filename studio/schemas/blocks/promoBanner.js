@@ -1,3 +1,6 @@
+// AI image generation — see docs/ai-image-generation.md
+import { withImageGenerator } from '../../lib/withImageGenerator'
+
 export default {
   name: 'promoBanner',
   title: 'Promo Banner',
@@ -19,7 +22,16 @@ export default {
       options: { list: ['charcoal', 'gradient', 'mist', 'purple', 'cream'] },
       initialValue: 'gradient',
     },
-    { name: 'image', title: 'Image', type: 'image', options: { hotspot: true } },
+    // AI image generation — replaces the plain image field
+    ...withImageGenerator('image'),
   ],
-  preview: { select: { title: 'headline' } },
+  preview: {
+    select: { title: 'headline', active: 'active', order: 'order' },
+    prepare({ title, active, order }) {
+      return {
+        title: title ?? '(no headline)',
+        subtitle: `Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+      }
+    },
+  },
 }

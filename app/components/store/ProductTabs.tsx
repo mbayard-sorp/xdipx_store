@@ -1,4 +1,8 @@
 import { useState } from 'react'
+import type { Review, ReviewAggregate } from '~/types/reviews'
+import { RatingSummary } from '~/components/reviews/RatingSummary'
+import { ReviewList }    from '~/components/reviews/ReviewList'
+import { ReviewForm }    from '~/components/reviews/ReviewForm'
 
 interface ProductTabsProps {
   fullStory:       string
@@ -6,17 +10,33 @@ interface ProductTabsProps {
   forHim:          string
   forHer:          string
   specifications?: string
+  // Reviews
+  productId?:     string
+  reviews?:       Review[]
+  aggregate?:     ReviewAggregate | null
+  reviewTotal?:   number
+  reviewPage?:    number
+  reviewSort?:    string
+  reviewFilter?:  string
 }
 
-const TABS = ['The Full Story', "What's In The Box", 'Both Ways ♥', 'Specs'] as const
-type Tab = typeof TABS[number]
+const BASE_TABS = ['The Full Story', "What's In The Box", 'Both Ways ♥'] as const
+type Tab = 'The Full Story' | "What's In The Box" | 'Both Ways ♥' | 'Specs' | 'Reviews'
 
-export function ProductTabs({ fullStory, boxContents, forHim, forHer, specifications }: ProductTabsProps) {
+export function ProductTabs({
+  fullStory, boxContents, forHim, forHer, specifications,
+  productId, reviews = [], aggregate, reviewTotal = 0,
+  reviewPage = 1, reviewSort = 'newest', reviewFilter = 'all',
+}: ProductTabsProps) {
   const [active, setActive] = useState<Tab>('The Full Story')
 
-  const visibleTabs = specifications
-    ? TABS
-    : TABS.filter(t => t !== 'Specs')
+  const visibleTabs: Tab[] = [
+    ...BASE_TABS,
+    ...(specifications ? ['Specs' as Tab] : []),
+    'Reviews',
+  ]
+
+  const reviewCount = aggregate?.approvedCount ?? 0
 
   return (
     <div className="mt-10">
@@ -34,7 +54,7 @@ export function ProductTabs({ fullStory, boxContents, forHim, forHer, specificat
             ].join(' ')}
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            {tab}
+            {tab === 'Reviews' && reviewCount > 0 ? `Reviews (${reviewCount})` : tab}
           </button>
         ))}
       </div>
@@ -101,6 +121,43 @@ export function ProductTabs({ fullStory, boxContents, forHim, forHer, specificat
             className="prose prose-sm max-w-none text-brand-charcoal/80 [&_table]:w-full [&_table]:text-sm [&_th]:text-left [&_th]:font-semibold [&_th]:py-2 [&_th]:px-3 [&_th]:bg-brand-mist [&_td]:py-2 [&_td]:px-3 [&_tr]:border-b [&_tr]:border-brand-mist/60"
             dangerouslySetInnerHTML={{ __html: specifications }}
           />
+        )}
+
+        {active === 'Reviews' && productId && (
+          <div className="space-y-8">
+            {/* Rating summary + list */}
+            {aggregate ? (
+              <ReviewList
+                reviews={reviews}
+                aggregate={aggregate}
+                productId={productId}
+                total={reviewTotal}
+                page={reviewPage}
+                sort={reviewSort}
+                filter={reviewFilter}
+              />
+            ) : (
+              <div className="text-center py-8 bg-brand-mist/40 rounded-2xl">
+                <p className="text-3xl mb-2" aria-hidden="true">♥</p>
+                <p className="text-brand-charcoal/50 text-sm">No reviews yet — be the first!</p>
+              </div>
+            )}
+
+            {/* Inline review form */}
+            <div className="border-t border-brand-mist pt-8">
+              <h3
+                className="text-lg font-bold text-brand-charcoal mb-6"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                Share your experience ♥
+              </h3>
+              <ReviewForm productId={productId} />
+            </div>
+          </div>
+        )}
+
+        {active === 'Reviews' && !productId && (
+          <p className="text-sm text-brand-charcoal/50">Reviews unavailable.</p>
         )}
       </div>
     </div>

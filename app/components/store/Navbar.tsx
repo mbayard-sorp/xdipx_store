@@ -1,31 +1,73 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router'
+import { AnimatePresence } from 'motion/react'
+import { CartDrawer } from '~/components/store/CartDrawer'
+import { DesktopMegaMenu, MobileMegaMenu } from '~/components/store/MegaMenu'
+import type { Cart } from '~/types'
+import type { MegaMenuBanner } from '~/types/cms'
+import type { ShopifyMenuItem } from '~/lib/shopify.server'
 
 interface NavbarProps {
+  cart?: Cart | null
   cartCount?: number
   logoUrl?: string
   logoAlt?: string
+  isCustomerLoggedIn?: boolean
+  menuItems?: ShopifyMenuItem[]
+  megaMenuBanners?: MegaMenuBanner[]
 }
 
-// Desktop links (exclude Today's Deal — that's the logo)
-const desktopLinks = [
-  { to: '/vault',   label: 'The Vault' },
-  { to: '/for-him', label: 'For Him'   },
-  { to: '/for-her', label: 'For Her'   },
-]
 
-// All links shown in the mobile drawer
-const drawerLinks = [
-  { to: '/',        label: "Today's Deal" },
-  { to: '/vault',   label: 'The Vault'    },
-  { to: '/for-him', label: 'For Him'      },
-  { to: '/for-her', label: 'For Her'      },
-  { to: '/for-him', label: 'Couples'      },
-]
-
-export function Navbar({ cartCount = 0, logoUrl, logoAlt = 'xdipx' }: NavbarProps) {
+export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx', isCustomerLoggedIn = false, menuItems = [], megaMenuBanners = [] }: NavbarProps) {
   const location = useLocation()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [cartOpen,   setCartOpen]   = useState(false)
+  const closeTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cartZoneRef      = useRef<HTMLDivElement>(null)
+  const cartDrawerRef    = useRef<HTMLDivElement>(null)
+
+  // Open cart drawer whenever any part of the site signals an item was added,
+  // then auto-close after 3 seconds if the user hasn't hovered into it.
+  useEffect(() => {
+    const handler = () => {
+      openCart()
+      if (autoCloseTimerRef.current) clearTimeout(autoCloseTimerRef.current)
+      autoCloseTimerRef.current = setTimeout(() => setCartOpen(false), 3000)
+    }
+    window.addEventListener('xdipx:cart-added', handler)
+    return () => window.removeEventListener('xdipx:cart-added', handler)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Close cart on click outside both the trigger button and the drawer panel
+  useEffect(() => {
+    if (!cartOpen) return
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (
+        cartZoneRef.current?.contains(target) ||
+        cartDrawerRef.current?.contains(target)
+      ) return
+      setCartOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [cartOpen])
+
+  const openCart = () => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    setCartOpen(true)
+  }
+
+  const scheduleClose = () => {
+    closeTimerRef.current = setTimeout(() => setCartOpen(false), 150)
+  }
+
+  // Cancel auto-close when the user hovers into the cart zone or drawer
+  const cancelAutoClose = () => {
+    if (autoCloseTimerRef.current) clearTimeout(autoCloseTimerRef.current)
+  }
 
   return (
     <>
@@ -59,49 +101,54 @@ export function Navbar({ cartCount = 0, logoUrl, logoAlt = 'xdipx' }: NavbarProp
             )}
           </Link>
 
-          {/* Desktop nav links */}
-          <ul className="hidden md:flex items-center gap-1 flex-1 justify-center">
-            {desktopLinks.map(({ to, label }) => {
-              const active = to === '/'
-                ? location.pathname === '/'
-                : location.pathname.startsWith(to)
-              return (
-                <li key={label}>
-                  <Link
-                    to={to}
-                    className={[
-                      'px-4 py-1.5 rounded-full text-sm font-medium transition-all',
-                      active
-                        ? 'bg-brand-mist text-brand-purple font-semibold'
-                        : 'text-brand-charcoal/70 hover:text-brand-purple hover:bg-brand-mist',
-                    ].join(' ')}
-                    style={{ fontFamily: 'var(--font-display)' }}
-                  >
-                    {label}
-                  </Link>
-                </li>
-              )
-            })}
-          </ul>
+          {/* Desktop mega menu */}
+          <DesktopMegaMenu items={menuItems} banners={megaMenuBanners} />
 
           {/* Right side */}
           <div className="flex items-center gap-2">
-            {/* Cart icon */}
+            {/* Account icon */}
             <Link
-              to="/cart"
+              to={isCustomerLoggedIn ? '/account' : '/account/login'}
               className="relative flex items-center justify-center w-9 h-9 rounded-full hover:bg-brand-mist transition-colors"
-              aria-label={`Cart${cartCount > 0 ? ` — ${cartCount} item${cartCount > 1 ? 's' : ''}` : ''}`}
+              aria-label={isCustomerLoggedIn ? 'My account' : 'Sign in'}
             >
-              <CartIcon />
-              {cartCount > 0 && (
-                <span
-                  className="absolute -top-0.5 -right-0.5 bg-brand-gradient text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center"
-                  aria-hidden="true"
-                >
-                  {cartCount > 9 ? '9+' : cartCount}
-                </span>
+              {isCustomerLoggedIn ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className="text-brand-purple" aria-hidden="true">
+                  <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-brand-charcoal/60" aria-hidden="true">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
               )}
             </Link>
+
+            {/* Cart icon — hover zone wraps button + drawer trigger */}
+            <div
+              ref={cartZoneRef}
+              className="relative"
+              onMouseEnter={() => { cancelAutoClose(); openCart() }}
+              onMouseLeave={scheduleClose}
+            >
+              <button
+                onClick={() => setCartOpen(o => !o)}
+                className="relative flex items-center justify-center w-9 h-9 rounded-full hover:bg-brand-mist transition-colors"
+                aria-label={`Cart${cartCount > 0 ? ` — ${cartCount} item${cartCount > 1 ? 's' : ''}` : ''}`}
+                aria-expanded={cartOpen}
+                aria-controls="cart-drawer"
+              >
+                <CartIcon />
+                {cartCount > 0 && (
+                  <span
+                    className="absolute -top-0.5 -right-0.5 bg-brand-gradient text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center"
+                    aria-hidden="true"
+                  >
+                    {cartCount > 9 ? '9+' : cartCount}
+                  </span>
+                )}
+              </button>
+            </div>
 
             {/* Hamburger — mobile only */}
             <button
@@ -117,7 +164,20 @@ export function Navbar({ cartCount = 0, logoUrl, logoAlt = 'xdipx' }: NavbarProp
         </nav>
       </header>
 
-      {/* ── Mobile drawer ──────────────────────────────────────────── */}
+      {/* ── Cart drawer ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {cartOpen && (
+          <CartDrawer
+            cart={cart}
+            panelRef={cartDrawerRef}
+            onClose={() => setCartOpen(false)}
+            onMouseEnter={() => { cancelAutoClose(); openCart() }}
+            onMouseLeave={scheduleClose}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Mobile nav drawer ───────────────────────────────────────── */}
       {drawerOpen && (
         <>
           {/* Backdrop */}
@@ -157,31 +217,42 @@ export function Navbar({ cartCount = 0, logoUrl, logoAlt = 'xdipx' }: NavbarProp
 
             {/* Drawer links */}
             <nav className="flex-1 overflow-y-auto py-4">
-              <ul className="space-y-1 px-3">
-                {drawerLinks.map(({ to, label }) => {
-                  const active = to === '/'
-                    ? location.pathname === '/'
-                    : location.pathname.startsWith(to)
-                  return (
-                    <li key={label}>
-                      <Link
-                        to={to}
-                        onClick={() => setDrawerOpen(false)}
-                        className={[
-                          'flex items-center px-4 py-3 rounded-xl text-base font-medium transition-all',
-                          active
-                            ? 'bg-brand-mist text-brand-purple font-semibold'
-                            : 'text-brand-charcoal hover:bg-brand-mist hover:text-brand-purple',
-                        ].join(' ')}
-                        style={{ fontFamily: 'var(--font-display)' }}
-                      >
-                        {label}
-                      </Link>
-                    </li>
-                  )
-                })}
+              {/* Today's Deal link */}
+              <ul className="space-y-0.5 px-3 mb-2">
+                <li>
+                  <Link
+                    to="/"
+                    onClick={() => setDrawerOpen(false)}
+                    className={[
+                      'flex items-center px-4 py-3 rounded-xl text-base font-medium transition-all',
+                      location.pathname === '/'
+                        ? 'bg-brand-mist text-brand-purple font-semibold'
+                        : 'text-brand-charcoal hover:bg-brand-mist hover:text-brand-purple',
+                    ].join(' ')}
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
+                    Today's Deal
+                  </Link>
+                </li>
               </ul>
+              {/* Category mega menu accordion */}
+              <MobileMegaMenu items={menuItems} onNavigate={() => setDrawerOpen(false)} />
             </nav>
+
+            {/* Account link in drawer */}
+            <div className="px-5 pt-2 pb-1 border-t border-brand-mist">
+              <Link
+                to={isCustomerLoggedIn ? '/account' : '/account/login'}
+                onClick={() => setDrawerOpen(false)}
+                className="flex items-center gap-2 text-sm font-medium text-brand-charcoal/60 hover:text-brand-charcoal py-2 transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+                {isCustomerLoggedIn ? 'My Account' : 'Sign in'}
+              </Link>
+            </div>
 
             {/* Drawer footer */}
             <div className="px-5 py-4 border-t border-brand-mist">

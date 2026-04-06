@@ -14,6 +14,12 @@ import stylesheet from './app.css?url'
 import { AgeGate } from './components/store/AgeGate'
 
 export const links: LinksFunction = () => [
+  // Favicons
+  { rel: 'icon', href: '/favicon.ico', sizes: '48x48' },
+  { rel: 'icon', type: 'image/png', href: '/favicon-16x16.png', sizes: '16x16' },
+  { rel: 'icon', type: 'image/png', href: '/favicon-32x32.png', sizes: '32x32' },
+  { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+  { rel: 'manifest', href: '/site.webmanifest' },
   // Preconnect for Google Fonts
   { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
   { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },

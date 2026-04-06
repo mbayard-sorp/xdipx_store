@@ -10,8 +10,21 @@ interface ProductCarouselProps {
   eyebrow?: string
   ctaLink?: string
   ctaLabel?: string
-  bgStyle?: 'white' | 'mist' | 'cream'
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
+  layout?: 'carousel' | 'grid' | 'grid-3'
   products: Product[]
+}
+
+const BG_CLASSES: Record<string, string> = {
+  white:    'bg-white',
+  cream:    'bg-brand-cream',
+  mist:     'bg-brand-mist',
+  charcoal: 'bg-brand-charcoal',
+  purple:   'bg-brand-purple',
+}
+
+function isDark(bg: string) {
+  return bg === 'charcoal' || bg === 'purple'
 }
 
 export function ProductCarousel({
@@ -21,6 +34,7 @@ export function ProductCarousel({
   ctaLink: ctaLinkProp,
   ctaLabel: ctaLabelProp,
   bgStyle: bgStyleProp,
+  layout: layoutProp,
   products,
 }: ProductCarouselProps) {
   const heading  = block?.heading  ?? headingProp  ?? 'Products'
@@ -28,12 +42,14 @@ export function ProductCarousel({
   const ctaLink  = block?.ctaLink  ?? ctaLinkProp
   const ctaLabel = block?.ctaLabel ?? ctaLabelProp ?? 'See all →'
   const bgStyle  = block?.bgStyle  ?? bgStyleProp  ?? 'white'
+  const layout   = block?.layout   ?? layoutProp   ?? 'carousel'
 
   const scrollRef = useRef<HTMLDivElement>(null)
 
   if (!products.length) return null
 
-  const bgClass = bgStyle === 'mist' ? 'bg-brand-mist' : bgStyle === 'cream' ? 'bg-brand-cream' : 'bg-white'
+  const bgClass = BG_CLASSES[bgStyle] ?? 'bg-white'
+  const dark = isDark(bgStyle)
 
   function scroll(dir: 'left' | 'right') {
     const el = scrollRef.current
@@ -48,37 +64,53 @@ export function ProductCarousel({
         <div className="flex items-end justify-between mb-6">
           <div>
             {eyebrow && (
-              <p className="text-brand-purple text-xs font-semibold uppercase tracking-widest mb-1">
+              <p className={`text-xs font-semibold uppercase tracking-widest mb-1 ${dark ? 'text-white/60' : 'text-brand-purple'}`}>
                 {eyebrow}
               </p>
             )}
             <h2
-              className="text-2xl font-bold text-brand-charcoal"
+              className={`text-2xl font-bold ${dark ? 'text-white' : 'text-brand-charcoal'}`}
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {heading}
             </h2>
           </div>
           <div className="flex items-center gap-2">
-            {/* Arrow buttons — desktop only */}
-            <button
-              onClick={() => scroll('left')}
-              aria-label="Scroll left"
-              className="hidden sm:flex items-center justify-center w-9 h-9 rounded-full border border-brand-mist bg-white text-brand-charcoal hover:border-brand-purple hover:text-brand-purple transition-colors shadow-sm"
-            >
-              ←
-            </button>
-            <button
-              onClick={() => scroll('right')}
-              aria-label="Scroll right"
-              className="hidden sm:flex items-center justify-center w-9 h-9 rounded-full border border-brand-mist bg-white text-brand-charcoal hover:border-brand-purple hover:text-brand-purple transition-colors shadow-sm"
-            >
-              →
-            </button>
+            {/* Arrow buttons — carousel only, desktop only */}
+            {layout === 'carousel' && (
+              <>
+                <button
+                  onClick={() => scroll('left')}
+                  aria-label="Scroll left"
+                  className={`hidden sm:flex items-center justify-center w-9 h-9 rounded-full border transition-colors shadow-sm ${
+                    dark
+                      ? 'border-white/20 bg-white/10 text-white hover:border-white/40 hover:text-white'
+                      : 'border-brand-mist bg-white text-brand-charcoal hover:border-brand-purple hover:text-brand-purple'
+                  }`}
+                >
+                  ←
+                </button>
+                <button
+                  onClick={() => scroll('right')}
+                  aria-label="Scroll right"
+                  className={`hidden sm:flex items-center justify-center w-9 h-9 rounded-full border transition-colors shadow-sm ${
+                    dark
+                      ? 'border-white/20 bg-white/10 text-white hover:border-white/40 hover:text-white'
+                      : 'border-brand-mist bg-white text-brand-charcoal hover:border-brand-purple hover:text-brand-purple'
+                  }`}
+                >
+                  →
+                </button>
+              </>
+            )}
             {ctaLink && (
               <Link
                 to={ctaLink}
-                className="text-sm font-semibold text-brand-purple hover:text-brand-purple-light transition-colors ml-1"
+                className={`text-sm font-semibold transition-colors ml-1 ${
+                  dark
+                    ? 'text-white/80 hover:text-white'
+                    : 'text-brand-purple hover:text-brand-purple-light'
+                }`}
                 style={{ fontFamily: 'var(--font-display)' }}
               >
                 {ctaLabel}
@@ -87,21 +119,35 @@ export function ProductCarousel({
           </div>
         </div>
 
-        {/* Scroll container */}
-        <div
-          ref={scrollRef}
-          className="flex gap-4 overflow-x-auto scrollbar-hide snap-x snap-mandatory pb-2"
-        >
-          {products.map(product => (
-            <ProductCard key={product.id} product={product} />
-          ))}
-        </div>
+        {/* Product grid or carousel */}
+        {layout === 'carousel' ? (
+          <div
+            ref={scrollRef}
+            className="flex gap-4 overflow-x-auto scrollbar-hide snap-x snap-mandatory pb-2"
+          >
+            {products.map(product => (
+              <ProductCard key={product.id} product={product} className="shrink-0 w-52 sm:w-60 snap-start" />
+            ))}
+          </div>
+        ) : (
+          <div
+            className={
+              layout === 'grid-3'
+                ? 'grid grid-cols-2 md:grid-cols-3 gap-4'
+                : 'grid grid-cols-2 md:grid-cols-4 gap-4'
+            }
+          >
+            {products.map(product => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   )
 }
 
-function ProductCard({ product }: { product: Product }) {
+function ProductCard({ product, className = '' }: { product: Product; className?: string }) {
   const price   = product.price
   const compare = product.compareAtPrice
   const onSale  = compare != null && compare > price
@@ -109,7 +155,7 @@ function ProductCard({ product }: { product: Product }) {
   return (
     <Link
       to={`/products/${product.handle}`}
-      className="group shrink-0 w-52 sm:w-60 snap-start"
+      className={`group ${className}`}
     >
       <article className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg hover:shadow-brand-purple/10 transition-all duration-300 card-lift h-full">
         <div className="relative aspect-square bg-brand-mist overflow-hidden">

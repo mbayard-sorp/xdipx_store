@@ -1,15 +1,19 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
-import { useLoaderData, useFetcher, redirect } from 'react-router'
-import { useEffect, useRef } from 'react'
+import { useLoaderData, useFetcher, useRevalidator, redirect } from 'react-router'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   getDealByShopifyId, updateProductMetafield, setDealStatus,
   activateShopifyProduct, updateVariantPricing, getVariantCost,
-  pushProductToShopify,
+  pushProductToShopify, getAccessoryProducts, getProductAdminImages,
 } from '~/lib/shopify.server'
+import type { AdminProductSearchResult, AdminProductImage } from '~/lib/shopify.server'
+import { ImageManager } from '~/components/admin/ImageManager'
 import { db } from '~/lib/db.server'
 import { dealHistory } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { generateCopy, generateSEOTitle } from '~/lib/claude.server'
+import { kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+import type { Product } from '~/types'
 
 export const meta: MetaFunction = () => [{ title: "Today's Deal — xdipx Admin" }]
 
@@ -34,7 +38,20 @@ export async function loader(_: LoaderFunctionArgs) {
 
   const deal = await getDealByShopifyId(dbDeal.shopifyProductId)
   const shopifyCost = deal?.variantId ? await getVariantCost(deal.variantId) : null
-  return { deal, shopifyCost, dealCategories: dbDeal.categories ?? [] }
+
+  const [currentAccessories, checkoutUpsellIds, productImages] = await Promise.all([
+    deal ? getAccessoryProducts(deal.accessoryProductIds) : Promise.resolve([] as Product[]),
+    kvGet<string[]>(KV_KEYS.checkoutUpsellIds).then(v => v ?? []),
+    deal ? getProductAdminImages(dbDeal.shopifyProductId) : Promise.resolve([] as AdminProductImage[]),
+  ])
+  const checkoutUpsells = checkoutUpsellIds.length
+    ? await getAccessoryProducts(checkoutUpsellIds)
+    : []
+
+  return {
+    deal, shopifyCost, dealCategories: dbDeal.categories ?? [],
+    currentAccessories, checkoutUpsells, checkoutUpsellIds, productImages,
+  }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -162,6 +179,19 @@ export async function action({ request }: ActionFunctionArgs) {
       console.error('[generate-all] failed:', message)
       return { ok: false, error: message }
     }
+  }
+
+  if (intent === 'save-accessories') {
+    const productId = form.get('productId') as string
+    const ids = JSON.parse(form.get('ids') as string) as string[]
+    await updateProductMetafield(productId, 'accessory_product_ids', JSON.stringify(ids), 'json')
+    return redirect('/admin/today')
+  }
+
+  if (intent === 'save-checkout-upsells') {
+    const ids = JSON.parse(form.get('ids') as string) as string[]
+    await kvSet(KV_KEYS.checkoutUpsellIds, ids)
+    return redirect('/admin/today')
   }
 
   return null
@@ -396,12 +426,325 @@ function RawDescriptionPanel({ deal, categories }: {
   )
 }
 
+// ─── Collapsible section ─────────────────────────────────────────────────
+
+function CollapsibleSection({
+  title,
+  subtitle,
+  children,
+  defaultOpen = false,
+}: {
+  title: string
+  subtitle?: string
+  children: React.ReactNode
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-brand-mist/40 transition-colors"
+      >
+        <div>
+          <span className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+            {title}
+          </span>
+          {subtitle && (
+            <span className="ml-3 text-xs text-brand-charcoal/40">{subtitle}</span>
+          )}
+        </div>
+        <span className={`text-brand-charcoal/40 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
+          ▼
+        </span>
+      </button>
+      {open && (
+        <div className="px-5 pb-5 space-y-4 border-t border-brand-mist">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Shared product picker type ───────────────────────────────────────────
+
+interface PickerProduct {
+  id: string
+  title: string
+  image: string | null
+  price?: number
+  compareAtPrice?: number
+  inventoryQuantity?: number
+  wholesaleCost?: number
+  mapPrice?: number
+  sku?: string
+}
+
+function productToPickerProduct(p: Product): PickerProduct {
+  return {
+    id:    p.id,
+    title: p.title,
+    image: p.images[0]?.url ?? null,
+    price: p.price,
+    compareAtPrice: p.compareAtPrice,
+  }
+}
+
+function searchResultToPickerProduct(p: AdminProductSearchResult): PickerProduct {
+  return {
+    id:                p.id,
+    title:             p.title,
+    image:             p.image,
+    price:             p.price,
+    compareAtPrice:    p.compareAtPrice ?? undefined,
+    inventoryQuantity: p.inventoryQuantity,
+    wholesaleCost:     p.wholesaleCost ?? undefined,
+    mapPrice:          p.mapPrice ?? undefined,
+    sku:               p.sku,
+  }
+}
+
+// ─── Product Picker component ─────────────────────────────────────────────
+
+function ProductPicker({
+  initial,
+  onSave,
+  saving,
+}: {
+  initial: PickerProduct[]
+  onSave: (ids: string[]) => void
+  saving: boolean
+}) {
+  const [selected, setSelected]   = useState<PickerProduct[]>(initial)
+  const [query, setQuery]         = useState('')
+  const [results, setResults]     = useState<AdminProductSearchResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const search = useCallback((q: string) => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    if (q.length < 2) { setResults([]); setSearchError(null); return }
+    timerRef.current = setTimeout(async () => {
+      setSearching(true)
+      setSearchError(null)
+      try {
+        const res  = await fetch(`/api/product-search?q=${encodeURIComponent(q)}`)
+        const data = await res.json() as { products: AdminProductSearchResult[]; error?: string }
+        if (data.error) setSearchError(data.error)
+        setResults(data.products ?? [])
+      } catch (err) {
+        setSearchError(err instanceof Error ? err.message : 'Search failed')
+      } finally {
+        setSearching(false)
+      }
+    }, 350)
+  }, [])
+
+  useEffect(() => { search(query) }, [query, search])
+
+  const isSelected = (id: string) => selected.some(p => p.id === id)
+
+  const add = (p: AdminProductSearchResult) => {
+    if (!isSelected(p.id)) setSelected(s => [...s, searchResultToPickerProduct(p)])
+  }
+
+  const remove = (id: string) => setSelected(s => s.filter(p => p.id !== id))
+
+  return (
+    <div className="space-y-4">
+      {/* Selected chips */}
+      {selected.length > 0 && (
+        <div className="space-y-2">
+          {selected.map(p => (
+            <div key={p.id} className="flex items-center gap-3 bg-brand-mist rounded-xl px-3 py-2">
+              {p.image && (
+                <img src={p.image} alt={p.title} className="w-10 h-10 object-cover rounded-lg shrink-0" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-brand-charcoal truncate">{p.title}</p>
+                <p className="text-xs text-brand-charcoal/50">
+                  {p.price != null && `$${p.price.toFixed(2)}`}
+                  {p.inventoryQuantity != null && ` · ${p.inventoryQuantity} in stock`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => remove(p.id)}
+                className="shrink-0 text-brand-charcoal/40 hover:text-red-500 transition-colors text-lg leading-none"
+                aria-label="Remove"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selected.length === 0 && (
+        <p className="text-sm text-brand-charcoal/40 italic">No products selected.</p>
+      )}
+
+      {/* Search input */}
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-charcoal/30 text-sm">🔍</span>
+        <input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search products by name…"
+          className="w-full border border-brand-mist rounded-xl pl-8 pr-4 py-2.5 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+        />
+        {searching && (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-brand-charcoal/40">Searching…</span>
+        )}
+      </div>
+
+      {searchError && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          ⚠ Search error: {searchError}
+        </p>
+      )}
+
+      {/* Search results */}
+      {results.length > 0 && (
+        <div className="border border-brand-mist rounded-xl overflow-hidden divide-y divide-brand-mist">
+          {results.map(p => {
+            const already = isSelected(p.id)
+            return (
+              <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 bg-white hover:bg-brand-mist/40 transition-colors">
+                {p.image && (
+                  <img src={p.image} alt={p.title} className="w-10 h-10 object-cover rounded-lg shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-brand-charcoal truncate">{p.title}</p>
+                  <div className="flex flex-wrap gap-x-3 text-xs text-brand-charcoal/50 mt-0.5">
+                    <span>Price: <strong className="text-brand-charcoal">${p.price.toFixed(2)}</strong></span>
+                    {p.compareAtPrice && <span>MSRP: ${p.compareAtPrice.toFixed(2)}</span>}
+                    {p.wholesaleCost != null && <span>Cost: <strong className="text-green-600">${p.wholesaleCost.toFixed(2)}</strong></span>}
+                    {p.mapPrice != null && <span>MAP: ${p.mapPrice.toFixed(2)}</span>}
+                    <span>Stock: <strong className={p.inventoryQuantity < 5 ? 'text-red-500' : 'text-brand-charcoal'}>{p.inventoryQuantity}</strong></span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => add(p)}
+                  disabled={already}
+                  className={
+                    already
+                      ? 'shrink-0 text-xs font-bold px-3 py-1.5 rounded-full bg-green-100 text-green-700 cursor-default'
+                      : 'shrink-0 text-xs font-bold px-3 py-1.5 rounded-full bg-brand-purple/10 text-brand-purple hover:bg-brand-purple/20 transition-colors'
+                  }
+                >
+                  {already ? '✓ Added' : '+ Add'}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Save button */}
+      <button
+        type="button"
+        onClick={() => onSave(selected.map(p => p.id))}
+        disabled={saving}
+        className={
+          saving
+            ? 'w-full py-2.5 rounded-xl text-sm font-bold bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
+            : 'w-full py-2.5 rounded-xl text-sm font-bold bg-brand-gradient text-white hover:opacity-90 transition-opacity'
+        }
+      >
+        {saving ? 'Saving…' : 'Save Changes'}
+      </button>
+    </div>
+  )
+}
+
+// ─── Make It Better panel ─────────────────────────────────────────────────
+
+function MakeItBetterPanel({
+  deal,
+  currentAccessories,
+}: {
+  deal: NonNullable<ReturnType<typeof useLoaderData<typeof loader>>['deal']>
+  currentAccessories: Product[]
+}) {
+  const fetcher = useFetcher<{ ok: boolean }>()
+
+  const handleSave = (ids: string[]) => {
+    const fd = new FormData()
+    fd.set('intent',    'save-accessories')
+    fd.set('productId', deal.shopifyProductId)
+    fd.set('ids',       JSON.stringify(ids))
+    fetcher.submit(fd, { method: 'post' })
+  }
+
+  return (
+    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+      <div>
+        <h3 className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          Make It Better ♥
+        </h3>
+        <p className="text-xs text-brand-charcoal/40 mt-1">
+          Up to 4 products shown below today's deal on the homepage and product page.
+        </p>
+      </div>
+      <ProductPicker
+        initial={currentAccessories.map(productToPickerProduct)}
+        onSave={handleSave}
+        saving={fetcher.state === 'submitting'}
+      />
+    </div>
+  )
+}
+
+// ─── Checkout Extras Upsells panel ────────────────────────────────────────
+
+function CheckoutExtrasPanel({ checkoutUpsells }: { checkoutUpsells: Product[] }) {
+  const fetcher = useFetcher<{ ok: boolean }>()
+
+  const handleSave = (ids: string[]) => {
+    const fd = new FormData()
+    fd.set('intent', 'save-checkout-upsells')
+    fd.set('ids',    JSON.stringify(ids))
+    fetcher.submit(fd, { method: 'post' })
+  }
+
+  return (
+    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+      <div>
+        <h3 className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          Checkout Extras — Upsell Products
+        </h3>
+        <p className="text-xs text-brand-charcoal/40 mt-1">
+          Products shown on the /checkout-extras page. Up to 4 are displayed.
+          These are site-wide (not per-deal).
+        </p>
+      </div>
+      <ProductPicker
+        initial={checkoutUpsells.map(productToPickerProduct)}
+        onSave={handleSave}
+        saving={fetcher.state === 'submitting'}
+      />
+    </div>
+  )
+}
+
+// ─── Checkout Content Blocks panel ────────────────────────────────────────
+
 // ─── Page ──────────────────────────────────────────────────────────────────
 
 export default function AdminToday() {
-  const { deal, shopifyCost, dealCategories } = useLoaderData<typeof loader>()
+  const {
+    deal, shopifyCost, dealCategories,
+    currentAccessories, checkoutUpsells, productImages,
+  } = useLoaderData<typeof loader>()
   const approveFetcher = useFetcher<{ ok: boolean }>()
   const liveFetcher    = useFetcher<{ ok: boolean }>()
+  const { revalidate } = useRevalidator()
 
   if (!deal) {
     return (
@@ -482,48 +825,115 @@ export default function AdminToday() {
         </div>
       </div>
 
+      {/* Variants panel — only shown for multi-variant products */}
+      {(deal.variants?.length ?? 0) > 1 && (
+        <CollapsibleSection
+          title="Variants"
+          subtitle={`${deal.variants!.length} variants · ${deal.options?.map(o => o.name).join(' × ')}`}
+          defaultOpen
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-brand-charcoal/50 border-b border-brand-mist">
+                  <th className="py-2 pr-3">Image</th>
+                  {deal.options?.map(o => <th key={o.name} className="py-2 pr-3">{o.name}</th>)}
+                  <th className="py-2 pr-3">Price</th>
+                  <th className="py-2 pr-3">Stock</th>
+                  <th className="py-2 pr-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-brand-mist/50">
+                {deal.variants!.map(v => (
+                  <tr key={v.id} className={!v.availableForSale ? 'opacity-50' : ''}>
+                    <td className="py-2 pr-3">
+                      {v.image ? (
+                        <img src={v.image.url} alt={v.title} className="w-10 h-10 object-cover rounded-lg" />
+                      ) : (
+                        <div className="w-10 h-10 bg-brand-mist rounded-lg flex items-center justify-center text-brand-charcoal/20 text-xs">—</div>
+                      )}
+                    </td>
+                    {deal.options?.map(o => {
+                      const val = v.selectedOptions.find(so => so.name === o.name)?.value
+                      return <td key={o.name} className="py-2 pr-3 font-medium text-brand-charcoal">{val ?? '—'}</td>
+                    })}
+                    <td className="py-2 pr-3 tabular-nums">${parseFloat(v.price).toFixed(2)}</td>
+                    <td className="py-2 pr-3 tabular-nums">
+                      <span className={v.quantityAvailable < 5 ? 'text-red-600 font-semibold' : ''}>
+                        {v.quantityAvailable}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3">
+                      {v.availableForSale ? (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">In Stock</span>
+                      ) : (
+                        <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Out of Stock</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CollapsibleSection>
+      )}
+
+      {/* Image Manager */}
+      <ImageManager
+        deal={deal}
+        initialImages={productImages ?? []}
+        onImagesChange={revalidate}
+      />
+
       {/* Pricing */}
       <PricingFields deal={deal} shopifyCost={shopifyCost} />
 
-      {/* Raw description + Generate All */}
-      <RawDescriptionPanel deal={deal} categories={dealCategories} />
+      {/* Copy & SEO — collapsible */}
+      <CollapsibleSection title="Copy & SEO" subtitle="Tagline · Story · Specs · Bullets · Meta">
+        <RawDescriptionPanel deal={deal} categories={dealCategories} />
+        <SaveableField label="Tagline"        fieldKey="tagline"        fieldType="single_line_text_field" defaultValue={deal.tagline}               productId={deal.shopifyProductId} rows={2} />
+        <SaveableField label="Full Story"     fieldKey="full_story"     fieldType="multi_line_text_field"  defaultValue={deal.fullStory}             productId={deal.shopifyProductId} rows={10} />
+        <SaveableField label="Works For Him"  fieldKey="works_for_him"  fieldType="multi_line_text_field"  defaultValue={deal.worksForHim}           productId={deal.shopifyProductId} />
+        <SaveableField label="Works For Her"  fieldKey="works_for_her"  fieldType="multi_line_text_field"  defaultValue={deal.worksForHer}           productId={deal.shopifyProductId} />
+        <SaveableField label="Specifications" fieldKey="specifications"  fieldType="multi_line_text_field"  defaultValue={deal.specifications ?? ''}  productId={deal.shopifyProductId} rows={6} />
+        <SaveableField
+          label="What's In The Box"
+          hint="One item per line. Shown in the 'What's In The Box' tab."
+          defaultValue={boxContentsDefault}
+          productId={deal.shopifyProductId}
+          rows={5}
+          intent="save-box-contents"
+        />
+        <SaveableField
+          label="Feature Bullets"
+          hint="One bullet per line. Shown in the hero panel."
+          defaultValue={featureBulletsDefault}
+          productId={deal.shopifyProductId}
+          rows={5}
+          intent="save-bullets"
+        />
+        <SaveableField
+          label="SEO Meta Description"
+          fieldKey="seo_meta_description"
+          fieldType="multi_line_text_field"
+          defaultValue={deal.metaDescription}
+          productId={deal.shopifyProductId}
+          rows={2}
+        />
+      </CollapsibleSection>
 
-      {/* Copy fields */}
-      <SaveableField label="Tagline"        fieldKey="tagline"        fieldType="single_line_text_field" defaultValue={deal.tagline}               productId={deal.shopifyProductId} rows={2} />
-      <SaveableField label="Full Story"     fieldKey="full_story"     fieldType="multi_line_text_field"  defaultValue={deal.fullStory}             productId={deal.shopifyProductId} rows={10} />
-      <SaveableField label="Works For Him"  fieldKey="works_for_him"  fieldType="multi_line_text_field"  defaultValue={deal.worksForHim}           productId={deal.shopifyProductId} />
-      <SaveableField label="Works For Her"  fieldKey="works_for_her"  fieldType="multi_line_text_field"  defaultValue={deal.worksForHer}           productId={deal.shopifyProductId} />
-      <SaveableField label="Specifications" fieldKey="specifications"  fieldType="multi_line_text_field"  defaultValue={deal.specifications ?? ''}  productId={deal.shopifyProductId} rows={6} />
+      {/* Divider */}
+      <div className="border-t border-brand-mist pt-2">
+        <h2 className="text-lg font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          Product Pickers
+        </h2>
+        <p className="text-sm text-brand-charcoal/50 mt-1">
+          Control which products appear in the "Make It Better" and "Checkout Extras" sections.
+        </p>
+      </div>
 
-      {/* What's in the box — one per line */}
-      <SaveableField
-        label="What's In The Box"
-        hint="One item per line. Shown in the 'What's In The Box' tab."
-        defaultValue={boxContentsDefault}
-        productId={deal.shopifyProductId}
-        rows={5}
-        intent="save-box-contents"
-      />
-
-      {/* Feature bullets — one per line */}
-      <SaveableField
-        label="Feature Bullets"
-        hint="One bullet per line. Shown in the hero panel."
-        defaultValue={featureBulletsDefault}
-        productId={deal.shopifyProductId}
-        rows={5}
-        intent="save-bullets"
-      />
-
-      {/* SEO meta */}
-      <SaveableField
-        label="SEO Meta Description"
-        fieldKey="seo_meta_description"
-        fieldType="multi_line_text_field"
-        defaultValue={deal.metaDescription}
-        productId={deal.shopifyProductId}
-        rows={2}
-      />
+      <MakeItBetterPanel deal={deal} currentAccessories={currentAccessories} />
+      <CheckoutExtrasPanel checkoutUpsells={checkoutUpsells} />
     </div>
   )
 }

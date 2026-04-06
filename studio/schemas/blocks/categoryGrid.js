@@ -24,5 +24,14 @@ export default {
       }],
     },
   ],
-  preview: { select: { title: 'heading' } },
+  preview: {
+    select: { title: 'heading', active: 'active', order: 'order', items: 'items' },
+    prepare({ title, active, order, items }) {
+      const n = Array.isArray(items) ? items.length : 0
+      return {
+        title: title ?? '(no heading)',
+        subtitle: `${n} categor${n !== 1 ? 'ies' : 'y'} · Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+      }
+    },
+  },
 }

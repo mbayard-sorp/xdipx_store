@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from 'react-router'
-import { Link, Outlet, useLoaderData, useRouteLoaderData } from 'react-router'
+import { Link, Outlet, useLoaderData } from 'react-router'
 import { VisualEditing } from '@sanity/visual-editing/react-router'
 import { Navbar }          from '~/components/store/Navbar'
 import { TrustBar }        from '~/components/store/TrustBar'
@@ -7,28 +7,34 @@ import { Footer }          from '~/components/store/Footer'
 import { CookieConsent }   from '~/components/store/CookieConsent'
 import { AnnouncementBar } from '~/components/cms/AnnouncementBar'
 import { getHomepageSections, getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
-import type { AnnouncementBarBlock, SocialLink } from '~/types/cms'
-import type { Cart } from '~/types'
+import { isCustomerLoggedIn } from '~/lib/customer-session.server'
+import { getCartIdFromCookie } from '~/lib/cart.server'
+import { getCart, getMainMenu } from '~/lib/shopify.server'
+import type { AnnouncementBarBlock, MegaMenuBanner, SocialLink } from '~/types/cms'
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const preview = isPreviewRequest(request)
-  const [cms, settings] = await Promise.all([
+  const preview  = isPreviewRequest(request)
+  const cartId   = getCartIdFromCookie(request)
+  const [cms, settings, loggedIn, cart, menuItems] = await Promise.all([
     getHomepageSections(preview),
     getSiteSettings(),
+    isCustomerLoggedIn(request),
+    cartId ? getCart(cartId) : Promise.resolve(null),
+    getMainMenu(),
   ])
   const announcementBar = cms?.sections.find(
     (s): s is AnnouncementBarBlock => s._type === 'announcementBar' && s.active,
   ) ?? null
   const socialLinks: SocialLink[] = settings?.socialLinks ?? []
+  const megaMenuBanners: MegaMenuBanner[] = settings?.megaMenuBanners ?? []
   const logoUrl  = settings?.logoUrl  ?? null
   const logoAlt  = settings?.logoAlt  ?? 'xdipx'
-  return { announcementBar, socialLinks, logoUrl, logoAlt, preview }
+  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, preview, isCustomerLoggedIn: loggedIn, cart, menuItems }
 }
 
 export default function StoreLayout() {
-  const root = useRouteLoaderData('root') as { cart?: Cart } | undefined
-  const { announcementBar, socialLinks, logoUrl, logoAlt, preview } = useLoaderData<typeof loader>()
-  const cartCount = root?.cart?.totalQuantity ?? 0
+  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, preview, isCustomerLoggedIn, cart, menuItems } = useLoaderData<typeof loader>()
+  const cartCount = cart?.totalQuantity ?? 0
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -46,7 +52,7 @@ export default function StoreLayout() {
       )}
 
       {announcementBar && <AnnouncementBar block={announcementBar} />}
-      <Navbar cartCount={cartCount} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} />
+      <Navbar cart={cart ?? null} cartCount={cartCount} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} isCustomerLoggedIn={isCustomerLoggedIn} menuItems={menuItems} megaMenuBanners={megaMenuBanners} />
       <TrustBar />
       <main className="flex-1">
         <Outlet />

@@ -127,20 +127,16 @@ interface ShopifyFulfilledOrder extends ShopifyOrder {
 }
 
 async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promise<void> {
-  // Only process on the first fulfillment
   if (!order.email || order.line_items.length === 0) return
 
-  // Check invite delay setting
   const { getReviewSettings, createInvite } = await import('../app/lib/reviews.server.js')
   const settings = await getReviewSettings()
 
   const delayMs = settings.inviteDelayDays * 24 * 60 * 60 * 1000
-  // Schedule via setTimeout (in production use a real job queue / Vercel Cron)
   setTimeout(async () => {
     for (const lineItem of order.line_items) {
       if (!lineItem.sku) continue
 
-      // Find Shopify product ID from SKU — look it up via admin API
       const searchRes = await shopifyAdmin(
         `/products.json?limit=1&sku=${encodeURIComponent(lineItem.sku)}`,
         'GET',
@@ -156,14 +152,13 @@ async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promise<void>
       ].filter(Boolean).join(' ') || 'Customer'
 
       await createInvite({
-        shopifyOrderId:   String(order.id),
+        shopifyOrderId:    String(order.id),
         shopifyCustomerId: order.customer?.id ? String(order.customer.id) : undefined,
         shopifyProductId,
-        reviewerEmail:    order.email,
+        reviewerEmail:     order.email,
         reviewerName,
       }).catch(err => console.error('[webhook:invite-create]', err))
 
-      // Track Klaviyo event
       const { trackEvent } = await import('../app/lib/klaviyo.server.js')
       await trackEvent(order.email, 'Review Invite Sent', {
         orderId:     order.id,
@@ -173,6 +168,27 @@ async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promise<void>
       }).catch(() => {/* non-critical */})
     }
   }, delayMs)
+}
+
+// ─── Product created handler ──────────────────────────────────────────────
+
+interface ShopifyProductWebhook {
+  id: number
+  handle: string
+  title: string
+  images?: { src: string }[]
+}
+
+async function handleProductCreated(product: ShopifyProductWebhook): Promise<void> {
+  const { upsertProductPage } = await import('../app/lib/sanity.server.js')
+  const gid = `gid://shopify/Product/${product.id}`
+  const result = await upsertProductPage({
+    handle: product.handle,
+    shopifyProductId: gid,
+    title: product.title,
+    imageUrl: product.images?.[0]?.src,
+  })
+  console.log(`[webhook:product-created] ${product.handle} → ${result.created ? 'created in Sanity' : 'already exists'}`)
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────
@@ -205,12 +221,25 @@ export function createWebhookRoutes() {
 
     const order = JSON.parse((req.body as Buffer).toString()) as ShopifyFulfilledOrder
 
-    // Respond immediately
     res.json({ ok: true })
 
-    // Schedule review invite (respects invite_delay_days setting)
     handleOrderFulfilled(order).catch(err =>
       console.error('[webhook:order-fulfilled]', err),
+    )
+  })
+
+  router.post('/product-created', async (req: Request, res: Response) => {
+    if (!verifyShopifyWebhook(req)) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const product = JSON.parse((req.body as Buffer).toString()) as ShopifyProductWebhook
+
+    res.json({ ok: true })
+
+    handleProductCreated(product).catch(err =>
+      console.error('[webhook:product-created]', err),
     )
   })
 

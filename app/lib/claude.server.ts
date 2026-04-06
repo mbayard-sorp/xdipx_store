@@ -239,6 +239,165 @@ export async function generateSEOTitle(rawTitle: string, brand: string): Promise
   return text.trim().slice(0, 60)
 }
 
+// ─── Video Content Generation ─────────────────────────────────────────────────
+
+export type VOFormat =
+  | 'sitcom_sketch'
+  | 'fake_testimonial'
+  | 'educational'
+  | 'breaking_news'
+  | 'absurdist_narrator'
+
+export interface VideoContentResult {
+  format: VOFormat
+  formatRationale: string
+  /** Narrator voiceover script — 2–3 sentences, max 35 words. Used directly as ElevenLabs input. */
+  narratorScript: string
+  /** Two short reaction strings styled like TikTok comments / phone notifications */
+  reactionText: string[]
+  /** Funny closing tagline shown on the end card under the logo */
+  endTagline: string
+  ctaWord: string
+}
+
+const CTA_WORDS = ['Today.', 'Yours.', 'Obviously.', 'Go on.', 'Finally.']
+
+function pickFormat(category: string): VOFormat {
+  const lowerCat = category.toLowerCase()
+  if (lowerCat.includes('couples')) return 'sitcom_sketch'
+  if (lowerCat.includes('him') || lowerCat.includes('strok')) return 'breaking_news'
+  if (lowerCat.includes('her') || lowerCat.includes('vibrat')) return 'fake_testimonial'
+  if (lowerCat.includes('lube') || lowerCat.includes('lubricant')) return 'educational'
+  const formats: VOFormat[] = ['sitcom_sketch', 'fake_testimonial', 'educational', 'breaking_news', 'absurdist_narrator']
+  return formats[Math.floor(Math.random() * formats.length)]!
+}
+
+/** Strip HTML tags from a string */
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim()
+}
+
+export async function generateVideoContent(product: {
+  title: string
+  brand: string
+  tagline?: string
+  category: string
+  dealPrice?: number
+  msrp?: number
+  fullStory?: string
+  worksForHim?: string
+  worksForHer?: string
+  specifications?: string
+  whatsInTheBox?: string
+  featureBullets?: string[]
+  /** Optional freeform instruction appended to the Claude prompt — for admin overrides */
+  customPrompt?: string
+  /** Pin to a specific format instead of auto-selecting */
+  forceFormat?: VOFormat
+}): Promise<VideoContentResult> {
+  const format = product.forceFormat ?? pickFormat(product.category)
+
+  // Pre-process rich-text fields — strip HTML, truncate to keep token count lean
+  const fullStory   = product.fullStory   ? stripHtml(product.fullStory).slice(0, 300)   : ''
+  const worksForHim = product.worksForHim ? stripHtml(product.worksForHim).slice(0, 200) : ''
+  const worksForHer = product.worksForHer ? stripHtml(product.worksForHer).slice(0, 200) : ''
+  const specs       = product.specifications ? stripHtml(product.specifications).slice(0, 200) : ''
+  const inTheBox    = product.whatsInTheBox  ? stripHtml(product.whatsInTheBox).slice(0, 150)  : ''
+  const bullets     = product.featureBullets
+    ? product.featureBullets.map(b => stripHtml(b).slice(0, 80)).filter(Boolean).join(', ')
+    : ''
+
+  const productContext = [
+    `Product: ${product.title}`,
+    `Brand: ${product.brand}`,
+    `Category: ${product.category}`,
+    product.tagline   ? `Tagline: ${product.tagline}`                              : '',
+    product.dealPrice ? `Deal price: $${product.dealPrice} (was $${product.msrp})` : '',
+    fullStory         ? `Full story: ${fullStory}`                                 : '',
+    worksForHim       ? `Works for him: ${worksForHim}`                            : '',
+    worksForHer       ? `Works for her: ${worksForHer}`                            : '',
+    specs             ? `Specifications: ${specs}`                                 : '',
+    inTheBox          ? `What's in the box: ${inTheBox}`                           : '',
+    bullets           ? `Features: ${bullets}`                                     : '',
+  ].filter(Boolean).join('\n')
+
+  const formatDescriptions: Record<VOFormat, string> = {
+    sitcom_sketch:      'narrator is a well-meaning friend who keeps accidentally describing couples activities in extremely innocent terms',
+    fake_testimonial:   'narrator is an EXTREMELY enthusiastic stranger who found this product and their life is now unrecognizable, in the best way',
+    educational:        "narrator is a hilariously underqualified 'expert' delivering 'facts' that are not facts",
+    breaking_news:      'narrator is reporting BREAKING NEWS with escalating urgency about a very personal problem that this product solves',
+    absurdist_narrator: 'narrator keeps accidentally describing the product perfectly while appearing to talk about something else entirely',
+  }
+
+  const customInstruction = product.customPrompt
+    ? `\n\nADDITIONAL DIRECTION FROM CREATOR:\n${product.customPrompt}\n`
+    : ''
+
+  const prompt = `Write a funny 10-second product ad narration.
+
+Narrator persona: ${formatDescriptions[format]}${customInstruction}
+
+This is for xdipx.com — a daily flash-sale site for sexual wellness products.
+Brand voice: playful, cheeky, warm. PG-13 strictly — suggest, never show. Innuendo welcome, explicit never.
+
+Product:
+${productContext}
+
+Use the product details above to make the narrator script and reaction text feel specific to THIS product — not generic wellness copy. Mine the full story, feature bullets, and specs for details that are funny, surprising, or unusually specific. A narrator referencing an actual feature ("7 settings" or "whisper quiet" or "USB rechargeable") is always funnier and more trustworthy than one speaking in generalities. Specificity = credibility = conversion.
+
+If works-for-him and works-for-her are both present, the narrator should feel warm and inclusive toward both without assuming who is watching. If only one is present, subtly orient the tone toward that audience without being exclusionary.
+
+Mine specifications and what's-in-the-box for unexpected details that land as humor (e.g. "comes with a satin pouch, because you deserve nice things").
+
+Write the narrator script: 2–3 sentences, max 35 words total. Punchy, warm, slightly conspiratorial. Written to be performed aloud, not read. This is the exact voiceover script for a female voice.
+
+Write exactly 2 reaction strings: max 8 words each. Style them like a phone notification or TikTok comment — a stranger reacting to what the narrator just said. Keep them dry, funny, relatable.
+Examples of good reactions: "sir this is a wellness site" / "...adding to cart" / "my therapist said treat yourself so" / "wait this is actually genius"
+
+Also write:
+- endTagline: a funny 4–8 word closing line for the end card (e.g. "Your body called. We answered." or "Treat yourself. You've earned it, probably.")
+
+Return ONLY this JSON (no markdown):
+{
+  "formatRationale": "one sentence why this format fits this product",
+  "narratorScript": "...",
+  "reactionText": ["...", "..."],
+  "endTagline": "..."
+}`
+
+  const raw = await generate(prompt, 1024)
+
+  let parsed: { formatRationale: string; narratorScript: string; reactionText: string[]; endTagline: string }
+  try {
+    parsed = JSON.parse(stripFences(raw)) as typeof parsed
+  } catch {
+    const match = raw.match(/\{[\s\S]*?"narratorScript"[\s\S]*?\}/)
+    if (match) {
+      parsed = JSON.parse(match[0]) as typeof parsed
+    } else {
+      // Fallback
+      parsed = {
+        formatRationale: 'Fallback content',
+        narratorScript: `${product.tagline ?? `${product.brand} ${product.title}. Today only at xdipx.`}`,
+        reactionText: ['...adding to cart', 'my therapist said treat yourself so'],
+        endTagline: 'One deal. One day. No regrets.',
+      }
+    }
+  }
+
+  const titleSum = product.title.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
+  const ctaWord = CTA_WORDS[titleSum % CTA_WORDS.length]!
+
+  return {
+    format,
+    formatRationale: parsed.formatRationale,
+    narratorScript: parsed.narratorScript,
+    reactionText: parsed.reactionText ?? ['...adding to cart', 'my therapist said treat yourself so'],
+    endTagline: parsed.endTagline,
+    ctaWord,
+  }
+}
+
 export async function selectAccessories(
   mainProduct: ProductScore,
   candidates: ProductScore[],

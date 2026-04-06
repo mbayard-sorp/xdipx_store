@@ -7,7 +7,7 @@ const { getSession, commitSession, destroySession } = createCookieSessionStorage
     path: '/',
     sameSite: 'lax',
     secrets: [process.env['SESSION_SECRET'] ?? 'dev-secret-change-me'],
-    secure: process.env['NODE_ENV'] === 'production',
+    secure: process.env['NODE_ENV'] === 'production' && !process.env['INSECURE_COOKIES'],
     maxAge: 60 * 60 * 24 * 7, // 7 days
   },
 })

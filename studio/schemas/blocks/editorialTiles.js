@@ -23,5 +23,14 @@ export default {
       }],
     },
   ],
-  preview: { select: { title: 'heading' } },
+  preview: {
+    select: { title: 'heading', active: 'active', order: 'order', count: 'tiles' },
+    prepare({ title, active, order, count }) {
+      const n = Array.isArray(count) ? count.length : 0
+      return {
+        title: title ?? '(no heading)',
+        subtitle: `${n} tile${n !== 1 ? 's' : ''} · Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+      }
+    },
+  },
 }

@@ -90,11 +90,15 @@ export interface ProductCarouselBlock {
   order: number
   heading: string
   eyebrow?: string
-  shopifyTag: string
+  source?: 'tag' | 'collection' | 'manual'
+  shopifyTag?: string
+  collectionHandle?: string
+  productHandles?: { handle: string }[]
   productLimit: number
+  layout?: 'carousel' | 'grid' | 'grid-3'
   ctaLink?: string
   ctaLabel?: string
-  bgStyle?: 'white' | 'mist' | 'cream'
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Play Together Banner ─────────────────────────────────────────────────
@@ -176,9 +180,40 @@ export interface SocialLink {
   url: string
 }
 
+export interface MegaMenuBanner {
+  _key: string
+  menuLabel: string
+  position: 'left' | 'right'
+  link?: string
+  imageUrl?: string
+  imageAlt?: string
+}
+
 export interface SiteSettings {
   _id: string
   logoUrl?: string
   logoAlt?: string
+  megaMenuBanners?: MegaMenuBanner[]
   socialLinks: SocialLink[]
+}
+
+// ─── Generic Page ─────────────────────────────────────────────────────────────
+
+// Pages can use all blocks except the site-wide announcementBar
+export type PageSection =
+  | PromoBannerBlock
+  | EditorialTilesBlock
+  | CategoryGridBlock
+  | ProductCarouselBlock
+  | PlayTogetherBannerBlock
+  | BrandLogoWallBlock
+  | TestimonialsBlock
+
+export interface SanityPage {
+  _id: string
+  title: string
+  slug: string
+  seoTitle?: string
+  seoDescription?: string
+  sections: PageSection[]
 }

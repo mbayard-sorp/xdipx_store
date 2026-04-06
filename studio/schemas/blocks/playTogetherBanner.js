@@ -15,5 +15,14 @@ export default {
     },
     { name: 'image', title: 'Image', type: 'image', options: { hotspot: true } },
   ],
-  preview: { select: { title: 'heading', media: 'image' } },
+  preview: {
+    select: { title: 'heading', media: 'image', active: 'active', order: 'order' },
+    prepare({ title, media, active, order }) {
+      return {
+        title: title ?? '(no heading)',
+        subtitle: `Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+        media,
+      }
+    },
+  },
 }

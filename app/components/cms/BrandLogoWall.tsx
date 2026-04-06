@@ -30,7 +30,7 @@ export function BrandLogoWall({ block }: BrandLogoWallProps) {
                 <img
                   src={logo.logo.url}
                   alt={logo.brand}
-                  className="h-7 md:h-8 w-auto object-contain"
+                  className="w-[130px] h-[130px] object-contain"
                   loading="lazy"
                 />
               </a>

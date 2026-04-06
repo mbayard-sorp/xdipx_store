@@ -41,12 +41,14 @@ export interface PipelineResult {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-function isViableCandidate(p: ProductScore, minMargin: number): boolean {
+function isViableCandidate(p: ProductScore, minMargin: number, minProfit: number): boolean {
   // Skip MAP = MSRP products — can't advertise a meaningful discount
   if (p.mapType === 'equals-msrp') return false
-  // Enforce minimum margin
-  const margin = (p.dealPrice - p.wholesaleCost) / p.dealPrice
+  // Enforce minimum margin: (MSRP - wholesale) / MSRP = 1 - wholesale/MSRP
+  const margin = (p.msrp - p.wholesaleCost) / p.msrp
   if (margin < minMargin) return false
+  // Enforce minimum profit per unit (deal price − wholesale cost)
+  if (p.profitPerUnit < minProfit) return false
   return true
 }
 
@@ -130,11 +132,14 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
     const scheduledDates = new Set(scheduled.map(r => r.dealDate))
 
     // 3. Pick best viable candidate not already scheduled
+    const minProfitSetting = await getPipelineSetting('minProfit')
+    const minProfit = Math.max(parseFloat(minProfitSetting ?? '0') || 0, 0)
+
     const viable = candidates.filter(p =>
-      isViableCandidate(p, minMarginPct) && !scheduledSkus.has(p.sku),
+      isViableCandidate(p, minMarginPct, minProfit) && !scheduledSkus.has(p.sku),
     )
     if (viable.length === 0) {
-      return { staged: false, reason: 'No viable candidates after filtering (all MAP=MSRP, low-margin, or already scheduled)' }
+      return { staged: false, reason: 'No viable candidates after filtering (all MAP=MSRP, low-margin, low-profit, or already scheduled)' }
     }
     const chosen = viable[0]! // already sorted by score desc from feed processor
 
@@ -223,7 +228,7 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
       dealDate,
       originalPrice:    chosen.msrp,
       wholesaleCost:    chosen.wholesaleCost,
-      mapPrice:         chosen.mapType === 'no-map' ? 0 : undefined,
+      mapPrice:         chosen.mapPrice,
       nalpacSku:        chosen.sku,
       dealScore:        chosen.score,
       accessoryProductIds: accessoryGids,
@@ -246,7 +251,7 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
       wholesaleCost:    chosen.wholesaleCost.toFixed(2),
       dealPrice:        chosen.dealPrice.toFixed(2),
       msrp:             chosen.msrp.toFixed(2),
-      mapPrice:         chosen.mapType !== 'no-map' ? chosen.dealPrice.toFixed(2) : '0',
+      mapPrice:         chosen.mapPrice.toFixed(2),
       unitsAvailable:   chosen.qty,
       dealScore:        chosen.score.toFixed(3),
       status:           'pending_review',

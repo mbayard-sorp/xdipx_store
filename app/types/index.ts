@@ -1,3 +1,15 @@
+// ─── Vault Filter Tabs ────────────────────────────────────────────────────
+
+export type VaultFilterTab = {
+  id: string
+  label: string
+  slug: string
+  filter:
+    | { type: 'all' }
+    | { type: 'collection'; handle: string }
+    | { type: 'price'; max: number }
+}
+
 // ─── Product / Deal ────────────────────────────────────────────────────────
 
 export interface ProductImage {
@@ -5,10 +17,16 @@ export interface ProductImage {
   altText: string
 }
 
+export interface ProductVideo {
+  previewImageUrl: string
+  sources: { url: string; mimeType: string }[]
+}
+
 export interface ProductVariant {
   id: string
   title: string
   selectedOptions: { name: string; value: string }[]
+  image?: ProductImage
   price: string
   compareAtPrice: string | null
   availableForSale: boolean
@@ -29,6 +47,7 @@ export interface Deal {
   boxContents: string[]
   specifications?: string
   images: ProductImage[]
+  videos: ProductVideo[]
   moodImageUrl?: string
   dealPrice: number
   msrp: number
@@ -57,6 +76,7 @@ export interface Product {
   seoTitle?: string
   metaDescription?: string
   images: ProductImage[]
+  videos: ProductVideo[]
   variants: ProductVariant[]
   price: number
   compareAtPrice?: number
@@ -149,6 +169,7 @@ export interface ProductScore {
   score: number
   msrp: number
   wholesaleCost: number
+  mapPrice: number
   dealPrice: number
   discountPct: number
   profitPerUnit: number
@@ -227,3 +248,49 @@ export interface KlaviyoProfile {
 
 export type ConsentType = 'all' | 'essential_only'
 export type VerificationLevel = 'click_through' | 'dob_entry' | 'id_verify'
+
+// ─── Bulk Import ──────────────────────────────────────────────────────────
+
+export interface BulkImportRow extends NalpacProduct {
+  'Master SKU': string
+  'Variant Option Name': string
+  'Variant Option Value': string
+  'Nav Category': string
+  'Nav Path': string
+  Collections: string
+  MPN: string
+}
+
+export interface BulkVariantRow {
+  sku: string
+  optionValue: string
+  price: number
+  compareAtPrice: number
+  qty: number
+  wholesale: number
+  images: string[]
+}
+
+export interface MasterProductGroup {
+  masterRow: BulkImportRow
+  variants: BulkVariantRow[]
+  isSingleVariant: boolean
+}
+
+export interface BulkImportJob {
+  jobId: string
+  status: 'idle' | 'running' | 'paused' | 'done' | 'error'
+  total: number
+  processed: number
+  skipped: number
+  failed: number
+  errors: { sku: string; message: string }[]
+  parseErrors: { sku: string; message: string }[]
+  groups: MasterProductGroup[]
+  currentIndex: number
+  startedAt: string
+  updatedAt: string
+}
+
+/** BulkImportJob without the groups array — safe to send to the client */
+export type BulkImportJobSummary = Omit<BulkImportJob, 'groups'>

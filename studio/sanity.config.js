@@ -20,18 +20,21 @@ export default defineConfig({
             S.listItem()
               .title('Homepage Sections')
               .id('homepageSections')
+              .icon(() => '🏠')
               .child(S.document().schemaType('homepageSections').documentId('singleton.homepage')),
             S.listItem()
               .title('Site Settings')
               .id('siteSettings')
+              .icon(() => '⚙️')
               .child(S.document().schemaType('siteSettings').documentId('singleton.siteSettings')),
             S.divider(),
-            S.documentTypeListItem('productPage').title('Products'),
+            S.documentTypeListItem('productPage').title('Products').icon(() => '🛍️'),
+            S.documentTypeListItem('page').title('Pages').icon(() => '📄'),
           ]),
     }),
     presentationTool({
       previewUrl: {
-        origin: 'http://localhost:3000',
+        origin: process.env.SANITY_STUDIO_PREVIEW_URL ?? 'http://localhost:3000',
         previewMode: {
           enable: '/api/sanity-preview',
         },

@@ -3,19 +3,24 @@ export default {
   title: 'Announcement Bar',
   type: 'object',
   fields: [
-    { name: 'active', title: 'Active', type: 'boolean', initialValue: true },
-    { name: 'order',  title: 'Order',  type: 'number',  initialValue: 0 },
+    { name: 'active', title: 'Active', type: 'boolean', initialValue: true,
+      description: 'Uncheck to hide this section without deleting it.' },
+    { name: 'order',  title: 'Display Order', type: 'number', initialValue: 0,
+      description: 'Lower numbers appear first on the page.' },
     {
-      name: 'bgStyle', title: 'Background', type: 'string',
+      name: 'bgStyle', title: 'Background Color', type: 'string',
       options: { list: ['charcoal', 'gradient', 'purple'] },
       initialValue: 'charcoal',
+      description: 'charcoal = dark bar, gradient = coral→orange, purple = brand purple.',
     },
     {
-      name: 'rotationIntervalMs', title: 'Rotation Interval (ms)',
+      name: 'rotationIntervalMs', title: 'Rotation Speed',
       type: 'number', initialValue: 4000,
+      description: 'Time between messages in milliseconds (4000 = 4 seconds).',
     },
     {
       name: 'messages', title: 'Messages', type: 'array',
+      description: 'Each message rotates in the bar. Add a Link URL + Label to make it clickable.',
       of: [{
         type: 'object',
         fields: [
@@ -26,5 +31,13 @@ export default {
       }],
     },
   ],
-  preview: { select: { title: 'messages.0.text' } },
+  preview: {
+    select: { title: 'messages.0.text', active: 'active', order: 'order' },
+    prepare({ title, active, order }) {
+      return {
+        title: title ?? '(no messages)',
+        subtitle: `Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+      }
+    },
+  },
 }

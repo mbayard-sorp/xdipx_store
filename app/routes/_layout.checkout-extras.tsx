@@ -1,8 +1,11 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, redirect } from 'react-router'
-import { getCart, getProductsByTag, addToCart, createCart } from '~/lib/shopify.server'
+import { getCart, getProductsByTag, addToCart, createCart, getAccessoryProducts } from '~/lib/shopify.server'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
+import { kvGet, KV_KEYS } from '~/lib/kv.server'
+import { getPage } from '~/lib/sanity.server'
 import { AccessoryCard } from '~/components/store/AccessoryCard'
+import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 
 export const meta: MetaFunction = () => [
   { title: 'Make it even better — xdipx' },
@@ -10,11 +13,19 @@ export const meta: MetaFunction = () => [
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const cartId = getCartIdFromCookie(request)
-  const [cart, accessories] = await Promise.all([
+
+  const [cart, upsellIds, cmsPage] = await Promise.all([
     cartId ? getCart(cartId) : null,
-    getProductsByTag('accessories', 4),
+    kvGet<string[]>(KV_KEYS.checkoutUpsellIds),
+    getPage('checkout-extras'),
   ])
-  return { cart, accessories, cartId }
+
+  // Use KV-stored upsell IDs if configured, else fall back to 'accessories' tag
+  const accessories = upsellIds?.length
+    ? await getAccessoryProducts(upsellIds.slice(0, 4))
+    : await getProductsByTag('accessories', 4)
+
+  return { cart, accessories, cartId, cmsSections: cmsPage?.sections ?? [] }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -23,6 +34,19 @@ export async function action({ request }: ActionFunctionArgs) {
 
   let cartId   = getCartIdFromCookie(request)
   const headers = new Headers()
+
+  if (intent === 'add-to-cart') {
+    const variantId = form.get('variantId') as string
+    const quantity  = parseInt((form.get('quantity') as string) ?? '1', 10)
+    let cart = cartId ? await getCart(cartId) : null
+    if (!cart) {
+      cart   = await createCart()
+      cartId = cart.id
+      headers.set('Set-Cookie', setCartCookie(cartId))
+    }
+    await addToCart(cartId, variantId, quantity)
+    return Response.json({ ok: true }, { headers })
+  }
 
   if (intent === 'add-accessory') {
     const variantId = form.get('variantId') as string
@@ -47,9 +71,10 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CheckoutExtras() {
-  const { cart, accessories, cartId } = useLoaderData<typeof loader>()
+  const { cart, accessories, cartId, cmsSections } = useLoaderData<typeof loader>()
 
   return (
+    <>
     <div className="max-w-2xl mx-auto px-4 py-10">
       {/* Progress bar */}
       <div className="flex items-center gap-2 mb-10 text-xs font-medium">
@@ -97,5 +122,11 @@ export default function CheckoutExtras() {
         </a>
       </form>
     </div>
+
+    {/* Sanity CMS content blocks — below the checkout form, above the footer */}
+    {cmsSections.map(block => (
+      <ContentBlockRenderer key={block._key} block={block} carouselProductMap={{}} />
+    ))}
+    </>
   )
 }

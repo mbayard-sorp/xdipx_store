@@ -1,5 +1,5 @@
 import { useFetcher } from 'react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Product } from '~/types'
 
 interface AccessoryCardProps {
@@ -8,13 +8,22 @@ interface AccessoryCardProps {
 }
 
 export function AccessoryCard({ product, cartId }: AccessoryCardProps) {
-  const fetcher = useFetcher()
+  const fetcher       = useFetcher()
+  const wasSubmitting = useRef(false)
   const [added, setAdded] = useState(false)
   const isPending = fetcher.state !== 'idle'
 
   useEffect(() => {
-    if (fetcher.data && (fetcher.data as { ok?: boolean }).ok) setAdded(true)
-  }, [fetcher.data])
+    if (fetcher.state === 'submitting') {
+      wasSubmitting.current = true
+    } else if (fetcher.state === 'idle' && wasSubmitting.current) {
+      wasSubmitting.current = false
+      if ((fetcher.data as { ok?: boolean } | undefined)?.ok) {
+        setAdded(true)
+        window.dispatchEvent(new CustomEvent('xdipx:cart-added'))
+      }
+    }
+  }, [fetcher.state, fetcher.data])
 
   const variant  = product.variants[0]
   const imgUrl   = product.images[0]?.url ?? ''
@@ -52,7 +61,7 @@ export function AccessoryCard({ product, cartId }: AccessoryCardProps) {
       </div>
 
       {/* Add button */}
-      <fetcher.Form method="post">
+      <fetcher.Form method="post" action="/checkout-extras">
         <input type="hidden" name="intent"    value="add-accessory" />
         <input type="hidden" name="variantId" value={variant?.id ?? ''} />
         {cartId && <input type="hidden" name="cartId" value={cartId} />}

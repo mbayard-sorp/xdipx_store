@@ -34,99 +34,92 @@ function pad(n: number): string {
   return String(n).padStart(2, '0')
 }
 
-export function CountdownTimer() {
-  const [timeLeft, setTimeLeft]     = useState<TimeLeft>({ hours: 0, minutes: 0, seconds: 0 })
-  const [taglineIdx, setTaglineIdx] = useState(0)
-  const [mounted, setMounted]       = useState(false)
+function useCountdown() {
+  const [timeLeft, setTimeLeft] = useState<TimeLeft>({ hours: 0, minutes: 0, seconds: 0 })
+  const [mounted, setMounted]   = useState(false)
 
   const tick = useCallback(() => {
     setTimeLeft(msToTimeLeft(getMidnightMs()))
   }, [])
 
   useEffect(() => {
-    // Set initial values immediately after mount (client only)
     tick()
     setMounted(true)
-
-    const tickId    = setInterval(tick, 1000)
-    const taglineId = setInterval(
-      () => setTaglineIdx(i => (i + 1) % TAGLINES.length),
-      4000,
-    )
-
-    return () => {
-      clearInterval(tickId)
-      clearInterval(taglineId)
-    }
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
   }, [tick])
 
-  const { hours, minutes, seconds } = timeLeft
+  const isUrgent = timeLeft.hours === 0 && timeLeft.minutes < 60
+  return { ...timeLeft, mounted, isUrgent }
+}
 
-  // Render placeholder during SSR / before hydration to avoid mismatch
+/** Thin charcoal divider line at the top of the homepage */
+export function CountdownTimer() {
+  return <div className="w-full h-px bg-brand-charcoal" />
+}
+
+/** Inline countdown placed beneath the buy button */
+export function InlineCountdown() {
+  const { hours, minutes, seconds, mounted, isUrgent } = useCountdown()
+  const [taglineIdx, setTaglineIdx] = useState(0)
+
+  useEffect(() => {
+    const id = setInterval(() => setTaglineIdx(i => (i + 1) % TAGLINES.length), 4000)
+    return () => clearInterval(id)
+  }, [])
+
   if (!mounted) {
     return (
-      <div className="w-full bg-brand-charcoal py-3 px-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-center gap-3">
-          <span className="text-white/60 text-sm" style={{ fontFamily: 'var(--font-display)' }}>
-            Deal ends tonight at midnight
-          </span>
-        </div>
+      <div className="text-center text-sm text-brand-charcoal/60 py-2">
+        Deal ends tonight at midnight
       </div>
     )
   }
 
-  const isUrgent = hours === 0 && minutes < 60
-
   return (
-    <div className={['w-full py-3 px-4', isUrgent ? 'bg-brand-gradient' : 'bg-brand-charcoal'].join(' ')}>
-      <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-6">
-
-        {/* Time display */}
-        <div className="flex items-center gap-1">
-          <TimeUnit value={hours}   label="hr"  urgent={isUrgent} />
-          <Colon />
-          <TimeUnit value={minutes} label="min" urgent={isUrgent} />
-          <Colon />
-          <TimeUnit value={seconds} label="sec" urgent={isUrgent} />
-        </div>
-
-        {/* Separator — hidden on small */}
-        <span className="hidden sm:block text-white/30 text-xl">·</span>
-
-        {/* Rotating tagline */}
-        <p
-          key={taglineIdx}
-          className="text-white/90 text-sm text-center fade-in"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          {TAGLINES[taglineIdx]}
-        </p>
+    <div className="flex flex-col items-center gap-1.5 pt-3">
+      <div className="flex items-center gap-1">
+        <InlineTimeUnit value={hours}   label="hr"  urgent={isUrgent} />
+        <InlineColon urgent={isUrgent} />
+        <InlineTimeUnit value={minutes} label="min" urgent={isUrgent} />
+        <InlineColon urgent={isUrgent} />
+        <InlineTimeUnit value={seconds} label="sec" urgent={isUrgent} />
       </div>
+      <p
+        key={taglineIdx}
+        className="text-brand-charcoal/50 text-xs text-center fade-in"
+        style={{ fontFamily: 'var(--font-display)' }}
+      >
+        {TAGLINES[taglineIdx]}
+      </p>
     </div>
   )
 }
 
-function TimeUnit({ value, label, urgent }: { value: number; label: string; urgent: boolean }) {
+function InlineTimeUnit({ value, label, urgent }: { value: number; label: string; urgent: boolean }) {
   return (
-    <div className="flex flex-col items-center w-10">
+    <div className="flex flex-col items-center w-9">
       <span
         className={[
-          'text-2xl font-black tabular-nums leading-none',
-          urgent ? 'text-white countdown-pulse' : 'text-brand-gradient',
+          'text-xl font-black tabular-nums leading-none',
+          urgent ? 'text-brand-coral countdown-pulse' : 'text-brand-charcoal',
         ].join(' ')}
         style={{ fontFamily: 'var(--font-display)' }}
       >
         {pad(value)}
       </span>
-      <span className="text-white/50 text-[10px] uppercase tracking-widest">{label}</span>
+      <span className="text-brand-charcoal/40 text-[9px] uppercase tracking-widest">{label}</span>
     </div>
   )
 }
 
-function Colon() {
+function InlineColon({ urgent }: { urgent: boolean }) {
   return (
     <span
-      className="text-white/40 text-xl font-bold pb-3 mx-0.5 select-none"
+      className={[
+        'text-lg font-bold pb-2.5 mx-0.5 select-none',
+        urgent ? 'text-brand-coral/40' : 'text-brand-charcoal/30',
+      ].join(' ')}
       aria-hidden="true"
     >
       :

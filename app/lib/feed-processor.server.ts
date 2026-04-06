@@ -74,19 +74,25 @@ export function getSKUsNeedingImagen(): string[] { return [...SKU_NEEDS_IMAGEN] 
 
 // ─── Scoring ───────────────────────────────────────────────────────────────
 
-function isEligible(product: NalpacProduct, recentSkus: Set<string>): boolean {
+function isEligible(
+  product: NalpacProduct,
+  recentSkus: Set<string>,
+  blockedBrands: Set<string>,
+): boolean {
   const qty      = parseInt(product['Total qty available'] ?? '0')
   const wholesale = parseFloat(product['Wholesale'] ?? '0')
   const msrp     = parseFloat(product['MSRP'] ?? '0')
-  return qty >= 20 && wholesale > 0 && msrp > 0 && !recentSkus.has(product.SKU)
+  const brandBlocked = blockedBrands.has(product.Brand.toLowerCase().trim())
+  return qty >= 20 && wholesale > 0 && msrp > 0 && !recentSkus.has(product.SKU) && !brandBlocked
 }
 
 export function scoreProduct(
   product: NalpacProduct,
   recentSkus: Set<string>,
   recentCategories: string[][],
+  blockedBrands: Set<string> = new Set(),
 ): ProductScore | null {
-  if (!isEligible(product, recentSkus)) return null
+  if (!isEligible(product, recentSkus, blockedBrands)) return null
 
   const wholesale   = parseFloat(product['Wholesale'])
   const msrp        = parseFloat(product['MSRP'])
@@ -95,8 +101,8 @@ export function scoreProduct(
   const images      = getImages(product)
   const categories  = parseCategories(product['Sub-Category'])
 
-  // 1. Profitability (35%) — 65% gross margin = perfect score
-  const profScore = Math.min((msrp - wholesale) / msrp / 0.65, 1.0)
+  // 1. Profitability (35%) — gross margin at MSRP: (MSRP - wholesale) / MSRP = 1 - wholesale/MSRP
+  const profScore = (msrp - wholesale) / msrp
 
   // 2. Deal-ability (30%)
   let dealScore: number
@@ -148,6 +154,7 @@ export function scoreProduct(
     score,
     msrp:         Math.round(msrp * 100) / 100,
     wholesaleCost: Math.round(wholesale * 100) / 100,
+    mapPrice:     Math.round(map * 100) / 100,
     dealPrice:    Math.round(dealPrice * 100) / 100,
     discountPct:  Math.round(discountPct * 10) / 10,
     profitPerUnit: Math.round((dealPrice - wholesale) * 100) / 100,
@@ -164,7 +171,7 @@ export async function dailyFeedProcessor(): Promise<{
   topCandidates: ProductScore[]
   needsImagen: string[]
 }> {
-  const [products, history] = await Promise.all([
+  const [products, history, blockedBrandsSetting] = await Promise.all([
     fetchNalpacFeed(),
     db.select({
       sku:        dealHistory.sku,
@@ -173,13 +180,20 @@ export async function dailyFeedProcessor(): Promise<{
     .from(dealHistory)
     .orderBy(sql`${dealHistory.dealDate} DESC`)
     .limit(90),
+    getPipelineSetting('blockedBrands'),
   ])
 
-  const recentSkus        = new Set(history.map(h => h.sku))
-  const recentCategories  = history.map(h => (h.categories ?? []) as string[])
+  const recentSkus       = new Set(history.map(h => h.sku))
+  const recentCategories = history.map(h => (h.categories ?? []) as string[])
+  const blockedBrands    = new Set(
+    (blockedBrandsSetting ?? '')
+      .split(',')
+      .map(b => b.toLowerCase().trim())
+      .filter(Boolean),
+  )
 
   const scores = products
-    .map(p => scoreProduct(p, recentSkus, recentCategories))
+    .map(p => scoreProduct(p, recentSkus, recentCategories, blockedBrands))
     .filter((s): s is ProductScore => s !== null)
     .sort((a, b) => b.score - a.score)
 
