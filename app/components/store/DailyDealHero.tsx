@@ -2,16 +2,13 @@ import { useState, useRef, useEffect } from 'react'
 import { useFetcher } from 'react-router'
 import type { Deal, ProductVideo, ProductVariant } from '~/types'
 import type { Review, ReviewAggregate } from '~/types/reviews'
+import { ProductImageGallery, type GalleryItem } from './ProductImageGallery'
 import { StockIndicator }   from './StockIndicator'
 import { SocialProofBar }   from './SocialProofBar'
 import { ProductTabs }      from './ProductTabs'
 import { InlineCountdown }  from './CountdownTimer'
 
 // ─── Gallery media types ──────────────────────────────────────────────────────
-
-type GalleryItem =
-  | { kind: 'image'; url: string; altText: string }
-  | { kind: 'video'; previewUrl: string; sources: ProductVideo['sources'] }
 
 function buildGallery(deal: Deal): GalleryItem[] {
   const videos: GalleryItem[] = (deal.videos ?? []).map(v => ({
@@ -252,7 +249,6 @@ function HeroContent({
   selectedVariant, variantPrice, variantInStock, variantQty,
 }: HeroContentProps) {
   const allMedia = buildGallery(deal)
-  const [isPlaying, setIsPlaying] = useState(false)
 
   // When a color variant is selected, jump to its image in the gallery
   function handleVariantSelect(variantId: string) {
@@ -264,16 +260,8 @@ function HeroContent({
       )
       if (idx >= 0) {
         setActiveImg(idx)
-        setIsPlaying(false)
       }
     }
-  }
-
-  const activeItem = allMedia[activeImg]
-
-  function selectMedia(i: number) {
-    setActiveImg(i)
-    setIsPlaying(false)
   }
 
   return (
@@ -281,83 +269,12 @@ function HeroContent({
       <div className="grid md:grid-cols-2 gap-8 lg:gap-12 items-start">
 
         {/* ── Left: Media gallery ──────────────────────────────────── */}
-        <div className="space-y-3">
-          <div className="relative aspect-square rounded-2xl overflow-hidden bg-brand-mist shadow-sm">
-            {activeItem?.kind === 'video' && isPlaying ? (
-              <video
-                key={activeItem.sources[0]?.url}
-                controls
-                autoPlay
-                playsInline
-                className="w-full h-full object-cover"
-              >
-                {activeItem.sources.map(s => (
-                  <source key={s.url} src={s.url} type={s.mimeType} />
-                ))}
-              </video>
-            ) : activeItem?.kind === 'video' ? (
-              <>
-                <img
-                  src={activeItem.previewUrl}
-                  alt={deal.seoTitle}
-                  className="w-full h-full object-cover"
-                />
-                <button
-                  onClick={() => setIsPlaying(true)}
-                  className="absolute inset-0 flex items-center justify-center group"
-                  aria-label="Play video"
-                >
-                  <div className="w-16 h-16 rounded-full bg-white/90 shadow-lg flex items-center justify-center transition-transform group-hover:scale-110">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <polygon points="8,5 20,12 8,19" fill="#1E1A2E" />
-                    </svg>
-                  </div>
-                </button>
-              </>
-            ) : activeItem?.kind === 'image' ? (
-              <img
-                src={activeItem.url}
-                alt={activeItem.altText || deal.seoTitle}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-brand-charcoal/20 text-6xl">
-                ♥
-              </div>
-            )}
-          </div>
-
-          {allMedia.length > 1 && (
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-              {allMedia.slice(0, 8).map((item, i) => (
-                <button
-                  key={i}
-                  onClick={() => selectMedia(i)}
-                  className={[
-                    'relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 transition-all',
-                    i === activeImg
-                      ? 'border-brand-coral'
-                      : 'border-transparent opacity-60 hover:opacity-100',
-                  ].join(' ')}
-                  aria-label={item.kind === 'video' ? `Play video ${i + 1}` : `View image ${i + 1}`}
-                >
-                  <img
-                    src={item.kind === 'video' ? item.previewUrl : item.url}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                  {item.kind === 'video' && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-brand-charcoal/30">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true">
-                        <polygon points="5,3 19,12 5,21" />
-                      </svg>
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <ProductImageGallery
+          items={allMedia}
+          alt={deal.seoTitle}
+          activeIndex={activeImg}
+          onSelectIndex={setActiveImg}
+        />
 
         {/* ── Right: Product info ─────────────────────────────────── */}
         <div className="space-y-4">
