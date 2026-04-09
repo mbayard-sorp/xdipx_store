@@ -24,23 +24,20 @@ type ShellData =
     }
 
 // Paths that should bypass requireCustomer and render without the shell chrome.
-// Prefix matches let us cover `/account/reset/:id/:token` and friends.
-const AUTH_PATH_PREFIXES = [
+const AUTH_EXACT = new Set([
   '/account/login',
   '/account/register',
   '/account/recover',
-  '/account/reset/',
-  '/account/activate/',
   '/account/logout',
-] as const
+])
+
+const AUTH_PREFIXES = ['/account/reset/', '/account/activate/'] as const
 
 function isAuthPath(pathname: string): boolean {
   const normalized = pathname.replace(/\/+$/, '') || '/'
-  return AUTH_PATH_PREFIXES.some((prefix) =>
-    prefix.endsWith('/')
-      ? normalized.startsWith(prefix.slice(0, -1) + '/') ||
-        normalized === prefix.slice(0, -1)
-      : normalized === prefix,
+  return (
+    AUTH_EXACT.has(normalized) ||
+    AUTH_PREFIXES.some((p) => pathname.startsWith(p))
   )
 }
 
@@ -85,7 +82,7 @@ export default function AccountLayout() {
   }
 
   return (
-    <AccountShell customer={data.customer} tokenType={data.tokenType}>
+    <AccountShell customer={data.customer}>
       <Outlet context={context} />
     </AccountShell>
   )

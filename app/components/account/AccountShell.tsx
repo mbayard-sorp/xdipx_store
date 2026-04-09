@@ -5,9 +5,6 @@ import { AccountMobileHeader } from './AccountMobileHeader'
 
 interface AccountShellProps {
   customer: CustomerProfile
-  // Kept so the shell can surface session-aware behavior later (e.g. disabling
-  // mutation UIs on account-API sessions). Not rendered for Phase 2.
-  tokenType: 'storefront' | 'account'
   children: ReactNode
 }
 

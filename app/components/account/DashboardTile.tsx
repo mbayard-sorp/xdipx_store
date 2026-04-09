@@ -1,8 +1,6 @@
-import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 
 export interface DashboardTileProps {
-  icon?: ReactNode
   label: string
   value: string | number
   to: string
@@ -10,7 +8,6 @@ export interface DashboardTileProps {
 }
 
 export function DashboardTile({
-  icon,
   label,
   value,
   to,
@@ -29,14 +26,6 @@ export function DashboardTile({
         <p className="text-xs font-semibold uppercase tracking-wider text-brand-charcoal/50">
           {label}
         </p>
-        {icon && (
-          <div
-            className="w-7 h-7 rounded-full bg-brand-mist flex items-center justify-center text-brand-charcoal/50"
-            aria-hidden="true"
-          >
-            {icon}
-          </div>
-        )}
       </div>
       <div
         className={`mt-3 text-2xl md:text-3xl font-bold ${

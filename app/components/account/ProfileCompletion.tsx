@@ -18,19 +18,19 @@ export function ProfileCompletion({ customer }: ProfileCompletionProps) {
       key: 'firstName',
       label: 'Add your first name',
       to: '/account/profile',
-      done: customer.firstName !== '',
+      done: !!customer.firstName?.trim(),
     },
     {
       key: 'lastName',
       label: 'Add your last name',
       to: '/account/profile',
-      done: customer.lastName !== '',
+      done: !!customer.lastName?.trim(),
     },
     {
       key: 'phone',
       label: 'Add your phone number',
       to: '/account/profile',
-      done: customer.phone !== null && customer.phone !== '',
+      done: !!customer.phone?.trim(),
     },
     {
       key: 'defaultAddress',

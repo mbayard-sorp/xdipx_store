@@ -69,7 +69,7 @@ export function AccountMobileHeader({ customer }: AccountMobileHeaderProps) {
   const isProfilePage = pathname.replace(/\/+$/, '') === '/account/profile'
 
   return (
-    <div className="lg:hidden sticky top-14 z-50 bg-brand-cream/95 backdrop-blur-sm border-b border-brand-mist h-12 flex items-center px-4 gap-3">
+    <div className="lg:hidden sticky top-14 z-[59] bg-brand-cream/95 backdrop-blur-sm border-b border-brand-mist h-12 flex items-center px-4 gap-3">
       {/* Left: avatar OR back arrow */}
       {section.isDashboard ? (
         <div
