@@ -1,4 +1,5 @@
 import { parse as parseCookie, serialize as serializeCookie } from 'cookie'
+import { cartBuyerIdentityUpdate } from './shopify.server'
 
 const CART_COOKIE = '__xdipx_cart'
 
@@ -25,4 +26,25 @@ export function clearCartCookie(): string {
     sameSite: 'lax',
     maxAge: 0,
   })
+}
+
+/**
+ * Link (or unlink) a cart to a Shopify customer's buyer identity.
+ * Pass token=null to strip customer from the cart on logout.
+ * Silent on failure — never blocks login/logout.
+ */
+export async function linkCartToCustomer(
+  cartId: string,
+  token: string | null,
+  opts: { email?: string | null; countryCode?: string | null } = {},
+): Promise<void> {
+  try {
+    await cartBuyerIdentityUpdate(cartId, {
+      customerAccessToken: token,
+      email: opts.email ?? null,
+      countryCode: opts.countryCode ?? null,
+    })
+  } catch (err) {
+    console.error('[cart] linkCartToCustomer failed:', err)
+  }
 }

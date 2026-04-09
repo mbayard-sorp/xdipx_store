@@ -50,6 +50,23 @@ export async function loginCustomerSession(
   return headers
 }
 
+/**
+ * Re-issues the customer cookie with a new access token.
+ * Used after customerUpdate rotates the token (email or password change).
+ */
+export async function refreshCustomerSession(
+  request: Request,
+  newToken: string,
+  tokenType: 'storefront' | 'account' = 'storefront',
+): Promise<Headers> {
+  const session = await getSession(request.headers.get('Cookie'))
+  session.set('customerAccessToken', newToken)
+  session.set('tokenType', tokenType)
+  const headers = new Headers()
+  headers.set('Set-Cookie', await commitSession(session))
+  return headers
+}
+
 /** Builds Set-Cookie headers that log the customer out. */
 export async function logoutCustomerSession(request: Request): Promise<Headers> {
   const session = await getSession(request.headers.get('Cookie'))

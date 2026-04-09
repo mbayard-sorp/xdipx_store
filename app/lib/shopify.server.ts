@@ -1747,6 +1747,850 @@ export async function getStorefrontCustomer(
   }
 }
 
+// ─── Customer API Surface (Phase 0A) ──────────────────────────────────────────
+//
+// Full customer API surface for the /account space. All Storefront API
+// mutations surface user errors as `{ error: string }`. See the existing
+// `createCustomerAccessToken` (above) for the pattern.
+
+export interface CustomerAddress {
+  id: string
+  firstName: string | null
+  lastName: string | null
+  company: string | null
+  address1: string | null
+  address2: string | null
+  city: string | null
+  province: string | null
+  provinceCode: string | null
+  country: string | null
+  countryCodeV2: string | null
+  zip: string | null
+  phone: string | null
+  formatted: string[]
+}
+
+export interface CustomerProfile {
+  id: string
+  firstName: string
+  lastName: string
+  email: string
+  phone: string | null
+  acceptsMarketing: boolean
+  createdAt: string
+  defaultAddressId: string | null
+  addresses: CustomerAddress[]
+  orders: StorefrontOrder[] // lean list for dashboard (first 10)
+}
+
+export interface FulfillmentTracking {
+  number: string | null
+  url: string | null
+  company: string | null
+}
+
+export interface Fulfillment {
+  trackingCompany: string | null
+  trackingInfo: FulfillmentTracking[]
+}
+
+export interface OrderDetail {
+  id: string
+  orderNumber: number
+  processedAt: string
+  financialStatus: string
+  fulfillmentStatus: string
+  statusUrl: string | null
+  email: string | null
+  phone: string | null
+  canceledAt: string | null
+  cancelReason: string | null
+  shippingAddress: CustomerAddress | null
+  subtotalPrice: { amount: string; currencyCode: string } | null
+  totalShippingPrice: { amount: string; currencyCode: string } | null
+  totalTax: { amount: string; currencyCode: string } | null
+  totalPrice: { amount: string; currencyCode: string }
+  successfulFulfillments: Fulfillment[]
+  lineItems: {
+    title: string
+    quantity: number
+    variantTitle: string | null
+    imageUrl: string | null
+    unitPrice: { amount: string; currencyCode: string } | null
+  }[]
+}
+
+export interface PaginatedOrders {
+  orders: StorefrontOrder[]
+  pageInfo: { hasNextPage: boolean; endCursor: string | null }
+}
+
+export interface Country {
+  isoCode: string
+  name: string
+  unitSystem: string
+  currency: { isoCode: string; symbol: string; name: string }
+}
+
+export interface CustomerCreateInput {
+  firstName?: string
+  lastName?: string
+  email: string
+  password: string
+  phone?: string
+  acceptsMarketing?: boolean
+}
+
+export interface CustomerUpdateInput {
+  firstName?: string
+  lastName?: string
+  email?: string
+  phone?: string
+  password?: string
+  acceptsMarketing?: boolean
+}
+
+export interface CustomerAddressInput {
+  firstName?: string
+  lastName?: string
+  company?: string
+  address1?: string
+  address2?: string
+  city?: string
+  province?: string // use full name; Shopify returns provinceCode derived
+  country?: string // full country name
+  zip?: string
+  phone?: string
+}
+
+// ─── Shared GraphQL fragments for customer queries ─────────────────────────────
+
+const CUSTOMER_ADDRESS_FRAGMENT = `
+  id
+  firstName
+  lastName
+  company
+  address1
+  address2
+  city
+  province
+  provinceCode
+  country
+  countryCodeV2
+  zip
+  phone
+  formatted
+`
+
+const STOREFRONT_ORDER_LEAN_FRAGMENT = `
+  id orderNumber processedAt financialStatus fulfillmentStatus
+  currentTotalPrice { amount currencyCode }
+  lineItems(first: 5) {
+    edges {
+      node {
+        title quantity
+        variant {
+          image { url }
+          price { amount }
+        }
+      }
+    }
+  }
+`
+
+// ─── Raw shape helpers ─────────────────────────────────────────────────────────
+
+interface RawCustomerAddress {
+  id: string
+  firstName: string | null
+  lastName: string | null
+  company: string | null
+  address1: string | null
+  address2: string | null
+  city: string | null
+  province: string | null
+  provinceCode: string | null
+  country: string | null
+  countryCodeV2: string | null
+  zip: string | null
+  phone: string | null
+  formatted: string[]
+}
+
+interface RawStorefrontOrderLean {
+  id: string
+  orderNumber: number
+  processedAt: string
+  financialStatus: string
+  fulfillmentStatus: string
+  currentTotalPrice: { amount: string; currencyCode: string }
+  lineItems: {
+    edges: {
+      node: {
+        title: string
+        quantity: number
+        variant: {
+          image: { url: string } | null
+          price: { amount: string }
+        } | null
+      }
+    }[]
+  }
+}
+
+function mapCustomerAddress(a: RawCustomerAddress): CustomerAddress {
+  return {
+    id: a.id,
+    firstName: a.firstName,
+    lastName: a.lastName,
+    company: a.company,
+    address1: a.address1,
+    address2: a.address2,
+    city: a.city,
+    province: a.province,
+    provinceCode: a.provinceCode,
+    country: a.country,
+    countryCodeV2: a.countryCodeV2,
+    zip: a.zip,
+    phone: a.phone,
+    formatted: a.formatted,
+  }
+}
+
+function mapLeanOrder(o: RawStorefrontOrderLean): StorefrontOrder {
+  return {
+    id: o.id,
+    orderNumber: o.orderNumber,
+    processedAt: o.processedAt,
+    financialStatus: o.financialStatus,
+    fulfillmentStatus: o.fulfillmentStatus,
+    totalPrice: o.currentTotalPrice,
+    lineItems: o.lineItems.edges.map(({ node: li }) => ({
+      title: li.title,
+      quantity: li.quantity,
+      imageUrl: li.variant?.image?.url ?? null,
+      price: li.variant?.price.amount ?? '0',
+    })),
+  }
+}
+
+// ─── Customer Queries ──────────────────────────────────────────────────────────
+
+export async function getCustomerProfile(
+  accessToken: string,
+): Promise<CustomerProfile | null> {
+  const data = await storefront<{
+    customer: {
+      id: string
+      firstName: string | null
+      lastName: string | null
+      email: string
+      phone: string | null
+      acceptsMarketing: boolean
+      createdAt: string
+      defaultAddress: { id: string } | null
+      addresses: { edges: { node: RawCustomerAddress }[] }
+      orders: { edges: { node: RawStorefrontOrderLean }[] }
+    } | null
+  }>(`
+    query GetCustomerProfile($customerAccessToken: String!) {
+      customer(customerAccessToken: $customerAccessToken) {
+        id firstName lastName email phone acceptsMarketing createdAt
+        defaultAddress { id }
+        addresses(first: 20) {
+          edges { node { ${CUSTOMER_ADDRESS_FRAGMENT} } }
+        }
+        orders(first: 10, sortKey: PROCESSED_AT, reverse: true) {
+          edges { node { ${STOREFRONT_ORDER_LEAN_FRAGMENT} } }
+        }
+      }
+    }
+  `, { customerAccessToken: accessToken }).catch(() => ({ customer: null }))
+
+  const c = data?.customer
+  if (!c) return null
+
+  return {
+    id: c.id,
+    firstName: c.firstName ?? '',
+    lastName: c.lastName ?? '',
+    email: c.email,
+    phone: c.phone,
+    acceptsMarketing: c.acceptsMarketing,
+    createdAt: c.createdAt,
+    defaultAddressId: c.defaultAddress?.id ?? null,
+    addresses: c.addresses.edges.map(e => mapCustomerAddress(e.node)),
+    orders: c.orders.edges.map(e => mapLeanOrder(e.node)),
+  }
+}
+
+export async function getCustomerOrders(
+  accessToken: string,
+  opts: { first?: number; after?: string | null; query?: string } = {},
+): Promise<PaginatedOrders> {
+  const first = opts.first ?? 10
+  const after = opts.after ?? null
+  const query = opts.query ?? null
+
+  const data = await storefront<{
+    customer: {
+      orders: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null }
+        edges: { node: RawStorefrontOrderLean }[]
+      }
+    } | null
+  }>(`
+    query GetCustomerOrders($customerAccessToken: String!, $first: Int!, $after: String, $query: String) {
+      customer(customerAccessToken: $customerAccessToken) {
+        orders(first: $first, after: $after, sortKey: PROCESSED_AT, reverse: true, query: $query) {
+          pageInfo { hasNextPage endCursor }
+          edges { node { ${STOREFRONT_ORDER_LEAN_FRAGMENT} } }
+        }
+      }
+    }
+  `, { customerAccessToken: accessToken, first, after, query })
+
+  const c = data?.customer
+  if (!c) {
+    return { orders: [], pageInfo: { hasNextPage: false, endCursor: null } }
+  }
+
+  return {
+    orders: c.orders.edges.map(e => mapLeanOrder(e.node)),
+    pageInfo: c.orders.pageInfo,
+  }
+}
+
+interface RawOrderDetail {
+  id: string
+  orderNumber: number
+  processedAt: string
+  financialStatus: string
+  fulfillmentStatus: string
+  statusUrl: string | null
+  email: string | null
+  phone: string | null
+  canceledAt: string | null
+  cancelReason: string | null
+  shippingAddress: RawCustomerAddress | null
+  subtotalPriceV2: { amount: string; currencyCode: string } | null
+  totalShippingPriceV2: { amount: string; currencyCode: string } | null
+  totalTaxV2: { amount: string; currencyCode: string } | null
+  totalPriceV2: { amount: string; currencyCode: string }
+  successfulFulfillments: {
+    trackingCompany: string | null
+    trackingInfo: { number: string | null; url: string | null }[]
+  }[]
+  lineItems: {
+    edges: {
+      node: {
+        title: string
+        quantity: number
+        variant: {
+          title: string | null
+          image: { url: string } | null
+          price: { amount: string; currencyCode: string }
+        } | null
+      }
+    }[]
+  }
+}
+
+function mapOrderDetail(o: RawOrderDetail): OrderDetail {
+  return {
+    id: o.id,
+    orderNumber: o.orderNumber,
+    processedAt: o.processedAt,
+    financialStatus: o.financialStatus,
+    fulfillmentStatus: o.fulfillmentStatus,
+    statusUrl: o.statusUrl,
+    email: o.email,
+    phone: o.phone,
+    canceledAt: o.canceledAt,
+    cancelReason: o.cancelReason,
+    shippingAddress: o.shippingAddress ? mapCustomerAddress(o.shippingAddress) : null,
+    subtotalPrice: o.subtotalPriceV2,
+    totalShippingPrice: o.totalShippingPriceV2,
+    totalTax: o.totalTaxV2,
+    totalPrice: o.totalPriceV2,
+    successfulFulfillments: o.successfulFulfillments.map(f => ({
+      trackingCompany: f.trackingCompany,
+      trackingInfo: f.trackingInfo.map(t => ({
+        number: t.number,
+        url: t.url,
+        company: f.trackingCompany,
+      })),
+    })),
+    lineItems: o.lineItems.edges.map(({ node: li }) => ({
+      title: li.title,
+      quantity: li.quantity,
+      variantTitle: li.variant?.title ?? null,
+      imageUrl: li.variant?.image?.url ?? null,
+      unitPrice: li.variant?.price
+        ? { amount: li.variant.price.amount, currencyCode: li.variant.price.currencyCode }
+        : null,
+    })),
+  }
+}
+
+export async function getCustomerOrder(
+  accessToken: string,
+  orderId: string,
+): Promise<OrderDetail | null> {
+  // Storefront customer.orders query syntax does not support id lookup
+  // reliably, so we fetch a wide page and filter client-side. Acceptable
+  // for account UX; revisit if perf becomes an issue.
+  const data = await storefront<{
+    customer: {
+      orders: {
+        edges: { node: RawOrderDetail }[]
+      }
+    } | null
+  }>(`
+    query GetCustomerOrder($customerAccessToken: String!) {
+      customer(customerAccessToken: $customerAccessToken) {
+        orders(first: 250, sortKey: PROCESSED_AT, reverse: true) {
+          edges {
+            node {
+              id orderNumber processedAt financialStatus fulfillmentStatus
+              statusUrl email phone canceledAt cancelReason
+              shippingAddress { ${CUSTOMER_ADDRESS_FRAGMENT} }
+              subtotalPriceV2 { amount currencyCode }
+              totalShippingPriceV2 { amount currencyCode }
+              totalTaxV2 { amount currencyCode }
+              totalPriceV2 { amount currencyCode }
+              successfulFulfillments(first: 10) {
+                trackingCompany
+                trackingInfo(first: 10) { number url }
+              }
+              lineItems(first: 50) {
+                edges {
+                  node {
+                    title quantity
+                    variant {
+                      title
+                      image { url }
+                      price { amount currencyCode }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `, { customerAccessToken: accessToken }).catch(() => ({ customer: null }))
+
+  const c = data?.customer
+  if (!c) return null
+
+  const match = c.orders.edges.find(e => e.node.id === orderId)
+  if (!match) return null
+  return mapOrderDetail(match.node)
+}
+
+export async function getCustomerAddresses(
+  accessToken: string,
+): Promise<CustomerAddress[]> {
+  const data = await storefront<{
+    customer: {
+      addresses: { edges: { node: RawCustomerAddress }[] }
+    } | null
+  }>(`
+    query GetCustomerAddresses($customerAccessToken: String!) {
+      customer(customerAccessToken: $customerAccessToken) {
+        addresses(first: 50) {
+          edges { node { ${CUSTOMER_ADDRESS_FRAGMENT} } }
+        }
+      }
+    }
+  `, { customerAccessToken: accessToken }).catch(() => ({ customer: null }))
+
+  const c = data?.customer
+  if (!c) return []
+  return c.addresses.edges.map(e => mapCustomerAddress(e.node))
+}
+
+export async function getCountries(): Promise<Country[]> {
+  const data = await storefront<{
+    localization: {
+      availableCountries: {
+        isoCode: string
+        name: string
+        unitSystem: string
+        currency: { isoCode: string; symbol: string; name: string }
+      }[]
+    }
+  }>(`
+    query GetCountries {
+      localization {
+        availableCountries {
+          isoCode
+          name
+          unitSystem
+          currency { isoCode symbol name }
+        }
+      }
+    }
+  `)
+
+  return [...data.localization.availableCountries].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )
+}
+
+// ─── Customer Mutations ────────────────────────────────────────────────────────
+
+export async function customerCreate(
+  input: CustomerCreateInput,
+): Promise<{ customer: { id: string; email: string } } | { error: string }> {
+  const data = await storefront<{
+    customerCreate: {
+      customer: { id: string; email: string } | null
+      customerUserErrors: { message: string }[]
+    }
+  }>(`
+    mutation CustomerCreate($input: CustomerCreateInput!) {
+      customerCreate(input: $input) {
+        customer { id email }
+        customerUserErrors { message }
+      }
+    }
+  `, { input })
+
+  const { customer, customerUserErrors } = data.customerCreate
+  if (customerUserErrors.length > 0) {
+    return { error: customerUserErrors[0]?.message ?? 'Account creation failed' }
+  }
+  if (!customer) return { error: 'Account creation failed' }
+  return { customer }
+}
+
+export async function customerRecover(
+  email: string,
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const data = await storefront<{
+      customerRecover: {
+        customerUserErrors: { message: string }[]
+      }
+    }>(`
+      mutation CustomerRecover($email: String!) {
+        customerRecover(email: $email) {
+          customerUserErrors { message }
+        }
+      }
+    `, { email })
+
+    // Intentionally swallow errors to prevent account enumeration —
+    // always return ok so callers can't distinguish "unknown email" from success.
+    if (data.customerRecover.customerUserErrors.length > 0) {
+      console.error('[customerRecover] user errors:', data.customerRecover.customerUserErrors)
+    }
+  } catch (err) {
+    console.error('[customerRecover] request failed:', err)
+  }
+  return { ok: true }
+}
+
+export async function customerReset(
+  id: string,
+  resetToken: string,
+  password: string,
+): Promise<{ accessToken: string } | { error: string }> {
+  const data = await storefront<{
+    customerReset: {
+      customerAccessToken: { accessToken: string } | null
+      customerUserErrors: { message: string }[]
+    }
+  }>(`
+    mutation CustomerReset($id: ID!, $input: CustomerResetInput!) {
+      customerReset(id: $id, input: $input) {
+        customerAccessToken { accessToken }
+        customerUserErrors { message }
+      }
+    }
+  `, { id, input: { resetToken, password } })
+
+  const { customerAccessToken, customerUserErrors } = data.customerReset
+  if (customerUserErrors.length > 0) {
+    return { error: customerUserErrors[0]?.message ?? 'Password reset failed' }
+  }
+  if (!customerAccessToken) return { error: 'Password reset failed' }
+  return { accessToken: customerAccessToken.accessToken }
+}
+
+export async function customerResetByUrl(
+  resetUrl: string,
+  password: string,
+): Promise<{ accessToken: string } | { error: string }> {
+  const data = await storefront<{
+    customerResetByUrl: {
+      customerAccessToken: { accessToken: string } | null
+      customerUserErrors: { message: string }[]
+    }
+  }>(`
+    mutation CustomerResetByUrl($resetUrl: URL!, $password: String!) {
+      customerResetByUrl(resetUrl: $resetUrl, password: $password) {
+        customerAccessToken { accessToken }
+        customerUserErrors { message }
+      }
+    }
+  `, { resetUrl, password })
+
+  const { customerAccessToken, customerUserErrors } = data.customerResetByUrl
+  if (customerUserErrors.length > 0) {
+    return { error: customerUserErrors[0]?.message ?? 'Password reset failed' }
+  }
+  if (!customerAccessToken) return { error: 'Password reset failed' }
+  return { accessToken: customerAccessToken.accessToken }
+}
+
+export async function customerActivate(
+  id: string,
+  activationToken: string,
+  password: string,
+): Promise<{ accessToken: string } | { error: string }> {
+  const data = await storefront<{
+    customerActivate: {
+      customerAccessToken: { accessToken: string } | null
+      customerUserErrors: { message: string }[]
+    }
+  }>(`
+    mutation CustomerActivate($id: ID!, $input: CustomerActivateInput!) {
+      customerActivate(id: $id, input: $input) {
+        customerAccessToken { accessToken }
+        customerUserErrors { message }
+      }
+    }
+  `, { id, input: { activationToken, password } })
+
+  const { customerAccessToken, customerUserErrors } = data.customerActivate
+  if (customerUserErrors.length > 0) {
+    return { error: customerUserErrors[0]?.message ?? 'Activation failed' }
+  }
+  if (!customerAccessToken) return { error: 'Activation failed' }
+  return { accessToken: customerAccessToken.accessToken }
+}
+
+export async function customerActivateByUrl(
+  activationUrl: string,
+  password: string,
+): Promise<{ accessToken: string } | { error: string }> {
+  const data = await storefront<{
+    customerActivateByUrl: {
+      customerAccessToken: { accessToken: string } | null
+      customerUserErrors: { message: string }[]
+    }
+  }>(`
+    mutation CustomerActivateByUrl($activationUrl: URL!, $password: String!) {
+      customerActivateByUrl(activationUrl: $activationUrl, password: $password) {
+        customerAccessToken { accessToken }
+        customerUserErrors { message }
+      }
+    }
+  `, { activationUrl, password })
+
+  const { customerAccessToken, customerUserErrors } = data.customerActivateByUrl
+  if (customerUserErrors.length > 0) {
+    return { error: customerUserErrors[0]?.message ?? 'Activation failed' }
+  }
+  if (!customerAccessToken) return { error: 'Activation failed' }
+  return { accessToken: customerAccessToken.accessToken }
+}
+
+export async function customerUpdate(
+  accessToken: string,
+  input: CustomerUpdateInput,
+): Promise<
+  | { customer: CustomerProfile; accessToken: string | null }
+  | { error: string }
+> {
+  const data = await storefront<{
+    customerUpdate: {
+      customer: { id: string } | null
+      customerAccessToken: { accessToken: string; expiresAt: string } | null
+      customerUserErrors: { message: string }[]
+    }
+  }>(`
+    mutation CustomerUpdate($customerAccessToken: String!, $customer: CustomerUpdateInput!) {
+      customerUpdate(customerAccessToken: $customerAccessToken, customer: $customer) {
+        customer { id }
+        customerAccessToken { accessToken expiresAt }
+        customerUserErrors { message }
+      }
+    }
+  `, { customerAccessToken: accessToken, customer: input })
+
+  const { customer, customerAccessToken, customerUserErrors } = data.customerUpdate
+  if (customerUserErrors.length > 0) {
+    return { error: customerUserErrors[0]?.message ?? 'Update failed' }
+  }
+  if (!customer) return { error: 'Update failed' }
+
+  const newToken = customerAccessToken?.accessToken ?? null
+  const tokenForRefetch = newToken ?? accessToken
+  const profile = await getCustomerProfile(tokenForRefetch)
+  if (!profile) return { error: 'Update succeeded but profile refetch failed' }
+
+  return { customer: profile, accessToken: newToken }
+}
+
+export async function customerAddressCreate(
+  accessToken: string,
+  address: CustomerAddressInput,
+): Promise<{ address: CustomerAddress } | { error: string }> {
+  const data = await storefront<{
+    customerAddressCreate: {
+      customerAddress: RawCustomerAddress | null
+      customerUserErrors: { message: string }[]
+    }
+  }>(`
+    mutation CustomerAddressCreate($customerAccessToken: String!, $address: MailingAddressInput!) {
+      customerAddressCreate(customerAccessToken: $customerAccessToken, address: $address) {
+        customerAddress { ${CUSTOMER_ADDRESS_FRAGMENT} }
+        customerUserErrors { message }
+      }
+    }
+  `, { customerAccessToken: accessToken, address })
+
+  const { customerAddress, customerUserErrors } = data.customerAddressCreate
+  if (customerUserErrors.length > 0) {
+    return { error: customerUserErrors[0]?.message ?? 'Address create failed' }
+  }
+  if (!customerAddress) return { error: 'Address create failed' }
+  return { address: mapCustomerAddress(customerAddress) }
+}
+
+export async function customerAddressUpdate(
+  accessToken: string,
+  id: string,
+  address: CustomerAddressInput,
+): Promise<{ address: CustomerAddress } | { error: string }> {
+  const data = await storefront<{
+    customerAddressUpdate: {
+      customerAddress: RawCustomerAddress | null
+      customerUserErrors: { message: string }[]
+    }
+  }>(`
+    mutation CustomerAddressUpdate($customerAccessToken: String!, $id: ID!, $address: MailingAddressInput!) {
+      customerAddressUpdate(customerAccessToken: $customerAccessToken, id: $id, address: $address) {
+        customerAddress { ${CUSTOMER_ADDRESS_FRAGMENT} }
+        customerUserErrors { message }
+      }
+    }
+  `, { customerAccessToken: accessToken, id, address })
+
+  const { customerAddress, customerUserErrors } = data.customerAddressUpdate
+  if (customerUserErrors.length > 0) {
+    return { error: customerUserErrors[0]?.message ?? 'Address update failed' }
+  }
+  if (!customerAddress) return { error: 'Address update failed' }
+  return { address: mapCustomerAddress(customerAddress) }
+}
+
+export async function customerAddressDelete(
+  accessToken: string,
+  id: string,
+): Promise<{ ok: true } | { error: string }> {
+  const data = await storefront<{
+    customerAddressDelete: {
+      deletedCustomerAddressId: string | null
+      customerUserErrors: { message: string }[]
+    }
+  }>(`
+    mutation CustomerAddressDelete($customerAccessToken: String!, $id: ID!) {
+      customerAddressDelete(customerAccessToken: $customerAccessToken, id: $id) {
+        deletedCustomerAddressId
+        customerUserErrors { message }
+      }
+    }
+  `, { customerAccessToken: accessToken, id })
+
+  const { deletedCustomerAddressId, customerUserErrors } = data.customerAddressDelete
+  if (customerUserErrors.length > 0) {
+    return { error: customerUserErrors[0]?.message ?? 'Address delete failed' }
+  }
+  if (!deletedCustomerAddressId) return { error: 'Address delete failed' }
+  return { ok: true }
+}
+
+export async function customerDefaultAddressUpdate(
+  accessToken: string,
+  addressId: string,
+): Promise<{ ok: true } | { error: string }> {
+  const data = await storefront<{
+    customerDefaultAddressUpdate: {
+      customer: { id: string } | null
+      customerUserErrors: { message: string }[]
+    }
+  }>(`
+    mutation CustomerDefaultAddressUpdate($customerAccessToken: String!, $addressId: ID!) {
+      customerDefaultAddressUpdate(customerAccessToken: $customerAccessToken, addressId: $addressId) {
+        customer { id }
+        customerUserErrors { message }
+      }
+    }
+  `, { customerAccessToken: accessToken, addressId })
+
+  const { customer, customerUserErrors } = data.customerDefaultAddressUpdate
+  if (customerUserErrors.length > 0) {
+    return { error: customerUserErrors[0]?.message ?? 'Default address update failed' }
+  }
+  if (!customer) return { error: 'Default address update failed' }
+  return { ok: true }
+}
+
+export async function cartBuyerIdentityUpdate(
+  cartId: string,
+  identity: {
+    customerAccessToken?: string | null
+    email?: string | null
+    countryCode?: string | null
+  },
+): Promise<Cart | null> {
+  try {
+    const data = await storefront<{
+      cartBuyerIdentityUpdate: {
+        cart: RawCart | null
+        userErrors: { message: string }[]
+      }
+    }>(`
+      mutation CartBuyerIdentityUpdate($cartId: ID!, $buyerIdentity: CartBuyerIdentityInput!) {
+        cartBuyerIdentityUpdate(cartId: $cartId, buyerIdentity: $buyerIdentity) {
+          cart { ${CART_FRAGMENT} }
+          userErrors { message }
+        }
+      }
+    `, {
+      cartId,
+      buyerIdentity: {
+        customerAccessToken: identity.customerAccessToken ?? null,
+        email: identity.email ?? null,
+        countryCode: identity.countryCode ?? null,
+      },
+    })
+
+    const { cart, userErrors } = data.cartBuyerIdentityUpdate
+    if (userErrors.length > 0) {
+      console.error('[cartBuyerIdentityUpdate] user errors:', userErrors)
+      return await getCart(cartId)
+    }
+    return cart ? rawCartToCart(cart) : await getCart(cartId)
+  } catch (err) {
+    console.error('[cartBuyerIdentityUpdate] request failed:', err)
+    return await getCart(cartId)
+  }
+}
+
+// ─── Admin REST: hard delete customer ──────────────────────────────────────────
+
+export async function adminCustomerDelete(customerGid: string): Promise<void> {
+  const id = customerGid.replace('gid://shopify/Customer/', '')
+  await shopifyAdmin(`/customers/${id}.json`, 'DELETE')
+}
+
 function buildProductTags(product: ProductScore): string[] {
   const tags: string[] = product.categories.map(c =>
     `cat:${c.toLowerCase().replace(/\s+/g, '-')}`,
