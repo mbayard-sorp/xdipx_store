@@ -1,157 +1,149 @@
-import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { useLoaderData, Link } from 'react-router'
-import { requireCustomer } from '~/lib/customer-session.server'
-import { getStorefrontCustomer } from '~/lib/shopify.server'
-import { getAccountCustomer } from '~/lib/customer-oauth.server'
-import type { StorefrontCustomer, StorefrontOrder } from '~/lib/shopify.server'
-import type { AccountCustomer, AccountOrder } from '~/lib/customer-oauth.server'
+import type { MetaFunction } from 'react-router'
+import { Link, useOutletContext } from 'react-router'
+import type { StorefrontOrder } from '~/lib/shopify.server'
+import type { AccountOutletContext } from './_layout.account'
+import { DashboardTile } from '~/components/account/DashboardTile'
+import { ProfileCompletion } from '~/components/account/ProfileCompletion'
+import { StatusPill } from '~/components/account/StatusPill'
+import { EmptyState } from '~/components/account/EmptyState'
 
-export const meta: MetaFunction = () => [{ title: 'My Account — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Account — xdipx' }]
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { token, tokenType } = await requireCustomer(request)
-
-  let customer: (StorefrontCustomer | AccountCustomer) | null = null
-
-  if (tokenType === 'storefront') {
-    customer = await getStorefrontCustomer(token)
-  } else {
-    customer = await getAccountCustomer(token)
-  }
-
-  if (!customer) {
-    // Token may have expired — boot back to login
-    throw new Response(null, { status: 302, headers: { Location: '/account/login' } })
-  }
-
-  return { customer }
-}
-
-export default function AccountPage() {
-  const { customer } = useLoaderData<typeof loader>()
+export default function AccountDashboard() {
+  const { customer } = useOutletContext<AccountOutletContext>()
+  const recentOrder = customer.orders[0] ?? null
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-10 space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1
-            className="text-2xl font-bold text-brand-charcoal"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            Hi, {customer.firstName || customer.email} ♥
-          </h1>
-          <p className="text-sm text-brand-charcoal/50 mt-0.5">{customer.email}</p>
-        </div>
-        <Link
-          to="/account/logout"
-          className="text-sm text-brand-charcoal/40 hover:text-brand-charcoal transition-colors"
-        >
-          Sign out
-        </Link>
-      </div>
-
-      {/* Orders */}
-      <section>
-        <h2
-          className="text-base font-bold text-brand-charcoal mb-4"
+    <div className="space-y-6">
+      {/* Desktop greeting (mobile header already shows this) */}
+      <section className="hidden lg:block">
+        <h1
+          className="text-2xl font-bold text-brand-charcoal"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          Your Orders
-        </h2>
-
-        {customer.orders.length === 0 ? (
-          <div className="bg-white rounded-2xl p-8 text-center shadow-sm">
-            <p className="text-brand-charcoal/40 text-sm">No orders yet.</p>
-            <Link
-              to="/"
-              className="mt-4 inline-block text-sm font-semibold text-brand-purple hover:underline"
-            >
-              Check today's deal →
-            </Link>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {customer.orders.map(order => (
-              <OrderRow key={order.id} order={order} />
-            ))}
-          </div>
-        )}
+          Hi, {customer.firstName || 'friend'} <span className="text-brand-purple">♥</span>
+        </h1>
+        <p className="text-sm text-brand-charcoal/50 mt-0.5">{customer.email}</p>
       </section>
-    </div>
-  )
-}
 
-function OrderRow({ order }: { order: StorefrontOrder | AccountOrder }) {
-  const date = new Date(order.processedAt).toLocaleDateString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric',
-  })
+      {/* Profile completion (renders null when nothing is pending) */}
+      <ProfileCompletion customer={customer} />
 
-  const orderNum = 'orderNumber' in order ? order.orderNumber : order.number
-  const total    = order.totalPrice
+      {/* Tile grid */}
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <DashboardTile
+          label="Orders"
+          value={customer.orders.length}
+          to="/account/orders"
+        />
+        <DashboardTile
+          label="Addresses"
+          value={customer.addresses.length}
+          to="/account/addresses"
+        />
+        <DashboardTile
+          label="Profile"
+          value="Edit"
+          to="/account/profile"
+        />
+        <DashboardTile
+          label="Preferences"
+          value="Set up"
+          to="/account/preferences"
+          accent="setup"
+        />
+      </section>
 
-  const financial   = order.financialStatus?.toLowerCase()
-  const fulfillment = order.fulfillmentStatus?.toLowerCase()
+      {/* Most recent order OR empty state */}
+      {recentOrder ? (
+        <section>
+          <h2
+            className="text-base font-bold text-brand-charcoal mb-3"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Most recent order
+          </h2>
+          <RecentOrderCard order={recentOrder} />
+        </section>
+      ) : (
+        <EmptyState
+          title="No orders yet ♥"
+          description="Your next favorite thing is one tap away."
+          cta={{ label: "See today's deal ♥", to: '/' }}
+        />
+      )}
 
-  return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold text-brand-charcoal">
-            Order #{orderNum}
-          </p>
-          <p className="text-xs text-brand-charcoal/50 mt-0.5">{date}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-sm font-bold text-brand-charcoal">
-            {total.currencyCode} ${parseFloat(total.amount).toFixed(2)}
-          </p>
-          <div className="flex gap-1.5 mt-1 justify-end flex-wrap">
-            <StatusBadge value={financial} type="financial" />
-            <StatusBadge value={fulfillment} type="fulfillment" />
+      {/* Klaviyo nudge — only when marketing is OFF */}
+      {!customer.acceptsMarketing && (
+        <section className="bg-brand-mist rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex-1">
+            <p
+              className="text-sm font-bold text-brand-charcoal"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              Want tomorrow's deal in your inbox?
+            </p>
+            <p className="text-xs text-brand-charcoal/60 mt-1">
+              One email a day, midnight sharp. No spam, just flings.
+            </p>
           </div>
-        </div>
-      </div>
-
-      {/* Line items */}
-      {order.lineItems.length > 0 && (
-        <ul className="border-t border-brand-mist pt-3 space-y-1">
-          {order.lineItems.map((li, i) => (
-            <li key={i} className="flex items-center gap-3 text-sm text-brand-charcoal/70">
-              {'imageUrl' in li && li.imageUrl && (
-                <img
-                  src={li.imageUrl}
-                  alt={li.title}
-                  className="w-8 h-8 rounded-lg object-cover bg-brand-mist shrink-0"
-                />
-              )}
-              <span className="flex-1 truncate">{li.title}</span>
-              <span className="text-xs text-brand-charcoal/40 shrink-0">×{li.quantity}</span>
-            </li>
-          ))}
-        </ul>
+          <Link
+            to="/account/preferences"
+            className="shrink-0 inline-flex items-center justify-center px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-brand-gradient hover:opacity-90 transition-opacity"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Dip me in ♥
+          </Link>
+        </section>
       )}
     </div>
   )
 }
 
-function StatusBadge({ value, type }: { value: string; type: 'financial' | 'fulfillment' }) {
-  const colorMap: Record<string, string> = {
-    paid:       'bg-green-100 text-green-700',
-    refunded:   'bg-red-100 text-red-700',
-    pending:    'bg-yellow-100 text-yellow-700',
-    fulfilled:  'bg-blue-100 text-blue-700',
-    unfulfilled: 'bg-gray-100 text-gray-500',
-    shipped:    'bg-blue-100 text-blue-700',
-  }
-  const label = value.replace(/_/g, ' ')
-  const color = colorMap[value] ?? 'bg-gray-100 text-gray-500'
+function RecentOrderCard({ order }: { order: StorefrontOrder }) {
+  const date = new Date(order.processedAt).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
 
-  if (type === 'fulfillment' && value === 'unfulfilled') return null
+  const { financialStatus, fulfillmentStatus, totalPrice, lineItems } = order
+  const firstItem = lineItems[0]
+  const moreCount = lineItems.length > 1 ? lineItems.length - 1 : 0
+  const lineItemSummary = firstItem
+    ? moreCount > 0
+      ? `${firstItem.title} + ${moreCount} more`
+      : firstItem.title
+    : 'No items'
 
   return (
-    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize ${color}`}>
-      {label}
-    </span>
+    <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-brand-charcoal">
+            Order #{order.orderNumber}{' '}
+            <span className="text-brand-charcoal/40">· {date}</span>
+          </p>
+          <p className="text-xs text-brand-charcoal/60 mt-1 truncate">
+            {lineItemSummary}
+          </p>
+          <div className="flex gap-1.5 mt-2 flex-wrap">
+            <StatusPill value={financialStatus} kind="financial" />
+            <StatusPill value={fulfillmentStatus} kind="fulfillment" />
+          </div>
+        </div>
+        <p className="text-sm font-bold text-brand-charcoal whitespace-nowrap">
+          ${parseFloat(totalPrice.amount).toFixed(2)}
+        </p>
+      </div>
+      <div className="pt-3 border-t border-brand-mist">
+        <Link
+          to={`/account/orders/${encodeURIComponent(order.id)}`}
+          className="text-sm font-semibold text-brand-purple hover:text-brand-purple-light transition-colors"
+        >
+          View order &rarr;
+        </Link>
+      </div>
+    </div>
   )
 }
