@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router'
-import { AnimatePresence } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { CartDrawer } from '~/components/store/CartDrawer'
 import { DesktopMegaMenu, MobileMegaMenu } from '~/components/store/MegaMenu'
-import type { Cart } from '~/types'
+import type { Cart, Product } from '~/types'
 import type { MegaMenuBanner } from '~/types/cms'
 import type { ShopifyMenuItem } from '~/lib/shopify.server'
 
@@ -13,19 +13,23 @@ interface NavbarProps {
   logoUrl?: string
   logoAlt?: string
   isCustomerLoggedIn?: boolean
+  customerFirstName?: string | null
   menuItems?: ShopifyMenuItem[]
   megaMenuBanners?: MegaMenuBanner[]
+  upsells?: Product[]
 }
 
 
-export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx', isCustomerLoggedIn = false, menuItems = [], megaMenuBanners = [] }: NavbarProps) {
+export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx', isCustomerLoggedIn = false, customerFirstName, menuItems = [], megaMenuBanners = [], upsells = [] }: NavbarProps) {
   const location = useLocation()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [cartOpen,   setCartOpen]   = useState(false)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const closeTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cartZoneRef      = useRef<HTMLDivElement>(null)
   const cartDrawerRef    = useRef<HTMLDivElement>(null)
+  const accountMenuRef   = useRef<HTMLDivElement>(null)
 
   // Open cart drawer whenever any part of the site signals an item was added,
   // then auto-close after 3 seconds if the user hasn't hovered into it.
@@ -39,6 +43,37 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
     return () => window.removeEventListener('xdipx:cart-added', handler)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Close account dropdown on click outside
+  useEffect(() => {
+    if (!accountMenuOpen) return
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (accountMenuRef.current?.contains(target)) return
+      setAccountMenuOpen(false)
+    }
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAccountMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [accountMenuOpen])
+
+  // Close account dropdown on route change
+  useEffect(() => {
+    setAccountMenuOpen(false)
+  }, [location.pathname])
+
+  // Focus first menu item when account dropdown opens
+  useEffect(() => {
+    if (!accountMenuOpen) return
+    const firstItem = accountMenuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')
+    firstItem?.focus()
+  }, [accountMenuOpen])
 
   // Close cart on click outside both the trigger button and the drawer panel
   useEffect(() => {
@@ -61,7 +96,7 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
   }
 
   const scheduleClose = () => {
-    closeTimerRef.current = setTimeout(() => setCartOpen(false), 150)
+    closeTimerRef.current = setTimeout(() => setCartOpen(false), 400)
   }
 
   // Cancel auto-close when the user hovers into the cart zone or drawer
@@ -71,7 +106,7 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
 
   return (
     <>
-      <header className="sticky top-0 z-50 bg-brand-cream/95 backdrop-blur-sm border-b border-brand-mist">
+      <header className="sticky top-0 z-[60] bg-brand-cream/95 backdrop-blur-sm border-b border-brand-mist">
         <nav className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
 
           {/* Logo */}
@@ -84,6 +119,8 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
               <img
                 src={logoUrl}
                 alt={logoAlt}
+                width={140}
+                height={32}
                 className="h-8 w-auto max-w-[140px] object-contain"
               />
             ) : (
@@ -104,12 +141,22 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
           {/* Desktop mega menu */}
           <DesktopMegaMenu items={menuItems} banners={megaMenuBanners} />
 
+          {/* Blog link (desktop) */}
+          <Link
+            to="/blog"
+            className="hidden md:block text-sm font-medium text-brand-charcoal/70 hover:text-brand-purple transition-colors"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Blog
+          </Link>
+
           {/* Right side */}
           <div className="flex items-center gap-2">
-            {/* Account icon */}
+            {/* Account icon — mobile: simple link, desktop: dropdown when logged in */}
+            {/* Mobile account link (always a simple link) */}
             <Link
               to={isCustomerLoggedIn ? '/account' : '/account/login'}
-              className="relative flex items-center justify-center w-9 h-9 rounded-full hover:bg-brand-mist transition-colors"
+              className="md:hidden relative flex items-center justify-center w-11 h-11 rounded-full hover:bg-brand-mist transition-colors"
               aria-label={isCustomerLoggedIn ? 'My account' : 'Sign in'}
             >
               {isCustomerLoggedIn ? (
@@ -124,7 +171,72 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
               )}
             </Link>
 
-            {/* Cart icon — hover zone wraps button + drawer trigger */}
+            {/* Desktop account — dropdown when logged in, simple link when not */}
+            {isCustomerLoggedIn ? (
+              <div ref={accountMenuRef} className="relative hidden md:block">
+                <button
+                  onClick={() => setAccountMenuOpen(o => !o)}
+                  className="relative flex items-center justify-center w-11 h-11 rounded-full hover:bg-brand-mist transition-colors"
+                  aria-label="My account"
+                  aria-expanded={accountMenuOpen}
+                  aria-haspopup="menu"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className="text-brand-purple" aria-hidden="true">
+                    <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
+                  </svg>
+                </button>
+                <AnimatePresence>
+                  {accountMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 top-full mt-2 w-56 bg-white border border-brand-mist rounded-2xl shadow-lg overflow-hidden z-[70]"
+                      role="menu"
+                    >
+                      <div className="px-4 pt-3 pb-2">
+                        <p
+                          className="text-sm font-bold text-brand-charcoal"
+                          style={{ fontFamily: 'var(--font-display)' }}
+                        >
+                          {customerFirstName ? <>Hi, {customerFirstName} <span aria-hidden="true">♥</span></> : <>My Account <span aria-hidden="true">♥</span></>}
+                        </p>
+                      </div>
+                      <div className="py-1">
+                        {([
+                          ['/account', 'Overview'],
+                          ['/account/orders', 'Orders'],
+                          ['/account/subscriptions', 'Subscriptions'],
+                          ['/account/addresses', 'Addresses'],
+                          ['/account/profile', 'Profile'],
+                          ['/account/preferences', 'Preferences'],
+                        ] as const).map(([to, label]) => (
+                          <Link key={to} to={to} onClick={() => setAccountMenuOpen(false)} className="block px-4 py-2 text-sm text-brand-charcoal hover:bg-brand-mist/60 hover:text-brand-purple transition-colors" role="menuitem">{label}</Link>
+                        ))}
+                      </div>
+                      <div className="border-t border-brand-mist my-1" />
+                      <div className="py-1 pb-2">
+                        <Link to="/account/logout" onClick={() => setAccountMenuOpen(false)} className="block px-4 py-2 text-sm text-brand-charcoal/50 hover:bg-brand-mist/60 hover:text-brand-purple transition-colors" role="menuitem">Sign out</Link>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            ) : (
+              <Link
+                to="/account/login"
+                className="hidden md:flex relative items-center justify-center w-11 h-11 rounded-full hover:bg-brand-mist transition-colors"
+                aria-label="Sign in"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-brand-charcoal/60" aria-hidden="true">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+              </Link>
+            )}
+
+            {/* Cart icon — hover zone wraps button + bridge to drawer */}
             <div
               ref={cartZoneRef}
               className="relative"
@@ -133,7 +245,7 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
             >
               <button
                 onClick={() => setCartOpen(o => !o)}
-                className="relative flex items-center justify-center w-9 h-9 rounded-full hover:bg-brand-mist transition-colors"
+                className="relative flex items-center justify-center w-11 h-11 rounded-full hover:bg-brand-mist transition-colors"
                 aria-label={`Cart${cartCount > 0 ? ` — ${cartCount} item${cartCount > 1 ? 's' : ''}` : ''}`}
                 aria-expanded={cartOpen}
                 aria-controls="cart-drawer"
@@ -153,7 +265,7 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
             {/* Hamburger — mobile only */}
             <button
               onClick={() => setDrawerOpen(true)}
-              className="md:hidden flex flex-col items-center justify-center w-9 h-9 rounded-full hover:bg-brand-mist transition-colors gap-1.5"
+              className="md:hidden flex flex-col items-center justify-center w-11 h-11 rounded-full hover:bg-brand-mist transition-colors gap-1.5"
               aria-label="Open menu"
             >
               <span className="w-4.5 h-0.5 bg-brand-charcoal rounded-full" />
@@ -167,13 +279,25 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
       {/* ── Cart drawer ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {cartOpen && (
-          <CartDrawer
-            cart={cart}
-            panelRef={cartDrawerRef}
-            onClose={() => setCartOpen(false)}
-            onMouseEnter={() => { cancelAutoClose(); openCart() }}
-            onMouseLeave={scheduleClose}
-          />
+          <>
+            <motion.div
+              className="fixed inset-0 z-[59] bg-brand-charcoal/40 backdrop-blur-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setCartOpen(false)}
+              aria-hidden="true"
+            />
+            <CartDrawer
+              cart={cart}
+              upsells={upsells}
+              panelRef={cartDrawerRef}
+              onClose={() => setCartOpen(false)}
+              onMouseEnter={() => { cancelAutoClose(); openCart() }}
+              onMouseLeave={scheduleClose}
+            />
+          </>
         )}
       </AnimatePresence>
 
@@ -208,10 +332,12 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
               )}
               <button
                 onClick={() => setDrawerOpen(false)}
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-brand-mist transition-colors text-brand-charcoal/60"
+                className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-brand-mist transition-colors text-brand-charcoal/60"
                 aria-label="Close menu"
               >
-                ✕
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M1 1l12 12M13 1L1 13" />
+                </svg>
               </button>
             </div>
 
@@ -237,6 +363,20 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
               </ul>
               {/* Category mega menu accordion */}
               <MobileMegaMenu items={menuItems} onNavigate={() => setDrawerOpen(false)} />
+
+              {/* Blog link (mobile drawer) */}
+              <ul className="px-5">
+                <li>
+                  <Link
+                    to="/blog"
+                    onClick={() => setDrawerOpen(false)}
+                    className="flex items-center gap-2 py-3 text-base font-medium text-brand-charcoal/80 hover:text-brand-purple transition-colors"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
+                    Blog
+                  </Link>
+                </li>
+              </ul>
             </nav>
 
             {/* Account link in drawer */}

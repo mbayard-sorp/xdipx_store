@@ -104,6 +104,16 @@
   animation: marquee 20s linear infinite;
 }
 
+/* Respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Hide scrollbars */
 .scrollbar-hide {
   -ms-overflow-style: none;
@@ -120,4 +130,25 @@
 .card-lift:hover {
   transform: translateY(-3px);
   box-shadow: 0 12px 32px rgba(123, 47, 190, 0.15);
+}
+
+/* Drag-apart spacer animation for deal table */
+@keyframes expand-in {
+  from { height: 0; opacity: 0; }
+  to   { height: 4px; opacity: 1; }
+}
+
+.animate-expand-in {
+  animation: expand-in 150ms ease-out forwards;
+}
+
+/* Profile-completion progress ring pulse */
+@keyframes pulse-ring {
+  0%   { transform: scale(1); opacity: 1; }
+  50%  { transform: scale(1.05); opacity: 0.7; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.pulse-ring {
+  animation: pulse-ring 2s ease-in-out infinite;
 }
