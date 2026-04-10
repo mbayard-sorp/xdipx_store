@@ -134,8 +134,9 @@ export function AddressForm({
         {/* We store the ISO code in component state and send the full name as
             a hidden field. Shopify's Storefront API CustomerAddress uses full
             country name, but we identify the country by isoCode for the cascade. */}
+        {/* CountrySelect's default id is "country", which matches the
+            FieldGroup label's htmlFor — keep them in sync. */}
         <CountrySelect
-          id="country-select"
           name="countryCode"
           value={countryCode}
           onChange={handleCountryChange}

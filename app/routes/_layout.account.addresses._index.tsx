@@ -148,7 +148,7 @@ export default function AddressesPage() {
       ) : addresses.length === 0 ? (
         <EmptyState
           title="No addresses yet ♥"
-          description="Let's make checkout faster."
+          description="Let's make checkout faster ♥"
           cta={{ label: 'Add address ♥', to: '/account/addresses/new' }}
         />
       ) : (
