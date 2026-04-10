@@ -115,3 +115,39 @@ export async function isCustomerLoggedIn(request: Request): Promise<boolean> {
   const session = await getSession(request.headers.get('Cookie'))
   return !!session.get('customerAccessToken')
 }
+
+// ── Social OAuth helpers (Google / Facebook) ──────────────────────────────────
+
+export async function setSocialOAuthPending(
+  request: Request,
+  state: string,
+  codeVerifier?: string,
+): Promise<Headers> {
+  const session = await getSession(request.headers.get('Cookie'))
+  session.set('socialOAuthState', state)
+  if (codeVerifier) session.set('socialOAuthCodeVerifier', codeVerifier)
+  else session.unset('socialOAuthCodeVerifier')
+  const headers = new Headers()
+  headers.set('Set-Cookie', await commitSession(session))
+  return headers
+}
+
+export async function getSocialOAuthPending(request: Request): Promise<{
+  state: string
+  codeVerifier: string | null
+} | null> {
+  const session = await getSession(request.headers.get('Cookie'))
+  const state = session.get('socialOAuthState') as string | undefined
+  if (!state) return null
+  const codeVerifier = (session.get('socialOAuthCodeVerifier') as string | undefined) ?? null
+  return { state, codeVerifier }
+}
+
+export async function clearSocialOAuthPending(request: Request, baseHeaders?: Headers): Promise<Headers> {
+  const session = await getSession(request.headers.get('Cookie'))
+  session.unset('socialOAuthState')
+  session.unset('socialOAuthCodeVerifier')
+  const headers = baseHeaders ?? new Headers()
+  headers.set('Set-Cookie', await commitSession(session))
+  return headers
+}

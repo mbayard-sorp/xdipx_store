@@ -1,11 +1,16 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import type { ActionFunctionArgs, MetaFunction } from 'react-router'
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react-router'
 import {
   data,
   useFetcher,
+  useLoaderData,
   useOutletContext,
   useRevalidator,
 } from 'react-router'
+import { db } from '~/lib/db.server'
+import { customerProfileExtras, customerAnniversaries } from '../../db/schema'
+import { eq } from 'drizzle-orm'
+import { updateProfileProperties } from '~/lib/klaviyo.server'
 import { requireCustomer, refreshCustomerSession } from '~/lib/customer-session.server'
 import { customerAPI } from '~/lib/customer-api.server'
 import { createCustomerAccessToken } from '~/lib/shopify.server'
@@ -29,8 +34,34 @@ export const meta: MetaFunction = () => [{ title: 'Profile — xdipx' }]
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ActionResponse =
-  | { ok: true; intent: 'personal' | 'email' | 'password' | 'marketing' }
-  | { error: string; intent?: 'personal' | 'email' | 'password' | 'marketing' }
+  | { ok: true; intent: 'personal' | 'email' | 'password' | 'marketing' | 'extras' }
+  | { error: string; intent?: 'personal' | 'email' | 'password' | 'marketing' | 'extras' }
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const { token, tokenType } = await requireCustomer(request)
+  if (tokenType === 'account') return { extras: null, anniversaries: [] as { id: number; name: string; date: string }[] }
+
+  const api = customerAPI({ token, tokenType })
+  const profile = await api.getProfile()
+  if (!profile) return { extras: null, anniversaries: [] as { id: number; name: string; date: string }[] }
+
+  const [row, annivRows] = await Promise.all([
+    db.query.customerProfileExtras.findFirst({
+      where: eq(customerProfileExtras.customerGid, profile.id),
+    }),
+    db.select().from(customerAnniversaries)
+      .where(eq(customerAnniversaries.customerGid, profile.id)),
+  ])
+
+  return {
+    extras: {
+      genderIdentity:     row?.genderIdentity     ?? null,
+      relationshipStatus: row?.relationshipStatus ?? null,
+      dateOfBirth:        row?.dateOfBirth        ?? null,
+    },
+    anniversaries: annivRows.map(r => ({ id: r.id, name: r.name, date: r.date })),
+  }
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   const { token, tokenType } = await requireCustomer(request)
@@ -41,6 +72,7 @@ export async function action({ request }: ActionFunctionArgs) {
     | 'email'
     | 'password'
     | 'marketing'
+    | 'extras'
     | ''
 
   if (tokenType === 'account') {
@@ -53,7 +85,9 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'personal') {
     const firstName = String(form.get('firstName') ?? '').trim()
     const lastName  = String(form.get('lastName')  ?? '').trim()
-    const phone     = String(form.get('phone')     ?? '').trim()
+    const rawPhone = String(form.get('phone') ?? '').replace(/\D/g, '')
+    // Shopify requires E.164 format. Prepend +1 for 10-digit US numbers.
+    const phone = rawPhone.length === 10 ? `+1${rawPhone}` : rawPhone.length === 11 ? `+${rawPhone}` : rawPhone
 
     const input: CustomerUpdateInput = {
       firstName,
@@ -170,6 +204,49 @@ export async function action({ request }: ActionFunctionArgs) {
     return data<ActionResponse>({ ok: true, intent })
   }
 
+  if (intent === 'extras') {
+    const genderIdentity     = String(form.get('genderIdentity')     ?? '').trim() || null
+    const relationshipStatus = String(form.get('relationshipStatus') ?? '').trim() || null
+    const dateOfBirth        = String(form.get('dateOfBirth')        ?? '').trim() || null
+    const annivCount         = parseInt(String(form.get('anniv_count') ?? '0'), 10)
+
+    const profile = await api.getProfile()
+    if (!profile) {
+      return data<ActionResponse>({ error: 'Session expired — please sign in again.', intent }, { status: 401 })
+    }
+
+    const annivRows: { customerGid: string; name: string; date: string }[] = []
+    for (let i = 0; i < annivCount; i++) {
+      const name = String(form.get(`anniv_name_${i}`) ?? '').trim()
+      const date = String(form.get(`anniv_date_${i}`) ?? '').trim()
+      if (name && date) annivRows.push({ customerGid: profile.id, name, date })
+    }
+
+    await db
+      .insert(customerProfileExtras)
+      .values({ customerGid: profile.id, genderIdentity, relationshipStatus, dateOfBirth, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: customerProfileExtras.customerGid,
+        set: { genderIdentity, relationshipStatus, dateOfBirth, updatedAt: new Date() },
+      })
+
+    await db.delete(customerAnniversaries).where(eq(customerAnniversaries.customerGid, profile.id))
+    if (annivRows.length > 0) {
+      await db.insert(customerAnniversaries).values(annivRows)
+    }
+
+    void updateProfileProperties(profile.email, {
+      gender_identity:     genderIdentity,
+      relationship_status: relationshipStatus,
+      date_of_birth:       dateOfBirth,
+      anniversaries:       annivRows.length > 0
+        ? JSON.stringify(annivRows.map(r => ({ name: r.name, date: r.date })))
+        : null,
+    })
+
+    return data<ActionResponse>({ ok: true, intent })
+  }
+
   return data<ActionResponse>({ error: 'Unknown intent.' }, { status: 400 })
 }
 
@@ -181,11 +258,20 @@ export default function ProfilePage() {
 
   // One fetcher per card so state is independent (no contention between
   // saves), plus a dedicated fetcher for the /api/customer/delete resource.
+  const { extras, anniversaries: savedAnniversaries } = useLoaderData<typeof loader>()
+
   const personalFetcher  = useFetcher<typeof action>()
   const emailFetcher     = useFetcher<typeof action>()
   const passwordFetcher  = useFetcher<typeof action>()
   const marketingFetcher = useFetcher<typeof action>()
+  const extrasFetcher    = useFetcher<typeof action>()
   const deleteFetcher    = useFetcher<{ error?: string }>()
+
+  type AnnivRow = { name: string; date: string }
+  const [annivRows, setAnnivRows] = useState<AnnivRow[]>(
+    () => savedAnniversaries ?? []
+  )
+  useEffect(() => { setAnnivRows(savedAnniversaries ?? []) }, [savedAnniversaries])
 
   // Toast state — single toast at a time (stacking is a nice-to-have).
   const [toast, setToast] = useState<{
@@ -207,6 +293,19 @@ export default function ProfilePage() {
 
   // Client-side password errors (shown inline, no server round-trip).
   const [passwordClientError, setPasswordClientError] = useState<string | null>(null)
+
+  // Phone number formatting.
+  function formatPhone(raw: string) {
+    let digits = raw.replace(/\D/g, '')
+    // Strip leading country code so +18187267258 → 8187267258 for display
+    if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1)
+    digits = digits.slice(0, 10)
+    if (digits.length <= 3) return digits
+    if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+  }
+  const [phoneValue, setPhoneValue] = useState(() => formatPhone(customer.phone ?? ''))
+  useEffect(() => { setPhoneValue(formatPhone(customer.phone ?? '')) }, [customer.phone])
 
   // Delete confirm dialog state.
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -269,6 +368,18 @@ export default function ProfilePage() {
     }
   }, [marketingFetcher.state, marketingFetcher.data, customer.acceptsMarketing, revalidator])
 
+  // ── Fetcher effect: extras ──────────────────────────────────────────────
+  useEffect(() => {
+    if (extrasFetcher.state !== 'idle' || !extrasFetcher.data) return
+    const res = extrasFetcher.data
+    if ('ok' in res && res.ok) {
+      setToast({ message: 'Saved ♥', variant: 'success' })
+      revalidator.revalidate()
+    } else if ('error' in res && res.error) {
+      setToast({ message: res.error, variant: 'error' })
+    }
+  }, [extrasFetcher.state, extrasFetcher.data, revalidator])
+
   // ── Error reads (for inline alerts on each card) ─────────────────────────
   const personalError =
     personalFetcher.data && 'error' in personalFetcher.data ? personalFetcher.data.error : null
@@ -278,6 +389,8 @@ export default function ProfilePage() {
     passwordFetcher.data && 'error' in passwordFetcher.data ? passwordFetcher.data.error : null
   const passwordError = passwordClientError ?? passwordServerError
   const deleteError = deleteFetcher.data?.error ?? null
+  const extrasError =
+    extrasFetcher.data && 'error' in extrasFetcher.data ? extrasFetcher.data.error : null
 
   // Handlers
   function handleMarketingToggle(next: boolean) {
@@ -388,14 +501,17 @@ export default function ProfilePage() {
           </div>
 
           <FieldGroup id="phone" label="Phone" helper="Optional. We only use this for shipping updates.">
+            {/* Hidden input sends raw digits so Shopify receives e.g. +15555555555 */}
+            <input type="hidden" name="phone" value={phoneValue.replace(/\D/g, '')} />
             <input
               id="phone"
-              name="phone"
               type="tel"
               autoComplete="tel"
-              defaultValue={customer.phone ?? ''}
+              value={phoneValue}
+              onChange={e => setPhoneValue(formatPhone(e.target.value))}
               aria-describedby={fieldDescribedBy('phone', 'Optional. We only use this for shipping updates.', undefined)}
               className={inputClass}
+              placeholder="(555) 555-5555"
             />
           </FieldGroup>
 
@@ -416,7 +532,136 @@ export default function ProfilePage() {
         </personalFetcher.Form>
       </section>
 
-      {/* Card 2 — Email */}
+      {/* Card 2 — Tell us about you */}
+      <section className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+        <div>
+          <h2
+            className="text-base font-bold text-brand-charcoal"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Tell us about you
+          </h2>
+          <p className="text-xs text-brand-charcoal/50 mt-0.5">
+            Helps us personalize your deals <span className="text-brand-purple">♥</span>
+          </p>
+        </div>
+
+        <extrasFetcher.Form method="post" className="space-y-4">
+          <input type="hidden" name="intent" value="extras" />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FieldGroup id="genderIdentity" label="Gender identity">
+              <select
+                id="genderIdentity"
+                name="genderIdentity"
+                defaultValue={extras?.genderIdentity ?? ''}
+                className={inputClass}
+              >
+                <option value="">Prefer not to say</option>
+                <option value="Man">Man</option>
+                <option value="Woman">Woman</option>
+                <option value="Other">Other</option>
+              </select>
+            </FieldGroup>
+
+            <FieldGroup id="relationshipStatus" label="Relationship status">
+              <select
+                id="relationshipStatus"
+                name="relationshipStatus"
+                defaultValue={extras?.relationshipStatus ?? ''}
+                className={inputClass}
+              >
+                <option value="">Prefer not to say</option>
+                <option value="Single">Single</option>
+                <option value="In a Relationship">In a Relationship</option>
+                <option value="Other">Other</option>
+              </select>
+            </FieldGroup>
+          </div>
+
+          <FieldGroup id="dateOfBirth" label="Date of birth">
+            <input
+              id="dateOfBirth"
+              name="dateOfBirth"
+              type="date"
+              defaultValue={extras?.dateOfBirth ?? ''}
+              className={inputClass}
+            />
+          </FieldGroup>
+          <p className="text-xs text-brand-charcoal/40 -mt-2">
+            xdipx.com accounts are only available for customers 18 years or over.
+          </p>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-brand-charcoal">Anniversaries</p>
+            <input type="hidden" name="anniv_count" value={annivRows.length} />
+
+            {annivRows.map((row, i) => (
+              <div key={i} className="flex gap-2 items-start">
+                <div className="flex-1">
+                  <input
+                    name={`anniv_name_${i}`}
+                    type="text"
+                    placeholder="Label (e.g. Wedding)"
+                    value={row.name}
+                    onChange={e => setAnnivRows(prev => prev.map((r, j) => j === i ? { ...r, name: e.target.value } : r))}
+                    className={inputClass}
+                  />
+                </div>
+                <div className="flex-1">
+                  <input
+                    name={`anniv_date_${i}`}
+                    type="date"
+                    value={row.date}
+                    onChange={e => setAnnivRows(prev => prev.map((r, j) => j === i ? { ...r, date: e.target.value } : r))}
+                    className={inputClass}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAnnivRows(prev => prev.filter((_, j) => j !== i))}
+                  className="mt-3 text-brand-charcoal/30 hover:text-red-400 transition-colors text-lg leading-none"
+                  aria-label="Remove anniversary"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => setAnnivRows(prev => [...prev, { name: '', date: '' }])}
+              className="text-sm text-brand-purple hover:text-brand-purple-light transition-colors font-medium"
+            >
+              + Add anniversary
+            </button>
+          </div>
+
+          {extrasError && (
+            <p role="alert" className="text-sm text-red-600">{extrasError}</p>
+          )}
+
+          <p className="text-xs text-brand-charcoal/40 leading-relaxed">
+            We never share this information with any other companies for marketing purposes other than our own.
+            This helps us give you a better experience of the xdipx.com website, and also lets us provide you
+            with information about products and topics that are most relevant to you.
+          </p>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={extrasFetcher.state !== 'idle'}
+              className="px-5 py-2.5 rounded-full text-sm font-bold text-white bg-brand-gradient hover:opacity-90 transition-opacity disabled:opacity-60"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              {extrasFetcher.state !== 'idle' ? 'Saving…' : 'Save ♥'}
+            </button>
+          </div>
+        </extrasFetcher.Form>
+      </section>
+
+      {/* Card 3 — Email */}
+
       <section className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
         <h2
           className="text-base font-bold text-brand-charcoal"
@@ -495,7 +740,7 @@ export default function ProfilePage() {
         )}
       </section>
 
-      {/* Card 3 — Password */}
+      {/* Card 4 — Password */}
       <section className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
         <h2
           className="text-base font-bold text-brand-charcoal"
@@ -560,7 +805,7 @@ export default function ProfilePage() {
         </passwordFetcher.Form>
       </section>
 
-      {/* Card 4 — Marketing */}
+      {/* Card 5 — Marketing */}
       <section className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
         <h2
           className="text-base font-bold text-brand-charcoal"
@@ -590,7 +835,8 @@ export default function ProfilePage() {
         </div>
       </section>
 
-      {/* Card 5 — Danger zone */}
+      {/* Card 6 — Danger zone */}
+
       <DangerZone>
         <h2
           className="text-base font-bold text-red-700"

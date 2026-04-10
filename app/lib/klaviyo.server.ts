@@ -349,3 +349,31 @@ export async function unsubscribeAll(email: string): Promise<void> {
     }
   }
 }
+
+/**
+ * Update custom profile properties on a Klaviyo profile.
+ * Used by the "Tell us about you" profile section to sync
+ * gender_identity, relationship_status, date_of_birth, anniversaries.
+ * Swallows errors so a Klaviyo outage never blocks the DB save.
+ */
+export async function updateProfileProperties(
+  email: string,
+  properties: Record<string, string | null>,
+): Promise<void> {
+  try {
+    const profile = await getProfileByEmail(email)
+    if (!profile) {
+      console.warn('[klaviyo.updateProfileProperties] no profile found for', email)
+      return
+    }
+    await klaviyoFetch(`/profiles/${profile.id}/`, 'PATCH', {
+      data: {
+        type: 'profile',
+        id: profile.id,
+        attributes: { properties },
+      },
+    })
+  } catch (err) {
+    console.error('[klaviyo.updateProfileProperties] failed:', err)
+  }
+}

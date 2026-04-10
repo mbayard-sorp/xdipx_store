@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore } from '~/types'
 import { toHTML } from '@portabletext/to-html'
 
@@ -2308,6 +2309,45 @@ export async function customerCreate(
   return { customer }
 }
 
+/**
+ * Given a social login identity (email + provider-scoped user ID), derives a
+ * deterministic Shopify password via HMAC, creates the customer if needed, and
+ * returns a Storefront API access token.
+ *
+ * The password is never stored — it is reproduced on every login from the
+ * stable provider user ID and the OAUTH_PASSWORD_SECRET env var.
+ */
+export async function loginWithSocialIdentity(params: {
+  email: string
+  firstName: string
+  lastName: string
+  provider: 'google' | 'facebook'
+  providerId: string
+}): Promise<{ accessToken: string; expiresAt: string } | { error: string }> {
+  const secret = process.env['OAUTH_PASSWORD_SECRET'] ?? 'oauth-secret-change-me'
+  const password = crypto
+    .createHmac('sha256', secret)
+    .update(`${params.provider}:${params.providerId}`)
+    .digest('base64url')
+    .slice(0, 32)
+
+  // Try to get existing token first (returning customer)
+  const tokenResult = await createCustomerAccessToken(params.email, password)
+  if ('accessToken' in tokenResult) return tokenResult
+
+  // Customer doesn't exist yet — create them
+  const createResult = await customerCreate({
+    email:            params.email,
+    password,
+    firstName:        params.firstName,
+    lastName:         params.lastName,
+    acceptsMarketing: false,
+  })
+  if ('error' in createResult) return { error: createResult.error }
+
+  return createCustomerAccessToken(params.email, password)
+}
+
 export async function customerRecover(
   email: string,
 ): Promise<{ ok: true } | { error: string }> {
@@ -2830,4 +2870,32 @@ function buildProductTags(product: ProductScore): string[] {
     product.msrp < 100 ? 'price:50-100'    : 'price:100-plus',
   )
   return tags
+}
+
+
+export async function updateCollectionImage(
+  collectionId: string,
+  imageBuffer: Buffer,
+  filename: string,
+  alt: string,
+): Promise<string> {
+  throw new Error('updateCollectionImage: not yet implemented')
+}
+
+export async function getAccessoryProductsAdmin(
+  productIds: string[],
+): Promise<unknown[]> {
+  throw new Error('getAccessoryProductsAdmin: not yet implemented')
+}
+
+export async function updateCollectionDescription(...args: unknown[]): Promise<unknown> {
+  throw new Error('updateCollectionDescription: not yet implemented')
+}
+
+export async function updateProductTags(...args: unknown[]): Promise<unknown> {
+  throw new Error('updateProductTags: not yet implemented')
+}
+
+export async function fetchAllDealProducts(...args: unknown[]): Promise<unknown> {
+  throw new Error('fetchAllDealProducts: not yet implemented')
 }

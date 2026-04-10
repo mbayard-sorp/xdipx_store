@@ -95,6 +95,22 @@ export const pipelineSettings = pgTable('pipeline_settings', {
   updatedAt: timestamp('updated_at').defaultNow(),
 })
 
+export const customerProfileExtras = pgTable('customer_profile_extras', {
+  customerGid:        varchar('customer_gid', { length: 60 }).primaryKey(),
+  genderIdentity:     varchar('gender_identity', { length: 30 }),
+  relationshipStatus: varchar('relationship_status', { length: 30 }),
+  dateOfBirth:        date('date_of_birth'),
+  updatedAt:          timestamp('updated_at').defaultNow().notNull(),
+})
+
+export const customerAnniversaries = pgTable('customer_anniversaries', {
+  id:          serial('id').primaryKey(),
+  customerGid: varchar('customer_gid', { length: 60 }).notNull(),
+  name:        varchar('name', { length: 60 }).notNull(),
+  date:        date('date').notNull(),
+  createdAt:   timestamp('created_at').defaultNow().notNull(),
+})
+
 export const socialPosts = pgTable('social_posts', {
   id:              serial('id').primaryKey(),
   platform:        varchar('platform', { length: 20 }).notNull(),
