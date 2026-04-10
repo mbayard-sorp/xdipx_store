@@ -1825,6 +1825,47 @@ export interface PaginatedOrders {
   pageInfo: { hasNextPage: boolean; endCursor: string | null }
 }
 
+// ─── Subscription Contract types ─────────────────────────────────────────────
+
+export interface SubscriptionContractLine {
+  id: string
+  title: string
+  variantTitle: string | null
+  quantity: number
+  currentPrice: { amount: string; currencyCode: string }
+  imageUrl: string | null
+  productId: string | null
+}
+
+export interface SubscriptionIntervalPolicy {
+  interval: 'DAY' | 'WEEK' | 'MONTH' | 'YEAR' | string
+  intervalCount: number
+}
+
+export interface SubscriptionContract {
+  id: string
+  status: string // ACTIVE | PAUSED | CANCELLED | EXPIRED | STALE | FAILED
+  createdAt: string
+  nextBillingDate: string | null
+  currencyCode: string
+  customerId: string
+  billingPolicy: SubscriptionIntervalPolicy | null
+  deliveryPolicy: SubscriptionIntervalPolicy | null
+  lines: SubscriptionContractLine[]
+  subtotalAmount: { amount: string; currencyCode: string } | null
+  shippingAddress: {
+    firstName: string | null
+    lastName: string | null
+    address1: string | null
+    address2: string | null
+    city: string | null
+    province: string | null
+    country: string | null
+    zip: string | null
+    phone: string | null
+  } | null
+}
+
 export interface Country {
   isoCode: string
   name: string
@@ -2589,6 +2630,185 @@ export async function cartBuyerIdentityUpdate(
 export async function adminCustomerDelete(customerGid: string): Promise<void> {
   const id = customerGid.replace('gid://shopify/Customer/', '')
   await shopifyAdmin(`/customers/${id}.json`, 'DELETE')
+}
+
+// ─── Admin GraphQL: Subscription Contracts ───────────────────────────────────
+
+interface RawSubscriptionContractLine {
+  id: string
+  title: string
+  variantTitle: string | null
+  quantity: number
+  currentPrice: { amount: string; currencyCode: string }
+  variantImage: { url: string } | null
+  productId: string | null
+}
+
+interface RawSubscriptionContractNode {
+  id: string
+  status: string
+  createdAt: string
+  nextBillingDate: string | null
+  billingPolicy: { interval: string; intervalCount: number } | null
+  deliveryPolicy: { interval: string; intervalCount: number } | null
+  customer: { id: string }
+  deliveryMethod: {
+    __typename: string
+    address?: {
+      firstName: string | null
+      lastName: string | null
+      address1: string | null
+      address2: string | null
+      city: string | null
+      province: string | null
+      country: string | null
+      zip: string | null
+      phone: string | null
+    }
+  } | null
+  lines: {
+    edges: { node: RawSubscriptionContractLine }[]
+  }
+}
+
+const SUBSCRIPTION_CONTRACT_FRAGMENT = `
+  id
+  status
+  createdAt
+  nextBillingDate
+  billingPolicy { interval intervalCount }
+  deliveryPolicy { interval intervalCount }
+  customer { id }
+  deliveryMethod {
+    __typename
+    ... on SubscriptionDeliveryMethodShipping {
+      address {
+        firstName lastName address1 address2
+        city province country zip phone
+      }
+    }
+  }
+  lines(first: 20) {
+    edges {
+      node {
+        id title variantTitle quantity
+        currentPrice { amount currencyCode }
+        variantImage { url }
+        productId
+      }
+    }
+  }
+`
+
+function mapSubscriptionContract(raw: RawSubscriptionContractNode): SubscriptionContract {
+  const lines: SubscriptionContractLine[] = raw.lines.edges.map((e) => ({
+    id: e.node.id,
+    title: e.node.title,
+    variantTitle: e.node.variantTitle,
+    quantity: e.node.quantity,
+    currentPrice: e.node.currentPrice,
+    imageUrl: e.node.variantImage?.url ?? null,
+    productId: e.node.productId,
+  }))
+
+  // Compute subtotal from line items
+  let subtotalNum = 0
+  let currencyCode = 'USD'
+  for (const line of lines) {
+    subtotalNum += parseFloat(line.currentPrice.amount) * line.quantity
+    currencyCode = line.currentPrice.currencyCode
+  }
+
+  const shippingAddr =
+    raw.deliveryMethod?.__typename === 'SubscriptionDeliveryMethodShipping' &&
+    raw.deliveryMethod.address
+      ? raw.deliveryMethod.address
+      : null
+
+  return {
+    id: raw.id,
+    status: raw.status,
+    createdAt: raw.createdAt,
+    nextBillingDate: raw.nextBillingDate,
+    currencyCode,
+    customerId: raw.customer.id,
+    billingPolicy: raw.billingPolicy,
+    deliveryPolicy: raw.deliveryPolicy,
+    lines,
+    subtotalAmount:
+      lines.length > 0
+        ? { amount: subtotalNum.toFixed(2), currencyCode }
+        : null,
+    shippingAddress: shippingAddr
+      ? {
+          firstName: shippingAddr.firstName ?? null,
+          lastName: shippingAddr.lastName ?? null,
+          address1: shippingAddr.address1 ?? null,
+          address2: shippingAddr.address2 ?? null,
+          city: shippingAddr.city ?? null,
+          province: shippingAddr.province ?? null,
+          country: shippingAddr.country ?? null,
+          zip: shippingAddr.zip ?? null,
+          phone: shippingAddr.phone ?? null,
+        }
+      : null,
+  }
+}
+
+export async function adminGetCustomerSubscriptions(
+  customerGid: string,
+): Promise<SubscriptionContract[]> {
+  try {
+    const data = await adminGraphQL<{
+      customer: {
+        subscriptionContracts: {
+          edges: { node: RawSubscriptionContractNode }[]
+        }
+      } | null
+    }>(
+      `query CustomerSubscriptions($id: ID!) {
+        customer(id: $id) {
+          subscriptionContracts(first: 20) {
+            edges {
+              node { ${SUBSCRIPTION_CONTRACT_FRAGMENT} }
+            }
+          }
+        }
+      }`,
+      { id: customerGid },
+    )
+
+    if (!data.customer) return []
+    return data.customer.subscriptionContracts.edges.map((e) =>
+      mapSubscriptionContract(e.node),
+    )
+  } catch (err) {
+    console.error('[adminGetCustomerSubscriptions] failed:', err)
+    return []
+  }
+}
+
+export async function adminGetSubscriptionContract(
+  contractGid: string,
+): Promise<SubscriptionContract | null> {
+  try {
+    const data = await adminGraphQL<{
+      subscriptionContract: RawSubscriptionContractNode | null
+    }>(
+      `query SubscriptionContractDetail($id: ID!) {
+        subscriptionContract(id: $id) {
+          ${SUBSCRIPTION_CONTRACT_FRAGMENT}
+        }
+      }`,
+      { id: contractGid },
+    )
+
+    if (!data.subscriptionContract) return null
+    return mapSubscriptionContract(data.subscriptionContract)
+  } catch (err) {
+    console.error('[adminGetSubscriptionContract] failed:', err)
+    return null
+  }
 }
 
 function buildProductTags(product: ProductScore): string[] {
