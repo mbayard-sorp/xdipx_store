@@ -7,3 +7,4 @@ build/
 .claude/worktrees/
 .react-router/
 .recovery/
+studio/npm run dev/
