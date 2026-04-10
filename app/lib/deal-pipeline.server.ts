@@ -9,7 +9,7 @@
  *   5. Select 2-3 accessories via Claude
  *   6. Generate all AI copy (tagline, full story, both ways, bullets, email subjects, SEO)
  *   7. Push all fields to Shopify as metafields
- *   8. Insert a dealHistory row with status: pending_review
+ *   8. Insert a dealHistory row with status: draft
  *
  * Called automatically after dailyFeedProcessor() in server/cron.js.
  * Can also be triggered manually via Admin → Settings → "Run Pipeline Now".
@@ -122,9 +122,7 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
       .from(dealHistory)
       .where(
         or(
-          eq(dealHistory.status, 'pending'),
-          eq(dealHistory.status, 'pending_review'),
-          eq(dealHistory.status, 'approved'),
+          eq(dealHistory.status, 'queued'),
           eq(dealHistory.status, 'live'),
         ),
       )
@@ -224,7 +222,7 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
       worksForHer:      forHer,
       featureBullets:   bullets,
       category:         inferCategory(chosen.categories),
-      dealStatus:       'pending_review',
+      dealStatus:       'draft',
       dealDate,
       originalPrice:    chosen.msrp,
       wholesaleCost:    chosen.wholesaleCost,
@@ -239,7 +237,7 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
     })
 
     // Mirror deal_status in Shopify tags (for Storefront API queries)
-    await setDealStatus(shopifyGid, 'pending_review')
+    await setDealStatus(shopifyGid, 'draft')
 
     // 9. Insert dealHistory row
     await db.insert(dealHistory).values({
@@ -254,7 +252,7 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
       mapPrice:         chosen.mapPrice.toFixed(2),
       unitsAvailable:   chosen.qty,
       dealScore:        chosen.score.toFixed(3),
-      status:           'pending_review',
+      status:           'queued',
       shopifyProductId: numericId,
     }).onConflictDoNothing()
 

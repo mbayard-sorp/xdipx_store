@@ -43,7 +43,7 @@ export async function action({ request }: ActionFunctionArgs) {
     style              = body.style ?? 'lifestyle'
     count              = Math.min(Math.max(1, body.count ?? 2), 4)
     aspectRatio        = VALID_RATIOS.has(body.aspectRatio ?? '') ? (body.aspectRatio ?? '1:1') : '1:1'
-    referenceImageUrls = Array.isArray(body.referenceImageUrls) ? body.referenceImageUrls.slice(0, 1) : []
+    referenceImageUrls = Array.isArray(body.referenceImageUrls) ? body.referenceImageUrls.slice(0, 5) : []
     productTitle       = body.productTitle ?? ''
   } catch {
     return Response.json({ error: 'Invalid JSON' }, { status: 400 })

@@ -100,5 +100,27 @@ export function createCronRoutes() {
     }
   })
 
+  /**
+   * POST /cron/inventory-check
+   * Schedule: every 5 min — check if live deal is sold out, rotate if so
+   */
+  router.post('/inventory-check', guard, async (_req, res) => {
+    try {
+      const { isLiveDealSoldOut, rotateDeal } = await import('../app/lib/deal-rotator.server.js')
+      const { soldOut } = await isLiveDealSoldOut()
+
+      if (soldOut) {
+        console.log('[cron:inventory-check] Live deal sold out — rotating')
+        const result = await rotateDeal()
+        res.json({ ok: true, rotated: true, ...result })
+      } else {
+        res.json({ ok: true, rotated: false })
+      }
+    } catch (err) {
+      console.error('[cron:inventory-check]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
   return router
 }

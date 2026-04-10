@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher, useSearchParams } from 'react-router'
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { db }           from '~/lib/db.server'
 import { dealHistory }  from '../../db/schema'
 import { generateSchedule } from '~/lib/claude.server'
@@ -355,15 +355,14 @@ export default function AdminQueuePage() {
               const dealPrice = shopifyData?.price != null
                 ? shopifyData.price
                 : deal.dealPrice ? parseFloat(deal.dealPrice) : null
-              const margin    = msrp && wholesale ? (msrp - wholesale) / msrp : null
+              const margin    = dealPrice && wholesale ? (dealPrice - wholesale) / dealPrice : null
               const images    = shopifyData?.images ?? []
               const thumbUrl  = images[0] ?? null
               const isExpanded = expandedRow === deal.id
 
               return (
-                <>
+                <React.Fragment key={deal.id}>
                   <tr
-                    key={deal.id}
                     className={[
                       'border-t border-brand-mist transition-colors cursor-pointer select-none',
                       isExpanded ? 'bg-brand-mist/40' : 'hover:bg-brand-mist/30',
@@ -503,7 +502,7 @@ export default function AdminQueuePage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               )
             })}
           </tbody>

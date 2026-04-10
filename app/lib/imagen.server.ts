@@ -70,7 +70,7 @@ async function generateOne(ai: GoogleGenAI, parts: Part[]): Promise<Buffer> {
   const response = await ai.models.generateContent({
     model:    MODEL,
     contents: [{ role: 'user', parts }],
-    config:   { responseModalities: ['IMAGE'] },
+    config: { responseModalities: ['IMAGE'] },
   })
 
   const candidate = response.candidates?.[0]
@@ -141,10 +141,13 @@ Style: editorial, tasteful, evocative but not explicit.`
   } else {
     const refs = opts.referenceImageBuffers
     if (refs && refs.length > 0) {
-      // Reference mode: reproduce the exact physical product in a new scene
-      parts.push({ inlineData: { mimeType: 'image/jpeg', data: refs[0]!.toString('base64') } })
+      // Reference mode: send all reference images then the prompt
+      for (const ref of refs) {
+        parts.push({ inlineData: { mimeType: 'image/jpeg', data: ref.toString('base64') } })
+      }
+      const plural = refs.length > 1 ? 'reference images' : 'reference image'
       parts.push({
-        text: `${basePrompt} Reproduce the exact same physical product shown in the reference image — same shape, color, finish, and details. Place it faithfully in the new scene without altering the product itself.`,
+        text: `${basePrompt} Reproduce the exact same physical product${refs.length > 1 ? 's' : ''} shown in the ${plural} — same shape, color, finish, and details. Place ${refs.length > 1 ? 'them' : 'it'} faithfully in the new scene without altering the product${refs.length > 1 ? 's themselves' : ' itself'}.`,
       })
     } else {
       parts.push({ text: basePrompt })

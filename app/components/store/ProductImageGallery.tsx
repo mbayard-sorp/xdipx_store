@@ -58,6 +58,7 @@ export function ProductImageGallery({
       if (!isZoomed || !containerRef.current || !imageRef.current) return
       e.preventDefault()
       const touch = e.touches[0]
+      if (!touch) return
       const rect = containerRef.current.getBoundingClientRect()
       const x = Math.max(0, Math.min(100, ((touch.clientX - rect.left) / rect.width) * 100))
       const y = Math.max(0, Math.min(100, ((touch.clientY - rect.top) / rect.height) * 100))
@@ -221,39 +222,133 @@ export function ProductImageGallery({
         {discountBadge && <div className="z-20 pointer-events-none">{discountBadge}</div>}
       </div>
 
-      {/* Thumbnail row */}
+      {/* Thumbnail row with nav arrows */}
       {items.length > 1 && (
-        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-          {items.slice(0, 8).map((item, i) => (
-            <button
-              key={i}
-              onMouseEnter={() => setPreviewIndex(i)}
-              onMouseLeave={() => setPreviewIndex(null)}
-              onClick={() => selectMedia(i)}
-              className={[
-                'relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 transition-all',
-                displayIndex === i
-                  ? 'border-brand-coral'
-                  : 'border-transparent opacity-60 hover:opacity-100',
-              ].join(' ')}
-              aria-label={item.kind === 'video' ? `Play video ${i + 1}` : `View image ${i + 1}`}
-            >
-              <img
-                src={item.kind === 'video' ? item.previewUrl : item.url}
-                alt=""
-                className="w-full h-full object-cover"
-              />
-              {item.kind === 'video' && (
-                <div className="absolute inset-0 flex items-center justify-center bg-brand-charcoal/30">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true">
-                    <polygon points="5,3 19,12 5,21" />
-                  </svg>
-                </div>
-              )}
-            </button>
-          ))}
-        </div>
+        <ThumbnailStrip
+          items={items}
+          displayIndex={displayIndex}
+          onHover={setPreviewIndex}
+          onSelect={selectMedia}
+        />
       )}
+    </div>
+  )
+}
+
+// ─── Thumbnail strip with navigation arrows ─────────────────────────────────
+
+function ThumbnailStrip({
+  items,
+  displayIndex,
+  onHover,
+  onSelect,
+}: {
+  items: GalleryItem[]
+  displayIndex: number
+  onHover: (i: number | null) => void
+  onSelect: (i: number) => void
+}) {
+  const thumbsRef = useRef<HTMLDivElement>(null)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+
+  const checkScroll = useCallback(() => {
+    const el = thumbsRef.current
+    if (!el) return
+    setCanScrollLeft(el.scrollLeft > 2)
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
+  }, [])
+
+  useEffect(() => {
+    const el = thumbsRef.current
+    if (!el) return
+    checkScroll()
+    el.addEventListener('scroll', checkScroll, { passive: true })
+    const ro = new ResizeObserver(checkScroll)
+    ro.observe(el)
+    return () => { el.removeEventListener('scroll', checkScroll); ro.disconnect() }
+  }, [checkScroll, items.length])
+
+  function scrollThumbs(direction: 'left' | 'right') {
+    const el = thumbsRef.current
+    if (!el) return
+    el.scrollBy({ left: direction === 'left' ? -216 : 216, behavior: 'smooth' })
+  }
+
+  return (
+    <div className="relative flex items-center gap-1.5">
+      {/* Left arrow */}
+      <button
+        type="button"
+        onClick={() => scrollThumbs('left')}
+        className={[
+          'shrink-0 w-11 h-11 rounded-full border border-brand-mist bg-white/80 backdrop-blur flex items-center justify-center transition-all',
+          canScrollLeft
+            ? 'text-brand-charcoal/60 hover:text-brand-charcoal hover:border-brand-charcoal/30'
+            : 'text-brand-charcoal/15 cursor-default',
+        ].join(' ')}
+        aria-label="Scroll thumbnails left"
+        tabIndex={canScrollLeft ? 0 : -1}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      </button>
+
+      {/* Thumbnails */}
+      <div
+        ref={thumbsRef}
+        className="flex gap-2 overflow-x-auto scrollbar-hide scroll-smooth flex-1"
+      >
+        {items.slice(0, 10).map((item, i) => (
+          <button
+            key={i}
+            onMouseEnter={() => onHover(i)}
+            onMouseLeave={() => onHover(null)}
+            onClick={() => onSelect(i)}
+            className={[
+              'relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 transition-all',
+              displayIndex === i
+                ? 'border-brand-coral'
+                : 'border-transparent opacity-60 hover:opacity-100',
+            ].join(' ')}
+            aria-label={item.kind === 'video' ? `Play video ${i + 1}` : `View image ${i + 1}`}
+          >
+            <img
+              src={item.kind === 'video' ? item.previewUrl : item.url}
+              alt=""
+              width={64}
+              height={64}
+              className="w-full h-full object-cover"
+            />
+            {item.kind === 'video' && (
+              <div className="absolute inset-0 flex items-center justify-center bg-brand-charcoal/30">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+                  <polygon points="5,3 19,12 5,21" />
+                </svg>
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Right arrow */}
+      <button
+        type="button"
+        onClick={() => scrollThumbs('right')}
+        className={[
+          'shrink-0 w-11 h-11 rounded-full border border-brand-mist bg-white/80 backdrop-blur flex items-center justify-center transition-all',
+          canScrollRight
+            ? 'text-brand-charcoal/60 hover:text-brand-charcoal hover:border-brand-charcoal/30'
+            : 'text-brand-charcoal/15 cursor-default',
+        ].join(' ')}
+        aria-label="Scroll thumbnails right"
+        tabIndex={canScrollRight ? 0 : -1}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </button>
     </div>
   )
 }

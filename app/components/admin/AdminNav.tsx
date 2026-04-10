@@ -17,36 +17,10 @@ function StarIcon() {
     </svg>
   )
 }
-function CalendarIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-      <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" />
-      <line x1="3" y1="10" x2="21" y2="10" />
-    </svg>
-  )
-}
-function ListIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" />
-      <line x1="8" y1="18" x2="21" y2="18" />
-      <line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" />
-      <line x1="3" y1="18" x2="3.01" y2="18" />
-    </svg>
-  )
-}
 function ReviewsIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  )
-}
-function SparkleIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z" />
     </svg>
   )
 }
@@ -55,6 +29,22 @@ function MailIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
       <polyline points="22,6 12,13 2,6" />
+    </svg>
+  )
+}
+function SocialsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 4l11.733 16h4.267l-11.733-16z" />
+      <path d="M4 20l6.768-6.768M17.5 4l-6.768 6.768" />
+    </svg>
+  )
+}
+function CartUpsellIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
+      <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
     </svg>
   )
 }
@@ -87,18 +77,17 @@ function UploadIcon() {
 
 const NAV_ITEMS = [
   { to: '/admin',                label: 'Dashboard',    Icon: DashboardIcon },
-  { to: '/admin/today',          label: "Today's Deal", Icon: StarIcon      },
-  { to: '/admin/schedule',       label: 'Schedule',     Icon: CalendarIcon  },
-  { to: '/admin/queue',          label: 'Deal Queue',   Icon: ListIcon      },
-  { to: '/admin/bulk-import',    label: 'Bulk Import',  Icon: UploadIcon    },
-  { to: '/admin/vault-tabs',     label: 'Vault Tabs',   Icon: VaultIcon     },
+  { to: '/admin/deals',              label: 'Deals',            Icon: StarIcon       },
+  { to: '/admin/checkout-upsells',  label: 'Checkout Upsells', Icon: CartUpsellIcon },
+  { to: '/admin/bulk-import',       label: 'Bulk Import',      Icon: UploadIcon     },
+  { to: '/admin/collections-mgr', label: 'Collections Mgr.',  Icon: VaultIcon     },
   { to: '/admin/reviews',        label: 'Reviews',      Icon: ReviewsIcon,  badgeKey: 'reviews' },
-  { to: '/admin/generate',       label: 'AI Generate',  Icon: SparkleIcon   },
   { to: '/admin/emails',         label: 'Emails',       Icon: MailIcon      },
+  { to: '/admin/socials',        label: 'Socials',      Icon: SocialsIcon   },
   { to: '/admin/settings',       label: 'Settings',     Icon: SettingsIcon  },
 ]
 
-export function AdminNav() {
+export function AdminNav({ logoUrl }: { logoUrl: string | null }) {
   const { pathname } = useLocation()
   const [pendingReviews, setPendingReviews] = useState<number | null>(null)
 
@@ -113,12 +102,16 @@ export function AdminNav() {
   return (
     <aside className="w-56 bg-brand-charcoal min-h-screen flex flex-col py-6 px-4 shrink-0">
       <Link to="/" className="block mb-8">
-        <span
-          className="text-2xl font-black text-brand-gradient select-none"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          xdipx
-        </span>
+        {logoUrl ? (
+          <img src={logoUrl} alt="xdipx" className="h-8 w-auto" />
+        ) : (
+          <span
+            className="text-2xl font-black text-brand-gradient select-none"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            xdipx
+          </span>
+        )}
         <span className="text-white/40 text-xs block mt-0.5 font-medium tracking-widest uppercase">
           admin
         </span>

@@ -55,7 +55,7 @@ export interface Deal {
   mapPrice: number
   brand: string
   category: 'for-him' | 'for-her' | 'both' | 'couples'
-  dealStatus: 'pending_approval' | 'approved' | 'live' | 'archived'
+  dealStatus: 'draft' | 'scheduled' | 'live'
   dealDate: string
   qty: number
   accessoryProductIds: string[]
@@ -66,6 +66,8 @@ export interface Deal {
   variantId: string
   variants?: ProductVariant[]
   options?: { name: string; values: string[] }[]
+  sellingPlanGroups?: SellingPlanGroup[]
+  tags: string[]
   rating?: { value: number; count: number }
 }
 
@@ -83,6 +85,7 @@ export interface Product {
   brand?: string
   tags: string[]
   category?: string
+  sellingPlanGroups?: SellingPlanGroup[]
   rating?: { value: number; count: number }
 }
 
@@ -96,8 +99,33 @@ export interface VaultDeal {
   images: ProductImage[]
   brand: string
   category: string
-  dealStatus: 'archived'
+  dealStatus: 'draft' | 'scheduled' | 'live'
   qty: number
+}
+
+// ─── Selling Plans / Subscriptions ───────────────────────────────────────
+
+export interface SellingPlanPriceAdjustment {
+  adjustmentValue:
+    | { __typename: 'SellingPlanPercentagePriceAdjustment'; adjustmentPercentage: number }
+    | { __typename: 'SellingPlanFixedAmountPriceAdjustment'; adjustmentAmount: { amount: string; currencyCode: string } }
+    | { __typename: 'SellingPlanFixedPriceAdjustment'; price: { amount: string; currencyCode: string } }
+}
+
+export interface SellingPlan {
+  id: string
+  name: string
+  description?: string
+  options: { name: string; value: string }[]
+  recurringDeliveries: boolean
+  priceAdjustments: SellingPlanPriceAdjustment[]
+}
+
+export interface SellingPlanGroup {
+  name: string
+  appName: string
+  options: { name: string; values: string[] }[]
+  sellingPlans: SellingPlan[]
 }
 
 // ─── Cart ─────────────────────────────────────────────────────────────────
@@ -115,6 +143,9 @@ export interface CartLine {
       images: ProductImage[]
     }
     price: { amount: string; currencyCode: string }
+  }
+  sellingPlanAllocation?: {
+    sellingPlan: { id: string; name: string }
   }
 }
 
@@ -181,7 +212,7 @@ export interface ProductScore {
 
 // ─── DB / Deals ───────────────────────────────────────────────────────────
 
-export type DealHistoryStatus = 'pending' | 'pending_review' | 'approved' | 'live' | 'archived'
+export type DealHistoryStatus = 'draft' | 'scheduled' | 'live'
 
 export interface DealHistoryRow {
   id: number
@@ -199,11 +230,12 @@ export interface DealHistoryRow {
   totalRevenue: string
   totalProfit: string
   dealScore: string | null
+  vaultPrice: string | null
   status: DealHistoryStatus
   shopifyProductId: string | null
   createdAt: Date
   activatedAt: Date | null
-  archivedAt: Date | null
+  completedAt: Date | null
 }
 
 export interface DailyProfitSummaryRow {

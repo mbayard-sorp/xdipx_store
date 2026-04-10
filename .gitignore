@@ -5,3 +5,5 @@ build/
 .remotion-bundle/
 .video-previews/
 .claude/worktrees/
+.react-router/
+.recovery/

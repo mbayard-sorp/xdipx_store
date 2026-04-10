@@ -18,6 +18,8 @@ export default {
         { type: 'playTogetherBanner' },
         { type: 'brandLogoWall'      },
         { type: 'testimonials'       },
+        { type: 'bonusDeal'          },
+        { type: 'richText'           },
       ],
     },
   ],

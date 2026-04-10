@@ -8,13 +8,16 @@ import { ProductCarousel }    from './ProductCarousel'
 import { PlayTogetherBanner } from './PlayTogetherBanner'
 import { BrandLogoWall }      from './BrandLogoWall'
 import { Testimonials }       from './Testimonials'
+import { BonusDealSection }   from './BonusDealSection'
+import { RichTextBlock }      from './RichTextBlock'
 
 interface ContentBlockRendererProps {
   block: ContentBlock
   carouselProductMap: Record<string, Product[]>
+  bonusDealProduct?: Product | null
 }
 
-export function ContentBlockRenderer({ block, carouselProductMap }: ContentBlockRendererProps) {
+export function ContentBlockRenderer({ block, carouselProductMap, bonusDealProduct }: ContentBlockRendererProps) {
   switch (block._type) {
     case 'announcementBar':
       return <AnnouncementBar block={block} />
@@ -37,6 +40,10 @@ export function ContentBlockRenderer({ block, carouselProductMap }: ContentBlock
       return <BrandLogoWall block={block} />
     case 'testimonials':
       return <Testimonials block={block} />
+    case 'bonusDeal':
+      return <BonusDealSection block={block} product={bonusDealProduct ?? null} />
+    case 'richText':
+      return <RichTextBlock block={block} />
     default:
       return null
   }

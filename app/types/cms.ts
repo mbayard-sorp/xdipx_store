@@ -152,6 +152,29 @@ export interface TestimonialsBlock {
   items: TestimonialItem[]
 }
 
+// ─── Bonus Deal ──────────────────────────────────────────────────────────
+
+export interface BonusDealBlock {
+  _type: 'bonusDeal'
+  _key: string
+  active: boolean
+  order: number
+  heading?: string
+  eyebrow?: string
+}
+
+// ─── Rich Text ───────────────────────────────────────────────────────────
+
+export interface RichTextBlock {
+  _type: 'richText'
+  _key: string
+  active: boolean
+  order: number
+  body: unknown[]
+  bgColor: 'white' | 'cream' | 'mist' | 'charcoal' | 'purple'
+  maxWidth: 'narrow' | 'medium' | 'wide'
+}
+
 // ─── Union ────────────────────────────────────────────────────────────────
 
 export type ContentBlock =
@@ -163,6 +186,8 @@ export type ContentBlock =
   | PlayTogetherBannerBlock
   | BrandLogoWallBlock
   | TestimonialsBlock
+  | BonusDealBlock
+  | RichTextBlock
 
 export interface HomepageSections {
   _id: string
@@ -189,12 +214,31 @@ export interface MegaMenuBanner {
   imageAlt?: string
 }
 
+export interface FooterLink {
+  _key: string
+  label: string
+  url: string
+}
+
+export interface FooterColumn {
+  _key: string
+  heading: string
+  links: FooterLink[]
+}
+
 export interface SiteSettings {
   _id: string
   logoUrl?: string
   logoAlt?: string
+  buyButtonText?: string
   megaMenuBanners?: MegaMenuBanner[]
   socialLinks: SocialLink[]
+  footerTagline?: string
+  footerDiscreetHeading?: string
+  footerDiscreetBody?: string
+  footerCopyright?: string
+  footerDisclaimer?: string
+  footerColumns?: FooterColumn[]
 }
 
 // ─── Generic Page ─────────────────────────────────────────────────────────────
@@ -208,6 +252,7 @@ export type PageSection =
   | PlayTogetherBannerBlock
   | BrandLogoWallBlock
   | TestimonialsBlock
+  | RichTextBlock
 
 export interface SanityPage {
   _id: string
@@ -216,4 +261,56 @@ export interface SanityPage {
   seoTitle?: string
   seoDescription?: string
   sections: PageSection[]
+}
+
+// ─── Blog ────────────────────────────────────────────────────────────────────
+
+export interface BlogAuthor {
+  name: string
+  slug: string
+  bio?: string
+  avatarUrl?: string
+  role?: string
+  socialLinks?: { platform: string; url: string }[]
+}
+
+export interface BlogHomepage {
+  heading?: string
+  subtext?: string
+  heroImageUrl?: string
+  heroImageAlt?: string
+}
+
+export interface BlogCategory {
+  name: string
+  slug: string
+  description?: string
+  color?: string
+  seoTitle?: string
+  seoDescription?: string
+}
+
+export interface BlogPostCard {
+  _id: string
+  title: string
+  slug: string
+  excerpt: string
+  publishedAt: string
+  featured: boolean
+  heroImageUrl?: string
+  heroImageAlt?: string
+  author?: BlogAuthor
+  category?: BlogCategory
+  readingTime: number
+}
+
+export interface BlogPost extends BlogPostCard {
+  _updatedAt?: string
+  body: unknown[]
+  seoTitle?: string
+  seoDescription?: string
+  ogImageUrl?: string
+  noIndex?: boolean
+  tags?: string[]
+  relatedPosts?: BlogPostCard[]
 }

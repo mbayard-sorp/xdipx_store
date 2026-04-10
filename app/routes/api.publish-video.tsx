@@ -11,6 +11,7 @@ import { createStagedVideoUpload, attachVideoToProduct, pollMediaReady, setMedia
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { uploadThumbnailToProduct } from '~/lib/shopify.server'
+import { applyWatermark } from '~/lib/watermark.server'
 
 const PREVIEW_DIR = join(process.cwd(), '.video-previews')
 
@@ -66,7 +67,8 @@ export async function action({ request }: ActionFunctionArgs) {
   const thumbPath = join(PREVIEW_DIR, `${token}.jpg`)
   if (existsSync(thumbPath)) {
     try {
-      const thumbBuffer = readFileSync(thumbPath)
+      const rawThumbBuffer = readFileSync(thumbPath)
+      const thumbBuffer = await applyWatermark(rawThumbBuffer)
       const thumbFilename = `xdipx-thumb-${Date.now()}.jpg`
       await uploadThumbnailToProduct(productId, thumbBuffer, thumbFilename, `${productName} — xdipx daily deal`)
     } catch { /* non-fatal */ }

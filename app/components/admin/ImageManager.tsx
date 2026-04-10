@@ -688,6 +688,11 @@ export function ImageManager({
   const [improveModal,      setImproveModal]      = useState<ImproveModalState | null>(null)
   const [deletingIds,       setDeletingIds]       = useState<Set<number>>(new Set())
   const [reordering,        setReordering]        = useState(false)
+
+  // Sync images when the product changes (e.g. date picker advanced)
+  useEffect(() => {
+    setImages(initialImages)
+  }, [deal.shopifyProductId])
   /** IDs of existing Shopify images selected as visual references for generation */
   const [referenceImageIds, setReferenceImageIds] = useState<Set<number>>(new Set())
   /** Optional variant to target for image generation (affects prompt context + upload association) */

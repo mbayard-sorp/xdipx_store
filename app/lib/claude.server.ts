@@ -239,6 +239,75 @@ export async function generateSEOTitle(rawTitle: string, brand: string): Promise
   return text.trim().slice(0, 60)
 }
 
+// ─── Tweet Copy Generation ───────────────────────────────────────────────────
+
+export async function generateTweetCopy(deal: {
+  title: string
+  brand: string
+  tagline?: string
+  dealPrice: number
+  msrp: number
+  category: string
+  handle: string
+}): Promise<{ mainTweet: string; threadReply?: string }> {
+  const discountPct = deal.msrp > 0
+    ? Math.round(100 - (deal.dealPrice / deal.msrp) * 100)
+    : 0
+  const productUrl = `https://xdipx.com/products/${deal.handle}`
+
+  const primaryPrompt = `Write a tweet for today's daily deal on xdipx.com.
+
+Product: ${deal.title}
+Brand: ${deal.brand}${deal.tagline ? `\nTagline: ${deal.tagline}` : ''}
+Price: $${deal.dealPrice} (was $${deal.msrp}) — ${discountPct}% off
+Category: ${deal.category}
+Link: ${productUrl}
+
+Rules:
+- The main tweet MUST be under 240 characters (leave room for the link)
+- Include the product URL at the end: ${productUrl}
+- Include 1-2 relevant hashtags from: #DailyDeal #FlashSale #SelfCare #PleasurePositive #IntimateWellness #TreatYourself
+- Brand voice: playful, cheeky, warm. Never clinical, never sleazy.
+- Include the discount percentage or price if compelling
+- Use the ♥ motif naturally
+- NEVER use explicit language or the word "sex" as an adjective
+
+Also write a thread reply (optional second tweet) with 1-2 extra detail sentences if the product warrants it. Max 240 chars. If no thread reply is needed, set threadReply to null.
+
+Return ONLY this JSON (no markdown):
+{"mainTweet": "...", "threadReply": "..." or null}`
+
+  const retryPrompt = `Return ONLY raw JSON, no markdown. Write a tweet under 240 chars for this product. Include the URL ${productUrl} and one hashtag.
+{"mainTweet": "...", "threadReply": null}
+
+Product: ${deal.brand} ${deal.title} — $${deal.dealPrice} (was $${deal.msrp})`
+
+  const tryParse = (raw: string): { mainTweet: string; threadReply?: string } | null => {
+    try {
+      const parsed = JSON.parse(stripFences(raw)) as { mainTweet: string; threadReply?: string | null }
+      if (parsed?.mainTweet) {
+        const result: { mainTweet: string; threadReply?: string } = { mainTweet: parsed.mainTweet }
+        if (parsed.threadReply) result.threadReply = parsed.threadReply
+        return result
+      }
+    } catch { /* fall through */ }
+    return null
+  }
+
+  const first = await generate(primaryPrompt, 512)
+  const firstParsed = tryParse(first)
+  if (firstParsed) return firstParsed
+
+  const retried = await generate(retryPrompt, 512)
+  const secondParsed = tryParse(retried)
+  if (secondParsed) return secondParsed
+
+  // Hardcoded fallback — always works
+  return {
+    mainTweet: `${deal.brand} ${deal.title} — ${discountPct}% off today only. $${deal.dealPrice} (was $${deal.msrp}) ♥\n\n${productUrl}\n\n#DailyDeal #SelfCare`,
+  }
+}
+
 // ─── Video Content Generation ─────────────────────────────────────────────────
 
 export type VOFormat =
@@ -247,6 +316,7 @@ export type VOFormat =
   | 'educational'
   | 'breaking_news'
   | 'absurdist_narrator'
+  | 'custom'
 
 export interface VideoContentResult {
   format: VOFormat
@@ -294,8 +364,10 @@ export async function generateVideoContent(product: {
   customPrompt?: string
   /** Pin to a specific format instead of auto-selecting */
   forceFormat?: VOFormat
+  /** Free-form narrator persona description (used when format is 'custom') */
+  customFormatDescription?: string
 }): Promise<VideoContentResult> {
-  const format = product.forceFormat ?? pickFormat(product.category)
+  const format = product.customFormatDescription ? 'custom' as VOFormat : (product.forceFormat ?? pickFormat(product.category))
 
   // Pre-process rich-text fields — strip HTML, truncate to keep token count lean
   const fullStory   = product.fullStory   ? stripHtml(product.fullStory).slice(0, 300)   : ''
@@ -321,7 +393,7 @@ export async function generateVideoContent(product: {
     bullets           ? `Features: ${bullets}`                                     : '',
   ].filter(Boolean).join('\n')
 
-  const formatDescriptions: Record<VOFormat, string> = {
+  const formatDescriptions: Partial<Record<VOFormat, string>> = {
     sitcom_sketch:      'narrator is a well-meaning friend who keeps accidentally describing couples activities in extremely innocent terms',
     fake_testimonial:   'narrator is an EXTREMELY enthusiastic stranger who found this product and their life is now unrecognizable, in the best way',
     educational:        "narrator is a hilariously underqualified 'expert' delivering 'facts' that are not facts",
@@ -333,9 +405,11 @@ export async function generateVideoContent(product: {
     ? `\n\nADDITIONAL DIRECTION FROM CREATOR:\n${product.customPrompt}\n`
     : ''
 
+  const persona = product.customFormatDescription || formatDescriptions[format] || 'narrator delivers a funny, engaging product pitch'
+
   const prompt = `Write a funny 10-second product ad narration.
 
-Narrator persona: ${formatDescriptions[format]}${customInstruction}
+Narrator persona: ${persona}${customInstruction}
 
 This is for xdipx.com — a daily flash-sale site for sexual wellness products.
 Brand voice: playful, cheeky, warm. PG-13 strictly — suggest, never show. Innuendo welcome, explicit never.
@@ -432,5 +506,115 @@ ${productList}`,
     return Array.isArray(parsed) ? parsed.slice(0, count) : []
   } catch {
     return []
+  }
+}
+
+// ─── Blog Content Generation ─────────────────────────────────────────────────
+
+export interface BlogOutline {
+  title: string
+  sections: { heading: string; bullets: string[] }[]
+  suggestedTags: string[]
+}
+
+export async function generateBlogOutline(
+  topic: string,
+  keywords: string[] = [],
+  category?: string,
+): Promise<BlogOutline> {
+  const raw = await generate(
+    `Create a detailed blog post outline for the xdipx.com blog.
+
+Topic: ${topic}
+${keywords.length ? `SEO keywords to target: ${keywords.join(', ')}` : ''}
+${category ? `Category: ${category}` : ''}
+
+The blog covers sexual wellness topics — guides, tips, product roundups, relationship advice.
+Voice: playful, cheeky, warm, judgment-free. Never clinical or sleazy.
+
+Return a JSON object with:
+- "title": an engaging, SEO-friendly headline (max 70 chars)
+- "sections": array of { "heading": "H2 section title", "bullets": ["key point 1", "key point 2", ...] }
+  Include 4-6 sections with 2-4 bullets each.
+- "suggestedTags": array of 3-5 tag strings for categorization
+
+Return only the JSON object, no markdown fences.`,
+    2048,
+  )
+
+  try {
+    return JSON.parse(stripFences(raw)) as BlogOutline
+  } catch {
+    return {
+      title: topic,
+      sections: [{ heading: 'Introduction', bullets: ['Overview of the topic'] }],
+      suggestedTags: [],
+    }
+  }
+}
+
+export async function generateBlogDraft(
+  outline: BlogOutline,
+): Promise<string> {
+  const sectionsText = outline.sections
+    .map(s => `## ${s.heading}\n${s.bullets.map(b => `- ${b}`).join('\n')}`)
+    .join('\n\n')
+
+  const raw = await generate(
+    `Write a full blog post draft for the xdipx.com blog based on this outline.
+
+Title: ${outline.title}
+
+Outline:
+${sectionsText}
+
+Write in xdipx brand voice: playful, cheeky, warm, curious, judgment-free.
+Return valid HTML using: <h2>, <h3>, <p>, <strong>, <em>, <ul>/<li>, <blockquote>.
+No <html>, <head>, <body>, or <h1> tags.
+Each section should be 2-3 paragraphs.
+Include a brief intro paragraph before the first section.
+End with a wrap-up that includes a subtle CTA to browse xdipx deals.
+Make it genuinely entertaining — innuendo and tasteful humor welcome.
+Target word count: 800-1200 words.`,
+    4096,
+  )
+
+  // Return as-is if it looks like HTML, otherwise wrap in <p>
+  if (raw.includes('<h2>') || raw.includes('<p>')) return raw.trim()
+  return `<p>${raw.trim()}</p>`
+}
+
+export interface BlogSEOSuggestion {
+  seoTitle: string
+  seoDescription: string
+  suggestedTags: string[]
+}
+
+export async function generateBlogSEO(
+  title: string,
+  excerpt: string,
+): Promise<BlogSEOSuggestion> {
+  const raw = await generate(
+    `Generate SEO metadata for this blog post on xdipx.com (sexual wellness daily deals site).
+
+Title: ${title}
+Excerpt: ${excerpt}
+
+Return a JSON object with:
+- "seoTitle": optimized page title, max 70 chars. Include primary keyword near the start.
+- "seoDescription": meta description, exactly 140-160 chars. Include a benefit and CTA. Conversational tone.
+- "suggestedTags": array of 3-5 relevant tags for the post.
+
+Return only the JSON object, no markdown.`,
+  )
+
+  try {
+    return JSON.parse(stripFences(raw)) as BlogSEOSuggestion
+  } catch {
+    return {
+      seoTitle: title.slice(0, 70),
+      seoDescription: excerpt.slice(0, 160),
+      suggestedTags: [],
+    }
   }
 }

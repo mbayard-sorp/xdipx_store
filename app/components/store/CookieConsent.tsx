@@ -53,7 +53,7 @@ export function CookieConsent() {
         </button>
         <button
           onClick={() => accept('essential_only')}
-          className="flex-1 bg-white/10 text-white/80 text-sm font-medium py-2 rounded-full hover:bg-white/20 transition-colors"
+          className="flex-1 bg-white/15 text-white text-sm font-medium py-2 rounded-full hover:bg-white/25 transition-colors"
         >
           Essential only
         </button>

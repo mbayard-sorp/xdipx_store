@@ -11,11 +11,6 @@ export function VaultCard({ deal }: VaultCardProps) {
     ? Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)
     : 0
 
-  const formattedDate = new Date(deal.dealDate + 'T00:00:00').toLocaleDateString('en-US', {
-    month: 'short',
-    day:   'numeric',
-  })
-
   return (
     <article className="bg-white rounded-2xl overflow-hidden shadow-sm card-lift group">
       <Link to={`/products/${deal.handle}`} className="block">
@@ -30,10 +25,6 @@ export function VaultCard({ deal }: VaultCardProps) {
           ) : (
             <div className="w-full h-full flex items-center justify-center text-brand-charcoal/10 text-5xl">♥</div>
           )}
-          {/* Date badge */}
-          <span className="absolute top-2 left-2 bg-brand-charcoal/70 text-white text-xs px-2 py-1 rounded-full">
-            {formattedDate}
-          </span>
         </div>
 
         <div className="p-4">
@@ -59,8 +50,16 @@ export function VaultCard({ deal }: VaultCardProps) {
 
       {/* Availability + waitlist */}
       <div className="px-4 pb-4">
-        {deal.qty > 0 ? (
-          <span className="text-xs text-green-600 font-medium">Available again</span>
+        {deal.qty > 5 ? (
+          <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-green-500" />
+            In Stock
+          </span>
+        ) : deal.qty > 0 ? (
+          <span className="text-xs text-yellow-600 font-medium flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-yellow-500" />
+            Low Stock
+          </span>
         ) : (
           <WaitlistButton productHandle={deal.handle} />
         )}

@@ -1,27 +1,19 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import type { LoaderFunctionArgs, MetaFunction, ActionFunctionArgs } from 'react-router'
-import { useLoaderData, useFetcher, useSearchParams } from 'react-router'
-import type { ProductVideo } from '~/types'
-
-// ─── Gallery media types (mirrors DailyDealHero) ─────────────────────────────
-
-type GalleryItem =
-  | { kind: 'image'; url: string; altText: string }
-  | { kind: 'video'; previewUrl: string; sources: ProductVideo['sources'] }
+import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
+import { useLoaderData, useOutletContext, useFetcher, useSearchParams } from 'react-router'
+import { ProductImageGallery, type GalleryItem } from '~/components/store/ProductImageGallery'
 import {
-  getDealByHandle, getAccessoryProducts, getProductsByTag,
-  getCart, addToCart, createCart,
+  getDealByHandle, getProductsByTag,
   getCollectionProducts, getProductsByHandles,
 } from '~/lib/shopify.server'
-import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
 import { getProductPageBlocks } from '~/lib/sanity.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
 import { ProductTabs }            from '~/components/store/ProductTabs'
 import { SocialProofBar }         from '~/components/store/SocialProofBar'
 import { StockIndicator }         from '~/components/store/StockIndicator'
-import { AccessoryCard }          from '~/components/store/AccessoryCard'
 import { WaitlistButton }         from '~/components/store/WaitlistButton'
+import { SubscriptionSelector, getSubscriptionPrice } from '~/components/store/SubscriptionSelector'
 import { EmailSubscribe }         from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }   from '~/components/cms/ContentBlockRenderer'
 import type { Product } from '~/types'
@@ -38,8 +30,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const reviewSort   = url.searchParams.get('reviewSort')   ?? 'newest'
   const reviewFilter = url.searchParams.get('reviewFilter') ?? 'all'
 
-  const [accessories, pdpBlocks, reviewData, aggregate] = await Promise.all([
-    getAccessoryProducts(deal.accessoryProductIds.slice(0, 4)),
+  const [pdpBlocks, reviewData, aggregate] = await Promise.all([
     getProductPageBlocks(params['slug']!),
     getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
@@ -67,13 +58,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
   }
 
-  const cartId = getCartIdFromCookie(request)
   return {
     deal,
-    accessories,
     pdpBlocks,
     carouselProductMap,
-    cartId,
     reviews:       reviewData.reviews,
     reviewTotal:   reviewData.total,
     reviewPage,
@@ -88,41 +76,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data?.deal) return [{ title: 'Product not found | xdipx' }]
   const { deal } = data
+  const description = deal.metaDescription || `${deal.seoTitle} — ships discreet from xdipx.`
   return [
     { title: `${deal.seoTitle} | xdipx` },
-    { name: 'description', content: deal.metaDescription || `${deal.seoTitle} — ships discreet from xdipx.` },
+    { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: `https://xdipx.com/products/${deal.handle}` },
+    { property: 'og:title', content: `${deal.seoTitle} | xdipx` },
+    { property: 'og:description', content: description },
+    { property: 'og:type', content: 'product' },
+    { property: 'og:url', content: `https://xdipx.com/products/${deal.handle}` },
     { property: 'og:image', content: deal.images[0]?.url ?? '' },
   ]
-}
-
-// ─── Action (accessory add-to-cart only — main CTA posts to /checkout-extras) ─
-
-export async function action({ request }: ActionFunctionArgs) {
-  const form      = await request.formData()
-  const intent    = form.get('intent') as string
-  const variantId = form.get('variantId') as string
-
-  if (intent === 'add-accessory') {
-    let cartId = (form.get('cartId') as string | null) ?? getCartIdFromCookie(request)
-    let cart   = cartId ? await getCart(cartId) : null
-    if (!cart) { cart = await createCart(); cartId = cart.id }
-    await addToCart(cartId, variantId, 1)
-    const headers = new Headers()
-    if (!getCartIdFromCookie(request)) headers.set('Set-Cookie', setCartCookie(cartId))
-    return new Response(JSON.stringify({ ok: true }), { headers, status: 200 })
-  }
-
-  return null
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ProductPage() {
   const {
-    deal, accessories, pdpBlocks, carouselProductMap, cartId,
+    deal, pdpBlocks, carouselProductMap,
     reviews, reviewTotal, reviewPage, reviewSort, reviewFilter, aggregate,
   } = useLoaderData<typeof loader>()
+  const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
 
@@ -138,9 +112,9 @@ export default function ProductPage() {
     ?? variants.find(v => v.availableForSale) ?? variants[0]
   const [selectedId, setSelectedId] = useState(initialVariant?.id ?? deal.variantId)
   const [quantity,   setQuantity]   = useState(1)
-  const [activeImg,  setActiveImg]  = useState(0)
-  const [isPlaying,  setIsPlaying]  = useState(false)
-  const [showSticky, setShowSticky] = useState(false)
+  const [activeImg,     setActiveImg]     = useState(0)
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
+  const [showSticky,    setShowSticky]    = useState(false)
   const ctaRef = useRef<HTMLButtonElement>(null)
 
   // Build unified gallery: first image → videos → remaining images
@@ -150,11 +124,6 @@ export default function ProductPage() {
     const [first, ...rest] = images
     return first ? [first, ...videos, ...rest] : [...videos]
   }, [deal.videos, deal.images])
-
-  function selectMedia(i: number) {
-    setActiveImg(i)
-    setIsPlaying(false)
-  }
 
   // When a variant is selected, jump to its image and update URL
   const handleVariantSelect = useCallback((variantId: string) => {
@@ -173,20 +142,21 @@ export default function ProductPage() {
       )
       if (idx >= 0) {
         setActiveImg(idx)
-        setIsPlaying(false)
       }
     }
   }, [variants, allMedia, setSearchParams])
 
   const selectedVariant = variants.find(v => v.id === selectedId) ?? variants[0]
-  const price    = selectedVariant ? parseFloat(selectedVariant.price) : deal.dealPrice
+  const basePrice = selectedVariant ? parseFloat(selectedVariant.price) : deal.dealPrice
+  const activePlan = selectedPlanId
+    ? deal.sellingPlanGroups?.flatMap(g => g.sellingPlans).find(p => p.id === selectedPlanId)
+    : undefined
+  const price    = activePlan ? getSubscriptionPrice(basePrice, activePlan) : basePrice
   const inStock  = selectedVariant?.availableForSale ?? deal.qty > 0
   const qty      = selectedVariant?.quantityAvailable ?? deal.qty
   const discount = deal.msrp > 0 && deal.msrp > price
     ? Math.round(((deal.msrp - price) / deal.msrp) * 100)
     : 0
-
-  const activeItem = allMedia[activeImg]
 
   const worksFor: [boolean, boolean, boolean] = [
     deal.category === 'for-him'  || deal.category === 'both' || deal.category === 'couples',
@@ -211,86 +181,17 @@ export default function ProductPage() {
       <div className="grid md:grid-cols-2 gap-8 lg:gap-12 items-start">
 
         {/* ── Left: Media gallery ─────────────────────────────────────── */}
-        <div className="space-y-3">
-          <div className="relative aspect-square rounded-2xl overflow-hidden bg-brand-mist shadow-sm">
-            {activeItem?.kind === 'video' && isPlaying ? (
-              <video
-                key={activeItem.sources[0]?.url}
-                controls
-                autoPlay
-                playsInline
-                className="w-full h-full object-cover"
-              >
-                {activeItem.sources.map(s => (
-                  <source key={s.url} src={s.url} type={s.mimeType} />
-                ))}
-              </video>
-            ) : activeItem?.kind === 'video' ? (
-              <>
-                <img
-                  src={activeItem.previewUrl}
-                  alt={deal.seoTitle}
-                  className="w-full h-full object-cover"
-                />
-                <button
-                  onClick={() => setIsPlaying(true)}
-                  className="absolute inset-0 flex items-center justify-center group"
-                  aria-label="Play video"
-                >
-                  <div className="w-16 h-16 rounded-full bg-white/90 shadow-lg flex items-center justify-center transition-transform group-hover:scale-110">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <polygon points="8,5 20,12 8,19" fill="#1E1A2E" />
-                    </svg>
-                  </div>
-                </button>
-              </>
-            ) : activeItem?.kind === 'image' ? (
-              <img
-                src={activeItem.url}
-                alt={activeItem.altText || deal.seoTitle}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-brand-charcoal/20 text-6xl">♥</div>
-            )}
-            {discount > 0 && (
-              <div className="absolute top-3 left-3 bg-brand-gradient text-white text-xs font-bold px-2.5 py-1 rounded-full">
-                {discount}% OFF
-              </div>
-            )}
-          </div>
-
-          {allMedia.length > 1 && (
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-              {allMedia.slice(0, 8).map((item, i) => (
-                <button
-                  key={i}
-                  onClick={() => selectMedia(i)}
-                  className={[
-                    'relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 transition-all',
-                    i === activeImg
-                      ? 'border-brand-coral'
-                      : 'border-transparent opacity-60 hover:opacity-100',
-                  ].join(' ')}
-                  aria-label={item.kind === 'video' ? `Play video ${i + 1}` : `View image ${i + 1}`}
-                >
-                  <img
-                    src={item.kind === 'video' ? item.previewUrl : item.url}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                  {item.kind === 'video' && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-brand-charcoal/30">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true">
-                        <polygon points="5,3 19,12 5,21" />
-                      </svg>
-                    </div>
-                  )}
-                </button>
-              ))}
+        <ProductImageGallery
+          items={allMedia}
+          alt={deal.seoTitle}
+          activeIndex={activeImg}
+          onSelectIndex={setActiveImg}
+          discountBadge={discount > 0 ? (
+            <div className="absolute top-3 left-3 bg-brand-gradient text-white text-xs font-bold px-2.5 py-1 rounded-full">
+              {discount}% OFF
             </div>
-          )}
-        </div>
+          ) : undefined}
+        />
 
         {/* ── Right: Product info ─────────────────────────────────────── */}
         <div className="space-y-4">
@@ -401,12 +302,22 @@ export default function ProductPage() {
             </div>
           )}
 
+          {/* Subscription selector */}
+          {deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0 && (
+            <SubscriptionSelector
+              sellingPlanGroups={deal.sellingPlanGroups}
+              basePrice={basePrice}
+              selectedPlanId={selectedPlanId}
+              onPlanChange={setSelectedPlanId}
+            />
+          )}
+
           {/* Qty + Add to cart */}
           {inStock ? (
-            <fetcher.Form method="post" action="/checkout-extras" className="space-y-3">
-              <input type="hidden" name="intent"    value="add-to-cart" />
+            <fetcher.Form method="post" action="/api/cart" className="space-y-3">
+              <input type="hidden" name="intent"    value="add-item" />
               <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
-              {cartId && <input type="hidden" name="cartId" value={cartId} />}
+              {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
 
               <div className="flex items-center gap-3">
                 <label className="text-sm font-medium text-brand-charcoal/70" htmlFor="qty">Qty</label>
@@ -436,7 +347,7 @@ export default function ProductPage() {
                 className="w-full py-4 rounded-full font-bold text-lg bg-brand-gradient text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-brand-coral/20 transition-all"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
-                {isPending ? 'Adding...' : 'Dip In ♥'}
+                {isPending ? 'Adding...' : buyButtonText}
               </button>
             </fetcher.Form>
           ) : (
@@ -498,23 +409,6 @@ export default function ProductPage() {
         </div>
       ) : heroContent}
 
-      {/* Accessories */}
-      {accessories.length > 0 && (
-        <section className="max-w-4xl mx-auto px-4 pb-8">
-          <h2
-            className="text-xl font-bold text-brand-charcoal mb-4"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            Make it better ♥
-          </h2>
-          <div className="grid sm:grid-cols-2 gap-3">
-            {accessories.map(acc => (
-              <AccessoryCard key={acc.id} product={acc as Product} cartId={cartId ?? undefined} />
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* CMS content blocks configured in Sanity for this product */}
       {pdpBlocks.map(block => (
         <ContentBlockRenderer
@@ -551,18 +445,18 @@ export default function ProductPage() {
               )}
             </p>
           </div>
-          <fetcher.Form method="post" action="/checkout-extras">
-            <input type="hidden" name="intent"    value="add-to-cart" />
+          <fetcher.Form method="post" action="/api/cart">
+            <input type="hidden" name="intent"    value="add-item" />
             <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
             <input type="hidden" name="quantity"  value={quantity} />
-            {cartId && <input type="hidden" name="cartId" value={cartId} />}
+            {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
             <button
               type="submit"
               disabled={isPending}
               className="bg-brand-gradient text-white font-bold text-sm px-5 py-2.5 rounded-full hover:opacity-90 transition-opacity shrink-0"
               style={{ fontFamily: 'var(--font-display)' }}
             >
-              {isPending ? 'Adding...' : 'Dip In ♥'}
+              {isPending ? 'Adding...' : buyButtonText}
             </button>
           </fetcher.Form>
         </div>

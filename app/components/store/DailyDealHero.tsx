@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
 import { useFetcher } from 'react-router'
-import type { Deal, ProductVideo, ProductVariant } from '~/types'
+import type { Deal, ProductVariant } from '~/types'
 import type { Review, ReviewAggregate } from '~/types/reviews'
 import { ProductImageGallery, type GalleryItem } from './ProductImageGallery'
 import { StockIndicator }   from './StockIndicator'
 import { SocialProofBar }   from './SocialProofBar'
 import { ProductTabs }      from './ProductTabs'
 import { InlineCountdown }  from './CountdownTimer'
+import { SubscriptionSelector, getSubscriptionPrice } from './SubscriptionSelector'
 
 // ─── Gallery media types ──────────────────────────────────────────────────────
 
@@ -27,19 +28,21 @@ function buildGallery(deal: Deal): GalleryItem[] {
 }
 
 interface DailyDealHeroProps {
-  deal:         Deal
-  cartId?:      string
-  viewers?:     number
-  soldToday?:   number
-  reviews?:     Review[]
-  reviewTotal?: number
-  aggregate?:   ReviewAggregate | null
+  deal:           Deal
+  cartId?:        string
+  viewers?:       number
+  soldToday?:     number
+  reviews?:       Review[]
+  reviewTotal?:   number
+  aggregate?:     ReviewAggregate | null
+  buyButtonText?: string
 }
 
-export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, reviews = [], reviewTotal = 0, aggregate = null }: DailyDealHeroProps) {
-  const [activeImg,   setActiveImg]   = useState(0)
-  const [quantity,    setQuantity]    = useState(1)
-  const [showSticky,  setShowSticky]  = useState(false)
+export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, reviews = [], reviewTotal = 0, aggregate = null, buyButtonText = 'I Want It ❤️' }: DailyDealHeroProps) {
+  const [activeImg,      setActiveImg]      = useState(0)
+  const [quantity,       setQuantity]       = useState(1)
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
+  const [showSticky,     setShowSticky]     = useState(false)
   const ctaRef        = useRef<HTMLButtonElement>(null)
   const wasSubmitting = useRef(false)
   const fetcher       = useFetcher()
@@ -52,7 +55,11 @@ export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, review
   const firstAvailable = variants.find(v => v.availableForSale) ?? variants[0]
   const [selectedId, setSelectedId] = useState(firstAvailable?.id ?? deal.variantId)
   const selectedVariant = variants.find(v => v.id === selectedId) ?? variants[0]
-  const variantPrice = selectedVariant ? parseFloat(selectedVariant.price) : deal.dealPrice
+  const basePrice = selectedVariant ? parseFloat(selectedVariant.price) : deal.dealPrice
+  const activePlan = selectedPlanId
+    ? deal.sellingPlanGroups?.flatMap(g => g.sellingPlans).find(p => p.id === selectedPlanId)
+    : undefined
+  const variantPrice = activePlan ? getSubscriptionPrice(basePrice, activePlan) : basePrice
   const variantInStock = selectedVariant?.availableForSale ?? deal.qty > 0
   const variantQty = selectedVariant?.quantityAvailable ?? deal.qty
 
@@ -126,8 +133,12 @@ export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, review
             setSelectedId={setSelectedId}
             selectedVariant={selectedVariant}
             variantPrice={variantPrice}
+            basePrice={basePrice}
             variantInStock={variantInStock}
             variantQty={variantQty}
+            selectedPlanId={selectedPlanId}
+            setSelectedPlanId={setSelectedPlanId}
+            buyButtonText={buyButtonText}
           />
         </div>
       )}
@@ -159,8 +170,12 @@ export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, review
           setSelectedId={setSelectedId}
           selectedVariant={selectedVariant}
           variantPrice={variantPrice}
+          basePrice={basePrice}
           variantInStock={variantInStock}
           variantQty={variantQty}
+          selectedPlanId={selectedPlanId}
+          setSelectedPlanId={setSelectedPlanId}
+          buyButtonText={buyButtonText}
         />
       )}
 
@@ -189,10 +204,11 @@ export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, review
               )}
             </p>
           </div>
-          <fetcher.Form method="post" action="/checkout-extras">
-            <input type="hidden" name="intent"    value="add-to-cart" />
+          <fetcher.Form method="post" action="/api/cart">
+            <input type="hidden" name="intent"    value="add-item" />
             <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
             <input type="hidden" name="quantity"  value={quantity} />
+            {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
             {cartId && <input type="hidden" name="cartId" value={cartId} />}
             <button
               type="submit"
@@ -200,7 +216,7 @@ export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, review
               className="bg-brand-gradient text-white font-bold text-sm px-5 py-2.5 rounded-full hover:opacity-90 transition-opacity shrink-0"
               style={{ fontFamily: 'var(--font-display)' }}
             >
-              {isPending ? 'Adding...' : 'Dip In ♥'}
+              {isPending ? 'Adding...' : buyButtonText}
             </button>
           </fetcher.Form>
         </div>
@@ -236,8 +252,12 @@ interface HeroContentProps {
   setSelectedId: (id: string) => void
   selectedVariant: ProductVariant | undefined
   variantPrice: number
+  basePrice: number
   variantInStock: boolean
   variantQty: number
+  selectedPlanId: string | null
+  setSelectedPlanId: (id: string | null) => void
+  buyButtonText: string
 }
 
 function HeroContent({
@@ -246,7 +266,8 @@ function HeroContent({
   isPending, fetcher, ctaRef, relative,
   reviews, reviewTotal, aggregate,
   multiVariant, variants, options, selectedId, setSelectedId,
-  selectedVariant, variantPrice, variantInStock, variantQty,
+  selectedVariant, variantPrice, basePrice, variantInStock, variantQty,
+  selectedPlanId, setSelectedPlanId, buyButtonText,
 }: HeroContentProps) {
   const allMedia = buildGallery(deal)
 
@@ -383,15 +404,26 @@ function HeroContent({
             </div>
           )}
 
+          {/* Subscription selector */}
+          {deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0 && (
+            <SubscriptionSelector
+              sellingPlanGroups={deal.sellingPlanGroups}
+              basePrice={basePrice}
+              selectedPlanId={selectedPlanId}
+              onPlanChange={setSelectedPlanId}
+            />
+          )}
+
           {/* Quantity + Add to cart */}
-          <fetcher.Form method="post" action="/checkout-extras" className="space-y-3">
-            <input type="hidden" name="intent"    value="add-to-cart" />
+          <fetcher.Form method="post" action="/api/cart" className="space-y-3">
+            <input type="hidden" name="intent"    value="add-item" />
             <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
+            {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
             {cartId && <input type="hidden" name="cartId" value={cartId} />}
 
             <div className="flex items-center gap-3">
-              <label className="text-sm font-medium text-brand-charcoal/70" htmlFor="qty">Qty</label>
-              <div className="flex items-center border border-brand-mist rounded-full overflow-hidden bg-white">
+              <span className="text-sm font-medium text-brand-charcoal/70">Qty</span>
+              <div className="flex items-center border border-brand-mist rounded-full overflow-hidden bg-white" role="group" aria-label="Quantity">
                 <button
                   type="button"
                   onClick={() => setQuantity(q => Math.max(1, q - 1))}
@@ -400,8 +432,8 @@ function HeroContent({
                 >
                   −
                 </button>
-                <input id="qty" type="hidden" name="quantity" value={quantity} />
-                <span className="px-4 text-sm font-semibold text-brand-charcoal tabular-nums">{quantity}</span>
+                <input type="hidden" name="quantity" value={quantity} />
+                <span className="px-4 text-sm font-semibold text-brand-charcoal tabular-nums" role="status" aria-live="polite" aria-label={`Quantity: ${quantity}`}>{quantity}</span>
                 <button
                   type="button"
                   onClick={() => setQuantity(q => Math.min(3, q + 1))}
@@ -426,7 +458,7 @@ function HeroContent({
               ].join(' ')}
               style={{ fontFamily: 'var(--font-display)' }}
             >
-              {!variantInStock ? 'Sold Out' : isPending ? 'Adding...' : 'Dip In ♥'}
+              {!variantInStock ? 'Sold Out' : isPending ? 'Adding...' : buyButtonText}
             </button>
 
             <InlineCountdown />

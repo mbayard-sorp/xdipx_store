@@ -8,6 +8,13 @@
       "when": 1775009196071,
       "tag": "0000_yielding_johnny_blaze",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1775670552988,
+      "tag": "0001_social_posts",
+      "breakpoints": true
     }
   ]
 }

@@ -1,23 +1,18 @@
-import type { LoaderFunctionArgs, MetaFunction, ActionFunctionArgs } from 'react-router'
-import { useLoaderData, redirect } from 'react-router'
+import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
+import { useLoaderData, useOutletContext } from 'react-router'
 import {
-  getDealByShopifyId, getProductsByTag, getBonusDeal, getRecentVaultDeals,
-  getAccessoryProducts, getCart, addToCart, createCart,
+  getDealByShopifyId, getProductsByTag, getBonusDeal,
   getCollectionProducts, getProductsByHandles,
 } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
 import { dealHistory } from '../../db/schema'
 import { eq } from 'drizzle-orm'
-import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
-import { kvGet, KV_KEYS }                      from '~/lib/kv.server'
+import { kvGet, KV_KEYS } from '~/lib/kv.server'
 import { getHomepageSections }                  from '~/lib/sanity.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { CountdownTimer }        from '~/components/store/CountdownTimer'
 import { DailyDealHero }         from '~/components/store/DailyDealHero'
-import { AccessoryCard }         from '~/components/store/AccessoryCard'
 import { ProductCarousel }       from '~/components/cms/ProductCarousel'
-import { BonusDeal }             from '~/components/store/BonusDeal'
-import { VaultCard }             from '~/components/store/VaultCard'
 import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }  from '~/components/cms/ContentBlockRenderer'
 import { ProductStructuredData } from '~/components/seo/ProductStructuredData'
@@ -35,13 +30,12 @@ async function getLiveDeal() {
   return getDealByShopifyId(dbDeal.shopifyProductId)
 }
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const [deal, forHim, forHer, bonusDeal, vaultPreview, cmsData] = await Promise.all([
+export async function loader(_args: LoaderFunctionArgs) {
+  const [deal, forHim, forHer, bonusDeal, cmsData] = await Promise.all([
     getLiveDeal(),
     getProductsByTag('for-him', 8),
     getProductsByTag('for-her', 8),
     getBonusDeal(),
-    getRecentVaultDeals(7),
     getHomepageSections(),
   ])
 
@@ -70,23 +64,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (!deal) {
     return {
-      deal: null, accessories: [], forHim, forHer, bonusDeal, vaultPreview,
-      cartId: null, viewers: 0, soldToday: 0, cmsData, carouselProductMap,
+      deal: null, forHim, forHer, bonusDeal,
+      viewers: 0, soldToday: 0, cmsData, carouselProductMap,
     }
   }
 
-  const [accessories, viewers, reviewData, aggregate] = await Promise.all([
-    getAccessoryProducts(deal.accessoryProductIds.slice(0, 4)),
+  const [viewers, reviewData, aggregate] = await Promise.all([
     kvGet<number>(KV_KEYS.viewerCount(deal.handle)).then(n => n ?? 0),
     getProductReviews(deal.shopifyProductId, { sort: 'newest', page: 1, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
   ])
 
-  const cartId = getCartIdFromCookie(request)
-
   return {
-    deal, accessories, forHim, forHer, bonusDeal, vaultPreview,
-    cartId, viewers, soldToday: 0, cmsData, carouselProductMap,
+    deal, forHim, forHer, bonusDeal,
+    viewers, soldToday: 0, cmsData, carouselProductMap,
     reviews: reviewData.reviews,
     reviewTotal: reviewData.total,
     aggregate: aggregate ?? null,
@@ -112,37 +103,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   ]
 }
 
-export async function action({ request }: ActionFunctionArgs) {
-  const form      = await request.formData()
-  const intent    = form.get('intent')
-  const variantId = form.get('variantId') as string
-  const quantity  = parseInt((form.get('quantity') as string) ?? '1')
-
-  if (intent === 'add-to-cart') {
-    let cartId = (form.get('cartId') as string | null) ?? getCartIdFromCookie(request)
-    let cart = cartId ? await getCart(cartId) : null
-    if (!cart) {
-      cart   = await createCart()
-      cartId = cart.id
-    }
-    await addToCart(cartId, variantId, quantity)
-
-    const headers = new Headers()
-    if (!getCartIdFromCookie(request)) {
-      headers.set('Set-Cookie', setCartCookie(cartId))
-    }
-    return redirect('/checkout-extras', { headers })
-  }
-
-  return null
-}
-
 export default function Homepage() {
   const {
-    deal, accessories, forHim, forHer, bonusDeal, vaultPreview,
-    cartId, viewers, soldToday, cmsData, carouselProductMap,
+    deal, forHim, forHer, bonusDeal,
+    viewers, soldToday, cmsData, carouselProductMap,
     reviews, reviewTotal, aggregate,
   } = useLoaderData<typeof loader>()
+  const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
 
   // Split CMS sections: those that sit above BonusDeal/Vault vs below
   const cmsSections = cmsData?.sections ?? []
@@ -157,29 +124,13 @@ export default function Homepage() {
         <>
           <DailyDealHero
             deal={deal}
-            cartId={cartId ?? undefined}
             viewers={viewers}
             soldToday={soldToday}
             reviews={reviews ?? []}
             reviewTotal={reviewTotal ?? 0}
             aggregate={aggregate}
+            buyButtonText={buyButtonText}
           />
-
-          {accessories.length > 0 && (
-            <section className="max-w-4xl mx-auto px-4 pb-8">
-              <h2
-                className="text-xl font-bold text-brand-charcoal mb-4"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                Make it better ♥
-              </h2>
-              <div className="grid sm:grid-cols-2 gap-3">
-                {accessories.map(acc => (
-                  <AccessoryCard key={acc.id} product={acc} cartId={cartId ?? undefined} />
-                ))}
-              </div>
-            </section>
-          )}
 
           <ProductStructuredData deal={deal} />
         </>
@@ -204,6 +155,7 @@ export default function Homepage() {
           key={block._key}
           block={block}
           carouselProductMap={carouselProductMap}
+          bonusDealProduct={bonusDeal}
         />
       ))}
 
@@ -227,26 +179,6 @@ export default function Homepage() {
             products={forHer}
           />
         </>
-      )}
-
-      {bonusDeal && <BonusDeal product={bonusDeal} />}
-
-      {vaultPreview.length > 0 && (
-        <section className="py-12 px-4 bg-white">
-          <div className="max-w-6xl mx-auto">
-            <h2
-              className="text-2xl font-bold text-brand-charcoal mb-6"
-              style={{ fontFamily: 'var(--font-display)' }}
-            >
-              From The Vault ♥
-            </h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {vaultPreview.slice(0, 4).map(v => (
-                <VaultCard key={v.id} deal={v} />
-              ))}
-            </div>
-          </div>
-        </section>
       )}
 
       <EmailSubscribe />

@@ -15,6 +15,7 @@
   "crons": [
     { "path": "/cron/daily-feed-processor", "schedule": "45 23 * * *" },
     { "path": "/cron/deal-activator",       "schedule": "59 23 * * *" },
-    { "path": "/cron/profit-summary",       "schedule": "5 0 * * *"  }
+    { "path": "/cron/profit-summary",       "schedule": "5 0 * * *"  },
+    { "path": "/cron/inventory-check",      "schedule": "*/5 * * * *" }
   ]
 }

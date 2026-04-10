@@ -191,6 +191,28 @@ async function handleProductCreated(product: ShopifyProductWebhook): Promise<voi
   console.log(`[webhook:product-created] ${product.handle} → ${result.created ? 'created in Sanity' : 'already exists'}`)
 }
 
+// ─── Inventory update: auto-rotate on sold-out ──────────────────────────
+
+interface ShopifyInventoryLevel {
+  inventory_item_id: number
+  location_id: number
+  available: number
+}
+
+async function handleInventoryUpdate(level: ShopifyInventoryLevel): Promise<void> {
+  // Only care if available hit zero
+  if (level.available > 0) return
+
+  const { isLiveDealSoldOut, rotateDeal } = await import('../app/lib/deal-rotator.server.js')
+  const { soldOut } = await isLiveDealSoldOut()
+
+  if (soldOut) {
+    console.log('[webhook:inventory-update] Live deal sold out — rotating to next deal')
+    const result = await rotateDeal()
+    console.log('[webhook:inventory-update] Rotation result:', result)
+  }
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────
 
 export function createWebhookRoutes() {
@@ -240,6 +262,21 @@ export function createWebhookRoutes() {
 
     handleProductCreated(product).catch(err =>
       console.error('[webhook:product-created]', err),
+    )
+  })
+
+  router.post('/inventory-update', async (req: Request, res: Response) => {
+    if (!verifyShopifyWebhook(req)) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const level = JSON.parse((req.body as Buffer).toString()) as ShopifyInventoryLevel
+
+    res.json({ ok: true })
+
+    handleInventoryUpdate(level).catch(err =>
+      console.error('[webhook:inventory-update]', err),
     )
   })
 

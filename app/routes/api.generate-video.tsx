@@ -61,7 +61,8 @@ export async function action({ request }: ActionFunctionArgs) {
   // Admin-pinned format + voice
   const rawFormat  = form.get('format') as string | null
   const forceFormat: VOFormat | undefined =
-    rawFormat && VALID_FORMATS.has(rawFormat as VOFormat) ? (rawFormat as VOFormat) : undefined
+    rawFormat && rawFormat !== 'custom' && VALID_FORMATS.has(rawFormat as VOFormat) ? (rawFormat as VOFormat) : undefined
+  const customFormatText = rawFormat === 'custom' ? ((form.get('customFormatText') as string) || undefined) : undefined
   const rawVoice       = (form.get('voice') as string) || 'Bella'
   const selectedVoice  = KNOWN_VOICES[rawVoice] ?? KNOWN_VOICES['Bella']!
 
@@ -95,6 +96,7 @@ export async function action({ request }: ActionFunctionArgs) {
     ...(featureBullets ? { featureBullets } : {}),
     ...(customPrompt   ? { customPrompt }   : {}),
     ...(forceFormat    ? { forceFormat }    : {}),
+    ...(customFormatText ? { customFormatDescription: customFormatText } : {}),
   })
 
   // ── Step 3: ElevenLabs VO + Music synthesis (parallel) ──────────────────────

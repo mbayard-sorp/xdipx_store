@@ -1,11 +1,30 @@
 import type { ActionFunctionArgs } from 'react-router'
-import { getCartIdFromCookie } from '~/lib/cart.server'
-import { removeFromCart, updateCartLine } from '~/lib/shopify.server'
+import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
+import { addToCart, createCart, removeFromCart, updateCartLine } from '~/lib/shopify.server'
 
 export async function action({ request }: ActionFunctionArgs) {
   const form   = await request.formData()
   const intent = form.get('intent') as string
-  const cartId = getCartIdFromCookie(request)
+  let   cartId = getCartIdFromCookie(request)
+
+  if (intent === 'add-item') {
+    const variantId     = form.get('variantId') as string
+    const quantity      = parseInt((form.get('quantity') as string) ?? '1', 10)
+    const sellingPlanId = (form.get('sellingPlanId') as string) || undefined
+    if (!variantId) return { ok: false, error: 'Missing variantId' }
+    const headers = new Headers()
+    if (!cartId) {
+      const cart = await createCart()
+      cartId = cart.id
+      headers.set('Set-Cookie', setCartCookie(cartId))
+    }
+    try {
+      await addToCart(cartId, variantId, quantity, sellingPlanId)
+    } catch {
+      return Response.json({ ok: false, error: 'Could not add item' }, { status: 400, headers })
+    }
+    return Response.json({ ok: true }, { headers })
+  }
 
   if (!cartId) return { ok: false, error: 'No cart' }
 

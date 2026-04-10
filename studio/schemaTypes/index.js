@@ -6,10 +6,21 @@ import productCarousel    from '../schemas/blocks/productCarousel.js'
 import playTogetherBanner from '../schemas/blocks/playTogetherBanner.js'
 import brandLogoWall      from '../schemas/blocks/brandLogoWall.js'
 import testimonials       from '../schemas/blocks/testimonials.js'
+import bonusDeal          from '../schemas/blocks/bonusDeal.js'
+import blogImage          from '../schemas/blocks/blogImage.js'
+import blogPullQuote      from '../schemas/blocks/blogPullQuote.js'
+import blogProductEmbed   from '../schemas/blocks/blogProductEmbed.js'
+import blogCta            from '../schemas/blocks/blogCta.js'
+import blogVideoEmbed     from '../schemas/blocks/blogVideoEmbed.js'
+import richText           from '../schemas/blocks/richText.js'
 import homepageSections   from '../schemas/homepageSections.js'
 import siteSettings       from '../schemas/siteSettings.js'
 import productPage        from '../schemas/productPage.js'
 import page               from '../schemas/page.js'
+import blogPost           from '../schemas/blogPost.js'
+import blogCategory       from '../schemas/blogCategory.js'
+import blogAuthor         from '../schemas/blogAuthor.js'
+import blogHomepage       from '../schemas/blogHomepage.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -19,6 +30,11 @@ export const schemaTypes = [
   productPage,
   // Documents (generic pages)
   page,
+  // Documents (blog)
+  blogPost,
+  blogCategory,
+  blogAuthor,
+  blogHomepage,
   // Block object types
   announcementBar,
   promoBanner,
@@ -28,4 +44,12 @@ export const schemaTypes = [
   playTogetherBanner,
   brandLogoWall,
   testimonials,
+  bonusDeal,
+  // Blog block object types
+  blogImage,
+  blogPullQuote,
+  blogProductEmbed,
+  blogCta,
+  blogVideoEmbed,
+  richText,
 ]

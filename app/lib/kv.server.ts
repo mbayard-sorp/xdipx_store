@@ -65,7 +65,7 @@ export const KV_KEYS = {
   socialProof:            (handle: string) => `social:proof:${handle}`,
   dealOfDay:              'deal:today',
   viewerCount:            (handle: string) => `viewers:${handle}`,
-  checkoutUpsellIds:      'checkout:upsell_ids',
+  pinnedAccessoryIds:     'pinned:accessory_ids',
   vaultFilterTabs:        'vault:filter_tabs',
   bulkImportJob:          'bulk-import:job',
 } as const

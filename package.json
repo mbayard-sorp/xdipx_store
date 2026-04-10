@@ -15,6 +15,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/genai": "^1.48.0",
     "@neondatabase/serverless": "^0.10.4",
+    "@portabletext/react": "^6.0.3",
     "@portabletext/to-html": "^5.0.2",
     "@react-router/express": "^7.5.0",
     "@react-router/node": "^7.5.0",
@@ -35,10 +36,12 @@
     "isbot": "^5.1.22",
     "jsdom": "^29.0.1",
     "motion": "^12.6.2",
+    "oauth-1.0a": "^2.2.6",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router": "^7.5.0",
-    "remotion": "^4.0.294"
+    "remotion": "^4.0.294",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@react-router/dev": "^7.5.0",

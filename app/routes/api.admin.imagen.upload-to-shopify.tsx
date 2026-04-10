@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { uploadThumbnailToProduct, associateImageWithVariant, getProductAdminImages } from '~/lib/shopify.server'
+import { applyWatermark } from '~/lib/watermark.server'
 
 export async function action({ request }: ActionFunctionArgs) {
   await requireAdmin(request)
@@ -31,10 +32,11 @@ export async function action({ request }: ActionFunctionArgs) {
   for (let i = 0; i < images.length; i++) {
     const img = images[i]!
     try {
-      const buffer   = Buffer.from(img.base64, 'base64')
-      const filename = `ai-generated-${Date.now()}-${i}.jpg`
-      const altText  = img.alt ?? 'Product image'
-      const mediaId  = await uploadThumbnailToProduct(productId, buffer, filename, altText)
+      const rawBuffer = Buffer.from(img.base64, 'base64')
+      const buffer    = await applyWatermark(rawBuffer)
+      const filename  = `ai-generated-${Date.now()}-${i}.jpg`
+      const altText   = img.alt ?? 'Product image'
+      const mediaId   = await uploadThumbnailToProduct(productId, buffer, filename, altText)
       results.push({ index: i, mediaId })
 
       // Associate uploaded image with a specific variant if requested.

@@ -1,22 +1,20 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher } from 'react-router'
-import { useState, useRef, useEffect } from 'react'
 import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
 import { kvGet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import { orchestrateDealPipeline } from '~/lib/deal-pipeline.server'
-import { getDealByShopifyId, shopifyAdmin } from '~/lib/shopify.server'
+import { shopifyAdmin } from '~/lib/shopify.server'
 import { upsertProductPage } from '~/lib/sanity.server'
-import { dealHistory } from '../../db/schema'
-import { eq } from 'drizzle-orm'
 
 export const meta: MetaFunction = () => [{ title: 'Pipeline Settings — xdipx Admin' }]
 
 const DEFAULTS: Record<string, string> = {
-  feedUrl:       process.env['NALPAC_FEED_URL'] ?? '',
-  daysAhead:     '2',
-  blockedBrands: '',
-  minProfit:     '0',
+  feedUrl:           process.env['NALPAC_FEED_URL'] ?? '',
+  daysAhead:         '2',
+  blockedBrands:     '',
+  minProfit:         '0',
+  vaultDiscountPct:  '25',
 }
 
 export async function loader(_: LoaderFunctionArgs) {
@@ -27,41 +25,10 @@ export async function loader(_: LoaderFunctionArgs) {
   const feedTimestamp = await kvGet<string>(KV_KEYS.feedCacheTimestamp)
   const candidates    = await kvGet<unknown[]>('feed:top-candidates')
 
-  // Use DB + Admin API (no CDN cache) — same pattern as admin.today.tsx
-  const [liveRow] = await db
-    .select()
-    .from(dealHistory)
-    .where(eq(dealHistory.status, 'live'))
-    .limit(1)
-
-  let liveDeal = null
-  if (liveRow?.shopifyProductId) {
-    const deal = await getDealByShopifyId(liveRow.shopifyProductId)
-    if (deal) {
-      liveDeal = {
-        productId:      deal.shopifyProductId,
-        productName:    deal.seoTitle,
-        brand:          deal.brand,
-        category:       liveRow.categories?.[0] ?? deal.category,
-        tagline:        deal.tagline,
-        dealPrice:      deal.dealPrice,
-        msrp:           deal.msrp,
-        imageUrls:      deal.images.map(i => i.url),
-        fullStory:      deal.fullStory,
-        worksForHim:    deal.worksForHim,
-        worksForHer:    deal.worksForHer,
-        featureBullets: deal.featureBullets,
-        specifications: deal.specifications,
-        whatsInTheBox:  deal.boxContents?.join(', '),
-      }
-    }
-  }
-
   return {
     settings,
     feedTimestamp,
     candidateCount: candidates?.length ?? 0,
-    liveDeal,
   }
 }
 
@@ -144,447 +111,10 @@ export async function action({ request }: ActionFunctionArgs) {
   return null
 }
 
-// ─── Video Generation Section ──────────────────────────────────────────────────
-
-interface GenerateVideoResponse {
-  ok?: boolean
-  token?: string
-  previewUrl?: string
-  narratorScript?: string
-  reactionText?: string[]
-  endTagline?: string
-  format?: string
-  formatRationale?: string
-  voiceName?: string
-  error?: string
-}
-
-interface PublishVideoResponse {
-  ok?: boolean
-  mediaId?: string
-  ready?: boolean
-  thumbnailSet?: { home_page: boolean; pdp: boolean }
-  error?: string
-}
-
-function VideoGeneratorSection({ liveDeal }: {
-  liveDeal: {
-    productId: string
-    productName: string
-    brand: string
-    category: string
-    tagline?: string
-    dealPrice?: number
-    msrp?: number
-    imageUrls: string[]
-    fullStory?: string
-    worksForHim?: string
-    worksForHer?: string
-    featureBullets?: string[]
-    specifications?: string
-    whatsInTheBox?: string
-  } | null
-}) {
-  const [customPrompt, setCustomPrompt] = useState('')
-  const [durationSeconds, setDurationSeconds] = useState(10)
-  const [selectedFormat, setSelectedFormat] = useState<string>('auto')
-  const [selectedVoice, setSelectedVoice] = useState<string>('Bella')
-  const [generating, setGenerating] = useState(false)
-  const [publishing, setPublishing] = useState(false)
-  const [result, setResult] = useState<GenerateVideoResponse | null>(null)
-  const [publishResult, setPublishResult] = useState<PublishVideoResponse | null>(null)
-  const [genError, setGenError] = useState<string | null>(null)
-  const [pubError, setPubError] = useState<string | null>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
-
-  // Reset publish result when a new video is generated
-  useEffect(() => {
-    setPublishResult(null)
-    setPubError(null)
-  }, [result?.token])
-
-  async function handleGenerate(e: React.FormEvent) {
-    e.preventDefault()
-    if (!liveDeal) return
-    setGenerating(true)
-    setResult(null)
-    setGenError(null)
-    setPublishResult(null)
-
-    try {
-      const fd = new FormData()
-      fd.set('productId',   liveDeal.productId)
-      fd.set('productName', liveDeal.productName)
-      fd.set('brand',       liveDeal.brand)
-      fd.set('category',    liveDeal.category)
-      fd.set('tagline',     liveDeal.tagline ?? '')
-      fd.set('dealPrice',   String(liveDeal.dealPrice ?? ''))
-      fd.set('msrp',        String(liveDeal.msrp ?? ''))
-      fd.set('imageUrls',   JSON.stringify(liveDeal.imageUrls))
-      fd.set('customPrompt', customPrompt)
-      fd.set('durationSeconds', String(durationSeconds))
-      if (selectedFormat !== 'auto') fd.set('format', selectedFormat)
-      fd.set('voice', selectedVoice)
-      if (liveDeal.fullStory)      fd.set('fullStory',      liveDeal.fullStory)
-      if (liveDeal.worksForHim)    fd.set('worksForHim',    liveDeal.worksForHim)
-      if (liveDeal.worksForHer)    fd.set('worksForHer',    liveDeal.worksForHer)
-      if (liveDeal.specifications) fd.set('specifications', liveDeal.specifications)
-      if (liveDeal.whatsInTheBox)  fd.set('whatsInTheBox',  liveDeal.whatsInTheBox)
-      if (liveDeal.featureBullets?.length) fd.set('featureBullets', JSON.stringify(liveDeal.featureBullets))
-
-      const res = await fetch('/api/generate-video', { method: 'POST', body: fd })
-      const data = await res.json() as GenerateVideoResponse
-      if (!res.ok || data.error) {
-        setGenError(data.error ?? 'Generation failed')
-      } else {
-        setResult(data)
-      }
-    } catch (err) {
-      setGenError(String(err))
-    } finally {
-      setGenerating(false)
-    }
-  }
-
-  async function handlePublish() {
-    if (!result?.token || !liveDeal) return
-    setPublishing(true)
-    setPubError(null)
-
-    try {
-      const fd = new FormData()
-      fd.set('token',       result.token)
-      fd.set('productId',   liveDeal.productId)
-      fd.set('productName', liveDeal.productName)
-
-      const res = await fetch('/api/publish-video', { method: 'POST', body: fd })
-      const data = await res.json() as PublishVideoResponse
-      if (!res.ok || data.error) {
-        setPubError(data.error ?? 'Upload failed')
-      } else {
-        setPublishResult(data)
-      }
-    } catch (err) {
-      setPubError(String(err))
-    } finally {
-      setPublishing(false)
-    }
-  }
-
-  const published = Boolean(publishResult?.ok)
-
-  return (
-    <section className="bg-white rounded-2xl shadow-sm overflow-hidden">
-      {/* Section header */}
-      <div className="px-6 pt-6 pb-4 border-b border-brand-mist">
-        <div className="flex items-center gap-3">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #F04E37, #FF8C38)' }}
-          >
-            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
-            </svg>
-          </div>
-          <div>
-            <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
-              Video Generator
-            </h2>
-            <p className="text-xs text-brand-charcoal/50 mt-0.5">
-              Generate a 10-second product ad for today's live deal
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="p-6 space-y-6">
-        {/* Live deal context */}
-        {liveDeal ? (
-          <div className="rounded-xl bg-brand-mist/60 px-4 py-3 flex items-center gap-3">
-            {liveDeal.imageUrls[0] && (
-              <img
-                src={liveDeal.imageUrls[0]}
-                alt=""
-                className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
-              />
-            )}
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-brand-charcoal truncate">{liveDeal.productName}</p>
-              <p className="text-xs text-brand-charcoal/50">{liveDeal.brand} · {liveDeal.category}</p>
-            </div>
-            <span className="ml-auto flex-shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full bg-green-100 text-green-700">
-              Live
-            </span>
-          </div>
-        ) : (
-          <div className="rounded-xl bg-yellow-50 border border-yellow-200 px-4 py-3 text-sm text-yellow-700">
-            No live deal found. Activate a deal first.
-          </div>
-        )}
-
-        {/* Prompt customisation */}
-        <form onSubmit={handleGenerate} className="space-y-4">
-          <div>
-            <label
-              htmlFor="video-custom-prompt"
-              className="block text-sm font-semibold text-brand-charcoal mb-1"
-            >
-              Custom direction
-              <span className="ml-2 text-xs font-normal text-brand-charcoal/40">(optional)</span>
-            </label>
-            <p className="text-xs text-brand-charcoal/50 mb-2">
-              Guide the tone, reference a specific feature, set a scene. Claude handles the rest.
-            </p>
-            <textarea
-              id="video-custom-prompt"
-              value={customPrompt}
-              onChange={e => setCustomPrompt(e.target.value)}
-              placeholder={'e.g. "Make the skeptic sound like a tired husband who secretly wants one" or "Focus on the air-pulse feature, reference blooming flowers"'}
-              rows={3}
-              disabled={generating || !liveDeal}
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-brand-purple/30 placeholder:text-brand-charcoal/30 disabled:opacity-50 disabled:cursor-not-allowed transition-shadow"
-            />
-          </div>
-
-          {/* Duration, Format + Voice selectors */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label htmlFor="video-duration" className="block text-xs font-semibold text-brand-charcoal/60 mb-1 uppercase tracking-wider">
-                Duration
-              </label>
-              <div className="relative">
-                <input
-                  id="video-duration"
-                  type="number"
-                  value={durationSeconds}
-                  onChange={e => setDurationSeconds(Math.max(8, Math.min(60, Number(e.target.value))))}
-                  min={8}
-                  max={60}
-                  step={1}
-                  disabled={generating || !liveDeal}
-                  className="w-full border border-brand-mist rounded-xl px-3 py-2.5 pr-10 text-sm bg-white text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-purple/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-brand-charcoal/40 pointer-events-none">
-                  sec
-                </span>
-              </div>
-            </div>
-            <div>
-              <label htmlFor="video-format" className="block text-xs font-semibold text-brand-charcoal/60 mb-1 uppercase tracking-wider">
-                Format
-              </label>
-              <select
-                id="video-format"
-                value={selectedFormat}
-                onChange={e => setSelectedFormat(e.target.value)}
-                disabled={generating || !liveDeal}
-                className="w-full border border-brand-mist rounded-xl px-3 py-2.5 text-sm bg-white text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-purple/30 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="auto">Auto (category-based)</option>
-                <option value="sitcom_sketch">Sitcom Sketch</option>
-                <option value="fake_testimonial">Fake Testimonial</option>
-                <option value="educational">Educational (bad expert)</option>
-                <option value="breaking_news">Breaking News</option>
-                <option value="absurdist_narrator">Absurdist Narrator</option>
-              </select>
-            </div>
-            <div>
-              <label htmlFor="video-voice" className="block text-xs font-semibold text-brand-charcoal/60 mb-1 uppercase tracking-wider">
-                Voice
-              </label>
-              <select
-                id="video-voice"
-                value={selectedVoice}
-                onChange={e => setSelectedVoice(e.target.value)}
-                disabled={generating || !liveDeal}
-                className="w-full border border-brand-mist rounded-xl px-3 py-2.5 text-sm bg-white text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-purple/30 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="Rachel">Rachel</option>
-                <option value="Bella">Bella</option>
-                <option value="Erin">Erin</option>
-              </select>
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={generating || !liveDeal}
-            className="relative flex items-center gap-2.5 px-6 py-2.5 rounded-full text-sm font-semibold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-brand-coral/40 focus:ring-offset-2"
-            style={{ background: 'linear-gradient(to right, #F04E37, #FF8C38)' }}
-          >
-            {generating ? (
-              <>
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                </svg>
-                Generating… (~45s)
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Generate Video
-              </>
-            )}
-          </button>
-        </form>
-
-        {/* Generation error */}
-        {genError && (
-          <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
-            <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span>{genError}</span>
-          </div>
-        )}
-
-        {/* Preview + dialogue */}
-        {result?.ok && result.previewUrl && (
-          <div className="space-y-5 pt-2">
-            {/* Divider */}
-            <div className="border-t border-brand-mist" />
-
-            {/* Script metadata */}
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="rounded-lg bg-brand-mist/60 px-3 py-2">
-                <span className="font-semibold text-brand-charcoal/50 uppercase tracking-wider">Format</span>
-                <p className="text-brand-charcoal font-medium mt-0.5 capitalize">{result.format?.replace(/_/g, ' ')}</p>
-              </div>
-              <div className="rounded-lg bg-brand-mist/60 px-3 py-2">
-                <span className="font-semibold text-brand-charcoal/50 uppercase tracking-wider">Voice</span>
-                <p className="text-brand-charcoal font-medium mt-0.5">{result.voiceName ?? 'Bella'}</p>
-              </div>
-              <div className="rounded-lg bg-brand-mist/60 px-3 py-2 col-span-2">
-                <span className="font-semibold text-brand-charcoal/50 uppercase tracking-wider">Why this format</span>
-                <p className="text-brand-charcoal mt-0.5 leading-relaxed">{result.formatRationale}</p>
-              </div>
-            </div>
-
-            {/* Narrator script + reactions */}
-            {result.narratorScript && (
-              <div className="space-y-3">
-                <p className="text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Narrator script</p>
-                <div className="rounded-xl bg-brand-charcoal/5 border border-brand-mist px-4 py-3">
-                  <p className="text-sm text-brand-charcoal leading-relaxed italic">
-                    &ldquo;{result.narratorScript}&rdquo;
-                  </p>
-                </div>
-
-                {result.reactionText && result.reactionText.length > 0 && (
-                  <>
-                    <p className="text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider pt-1">Reactions</p>
-                    <div className="flex flex-col gap-2">
-                      {result.reactionText.map((r, i) => (
-                        <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
-                          <span className="text-xs bg-brand-cream border border-brand-mist rounded-full px-3 py-1.5 text-brand-charcoal/70">
-                            {r}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-
-                {result.endTagline && (
-                  <p className="text-xs text-brand-charcoal/40 text-center pt-1 italic">
-                    End card: &ldquo;{result.endTagline}&rdquo;
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Video player */}
-            <div className="rounded-2xl overflow-hidden bg-brand-charcoal aspect-square relative">
-              <video
-                ref={videoRef}
-                src={result.previewUrl}
-                controls
-                playsInline
-                preload="metadata"
-                className="w-full h-full object-contain"
-              />
-            </div>
-
-            {/* Publish controls */}
-            {!published ? (
-              <div className="flex items-center gap-3 pt-1">
-                <button
-                  onClick={handlePublish}
-                  disabled={publishing}
-                  className="flex-1 flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-purple/40 focus:ring-offset-2"
-                  style={{ background: '#7B2FBE' }}
-                >
-                  {publishing ? (
-                    <>
-                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                      </svg>
-                      Uploading to Shopify…
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                      </svg>
-                      Upload to Shopify
-                    </>
-                  )}
-                </button>
-
-                <button
-                  onClick={handleGenerate}
-                  disabled={generating || !liveDeal}
-                  className="px-5 py-2.5 rounded-full text-sm font-semibold text-brand-charcoal bg-brand-mist hover:bg-brand-mist/70 transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-charcoal/20 focus:ring-offset-2"
-                >
-                  Regenerate
-                </button>
-              </div>
-            ) : (
-              <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 space-y-1">
-                <p className="text-sm font-semibold text-green-700 flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                  Video uploaded to Shopify
-                </p>
-                <p className="text-xs text-green-600">
-                  Media ID: <span className="font-mono">{publishResult?.mediaId}</span>
-                  {publishResult?.ready && ' · Status: Ready'}
-                </p>
-                {publishResult?.thumbnailSet?.home_page && (
-                  <p className="text-xs text-green-600">Set as primary thumbnail on PDP and home hero.</p>
-                )}
-                <button
-                  onClick={() => { setResult(null); setPublishResult(null) }}
-                  className="mt-2 text-xs font-semibold text-green-700 underline underline-offset-2"
-                >
-                  Generate another video
-                </button>
-              </div>
-            )}
-
-            {/* Publish error */}
-            {pubError && (
-              <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-                {pubError}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </section>
-  )
-}
-
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AdminSettingsPage() {
-  const { settings, feedTimestamp, candidateCount, liveDeal } = useLoaderData<typeof loader>()
+  const { settings, feedTimestamp, candidateCount } = useLoaderData<typeof loader>()
   const fetcher         = useFetcher<typeof action>()
   const pipelineFetcher = useFetcher<typeof action>()
 
@@ -672,6 +202,16 @@ export default function AdminSettingsPage() {
           label="Blocked Brands"
           settingKey="blockedBrands"
           description="Comma-separated list of brand names to exclude from deal selection. Case-insensitive. e.g. Acme, Foobar, Some Brand"
+        />
+
+        <SaveForm
+          label="Vault Discount %"
+          settingKey="vaultDiscountPct"
+          type="number"
+          min={5}
+          max={60}
+          inputWidth="w-20"
+          description="Default discount off MSRP for products after their deal ends. e.g. 25 = vault price is 25% below MSRP."
         />
 
         <div className="flex items-center gap-6 text-sm text-brand-charcoal/60 pt-2 border-t border-brand-mist">
@@ -792,8 +332,6 @@ export default function AdminSettingsPage() {
         )}
       </section>
 
-      {/* ── Video Generator ──────────────────────────────────────────────────── */}
-      <VideoGeneratorSection liveDeal={liveDeal} />
     </div>
   )
 }
