@@ -22,6 +22,10 @@ export function AddressCard({
   // Build a display name from first/last or fall back to empty
   const name = [address.firstName, address.lastName].filter(Boolean).join(' ')
 
+  // Disambiguator for accessible button labels — screen readers navigating
+  // by buttons should hear which address each Edit/Delete/Set default acts on.
+  const label = name || address.address1 || 'address'
+
   // Encode the GID for use in the URL (GIDs contain slashes)
   const encodedId = encodeURIComponent(address.id)
 
@@ -60,6 +64,7 @@ export function AddressCard({
         <Link
           to={`/account/addresses/${encodedId}/edit`}
           className="text-brand-purple font-semibold hover:underline"
+          aria-label={`Edit address: ${label}`}
         >
           Edit
         </Link>
@@ -70,6 +75,7 @@ export function AddressCard({
           type="button"
           onClick={() => onDelete(address.id)}
           className="text-brand-charcoal/60 hover:text-red-600 font-semibold transition-colors"
+          aria-label={`Delete address: ${label}`}
         >
           Delete
         </button>
@@ -81,6 +87,7 @@ export function AddressCard({
               type="button"
               onClick={() => onSetDefault(address.id)}
               className="text-brand-charcoal/60 hover:text-brand-purple font-semibold transition-colors"
+              aria-label={`Set as default address: ${label}`}
             >
               Set default
             </button>

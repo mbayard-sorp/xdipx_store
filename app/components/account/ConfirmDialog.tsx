@@ -35,12 +35,17 @@ export function ConfirmDialog({
   const dialogRef  = useRef<HTMLDivElement>(null)
   const cancelRef  = useRef<HTMLButtonElement>(null)
 
-  // Focus the cancel button when dialog opens
+  // Focus the cancel button when dialog opens, and restore focus to the
+  // previously-focused element when it closes (so keyboard users land back
+  // on the trigger they came from instead of <body>).
   useEffect(() => {
-    if (open) {
-      // Small timeout so the element is visible before focus
-      const t = setTimeout(() => cancelRef.current?.focus(), 50)
-      return () => clearTimeout(t)
+    if (!open) return
+    const trigger = document.activeElement as HTMLElement | null
+    // Small timeout so the element is visible before focus
+    const t = setTimeout(() => cancelRef.current?.focus(), 50)
+    return () => {
+      clearTimeout(t)
+      trigger?.focus()
     }
   }, [open])
 
@@ -81,6 +86,10 @@ export function ConfirmDialog({
 
   if (!open) return null
 
+  // Wire the description (if any) to aria-describedby so screen readers
+  // announce it as the dialog's accessible description.
+  const descriptionId = description ? `${titleId}-desc` : undefined
+
   return (
     // Scrim
     <div
@@ -94,6 +103,7 @@ export function ConfirmDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={descriptionId}
         className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-6 space-y-4"
       >
         <h2
@@ -105,7 +115,10 @@ export function ConfirmDialog({
         </h2>
 
         {description && (
-          <p className="text-sm text-brand-charcoal/70 leading-relaxed">
+          <p
+            id={descriptionId}
+            className="text-sm text-brand-charcoal/70 leading-relaxed"
+          >
             {description}
           </p>
         )}

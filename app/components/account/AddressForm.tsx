@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import { Form } from 'react-router'
+import { Form, Link } from 'react-router'
 import type { CustomerAddress, Country } from '~/lib/shopify.server'
 import { FieldGroup, fieldDescribedBy, inputClass } from './FieldGroup'
+// fieldDescribedBy is only used on inputs that actually have a helper or error;
+// firstName/lastName/address1/city/zip have neither, so they don't need it.
 import { CountrySelect } from './CountrySelect'
 import { ProvinceSelect } from './ProvinceSelect'
 
@@ -62,7 +64,6 @@ export function AddressForm({
             defaultValue={initial?.firstName ?? ''}
             autoComplete="given-name"
             className={inputClass}
-            aria-describedby={fieldDescribedBy('firstName', undefined, undefined)}
           />
         </FieldGroup>
 
@@ -74,7 +75,6 @@ export function AddressForm({
             defaultValue={initial?.lastName ?? ''}
             autoComplete="family-name"
             className={inputClass}
-            aria-describedby={fieldDescribedBy('lastName', undefined, undefined)}
           />
         </FieldGroup>
       </div>
@@ -210,13 +210,13 @@ export function AddressForm({
           >
             {isEditing ? 'Save changes' : 'Add address'} ♥
           </button>
-          <a
-            href="/account/addresses"
+          <Link
+            to="/account/addresses"
             className="flex-1 md:flex-none md:px-8 flex items-center justify-center text-sm font-semibold text-brand-charcoal/60 hover:text-brand-charcoal bg-brand-mist rounded-full py-3 transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Cancel
-          </a>
+          </Link>
         </div>
       </div>
     </Form>

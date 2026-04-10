@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { Link, redirect, useActionData, useFetcher, useLoaderData, useOutletContext } from 'react-router'
+import { Link, redirect, useFetcher, useLoaderData, useOutletContext } from 'react-router'
 import { requireCustomer } from '~/lib/customer-session.server'
 import { customerAPI } from '~/lib/customer-api.server'
 import { AddressCard } from '~/components/account/AddressCard'
@@ -55,13 +55,17 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function AddressesPage() {
   const { addresses, tokenType } = useLoaderData<typeof loader>()
   const { customer } = useOutletContext<AccountOutletContext>()
-  const actionData = useActionData<typeof action>()
-  const fetcher = useFetcher()
+  // Both delete and set-default are submitted via fetcher.submit, so action
+  // errors land in fetcher.data — NOT useActionData. The action throws redirect
+  // on success, so fetcher.data is only populated on failure.
+  const fetcher = useFetcher<typeof action>()
+  const fetcherError =
+    fetcher.data && 'error' in fetcher.data ? fetcher.data.error : null
 
   // Track which address the user wants to delete — drives the confirm dialog
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
 
-  // Close the dialog when the fetcher returns to idle after a delete
+  // Loading indicator for in-flight delete/set-default operations.
   const isDeleting = fetcher.state !== 'idle'
 
   function handleDeleteConfirm() {
@@ -118,10 +122,13 @@ export default function AddressesPage() {
         </div>
       )}
 
-      {/* Action error (non-delete errors come back via actionData) */}
-      {actionData && 'error' in actionData && (
-        <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          {actionData.error}
+      {/* Fetcher error (delete / set-default failures) */}
+      {fetcherError && (
+        <div
+          role="alert"
+          className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700"
+        >
+          {fetcherError}
         </div>
       )}
 

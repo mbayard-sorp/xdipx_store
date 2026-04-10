@@ -1,4 +1,4 @@
-import type { ReactNode, HTMLAttributes } from 'react'
+import type { ReactNode } from 'react'
 
 interface FieldGroupProps {
   /** The input's id — used for `for` on the label and `aria-describedby` on the input */
@@ -95,13 +95,3 @@ export function fieldDescribedBy(
 /** Shared input class — reuse across AddressForm inputs */
 export const inputClass =
   'w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50 bg-white'
-
-/** Same but with an error ring */
-export function inputErrorClass(hasError: boolean): string {
-  return hasError
-    ? 'w-full border border-red-400 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-400/50 bg-white'
-    : inputClass
-}
-
-// Re-export so consumers can import everything from one place
-export type { HTMLAttributes }
