@@ -2649,6 +2649,7 @@ interface RawSubscriptionContractNode {
   status: string
   createdAt: string
   nextBillingDate: string | null
+  currencyCode: string
   billingPolicy: { interval: string; intervalCount: number } | null
   deliveryPolicy: { interval: string; intervalCount: number } | null
   customer: { id: string }
@@ -2676,6 +2677,7 @@ const SUBSCRIPTION_CONTRACT_FRAGMENT = `
   status
   createdAt
   nextBillingDate
+  currencyCode
   billingPolicy { interval intervalCount }
   deliveryPolicy { interval intervalCount }
   customer { id }
@@ -2711,13 +2713,12 @@ function mapSubscriptionContract(raw: RawSubscriptionContractNode): Subscription
     productId: e.node.productId,
   }))
 
-  // Compute subtotal from line items
-  let subtotalNum = 0
-  let currencyCode = 'USD'
-  for (const line of lines) {
-    subtotalNum += parseFloat(line.currentPrice.amount) * line.quantity
-    currencyCode = line.currentPrice.currencyCode
-  }
+  // Compute subtotal from line items; currency comes from the contract node.
+  const currencyCode = raw.currencyCode
+  const subtotalNum = lines.reduce(
+    (acc, line) => acc + parseFloat(line.currentPrice.amount) * line.quantity,
+    0,
+  )
 
   const shippingAddr =
     raw.deliveryMethod?.__typename === 'SubscriptionDeliveryMethodShipping' &&

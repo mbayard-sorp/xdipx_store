@@ -55,10 +55,6 @@ export function SubscriptionContractCard({
       })
     : null
 
-  const totalLabel = subtotalAmount
-    ? `$${parseFloat(subtotalAmount.amount).toFixed(2)}`
-    : null
-
   return (
     <Link
       to={detailHref}
@@ -109,14 +105,12 @@ export function SubscriptionContractCard({
         </div>
 
         {/* Subtotal */}
-        {totalLabel && (
+        {subtotalAmount && (
           <p className="text-sm font-bold text-brand-charcoal tabular-nums shrink-0">
-            {totalLabel}
-            {subtotalAmount && (
-              <span className="text-[11px] font-normal text-brand-charcoal/40 ml-0.5">
-                {subtotalAmount.currencyCode}
-              </span>
-            )}
+            ${parseFloat(subtotalAmount.amount).toFixed(2)}
+            <span className="text-[11px] font-normal text-brand-charcoal/40 ml-0.5">
+              {subtotalAmount.currencyCode}
+            </span>
           </p>
         )}
       </div>

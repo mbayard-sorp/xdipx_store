@@ -44,7 +44,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
 export default function SubscriptionDetailRoute() {
   const { contract } = useLoaderData<typeof loader>()
-  useOutletContext<AccountOutletContext>() // ensure type contract holds
+  useOutletContext<AccountOutletContext>() // type contract guard (matches orders detail pattern)
 
   const cadence = formatCadence(contract)
 
