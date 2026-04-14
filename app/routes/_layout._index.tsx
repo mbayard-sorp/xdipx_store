@@ -40,6 +40,9 @@ export function headers() {
   // revalidation is safe — SWR keeps users fast during revalidation.
   return {
     'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+    // Explicit Vercel CDN directive — overrides browser Cache-Control at the edge
+    // so the CDN serves cached HTML for 60s with 600s SWR while origin revalidates.
+    'Vercel-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=600',
   }
 }
 

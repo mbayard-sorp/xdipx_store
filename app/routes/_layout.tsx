@@ -21,15 +21,17 @@ import type { AnnouncementBarBlock, MegaMenuBanner, SocialLink, FooterColumn } f
 export async function loader({ request }: LoaderFunctionArgs) {
   const preview  = isPreviewRequest(request)
   const cartId   = getCartIdFromCookie(request)
-  const [cms, settings, customerToken, cart, menuItems, pinnedIds] = await Promise.all([
+  // pinnedIds live in KV and resolve in ~1–5ms — fetch them outside the main
+  // Promise.all so we can fan accessories in parallel with everything else.
+  const pinnedIds = (await getPinnedAccessoryIds()) ?? []
+  const [cms, settings, customerToken, cart, menuItems, upsells] = await Promise.all([
     getHomepageSections(preview),
     getSiteSettings(),
     getCustomerToken(request),
     cartId ? getCart(cartId) : Promise.resolve(null),
     getMainMenu(),
-    getPinnedAccessoryIds(),
+    pinnedIds.length ? getAccessoryProducts(pinnedIds.slice(0, 4)) : Promise.resolve<Product[]>([]),
   ])
-  const upsells: Product[] = pinnedIds?.length ? await getAccessoryProducts(pinnedIds.slice(0, 4)) : []
 
   // Fetch customer first name for the Navbar greeting (only when logged in)
   let loggedIn = !!customerToken

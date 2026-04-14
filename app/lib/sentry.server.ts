@@ -14,7 +14,7 @@ export function initSentryServer(): void {
   Sentry.init({
     dsn,
     environment: process.env['NODE_ENV'] ?? 'development',
-    tracesSampleRate: 0,
+    tracesSampleRate: 0.1,
     sendDefaultPii: false,
   })
   initialized = true

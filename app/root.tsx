@@ -41,7 +41,13 @@ export const links: LinksFunction = () => [
   { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
   // Preconnect for Google Analytics
   { rel: 'preconnect', href: 'https://www.googletagmanager.com' },
-  // Poppins (display) + Inter (body)
+  // Poppins (display) + Inter (body) — preload the stylesheet request so it
+  // starts alongside HTML parsing instead of waiting for the parser to reach it.
+  {
+    rel: 'preload',
+    as: 'style',
+    href: 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap',
+  },
   {
     rel: 'stylesheet',
     href: 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap',

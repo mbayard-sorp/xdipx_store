@@ -4,6 +4,7 @@ import { initSentryServer } from '../app/lib/sentry.server.js'
 initSentryServer()
 
 import express from 'express'
+import compression from 'compression'
 import { createRequestHandler } from '@react-router/express'
 import { createCronRoutes } from './cron.js'
 import { createWebhookRoutes } from './webhooks.js'
@@ -23,6 +24,11 @@ const viteDevServer = isProduction
     )
 
 const app = express()
+
+// ─── gzip/brotli-friendly compression for HTML/JSON responses ────────────
+// Static asset handlers below set their own immutable caching; compression
+// skips pre-compressed assets automatically via the default filter.
+app.use(compression())
 
 // ─── Static assets (production only; Vite serves them in dev) ────────────
 if (!viteDevServer) {
@@ -72,12 +78,12 @@ app.use('/api/', (req, res, next) => {
   next()
 })
 
-// ─── Body size caps for all remaining routes ─────────────────────────────
-// Admin upload routes that need more should set their own limit at the route.
-app.use(express.json({ limit: '64kb' }))
-app.use(express.urlencoded({ extended: true, limit: '64kb' }))
-
 // ─── React Router handles everything else ────────────────────────────────
+// Do NOT install global express.json/urlencoded here — they drain the request
+// body before React Router's handler can call `request.formData()`, which
+// silently turns every form submission into empty fields (regression: admin
+// login reported "Email and password are required" with valid input).
+// Route-specific parsers (cron, webhooks) already set their own limits.
 const build = viteDevServer
   ? () =>
       viteDevServer.ssrLoadModule(

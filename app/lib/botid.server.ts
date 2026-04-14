@@ -5,7 +5,10 @@
  */
 import { checkBotId } from 'botid/server'
 
+const isDev = process.env['NODE_ENV'] !== 'production'
+
 export async function rejectIfBot(): Promise<Response | null> {
+  if (isDev) return null
   const result = await checkBotId()
   if (result.isBot && !result.isVerifiedBot) {
     return Response.json({ error: 'Forbidden' }, { status: 403 })

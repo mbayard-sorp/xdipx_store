@@ -2,6 +2,7 @@ import { Link } from 'react-router'
 import type { VaultDeal } from '~/types'
 import { WaitlistButton } from './WaitlistButton'
 import { HeartButton } from './HeartButton'
+import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
 interface VaultCardProps {
   deal: VaultDeal
@@ -26,10 +27,13 @@ export function VaultCard({ deal }: VaultCardProps) {
         <div className="aspect-square overflow-hidden bg-brand-mist relative">
           {deal.images[0] ? (
             <img
-              src={deal.images[0].url}
+              src={shopifyImageUrl(deal.images[0].url, 480) || deal.images[0].url}
+              srcSet={shopifyImageSrcSet(deal.images[0].url, [240, 360, 480, 720])}
+              sizes="(min-width: 768px) 25vw, 50vw"
               alt={deal.images[0].altText || deal.seoTitle}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               loading="lazy"
+              decoding="async"
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-brand-charcoal/10 text-5xl">♥</div>

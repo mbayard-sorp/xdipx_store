@@ -1,6 +1,9 @@
 import crypto from 'node:crypto'
 import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore } from '~/types'
 import { toHTML } from '@portabletext/to-html'
+import { kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+
+const COLLECTION_CURSOR_TTL = 300 // 5 minutes — collection order is stable short-term
 
 type PortableTextBlocks = Parameters<typeof toHTML>[0]
 
@@ -121,6 +124,77 @@ const PRODUCT_CORE_FRAGMENT = `
   }
   ${METAFIELDS_FRAGMENT}
 `
+
+// Lightweight fragment for list/grid views (vault, PLPs). Skips media,
+// extra variants, options, and non-card metafields — cuts payload ~70%
+// versus PRODUCT_CORE_FRAGMENT.
+const CARD_METAFIELDS_FRAGMENT = `
+  metafields(identifiers: [
+    { namespace: "xdipx", key: "deal_date" }
+    { namespace: "xdipx", key: "original_price" }
+    { namespace: "xdipx", key: "category" }
+    { namespace: "xdipx", key: "deal_status" }
+  ]) {
+    namespace key value
+  }
+`
+
+const PRODUCT_CARD_FRAGMENT = `
+  id handle title vendor tags
+  images(first: 1) {
+    edges { node { url altText } }
+  }
+  variants(first: 1) {
+    edges {
+      node {
+        price { amount }
+        compareAtPrice { amount }
+        quantityAvailable
+        availableForSale
+      }
+    }
+  }
+  ${CARD_METAFIELDS_FRAGMENT}
+`
+
+interface ShopifyProductCardNode {
+  id: string
+  handle: string
+  title: string
+  vendor: string
+  tags: string[]
+  images: { edges: { node: { url: string; altText: string | null } }[] }
+  variants: {
+    edges: {
+      node: {
+        price: { amount: string }
+        compareAtPrice: { amount: string } | null
+        quantityAvailable: number
+        availableForSale: boolean
+      }
+    }[]
+  }
+  metafields: ({ namespace: string; key: string; value: string } | null)[]
+}
+
+function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
+  const mf = node.metafields
+  const variant = node.variants.edges[0]?.node
+  const dealPrice = parseFloat(variant?.price.amount ?? '0')
+  return {
+    id: node.id,
+    handle: node.handle,
+    seoTitle: node.title,
+    dealDate: parseMetafield(mf, 'deal_date'),
+    dealPrice,
+    msrp: parseFloat(parseMetafield(mf, 'original_price') || (variant?.compareAtPrice?.amount ?? '0')),
+    images: parseImages(node.images.edges),
+    brand: node.vendor,
+    category: (parseMetafield(mf, 'category') || 'both') as Deal['category'],
+    dealStatus: 'archived' as const,
+    qty: variant?.quantityAvailable ?? 0,
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -562,37 +636,22 @@ export async function getBonusDeal(): Promise<Product | null> {
 
 export async function getRecentVaultDeals(limit = 7): Promise<VaultDeal[]> {
   const data = await storefront<{
-    products: { edges: { node: ShopifyProductNode }[] }
+    products: { edges: { node: ShopifyProductCardNode }[] }
   }>(`
     query GetVaultDeals($first: Int!) {
       products(first: $first, query: "tag:deal-status-archived", sortKey: UPDATED_AT, reverse: true) {
-        edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+        edges { node { ${PRODUCT_CARD_FRAGMENT} } }
       }
     }
   `, { first: limit })
 
-  return data.products.edges.map(e => {
-    const deal = nodeToDeal(e.node)
-    return {
-      id: deal.id,
-      handle: deal.handle,
-      seoTitle: deal.seoTitle,
-      dealDate: deal.dealDate,
-      dealPrice: deal.dealPrice,
-      msrp: deal.msrp,
-      images: deal.images,
-      brand: deal.brand,
-      category: deal.category,
-      dealStatus: 'archived' as const,
-      qty: deal.qty,
-    }
-  })
+  return data.products.edges.map(e => nodeToVaultDeal(e.node))
 }
 
 export async function getVaultDeals(page = 1, limit = 20): Promise<{ deals: VaultDeal[]; hasNextPage: boolean }> {
   const data = await storefront<{
     products: {
-      edges: { node: ShopifyProductNode; cursor: string }[]
+      edges: { node: ShopifyProductCardNode; cursor: string }[]
       pageInfo: { hasNextPage: boolean }
     }
   }>(`
@@ -601,17 +660,14 @@ export async function getVaultDeals(page = 1, limit = 20): Promise<{ deals: Vaul
         pageInfo { hasNextPage }
         edges {
           cursor
-          node { ${PRODUCT_CORE_FRAGMENT} }
+          node { ${PRODUCT_CARD_FRAGMENT} }
         }
       }
     }
   `, { first: limit, after: page > 1 ? btoa(`${(page - 1) * limit}`) : null })
 
   return {
-    deals: data.products.edges.map(e => {
-      const deal = nodeToDeal(e.node)
-      return { id: deal.id, handle: deal.handle, seoTitle: deal.seoTitle, dealDate: deal.dealDate, dealPrice: deal.dealPrice, msrp: deal.msrp, images: deal.images, brand: deal.brand, category: deal.category, dealStatus: 'archived' as const, qty: deal.qty }
-    }),
+    deals: data.products.edges.map(e => nodeToVaultDeal(e.node)),
     hasNextPage: data.products.pageInfo.hasNextPage,
   }
 }
@@ -621,32 +677,42 @@ export async function getCollectionDeals(
   page = 1,
   limit = 20,
 ): Promise<{ deals: VaultDeal[]; hasNextPage: boolean }> {
-  // Shopify uses opaque cursors — walk through prior pages to get the cursor
+  // Shopify uses opaque cursors — cache the cursor for the start of each
+  // requested page in KV so we don't re-walk on every request. On cache miss
+  // we walk forward once and populate every page's cursor along the way.
   let after: string | null = null
-  for (let p = 1; p < page; p++) {
-    const skip = await storefront<{
-      collection: {
-        products: { edges: { cursor: string }[] }
-      } | null
-    }>(`
-      query SkipPage($handle: String!, $first: Int!, $after: String) {
-        collection(handle: $handle) {
-          products(first: $first, after: $after, sortKey: MANUAL) {
-            edges { cursor }
+  if (page > 1) {
+    const cached = await kvGet<string>(KV_KEYS.collectionCursor(handle, page))
+    if (cached) {
+      after = cached
+    } else {
+      for (let p = 1; p < page; p++) {
+        const skip = await storefront<{
+          collection: {
+            products: { edges: { cursor: string }[] }
+          } | null
+        }>(`
+          query SkipPage($handle: String!, $first: Int!, $after: String) {
+            collection(handle: $handle) {
+              products(first: $first, after: $after, sortKey: MANUAL) {
+                edges { cursor }
+              }
+            }
           }
-        }
+        `, { handle, first: limit, after })
+        const edges = skip.collection?.products.edges
+        if (!edges?.length) return { deals: [], hasNextPage: false }
+        after = edges[edges.length - 1]!.cursor
+        await kvSet(KV_KEYS.collectionCursor(handle, p + 1), after, COLLECTION_CURSOR_TTL)
       }
-    `, { handle, first: limit, after })
-    const edges = skip.collection?.products.edges
-    if (!edges?.length) return { deals: [], hasNextPage: false }
-    after = edges[edges.length - 1]!.cursor
+    }
   }
 
   const data = await storefront<{
     collection: {
       products: {
         pageInfo: { hasNextPage: boolean }
-        edges: { cursor: string; node: ShopifyProductNode }[]
+        edges: { cursor: string; node: ShopifyProductCardNode }[]
       }
     } | null
   }>(`
@@ -654,7 +720,7 @@ export async function getCollectionDeals(
       collection(handle: $handle) {
         products(first: $first, after: $after, sortKey: MANUAL) {
           pageInfo { hasNextPage }
-          edges { cursor node { ${PRODUCT_CORE_FRAGMENT} } }
+          edges { cursor node { ${PRODUCT_CARD_FRAGMENT} } }
         }
       }
     }
@@ -662,10 +728,7 @@ export async function getCollectionDeals(
 
   if (!data.collection) return { deals: [], hasNextPage: false }
   return {
-    deals: data.collection.products.edges.map(e => {
-      const deal = nodeToDeal(e.node)
-      return { id: deal.id, handle: deal.handle, seoTitle: deal.seoTitle, dealDate: deal.dealDate, dealPrice: deal.dealPrice, msrp: deal.msrp, images: deal.images, brand: deal.brand, category: deal.category, dealStatus: 'archived' as const, qty: deal.qty }
-    }),
+    deals: data.collection.products.edges.map(e => nodeToVaultDeal(e.node)),
     hasNextPage: data.collection.products.pageInfo.hasNextPage,
   }
 }

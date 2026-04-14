@@ -10,6 +10,7 @@ import { ProductTabs }      from './ProductTabs'
 import { SubscriptionSelector, getSubscriptionPrice } from './SubscriptionSelector'
 import { ShareButtons } from '../common/ShareButtons'
 import { HeartButton } from './HeartButton'
+import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
 // ─── Gallery media types ──────────────────────────────────────────────────────
 
@@ -131,10 +132,13 @@ export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, review
       {deal.moodImageUrl && (
         <div className="relative overflow-hidden">
           <img
-            src={deal.moodImageUrl}
+            src={shopifyImageUrl(deal.moodImageUrl, 1280) || deal.moodImageUrl}
+            srcSet={shopifyImageSrcSet(deal.moodImageUrl, [640, 960, 1280, 1600])}
+            sizes="100vw"
             alt=""
             aria-hidden="true"
             decoding="async"
+            fetchPriority="high"
             className="absolute inset-0 w-full h-full object-cover"
           />
           <div className="absolute inset-0 bg-gradient-to-r from-brand-cream/97 via-brand-cream/90 to-brand-cream/60" />

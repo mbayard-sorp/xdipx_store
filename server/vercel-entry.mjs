@@ -411,6 +411,24 @@ async function adminGraphQL(query, variables) {
   if (errors?.length) throw new Error(errors[0]?.message ?? "Shopify Admin GraphQL error");
   return data;
 }
+function nodeToVaultDeal(node) {
+  const mf = node.metafields;
+  const variant = node.variants.edges[0]?.node;
+  const dealPrice = parseFloat(variant?.price.amount ?? "0");
+  return {
+    id: node.id,
+    handle: node.handle,
+    seoTitle: node.title,
+    dealDate: parseMetafield(mf, "deal_date"),
+    dealPrice,
+    msrp: parseFloat(parseMetafield(mf, "original_price") || (variant?.compareAtPrice?.amount ?? "0")),
+    images: parseImages(node.images.edges),
+    brand: node.vendor,
+    category: parseMetafield(mf, "category") || "both",
+    dealStatus: "archived",
+    qty: variant?.quantityAvailable ?? 0
+  };
+}
 function parseMetafield(metafields, key) {
   return metafields.find((m) => m?.key === key)?.value ?? "";
 }
@@ -743,26 +761,11 @@ async function getRecentVaultDeals(limit = 7) {
   const data = await storefront(`
     query GetVaultDeals($first: Int!) {
       products(first: $first, query: "tag:deal-status-archived", sortKey: UPDATED_AT, reverse: true) {
-        edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+        edges { node { ${PRODUCT_CARD_FRAGMENT} } }
       }
     }
   `, { first: limit });
-  return data.products.edges.map((e) => {
-    const deal = nodeToDeal(e.node);
-    return {
-      id: deal.id,
-      handle: deal.handle,
-      seoTitle: deal.seoTitle,
-      dealDate: deal.dealDate,
-      dealPrice: deal.dealPrice,
-      msrp: deal.msrp,
-      images: deal.images,
-      brand: deal.brand,
-      category: deal.category,
-      dealStatus: "archived",
-      qty: deal.qty
-    };
-  });
+  return data.products.edges.map((e) => nodeToVaultDeal(e.node));
 }
 async function getVaultDeals(page = 1, limit = 20) {
   const data = await storefront(`
@@ -771,16 +774,13 @@ async function getVaultDeals(page = 1, limit = 20) {
         pageInfo { hasNextPage }
         edges {
           cursor
-          node { ${PRODUCT_CORE_FRAGMENT} }
+          node { ${PRODUCT_CARD_FRAGMENT} }
         }
       }
     }
   `, { first: limit, after: page > 1 ? btoa(`${(page - 1) * limit}`) : null });
   return {
-    deals: data.products.edges.map((e) => {
-      const deal = nodeToDeal(e.node);
-      return { id: deal.id, handle: deal.handle, seoTitle: deal.seoTitle, dealDate: deal.dealDate, dealPrice: deal.dealPrice, msrp: deal.msrp, images: deal.images, brand: deal.brand, category: deal.category, dealStatus: "archived", qty: deal.qty };
-    }),
+    deals: data.products.edges.map((e) => nodeToVaultDeal(e.node)),
     hasNextPage: data.products.pageInfo.hasNextPage
   };
 }
@@ -805,17 +805,14 @@ async function getCollectionDeals(handle, page = 1, limit = 20) {
       collection(handle: $handle) {
         products(first: $first, after: $after, sortKey: MANUAL) {
           pageInfo { hasNextPage }
-          edges { cursor node { ${PRODUCT_CORE_FRAGMENT} } }
+          edges { cursor node { ${PRODUCT_CARD_FRAGMENT} } }
         }
       }
     }
   `, { handle, first: limit, after });
   if (!data.collection) return { deals: [], hasNextPage: false };
   return {
-    deals: data.collection.products.edges.map((e) => {
-      const deal = nodeToDeal(e.node);
-      return { id: deal.id, handle: deal.handle, seoTitle: deal.seoTitle, dealDate: deal.dealDate, dealPrice: deal.dealPrice, msrp: deal.msrp, images: deal.images, brand: deal.brand, category: deal.category, dealStatus: "archived", qty: deal.qty };
-    }),
+    deals: data.collection.products.edges.map((e) => nodeToVaultDeal(e.node)),
     hasNextPage: data.collection.products.pageInfo.hasNextPage
   };
 }
@@ -2234,7 +2231,7 @@ async function getStorefrontCollections(first = 50) {
   `, { first });
   return data.collections.edges.map((e) => e.node);
 }
-var STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT;
+var STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
     "use strict";
@@ -2298,6 +2295,33 @@ var init_shopify_server = __esm({
     }
   }
   ${METAFIELDS_FRAGMENT}
+`;
+    CARD_METAFIELDS_FRAGMENT = `
+  metafields(identifiers: [
+    { namespace: "xdipx", key: "deal_date" }
+    { namespace: "xdipx", key: "original_price" }
+    { namespace: "xdipx", key: "category" }
+    { namespace: "xdipx", key: "deal_status" }
+  ]) {
+    namespace key value
+  }
+`;
+    PRODUCT_CARD_FRAGMENT = `
+  id handle title vendor tags
+  images(first: 1) {
+    edges { node { url altText } }
+  }
+  variants(first: 1) {
+    edges {
+      node {
+        price { amount }
+        compareAtPrice { amount }
+        quantityAvailable
+        availableForSale
+      }
+    }
+  }
+  ${CARD_METAFIELDS_FRAGMENT}
 `;
     CART_FRAGMENT = `
   id checkoutUrl totalQuantity
@@ -4342,7 +4366,7 @@ function initSentryServer() {
   Sentry.init({
     dsn,
     environment: process.env["NODE_ENV"] ?? "development",
-    tracesSampleRate: 0,
+    tracesSampleRate: 0.1,
     sendDefaultPii: false
   });
   initialized = true;
@@ -4350,6 +4374,7 @@ function initSentryServer() {
 
 // server/index.ts
 import express from "express";
+import compression from "compression";
 import { createRequestHandler } from "@react-router/express";
 
 // server/cron.js
@@ -4830,6 +4855,7 @@ var viteDevServer = isProduction ? void 0 : await import("vite").then(
   })
 );
 var app = express();
+app.use(compression());
 if (!viteDevServer) {
   app.use(
     "/assets",
@@ -4863,8 +4889,6 @@ app.use("/api/", (req, res, next) => {
   }
   next();
 });
-app.use(express.json({ limit: "64kb" }));
-app.use(express.urlencoded({ extended: true, limit: "64kb" }));
 var build = viteDevServer ? () => viteDevServer.ssrLoadModule(
   "virtual:react-router/server-build"
 ) : await import(

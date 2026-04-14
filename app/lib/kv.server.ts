@@ -72,6 +72,7 @@ export const KV_KEYS = {
   ltxOperation:           (token: string) => `ltx:op:${token}`,
   liveDealHandle:         'live-deal:handle',
   fbt:                    (handle: string) => `fbt:${handle}`,
+  collectionCursor:       (handle: string, page: number) => `vault:cursor:${handle}:p${page}`,
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────
