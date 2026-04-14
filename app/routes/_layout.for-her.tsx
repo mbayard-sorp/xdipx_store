@@ -12,6 +12,13 @@ export const meta: MetaFunction = () => [
   { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/for-her' },
 ]
 
+export function headers() {
+  return {
+    'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+    'Vercel-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=600',
+  }
+}
+
 export async function loader(_: LoaderFunctionArgs) {
   const products = await getProductsByTag('for-her', 24)
   return { products }

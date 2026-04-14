@@ -24,7 +24,7 @@ const BOTID_PROTECTED_ROUTES = [
 if (typeof window !== 'undefined') {
   const dsn = (window as unknown as { ENV?: { SENTRY_DSN?: string } }).ENV?.SENTRY_DSN
   if (dsn && !(window as unknown as { __sentryInit?: boolean }).__sentryInit) {
-    Sentry.init({ dsn, environment: import.meta.env.MODE, tracesSampleRate: 0 })
+    Sentry.init({ dsn, environment: import.meta.env.MODE, tracesSampleRate: 0.1 })
     ;(window as unknown as { __sentryInit: boolean }).__sentryInit = true
   }
 }

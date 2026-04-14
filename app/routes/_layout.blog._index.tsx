@@ -4,6 +4,13 @@ import { getBlogPosts, getBlogCategories, getBlogHomepage, isPreviewRequest } fr
 import { BlogPostCard } from '~/components/blog/BlogPostCard'
 import type { BlogPostCard as BlogPostCardType, BlogCategory } from '~/types/cms'
 
+export function headers() {
+  return {
+    'Cache-Control': 'public, max-age=0, s-maxage=300, stale-while-revalidate=1800',
+    'Vercel-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=1800',
+  }
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const page = Math.max(1, Number(url.searchParams.get('page') ?? '1'))

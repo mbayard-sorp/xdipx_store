@@ -101,5 +101,5 @@ export async function getPinnedAccessoryIds(): Promise<string[]> {
 }
 
 export async function setPinnedAccessoryIds(ids: string[]): Promise<void> {
-  await kvSet(KV_KEYS.pinnedAccessoryIds, ids)
+  await kvSet(KV_KEYS.pinnedAccessoryIds, ids, 86400)
 }

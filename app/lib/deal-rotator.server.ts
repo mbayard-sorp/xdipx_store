@@ -163,7 +163,7 @@ export async function activateDeal(
     sku: deal.sku,
     title: deal.seoTitle,
     date: estDate(0),
-  })
+  }, 86400)
 
   // Trigger Klaviyo email
   await triggerDailyDealEmail({

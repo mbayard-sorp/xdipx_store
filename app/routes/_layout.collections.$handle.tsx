@@ -11,6 +11,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   ]
 }
 
+export function headers() {
+  return {
+    'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+    'Vercel-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=600',
+  }
+}
+
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const handle = params.handle!
   const url = new URL(request.url)

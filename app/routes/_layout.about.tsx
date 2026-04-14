@@ -6,6 +6,13 @@ export const meta: MetaFunction = () => [
   { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/about' },
 ]
 
+export function headers() {
+  return {
+    'Cache-Control': 'public, max-age=0, s-maxage=3600, stale-while-revalidate=86400',
+    'Vercel-CDN-Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+  }
+}
+
 export default function AboutPage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-16">

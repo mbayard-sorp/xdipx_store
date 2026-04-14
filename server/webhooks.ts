@@ -58,12 +58,13 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
     ),
   )
 
-  for (const lineItem of order.line_items) {
+  // Per-line-item work is independent — parallelize to keep the webhook
+  // inside Shopify's retry budget on multi-item orders.
+  await Promise.all(order.line_items.map(async lineItem => {
     const cost   = await getWholesaleCostBySKU(lineItem.sku).catch(() => 0)
     const profit = parseFloat(lineItem.price) - cost
 
-    // Write per-line-item profit metafield onto the order
-    await shopifyAdmin(`/orders/${order.id}/metafields.json`, 'POST', {
+    const metafieldWrite = shopifyAdmin(`/orders/${order.id}/metafields.json`, 'POST', {
       metafield: {
         namespace: 'xdipx',
         key:       `profit_${lineItem.sku}`,
@@ -79,18 +80,18 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
       },
     }).catch(err => console.error('[webhook] metafield write failed:', err))
 
-    // Update deal_history units_sold
-    const today = new Date().toISOString().split('T')[0]!
-    await db
+    const dealHistoryUpdate = db
       .update(dealHistory)
       .set({
-        unitsSold:    db.$count(dealHistory, eq(dealHistory.sku, lineItem.sku)), // increment handled via raw SQL
+        unitsSold:    db.$count(dealHistory, eq(dealHistory.sku, lineItem.sku)),
         totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
         totalProfit:  String(profit * lineItem.quantity),
       })
       .where(eq(dealHistory.sku, lineItem.sku))
       .catch(() => {/* non-critical */})
-  }
+
+    await Promise.all([metafieldWrite, dealHistoryUpdate])
+  }))
 
   // Persist raw line items for analytics + copurchase rollups
   try {

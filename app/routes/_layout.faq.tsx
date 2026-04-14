@@ -8,6 +8,13 @@ export const meta: MetaFunction = () => [
   { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/faq' },
 ]
 
+export function headers() {
+  return {
+    'Cache-Control': 'public, max-age=0, s-maxage=3600, stale-while-revalidate=86400',
+    'Vercel-CDN-Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+  }
+}
+
 const FAQ_SECTIONS = [
   {
     heading: 'Shipping & Packaging',
