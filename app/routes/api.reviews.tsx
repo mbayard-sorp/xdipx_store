@@ -7,6 +7,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from 'react-router'
 import { getProductReviews, createReview, getInviteByToken, markInviteClicked, getReviewSettings, updateReviewStatus, updateReviewAI } from '~/lib/reviews.server'
 import { analyzeReview } from '~/lib/reviews-ai.server'
 import { kvSet, kvIncr } from '~/lib/kv.server'
+import { rejectIfBot } from '~/lib/botid.server'
 
 // ─── Loader: GET /api/reviews?productId=X ────────────────────────────────
 
@@ -37,6 +38,9 @@ export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 })
   }
+
+  const bot = await rejectIfBot()
+  if (bot) return bot
 
   let formData: FormData
   try {

@@ -1,16 +1,34 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
-import { dailyFeedProcessor } from '../app/lib/feed-processor.server.js'
-import { dealActivator }       from '../app/lib/deal-activator.server.js'
-import { writeProfitSummary }  from '../app/lib/profit.server.js'
-import { getPendingReminderInvites, markReminderSent, getReviewSettings } from '../app/lib/reviews.server.js'
+import { timingSafeEqual } from 'node:crypto'
+
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a)
+  const bb = Buffer.from(b)
+  if (ab.length !== bb.length) return false
+  return timingSafeEqual(ab, bb)
+}
 
 export function createCronRoutes() {
   const router = Router()
 
-  // Guard — all cron routes require x-cron-secret header
+  // Guard — all cron routes require x-cron-secret header.
+  // Vercel also sets `x-vercel-cron: 1` on scheduled invocations; we require
+  // either the shared secret OR that header (the platform gate) to pass.
   const guard = (req: Request, res: Response, next: NextFunction) => {
-    const secret = req.headers['x-cron-secret']
-    if (!process.env['CRON_SECRET'] || secret !== process.env['CRON_SECRET']) {
+    const expected = process.env['CRON_SECRET']
+    const headerSecret = req.headers['x-cron-secret']
+    const authHeader = req.headers['authorization']
+    const bearer =
+      typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7)
+        : undefined
+    const provided = typeof headerSecret === 'string' ? headerSecret : bearer
+    if (
+      typeof expected !== 'string' ||
+      expected.length === 0 ||
+      typeof provided !== 'string' ||
+      !safeEqual(provided, expected)
+    ) {
       res.status(401).json({ error: 'Unauthorized' })
       return
     }
@@ -23,6 +41,7 @@ export function createCronRoutes() {
    */
   router.post('/daily-feed-processor', guard, async (_req, res) => {
     try {
+      const { dailyFeedProcessor } = await import('../app/lib/feed-processor.server.js')
       const result = await dailyFeedProcessor()
       res.json({ ok: true, topCandidates: result.topCandidates.length, needsImagen: result.needsImagen.length })
     } catch (err) {
@@ -37,6 +56,7 @@ export function createCronRoutes() {
    */
   router.post('/deal-activator', guard, async (_req, res) => {
     try {
+      const { dealActivator } = await import('../app/lib/deal-activator.server.js')
       const result = await dealActivator()
       res.json({ ok: true, ...result })
     } catch (err) {
@@ -51,6 +71,7 @@ export function createCronRoutes() {
    */
   router.post('/profit-summary', guard, async (_req, res) => {
     try {
+      const { writeProfitSummary } = await import('../app/lib/profit.server.js')
       await writeProfitSummary()
       res.json({ ok: true })
     } catch (err) {
@@ -65,6 +86,7 @@ export function createCronRoutes() {
    */
   router.post('/review-reminders', guard, async (_req, res) => {
     try {
+      const { getReviewSettings, getPendingReminderInvites, markReminderSent } = await import('../app/lib/reviews.server.js')
       const settings = await getReviewSettings()
       if (!settings.remindersEnabled) {
         res.json({ ok: true, skipped: true, reason: 'reminders disabled' })

@@ -3,7 +3,10 @@ import type { GenerateCopyRequest, GenerateCopyResult, ProductScore } from '~/ty
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] })
 
-const MODEL = 'claude-sonnet-4-20250514'
+// Tiered models: HAIKU for short/templated copy (~20× cheaper), SONNET for
+// long-form narrative and structured tasks (full_story, specs, schedule, blog).
+const MODEL      = 'claude-sonnet-4-20250514'
+const MODEL_FAST = 'claude-haiku-4-5-20251001'
 
 const SYSTEM_PROMPT = `You are the voice of xdipx.com — a daily flash-sale site for sexual wellness products.
 Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy.
@@ -14,9 +17,13 @@ Never use "sex" as an adjective — use "intimate", "pleasure", or "wellness".
 Never assume the reader's experience level.
 Always end descriptions with a curiosity hook that makes the reader want to try it.`
 
-async function generate(prompt: string, maxTokens = 1024): Promise<string> {
+async function generate(
+  prompt: string,
+  maxTokens = 1024,
+  model: string = MODEL,
+): Promise<string> {
   const msg = await client.messages.create({
-    model: MODEL,
+    model,
     max_tokens: maxTokens,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: prompt }],
@@ -40,14 +47,14 @@ export async function generateCopy(req: GenerateCopyRequest): Promise<GenerateCo
       const primaryPrompt = `Write 3 one-sentence taglines for the following product. Be genuinely funny — irreverent, witty, puns welcome. Think: a comedian friend who loves these products and has zero shame. Tasteful but not boring. Max 12 words each. Return as a JSON array of strings (no markdown).\n\n${productContext}`
       const retryPrompt   = `Return exactly one short funny sentence as a product tagline. No JSON, no newlines, no lists, no quotes. Just the sentence.\n\n${productContext}`
 
-      const raw = await generate(primaryPrompt)
+      const raw = await generate(primaryPrompt, 1024, MODEL_FAST)
       try {
         const parsed = JSON.parse(stripFences(raw)) as string[]
         const first = Array.isArray(parsed) ? parsed.find(s => typeof s === 'string' && s.trim()) : null
         if (first) return { type, content: parsed }
       } catch { /* fall through to retry */ }
 
-      const retried = await generate(retryPrompt)
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST)
       const line = retried.trim().split('\n')[0]?.trim()
       if (line) return { type, content: [line] }
 
@@ -122,13 +129,13 @@ ${productContext}`
       const primaryPrompt = `Write 4–6 feature bullet points for this product. Short, specific, benefit-first. No fluff. Return as a JSON array of strings.\n\n${productContext}`
       const retryPrompt   = `Return ONLY a JSON array of 4 to 5 short benefit strings. Example: ["Dual motors for blended stimulation", "Whisper-quiet for total privacy"]. Nothing else — no markdown, no prose.\n\n${productContext}`
 
-      const raw = await generate(primaryPrompt)
+      const raw = await generate(primaryPrompt, 1024, MODEL_FAST)
       try {
         const parsed = JSON.parse(stripFences(raw)) as string[]
         if (Array.isArray(parsed) && parsed.length >= 3) return { type, content: parsed }
       } catch { /* fall through */ }
 
-      const retried = await generate(retryPrompt)
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST)
       try {
         const parsed = JSON.parse(stripFences(retried)) as string[]
         if (Array.isArray(parsed) && parsed.length >= 3) return { type, content: parsed }
@@ -146,6 +153,8 @@ ${productContext}`
     case 'email_subjects': {
       const raw = await generate(
         `Write 5 email subject lines for today's daily deal email. Max 50 chars each. Playful, urgent, curiosity-driven. Return as a JSON array of strings.\n\n${productContext}`,
+        1024,
+        MODEL_FAST,
       )
       try {
         return { type, content: JSON.parse(stripFences(raw)) as string[] }
@@ -161,11 +170,11 @@ ${productContext}`
       const primaryPrompt = `Write a 140–155 character SEO meta description for this product. Format: "[Discount or 'Best price']. [1-sentence benefit]. Ships discreet. $[price] at xdipx." Return only the meta description, no quotes.\n\n${productContext}`
       const retryPrompt   = `Write a single SEO meta description between 140 and 155 characters. Return only the description — no quotes, no labels, no explanation.\n\n${productContext}`
 
-      const text = await generate(primaryPrompt)
+      const text = await generate(primaryPrompt, 1024, MODEL_FAST)
       const cleaned = text.replace(/^["']|["']$/g, '').trim()
       if (cleaned.length >= 50) return { type, content: cleaned.slice(0, 155) }
 
-      const retried = await generate(retryPrompt)
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST)
       const cleanedRetry = retried.replace(/^["']|["']$/g, '').trim()
       if (cleanedRetry.length >= 50) return { type, content: cleanedRetry.slice(0, 155) }
 
@@ -177,13 +186,13 @@ ${productContext}`
       const primaryPrompt = `Extract what is physically included in the box for this product from the description below. Return a JSON array of short strings (one item per element), e.g. ["1x vibrator", "1x USB charging cable", "1x storage pouch"]. If the description doesn't mention box contents, infer the most likely inclusions based on the product type. Return only the JSON array, no markdown.\n\n${productContext}`
       const retryPrompt   = `Return ONLY a JSON array of what's in the box. Example: ["1x vibrator", "1x USB cable"]. Nothing else — no markdown, no prose, no explanation.\n\n${productContext}`
 
-      const raw = await generate(primaryPrompt)
+      const raw = await generate(primaryPrompt, 1024, MODEL_FAST)
       try {
         const parsed = JSON.parse(stripFences(raw)) as string[]
         if (Array.isArray(parsed) && parsed.length >= 1) return { type, content: parsed }
       } catch { /* fall through */ }
 
-      const retried = await generate(retryPrompt)
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST)
       try {
         const parsed = JSON.parse(stripFences(retried)) as string[]
         if (Array.isArray(parsed) && parsed.length >= 1) return { type, content: parsed }
@@ -235,6 +244,8 @@ export async function generateSchedule(
 export async function generateSEOTitle(rawTitle: string, brand: string): Promise<string> {
   const text = await generate(
     `Rewrite this product title for SEO. Max 60 chars. Format: {Brand} {Product Type} {Key Feature}. Remove filler words and explicit language. Replace explicit terms with tasteful equivalents.\n\nRaw title: "${rawTitle}"\nBrand: "${brand}"\n\nReturn only the rewritten title, no quotes.`,
+    256,
+    MODEL_FAST,
   )
   return text.trim().slice(0, 60)
 }
@@ -294,11 +305,11 @@ Product: ${deal.brand} ${deal.title} — $${deal.dealPrice} (was $${deal.msrp})`
     return null
   }
 
-  const first = await generate(primaryPrompt, 512)
+  const first = await generate(primaryPrompt, 512, MODEL_FAST)
   const firstParsed = tryParse(first)
   if (firstParsed) return firstParsed
 
-  const retried = await generate(retryPrompt, 512)
+  const retried = await generate(retryPrompt, 512, MODEL_FAST)
   const secondParsed = tryParse(retried)
   if (secondParsed) return secondParsed
 
@@ -470,6 +481,128 @@ Return ONLY this JSON (no markdown):
     endTagline: parsed.endTagline,
     ctaWord,
   }
+}
+
+// ─── Veo Prompt Enhancement ─────────────────────────────────────────────────
+
+const VEO_SYSTEM_PROMPT = `You are a video prompt engineer for Google Veo. You enhance simple video ideas into detailed, production-ready Veo prompts. Your job is to FAITHFULLY EXPAND the user's idea — not replace it. The user's concept is the creative foundation. You add cinematic detail (camera, lighting, composition, audio) while keeping their vision intact.
+
+Brand context: xdipx.com is a daily flash-sale site for sexual wellness products.
+Visual style: premium, warm, tasteful. Suggestive never explicit.`
+
+export async function enhanceVeoPrompt(opts: {
+  userIdea: string
+  productTitle: string
+  productBrand: string
+  productCategory?: string
+  hasStartingImage: boolean
+  imageMode: 'start_frame' | 'reference'
+  aspectRatio: '16:9' | '9:16'
+  durationSeconds: number
+}): Promise<string> {
+  const msg = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1024,
+    system: VEO_SYSTEM_PROMPT,
+    messages: [{
+      role: 'user',
+      content: `Enhance this video idea into a detailed Google Veo prompt. IMPORTANT: The user's idea IS the creative direction — keep it as the core of your prompt and build around it with cinematic detail.
+
+THE VIDEO IDEA: "${opts.userIdea}"
+
+Product: ${opts.productTitle} by ${opts.productBrand}${opts.productCategory ? ` (${opts.productCategory})` : ''}
+${opts.hasStartingImage
+  ? opts.imageMode === 'reference'
+    ? 'Mode: TEXT-TO-VIDEO with REFERENCE IMAGE — a product photo is included as visual context (NOT the first frame). The video should feature the product as it appears in the reference image.'
+    : 'Mode: IMAGE-TO-VIDEO — the starting frame is a product photo. Describe how the scene evolves FROM that image.'
+  : 'Mode: TEXT-TO-VIDEO — describe the full scene from scratch.'}
+Aspect: ${opts.aspectRatio} (${opts.aspectRatio === '16:9' ? 'landscape' : 'vertical'}) | Duration: ${opts.durationSeconds}s
+
+Take the user's idea above and enrich it with:
+- Camera work (angle, movement: pan, dolly, tracking, etc.)
+- Lighting (golden hour, soft diffusion, neon, etc.)
+- Depth of field / focus effects
+- Audio: dialogue in quotes, sound effects, ambient noise
+
+Stay true to what the user described. Don't replace their concept with something different. Add production detail, don't reimagine.
+
+Return ONLY the enhanced prompt as one flowing paragraph. No labels, no markdown.`,
+    }],
+  })
+  const block = msg.content[0]
+  if (block?.type !== 'text') throw new Error('Unexpected Claude response type for Veo prompt')
+  return block.text.trim()
+}
+
+// ─── LTX Prompt Enhancement ───────────────────────────────────────────────────
+
+const LTX_SYSTEM_PROMPT = `You are a video prompt engineer for LTX Video, an image-to-video model. You enhance simple video ideas into detailed, production-ready prompts.
+
+CRITICAL RULE — NEVER RE-DESCRIBE THE FIRST FRAME.
+The model already sees the product image as its starting frame. Your prompt must describe what happens NEXT — motion, change, evolution. If you restate what is already visible, the model wastes capacity on redundancy.
+
+Structure every prompt using three temporal layers, in order:
+
+1. SUBJECT ACTION — What moves and how. This is the hero moment. Name the subject first ("The vibrator begins to glow…"), then describe the physical change. No adjective labels like "epic" or "stunning" — describe what physically happens.
+
+2. CAMERA MOVEMENT — Use specific cinematographic terms: slow dolly in, gentle jib up, smooth tracking left, rack focus from foreground to background. Never use vague words like "dynamic" or "cinematic" without specifying the actual motion.
+
+3. ENVIRONMENT / ATMOSPHERE — What shifts in the background: lighting changes (warm golden light intensifies, soft shadow creeps across the surface), particles (dust motes drift through a shaft of light), reflections, color temperature shifts. Describe change, not static state.
+
+Think of the prompt as a mini screenplay beat:
+- Sense of place/time (implied by the atmosphere layer)
+- Blocking (choreography between subject motion and camera)
+- Atmospheric detail (what the viewer feels through visual cues)
+
+Prompt length rules:
+- 6-8 second videos: 3-5 rich sentences
+- 10-15 second videos: 5-8 sentences with more temporal progression
+- 16-20 second videos: 8-12 sentences — describe phases of motion, mid-video shifts, ending beat
+
+Template skeleton: [product action] + [camera instruction] + [lighting/atmosphere shift] + [optional ambient audio cue]
+
+Brand context: xdipx.com — daily flash-sale site for sexual wellness products.
+Visual style: premium, warm, a little edgy — push boundaries while staying tasteful. Suggestive and playful, never outright explicit. Think high-end fragrance ad that makes you look twice.`
+
+export async function enhanceLtxPrompt(opts: {
+  userIdea: string
+  productTitle: string
+  productBrand: string
+  productCategory?: string
+  hasStartingImage: boolean
+  resolution: string
+  durationSeconds: number
+  cameraMotion?: string
+}): Promise<string> {
+  const msg = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1024,
+    system: LTX_SYSTEM_PROMPT,
+    messages: [{
+      role: 'user',
+      content: `Enhance this video idea into a detailed LTX Video prompt using the three-layer structure. IMPORTANT: The user's idea IS the creative direction — keep it as the core and build cinematic detail around it.
+
+THE VIDEO IDEA: "${opts.userIdea}"
+
+Product: ${opts.productTitle} by ${opts.productBrand}${opts.productCategory ? ` (${opts.productCategory})` : ''}
+
+FIRST FRAME: The starting frame is a product photo — the model already sees it. DO NOT re-describe the product's appearance, color, shape, or packaging. Jump straight into what happens next.
+
+Duration: ${opts.durationSeconds}s — scale your detail proportionally. ${opts.durationSeconds <= 8 ? 'Keep it tight: 3-5 sentences.' : opts.durationSeconds <= 15 ? 'Medium detail: 5-8 sentences with temporal progression.' : 'Full detail: 8-12 sentences with phases of motion, mid-video shifts, and an ending beat.'}
+Resolution: ${opts.resolution}
+${opts.cameraMotion ? `Camera direction: "${opts.cameraMotion.replace(/_/g, ' ')}" — use this as the Camera Movement layer. Integrate it specifically (e.g., if "dolly in", describe pace and target of the dolly).` : 'No camera direction specified — choose an appropriate camera movement for the Subject Action.'}
+
+Build the prompt with these three layers in order:
+1. SUBJECT ACTION — what moves, how, the hero moment
+2. CAMERA MOVEMENT — specific cinematographic terms
+3. ENVIRONMENT/ATMOSPHERE — what shifts in lighting, particles, reflections, color temperature
+
+Return ONLY the enhanced prompt as one flowing paragraph. No labels, no markdown, no layer headings.`,
+    }],
+  })
+  const block = msg.content[0]
+  if (block?.type !== 'text') throw new Error('Unexpected Claude response type for LTX prompt')
+  return block.text.trim()
 }
 
 export async function selectAccessories(

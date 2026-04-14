@@ -177,6 +177,19 @@ export default function AdminSettingsPage() {
         Settings
       </h1>
 
+      {/* Analytics */}
+      <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
+        <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          Analytics
+        </h2>
+
+        <SaveForm
+          label="GA4 Measurement ID"
+          settingKey="ga4MeasurementId"
+          description="Google Analytics 4 measurement ID (e.g. G-XXXXXXXXXX). Used for the storefront data layer."
+        />
+      </section>
+
       {/* Feed Settings */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
         <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
@@ -205,13 +218,13 @@ export default function AdminSettingsPage() {
         />
 
         <SaveForm
-          label="Vault Discount %"
+          label="Deal Close Price Adjustment"
           settingKey="vaultDiscountPct"
           type="number"
           min={5}
           max={60}
           inputWidth="w-20"
-          description="Default discount off MSRP for products after their deal ends. e.g. 25 = vault price is 25% below MSRP."
+          description="When a deal ends, the new Everyday Price will be MSRP less the value below when it leaves the buy box."
         />
 
         <div className="flex items-center gap-6 text-sm text-brand-charcoal/60 pt-2 border-t border-brand-mist">

@@ -1,17 +1,25 @@
 import type { ActionFunctionArgs } from 'react-router'
+import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 
 /**
  * Klaviyo webhook handler.
- * Receives events from Klaviyo (e.g. unsubscribes, bounces).
- * Signature verification should be added when Klaviyo provides a secret.
+ * Klaviyo does not sign webhooks, so this endpoint is anonymous by design.
+ * Defensive posture: rate-limit per IP and cap body size. The route only logs
+ * — no side effects — so abuse is low-impact today. Add signature verification
+ * if Klaviyo ever publishes a secret.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  // Klaviyo sends JSON payloads
-  const payload = await request.json().catch(() => null)
-  if (!payload) return Response.json({ ok: true })
+  const rl = await checkRateLimit(request, 'klaviyo-hook', 60, 60)
+  if (!rl.ok) return rateLimited()
 
-  // Log for now — add handlers per event type as needed
-  console.log('[klaviyo webhook]', JSON.stringify(payload).slice(0, 200))
+  const raw = await request.text().catch(() => '')
+  if (raw.length > 8_192) return Response.json({ ok: true }) // drop oversized payloads silently
+  try {
+    const payload = JSON.parse(raw) as unknown
+    console.log('[klaviyo webhook]', JSON.stringify(payload).slice(0, 200))
+  } catch {
+    // ignore
+  }
 
   return Response.json({ ok: true })
 }

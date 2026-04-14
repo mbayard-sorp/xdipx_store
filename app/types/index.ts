@@ -20,6 +20,9 @@ export interface ProductImage {
 export interface ProductVideo {
   previewImageUrl: string
   sources: { url: string; mimeType: string }[]
+  aspect?: 'portrait' | 'landscape' | 'square'
+  width?: number
+  height?: number
 }
 
 export interface ProductVariant {

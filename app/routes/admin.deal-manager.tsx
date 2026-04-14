@@ -3,21 +3,31 @@ import { useLoaderData, useFetcher, useRevalidator, useSearchParams, redirect } 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   getDealByShopifyId, updateProductMetafield, setDealStatus,
-  activateShopifyProduct, updateVariantPricing, getVariantCost,
+  activateShopifyProduct, getVariantCost,
   pushProductToShopify, getAccessoryProductsAdmin, getProductAdminImages,
   updateProductTags,
 } from '~/lib/shopify.server'
 import type { AdminProductImage } from '~/lib/shopify.server'
 import { ProductPicker, productToPickerProduct } from '~/components/admin/ProductPicker'
 import { ImageManager } from '~/components/admin/ImageManager'
+import { PricingPanel } from '~/components/admin/PricingPanel'
 import { db } from '~/lib/db.server'
 import { dealHistory, pipelineSettings } from '../../db/schema'
 import { eq, like } from 'drizzle-orm'
 import { generateCopy, generateSEOTitle } from '~/lib/claude.server'
-import { kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
 import type { Product } from '~/types'
 
 export const meta: MetaFunction = () => [{ title: 'Deal Manager — xdipx Admin' }]
+
+type PricingConfig = {
+  dealPrice: number
+  msrp: number
+  wholesaleCost: number
+  mapPrice: number
+  pctOffMsrp: number
+  vaultPriceOverride: number | null
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
@@ -43,15 +53,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       pinnedAccessories: [] as Product[], pinnedAccessoryIds: [] as string[],
       productImages: [] as AdminProductImage[],
       promptSettings,
+      pricingConfig: null as PricingConfig | null,
     }
   }
 
   const deal = await getDealByShopifyId(dbDeal.shopifyProductId)
   const shopifyCost = deal?.variantId ? await getVariantCost(deal.variantId) : null
 
+  const pricingConfig: PricingConfig = {
+    dealPrice:          parseFloat(dbDeal.dealPrice     ?? '0'),
+    msrp:               parseFloat(dbDeal.msrp          ?? '0'),
+    wholesaleCost:      parseFloat(dbDeal.wholesaleCost ?? '0'),
+    mapPrice:           parseFloat(dbDeal.mapPrice      ?? '0'),
+    pctOffMsrp:         parseFloat(dbDeal.pctOffMsrp    ?? '0'),
+    vaultPriceOverride: dbDeal.vaultPrice ? parseFloat(dbDeal.vaultPrice) : null,
+  }
+
   const [productImages, pinnedAccessoryIds] = await Promise.all([
     deal ? getProductAdminImages(dbDeal.shopifyProductId) : Promise.resolve([] as AdminProductImage[]),
-    kvGet<string[]>(KV_KEYS.pinnedAccessoryIds).then(v => v ?? []),
+    getPinnedAccessoryIds(),
   ])
   const pinnedAccessories = pinnedAccessoryIds.length
     ? await getAccessoryProductsAdmin(pinnedAccessoryIds)
@@ -62,6 +82,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     dealCategories: dbDeal.categories ?? [],
     pinnedAccessories, pinnedAccessoryIds, productImages,
     promptSettings,
+    pricingConfig,
   }
 }
 
@@ -106,18 +127,31 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'save-pricing') {
-    const productId     = form.get('productId') as string
-    const variantId     = form.get('variantId') as string
-    const dealPrice     = form.get('dealPrice') as string
-    const msrp          = form.get('msrp') as string
-    const wholesaleCost = form.get('wholesaleCost') as string
-    const mapPrice      = form.get('mapPrice') as string
-    await Promise.all([
-      updateVariantPricing(variantId, dealPrice, msrp, wholesaleCost),
-      updateProductMetafield(productId, 'original_price',  msrp,          'number_decimal'),
-      updateProductMetafield(productId, 'wholesale_cost',  wholesaleCost,  'number_decimal'),
-      updateProductMetafield(productId, 'map_price',       mapPrice,       'number_decimal'),
-    ])
+    const productIdRaw       = form.get('productId') as string
+    const productId          = productIdRaw.replace('gid://shopify/Product/', '')
+    const dealPrice          = form.get('dealPrice') as string
+    const msrp               = form.get('msrp') as string
+    const wholesaleCost      = form.get('wholesaleCost') as string
+    const mapPrice           = form.get('mapPrice') as string
+    const pctOffMsrp         = form.get('pctOffMsrp') as string
+    const vaultPriceOverride = form.get('vaultPriceOverride') as string | null
+
+    const clampedPct = Math.max(0, Math.min(100, parseFloat(pctOffMsrp || '0') || 0))
+    const vaultVal = vaultPriceOverride && vaultPriceOverride.trim() !== ''
+      ? parseFloat(vaultPriceOverride).toFixed(2)
+      : null
+
+    await db
+      .update(dealHistory)
+      .set({
+        dealPrice:     (parseFloat(dealPrice || '0') || 0).toFixed(2),
+        msrp:          (parseFloat(msrp || '0') || 0).toFixed(2),
+        wholesaleCost: (parseFloat(wholesaleCost || '0') || 0).toFixed(2),
+        mapPrice:      (parseFloat(mapPrice || '0') || 0).toFixed(2),
+        pctOffMsrp:    clampedPct.toFixed(2),
+        vaultPrice:    vaultVal,
+      })
+      .where(eq(dealHistory.shopifyProductId, productId))
     return { ok: true }
   }
 
@@ -206,7 +240,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'save-pinned-accessories') {
     const ids = JSON.parse(form.get('ids') as string) as string[]
-    await kvSet(KV_KEYS.pinnedAccessoryIds, ids)
+    await setPinnedAccessoryIds(ids)
     const currentDate = form.get('currentDate') as string | null
     return redirect(currentDate ? `/admin/deal-manager?date=${currentDate}` : '/admin/deal-manager')
   }
@@ -1204,10 +1238,10 @@ function DealManager() {
     deal, shopifyCost, targetDate, todayEST, dealCategories,
     pinnedAccessories, productImages,
     promptSettings,
+    pricingConfig,
   } = useLoaderData<typeof loader>()
   const approveFetcher  = useFetcher<{ ok: boolean }>()
   const liveFetcher     = useFetcher<{ ok: boolean }>()
-  const pricingFetcher  = useFetcher<{ ok: boolean }>()
   const { revalidate } = useRevalidator()
   const [variantsOpen, setVariantsOpen] = useState(true)
 
@@ -1341,72 +1375,14 @@ function DealManager() {
                   </div>
                 </div>
 
-                {/* Pricing — inline */}
-                {(() => {
-                  const pricingSaved = pricingFetcher.state === 'idle' && pricingFetcher.data?.ok === true
-                  const profit = deal.dealPrice - deal.wholesaleCost
-                  const margin = deal.dealPrice > 0 ? (profit / deal.dealPrice) * 100 : 0
-                  return (
-                    <div className="border-t border-brand-mist mt-3 pt-3">
-                      <pricingFetcher.Form method="post" className="space-y-3">
-                        <input type="hidden" name="intent"    value="save-pricing" />
-                        <input type="hidden" name="productId" value={deal.shopifyProductId} />
-                        <input type="hidden" name="variantId" value={deal.variantId} />
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                          {([
-                            { label: 'Deal Price',      name: 'dealPrice',     value: deal.dealPrice.toFixed(2) },
-                            { label: 'MSRP',            name: 'msrp',          value: deal.msrp.toFixed(2) },
-                            { label: 'Wholesale Cost',  name: 'wholesaleCost', value: deal.wholesaleCost.toFixed(2) },
-                            { label: 'MAP Price',       name: 'mapPrice',      value: deal.mapPrice.toFixed(2) },
-                          ] as const).map(({ label, name, value }) => (
-                            <div key={name}>
-                              <label className="text-xs font-medium text-brand-charcoal/50 block mb-1">{label}</label>
-                              <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-brand-charcoal/40">$</span>
-                                <input
-                                  type="number"
-                                  name={name}
-                                  defaultValue={value}
-                                  step="0.01"
-                                  min="0"
-                                  className="w-full border border-brand-mist rounded-xl pl-6 pr-3 py-2 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                        {shopifyCost !== null && (
-                          <div className="flex items-center gap-2 text-xs text-brand-charcoal/50">
-                            <span>Shopify cost on file:</span>
-                            <span className="font-semibold text-brand-charcoal">${shopifyCost.toFixed(2)}</span>
-                            {shopifyCost !== deal.wholesaleCost && (
-                              <span className="text-amber-600 font-medium">⚠ differs from wholesale cost above</span>
-                            )}
-                          </div>
-                        )}
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs text-brand-charcoal/50">
-                            Profit/unit: <strong className="text-green-600">${profit.toFixed(2)}</strong>
-                            &nbsp;·&nbsp;Margin: <strong className="text-green-600">{margin.toFixed(1)}%</strong>
-                          </p>
-                          <button
-                            type="submit"
-                            disabled={pricingFetcher.state === 'submitting'}
-                            className={
-                              pricingFetcher.state === 'submitting'
-                                ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
-                                : pricingSaved
-                                  ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-green-100 text-green-700'
-                                  : 'text-xs font-bold px-3 py-1.5 rounded-full bg-brand-mist text-brand-purple hover:bg-brand-purple/10 transition-colors'
-                            }
-                          >
-                            {pricingFetcher.state === 'submitting' ? 'Saving…' : pricingSaved ? '✓ Saved!' : 'Save Pricing'}
-                          </button>
-                        </div>
-                      </pricingFetcher.Form>
-                    </div>
-                  )
-                })()}
+                {/* Pricing — three-section panel with auto-save */}
+                {pricingConfig && (
+                  <PricingPanel
+                    productId={deal.shopifyProductId}
+                    config={pricingConfig}
+                    shopifyCost={shopifyCost}
+                  />
+                )}
 
                 {/* Variants — merged into hero card */}
                 {(deal.variants?.length ?? 0) > 1 && (

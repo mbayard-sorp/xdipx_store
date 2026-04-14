@@ -48,6 +48,21 @@ function CartUpsellIcon() {
     </svg>
   )
 }
+function SearchFilterIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+    </svg>
+  )
+}
+function LabsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 3h6v6l5 10H4L9 9V3z" />
+      <line x1="9" y1="3" x2="15" y2="3" />
+    </svg>
+  )
+}
 function SettingsIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -74,6 +89,22 @@ function UploadIcon() {
     </svg>
   )
 }
+function UsersIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  )
+}
+
+interface AdminUserInfo {
+  name: string
+  email: string
+  role: 'owner' | 'admin'
+}
 
 const NAV_ITEMS = [
   { to: '/admin',                label: 'Dashboard',    Icon: DashboardIcon },
@@ -84,10 +115,12 @@ const NAV_ITEMS = [
   { to: '/admin/reviews',        label: 'Reviews',      Icon: ReviewsIcon,  badgeKey: 'reviews' },
   { to: '/admin/emails',         label: 'Emails',       Icon: MailIcon      },
   { to: '/admin/socials',        label: 'Socials',      Icon: SocialsIcon   },
+  { to: '/admin/search-filters', label: 'Search Filters', Icon: SearchFilterIcon },
+  { to: '/admin/labs',           label: 'Labs',          Icon: LabsIcon      },
   { to: '/admin/settings',       label: 'Settings',     Icon: SettingsIcon  },
 ]
 
-export function AdminNav({ logoUrl }: { logoUrl: string | null }) {
+export function AdminNav({ logoUrl, adminUser }: { logoUrl: string | null; adminUser: AdminUserInfo | null }) {
   const { pathname } = useLocation()
   const [pendingReviews, setPendingReviews] = useState<number | null>(null)
 
@@ -98,6 +131,11 @@ export function AdminNav({ logoUrl }: { logoUrl: string | null }) {
       .then(data => setPendingReviews(data.count))
       .catch(() => {/* non-critical */})
   }, [pathname])
+
+  // Build nav items — add Users link for owners
+  const navItems = adminUser?.role === 'owner'
+    ? [...NAV_ITEMS, { to: '/admin/users', label: 'Users', Icon: UsersIcon }]
+    : NAV_ITEMS
 
   return (
     <aside className="w-56 bg-brand-charcoal min-h-screen flex flex-col py-6 px-4 shrink-0">
@@ -118,7 +156,7 @@ export function AdminNav({ logoUrl }: { logoUrl: string | null }) {
       </Link>
 
       <nav className="flex-1 space-y-0.5" aria-label="Admin navigation">
-        {NAV_ITEMS.map(({ to, label, Icon, badgeKey }) => {
+        {navItems.map(({ to, label, Icon, badgeKey }) => {
           const active = pathname === to || (to !== '/admin' && pathname.startsWith(to))
           const badge  = badgeKey === 'reviews' && pendingReviews && pendingReviews > 0 ? pendingReviews : null
           return (
@@ -146,6 +184,15 @@ export function AdminNav({ logoUrl }: { logoUrl: string | null }) {
       </nav>
 
       <div className="pt-4 border-t border-white/10">
+        {adminUser && (
+          <Link
+            to="/admin/account"
+            className="block px-3 py-2 mb-2 rounded-lg hover:bg-white/5 transition-colors"
+          >
+            <p className="text-white/80 text-sm font-medium truncate">{adminUser.name}</p>
+            <p className="text-white/40 text-xs truncate">{adminUser.email}</p>
+          </Link>
+        )}
         <Form method="post" action="/admin/login">
           <input type="hidden" name="intent" value="logout" />
           <button

@@ -68,6 +68,10 @@ export const KV_KEYS = {
   pinnedAccessoryIds:     'pinned:accessory_ids',
   vaultFilterTabs:        'vault:filter_tabs',
   bulkImportJob:          'bulk-import:job',
+  veoOperation:           (token: string) => `veo:op:${token}`,
+  ltxOperation:           (token: string) => `ltx:op:${token}`,
+  liveDealHandle:         'live-deal:handle',
+  fbt:                    (handle: string) => `fbt:${handle}`,
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────
@@ -86,4 +90,15 @@ export const DEFAULT_VAULT_TABS: VaultFilterTab[] = [
 export async function getVaultFilterTabs(): Promise<VaultFilterTab[]> {
   const stored = await kvGet<VaultFilterTab[]>(KV_KEYS.vaultFilterTabs)
   return stored ?? DEFAULT_VAULT_TABS
+}
+
+// ─── Pinned accessory IDs (KV-backed for hot vault-load path) ─────────────
+
+export async function getPinnedAccessoryIds(): Promise<string[]> {
+  const ids = await kvGet<string[]>(KV_KEYS.pinnedAccessoryIds)
+  return Array.isArray(ids) ? ids : []
+}
+
+export async function setPinnedAccessoryIds(ids: string[]): Promise<void> {
+  await kvSet(KV_KEYS.pinnedAccessoryIds, ids)
 }

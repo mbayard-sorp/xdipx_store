@@ -1,16 +1,25 @@
 import type { ActionFunctionArgs, MetaFunction, LoaderFunctionArgs } from 'react-router'
 import { useActionData, redirect, Form } from 'react-router'
 import { loginAdmin, logoutAdmin, getSession } from '~/lib/session.server'
+import { checkRateLimit, rateLimited, getClientIp } from '~/lib/rate-limit.server'
+import { kvIncr, kvSet } from '~/lib/kv.server'
+import { rejectIfBot } from '~/lib/botid.server'
 
 export const meta: MetaFunction = () => [{ title: 'Admin Login — xdipx' }]
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request.headers.get('Cookie'))
-  if (session.get('admin_authed')) return redirect('/admin')
+  if (session.get('admin_user_id')) return redirect('/admin')
   return null
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  const bot = await rejectIfBot()
+  if (bot) return bot
+  // IP-level throttle — blunt but effective against distributed credential stuffing from one source
+  const rl = await checkRateLimit(request, 'admin-login', 20, 900)
+  if (!rl.ok) return rateLimited()
+
   const form   = await request.formData()
   const intent = form.get('intent')
 
@@ -19,9 +28,27 @@ export async function action({ request }: ActionFunctionArgs) {
     return redirect('/admin/login', { headers })
   }
 
+  const email    = (form.get('email') as string ?? '').trim().toLowerCase()
   const password = form.get('password') as string
-  const headers  = await loginAdmin(request, password)
-  if (!headers) return { error: 'Wrong password. Try again.' }
+
+  if (!email || !password) {
+    return { error: 'Email and password are required.' }
+  }
+
+  // Per-(email+ip) failed-attempt lockout: 5 fails / 15min
+  const ip = getClientIp(request)
+  const failKey = `admin-login:fails:${email}:${ip}`
+  const fails = await kvIncr(failKey)
+  if (fails === 1) await kvSet(failKey, fails, 900)
+  if (fails > 5) {
+    return { error: 'Too many failed attempts. Try again in 15 minutes.' }
+  }
+
+  const headers = await loginAdmin(request, email, password)
+  if (!headers) return { error: 'Invalid email or password.' }
+
+  // Success — clear fail counter
+  await kvSet(failKey, 0, 60)
 
   return redirect('/admin', { headers })
 }
@@ -44,11 +71,21 @@ export default function AdminLogin() {
 
         <Form method="post" className="space-y-4">
           <input
+            type="email"
+            name="email"
+            placeholder="Email"
+            autoFocus
+            required
+            autoComplete="email"
+            className="w-full px-4 py-3 rounded-xl border border-brand-mist bg-brand-cream text-brand-charcoal placeholder-brand-charcoal/40 focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+          />
+
+          <input
             type="password"
             name="password"
             placeholder="Password"
-            autoFocus
             required
+            autoComplete="current-password"
             className="w-full px-4 py-3 rounded-xl border border-brand-mist bg-brand-cream text-brand-charcoal placeholder-brand-charcoal/40 focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
           />
 

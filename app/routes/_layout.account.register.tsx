@@ -122,7 +122,7 @@ export async function action({ request }: ActionFunctionArgs) {
     console.error('[register] cart link failed:', err)
   }
 
-  throw redirect('/account', { headers })
+  throw redirect('/account?from=register', { headers })
 }
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {

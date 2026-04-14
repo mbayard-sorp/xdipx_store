@@ -8,3 +8,5 @@ build/
 .react-router/
 .recovery/
 studio/npm run dev/
+.vercel
+.env*.local

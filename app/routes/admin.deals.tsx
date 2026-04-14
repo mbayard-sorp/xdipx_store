@@ -6,15 +6,16 @@ import { db } from '~/lib/db.server'
 import { dealHistory, pipelineSettings } from '../../db/schema'
 import { eq, like, asc, min, max, count, sql, inArray, and, isNull } from 'drizzle-orm'
 import {
-  setDealStatus, activateShopifyProduct, getAdminProductData,
-  getDealByShopifyId, updateProductMetafield, updateVariantPricing,
+  getAdminProductData,
+  getDealByShopifyId, updateProductMetafield,
   getVariantCost, pushProductToShopify, getAccessoryProductsAdmin,
   getProductAdminImages, updateProductTags, fetchAllDealProducts,
 } from '~/lib/shopify.server'
 import type { AdminProductImage } from '~/lib/shopify.server'
 import { generateCopy, generateSEOTitle } from '~/lib/claude.server'
-import { kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
 import { ImageManager } from '~/components/admin/ImageManager'
+import { PricingPanel } from '~/components/admin/PricingPanel'
 import type { Product } from '~/types'
 
 export const meta: MetaFunction = () => [{ title: 'Deals — xdipx Admin' }]
@@ -79,7 +80,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     productImages: AdminProductImage[]
     promptSettings: Record<string, string>
     dbDealId: number
-    dbVaultPrice: string | null
+    pricingConfig: {
+      dealPrice: number
+      msrp: number
+      wholesaleCost: number
+      mapPrice: number
+      pctOffMsrp: number
+      vaultPriceOverride: number | null
+    }
   } | null = null
 
   if (editId) {
@@ -87,31 +95,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const [dbDeal] = await db.select().from(dealHistory).where(eq(dealHistory.id, id)).limit(1)
 
     if (dbDeal?.shopifyProductId) {
-      const deal = await getDealByShopifyId(dbDeal.shopifyProductId)
-      const shopifyCost = deal?.variantId ? await getVariantCost(deal.variantId) : null
+      try {
+        const deal = await getDealByShopifyId(dbDeal.shopifyProductId)
+        const shopifyCost = deal?.variantId ? await getVariantCost(deal.variantId) : null
 
-      const promptRows = await db.select().from(pipelineSettings).where(like(pipelineSettings.key, 'video:%'))
-      const promptSettings: Record<string, string> = {}
-      for (const row of promptRows) promptSettings[row.key] = row.value
+        const promptRows = await db.select().from(pipelineSettings).where(like(pipelineSettings.key, 'video:%'))
+        const promptSettings: Record<string, string> = {}
+        for (const row of promptRows) promptSettings[row.key] = row.value
 
-      const [productImages, pinnedAccessoryIds] = await Promise.all([
-        deal ? getProductAdminImages(dbDeal.shopifyProductId) : Promise.resolve([] as AdminProductImage[]),
-        kvGet<string[]>(KV_KEYS.pinnedAccessoryIds).then(v => v ?? []),
-      ])
-      const pinnedAccessories = pinnedAccessoryIds.length
-        ? await getAccessoryProductsAdmin(pinnedAccessoryIds)
-        : []
+        const [productImages, pinnedAccessoryIds] = await Promise.all([
+          deal ? getProductAdminImages(dbDeal.shopifyProductId) : Promise.resolve([] as AdminProductImage[]),
+          getPinnedAccessoryIds(),
+        ])
+        const pinnedAccessories = pinnedAccessoryIds.length
+          ? await getAccessoryProductsAdmin(pinnedAccessoryIds)
+          : []
 
-      editorData = {
-        deal,
-        shopifyCost,
-        dealCategories: dbDeal.categories ?? [],
-        pinnedAccessories,
-        pinnedAccessoryIds,
-        productImages,
-        promptSettings,
-        dbDealId: dbDeal.id,
-        dbVaultPrice: dbDeal.vaultPrice,
+        editorData = {
+          deal,
+          shopifyCost,
+          dealCategories: dbDeal.categories ?? [],
+          pinnedAccessories,
+          pinnedAccessoryIds,
+          productImages,
+          promptSettings,
+          dbDealId: dbDeal.id,
+          pricingConfig: {
+            dealPrice:          parseFloat(dbDeal.dealPrice ?? '0') || 0,
+            msrp:               parseFloat(dbDeal.msrp ?? '0') || 0,
+            wholesaleCost:      parseFloat(dbDeal.wholesaleCost ?? '0') || 0,
+            mapPrice:           parseFloat(dbDeal.mapPrice ?? '0') || 0,
+            pctOffMsrp:         parseFloat(dbDeal.pctOffMsrp ?? '0') || 0,
+            vaultPriceOverride: dbDeal.vaultPrice ? parseFloat(dbDeal.vaultPrice) : null,
+          },
+        }
+      } catch (err) {
+        console.error('[admin/deals] failed to load editor data for product', dbDeal.shopifyProductId, err)
+        // editorData stays null — editor panel shows "No deal data found"
       }
     }
   }
@@ -172,9 +192,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'force-live') {
-    const id               = parseInt(form.get('id') as string)
-    const shopifyProductId = form.get('shopifyProductId') as string
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const id = parseInt(form.get('id') as string)
 
     // Vault whatever is currently live
     const [liveNow] = await db.select().from(dealHistory).where(eq(dealHistory.status, 'live')).limit(1)
@@ -183,12 +201,12 @@ export async function action({ request }: ActionFunctionArgs) {
       await transitionToVaultPricing(liveNow)
     }
 
-    await activateShopifyProduct(shopifyProductId)
-    await setDealStatus(shopifyProductId, 'live')
-    await db
-      .update(dealHistory)
-      .set({ status: 'live', activatedAt: new Date(), dealDate: today })
-      .where(eq(dealHistory.id, id))
+    // Route through activateDeal so configured dealPrice is pushed to variant.
+    const [target] = await db.select().from(dealHistory).where(eq(dealHistory.id, id)).limit(1)
+    if (target) {
+      const { activateDeal } = await import('~/lib/deal-rotator.server')
+      await activateDeal(target)
+    }
     return { ok: true }
   }
 
@@ -262,7 +280,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'save-bullets') {
     const productId = form.get('productId') as string
-    const raw       = form.get('value') as string
+    const raw       = (form.get('value') as string | null) ?? ''
     const bullets   = raw.split('\n').map(l => l.trim()).filter(Boolean)
     await updateProductMetafield(productId, 'feature_bullets', JSON.stringify(bullets), 'json')
     return { ok: true }
@@ -270,35 +288,35 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'save-box-contents') {
     const productId = form.get('productId') as string
-    const raw       = form.get('value') as string
+    const raw       = (form.get('value') as string | null) ?? ''
     const items     = raw.split('\n').map(l => l.trim()).filter(Boolean)
     await updateProductMetafield(productId, 'box_contents', JSON.stringify(items), 'json')
     return { ok: true }
   }
 
   if (intent === 'save-pricing') {
-    const productId     = form.get('productId') as string
-    const variantId     = form.get('variantId') as string
-    const dealPrice     = form.get('dealPrice') as string
-    const msrp          = form.get('msrp') as string
-    const wholesaleCost = form.get('wholesaleCost') as string
-    const mapPrice      = form.get('mapPrice') as string
-    const vaultPriceOverride = form.get('vaultPrice') as string | null
-    const dbDealId      = parseInt(form.get('dbDealId') as string)
+    const productIdRaw       = form.get('productId') as string
+    const productId          = productIdRaw.replace('gid://shopify/Product/', '')
+    const dealPrice          = form.get('dealPrice') as string
+    const msrp               = form.get('msrp') as string
+    const wholesaleCost      = form.get('wholesaleCost') as string
+    const mapPrice           = form.get('mapPrice') as string
+    const pctOffMsrp         = form.get('pctOffMsrp') as string
+    const vaultPriceOverride = form.get('vaultPriceOverride') as string | null
 
-    await Promise.all([
-      updateVariantPricing(variantId, dealPrice, msrp, wholesaleCost),
-      updateProductMetafield(productId, 'original_price',  msrp,          'number_decimal'),
-      updateProductMetafield(productId, 'wholesale_cost',  wholesaleCost,  'number_decimal'),
-      updateProductMetafield(productId, 'map_price',       mapPrice,       'number_decimal'),
-    ])
+    const clampedPct = Math.max(0, Math.min(100, parseFloat(pctOffMsrp || '0') || 0))
+    const vaultVal = vaultPriceOverride && vaultPriceOverride.trim() !== ''
+      ? parseFloat(vaultPriceOverride).toFixed(2)
+      : null
 
-    // Save vault price override if provided
-    if (vaultPriceOverride && dbDealId) {
-      await db.update(dealHistory)
-        .set({ vaultPrice: vaultPriceOverride })
-        .where(eq(dealHistory.id, dbDealId))
-    }
+    await db.update(dealHistory).set({
+      dealPrice:     (parseFloat(dealPrice     || '0') || 0).toFixed(2),
+      msrp:          (parseFloat(msrp          || '0') || 0).toFixed(2),
+      wholesaleCost: (parseFloat(wholesaleCost || '0') || 0).toFixed(2),
+      mapPrice:      (parseFloat(mapPrice      || '0') || 0).toFixed(2),
+      pctOffMsrp:    clampedPct.toFixed(2),
+      vaultPrice:    vaultVal,
+    }).where(eq(dealHistory.shopifyProductId, productId))
 
     return { ok: true }
   }
@@ -316,7 +334,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const rawDesc    = form.get('rawDescription') as string
       const title      = form.get('title') as string
       const brand      = form.get('brand') as string
-      const categories = (form.get('categories') as string).split(',').filter(Boolean)
+      const categories = ((form.get('categories') as string | null) ?? '').split(',').filter(Boolean)
       const dealPrice  = parseFloat((form.get('dealPrice') as string) || '0')
       const msrp       = parseFloat((form.get('msrp') as string) || '0')
       const editId     = form.get('editId') as string | null
@@ -364,7 +382,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'save-pinned-accessories') {
     const ids = JSON.parse(form.get('ids') as string) as string[]
-    await kvSet(KV_KEYS.pinnedAccessoryIds, ids)
+    await setPinnedAccessoryIds(ids)
     const editId = form.get('editId') as string | null
     return redirect(editId ? `/admin/deals?edit=${editId}` : '/admin/deals')
   }
@@ -489,76 +507,6 @@ function RawDescriptionPanel({ deal, categories, editId }: {
           {genError}
         </div>
       )}
-    </div>
-  )
-}
-
-// ─── Pricing Panel ─────────────────────────────────────────────────────────
-
-function PricingPanel({ deal, shopifyCost, dbDealId, dbVaultPrice }: {
-  deal: NonNullable<Awaited<ReturnType<typeof getDealByShopifyId>>>
-  shopifyCost: number | null
-  dbDealId: number
-  dbVaultPrice: string | null
-}) {
-  const fetcher = useFetcher<{ ok: boolean }>()
-  const saved = fetcher.state === 'idle' && fetcher.data?.ok === true
-  const profit = deal.dealPrice - deal.wholesaleCost
-  const margin = deal.dealPrice > 0 ? ((profit / deal.dealPrice) * 100) : 0
-
-  return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm">
-      <h3 className="font-semibold text-brand-charcoal mb-3" style={{ fontFamily: 'var(--font-display)' }}>
-        Pricing
-      </h3>
-      <fetcher.Form method="post" className="space-y-3">
-        <input type="hidden" name="intent"    value="save-pricing" />
-        <input type="hidden" name="productId" value={deal.shopifyProductId} />
-        <input type="hidden" name="variantId" value={deal.variantId} />
-        <input type="hidden" name="dbDealId"  value={dbDealId} />
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="text-xs font-semibold text-brand-charcoal/60">Deal Price</span>
-            <input type="number" name="dealPrice" step="0.01" defaultValue={deal.dealPrice.toFixed(2)}
-              className="w-full border border-brand-mist rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:ring-2 focus:ring-brand-coral/30" />
-          </label>
-          <label className="block">
-            <span className="text-xs font-semibold text-brand-charcoal/60">MSRP</span>
-            <input type="number" name="msrp" step="0.01" defaultValue={deal.msrp.toFixed(2)}
-              className="w-full border border-brand-mist rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:ring-2 focus:ring-brand-coral/30" />
-          </label>
-          <label className="block">
-            <span className="text-xs font-semibold text-brand-charcoal/60">Wholesale Cost</span>
-            <input type="number" name="wholesaleCost" step="0.01" defaultValue={deal.wholesaleCost.toFixed(2)}
-              className="w-full border border-brand-mist rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:ring-2 focus:ring-brand-coral/30" />
-          </label>
-          <label className="block">
-            <span className="text-xs font-semibold text-brand-charcoal/60">MAP</span>
-            <input type="number" name="mapPrice" step="0.01" defaultValue={deal.mapPrice.toFixed(2)}
-              className="w-full border border-brand-mist rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:ring-2 focus:ring-brand-coral/30" />
-          </label>
-        </div>
-        <label className="block">
-          <span className="text-xs font-semibold text-brand-charcoal/60">Vault Price Override</span>
-          <span className="text-xs text-brand-charcoal/40 ml-2">(leave empty for auto-calculated)</span>
-          <input type="number" name="vaultPrice" step="0.01"
-            defaultValue={dbVaultPrice ?? ''}
-            placeholder="Auto from settings"
-            className="w-full border border-brand-mist rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:ring-2 focus:ring-brand-coral/30" />
-        </label>
-        <div className="flex items-center justify-between pt-2 border-t border-brand-mist text-xs text-brand-charcoal/60">
-          <span>Profit/unit: <strong className={profit >= 0 ? 'text-green-600' : 'text-red-500'}>${profit.toFixed(2)}</strong></span>
-          <span>Margin: <strong className={margin >= 40 ? 'text-green-600' : margin >= 25 ? 'text-yellow-600' : 'text-red-500'}>{margin.toFixed(0)}%</strong></span>
-          {shopifyCost != null && <span>Shopify cost: ${shopifyCost.toFixed(2)}</span>}
-        </div>
-        <button
-          type="submit"
-          disabled={fetcher.state === 'submitting'}
-          className="w-full text-xs font-bold py-2 rounded-full bg-brand-mist text-brand-purple hover:bg-brand-purple/10 transition-colors"
-        >
-          {fetcher.state === 'submitting' ? 'Saving...' : saved ? 'Saved!' : 'Save Pricing'}
-        </button>
-      </fetcher.Form>
     </div>
   )
 }
@@ -984,27 +932,31 @@ export default function AdminDealsPage() {
       <div className="rounded-2xl overflow-visible shadow-sm">
         <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: '0 3px' }}>
           <colgroup>
-            <col style={{ width: '48px' }} />
+            <col style={{ width: '220px' }} />
             <col />
-            <col style={{ width: '85px' }} />
-            <col style={{ width: '75px' }} />
+            <col style={{ width: '90px' }} />
+            <col style={{ width: '90px' }} />
             <col style={{ width: '70px' }} />
+            <col style={{ width: '85px' }} />
+            <col style={{ width: '85px' }} />
             <col style={{ width: '80px' }} />
           </colgroup>
           <thead>
             <tr className="bg-brand-mist text-brand-charcoal/60 text-xs uppercase tracking-wide">
-              <th className="px-1 py-3 rounded-l-xl"></th>
-              <th className="px-3 py-3 text-left">Product</th>
+              <th className="px-3 py-3 text-left rounded-l-xl">Product</th>
+              <th className="px-3 py-3 text-left">Images</th>
               <th className="px-3 py-3 text-right">Deal Price</th>
-              <th className="px-3 py-3 text-right">MSRP</th>
+              <th className="px-3 py-3 text-right">Wholesale</th>
               <th className="px-3 py-3 text-right">Margin</th>
+              <th className="px-3 py-3 text-right">MSRP</th>
+              <th className="px-3 py-3 text-right">MAP</th>
               <th className="px-3 py-3 text-right rounded-r-xl">Inventory</th>
             </tr>
           </thead>
           <tbody>
             {filteredDeals.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-brand-charcoal/40 text-sm">
+                <td colSpan={8} className="px-4 py-10 text-center text-brand-charcoal/40 text-sm">
                   {search ? 'No deals match your search.' : 'No deals in the queue.'}
                 </td>
               </tr>
@@ -1013,9 +965,9 @@ export default function AdminDealsPage() {
               const shopifyData = deal.shopifyProductId ? shopifyDataMap[deal.shopifyProductId] : null
               const msrp      = deal.msrp          ? parseFloat(deal.msrp)          : null
               const wholesale = deal.wholesaleCost  ? parseFloat(deal.wholesaleCost) : null
+              const mapPrice  = deal.mapPrice       ? parseFloat(deal.mapPrice)      : null
               const dealPrice = shopifyData?.price ?? (deal.dealPrice ? parseFloat(deal.dealPrice) : null)
               const margin    = dealPrice && wholesale ? (dealPrice - wholesale) / dealPrice : null
-              const thumbUrl  = shopifyData?.images?.[0] ?? null
               const isCompleted = Boolean(deal.completedAt)
               const isDraggable = deal.status === 'pending' && !isCompleted
               const isBeingDragged = draggedId === deal.id
@@ -1026,7 +978,7 @@ export default function AdminDealsPage() {
                   {/* Drag indicator spacer */}
                   {isDragTarget && (
                     <tr>
-                      <td colSpan={6} className="p-0">
+                      <td colSpan={8} className="p-0">
                         <div className="h-1 bg-brand-purple rounded-full mx-2 animate-expand-in" />
                       </td>
                     </tr>
@@ -1072,10 +1024,25 @@ export default function AdminDealsPage() {
                       setDraggedId(null)
                     } : undefined}
                   >
-                    {/* Thumbnail */}
-                    <td className={`px-1 py-3 bg-white rounded-l-xl ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
-                      {thumbUrl ? (
-                        <img src={thumbUrl} alt="" className="w-9 h-9 object-cover rounded-lg shrink-0 transition-transform duration-150 hover:scale-[1.75] hover:z-10 hover:relative hover:shadow-lg hover:rounded-xl" />
+                    {/* Product info */}
+                    <td className={`px-3 py-3 min-w-0 bg-white rounded-l-xl ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                      <p className="font-medium text-brand-charcoal truncate">{deal.seoTitle ?? deal.sku}</p>
+                      <p className="text-xs text-brand-charcoal/50 truncate">{deal.brand} · {deal.sku}</p>
+                    </td>
+
+                    {/* Images — flexes to fill remaining space; clips when tight */}
+                    <td className={`px-3 py-3 bg-white overflow-hidden ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                      {shopifyData?.images?.length ? (
+                        <div className="flex gap-1 items-center overflow-hidden w-full">
+                          {shopifyData.images.slice(0, 3).map((url, i) => (
+                            <img key={i} src={url} alt="" className="w-9 h-9 object-cover rounded-lg shrink-0 transition-transform duration-150 hover:scale-[2] hover:z-10 hover:relative hover:shadow-lg hover:rounded-xl" />
+                          ))}
+                          {shopifyData.images.length > 3 && (
+                            <span className="text-[10px] font-semibold text-brand-charcoal/50 shrink-0 pl-0.5">
+                              +{shopifyData.images.length - 3}
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <div className="w-9 h-9 rounded-lg bg-brand-mist flex items-center justify-center shrink-0">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-brand-charcoal/20">
@@ -1085,18 +1052,15 @@ export default function AdminDealsPage() {
                       )}
                     </td>
 
-                    {/* Product info */}
-                    <td className={`px-3 py-3 min-w-0 bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
-                      <p className="font-medium text-brand-charcoal truncate">{deal.seoTitle ?? deal.sku}</p>
-                      <p className="text-xs text-brand-charcoal/50 truncate">{deal.brand} · {deal.sku}</p>
-                    </td>
-
+                    {/* Deal Price */}
                     <td className={`px-3 py-3 text-right font-semibold text-brand-charcoal text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
                       {dealPrice != null ? `$${dealPrice.toFixed(2)}` : '\u2014'}
                     </td>
-                    <td className={`px-3 py-3 text-right text-brand-charcoal/60 text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
-                      {msrp ? `$${msrp.toFixed(2)}` : '\u2014'}
+                    {/* Wholesale Cost */}
+                    <td className={`px-3 py-3 text-right text-brand-charcoal/70 text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                      {wholesale != null ? `$${wholesale.toFixed(2)}` : '\u2014'}
                     </td>
+                    {/* Margin */}
                     <td className={`px-3 py-3 text-right font-semibold text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
                       {margin !== null
                         ? <span className={margin >= 0.4 ? 'text-green-600' : margin >= 0.25 ? 'text-yellow-600' : 'text-red-500'}>
@@ -1104,6 +1068,15 @@ export default function AdminDealsPage() {
                           </span>
                         : '\u2014'}
                     </td>
+                    {/* MSRP */}
+                    <td className={`px-3 py-3 text-right text-brand-charcoal/60 text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                      {msrp ? `$${msrp.toFixed(2)}` : '\u2014'}
+                    </td>
+                    {/* MAP */}
+                    <td className={`px-3 py-3 text-right text-brand-charcoal/60 text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                      {mapPrice && mapPrice > 0 ? `$${mapPrice.toFixed(2)}` : ''}
+                    </td>
+                    {/* Inventory */}
                     <td className={`px-3 py-3 text-right text-brand-charcoal/70 text-xs tabular-nums bg-white rounded-r-xl ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
                       {deal.unitsAvailable ?? '\u2014'}
                     </td>
@@ -1208,15 +1181,36 @@ export default function AdminDealsPage() {
           {/* Panel */}
           <div className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl bg-brand-cream shadow-2xl overflow-y-auto">
             {/* Close bar */}
-            <div className="sticky top-0 z-10 bg-brand-cream/95 backdrop-blur-sm border-b border-brand-mist px-6 py-4 flex items-center justify-between">
+            <div className="sticky top-0 z-10 bg-brand-cream/95 backdrop-blur-sm border-b border-brand-mist px-6 py-3 flex items-center gap-3">
               {editorData?.deal ? (
-                <ReadinessChecklist deal={editorData.deal} />
+                <>
+                  {editorData.productImages[0] ? (
+                    <img
+                      src={editorData.productImages[0].src}
+                      alt={editorData.productImages[0].alt ?? ''}
+                      className="w-12 h-12 rounded-xl object-cover border border-brand-mist shrink-0"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-brand-mist shrink-0 flex items-center justify-center text-brand-charcoal/30 text-xs">
+                      No img
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-brand-charcoal truncate leading-tight"
+                       style={{ fontFamily: 'var(--font-display)' }}>
+                      {editorData.deal.seoTitle ?? editorData.deal.sku}
+                    </p>
+                    <div className="mt-1">
+                      <ReadinessChecklist deal={editorData.deal} />
+                    </div>
+                  </div>
+                </>
               ) : (
-                <span />
+                <span className="flex-1" />
               )}
               <button
                 onClick={closeEditor}
-                className="p-2 hover:bg-brand-mist rounded-xl transition-colors"
+                className="p-2 hover:bg-brand-mist rounded-xl transition-colors shrink-0"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -1228,12 +1222,16 @@ export default function AdminDealsPage() {
               {editorData?.deal ? (
                 <>
                   {/* Pricing */}
-                  <PricingPanel
-                    deal={editorData.deal}
-                    shopifyCost={editorData.shopifyCost}
-                    dbDealId={editorData.dbDealId}
-                    dbVaultPrice={editorData.dbVaultPrice}
-                  />
+                  <div className="bg-white rounded-2xl p-5 shadow-sm">
+                    <h3 className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+                      Pricing
+                    </h3>
+                    <PricingPanel
+                      productId={editorData.deal.shopifyProductId}
+                      config={editorData.pricingConfig}
+                      shopifyCost={editorData.shopifyCost}
+                    />
+                  </div>
 
                   {/* Images */}
                   <div className="bg-white rounded-2xl p-5 shadow-sm">

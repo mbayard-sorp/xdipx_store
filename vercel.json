@@ -2,20 +2,26 @@
   "version": 2,
   "builds": [
     {
-      "src": "server/index.ts",
-      "use": "@vercel/node"
+      "src": "server/vercel-entry.mjs",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["build/**"],
+        "maxDuration": 60,
+        "memory": 1024
+      }
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "server/index.ts"
+      "dest": "server/vercel-entry.mjs"
     }
   ],
   "crons": [
     { "path": "/cron/daily-feed-processor", "schedule": "45 23 * * *" },
     { "path": "/cron/deal-activator",       "schedule": "59 23 * * *" },
     { "path": "/cron/profit-summary",       "schedule": "5 0 * * *"  },
-    { "path": "/cron/inventory-check",      "schedule": "*/5 * * * *" }
+    { "path": "/cron/review-reminders",     "schedule": "0 9 * * *"  },
+    { "path": "/cron/inventory-check",      "schedule": "*/15 * * * *" }
   ]
 }

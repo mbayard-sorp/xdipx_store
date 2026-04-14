@@ -8,8 +8,11 @@ import {
 } from '~/lib/shopify.server'
 import { getProductPageBlocks } from '~/lib/sanity.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
+import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
 import { ProductTabs }            from '~/components/store/ProductTabs'
+import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
+import FrequentlyBoughtWith       from '~/components/store/FrequentlyBoughtWith'
 import { SocialProofBar }         from '~/components/store/SocialProofBar'
 import { StockIndicator }         from '~/components/store/StockIndicator'
 import { WaitlistButton }         from '~/components/store/WaitlistButton'
@@ -18,8 +21,18 @@ import { EmailSubscribe }         from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }   from '~/components/cms/ContentBlockRenderer'
 import type { Product } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
+import { trackViewItem, trackAddToCart } from '~/lib/analytics.client'
+import { ShareButtons } from '~/components/common/ShareButtons'
+import { HeartButton } from '~/components/store/HeartButton'
+import { buildSocialMeta } from '~/lib/social-meta'
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
+
+export function headers() {
+  return {
+    'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+  }
+}
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const deal = await getDealByHandle(params['slug']!)
@@ -30,11 +43,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const reviewSort   = url.searchParams.get('reviewSort')   ?? 'newest'
   const reviewFilter = url.searchParams.get('reviewFilter') ?? 'all'
 
-  const [pdpBlocks, reviewData, aggregate] = await Promise.all([
+  const [pdpBlocks, reviewData, aggregate, fbtHandles] = await Promise.all([
     getProductPageBlocks(params['slug']!),
     getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
+    getFrequentlyBoughtWith(params['slug']!, 4),
   ])
+
+  const fbtProducts = fbtHandles.length > 0
+    ? (await getProductsByHandles(fbtHandles)).map(p => ({
+        handle: p.handle,
+        title:  p.title,
+        image:  p.images[0]?.url ?? null,
+        price:  p.price,
+        compareAtPrice: p.compareAtPrice ?? null,
+      }))
+    : []
 
   // Resolve Shopify products for any productCarousel blocks
   const carouselBlocks = pdpBlocks.filter(
@@ -62,6 +86,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     deal,
     pdpBlocks,
     carouselProductMap,
+    fbtProducts,
     reviews:       reviewData.reviews,
     reviewTotal:   reviewData.total,
     reviewPage,
@@ -76,16 +101,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data?.deal) return [{ title: 'Product not found | xdipx' }]
   const { deal } = data
+  const title = `${deal.seoTitle} | xdipx`
   const description = deal.metaDescription || `${deal.seoTitle} — ships discreet from xdipx.`
+  const url = `https://xdipx.com/products/${deal.handle}`
   return [
-    { title: `${deal.seoTitle} | xdipx` },
+    { title },
     { name: 'description', content: description },
-    { tagName: 'link', rel: 'canonical', href: `https://xdipx.com/products/${deal.handle}` },
-    { property: 'og:title', content: `${deal.seoTitle} | xdipx` },
-    { property: 'og:description', content: description },
-    { property: 'og:type', content: 'product' },
-    { property: 'og:url', content: `https://xdipx.com/products/${deal.handle}` },
-    { property: 'og:image', content: deal.images[0]?.url ?? '' },
+    { tagName: 'link', rel: 'canonical', href: url },
+    ...buildSocialMeta({
+      title,
+      description,
+      url,
+      image: deal.images[0]?.url ?? null,
+      type: 'product',
+      imageAlt: deal.seoTitle,
+    }),
   ]
 }
 
@@ -93,7 +123,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 
 export default function ProductPage() {
   const {
-    deal, pdpBlocks, carouselProductMap,
+    deal, pdpBlocks, carouselProductMap, fbtProducts,
     reviews, reviewTotal, reviewPage, reviewSort, reviewFilter, aggregate,
   } = useLoaderData<typeof loader>()
   const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
@@ -119,7 +149,12 @@ export default function ProductPage() {
 
   // Build unified gallery: first image → videos → remaining images
   const allMedia = useMemo<GalleryItem[]>(() => {
-    const videos = (deal.videos ?? []).map(v => ({ kind: 'video' as const, previewUrl: v.previewImageUrl, sources: v.sources }))
+    const videos = (deal.videos ?? []).map(v => ({
+      kind: 'video' as const,
+      previewUrl: v.previewImageUrl,
+      sources: v.sources,
+      ...(v.aspect ? { aspect: v.aspect } : {}),
+    }))
     const images = deal.images.map(img => ({ kind: 'image' as const, url: img.url, altText: img.altText }))
     const [first, ...rest] = images
     return first ? [first, ...videos, ...rest] : [...videos]
@@ -176,6 +211,39 @@ export default function ProductPage() {
     return () => observer.disconnect()
   }, [])
 
+  // ── GA4: view_item ────────────────────────────────────────────────────
+  useEffect(() => {
+    trackViewItem({
+      item_id: deal.shopifyProductId,
+      item_name: deal.seoTitle,
+      item_brand: deal.brand,
+      item_category: deal.category,
+      price,
+    }, price)
+  }, [deal.handle])
+
+  // ── GA4: add_to_cart on fetcher success ────────────────────────────────
+  const wasSubmittingPDP = useRef(false)
+  useEffect(() => {
+    if (fetcher.state === 'submitting') {
+      wasSubmittingPDP.current = true
+    } else if (fetcher.state === 'idle' && wasSubmittingPDP.current) {
+      wasSubmittingPDP.current = false
+      const data = fetcher.data as { ok?: boolean } | undefined
+      if (data?.ok) {
+        trackAddToCart({
+          item_id: deal.shopifyProductId,
+          item_name: deal.seoTitle,
+          item_brand: deal.brand,
+          item_category: deal.category,
+          price,
+          quantity,
+          ...(selectedVariant?.title ? { item_variant: selectedVariant.title } : {}),
+        })
+      }
+    }
+  }, [fetcher.state, fetcher.data])
+
   const heroContent = (
     <section className="max-w-6xl mx-auto px-4 py-8 relative">
       <div className="grid md:grid-cols-2 gap-8 lg:gap-12 items-start">
@@ -186,11 +254,24 @@ export default function ProductPage() {
           alt={deal.seoTitle}
           activeIndex={activeImg}
           onSelectIndex={setActiveImg}
-          discountBadge={discount > 0 ? (
-            <div className="absolute top-3 left-3 bg-brand-gradient text-white text-xs font-bold px-2.5 py-1 rounded-full">
-              {discount}% OFF
-            </div>
-          ) : undefined}
+          shareOverlay={
+            <ShareButtons
+              url={`https://xdipx.com/products/${deal.handle}`}
+              title={deal.seoTitle}
+              image={deal.images[0]?.url ?? null}
+              variant="overlay"
+            />
+          }
+          heartOverlay={
+            <HeartButton
+              shopifyProductId={deal.shopifyProductId}
+              handle={deal.handle}
+              productTitle={deal.seoTitle}
+              price={deal.dealPrice}
+              variant="overlay"
+              size="md"
+            />
+          }
         />
 
         {/* ── Right: Product info ─────────────────────────────────────── */}
@@ -229,6 +310,7 @@ export default function ProductPage() {
                 </span>
               </>
             )}
+            <StockIndicator qty={qty} />
           </div>
 
           {/* Social proof */}
@@ -354,24 +436,6 @@ export default function ProductPage() {
             <WaitlistButton productHandle={deal.handle} />
           )}
 
-          {/* Stock + Trust badges */}
-          <StockIndicator qty={qty} />
-
-          <div className="flex flex-wrap gap-2 pt-1">
-            {[
-              { label: 'Secure checkout', Icon: LockIcon },
-              { label: 'Ships discreetly', Icon: BoxIcon },
-              { label: '14-day returns', Icon: ReturnIcon },
-            ].map(({ label, Icon }) => (
-              <span
-                key={label}
-                className="inline-flex items-center gap-1.5 text-xs text-brand-charcoal/60 bg-brand-mist px-3 py-1.5 rounded-full"
-              >
-                <Icon />
-                {label}
-              </span>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -408,6 +472,11 @@ export default function ProductPage() {
           {heroContent}
         </div>
       ) : heroContent}
+
+      <div className="max-w-6xl mx-auto px-4">
+        <RecentlyBrowsed currentHandle={deal.handle} />
+        <FrequentlyBoughtWith products={fbtProducts} />
+      </div>
 
       {/* CMS content blocks configured in Sanity for this product */}
       {pdpBlocks.map(block => (
@@ -476,28 +545,3 @@ function WorksForBadge({ label, emoji }: { label: string; emoji: string }) {
   )
 }
 
-function LockIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-  )
-}
-function BoxIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-      <line x1="12" y1="22.08" x2="12" y2="12" />
-    </svg>
-  )
-}
-function ReturnIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="1 4 1 10 7 10" />
-      <path d="M3.51 15a9 9 0 1 0 .49-3.49" />
-    </svg>
-  )
-}

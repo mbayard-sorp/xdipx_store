@@ -1,7 +1,9 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { generateMoodImage } from '~/lib/imagen.server'
+import { requireAdmin } from '~/lib/session.server'
 
 export async function action({ request }: ActionFunctionArgs) {
+  await requireAdmin(request)
   const form = await request.formData()
   const categoriesRaw = form.get('categories') as string
 

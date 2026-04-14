@@ -7,6 +7,7 @@
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
+import { apiError } from '~/lib/api-error.server'
 import { kvGet, kvSet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import { parseBulkImportCSV, importProductGroup } from '~/lib/bulk-import.server'
 import type { BulkImportJob, BulkImportJobSummary } from '~/types'
@@ -39,8 +40,7 @@ export async function action({ request }: ActionFunctionArgs) {
     try {
       ;({ groups, parseErrors } = parseBulkImportCSV(csvText))
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return Response.json({ error: `CSV parse failed: ${msg}` }, { status: 400 })
+      return apiError('bulk-import.parse', err, 'CSV parse failed', 400)
     }
 
     const job: BulkImportJob = {

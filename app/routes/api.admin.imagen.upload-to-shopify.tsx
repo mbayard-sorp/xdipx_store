@@ -58,7 +58,11 @@ export async function action({ request }: ActionFunctionArgs) {
         }
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[imagen.upload-to-shopify] image failed', { index: i, err })
+      const isProd = process.env['NODE_ENV'] === 'production'
+      const msg = isProd
+        ? 'Upload failed'
+        : err instanceof Error ? err.message : String(err)
       results.push({ index: i, error: msg })
     }
   }

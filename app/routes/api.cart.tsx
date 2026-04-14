@@ -1,8 +1,12 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
 import { addToCart, createCart, removeFromCart, updateCartLine } from '~/lib/shopify.server'
+import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 
 export async function action({ request }: ActionFunctionArgs) {
+  const rl = await checkRateLimit(request, 'cart', 60, 60)
+  if (!rl.ok) return rateLimited()
+
   const form   = await request.formData()
   const intent = form.get('intent') as string
   let   cartId = getCartIdFromCookie(request)
@@ -21,7 +25,15 @@ export async function action({ request }: ActionFunctionArgs) {
     try {
       await addToCart(cartId, variantId, quantity, sellingPlanId)
     } catch {
-      return Response.json({ ok: false, error: 'Could not add item' }, { status: 400, headers })
+      // Cart may be expired — create a fresh one and retry once
+      try {
+        const freshCart = await createCart()
+        cartId = freshCart.id
+        headers.set('Set-Cookie', setCartCookie(cartId))
+        await addToCart(cartId, variantId, quantity, sellingPlanId)
+      } catch {
+        return Response.json({ ok: false, error: 'Could not add item' }, { status: 400, headers })
+      }
     }
     return Response.json({ ok: true }, { headers })
   }

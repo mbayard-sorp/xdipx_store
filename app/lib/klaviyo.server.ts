@@ -377,3 +377,70 @@ export async function updateProfileProperties(
     console.error('[klaviyo.updateProfileProperties] failed:', err)
   }
 }
+
+// ─── Wishlist events & sync ─────────────────────────────────────────────────
+
+type WishlistItemInfo = {
+  productHandle: string
+  productTitle?: string
+  price?: string | number
+  listName?: string
+}
+
+export async function trackWishlistAdded(email: string, item: WishlistItemInfo): Promise<void> {
+  try {
+    await trackEvent(email, 'Added to Wishlist', {
+      product_handle: item.productHandle,
+      product_title:  item.productTitle ?? null,
+      price:          item.price ?? null,
+      list_name:      item.listName ?? null,
+      added_at:       new Date().toISOString(),
+    })
+  } catch (err) {
+    console.error('[klaviyo.trackWishlistAdded] failed:', err)
+  }
+}
+
+export async function trackWishlistRemoved(email: string, item: { productHandle: string; listName?: string }): Promise<void> {
+  try {
+    await trackEvent(email, 'Removed from Wishlist', {
+      product_handle: item.productHandle,
+      list_name:      item.listName ?? null,
+      removed_at:     new Date().toISOString(),
+    })
+  } catch (err) {
+    console.error('[klaviyo.trackWishlistRemoved] failed:', err)
+  }
+}
+
+/**
+ * Sync the customer's current wishlist state to their Klaviyo profile so flows
+ * can segment on wishlist_count / filter by wishlist_handles.
+ * Accepts a wider property shape than updateProfileProperties (arrays + numbers).
+ */
+export async function syncWishlistProfileProperty(
+  email: string,
+  handles: string[],
+): Promise<void> {
+  try {
+    const profile = await getProfileByEmail(email)
+    if (!profile) {
+      console.warn('[klaviyo.syncWishlistProfileProperty] no profile found for', email)
+      return
+    }
+    await klaviyoFetch(`/profiles/${profile.id}/`, 'PATCH', {
+      data: {
+        type: 'profile',
+        id: profile.id,
+        attributes: {
+          properties: {
+            wishlist_handles: handles,
+            wishlist_count:   handles.length,
+          },
+        },
+      },
+    })
+  } catch (err) {
+    console.error('[klaviyo.syncWishlistProfileProperty] failed:', err)
+  }
+}

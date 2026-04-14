@@ -48,6 +48,14 @@ function getSectionInfo(pathname: string, firstName: string): SectionInfo {
     return { title: 'Subscription', isDashboard: false }
   }
 
+  // Wishlists.
+  if (path === '/account/wishlists') {
+    return { title: 'Wishlists', isDashboard: false }
+  }
+  if (path.startsWith('/account/wishlists/')) {
+    return { title: 'Wishlist', isDashboard: false }
+  }
+
   // Profile / preferences.
   if (path === '/account/profile') {
     return { title: 'Profile', isDashboard: false }

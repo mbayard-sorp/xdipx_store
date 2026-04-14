@@ -10,8 +10,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const products = await searchAdminProducts(q, 20)
     return Response.json({ products })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error('[api.product-search] error:', message)
-    return Response.json({ products: [], error: message }, { status: 200 })
+    console.error('[api.product-search] error:', err)
+    return Response.json({ products: [], error: 'Search failed' }, { status: 200 })
   }
 }

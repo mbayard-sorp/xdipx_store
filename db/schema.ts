@@ -2,12 +2,14 @@ import {
   boolean,
   date,
   decimal,
+  index,
   integer,
   json,
   pgTable,
   serial,
   text,
   timestamp,
+  uniqueIndex,
   varchar,
 } from 'drizzle-orm/pg-core'
 
@@ -28,6 +30,7 @@ export const dealHistory = pgTable('deal_history', {
   totalProfit:      decimal('total_profit',  { precision: 10, scale: 2 }).default('0').notNull(),
   dealScore:        decimal('deal_score',    { precision: 5,  scale: 3 }),
   vaultPrice:       decimal('vault_price',   { precision: 10, scale: 2 }),
+  pctOffMsrp:       decimal('pct_off_msrp',  { precision: 5,  scale: 2 }),
   sortOrder:        integer('sort_order').default(0).notNull(),
   status:           varchar('status', { length: 20 }).default('queued').notNull(),
   shopifyProductId: varchar('shopify_product_id', { length: 30 }),
@@ -45,7 +48,9 @@ export const consentLog = pgTable('consent_log', {
   consentType:   varchar('consent_type', { length: 20 }),
   policyVersion: varchar('policy_version', { length: 10 }).notNull(),
   consentedAt:   timestamp('consented_at').defaultNow().notNull(),
-})
+}, t => ({
+  sessionIdx: index('consent_log_session_idx').on(t.sessionId, t.consentedAt),
+}))
 
 export const tosAcceptance = pgTable('tos_acceptance', {
   id:               serial('id').primaryKey(),
@@ -127,3 +132,65 @@ export const socialPosts = pgTable('social_posts', {
   createdAt:       timestamp('created_at').defaultNow().notNull(),
   createdBy:       varchar('created_by', { length: 20 }).default('system'),
 })
+
+export const adminRoles = pgTable('admin_roles', {
+  id:              serial('id').primaryKey(),
+  neonAuthUserId:  varchar('neon_auth_user_id', { length: 60 }).notNull().unique(),
+  email:           varchar('email', { length: 255 }).notNull(),
+  name:            varchar('name', { length: 100 }).notNull(),
+  role:            varchar('role', { length: 20 }).notNull().default('admin'),
+  createdAt:       timestamp('created_at').defaultNow().notNull(),
+  lastLoginAt:     timestamp('last_login_at'),
+})
+
+export const orderLineItems = pgTable('order_line_items', {
+  id:               serial('id').primaryKey(),
+  shopifyOrderId:   varchar('shopify_order_id', { length: 30 }).notNull(),
+  shopifyProductId: varchar('shopify_product_id', { length: 30 }).notNull(),
+  handle:           varchar('handle', { length: 255 }),
+  sku:              varchar('sku', { length: 50 }),
+  quantity:         integer('quantity').notNull(),
+  unitPrice:        decimal('unit_price', { precision: 10, scale: 2 }),
+  createdAt:        timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  orderIdx:   index('oli_order_idx').on(t.shopifyOrderId),
+  handleIdx:  index('oli_handle_idx').on(t.handle),
+  productIdx: index('oli_product_idx').on(t.shopifyProductId),
+}))
+
+export const wishlists = pgTable('wishlists', {
+  id:          serial('id').primaryKey(),
+  customerGid: varchar('customer_gid', { length: 60 }).notNull(),
+  name:        varchar('name', { length: 100 }).notNull(),
+  isDefault:   boolean('is_default').default(false).notNull(),
+  publicSlug:  varchar('public_slug', { length: 20 }),
+  createdAt:   timestamp('created_at').defaultNow().notNull(),
+  updatedAt:   timestamp('updated_at').defaultNow().notNull(),
+}, t => ({
+  slugUnique:      uniqueIndex('wishlists_slug_uniq').on(t.publicSlug),
+  customerIdx:     index('wishlists_customer_idx').on(t.customerGid),
+  customerNameUq:  uniqueIndex('wishlists_customer_name').on(t.customerGid, t.name),
+}))
+
+export const wishlistItems = pgTable('wishlist_items', {
+  id:               serial('id').primaryKey(),
+  wishlistId:       integer('wishlist_id').notNull().references(() => wishlists.id, { onDelete: 'cascade' }),
+  shopifyProductId: varchar('shopify_product_id', { length: 64 }).notNull(),
+  handle:           varchar('handle', { length: 255 }).notNull(),
+  addedAt:          timestamp('added_at').defaultNow().notNull(),
+}, t => ({
+  itemUnique: uniqueIndex('wishlist_items_unique').on(t.wishlistId, t.shopifyProductId),
+  listIdx:    index('wishlist_items_list_idx').on(t.wishlistId),
+}))
+
+export const productCopurchase = pgTable('product_copurchase', {
+  id:         serial('id').primaryKey(),
+  handleA:    varchar('handle_a', { length: 255 }).notNull(),
+  handleB:    varchar('handle_b', { length: 255 }).notNull(),
+  count:      integer('count').default(0).notNull(),
+  lastSeenAt: timestamp('last_seen_at').defaultNow().notNull(),
+}, t => ({
+  pairUnique: uniqueIndex('copurchase_pair_uniq').on(t.handleA, t.handleB),
+  handleAIdx: index('copurchase_a_idx').on(t.handleA),
+  handleBIdx: index('copurchase_b_idx').on(t.handleB),
+}))

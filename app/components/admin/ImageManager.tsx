@@ -72,25 +72,54 @@ function ConfirmDeletePopover({ onConfirm, onCancel }: { onConfirm: () => void; 
 
 function ImageTile({
   image,
+  index,
   isFirst,
   isLast,
+  isDragging,
+  isDragOver,
   onDelete,
   onImprove,
   onMoveLeft,
   onMoveRight,
+  onDragStart,
+  onDragEnter,
+  onDragEnd,
+  onDrop,
 }: {
   image: AdminProductImage
+  index: number
   isFirst: boolean
   isLast: boolean
+  isDragging: boolean
+  isDragOver: boolean
   onDelete: () => void
   onImprove: () => void
   onMoveLeft: () => void
   onMoveRight: () => void
+  onDragStart: (index: number) => void
+  onDragEnter: (index: number) => void
+  onDragEnd: () => void
+  onDrop: (index: number) => void
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   return (
-    <div className="relative group aspect-square rounded-xl overflow-hidden border border-brand-mist bg-brand-mist/30">
+    <div
+      draggable
+      onDragStart={e => {
+        e.dataTransfer.effectAllowed = 'move'
+        onDragStart(index)
+      }}
+      onDragEnter={() => onDragEnter(index)}
+      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+      onDrop={e => { e.preventDefault(); onDrop(index) }}
+      onDragEnd={onDragEnd}
+      className={[
+        'relative group aspect-square rounded-xl overflow-hidden border bg-brand-mist/30 cursor-grab active:cursor-grabbing transition-all',
+        isDragging ? 'opacity-40 scale-95' : '',
+        isDragOver ? 'border-brand-coral ring-2 ring-brand-coral/40' : 'border-brand-mist',
+      ].join(' ')}
+    >
       <img
         src={image.src}
         alt={image.alt ?? 'Product image'}
@@ -849,12 +878,7 @@ export function ImageManager({
   }
 
   // ── Reorder ────────────────────────────────────────────────────────────────
-  const handleMove = async (index: number, direction: 'left' | 'right') => {
-    const newImages = [...images]
-    const swapIndex = direction === 'left' ? index - 1 : index + 1
-    if (swapIndex < 0 || swapIndex >= newImages.length) return
-    ;[newImages[index], newImages[swapIndex]] = [newImages[swapIndex]!, newImages[index]!]
-    setImages(newImages)
+  const persistOrder = async (ordered: AdminProductImage[]) => {
     setReordering(true)
     try {
       await fetch('/api/admin/imagen/reorder-images', {
@@ -862,12 +886,37 @@ export function ImageManager({
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           productId: deal.shopifyProductId,
-          imageIds:  newImages.map(i => i.id),
+          imageIds:  ordered.map(i => i.id),
         }),
       })
     } finally {
       setReordering(false)
     }
+  }
+
+  const handleMove = async (index: number, direction: 'left' | 'right') => {
+    const newImages = [...images]
+    const swapIndex = direction === 'left' ? index - 1 : index + 1
+    if (swapIndex < 0 || swapIndex >= newImages.length) return
+    ;[newImages[index], newImages[swapIndex]] = [newImages[swapIndex]!, newImages[index]!]
+    setImages(newImages)
+    await persistOrder(newImages)
+  }
+
+  const [dragFromIdx, setDragFromIdx] = useState<number | null>(null)
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
+
+  const handleDrop = async (targetIdx: number) => {
+    const from = dragFromIdx
+    setDragFromIdx(null)
+    setDragOverIdx(null)
+    if (from === null || from === targetIdx) return
+    const newImages = [...images]
+    const [moved] = newImages.splice(from, 1)
+    if (!moved) return
+    newImages.splice(targetIdx, 0, moved)
+    setImages(newImages)
+    await persistOrder(newImages)
   }
 
   // ── Upload complete → refresh images from Shopify ──────────────────────────
@@ -924,8 +973,11 @@ export function ImageManager({
                     <ImageTile
                       key={img.id}
                       image={img}
+                      index={idx}
                       isFirst={idx === 0}
                       isLast={idx === images.length - 1}
+                      isDragging={dragFromIdx === idx}
+                      isDragOver={dragOverIdx === idx && dragFromIdx !== idx}
                       onDelete={() => handleDeleteImage(img)}
                       onImprove={() => setImproveModal({
                         image:              img,
@@ -938,6 +990,10 @@ export function ImageManager({
                       })}
                       onMoveLeft={() => handleMove(idx, 'left')}
                       onMoveRight={() => handleMove(idx, 'right')}
+                      onDragStart={setDragFromIdx}
+                      onDragEnter={setDragOverIdx}
+                      onDragEnd={() => { setDragFromIdx(null); setDragOverIdx(null) }}
+                      onDrop={handleDrop}
                     />
                   )
                 ))}

@@ -21,6 +21,7 @@ export function AccountSidebar({ customer }: AccountSidebarProps) {
     { to: '/account',               label: 'Overview',      end: true },
     { to: '/account/orders',        label: 'Orders',        count: customer.orders.length },
     { to: '/account/subscriptions', label: 'Subscriptions' },
+    { to: '/account/wishlists',     label: 'Wishlists' },
     { to: '/account/addresses',     label: 'Addresses',     count: customer.addresses.length },
     { to: '/account/profile',       label: 'Profile' },
     { to: '/account/preferences',   label: 'Preferences' },

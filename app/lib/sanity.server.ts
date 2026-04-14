@@ -174,6 +174,16 @@ export async function upsertProductPage(params: {
   shopifyProductId: string
   title: string
   imageUrl?: string
+  // Enriched fields for search
+  vendor?: string
+  tags?: string[]
+  tagline?: string
+  description?: string
+  seoDescription?: string
+  featureBullets?: string[]
+  category?: string
+  price?: number
+  compareAtPrice?: number
 }): Promise<{ created: boolean }> {
   const writeClient = getClient(true)
   if (!writeClient) throw new Error('Sanity not configured — SANITY_API_TOKEN or SANITY_PROJECT_ID missing')
@@ -201,6 +211,22 @@ export async function upsertProductPage(params: {
       title: params.title,
     })
     created = true
+  }
+
+  // Patch enriched search fields if provided
+  const searchFields: Record<string, unknown> = {}
+  if (params.vendor !== undefined) searchFields.vendor = params.vendor
+  if (params.tags !== undefined) searchFields.tags = params.tags
+  if (params.tagline !== undefined) searchFields.tagline = params.tagline
+  if (params.description !== undefined) searchFields.description = params.description
+  if (params.seoDescription !== undefined) searchFields.seoDescription = params.seoDescription
+  if (params.featureBullets !== undefined) searchFields.featureBullets = params.featureBullets
+  if (params.category !== undefined) searchFields.category = params.category
+  if (params.price !== undefined) searchFields.price = params.price
+  if (params.compareAtPrice !== undefined) searchFields.compareAtPrice = params.compareAtPrice
+
+  if (Object.keys(searchFields).length > 0) {
+    await writeClient.patch(docId).set(searchFields).commit()
   }
 
   // Upload image to Sanity's own CDN so Studio can render it (Shopify CDN is blocked by Studio CSP)

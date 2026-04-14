@@ -1,9 +1,11 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { generateCopy } from '~/lib/claude.server'
+import { requireAdmin } from '~/lib/session.server'
 import type { GenerateCopyRequest } from '~/types'
 
 // API-only route — no default export
 export async function action({ request }: ActionFunctionArgs) {
+  await requireAdmin(request)
   const form = await request.formData()
   const type = form.get('type') as GenerateCopyRequest['type']
 

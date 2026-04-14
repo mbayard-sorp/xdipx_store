@@ -1,5 +1,7 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { subscribeToDailyDeal, subscribeToWaitlist } from '~/lib/klaviyo.server'
+import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
+import { rejectIfBot } from '~/lib/botid.server'
 
 // Loader required so fetcher revalidation doesn't 404
 export async function loader() {
@@ -7,6 +9,11 @@ export async function loader() {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  const bot = await rejectIfBot()
+  if (bot) return bot
+  const rl = await checkRateLimit(request, 'waitlist', 5, 3600)
+  if (!rl.ok) return rateLimited()
+
   const form   = await request.formData()
   const intent = form.get('intent')
   const email  = (form.get('email') as string | null)?.trim()

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useOutletContext } from 'react-router'
 import {
@@ -17,8 +18,11 @@ import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }  from '~/components/cms/ContentBlockRenderer'
 import { ProductStructuredData } from '~/components/seo/ProductStructuredData'
 import { OrganizationStructuredData } from '~/components/seo/OrganizationStructuredData'
+import { WebsiteStructuredData } from '~/components/seo/WebsiteStructuredData'
 import type { Product } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
+import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~/lib/analytics.client'
+import { buildSocialMeta } from '~/lib/social-meta'
 
 async function getLiveDeal() {
   const [dbDeal] = await db
@@ -28,6 +32,15 @@ async function getLiveDeal() {
     .limit(1)
   if (!dbDeal?.shopifyProductId) return null
   return getDealByShopifyId(dbDeal.shopifyProductId)
+}
+
+export function headers() {
+  // Edge-cache the homepage so burst traffic doesn't fan out to Shopify/Sanity.
+  // Deal rotations happen at midnight (and inventory sellouts), so 60s
+  // revalidation is safe — SWR keeps users fast during revalidation.
+  return {
+    'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+  }
 }
 
 export async function loader(_args: LoaderFunctionArgs) {
@@ -85,21 +98,32 @@ export async function loader(_args: LoaderFunctionArgs) {
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  const canonical = 'https://xdipx.com/'
   if (!data?.deal) {
+    const title = 'xdipx — Daily Wellness Deals'
+    const description = 'One deal. Every day. Ships discreet.'
     return [
-      { title: 'xdipx — Daily Wellness Deals' },
-      { name: 'description', content: 'One deal. Every day. Ships discreet.' },
+      { title },
+      { name: 'description', content: description },
+      { tagName: 'link', rel: 'canonical', href: canonical },
+      ...buildSocialMeta({ title, description, url: canonical, image: null, type: 'website' }),
     ]
   }
   const { deal } = data
+  const title = `${deal.seoTitle} — Today Only | xdipx`
+  const description = deal.metaDescription || `${deal.seoTitle} — today's deal at xdipx. Ships discreet.`
   return [
-    { title: `${deal.seoTitle} — Today Only | xdipx` },
-    { name: 'description', content: deal.metaDescription || `${deal.seoTitle} — today's deal at xdipx. Ships discreet.` },
-    { property: 'og:title',       content: `${deal.seoTitle} — Today Only | xdipx` },
-    { property: 'og:description', content: deal.metaDescription },
-    { property: 'og:image',       content: deal.images[0]?.url ?? '' },
-    { property: 'og:type',        content: 'website' },
-    { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/' },
+    { title },
+    { name: 'description', content: description },
+    { tagName: 'link', rel: 'canonical', href: canonical },
+    ...buildSocialMeta({
+      title,
+      description,
+      url: canonical,
+      image: deal.images[0]?.url ?? null,
+      type: 'website',
+      imageAlt: deal.seoTitle,
+    }),
   ]
 }
 
@@ -110,6 +134,33 @@ export default function Homepage() {
     reviews, reviewTotal, aggregate,
   } = useLoaderData<typeof loader>()
   const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
+
+  // ── GA4: track deal view + item lists ───────────────────────────────────
+  useEffect(() => {
+    if (!deal) return
+    const item: GA4Item = {
+      item_id: deal.shopifyProductId,
+      item_name: deal.seoTitle,
+      item_brand: deal.brand,
+      item_category: deal.category,
+      price: deal.dealPrice,
+    }
+    trackViewItem(item, deal.dealPrice)
+    trackDealView(deal.handle, deal.seoTitle, deal.dealPrice)
+  }, [deal?.handle])
+
+  useEffect(() => {
+    if (forHim.length > 0) {
+      trackViewItemList('for_him', 'For Him', forHim.map((p, i) => ({
+        item_id: p.id, item_name: p.title, ...(p.brand ? { item_brand: p.brand } : {}), price: p.price, index: i,
+      })))
+    }
+    if (forHer.length > 0) {
+      trackViewItemList('for_her', 'For Her', forHer.map((p, i) => ({
+        item_id: p.id, item_name: p.title, ...(p.brand ? { item_brand: p.brand } : {}), price: p.price, index: i,
+      })))
+    }
+  }, [forHim, forHer])
 
   // Split CMS sections: those that sit above BonusDeal/Vault vs below
   const cmsSections = cmsData?.sections ?? []
@@ -130,6 +181,9 @@ export default function Homepage() {
             reviewTotal={reviewTotal ?? 0}
             aggregate={aggregate}
             buyButtonText={buyButtonText}
+            shareUrl="https://xdipx.com/"
+            shareTitle={deal.seoTitle}
+            shareImage={deal.images[0]?.url ?? null}
           />
 
           <ProductStructuredData deal={deal} />
@@ -183,6 +237,7 @@ export default function Homepage() {
 
       <EmailSubscribe />
       <OrganizationStructuredData />
+      <WebsiteStructuredData />
     </>
   )
 }

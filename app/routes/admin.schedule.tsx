@@ -78,9 +78,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'force-live') {
-    const id               = parseInt(form.get('id') as string)
-    const shopifyProductId = form.get('shopifyProductId') as string
-    const today = estDateStr(0)
+    const id = parseInt(form.get('id') as string)
 
     const [liveNow] = await db
       .select()
@@ -96,11 +94,12 @@ export async function action({ request }: ActionFunctionArgs) {
         .where(eq(dealHistory.id, liveNow.id))
     }
 
-    await setDealStatus(shopifyProductId, 'live')
-    await db
-      .update(dealHistory)
-      .set({ status: 'live', activatedAt: new Date(), dealDate: today })
-      .where(eq(dealHistory.id, id))
+    // Route through activateDeal so configured dealPrice is pushed to variant.
+    const [target] = await db.select().from(dealHistory).where(eq(dealHistory.id, id)).limit(1)
+    if (target) {
+      const { activateDeal } = await import('~/lib/deal-rotator.server')
+      await activateDeal(target)
+    }
     return { ok: true }
   }
 

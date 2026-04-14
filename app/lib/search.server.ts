@@ -1,0 +1,620 @@
+/**
+ * Unified search module — queries Sanity for products, pages, and blog posts.
+ * Falls back to Shopify Storefront search when Sanity is not configured.
+ *
+ * Products returned from Sanity are hydrated with real-time pricing from
+ * Shopify Storefront API via getProductsByHandles().
+ */
+import { createClient } from '@sanity/client'
+import { getProductsByHandles, searchProducts, predictiveSearch as shopifyPredictiveSearch } from './shopify.server'
+import type { Product } from '~/types'
+
+// ─── Sanity client (read-only, CDN) ────────────────────────────────────────
+
+const projectId  = process.env['SANITY_PROJECT_ID']
+const dataset    = process.env['SANITY_DATASET'] ?? 'production'
+const apiVersion = '2024-10-01'
+
+function getSearchClient() {
+  if (!projectId) return null
+  const token = process.env['SANITY_API_TOKEN']
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return createClient({ projectId, dataset, apiVersion, useCdn: true, token } as any)
+}
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+export interface SearchProductResult {
+  handle: string
+  title: string
+  vendor: string | null
+  tags: string[]
+  category: string | null
+  previewImageUrl: string | null
+  // Hydrated from Shopify
+  price: string | null
+  compareAtPrice: string | null
+  featuredImage: { url: string; altText: string | null } | null
+  shopifyId: string | null
+  // Variant + video info for PLP tile interactions
+  defaultVariantId: string | null
+  hasMultipleVariants: boolean
+  availableForSale: boolean
+  firstVideo: {
+    previewUrl: string
+    src: string
+    aspect: 'portrait' | 'landscape' | 'square' | null
+  } | null
+}
+
+export interface SearchFacets {
+  tagCounts: Record<string, number>
+  vendorCounts: Record<string, number>
+  priceBuckets: { under25: number; p25_50: number; p50_100: number; over100: number }
+}
+
+export interface ContentResult {
+  _type: 'page' | 'blogPost'
+  title: string
+  slug: string
+  excerpt: string | null
+  seoDescription: string | null
+  categoryName?: string | null
+}
+
+export interface UnifiedSearchResult {
+  products: SearchProductResult[]
+  pages: ContentResult[]
+  blogPosts: ContentResult[]
+  totalProducts: number
+  hasNextPage: boolean
+  facets: SearchFacets
+}
+
+export interface PredictiveProduct {
+  handle: string
+  title: string
+  previewImageUrl: string | null
+  vendor: string | null
+  price: string | null
+  compareAtPrice: string | null
+  category: string | null
+}
+
+export interface PredictiveResult {
+  products: PredictiveProduct[]
+  pages: { title: string; slug: string }[]
+  blogPosts: { title: string; slug: string }[]
+  totalProducts: number
+  categories: { label: string; count: number }[]
+}
+
+// ─── Query helpers ──────────────────────────────────────────────────────────
+
+// GROQ `match` does word-prefix matching, not stemming. Typing "dildos" won't
+// match products titled "Dildo". Build a small set of prefix patterns that
+// covers trailing -s / -es / -ies pluralization in either direction.
+function buildQueryPatterns(query: string): string[] {
+  const lower = query.trim().toLowerCase()
+  if (!lower) return []
+  const patterns = new Set<string>([`${lower}*`])
+
+  // Singular forms of a plural input
+  if (lower.length > 4 && lower.endsWith('ies')) patterns.add(`${lower.slice(0, -3)}y*`)
+  if (lower.length > 3 && lower.endsWith('es')) patterns.add(`${lower.slice(0, -2)}*`)
+  if (lower.length > 3 && lower.endsWith('s'))  patterns.add(`${lower.slice(0, -1)}*`)
+
+  return Array.from(patterns)
+}
+
+// Render an OR-across-patterns match expression for one field.
+// e.g. ["dildos*", "dildo*"], field="title", prefix="q"
+// →    "(title match $q0 || title match $q1)"
+function fieldMatchAny(field: string, paramNames: string[]): string {
+  return `(${paramNames.map(n => `${field} match $${n}`).join(' || ')})`
+}
+
+// ─── Sort helpers ───────────────────────────────────────────────────────────
+
+type SortOption = 'relevance' | 'price_asc' | 'price_desc' | 'newest'
+
+function sanitySort(sort: SortOption): string {
+  switch (sort) {
+    case 'price_asc':  return '| order(price asc)'
+    case 'price_desc': return '| order(price desc)'
+    case 'newest':     return '| order(_createdAt desc)'
+    default:           return '' // relevance = score order (default from score())
+  }
+}
+
+// ─── Full search ────────────────────────────────────────────────────────────
+
+export async function searchAll(params: {
+  query: string
+  tags?: string[]
+  vendors?: string[]
+  priceMin?: number | null
+  priceMax?: number | null
+  sort?: SortOption
+  page?: number
+  perPage?: number
+}): Promise<UnifiedSearchResult> {
+  const client = getSearchClient()
+
+  // Fallback to Shopify search if Sanity not configured
+  if (!client) return shopifyFallback(params)
+
+  const {
+    query,
+    tags = [],
+    vendors = [],
+    priceMin = null,
+    priceMax = null,
+    sort = 'relevance',
+    page = 1,
+    perPage = 24,
+  } = params
+
+  const start = (page - 1) * perPage
+  const end = start + perPage + 1 // fetch one extra to detect next page
+
+  // Build filter conditions for products
+  const productConditions: string[] = ['_type == "productPage"']
+  const groqParams: Record<string, unknown> = {}
+
+  const queryPatterns = query ? buildQueryPatterns(query) : []
+  const queryParamNames = queryPatterns.map((_, i) => `q${i}`)
+  if (query && queryPatterns.length > 0) {
+    queryPatterns.forEach((p, i) => { groqParams[`q${i}`] = p })
+    // GROQ `match` does word-prefix matching. We also OR across singular/plural
+    // variants (see buildQueryPatterns) so "dildos" matches "Dildo", etc.
+    const titleMatch  = fieldMatchAny('title', queryParamNames)
+    const taglineMatch = fieldMatchAny('tagline', queryParamNames)
+    const vendorMatch  = fieldMatchAny('vendor', queryParamNames)
+    const seoMatch     = fieldMatchAny('seoDescription', queryParamNames)
+    const categoryMatch = fieldMatchAny('category', queryParamNames)
+    const descMatch    = fieldMatchAny('pt::text(description)', queryParamNames)
+    const tagInAny     = `(${queryParamNames.map(n => `$${n} in tags`).join(' || ')})`
+    productConditions.push(
+      `(${titleMatch} || ${taglineMatch} || ${vendorMatch} || ${seoMatch} || ${categoryMatch} || ${tagInAny} || ${descMatch})`
+    )
+  }
+
+  if (tags.length > 0) {
+    // All selected tag filters must match (AND between filters)
+    // Each filter may be comma-delimited — any part matches (OR within filter)
+    for (let i = 0; i < tags.length; i++) {
+      const parts = tags[i]!.split(',').map(s => s.trim()).filter(Boolean)
+      if (parts.length === 1) {
+        const paramName = `tag${i}`
+        productConditions.push(`$${paramName} in tags`)
+        groqParams[paramName] = parts[0]
+      } else {
+        const orConditions = parts.map((part, j) => {
+          const paramName = `tag${i}_${j}`
+          groqParams[paramName] = part
+          return `$${paramName} in tags`
+        })
+        productConditions.push(`(${orConditions.join(' || ')})`)
+      }
+    }
+  }
+
+  if (vendors.length > 0) {
+    const vendorConditions = vendors.map((_, i) => `vendor == $vendor${i}`).join(' || ')
+    productConditions.push(`(${vendorConditions})`)
+    vendors.forEach((v, i) => { groqParams[`vendor${i}`] = v })
+  }
+
+  if (priceMin != null) {
+    productConditions.push('price >= $priceMin')
+    groqParams.priceMin = priceMin
+  }
+  if (priceMax != null) {
+    productConditions.push('price <= $priceMax')
+    groqParams.priceMax = priceMax
+  }
+
+  const productFilter = productConditions.join(' && ')
+  const sortClause = sanitySort(sort)
+
+  // Build the GROQ query with score() for relevance ranking.
+  // Boost on each query-pattern variant so the original spelling still wins.
+  const boosts = queryParamNames.length > 0
+    ? [
+        ...queryParamNames.map(n => `boost(title match $${n}, 5)`),
+        ...queryParamNames.map(n => `boost(tagline match $${n}, 3)`),
+        ...queryParamNames.map(n => `boost(vendor match $${n}, 2)`),
+        ...queryParamNames.map(n => `boost(pt::text(description) match $${n}, 1)`),
+        ...queryParamNames.map(n => `boost(seoDescription match $${n}, 1)`),
+      ].join(',\n        ')
+    : ''
+  const productQuery = query
+    ? `*[${productFilter}] | score(\n        ${boosts}\n      ) ${sortClause} [${start}...${end}]`
+    : `*[${productFilter}] ${sortClause} [${start}...${end}]`
+
+  const productProjection = `{
+    "handle": shopifyHandle,
+    title,
+    vendor,
+    tags,
+    category,
+    previewImageUrl,
+    "shopifyId": shopifyProductId,
+    _score
+  }`
+
+  // Content search (pages + blog posts) — only on first page
+  const pageTitleAny = fieldMatchAny('title', queryParamNames)
+  const pageSeoTitleAny = fieldMatchAny('seoTitle', queryParamNames)
+  const pageSeoDescAny = fieldMatchAny('seoDescription', queryParamNames)
+  const postTitleAny = fieldMatchAny('title', queryParamNames)
+  const postExcerptAny = fieldMatchAny('excerpt', queryParamNames)
+  const postBodyAny = fieldMatchAny('pt::text(body)', queryParamNames)
+  const pageBoosts = queryParamNames.length > 0
+    ? [
+        ...queryParamNames.map(n => `boost(title match $${n}, 3)`),
+        ...queryParamNames.map(n => `boost(seoDescription match $${n}, 1)`),
+      ].join(', ')
+    : ''
+  const postBoosts = queryParamNames.length > 0
+    ? [
+        ...queryParamNames.map(n => `boost(title match $${n}, 3)`),
+        ...queryParamNames.map(n => `boost(excerpt match $${n}, 2)`),
+      ].join(', ')
+    : ''
+  const contentQueries = page === 1 && query ? {
+    pages: `*[_type == "page" && (${pageTitleAny} || ${pageSeoTitleAny} || ${pageSeoDescAny})] | score(${pageBoosts}) [0...5] {
+      _type, title, "slug": slug.current, seoDescription, "excerpt": null
+    }`,
+    blogPosts: `*[_type == "blogPost" && status == "published" && (${postTitleAny} || ${postExcerptAny} || ${postBodyAny})] | score(${postBoosts}) [0...5] {
+      _type, title, "slug": slug.current, excerpt, seoDescription, "categoryName": category->name
+    }`,
+  } : null
+
+  // Count total products matching the filter
+  const countQuery = `count(*[${productFilter}])`
+
+  try {
+    // Execute all queries in a single GROQ request
+    const combinedQuery = `{
+      "products": ${productQuery} ${productProjection},
+      "totalProducts": ${countQuery}
+      ${contentQueries ? `, "pages": ${contentQueries.pages}, "blogPosts": ${contentQueries.blogPosts}` : ''}
+    }`
+
+    const data = await client.fetch<{
+      products: (Omit<SearchProductResult, 'price' | 'compareAtPrice' | 'featuredImage'> & { _score?: number })[]
+      totalProducts: number
+      pages?: ContentResult[]
+      blogPosts?: ContentResult[]
+    }>(combinedQuery, groqParams)
+
+    // Detect hasNextPage by checking if we got the extra result
+    const hasNextPage = data.products.length > perPage
+    const sanityProducts = hasNextPage ? data.products.slice(0, perPage) : data.products
+
+    // Hydrate products with real-time Shopify pricing
+    const handles = sanityProducts.map(p => p.handle).filter(Boolean)
+    const shopifyProducts = handles.length > 0 ? await getProductsByHandles(handles) : []
+    const shopifyMap = new Map<string, Product>(shopifyProducts.map(p => [p.handle, p]))
+
+    const products: SearchProductResult[] = sanityProducts.map(sp => {
+      const shopify = shopifyMap.get(sp.handle)
+      const firstAvailable = shopify?.variants.find(v => v.availableForSale) ?? shopify?.variants[0]
+      const firstVid = shopify?.videos?.[0]
+      const mp4 = firstVid?.sources.find(s => s.mimeType.includes('mp4')) ?? firstVid?.sources[0]
+      return {
+        handle: sp.handle,
+        title: sp.title ?? shopify?.title ?? '',
+        vendor: sp.vendor ?? shopify?.brand ?? null,
+        tags: sp.tags ?? shopify?.tags ?? [],
+        category: sp.category ?? null,
+        previewImageUrl: sp.previewImageUrl ?? null,
+        price: shopify ? String(shopify.price) : null,
+        compareAtPrice: shopify?.compareAtPrice ? String(shopify.compareAtPrice) : null,
+        featuredImage: shopify?.images?.[0]
+          ? { url: shopify.images[0].url, altText: shopify.images[0].altText ?? null }
+          : sp.previewImageUrl
+            ? { url: sp.previewImageUrl, altText: sp.title }
+            : null,
+        shopifyId: sp.shopifyId ?? null,
+        defaultVariantId: firstAvailable?.id ?? null,
+        hasMultipleVariants: (shopify?.variants.length ?? 0) > 1,
+        availableForSale: firstAvailable?.availableForSale ?? false,
+        firstVideo: firstVid && mp4
+          ? { previewUrl: firstVid.previewImageUrl, src: mp4.url, aspect: firstVid.aspect ?? null }
+          : null,
+      }
+    })
+
+    // Compute facets over the full filtered result set (all pages)
+    const facets = await computeFacets(client, productFilter, groqParams)
+
+    return {
+      products,
+      pages: data.pages ?? [],
+      blogPosts: data.blogPosts ?? [],
+      totalProducts: data.totalProducts,
+      hasNextPage,
+      facets,
+    }
+  } catch (err) {
+    console.error('[search] Sanity search failed, falling back to Shopify:', err)
+    return shopifyFallback(params)
+  }
+}
+
+// ─── Facet computation ──────────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function computeFacets(client: any, productFilter: string, groqParams: Record<string, unknown>): Promise<SearchFacets> {
+  const emptyFacets: SearchFacets = { tagCounts: {}, vendorCounts: {}, priceBuckets: { under25: 0, p25_50: 0, p50_100: 0, over100: 0 } }
+  try {
+    const rows = await client.fetch<{ vendor: string | null; tags: string[] | null; price: number | null }[]>(
+      `*[${productFilter}]{ vendor, tags, price }`,
+      groqParams,
+    )
+    const tagCounts: Record<string, number> = {}
+    const vendorCounts: Record<string, number> = {}
+    const priceBuckets = { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }
+    for (const r of rows) {
+      if (r.vendor) vendorCounts[r.vendor] = (vendorCounts[r.vendor] ?? 0) + 1
+      if (r.tags) for (const t of r.tags) tagCounts[t] = (tagCounts[t] ?? 0) + 1
+      const p = r.price ?? 0
+      if (p < 25) priceBuckets.under25++
+      else if (p < 50) priceBuckets.p25_50++
+      else if (p < 100) priceBuckets.p50_100++
+      else priceBuckets.over100++
+    }
+    return { tagCounts, vendorCounts, priceBuckets }
+  } catch {
+    return emptyFacets
+  }
+}
+
+// ─── Predictive search ──────────────────────────────────────────────────────
+
+export async function predictiveSearchUnified(query: string): Promise<PredictiveResult> {
+  const client = getSearchClient()
+
+  if (!client) {
+    // Fallback: use Shopify predictive search
+    const result = await shopifyPredictiveSearch(query)
+    const products: PredictiveProduct[] = result.products.map(p => ({
+      handle: p.handle,
+      title: p.title,
+      previewImageUrl: p.featuredImage?.url ?? null,
+      vendor: p.vendor ?? null,
+      price: null,
+      compareAtPrice: null,
+      category: null,
+    }))
+    return {
+      products,
+      pages: [],
+      blogPosts: [],
+      totalProducts: products.length,
+      categories: [],
+    }
+  }
+
+  const patterns = buildQueryPatterns(query)
+  if (patterns.length === 0) {
+    return { products: [], pages: [], blogPosts: [], totalProducts: 0, categories: [] }
+  }
+  const paramNames = patterns.map((_, i) => `q${i}`)
+  const groqParams: Record<string, string> = {}
+  patterns.forEach((p, i) => { groqParams[`q${i}`] = p })
+
+  // Any of the query-pattern variants matching a given field
+  const anyTitle = fieldMatchAny('title', paramNames)
+  const anyTagline = fieldMatchAny('tagline', paramNames)
+  const anyVendor = fieldMatchAny('vendor', paramNames)
+  const anyCategory = fieldMatchAny('category', paramNames)
+  const anySeoTitle = fieldMatchAny('seoTitle', paramNames)
+  const anyExcerpt = fieldMatchAny('excerpt', paramNames)
+  const anyTagIn = `(${paramNames.map(n => `$${n} in tags`).join(' || ')})`
+  const productMatchAny = `(${anyTitle} || ${anyTagline} || ${anyVendor} || ${anyCategory})`
+  const productFullMatchAny = `(${anyTitle} || ${anyTagline} || ${anyVendor} || ${anyCategory} || ${anyTagIn})`
+  const productBoosts = [
+    ...paramNames.map(n => `boost(title match $${n}, 5)`),
+    ...paramNames.map(n => `boost(tagline match $${n}, 3)`),
+    ...paramNames.map(n => `boost(vendor match $${n}, 2)`),
+    ...paramNames.map(n => `boost(category match $${n}, 1)`),
+  ].join(', ')
+
+  try {
+    const data = await client.fetch<{
+      products: { handle: string; title: string; previewImageUrl: string | null; vendor: string | null; category: string | null }[]
+      totalProducts: number
+      categoryRows: { category: string | null }[]
+      pages: { title: string; slug: string }[]
+      blogPosts: { title: string; slug: string }[]
+    }>(`{
+      "products": *[_type == "productPage" && ${productMatchAny}] | score(${productBoosts}) [0...6] {
+        "handle": shopifyHandle, title, previewImageUrl, vendor, category
+      },
+      "totalProducts": count(*[_type == "productPage" && ${productFullMatchAny}]),
+      "categoryRows": *[_type == "productPage" && ${productFullMatchAny} && defined(category)]{ category },
+      "pages": *[_type == "page" && (${anyTitle} || ${anySeoTitle})] [0...3] {
+        title, "slug": slug.current
+      },
+      "blogPosts": *[_type == "blogPost" && status == "published" && (${anyTitle} || ${anyExcerpt})] [0...3] {
+        title, "slug": slug.current
+      }
+    }`, groqParams)
+
+    // Hydrate top products with Shopify pricing
+    const handles = data.products.map(p => p.handle).filter(Boolean)
+    const shopifyProducts = handles.length > 0 ? await getProductsByHandles(handles) : []
+    const shopifyMap = new Map<string, Product>(shopifyProducts.map(p => [p.handle, p]))
+
+    const products: PredictiveProduct[] = data.products.map(sp => {
+      const shopify = shopifyMap.get(sp.handle)
+      return {
+        handle: sp.handle,
+        title: sp.title,
+        previewImageUrl: sp.previewImageUrl,
+        vendor: sp.vendor,
+        price: shopify ? String(shopify.price) : null,
+        compareAtPrice: shopify?.compareAtPrice ? String(shopify.compareAtPrice) : null,
+        category: sp.category ?? null,
+      }
+    })
+
+    // Aggregate top categories from the matched result set
+    const categoryCounts = new Map<string, number>()
+    for (const row of data.categoryRows ?? []) {
+      if (row.category) categoryCounts.set(row.category, (categoryCounts.get(row.category) ?? 0) + 1)
+    }
+    const categories = Array.from(categoryCounts.entries())
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3)
+
+    return {
+      products,
+      pages: data.pages ?? [],
+      blogPosts: data.blogPosts ?? [],
+      totalProducts: data.totalProducts ?? products.length,
+      categories,
+    }
+  } catch (err) {
+    console.error('[search] Sanity predictive search failed:', err)
+    return { products: [], pages: [], blogPosts: [], totalProducts: 0, categories: [] }
+  }
+}
+
+// ─── Vendor list for filters ────────────────────────────────────────────────
+
+export async function getSearchVendors(): Promise<{ vendor: string; count: number }[]> {
+  const client = getSearchClient()
+  if (!client) return []
+
+  try {
+    // Get all unique vendors with counts
+    const allProducts = await client.fetch<{ vendor: string }[]>(
+      `*[_type == "productPage" && defined(vendor)]{ vendor }`
+    )
+
+    const counts = new Map<string, number>()
+    for (const p of allProducts) {
+      if (p.vendor) counts.set(p.vendor, (counts.get(p.vendor) ?? 0) + 1)
+    }
+
+    return Array.from(counts.entries())
+      .map(([vendor, count]) => ({ vendor, count }))
+      .sort((a, b) => b.count - a.count)
+  } catch {
+    return []
+  }
+}
+
+// ─── Tag counts for admin ──────────────────────────────────────────────────
+
+export async function getTagCounts(compoundTags?: string[]): Promise<Record<string, number>> {
+  const client = getSearchClient()
+  if (!client) return {}
+
+  try {
+    const products = await client.fetch<{ tags: string[] }[]>(
+      `*[_type == "productPage" && defined(tags)]{ tags }`
+    )
+    const counts: Record<string, number> = {}
+
+    // Count individual tags
+    for (const p of products) {
+      for (const tag of p.tags) {
+        counts[tag] = (counts[tag] ?? 0) + 1
+      }
+    }
+
+    // Count compound (comma-delimited) tags — unique products matching ANY part
+    if (compoundTags) {
+      for (const entry of compoundTags) {
+        if (entry in counts) continue // already counted as individual tag
+        const parts = entry.split(',').map(s => s.trim()).filter(Boolean)
+        if (parts.length <= 1) continue
+        let count = 0
+        for (const p of products) {
+          if (parts.some(part => p.tags.includes(part))) count++
+        }
+        counts[entry] = count
+      }
+    }
+
+    return counts
+  } catch {
+    return {}
+  }
+}
+
+// ─── Shopify fallback ───────────────────────────────────────────────────────
+
+async function shopifyFallback(params: {
+  query: string
+  tags?: string[]
+  vendors?: string[]
+  priceMin?: number | null
+  priceMax?: number | null
+  sort?: string
+  page?: number
+  perPage?: number
+}): Promise<UnifiedSearchResult> {
+  const {
+    query,
+    tags = [],
+    vendors = [],
+    priceMin = null,
+    priceMax = null,
+    sort = 'relevance',
+    perPage = 24,
+  } = params
+
+  const productFilters: Record<string, unknown>[] = [
+    ...vendors.map(v => ({ productVendor: v })),
+    ...tags.map(t => ({ tag: t })),
+    ...(priceMin != null || priceMax != null ? [{
+      price: {
+        min: priceMin ?? undefined,
+        max: priceMax ?? undefined,
+      },
+    }] : []),
+  ]
+
+  const sortKey = sort === 'price_asc' || sort === 'price_desc' ? 'PRICE' as const : 'RELEVANCE' as const
+  const reverse = sort === 'price_desc'
+  const effectiveQuery = query.trim() || 'wellness'
+
+  const result = await searchProducts({
+    query: effectiveQuery,
+    first: perPage,
+    sortKey,
+    reverse,
+    productFilters,
+  })
+
+  return {
+    products: result.products.map(p => ({
+      handle: p.handle,
+      title: p.title,
+      vendor: p.vendor,
+      tags: p.tags,
+      category: null,
+      previewImageUrl: p.featuredImage?.url ?? null,
+      price: p.priceRange.minVariantPrice.amount,
+      compareAtPrice: p.compareAtPriceRange.maxVariantPrice?.amount ?? null,
+      featuredImage: p.featuredImage,
+      shopifyId: p.id,
+      defaultVariantId: null,
+      hasMultipleVariants: false,
+      availableForSale: true,
+      firstVideo: null,
+    })),
+    pages: [],
+    blogPosts: [],
+    totalProducts: result.totalCount,
+    hasNextPage: result.pageInfo.hasNextPage,
+    facets: { tagCounts: {}, vendorCounts: {}, priceBuckets: { under25: 0, p25_50: 0, p50_100: 0, over100: 0 } },
+  }
+}

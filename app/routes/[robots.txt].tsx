@@ -3,6 +3,7 @@ export async function loader() {
     'User-agent: *',
     'Allow: /',
     'Disallow: /admin',
+    'Disallow: /account',
     'Disallow: /api/',
     '',
     'Sitemap: https://xdipx.com/sitemap.xml',

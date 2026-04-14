@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { generateMoodImage } from '~/lib/imagen.server'
+import { apiError } from '~/lib/api-error.server'
 
 const STYLE_SUFFIXES: Record<string, string> = {
   'lifestyle':    'warm lifestyle photography, natural lighting, editorial aesthetic',
@@ -73,8 +74,7 @@ export async function action({ request }: ActionFunctionArgs) {
       referenceProductTitle: productTitle || undefined,
     })
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return Response.json({ error: msg }, { status: 502 })
+    return apiError('imagen.generate', err, 'Image generation failed', 502)
   }
 
   const images = buffers.map(buf => ({

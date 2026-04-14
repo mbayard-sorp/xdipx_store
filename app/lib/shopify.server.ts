@@ -138,14 +138,39 @@ function parseImages(edges: { node: { url: string; altText: string | null } }[])
   return edges.map(e => ({ url: e.node.url, altText: e.node.altText ?? '' }))
 }
 
+/** Shopify Storefront API returns video CDN URLs on the store's custom domain
+ *  (e.g. xdipx.com/cdn/shop/videos/...). When the custom domain points at
+ *  Vercel instead of Shopify those paths 404.  Rewrite to cdn.shopify.com. */
+function fixVideoCdnUrl(url: string): string {
+  const m = url.match(/\/cdn\/shop\/(videos\/.*)/)
+  return m ? `https://cdn.shopify.com/${m[1]}` : url
+}
+
 function parseVideos(media?: { edges: { node: ShopifyMediaNode }[] }): ProductVideo[] {
   if (!media) return []
   return media.edges
     .filter(e => e.node.mediaContentType === 'VIDEO' && e.node.previewImage && e.node.sources?.length)
-    .map(e => ({
-      previewImageUrl: e.node.previewImage!.url,
-      sources: (e.node.sources ?? []).map(s => ({ url: s.url, mimeType: s.mimeType })),
-    }))
+    .map(e => {
+      const sources = e.node.sources ?? []
+      // Prefer dimensions from the mp4 source (or first). Some sources lack h/w; fall back.
+      const dimSource = sources.find(s => s.mimeType.includes('mp4') && s.height && s.width) ?? sources.find(s => s.height && s.width)
+      const width = dimSource?.width
+      const height = dimSource?.height
+      let aspect: ProductVideo['aspect'] | undefined
+      if (width && height) {
+        if (height > width * 1.15) aspect = 'portrait'
+        else if (width > height * 1.15) aspect = 'landscape'
+        else aspect = 'square'
+      }
+      const video: ProductVideo = {
+        previewImageUrl: e.node.previewImage!.url,
+        sources: sources.map(s => ({ url: fixVideoCdnUrl(s.url), mimeType: s.mimeType })),
+      }
+      if (aspect) video.aspect = aspect
+      if (width) video.width = width
+      if (height) video.height = height
+      return video
+    })
 }
 
 interface ShopifyVariantNode {
@@ -232,6 +257,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     dealStatus: (parseMetafield(mf, 'deal_status') || 'live') as Deal['dealStatus'],
     dealDate: parseMetafield(mf, 'deal_date'),
     qty: variant?.quantityAvailable ?? 0,
+    tags: node.tags ?? [],
     accessoryProductIds: parseMetafieldJSON<string[]>(mf, 'accessory_product_ids', []),
     ...(parseMetafield(mf, 'specifications') ? { specifications: parseMetafield(mf, 'specifications') } : {}),
     metaDescription: parseMetafield(mf, 'seo_meta_description'),
@@ -278,6 +304,20 @@ export async function getDailyDeal(): Promise<Deal | null> {
   `, { handle })
   if (!data.product) return null
   return nodeToDeal(data.product)
+}
+
+/** Lightweight: returns only the live deal's handle. Used by PLPs to flag tiles. */
+export async function getLiveDealHandle(): Promise<string | null> {
+  const search = await storefront<{
+    products: { edges: { node: { handle: string } }[] }
+  }>(`
+    query GetLiveDealHandle {
+      products(first: 1, query: "tag:deal-status-live") {
+        edges { node { handle } }
+      }
+    }
+  `).catch(() => null)
+  return search?.products.edges[0]?.node.handle ?? null
 }
 
 /** Like getDailyDeal but finds the deal-status-approved product so admin can promote it. */
@@ -371,7 +411,7 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     .filter(e => e.node.mediaContentType === 'VIDEO' && e.node.previewImage && e.node.sources?.length)
     .map(e => ({
       previewImageUrl: e.node.previewImage!.url,
-      sources: e.node.sources!.map(s => ({ url: s.url, mimeType: s.mimeType })),
+      sources: e.node.sources!.map(s => ({ url: fixVideoCdnUrl(s.url), mimeType: s.mimeType })),
     }))
 
   const mf = [...(xdipxMF ?? []), ...(customMF ?? [])]
@@ -409,6 +449,7 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     dealStatus: (mfVal('deal_status') || 'pending') as Deal['dealStatus'],
     dealDate: mfVal('deal_date'),
     qty: variant?.inventory_quantity ?? 0,
+    tags: product.tags ? product.tags.split(', ').filter(Boolean) : [],
     accessoryProductIds: mfJSON<string[]>('accessory_product_ids', []),
     ...(mfVal('specifications') ? { specifications: mfVal('specifications') } : {}),
     metaDescription: mfVal('seo_meta_description'),
@@ -679,7 +720,7 @@ export async function getAccessoryProducts(ids: string[]): Promise<Product[]> {
   if (!ids.length) return []
   const queries = ids.map((id, i) => `p${i}: product(id: "${id}") { ${PRODUCT_CORE_FRAGMENT} }`).join('\n')
   const data = await storefront<Record<string, ShopifyProductNode | null>>(`query { ${queries} }`)
-  return Object.values(data).filter(Boolean).map(n => nodeToProduct(n!))
+  return Object.values(data).filter((n): n is ShopifyProductNode => n !== null).map(n => nodeToProduct(n))
 }
 
 // ─── Admin Product Search (for admin pickers) ─────────────────────────────
@@ -879,14 +920,18 @@ export async function getCart(cartId: string): Promise<Cart | null> {
   return rawCartToCart(data.cart)
 }
 
-export async function addToCart(cartId: string, variantId: string, quantity: number): Promise<Cart> {
-  const data = await storefront<{ cartLinesAdd: CartResponse }>(`
+export async function addToCart(cartId: string, variantId: string, quantity: number, sellingPlanId?: string): Promise<Cart> {
+  const line: Record<string, unknown> = { merchandiseId: variantId, quantity }
+  if (sellingPlanId) line['sellingPlanId'] = sellingPlanId
+  const data = await storefront<{ cartLinesAdd: { cart: RawCart | null } }>(`
     mutation AddToCart($cartId: ID!, $lines: [CartLineInput!]!) {
       cartLinesAdd(cartId: $cartId, lines: $lines) {
         cart { ${CART_FRAGMENT} }
+        userErrors { field message }
       }
     }
-  `, { cartId, lines: [{ merchandiseId: variantId, quantity }] })
+  `, { cartId, lines: [line] })
+  if (!data.cartLinesAdd.cart) throw new Error('Cart not found or line could not be added')
   return rawCartToCart(data.cartLinesAdd.cart)
 }
 
@@ -954,7 +999,8 @@ export async function setDealStatus(productId: string, status: string): Promise<
   const numericId = productId.replace('gid://shopify/Product/', '')
   await updateProductMetafield(productId, 'deal_status', status)
   // Mirror status in tags for Storefront API querying
-  const { product } = await shopifyAdmin<{ product: { tags: string } }>(`/products/${numericId}.json`)
+  const { product } = await shopifyAdmin<{ product: { tags: string } | null }>(`/products/${numericId}.json`)
+  if (!product) throw new Error(`Product ${numericId} not found when setting deal status`)
   const currentTags = product.tags.split(', ').filter((t: string) => !t.startsWith('deal-status-'))
   currentTags.push(`deal-status-${status}`)
   await shopifyAdmin(`/products/${numericId}.json`, 'PUT', {
@@ -987,6 +1033,18 @@ export async function createDraftProduct(data: {
     },
   })
   return res.product.id
+}
+
+export async function getHandleByProductId(productId: string | number): Promise<string | null> {
+  try {
+    const res = await shopifyAdmin<{ product?: { handle?: string } }>(
+      `/products/${productId}.json`,
+      'GET',
+    )
+    return res?.product?.handle ?? null
+  } catch {
+    return null
+  }
 }
 
 export async function getWholesaleCostBySKU(sku: string): Promise<number> {
@@ -2879,23 +2937,312 @@ export async function updateCollectionImage(
   filename: string,
   alt: string,
 ): Promise<string> {
-  throw new Error('updateCollectionImage: not yet implemented')
+  console.warn('updateCollectionImage: not yet implemented')
+  return ''
 }
 
 export async function getAccessoryProductsAdmin(
   productIds: string[],
-): Promise<unknown[]> {
-  throw new Error('getAccessoryProductsAdmin: not yet implemented')
+): Promise<Product[]> {
+  if (productIds.length === 0) return []
+  // Normalize to GIDs
+  const gids = productIds.map(id =>
+    id.startsWith('gid://') ? id : `gid://shopify/Product/${id}`,
+  )
+  const data = await adminGraphQL<{
+    nodes: Array<{
+      id: string
+      handle: string
+      title: string
+      vendor: string
+      tags: string[]
+      images: { nodes: Array<{ url: string; altText: string | null }> }
+      variants: { nodes: Array<{ id: string; title: string; price: string; compareAtPrice: string | null; inventoryQuantity: number }> }
+    } | null>
+  }>(`
+    query GetAccessoryProducts($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on Product {
+          id handle title vendor tags
+          images(first: 5) { nodes { url altText } }
+          variants(first: 10) {
+            nodes {
+              id title price compareAtPrice
+              inventoryQuantity
+            }
+          }
+        }
+      }
+    }
+  `, { ids: gids })
+
+  return (data.nodes ?? []).flatMap(node => {
+    if (!node) return []
+    const variant = node.variants.nodes[0]
+    const product: Product = {
+      id: node.id,
+      handle: node.handle,
+      title: node.title,
+      images: node.images.nodes.map(img => ({ url: img.url, altText: img.altText ?? '' })),
+      videos: [],
+      variants: node.variants.nodes.map(v => ({
+        id: v.id,
+        title: v.title,
+        selectedOptions: [],
+        price: v.price,
+        compareAtPrice: v.compareAtPrice,
+        availableForSale: (v.inventoryQuantity ?? 0) > 0,
+        quantityAvailable: v.inventoryQuantity ?? 0,
+      })),
+      price: parseFloat(variant?.price ?? '0'),
+      ...(variant?.compareAtPrice ? { compareAtPrice: parseFloat(variant.compareAtPrice) } : {}),
+      brand: node.vendor,
+      tags: node.tags,
+    }
+    return [product]
+  })
 }
 
-export async function updateCollectionDescription(...args: unknown[]): Promise<unknown> {
-  throw new Error('updateCollectionDescription: not yet implemented')
+export async function updateCollectionDescription(...args: unknown[]): Promise<void> {
+  console.warn('updateCollectionDescription: not yet implemented')
 }
 
-export async function updateProductTags(...args: unknown[]): Promise<unknown> {
-  throw new Error('updateProductTags: not yet implemented')
+export async function updateProductTags(productId: string, tags: string[]): Promise<void> {
+  const id = productId.replace('gid://shopify/Product/', '')
+  await shopifyAdmin(`/products/${id}.json`, 'PUT', {
+    product: { id, tags: tags.join(', ') },
+  })
 }
 
-export async function fetchAllDealProducts(...args: unknown[]): Promise<unknown> {
-  throw new Error('fetchAllDealProducts: not yet implemented')
+export interface FetchedDealProduct {
+  shopifyProductId: string
+  sku: string
+  nalpacSku?: string
+  title: string
+  vendor: string
+  category?: string
+  dealDate?: string
+  wholesaleCost?: number
+  dealPrice: number
+  msrp?: number
+  mapPrice?: number
+  inventoryQuantity: number
+  dealScore?: number
+}
+
+export async function fetchAllDealProducts(): Promise<{ products: FetchedDealProduct[]; totalScanned: number }> {
+  interface AdminVariantNode { price: string; inventoryQuantity: number }
+  interface AdminMetafieldNode { key: string; value: string }
+  interface AdminProductNode {
+    id: string
+    title: string
+    vendor: string
+    variants: { nodes: AdminVariantNode[] }
+    metafields: { nodes: AdminMetafieldNode[] }
+  }
+  interface PageInfo { hasNextPage: boolean; endCursor: string | null }
+
+  const products: FetchedDealProduct[] = []
+  let totalScanned = 0
+  let cursor: string | null = null
+  let hasNextPage = true
+
+  type FetchResult = { products: { pageInfo: PageInfo; nodes: AdminProductNode[] } }
+
+  while (hasNextPage) {
+    const data: FetchResult = await adminGraphQL<FetchResult>(`
+      query FetchDealProducts($first: Int!, $after: String) {
+        products(first: $first, after: $after) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id title vendor
+            variants(first: 1) { nodes { price inventoryQuantity } }
+            metafields(namespace: "xdipx", first: 20) {
+              nodes { key value }
+            }
+          }
+        }
+      }
+    `, { first: 50, after: cursor })
+
+    const page: FetchResult['products'] = data.products
+    hasNextPage = page.pageInfo.hasNextPage
+    cursor = page.pageInfo.endCursor
+    totalScanned += page.nodes.length
+
+    for (const node of page.nodes) {
+      const mf = node.metafields.nodes
+      const mfVal = (key: string) => mf.find((m: AdminMetafieldNode) => m.key === key)?.value ?? ''
+
+      // Only include products that have been set up as deals (have a deal_status metafield)
+      if (!mfVal('deal_status') && !mfVal('nalpac_sku')) continue
+
+      const numericId = node.id.replace('gid://shopify/Product/', '')
+      const variant = node.variants.nodes[0]
+      const wholesaleCost = parseFloat(mfVal('wholesale_cost'))
+      const msrp = parseFloat(mfVal('original_price'))
+      const mapPrice = parseFloat(mfVal('map_price'))
+      const dealScore = parseFloat(mfVal('deal_score'))
+
+      products.push({
+        shopifyProductId: numericId,
+        sku: mfVal('nalpac_sku') || numericId,
+        ...(mfVal('nalpac_sku') ? { nalpacSku: mfVal('nalpac_sku') } : {}),
+        title: node.title,
+        vendor: node.vendor,
+        ...(mfVal('category') ? { category: mfVal('category') } : {}),
+        ...(mfVal('deal_date') ? { dealDate: mfVal('deal_date') } : {}),
+        ...(!isNaN(wholesaleCost) ? { wholesaleCost } : {}),
+        dealPrice: parseFloat(variant?.price ?? '0'),
+        ...(!isNaN(msrp) ? { msrp } : {}),
+        ...(!isNaN(mapPrice) ? { mapPrice } : {}),
+        inventoryQuantity: variant?.inventoryQuantity ?? 0,
+        ...(!isNaN(dealScore) ? { dealScore } : {}),
+      })
+    }
+  }
+
+  return { products, totalScanned }
+}
+
+// ─── Storefront Search (Search & Discovery app) ───────────────────────────
+
+export interface SearchProduct {
+  id: string
+  handle: string
+  title: string
+  vendor: string
+  tags: string[]
+  featuredImage: { url: string; altText: string | null } | null
+  priceRange: { minVariantPrice: { amount: string; currencyCode: string } }
+  // Bug fix: Storefront API field is maxVariantPrice (not maxVariantCompareAtPrice)
+  compareAtPriceRange: { maxVariantPrice: { amount: string; currencyCode: string } | null }
+}
+
+export interface SearchFilter {
+  id: string
+  label: string
+  type: string
+  values: { id: string; label: string; count: number; input: string }[]
+}
+
+const SEARCH_PRODUCT_FRAGMENT = `
+  id handle title vendor tags
+  featuredImage { url altText }
+  priceRange { minVariantPrice { amount currencyCode } }
+  compareAtPriceRange { maxVariantPrice { amount currencyCode } }
+`
+
+export interface PredictiveCollection {
+  id: string
+  handle: string
+  title: string
+}
+
+export interface PredictiveSearchResult {
+  products: SearchProduct[]
+  collections: PredictiveCollection[]
+}
+
+export async function predictiveSearch(query: string): Promise<PredictiveSearchResult> {
+  const data = await storefront<{
+    predictiveSearch: {
+      products: SearchProduct[]
+      collections: PredictiveCollection[]
+    }
+  }>(`
+    query PredictiveSearch($query: String!) {
+      predictiveSearch(query: $query, limit: 6, types: [PRODUCT, COLLECTION]) {
+        products { ${SEARCH_PRODUCT_FRAGMENT} }
+        collections { id handle title }
+      }
+    }
+  `, { query })
+  return {
+    products: data.predictiveSearch.products,
+    collections: data.predictiveSearch.collections,
+  }
+}
+
+// Bug fix: Shopify Storefront search query only supports RELEVANCE and PRICE sort keys.
+// UPDATED_AT, BEST_SELLING, etc. are not valid for the search query (only for products query).
+export type SearchSortKey = 'RELEVANCE' | 'PRICE'
+
+export async function searchProducts(params: {
+  query: string
+  first?: number
+  after?: string
+  sortKey?: SearchSortKey
+  reverse?: boolean
+  productFilters?: Record<string, unknown>[]
+}): Promise<{
+  products: SearchProduct[]
+  totalCount: number
+  filters: SearchFilter[]
+  pageInfo: { hasNextPage: boolean; endCursor: string | null }
+}> {
+  const { query, first = 24, after, sortKey = 'RELEVANCE', reverse = false, productFilters = [] } = params
+  const data = await storefront<{
+    search: {
+      totalCount: number
+      productFilters: SearchFilter[]
+      edges: { cursor: string; node: SearchProduct }[]
+      pageInfo: { hasNextPage: boolean; endCursor: string | null }
+    }
+  }>(`
+    query SearchProducts(
+      $query: String!
+      $first: Int!
+      $after: String
+      $sortKey: SearchSortKeys
+      $reverse: Boolean
+      $productFilters: [ProductFilter!]
+    ) {
+      search(
+        query: $query
+        first: $first
+        after: $after
+        sortKey: $sortKey
+        reverse: $reverse
+        productFilters: $productFilters
+        types: [PRODUCT]
+      ) {
+        totalCount
+        productFilters {
+          id label type
+          values { id label count input }
+        }
+        edges {
+          cursor
+          node {
+            ... on Product { ${SEARCH_PRODUCT_FRAGMENT} }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  `, { query, first, after: after ?? null, sortKey, reverse, productFilters })
+
+  return {
+    products: data.search.edges.map(e => e.node),
+    totalCount: data.search.totalCount,
+    filters: data.search.productFilters,
+    pageInfo: data.search.pageInfo,
+  }
+}
+
+// Returns storefront collections (id included for productFilters usage)
+export async function getStorefrontCollections(
+  first = 50,
+): Promise<{ id: string; handle: string; title: string }[]> {
+  const data = await storefront<{
+    collections: { edges: { node: { id: string; handle: string; title: string } }[] }
+  }>(`
+    query GetStorefrontCollections($first: Int!) {
+      collections(first: $first, sortKey: TITLE) {
+        edges { node { id handle title } }
+      }
+    }
+  `, { first })
+  return data.collections.edges.map(e => e.node)
 }

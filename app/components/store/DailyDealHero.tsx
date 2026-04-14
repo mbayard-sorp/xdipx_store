@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect } from 'react'
 import { useFetcher } from 'react-router'
 import type { Deal, ProductVariant } from '~/types'
+import { trackAddToCart, trackCountdownUrgency } from '~/lib/analytics.client'
 import type { Review, ReviewAggregate } from '~/types/reviews'
 import { ProductImageGallery, type GalleryItem } from './ProductImageGallery'
 import { StockIndicator }   from './StockIndicator'
 import { SocialProofBar }   from './SocialProofBar'
 import { ProductTabs }      from './ProductTabs'
-import { InlineCountdown }  from './CountdownTimer'
 import { SubscriptionSelector, getSubscriptionPrice } from './SubscriptionSelector'
+import { ShareButtons } from '../common/ShareButtons'
+import { HeartButton } from './HeartButton'
 
 // ─── Gallery media types ──────────────────────────────────────────────────────
 
@@ -36,9 +38,12 @@ interface DailyDealHeroProps {
   reviewTotal?:   number
   aggregate?:     ReviewAggregate | null
   buyButtonText?: string
+  shareUrl?:      string
+  shareTitle?:    string
+  shareImage?:    string | null
 }
 
-export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, reviews = [], reviewTotal = 0, aggregate = null, buyButtonText = 'I Want It ❤️' }: DailyDealHeroProps) {
+export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, reviews = [], reviewTotal = 0, aggregate = null, buyButtonText = 'I Want It ❤️', shareUrl, shareTitle, shareImage }: DailyDealHeroProps) {
   const [activeImg,      setActiveImg]      = useState(0)
   const [quantity,       setQuantity]       = useState(1)
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
@@ -71,8 +76,32 @@ export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, review
     } else if (fetcher.state === 'idle' && wasSubmitting.current) {
       wasSubmitting.current = false
       window.dispatchEvent(new CustomEvent('xdipx:cart-added'))
+      // GA4: add_to_cart
+      trackAddToCart({
+        item_id: deal.shopifyProductId,
+        item_name: deal.seoTitle,
+        item_brand: deal.brand,
+        item_category: deal.category,
+        price: variantPrice,
+        quantity,
+        ...(selectedVariant?.title ? { item_variant: selectedVariant.title } : {}),
+      })
     }
   }, [fetcher.state])
+
+  // GA4: countdown urgency — fire once per session when < 2 hours remain
+  const urgencyFired = useRef(false)
+  useEffect(() => {
+    if (urgencyFired.current) return
+    const now = new Date()
+    const midnight = new Date(now)
+    midnight.setHours(24, 0, 0, 0)
+    const hoursRemaining = (midnight.getTime() - now.getTime()) / (1000 * 60 * 60)
+    if (hoursRemaining < 2) {
+      urgencyFired.current = true
+      trackCountdownUrgency(Math.round(hoursRemaining * 10) / 10)
+    }
+  }, [])
 
   const discount = deal.msrp > 0 && deal.msrp > variantPrice
     ? Math.round(((deal.msrp - variantPrice) / deal.msrp) * 100)
@@ -105,6 +134,7 @@ export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, review
             src={deal.moodImageUrl}
             alt=""
             aria-hidden="true"
+            decoding="async"
             className="absolute inset-0 w-full h-full object-cover"
           />
           <div className="absolute inset-0 bg-gradient-to-r from-brand-cream/97 via-brand-cream/90 to-brand-cream/60" />
@@ -139,6 +169,9 @@ export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, review
             selectedPlanId={selectedPlanId}
             setSelectedPlanId={setSelectedPlanId}
             buyButtonText={buyButtonText}
+            {...(shareUrl   !== undefined ? { shareUrl }   : {})}
+            {...(shareTitle !== undefined ? { shareTitle } : {})}
+            {...(shareImage !== undefined ? { shareImage } : {})}
           />
         </div>
       )}
@@ -176,6 +209,9 @@ export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, review
           selectedPlanId={selectedPlanId}
           setSelectedPlanId={setSelectedPlanId}
           buyButtonText={buyButtonText}
+          {...(shareUrl   !== undefined ? { shareUrl }   : {})}
+          {...(shareTitle !== undefined ? { shareTitle } : {})}
+          {...(shareImage !== undefined ? { shareImage } : {})}
         />
       )}
 
@@ -187,6 +223,10 @@ export function DailyDealHero({ deal, cartId, viewers = 0, soldToday = 0, review
               src={deal.images[0].url}
               alt=""
               aria-hidden="true"
+              width={48}
+              height={48}
+              loading="lazy"
+              decoding="async"
               className="w-12 h-12 rounded-xl object-cover bg-brand-mist shrink-0"
             />
           )}
@@ -258,6 +298,9 @@ interface HeroContentProps {
   selectedPlanId: string | null
   setSelectedPlanId: (id: string | null) => void
   buyButtonText: string
+  shareUrl?: string
+  shareTitle?: string
+  shareImage?: string | null
 }
 
 function HeroContent({
@@ -268,6 +311,7 @@ function HeroContent({
   multiVariant, variants, options, selectedId, setSelectedId,
   selectedVariant, variantPrice, basePrice, variantInStock, variantQty,
   selectedPlanId, setSelectedPlanId, buyButtonText,
+  shareUrl, shareTitle, shareImage,
 }: HeroContentProps) {
   const allMedia = buildGallery(deal)
 
@@ -295,6 +339,26 @@ function HeroContent({
           alt={deal.seoTitle}
           activeIndex={activeImg}
           onSelectIndex={setActiveImg}
+          shareOverlay={
+            shareUrl && shareTitle ? (
+              <ShareButtons
+                url={shareUrl}
+                title={shareTitle}
+                image={shareImage ?? null}
+                variant="overlay"
+              />
+            ) : null
+          }
+          heartOverlay={
+            <HeartButton
+              shopifyProductId={deal.shopifyProductId}
+              handle={deal.handle}
+              productTitle={deal.seoTitle}
+              price={variantPrice}
+              variant="overlay"
+              size="md"
+            />
+          }
         />
 
         {/* ── Right: Product info ─────────────────────────────────── */}
@@ -333,6 +397,7 @@ function HeroContent({
                 </span>
               </>
             )}
+            <StockIndicator qty={variantQty} />
           </div>
 
           {/* Social proof */}
@@ -443,7 +508,6 @@ function HeroContent({
                   +
                 </button>
               </div>
-              <span className="text-xs text-brand-charcoal/40">Max 3</span>
             </div>
 
             <button
@@ -460,28 +524,7 @@ function HeroContent({
             >
               {!variantInStock ? 'Sold Out' : isPending ? 'Adding...' : buyButtonText}
             </button>
-
-            <InlineCountdown />
           </fetcher.Form>
-
-          {/* Stock + Trust badges */}
-          <StockIndicator qty={variantQty} />
-
-          <div className="flex flex-wrap gap-2 pt-2">
-            {[
-              { label: 'Secure checkout', icon: <LockIcon /> },
-              { label: 'Ships discreetly', icon: <BoxIcon /> },
-              { label: '14-day returns', icon: <ReturnIcon /> },
-            ].map(({ label, icon }) => (
-              <span
-                key={label}
-                className="inline-flex items-center gap-1.5 text-xs text-brand-charcoal/60 bg-brand-mist px-3 py-1.5 rounded-full"
-              >
-                {icon}
-                {label}
-              </span>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -510,30 +553,3 @@ function WorksForBadge({ label, emoji }: { label: string; emoji: string }) {
   )
 }
 
-function LockIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-  )
-}
-
-function BoxIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-      <line x1="12" y1="22.08" x2="12" y2="12" />
-    </svg>
-  )
-}
-
-function ReturnIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="1 4 1 10 7 10" />
-      <path d="M3.51 15a9 9 0 1 0 .49-3.49" />
-    </svg>
-  )
-}

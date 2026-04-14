@@ -1,20 +1,50 @@
+import { useEffect } from 'react'
 import type { MetaFunction } from 'react-router'
-import { Link, useOutletContext } from 'react-router'
+import { Link, useOutletContext, useRouteLoaderData, useSearchParams } from 'react-router'
 import type { StorefrontOrder } from '~/lib/shopify.server'
 import type { AccountOutletContext } from './_layout.account'
+import { trackLogin, trackSignUp } from '~/lib/analytics.client'
 import { DashboardTile } from '~/components/account/DashboardTile'
 import { ProfileCompletion } from '~/components/account/ProfileCompletion'
 import { StatusPill } from '~/components/account/StatusPill'
 import { EmptyState } from '~/components/account/EmptyState'
+import { MergeLocalHearts } from '~/components/store/MergeLocalHearts'
 
 export const meta: MetaFunction = () => [{ title: 'Account — xdipx' }]
 
 export default function AccountDashboard() {
   const { customer } = useOutletContext<AccountOutletContext>()
+  const layoutData = useRouteLoaderData('routes/_layout') as
+    | { wishlistCount?: number }
+    | undefined
+  const wishlistCount = layoutData?.wishlistCount ?? 0
   const recentOrder = customer.orders[0] ?? null
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // GA4: fire login/sign_up event after redirect from auth
+  useEffect(() => {
+    const from = searchParams.get('from')
+    if (from === 'login') {
+      trackLogin('email')
+      setSearchParams(prev => { prev.delete('from'); return prev }, { replace: true })
+    } else if (from === 'register') {
+      trackSignUp('email')
+      setSearchParams(prev => { prev.delete('from'); return prev }, { replace: true })
+    } else if (from === 'google') {
+      trackLogin('google')
+      setSearchParams(prev => { prev.delete('from'); return prev }, { replace: true })
+    } else if (from === 'facebook') {
+      trackLogin('facebook')
+      setSearchParams(prev => { prev.delete('from'); return prev }, { replace: true })
+    } else if (from === 'shop') {
+      trackLogin('shop')
+      setSearchParams(prev => { prev.delete('from'); return prev }, { replace: true })
+    }
+  }, [])
 
   return (
     <div className="space-y-6">
+      <MergeLocalHearts />
       {/* Desktop greeting (mobile header already shows this) */}
       <section className="hidden lg:block">
         <h1
@@ -30,11 +60,16 @@ export default function AccountDashboard() {
       <ProfileCompletion customer={customer} />
 
       {/* Tile grid */}
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         <DashboardTile
           label="Orders"
           value={customer.orders.length}
           to="/account/orders"
+        />
+        <DashboardTile
+          label="Wishlists"
+          value={wishlistCount}
+          to="/account/wishlists"
         />
         <DashboardTile
           label="Addresses"

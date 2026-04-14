@@ -1,7 +1,10 @@
+import { useEffect } from 'react'
 import type { MetaFunction, LoaderFunctionArgs } from 'react-router'
 import { useLoaderData } from 'react-router'
 import { getProductsByTag } from '~/lib/shopify.server'
 import { Link } from 'react-router'
+import { trackViewItemList } from '~/lib/analytics.client'
+import { HeartButton } from '~/components/store/HeartButton'
 
 export const meta: MetaFunction = () => [
   { title: 'For Her — Pleasure Products | xdipx' },
@@ -16,6 +19,15 @@ export async function loader(_: LoaderFunctionArgs) {
 
 export default function ForHerPage() {
   const { products } = useLoaderData<typeof loader>()
+
+  useEffect(() => {
+    if (products.length > 0) {
+      trackViewItemList('for_her', 'For Her', products.map((p, i) => ({
+        item_id: p.id, item_name: p.title, ...(p.brand ? { item_brand: p.brand } : {}), price: p.price, index: i,
+      })))
+    }
+  }, [products])
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-10 bg-brand-mist min-h-screen">
       <h1 className="text-3xl font-bold text-brand-charcoal mb-1" style={{ fontFamily: 'var(--font-display)' }}>
@@ -25,8 +37,16 @@ export default function ForHerPage() {
       {products.length > 0 ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {products.map(p => (
-            <Link to={`/products/${p.handle}`} key={p.id} className="group">
-              <article className="bg-white rounded-2xl overflow-hidden shadow-sm card-lift">
+            <article key={p.id} className="bg-white rounded-2xl overflow-hidden shadow-sm card-lift group relative">
+              <HeartButton
+                shopifyProductId={p.id}
+                handle={p.handle}
+                productTitle={p.title}
+                price={p.price}
+                variant="overlay"
+                size="sm"
+              />
+              <Link to={`/products/${p.handle}`} className="block">
                 <div className="aspect-square bg-brand-cream overflow-hidden">
                   {p.images[0] ? (
                     <img src={p.images[0].url} alt={p.images[0].altText || p.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
@@ -39,8 +59,8 @@ export default function ForHerPage() {
                   <p className="font-semibold text-sm text-brand-charcoal mt-0.5 line-clamp-2" style={{ fontFamily: 'var(--font-display)' }}>{p.title}</p>
                   <p className="text-brand-gradient font-bold text-sm mt-2">${p.price.toFixed(2)}</p>
                 </div>
-              </article>
-            </Link>
+              </Link>
+            </article>
           ))}
         </div>
       ) : (

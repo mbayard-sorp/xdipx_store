@@ -6,6 +6,7 @@ import { dealHistory }  from '../../db/schema'
 import { generateSchedule } from '~/lib/claude.server'
 import { dailyFeedProcessor } from '~/lib/feed-processor.server'
 import { setDealStatus, activateShopifyProduct, getAdminProductData } from '~/lib/shopify.server'
+import { activateDeal } from '~/lib/deal-rotator.server'
 import { eq, and } from 'drizzle-orm'
 
 export const meta: MetaFunction = () => [{ title: 'Deal Queue — xdipx Admin' }]
@@ -62,9 +63,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'force-live') {
-    const id               = parseInt(form.get('id') as string)
-    const shopifyProductId = form.get('shopifyProductId') as string
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const id = parseInt(form.get('id') as string)
 
     // Archive whatever is currently live
     const [liveNow] = await db
@@ -80,14 +79,14 @@ export async function action({ request }: ActionFunctionArgs) {
         .where(eq(dealHistory.id, liveNow.id))
     }
 
-    // Ensure product is active (pipeline creates as draft)
-    await activateShopifyProduct(shopifyProductId)
-    // Make this deal live and stamp today's date
-    await setDealStatus(shopifyProductId, 'live')
-    await db
-      .update(dealHistory)
-      .set({ status: 'live', activatedAt: new Date(), dealDate: today })
+    // Load target deal and route through activateDeal — which pushes
+    // configured dealPrice to the variant before flipping status live.
+    const [target] = await db
+      .select()
+      .from(dealHistory)
       .where(eq(dealHistory.id, id))
+      .limit(1)
+    if (target) await activateDeal(target)
     return { ok: true }
   }
 

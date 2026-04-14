@@ -1,6 +1,14 @@
 import type { ActionFunctionArgs } from 'react-router'
+import { timingSafeEqual } from 'node:crypto'
 import { pushProductToShopify } from '~/lib/shopify.server'
 import type { ProductPageDoc } from '~/lib/shopify.server'
+
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a)
+  const bb = Buffer.from(b)
+  if (ab.length !== bb.length) return false
+  return timingSafeEqual(ab, bb)
+}
 
 /**
  * POST /api/sanity-product-push
@@ -21,8 +29,9 @@ export async function action({ request }: ActionFunctionArgs) {
     return new Response('Method not allowed', { status: 405 })
   }
 
+  const expected = process.env['SANITY_WEBHOOK_SECRET']
   const secret = request.headers.get('x-sanity-webhook-secret')
-  if (!secret || secret !== process.env['SANITY_WEBHOOK_SECRET']) {
+  if (!expected || !secret || !safeEqual(secret, expected)) {
     return new Response('Unauthorized', { status: 401 })
   }
 

@@ -105,7 +105,7 @@ export async function action({ request }: ActionFunctionArgs) {
     console.error('[login] cart link failed:', err)
   }
 
-  throw redirect('/account', { headers })
+  throw redirect('/account?from=login', { headers })
 }
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {

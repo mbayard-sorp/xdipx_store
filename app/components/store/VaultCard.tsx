@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import type { VaultDeal } from '~/types'
 import { WaitlistButton } from './WaitlistButton'
+import { HeartButton } from './HeartButton'
 
 interface VaultCardProps {
   deal: VaultDeal
@@ -12,7 +13,15 @@ export function VaultCard({ deal }: VaultCardProps) {
     : 0
 
   return (
-    <article className="bg-white rounded-2xl overflow-hidden shadow-sm card-lift group">
+    <article className="bg-white rounded-2xl overflow-hidden shadow-sm card-lift group relative">
+      <HeartButton
+        shopifyProductId={deal.id}
+        handle={deal.handle}
+        productTitle={deal.seoTitle}
+        price={deal.dealPrice}
+        variant="overlay"
+        size="sm"
+      />
       <Link to={`/products/${deal.handle}`} className="block">
         <div className="aspect-square overflow-hidden bg-brand-mist relative">
           {deal.images[0] ? (

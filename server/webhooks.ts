@@ -1,9 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
-import { db } from '../app/lib/db.server.js'
-import { dealHistory, referrals } from '../db/schema.js'
-import { eq } from 'drizzle-orm'
-import { getWholesaleCostBySKU, shopifyAdmin } from '../app/lib/shopify.server.js'
+import { dealHistory, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
+import { eq, sql } from 'drizzle-orm'
 
 // ─── HMAC verification ────────────────────────────────────────────────────
 
@@ -23,6 +21,8 @@ function verifyShopifyWebhook(req: Request): boolean {
 
 interface ShopifyLineItem {
   id: number
+  product_id?: number
+  variant_id?: number
   sku: string
   title: string
   quantity: number
@@ -48,6 +48,16 @@ interface ShopifyOrder {
  * Also captures referral code.
  */
 async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
+  const { db } = await import('../app/lib/db.server.js')
+  const { getWholesaleCostBySKU, getHandleByProductId, shopifyAdmin } = await import('../app/lib/shopify.server.js')
+
+  // Resolve handles for each line item (used for copurchase rollup).
+  const resolvedHandles: (string | null)[] = await Promise.all(
+    order.line_items.map(li =>
+      li.product_id ? getHandleByProductId(li.product_id).catch(() => null) : Promise.resolve(null),
+    ),
+  )
+
   for (const lineItem of order.line_items) {
     const cost   = await getWholesaleCostBySKU(lineItem.sku).catch(() => 0)
     const profit = parseFloat(lineItem.price) - cost
@@ -80,6 +90,46 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
       })
       .where(eq(dealHistory.sku, lineItem.sku))
       .catch(() => {/* non-critical */})
+  }
+
+  // Persist raw line items for analytics + copurchase rollups
+  try {
+    const rows = order.line_items.map((li, i) => ({
+      shopifyOrderId:   String(order.id),
+      shopifyProductId: li.product_id ? String(li.product_id) : '',
+      handle:           resolvedHandles[i] ?? null,
+      sku:              li.sku || null,
+      quantity:         li.quantity,
+      unitPrice:        li.price,
+    }))
+    if (rows.length > 0) await db.insert(orderLineItems).values(rows)
+  } catch (err) {
+    console.error('[webhook:order-created] line items insert failed:', err)
+  }
+
+  // UPSERT co-purchase pairs. Convention: handle_a < handle_b (lexicographic).
+  const uniqueHandles = Array.from(
+    new Set(resolvedHandles.filter((h): h is string => !!h)),
+  )
+  if (uniqueHandles.length >= 2) {
+    for (let i = 0; i < uniqueHandles.length; i++) {
+      for (let j = i + 1; j < uniqueHandles.length; j++) {
+        const [a, b] = [uniqueHandles[i]!, uniqueHandles[j]!].sort() as [string, string]
+        try {
+          await db.insert(productCopurchase)
+            .values({ handleA: a, handleB: b, count: 1 })
+            .onConflictDoUpdate({
+              target: [productCopurchase.handleA, productCopurchase.handleB],
+              set: {
+                count:      sql`${productCopurchase.count} + 1`,
+                lastSeenAt: new Date(),
+              },
+            })
+        } catch (err) {
+          console.error('[webhook:order-created] copurchase upsert failed:', err)
+        }
+      }
+    }
   }
 
   // Capture referral code from note_attributes
@@ -129,6 +179,7 @@ interface ShopifyFulfilledOrder extends ShopifyOrder {
 async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promise<void> {
   if (!order.email || order.line_items.length === 0) return
 
+  const { shopifyAdmin } = await import('../app/lib/shopify.server.js')
   const { getReviewSettings, createInvite } = await import('../app/lib/reviews.server.js')
   const settings = await getReviewSettings()
 

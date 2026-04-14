@@ -58,16 +58,20 @@ export async function transitionToVaultPricing(
     shopifyProductId: string | null
     msrp: string | null
     vaultPrice: string | null
+    pctOffMsrp?: string | null
   },
 ): Promise<void> {
   if (!deal.shopifyProductId) return
 
-  const pct = await getVaultDiscountPct()
   const msrp = parseFloat(deal.msrp ?? '0')
 
-  // Use manually set vault price, or calculate from MSRP * (1 - pct/100)
+  // Priority: per-product vaultPrice override → per-product pctOffMsrp → global vaultDiscountPct.
   let vaultPrice = deal.vaultPrice ? parseFloat(deal.vaultPrice) : 0
   if (!vaultPrice && msrp > 0) {
+    const productPct = deal.pctOffMsrp ? parseFloat(deal.pctOffMsrp) : NaN
+    const pct = isFinite(productPct) && productPct > 0
+      ? Math.max(0, Math.min(100, productPct))
+      : await getVaultDiscountPct()
     vaultPrice = Math.round(msrp * (1 - pct / 100) * 100) / 100
   }
 
@@ -116,6 +120,7 @@ export async function activateDeal(
     seoTitle: string | null
     dealPrice: string | null
     msrp: string | null
+    wholesaleCost?: string | null
   },
 ): Promise<void> {
   if (!deal.shopifyProductId) return
@@ -123,6 +128,22 @@ export async function activateDeal(
   // Ensure product is published (not draft)
   const numericId = deal.shopifyProductId.replace('gid://shopify/Product/', '')
   await activateShopifyProduct(numericId)
+
+  // Push configured deal price → variant.price (compareAtPrice = MSRP)
+  // Admin edits pricing config without mutating live price; we flip it here.
+  const dealPrice = parseFloat(deal.dealPrice ?? '0')
+  const msrp      = parseFloat(deal.msrp ?? '0')
+  if (dealPrice > 0) {
+    const variantGid = await getFirstVariantGid(deal.shopifyProductId)
+    if (variantGid) {
+      await updateVariantPricing(
+        variantGid,
+        dealPrice.toFixed(2),
+        msrp > 0 ? msrp.toFixed(2) : '',
+        deal.wholesaleCost ?? undefined,
+      )
+    }
+  }
 
   // Set live status in Shopify
   await setDealStatus(deal.shopifyProductId, 'live')

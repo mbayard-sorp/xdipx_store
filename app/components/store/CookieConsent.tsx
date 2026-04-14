@@ -19,6 +19,9 @@ export function CookieConsent() {
     localStorage.setItem(CONSENT_KEY, JSON.stringify({ type, version: POLICY_VERSION, ts: Date.now() }))
     setVisible(false)
 
+    // Notify Analytics component of consent change
+    window.dispatchEvent(new CustomEvent('xdipx:consent-update'))
+
     // Fire consent log to API (non-blocking)
     fetch('/api/consent', {
       method: 'POST',
@@ -41,7 +44,7 @@ export function CookieConsent() {
     >
       <p className="text-sm leading-relaxed mb-4 text-white/80">
         We use cookies to remember your preferences and improve your experience.{' '}
-        <a href="/privacy" className="underline text-white/60 hover:text-white">Privacy policy</a>
+        <a href="/pages/privacy-policy" className="underline text-white/60 hover:text-white">Privacy policy</a>
       </p>
       <div className="flex gap-2">
         <button

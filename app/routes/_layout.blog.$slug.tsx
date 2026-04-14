@@ -7,7 +7,8 @@ import { BlogHero } from '~/components/blog/BlogHero'
 import { BlogBody } from '~/components/blog/BlogBody'
 import { TableOfContents } from '~/components/blog/TableOfContents'
 import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
-import { ShareButtons } from '~/components/blog/ShareButtons'
+import { ShareButtons } from '~/components/common/ShareButtons'
+import { buildSocialMeta } from '~/lib/social-meta'
 import { RelatedPosts } from '~/components/blog/RelatedPosts'
 import { BlogStructuredData } from '~/components/seo/BlogStructuredData'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
@@ -40,29 +41,17 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const { post } = data
   const title = (post.seoTitle ?? post.title) + ' — xdipx Blog'
   const description = post.seoDescription ?? post.excerpt
-  const image = post.ogImageUrl ?? post.heroImageUrl
+  const image = post.ogImageUrl ?? post.heroImageUrl ?? null
   const canonical = `https://xdipx.com/blog/${post.slug}`
 
   return [
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: canonical },
-    // Open Graph
-    { property: 'og:title', content: title },
-    { property: 'og:description', content: description },
-    { property: 'og:type', content: 'article' },
-    { property: 'og:url', content: canonical },
-    ...(image ? [{ property: 'og:image', content: image }] : []),
-    // Article meta
+    ...buildSocialMeta({ title, description, url: canonical, image, type: 'article' }),
     { property: 'article:published_time', content: post.publishedAt },
     ...(post.author ? [{ property: 'article:author', content: post.author.name }] : []),
     ...(post.tags ?? []).map(tag => ({ property: 'article:tag', content: tag })),
-    // Twitter card
-    { name: 'twitter:card', content: 'summary_large_image' },
-    { name: 'twitter:title', content: title },
-    { name: 'twitter:description', content: description },
-    ...(image ? [{ name: 'twitter:image', content: image }] : []),
-    // noindex
     ...(post.noIndex ? [{ name: 'robots', content: 'noindex' }] : []),
   ]
 }
@@ -105,6 +94,7 @@ export default function BlogPostPage() {
             <ShareButtons
               url={`https://xdipx.com/blog/${post.slug}`}
               title={post.title}
+              image={post.ogImageUrl ?? post.heroImageUrl ?? null}
             />
 
             {post.author && (

@@ -10,8 +10,24 @@ import {
 } from 'react-router'
 import type { LoaderFunctionArgs, LinksFunction } from 'react-router'
 
+import * as Sentry from '@sentry/react'
+import { BotIdClient } from 'botid/client'
 import stylesheet from './app.css?url'
 import { AgeGate } from './components/store/AgeGate'
+
+const BOTID_PROTECTED_ROUTES = [
+  { path: '/api/waitlist',  method: 'POST' },
+  { path: '/admin/login',   method: 'POST' },
+  { path: '/api/reviews',   method: 'POST' },
+]
+
+if (typeof window !== 'undefined') {
+  const dsn = (window as unknown as { ENV?: { SENTRY_DSN?: string } }).ENV?.SENTRY_DSN
+  if (dsn && !(window as unknown as { __sentryInit?: boolean }).__sentryInit) {
+    Sentry.init({ dsn, environment: import.meta.env.MODE, tracesSampleRate: 0 })
+    ;(window as unknown as { __sentryInit: boolean }).__sentryInit = true
+  }
+}
 
 export const links: LinksFunction = () => [
   // Favicons
@@ -23,6 +39,8 @@ export const links: LinksFunction = () => [
   // Preconnect for Google Fonts
   { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
   { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
+  // Preconnect for Google Analytics
+  { rel: 'preconnect', href: 'https://www.googletagmanager.com' },
   // Poppins (display) + Inter (body)
   {
     rel: 'stylesheet',
@@ -49,11 +67,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ENV: {
       GA4_ID:          process.env['GA4_MEASUREMENT_ID'] ?? '',
       AGE_GATE_LEVEL:  process.env['AGE_GATE_LEVEL'] ?? 'click_through',
+      SENTRY_DSN:      process.env['SENTRY_DSN'] ?? '',
     },
   }
 }
 
 export function Layout({ children }: { children: React.ReactNode }) {
+  // GA4_ID is injected via window.ENV in App() — read it here for the head scripts.
+  // During SSR we pull from the loader; on the client we read window.ENV.
+  const ga4Id = typeof document !== 'undefined'
+    ? (window as unknown as { ENV?: { GA4_ID?: string } }).ENV?.GA4_ID ?? ''
+    : (process.env['GA4_MEASUREMENT_ID'] ?? '')
+
   return (
     <html lang="en" className="bg-brand-cream">
       <head>
@@ -61,6 +86,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
+        <BotIdClient protect={BOTID_PROTECTED_ROUTES} />
+        {ga4Id && (
+          <>
+            <script async src={`https://www.googletagmanager.com/gtag/js?id=${ga4Id}`} />
+            <script
+              dangerouslySetInnerHTML={{
+                __html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});gtag('js',new Date());gtag('config','${ga4Id}',{send_page_view:false});`,
+              }}
+            />
+          </>
+        )}
       </head>
       <body
         className="font-body text-brand-charcoal antialiased"

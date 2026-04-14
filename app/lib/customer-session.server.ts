@@ -1,4 +1,5 @@
 import { createCookieSessionStorage, redirect } from 'react-router'
+import { requireSecret } from './env.server'
 
 const { getSession, commitSession, destroySession } = createCookieSessionStorage({
   cookie: {
@@ -6,7 +7,7 @@ const { getSession, commitSession, destroySession } = createCookieSessionStorage
     httpOnly: true,
     path: '/',
     sameSite: 'lax',
-    secrets: [process.env['SESSION_SECRET'] ?? 'dev-secret-change-me'],
+    secrets: [requireSecret('SESSION_SECRET')],
     secure: process.env['NODE_ENV'] === 'production',
     maxAge: 60 * 60 * 24 * 30, // 30 days
   },

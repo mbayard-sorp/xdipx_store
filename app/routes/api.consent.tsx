@@ -2,9 +2,13 @@ import type { ActionFunctionArgs } from 'react-router'
 import { db }         from '~/lib/db.server'
 import { consentLog } from '../../db/schema'
 import { getClientIP, hashIP } from '~/lib/attribution.server'
+import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import type { ConsentType } from '~/types'
 
 export async function action({ request }: ActionFunctionArgs) {
+  const rl = await checkRateLimit(request, 'consent', 10, 3600)
+  if (!rl.ok) return rateLimited()
+
   const body = await request.json() as {
     session_id:     string
     customer_id?:   string

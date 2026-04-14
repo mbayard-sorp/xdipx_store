@@ -15,6 +15,13 @@
       "when": 1775670552988,
       "tag": "0001_social_posts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776132580581,
+      "tag": "0002_fluffy_james_howlett",
+      "breakpoints": true
     }
   ]
 }

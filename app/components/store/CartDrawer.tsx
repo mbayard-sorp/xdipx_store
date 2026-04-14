@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useFetcher } from 'react-router'
 import { motion } from 'motion/react'
 import type { Cart, CartLine, Product } from '~/types'
+import { trackViewCart, trackRemoveFromCart, trackBeginCheckout, type GA4Item } from '~/lib/analytics.client'
 
 const FREE_SHIPPING_THRESHOLD = 99
 
@@ -15,10 +16,31 @@ interface CartDrawerProps {
   onMouseLeave?: () => void
 }
 
+function cartLinesToGA4(lines: CartLine[]): GA4Item[] {
+  return lines.map((line, i) => {
+    const variantTitle = line.merchandise.title === 'Default Title' ? null : line.merchandise.title
+    return {
+      item_id: line.merchandise.product.id ?? line.id,
+      item_name: line.merchandise.product.title,
+      ...(variantTitle ? { item_variant: variantTitle } : {}),
+      price: parseFloat(line.merchandise.price.amount),
+      quantity: line.quantity,
+      index: i,
+    }
+  })
+}
+
 export function CartDrawer({ cart, upsells = [], panelRef, onClose, onMouseEnter, onMouseLeave }: CartDrawerProps) {
   const subtotal  = cart ? parseFloat(cart.cost.subtotalAmount.amount) : 0
   const remaining = Math.max(FREE_SHIPPING_THRESHOLD - subtotal, 0)
   const progress  = Math.min((subtotal / FREE_SHIPPING_THRESHOLD) * 100, 100)
+
+  // ── GA4: view_cart on drawer open ─────────────────────────────────────
+  useEffect(() => {
+    if (cart && cart.lines.length > 0) {
+      trackViewCart(cartLinesToGA4(cart.lines), subtotal)
+    }
+  }, []) // fire once on mount (drawer open)
 
   return (
     <>
@@ -129,6 +151,7 @@ export function CartDrawer({ cart, upsells = [], panelRef, onClose, onMouseEnter
             </p>
             <a
               href={cart.checkoutUrl}
+              onClick={() => trackBeginCheckout(cartLinesToGA4(cart.lines), subtotal)}
               className="flex items-center justify-center gap-2 w-full py-4 rounded-xl text-white text-base font-bold tracking-wide transition-all hover:opacity-90 hover:shadow-lg hover:shadow-brand-coral/20"
               style={{
                 background: 'linear-gradient(to right, #F04E37, #FF8C38)',
@@ -157,12 +180,29 @@ export function CartDrawer({ cart, upsells = [], panelRef, onClose, onMouseEnter
 function CartLineItem({ line }: { line: CartLine }) {
   const removeFetcher  = useFetcher()
   const updateFetcher  = useFetcher()
+  const wasRemoving    = useRef(false)
 
   const isRemoving  = removeFetcher.state !== 'idle'
   const isUpdating  = updateFetcher.state !== 'idle'
   const price       = parseFloat(line.merchandise.price.amount)
   const image       = line.merchandise.product.images[0]
   const variantTitle = line.merchandise.title === 'Default Title' ? null : line.merchandise.title
+
+  // GA4: remove_from_cart on success
+  useEffect(() => {
+    if (removeFetcher.state === 'submitting') {
+      wasRemoving.current = true
+    } else if (removeFetcher.state === 'idle' && wasRemoving.current) {
+      wasRemoving.current = false
+      trackRemoveFromCart({
+        item_id: line.merchandise.product.id ?? line.id,
+        item_name: line.merchandise.product.title,
+        ...(variantTitle ? { item_variant: variantTitle } : {}),
+        price,
+        quantity: line.quantity,
+      })
+    }
+  }, [removeFetcher.state])
 
   const changeQty = (delta: number) => {
     const newQty = line.quantity + delta

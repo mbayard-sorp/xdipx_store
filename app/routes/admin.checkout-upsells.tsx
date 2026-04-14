@@ -1,13 +1,13 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher } from 'react-router'
-import { kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
 import { getAccessoryProductsAdmin } from '~/lib/shopify.server'
 import { ProductPicker, productToPickerProduct } from '~/components/admin/ProductPicker'
 
 export const meta: MetaFunction = () => [{ title: 'Checkout Upsells — xdipx Admin' }]
 
 export async function loader(_args: LoaderFunctionArgs) {
-  const pinnedIds = await kvGet<string[]>(KV_KEYS.pinnedAccessoryIds) ?? []
+  const pinnedIds = await getPinnedAccessoryIds()
   const pinnedAccessories = pinnedIds.length
     ? await getAccessoryProductsAdmin(pinnedIds)
     : []
@@ -21,7 +21,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'save-pinned-accessories') {
     const ids = JSON.parse(form.get('ids') as string) as string[]
-    await kvSet(KV_KEYS.pinnedAccessoryIds, ids)
+    await setPinnedAccessoryIds(ids)
     return { ok: true }
   }
 

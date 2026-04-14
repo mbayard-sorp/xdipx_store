@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router'
 import { AnimatePresence, motion } from 'motion/react'
 import { CartDrawer } from '~/components/store/CartDrawer'
 import { DesktopMegaMenu, MobileMegaMenu } from '~/components/store/MegaMenu'
+import { SearchBar } from '~/components/store/SearchBar'
 import type { Cart, Product } from '~/types'
 import type { MegaMenuBanner } from '~/types/cms'
 import type { ShopifyMenuItem } from '~/lib/shopify.server'
@@ -17,10 +18,11 @@ interface NavbarProps {
   menuItems?: ShopifyMenuItem[]
   megaMenuBanners?: MegaMenuBanner[]
   upsells?: Product[]
+  wishlistCount?: number
 }
 
 
-export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx', isCustomerLoggedIn = false, customerFirstName, menuItems = [], megaMenuBanners = [], upsells = [] }: NavbarProps) {
+export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx', isCustomerLoggedIn = false, customerFirstName, menuItems = [], megaMenuBanners = [], upsells = [], wishlistCount = 0 }: NavbarProps) {
   const location = useLocation()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [cartOpen,   setCartOpen]   = useState(false)
@@ -138,39 +140,17 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
             )}
           </Link>
 
-          {/* Desktop mega menu */}
-          <DesktopMegaMenu items={menuItems} banners={megaMenuBanners} />
+          {/* Desktop mega menu — flex-1 so SearchBar expansion compresses it left */}
+          <div className="hidden md:flex flex-1 min-w-0 overflow-hidden">
+            <DesktopMegaMenu items={menuItems} banners={megaMenuBanners} />
+          </div>
 
-          {/* Blog link (desktop) */}
-          <Link
-            to="/blog"
-            className="hidden md:block text-sm font-medium text-brand-charcoal/70 hover:text-brand-purple transition-colors"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            Blog
-          </Link>
+          {/* Search */}
+          <SearchBar />
+
 
           {/* Right side */}
           <div className="flex items-center gap-2">
-            {/* Account icon — mobile: simple link, desktop: dropdown when logged in */}
-            {/* Mobile account link (always a simple link) */}
-            <Link
-              to={isCustomerLoggedIn ? '/account' : '/account/login'}
-              className="md:hidden relative flex items-center justify-center w-11 h-11 rounded-full hover:bg-brand-mist transition-colors"
-              aria-label={isCustomerLoggedIn ? 'My account' : 'Sign in'}
-            >
-              {isCustomerLoggedIn ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className="text-brand-purple" aria-hidden="true">
-                  <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-brand-charcoal/60" aria-hidden="true">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                  <circle cx="12" cy="7" r="4"/>
-                </svg>
-              )}
-            </Link>
-
             {/* Desktop account — dropdown when logged in, simple link when not */}
             {isCustomerLoggedIn ? (
               <div ref={accountMenuRef} className="relative hidden md:block">
@@ -208,11 +188,17 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
                           ['/account', 'Overview'],
                           ['/account/orders', 'Orders'],
                           ['/account/subscriptions', 'Subscriptions'],
+                          ['/account/wishlists', 'Wishlists'],
                           ['/account/addresses', 'Addresses'],
                           ['/account/profile', 'Profile'],
                           ['/account/preferences', 'Preferences'],
                         ] as const).map(([to, label]) => (
-                          <Link key={to} to={to} onClick={() => setAccountMenuOpen(false)} className="block px-4 py-2 text-sm text-brand-charcoal hover:bg-brand-mist/60 hover:text-brand-purple transition-colors" role="menuitem">{label}</Link>
+                          <Link key={to} to={to} onClick={() => setAccountMenuOpen(false)} className="flex items-center justify-between px-4 py-2 text-sm text-brand-charcoal hover:bg-brand-mist/60 hover:text-brand-purple transition-colors" role="menuitem">
+                            <span>{label}</span>
+                            {label === 'Wishlists' && wishlistCount > 0 && (
+                              <span className="ml-2 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-brand-purple text-white text-[11px] font-bold">{wishlistCount}</span>
+                            )}
+                          </Link>
                         ))}
                       </div>
                       <div className="border-t border-brand-mist my-1" />
@@ -265,12 +251,12 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
             {/* Hamburger — mobile only */}
             <button
               onClick={() => setDrawerOpen(true)}
-              className="md:hidden flex flex-col items-center justify-center w-11 h-11 rounded-full hover:bg-brand-mist transition-colors gap-1.5"
+              className="md:hidden flex flex-col items-center justify-center w-11 h-11 rounded-full hover:bg-brand-mist transition-colors gap-[5px]"
               aria-label="Open menu"
             >
-              <span className="w-4.5 h-0.5 bg-brand-charcoal rounded-full" />
-              <span className="w-4.5 h-0.5 bg-brand-charcoal rounded-full" />
-              <span className="w-3 h-0.5 bg-brand-charcoal rounded-full self-end" />
+              <span className="block w-[18px] h-[2px] bg-brand-charcoal rounded-full" />
+              <span className="block w-[18px] h-[2px] bg-brand-charcoal rounded-full" />
+              <span className="block w-[18px] h-[2px] bg-brand-charcoal rounded-full" />
             </button>
           </div>
         </nav>
@@ -302,18 +288,27 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
       </AnimatePresence>
 
       {/* ── Mobile nav drawer ───────────────────────────────────────── */}
-      {drawerOpen && (
+      <AnimatePresence>
+        {drawerOpen && (
         <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-50 bg-brand-charcoal/40 backdrop-blur-sm md:hidden"
+          {/* Backdrop — z-[65] sits above sticky navbar (z-[60]) */}
+          <motion.div
+            className="fixed inset-0 z-[65] bg-brand-charcoal/50 backdrop-blur-sm md:hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
             onClick={() => setDrawerOpen(false)}
             aria-hidden="true"
           />
 
-          {/* Drawer panel */}
-          <div
-            className="fixed top-0 right-0 bottom-0 z-50 w-72 bg-brand-cream shadow-2xl flex flex-col md:hidden"
+          {/* Drawer panel — slides in from right */}
+          <motion.div
+            className="fixed top-0 right-0 bottom-0 z-[66] w-[85vw] max-w-xs bg-brand-cream shadow-2xl flex flex-col md:hidden"
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'tween', duration: 0.25, ease: 'easeOut' }}
             role="dialog"
             aria-modal="true"
             aria-label="Navigation menu"
@@ -364,16 +359,16 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
               {/* Category mega menu accordion */}
               <MobileMegaMenu items={menuItems} onNavigate={() => setDrawerOpen(false)} />
 
-              {/* Blog link (mobile drawer) */}
+              {/* Search link (mobile drawer) */}
               <ul className="px-5">
                 <li>
                   <Link
-                    to="/blog"
+                    to="/search"
                     onClick={() => setDrawerOpen(false)}
                     className="flex items-center gap-2 py-3 text-base font-medium text-brand-charcoal/80 hover:text-brand-purple transition-colors"
                     style={{ fontFamily: 'var(--font-display)' }}
                   >
-                    Blog
+                    Search
                   </Link>
                 </li>
               </ul>
@@ -400,9 +395,10 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
                 One deal. Every day. Ships discreet. ♥
               </p>
             </div>
-          </div>
+          </motion.div>
         </>
-      )}
+        )}
+      </AnimatePresence>
     </>
   )
 }

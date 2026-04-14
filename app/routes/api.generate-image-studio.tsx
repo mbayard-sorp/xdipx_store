@@ -7,7 +7,15 @@
  * Chrome will reject the response.
  */
 import type { ActionFunctionArgs } from 'react-router'
+import { timingSafeEqual } from 'node:crypto'
 import { generateMoodImage } from '~/lib/imagen.server'
+
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a)
+  const bb = Buffer.from(b)
+  if (ab.length !== bb.length) return false
+  return timingSafeEqual(ab, bb)
+}
 
 export type GenerateImageResponse = {
   images: Array<{ base64: string; mimeType: string }>
@@ -16,9 +24,10 @@ export type GenerateImageResponse = {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  // Auth
-  const secret = request.headers.get('x-studio-secret')
-  if (!secret || secret !== process.env['STUDIO_API_SECRET']) {
+  // Auth (timing-safe)
+  const expected = process.env['STUDIO_API_SECRET']
+  const secret   = request.headers.get('x-studio-secret')
+  if (!expected || !secret || !safeEqual(secret, expected)) {
     return Response.json(
       { error: 'Unauthorized' } satisfies GenerateImageResponse,
       { status: 401 },
@@ -55,10 +64,15 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     buffers = await generateMoodImage({ categories: [], prompt, aspectRatio, personGeneration: 'allow_adult' })
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    const status = msg.includes('aborted') || msg.includes('timeout') ? 504 : 502
+    console.error('[generate-image-studio] error:', err)
+    const rawMsg = err instanceof Error ? err.message : String(err)
+    const status = rawMsg.includes('aborted') || rawMsg.includes('timeout') ? 504 : 502
+    const isProd = process.env['NODE_ENV'] === 'production'
     return Response.json(
-      { error: msg } satisfies GenerateImageResponse,
+      {
+        images: [],
+        error: isProd ? 'Image generation failed' : rawMsg,
+      } satisfies GenerateImageResponse,
       { status },
     )
   }

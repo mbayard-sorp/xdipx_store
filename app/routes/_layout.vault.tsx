@@ -1,14 +1,22 @@
+import { useEffect } from 'react'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, Link } from 'react-router'
 import { getVaultDeals, getCollectionDeals } from '~/lib/shopify.server'
 import { getVaultFilterTabs } from '~/lib/kv.server'
 import { VaultCard } from '~/components/store/VaultCard'
+import { trackVaultBrowse, trackViewItemList } from '~/lib/analytics.client'
 
 export const meta: MetaFunction = () => [
   { title: 'The Vault — Past Deals | xdipx' },
   { name: 'description', content: 'Browse every xdipx deal — missed one? It might be back in stock.' },
   { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/vault' },
 ]
+
+export function headers() {
+  return {
+    'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+  }
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url     = new URL(request.url)
@@ -40,6 +48,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export default function VaultPage() {
   const { deals, hasNextPage, page, tabs, activeTabId, activeTabSlug } = useLoaderData<typeof loader>()
+
+  // ── GA4: vault_browse + view_item_list ────────────────────────────────
+  useEffect(() => {
+    trackVaultBrowse(activeTabSlug, page)
+    if (deals.length > 0) {
+      trackViewItemList('vault', 'The Vault', deals.map((d, i) => ({
+        item_id: d.id, item_name: d.seoTitle, item_brand: d.brand, price: d.dealPrice, index: i,
+      })))
+    }
+  }, [activeTabSlug, page])
 
   function tabHref(slug: string) {
     return slug === 'all' ? '/vault' : `/vault?tab=${slug}`
