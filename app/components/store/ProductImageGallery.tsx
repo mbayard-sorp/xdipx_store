@@ -262,6 +262,8 @@ export function ProductImageGallery({
                 <img
                   src={items[lockedIndex].url}
                   alt={items[lockedIndex].altText || alt}
+                  width={1200}
+                  height={1200}
                   className="w-full h-full object-cover"
                   draggable={false}
                   fetchPriority="high"
@@ -289,6 +291,8 @@ export function ProductImageGallery({
                     <img
                       src={items[previewIndex].previewUrl}
                       alt={alt}
+                      width={1200}
+                      height={1200}
                       className="w-full h-full object-cover"
                       draggable={false}
                       loading="lazy"
@@ -306,6 +310,8 @@ export function ProductImageGallery({
                   <img
                     src={items[previewIndex].url}
                     alt={items[previewIndex].altText || alt}
+                    width={1200}
+                    height={1200}
                     className="w-full h-full object-cover"
                     draggable={false}
                     loading="lazy"

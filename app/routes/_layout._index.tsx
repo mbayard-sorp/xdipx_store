@@ -24,14 +24,13 @@ import type { ProductCarouselBlock } from '~/types/cms'
 import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~/lib/analytics.client'
 import { buildSocialMeta } from '~/lib/social-meta'
 
-async function getLiveDeal() {
+async function getLiveDealRow() {
   const [dbDeal] = await db
     .select()
     .from(dealHistory)
     .where(eq(dealHistory.status, 'live'))
     .limit(1)
-  if (!dbDeal?.shopifyProductId) return null
-  return getDealByShopifyId(dbDeal.shopifyProductId)
+  return dbDeal ?? null
 }
 
 export function headers() {
@@ -47,8 +46,11 @@ export function headers() {
 }
 
 export async function loader(_args: LoaderFunctionArgs) {
+  // Read the live-deal row first (indexed, cheap); then fan out the Shopify
+  // fetch alongside the other branches so it overlaps rather than chains.
+  const dbDeal = await getLiveDealRow()
   const [deal, forHim, forHer, bonusDeal, cmsData] = await Promise.all([
-    getLiveDeal(),
+    dbDeal?.shopifyProductId ? getDealByShopifyId(dbDeal.shopifyProductId) : Promise.resolve(null),
     getProductsByTag('for-him', 8),
     getProductsByTag('for-her', 8),
     getBonusDeal(),

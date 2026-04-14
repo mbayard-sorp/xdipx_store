@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto'
+import { lazy, Suspense } from 'react'
 import type { LoaderFunctionArgs } from 'react-router'
 import { Link, Outlet, useLoaderData, useRevalidator } from 'react-router'
-import { VisualEditing } from '@sanity/visual-editing/react-router'
+
+// Lazy-load Sanity visual editing — only shipped to users in preview mode.
+const VisualEditing = lazy(() =>
+  import('@sanity/visual-editing/react-router').then(m => ({ default: m.VisualEditing })),
+)
 import { Navbar }          from '~/components/store/Navbar'
 import { TrustBar }        from '~/components/store/TrustBar'
 import { Footer }          from '~/components/store/Footer'
@@ -113,8 +118,8 @@ export default function StoreLayout() {
 function LivePreview() {
   const { revalidate } = useRevalidator()
   return (
-    <VisualEditing
-      refresh={async () => { revalidate() }}
-    />
+    <Suspense fallback={null}>
+      <VisualEditing refresh={async () => { revalidate() }} />
+    </Suspense>
   )
 }

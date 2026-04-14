@@ -56,7 +56,8 @@ var init_kv_server = __esm({
       veoOperation: (token) => `veo:op:${token}`,
       ltxOperation: (token) => `ltx:op:${token}`,
       liveDealHandle: "live-deal:handle",
-      fbt: (handle) => `fbt:${handle}`
+      fbt: (handle) => `fbt:${handle}`,
+      collectionCursor: (handle, page) => `vault:cursor:${handle}:p${page}`
     };
   }
 });
@@ -122,7 +123,10 @@ var init_schema = __esm({
       createdAt: timestamp("created_at").defaultNow().notNull(),
       activatedAt: timestamp("activated_at"),
       completedAt: timestamp("completed_at")
-    });
+    }, (t) => ({
+      statusIdx: index("deal_history_status_idx").on(t.status),
+      dealDateIdx: index("deal_history_deal_date_idx").on(t.dealDate)
+    }));
     consentLog = pgTable("consent_log", {
       id: serial("id").primaryKey(),
       sessionId: varchar("session_id", { length: 64 }),
@@ -786,19 +790,27 @@ async function getVaultDeals(page = 1, limit = 20) {
 }
 async function getCollectionDeals(handle, page = 1, limit = 20) {
   let after = null;
-  for (let p = 1; p < page; p++) {
-    const skip = await storefront(`
-      query SkipPage($handle: String!, $first: Int!, $after: String) {
-        collection(handle: $handle) {
-          products(first: $first, after: $after, sortKey: MANUAL) {
-            edges { cursor }
+  if (page > 1) {
+    const cached = await kvGet(KV_KEYS.collectionCursor(handle, page));
+    if (cached) {
+      after = cached;
+    } else {
+      for (let p = 1; p < page; p++) {
+        const skip = await storefront(`
+          query SkipPage($handle: String!, $first: Int!, $after: String) {
+            collection(handle: $handle) {
+              products(first: $first, after: $after, sortKey: MANUAL) {
+                edges { cursor }
+              }
+            }
           }
-        }
+        `, { handle, first: limit, after });
+        const edges = skip.collection?.products.edges;
+        if (!edges?.length) return { deals: [], hasNextPage: false };
+        after = edges[edges.length - 1].cursor;
+        await kvSet(KV_KEYS.collectionCursor(handle, p + 1), after, COLLECTION_CURSOR_TTL);
       }
-    `, { handle, first: limit, after });
-    const edges = skip.collection?.products.edges;
-    if (!edges?.length) return { deals: [], hasNextPage: false };
-    after = edges[edges.length - 1].cursor;
+    }
   }
   const data = await storefront(`
     query GetCollectionDeals($handle: String!, $first: Int!, $after: String) {
@@ -2231,10 +2243,12 @@ async function getStorefrontCollections(first = 50) {
   `, { first });
   return data.collections.edges.map((e) => e.node);
 }
-var STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT;
+var COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
     "use strict";
+    init_kv_server();
+    COLLECTION_CURSOR_TTL = 300;
     STOREFRONT_ENDPOINT = `https://${process.env["SHOPIFY_STORE_DOMAIN"]}/api/2024-10/graphql.json`;
     ADMIN_ENDPOINT = `https://${process.env["SHOPIFY_STORE_DOMAIN"]}/admin/api/2024-10`;
     ADMIN_GQL_ENDPOINT = `https://${process.env["SHOPIFY_STORE_DOMAIN"]}/admin/api/2024-10/graphql.json`;
@@ -3188,7 +3202,7 @@ async function activateDeal(deal) {
     sku: deal.sku,
     title: deal.seoTitle,
     date: estDate(0)
-  });
+  }, 86400);
   await triggerDailyDealEmail({
     title: deal.seoTitle ?? "",
     tagline: "",

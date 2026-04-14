@@ -37,7 +37,10 @@ export const dealHistory = pgTable('deal_history', {
   createdAt:        timestamp('created_at').defaultNow().notNull(),
   activatedAt:      timestamp('activated_at'),
   completedAt:      timestamp('completed_at'),
-})
+}, t => ({
+  statusIdx:   index('deal_history_status_idx').on(t.status),
+  dealDateIdx: index('deal_history_deal_date_idx').on(t.dealDate),
+}))
 
 export const consentLog = pgTable('consent_log', {
   id:            serial('id').primaryKey(),

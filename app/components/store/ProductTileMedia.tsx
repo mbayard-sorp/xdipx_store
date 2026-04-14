@@ -42,6 +42,8 @@ export default function ProductTileMedia({ imageUrl, imageAlt, video }: ProductT
       <img
         src={imageUrl}
         alt={imageAlt}
+        width={800}
+        height={800}
         loading="lazy"
         decoding="async"
         className={`w-full h-full object-cover transition-opacity duration-200 ${
