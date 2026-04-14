@@ -306,7 +306,7 @@ export async function searchAll(params: {
       const mp4 = firstVid?.sources.find(s => s.mimeType.includes('mp4')) ?? firstVid?.sources[0]
       return {
         handle: sp.handle,
-        title: sp.title ?? shopify?.title ?? '',
+        title: shopify?.title ?? sp.title ?? '',
         vendor: sp.vendor ?? shopify?.brand ?? null,
         tags: sp.tags ?? shopify?.tags ?? [],
         category: sp.category ?? null,
@@ -453,7 +453,7 @@ export async function predictiveSearchUnified(query: string): Promise<Predictive
       const shopify = shopifyMap.get(sp.handle)
       return {
         handle: sp.handle,
-        title: sp.title,
+        title: shopify?.title ?? sp.title,
         previewImageUrl: sp.previewImageUrl,
         vendor: sp.vendor,
         price: shopify ? String(shopify.price) : null,
