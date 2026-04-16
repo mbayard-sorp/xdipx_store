@@ -17,7 +17,7 @@
 
 import { kvGet } from './kv.server'
 import { db } from './db.server'
-import { dealHistory, pipelineSettings } from '../../db/schema'
+import { dealHistory } from '../../db/schema'
 import { getPipelineSetting, dailyFeedProcessor } from './feed-processor.server'
 import { selectAccessories, generateCopy, generateSEOTitle } from './claude.server'
 import {
@@ -26,7 +26,7 @@ import {
   pushProductToShopify,
   setDealStatus,
 } from './shopify.server'
-import { eq, or, and, gte } from 'drizzle-orm'
+import { eq, or } from 'drizzle-orm'
 import type { ProductScore } from '~/types'
 
 const DEFAULT_MIN_MARGIN = 0.40  // 40% gross margin floor
@@ -116,7 +116,6 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
     }
 
     // 2. Load already-scheduled SKUs and dates from DB
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
     const scheduled = await db
       .select({ sku: dealHistory.sku, dealDate: dealHistory.dealDate })
       .from(dealHistory)

@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import type { Review, ReviewAggregate } from '~/types/reviews'
-import { RatingSummary } from '~/components/reviews/RatingSummary'
 import { ReviewList }    from '~/components/reviews/ReviewList'
 import { ReviewForm }    from '~/components/reviews/ReviewForm'
 
@@ -9,7 +8,7 @@ interface ProductTabsProps {
   boxContents:     string[]
   forHim:          string
   forHer:          string
-  specifications?: string
+  specifications?: string | undefined
   // Reviews
   productId?:     string
   reviews?:       Review[]

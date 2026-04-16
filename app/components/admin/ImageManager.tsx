@@ -585,7 +585,7 @@ function UploadQueueBar({
   onUploadComplete: (newImageIds: string[]) => void
 }) {
   const [uploading, setUploading] = useState(false)
-  const [results,   setResults]   = useState<{ tempId: string; state: 'done' | 'error'; msg?: string }[]>([])
+  const [results,   setResults]   = useState<{ tempId: string; state: 'done' | 'error'; msg?: string | undefined }[]>([])
 
   const handleUpload = async () => {
     if (uploading || queue.length === 0) return
@@ -847,11 +847,6 @@ export function ImageManager({
       }]
     })
     setGeneratedImages(prev => prev.map(g => g.tempId === img.tempId ? { ...g, inQueue: true } : g))
-  }
-
-  const removeFromQueue = (tempId: string) => {
-    setQueue(prev => prev.filter(q => q.tempId !== tempId))
-    setGeneratedImages(prev => prev.map(g => g.tempId === tempId ? { ...g, inQueue: false } : g))
   }
 
   const clearQueue = () => {

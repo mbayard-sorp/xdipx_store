@@ -1,6 +1,6 @@
 {
   "include": ["**/*.ts", "**/*.tsx", ".react-router/types/**/*"],
-  "exclude": ["node_modules", "ivr", "studio", "build", "dist"],
+  "exclude": ["node_modules", "ivr", "studio", "build", "dist", "scripts/**/*", "remotion/**/*", "remotion.config.ts"],
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"],
@@ -10,6 +10,7 @@
     "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
+    "skipLibCheck": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "exactOptionalPropertyTypes": true,
@@ -17,7 +18,8 @@
     "rootDirs": [".", "./.react-router/types"],
     "baseUrl": ".",
     "paths": {
-      "~/*": ["./app/*"]
+      "~/*": ["./app/*"],
+      "remotion": ["./node_modules/remotion"]
     }
   }
 }
