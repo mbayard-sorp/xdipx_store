@@ -76,6 +76,10 @@ export async function streamReply(
       const result = await runOneHop(session, controller, cb)
       if (controller.signal.aborted) break
 
+      console.log(
+        `[ivr] hop${hops} callSid=${session.callSid} stop=${result.stopReason} blocks=${result.blocks.length} text=${result.textBuf.length}`,
+      )
+
       if (result.stopReason !== 'tool_use') {
         if (result.textBuf) session.addTurn('assistant', result.textBuf)
 
@@ -154,6 +158,10 @@ export async function streamReply(
       cb.onDone()
       return
     }
+    console.error(
+      `[ivr] streamReply error callSid=${session.callSid}`,
+      err instanceof Error ? `${err.name}: ${err.message}` : err,
+    )
     cb.onError(err)
   } finally {
     if (session.abort === controller) session.abort = null
