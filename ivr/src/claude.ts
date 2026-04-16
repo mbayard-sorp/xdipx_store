@@ -11,7 +11,8 @@
  * cap, pre-truncated history, AbortSignal for barge-in.
  */
 import Anthropic from '@anthropic-ai/sdk'
-import { SYSTEM_PROMPT } from './prompts.ts'
+import { buildSystemPrompt } from './prompts.ts'
+import { DEFAULT_BRAND_VOICE } from './settings.ts'
 import type { Session } from './session.ts'
 import { TOOL_DEFINITIONS, runTool } from './tools/index.ts'
 import { IVR_LIMITS } from './config.ts'
@@ -26,6 +27,13 @@ if (!apiKey) {
 }
 
 const client = new Anthropic({ apiKey: apiKey ?? '' })
+
+// ElevenLabs reads markdown markers literally ("asterisk asterisk"). Strip the
+// formatting characters that have no spoken meaning before forwarding deltas
+// to Twilio. Punctuation that affects prosody (.,?!:;-) is preserved.
+function stripForTTS(s: string): string {
+  return s.replace(/[*_`~#]+/g, '')
+}
 
 export interface StreamCallbacks {
   onToken: (token: string) => void
@@ -113,7 +121,7 @@ async function runOneHop(
       system: [
         {
           type: 'text',
-          text: SYSTEM_PROMPT,
+          text: session.systemPrompt || buildSystemPrompt(DEFAULT_BRAND_VOICE),
           cache_control: { type: 'ephemeral' },
         },
       ] as unknown as Anthropic.TextBlockParam[],
@@ -126,7 +134,8 @@ async function runOneHop(
   let textBuf = ''
   stream.on('text', (delta) => {
     textBuf += delta
-    cb.onToken(delta)
+    const spoken = stripForTTS(delta)
+    if (spoken) cb.onToken(spoken)
   })
 
   const final = await stream.finalMessage()

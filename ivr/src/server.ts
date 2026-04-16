@@ -13,6 +13,8 @@ import { streamReply } from './claude.ts'
 import { Session } from './session.ts'
 import { IVR_LIMITS, type CallEndReason } from './config.ts'
 import { recordCall } from './db.ts'
+import { loadIvrSettings } from './settings.ts'
+import { buildSystemPrompt } from './prompts.ts'
 import type { OutboundMessage, TwilioInboundMessage } from './types.ts'
 
 const PORT = Number(process.env['PORT'] ?? 8080)
@@ -83,6 +85,14 @@ wss.on('connection', (ws, req) => {
         session.fromNumber = msg.from
         session.toNumber = msg.to
         console.log(`[ivr] setup callSid=${session.callSid} from=${session.fromNumber}`)
+        // Fetch admin-configured voice + farewells in parallel with the greeting.
+        // A DB hiccup falls back to code defaults — see settings.ts.
+        loadIvrSettings()
+          .then((s) => {
+            session.settings = s
+            session.systemPrompt = buildSystemPrompt(s.brandVoice)
+          })
+          .catch(() => { /* already logged in loader */ })
         // Start the silence + duration clocks as soon as the greeting begins.
         armInitialSilence(ws, session)
         session.armDuration(IVR_LIMITS.maxCallDurationMs, () => wrapUp(ws, session))
@@ -96,7 +106,7 @@ wss.on('connection', (ws, req) => {
 
         if (session.promptCount > IVR_LIMITS.maxPrompts) {
           console.warn(`[ivr] max prompts exceeded callSid=${session.callSid}`)
-          endCall(ws, session, 'max_prompts', "We've covered a lot — let me have someone call you back. Bye for now.")
+          endCall(ws, session, 'max_prompts', farewellFor(session, 'maxPrompts'))
           return
         }
 
@@ -205,13 +215,26 @@ function onSilence(ws: WebSocket, session: Session): void {
     armInterTurnSilence(ws, session)
     return
   }
-  endCall(ws, session, 'silent_caller', null)
+  endCall(ws, session, 'silent_caller', farewellFor(session, 'silent'))
 }
 
 function wrapUp(ws: WebSocket, session: Session): void {
   if (ws.readyState !== ws.OPEN) return
   console.log(`[ivr] max duration reached callSid=${session.callSid}`)
-  endCall(ws, session, 'max_duration', "We're running long — I'll let you go. Thanks for calling xdipx.")
+  endCall(ws, session, 'max_duration', farewellFor(session, 'maxDuration'))
+}
+
+/** Resolve the admin-configured farewell for a given end reason, or null to
+ *  hang up silently. Empty string in settings means "no farewell". */
+function farewellFor(session: Session, which: 'maxPrompts' | 'maxDuration' | 'silent'): string | null {
+  const s = session.settings
+  if (!s) return null
+  const raw =
+    which === 'maxPrompts' ? s.farewellMaxPrompts :
+    which === 'maxDuration' ? s.farewellMaxDuration :
+    s.farewellSilent
+  const trimmed = raw.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 function endCall(

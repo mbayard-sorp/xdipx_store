@@ -7,6 +7,7 @@
  */
 import type Anthropic from '@anthropic-ai/sdk'
 import type { CallEndReason } from './config.ts'
+import type { IvrSettings } from './settings.ts'
 
 type Role = 'user' | 'assistant'
 export interface Turn {
@@ -40,6 +41,10 @@ export class Session {
   wrapUpMode = false
   /** Reason we'll log on WS close, if we end the call ourselves. */
   endReason: CallEndReason = 'user_hangup'
+  /** Admin-configured prompts + farewells, resolved once at session start. */
+  settings: IvrSettings | null = null
+  /** Resolved system prompt for this call (built from settings.brandVoice). */
+  systemPrompt = ''
   /** Active silence/duration timers owned by the session. */
   private silenceTimer: NodeJS.Timeout | null = null
   private durationTimer: NodeJS.Timeout | null = null

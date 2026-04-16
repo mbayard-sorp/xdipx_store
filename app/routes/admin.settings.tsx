@@ -9,12 +9,23 @@ import { upsertProductPage } from '~/lib/sanity.server'
 
 export const meta: MetaFunction = () => [{ title: 'Pipeline Settings — xdipx Admin' }]
 
+const DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Your goal is to welcome first-time buyers and delight experienced ones. Keep all copy tasteful — suggestive is fine, explicit is not. Always signal discretion, value, and trust. Never use "sex" as an adjective — use "intimate", "pleasure", or "wellness". Never assume the reader's experience level.`
+
+const DEFAULT_FAREWELL_MAX_PROMPTS =
+  "I really like you — but it might be easier if you send an email to hello at exdipex dot com and we can help you directly. Once again that's hello at exdipex dot com."
+const DEFAULT_FAREWELL_MAX_DURATION = DEFAULT_FAREWELL_MAX_PROMPTS
+const DEFAULT_FAREWELL_SILENT = ''
+
 const DEFAULTS: Record<string, string> = {
-  feedUrl:           process.env['NALPAC_FEED_URL'] ?? '',
-  daysAhead:         '2',
-  blockedBrands:     '',
-  minProfit:         '0',
-  vaultDiscountPct:  '25',
+  feedUrl:                  process.env['NALPAC_FEED_URL'] ?? '',
+  daysAhead:                '2',
+  blockedBrands:            '',
+  minProfit:                '0',
+  vaultDiscountPct:         '25',
+  brandVoice:               DEFAULT_BRAND_VOICE,
+  ivrFarewellMaxPrompts:    DEFAULT_FAREWELL_MAX_PROMPTS,
+  ivrFarewellMaxDuration:   DEFAULT_FAREWELL_MAX_DURATION,
+  ivrFarewellSilent:        DEFAULT_FAREWELL_SILENT,
 }
 
 export async function loader(_: LoaderFunctionArgs) {
@@ -129,7 +140,7 @@ export default function AdminSettingsPage() {
     ? (fetcher.data as { error: string }).error
     : null
 
-  function SaveForm({ label, settingKey, type = 'text', description, min, max, inputWidth }: {
+  function SaveForm({ label, settingKey, type = 'text', description, min, max, inputWidth, multiline, rows }: {
     label: string
     settingKey: string
     type?: string
@@ -137,6 +148,8 @@ export default function AdminSettingsPage() {
     min?: number
     max?: number
     inputWidth?: string
+    multiline?: boolean
+    rows?: number
   }) {
     return (
       <fetcher.Form method="post" className="space-y-1">
@@ -148,18 +161,27 @@ export default function AdminSettingsPage() {
         {description && (
           <p className="text-xs text-brand-charcoal/50">{description}</p>
         )}
-        <div className="flex gap-3 items-center pt-1">
-          <input
-            type={type}
-            name="value"
-            defaultValue={settings[settingKey] ?? ''}
-            className={`${inputWidth ?? 'flex-1'} border border-brand-mist rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30`}
-            min={min}
-            max={max}
-          />
+        <div className={`${multiline ? 'flex flex-col gap-2' : 'flex gap-3 items-center'} pt-1`}>
+          {multiline ? (
+            <textarea
+              name="value"
+              defaultValue={settings[settingKey] ?? ''}
+              rows={rows ?? 4}
+              className="w-full border border-brand-mist rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30 font-body leading-relaxed"
+            />
+          ) : (
+            <input
+              type={type}
+              name="value"
+              defaultValue={settings[settingKey] ?? ''}
+              className={`${inputWidth ?? 'flex-1'} border border-brand-mist rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30`}
+              min={min}
+              max={max}
+            />
+          )}
           <button
             type="submit"
-            className="text-sm font-semibold px-4 py-2 bg-brand-mist text-brand-purple rounded-full hover:bg-brand-purple/10 transition-colors whitespace-nowrap"
+            className={`text-sm font-semibold px-4 py-2 bg-brand-mist text-brand-purple rounded-full hover:bg-brand-purple/10 transition-colors whitespace-nowrap ${multiline ? 'self-start' : ''}`}
           >
             Save
           </button>
@@ -187,6 +209,38 @@ export default function AdminSettingsPage() {
           label="IVR Greeting"
           settingKey="ivrGreeting"
           description="What the caller hears when they first connect. Keep it short and conversational."
+        />
+
+        <SaveForm
+          label="Voice & Personality"
+          settingKey="brandVoice"
+          multiline
+          rows={6}
+          description="How Emma sounds on voice and SMS — tone, style, what to avoid. Technical rules (pronunciation, tool behavior) stay locked in code. Leave blank to use defaults."
+        />
+
+        <SaveForm
+          label="Farewell — Too Many Turns"
+          settingKey="ivrFarewellMaxPrompts"
+          multiline
+          rows={3}
+          description="Spoken when the call hits the prompt-count cap (runaway guard). Written for TTS — spell tricky words phonetically (e.g. 'ex-dip-ex dot com')."
+        />
+
+        <SaveForm
+          label="Farewell — Max Call Length"
+          settingKey="ivrFarewellMaxDuration"
+          multiline
+          rows={3}
+          description="Spoken when the call hits the 5-minute hard cap."
+        />
+
+        <SaveForm
+          label="Farewell — Silent Caller"
+          settingKey="ivrFarewellSilent"
+          multiline
+          rows={2}
+          description="Spoken when the caller stops responding. Leave blank to hang up quietly."
         />
       </section>
 
