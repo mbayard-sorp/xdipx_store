@@ -226,11 +226,19 @@ export interface FooterColumn {
   links: FooterLink[]
 }
 
+export interface SiteBanner {
+  enabled?: boolean
+  imageUrl?: string
+  imageAlt?: string
+  link?: string
+}
+
 export interface SiteSettings {
   _id: string
   logoUrl?: string
   logoAlt?: string
   buyButtonText?: string
+  siteBanner?: SiteBanner
   megaMenuBanners?: MegaMenuBanner[]
   socialLinks: SocialLink[]
   footerTagline?: string

@@ -173,17 +173,17 @@ export async function upsertProductPage(params: {
   handle: string
   shopifyProductId: string
   title: string
-  imageUrl?: string
+  imageUrl?: string | undefined
   // Enriched fields for search
-  vendor?: string
-  tags?: string[]
-  tagline?: string
-  description?: string
-  seoDescription?: string
-  featureBullets?: string[]
-  category?: string
-  price?: number
-  compareAtPrice?: number
+  vendor?: string | undefined
+  tags?: string[] | undefined
+  tagline?: string | undefined
+  description?: string | undefined
+  seoDescription?: string | undefined
+  featureBullets?: string[] | undefined
+  category?: string | undefined
+  price?: number | undefined
+  compareAtPrice?: number | undefined
 }): Promise<{ created: boolean }> {
   const writeClient = getClient(true)
   if (!writeClient) throw new Error('Sanity not configured — SANITY_API_TOKEN or SANITY_PROJECT_ID missing')
@@ -263,6 +263,7 @@ export async function getSiteSettings(): Promise<SiteSettings | null> {
         "logoUrl": logo.asset->url,
         "logoAlt": logo.alt,
         buyButtonText,
+        "siteBanner": siteBanner{ enabled, link, "imageUrl": image.asset->url, "imageAlt": coalesce(alt, image.alt) },
         megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
         socialLinks[],
         footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
