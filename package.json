@@ -10,7 +10,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx db/seed.ts",
-    "sanity:sync": "tsx scripts/sync-products-to-sanity.ts"
+    "sanity:sync": "tsx scripts/sync-products-to-sanity.ts",
+    "postinstall": "[ \"$VERCEL\" = \"1\" ] && npm run build || true"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

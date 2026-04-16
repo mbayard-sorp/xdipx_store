@@ -1,15 +1,21 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
-  "functions": {
-    "server/vercel-entry.mjs": {
-      "includeFiles": "build/**",
-      "maxDuration": 60,
-      "memory": 1024
+  "builds": [
+    {
+      "src": "server/vercel-entry.mjs",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["build/**"],
+        "maxDuration": 60,
+        "memory": 1024
+      }
     }
-  },
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/server/vercel-entry.mjs" }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "server/vercel-entry.mjs"
+    }
   ],
   "crons": [
     { "path": "/cron/daily-feed-processor", "schedule": "45 23 * * *" },
