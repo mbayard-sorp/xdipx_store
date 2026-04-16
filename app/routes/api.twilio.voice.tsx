@@ -10,7 +10,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { and, eq, gte, sql } from 'drizzle-orm'
 import { twiml, verifyTwilioRequest, xmlEscape } from '~/lib/twilio.server'
 import { db } from '~/lib/db.server'
-import { callLog } from '../../db/schema'
+import { callLog, pipelineSettings } from '../../db/schema'
 
 const MAX_CALLS_PER_HOUR = Number(process.env['IVR_MAX_CALLS_PER_HOUR'] ?? 5)
 
@@ -50,10 +50,22 @@ function afterHoursTwiml(): string {
 </Response>`
 }
 
-const WELCOME_GREETING =
+const DEFAULT_GREETING =
   "Hey, you've reached ex-dip. This call may be recorded. What's going on?"
 
-function buildTwiml(): string {
+async function getGreeting(): Promise<string> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, 'ivrGreeting'))
+    return rows[0]?.value || DEFAULT_GREETING
+  } catch {
+    return DEFAULT_GREETING
+  }
+}
+
+function buildTwiml(greeting: string): string {
   const base = process.env['IVR_WS_URL'] ?? ''
   const secret = process.env['IVR_WS_SECRET'] ?? ''
   // Append shared secret so the Fly WS rejects connections that didn't come
@@ -76,7 +88,7 @@ function buildTwiml(): string {
   <Connect>
     <ConversationRelay
       url="${xmlEscape(wsUrl)}"
-      welcomeGreeting="${xmlEscape(WELCOME_GREETING)}"
+      welcomeGreeting="${xmlEscape(greeting)}"
       ttsProvider="ElevenLabs"
       voice="${xmlEscape(voice)}"
       transcriptionProvider="Deepgram"
@@ -116,7 +128,8 @@ export async function action({ request }: ActionFunctionArgs) {
     return twiml(afterHoursTwiml())
   }
 
-  return twiml(buildTwiml())
+  const greeting = await getGreeting()
+  return twiml(buildTwiml(greeting))
 }
 
 async function isRateLimited(fromNumber: string): Promise<boolean> {
@@ -179,5 +192,5 @@ export async function loader({ request: _request }: LoaderFunctionArgs) {
   if (process.env['NODE_ENV'] === 'production') {
     return new Response('Method Not Allowed', { status: 405 })
   }
-  return twiml(buildTwiml())
+  return twiml(buildTwiml('Hi, thanks for calling xdipx. How can I help you today?'))
 }

@@ -177,6 +177,19 @@ export default function AdminSettingsPage() {
         Settings
       </h1>
 
+      {/* Voice */}
+      <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
+        <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          Voice
+        </h2>
+
+        <SaveForm
+          label="IVR Greeting"
+          settingKey="ivrGreeting"
+          description="What the caller hears when they first connect. Keep it short and conversational."
+        />
+      </section>
+
       {/* Analytics */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
         <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>

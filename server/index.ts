@@ -6,6 +6,7 @@ initSentryServer()
 import express from 'express'
 import compression from 'compression'
 import { createRequestHandler } from '@react-router/express'
+import type { ServerBuild } from 'react-router'
 import { createCronRoutes } from './cron.js'
 import { createWebhookRoutes } from './webhooks.js'
 import { validateStartupEnv } from '../app/lib/env.server.js'
@@ -84,15 +85,15 @@ app.use('/api/', (req, res, next) => {
 // silently turns every form submission into empty fields (regression: admin
 // login reported "Email and password are required" with valid input).
 // Route-specific parsers (cron, webhooks) already set their own limits.
-const build = viteDevServer
+const build: ServerBuild | (() => Promise<ServerBuild>) = viteDevServer
   ? () =>
       viteDevServer.ssrLoadModule(
         'virtual:react-router/server-build',
-      ) as Promise<Parameters<typeof createRequestHandler>[0]['build']>
+      ) as Promise<ServerBuild>
   : ((await import(
       // @ts-expect-error — resolved at runtime after `react-router build`
       '../build/server/index.js'
-    )) as Parameters<typeof createRequestHandler>[0]['build'])
+    )) as ServerBuild)
 
 app.all(
   '*',
