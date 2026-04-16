@@ -14,6 +14,15 @@ import { callLog, pipelineSettings } from '../../db/schema'
 
 const MAX_CALLS_PER_HOUR = Number(process.env['IVR_MAX_CALLS_PER_HOUR'] ?? 5)
 
+// Comma-separated E.164 numbers (e.g. "+18187267258,+15551234567") that bypass
+// the per-hour rate limit. Use for staff/test phones during dev.
+const RATE_LIMIT_ALLOWLIST = new Set(
+  (process.env['IVR_RATE_LIMIT_ALLOWLIST'] ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+)
+
 // Kept in sync with ivr/src/config.ts CallEndReason. The IVR service writes
 // the first five from the Fly runtime; this Vercel route owns the last three
 // (pre-agent gates).
@@ -133,6 +142,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 async function isRateLimited(fromNumber: string): Promise<boolean> {
+  if (RATE_LIMIT_ALLOWLIST.has(fromNumber)) return false
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
   try {
     const rows = await db
