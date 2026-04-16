@@ -7,8 +7,11 @@ import {
   getCollectionProducts, getProductsByHandles,
 } from '~/lib/shopify.server'
 import { getProductPageBlocks } from '~/lib/sanity.server'
+import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
+import BundleHero from '~/components/store/BundleHero'
+import BundleSaveCard from '~/components/store/BundleSaveCard'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
 import { ProductTabs }            from '~/components/store/ProductTabs'
 import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
@@ -36,7 +39,31 @@ export function headers() {
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const deal = await getDealByHandle(params['slug']!)
+  const slug = params['slug']!
+
+  // Bundle fast-path: if Sanity has a bundle doc for this handle, render the
+  // BundleHero instead of the normal PDP. Shopify product still needs to exist
+  // (for the handle), but we skip the heavy PDP data fetches.
+  const bundle = await getBundleByHandle(slug)
+  if (bundle) {
+    return {
+      type: 'bundle' as const,
+      bundle,
+      deal: null,
+      pdpBlocks: [],
+      carouselProductMap: {},
+      fbtProducts: [],
+      companionBundle: null,
+      reviews: [],
+      reviewTotal: 0,
+      reviewPage: 1,
+      reviewSort: 'newest',
+      reviewFilter: 'all',
+      aggregate: null,
+    }
+  }
+
+  const deal = await getDealByHandle(slug)
   if (!deal) throw new Response('Product not found', { status: 404 })
 
   const url          = new URL(request.url)
@@ -44,11 +71,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const reviewSort   = url.searchParams.get('reviewSort')   ?? 'newest'
   const reviewFilter = url.searchParams.get('reviewFilter') ?? 'all'
 
-  const [pdpBlocks, reviewData, aggregate, fbtHandles] = await Promise.all([
-    getProductPageBlocks(params['slug']!),
+  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle] = await Promise.all([
+    getProductPageBlocks(slug),
     getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
-    getFrequentlyBoughtWith(params['slug']!, 4),
+    getFrequentlyBoughtWith(slug, 4),
+    getBundleCompanionFor(slug),
   ])
 
   const fbtProducts = fbtHandles.length > 0
@@ -84,23 +112,46 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   return {
+    type: 'product' as const,
     deal,
     pdpBlocks,
     carouselProductMap,
     fbtProducts,
+    companionBundle,
     reviews:       reviewData.reviews,
     reviewTotal:   reviewData.total,
     reviewPage,
     reviewSort,
     reviewFilter,
     aggregate:     aggregate ?? null,
+    bundle: null,
   }
 }
 
 // ─── Meta ─────────────────────────────────────────────────────────────────────
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  if (!data?.deal) return [{ title: 'Product not found | xdipx' }]
+  if (!data) return [{ title: 'Product not found | xdipx' }]
+  if (data.type === 'bundle' && data.bundle) {
+    const { bundle } = data
+    const title = `${bundle.title} — Bundle Deal | xdipx`
+    const description = bundle.tagline || `${bundle.title} — save ${bundle.discountPct}% when you buy the bundle.`
+    const url = `https://xdipx.com/products/${bundle.handle}`
+    return [
+      { title },
+      { name: 'description', content: description },
+      { tagName: 'link', rel: 'canonical', href: url },
+      ...buildSocialMeta({
+        title,
+        description,
+        url,
+        image: bundle.images[0]?.url ?? null,
+        type: 'product',
+        imageAlt: bundle.title,
+      }),
+    ]
+  }
+  if (!data.deal) return [{ title: 'Product not found | xdipx' }]
   const { deal } = data
   const title = `${deal.seoTitle} | xdipx`
   const description = deal.metaDescription || `${deal.seoTitle} — ships discreet from xdipx.`
@@ -122,12 +173,47 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function ProductPage() {
-  const {
-    deal, pdpBlocks, carouselProductMap, fbtProducts,
-    reviews, reviewTotal, reviewPage, reviewSort, reviewFilter, aggregate,
-  } = useLoaderData<typeof loader>()
+export default function ProductPageRoute() {
+  const data = useLoaderData<typeof loader>()
   const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
+  if (data.type === 'bundle' && data.bundle) {
+    return (
+      <>
+        {data.bundle.moodImageUrl ? (
+          <div className="relative overflow-hidden">
+            <img
+              src={data.bundle.moodImageUrl}
+              alt=""
+              aria-hidden="true"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-brand-cream/97 via-brand-cream/90 to-brand-cream/60" />
+            <BundleHero bundle={data.bundle} buyButtonText={buyButtonText} />
+          </div>
+        ) : (
+          <BundleHero bundle={data.bundle} buyButtonText={buyButtonText} />
+        )}
+      </>
+    )
+  }
+  return <ProductPage />
+}
+
+function ProductPage() {
+  const loaderData = useLoaderData<typeof loader>()
+  const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
+  // Bundle branch handled in ProductPageRoute — when we're here, deal is guaranteed.
+  const deal = loaderData.deal!
+  const pdpBlocks = loaderData.pdpBlocks
+  const carouselProductMap = loaderData.carouselProductMap
+  const fbtProducts = loaderData.fbtProducts
+  const companionBundle = loaderData.companionBundle
+  const reviews = loaderData.reviews
+  const reviewTotal = loaderData.reviewTotal
+  const reviewPage = loaderData.reviewPage
+  const reviewSort = loaderData.reviewSort
+  const reviewFilter = loaderData.reviewFilter
+  const aggregate = loaderData.aggregate
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
 
@@ -188,7 +274,8 @@ export default function ProductPage() {
     ? deal.sellingPlanGroups?.flatMap(g => g.sellingPlans).find(p => p.id === selectedPlanId)
     : undefined
   const price    = activePlan ? getSubscriptionPrice(basePrice, activePlan) : basePrice
-  const inStock  = selectedVariant?.availableForSale ?? deal.qty > 0
+  const isDigital = deal.handle === 'egift-card'
+  const inStock  = isDigital ? true : (selectedVariant?.availableForSale ?? deal.qty > 0)
   const qty      = selectedVariant?.quantityAvailable ?? deal.qty
   const discount = deal.msrp > 0 && deal.msrp > price
     ? Math.round(((deal.msrp - price) / deal.msrp) * 100)
@@ -311,7 +398,7 @@ export default function ProductPage() {
                 </span>
               </>
             )}
-            <StockIndicator qty={qty} />
+            <StockIndicator qty={qty} isDigital={isDigital} />
           </div>
 
           {/* Social proof */}
@@ -446,7 +533,7 @@ export default function ProductPage() {
         boxContents={deal.boxContents ?? []}
         forHim={deal.worksForHim}
         forHer={deal.worksForHer}
-        specifications={deal.specifications}
+        {...(deal.specifications ? { specifications: deal.specifications } : {})}
         productId={deal.shopifyProductId}
         reviews={reviews}
         reviewTotal={reviewTotal}
@@ -477,6 +564,9 @@ export default function ProductPage() {
       <div className="max-w-6xl mx-auto px-4">
         <RecentlyBrowsed currentHandle={deal.handle} />
         <FrequentlyBoughtWith products={fbtProducts} />
+        {companionBundle && (
+          <BundleSaveCard bundle={companionBundle} buyButtonText={buyButtonText} />
+        )}
       </div>
 
       {/* CMS content blocks configured in Sanity for this product */}

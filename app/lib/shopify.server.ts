@@ -998,6 +998,25 @@ export async function addToCart(cartId: string, variantId: string, quantity: num
   return rawCartToCart(data.cartLinesAdd.cart)
 }
 
+export async function addLinesToCart(
+  cartId: string,
+  lines: { variantId: string; quantity: number }[],
+): Promise<Cart> {
+  const data = await storefront<{ cartLinesAdd: { cart: RawCart | null } }>(`
+    mutation AddLinesToCart($cartId: ID!, $lines: [CartLineInput!]!) {
+      cartLinesAdd(cartId: $cartId, lines: $lines) {
+        cart { ${CART_FRAGMENT} }
+        userErrors { field message }
+      }
+    }
+  `, {
+    cartId,
+    lines: lines.map(l => ({ merchandiseId: l.variantId, quantity: l.quantity })),
+  })
+  if (!data.cartLinesAdd.cart) throw new Error('Cart not found or lines could not be added')
+  return rawCartToCart(data.cartLinesAdd.cart)
+}
+
 export async function removeFromCart(cartId: string, lineIds: string[]): Promise<Cart> {
   const data = await storefront<{ cartLinesRemove: CartResponse }>(`
     mutation RemoveFromCart($cartId: ID!, $lineIds: [ID!]!) {
@@ -1936,6 +1955,7 @@ export interface OrderDetail {
   lineItems: {
     title: string
     quantity: number
+    variantId: string | null
     variantTitle: string | null
     imageUrl: string | null
     unitPrice: { amount: string; currencyCode: string } | null
@@ -2250,6 +2270,7 @@ interface RawOrderDetail {
         title: string
         quantity: number
         variant: {
+          id: string
           title: string | null
           image: { url: string } | null
           price: { amount: string; currencyCode: string }
@@ -2287,6 +2308,7 @@ function mapOrderDetail(o: RawOrderDetail): OrderDetail {
     lineItems: o.lineItems.edges.map(({ node: li }) => ({
       title: li.title,
       quantity: li.quantity,
+      variantId: li.variant?.id ?? null,
       variantTitle: li.variant?.title ?? null,
       imageUrl: li.variant?.image?.url ?? null,
       unitPrice: li.variant?.price
@@ -2331,6 +2353,7 @@ export async function getCustomerOrder(
                   node {
                     title quantity
                     variant {
+                      id
                       title
                       image { url }
                       price { amount currencyCode }
@@ -3077,6 +3100,18 @@ export async function updateProductTags(productId: string, tags: string[]): Prom
   })
 }
 
+export async function appendProductTag(productId: string, tag: string): Promise<void> {
+  const id = productId.replace('gid://shopify/Product/', '')
+  const { product } = await shopifyAdmin<{ product: { tags: string } | null }>(`/products/${id}.json?fields=tags`)
+  if (!product) return
+  const current = product.tags.split(',').map((t) => t.trim()).filter(Boolean)
+  if (current.includes(tag)) return
+  current.push(tag)
+  await shopifyAdmin(`/products/${id}.json`, 'PUT', {
+    product: { id, tags: current.join(', ') },
+  })
+}
+
 export interface FetchedDealProduct {
   shopifyProductId: string
   sku: string
@@ -3308,4 +3343,180 @@ export async function getStorefrontCollections(
     }
   `, { first })
   return data.collections.edges.map(e => e.node)
+}
+
+// ─── Draft Orders (phone/SMS ordering) ────────────────────────────────────
+
+export interface DraftOrderCustomer {
+  email: string
+  name: string
+  phone?: string
+}
+
+export interface DraftOrderShipping {
+  address1: string
+  address2?: string
+  city: string
+  province: string
+  zip: string
+  country?: string
+}
+
+export interface DraftOrderLineInput {
+  variantId: string
+  quantity: number
+}
+
+export interface DraftOrderResult {
+  id: string
+  name: string
+  invoiceUrl: string | null
+  subtotalPriceCents: number
+  totalPriceCents: number
+  lineItems: Array<{ variantId: string; title: string; quantity: number; unitPriceCents: number }>
+}
+
+export async function findCustomerByPhone(phone: string): Promise<{
+  id: string
+  email: string | null
+  firstName: string | null
+  lastName: string | null
+  defaultAddress: { address1: string; city: string; province: string; zip: string; country: string } | null
+} | null> {
+  const data = await adminGraphQL<{
+    customers: { nodes: Array<{
+      id: string
+      email: string | null
+      firstName: string | null
+      lastName: string | null
+      defaultAddress: { address1: string | null; city: string | null; province: string | null; zip: string | null; country: string | null } | null
+    }> }
+  }>(`
+    query FindCustomer($q: String!) {
+      customers(first: 1, query: $q) {
+        nodes {
+          id email firstName lastName
+          defaultAddress { address1 city province zip country }
+        }
+      }
+    }
+  `, { q: `phone:${phone}` })
+  const c = data.customers.nodes[0]
+  if (!c) return null
+  const addr = c.defaultAddress
+  return {
+    id: c.id,
+    email: c.email,
+    firstName: c.firstName,
+    lastName: c.lastName,
+    defaultAddress: addr && addr.address1 && addr.city && addr.province && addr.zip
+      ? { address1: addr.address1, city: addr.city, province: addr.province, zip: addr.zip, country: addr.country ?? 'US' }
+      : null,
+  }
+}
+
+export async function createDraftOrder(input: {
+  lineItems: DraftOrderLineInput[]
+  customer: DraftOrderCustomer
+  shipping: DraftOrderShipping
+  note?: string
+  channel: 'voice' | 'sms'
+}): Promise<DraftOrderResult> {
+  const [firstName, ...rest] = input.customer.name.trim().split(/\s+/)
+  const lastName = rest.join(' ') || firstName || ''
+  const res = await adminGraphQL<{
+    draftOrderCreate: {
+      draftOrder: {
+        id: string
+        name: string
+        invoiceUrl: string | null
+        subtotalPriceSet: { shopMoney: { amount: string } }
+        totalPriceSet:    { shopMoney: { amount: string } }
+        lineItems: { nodes: Array<{ variant: { id: string } | null; title: string; quantity: number; originalUnitPriceSet: { shopMoney: { amount: string } } }> }
+      } | null
+      userErrors: { field: string[] | null; message: string }[]
+    }
+  }>(`
+    mutation CreateDraft($input: DraftOrderInput!) {
+      draftOrderCreate(input: $input) {
+        draftOrder {
+          id name invoiceUrl
+          subtotalPriceSet { shopMoney { amount } }
+          totalPriceSet    { shopMoney { amount } }
+          lineItems(first: 20) {
+            nodes {
+              title quantity
+              variant { id }
+              originalUnitPriceSet { shopMoney { amount } }
+            }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `, {
+    input: {
+      email: input.customer.email,
+      phone: input.customer.phone,
+      note: input.note ?? `xdipx ${input.channel} order`,
+      tags: [`channel:${input.channel}`, 'phone-order'],
+      lineItems: input.lineItems.map(li => ({ variantId: li.variantId, quantity: li.quantity })),
+      shippingAddress: {
+        firstName: firstName ?? '',
+        lastName,
+        address1: input.shipping.address1,
+        address2: input.shipping.address2 ?? '',
+        city: input.shipping.city,
+        province: input.shipping.province,
+        zip: input.shipping.zip,
+        country: input.shipping.country ?? 'US',
+        phone: input.customer.phone,
+      },
+      useCustomerDefaultAddress: false,
+    },
+  })
+  if (res.draftOrderCreate.userErrors.length > 0) {
+    throw new Error(`draftOrderCreate: ${res.draftOrderCreate.userErrors.map(e => e.message).join('; ')}`)
+  }
+  const d = res.draftOrderCreate.draftOrder
+  if (!d) throw new Error('draftOrderCreate returned null')
+  return {
+    id: d.id,
+    name: d.name,
+    invoiceUrl: d.invoiceUrl,
+    subtotalPriceCents: Math.round(parseFloat(d.subtotalPriceSet.shopMoney.amount) * 100),
+    totalPriceCents:    Math.round(parseFloat(d.totalPriceSet.shopMoney.amount) * 100),
+    lineItems: d.lineItems.nodes.map(n => ({
+      variantId: n.variant?.id ?? '',
+      title: n.title,
+      quantity: n.quantity,
+      unitPriceCents: Math.round(parseFloat(n.originalUnitPriceSet.shopMoney.amount) * 100),
+    })),
+  }
+}
+
+export async function sendDraftOrderInvoice(
+  draftOrderId: string,
+  opts?: { to?: string; customMessage?: string },
+): Promise<{ invoiceUrl: string | null }> {
+  const emailInput = opts?.to || opts?.customMessage
+    ? { to: opts?.to, customMessage: opts?.customMessage }
+    : undefined
+  const res = await adminGraphQL<{
+    draftOrderInvoiceSend: {
+      draftOrder: { invoiceUrl: string | null } | null
+      userErrors: { message: string }[]
+    }
+  }>(`
+    mutation SendInvoice($id: ID!, $email: EmailInput) {
+      draftOrderInvoiceSend(id: $id, email: $email) {
+        draftOrder { invoiceUrl }
+        userErrors { message }
+      }
+    }
+  `, { id: draftOrderId, email: emailInput })
+  if (res.draftOrderInvoiceSend.userErrors.length > 0) {
+    throw new Error(`draftOrderInvoiceSend: ${res.draftOrderInvoiceSend.userErrors.map(e => e.message).join('; ')}`)
+  }
+  return { invoiceUrl: res.draftOrderInvoiceSend.draftOrder?.invoiceUrl ?? null }
 }

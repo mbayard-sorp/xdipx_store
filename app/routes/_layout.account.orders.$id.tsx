@@ -1,9 +1,11 @@
-import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { Link, useLoaderData, useOutletContext } from 'react-router'
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react-router'
+import { useFetcher, useLoaderData, useOutletContext, redirect } from 'react-router'
 import { requireCustomer } from '~/lib/customer-session.server'
 import { customerAPI } from '~/lib/customer-api.server'
 import { StatusPill } from '~/components/account/StatusPill'
 import { OrderTrackingStepper } from '~/components/account/OrderTrackingStepper'
+import { addLinesToCart, createCart, getCart } from '~/lib/shopify.server'
+import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
 import type { OrderDetail } from '~/lib/shopify.server'
 import type { AccountOutletContext } from './_layout.account'
 
@@ -33,9 +35,60 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return { order, tokenType }
 }
 
+export async function action({ request, params }: ActionFunctionArgs) {
+  const { token, tokenType } = await requireCustomer(request)
+  const api = customerAPI({ token, tokenType })
+
+  const rawId = params['id']
+  if (!rawId) return { error: 'Order not found' }
+  const order = await api.getOrder(decodeURIComponent(rawId))
+  if (!order) return { error: 'Order not found' }
+
+  const lines = order.lineItems
+    .filter(li => li.variantId)
+    .map(li => ({ variantId: li.variantId as string, quantity: li.quantity }))
+
+  if (lines.length === 0) {
+    return { error: 'No items from this order are available to reorder.' }
+  }
+
+  const headers = new Headers()
+  let cartId = getCartIdFromCookie(request)
+
+  const tryAdd = async (id: string) => addLinesToCart(id, lines)
+
+  let cart
+  try {
+    if (!cartId) {
+      const fresh = await createCart()
+      cartId = fresh.id
+      headers.set('Set-Cookie', setCartCookie(cartId))
+    }
+    cart = await tryAdd(cartId)
+  } catch {
+    try {
+      const fresh = await createCart()
+      cartId = fresh.id
+      headers.set('Set-Cookie', setCartCookie(cartId))
+      cart = await tryAdd(cartId)
+    } catch {
+      return { error: 'Some items are no longer available. Please add them manually.' }
+    }
+  }
+
+  const checkoutUrl = cart?.checkoutUrl ?? (await getCart(cartId))?.checkoutUrl
+  if (!checkoutUrl) return { error: 'Could not start checkout. Please try again.' }
+
+  return redirect(checkoutUrl, { headers })
+}
+
 export default function OrderDetailRoute() {
   const { order } = useLoaderData<typeof loader>()
   useOutletContext<AccountOutletContext>() // ensure type contract holds
+  const reorderFetcher = useFetcher<typeof action>()
+  const reordering = reorderFetcher.state !== 'idle'
+  const reorderError =
+    reorderFetcher.data && 'error' in reorderFetcher.data ? reorderFetcher.data.error : null
 
   const processedDate = new Date(order.processedAt).toLocaleDateString('en-US', {
     month: 'long',
@@ -199,21 +252,29 @@ export default function OrderDetailRoute() {
       )}
 
       {/* Action buttons */}
-      <section className="flex flex-col sm:flex-row gap-3 pt-2">
-        <Link
-          to="/"
-          className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-white bg-brand-gradient hover:opacity-90 transition-opacity"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          Reorder <span aria-hidden="true">♥</span>
-        </Link>
-        <a
-          href="mailto:support@xdipx.com"
-          className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          Need help?
-        </a>
+      <section className="space-y-2 pt-2">
+        {reorderError && (
+          <p className="text-xs text-red-600 text-center">{reorderError}</p>
+        )}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <reorderFetcher.Form method="post" className="flex-1">
+            <button
+              type="submit"
+              disabled={reordering}
+              className="w-full text-center px-5 py-3 rounded-full text-sm font-semibold text-white bg-brand-gradient hover:opacity-90 transition-opacity disabled:opacity-60"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              {reordering ? 'Adding to cart…' : <>Reorder <span aria-hidden="true">♥</span></>}
+            </button>
+          </reorderFetcher.Form>
+          <a
+            href="mailto:support@xdipx.com"
+            className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Need help?
+          </a>
+        </div>
       </section>
 
       {/* Reassurance strip */}

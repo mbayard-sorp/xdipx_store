@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, MetaFunction, LoaderFunctionArgs } from 'react-router'
-import { Link, useActionData, useLoaderData, useFetcher, useSearchParams, redirect } from 'react-router'
+import { Link, useLoaderData, useFetcher, useSearchParams, redirect } from 'react-router'
 import { createCustomerAccessToken } from '~/lib/shopify.server'
 import {
   loginCustomerSession,
@@ -116,14 +116,14 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
 
 export default function AccountLoginPage() {
   const { shopOAuthEnabled, googleOAuthEnabled, facebookOAuthEnabled } = useLoaderData<typeof loader>()
-  const actionData = useActionData<typeof action>()
-  const fetcher    = useFetcher()
+  const fetcher    = useFetcher<typeof action>()
   const isLoading  = fetcher.state !== 'idle'
   const [searchParams] = useSearchParams()
 
+  const fetcherError = fetcher.data && 'error' in fetcher.data ? fetcher.data.error : null
   const oauthError = searchParams.get('error')
   const errorMessage =
-    (actionData && 'error' in actionData ? actionData.error : null) ??
+    fetcherError ??
     (oauthError ? OAUTH_ERROR_MESSAGES[oauthError] ?? 'Sign-in failed. Please try again.' : null)
 
   const hasSocialButtons = shopOAuthEnabled || googleOAuthEnabled || facebookOAuthEnabled

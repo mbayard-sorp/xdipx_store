@@ -9,7 +9,8 @@
     "typecheck": "react-router typegen && tsc",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:seed": "tsx db/seed.ts"
+    "db:seed": "tsx db/seed.ts",
+    "sanity:sync": "tsx scripts/sync-products-to-sanity.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

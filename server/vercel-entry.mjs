@@ -289,10 +289,12 @@ var init_db_server = __esm({
 var shopify_server_exports = {};
 __export(shopify_server_exports, {
   activateShopifyProduct: () => activateShopifyProduct,
+  addLinesToCart: () => addLinesToCart,
   addToCart: () => addToCart,
   adminCustomerDelete: () => adminCustomerDelete,
   adminGetCustomerSubscriptions: () => adminGetCustomerSubscriptions,
   adminGetSubscriptionContract: () => adminGetSubscriptionContract,
+  appendProductTag: () => appendProductTag,
   associateImageWithVariant: () => associateImageWithVariant,
   attachVideoToProduct: () => attachVideoToProduct,
   cartBuyerIdentityUpdate: () => cartBuyerIdentityUpdate,
@@ -998,6 +1000,21 @@ async function addToCart(cartId, variantId, quantity, sellingPlanId) {
   if (!data.cartLinesAdd.cart) throw new Error("Cart not found or line could not be added");
   return rawCartToCart(data.cartLinesAdd.cart);
 }
+async function addLinesToCart(cartId, lines) {
+  const data = await storefront(`
+    mutation AddLinesToCart($cartId: ID!, $lines: [CartLineInput!]!) {
+      cartLinesAdd(cartId: $cartId, lines: $lines) {
+        cart { ${CART_FRAGMENT} }
+        userErrors { field message }
+      }
+    }
+  `, {
+    cartId,
+    lines: lines.map((l) => ({ merchandiseId: l.variantId, quantity: l.quantity }))
+  });
+  if (!data.cartLinesAdd.cart) throw new Error("Cart not found or lines could not be added");
+  return rawCartToCart(data.cartLinesAdd.cart);
+}
 async function removeFromCart(cartId, lineIds) {
   const data = await storefront(`
     mutation RemoveFromCart($cartId: ID!, $lineIds: [ID!]!) {
@@ -1659,6 +1676,7 @@ function mapOrderDetail(o) {
     lineItems: o.lineItems.edges.map(({ node: li }) => ({
       title: li.title,
       quantity: li.quantity,
+      variantId: li.variant?.id ?? null,
       variantTitle: li.variant?.title ?? null,
       imageUrl: li.variant?.image?.url ?? null,
       unitPrice: li.variant?.price ? { amount: li.variant.price.amount, currencyCode: li.variant.price.currencyCode } : null
@@ -1688,6 +1706,7 @@ async function getCustomerOrder(accessToken, orderId) {
                   node {
                     title quantity
                     variant {
+                      id
                       title
                       image { url }
                       price { amount currencyCode }
@@ -2122,6 +2141,17 @@ async function updateProductTags(productId, tags) {
   const id = productId.replace("gid://shopify/Product/", "");
   await shopifyAdmin(`/products/${id}.json`, "PUT", {
     product: { id, tags: tags.join(", ") }
+  });
+}
+async function appendProductTag(productId, tag) {
+  const id = productId.replace("gid://shopify/Product/", "");
+  const { product } = await shopifyAdmin(`/products/${id}.json?fields=tags`);
+  if (!product) return;
+  const current = product.tags.split(",").map((t) => t.trim()).filter(Boolean);
+  if (current.includes(tag)) return;
+  current.push(tag);
+  await shopifyAdmin(`/products/${id}.json`, "PUT", {
+    product: { id, tags: current.join(", ") }
   });
 }
 async function fetchAllDealProducts() {
@@ -3132,6 +3162,13 @@ function estDate(offsetDays = 0) {
   const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1e3);
   return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 }
+function pastDealTag(dealDate) {
+  if (!dealDate) return null;
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(dealDate);
+  if (!m) return null;
+  const [, yyyy, mm] = m;
+  return `past-daily-deal-${mm}-${yyyy.slice(2)}`;
+}
 async function getVaultDiscountPct() {
   const [row] = await db.select().from(pipelineSettings).where(eq3(pipelineSettings.key, "vaultDiscountPct")).limit(1);
   const pct = parseFloat(row?.value ?? "25");
@@ -3169,6 +3206,8 @@ async function transitionToVaultPricing(deal) {
     );
   }
   await setDealStatus(deal.shopifyProductId, "vault");
+  const tag = pastDealTag(deal.dealDate);
+  if (tag) await appendProductTag(deal.shopifyProductId, tag);
   await db.update(dealHistory).set({
     status: "queued",
     completedAt: /* @__PURE__ */ new Date(),

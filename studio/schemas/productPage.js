@@ -35,6 +35,7 @@ export default {
     { name: 'product',  title: 'Product',        default: true },
     { name: 'copy',     title: 'Copy & Story'                  },
     { name: 'deal',     title: 'Deal Settings'                 },
+    { name: 'bundle',   title: 'Bundle'                        },
     { name: 'content',  title: 'Content Blocks'                },
   ],
 
@@ -232,8 +233,85 @@ export default {
       type: 'string',
       group: 'deal',
     },
+    {
+      name: 'archived',
+      title: 'Archived',
+      type: 'boolean',
+      group: 'product',
+      description: 'Set automatically when the linked Shopify product is no longer active. Archived docs are excluded from search.',
+    },
 
-    // ── Content Blocks ───────────────────────────────────────────────────────
+    // ── Bundle ───────────────────────────────────────────────────────────────
+    {
+      name: 'isBundle',
+      title: 'This product is a bundle',
+      type: 'boolean',
+      group: 'bundle',
+      description: 'When checked, the PDP renders a multi-product bundle hero instead of a single-product layout. Shopify product still needs to exist for the handle/URL.',
+      initialValue: false,
+    },
+    {
+      name: 'bundleComponents',
+      title: 'Bundle Components',
+      type: 'array',
+      group: 'bundle',
+      description: 'Products included in this bundle. "Dip In ♥" adds each component as its own cart line.',
+      hidden: ({ parent }) => !parent?.isBundle,
+      of: [
+        {
+          type: 'object',
+          name: 'bundleComponent',
+          title: 'Component',
+          fields: [
+            {
+              name: 'product',
+              title: 'Product',
+              type: 'reference',
+              to: [{ type: 'productPage' }],
+              validation: Rule => Rule.required(),
+            },
+            {
+              name: 'quantity',
+              title: 'Quantity',
+              type: 'number',
+              initialValue: 1,
+              validation: Rule => Rule.required().integer().min(1).max(10),
+            },
+          ],
+          preview: {
+            select: { title: 'product.title', subtitle: 'product.shopifyHandle', qty: 'quantity', imageUrl: 'product.previewImageUrl' },
+            prepare: ({ title, subtitle, qty, imageUrl }) => ({
+              title: title || subtitle || 'Component',
+              subtitle: `Qty ${qty ?? 1}${subtitle ? ` · /${subtitle}` : ''}`,
+              media: imageUrl
+                ? createElement('img', { src: imageUrl, style: { width: '100%', height: '100%', objectFit: 'cover' } })
+                : undefined,
+            }),
+          },
+        },
+      ],
+    },
+    {
+      name: 'bundleDiscountPct',
+      title: 'Bundle Discount (%)',
+      type: 'number',
+      group: 'bundle',
+      description: 'Percent off the combined MSRP of all components. E.g. 20 = 20% off. Applied in Shopify via an automatic discount tied to the bundle tag.',
+      hidden: ({ parent }) => !parent?.isBundle,
+      validation: Rule => Rule.min(0).max(90),
+      initialValue: 0,
+    },
+    {
+      name: 'bundleCompanionFor',
+      title: 'Offer On These Product PDPs',
+      type: 'array',
+      group: 'bundle',
+      description: 'Products whose PDP should show a "Bundle & Save" card pointing at this bundle. Leave empty to only surface the bundle on its own URL / homepage.',
+      hidden: ({ parent }) => !parent?.isBundle,
+      of: [{ type: 'reference', to: [{ type: 'productPage' }] }],
+    },
+
+    // ── Content Blocks ────────────────────────────────────────────────────────
     {
       name: 'contentBlocks',
       title: 'Content Blocks',

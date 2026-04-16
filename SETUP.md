@@ -233,6 +233,11 @@ SHOPIFY_WEBHOOK_SECRET=your-webhook-secret
    ```env
    GA4_MEASUREMENT_ID=G-XXXXXXXXXX
    ```
+3. (Optional) To load Google Tag Manager alongside GA4 — lets marketing add/update pixels (Meta, TikTok, ads) without code deploys — create a container at tagmanager.google.com and set:
+   ```env
+   GTM_CONTAINER_ID=GTM-XXXXXXX
+   ```
+   GTM respects the same Consent Mode v2 defaults (all denied) until the user accepts cookies. Leave blank to disable.
 
 ---
 
@@ -336,6 +341,7 @@ See `.env.example` for all variables. Key ones for launch:
 | SESSION_SECRET | ✅ | `openssl rand -hex 32` |
 | CRON_SECRET | ✅ | `openssl rand -hex 32` |
 | GA4_MEASUREMENT_ID | At launch | Google Analytics |
+| GTM_CONTAINER_ID | Optional | Google Tag Manager container |
 | AGE_GATE_LEVEL | Optional | `click_through` default |
 | CURRENT_TOS_VERSION | Optional | `1.0` default |
 

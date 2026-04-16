@@ -228,9 +228,20 @@ async function main() {
 
   let created = 0
   let updated = 0
+  let archived = 0
+
+  const activeHandles = new Set(active.map(p => p.handle))
 
   for (const p of active) {
-    const docId = `product-${p.handle}`
+    // Look up existing doc by shopifyHandle field, not _id. Two prior code paths
+    // wrote docs with different _id conventions (`product-{handle}` from this
+    // script, `productPage-{handle}` from upsertProductPage). Matching by field
+    // reuses whichever doc exists and prevents creating a second one.
+    const existing = await sanity.fetch<{ _id: string } | null>(
+      `*[_type == "productPage" && shopifyHandle == $handle][0]{ _id }`,
+      { handle: p.handle },
+    )
+    const docId = existing?._id ?? `productPage-${p.handle}`
 
     // Build the fields object from Shopify data
     const fields: Record<string, unknown> = {
@@ -270,39 +281,51 @@ async function main() {
       Object.entries(fields).filter(([, v]) => v !== undefined)
     )
 
-    const existing = await sanity.getDocument(docId)
-
     if (!existing) {
       await sanity.create({ _id: docId, _type: 'productPage', ...cleanFields })
       console.log(`  ✓ created   ${p.handle}`)
       created++
-    } else if (FORCE) {
-      // Update all fields except contentBlocks
-      const { contentBlocks, ...rest } = cleanFields
-      void contentBlocks
-      await sanity.patch(docId).set(rest).commit()
-      console.log(`  ↺ force-upd  ${p.handle}`)
-      updated++
     } else {
-      // Gentle update: only update fields that are currently blank in Sanity
-      const updates: Record<string, unknown> = {}
-      for (const [key, value] of Object.entries(cleanFields)) {
-        if (key === 'contentBlocks') continue          // never touch blocks
-        if (!existing[key] && value) updates[key] = value  // fill blanks only
-        // always update these structural fields
-        if (['shopifyHandle', 'shopifyProductId', 'title', 'vendor', 'tags'].includes(key)) {
-          updates[key] = value
+      // Fetch the full doc to honor gentle-update semantics (fill blanks only).
+      const full = await sanity.getDocument(existing._id)
+      if (FORCE) {
+        // Update all fields except contentBlocks
+        const { contentBlocks, ...rest } = cleanFields
+        void contentBlocks
+        await sanity.patch(existing._id).set({ ...rest, archived: false }).commit()
+        console.log(`  ↺ force-upd  ${p.handle}`)
+        updated++
+      } else {
+        const updates: Record<string, unknown> = { archived: false }
+        for (const [key, value] of Object.entries(cleanFields)) {
+          if (key === 'contentBlocks') continue          // never touch blocks
+          if (full && !full[key] && value) updates[key] = value  // fill blanks only
+          // always update these structural fields
+          if (['shopifyHandle', 'shopifyProductId', 'title', 'vendor', 'tags'].includes(key)) {
+            updates[key] = value
+          }
         }
+        await sanity.patch(existing._id).set(updates).commit()
+        console.log(`  · updated   ${p.handle}`)
+        updated++
       }
-      if (Object.keys(updates).length > 0) {
-        await sanity.patch(docId).set(updates).commit()
-      }
-      console.log(`  · updated   ${p.handle}`)
-      updated++
     }
   }
 
-  console.log(`\nDone. Created: ${created}  Updated: ${updated}`)
+  // ─── Archive orphans ──────────────────────────────────────────────────────
+  // Any productPage doc whose shopifyHandle is not in the active set points to
+  // a deleted/archived Shopify product. Mark archived so search can filter it.
+  const orphans = await sanity.fetch<{ _id: string; shopifyHandle: string }[]>(
+    `*[_type == "productPage" && defined(shopifyHandle) && archived != true]{ _id, shopifyHandle }`,
+  )
+  for (const o of orphans) {
+    if (activeHandles.has(o.shopifyHandle)) continue
+    await sanity.patch(o._id).set({ archived: true }).commit()
+    console.log(`  ⊘ archived  ${o.shopifyHandle}`)
+    archived++
+  }
+
+  console.log(`\nDone. Created: ${created}  Updated: ${updated}  Archived: ${archived}`)
 }
 
 main().catch(err => { console.error(err); process.exit(1) })

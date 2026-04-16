@@ -159,7 +159,7 @@ export async function searchAll(params: {
   const end = start + perPage + 1 // fetch one extra to detect next page
 
   // Build filter conditions for products
-  const productConditions: string[] = ['_type == "productPage"']
+  const productConditions: string[] = ['_type == "productPage"', 'archived != true']
   const groqParams: Record<string, unknown> = {}
 
   const queryPatterns = query ? buildQueryPatterns(query) : []

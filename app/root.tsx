@@ -72,6 +72,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     refCode,
     ENV: {
       GA4_ID:          process.env['GA4_MEASUREMENT_ID'] ?? '',
+      GTM_ID:          process.env['GTM_CONTAINER_ID'] ?? '',
       AGE_GATE_LEVEL:  process.env['AGE_GATE_LEVEL'] ?? 'click_through',
       SENTRY_DSN:      process.env['SENTRY_DSN'] ?? '',
     },
@@ -84,6 +85,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const ga4Id = typeof document !== 'undefined'
     ? (window as unknown as { ENV?: { GA4_ID?: string } }).ENV?.GA4_ID ?? ''
     : (process.env['GA4_MEASUREMENT_ID'] ?? '')
+  const gtmId = typeof document !== 'undefined'
+    ? (window as unknown as { ENV?: { GTM_ID?: string } }).ENV?.GTM_ID ?? ''
+    : (process.env['GTM_CONTAINER_ID'] ?? '')
 
   return (
     <html lang="en" className="bg-brand-cream">
@@ -93,12 +97,26 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Meta />
         <Links />
         <BotIdClient protect={BOTID_PROTECTED_ROUTES} />
+        {(ga4Id || gtmId) && (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});`,
+            }}
+          />
+        )}
+        {gtmId && (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${gtmId}');`,
+            }}
+          />
+        )}
         {ga4Id && (
           <>
             <script async src={`https://www.googletagmanager.com/gtag/js?id=${ga4Id}`} />
             <script
               dangerouslySetInnerHTML={{
-                __html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});gtag('js',new Date());gtag('config','${ga4Id}',{send_page_view:false});`,
+                __html: `gtag('js',new Date());gtag('config','${ga4Id}',{send_page_view:false});`,
               }}
             />
           </>
@@ -108,6 +126,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
         className="font-body text-brand-charcoal antialiased"
         style={{ fontFamily: 'var(--font-body)' }}
       >
+        {gtmId && (
+          <noscript>
+            <iframe
+              src={`https://www.googletagmanager.com/ns.html?id=${gtmId}`}
+              height="0"
+              width="0"
+              style={{ display: 'none', visibility: 'hidden' }}
+            />
+          </noscript>
+        )}
         {children}
         <ScrollRestoration />
         <Scripts />

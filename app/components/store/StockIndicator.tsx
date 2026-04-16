@@ -1,9 +1,19 @@
 interface StockIndicatorProps {
   qty: number
+  isDigital?: boolean
   className?: string
 }
 
-export function StockIndicator({ qty, className = '' }: StockIndicatorProps) {
+export function StockIndicator({ qty, isDigital = false, className = '' }: StockIndicatorProps) {
+  if (isDigital) {
+    return (
+      <span className={`inline-flex items-center gap-1.5 text-sm text-brand-charcoal/60 ${className}`}>
+        <span className="w-2 h-2 rounded-full bg-green-400" aria-hidden="true" />
+        Delivered instantly by email
+      </span>
+    )
+  }
+
   if (qty <= 0) {
     return (
       <span className={`inline-flex items-center gap-1.5 text-sm font-medium text-red-500 ${className}`}>
