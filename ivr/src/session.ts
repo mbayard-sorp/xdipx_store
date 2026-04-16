@@ -10,12 +10,27 @@ import type { CallEndReason } from './config.ts'
 import type { IvrSettings } from './settings.ts'
 
 type Role = 'user' | 'assistant'
+/** SDK 0.32.x doesn't export a single ContentBlockParam alias, but
+ *  MessageParam.content is `string | Array<...>` of these four. */
+export type AnyContentBlockParam =
+  | Anthropic.TextBlockParam
+  | Anthropic.ImageBlockParam
+  | Anthropic.ToolUseBlockParam
+  | Anthropic.ToolResultBlockParam
+/** Turn content is either a plain spoken/typed string OR an array of Anthropic
+ *  content blocks (text + tool_use for assistant turns, tool_result for user
+ *  turns). Tool blocks must persist across user turns so Claude retains
+ *  variantIds, customer lookups, etc. — otherwise it loops on searchProducts
+ *  and never reaches createDraftOrder. */
+export type TurnContent = string | AnyContentBlockParam[]
 export interface Turn {
   role: Role
-  content: string
+  content: TurnContent
 }
 
-const MAX_TURNS = 12 // 12 user+assistant messages total, not pairs
+// Higher than before because tool turns add 2 rows per hop (assistant blocks +
+// user tool_result). 40 rows ≈ 10–12 conversational turns with tool use.
+const MAX_TURNS = 40
 
 export class Session {
   callSid = ''
@@ -23,9 +38,6 @@ export class Session {
   toNumber = ''
   summary = '' // running summary of truncated turns
   history: Turn[] = []
-  /** Ephemeral per-turn scratch space for multi-hop tool-use loops.
-   *  Cleared at the end of every streamReply call. */
-  toolHopHistory: Anthropic.MessageParam[] = []
   abort: AbortController | null = null
   /** Per-call rate-limiting counters keyed by tool name. */
   toolCallCount: Record<string, number> = {}
@@ -86,17 +98,28 @@ export class Session {
     return n
   }
 
-  addTurn(role: Role, content: string): void {
+  addTurn(role: Role, content: TurnContent): void {
     this.history.push({ role, content })
     this.truncate()
   }
 
-  /** Drop oldest turns when over cap. Summary update happens lazily in Phase E. */
+  /** Drop oldest turns when over cap. The Anthropic API rejects a leading
+   *  user tool_result that has no matching assistant tool_use, so when
+   *  truncation would land on one we keep dropping until the new head is a
+   *  plain caller utterance. */
   private truncate(): void {
     if (this.history.length <= MAX_TURNS) return
-    const dropped = this.history.splice(0, this.history.length - MAX_TURNS)
-    // Minimal running-summary stub; Phase E replaces with a Sonnet summarisation call.
-    const droppedText = dropped.map((t) => `${t.role}: ${t.content}`).join('\n')
+    let dropCount = this.history.length - MAX_TURNS
+    while (dropCount < this.history.length) {
+      const head = this.history[dropCount]
+      if (!head) break
+      const isToolResultHead = head.role === 'user' && Array.isArray(head.content)
+      if (!isToolResultHead) break
+      dropCount++
+    }
+    if (dropCount === 0) return
+    const dropped = this.history.splice(0, dropCount)
+    const droppedText = dropped.map(turnToText).join('\n')
     this.summary = this.summary
       ? `${this.summary}\n${droppedText}`
       : droppedText
@@ -112,7 +135,9 @@ export class Session {
       })
       msgs.push({ role: 'assistant', content: 'Understood.' })
     }
-    for (const t of this.history) msgs.push({ role: t.role, content: t.content })
+    for (const t of this.history) {
+      msgs.push({ role: t.role, content: t.content } as Anthropic.MessageParam)
+    }
     if (this.wrapUpMode) {
       msgs.push({
         role: 'user',
@@ -129,4 +154,20 @@ export class Session {
       this.abort = null
     }
   }
+}
+
+/** Render a turn as a single human-readable line. Used for voicemail
+ *  transcripts and the running summary when turns are truncated. */
+export function turnToText(t: Turn): string {
+  const role = t.role === 'user' ? 'Caller' : 'Agent'
+  if (typeof t.content === 'string') return `${role}: ${t.content}`
+  const parts = t.content
+    .map((b) => {
+      if (b.type === 'text') return b.text
+      if (b.type === 'tool_use') return `[called ${b.name}]`
+      if (b.type === 'tool_result') return `[tool result]`
+      return ''
+    })
+    .filter(Boolean)
+  return `${role}: ${parts.join(' ')}`
 }

@@ -74,6 +74,19 @@ async function getGreeting(): Promise<string> {
   }
 }
 
+// Vocabulary hint biases Deepgram's STT. ConversationRelay has no profanity-
+// off toggle, so without these hints Deepgram redacts terms like "anal" and
+// "vibrator" to asterisks and Claude can't act on what the caller asked for.
+// Keep ≤ ~30 terms; longer lists dilute the bias.
+const STT_HINTS = [
+  'xdipx',
+  'anal', 'vibrator', 'dildo', 'cock ring', 'butt plug', 'plug',
+  'lube', 'lubricant', 'harness', 'strap on', 'masturbator',
+  'wand', 'rabbit', 'bullet', 'pleasure', 'kink', 'bdsm', 'fetish',
+  'lingerie', 'corset', 'bra', 'underwire',
+  'lovense', 'fleshlight', 'tenga', 'satisfyer', 'romp', 'icicles', 'oh la la cheri',
+].join(',')
+
 function buildTwiml(greeting: string): string {
   const base = process.env['IVR_WS_URL'] ?? ''
   const secret = process.env['IVR_WS_SECRET'] ?? ''
@@ -102,6 +115,7 @@ function buildTwiml(greeting: string): string {
       voice="${xmlEscape(voice)}"
       transcriptionProvider="Deepgram"
       speechModel="nova-2-phonecall"
+      hints="${xmlEscape(STT_HINTS)}"
       interruptible="true"
       dtmfDetection="true"
     />

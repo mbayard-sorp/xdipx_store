@@ -4,7 +4,7 @@
  * to leave a message and it has a callback number + a written summary.
  */
 import { insertVoicemail } from '../db.ts'
-import type { Session } from '../session.ts'
+import { turnToText, type Session } from '../session.ts'
 
 const APP_URL = process.env['XDIPX_APP_URL'] ?? 'https://xdipx.com'
 const SECRET = process.env['INTERNAL_API_SECRET'] ?? ''
@@ -26,9 +26,7 @@ export async function recordVoicemail(
     return { ok: false, error: 'summary_required', message: 'Summary is required.' }
   }
 
-  const transcript = session.history
-    .map((t) => `${t.role === 'user' ? 'Caller' : 'Agent'}: ${t.content}`)
-    .join('\n')
+  const transcript = session.history.map(turnToText).join('\n')
 
   const callbackNumber = (input.callbackNumber ?? session.fromNumber ?? '').trim() || null
 

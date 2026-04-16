@@ -13,13 +13,16 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { buildSystemPrompt } from './prompts.ts'
 import { DEFAULT_BRAND_VOICE } from './settings.ts'
-import type { Session } from './session.ts'
+import type { AnyContentBlockParam, Session } from './session.ts'
 import { TOOL_DEFINITIONS, runTool } from './tools/index.ts'
 import { IVR_LIMITS } from './config.ts'
 
 const MODEL = 'claude-haiku-4-5-20251001'
 const MAX_TOKENS = 150
-const MAX_TOOL_HOPS = 4
+// Single-turn flow can need: searchProducts -> getProductDetails ->
+// lookupReturningCustomer -> createDraftOrder -> final text. 4 was too tight
+// and Claude bailed before reaching createDraftOrder. 6 leaves headroom.
+const MAX_TOOL_HOPS = 6
 
 const apiKey = process.env['ANTHROPIC_API_KEY']
 if (!apiKey) {
@@ -41,10 +44,6 @@ export interface StreamCallbacks {
   onError: (err: unknown) => void
 }
 
-type ContentBlock =
-  | { type: 'text'; text: string }
-  | { type: 'tool_use'; id: string; name: string; input: unknown }
-
 export async function streamReply(
   session: Session,
   cb: StreamCallbacks,
@@ -59,16 +58,16 @@ export async function streamReply(
       const result = await runOneHop(session, controller, cb)
       if (controller.signal.aborted) break
 
-      if (result.stopReason !== 'tool_use') break
+      if (result.stopReason !== 'tool_use') {
+        if (result.textBuf) session.addTurn('assistant', result.textBuf)
+        break
+      }
 
-      // Push the full assistant block list (text + tool_use) into the tool-hop
-      // scratch history so Claude sees its own calls when we re-enter the loop.
-      session.toolHopHistory.push({
-        role: 'assistant',
-        content: result.blocks as unknown as string,
-      })
+      // Persist the assistant turn (text + tool_use blocks) so the next user
+      // turn still has variantIds, lookup results, etc. Without this, Claude
+      // would re-search on every "yes" and never reach createDraftOrder.
+      session.addTurn('assistant', result.blocks)
 
-      // Execute every tool_use in this turn
       const toolResults: Anthropic.ToolResultBlockParam[] = []
       for (const block of result.blocks) {
         if (block.type !== 'tool_use') continue
@@ -85,7 +84,7 @@ export async function streamReply(
           content: JSON.stringify(output),
         })
       }
-      session.toolHopHistory.push({ role: 'user', content: toolResults })
+      session.addTurn('user', toolResults)
       hops++
     }
     cb.onDone()
@@ -97,13 +96,13 @@ export async function streamReply(
     cb.onError(err)
   } finally {
     if (session.abort === controller) session.abort = null
-    session.toolHopHistory = []
   }
 }
 
 interface HopResult {
   stopReason: Anthropic.Message['stop_reason']
-  blocks: ContentBlock[]
+  blocks: AnyContentBlockParam[]
+  textBuf: string
 }
 
 async function runOneHop(
@@ -111,7 +110,7 @@ async function runOneHop(
   controller: AbortController,
   cb: StreamCallbacks,
 ): Promise<HopResult> {
-  const messages = [...session.buildMessages(), ...session.toolHopHistory]
+  const messages = session.buildMessages()
 
   const stream = client.messages.stream(
     {
@@ -156,18 +155,15 @@ async function runOneHop(
     session.wrapUpMode = true
   }
 
-  const blocks: ContentBlock[] = final.content.map((b) => {
-    if (b.type === 'text') return { type: 'text', text: b.text }
-    if (b.type === 'tool_use') {
-      return { type: 'tool_use', id: b.id, name: b.name, input: b.input }
-    }
-    return { type: 'text', text: '' }
-  })
+  const blocks: AnyContentBlockParam[] = []
+  for (const b of final.content) {
+    if (b.type === 'text') blocks.push({ type: 'text', text: b.text })
+    else if (b.type === 'tool_use') blocks.push({ type: 'tool_use', id: b.id, name: b.name, input: b.input })
+  }
 
-  if (final.stop_reason !== 'tool_use' && textBuf) {
-    session.addTurn('assistant', textBuf)
+  if (textBuf) {
     console.log(`[ivr] assistant callSid=${session.callSid}: ${textBuf.replace(/\s+/g, ' ').trim()}`)
   }
 
-  return { stopReason: final.stop_reason, blocks }
+  return { stopReason: final.stop_reason, blocks, textBuf }
 }
