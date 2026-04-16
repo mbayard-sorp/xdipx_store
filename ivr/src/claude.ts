@@ -34,7 +34,7 @@ const MAX_TOOL_HOPS = 6
 // created this call, we re-run the hop with tool_choice forced so the tool
 // actually fires. Stronger prompting alone has not reliably fixed this.
 const SEND_INTENT_RE =
-  /\b(sending|sent|send(ing)?\s+(it|that|the\s+(link|order))|email(ing)?\s+(you|it|that|the)|text(ing)?\s+(you|it|that)|on\s+(its|it's|the)\s+way|right\s+over|shooting\s+(it|that)\s+over|check\s+your\s+(phone|email|inbox|text|messages))\b/i
+  /\b(sending|sent|send(ing)?\s+(it|that|the\s+(link|order))|email(ing)?\s+(you|it|that|the)|text(ing)?\s+(you|it|that)|on\s+(its|it's|the)\s+way|right\s+over|shooting\s+(it|that)\s+over|check\s+your\s+(phone|email|inbox|text|messages)|went\s+to\s+your\s+(email|inbox|phone|text)|link\s+(just\s+)?(went|sent|emailed)|just\s+went\s+to\s+your)\b/i
 
 const apiKey = process.env['ANTHROPIC_API_KEY']
 if (!apiKey) {
