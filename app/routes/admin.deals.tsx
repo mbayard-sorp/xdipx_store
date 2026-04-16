@@ -10,6 +10,7 @@ import {
   getDealByShopifyId, updateProductMetafield,
   getVariantCost, pushProductToShopify, getAccessoryProductsAdmin,
   getProductAdminImages, updateProductTags, fetchAllDealProducts,
+  updateVariantPricing,
 } from '~/lib/shopify.server'
 import type { AdminProductImage } from '~/lib/shopify.server'
 import { generateCopy, generateSEOTitle } from '~/lib/claude.server'
@@ -373,6 +374,25 @@ export async function action({ request }: ActionFunctionArgs) {
       vaultPrice:    vaultVal,
     }).where(eq(dealHistory.shopifyProductId, productId))
 
+    return { ok: true }
+  }
+
+  if (intent === 'save-variant-pricing') {
+    const variantGid     = form.get('variantGid') as string
+    const price          = form.get('price') as string
+    const compareAtPrice = ((form.get('compareAtPrice') as string | null) ?? '').trim()
+    await updateVariantPricing(variantGid, price, compareAtPrice)
+    return { ok: true }
+  }
+
+  if (intent === 'sync-all-variants-pricing') {
+    const variantGidsJson = form.get('variantGids') as string
+    const price           = form.get('price') as string
+    const compareAtPrice  = ((form.get('compareAtPrice') as string | null) ?? '').trim()
+    const variantGids     = JSON.parse(variantGidsJson) as string[]
+    await Promise.all(
+      variantGids.map(gid => updateVariantPricing(gid, price, compareAtPrice)),
+    )
     return { ok: true }
   }
 
@@ -1408,6 +1428,7 @@ export default function AdminDealsPage() {
                       productId={editorData.deal.shopifyProductId}
                       config={editorData.pricingConfig}
                       shopifyCost={editorData.shopifyCost}
+                      variants={editorData.deal.variants}
                     />
                   </div>
 
