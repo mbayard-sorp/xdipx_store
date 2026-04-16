@@ -102,7 +102,7 @@ export interface VaultDeal {
   images: ProductImage[]
   brand: string
   category: string
-  dealStatus: 'draft' | 'scheduled' | 'live'
+  dealStatus: 'draft' | 'scheduled' | 'live' | 'archived'
   qty: number
 }
 

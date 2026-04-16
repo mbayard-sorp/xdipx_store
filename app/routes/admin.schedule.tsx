@@ -90,7 +90,7 @@ export async function action({ request }: ActionFunctionArgs) {
       await setDealStatus(liveNow.shopifyProductId, 'archived')
       await db
         .update(dealHistory)
-        .set({ status: 'archived', archivedAt: new Date() })
+        .set({ status: 'archived', completedAt: new Date() })
         .where(eq(dealHistory.id, liveNow.id))
     }
 

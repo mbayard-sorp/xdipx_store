@@ -75,7 +75,7 @@ export async function action({ request }: ActionFunctionArgs) {
       await setDealStatus(liveNow.shopifyProductId, 'archived')
       await db
         .update(dealHistory)
-        .set({ status: 'archived', archivedAt: new Date() })
+        .set({ status: 'archived', completedAt: new Date() })
         .where(eq(dealHistory.id, liveNow.id))
     }
 
@@ -102,7 +102,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (liveNow?.shopifyProductId) {
       await setDealStatus(liveNow.shopifyProductId, 'archived')
       await db.update(dealHistory)
-        .set({ status: 'archived', archivedAt: new Date() })
+        .set({ status: 'archived', completedAt: new Date() })
         .where(eq(dealHistory.id, liveNow.id))
     }
 
@@ -140,7 +140,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'unarchive') {
     const id               = parseInt(form.get('id') as string)
     const shopifyProductId = form.get('shopifyProductId') as string | null
-    await db.update(dealHistory).set({ status: 'pending', archivedAt: null }).where(eq(dealHistory.id, id))
+    await db.update(dealHistory).set({ status: 'pending', completedAt: null }).where(eq(dealHistory.id, id))
     if (shopifyProductId) await setDealStatus(shopifyProductId, 'pending')
     return { ok: true }
   }
@@ -180,8 +180,8 @@ const FILTER_IDLE   = 'bg-white text-brand-charcoal/60 hover:text-brand-charcoal
 
 type PendingConfirm = {
   intent: string
-  id?: number
-  shopifyProductId?: string
+  id?: number | undefined
+  shopifyProductId?: string | undefined
   label: string
   message: string
 }
