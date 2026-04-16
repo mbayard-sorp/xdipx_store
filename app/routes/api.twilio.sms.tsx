@@ -9,7 +9,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { and, asc, eq, gte, sql } from 'drizzle-orm'
 import { twiml, verifyTwilioRequest, xmlEscape } from '~/lib/twilio.server'
 import { db } from '~/lib/db.server'
-import { smsMessages, smsOptouts } from '../../db/schema'
+import { smsAgeConsent, smsMessages, smsOptouts } from '../../db/schema'
 import { generateSmsReply, type SmsTurn } from '~/lib/ai-agent/sms.server'
 
 const HISTORY_TURNS = 10
@@ -17,13 +17,22 @@ const HISTORY_WINDOW_HOURS = 24
 const MAX_SMS_PER_HOUR = Number(process.env['SMS_MAX_PER_HOUR'] ?? 15)
 
 const STOP_WORDS = new Set(['stop', 'stopall', 'unsubscribe', 'cancel', 'end', 'quit', 'revoke'])
-const START_WORDS = new Set(['start', 'unstop', 'yes', 'subscribe'])
+// START is a resubscribe keyword; YES is reserved for age-gate consent only and
+// handled separately below so a stray "yes" from an existing conversation isn't
+// treated as a resubscribe.
+const START_WORDS = new Set(['start', 'unstop', 'subscribe'])
 const HELP_WORDS = new Set(['help', 'info'])
+// Relaxed match: "yes", "y", "im 18", "i am 18", "18", "18+", "ya", "yep", "yup", "sure"
+const AGE_CONFIRM_RE = /^(y|ya|yes|yep|yup|sure|ok|okay|confirm|im18|iam18|18|18plus)$/i
 
 const HELP_REPLY =
   "xdipx: daily flash-sale wellness deals. Reply STOP to opt out, START to resume. Msg&data rates may apply. Help: support@xdipx.com"
 const STOP_REPLY = "You're opted out of xdipx messages. Reply START anytime to resume."
 const START_REPLY = "You're back in. Reply STOP to opt out anytime. Msg&data rates may apply."
+const AGE_GATE_REPLY =
+  "xdipx is 18+ only. Reply YES to confirm you're 18 or older and we'll help you find what you're looking for. STOP to opt out."
+const AGE_WELCOME_REPLY =
+  "You're in. I'm Emma — ask me anything about our daily deals, products, or your orders. What's on your mind?"
 
 function replyTwiml(body: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -76,6 +85,23 @@ export async function action({ request }: ActionFunctionArgs) {
     return twiml(EMPTY_TWIML)
   }
 
+  // 18+ age gate — required before any product content for unverified phones.
+  // Sexual-wellness brand: must gate on the SMS channel itself (web age gate
+  // doesn't help texters who never visit the site).
+  if (!(await hasAgeConsent(from))) {
+    await recordInbound(from, body, twilioSid)
+    if (AGE_CONFIRM_RE.test(body.trim())) {
+      await db
+        .insert(smsAgeConsent)
+        .values({ phone: from, method: 'sms_yes' })
+        .onConflictDoNothing({ target: smsAgeConsent.phone })
+      await recordOutbound(from, AGE_WELCOME_REPLY, null)
+      return twiml(replyTwiml(AGE_WELCOME_REPLY))
+    }
+    await recordOutbound(from, AGE_GATE_REPLY, null)
+    return twiml(replyTwiml(AGE_GATE_REPLY))
+  }
+
   // Rate limit — swallow further messages silently so we don't feed a loop.
   if (await isRateLimited(from)) {
     console.warn(`[sms] rate-limited from=${from}`)
@@ -83,11 +109,11 @@ export async function action({ request }: ActionFunctionArgs) {
     return twiml(EMPTY_TWIML)
   }
 
-  await recordInbound(from, body, twilioSid)
-
-  // Build short history window, then append the new message.
+  // Load history first, then record the new inbound so it isn't in the loaded
+  // window twice. generateSmsReply appends the new turn itself via the push below.
   const history = await loadHistory(from)
   history.push({ role: 'user', text: body })
+  await recordInbound(from, body, twilioSid)
 
   let reply: string
   try {
@@ -101,6 +127,21 @@ export async function action({ request }: ActionFunctionArgs) {
 
   await recordOutbound(from, reply, null)
   return twiml(replyTwiml(reply))
+}
+
+async function hasAgeConsent(phone: string): Promise<boolean> {
+  try {
+    const rows = await db
+      .select({ phone: smsAgeConsent.phone })
+      .from(smsAgeConsent)
+      .where(eq(smsAgeConsent.phone, phone))
+      .limit(1)
+    return rows.length > 0
+  } catch (err) {
+    console.error('[sms] age consent check failed', err)
+    // Fail closed — if we can't verify consent, treat as unverified.
+    return false
+  }
 }
 
 async function isOptedOut(phone: string): Promise<boolean> {

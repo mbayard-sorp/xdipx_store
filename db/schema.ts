@@ -237,6 +237,12 @@ export const smsMessages = pgTable('sms_messages', {
   createdIdx: index('sms_messages_created_idx').on(t.createdAt),
 }))
 
+export const smsAgeConsent = pgTable('sms_age_consent', {
+  phone:        varchar('phone', { length: 20 }).primaryKey(),
+  consentedAt:  timestamp('consented_at').defaultNow().notNull(),
+  method:       varchar('method', { length: 20 }).default('sms_yes').notNull(),
+})
+
 export interface DraftOrderLineItem {
   variantId: string
   title: string
