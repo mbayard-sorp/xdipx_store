@@ -51,6 +51,9 @@ export class Session {
   tokensUsed = 0
   /** Once true, we inject a "wrap up" hint into the next turn's messages. */
   wrapUpMode = false
+  /** True once createDraftOrder has been invoked this call. Guards the
+   *  send-intent trap in claude.ts from firing twice. */
+  createdDraftOrderThisCall = false
   /** Reason we'll log on WS close, if we end the call ourselves. */
   endReason: CallEndReason = 'user_hangup'
   /** Admin-configured prompts + farewells, resolved once at session start. */

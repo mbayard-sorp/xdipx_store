@@ -114,7 +114,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'createDraftOrder',
     description:
-      "Create a Shopify draft order and text the caller a secure Shopify checkout link (also emailed). ONLY call after: (1) confirmed each product + variant + quantity via searchProducts/getProductDetails, (2) collected email + full name + full shipping address, (3) read back a GENERIC item description (e.g. 'one item from for-her, one accessory') and got a clear 'yes'. Never read full product names on a speakerphone. Never collect card numbers — Shopify handles payment. Hard caps: $500 subtotal, 5 line items, 2 orders per 24h per number. On limit error, apologize and offer a human callback via recordVoicemail.",
+      "Create a Shopify draft order and EMAIL the caller a secure Shopify checkout link. SMS is not wired up — delivery is email only, so the caller's email must be correct. ONLY call after: (1) confirmed each product + variant + quantity via searchProducts/getProductDetails, (2) collected email (read back to confirm) + full name + full shipping address, (3) read back a GENERIC item description (e.g. 'one item from for-her, one accessory') and got a clear 'yes'. Never read full product names on a speakerphone. Never collect card numbers — Shopify handles payment. Hard caps: $500 subtotal, 5 line items, 2 orders per 24h per number. On limit error, apologize and offer a human callback via recordVoicemail.",
     input_schema: {
       type: 'object',
       properties: {

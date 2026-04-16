@@ -15,10 +15,10 @@ import {
   findCustomerByPhone,
   getProductByHandle,
   searchProducts as shopifySearch,
+  sendDraftOrderInvoice,
 } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
 import { draftOrders } from '~/../db/schema'
-import { sendSms } from '~/lib/twilio.server'
 import type { Product } from '~/types'
 
 export const MAX_ORDER_VALUE_CENTS = Number(process.env['IVR_MAX_ORDER_VALUE_CENTS'] ?? 50_000) // $500
@@ -297,12 +297,15 @@ export async function runQaTool(
         }
       }
 
-      if (draft.invoiceUrl) {
-        try {
-          await sendSms(ctx.phone, `xdipx: your secure payment link for ${draft.name} — ${draft.invoiceUrl} — held 24h.`)
-        } catch (err) {
-          console.error('[ai-agent] failed to SMS invoice link', err)
-        }
+      // Fire Shopify's built-in draft-order invoice email. SMS isn't wired up
+      // on this number yet, so email is the only delivery channel for the
+      // secure checkout link.
+      let emailSent = false
+      try {
+        await sendDraftOrderInvoice(draft.id, { to: email })
+        emailSent = true
+      } catch (err) {
+        console.error('[ai-agent] failed to send draft invoice email', err)
       }
 
       await db.insert(draftOrders).values({
@@ -329,6 +332,8 @@ export async function runQaTool(
           invoiceUrl: draft.invoiceUrl,
           subtotalCents: draft.subtotalPriceCents,
           totalCents: draft.totalPriceCents,
+          emailSent,
+          sentTo: email,
           lineItems: draft.lineItems.map((li) => ({
             title: li.title, quantity: li.quantity, unitPriceCents: li.unitPriceCents,
           })),

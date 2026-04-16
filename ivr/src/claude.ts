@@ -24,6 +24,14 @@ const MAX_TOKENS = 150
 // and Claude bailed before reaching createDraftOrder. 6 leaves headroom.
 const MAX_TOOL_HOPS = 6
 
+// Haiku sometimes narrates "sending it right over" without actually emitting
+// the createDraftOrder tool_use block — the caller hears the promise but no
+// draft/SMS ever goes out. When we detect this pattern and no draft has been
+// created this call, we re-run the hop with tool_choice forced so the tool
+// actually fires. Stronger prompting alone has not reliably fixed this.
+const SEND_INTENT_RE =
+  /\b(sending|sent|send(ing)?\s+(it|that|the\s+(link|order))|email(ing)?\s+(you|it|that|the)|text(ing)?\s+(you|it|that)|on\s+(its|it's|the)\s+way|right\s+over|shooting\s+(it|that)\s+over|check\s+your\s+(phone|email|inbox|text|messages))\b/i
+
 const apiKey = process.env['ANTHROPIC_API_KEY']
 if (!apiKey) {
   console.warn('[ivr] ANTHROPIC_API_KEY not set — Claude calls will fail')
@@ -52,6 +60,12 @@ export async function streamReply(
   const controller = new AbortController()
   session.abort = controller
 
+  const silentCb: StreamCallbacks = {
+    onToken: () => {},
+    onDone: () => {},
+    onError: () => {},
+  }
+
   try {
     let hops = 0
     while (hops <= MAX_TOOL_HOPS) {
@@ -60,7 +74,49 @@ export async function streamReply(
 
       if (result.stopReason !== 'tool_use') {
         if (result.textBuf) session.addTurn('assistant', result.textBuf)
-        break
+
+        const shouldForceDraft =
+          !session.createdDraftOrderThisCall &&
+          result.textBuf.length > 0 &&
+          SEND_INTENT_RE.test(result.textBuf)
+
+        if (!shouldForceDraft) break
+
+        console.warn(
+          `[ivr] send-intent without tool_use callSid=${session.callSid} — forcing createDraftOrder`,
+        )
+        const forced = await runOneHop(session, controller, silentCb, {
+          type: 'tool',
+          name: 'createDraftOrder',
+        })
+        if (controller.signal.aborted) break
+        if (forced.stopReason !== 'tool_use') {
+          console.error(
+            `[ivr] forced createDraftOrder did not emit tool_use callSid=${session.callSid} stop=${forced.stopReason}`,
+          )
+          break
+        }
+        session.addTurn('assistant', forced.blocks)
+        const forcedResults: Anthropic.ToolResultBlockParam[] = []
+        for (const block of forced.blocks) {
+          if (block.type !== 'tool_use') continue
+          console.log(`[ivr] tool_use (forced) callSid=${session.callSid} name=${block.name}`)
+          let output: unknown
+          try {
+            output = await runTool(block.name, block.input, { session })
+          } catch (err) {
+            output = { error: 'handler_threw', message: err instanceof Error ? err.message : String(err) }
+          }
+          if (block.name === 'createDraftOrder') session.createdDraftOrderThisCall = true
+          forcedResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: JSON.stringify(output),
+          })
+        }
+        session.addTurn('user', forcedResults)
+        hops++
+        continue
       }
 
       // Persist the assistant turn (text + tool_use blocks) so the next user
@@ -78,6 +134,7 @@ export async function streamReply(
         } catch (err) {
           output = { error: 'handler_threw', message: err instanceof Error ? err.message : String(err) }
         }
+        if (block.name === 'createDraftOrder') session.createdDraftOrderThisCall = true
         toolResults.push({
           type: 'tool_result',
           tool_use_id: block.id,
@@ -109,6 +166,7 @@ async function runOneHop(
   session: Session,
   controller: AbortController,
   cb: StreamCallbacks,
+  toolChoice?: Anthropic.ToolChoice,
 ): Promise<HopResult> {
   const messages = session.buildMessages()
 
@@ -125,6 +183,7 @@ async function runOneHop(
         },
       ] as unknown as Anthropic.TextBlockParam[],
       tools: TOOL_DEFINITIONS,
+      ...(toolChoice ? { tool_choice: toolChoice } : {}),
       messages: messages as Anthropic.MessageParam[],
     },
     { signal: controller.signal },
