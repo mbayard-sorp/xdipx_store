@@ -18,11 +18,13 @@ import { TOOL_DEFINITIONS, runTool } from './tools/index.ts'
 import { IVR_LIMITS } from './config.ts'
 
 const MODEL = 'claude-haiku-4-5-20251001'
-const MAX_TOKENS = 150
-// Forced tool calls must emit a full JSON payload (e.g. createDraftOrder:
-// items array + email + address + state + zip). 150 tokens truncates that
-// and the stream stops with max_tokens before the tool_use block closes.
-const MAX_TOKENS_FORCED_TOOL = 800
+// Must fit a full tool_use JSON payload (createDraftOrder: items array +
+// email + address + state + zip ~= 400–600 tokens). 150 truncated those and
+// the stream stopped with max_tokens before the tool_use block closed,
+// leaving stop_reason=max_tokens so the tool never executed. Speech replies
+// are naturally short (~60–100 tokens), so this ceiling costs nothing unless
+// Claude actually generates more.
+const MAX_TOKENS = 800
 // Single-turn flow can need: searchProducts -> getProductDetails ->
 // lookupReturningCustomer -> createDraftOrder -> final text. 4 was too tight
 // and Claude bailed before reaching createDraftOrder. 6 leaves headroom.
@@ -185,7 +187,7 @@ async function runOneHop(
   const stream = client.messages.stream(
     {
       model: MODEL,
-      max_tokens: toolChoice ? MAX_TOKENS_FORCED_TOOL : MAX_TOKENS,
+      max_tokens: MAX_TOKENS,
       // cache_control is GA on the Messages API; SDK 0.32.1 types lag, so cast.
       system: [
         {
