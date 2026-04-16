@@ -137,14 +137,30 @@ function productToCard(p: Product) {
   const mapPrice = (p as Product & { mapPrice?: number }).mapPrice ?? 0
   const msrp = p.compareAtPrice ?? price
   const disp = applyMapRule(price, msrp, mapPrice)
+  // Claude needs variant GIDs to build createDraftOrder line items. We expose
+  // the default variant for single-variant products, plus a trimmed list of
+  // in-stock variants for multi-variant products so Claude can offer options.
+  const inStockVariants = p.variants.filter((v) => v.availableForSale)
+  const defaultVariant = inStockVariants[0] ?? p.variants[0]
+  const variantOptions =
+    p.variants.length > 1
+      ? p.variants.slice(0, 5).map((v) => ({
+          variantId: v.id,
+          label: v.title,
+          price: Number(v.price),
+          inStock: v.availableForSale,
+        }))
+      : undefined
   return {
     title: p.title,
     handle: p.handle,
     url: `https://xdipx.com/products/${p.handle}`,
     brand: p.brand ?? '',
     category: p.category ?? '',
-    inStock: p.variants.some((v) => v.availableForSale),
+    inStock: inStockVariants.length > 0,
     display: disp,
+    variantId: defaultVariant?.id ?? '',
+    ...(variantOptions ? { variantOptions } : {}),
   }
 }
 

@@ -75,11 +75,11 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'searchProducts',
     description:
-      "Search the xdipx catalog for products matching what the caller described. Returns up to 5 matches with titles, prices cleared against MAP rules, and stock status. Always call this before quoting any price — never guess.",
+      "Search the xdipx catalog for products matching what the caller described. Returns up to 5 matches with titles, MAP-cleared prices, stock status, AND the Shopify variantId you'll need later to create a draft order. Always call this before quoting any price. If the first search returns nothing useful, try again with a broader or different term (e.g. 'massager' instead of 'back massager'; 'couple' instead of 'couple play kit'). Remove modifiers and retry before telling the caller we don't carry it.",
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: "The caller's search words." },
+        query: { type: 'string', description: "Short search words. Prefer 1–2 words (e.g. 'wand', 'lube', 'couple kit'). Don't paste the caller's full sentence." },
         limit: { type: 'number', description: '1–5, default 3. Keep low on phone — you can only say a few aloud.' },
       },
       required: ['query'],
@@ -89,7 +89,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'getProductDetails',
     description:
-      "Fetch details on a specific product by its handle (slug). Use after searchProducts when the caller picks one, to get a short description and the MAP-cleared price.",
+      "Fetch details on a specific product by its handle (slug). Use after searchProducts when the caller picks one, to get a short description, the MAP-cleared price, and the variantId (or a list of variantOptions if the product has multiple choices).",
     input_schema: {
       type: 'object',
       properties: {

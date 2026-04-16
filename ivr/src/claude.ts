@@ -166,6 +166,7 @@ async function runOneHop(
 
   if (final.stop_reason !== 'tool_use' && textBuf) {
     session.addTurn('assistant', textBuf)
+    console.log(`[ivr] assistant callSid=${session.callSid}: ${textBuf.replace(/\s+/g, ' ').trim()}`)
   }
 
   return { stopReason: final.stop_reason, blocks }
