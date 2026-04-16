@@ -350,10 +350,10 @@ export async function searchAll(params: {
 async function computeFacets(client: any, productFilter: string, groqParams: Record<string, unknown>): Promise<SearchFacets> {
   const emptyFacets: SearchFacets = { tagCounts: {}, vendorCounts: {}, priceBuckets: { under25: 0, p25_50: 0, p50_100: 0, over100: 0 } }
   try {
-    const rows = await client.fetch<{ vendor: string | null; tags: string[] | null; price: number | null }[]>(
+    const rows = (await client.fetch(
       `*[${productFilter}]{ vendor, tags, price }`,
       groqParams,
-    )
+    )) as { vendor: string | null; tags: string[] | null; price: number | null }[]
     const tagCounts: Record<string, number> = {}
     const vendorCounts: Record<string, number> = {}
     const priceBuckets = { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }

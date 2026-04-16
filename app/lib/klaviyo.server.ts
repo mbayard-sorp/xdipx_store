@@ -5,7 +5,7 @@ async function klaviyoFetch<T>(
   method = 'GET',
   body?: unknown,
 ): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const init: RequestInit = {
     method,
     headers: {
       accept:         'application/json',
@@ -13,8 +13,9 @@ async function klaviyoFetch<T>(
       revision:       '2024-10-15',
       Authorization:  `Klaviyo-API-Key ${process.env['KLAVIYO_API_KEY']}`,
     },
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  }
+  if (body) init.body = JSON.stringify(body)
+  const res = await fetch(`${BASE}${path}`, init)
   if (!res.ok) {
     const text = await res.text()
     throw new Error(`Klaviyo API error ${res.status}: ${text}`)
