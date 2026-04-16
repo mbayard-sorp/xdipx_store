@@ -687,7 +687,7 @@ export async function getCollectionDeals(
       after = cached
     } else {
       for (let p = 1; p < page; p++) {
-        const skip = await storefront<{
+        const skip: { collection: { products: { edges: { cursor: string }[] } } | null } = await storefront<{
           collection: {
             products: { edges: { cursor: string }[] }
           } | null
@@ -766,17 +766,53 @@ export async function getMainMenu(): Promise<ShopifyMenuItem[]> {
 }
 
 // Fetch all Shopify collections for the admin collection picker.
-export async function getShopifyCollections(): Promise<{ handle: string; title: string }[]> {
+export interface ShopifyCollectionSummary {
+  id: string
+  handle: string
+  title: string
+  descriptionHtml: string
+  productsCount: number
+  image: { url: string; altText: string | null } | null
+}
+
+export async function getShopifyCollections(): Promise<ShopifyCollectionSummary[]> {
   const data = await adminGraphQL<{
-    collections: { edges: { node: { handle: string; title: string } }[] }
+    collections: {
+      edges: {
+        node: {
+          id: string
+          handle: string
+          title: string
+          descriptionHtml: string
+          productsCount: { count: number } | null
+          image: { url: string; altText: string | null } | null
+        }
+      }[]
+    }
   }>(`
     query GetCollections {
       collections(first: 100, sortKey: TITLE) {
-        edges { node { handle title } }
+        edges {
+          node {
+            id
+            handle
+            title
+            descriptionHtml
+            productsCount { count }
+            image { url altText }
+          }
+        }
       }
     }
   `)
-  return data.collections.edges.map(e => e.node)
+  return data.collections.edges.map(e => ({
+    id:              e.node.id,
+    handle:          e.node.handle,
+    title:           e.node.title,
+    descriptionHtml: e.node.descriptionHtml,
+    productsCount:   e.node.productsCount?.count ?? 0,
+    image:           e.node.image,
+  }))
 }
 
 export async function getAccessoryProducts(ids: string[]): Promise<Product[]> {
@@ -1153,31 +1189,31 @@ export async function getWholesaleCostBySKU(sku: string): Promise<number> {
 
 export interface ProductPageDoc {
   shopifyProductId: string
-  title?: string
-  vendor?: string
-  tags?: string[]
+  title?: string | undefined
+  vendor?: string | undefined
+  tags?: string[] | undefined
   description?: unknown        // string (legacy) or portable text blocks
-  seoTitle?: string
-  seoDescription?: string
-  tagline?: string
+  seoTitle?: string | undefined
+  seoDescription?: string | undefined
+  tagline?: string | undefined
   fullStory?: unknown           // string (legacy) or portable text blocks
   worksForHim?: unknown        // string (legacy) or portable text blocks
   worksForHer?: unknown        // string (legacy) or portable text blocks
-  featureBullets?: string[]
-  boxContents?: string[]
-  moodImageUrl?: string
-  category?: string
-  dealStatus?: string
-  dealDate?: string
-  originalPrice?: number
-  wholesaleCost?: number
-  mapPrice?: number
-  nalpacSku?: string
-  dealScore?: number
-  accessoryProductIds?: string[]
-  seoMetaDescription?: string
-  specifications?: string
-  rawDescription?: string
+  featureBullets?: string[] | undefined
+  boxContents?: string[] | undefined
+  moodImageUrl?: string | undefined
+  category?: string | undefined
+  dealStatus?: string | undefined
+  dealDate?: string | undefined
+  originalPrice?: number | undefined
+  wholesaleCost?: number | undefined
+  mapPrice?: number | undefined
+  nalpacSku?: string | undefined
+  dealScore?: number | undefined
+  accessoryProductIds?: string[] | undefined
+  seoMetaDescription?: string | undefined
+  specifications?: string | undefined
+  rawDescription?: string | undefined
 }
 
 export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
@@ -1669,7 +1705,7 @@ export async function uploadThumbnailToProduct(
   // 2. POST image to staged URL
   const form = new FormData()
   for (const param of target.parameters) form.append(param.name, param.value)
-  form.append('file', new Blob([imageBuffer], { type: 'image/jpeg' }), filename)
+  form.append('file', new Blob([new Uint8Array(imageBuffer)], { type: 'image/jpeg' }), filename)
 
   const uploadRes = await fetch(target.url, { method: 'POST', body: form })
   if (!uploadRes.ok) {
@@ -3018,10 +3054,10 @@ function buildProductTags(product: ProductScore): string[] {
 
 
 export async function updateCollectionImage(
-  collectionId: string,
-  imageBuffer: Buffer,
-  filename: string,
-  alt: string,
+  _collectionId: string,
+  _imageBuffer: Buffer,
+  _filename: string,
+  _alt: string,
 ): Promise<string> {
   console.warn('updateCollectionImage: not yet implemented')
   return ''
@@ -3089,7 +3125,7 @@ export async function getAccessoryProductsAdmin(
   })
 }
 
-export async function updateCollectionDescription(...args: unknown[]): Promise<void> {
+export async function updateCollectionDescription(..._args: unknown[]): Promise<void> {
   console.warn('updateCollectionDescription: not yet implemented')
 }
 
