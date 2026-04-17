@@ -9,7 +9,7 @@ export const IVR_LIMITS = {
   /** Between caller turns (after Claude finishes replying). */
   interTurnSilenceMs: Number(process.env['IVR_INTER_TURN_SILENCE_MS'] ?? 20_000),
   /** Hard cap on total call length. */
-  maxCallDurationMs: Number(process.env['IVR_MAX_CALL_DURATION_MS'] ?? 300_000),
+  maxCallDurationMs: Number(process.env['IVR_MAX_CALL_DURATION_MS'] ?? 900_000),
   /** Runaway-loop guard: cap total prompt events per call. */
   maxPrompts: Number(process.env['IVR_MAX_PROMPTS'] ?? 30),
   /** "Still there?" prompts sent before we hang up on silence. */

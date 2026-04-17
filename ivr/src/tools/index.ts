@@ -75,21 +75,55 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'searchProducts',
     description:
-      "Search the xdipx catalog for products matching what the caller described. Returns up to 5 matches with titles, MAP-cleared prices, stock status, AND the Shopify variantId you'll need later to create a draft order. Always call this before quoting any price. If the first search returns nothing useful, try again with a broader or different term (e.g. 'massager' instead of 'back massager'; 'couple' instead of 'couple play kit'). Remove modifiers and retry before telling the caller we don't carry it.",
+      "Search the xdipx catalog for products matching a keyword or phrase. Returns up to 5 matches with titles, taglines, MAP-cleared prices, stock status, AND the Shopify variantId you'll need later to create a draft order. Always call this before quoting any price. Supports optional category and price filters. If the first search returns nothing useful, try again with a broader or different term (e.g. 'massager' instead of 'back massager'). Remove modifiers and retry before telling the caller we don't carry it.",
     input_schema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: "Short search words. Prefer 1–2 words (e.g. 'wand', 'lube', 'couple kit'). Don't paste the caller's full sentence." },
         limit: { type: 'number', description: '1–5, default 3. Keep low on phone — you can only say a few aloud.' },
+        category: { type: 'string', enum: ['for-him', 'for-her', 'couples', 'both'], description: 'Filter by audience category if the caller specified.' },
+        priceMax: { type: 'number', description: 'Max price in dollars if the caller gave a budget.' },
       },
       required: ['query'],
       additionalProperties: false,
     },
   },
   {
+    name: 'discoverProducts',
+    description:
+      "Find products by mood, use-case, experience level, or features — use when the caller describes a vibe or scenario rather than naming a specific product (e.g. 'something for date night', 'beginner-friendly', 'waterproof and quiet'). Uses structured tags for better matching than keyword search.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        mood: { type: 'array', items: { type: 'string', enum: ['playful', 'romantic', 'luxurious', 'adventurous', 'relaxing'] }, description: 'Mood/vibe tags matching what the caller described.' },
+        experience: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Experience level if the caller mentioned it.' },
+        useCase: { type: 'array', items: { type: 'string', enum: ['solo', 'couples', 'date-night', 'gift', 'travel'] }, description: 'Use-case tags.' },
+        features: { type: 'array', items: { type: 'string', enum: ['waterproof', 'quiet', 'rechargeable', 'app-controlled', 'body-safe'] }, description: 'Feature tags the caller asked about.' },
+        category: { type: 'string', enum: ['for-him', 'for-her', 'couples', 'both'], description: 'Audience category.' },
+        priceMax: { type: 'number', description: 'Max price in dollars.' },
+        limit: { type: 'number', description: '1–5, default 3. Keep low on phone.' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'recommendSimilar',
+    description:
+      "After the caller picks a product, suggest 1–2 frequently bought-together items. Use as a natural add-on: 'people who got that also grabbed...' Keep it brief — one sentence. Never push if the caller has declined or seems in a hurry.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        handle: { type: 'string', description: 'Handle of the product the caller is buying.' },
+        limit: { type: 'number', description: '1–3, default 2.' },
+      },
+      required: ['handle'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'getProductDetails',
     description:
-      "Fetch details on a specific product by its handle (slug). Use after searchProducts when the caller picks one, to get a short description, the MAP-cleared price, and the variantId (or a list of variantOptions if the product has multiple choices).",
+      "Fetch extra details on a specific product by its handle. Only needed if the caller asks about specific variant options or details not covered by the search result tagline — searchProducts already returns title, tagline, pricing, and default variant.",
     input_schema: {
       type: 'object',
       properties: {
@@ -114,7 +148,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'createDraftOrder',
     description:
-      "Create a Shopify draft order and EMAIL the caller a secure Shopify checkout link. SMS is not wired up — delivery is email only, so the caller's email must be correct. ONLY call after: (1) confirmed each product + variant + quantity via searchProducts/getProductDetails, (2) collected email (read back to confirm) + full name + full shipping address, (3) read back a GENERIC item description (e.g. 'one item from for-her, one accessory') and got a clear 'yes'. Never read full product names on a speakerphone. Never collect card numbers — Shopify handles payment. Hard caps: $500 subtotal, 5 line items, 2 orders per 24h per number. On limit error, apologize and offer a human callback via recordVoicemail.",
+      "Create a Shopify draft order and EMAIL the caller a secure Shopify checkout link. SMS is not wired up — delivery is email only, so the caller's email must be correct. ONLY call after: (1) confirmed each product + variant + quantity via searchProducts/getProductDetails, (2) collected email (read back to confirm) + full name + full shipping address, (3) read back a GENERIC item description (e.g. 'one item from for-her, one accessory') and got a clear 'yes'. Never read full product names on a speakerphone. Never collect card numbers — Shopify handles payment. Hard caps: $500 subtotal, 5 line items. On limit error, apologize and offer a human callback via recordVoicemail.",
     input_schema: {
       type: 'object',
       properties: {
@@ -200,6 +234,8 @@ export async function runTool(
       })
     }
     case 'searchProducts':
+    case 'discoverProducts':
+    case 'recommendSimilar':
     case 'getProductDetails':
     case 'listTodaysCollections':
     case 'lookupReturningCustomer':
