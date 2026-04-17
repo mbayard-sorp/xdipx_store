@@ -116,6 +116,7 @@ function buildTwiml(greeting: string): string {
       transcriptionProvider="Deepgram"
       speechModel="nova-2-phonecall"
       hints="${xmlEscape(STT_HINTS)}"
+      profanityFilter="false"
       interruptible="true"
       dtmfDetection="true"
     />

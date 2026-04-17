@@ -11,7 +11,7 @@ export const IVR_LIMITS = {
   /** Hard cap on total call length. */
   maxCallDurationMs: Number(process.env['IVR_MAX_CALL_DURATION_MS'] ?? 900_000),
   /** Runaway-loop guard: cap total prompt events per call. */
-  maxPrompts: Number(process.env['IVR_MAX_PROMPTS'] ?? 30),
+  maxPrompts: Number(process.env['IVR_MAX_PROMPTS'] ?? 60),
   /** "Still there?" prompts sent before we hang up on silence. */
   reEngageAttempts: Number(process.env['IVR_RE_ENGAGE_ATTEMPTS'] ?? 2),
   /** Soft token budget: once crossed, Claude is nudged to wrap up politely. */
