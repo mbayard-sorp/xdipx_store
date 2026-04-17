@@ -23,7 +23,7 @@ var CHANNEL_RULES = `PHONE CALL MODE:
 ORDER LOOKUPS:
 - When a caller asks about an order, collect two things: the order number and the last 4 digits of their billing ZIP. They may say digits as words ("one two three four") \u2014 treat as digits.
 - Call the lookupOrder tool with both. Read back status plainly ("it shipped Tuesday with UPS, tracking ends in 7 2 0 3").
-- If verification_failed happens twice in a row, stop retrying and offer to take a voicemail so a human can follow up.
+- If verification_failed happens twice in a row, stop retrying and offer to take a voicemail so the team can help.
 - If rate_limited, apologise briefly and offer a voicemail.
 
 TAKING AN ORDER (closing a sale on the phone):
@@ -32,30 +32,48 @@ TAKING AN ORDER (closing a sale on the phone):
   1. Use searchProducts to find what they want. Every result includes a variantId (Shopify GID). If the product has variantOptions, call getProductDetails or ask the caller which option they want before proceeding \u2014 that's where you get the right variantId.
   2. Call lookupReturningCustomer \u2014 uses caller ID automatically. If found, offer to ship to the address on file instead of re-collecting, and confirm the email on file is still the best one for the checkout link.
   3. If new caller, collect: email (READ IT BACK carefully \u2014 this is where the link goes), full name, street address, city, state (2-letter), ZIP.
-  4. Read back a GENERIC summary before charging forward \u2014 e.g. "one item from for-her, shipping to Mike in Los Angeles, total around forty dollars, checkout link going to m-mike at gmail \u2014 sound right?" Never read full product names aloud; the caller may be on speakerphone.
+  4. Read back a GENERIC summary before charging forward \u2014 e.g. "one item from our vibrators collection, shipping to Mike in Los Angeles, total around forty dollars, checkout link going to m-mike at gmail \u2014 sound right?" Never read full product names aloud; the caller may be on speakerphone.
   5. As soon as they say yes, CALL createDraftOrder with the items array (variantId + quantity), email, name, and address. Do not narrate "let me send that over" \u2014 just call the tool.
   6. When the tool returns ok with emailSent=true, tell them plainly: "Done \u2014 the secure checkout link just went to your email. Anything else?"
-  7. If ok but emailSent=false, say: "Order is saved but the email didn't send. I'll have someone follow up \u2014 can I take a voicemail?" then recordVoicemail.
+  7. If ok but emailSent=false, say: "Order is saved but the email didn't send. Let me send this to my team \u2014 they'll take amazing care of you." then recordVoicemail.
 - Never tell the caller you're "texting" the link or that they'll "get a text" \u2014 it's email only.
-- Caps: $500 subtotal, 5 items. If the tool returns a limit error, apologise and offer a voicemail callback via recordVoicemail.
+- Caps: $500 subtotal, 5 items. If the tool returns a limit error, apologise and offer to send it to the team via recordVoicemail.
 - CRITICAL: saying "I'll email you a link" without actually invoking createDraftOrder is a bug. If you've said yes you're sending, the very next action MUST be the tool call \u2014 not another question, not a confirmation.
+- If createDraftOrder returns ok:false, READ the message field \u2014 it tells you exactly what to fix (invalid_state, invalid_zip, invalid_email, missing_fields, shopify_rejected). Ask the caller to clarify just that field and retry the tool. DO NOT fall back to voicemail on the first validation error \u2014 only after the same error twice in a row.
+- State MUST be the 2-letter code (CA, NY, TX). If the caller says "California", convert to "CA" yourself before passing to the tool.
 
 PRODUCT DISCOVERY:
 - When the caller describes a mood, scenario, or experience level ("something for date night", "beginner-friendly", "waterproof and quiet"), use discoverProducts with structured filters rather than searchProducts.
 - When the caller names a specific product or category keyword ("vibrators", "lube", "rabbit"), use searchProducts.
+- NEVER reference "Vault", "For Him", "For Her", or "Couples" as sections of the site \u2014 those are deprecated. Instead, refer to "collections". Our current collections are: {collections}. Reference the most relevant collection based on what the caller is looking for.
+- After describing a product the caller is interested in, ask ONE question and STOP: "Want me to add that to your bag?" Then be quiet \u2014 give the caller time to answer. Do NOT tack on a second question ("What else can I help you find?") in the same breath. You can ask about next steps AFTER they answer.
 - After the caller commits to a product, use recommendSimilar once to suggest one add-on. Keep it to one sentence: "People who got that also grabbed a [generic description] for [price as words] \u2014 want me to add it?"
 - Never push an upsell if the caller has declined once or seems in a hurry.
 
 VOICEMAILS:
 - If you can't answer something, if the caller wants a human, or if tools repeatedly fail, offer to take a message.
-- Before saving: confirm a callback number (default their caller ID \u2014 just ask "good to call you back at this number?") and hold a one-to-two-sentence summary in your head.
+- Before saving: confirm a callback number (default their caller ID \u2014 just ask "is this a good number to reach you at?") and hold a one-to-two-sentence summary in your head.
 - Then call recordVoicemail with { summary, callbackNumber, contextOrderNumber? }. The summary is written text for staff, not spoken.
-- After the tool returns ok, tell the caller you've got it: "Got it \u2014 someone will get back to you. Anything else?" If not ok, apologise and offer to try once more.`;
-function buildSystemPrompt(brandVoice) {
-  return `${IDENTITY_HEADER}
+- After the tool returns ok, tell the caller: "Got it \u2014 I'll send this to my team and they'll take amazing care of you. Anything else?" If not ok, apologise and offer to try once more.
+- NEVER say "someone will call you back" or "we'll get back to you" \u2014 always frame it as "I'll send this to my team and they'll take amazing care of you."
+
+ENDING THE CALL:
+- When the caller says goodbye, thanks you, or says they don't need anything else, wrap up with: {goodbye}
+- Keep it warm and brief. One goodbye \u2014 don't repeat yourself or drag it out.`;
+function buildSystemPrompt(brandVoice, collections, goodbye) {
+  let prompt = `${IDENTITY_HEADER}
 ${brandVoice.trim()}
 
 ${CHANNEL_RULES}`;
+  if (collections?.length) {
+    prompt = prompt.replace(
+      "{collections}",
+      collections.join(", ")
+    );
+  }
+  const outroText = goodbye?.trim() || "Thanks for calling ex-dip \u2014 have a great one!";
+  prompt = prompt.replace("{goodbye}", outroText);
+  return prompt;
 }
 
 // src/settings.ts
@@ -63,18 +81,38 @@ import { neon } from "@neondatabase/serverless";
 var url = process.env["DATABASE_URL"];
 var sql = neon(url ?? "");
 var DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Your goal is to welcome first-time buyers and delight experienced ones. Keep all copy tasteful \u2014 suggestive is fine, explicit is not. Always signal discretion, value, and trust. Never use "sex" as an adjective \u2014 use "intimate", "pleasure", or "wellness". Never assume the reader's experience level.`;
+var DEFAULT_GREETING = "Hey, you've reached ex-dip. I'm {feeling} you called. This call may be recorded. What's going on?";
+var DEFAULT_FEELINGS = "so happy,thrilled,super excited,really glad,pumped,stoked,delighted";
+var DEFAULT_ACTIVITIES = "browsing the vault,curating today's deal,testing out some new arrivals,organizing the stockroom";
+var DEFAULT_FAREWELL_GOODBYE = "Thanks for calling ex-dip \u2014 have a great one!";
 var DEFAULT_FAREWELL_MAX_PROMPTS = "I really like you \u2014 but it might be easier if you send an email to hello at exdipex dot com and we can help you directly. Once again that's hello at exdipex dot com.";
 var DEFAULT_FAREWELL_MAX_DURATION = DEFAULT_FAREWELL_MAX_PROMPTS;
 var DEFAULT_FAREWELL_SILENT = "";
 var KEYS = [
   "brandVoice",
+  "ivrGreeting",
+  "ivrFeelings",
+  "ivrActivities",
+  "ivrFarewellGoodbye",
   "ivrFarewellMaxPrompts",
   "ivrFarewellMaxDuration",
   "ivrFarewellSilent"
 ];
+function pickRandom(csv, fallback) {
+  const items = csv.split(",").map((s) => s.trim()).filter(Boolean);
+  if (!items.length) return fallback;
+  return items[Math.floor(Math.random() * items.length)];
+}
+function resolveGreeting(template, feelings, activities) {
+  const feeling = pickRandom(feelings, "happy");
+  const activity = pickRandom(activities, "working");
+  return template.replace("{feeling}", feeling).replace("{activity}", activity);
+}
 async function loadIvrSettings() {
   const fallback = {
     brandVoice: DEFAULT_BRAND_VOICE,
+    greeting: resolveGreeting(DEFAULT_GREETING, DEFAULT_FEELINGS, DEFAULT_ACTIVITIES),
+    farewellGoodbye: DEFAULT_FAREWELL_GOODBYE,
     farewellMaxPrompts: DEFAULT_FAREWELL_MAX_PROMPTS,
     farewellMaxDuration: DEFAULT_FAREWELL_MAX_DURATION,
     farewellSilent: DEFAULT_FAREWELL_SILENT
@@ -89,6 +127,12 @@ async function loadIvrSettings() {
     for (const row of rows) map.set(row.key, row.value);
     return {
       brandVoice: map.get("brandVoice") || fallback.brandVoice,
+      greeting: resolveGreeting(
+        map.get("ivrGreeting") || DEFAULT_GREETING,
+        map.get("ivrFeelings") || DEFAULT_FEELINGS,
+        map.get("ivrActivities") || DEFAULT_ACTIVITIES
+      ),
+      farewellGoodbye: map.get("ivrFarewellGoodbye") || fallback.farewellGoodbye,
       farewellMaxPrompts: map.get("ivrFarewellMaxPrompts") || fallback.farewellMaxPrompts,
       farewellMaxDuration: map.get("ivrFarewellMaxDuration") || fallback.farewellMaxDuration,
       // Silent caller is allowed to be empty — only admins unset it on purpose.
@@ -465,7 +509,7 @@ async function callQaTool(tool, input, ctx) {
 }
 
 // src/tools/index.ts
-var MAX_ORDER_LOOKUPS_PER_CALL = 5;
+var MAX_ORDER_LOOKUPS_PER_CALL = 15;
 var TOOL_DEFINITIONS = [
   {
     name: "readTodaysDeal",
@@ -526,7 +570,7 @@ var TOOL_DEFINITIONS = [
       properties: {
         query: { type: "string", description: "Short search words. Prefer 1\u20132 words (e.g. 'wand', 'lube', 'couple kit'). Don't paste the caller's full sentence." },
         limit: { type: "number", description: "1\u20135, default 3. Keep low on phone \u2014 you can only say a few aloud." },
-        category: { type: "string", enum: ["for-him", "for-her", "couples", "both"], description: "Filter by audience category if the caller specified." },
+        collection: { type: "string", description: 'Collection handle to filter by if the caller mentioned one (e.g. "vibrators", "lubricants", "bondage"). Use the handle from listCollections.' },
         priceMax: { type: "number", description: "Max price in dollars if the caller gave a budget." }
       },
       required: ["query"],
@@ -543,7 +587,7 @@ var TOOL_DEFINITIONS = [
         experience: { type: "string", enum: ["beginner", "intermediate", "advanced"], description: "Experience level if the caller mentioned it." },
         useCase: { type: "array", items: { type: "string", enum: ["solo", "couples", "date-night", "gift", "travel"] }, description: "Use-case tags." },
         features: { type: "array", items: { type: "string", enum: ["waterproof", "quiet", "rechargeable", "app-controlled", "body-safe"] }, description: "Feature tags the caller asked about." },
-        category: { type: "string", enum: ["for-him", "for-her", "couples", "both"], description: "Audience category." },
+        collection: { type: "string", description: "Collection handle to narrow results. Use the handle from listCollections." },
         priceMax: { type: "number", description: "Max price in dollars." },
         limit: { type: "number", description: "1\u20135, default 3. Keep low on phone." }
       },
@@ -576,8 +620,8 @@ var TOOL_DEFINITIONS = [
     }
   },
   {
-    name: "listTodaysCollections",
-    description: "List the browsable collections on xdipx (For Him, For Her, Couples, Bundles, Vault). Use when the caller asks what we sell overall.",
+    name: "listCollections",
+    description: "List the browsable collections on xdipx. Use when the caller asks what we sell, what categories we have, or when you want to suggest they browse a specific collection.",
     input_schema: { type: "object", properties: {}, additionalProperties: false }
   },
   {
@@ -587,7 +631,7 @@ var TOOL_DEFINITIONS = [
   },
   {
     name: "createDraftOrder",
-    description: "Create a Shopify draft order and EMAIL the caller a secure Shopify checkout link. SMS is not wired up \u2014 delivery is email only, so the caller's email must be correct. ONLY call after: (1) confirmed each product + variant + quantity via searchProducts/getProductDetails, (2) collected email (read back to confirm) + full name + full shipping address, (3) read back a GENERIC item description (e.g. 'one item from for-her, one accessory') and got a clear 'yes'. Never read full product names on a speakerphone. Never collect card numbers \u2014 Shopify handles payment. Hard caps: $500 subtotal, 5 line items. On limit error, apologize and offer a human callback via recordVoicemail.",
+    description: "Create a Shopify draft order and EMAIL the caller a secure Shopify checkout link. SMS is not wired up \u2014 delivery is email only, so the caller's email must be correct. ONLY call after: (1) confirmed each product + variant + quantity via searchProducts/getProductDetails, (2) collected email (read back to confirm) + full name + full shipping address, (3) read back a GENERIC item description (e.g. 'one item from our vibrators collection, one accessory') and got a clear 'yes'. Never read full product names on a speakerphone. Never collect card numbers \u2014 Shopify handles payment. Hard caps: $500 subtotal, 5 line items. On limit error, apologize and offer a human callback via recordVoicemail.",
     input_schema: {
       type: "object",
       properties: {
@@ -666,13 +710,23 @@ async function runTool(name, _input, ctx) {
     case "discoverProducts":
     case "recommendSimilar":
     case "getProductDetails":
-    case "listTodaysCollections":
+    case "listCollections":
     case "lookupReturningCustomer":
     case "createDraftOrder": {
-      return await callQaTool(name, _input ?? {}, {
+      const result = await callQaTool(name, _input ?? {}, {
         channel: "voice",
         ...ctx.session.fromNumber ? { phone: ctx.session.fromNumber } : {}
       });
+      if (name === "createDraftOrder") {
+        const r = result;
+        if (!r.ok) {
+          const inp = _input ?? {};
+          console.error(
+            `[ivr] createDraftOrder failed callSid=${ctx.session.callSid} error=${r.error} msg=${r.message} state=${inp["state"]} zip=${inp["zip"]} city=${inp["city"]} items=${Array.isArray(inp["items"]) ? inp["items"].length : 0}`
+          );
+        }
+      }
+      return result;
     }
     case "sendDealLinkSMS": {
       const deal = await readTodaysDeal();
@@ -695,7 +749,7 @@ async function runTool(name, _input, ctx) {
 // src/config.ts
 var IVR_LIMITS = {
   /** After greeting, how long we wait for the caller to say anything. */
-  initialSilenceMs: Number(process.env["IVR_INITIAL_SILENCE_MS"] ?? 12e3),
+  initialSilenceMs: Number(process.env["IVR_INITIAL_SILENCE_MS"] ?? 25e3),
   /** Between caller turns (after Claude finishes replying). */
   interTurnSilenceMs: Number(process.env["IVR_INTER_TURN_SILENCE_MS"] ?? 2e4),
   /** Hard cap on total call length. */
@@ -713,7 +767,7 @@ var IVR_LIMITS = {
 // src/claude.ts
 var MODEL = "claude-haiku-4-5-20251001";
 var MAX_TOKENS = 800;
-var MAX_TOOL_HOPS = 6;
+var MAX_TOOL_HOPS = 20;
 var SEND_INTENT_RE = /\b(sending|sent|send(ing)?\s+(it|that|the\s+(link|order))|email(ing)?\s+(you|it|that|the)|text(ing)?\s+(you|it|that)|on\s+(its|it's|the)\s+way|right\s+over|shooting\s+(it|that)\s+over|check\s+your\s+(phone|email|inbox|text|messages)|went\s+to\s+your\s+(email|inbox|phone|text)|link\s+(just\s+)?(went|sent|emailed)|just\s+went\s+to\s+your)\b/i;
 var apiKey = process.env["ANTHROPIC_API_KEY"];
 if (!apiKey) {
@@ -840,12 +894,22 @@ async function runOneHop(session, controller, cb, toolChoice) {
     { signal: controller.signal }
   );
   let textBuf = "";
+  let ttsBuffer = "";
   stream.on("text", (delta) => {
     textBuf += delta;
     const spoken = stripForTTS(delta);
-    if (spoken) cb.onToken(spoken);
+    if (!spoken) return;
+    ttsBuffer += spoken;
+    if (/\w/.test(ttsBuffer)) {
+      cb.onToken(ttsBuffer);
+      ttsBuffer = "";
+    }
   });
   const final = await stream.finalMessage();
+  if (ttsBuffer) {
+    cb.onToken(ttsBuffer);
+    ttsBuffer = "";
+  }
   const usage = final.usage;
   const hopTokens = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
   session.tokensUsed += hopTokens;
@@ -902,7 +966,10 @@ httpServer.on("upgrade", (req, socket, head) => {
 wss.on("connection", (ws, req) => {
   const remote = req.socket.remoteAddress ?? "unknown";
   console.log(`[ivr] ws connected from ${remote}`);
+  const wsUrl = new URL(req.url ?? "/", "http://localhost");
+  const greetingFromUrl = decodeURIComponent(wsUrl.searchParams.get("greeting") ?? "");
   const session = new Session();
+  if (greetingFromUrl) session.addTurn("assistant", greetingFromUrl);
   ws.on("message", (raw) => {
     let msg;
     try {
@@ -917,12 +984,24 @@ wss.on("connection", (ws, req) => {
         session.fromNumber = msg.from;
         session.toNumber = msg.to;
         console.log(`[ivr] setup callSid=${session.callSid} from=${session.fromNumber}`);
-        loadIvrSettings().then((s) => {
+        if (greetingFromUrl) sendText(ws, greetingFromUrl, true);
+        Promise.all([
+          loadIvrSettings(),
+          callQaTool("listCollections", {}).then((r) => {
+            const res = r;
+            return res.ok ? res.data?.collections?.map((c) => c.title) ?? [] : [];
+          }).catch(() => [])
+        ]).then(([s, collections]) => {
           session.settings = s;
-          session.systemPrompt = buildSystemPrompt(s.brandVoice);
+          session.systemPrompt = buildSystemPrompt(s.brandVoice, collections, s.farewellGoodbye);
+          if (!greetingFromUrl && s.greeting) {
+            session.addTurn("assistant", s.greeting);
+            sendText(ws, s.greeting, true);
+          }
         }).catch(() => {
         });
-        armInitialSilence(ws, session);
+        const greetingBuffer = greetingFromUrl ? estimateTtsMs(greetingFromUrl) : 5e3;
+        armInitialSilence(ws, session, greetingBuffer);
         session.armDuration(IVR_LIMITS.maxCallDurationMs, () => wrapUp(ws, session));
         return;
       }
@@ -979,6 +1058,11 @@ wss.on("connection", (ws, req) => {
     console.error(`[ivr] ws error callSid=${session.callSid}`, err);
   });
 });
+var TTS_WORDS_PER_SEC = 2.5;
+function estimateTtsMs(text) {
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return Math.round(words / TTS_WORDS_PER_SEC * 1e3);
+}
 function handlePrompt(ws, session, voicePrompt) {
   if (!voicePrompt.trim()) {
     armInterTurnSilence(ws, session);
@@ -987,6 +1071,7 @@ function handlePrompt(ws, session, voicePrompt) {
   session.addTurn("user", voicePrompt);
   const started = Date.now();
   let firstTokenAt = 0;
+  let spokenText = "";
   streamReply(session, {
     onToken: (token) => {
       if (ws.readyState !== ws.OPEN) return;
@@ -998,11 +1083,15 @@ function handlePrompt(ws, session, voicePrompt) {
           console.warn(`[ivr] first-token SLO breach callSid=${session.callSid} ms=${ms} slo=${IVR_LIMITS.firstTokenSloMs}`);
         }
       }
+      spokenText += token;
       sendText(ws, token, false);
     },
     onDone: () => {
       if (ws.readyState === ws.OPEN) sendText(ws, "", true);
-      armInterTurnSilence(ws, session);
+      const ttsTotal = estimateTtsMs(spokenText);
+      const alreadySpoken = firstTokenAt ? Date.now() - firstTokenAt : 0;
+      const ttsBuffer = Math.min(Math.max(0, ttsTotal - alreadySpoken), 15e3);
+      armInterTurnSilence(ws, session, ttsBuffer);
     },
     onError: (err) => {
       console.error(`[ivr] claude error callSid=${session.callSid}`, err);
@@ -1013,11 +1102,11 @@ function handlePrompt(ws, session, voicePrompt) {
     }
   });
 }
-function armInitialSilence(ws, session) {
-  session.armSilence(IVR_LIMITS.initialSilenceMs, () => onSilence(ws, session));
+function armInitialSilence(ws, session, ttsBufferMs = 0) {
+  session.armSilence(IVR_LIMITS.initialSilenceMs + ttsBufferMs, () => onSilence(ws, session));
 }
-function armInterTurnSilence(ws, session) {
-  session.armSilence(IVR_LIMITS.interTurnSilenceMs, () => onSilence(ws, session));
+function armInterTurnSilence(ws, session, ttsBufferMs = 0) {
+  session.armSilence(IVR_LIMITS.interTurnSilenceMs + ttsBufferMs, () => onSilence(ws, session));
 }
 function onSilence(ws, session) {
   if (ws.readyState !== ws.OPEN) return;

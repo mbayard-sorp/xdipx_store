@@ -14,16 +14,41 @@ import {
   createDraftOrder,
   findCustomerByPhone,
   getProductByHandle,
-  searchProducts as shopifySearch,
+  getStorefrontCollections,
   sendDraftOrderInvoice,
 } from '~/lib/shopify.server'
+import { searchForIvr, discoverForIvr, getIvrCardsByHandles } from '~/lib/ivr-search.server'
+import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
 import { db } from '~/lib/db.server'
 import { draftOrders } from '~/../db/schema'
 import type { Product } from '~/types'
 
 export const MAX_ORDER_VALUE_CENTS = Number(process.env['IVR_MAX_ORDER_VALUE_CENTS'] ?? 50_000) // $500
 export const MAX_ITEMS_PER_ORDER   = Number(process.env['IVR_MAX_ITEMS_PER_ORDER']   ?? 5)
-export const MAX_ORDERS_PER_24H    = Number(process.env['IVR_MAX_ORDERS_PER_24H']    ?? 2)
+export const MAX_ORDERS_PER_24H    = Number(process.env['IVR_MAX_ORDERS_PER_24H']    ?? 50)
+
+// Claude sometimes passes the full state name ("California") even when the
+// prompt asks for a 2-letter code. Normalize on the server so the tool call
+// succeeds instead of bouncing Claude into a voicemail fallback.
+const STATE_CODES: Record<string, string> = {
+  ALABAMA: 'AL', ALASKA: 'AK', ARIZONA: 'AZ', ARKANSAS: 'AR', CALIFORNIA: 'CA',
+  COLORADO: 'CO', CONNECTICUT: 'CT', DELAWARE: 'DE', FLORIDA: 'FL', GEORGIA: 'GA',
+  HAWAII: 'HI', IDAHO: 'ID', ILLINOIS: 'IL', INDIANA: 'IN', IOWA: 'IA',
+  KANSAS: 'KS', KENTUCKY: 'KY', LOUISIANA: 'LA', MAINE: 'ME', MARYLAND: 'MD',
+  MASSACHUSETTS: 'MA', MICHIGAN: 'MI', MINNESOTA: 'MN', MISSISSIPPI: 'MS', MISSOURI: 'MO',
+  MONTANA: 'MT', NEBRASKA: 'NE', NEVADA: 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ',
+  'NEW MEXICO': 'NM', 'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', OHIO: 'OH',
+  OKLAHOMA: 'OK', OREGON: 'OR', PENNSYLVANIA: 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC',
+  'SOUTH DAKOTA': 'SD', TENNESSEE: 'TN', TEXAS: 'TX', UTAH: 'UT', VERMONT: 'VT',
+  VIRGINIA: 'VA', WASHINGTON: 'WA', 'WEST VIRGINIA': 'WV', WISCONSIN: 'WI', WYOMING: 'WY',
+  'DISTRICT OF COLUMBIA': 'DC',
+}
+
+function normalizeState(raw: string): string {
+  const s = raw.trim().toUpperCase()
+  if (/^[A-Z]{2}$/.test(s)) return s
+  return STATE_CODES[s] ?? s
+}
 
 export interface AgentContext {
   phone?: string
@@ -34,21 +59,55 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'searchProducts',
     description:
-      "Search the xdipx catalog for products that match the user's words. Use when the user asks for a category, brand, problem, or use-case (e.g. 'anything for couples', 'lube for sensitive skin', 'show me rabbits'). Returns up to 5 products with titles, handles, and pricing cleared against MAP rules. Never guess pricing — always call this.",
+      "Search the xdipx catalog for products matching a keyword or phrase. Use when the user names a specific product, category, or brand (e.g. 'vibrator', 'lube', 'show me rabbits'). Returns up to 5 products with titles, taglines, MAP-cleared prices, and variant IDs. Supports optional category and price filters. Never guess pricing — always call this.",
     input_schema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Free-text search query from the user.' },
         limit: { type: 'number', description: 'Max results to return. 1–5. Default 5.' },
+        category: { type: 'string', enum: ['for-him', 'for-her', 'couples', 'both'], description: 'Filter by audience category.' },
+        priceMax: { type: 'number', description: 'Max price in dollars.' },
       },
       required: ['query'],
       additionalProperties: false,
     },
   },
   {
+    name: 'discoverProducts',
+    description:
+      "Find products by mood, use-case, experience level, or features — use when the user describes a vibe or scenario rather than naming a specific product (e.g. 'something for date night', 'beginner-friendly', 'waterproof and quiet'). Uses structured tags for better matching than keyword search.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        mood: { type: 'array', items: { type: 'string', enum: ['playful', 'romantic', 'luxurious', 'adventurous', 'relaxing'] }, description: 'Mood/vibe tags.' },
+        experience: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Experience level.' },
+        useCase: { type: 'array', items: { type: 'string', enum: ['solo', 'couples', 'date-night', 'gift', 'travel'] }, description: 'Use-case tags.' },
+        features: { type: 'array', items: { type: 'string', enum: ['waterproof', 'quiet', 'rechargeable', 'app-controlled', 'body-safe'] }, description: 'Feature tags.' },
+        category: { type: 'string', enum: ['for-him', 'for-her', 'couples', 'both'], description: 'Audience category.' },
+        priceMax: { type: 'number', description: 'Max price in dollars.' },
+        limit: { type: 'number', description: '1–5, default 3.' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'recommendSimilar',
+    description:
+      "Suggest 1–2 frequently bought-together items after the user picks a product. Use as a natural add-on suggestion: 'people who got that also grabbed...' Returns recommendations based on real order data.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        handle: { type: 'string', description: 'Handle of the product the user chose.' },
+        limit: { type: 'number', description: '1–3, default 2.' },
+      },
+      required: ['handle'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'getProductDetails',
     description:
-      "Fetch full details on a specific product by its handle (slug). Use after searchProducts when the user picks one, or when they name a specific product. Returns title, description, price, MAP-cleared display price, tags, and URL.",
+      "Fetch extra details on a specific product by its handle. Only needed if the user asks about specific variant options or details not covered by the search result tagline — searchProducts already returns title, tagline, pricing, and default variant.",
     input_schema: {
       type: 'object',
       properties: {
@@ -59,9 +118,9 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'listTodaysCollections',
+    name: 'listCollections',
     description:
-      "List the top-level browsable collections on xdipx (For Him, For Her, Couples, Daily Deal, Bundles, Vault). Use when the user asks 'what do you sell' or 'what categories do you have'.",
+      "List the browsable collections on xdipx. Use when the user asks 'what do you sell' or 'what categories do you have'.",
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
@@ -116,7 +175,7 @@ export interface DisplayPrice {
   phrasing: 'deal' | 'map_floor' | 'msrp_only'
 }
 
-function applyMapRule(price: number, msrp: number, mapPrice: number): DisplayPrice {
+export function applyMapRule(price: number, msrp: number, mapPrice: number): DisplayPrice {
   const effectiveMsrp = msrp > 0 ? msrp : price
   if (mapPrice > 0 && mapPrice >= effectiveMsrp) {
     return { price: effectiveMsrp, msrp: effectiveMsrp, pctOffMsrp: 0, phrasing: 'msrp_only' }
@@ -181,12 +240,32 @@ export async function runQaTool(
       const query = String(input['query'] ?? '').trim()
       const limit = Math.max(1, Math.min(5, Number(input['limit'] ?? 5)))
       if (!query) return { ok: false, error: 'empty query' }
-      const { products } = await shopifySearch({ query, first: limit })
-      const resolved = await Promise.all(
-        products.slice(0, limit).map((sp) => getProductByHandle(sp.handle)),
-      )
-      const cards = resolved.filter((p): p is Product => !!p).map(productToCard)
+      const category = input['category'] ? String(input['category']).trim() : undefined
+      const priceMax = input['priceMax'] != null ? Number(input['priceMax']) : undefined
+      const cards = await searchForIvr({ query, limit, category, priceMax })
       return { ok: true, data: { query, results: cards } }
+    }
+
+    if (name === 'discoverProducts') {
+      const mood = Array.isArray(input['mood']) ? input['mood'] as string[] : undefined
+      const experience = input['experience'] ? String(input['experience']) : undefined
+      const useCase = Array.isArray(input['useCase']) ? input['useCase'] as string[] : undefined
+      const features = Array.isArray(input['features']) ? input['features'] as string[] : undefined
+      const category = input['category'] ? String(input['category']) : undefined
+      const priceMax = input['priceMax'] != null ? Number(input['priceMax']) : undefined
+      const limit = Math.max(1, Math.min(5, Number(input['limit'] ?? 3)))
+      const cards = await discoverForIvr({ mood, experience, useCase, features, category, priceMax, limit })
+      return { ok: true, data: { results: cards } }
+    }
+
+    if (name === 'recommendSimilar') {
+      const handle = String(input['handle'] ?? '').trim()
+      if (!handle) return { ok: false, error: 'handle required' }
+      const limit = Math.max(1, Math.min(3, Number(input['limit'] ?? 2)))
+      const handles = await getFrequentlyBoughtWith(handle, limit)
+      if (handles.length === 0) return { ok: true, data: { results: [] } }
+      const cards = await getIvrCardsByHandles(handles)
+      return { ok: true, data: { forHandle: handle, results: cards } }
     }
 
     if (name === 'getProductDetails') {
@@ -204,18 +283,16 @@ export async function runQaTool(
       }
     }
 
-    if (name === 'listTodaysCollections') {
+    if (name === 'listCollections') {
+      const collections = await getStorefrontCollections()
       return {
         ok: true,
         data: {
-          collections: [
-            { handle: 'daily-deal', title: "Today's Deal", url: 'https://xdipx.com/' },
-            { handle: 'for-him', title: 'For Him', url: 'https://xdipx.com/for-him' },
-            { handle: 'for-her', title: 'For Her', url: 'https://xdipx.com/for-her' },
-            { handle: 'couples', title: 'For Couples', url: 'https://xdipx.com/for-couples' },
-            { handle: 'bundles', title: 'Bundles', url: 'https://xdipx.com/bundles' },
-            { handle: 'vault', title: 'The Vault (past deals)', url: 'https://xdipx.com/vault' },
-          ],
+          collections: collections.map(c => ({
+            handle: c.handle,
+            title: c.title,
+            url: `https://xdipx.com/collections/${c.handle}`,
+          })),
         },
       }
     }
@@ -257,37 +334,60 @@ export async function runQaTool(
       const customerName = String(input['name'] ?? '').trim()
       const address1 = String(input['address1'] ?? '').trim()
       const city = String(input['city'] ?? '').trim()
-      const state = String(input['state'] ?? '').trim().toUpperCase()
-      const zip = String(input['zip'] ?? '').trim()
-      if (!email || !customerName || !address1 || !city || !state || !zip) {
-        return { ok: false, error: 'missing_fields' }
+      const stateRaw = String(input['state'] ?? '').trim()
+      const state = normalizeState(stateRaw)
+      const zipRaw = String(input['zip'] ?? '').trim()
+      // Strip any spaces/dashes ElevenLabs transcribed mid-zip ("9 1 0 1 1").
+      const zip = zipRaw.replace(/\s+/g, '').replace(/[^\d-]/g, '')
+      const missing: string[] = []
+      if (!email) missing.push('email')
+      if (!customerName) missing.push('name')
+      if (!address1) missing.push('address1')
+      if (!city) missing.push('city')
+      if (!stateRaw) missing.push('state')
+      if (!zipRaw) missing.push('zip')
+      if (missing.length) {
+        return { ok: false, error: 'missing_fields', message: `Missing: ${missing.join(', ')}. Ask the caller for these and try again.` }
       }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'invalid_email' }
-      if (!/^\d{5}(-\d{4})?$/.test(zip)) return { ok: false, error: 'invalid_zip' }
-      if (!/^[A-Z]{2}$/.test(state)) return { ok: false, error: 'invalid_state' }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return { ok: false, error: 'invalid_email', message: `Email "${email}" doesn't look right. Read it back to the caller and retry.` }
+      }
+      if (!/^\d{5}(-\d{4})?$/.test(zip)) {
+        return { ok: false, error: 'invalid_zip', message: `ZIP "${zipRaw}" isn't 5 digits. Ask the caller for their ZIP again.` }
+      }
+      if (!/^[A-Z]{2}$/.test(state)) {
+        return { ok: false, error: 'invalid_state', message: `State "${stateRaw}" is not a US state. Retry with a 2-letter code like CA or NY.` }
+      }
 
       const lineItems = items.map((it) => ({
         variantId: String(it['variantId'] ?? ''),
         quantity: Math.max(1, Math.min(MAX_ITEMS_PER_ORDER, Number(it['quantity'] ?? 1))),
       }))
       if (lineItems.some((li) => !li.variantId.startsWith('gid://shopify/ProductVariant/'))) {
-        return { ok: false, error: 'invalid_variant_id' }
+        return { ok: false, error: 'invalid_variant_id', message: 'One or more variantIds are missing the Shopify GID prefix. Re-run searchProducts to get fresh variantIds.' }
       }
 
       const address2 = String(input['address2'] ?? '').trim()
-      const draft = await createDraftOrder({
-        lineItems,
-        customer: { email, name: customerName, phone: ctx.phone },
-        shipping: {
-          address1,
-          ...(address2 ? { address2 } : {}),
-          city,
-          province: state,
-          zip,
-          country: 'US',
-        },
-        channel: ctx.channel,
-      })
+      let draft: Awaited<ReturnType<typeof createDraftOrder>>
+      try {
+        draft = await createDraftOrder({
+          lineItems,
+          customer: { email, name: customerName, phone: ctx.phone },
+          shipping: {
+            address1,
+            ...(address2 ? { address2 } : {}),
+            city,
+            province: state,
+            zip,
+            country: 'US',
+          },
+          channel: ctx.channel,
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error('[ai-agent] createDraftOrder shopify failed', { msg, state, zip, city })
+        return { ok: false, error: 'shopify_rejected', message: `Shopify rejected the draft: ${msg}. Read back the address to the caller and try again.` }
+      }
 
       if (draft.subtotalPriceCents > MAX_ORDER_VALUE_CENTS) {
         return {

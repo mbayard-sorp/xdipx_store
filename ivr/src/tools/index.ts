@@ -11,7 +11,7 @@ import { sendDealLinkSMS } from './sms.ts'
 import { recordVoicemail } from './voicemail.ts'
 import { callQaTool } from './catalog.ts'
 
-const MAX_ORDER_LOOKUPS_PER_CALL = 5
+const MAX_ORDER_LOOKUPS_PER_CALL = 15
 
 export interface ToolContext {
   session: Session
@@ -81,7 +81,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
       properties: {
         query: { type: 'string', description: "Short search words. Prefer 1–2 words (e.g. 'wand', 'lube', 'couple kit'). Don't paste the caller's full sentence." },
         limit: { type: 'number', description: '1–5, default 3. Keep low on phone — you can only say a few aloud.' },
-        category: { type: 'string', enum: ['for-him', 'for-her', 'couples', 'both'], description: 'Filter by audience category if the caller specified.' },
+        collection: { type: 'string', description: 'Collection handle to filter by if the caller mentioned one (e.g. "vibrators", "lubricants", "bondage"). Use the handle from listCollections.' },
         priceMax: { type: 'number', description: 'Max price in dollars if the caller gave a budget.' },
       },
       required: ['query'],
@@ -99,7 +99,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
         experience: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Experience level if the caller mentioned it.' },
         useCase: { type: 'array', items: { type: 'string', enum: ['solo', 'couples', 'date-night', 'gift', 'travel'] }, description: 'Use-case tags.' },
         features: { type: 'array', items: { type: 'string', enum: ['waterproof', 'quiet', 'rechargeable', 'app-controlled', 'body-safe'] }, description: 'Feature tags the caller asked about.' },
-        category: { type: 'string', enum: ['for-him', 'for-her', 'couples', 'both'], description: 'Audience category.' },
+        collection: { type: 'string', description: 'Collection handle to narrow results. Use the handle from listCollections.' },
         priceMax: { type: 'number', description: 'Max price in dollars.' },
         limit: { type: 'number', description: '1–5, default 3. Keep low on phone.' },
       },
@@ -134,9 +134,9 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'listTodaysCollections',
+    name: 'listCollections',
     description:
-      "List the browsable collections on xdipx (For Him, For Her, Couples, Bundles, Vault). Use when the caller asks what we sell overall.",
+      "List the browsable collections on xdipx. Use when the caller asks what we sell, what categories we have, or when you want to suggest they browse a specific collection.",
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
@@ -148,7 +148,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'createDraftOrder',
     description:
-      "Create a Shopify draft order and EMAIL the caller a secure Shopify checkout link. SMS is not wired up — delivery is email only, so the caller's email must be correct. ONLY call after: (1) confirmed each product + variant + quantity via searchProducts/getProductDetails, (2) collected email (read back to confirm) + full name + full shipping address, (3) read back a GENERIC item description (e.g. 'one item from for-her, one accessory') and got a clear 'yes'. Never read full product names on a speakerphone. Never collect card numbers — Shopify handles payment. Hard caps: $500 subtotal, 5 line items. On limit error, apologize and offer a human callback via recordVoicemail.",
+      "Create a Shopify draft order and EMAIL the caller a secure Shopify checkout link. SMS is not wired up — delivery is email only, so the caller's email must be correct. ONLY call after: (1) confirmed each product + variant + quantity via searchProducts/getProductDetails, (2) collected email (read back to confirm) + full name + full shipping address, (3) read back a GENERIC item description (e.g. 'one item from our vibrators collection, one accessory') and got a clear 'yes'. Never read full product names on a speakerphone. Never collect card numbers — Shopify handles payment. Hard caps: $500 subtotal, 5 line items. On limit error, apologize and offer a human callback via recordVoicemail.",
     input_schema: {
       type: 'object',
       properties: {
@@ -237,13 +237,25 @@ export async function runTool(
     case 'discoverProducts':
     case 'recommendSimilar':
     case 'getProductDetails':
-    case 'listTodaysCollections':
+    case 'listCollections':
     case 'lookupReturningCustomer':
     case 'createDraftOrder': {
-      return await callQaTool(name, (_input ?? {}) as Record<string, unknown>, {
+      const result = await callQaTool(name, (_input ?? {}) as Record<string, unknown>, {
         channel: 'voice',
         ...(ctx.session.fromNumber ? { phone: ctx.session.fromNumber } : {}),
       })
+      // Checkout failures silently fall back to voicemail if we don't surface
+      // them. Log the error and the sanitised input so we can diagnose.
+      if (name === 'createDraftOrder') {
+        const r = result as { ok?: boolean; error?: string; message?: string }
+        if (!r.ok) {
+          const inp = (_input ?? {}) as Record<string, unknown>
+          console.error(
+            `[ivr] createDraftOrder failed callSid=${ctx.session.callSid} error=${r.error} msg=${r.message} state=${inp['state']} zip=${inp['zip']} city=${inp['city']} items=${Array.isArray(inp['items']) ? (inp['items'] as unknown[]).length : 0}`,
+          )
+        }
+      }
+      return result
     }
     case 'sendDealLinkSMS': {
       const deal = await readTodaysDeal()
