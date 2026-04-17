@@ -9,7 +9,6 @@
  *   - MAP = MSRP     → cannot advertise a discount at all
  */
 import type Anthropic from '@anthropic-ai/sdk'
-import { and, eq, gte, sql } from 'drizzle-orm'
 import {
   createDraftOrder,
   findCustomerByPhone,
@@ -25,7 +24,6 @@ import type { Product } from '~/types'
 
 export const MAX_ORDER_VALUE_CENTS = Number(process.env['IVR_MAX_ORDER_VALUE_CENTS'] ?? 50_000) // $500
 export const MAX_ITEMS_PER_ORDER   = Number(process.env['IVR_MAX_ITEMS_PER_ORDER']   ?? 5)
-export const MAX_ORDERS_PER_24H    = Number(process.env['IVR_MAX_ORDERS_PER_24H']    ?? 50)
 
 // Claude sometimes passes the full state name ("California") even when the
 // prompt asks for a 2-letter code. Normalize on the server so the tool call
@@ -319,15 +317,6 @@ export async function runQaTool(
       if (items.length === 0) return { ok: false, error: 'no_items' }
       if (items.length > MAX_ITEMS_PER_ORDER) {
         return { ok: false, error: 'too_many_items', message: `Max ${MAX_ITEMS_PER_ORDER} line items.` }
-      }
-
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-      const [recent] = await db
-        .select({ n: sql<number>`count(*)::int` })
-        .from(draftOrders)
-        .where(and(eq(draftOrders.phone, ctx.phone), gte(draftOrders.createdAt, since)))
-      if ((recent?.n ?? 0) >= MAX_ORDERS_PER_24H) {
-        return { ok: false, error: 'rate_limited', message: `Max ${MAX_ORDERS_PER_24H} orders per 24h.` }
       }
 
       const email = String(input['email'] ?? '').trim()
