@@ -60,17 +60,30 @@ function afterHoursTwiml(): string {
 }
 
 const DEFAULT_GREETING =
-  "Hey, you've reached ex-dip. This call may be recorded. What's going on?"
+  "Hey, you've reached ex-dip. I'm {feeling} you called. This call may be recorded. What's going on?"
+
+const DEFAULT_FEELINGS = 'so happy,thrilled,super excited,really glad,pumped,stoked,delighted'
+const DEFAULT_ACTIVITIES = "browsing the vault,curating today's deal,testing out some new arrivals,organizing the stockroom"
+
+function pickRandom(csv: string, fallback: string): string {
+  const items = csv.split(',').map(s => s.trim()).filter(Boolean)
+  if (!items.length) return fallback
+  return items[Math.floor(Math.random() * items.length)]!
+}
 
 async function getGreeting(): Promise<string> {
   try {
     const rows = await db
-      .select({ value: pipelineSettings.value })
+      .select({ key: pipelineSettings.key, value: pipelineSettings.value })
       .from(pipelineSettings)
-      .where(eq(pipelineSettings.key, 'ivrGreeting'))
-    return rows[0]?.value || DEFAULT_GREETING
+      .where(sql`${pipelineSettings.key} IN ('ivrGreeting', 'ivrFeelings', 'ivrActivities')`)
+    const map = new Map(rows.map(r => [r.key, r.value]))
+    const template = map.get('ivrGreeting') || DEFAULT_GREETING
+    const feeling = pickRandom(map.get('ivrFeelings') || DEFAULT_FEELINGS, 'happy')
+    const activity = pickRandom(map.get('ivrActivities') || DEFAULT_ACTIVITIES, 'working')
+    return template.replace('{feeling}', feeling).replace('{activity}', activity)
   } catch {
-    return DEFAULT_GREETING
+    return DEFAULT_GREETING.replace('{feeling}', 'happy')
   }
 }
 
@@ -91,8 +104,11 @@ function buildTwiml(greeting: string): string {
   const base = process.env['IVR_WS_URL'] ?? ''
   const secret = process.env['IVR_WS_SECRET'] ?? ''
   // Append shared secret so the Fly WS rejects connections that didn't come
-  // via our signed TwiML response.
-  const wsUrl = secret ? `${base}${base.includes('?') ? '&' : '?'}token=${encodeURIComponent(secret)}` : base
+  // via our signed TwiML response. Also forward the resolved greeting so the
+  // IVR server can speak it as its first text message — no independent random pick.
+  let wsUrl = secret ? `${base}${base.includes('?') ? '&' : '?'}token=${encodeURIComponent(secret)}` : base
+  const sep = wsUrl.includes('?') ? '&' : '?'
+  wsUrl += `${sep}greeting=${encodeURIComponent(greeting)}`
   const voice = process.env['ELEVENLABS_VOICE_ID_IVR'] ?? ''
 
   // ConversationRelay keeps the call media on Twilio; we exchange text over WSS.
@@ -102,6 +118,10 @@ function buildTwiml(greeting: string): string {
   // status callback in Phase H and stitched onto the voicemail row.
   const appUrl = process.env['APP_URL'] ?? ''
   const recordingCallback = appUrl ? `${appUrl}/api/twilio/recording-status` : ''
+  // The greeting is NOT set via welcomeGreeting because that TwiML attribute
+  // silently truncates long strings, cutting off greetings with multiple
+  // placeholders.  Instead the IVR WebSocket server sends the full greeting
+  // as its first text message (the resolved text is in the URL query param).
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Start>
@@ -110,7 +130,6 @@ function buildTwiml(greeting: string): string {
   <Connect>
     <ConversationRelay
       url="${xmlEscape(wsUrl)}"
-      welcomeGreeting="${xmlEscape(greeting)}"
       ttsProvider="ElevenLabs"
       voice="${xmlEscape(voice)}"
       transcriptionProvider="Deepgram"
