@@ -1,24 +1,20 @@
-interface TrustItem {
-  icon:  React.ReactNode
-  label: string
-  sub?:  string
+import type { TrustIcon, TrustItem } from '~/types/cms'
+
+interface TrustBarProps {
+  items: TrustItem[]
 }
 
-const TRUST_ITEMS: TrustItem[] = [
-  { icon: <LockIcon />,    label: 'Discreet shipping',  sub: 'Plain box, no logos'              },
-  { icon: <ShieldIcon />,  label: 'Secure checkout',    sub: 'SSL encrypted'                    },
-  { icon: <PackageIcon />, label: 'Discreet billing',   sub: 'Nothing obvious on your statement'},
-  { icon: <HeartIcon />,   label: 'Returns accepted',   sub: 'Unopened within 14 days'          },
-  { icon: <TruckIcon />,   label: 'Ships in 1–2 days',  sub: '3–7 days to your door'            },
-]
+export function TrustBar({ items }: TrustBarProps) {
+  // Drop null entries — broken or unpublished Sanity refs dereference to null
+  const visible = items.filter((i): i is TrustItem => i != null && i.active !== false)
+  if (visible.length === 0) return null
 
-export function TrustBar() {
   return (
     <div className="bg-white border-y border-brand-mist py-3 px-4 overflow-hidden">
-      {/* Desktop: static 5-column row */}
+      {/* Desktop: static row */}
       <ul className="hidden md:flex max-w-6xl mx-auto items-center justify-between gap-2">
-        {TRUST_ITEMS.map(item => (
-          <TrustItem key={item.label} {...item} />
+        {visible.map((item, i) => (
+          <TrustItemEl key={`${item.headline}-${i}`} item={item} />
         ))}
       </ul>
 
@@ -26,8 +22,8 @@ export function TrustBar() {
       <div className="md:hidden relative">
         <ul className="flex items-center gap-8 w-max animate-marquee">
           {/* Duplicate for seamless loop */}
-          {[...TRUST_ITEMS, ...TRUST_ITEMS].map((item, i) => (
-            <TrustItem key={`${item.label}-${i}`} {...item} />
+          {[...visible, ...visible].map((item, i) => (
+            <TrustItemEl key={`${item.headline}-${i}`} item={item} />
           ))}
         </ul>
       </div>
@@ -35,22 +31,23 @@ export function TrustBar() {
   )
 }
 
-function TrustItem({ icon, label, sub }: TrustItem) {
+function TrustItemEl({ item }: { item: TrustItem }) {
+  const Icon = ICON_MAP[item.icon] ?? LockIcon
   return (
     <li className="flex items-center gap-2 shrink-0 px-1">
       <span className="text-brand-purple shrink-0" aria-hidden="true">
-        {icon}
+        <Icon />
       </span>
       <div>
         <p
           className="text-brand-charcoal text-xs font-semibold leading-tight whitespace-nowrap"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          {label}
+          {item.headline}
         </p>
-        {sub && (
+        {item.subheadline && (
           <p className="text-brand-charcoal/50 text-[11px] leading-tight whitespace-nowrap">
-            {sub}
+            {item.subheadline}
           </p>
         )}
       </div>
@@ -105,4 +102,40 @@ function TruckIcon() {
       <circle cx="18.5" cy="18.5" r="2.5" />
     </svg>
   )
+}
+
+function StarIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  )
+}
+
+function LeafIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 3c6 0 15 3 15 12a6 6 0 0 1-12 0c0-5 4-8 9-9" />
+      <path d="M6 3c0 9 6 15 15 15" />
+    </svg>
+  )
+}
+
+function ChatIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  )
+}
+
+const ICON_MAP: Record<TrustIcon, () => React.ReactElement> = {
+  lock: LockIcon,
+  shield: ShieldIcon,
+  package: PackageIcon,
+  heart: HeartIcon,
+  truck: TruckIcon,
+  star: StarIcon,
+  leaf: LeafIcon,
+  chat: ChatIcon,
 }

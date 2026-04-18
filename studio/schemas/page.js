@@ -45,6 +45,7 @@ export default {
         { type: 'playTogetherBanner' },
         { type: 'brandLogoWall'      },
         { type: 'testimonials'       },
+        { type: 'trustBar'           },
         { type: 'richText'           },
       ],
     },

@@ -15,10 +15,15 @@ const CONTENT_BLOCKS_PROJECTION = `
     label, body, link, linkLabel, emoji,
     "image": image{ "url": asset->url, alt }
   },
-  // categoryGrid + testimonials share the field name "items" — use select() to avoid collision
+  // categoryGrid + testimonials use inline item objects; trustBar uses references.
+  // Keep them in separate fields — combining them via select() silently null-derefs
+  // the trustBar references (GROQ quirk). TrustBarBlock reads trustItems.
   "items": select(
     _type == "categoryGrid" => items[]{ label, link, emoji, "image": image{ "url": asset->url, alt } },
-    _type == "testimonials"  => items[]{ quote, author, rating, verified }
+    _type == "testimonials" => items[]{ quote, author, rating, verified }
+  ),
+  "trustItems": select(
+    _type == "trustBar" => items[]->{ icon, headline, subheadline, active }
   ),
   columns,
   // productCarousel

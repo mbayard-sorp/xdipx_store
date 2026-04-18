@@ -163,6 +163,25 @@ export interface BonusDealBlock {
   eyebrow?: string
 }
 
+// ─── Trust Bar ───────────────────────────────────────────────────────────
+
+export type TrustIcon = 'lock' | 'shield' | 'package' | 'heart' | 'truck' | 'star' | 'leaf' | 'chat'
+
+export interface TrustItem {
+  icon: TrustIcon
+  headline: string
+  subheadline?: string
+  active?: boolean
+}
+
+export interface TrustBarBlock {
+  _type: 'trustBar'
+  _key: string
+  active: boolean
+  order: number
+  trustItems?: TrustItem[]
+}
+
 // ─── Rich Text ───────────────────────────────────────────────────────────
 
 export interface RichTextBlock {
@@ -187,6 +206,7 @@ export type ContentBlock =
   | BrandLogoWallBlock
   | TestimonialsBlock
   | BonusDealBlock
+  | TrustBarBlock
   | RichTextBlock
 
 export interface HomepageSections {
@@ -260,6 +280,7 @@ export type PageSection =
   | PlayTogetherBannerBlock
   | BrandLogoWallBlock
   | TestimonialsBlock
+  | TrustBarBlock
   | RichTextBlock
 
 export interface SanityPage {

@@ -35,6 +35,7 @@ export default {
     { name: 'product',  title: 'Product',        default: true },
     { name: 'copy',     title: 'Copy & Story'                  },
     { name: 'deal',     title: 'Deal Settings'                 },
+    { name: 'ivr',      title: 'IVR / Voice'                   },
     { name: 'bundle',   title: 'Bundle'                        },
     { name: 'content',  title: 'Content Blocks'                },
   ],
@@ -241,6 +242,82 @@ export default {
       description: 'Set automatically when the linked Shopify product is no longer active. Archived docs are excluded from search.',
     },
 
+    // ── IVR / Voice Discovery ─────────────────────────────────────────────────
+    {
+      name: 'ivrMood',
+      title: 'Mood Tags',
+      type: 'array',
+      group: 'ivr',
+      description: 'Mood/vibe for voice discovery queries like "something romantic" or "playful".',
+      of: [{ type: 'string' }],
+      options: {
+        list: [
+          { title: 'Playful',      value: 'playful'     },
+          { title: 'Romantic',     value: 'romantic'     },
+          { title: 'Luxurious',    value: 'luxurious'    },
+          { title: 'Adventurous',  value: 'adventurous'  },
+          { title: 'Relaxing',     value: 'relaxing'     },
+        ],
+      },
+    },
+    {
+      name: 'ivrExperience',
+      title: 'Experience Level',
+      type: 'string',
+      group: 'ivr',
+      description: 'Used when callers say "beginner-friendly" or "something advanced".',
+      options: {
+        list: [
+          { title: 'Beginner',      value: 'beginner'     },
+          { title: 'Intermediate',  value: 'intermediate' },
+          { title: 'Advanced',      value: 'advanced'     },
+        ],
+        layout: 'radio',
+      },
+    },
+    {
+      name: 'ivrUseCase',
+      title: 'Use Case Tags',
+      type: 'array',
+      group: 'ivr',
+      description: 'Scenarios like "date night", "gift", "travel-friendly".',
+      of: [{ type: 'string' }],
+      options: {
+        list: [
+          { title: 'Solo',        value: 'solo'       },
+          { title: 'Couples',     value: 'couples'    },
+          { title: 'Date Night',  value: 'date-night' },
+          { title: 'Gift',        value: 'gift'       },
+          { title: 'Travel',      value: 'travel'     },
+        ],
+      },
+    },
+    {
+      name: 'ivrFeatures',
+      title: 'Feature Tags',
+      type: 'array',
+      group: 'ivr',
+      description: 'Physical features callers ask about: "is it waterproof?", "is it quiet?".',
+      of: [{ type: 'string' }],
+      options: {
+        list: [
+          { title: 'Waterproof',      value: 'waterproof'      },
+          { title: 'Quiet',           value: 'quiet'           },
+          { title: 'Rechargeable',    value: 'rechargeable'    },
+          { title: 'App-controlled',  value: 'app-controlled'  },
+          { title: 'Body-safe',       value: 'body-safe'       },
+        ],
+      },
+    },
+    {
+      name: 'ivrVoiceSummary',
+      title: 'Voice Summary',
+      type: 'string',
+      group: 'ivr',
+      description: 'One TTS-safe sentence for the phone agent. No markdown, no URLs. Under 120 chars.',
+      validation: Rule => Rule.max(120),
+    },
+
     // ── Bundle ───────────────────────────────────────────────────────────────
     {
       name: 'isBundle',
@@ -326,6 +403,7 @@ export default {
         { type: 'playTogetherBanner' },
         { type: 'brandLogoWall'      },
         { type: 'testimonials'       },
+        { type: 'trustBar'           },
       ],
     },
   ],

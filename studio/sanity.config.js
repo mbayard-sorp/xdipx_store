@@ -32,6 +32,7 @@ export default defineConfig({
             S.divider(),
             S.documentTypeListItem('productPage').title('Products').icon(() => '🛍️'),
             S.documentTypeListItem('page').title('Pages').icon(() => '📄'),
+            S.documentTypeListItem('trustItem').title('Trust Items').icon(() => '✅'),
             S.divider(),
             S.listItem()
               .title('Blog')
