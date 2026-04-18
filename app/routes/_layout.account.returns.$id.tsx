@@ -19,10 +19,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!customer) throw new Response('Unauthorized', { status: 401 })
 
   const id = Number(params['id'])
-  if (!Number.isFinite(id)) throw new Response('Not found', { status: 404 })
+  if (!Number.isFinite(id)) {
+    console.error('[returns/$id] bad id param', { param: params['id'] })
+    throw new Response('Not found', { status: 404 })
+  }
 
   const row = await getCustomerReturn(id, customer.id)
-  if (!row) throw new Response('Not found', { status: 404 })
+  if (!row) {
+    console.error('[returns/$id] row not found or owner mismatch', {
+      id,
+      customerGid: customer.id,
+    })
+    throw new Response('Not found', { status: 404 })
+  }
 
   const itemsTotalCents = row.lineItems.reduce(
     (sum, li) => sum + li.unitPriceCents * li.quantity, 0,
@@ -107,7 +116,7 @@ export default function ReturnDetail() {
         <section className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 md:p-5">
           <p className="text-sm text-yellow-800">
             Your return is approved but we couldn't generate a label automatically. Email{' '}
-            <a href="mailto:support@xdipx.com" className="underline font-semibold">support@xdipx.com</a>{' '}
+            <a href="mailto:hello@xdipx.com" className="underline font-semibold">hello@xdipx.com</a>{' '}
             with your RMA number ({data.rma}) and we'll sort it out.
           </p>
         </section>
@@ -166,7 +175,7 @@ export default function ReturnDetail() {
           All returns
         </Link>
         <a
-          href="mailto:support@xdipx.com"
+          href="mailto:hello@xdipx.com"
           className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"
           style={{ fontFamily: 'var(--font-display)' }}
         >
