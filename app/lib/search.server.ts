@@ -51,6 +51,8 @@ export interface SearchFacets {
   tagCounts: Record<string, number>
   vendorCounts: Record<string, number>
   priceBuckets: { under25: number; p25_50: number; p50_100: number; over100: number }
+  featureCounts: Record<string, number>
+  experienceCounts: Record<string, number>
 }
 
 export interface ContentResult {
@@ -94,7 +96,7 @@ export interface PredictiveResult {
 // GROQ `match` does word-prefix matching, not stemming. Typing "dildos" won't
 // match products titled "Dildo". Build a small set of prefix patterns that
 // covers trailing -s / -es / -ies pluralization in either direction.
-function buildQueryPatterns(query: string): string[] {
+export function buildQueryPatterns(query: string): string[] {
   const lower = query.trim().toLowerCase()
   if (!lower) return []
   const patterns = new Set<string>([`${lower}*`])
@@ -110,8 +112,73 @@ function buildQueryPatterns(query: string): string[] {
 // Render an OR-across-patterns match expression for one field.
 // e.g. ["dildos*", "dildo*"], field="title", prefix="q"
 // →    "(title match $q0 || title match $q1)"
-function fieldMatchAny(field: string, paramNames: string[]): string {
+export function fieldMatchAny(field: string, paramNames: string[]): string {
   return `(${paramNames.map(n => `${field} match $${n}`).join(' || ')})`
+}
+
+// ─── IVR keyword → structured field mapping ────────────────────────────────
+// Pure dictionary lookup at query time — zero overhead. Translates common
+// search terms into their IVR descriptor field + enum value so GROQ boosts
+// and filters can leverage the enriched product metadata.
+
+interface IvrTermMatch { field: string; value: string; paramName: string }
+
+const IVR_KEYWORD_MAP: Record<string, { field: string; value: string }> = {
+  // Features (array field: ivrFeatures)
+  'waterproof':   { field: 'ivrFeatures', value: 'waterproof' },
+  'submersible':  { field: 'ivrFeatures', value: 'waterproof' },
+  'quiet':        { field: 'ivrFeatures', value: 'quiet' },
+  'silent':       { field: 'ivrFeatures', value: 'quiet' },
+  'discreet':     { field: 'ivrFeatures', value: 'quiet' },
+  'rechargeable': { field: 'ivrFeatures', value: 'rechargeable' },
+  'bluetooth':    { field: 'ivrFeatures', value: 'app-controlled' },
+  'remote':       { field: 'ivrFeatures', value: 'app-controlled' },
+  'body-safe':    { field: 'ivrFeatures', value: 'body-safe' },
+  'silicone':     { field: 'ivrFeatures', value: 'body-safe' },
+  // Mood (array field: ivrMood)
+  'romantic':     { field: 'ivrMood', value: 'romantic' },
+  'playful':      { field: 'ivrMood', value: 'playful' },
+  'luxurious':    { field: 'ivrMood', value: 'luxurious' },
+  'luxury':       { field: 'ivrMood', value: 'luxurious' },
+  'adventurous':  { field: 'ivrMood', value: 'adventurous' },
+  'relaxing':     { field: 'ivrMood', value: 'relaxing' },
+  // Experience (string field: ivrExperience)
+  'beginner':     { field: 'ivrExperience', value: 'beginner' },
+  'starter':      { field: 'ivrExperience', value: 'beginner' },
+  'first time':   { field: 'ivrExperience', value: 'beginner' },
+  'advanced':     { field: 'ivrExperience', value: 'advanced' },
+  // Use case (array field: ivrUseCase)
+  'couples':      { field: 'ivrUseCase', value: 'couples' },
+  'couple':       { field: 'ivrUseCase', value: 'couples' },
+  'date night':   { field: 'ivrUseCase', value: 'date-night' },
+  'gift':         { field: 'ivrUseCase', value: 'gift' },
+  'travel':       { field: 'ivrUseCase', value: 'travel' },
+  'portable':     { field: 'ivrUseCase', value: 'travel' },
+}
+
+// Sorted longest-first so multi-word phrases like "date night" match before "date"
+const IVR_KEYWORDS_SORTED = Object.keys(IVR_KEYWORD_MAP).sort((a, b) => b.length - a.length)
+
+// Array fields use `$param in field`; string fields use `field == $param`
+const IVR_ARRAY_FIELDS = new Set(['ivrFeatures', 'ivrMood', 'ivrUseCase'])
+
+export function detectIvrTerms(query: string): IvrTermMatch[] {
+  const lower = query.toLowerCase()
+  const seen = new Set<string>() // dedupe by field+value
+  const matches: IvrTermMatch[] = []
+  let idx = 0
+
+  for (const keyword of IVR_KEYWORDS_SORTED) {
+    if (!lower.includes(keyword)) continue
+    const entry = IVR_KEYWORD_MAP[keyword]!
+    const key = `${entry.field}:${entry.value}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    matches.push({ field: entry.field, value: entry.value, paramName: `ivr${idx}` })
+    idx++
+  }
+
+  return matches
 }
 
 // ─── Sort helpers ───────────────────────────────────────────────────────────
@@ -133,6 +200,8 @@ export async function searchAll(params: {
   query: string
   tags?: string[]
   vendors?: string[]
+  features?: string[]
+  experience?: string[]
   priceMin?: number | null
   priceMax?: number | null
   sort?: SortOption
@@ -148,6 +217,8 @@ export async function searchAll(params: {
     query,
     tags = [],
     vendors = [],
+    features = [],
+    experience = [],
     priceMin = null,
     priceMax = null,
     sort = 'relevance',
@@ -164,6 +235,12 @@ export async function searchAll(params: {
 
   const queryPatterns = query ? buildQueryPatterns(query) : []
   const queryParamNames = queryPatterns.map((_, i) => `q${i}`)
+  // Detect IVR descriptor matches from the query (e.g. "waterproof" → ivrFeatures)
+  const ivrTerms = query ? detectIvrTerms(query) : []
+  for (const term of ivrTerms) {
+    groqParams[term.paramName] = term.value
+  }
+
   if (query && queryPatterns.length > 0) {
     queryPatterns.forEach((p, i) => { groqParams[`q${i}`] = p })
     // GROQ `match` does word-prefix matching. We also OR across singular/plural
@@ -174,10 +251,28 @@ export async function searchAll(params: {
     const seoMatch     = fieldMatchAny('seoDescription', queryParamNames)
     const categoryMatch = fieldMatchAny('category', queryParamNames)
     const descMatch    = fieldMatchAny('pt::text(description)', queryParamNames)
+    const voiceSummaryMatch = fieldMatchAny('ivrVoiceSummary', queryParamNames)
     const tagInAny     = `(${queryParamNames.map(n => `$${n} in tags`).join(' || ')})`
-    productConditions.push(
-      `(${titleMatch} || ${taglineMatch} || ${vendorMatch} || ${seoMatch} || ${categoryMatch} || ${tagInAny} || ${descMatch})`
+
+    // IVR field match conditions — products matching only via descriptors still appear
+    const ivrMatchClauses = ivrTerms.map(t =>
+      IVR_ARRAY_FIELDS.has(t.field)
+        ? `$${t.paramName} in ${t.field}`
+        : `${t.field} == $${t.paramName}`
     )
+    const ivrMatchOr = ivrMatchClauses.length > 0 ? ` || ${ivrMatchClauses.join(' || ')}` : ''
+
+    productConditions.push(
+      `(${titleMatch} || ${taglineMatch} || ${vendorMatch} || ${seoMatch} || ${categoryMatch} || ${tagInAny} || ${descMatch} || ${voiceSummaryMatch}${ivrMatchOr})`
+    )
+  } else if (ivrTerms.length > 0) {
+    // No text query but IVR terms detected (shouldn't normally happen, but be safe)
+    const ivrMatchClauses = ivrTerms.map(t =>
+      IVR_ARRAY_FIELDS.has(t.field)
+        ? `$${t.paramName} in ${t.field}`
+        : `${t.field} == $${t.paramName}`
+    )
+    productConditions.push(`(${ivrMatchClauses.join(' || ')})`)
   }
 
   if (tags.length > 0) {
@@ -206,6 +301,22 @@ export async function searchAll(params: {
     vendors.forEach((v, i) => { groqParams[`vendor${i}`] = v })
   }
 
+  if (features.length > 0) {
+    // All selected features must be present (AND)
+    for (let i = 0; i < features.length; i++) {
+      const paramName = `feat${i}`
+      productConditions.push(`$${paramName} in ivrFeatures`)
+      groqParams[paramName] = features[i]
+    }
+  }
+
+  if (experience.length > 0) {
+    // Any selected experience level matches (OR)
+    const expConditions = experience.map((_, i) => `ivrExperience == $exp${i}`).join(' || ')
+    productConditions.push(`(${expConditions})`)
+    experience.forEach((e, i) => { groqParams[`exp${i}`] = e })
+  }
+
   if (priceMin != null) {
     productConditions.push('price >= $priceMin')
     groqParams.priceMin = priceMin
@@ -220,11 +331,19 @@ export async function searchAll(params: {
 
   // Build the GROQ query with score() for relevance ranking.
   // Boost on each query-pattern variant so the original spelling still wins.
-  const boosts = queryParamNames.length > 0
+  // IVR descriptor boosts (weight 4) sit between title (5) and tagline (3).
+  const ivrBoosts = ivrTerms.map(t =>
+    IVR_ARRAY_FIELDS.has(t.field)
+      ? `boost($${t.paramName} in ${t.field}, 4)`
+      : `boost(${t.field} == $${t.paramName}, 4)`
+  )
+  const boosts = (queryParamNames.length > 0 || ivrBoosts.length > 0)
     ? [
         ...queryParamNames.map(n => `boost(title match $${n}, 5)`),
+        ...ivrBoosts,
         ...queryParamNames.map(n => `boost(tagline match $${n}, 3)`),
         ...queryParamNames.map(n => `boost(vendor match $${n}, 2)`),
+        ...queryParamNames.map(n => `boost(ivrVoiceSummary match $${n}, 2)`),
         ...queryParamNames.map(n => `boost(pt::text(description) match $${n}, 1)`),
         ...queryParamNames.map(n => `boost(seoDescription match $${n}, 1)`),
       ].join(',\n        ')
@@ -348,25 +467,29 @@ export async function searchAll(params: {
 // ─── Facet computation ──────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function computeFacets(client: any, productFilter: string, groqParams: Record<string, unknown>): Promise<SearchFacets> {
-  const emptyFacets: SearchFacets = { tagCounts: {}, vendorCounts: {}, priceBuckets: { under25: 0, p25_50: 0, p50_100: 0, over100: 0 } }
+  const emptyFacets: SearchFacets = { tagCounts: {}, vendorCounts: {}, priceBuckets: { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }, featureCounts: {}, experienceCounts: {} }
   try {
     const rows = (await client.fetch(
-      `*[${productFilter}]{ vendor, tags, price }`,
+      `*[${productFilter}]{ vendor, tags, price, ivrFeatures, ivrExperience }`,
       groqParams,
-    )) as { vendor: string | null; tags: string[] | null; price: number | null }[]
+    )) as { vendor: string | null; tags: string[] | null; price: number | null; ivrFeatures: string[] | null; ivrExperience: string | null }[]
     const tagCounts: Record<string, number> = {}
     const vendorCounts: Record<string, number> = {}
+    const featureCounts: Record<string, number> = {}
+    const experienceCounts: Record<string, number> = {}
     const priceBuckets = { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }
     for (const r of rows) {
       if (r.vendor) vendorCounts[r.vendor] = (vendorCounts[r.vendor] ?? 0) + 1
       if (r.tags) for (const t of r.tags) tagCounts[t] = (tagCounts[t] ?? 0) + 1
+      if (r.ivrFeatures) for (const f of r.ivrFeatures) featureCounts[f] = (featureCounts[f] ?? 0) + 1
+      if (r.ivrExperience) experienceCounts[r.ivrExperience] = (experienceCounts[r.ivrExperience] ?? 0) + 1
       const p = r.price ?? 0
       if (p < 25) priceBuckets.under25++
       else if (p < 50) priceBuckets.p25_50++
       else if (p < 100) priceBuckets.p50_100++
       else priceBuckets.over100++
     }
-    return { tagCounts, vendorCounts, priceBuckets }
+    return { tagCounts, vendorCounts, priceBuckets, featureCounts, experienceCounts }
   } catch {
     return emptyFacets
   }
@@ -403,23 +526,47 @@ export async function predictiveSearchUnified(query: string): Promise<Predictive
     return { products: [], pages: [], blogPosts: [], totalProducts: 0, categories: [] }
   }
   const paramNames = patterns.map((_, i) => `q${i}`)
-  const groqParams: Record<string, string> = {}
+  const groqParams: Record<string, unknown> = {}
   patterns.forEach((p, i) => { groqParams[`q${i}`] = p })
+
+  // IVR descriptor matches for typeahead
+  const ivrTerms = detectIvrTerms(query)
+  for (const term of ivrTerms) {
+    groqParams[term.paramName] = term.value
+  }
 
   // Any of the query-pattern variants matching a given field
   const anyTitle = fieldMatchAny('title', paramNames)
   const anyTagline = fieldMatchAny('tagline', paramNames)
   const anyVendor = fieldMatchAny('vendor', paramNames)
   const anyCategory = fieldMatchAny('category', paramNames)
+  const anyVoiceSummary = fieldMatchAny('ivrVoiceSummary', paramNames)
   const anySeoTitle = fieldMatchAny('seoTitle', paramNames)
   const anyExcerpt = fieldMatchAny('excerpt', paramNames)
   const anyTagIn = `(${paramNames.map(n => `$${n} in tags`).join(' || ')})`
-  const productMatchAny = `(${anyTitle} || ${anyTagline} || ${anyVendor} || ${anyCategory})`
-  const productFullMatchAny = `(${anyTitle} || ${anyTagline} || ${anyVendor} || ${anyCategory} || ${anyTagIn})`
+
+  // IVR field match clauses for filter + count
+  const ivrMatchClauses = ivrTerms.map(t =>
+    IVR_ARRAY_FIELDS.has(t.field)
+      ? `$${t.paramName} in ${t.field}`
+      : `${t.field} == $${t.paramName}`
+  )
+  const ivrMatchOr = ivrMatchClauses.length > 0 ? ` || ${ivrMatchClauses.join(' || ')}` : ''
+
+  const productMatchAny = `(${anyTitle} || ${anyTagline} || ${anyVendor} || ${anyCategory} || ${anyVoiceSummary}${ivrMatchOr})`
+  const productFullMatchAny = `(${anyTitle} || ${anyTagline} || ${anyVendor} || ${anyCategory} || ${anyTagIn} || ${anyVoiceSummary}${ivrMatchOr})`
+
+  const ivrBoosts = ivrTerms.map(t =>
+    IVR_ARRAY_FIELDS.has(t.field)
+      ? `boost($${t.paramName} in ${t.field}, 4)`
+      : `boost(${t.field} == $${t.paramName}, 4)`
+  )
   const productBoosts = [
     ...paramNames.map(n => `boost(title match $${n}, 5)`),
+    ...ivrBoosts,
     ...paramNames.map(n => `boost(tagline match $${n}, 3)`),
     ...paramNames.map(n => `boost(vendor match $${n}, 2)`),
+    ...paramNames.map(n => `boost(ivrVoiceSummary match $${n}, 2)`),
     ...paramNames.map(n => `boost(category match $${n}, 1)`),
   ].join(', ')
 
@@ -615,6 +762,6 @@ async function shopifyFallback(params: {
     blogPosts: [],
     totalProducts: result.totalCount,
     hasNextPage: result.pageInfo.hasNextPage,
-    facets: { tagCounts: {}, vendorCounts: {}, priceBuckets: { under25: 0, p25_50: 0, p50_100: 0, over100: 0 } },
+    facets: { tagCounts: {}, vendorCounts: {}, priceBuckets: { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }, featureCounts: {}, experienceCounts: {} },
   }
 }
