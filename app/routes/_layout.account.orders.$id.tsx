@@ -5,6 +5,7 @@ import { customerAPI } from '~/lib/customer-api.server'
 import { StatusPill } from '~/components/account/StatusPill'
 import { OrderTrackingStepper } from '~/components/account/OrderTrackingStepper'
 import type { OrderDetail } from '~/lib/shopify.server'
+import { isOrderWithinReturnWindow } from '~/lib/returns.server'
 import type { AccountOutletContext } from './_layout.account'
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -30,11 +31,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('Order not found', { status: 404 })
   }
 
-  return { order, tokenType }
+  const fulfilled = order.fulfillmentStatus?.toLowerCase() === 'fulfilled'
+  const notCanceled = !order.canceledAt
+  const withinWindow = isOrderWithinReturnWindow(null, order.processedAt)
+  const returnEligible = fulfilled && notCanceled && withinWindow
+
+  return { order, tokenType, returnEligible }
 }
 
 export default function OrderDetailRoute() {
-  const { order } = useLoaderData<typeof loader>()
+  const { order, returnEligible } = useLoaderData<typeof loader>()
   useOutletContext<AccountOutletContext>() // ensure type contract holds
 
   const processedDate = new Date(order.processedAt).toLocaleDateString('en-US', {
@@ -207,6 +213,15 @@ export default function OrderDetailRoute() {
         >
           Reorder <span aria-hidden="true">♥</span>
         </Link>
+        {returnEligible && (
+          <Link
+            to={`/account/returns/new?orderId=${encodeURIComponent(order.id)}`}
+            className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Start a return
+          </Link>
+        )}
         <a
           href="mailto:support@xdipx.com"
           className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"

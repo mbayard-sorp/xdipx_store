@@ -20,6 +20,7 @@ export function AccountSidebar({ customer }: AccountSidebarProps) {
   const items: NavItem[] = [
     { to: '/account',               label: 'Overview',      end: true },
     { to: '/account/orders',        label: 'Orders',        count: customer.orders.length },
+    { to: '/account/returns',       label: 'Returns' },
     { to: '/account/subscriptions', label: 'Subscriptions' },
     { to: '/account/wishlists',     label: 'Wishlists' },
     { to: '/account/addresses',     label: 'Addresses',     count: customer.addresses.length },

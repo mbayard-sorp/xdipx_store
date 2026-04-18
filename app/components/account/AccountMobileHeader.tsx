@@ -29,6 +29,17 @@ function getSectionInfo(pathname: string, firstName: string): SectionInfo {
     return { title: 'Order detail', isDashboard: false }
   }
 
+  // Returns.
+  if (path === '/account/returns') {
+    return { title: 'Returns', isDashboard: false }
+  }
+  if (path === '/account/returns/new') {
+    return { title: 'Start a return', isDashboard: false }
+  }
+  if (path.startsWith('/account/returns/')) {
+    return { title: 'Return detail', isDashboard: false }
+  }
+
   // Addresses.
   if (path === '/account/addresses') {
     return { title: 'Addresses', isDashboard: false }
