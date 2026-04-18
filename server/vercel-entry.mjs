@@ -77,6 +77,7 @@ __export(schema_exports, {
   pipelineSettings: () => pipelineSettings,
   productCopurchase: () => productCopurchase,
   referrals: () => referrals,
+  returns: () => returns,
   smsAgeConsent: () => smsAgeConsent,
   smsMessages: () => smsMessages,
   smsOptouts: () => smsOptouts,
@@ -101,7 +102,7 @@ import {
   uniqueIndex,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, productCopurchase;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, productCopurchase;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -335,6 +336,35 @@ var init_schema = __esm({
       phoneIdx: index("draft_orders_phone_idx").on(t.phone, t.createdAt),
       createdIdx: index("draft_orders_created_idx").on(t.createdAt)
     }));
+    returns = pgTable("returns", {
+      id: serial("id").primaryKey(),
+      shopifyReturnId: varchar("shopify_return_id", { length: 60 }).notNull(),
+      shopifyOrderId: varchar("shopify_order_id", { length: 60 }).notNull(),
+      customerGid: varchar("customer_gid", { length: 60 }).notNull(),
+      status: varchar("status", { length: 20 }).default("requested").notNull(),
+      reason: varchar("reason", { length: 40 }),
+      reasonNote: text("reason_note"),
+      lineItems: json("line_items").$type().notNull(),
+      shopifyReverseDeliveryId: varchar("shopify_reverse_delivery_id", { length: 60 }),
+      labelUrl: text("label_url"),
+      labelCostCents: integer("label_cost_cents"),
+      labelCostEstimatedCents: integer("label_cost_estimated_cents"),
+      trackingNumber: varchar("tracking_number", { length: 60 }),
+      trackingStatus: varchar("tracking_status", { length: 40 }),
+      refundAmountCents: integer("refund_amount_cents"),
+      shopifyRefundId: varchar("shopify_refund_id", { length: 60 }),
+      createdAt: timestamp("created_at").defaultNow().notNull(),
+      updatedAt: timestamp("updated_at").defaultNow().notNull(),
+      labelPurchasedAt: timestamp("label_purchased_at"),
+      receivedAt: timestamp("received_at"),
+      refundedAt: timestamp("refunded_at"),
+      closedAt: timestamp("closed_at")
+    }, (t) => ({
+      shopifyReturnUq: uniqueIndex("returns_shopify_return_uniq").on(t.shopifyReturnId),
+      customerIdx: index("returns_customer_idx").on(t.customerGid, t.createdAt),
+      orderIdx: index("returns_order_idx").on(t.shopifyOrderId),
+      statusIdx: index("returns_status_idx").on(t.status)
+    }));
     productCopurchase = pgTable("product_copurchase", {
       id: serial("id").primaryKey(),
       handleA: varchar("handle_a", { length: 255 }).notNull(),
@@ -375,10 +405,13 @@ __export(shopify_server_exports, {
   associateImageWithVariant: () => associateImageWithVariant,
   attachVideoToProduct: () => attachVideoToProduct,
   cartBuyerIdentityUpdate: () => cartBuyerIdentityUpdate,
+  closeReturn: () => closeReturn,
   createCart: () => createCart,
   createCustomerAccessToken: () => createCustomerAccessToken,
   createDraftOrder: () => createDraftOrder,
   createDraftProduct: () => createDraftProduct,
+  createRefund: () => createRefund,
+  createReturn: () => createReturn,
   createShopifyProductFromFeed: () => createShopifyProductFromFeed,
   createShopifyProductWithVariants: () => createShopifyProductWithVariants,
   createStagedVideoUpload: () => createStagedVideoUpload,
@@ -423,6 +456,8 @@ __export(shopify_server_exports, {
   getProductsByIds: () => getProductsByIds,
   getProductsByTag: () => getProductsByTag,
   getRecentVaultDeals: () => getRecentVaultDeals,
+  getReturn: () => getReturn,
+  getReturnableFulfillments: () => getReturnableFulfillments,
   getShopifyCollections: () => getShopifyCollections,
   getStorefrontCollections: () => getStorefrontCollections,
   getStorefrontCustomer: () => getStorefrontCustomer,
@@ -433,6 +468,7 @@ __export(shopify_server_exports, {
   pollMediaReady: () => pollMediaReady,
   predictiveSearch: () => predictiveSearch,
   pushProductToShopify: () => pushProductToShopify,
+  registerReverseDelivery: () => registerReverseDelivery,
   removeFromCart: () => removeFromCart,
   reorderProductImages: () => reorderProductImages,
   searchAdminProducts: () => searchAdminProducts,
@@ -2357,6 +2393,229 @@ async function searchProducts(params) {
     totalCount: data.search.totalCount,
     filters: data.search.productFilters,
     pageInfo: data.search.pageInfo
+  };
+}
+async function getReturnableFulfillments(orderId) {
+  const data = await adminGraphQL(`
+    query ReturnableFulfillments($orderId: ID!) {
+      returnableFulfillments(first: 10, orderId: $orderId) {
+        edges {
+          node {
+            id
+            fulfillment { id }
+            returnableFulfillmentLineItems(first: 50) {
+              edges {
+                node {
+                  quantity
+                  fulfillmentLineItem {
+                    id
+                    lineItem {
+                      id
+                      title
+                      variantTitle
+                      image { url }
+                      originalUnitPriceSet { shopMoney { amount currencyCode } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `, { orderId });
+  return data.returnableFulfillments.edges.map(({ node: rf }) => {
+    const lineItems = rf.returnableFulfillmentLineItems.edges.map(
+      ({ node: rfli }) => ({
+        fulfillmentLineItemId: rfli.fulfillmentLineItem.id,
+        orderLineItemId: rfli.fulfillmentLineItem.lineItem.id,
+        quantity: rfli.quantity,
+        title: rfli.fulfillmentLineItem.lineItem.title,
+        variantTitle: rfli.fulfillmentLineItem.lineItem.variantTitle,
+        imageUrl: rfli.fulfillmentLineItem.lineItem.image?.url ?? null,
+        unitPrice: {
+          amount: rfli.fulfillmentLineItem.lineItem.originalUnitPriceSet.shopMoney.amount,
+          currencyCode: rfli.fulfillmentLineItem.lineItem.originalUnitPriceSet.shopMoney.currencyCode
+        }
+      })
+    );
+    return {
+      id: rf.id,
+      fulfillmentId: rf.fulfillment.id,
+      lineItems,
+      reverseFulfillmentOrderId: null
+    };
+  });
+}
+async function createReturn(input) {
+  const data = await adminGraphQL(`
+    mutation ReturnCreate($returnInput: ReturnInput!) {
+      returnCreate(returnInput: $returnInput) {
+        return {
+          id
+          reverseFulfillmentOrders(first: 1) {
+            edges {
+              node {
+                id
+                lineItems(first: 50) {
+                  edges {
+                    node {
+                      id
+                      fulfillmentLineItem { id }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `, {
+    returnInput: {
+      orderId: input.orderId,
+      returnLineItems: input.lineItems.map((li) => ({
+        fulfillmentLineItemId: li.fulfillmentLineItemId,
+        quantity: li.quantity,
+        returnReason: li.returnReason,
+        returnReasonNote: li.returnReasonNote ?? ""
+      })),
+      notifyCustomer: input.notifyCustomer ?? false
+    }
+  });
+  const err = data.returnCreate.userErrors[0];
+  if (err) return { ok: false, error: err.message };
+  if (!data.returnCreate.return) return { ok: false, error: "returnCreate returned no return" };
+  const rfoNode = data.returnCreate.return.reverseFulfillmentOrders.edges[0]?.node;
+  const fliToRfoLineItemId = {};
+  for (const { node: li } of rfoNode?.lineItems.edges ?? []) {
+    fliToRfoLineItemId[li.fulfillmentLineItem.id] = li.id;
+  }
+  return {
+    ok: true,
+    data: {
+      returnId: data.returnCreate.return.id,
+      reverseFulfillmentOrderId: rfoNode?.id ?? null,
+      fliToRfoLineItemId
+    }
+  };
+}
+async function registerReverseDelivery(input) {
+  const data = await adminGraphQL(`
+    mutation ReverseDeliveryCreateWithShipping(
+      $reverseFulfillmentOrderId: ID!
+      $reverseDeliveryLineItems: [ReverseDeliveryLineItemInput!]!
+      $labelInput: ReverseDeliveryLabelInput
+      $trackingInput: ReverseDeliveryTrackingInput
+      $notifyCustomer: Boolean
+    ) {
+      reverseDeliveryCreateWithShipping(
+        reverseFulfillmentOrderId: $reverseFulfillmentOrderId
+        reverseDeliveryLineItems: $reverseDeliveryLineItems
+        labelInput: $labelInput
+        trackingInput: $trackingInput
+        notifyCustomer: $notifyCustomer
+      ) {
+        reverseDelivery { id }
+        userErrors { field message }
+      }
+    }
+  `, {
+    reverseFulfillmentOrderId: input.reverseFulfillmentOrderId,
+    reverseDeliveryLineItems: input.reverseDeliveryLineItems.map((li) => ({
+      reverseFulfillmentOrderLineItemId: li.reverseFulfillmentOrderLineItemId,
+      quantity: li.quantity
+    })),
+    labelInput: { fileUrl: input.labelFileUrl },
+    trackingInput: {
+      number: input.trackingNumber,
+      ...input.trackingUrl ? { url: input.trackingUrl } : {},
+      ...input.carrierIdentifier ? { carrierIdentifier: input.carrierIdentifier } : {}
+    },
+    notifyCustomer: input.notifyCustomer ?? false
+  });
+  const err = data.reverseDeliveryCreateWithShipping.userErrors[0];
+  if (err) return { ok: false, error: err.message };
+  const rd = data.reverseDeliveryCreateWithShipping.reverseDelivery;
+  if (!rd) return { ok: false, error: "reverseDeliveryCreateWithShipping returned no delivery" };
+  return { ok: true, data: { reverseDeliveryId: rd.id } };
+}
+async function createRefund(input) {
+  const data = await adminGraphQL(`
+    mutation RefundCreate($input: RefundInput!) {
+      refundCreate(input: $input) {
+        refund { id }
+        userErrors { field message }
+      }
+    }
+  `, {
+    input: {
+      orderId: input.orderId,
+      note: input.note ?? "xdipx self-service return",
+      notify: input.notify ?? true,
+      currency: input.currencyCode,
+      refundLineItems: input.refundLineItems.map((li) => ({
+        lineItemId: li.lineItemId,
+        quantity: li.quantity,
+        restockType: li.restockType ?? "RETURN",
+        ...li.locationId ? { locationId: li.locationId } : {}
+      })),
+      ...input.shippingAmount != null ? { shipping: { amount: input.shippingAmount.toFixed(2) } } : {}
+    }
+  });
+  const err = data.refundCreate.userErrors[0];
+  if (err) return { ok: false, error: err.message };
+  if (!data.refundCreate.refund) return { ok: false, error: "refundCreate returned no refund" };
+  return { ok: true, refundId: data.refundCreate.refund.id };
+}
+async function closeReturn(returnId) {
+  const data = await adminGraphQL(`
+    mutation ReturnClose($id: ID!) {
+      returnClose(id: $id) {
+        return { id status }
+        userErrors { field message }
+      }
+    }
+  `, { id: returnId });
+  const err = data.returnClose.userErrors[0];
+  if (err) return { ok: false, error: err.message };
+  return { ok: true };
+}
+async function getReturn(returnId) {
+  const data = await adminGraphQL(`
+    query GetReturn($id: ID!) {
+      return(id: $id) {
+        id
+        status
+        reverseDeliveries(first: 5) {
+          edges {
+            node {
+              id
+              deliverable {
+                __typename
+                ... on ReverseDeliveryShippingDeliverable {
+                  tracking { number url }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `, { id: returnId });
+  if (!data.return) return null;
+  return {
+    id: data.return.id,
+    status: data.return.status,
+    reverseDeliveries: data.return.reverseDeliveries.edges.map(({ node }) => ({
+      id: node.id,
+      trackingNumber: node.deliverable?.tracking?.number ?? null,
+      trackingUrl: node.deliverable?.tracking?.url ?? null,
+      deliveredAt: null
+      // Shopify exposes delivery state via webhook, not query
+    }))
   };
 }
 async function getStorefrontCollections(first = 50) {

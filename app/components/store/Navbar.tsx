@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { CartDrawer } from '~/components/store/CartDrawer'
 import { DesktopMegaMenu, MobileMegaMenu } from '~/components/store/MegaMenu'
 import { SearchBar } from '~/components/store/SearchBar'
+import { useSession } from '~/lib/session-context'
 import type { Cart, Product } from '~/types'
 import type { MegaMenuBanner } from '~/types/cms'
 import type { ShopifyMenuItem } from '~/lib/shopify.server'
@@ -13,16 +14,14 @@ interface NavbarProps {
   cartCount?: number
   logoUrl?: string | undefined
   logoAlt?: string
-  isCustomerLoggedIn?: boolean
-  customerFirstName?: string | null
   menuItems?: ShopifyMenuItem[]
   megaMenuBanners?: MegaMenuBanner[]
   upsells?: Product[]
-  wishlistCount?: number
 }
 
 
-export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx', isCustomerLoggedIn = false, customerFirstName, menuItems = [], megaMenuBanners = [], upsells = [], wishlistCount = 0 }: NavbarProps) {
+export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBanners = [], upsells = [] }: NavbarProps) {
+  const { isCustomerLoggedIn, customerFirstName, wishlistCount, isLoaded: isSessionLoaded } = useSession()
   const location = useLocation()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [cartOpen,   setCartOpen]   = useState(false)
@@ -151,8 +150,14 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
 
           {/* Right side */}
           <div className="flex items-center gap-2">
-            {/* Desktop account — dropdown when logged in, simple link when not */}
-            {isCustomerLoggedIn ? (
+            {/* Desktop account — neutral placeholder until session resolves, then
+                dropdown when logged in or sign-in link when not. */}
+            {!isSessionLoaded ? (
+              <div
+                className="hidden md:flex items-center justify-center w-11 h-11 rounded-full"
+                aria-hidden="true"
+              />
+            ) : isCustomerLoggedIn ? (
               <div ref={accountMenuRef} className="relative hidden md:block">
                 <button
                   onClick={() => setAccountMenuOpen(o => !o)}

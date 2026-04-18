@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { lazy, Suspense } from 'react'
 import type { LoaderFunctionArgs } from 'react-router'
 import { Link, Outlet, useLoaderData, useRevalidator } from 'react-router'
@@ -14,12 +13,10 @@ import { CookieConsent }   from '~/components/store/CookieConsent'
 import { Analytics }       from '~/components/store/Analytics'
 import { AnnouncementBar } from '~/components/cms/AnnouncementBar'
 import { getHomepageSections, getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
-import { getCustomerToken } from '~/lib/customer-session.server'
-import { customerAPI } from '~/lib/customer-api.server'
 import { getCartIdFromCookie } from '~/lib/cart.server'
 import { getAccessoryProducts, getCart, getMainMenu } from '~/lib/shopify.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
-import { getHeartedProductIds } from '~/lib/wishlist.server'
+import { SessionProvider } from '~/lib/session-context'
 import type { Product } from '~/types'
 import type { AnnouncementBarBlock, MegaMenuBanner, SocialLink, FooterColumn, SiteBanner as SiteBannerData } from '~/types/cms'
 
@@ -29,33 +26,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // pinnedIds live in KV and resolve in ~1–5ms — fetch them outside the main
   // Promise.all so we can fan accessories in parallel with everything else.
   const pinnedIds = (await getPinnedAccessoryIds()) ?? []
-  const [cms, settings, customerToken, cart, menuItems, upsells] = await Promise.all([
+  const [cms, settings, cart, menuItems, upsells] = await Promise.all([
     getHomepageSections(preview),
     getSiteSettings(),
-    getCustomerToken(request),
     cartId ? getCart(cartId) : Promise.resolve(null),
     getMainMenu(),
     pinnedIds.length ? getAccessoryProducts(pinnedIds.slice(0, 4)) : Promise.resolve<Product[]>([]),
   ])
 
-  // Fetch customer first name for the Navbar greeting (only when logged in)
-  let loggedIn = !!customerToken
-  let customerFirstName: string | null = null
-  let heartedProductIds: string[] = []
-  let wishlistCount = 0
-  if (customerToken) {
-    try {
-      const profile = await customerAPI(customerToken).getProfile()
-      customerFirstName = profile?.firstName ?? null
-      if (profile) {
-        heartedProductIds = await getHeartedProductIds(profile.id)
-        wishlistCount = heartedProductIds.length
-      }
-    } catch {
-      // Token likely expired — treat as logged-out for this render
-      loggedIn = false
-    }
-  }
   const announcementBar = cms?.sections.find(
     (s): s is AnnouncementBarBlock => s._type === 'announcementBar' && s.active,
   ) ?? null
@@ -71,48 +49,45 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const footerDisclaimer = settings?.footerDisclaimer ?? null
   const buyButtonText = settings?.buyButtonText || 'I Want It ❤️'
   const siteBanner: SiteBannerData | null = settings?.siteBanner ?? null
-  const customerIdHash = loggedIn && customerToken
-    ? createHash('sha256').update(customerToken.token).digest('hex').slice(0, 12)
-    : null
-  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, isCustomerLoggedIn: loggedIn, customerFirstName, customerIdHash, cart, menuItems, upsells, heartedProductIds, wishlistCount }
+  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, cart, menuItems, upsells }
 }
 
 export default function StoreLayout() {
-  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, isCustomerLoggedIn, customerFirstName, customerIdHash, cart, menuItems, upsells, wishlistCount } = useLoaderData<typeof loader>()
+  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, cart, menuItems, upsells } = useLoaderData<typeof loader>()
   const cartCount = cart?.totalQuantity ?? 0
 
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* Preview mode banner */}
-      {preview && (
-        <div className="bg-brand-purple text-white text-xs font-semibold text-center py-2 px-4 flex items-center justify-center gap-4">
-          <span>⚡ Preview mode — viewing unpublished drafts</span>
-          <Link
-            to="/api/sanity-exit-preview"
-            className="underline underline-offset-2 opacity-80 hover:opacity-100"
-          >
-            Exit preview
-          </Link>
-        </div>
-      )}
+    <SessionProvider>
+      <div className="flex flex-col min-h-screen">
+        {/* Preview mode banner */}
+        {preview && (
+          <div className="bg-brand-purple text-white text-xs font-semibold text-center py-2 px-4 flex items-center justify-center gap-4">
+            <span>⚡ Preview mode — viewing unpublished drafts</span>
+            <Link
+              to="/api/sanity-exit-preview"
+              className="underline underline-offset-2 opacity-80 hover:opacity-100"
+            >
+              Exit preview
+            </Link>
+          </div>
+        )}
 
-      {announcementBar && <AnnouncementBar block={announcementBar} />}
-      <Navbar cart={cart ?? null} cartCount={cartCount} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} isCustomerLoggedIn={isCustomerLoggedIn} customerFirstName={customerFirstName} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} wishlistCount={wishlistCount} />
-      <SiteBanner banner={siteBanner} />
-      <main className="flex-1">
-        <Outlet context={{ buyButtonText }} />
-      </main>
-      <Footer socialLinks={socialLinks} footerColumns={footerColumns} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} />
-      <CookieConsent />
-      <Analytics
-        ga4Id={typeof window !== 'undefined' ? (window as unknown as { ENV?: { GA4_ID?: string } }).ENV?.GA4_ID ?? '' : ''}
-        isLoggedIn={isCustomerLoggedIn}
-        {...(customerIdHash ? { customerIdHash } : {})}
-      />
+        {announcementBar && <AnnouncementBar block={announcementBar} />}
+        <Navbar cart={cart ?? null} cartCount={cartCount} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} />
+        <SiteBanner banner={siteBanner} />
+        <main className="flex-1">
+          <Outlet context={{ buyButtonText }} />
+        </main>
+        <Footer socialLinks={socialLinks} footerColumns={footerColumns} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} />
+        <CookieConsent />
+        <Analytics
+          ga4Id={typeof window !== 'undefined' ? (window as unknown as { ENV?: { GA4_ID?: string } }).ENV?.GA4_ID ?? '' : ''}
+        />
 
-      {/* Visual editing overlays — only active when Sanity studio is open */}
-      {preview && <LivePreview />}
-    </div>
+        {/* Visual editing overlays — only active when Sanity studio is open */}
+        {preview && <LivePreview />}
+      </div>
+    </SessionProvider>
   )
 }
 
