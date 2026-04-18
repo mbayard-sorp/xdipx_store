@@ -10,10 +10,33 @@
  */
 import crypto from 'node:crypto'
 
-function getAuthToken(): string {
+function getAuthToken(): string | null {
   const t = process.env['TWILIO_AUTH_TOKEN']
-  if (!t) throw new Error('TWILIO_AUTH_TOKEN is not set')
+  if (!t) {
+    console.error('[twilio] TWILIO_AUTH_TOKEN not set — signature verification will fail closed')
+    return null
+  }
   return t
+}
+
+/**
+ * Race a promise against a timeout. Resolves to `fallback` if the promise
+ * doesn't settle in time. Keeps voice/SMS handlers under Twilio's 15s webhook
+ * ceiling even if Neon/Sanity/Shopify is slow.
+ */
+export async function withTimeout<T>(p: Promise<T>, ms: number, fallback: T, label = 'op'): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      console.warn(`[twilio] ${label} timed out after ${ms}ms`)
+      resolve(fallback)
+    }, ms)
+  })
+  try {
+    return await Promise.race([p, timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /**
@@ -27,10 +50,12 @@ export function verifyTwilioSignature(
   params: Record<string, string>,
 ): boolean {
   if (!signature) return false
+  const token = getAuthToken()
+  if (!token) return false
   const sorted = Object.keys(params).sort()
   const data = fullUrl + sorted.map((k) => k + params[k]).join('')
   const expected = crypto
-    .createHmac('sha1', getAuthToken())
+    .createHmac('sha1', token)
     .update(Buffer.from(data, 'utf-8'))
     .digest('base64')
   // timingSafeEqual requires equal-length buffers

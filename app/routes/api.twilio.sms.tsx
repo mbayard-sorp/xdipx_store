@@ -42,6 +42,18 @@ function replyTwiml(body: string): string {
 const EMPTY_TWIML = `<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>`
 
 export async function action({ request }: ActionFunctionArgs) {
+  try {
+    return await handleSmsAction(request)
+  } catch (err) {
+    // Never throw out of the action — Vercel would return FUNCTION_INVOCATION_FAILED
+    // and Twilio would retry with exponential backoff, amplifying the outage.
+    // Empty TwiML = 200 with no auto-reply, which is safe.
+    console.error('[sms] action crashed — returning empty TwiML', err)
+    return twiml(EMPTY_TWIML)
+  }
+}
+
+async function handleSmsAction(request: Request): Promise<Response> {
   const { ok, params } = await verifyTwilioRequest(request)
   if (!ok) return new Response('Forbidden', { status: 403 })
 
@@ -155,6 +167,8 @@ async function isOptedOut(phone: string): Promise<boolean> {
 }
 
 async function isRateLimited(phone: string): Promise<boolean> {
+  // 0 (or negative) = disabled — use during testing.
+  if (MAX_SMS_PER_HOUR <= 0) return false
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
   try {
     const rows = await db

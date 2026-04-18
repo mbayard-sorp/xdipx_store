@@ -8,7 +8,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { and, eq, gte, sql } from 'drizzle-orm'
-import { twiml, verifyTwilioRequest, xmlEscape } from '~/lib/twilio.server'
+import { twiml, verifyTwilioRequest, withTimeout, xmlEscape } from '~/lib/twilio.server'
 import { db } from '~/lib/db.server'
 import { callLog, pipelineSettings } from '../../db/schema'
 
@@ -71,19 +71,37 @@ function pickRandom(csv: string, fallback: string): string {
   return items[Math.floor(Math.random() * items.length)]!
 }
 
+function resolveGreeting(
+  template: string,
+  feelingsCsv: string,
+  activitiesCsv: string,
+): string {
+  const feeling = pickRandom(feelingsCsv, 'happy')
+  const activity = pickRandom(activitiesCsv, 'working')
+  return template.replace('{feeling}', feeling).replace('{activity}', activity)
+}
+
 async function getGreeting(): Promise<string> {
+  const fallback = resolveGreeting(DEFAULT_GREETING, DEFAULT_FEELINGS, DEFAULT_ACTIVITIES)
   try {
-    const rows = await db
-      .select({ key: pipelineSettings.key, value: pipelineSettings.value })
-      .from(pipelineSettings)
-      .where(sql`${pipelineSettings.key} IN ('ivrGreeting', 'ivrFeelings', 'ivrActivities')`)
-    const map = new Map(rows.map(r => [r.key, r.value]))
-    const template = map.get('ivrGreeting') || DEFAULT_GREETING
-    const feeling = pickRandom(map.get('ivrFeelings') || DEFAULT_FEELINGS, 'happy')
-    const activity = pickRandom(map.get('ivrActivities') || DEFAULT_ACTIVITIES, 'working')
-    return template.replace('{feeling}', feeling).replace('{activity}', activity)
-  } catch {
-    return DEFAULT_GREETING.replace('{feeling}', 'happy')
+    const rows = await withTimeout(
+      db
+        .select({ key: pipelineSettings.key, value: pipelineSettings.value })
+        .from(pipelineSettings)
+        .where(sql`${pipelineSettings.key} IN ('ivrGreeting', 'ivrFeelings', 'ivrActivities')`),
+      3000,
+      [] as { key: string; value: string | null }[],
+      'getGreeting',
+    )
+    const map = new Map(rows.map((r) => [r.key, r.value]))
+    return resolveGreeting(
+      map.get('ivrGreeting') || DEFAULT_GREETING,
+      map.get('ivrFeelings') || DEFAULT_FEELINGS,
+      map.get('ivrActivities') || DEFAULT_ACTIVITIES,
+    )
+  } catch (err) {
+    console.error('[ivr] getGreeting failed — using fallback', err)
+    return fallback
   }
 }
 
@@ -100,16 +118,25 @@ const STT_HINTS = [
   'lovense', 'fleshlight', 'tenga', 'satisfyer', 'romp', 'icicles', 'oh la la cheri',
 ].join(',')
 
-function buildTwiml(greeting: string): string {
+/**
+ * Returns null when required ConversationRelay config is missing — caller
+ * should route to voicemail instead of emitting broken TwiML that Twilio
+ * would render as an "application error" to the caller.
+ */
+function buildTwiml(greeting: string): string | null {
   const base = process.env['IVR_WS_URL'] ?? ''
   const secret = process.env['IVR_WS_SECRET'] ?? ''
+  const voiceId = process.env['ELEVENLABS_VOICE_ID_IVR'] ?? ''
+  if (!base || !voiceId) {
+    console.error('[ivr] missing required env — IVR_WS_URL or ELEVENLABS_VOICE_ID_IVR not set; falling back to voicemail')
+    return null
+  }
   // Append shared secret so the Fly WS rejects connections that didn't come
   // via our signed TwiML response. Also forward the resolved greeting so the
   // IVR server can speak it as its first text message — no independent random pick.
   let wsUrl = secret ? `${base}${base.includes('?') ? '&' : '?'}token=${encodeURIComponent(secret)}` : base
   const sep = wsUrl.includes('?') ? '&' : '?'
   wsUrl += `${sep}greeting=${encodeURIComponent(greeting)}`
-  const voice = process.env['ELEVENLABS_VOICE_ID_IVR'] ?? ''
 
   // ConversationRelay keeps the call media on Twilio; we exchange text over WSS.
   // ElevenLabs handles TTS; Deepgram handles STT on Twilio's side.
@@ -131,7 +158,7 @@ function buildTwiml(greeting: string): string {
     <ConversationRelay
       url="${xmlEscape(wsUrl)}"
       ttsProvider="ElevenLabs"
-      voice="${xmlEscape(voice)}"
+      voice="${xmlEscape(voiceId)}"
       transcriptionProvider="Deepgram"
       speechModel="nova-2-phonecall"
       hints="${xmlEscape(STT_HINTS)}"
@@ -144,38 +171,67 @@ function buildTwiml(greeting: string): string {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { ok, params } = await verifyTwilioRequest(request)
-  if (!ok) return new Response('Forbidden', { status: 403 })
+  try {
+    const { ok, params } = await verifyTwilioRequest(request)
+    if (!ok) return new Response('Forbidden', { status: 403 })
 
-  const fromNumber = params['From'] ?? ''
-  const callSid = params['CallSid'] ?? ''
-  const toNumber = params['To'] ?? null
+    const fromNumber = params['From'] ?? ''
+    const callSid = params['CallSid'] ?? ''
+    const toNumber = params['To'] ?? null
 
-  // Anonymous / blocked callers skip the live agent — voicemail only.
-  const isAnonymous = !fromNumber || /anonymous|private|unknown/i.test(fromNumber)
-  if (isAnonymous) {
-    console.warn(`[ivr] anonymous caller sid=${callSid}`)
-    await recordRejectedCall(callSid, fromNumber || 'anonymous', toNumber, 'anonymous')
+    // Anonymous / blocked callers skip the live agent — voicemail only.
+    const isAnonymous = !fromNumber || /anonymous|private|unknown/i.test(fromNumber)
+    if (isAnonymous) {
+      console.warn(`[ivr] anonymous caller sid=${callSid}`)
+      await withTimeout(
+        recordRejectedCall(callSid, fromNumber || 'anonymous', toNumber, 'anonymous'),
+        2000,
+        undefined,
+        'recordRejectedCall.anonymous',
+      )
+      return twiml(afterHoursTwiml())
+    }
+
+    if (fromNumber && (await withTimeout(isRateLimited(fromNumber), 2000, false, 'isRateLimited'))) {
+      console.warn(`[ivr] rate-limited caller from=${fromNumber} sid=${callSid}`)
+      await withTimeout(
+        recordRejectedCall(callSid, fromNumber, toNumber, 'rate_limited'),
+        2000,
+        undefined,
+        'recordRejectedCall.rate_limited',
+      )
+      return twiml(REJECT_TWIML)
+    }
+
+    if (!isBusinessHoursNow()) {
+      console.info(`[ivr] after-hours sid=${callSid} tz=${BUSINESS_TZ} window=${BUSINESS_HOURS}`)
+      await withTimeout(
+        recordRejectedCall(callSid, fromNumber, toNumber, 'after_hours'),
+        2000,
+        undefined,
+        'recordRejectedCall.after_hours',
+      )
+      return twiml(afterHoursTwiml())
+    }
+
+    const greeting = await getGreeting()
+    const xml = buildTwiml(greeting)
+    // Missing env → no valid ConversationRelay TwiML; send caller to voicemail
+    // rather than letting Twilio play a generic "application error" message.
+    if (!xml) return twiml(afterHoursTwiml())
+    return twiml(xml)
+  } catch (err) {
+    // Never throw out of this action — Twilio would serve its generic error
+    // message or (worse) Vercel returns FUNCTION_INVOCATION_FAILED. Always
+    // return a valid TwiML voicemail response so the caller gets heard.
+    console.error('[ivr] voice action crashed — falling back to voicemail', err)
     return twiml(afterHoursTwiml())
   }
-
-  if (fromNumber && (await isRateLimited(fromNumber))) {
-    console.warn(`[ivr] rate-limited caller from=${fromNumber} sid=${callSid}`)
-    await recordRejectedCall(callSid, fromNumber, toNumber, 'rate_limited')
-    return twiml(REJECT_TWIML)
-  }
-
-  if (!isBusinessHoursNow()) {
-    console.info(`[ivr] after-hours sid=${callSid} tz=${BUSINESS_TZ} window=${BUSINESS_HOURS}`)
-    await recordRejectedCall(callSid, fromNumber, toNumber, 'after_hours')
-    return twiml(afterHoursTwiml())
-  }
-
-  const greeting = await getGreeting()
-  return twiml(buildTwiml(greeting))
 }
 
 async function isRateLimited(fromNumber: string): Promise<boolean> {
+  // 0 (or negative) = disabled — use during testing so every call goes through.
+  if (MAX_CALLS_PER_HOUR <= 0) return false
   if (RATE_LIMIT_ALLOWLIST.has(fromNumber)) return false
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
   try {
@@ -218,6 +274,12 @@ function isBusinessHoursNow(): boolean {
   const openHour = Number(m[1])
   const closeHour = Number(m[2])
   if (!Number.isFinite(openHour) || !Number.isFinite(closeHour)) return true
+  // Reject out-of-range hours loudly — otherwise a typo ("25-30") silently
+  // bypasses the gate and every caller hits the live agent.
+  if (openHour < 0 || openHour > 23 || closeHour < 0 || closeHour > 23) {
+    console.warn(`[ivr] IVR_BUSINESS_HOURS out of range: ${BUSINESS_HOURS} — gate disabled`)
+    return true
+  }
   let hour: number
   try {
     const s = new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: BUSINESS_TZ }).format(new Date())
@@ -236,5 +298,6 @@ export async function loader({ request: _request }: LoaderFunctionArgs) {
   if (process.env['NODE_ENV'] === 'production') {
     return new Response('Method Not Allowed', { status: 405 })
   }
-  return twiml(buildTwiml('Hi, thanks for calling xdipx. How can I help you today?'))
+  const xml = buildTwiml('Hi, thanks for calling xdipx. How can I help you today?')
+  return twiml(xml ?? afterHoursTwiml())
 }
