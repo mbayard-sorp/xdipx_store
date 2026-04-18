@@ -24,13 +24,16 @@ const REASONS: { code: ReturnReasonCode; label: string }[] = [
 export async function loader({ request }: LoaderFunctionArgs) {
   const { token, tokenType } = await requireCustomer(request)
   const url = new URL(request.url)
-  const orderId = url.searchParams.get('orderId')
-  if (!orderId) throw redirect('/account/orders')
+  const rawOrderId = url.searchParams.get('orderId')
+  if (!rawOrderId) throw redirect('/account/orders')
+  // Customer Account API appends ?key=<token> to order GIDs; strip it before
+  // calling Admin API, which rejects query-string suffixes on IDs.
+  const orderId = rawOrderId.split('?')[0] ?? rawOrderId
 
   const api = customerAPI({ token, tokenType })
   const [customer, order] = await Promise.all([
     api.getProfile(),
-    api.getOrder(orderId),
+    api.getOrder(rawOrderId),
   ])
   if (!customer) throw redirect('/account/login')
   if (!order) throw new Response('Order not found', { status: 404 })
@@ -67,7 +70,8 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response 
   if (!customer) throw redirect('/account/login')
 
   const form = await request.formData()
-  const orderId = String(form.get('orderId') || '')
+  const rawOrderIdInput = String(form.get('orderId') || '')
+  const orderId = rawOrderIdInput.split('?')[0] ?? rawOrderIdInput
   const currencyCode = String(form.get('currencyCode') || 'USD')
   const hygieneAttested = form.get('hygieneAttested') === 'on'
   const labelCostAcknowledged = form.get('labelCostAck') === 'on'
