@@ -18,13 +18,17 @@ import { returns as returnsTable, type ReturnStatus } from '../../db/schema'
 import type { InferSelectModel } from 'drizzle-orm'
 import {
   createReturn,
-  buyReturnLabel,
+  registerReverseDelivery,
   createRefund,
   closeReturn,
   getReturnableFulfillments,
   type ReturnReasonCode,
-  type ReturnableFulfillment,
 } from './shopify.server'
+import {
+  buyReturnLabel as easypostBuyReturnLabel,
+  nalpacAddress,
+  type EasyPostAddress,
+} from './easypost.server'
 
 export type ReturnRow = InferSelectModel<typeof returnsTable>
 
@@ -51,13 +55,15 @@ export interface CreateCustomerReturnInput {
   }>
   /** Estimated label cost shown in the wizard. Stored for audit. */
   labelCostEstimatedCents: number
-  /** Parcel dims for Shopify Shipping rate calc. */
+  /** Parcel dims for EasyPost rate calc. */
   parcel: {
     lengthIn: number
     widthIn:  number
     heightIn: number
     weightOz: number
   }
+  /** Customer's shipping address — used as the "from" on the return label. */
+  fromAddress: EasyPostAddress
 }
 
 export type CreateCustomerReturnResult =
@@ -75,14 +81,23 @@ export type CreateCustomerReturnResult =
 export async function createCustomerReturn(
   input: CreateCustomerReturnInput,
 ): Promise<CreateCustomerReturnResult> {
-  // 1. Find the reverseFulfillmentOrderId for the selected items.
+  console.log('[returns] createCustomerReturn start', {
+    orderId: input.orderId,
+    selectionCount: input.selections.length,
+    fliIds: input.selections.map(s => s.fulfillmentLineItemId),
+  })
+  // 1. Validate the selected items are actually returnable.
   const returnables = await getReturnableFulfillments(input.orderId)
-  const rfoId = pickReverseFulfillmentOrderId(returnables, input.selections.map(s => s.fulfillmentLineItemId))
-  if (!rfoId) {
-    return { ok: false, error: 'No returnable fulfillment found for these items.' }
+  const returnableFliIds = new Set(
+    returnables.flatMap(rf => rf.lineItems.map(li => li.fulfillmentLineItemId)),
+  )
+  const invalid = input.selections.find(s => !returnableFliIds.has(s.fulfillmentLineItemId))
+  if (invalid) {
+    return { ok: false, error: 'Selected items are not returnable right now.' }
   }
 
-  // 2. Create the Shopify return.
+  // 2. Create the Shopify return. The reverseFulfillmentOrderId for label
+  //    purchase comes back in this mutation's response.
   const createResult = await createReturn({
     orderId: input.orderId,
     lineItems: input.selections.map(s => ({
@@ -93,7 +108,11 @@ export async function createCustomerReturn(
     })),
     notifyCustomer: false, // we email via Klaviyo with the label link
   })
-  if (!createResult.ok) return { ok: false, error: createResult.error }
+  if (!createResult.ok) {
+    console.error('[returns] createReturn failed', createResult.error)
+    return { ok: false, error: createResult.error }
+  }
+  console.log('[returns] createReturn ok', createResult.data)
 
   // 3. Persist a row in 'requested' state before buying the label so failures
   //    mid-flight leave an audit trail.
@@ -121,50 +140,89 @@ export async function createCustomerReturn(
 
   if (!row) return { ok: false, error: 'Failed to persist return row.' }
 
-  // 4. Buy the label.
-  const labelResult = await buyReturnLabel({
-    reverseFulfillmentOrderId: createResult.data.reverseFulfillmentOrderId ?? rfoId,
-    reverseDeliveryLineItems: input.selections.map(s => ({
-      fulfillmentLineItemId: s.fulfillmentLineItemId,
-      quantity:              s.quantity,
-    })),
-    parcel: input.parcel,
-    notifyCustomer: false,
-  })
-
-  if (!labelResult.ok) {
-    // Mark row as approved-without-label so UI can offer retry.
+  // 4. Buy the label via EasyPost (customer → Nalpac warehouse).
+  let easypostLabel
+  const toAddress = nalpacAddress()
+  console.log('[returns] easypost addresses', { from: input.fromAddress, to: toAddress })
+  try {
+    easypostLabel = await easypostBuyReturnLabel({
+      from:   input.fromAddress,
+      to:     toAddress,
+      parcel: {
+        length: input.parcel.lengthIn,
+        width:  input.parcel.widthIn,
+        height: input.parcel.heightIn,
+        weight: input.parcel.weightOz,
+      },
+    })
+  } catch (err) {
+    console.error('[returns] easypost buyReturnLabel failed', err)
+    // Approved-without-label: UI offers retry / manual resolution.
     return { ok: true, returnRow: row }
   }
+  console.log('[returns] easypost buyReturnLabel ok', {
+    tracking: easypostLabel.trackingNumber,
+    costCents: easypostLabel.costCents,
+    service: easypostLabel.service,
+  })
 
-  const [updated] = await db.update(returnsTable)
-    .set({
-      shopifyReverseDeliveryId: labelResult.data.reverseDeliveryId,
-      labelUrl:                 labelResult.data.labelUrl,
-      trackingNumber:           labelResult.data.trackingNumber,
-      labelCostCents:           labelResult.data.labelCostCents,
-      status:                   'label_sent' as ReturnStatus,
-      labelPurchasedAt:         new Date(),
-      updatedAt:                new Date(),
-    })
-    .where(eq(returnsTable.id, row.id))
-    .returning()
+  // 5. Register the label + tracking on the Shopify reverse delivery so merchants
+  //    see it in the admin. Best-effort — we already have the row + label.
+  let reverseDeliveryId: string | null = null
+  if (createResult.data.reverseFulfillmentOrderId) {
+    const rfoLineItemMap = createResult.data.fliToRfoLineItemId
+    const reverseDeliveryLineItems = input.selections
+      .map(s => {
+        const rfoLineItemId = rfoLineItemMap[s.fulfillmentLineItemId]
+        return rfoLineItemId
+          ? { reverseFulfillmentOrderLineItemId: rfoLineItemId, quantity: s.quantity }
+          : null
+      })
+      .filter((x): x is { reverseFulfillmentOrderLineItemId: string; quantity: number } => x !== null)
 
-  return { ok: true, returnRow: updated ?? row }
-}
-
-/** Pick which reverseFulfillmentOrder to target based on selected items. */
-function pickReverseFulfillmentOrderId(
-  returnables: ReturnableFulfillment[],
-  selectedFliIds: string[],
-): string | null {
-  for (const rf of returnables) {
-    if (rf.reverseFulfillmentOrderId == null) continue
-    if (rf.lineItems.some(li => selectedFliIds.includes(li.fulfillmentLineItemId))) {
-      return rf.reverseFulfillmentOrderId
+    if (reverseDeliveryLineItems.length > 0) {
+      try {
+        const regResult = await registerReverseDelivery({
+          reverseFulfillmentOrderId: createResult.data.reverseFulfillmentOrderId,
+          reverseDeliveryLineItems,
+          labelFileUrl:      easypostLabel.labelUrl,
+          trackingNumber:    easypostLabel.trackingNumber,
+          ...(easypostLabel.trackingUrl ? { trackingUrl: easypostLabel.trackingUrl } : {}),
+          carrierIdentifier: easypostLabel.carrier,
+          notifyCustomer:    false,
+        })
+        if (regResult.ok) {
+          reverseDeliveryId = regResult.data.reverseDeliveryId
+          console.log('[returns] registerReverseDelivery ok', { reverseDeliveryId })
+        } else {
+          console.error('[returns] registerReverseDelivery failed', regResult.error)
+        }
+      } catch (err) {
+        console.error('[returns] registerReverseDelivery threw', err)
+      }
     }
   }
-  return null
+
+  let updated: ReturnRow | undefined
+  try {
+    ;[updated] = await db.update(returnsTable)
+      .set({
+        shopifyReverseDeliveryId: reverseDeliveryId,
+        labelUrl:                 easypostLabel.labelUrl,
+        trackingNumber:           easypostLabel.trackingNumber,
+        labelCostCents:           easypostLabel.costCents,
+        status:                   'label_sent' as ReturnStatus,
+        labelPurchasedAt:         new Date(),
+        updatedAt:                new Date(),
+      })
+      .where(eq(returnsTable.id, row.id))
+      .returning()
+    console.log('[returns] db update ok', { rowId: updated?.id ?? row.id })
+  } catch (err) {
+    console.error('[returns] db update threw', err)
+  }
+
+  return { ok: true, returnRow: updated ?? row }
 }
 
 /**
@@ -256,7 +314,18 @@ export async function getCustomerReturn(
   const [row] = await db.select().from(returnsTable)
     .where(eq(returnsTable.id, id))
     .limit(1)
-  if (!row || row.customerGid !== customerGid) return null
+  if (!row) {
+    console.error('[returns] getCustomerReturn: no row for id', { id })
+    return null
+  }
+  if (row.customerGid !== customerGid) {
+    console.error('[returns] getCustomerReturn: customerGid mismatch', {
+      id,
+      rowGid: row.customerGid,
+      requestedGid: customerGid,
+    })
+    return null
+  }
   return row
 }
 

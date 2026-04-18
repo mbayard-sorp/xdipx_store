@@ -30,7 +30,10 @@ export async function action({ request }: ActionFunctionArgs) {
   const api = customerAPI({ token, tokenType })
   const form = await request.formData()
   const intent = form.get('intent') as string
-  const id     = form.get('id') as string
+  const rawId  = form.get('id') as string
+  // Strip embedded customer_access_token query string; Shopify accepts the
+  // bare MailingAddress GID on mutations and the embedded token rotates.
+  const id = rawId ? (rawId.split('?')[0] ?? rawId) : ''
 
   if (!id) return { error: 'Missing address id.' }
 

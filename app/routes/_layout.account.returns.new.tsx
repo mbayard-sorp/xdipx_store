@@ -8,6 +8,7 @@ import {
   estimateLabelCostCents,
   isOrderWithinReturnWindow,
 } from '~/lib/returns.server'
+import { verifyAddress } from '~/lib/easypost.server'
 
 export const meta: MetaFunction = () => [{ title: 'Start a return — xdipx' }]
 
@@ -31,21 +32,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const orderId = rawOrderId.split('?')[0] ?? rawOrderId
 
   const api = customerAPI({ token, tokenType })
-  const [customer, order] = await Promise.all([
-    api.getProfile(),
-    api.getOrder(rawOrderId),
-  ])
+  console.log('[returns-new] loader', { rawOrderId, orderId, tokenType })
+  let customer, order
+  try {
+    ;[customer, order] = await Promise.all([
+      api.getProfile(),
+      api.getOrder(rawOrderId),
+    ])
+  } catch (err) {
+    console.error('[returns-new] profile/getOrder failed', err)
+    throw err
+  }
   if (!customer) throw redirect('/account/login')
   if (!order) throw new Response('Order not found', { status: 404 })
 
-  // Window check — use first successful fulfillment as delivery anchor.
-  // Storefront API doesn't expose deliveredAt cleanly, so we approximate
-  // using the order processedAt + 5d as floor. Shopify Admin API does
-  // expose it; upgrade path is to add it to OrderDetail later.
   const withinWindow = isOrderWithinReturnWindow(null, order.processedAt)
+  console.log('[returns-new] withinWindow', { withinWindow, processedAt: order.processedAt })
 
-  // Load returnable fulfillments from Admin API.
-  const returnables = withinWindow ? await getReturnableFulfillments(orderId) : []
+  let returnables: Awaited<ReturnType<typeof getReturnableFulfillments>> = []
+  if (withinWindow) {
+    try {
+      returnables = await getReturnableFulfillments(orderId)
+    } catch (err) {
+      console.error('[returns-new] getReturnableFulfillments failed', err)
+      throw err
+    }
+  }
 
   return {
     customerId: customer.id,
@@ -75,6 +87,53 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response 
   const currencyCode = String(form.get('currencyCode') || 'USD')
   const hygieneAttested = form.get('hygieneAttested') === 'on'
   const labelCostAcknowledged = form.get('labelCostAck') === 'on'
+
+  // Re-fetch the order to get the shipping address (used as label "from").
+  const order = await api.getOrder(rawOrderIdInput)
+  if (!order) return { error: 'Order not found.' }
+  const addr = order.shippingAddress
+  if (!addr || !addr.address1 || !addr.city || !addr.provinceCode || !addr.zip) {
+    return { error: 'No shipping address on file for this order. Email hello@xdipx.com and we\'ll help.' }
+  }
+  const fromAddress = {
+    name: [addr.firstName, addr.lastName].filter(Boolean).join(' ') || customer.email,
+    ...(addr.company ? { company: addr.company } : {}),
+    street1: addr.address1,
+    ...(addr.address2 ? { street2: addr.address2 } : {}),
+    city:    addr.city,
+    state:   addr.provinceCode,
+    zip:     addr.zip,
+    country: addr.countryCodeV2 ?? 'US',
+    ...(addr.phone ? { phone: addr.phone } : {}),
+    ...(customer.email ? { email: customer.email } : {}),
+  }
+
+  // Verify deliverability BEFORE creating the Shopify return so address
+  // failures don't leave orphan RMAs.
+  const verified = await verifyAddress(fromAddress)
+  if (!verified.ok) {
+    if (verified.code === 'undeliverable') {
+      return {
+        error:
+          "We couldn't generate a return label for the shipping address on this order. " +
+          'USPS needs a residential or business street address where carriers deliver — ' +
+          "stadiums, event venues, and unverified PO boxes don't work. " +
+          'Email hello@xdipx.com with a deliverable address and your order number and we\'ll start the return for you.',
+      }
+    }
+    if (verified.code === 'incomplete') {
+      return {
+        error:
+          'The shipping address on this order is missing information we need for a return label. ' +
+          'Email hello@xdipx.com with a complete street address, city, state, and ZIP and we\'ll help.',
+      }
+    }
+    return {
+      error:
+        "We couldn't verify the shipping address with our label service. " +
+        'Email hello@xdipx.com and we\'ll start the return for you.',
+    }
+  }
 
   if (!hygieneAttested) return { error: 'Please confirm items are unopened and in original packaging.' }
   if (!labelCostAcknowledged) return { error: 'Please acknowledge the return shipping deduction.' }
@@ -124,10 +183,13 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response 
     selections,
     labelCostEstimatedCents,
     parcel,
+    fromAddress,
   })
 
   if (!result.ok) return { error: result.error }
-  throw redirect(`/account/returns/${result.returnRow.id}`)
+  const redirectTo = `/account/returns/${result.returnRow.id}`
+  console.log('[returns-new] redirecting to', { redirectTo, rowId: result.returnRow.id })
+  throw redirect(redirectTo)
 }
 
 export default function ReturnWizard() {
@@ -327,7 +389,7 @@ function OutOfWindow({ orderNumber }: { orderNumber: number }) {
           problem with the product and we'll see what we can do.
         </p>
         <a
-          href="mailto:support@xdipx.com"
+          href="mailto:hello@xdipx.com"
           className="inline-flex mt-2 px-5 py-2.5 rounded-full text-sm font-semibold text-brand-charcoal bg-brand-mist hover:bg-brand-mist/70 transition-colors"
           style={{ fontFamily: 'var(--font-display)' }}
         >

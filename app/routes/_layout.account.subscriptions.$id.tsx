@@ -190,7 +190,7 @@ export default function SubscriptionDetailRoute() {
           Our support team can help with any subscription changes.
         </p>
         <a
-          href={`mailto:support@xdipx.com?subject=${encodeURIComponent(`Subscription change request — ${contract.id}`)}`}
+          href={`mailto:hello@xdipx.com?subject=${encodeURIComponent(`Subscription change request — ${contract.id}`)}`}
           className="inline-flex items-center justify-center mt-1 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-brand-gradient hover:opacity-90 transition-opacity"
           style={{ fontFamily: 'var(--font-display)' }}
         >

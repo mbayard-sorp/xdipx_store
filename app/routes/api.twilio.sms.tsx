@@ -26,7 +26,7 @@ const HELP_WORDS = new Set(['help', 'info'])
 const AGE_CONFIRM_RE = /^(y|ya|yes|yep|yup|sure|ok|okay|confirm|im18|iam18|18|18plus)$/i
 
 const HELP_REPLY =
-  "xdipx: daily flash-sale wellness deals. Reply STOP to opt out, START to resume. Msg&data rates may apply. Help: support@xdipx.com"
+  "xdipx: daily flash-sale wellness deals. Reply STOP to opt out, START to resume. Msg&data rates may apply. Help: hello@xdipx.com"
 const STOP_REPLY = "You're opted out of xdipx messages. Reply START anytime to resume."
 const START_REPLY = "You're back in. Reply STOP to opt out anytime. Msg&data rates may apply."
 const AGE_GATE_REPLY =
