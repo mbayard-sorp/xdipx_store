@@ -39,16 +39,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const sort   = (url.searchParams.get('sort') ?? 'relevance') as SortValue
   const page   = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10))
 
-  const vendors   = url.searchParams.getAll('vendor')
-  const tags      = url.searchParams.getAll('tag')
-  const priceMin  = url.searchParams.get('price_min')
-  const priceMax  = url.searchParams.get('price_max')
+  const vendors    = url.searchParams.getAll('vendor')
+  const tags       = url.searchParams.getAll('tag')
+  const features   = url.searchParams.getAll('feature')
+  const experience = url.searchParams.getAll('experience')
+  const priceMin   = url.searchParams.get('price_min')
+  const priceMax   = url.searchParams.get('price_max')
 
   const [searchResult, taxonomyRow, vendorList, liveDealHandle, bannerPage] = await Promise.all([
     searchAll({
       query: q,
       tags,
       vendors,
+      features,
+      experience,
       priceMin: priceMin ? parseFloat(priceMin) : null,
       priceMax: priceMax ? parseFloat(priceMax) : null,
       sort,
@@ -76,7 +80,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     vendorList,
     liveDealHandle,
     bannerBlocks,
-    activeFilters: { vendors, tags, priceMin, priceMax },
+    activeFilters: { vendors, tags, features, experience, priceMin, priceMax },
   }
 }
 
@@ -104,6 +108,8 @@ export default function SearchPage() {
     if (sort) params.set('sort', sort)
     activeFilters.vendors.forEach(v => params.append('vendor', v))
     activeFilters.tags.forEach(t => params.append('tag', t))
+    activeFilters.features.forEach(f => params.append('feature', f))
+    activeFilters.experience.forEach(e => params.append('experience', e))
     if (activeFilters.priceMin) params.set('price_min', activeFilters.priceMin)
     if (activeFilters.priceMax) params.set('price_max', activeFilters.priceMax)
 
@@ -117,8 +123,14 @@ export default function SearchPage() {
     return `/search?${params.toString()}`
   }
 
-  function toggleArrayFilter(key: 'vendor' | 'tag', value: string) {
-    const current = key === 'vendor' ? activeFilters.vendors : activeFilters.tags
+  function toggleArrayFilter(key: 'vendor' | 'tag' | 'feature' | 'experience', value: string) {
+    const currentMap: Record<string, string[]> = {
+      vendor: activeFilters.vendors,
+      tag: activeFilters.tags,
+      feature: activeFilters.features,
+      experience: activeFilters.experience,
+    }
+    const current = currentMap[key]!
     const next = current.includes(value)
       ? current.filter(v => v !== value)
       : [...current, value]
@@ -166,9 +178,16 @@ export default function SearchPage() {
 
   const priceBuckets = facets?.priceBuckets ?? { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }
 
+  const featureCounts = facets?.featureCounts ?? {}
+  const experienceCounts = facets?.experienceCounts ?? {}
+  const hasAnyFeatures = Object.keys(featureCounts).length > 0
+  const hasAnyExperience = Object.keys(experienceCounts).length > 0
+
   const hasActiveFilters =
     activeFilters.vendors.length > 0 ||
     activeFilters.tags.length > 0 ||
+    activeFilters.features.length > 0 ||
+    activeFilters.experience.length > 0 ||
     activeFilters.priceMin != null ||
     activeFilters.priceMax != null
 
@@ -203,6 +222,65 @@ export default function SearchPage() {
           </ul>
         </FilterSection>
       ))}
+
+      {/* Features (from IVR descriptors) */}
+      {hasAnyFeatures && (
+        <FilterSection title="Features" collapsible defaultExpanded>
+          <ul className="space-y-2">
+            {Object.entries(featureCounts)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 10)
+              .map(([feature, count]) => {
+                const checked = activeFilters.features.includes(feature)
+                return (
+                  <li key={feature}>
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleArrayFilter('feature', feature)}
+                        className="accent-brand-purple w-3.5 h-3.5 rounded"
+                      />
+                      <span className={`text-sm capitalize transition-colors ${checked ? 'text-brand-purple font-medium' : 'text-brand-charcoal/70 group-hover:text-brand-purple'}`}>
+                        {feature.replace(/-/g, ' ')}
+                      </span>
+                      <span className="text-xs text-brand-charcoal/30 ml-auto">({count})</span>
+                    </label>
+                  </li>
+                )
+              })}
+          </ul>
+        </FilterSection>
+      )}
+
+      {/* Experience Level (from IVR descriptors) */}
+      {hasAnyExperience && (
+        <FilterSection title="Experience Level" collapsible defaultExpanded>
+          <ul className="space-y-2">
+            {Object.entries(experienceCounts)
+              .sort(([, a], [, b]) => b - a)
+              .map(([level, count]) => {
+                const checked = activeFilters.experience.includes(level)
+                return (
+                  <li key={level}>
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleArrayFilter('experience', level)}
+                        className="accent-brand-purple w-3.5 h-3.5 rounded"
+                      />
+                      <span className={`text-sm capitalize transition-colors ${checked ? 'text-brand-purple font-medium' : 'text-brand-charcoal/70 group-hover:text-brand-purple'}`}>
+                        {level}
+                      </span>
+                      <span className="text-xs text-brand-charcoal/30 ml-auto">({count})</span>
+                    </label>
+                  </li>
+                )
+              })}
+          </ul>
+        </FilterSection>
+      )}
 
       {/* Brand / Vendor */}
       {vendorList.length > 0 && (
@@ -320,6 +398,12 @@ export default function SearchPage() {
               {activeFilters.tags.map(t => (
                 <FilterChip key={t} label={tagLabelMap.get(t) ?? t} onRemove={() => toggleArrayFilter('tag', t)} />
               ))}
+              {activeFilters.features.map(f => (
+                <FilterChip key={`feat-${f}`} label={f} onRemove={() => toggleArrayFilter('feature', f)} />
+              ))}
+              {activeFilters.experience.map(e => (
+                <FilterChip key={`exp-${e}`} label={e} onRemove={() => toggleArrayFilter('experience', e)} />
+              ))}
               {(activeFilters.priceMin || activeFilters.priceMax) && (
                 <FilterChip
                   label={activeFilters.priceMin && activeFilters.priceMax
@@ -329,7 +413,7 @@ export default function SearchPage() {
                 />
               )}
               <button
-                onClick={() => navigate(buildUrl({ vendor: null, tag: null, price_min: null, price_max: null }))}
+                onClick={() => navigate(buildUrl({ vendor: null, tag: null, feature: null, experience: null, price_min: null, price_max: null }))}
                 className="text-xs text-brand-charcoal/40 hover:text-brand-coral transition-colors underline underline-offset-2"
               >
                 Clear all

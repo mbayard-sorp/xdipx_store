@@ -7,6 +7,7 @@ import playTogetherBanner from '../schemas/blocks/playTogetherBanner.js'
 import brandLogoWall      from '../schemas/blocks/brandLogoWall.js'
 import testimonials       from '../schemas/blocks/testimonials.js'
 import bonusDeal          from '../schemas/blocks/bonusDeal.js'
+import trustBar           from '../schemas/blocks/trustBar.js'
 import blogImage          from '../schemas/blocks/blogImage.js'
 import blogPullQuote      from '../schemas/blocks/blogPullQuote.js'
 import blogProductEmbed   from '../schemas/blocks/blogProductEmbed.js'
@@ -17,6 +18,7 @@ import homepageSections   from '../schemas/homepageSections.js'
 import siteSettings       from '../schemas/siteSettings.js'
 import productPage        from '../schemas/productPage.js'
 import page               from '../schemas/page.js'
+import trustItem          from '../schemas/trustItem.js'
 import blogPost           from '../schemas/blogPost.js'
 import blogCategory       from '../schemas/blogCategory.js'
 import blogAuthor         from '../schemas/blogAuthor.js'
@@ -30,6 +32,8 @@ export const schemaTypes = [
   productPage,
   // Documents (generic pages)
   page,
+  // Documents (reusable site-wide items)
+  trustItem,
   // Documents (blog)
   blogPost,
   blogCategory,
@@ -45,6 +49,7 @@ export const schemaTypes = [
   brandLogoWall,
   testimonials,
   bonusDeal,
+  trustBar,
   // Blog block object types
   blogImage,
   blogPullQuote,

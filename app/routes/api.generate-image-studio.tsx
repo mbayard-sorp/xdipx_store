@@ -18,7 +18,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export type GenerateImageResponse = {
-  images: Array<{ base64: string; mimeType: string }>
+  images?: Array<{ base64: string; mimeType: string }>
   blocked?: number
   error?: string
 }

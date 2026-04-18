@@ -10,6 +10,7 @@ import {
   getDealByShopifyId, updateProductMetafield,
   getVariantCost, pushProductToShopify, getAccessoryProductsAdmin,
   getProductAdminImages, updateProductTags, fetchAllDealProducts,
+  updateVariantPricing,
 } from '~/lib/shopify.server'
 import type { AdminProductImage } from '~/lib/shopify.server'
 import { generateCopy, generateSEOTitle } from '~/lib/claude.server'
@@ -17,6 +18,8 @@ import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
 import { ImageManager } from '~/components/admin/ImageManager'
 import { PricingPanel } from '~/components/admin/PricingPanel'
 import type { Product } from '~/types'
+import { dealOrderToCSV, type DealOrderRow } from '~/lib/deal-order-csv'
+import { dealOrderFromCSV } from '~/lib/deal-order-csv.server'
 
 export const meta: MetaFunction = () => [{ title: 'Deals — xdipx Admin' }]
 
@@ -136,9 +139,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
+  // Full export list — all pending/live deals (and the live row), unpaginated,
+  // minimal fields only. Used by the "Export CSV" button.
+  const allDealsForExport = await db
+    .select({
+      id: dealHistory.id,
+      sku: dealHistory.sku,
+      seoTitle: dealHistory.seoTitle,
+      dealDate: dealHistory.dealDate,
+      status: dealHistory.status,
+      sortOrder: dealHistory.sortOrder,
+    })
+    .from(dealHistory)
+    .where(and(inArray(dealHistory.status, activeStatuses), isNull(dealHistory.completedAt)))
+    .orderBy(asc(dealHistory.sortOrder))
+
   return {
     deals, shopifyDataMap, editorData, editId, liveDealRow: liveDealRow ?? null,
-    page: safePage, totalPages, totalFiltered,
+    page: safePage, totalPages, totalFiltered, allDealsForExport,
   }
 }
 
@@ -174,6 +192,44 @@ export async function action({ request }: ActionFunctionArgs) {
     const maxSort = result[0]?.maxSort ?? 0
     await db.update(dealHistory).set({ sortOrder: maxSort + 1 }).where(eq(dealHistory.id, id))
     return { ok: true }
+  }
+
+  if (intent === 'import-deal-order') {
+    const csv = form.get('csv') as string
+    if (!csv) return { importErrors: ['Missing CSV data'], importCount: 0 }
+
+    const { orders, errors } = dealOrderFromCSV(csv)
+    if (errors.length > 0) {
+      return { importErrors: errors, importCount: 0 }
+    }
+
+    const ids = orders.map(o => o.id)
+    const existing = await db
+      .select({ id: dealHistory.id, status: dealHistory.status })
+      .from(dealHistory)
+      .where(inArray(dealHistory.id, ids))
+    const eligibleIds = new Set(
+      existing.filter(r => r.status === 'pending' || r.status === 'live').map(r => r.id)
+    )
+
+    const missing = ids.filter(id => !eligibleIds.has(id))
+    if (missing.length > 0) {
+      return {
+        importErrors: [
+          `Unknown or non-editable deal_id(s): ${missing.join(', ')} (only pending/live deals can be reordered)`,
+        ],
+        importCount: 0,
+      }
+    }
+
+    await Promise.all(
+      orders.map((o, index) =>
+        db.update(dealHistory)
+          .set({ sortOrder: index + 1 })
+          .where(eq(dealHistory.id, o.id))
+      )
+    )
+    return { importCount: orders.length }
   }
 
   if (intent === 'sort-by-date') {
@@ -318,6 +374,25 @@ export async function action({ request }: ActionFunctionArgs) {
       vaultPrice:    vaultVal,
     }).where(eq(dealHistory.shopifyProductId, productId))
 
+    return { ok: true }
+  }
+
+  if (intent === 'save-variant-pricing') {
+    const variantGid     = form.get('variantGid') as string
+    const price          = form.get('price') as string
+    const compareAtPrice = ((form.get('compareAtPrice') as string | null) ?? '').trim()
+    await updateVariantPricing(variantGid, price, compareAtPrice)
+    return { ok: true }
+  }
+
+  if (intent === 'sync-all-variants-pricing') {
+    const variantGidsJson = form.get('variantGids') as string
+    const price           = form.get('price') as string
+    const compareAtPrice  = ((form.get('compareAtPrice') as string | null) ?? '').trim()
+    const variantGids     = JSON.parse(variantGidsJson) as string[]
+    await Promise.all(
+      variantGids.map(gid => updateVariantPricing(gid, price, compareAtPrice)),
+    )
     return { ok: true }
   }
 
@@ -772,10 +847,13 @@ function LiveDealCard({ liveDealRow, shopifyData, onDrop, onClick, onBumpToBotto
 export default function AdminDealsPage() {
   const {
     deals, shopifyDataMap, editorData, editId, liveDealRow,
-    page, totalPages, totalFiltered,
+    page, totalPages, totalFiltered, allDealsForExport,
   } = useLoaderData<typeof loader>()
   const reorderFetcher  = useFetcher()
   const moveFetcher     = useFetcher()
+  const importFetcher   = useFetcher<{ importCount?: number; importErrors?: string[] }>()
+  const fileInputRef    = useRef<HTMLInputElement>(null)
+  const [pendingImport, setPendingImport] = useState<{ csv: string; rowCount: number } | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const [pendingConfirm, setPendingConfirm] = useState<{
     intent: string; id?: number; shopifyProductId?: string; label: string; message: string
@@ -838,6 +916,51 @@ export default function AdminDealsPage() {
     )
   }
 
+  function handleExportOrder() {
+    const rows: DealOrderRow[] = allDealsForExport.map(d => ({
+      dealId: d.id,
+      sku: d.sku,
+      seoTitle: d.seoTitle ?? '',
+      dealDate: d.dealDate ?? '',
+      status: d.status,
+      sortOrder: d.sortOrder ?? 0,
+    }))
+    const csv = dealOrderToCSV(rows)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `deal-order-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  function handleImportFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const csv = String(reader.result ?? '')
+      const rowCount = Math.max(0, (csv.match(/\n/g)?.length ?? 1) - 1)
+      setPendingImport({ csv, rowCount })
+    }
+    reader.readAsText(file)
+  }
+
+  function confirmImportOrder() {
+    if (!pendingImport) return
+    const formData = new FormData()
+    formData.set('intent', 'import-deal-order')
+    formData.set('csv', pendingImport.csv)
+    importFetcher.submit(formData, { method: 'post' })
+    setPendingImport(null)
+  }
+
+  const importResult = importFetcher.data
+
   function openEditor(dealId: number) {
     const params = new URLSearchParams(searchParams)
     params.set('edit', String(dealId))
@@ -868,10 +991,85 @@ export default function AdminDealsPage() {
         </div>
       )}
 
+      {/* Import result banner */}
+      {importResult && (
+        importResult.importErrors && importResult.importErrors.length > 0 ? (
+          <div className="mb-4 rounded-2xl px-5 py-3 text-sm bg-red-50 border border-red-200 text-red-700">
+            <p className="font-semibold mb-1">CSV import failed</p>
+            <ul className="list-disc pl-5 space-y-0.5">
+              {importResult.importErrors.slice(0, 10).map((err, i) => <li key={i}>{err}</li>)}
+              {importResult.importErrors.length > 10 && (
+                <li>…and {importResult.importErrors.length - 10} more</li>
+              )}
+            </ul>
+          </div>
+        ) : importResult.importCount ? (
+          <div className="mb-4 rounded-2xl px-5 py-3 text-sm bg-green-50 border border-green-200 text-green-700">
+            Imported order for <strong>{importResult.importCount}</strong> deal{importResult.importCount !== 1 ? 's' : ''}. Reload to see the new order.
+          </div>
+        ) : null
+      )}
+
       {/* Header */}
-      <h1 className="text-2xl font-bold text-brand-charcoal mb-4" style={{ fontFamily: 'var(--font-display)' }}>
-        Deals
-      </h1>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          Deals
+        </h1>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleExportOrder}
+            className="px-4 py-2 text-sm font-semibold text-brand-charcoal bg-white border border-brand-mist rounded-full hover:border-brand-purple/40 hover:text-brand-purple transition-colors"
+          >
+            Export CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="px-4 py-2 text-sm font-semibold text-brand-charcoal bg-white border border-brand-mist rounded-full hover:border-brand-purple/40 hover:text-brand-purple transition-colors"
+          >
+            Import CSV
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleImportFilePick}
+            className="hidden"
+          />
+        </div>
+      </div>
+
+      {pendingImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <h2 className="text-lg font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+              Replace deal order?
+            </h2>
+            <p className="text-sm text-brand-charcoal/70">
+              Importing will replace the sort order of all pending/live deals with the CSV contents
+              (~{pendingImport.rowCount} row{pendingImport.rowCount !== 1 ? 's' : ''}).
+              The server will validate deal IDs and report errors before applying.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPendingImport(null)}
+                className="px-4 py-2 text-sm font-semibold text-brand-charcoal/70 hover:text-brand-charcoal transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmImportOrder}
+                className="px-4 py-2 bg-brand-gradient text-white text-sm font-bold rounded-full hover:opacity-90 transition-opacity"
+              >
+                Replace &amp; save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Live Deal Card */}
       <LiveDealCard
@@ -1230,6 +1428,7 @@ export default function AdminDealsPage() {
                       productId={editorData.deal.shopifyProductId}
                       config={editorData.pricingConfig}
                       shopifyCost={editorData.shopifyCost}
+                      variants={editorData.deal.variants}
                     />
                   </div>
 

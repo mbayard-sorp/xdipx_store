@@ -10,6 +10,7 @@ import { BrandLogoWall }      from './BrandLogoWall'
 import { Testimonials }       from './Testimonials'
 import { BonusDealSection }   from './BonusDealSection'
 import { RichTextBlock }      from './RichTextBlock'
+import { TrustBarBlock }      from './TrustBarBlock'
 
 interface ContentBlockRendererProps {
   block: ContentBlock
@@ -42,6 +43,8 @@ export function ContentBlockRenderer({ block, carouselProductMap, bonusDealProdu
       return <Testimonials block={block} />
     case 'bonusDeal':
       return <BonusDealSection block={block} product={bonusDealProduct ?? null} />
+    case 'trustBar':
+      return <TrustBarBlock block={block} />
     case 'richText':
       return <RichTextBlock block={block} />
     default:

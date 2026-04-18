@@ -186,6 +186,87 @@ export const wishlistItems = pgTable('wishlist_items', {
   listIdx:    index('wishlist_items_list_idx').on(t.wishlistId),
 }))
 
+export const callLog = pgTable('call_log', {
+  id:              serial('id').primaryKey(),
+  callSid:         varchar('call_sid', { length: 64 }).notNull().unique(),
+  fromNumber:      varchar('from_number', { length: 20 }).notNull(),
+  toNumber:        varchar('to_number', { length: 20 }),
+  direction:       varchar('direction', { length: 10 }),
+  endReason:       varchar('end_reason', { length: 20 }),
+  durationSec:     integer('duration_sec'),
+  tokensTotal:     integer('tokens_total'),
+  voicemailId:     integer('voicemail_id'),
+  createdAt:       timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  fromIdx:    index('call_log_from_idx').on(t.fromNumber, t.createdAt),
+  createdIdx: index('call_log_created_idx').on(t.createdAt),
+}))
+
+export const voicemails = pgTable('voicemails', {
+  id:                  serial('id').primaryKey(),
+  callSid:             varchar('call_sid', { length: 64 }).notNull().unique(),
+  fromNumber:          varchar('from_number', { length: 20 }).notNull(),
+  callbackNumber:      varchar('callback_number', { length: 20 }),
+  summary:             text('summary').notNull(),
+  transcript:          text('transcript').notNull(),
+  recordingUrl:        text('recording_url'),
+  contextOrderNumber:  varchar('context_order_number', { length: 20 }),
+  status:              varchar('status', { length: 20 }).default('new').notNull(),
+  createdAt:           timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  statusIdx:  index('voicemails_status_idx').on(t.status),
+  createdIdx: index('voicemails_created_idx').on(t.createdAt),
+}))
+
+export const smsOptouts = pgTable('sms_optouts', {
+  id:         serial('id').primaryKey(),
+  phone:      varchar('phone', { length: 20 }).notNull().unique(),
+  reason:     varchar('reason', { length: 20 }).default('stop').notNull(),
+  createdAt:  timestamp('created_at').defaultNow().notNull(),
+})
+
+export const smsMessages = pgTable('sms_messages', {
+  id:          serial('id').primaryKey(),
+  phone:       varchar('phone', { length: 20 }).notNull(),
+  direction:   varchar('direction', { length: 10 }).notNull(),
+  body:        text('body').notNull(),
+  twilioSid:   varchar('twilio_sid', { length: 64 }),
+  createdAt:   timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  phoneIdx:   index('sms_messages_phone_idx').on(t.phone, t.createdAt),
+  createdIdx: index('sms_messages_created_idx').on(t.createdAt),
+}))
+
+export const smsAgeConsent = pgTable('sms_age_consent', {
+  phone:        varchar('phone', { length: 20 }).primaryKey(),
+  consentedAt:  timestamp('consented_at').defaultNow().notNull(),
+  method:       varchar('method', { length: 20 }).default('sms_yes').notNull(),
+})
+
+export interface DraftOrderLineItem {
+  variantId: string
+  title: string
+  quantity: number
+  unitPriceCents: number
+}
+
+export const draftOrders = pgTable('draft_orders', {
+  id:                serial('id').primaryKey(),
+  shopifyDraftId:    varchar('shopify_draft_id', { length: 64 }).notNull().unique(),
+  shopifyInvoiceUrl: text('shopify_invoice_url'),
+  channel:           varchar('channel', { length: 10 }).notNull(), // voice | sms
+  phone:             varchar('phone', { length: 20 }).notNull(),
+  email:             varchar('email', { length: 255 }),
+  customerName:      varchar('customer_name', { length: 255 }),
+  subtotalCents:     integer('subtotal_cents').notNull(),
+  itemCount:         integer('item_count').notNull(),
+  lineItems:         json('line_items').$type<DraftOrderLineItem[]>().notNull(),
+  status:            varchar('status', { length: 20 }).default('sent').notNull(), // sent | paid | expired | cancelled
+  createdAt:         timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  phoneIdx:   index('draft_orders_phone_idx').on(t.phone, t.createdAt),
+  createdIdx: index('draft_orders_created_idx').on(t.createdAt),
+}))
 export const returns = pgTable('returns', {
   id:                       serial('id').primaryKey(),
   shopifyReturnId:          varchar('shopify_return_id', { length: 60 }).notNull(),

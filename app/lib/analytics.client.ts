@@ -17,6 +17,12 @@ function gtag(...args: [GtagCommand, ...unknown[]]) {
   window.dataLayer.push(args)
 }
 
+export function pushToDataLayer(payload: Record<string, unknown>) {
+  if (typeof window === 'undefined') return
+  window.dataLayer = window.dataLayer || []
+  window.dataLayer.push(payload)
+}
+
 // ─── GA4 Item shape ───────────────────────────────────────────────────────────
 
 export interface GA4Item {

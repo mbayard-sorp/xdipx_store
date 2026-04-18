@@ -10,9 +10,11 @@ import { dealHistory } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { kvGet, KV_KEYS } from '~/lib/kv.server'
 import { getHomepageSections }                  from '~/lib/sanity.server'
+import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { CountdownTimer }        from '~/components/store/CountdownTimer'
 import { DailyDealHero }         from '~/components/store/DailyDealHero'
+import { BundleHero }            from '~/components/store/BundleHero'
 import { ProductCarousel }       from '~/components/cms/ProductCarousel'
 import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }  from '~/components/cms/ContentBlockRenderer'
@@ -57,6 +59,11 @@ export async function loader(_args: LoaderFunctionArgs) {
     getHomepageSections(),
   ])
 
+  // If the live deal's Sanity doc is flagged as a bundle, render the bundle hero
+  // instead of the DailyDealHero. Falls back to the regular product hero when
+  // Sanity has no bundle doc for this handle.
+  const bundle = deal?.handle ? await getBundleByHandle(deal.handle) : null
+
   // Resolve Shopify products for any CMS productCarousel blocks
   const carouselBlocks = (cmsData?.sections ?? []).filter(
     (s): s is ProductCarouselBlock => s._type === 'productCarousel',
@@ -82,7 +89,7 @@ export async function loader(_args: LoaderFunctionArgs) {
 
   if (!deal) {
     return {
-      deal: null, forHim, forHer, bonusDeal,
+      deal: null, bundle: null, forHim, forHer, bonusDeal,
       viewers: 0, soldToday: 0, cmsData, carouselProductMap,
     }
   }
@@ -94,7 +101,7 @@ export async function loader(_args: LoaderFunctionArgs) {
   ])
 
   return {
-    deal, forHim, forHer, bonusDeal,
+    deal, bundle, forHim, forHer, bonusDeal,
     viewers, soldToday: 0, cmsData, carouselProductMap,
     reviews: reviewData.reviews,
     reviewTotal: reviewData.total,
@@ -134,7 +141,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 
 export default function Homepage() {
   const {
-    deal, forHim, forHer, bonusDeal,
+    deal, bundle, forHim, forHer, bonusDeal,
     viewers, soldToday, cmsData, carouselProductMap,
     reviews, reviewTotal, aggregate,
   } = useLoaderData<typeof loader>()
@@ -176,7 +183,9 @@ export default function Homepage() {
     <>
       <CountdownTimer />
 
-      {deal ? (
+      {bundle ? (
+        <BundleHero bundle={bundle} buyButtonText={buyButtonText} />
+      ) : deal ? (
         <>
           <DailyDealHero
             deal={deal}

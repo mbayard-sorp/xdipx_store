@@ -5,6 +5,7 @@ import { getVaultDeals, getCollectionDeals } from '~/lib/shopify.server'
 import { getVaultFilterTabs } from '~/lib/kv.server'
 import { VaultCard } from '~/components/store/VaultCard'
 import { trackVaultBrowse, trackViewItemList } from '~/lib/analytics.client'
+import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 
 export const meta: MetaFunction = () => [
   { title: 'The Vault — Past Deals | xdipx' },
@@ -71,6 +72,10 @@ export default function VaultPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10">
+      <BreadcrumbStructuredData items={[
+        { name: 'Home',  url: 'https://xdipx.com/' },
+        { name: 'Vault', url: 'https://xdipx.com/vault' },
+      ]} />
       <div className="mb-8">
         <h1
           className="text-3xl font-bold text-brand-charcoal"

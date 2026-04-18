@@ -107,8 +107,6 @@ export function parseBulkImportCSV(csvText: string): {
       continue
     }
 
-    const optionName = allVariantRows[0]?.['Variant Option Name'] ?? 'Option'
-
     const variants: BulkVariantRow[] = allVariantRows.map(r => {
       const wholesale     = parseFloat(r.Wholesale) || 0
       const msrp          = parseFloat(r.MSRP)      || 0
@@ -216,8 +214,6 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
         optionName,
       )
     }
-
-    const shopifyGid = `gid://shopify/Product/${numericId}`
 
     // 4. Generate SEO title
     const seoTitle = await generateSEOTitle(masterRow['Product Title'], masterRow.Brand)

@@ -15,6 +15,7 @@ import {
   activateShopifyProduct,
   updateVariantPricing,
   updateProductMetafield,
+  appendProductTag,
   shopifyAdmin,
 } from './shopify.server'
 import { triggerDailyDealEmail } from './klaviyo.server'
@@ -24,6 +25,15 @@ import { kvSet, KV_KEYS } from './kv.server'
 function estDate(offsetDays = 0): string {
   const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000)
   return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+}
+
+/** Derive `past-daily-deal-MM-YY` from a YYYY-MM-DD dealDate string. */
+function pastDealTag(dealDate: string | null): string | null {
+  if (!dealDate) return null
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(dealDate)
+  if (!m) return null
+  const [, yyyy, mm] = m
+  return `past-daily-deal-${mm}-${yyyy!.slice(2)}`
 }
 
 /** Read the global vault discount percentage from pipeline settings. */
@@ -59,6 +69,7 @@ export async function transitionToVaultPricing(
     msrp: string | null
     vaultPrice: string | null
     pctOffMsrp?: string | null
+    dealDate: string | null
   },
 ): Promise<void> {
   if (!deal.shopifyProductId) return
@@ -97,6 +108,10 @@ export async function transitionToVaultPricing(
 
   // Set status to vault in Shopify (metafield + tags)
   await setDealStatus(deal.shopifyProductId, 'vault')
+
+  // Tag with `past-daily-deal-MM-YY` so monthly archive pages can filter by tag.
+  const tag = pastDealTag(deal.dealDate)
+  if (tag) await appendProductTag(deal.shopifyProductId, tag)
 
   // Update DB — mark completed, store calculated vault price
   await db

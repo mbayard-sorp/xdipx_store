@@ -10,3 +10,7 @@ build/
 studio/npm run dev/
 .vercel
 .env*.local
+.env.preview
+.env.preview-*
+.claude/launch.json
+ivr_descriptors.csv

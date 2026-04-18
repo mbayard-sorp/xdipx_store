@@ -5,8 +5,6 @@ import { useEffect, useState } from 'react'
 const CONSENT_KEY     = 'xdipx_consent'
 const POLICY_VERSION  = '1.0'
 
-type ConsentChoice = 'all' | 'essential_only' | null
-
 export function CookieConsent() {
   const [visible, setVisible] = useState(false)
 

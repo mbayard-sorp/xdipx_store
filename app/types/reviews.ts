@@ -103,7 +103,7 @@ export interface CreateReviewInput {
 
 export interface CreateInviteInput {
   shopifyOrderId: string
-  shopifyCustomerId?: string
+  shopifyCustomerId?: string | undefined
   shopifyProductId: string
   reviewerEmail: string
   reviewerName: string

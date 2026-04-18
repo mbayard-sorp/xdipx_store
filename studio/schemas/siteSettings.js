@@ -22,6 +22,33 @@ export default {
       ],
     },
     {
+      name: 'siteBanner',
+      title: 'Site Banner',
+      description: 'Wide promotional banner displayed site-wide beneath the trust bar. Toggle off to hide.',
+      type: 'object',
+      fields: [
+        {
+          name: 'enabled',
+          title: 'Show banner',
+          type: 'boolean',
+          initialValue: false,
+        },
+        ...withImageGenerator('image'),
+        {
+          name: 'alt',
+          title: 'Alt text',
+          type: 'string',
+          description: 'Describe the banner for screen readers.',
+        },
+        {
+          name: 'link',
+          title: 'Link URL (optional)',
+          type: 'string',
+          description: 'Internal path (e.g. /vault) or full URL. Leave blank for a non-clickable banner.',
+        },
+      ],
+    },
+    {
       name: 'megaMenuBanners',
       title: 'Mega Menu Promo Banners',
       description: 'Promotional graphics displayed alongside menu columns. Configure separate banners for the left and right sides of each top-level menu.',

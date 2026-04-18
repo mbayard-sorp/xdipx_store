@@ -35,6 +35,8 @@ export default {
     { name: 'product',  title: 'Product',        default: true },
     { name: 'copy',     title: 'Copy & Story'                  },
     { name: 'deal',     title: 'Deal Settings'                 },
+    { name: 'ivr',      title: 'IVR / Voice'                   },
+    { name: 'bundle',   title: 'Bundle'                        },
     { name: 'content',  title: 'Content Blocks'                },
   ],
 
@@ -232,8 +234,161 @@ export default {
       type: 'string',
       group: 'deal',
     },
+    {
+      name: 'archived',
+      title: 'Archived',
+      type: 'boolean',
+      group: 'product',
+      description: 'Set automatically when the linked Shopify product is no longer active. Archived docs are excluded from search.',
+    },
 
-    // ── Content Blocks ───────────────────────────────────────────────────────
+    // ── IVR / Voice Discovery ─────────────────────────────────────────────────
+    {
+      name: 'ivrMood',
+      title: 'Mood Tags',
+      type: 'array',
+      group: 'ivr',
+      description: 'Mood/vibe for voice discovery queries like "something romantic" or "playful".',
+      of: [{ type: 'string' }],
+      options: {
+        list: [
+          { title: 'Playful',      value: 'playful'     },
+          { title: 'Romantic',     value: 'romantic'     },
+          { title: 'Luxurious',    value: 'luxurious'    },
+          { title: 'Adventurous',  value: 'adventurous'  },
+          { title: 'Relaxing',     value: 'relaxing'     },
+        ],
+      },
+    },
+    {
+      name: 'ivrExperience',
+      title: 'Experience Level',
+      type: 'string',
+      group: 'ivr',
+      description: 'Used when callers say "beginner-friendly" or "something advanced".',
+      options: {
+        list: [
+          { title: 'Beginner',      value: 'beginner'     },
+          { title: 'Intermediate',  value: 'intermediate' },
+          { title: 'Advanced',      value: 'advanced'     },
+        ],
+        layout: 'radio',
+      },
+    },
+    {
+      name: 'ivrUseCase',
+      title: 'Use Case Tags',
+      type: 'array',
+      group: 'ivr',
+      description: 'Scenarios like "date night", "gift", "travel-friendly".',
+      of: [{ type: 'string' }],
+      options: {
+        list: [
+          { title: 'Solo',        value: 'solo'       },
+          { title: 'Couples',     value: 'couples'    },
+          { title: 'Date Night',  value: 'date-night' },
+          { title: 'Gift',        value: 'gift'       },
+          { title: 'Travel',      value: 'travel'     },
+        ],
+      },
+    },
+    {
+      name: 'ivrFeatures',
+      title: 'Feature Tags',
+      type: 'array',
+      group: 'ivr',
+      description: 'Physical features callers ask about: "is it waterproof?", "is it quiet?".',
+      of: [{ type: 'string' }],
+      options: {
+        list: [
+          { title: 'Waterproof',      value: 'waterproof'      },
+          { title: 'Quiet',           value: 'quiet'           },
+          { title: 'Rechargeable',    value: 'rechargeable'    },
+          { title: 'App-controlled',  value: 'app-controlled'  },
+          { title: 'Body-safe',       value: 'body-safe'       },
+        ],
+      },
+    },
+    {
+      name: 'ivrVoiceSummary',
+      title: 'Voice Summary',
+      type: 'string',
+      group: 'ivr',
+      description: 'One TTS-safe sentence for the phone agent. No markdown, no URLs. Under 120 chars.',
+      validation: Rule => Rule.max(120),
+    },
+
+    // ── Bundle ───────────────────────────────────────────────────────────────
+    {
+      name: 'isBundle',
+      title: 'This product is a bundle',
+      type: 'boolean',
+      group: 'bundle',
+      description: 'When checked, the PDP renders a multi-product bundle hero instead of a single-product layout. Shopify product still needs to exist for the handle/URL.',
+      initialValue: false,
+    },
+    {
+      name: 'bundleComponents',
+      title: 'Bundle Components',
+      type: 'array',
+      group: 'bundle',
+      description: 'Products included in this bundle. "Dip In ♥" adds each component as its own cart line.',
+      hidden: ({ parent }) => !parent?.isBundle,
+      of: [
+        {
+          type: 'object',
+          name: 'bundleComponent',
+          title: 'Component',
+          fields: [
+            {
+              name: 'product',
+              title: 'Product',
+              type: 'reference',
+              to: [{ type: 'productPage' }],
+              validation: Rule => Rule.required(),
+            },
+            {
+              name: 'quantity',
+              title: 'Quantity',
+              type: 'number',
+              initialValue: 1,
+              validation: Rule => Rule.required().integer().min(1).max(10),
+            },
+          ],
+          preview: {
+            select: { title: 'product.title', subtitle: 'product.shopifyHandle', qty: 'quantity', imageUrl: 'product.previewImageUrl' },
+            prepare: ({ title, subtitle, qty, imageUrl }) => ({
+              title: title || subtitle || 'Component',
+              subtitle: `Qty ${qty ?? 1}${subtitle ? ` · /${subtitle}` : ''}`,
+              media: imageUrl
+                ? createElement('img', { src: imageUrl, style: { width: '100%', height: '100%', objectFit: 'cover' } })
+                : undefined,
+            }),
+          },
+        },
+      ],
+    },
+    {
+      name: 'bundleDiscountPct',
+      title: 'Bundle Discount (%)',
+      type: 'number',
+      group: 'bundle',
+      description: 'Percent off the combined MSRP of all components. E.g. 20 = 20% off. Applied in Shopify via an automatic discount tied to the bundle tag.',
+      hidden: ({ parent }) => !parent?.isBundle,
+      validation: Rule => Rule.min(0).max(90),
+      initialValue: 0,
+    },
+    {
+      name: 'bundleCompanionFor',
+      title: 'Offer On These Product PDPs',
+      type: 'array',
+      group: 'bundle',
+      description: 'Products whose PDP should show a "Bundle & Save" card pointing at this bundle. Leave empty to only surface the bundle on its own URL / homepage.',
+      hidden: ({ parent }) => !parent?.isBundle,
+      of: [{ type: 'reference', to: [{ type: 'productPage' }] }],
+    },
+
+    // ── Content Blocks ────────────────────────────────────────────────────────
     {
       name: 'contentBlocks',
       title: 'Content Blocks',
@@ -248,6 +403,7 @@ export default {
         { type: 'playTogetherBanner' },
         { type: 'brandLogoWall'      },
         { type: 'testimonials'       },
+        { type: 'trustBar'           },
       ],
     },
   ],

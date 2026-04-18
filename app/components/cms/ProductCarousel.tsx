@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import { Link } from 'react-router'
 import type { Product } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
+import ProductTileMedia from '~/components/store/ProductTileMedia'
 
 interface ProductCarouselProps {
   block?: ProductCarouselBlock
@@ -151,6 +152,12 @@ function ProductCard({ product, className = '' }: { product: Product; className?
   const price   = product.price
   const compare = product.compareAtPrice
   const onSale  = compare != null && compare > price
+  const firstImage = product.images[0]
+  const firstVideo = product.videos?.[0]
+  const videoSrc = firstVideo?.sources?.[0]?.url
+  const video = firstVideo && videoSrc
+    ? { previewUrl: firstVideo.previewImageUrl, src: videoSrc }
+    : null
 
   return (
     <Link
@@ -159,14 +166,11 @@ function ProductCard({ product, className = '' }: { product: Product; className?
     >
       <article className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg hover:shadow-brand-purple/10 transition-all duration-300 card-lift h-full">
         <div className="relative aspect-square bg-brand-mist overflow-hidden">
-          {product.images[0] ? (
-            <img
-              src={product.images[0].url}
-              alt={product.images[0].altText || product.title}
-              width={800}
-              height={800}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-              loading="lazy"
+          {firstImage ? (
+            <ProductTileMedia
+              imageUrl={firstImage.url}
+              imageAlt={firstImage.altText || product.title}
+              video={video}
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-brand-charcoal/10 text-4xl">
@@ -174,7 +178,7 @@ function ProductCard({ product, className = '' }: { product: Product; className?
             </div>
           )}
           {onSale && (
-            <span className="absolute top-2 left-2 bg-brand-gradient text-white text-xs font-bold px-2 py-0.5 rounded-full">
+            <span className="absolute top-2 left-2 bg-brand-gradient text-white text-xs font-bold px-2 py-0.5 rounded-full z-10">
               SALE
             </span>
           )}

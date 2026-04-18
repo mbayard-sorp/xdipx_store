@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher } from 'react-router'
 import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { getTagCounts } from '~/lib/search.server'
+import { taxonomyToCSV } from '~/lib/search-filter-csv'
+import { taxonomyFromCSV } from '~/lib/search-filter-csv.server'
 
 export const meta: MetaFunction = () => [{ title: 'Search Filters — xdipx Admin' }]
 
@@ -61,6 +63,31 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: true }
   }
 
+  if (intent === 'import-csv') {
+    const csv = form.get('csv') as string
+    if (!csv) return { ok: false, error: 'Missing CSV data' }
+
+    const { groups, errors } = taxonomyFromCSV(csv)
+    if (errors.length > 0) {
+      return { ok: false, error: errors.join('; '), errors }
+    }
+
+    for (const group of groups) {
+      if (!group.id || !group.label) return { ok: false, error: `Group missing id or label` }
+      for (const tag of group.tags) {
+        if (!tag.tag || !tag.label) return { ok: false, error: `Tag missing tag or label in group "${group.label}"` }
+      }
+    }
+
+    await db
+      .insert(pipelineSettings)
+      .values({ key: SETTINGS_KEY, value: JSON.stringify(groups), updatedAt: new Date() })
+      .onConflictDoUpdate({ target: pipelineSettings.key, set: { value: JSON.stringify(groups), updatedAt: new Date() } })
+
+    const tagCount = groups.reduce((n, g) => n + g.tags.length, 0)
+    return { ok: true, imported: { groups, groupCount: groups.length, tagCount } }
+  }
+
   return null
 }
 
@@ -73,6 +100,11 @@ export default function AdminSearchFiltersPage() {
   const fetcher = useFetcher<typeof action>()
   const [groups, setGroups] = useState<TaxonomyGroup[]>(saved)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<number>>(new Set())
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [pendingImport, setPendingImport] = useState<{ csv: string; groups: TaxonomyGroup[]; tagCount: number } | null>(null)
+
+  // Re-sync local state when loader data changes after a successful import
+  useEffect(() => { setGroups(saved) }, [saved])
 
   function toggleCollapsed(idx: number) {
     setCollapsedGroups(prev => {
@@ -156,6 +188,44 @@ export default function AdminSearchFiltersPage() {
     fetcher.submit(formData, { method: 'post' })
   }
 
+  function handleExport() {
+    const csv = taxonomyToCSV(groups)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `search-filters-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-picking the same file
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const csv = String(reader.result ?? '')
+      // Preview by parsing client-side via the export-shaped structure is not possible
+      // (parser lives in .server.ts). Stash raw CSV and let the user confirm replace;
+      // server validates and returns errors.
+      const tagCount = (csv.match(/\n/g)?.length ?? 1) - 1 // rough count for preview
+      setPendingImport({ csv, groups: [], tagCount: Math.max(0, tagCount) })
+    }
+    reader.readAsText(file)
+  }
+
+  function confirmImport() {
+    if (!pendingImport) return
+    const formData = new FormData()
+    formData.set('intent', 'import-csv')
+    formData.set('csv', pendingImport.csv)
+    fetcher.submit(formData, { method: 'post' })
+    setPendingImport(null)
+  }
+
   return (
     <div className="max-w-2xl space-y-8">
       <div className="flex items-center justify-between">
@@ -170,7 +240,60 @@ export default function AdminSearchFiltersPage() {
             Curate which product tags appear as filter options in the search sidebar.
           </p>
         </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleExport}
+            className="px-4 py-2 text-sm font-semibold text-brand-charcoal bg-white border border-brand-mist rounded-full hover:border-brand-purple/40 hover:text-brand-purple transition-colors"
+          >
+            Export CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="px-4 py-2 text-sm font-semibold text-brand-charcoal bg-white border border-brand-mist rounded-full hover:border-brand-purple/40 hover:text-brand-purple transition-colors"
+          >
+            Import CSV
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleFilePick}
+            className="hidden"
+          />
+        </div>
       </div>
+
+      {pendingImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <h2 className="text-lg font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+              Replace taxonomy?
+            </h2>
+            <p className="text-sm text-brand-charcoal/70">
+              Importing will replace the entire current taxonomy with the CSV contents.
+              Any unsaved edits will be lost. The server will validate rows and report any errors.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPendingImport(null)}
+                className="px-4 py-2 text-sm font-semibold text-brand-charcoal/70 hover:text-brand-charcoal transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmImport}
+                className="px-4 py-2 bg-brand-gradient text-white text-sm font-bold rounded-full hover:opacity-90 transition-opacity"
+              >
+                Replace &amp; save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filter groups */}
       {groups.map((group, gi) => {
@@ -356,7 +479,13 @@ export default function AdminSearchFiltersPage() {
         <div className="bg-white rounded-2xl shadow-lg border border-brand-mist p-4 flex items-center justify-between gap-4">
           <div className="text-sm">
             {saveResult && 'ok' in saveResult && saveResult.ok ? (
-              <span className="text-green-600 font-medium">Saved successfully</span>
+              'imported' in saveResult && saveResult.imported ? (
+                <span className="text-green-600 font-medium">
+                  Imported {saveResult.imported.groupCount} groups, {saveResult.imported.tagCount} tags
+                </span>
+              ) : (
+                <span className="text-green-600 font-medium">Saved successfully</span>
+              )
             ) : saveResult && 'error' in saveResult ? (
               <span className="text-red-500 font-medium">{(saveResult as { error: string }).error}</span>
             ) : isDirty ? (

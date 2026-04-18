@@ -8,7 +8,7 @@ const VisualEditing = lazy(() =>
   import('@sanity/visual-editing/react-router').then(m => ({ default: m.VisualEditing })),
 )
 import { Navbar }          from '~/components/store/Navbar'
-import { TrustBar }        from '~/components/store/TrustBar'
+import { SiteBanner }      from '~/components/store/SiteBanner'
 import { Footer }          from '~/components/store/Footer'
 import { CookieConsent }   from '~/components/store/CookieConsent'
 import { Analytics }       from '~/components/store/Analytics'
@@ -21,7 +21,7 @@ import { getAccessoryProducts, getCart, getMainMenu } from '~/lib/shopify.server
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { getHeartedProductIds } from '~/lib/wishlist.server'
 import type { Product } from '~/types'
-import type { AnnouncementBarBlock, MegaMenuBanner, SocialLink, FooterColumn } from '~/types/cms'
+import type { AnnouncementBarBlock, MegaMenuBanner, SocialLink, FooterColumn, SiteBanner as SiteBannerData } from '~/types/cms'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const preview  = isPreviewRequest(request)
@@ -70,14 +70,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const footerCopyright = settings?.footerCopyright ?? null
   const footerDisclaimer = settings?.footerDisclaimer ?? null
   const buyButtonText = settings?.buyButtonText || 'I Want It ❤️'
+  const siteBanner: SiteBannerData | null = settings?.siteBanner ?? null
   const customerIdHash = loggedIn && customerToken
     ? createHash('sha256').update(customerToken.token).digest('hex').slice(0, 12)
     : null
-  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, preview, isCustomerLoggedIn: loggedIn, customerFirstName, customerIdHash, cart, menuItems, upsells, heartedProductIds, wishlistCount }
+  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, isCustomerLoggedIn: loggedIn, customerFirstName, customerIdHash, cart, menuItems, upsells, heartedProductIds, wishlistCount }
 }
 
 export default function StoreLayout() {
-  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, preview, isCustomerLoggedIn, customerFirstName, customerIdHash, cart, menuItems, upsells, wishlistCount } = useLoaderData<typeof loader>()
+  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, isCustomerLoggedIn, customerFirstName, customerIdHash, cart, menuItems, upsells, wishlistCount } = useLoaderData<typeof loader>()
   const cartCount = cart?.totalQuantity ?? 0
 
   return (
@@ -97,7 +98,7 @@ export default function StoreLayout() {
 
       {announcementBar && <AnnouncementBar block={announcementBar} />}
       <Navbar cart={cart ?? null} cartCount={cartCount} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} isCustomerLoggedIn={isCustomerLoggedIn} customerFirstName={customerFirstName} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} wishlistCount={wishlistCount} />
-      <TrustBar />
+      <SiteBanner banner={siteBanner} />
       <main className="flex-1">
         <Outlet context={{ buyButtonText }} />
       </main>

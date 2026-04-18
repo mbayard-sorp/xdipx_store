@@ -66,18 +66,24 @@ var init_kv_server = __esm({
 var schema_exports = {};
 __export(schema_exports, {
   adminRoles: () => adminRoles,
+  callLog: () => callLog,
   consentLog: () => consentLog,
   customerAnniversaries: () => customerAnniversaries,
   customerProfileExtras: () => customerProfileExtras,
   dailyProfitSummary: () => dailyProfitSummary,
   dealHistory: () => dealHistory,
+  draftOrders: () => draftOrders,
   orderLineItems: () => orderLineItems,
   pipelineSettings: () => pipelineSettings,
   productCopurchase: () => productCopurchase,
   referrals: () => referrals,
+  smsAgeConsent: () => smsAgeConsent,
+  smsMessages: () => smsMessages,
+  smsOptouts: () => smsOptouts,
   socialPosts: () => socialPosts,
   tosAcceptance: () => tosAcceptance,
   tosVersions: () => tosVersions,
+  voicemails: () => voicemails,
   wishlistItems: () => wishlistItems,
   wishlists: () => wishlists
 });
@@ -95,7 +101,7 @@ import {
   uniqueIndex,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, productCopurchase;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, productCopurchase;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -258,6 +264,77 @@ var init_schema = __esm({
       itemUnique: uniqueIndex("wishlist_items_unique").on(t.wishlistId, t.shopifyProductId),
       listIdx: index("wishlist_items_list_idx").on(t.wishlistId)
     }));
+    callLog = pgTable("call_log", {
+      id: serial("id").primaryKey(),
+      callSid: varchar("call_sid", { length: 64 }).notNull().unique(),
+      fromNumber: varchar("from_number", { length: 20 }).notNull(),
+      toNumber: varchar("to_number", { length: 20 }),
+      direction: varchar("direction", { length: 10 }),
+      endReason: varchar("end_reason", { length: 20 }),
+      durationSec: integer("duration_sec"),
+      tokensTotal: integer("tokens_total"),
+      voicemailId: integer("voicemail_id"),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    }, (t) => ({
+      fromIdx: index("call_log_from_idx").on(t.fromNumber, t.createdAt),
+      createdIdx: index("call_log_created_idx").on(t.createdAt)
+    }));
+    voicemails = pgTable("voicemails", {
+      id: serial("id").primaryKey(),
+      callSid: varchar("call_sid", { length: 64 }).notNull().unique(),
+      fromNumber: varchar("from_number", { length: 20 }).notNull(),
+      callbackNumber: varchar("callback_number", { length: 20 }),
+      summary: text("summary").notNull(),
+      transcript: text("transcript").notNull(),
+      recordingUrl: text("recording_url"),
+      contextOrderNumber: varchar("context_order_number", { length: 20 }),
+      status: varchar("status", { length: 20 }).default("new").notNull(),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    }, (t) => ({
+      statusIdx: index("voicemails_status_idx").on(t.status),
+      createdIdx: index("voicemails_created_idx").on(t.createdAt)
+    }));
+    smsOptouts = pgTable("sms_optouts", {
+      id: serial("id").primaryKey(),
+      phone: varchar("phone", { length: 20 }).notNull().unique(),
+      reason: varchar("reason", { length: 20 }).default("stop").notNull(),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    });
+    smsMessages = pgTable("sms_messages", {
+      id: serial("id").primaryKey(),
+      phone: varchar("phone", { length: 20 }).notNull(),
+      direction: varchar("direction", { length: 10 }).notNull(),
+      body: text("body").notNull(),
+      twilioSid: varchar("twilio_sid", { length: 64 }),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    }, (t) => ({
+      phoneIdx: index("sms_messages_phone_idx").on(t.phone, t.createdAt),
+      createdIdx: index("sms_messages_created_idx").on(t.createdAt)
+    }));
+    smsAgeConsent = pgTable("sms_age_consent", {
+      phone: varchar("phone", { length: 20 }).primaryKey(),
+      consentedAt: timestamp("consented_at").defaultNow().notNull(),
+      method: varchar("method", { length: 20 }).default("sms_yes").notNull()
+    });
+    draftOrders = pgTable("draft_orders", {
+      id: serial("id").primaryKey(),
+      shopifyDraftId: varchar("shopify_draft_id", { length: 64 }).notNull().unique(),
+      shopifyInvoiceUrl: text("shopify_invoice_url"),
+      channel: varchar("channel", { length: 10 }).notNull(),
+      // voice | sms
+      phone: varchar("phone", { length: 20 }).notNull(),
+      email: varchar("email", { length: 255 }),
+      customerName: varchar("customer_name", { length: 255 }),
+      subtotalCents: integer("subtotal_cents").notNull(),
+      itemCount: integer("item_count").notNull(),
+      lineItems: json("line_items").$type().notNull(),
+      status: varchar("status", { length: 20 }).default("sent").notNull(),
+      // sent | paid | expired | cancelled
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    }, (t) => ({
+      phoneIdx: index("draft_orders_phone_idx").on(t.phone, t.createdAt),
+      createdIdx: index("draft_orders_created_idx").on(t.createdAt)
+    }));
     productCopurchase = pgTable("product_copurchase", {
       id: serial("id").primaryKey(),
       handleA: varchar("handle_a", { length: 255 }).notNull(),
@@ -289,15 +366,18 @@ var init_db_server = __esm({
 var shopify_server_exports = {};
 __export(shopify_server_exports, {
   activateShopifyProduct: () => activateShopifyProduct,
+  addLinesToCart: () => addLinesToCart,
   addToCart: () => addToCart,
   adminCustomerDelete: () => adminCustomerDelete,
   adminGetCustomerSubscriptions: () => adminGetCustomerSubscriptions,
   adminGetSubscriptionContract: () => adminGetSubscriptionContract,
+  appendProductTag: () => appendProductTag,
   associateImageWithVariant: () => associateImageWithVariant,
   attachVideoToProduct: () => attachVideoToProduct,
   cartBuyerIdentityUpdate: () => cartBuyerIdentityUpdate,
   createCart: () => createCart,
   createCustomerAccessToken: () => createCustomerAccessToken,
+  createDraftOrder: () => createDraftOrder,
   createDraftProduct: () => createDraftProduct,
   createShopifyProductFromFeed: () => createShopifyProductFromFeed,
   createShopifyProductWithVariants: () => createShopifyProductWithVariants,
@@ -315,6 +395,7 @@ __export(shopify_server_exports, {
   customerUpdate: () => customerUpdate,
   deleteProductImage: () => deleteProductImage,
   fetchAllDealProducts: () => fetchAllDealProducts,
+  findCustomerByPhone: () => findCustomerByPhone,
   findProductBySKU: () => findProductBySKU,
   getAccessoryProducts: () => getAccessoryProducts,
   getAccessoryProductsAdmin: () => getAccessoryProductsAdmin,
@@ -356,6 +437,7 @@ __export(shopify_server_exports, {
   reorderProductImages: () => reorderProductImages,
   searchAdminProducts: () => searchAdminProducts,
   searchProducts: () => searchProducts,
+  sendDraftOrderInvoice: () => sendDraftOrderInvoice,
   setDealStatus: () => setDealStatus,
   setMediaAsPrimary: () => setMediaAsPrimary,
   shopifyAdmin: () => shopifyAdmin,
@@ -853,11 +935,27 @@ async function getShopifyCollections() {
   const data = await adminGraphQL(`
     query GetCollections {
       collections(first: 100, sortKey: TITLE) {
-        edges { node { handle title } }
+        edges {
+          node {
+            id
+            handle
+            title
+            descriptionHtml
+            productsCount { count }
+            image { url altText }
+          }
+        }
       }
     }
   `);
-  return data.collections.edges.map((e) => e.node);
+  return data.collections.edges.map((e) => ({
+    id: e.node.id,
+    handle: e.node.handle,
+    title: e.node.title,
+    descriptionHtml: e.node.descriptionHtml,
+    productsCount: e.node.productsCount?.count ?? 0,
+    image: e.node.image
+  }));
 }
 async function getAccessoryProducts(ids) {
   if (!ids.length) return [];
@@ -996,6 +1094,21 @@ async function addToCart(cartId, variantId, quantity, sellingPlanId) {
     }
   `, { cartId, lines: [line] });
   if (!data.cartLinesAdd.cart) throw new Error("Cart not found or line could not be added");
+  return rawCartToCart(data.cartLinesAdd.cart);
+}
+async function addLinesToCart(cartId, lines) {
+  const data = await storefront(`
+    mutation AddLinesToCart($cartId: ID!, $lines: [CartLineInput!]!) {
+      cartLinesAdd(cartId: $cartId, lines: $lines) {
+        cart { ${CART_FRAGMENT} }
+        userErrors { field message }
+      }
+    }
+  `, {
+    cartId,
+    lines: lines.map((l) => ({ merchandiseId: l.variantId, quantity: l.quantity }))
+  });
+  if (!data.cartLinesAdd.cart) throw new Error("Cart not found or lines could not be added");
   return rawCartToCart(data.cartLinesAdd.cart);
 }
 async function removeFromCart(cartId, lineIds) {
@@ -1424,7 +1537,7 @@ async function uploadThumbnailToProduct(shopifyProductGid, imageBuffer, filename
   if (!target) throw new Error("Shopify returned no staged upload target for image");
   const form = new FormData();
   for (const param of target.parameters) form.append(param.name, param.value);
-  form.append("file", new Blob([imageBuffer], { type: "image/jpeg" }), filename);
+  form.append("file", new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" }), filename);
   const uploadRes = await fetch(target.url, { method: "POST", body: form });
   if (!uploadRes.ok) {
     throw new Error(`Staged image upload failed: ${uploadRes.status} ${await uploadRes.text()}`);
@@ -1659,6 +1772,7 @@ function mapOrderDetail(o) {
     lineItems: o.lineItems.edges.map(({ node: li }) => ({
       title: li.title,
       quantity: li.quantity,
+      variantId: li.variant?.id ?? null,
       variantTitle: li.variant?.title ?? null,
       imageUrl: li.variant?.image?.url ?? null,
       unitPrice: li.variant?.price ? { amount: li.variant.price.amount, currencyCode: li.variant.price.currencyCode } : null
@@ -1688,6 +1802,7 @@ async function getCustomerOrder(accessToken, orderId) {
                   node {
                     title quantity
                     variant {
+                      id
                       title
                       image { url }
                       price { amount currencyCode }
@@ -2064,7 +2179,7 @@ function buildProductTags(product) {
   );
   return tags;
 }
-async function updateCollectionImage(collectionId, imageBuffer, filename, alt) {
+async function updateCollectionImage(_collectionId, _imageBuffer, _filename, _alt) {
   console.warn("updateCollectionImage: not yet implemented");
   return "";
 }
@@ -2115,13 +2230,24 @@ async function getAccessoryProductsAdmin(productIds) {
     return [product];
   });
 }
-async function updateCollectionDescription(...args) {
+async function updateCollectionDescription(..._args) {
   console.warn("updateCollectionDescription: not yet implemented");
 }
 async function updateProductTags(productId, tags) {
   const id = productId.replace("gid://shopify/Product/", "");
   await shopifyAdmin(`/products/${id}.json`, "PUT", {
     product: { id, tags: tags.join(", ") }
+  });
+}
+async function appendProductTag(productId, tag) {
+  const id = productId.replace("gid://shopify/Product/", "");
+  const { product } = await shopifyAdmin(`/products/${id}.json?fields=tags`);
+  if (!product) return;
+  const current = product.tags.split(",").map((t) => t.trim()).filter(Boolean);
+  if (current.includes(tag)) return;
+  current.push(tag);
+  await shopifyAdmin(`/products/${id}.json`, "PUT", {
+    product: { id, tags: current.join(", ") }
   });
 }
 async function fetchAllDealProducts() {
@@ -2242,6 +2368,104 @@ async function getStorefrontCollections(first = 50) {
     }
   `, { first });
   return data.collections.edges.map((e) => e.node);
+}
+async function findCustomerByPhone(phone) {
+  const data = await adminGraphQL(`
+    query FindCustomer($q: String!) {
+      customers(first: 1, query: $q) {
+        nodes {
+          id email firstName lastName
+          defaultAddress { address1 city province zip country }
+        }
+      }
+    }
+  `, { q: `phone:${phone}` });
+  const c = data.customers.nodes[0];
+  if (!c) return null;
+  const addr = c.defaultAddress;
+  return {
+    id: c.id,
+    email: c.email,
+    firstName: c.firstName,
+    lastName: c.lastName,
+    defaultAddress: addr && addr.address1 && addr.city && addr.province && addr.zip ? { address1: addr.address1, city: addr.city, province: addr.province, zip: addr.zip, country: addr.country ?? "US" } : null
+  };
+}
+async function createDraftOrder(input) {
+  const [firstName, ...rest] = input.customer.name.trim().split(/\s+/);
+  const lastName = rest.join(" ") || firstName || "";
+  const res = await adminGraphQL(`
+    mutation CreateDraft($input: DraftOrderInput!) {
+      draftOrderCreate(input: $input) {
+        draftOrder {
+          id name invoiceUrl
+          subtotalPriceSet { shopMoney { amount } }
+          totalPriceSet    { shopMoney { amount } }
+          lineItems(first: 20) {
+            nodes {
+              title quantity
+              variant { id }
+              originalUnitPriceSet { shopMoney { amount } }
+            }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `, {
+    input: {
+      email: input.customer.email,
+      phone: input.customer.phone,
+      note: input.note ?? `xdipx ${input.channel} order`,
+      tags: [`channel:${input.channel}`, "phone-order"],
+      lineItems: input.lineItems.map((li) => ({ variantId: li.variantId, quantity: li.quantity })),
+      shippingAddress: {
+        firstName: firstName ?? "",
+        lastName,
+        address1: input.shipping.address1,
+        address2: input.shipping.address2 ?? "",
+        city: input.shipping.city,
+        province: input.shipping.province,
+        zip: input.shipping.zip,
+        country: input.shipping.country ?? "US",
+        phone: input.customer.phone
+      },
+      useCustomerDefaultAddress: false
+    }
+  });
+  if (res.draftOrderCreate.userErrors.length > 0) {
+    throw new Error(`draftOrderCreate: ${res.draftOrderCreate.userErrors.map((e) => e.message).join("; ")}`);
+  }
+  const d = res.draftOrderCreate.draftOrder;
+  if (!d) throw new Error("draftOrderCreate returned null");
+  return {
+    id: d.id,
+    name: d.name,
+    invoiceUrl: d.invoiceUrl,
+    subtotalPriceCents: Math.round(parseFloat(d.subtotalPriceSet.shopMoney.amount) * 100),
+    totalPriceCents: Math.round(parseFloat(d.totalPriceSet.shopMoney.amount) * 100),
+    lineItems: d.lineItems.nodes.map((n) => ({
+      variantId: n.variant?.id ?? "",
+      title: n.title,
+      quantity: n.quantity,
+      unitPriceCents: Math.round(parseFloat(n.originalUnitPriceSet.shopMoney.amount) * 100)
+    }))
+  };
+}
+async function sendDraftOrderInvoice(draftOrderId, opts) {
+  const emailInput = opts?.to || opts?.customMessage ? { to: opts?.to, customMessage: opts?.customMessage } : void 0;
+  const res = await adminGraphQL(`
+    mutation SendInvoice($id: ID!, $email: EmailInput) {
+      draftOrderInvoiceSend(id: $id, email: $email) {
+        draftOrder { invoiceUrl }
+        userErrors { message }
+      }
+    }
+  `, { id: draftOrderId, email: emailInput });
+  if (res.draftOrderInvoiceSend.userErrors.length > 0) {
+    throw new Error(`draftOrderInvoiceSend: ${res.draftOrderInvoiceSend.userErrors.map((e) => e.message).join("; ")}`);
+  }
+  return { invoiceUrl: res.draftOrderInvoiceSend.draftOrder?.invoiceUrl ?? null };
 }
 var COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT;
 var init_shopify_server = __esm({
@@ -2450,16 +2674,17 @@ __export(klaviyo_server_exports, {
   updateProfileProperties: () => updateProfileProperties
 });
 async function klaviyoFetch(path, method = "GET", body) {
-  const res = await fetch(`${BASE}${path}`, {
+  const init2 = {
     method,
     headers: {
       accept: "application/json",
       "content-type": "application/json",
       revision: "2024-10-15",
       Authorization: `Klaviyo-API-Key ${process.env["KLAVIYO_API_KEY"]}`
-    },
-    body: body ? JSON.stringify(body) : void 0
-  });
+    }
+  };
+  if (body) init2.body = JSON.stringify(body);
+  const res = await fetch(`${BASE}${path}`, init2);
   if (!res.ok) {
     const text3 = await res.text();
     throw new Error(`Klaviyo API error ${res.status}: ${text3}`);
@@ -3132,6 +3357,13 @@ function estDate(offsetDays = 0) {
   const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1e3);
   return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 }
+function pastDealTag(dealDate) {
+  if (!dealDate) return null;
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(dealDate);
+  if (!m) return null;
+  const [, yyyy, mm] = m;
+  return `past-daily-deal-${mm}-${yyyy.slice(2)}`;
+}
 async function getVaultDiscountPct() {
   const [row] = await db.select().from(pipelineSettings).where(eq3(pipelineSettings.key, "vaultDiscountPct")).limit(1);
   const pct = parseFloat(row?.value ?? "25");
@@ -3169,6 +3401,8 @@ async function transitionToVaultPricing(deal) {
     );
   }
   await setDealStatus(deal.shopifyProductId, "vault");
+  const tag = pastDealTag(deal.dealDate);
+  if (tag) await appendProductTag(deal.shopifyProductId, tag);
   await db.update(dealHistory).set({
     status: "queued",
     completedAt: /* @__PURE__ */ new Date(),
@@ -4062,6 +4296,7 @@ async function getSiteSettings() {
         "logoUrl": logo.asset->url,
         "logoAlt": logo.alt,
         buyButtonText,
+        "siteBanner": siteBanner{ enabled, link, "imageUrl": image.asset->url, "imageAlt": coalesce(alt, image.alt) },
         megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
         socialLinks[],
         footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
@@ -4323,10 +4558,15 @@ var init_sanity_server = __esm({
     label, body, link, linkLabel, emoji,
     "image": image{ "url": asset->url, alt }
   },
-  // categoryGrid + testimonials share the field name "items" \u2014 use select() to avoid collision
+  // categoryGrid + testimonials use inline item objects; trustBar uses references.
+  // Keep them in separate fields \u2014 combining them via select() silently null-derefs
+  // the trustBar references (GROQ quirk). TrustBarBlock reads trustItems.
   "items": select(
     _type == "categoryGrid" => items[]{ label, link, emoji, "image": image{ "url": asset->url, alt } },
-    _type == "testimonials"  => items[]{ quote, author, rating, verified }
+    _type == "testimonials" => items[]{ quote, author, rating, verified }
+  ),
+  "trustItems": select(
+    _type == "trustBar" => items[]->{ icon, headline, subheadline, active }
   ),
   columns,
   // productCarousel
@@ -4848,7 +5088,16 @@ var REQUIRED_IN_PRODUCTION = [
   "SHOPIFY_WEBHOOK_SECRET",
   "SHOPIFY_STORE_DOMAIN",
   "SHOPIFY_STOREFRONT_TOKEN",
-  "DATABASE_URL"
+  "DATABASE_URL",
+  "ANTHROPIC_API_KEY",
+  "APP_URL",
+  "TWILIO_ACCOUNT_SID",
+  "TWILIO_AUTH_TOKEN",
+  "TWILIO_PHONE_NUMBER",
+  "IVR_WS_URL",
+  "IVR_WS_SECRET",
+  "ELEVENLABS_VOICE_ID_IVR",
+  "INTERNAL_API_SECRET"
 ];
 function validateStartupEnv() {
   if (!isProd) return;

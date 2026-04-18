@@ -11,7 +11,7 @@ import type { ShopifyMenuItem } from '~/lib/shopify.server'
 interface NavbarProps {
   cart?: Cart | null
   cartCount?: number
-  logoUrl?: string
+  logoUrl?: string | undefined
   logoAlt?: string
   isCustomerLoggedIn?: boolean
   customerFirstName?: string | null

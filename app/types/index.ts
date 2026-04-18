@@ -102,8 +102,31 @@ export interface VaultDeal {
   images: ProductImage[]
   brand: string
   category: string
-  dealStatus: 'draft' | 'scheduled' | 'live'
+  dealStatus: 'draft' | 'scheduled' | 'live' | 'archived'
   qty: number
+}
+
+// ─── Bundles ──────────────────────────────────────────────────────────────
+
+export interface BundleComponent {
+  product: Product
+  quantity: number
+}
+
+export interface Bundle {
+  handle: string
+  title: string
+  tagline?: string
+  images: ProductImage[]
+  moodImageUrl?: string
+  components: BundleComponent[]
+  discountPct: number
+  /** Sum of component MSRPs × quantities (pre-discount). */
+  originalTotal: number
+  /** originalTotal after discountPct is applied. */
+  bundlePrice: number
+  /** Shopify tag to attach to the cart so a Shopify Automatic Discount can target this bundle. */
+  bundleTag: string
 }
 
 // ─── Selling Plans / Subscriptions ───────────────────────────────────────

@@ -19,6 +19,7 @@ export default {
         { type: 'brandLogoWall'      },
         { type: 'testimonials'       },
         { type: 'bonusDeal'          },
+        { type: 'trustBar'           },
         { type: 'richText'           },
       ],
     },

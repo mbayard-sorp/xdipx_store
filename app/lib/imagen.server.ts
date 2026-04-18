@@ -96,25 +96,25 @@ async function generateOne(ai: GoogleGenAI, parts: Part[]): Promise<Buffer> {
 
 export async function generateMoodImage(opts: {
   categories: string[]
-  prompt?: string
+  prompt?: string | undefined
   /** @deprecated aspectRatio not supported by gemini-2.5-flash-image; ignored */
-  aspectRatio?: string
+  aspectRatio?: string | undefined
   /** @deprecated personGeneration not supported by gemini-2.5-flash-image; ignored */
-  personGeneration?: 'dont_allow' | 'allow_adult' | 'allow_all'
+  personGeneration?: 'dont_allow' | 'allow_adult' | 'allow_all' | undefined
   /** How many images to generate (default 2, max 4). Each is a parallel API call. */
-  count?: number
+  count?: number | undefined
   /**
    * Optional reference image buffers fetched server-side from CDN.
    * Used to reproduce the exact same physical product in the new scene.
    */
-  referenceImageBuffers?: Buffer[]
+  referenceImageBuffers?: Buffer[] | undefined
   /** Product title for logging/context. */
-  referenceProductTitle?: string
+  referenceProductTitle?: string | undefined
   /**
    * For improvement calls: the original image buffer to use as the base.
    * The prompt should describe only what to change.
    */
-  originalImageBuffer?: Buffer
+  originalImageBuffer?: Buffer | undefined
 }): Promise<Buffer[]> {
   const project = process.env['GOOGLE_CLOUD_PROJECT_ID']
   if (!project) throw new Error('GOOGLE_CLOUD_PROJECT_ID not set')

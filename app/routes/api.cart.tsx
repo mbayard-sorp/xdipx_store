@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
-import { addToCart, createCart, removeFromCart, updateCartLine } from '~/lib/shopify.server'
+import { addToCart, addLinesToCart, createCart, removeFromCart, updateCartLine } from '~/lib/shopify.server'
+import { getBundleByHandle, bundleCartLines } from '~/lib/bundles.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -36,6 +37,34 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
     return Response.json({ ok: true }, { headers })
+  }
+
+  if (intent === 'add-bundle') {
+    const bundleHandle = form.get('bundleHandle') as string
+    if (!bundleHandle) return { ok: false, error: 'Missing bundleHandle' }
+    const bundle = await getBundleByHandle(bundleHandle)
+    if (!bundle) return Response.json({ ok: false, error: 'Bundle not found' }, { status: 404 })
+    const lines = bundleCartLines(bundle)
+    if (lines.length === 0) return Response.json({ ok: false, error: 'Bundle has no buyable components' }, { status: 400 })
+    const headers = new Headers()
+    if (!cartId) {
+      const cart = await createCart()
+      cartId = cart.id
+      headers.set('Set-Cookie', setCartCookie(cartId))
+    }
+    try {
+      await addLinesToCart(cartId, lines)
+    } catch {
+      try {
+        const freshCart = await createCart()
+        cartId = freshCart.id
+        headers.set('Set-Cookie', setCartCookie(cartId))
+        await addLinesToCart(cartId, lines)
+      } catch {
+        return Response.json({ ok: false, error: 'Could not add bundle' }, { status: 400, headers })
+      }
+    }
+    return Response.json({ ok: true, bundleTag: bundle.bundleTag }, { headers })
   }
 
   if (!cartId) return { ok: false, error: 'No cart' }

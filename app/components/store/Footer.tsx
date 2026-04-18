@@ -4,7 +4,7 @@ import type { SocialLink, SocialPlatform, FooterColumn } from '~/types/cms'
 interface FooterProps {
   socialLinks?: SocialLink[]
   footerColumns?: FooterColumn[]
-  logoUrl?: string
+  logoUrl?: string | undefined
   logoAlt?: string
   tagline?: string | null
   discreetHeading?: string | null
