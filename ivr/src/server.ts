@@ -15,6 +15,7 @@ import { IVR_LIMITS, type CallEndReason } from './config.ts'
 import { recordCall } from './db.ts'
 import { loadIvrSettings } from './settings.ts'
 import { buildSystemPrompt } from './prompts.ts'
+import { callQaTool } from './tools/catalog.ts'
 import type { OutboundMessage, TwilioInboundMessage } from './types.ts'
 
 const PORT = Number(process.env['PORT'] ?? 8080)
@@ -68,7 +69,15 @@ wss.on('connection', (ws, req) => {
   const remote = req.socket.remoteAddress ?? 'unknown'
   console.log(`[ivr] ws connected from ${remote}`)
 
+  // Extract the resolved greeting from the URL — the Vercel handler appends
+  // the exact text to speak. Seeding it here (synchronously, before any
+  // prompt can arrive) eliminates the race where a fast caller speaks before
+  // the async settings load finishes.
+  const wsUrl = new URL(req.url ?? '/', 'http://localhost')
+  const greetingFromUrl = decodeURIComponent(wsUrl.searchParams.get('greeting') ?? '')
+
   const session = new Session()
+  if (greetingFromUrl) session.addTurn('assistant', greetingFromUrl)
 
   ws.on('message', (raw) => {
     let msg: TwilioInboundMessage
@@ -85,16 +94,35 @@ wss.on('connection', (ws, req) => {
         session.fromNumber = msg.from
         session.toNumber = msg.to
         console.log(`[ivr] setup callSid=${session.callSid} from=${session.fromNumber}`)
-        // Fetch admin-configured voice + farewells in parallel with the greeting.
+
+        // Speak the greeting over WS instead of relying on TwiML's
+        // welcomeGreeting attribute, which silently truncates long strings.
+        if (greetingFromUrl) sendText(ws, greetingFromUrl, true)
+
+        // Fetch admin-configured voice + farewells in parallel with collections.
         // A DB hiccup falls back to code defaults — see settings.ts.
-        loadIvrSettings()
-          .then((s) => {
+        Promise.all([
+          loadIvrSettings(),
+          callQaTool('listCollections', {}).then((r) => {
+            const res = r as { ok?: boolean; data?: { collections?: { title: string }[] } }
+            return res.ok ? (res.data?.collections?.map(c => c.title) ?? []) : []
+          }).catch(() => [] as string[]),
+        ])
+          .then(([s, collections]) => {
             session.settings = s
-            session.systemPrompt = buildSystemPrompt(s.brandVoice)
+            session.systemPrompt = buildSystemPrompt(s.brandVoice, collections, s.farewellGoodbye)
+            // If the URL didn't carry the greeting (old Vercel deploy), fall
+            // back to a DB-resolved copy so Claude still knows it greeted.
+            if (!greetingFromUrl && s.greeting) {
+              session.addTurn('assistant', s.greeting)
+              sendText(ws, s.greeting, true)
+            }
           })
           .catch(() => { /* already logged in loader */ })
-        // Start the silence + duration clocks as soon as the greeting begins.
-        armInitialSilence(ws, session)
+        // Start the silence clock, but pad it with estimated greeting TTS
+        // duration — the caller can't respond until TTS finishes speaking.
+        const greetingBuffer = greetingFromUrl ? estimateTtsMs(greetingFromUrl) : 5_000
+        armInitialSilence(ws, session, greetingBuffer)
         session.armDuration(IVR_LIMITS.maxCallDurationMs, () => wrapUp(ws, session))
         return
       }
@@ -156,6 +184,15 @@ wss.on('connection', (ws, req) => {
   })
 })
 
+// Estimate how long TTS needs to speak text aloud. ~150 words/min with a
+// small pad for inter-sentence pauses. Used to offset the silence timer so
+// it starts from when the caller actually *hears* the end of the reply.
+const TTS_WORDS_PER_SEC = 2.5
+function estimateTtsMs(text: string): number {
+  const words = text.split(/\s+/).filter(Boolean).length
+  return Math.round((words / TTS_WORDS_PER_SEC) * 1000)
+}
+
 function handlePrompt(ws: WebSocket, session: Session, voicePrompt: string): void {
   if (!voicePrompt.trim()) {
     // Twilio sometimes sends empty prompts on false-positive VAD. Reset the
@@ -167,6 +204,7 @@ function handlePrompt(ws: WebSocket, session: Session, voicePrompt: string): voi
 
   const started = Date.now()
   let firstTokenAt = 0
+  let spokenText = ''
 
   streamReply(session, {
     onToken: (token) => {
@@ -179,12 +217,18 @@ function handlePrompt(ws: WebSocket, session: Session, voicePrompt: string): voi
           console.warn(`[ivr] first-token SLO breach callSid=${session.callSid} ms=${ms} slo=${IVR_LIMITS.firstTokenSloMs}`)
         }
       }
+      spokenText += token
       sendText(ws, token, false)
     },
     onDone: () => {
       if (ws.readyState === ws.OPEN) sendText(ws, '', true)
-      // Caller's turn to speak — start the inter-turn silence clock.
-      armInterTurnSilence(ws, session)
+      // The silence timer starts now, but TTS is still speaking the reply.
+      // Estimate how much longer TTS needs by subtracting the time that has
+      // already elapsed since the first token (TTS has been playing since then).
+      const ttsTotal = estimateTtsMs(spokenText)
+      const alreadySpoken = firstTokenAt ? Date.now() - firstTokenAt : 0
+      const ttsBuffer = Math.min(Math.max(0, ttsTotal - alreadySpoken), 15_000)
+      armInterTurnSilence(ws, session, ttsBuffer)
     },
     onError: (err) => {
       console.error(`[ivr] claude error callSid=${session.callSid}`, err)
@@ -198,12 +242,12 @@ function handlePrompt(ws: WebSocket, session: Session, voicePrompt: string): voi
 
 // ─── Silence handling ────────────────────────────────────────────────────────
 
-function armInitialSilence(ws: WebSocket, session: Session): void {
-  session.armSilence(IVR_LIMITS.initialSilenceMs, () => onSilence(ws, session))
+function armInitialSilence(ws: WebSocket, session: Session, ttsBufferMs = 0): void {
+  session.armSilence(IVR_LIMITS.initialSilenceMs + ttsBufferMs, () => onSilence(ws, session))
 }
 
-function armInterTurnSilence(ws: WebSocket, session: Session): void {
-  session.armSilence(IVR_LIMITS.interTurnSilenceMs, () => onSilence(ws, session))
+function armInterTurnSilence(ws: WebSocket, session: Session, ttsBufferMs = 0): void {
+  session.armSilence(IVR_LIMITS.interTurnSilenceMs + ttsBufferMs, () => onSilence(ws, session))
 }
 
 function onSilence(ws: WebSocket, session: Session): void {

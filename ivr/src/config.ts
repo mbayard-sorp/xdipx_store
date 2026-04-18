@@ -5,7 +5,7 @@
 
 export const IVR_LIMITS = {
   /** After greeting, how long we wait for the caller to say anything. */
-  initialSilenceMs: Number(process.env['IVR_INITIAL_SILENCE_MS'] ?? 12_000),
+  initialSilenceMs: Number(process.env['IVR_INITIAL_SILENCE_MS'] ?? 25_000),
   /** Between caller turns (after Claude finishes replying). */
   interTurnSilenceMs: Number(process.env['IVR_INTER_TURN_SILENCE_MS'] ?? 20_000),
   /** Hard cap on total call length. */

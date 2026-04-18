@@ -19,6 +19,12 @@ export const DEFAULT_BRAND_VOICE =
   `Never use "sex" as an adjective — use "intimate", "pleasure", or "wellness". ` +
   `Never assume the reader's experience level.`
 
+export const DEFAULT_GREETING =
+  "Hey, you've reached ex-dip. I'm {feeling} you called. This call may be recorded. What's going on?"
+export const DEFAULT_FEELINGS = 'so happy,thrilled,super excited,really glad,pumped,stoked,delighted'
+export const DEFAULT_ACTIVITIES = "browsing the vault,curating today's deal,testing out some new arrivals,organizing the stockroom"
+
+export const DEFAULT_FAREWELL_GOODBYE = "Thanks for calling ex-dip — have a great one!"
 export const DEFAULT_FAREWELL_MAX_PROMPTS =
   "I really like you — but it might be easier if you send an email to hello at exdipex dot com and we can help you directly. Once again that's hello at exdipex dot com."
 export const DEFAULT_FAREWELL_MAX_DURATION = DEFAULT_FAREWELL_MAX_PROMPTS
@@ -26,6 +32,10 @@ export const DEFAULT_FAREWELL_SILENT = ''
 
 export interface IvrSettings {
   brandVoice: string
+  /** Resolved greeting text (placeholders already substituted). */
+  greeting: string
+  /** Happy-path goodbye injected into system prompt. */
+  farewellGoodbye: string
   farewellMaxPrompts: string
   farewellMaxDuration: string
   /** Empty string = don't speak anything before hangup. */
@@ -34,14 +44,32 @@ export interface IvrSettings {
 
 const KEYS = [
   'brandVoice',
+  'ivrGreeting',
+  'ivrFeelings',
+  'ivrActivities',
+  'ivrFarewellGoodbye',
   'ivrFarewellMaxPrompts',
   'ivrFarewellMaxDuration',
   'ivrFarewellSilent',
 ] as const
 
+function pickRandom(csv: string, fallback: string): string {
+  const items = csv.split(',').map(s => s.trim()).filter(Boolean)
+  if (!items.length) return fallback
+  return items[Math.floor(Math.random() * items.length)]!
+}
+
+function resolveGreeting(template: string, feelings: string, activities: string): string {
+  const feeling = pickRandom(feelings, 'happy')
+  const activity = pickRandom(activities, 'working')
+  return template.replace('{feeling}', feeling).replace('{activity}', activity)
+}
+
 export async function loadIvrSettings(): Promise<IvrSettings> {
   const fallback: IvrSettings = {
     brandVoice: DEFAULT_BRAND_VOICE,
+    greeting: resolveGreeting(DEFAULT_GREETING, DEFAULT_FEELINGS, DEFAULT_ACTIVITIES),
+    farewellGoodbye: DEFAULT_FAREWELL_GOODBYE,
     farewellMaxPrompts: DEFAULT_FAREWELL_MAX_PROMPTS,
     farewellMaxDuration: DEFAULT_FAREWELL_MAX_DURATION,
     farewellSilent: DEFAULT_FAREWELL_SILENT,
@@ -59,6 +87,12 @@ export async function loadIvrSettings(): Promise<IvrSettings> {
 
     return {
       brandVoice:           map.get('brandVoice')             || fallback.brandVoice,
+      greeting: resolveGreeting(
+        map.get('ivrGreeting') || DEFAULT_GREETING,
+        map.get('ivrFeelings') || DEFAULT_FEELINGS,
+        map.get('ivrActivities') || DEFAULT_ACTIVITIES,
+      ),
+      farewellGoodbye:      map.get('ivrFarewellGoodbye')     || fallback.farewellGoodbye,
       farewellMaxPrompts:   map.get('ivrFarewellMaxPrompts')  || fallback.farewellMaxPrompts,
       farewellMaxDuration:  map.get('ivrFarewellMaxDuration') || fallback.farewellMaxDuration,
       // Silent caller is allowed to be empty — only admins unset it on purpose.

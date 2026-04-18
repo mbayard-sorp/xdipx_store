@@ -28,7 +28,7 @@ const MAX_TOKENS = 800
 // Single-turn flow can need: searchProducts -> getProductDetails ->
 // lookupReturningCustomer -> createDraftOrder -> final text. 4 was too tight
 // and Claude bailed before reaching createDraftOrder. 6 leaves headroom.
-const MAX_TOOL_HOPS = 6
+const MAX_TOOL_HOPS = 20
 
 // Haiku sometimes narrates "sending it right over" without actually emitting
 // the createDraftOrder tool_use block — the caller hears the promise but no
@@ -204,13 +204,27 @@ async function runOneHop(
   )
 
   let textBuf = ''
+  let ttsBuffer = ''
   stream.on('text', (delta) => {
     textBuf += delta
     const spoken = stripForTTS(delta)
-    if (spoken) cb.onToken(spoken)
+    if (!spoken) return
+    ttsBuffer += spoken
+    // Only flush when the buffer has word content — prevents standalone
+    // punctuation tokens (",", ".") from reaching ElevenLabs, which reads
+    // them aloud as "comma" or "period".
+    if (/\w/.test(ttsBuffer)) {
+      cb.onToken(ttsBuffer)
+      ttsBuffer = ''
+    }
   })
 
   const final = await stream.finalMessage()
+  // Flush any trailing punctuation that wasn't followed by a word delta.
+  if (ttsBuffer) {
+    cb.onToken(ttsBuffer)
+    ttsBuffer = ''
+  }
 
   // Cache fields exist on the API but SDK 0.32.1 Usage type omits them.
   const usage = final.usage as Anthropic.Usage & {

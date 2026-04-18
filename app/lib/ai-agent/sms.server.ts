@@ -14,7 +14,7 @@ export interface SmsTurn {
 
 /**
  * Generate an SMS reply. Runs a small tool-use loop so Claude can answer
- * product questions (searchProducts / getProductDetails / listTodaysCollections)
+ * product questions (searchProducts / getProductDetails / listCollections)
  * before composing the final text reply. Cap output to ~320 chars so Twilio
  * sends at most 2 segments.
  */
