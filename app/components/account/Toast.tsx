@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 
 interface ToastProps {
-  /** Message to show — the toast re-mounts when this changes */
-  message: string
+  /** Plain-text message — ignored when children is provided */
+  message?: string
+  /** Rich content — takes precedence over message */
+  children?: React.ReactNode
   /** Called after auto-dismiss (3s) or on fade-out end */
   onDismiss: () => void
   /** Visual variant — success (purple check) or error (red dot) */
   variant?: 'success' | 'error'
+  /** Show an X close button */
+  showClose?: boolean
 }
 
 /**
@@ -17,7 +21,7 @@ interface ToastProps {
  * - Fades + slides in, auto-dismisses after 3000ms
  * - Brand styling: rounded-2xl, white bg, subtle shadow
  */
-export function Toast({ message, onDismiss, variant = 'success' }: ToastProps) {
+export function Toast({ message, children, onDismiss, variant = 'success', showClose = false }: ToastProps) {
   const [visible, setVisible] = useState(false)
 
   // Route onDismiss through a ref so the dismiss-timer effect only runs ONCE
@@ -81,7 +85,22 @@ export function Toast({ message, onDismiss, variant = 'success' }: ToastProps) {
             className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0"
           />
         )}
-        <span className="font-semibold">{message}</span>
+        {children ?? <span className="font-semibold">{message}</span>}
+        {showClose && (
+          <button
+            type="button"
+            onClick={() => {
+              setVisible(false)
+              setTimeout(() => onDismissRef.current(), 200)
+            }}
+            aria-label="Close"
+            className="ml-2 text-brand-charcoal/40 hover:text-brand-charcoal transition-colors shrink-0"
+          >
+            <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   )

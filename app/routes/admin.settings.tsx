@@ -199,51 +199,6 @@ export default function AdminSettingsPage() {
         Settings
       </h1>
 
-      {/* Voice */}
-      <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
-        <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
-          Voice
-        </h2>
-
-        <SaveForm
-          label="IVR Greeting"
-          settingKey="ivrGreeting"
-          description="What the caller hears when they first connect. Keep it short and conversational."
-        />
-
-        <SaveForm
-          label="Voice & Personality"
-          settingKey="brandVoice"
-          multiline
-          rows={6}
-          description="How Emma sounds on voice and SMS — tone, style, what to avoid. Technical rules (pronunciation, tool behavior) stay locked in code. Leave blank to use defaults."
-        />
-
-        <SaveForm
-          label="Farewell — Too Many Turns"
-          settingKey="ivrFarewellMaxPrompts"
-          multiline
-          rows={3}
-          description="Spoken when the call hits the prompt-count cap (runaway guard). Written for TTS — spell tricky words phonetically (e.g. 'ex-dip-ex dot com')."
-        />
-
-        <SaveForm
-          label="Farewell — Max Call Length"
-          settingKey="ivrFarewellMaxDuration"
-          multiline
-          rows={3}
-          description="Spoken when the call hits the 5-minute hard cap."
-        />
-
-        <SaveForm
-          label="Farewell — Silent Caller"
-          settingKey="ivrFarewellSilent"
-          multiline
-          rows={2}
-          description="Spoken when the caller stops responding. Leave blank to hang up quietly."
-        />
-      </section>
-
       {/* Analytics */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
         <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>

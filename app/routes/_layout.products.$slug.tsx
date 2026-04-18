@@ -13,6 +13,7 @@ import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
 import BundleHero from '~/components/store/BundleHero'
 import BundleSaveCard from '~/components/store/BundleSaveCard'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
+import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 import { ProductTabs }            from '~/components/store/ProductTabs'
 import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
 import FrequentlyBoughtWith       from '~/components/store/FrequentlyBoughtWith'
@@ -623,6 +624,12 @@ function ProductPage() {
       )}
 
       <ProductStructuredData deal={deal} />
+      <BreadcrumbStructuredData items={[
+        { name: 'Home',          url: 'https://xdipx.com/' },
+        ...(deal.category === 'for-him' ? [{ name: 'For Him', url: 'https://xdipx.com/for-him' }] : []),
+        ...(deal.category === 'for-her' ? [{ name: 'For Her', url: 'https://xdipx.com/for-her' }] : []),
+        { name: deal.seoTitle,   url: `https://xdipx.com/products/${deal.handle}` },
+      ]} />
     </>
   )
 }

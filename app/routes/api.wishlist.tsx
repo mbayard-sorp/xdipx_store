@@ -59,7 +59,7 @@ export async function action({ request }: ActionFunctionArgs) {
           ...(price !== undefined ? { price } : {}),
         })
         void syncAfterMutation(customerGid, email)
-        return Response.json({ ok: true, hearted: true, listId: list.id })
+        return Response.json({ ok: true, hearted: true, listId: list.id, listName: list.name })
       }
 
       case 'remove': {

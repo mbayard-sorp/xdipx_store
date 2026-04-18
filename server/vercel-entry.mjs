@@ -77,6 +77,7 @@ __export(schema_exports, {
   pipelineSettings: () => pipelineSettings,
   productCopurchase: () => productCopurchase,
   referrals: () => referrals,
+  smsAgeConsent: () => smsAgeConsent,
   smsMessages: () => smsMessages,
   smsOptouts: () => smsOptouts,
   socialPosts: () => socialPosts,
@@ -100,7 +101,7 @@ import {
   uniqueIndex,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, callLog, voicemails, smsOptouts, smsMessages, draftOrders, productCopurchase;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, productCopurchase;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -310,6 +311,11 @@ var init_schema = __esm({
       phoneIdx: index("sms_messages_phone_idx").on(t.phone, t.createdAt),
       createdIdx: index("sms_messages_created_idx").on(t.createdAt)
     }));
+    smsAgeConsent = pgTable("sms_age_consent", {
+      phone: varchar("phone", { length: 20 }).primaryKey(),
+      consentedAt: timestamp("consented_at").defaultNow().notNull(),
+      method: varchar("method", { length: 20 }).default("sms_yes").notNull()
+    });
     draftOrders = pgTable("draft_orders", {
       id: serial("id").primaryKey(),
       shopifyDraftId: varchar("shopify_draft_id", { length: 64 }).notNull().unique(),
@@ -4552,10 +4558,15 @@ var init_sanity_server = __esm({
     label, body, link, linkLabel, emoji,
     "image": image{ "url": asset->url, alt }
   },
-  // categoryGrid + testimonials share the field name "items" \u2014 use select() to avoid collision
+  // categoryGrid + testimonials use inline item objects; trustBar uses references.
+  // Keep them in separate fields \u2014 combining them via select() silently null-derefs
+  // the trustBar references (GROQ quirk). TrustBarBlock reads trustItems.
   "items": select(
     _type == "categoryGrid" => items[]{ label, link, emoji, "image": image{ "url": asset->url, alt } },
-    _type == "testimonials"  => items[]{ quote, author, rating, verified }
+    _type == "testimonials" => items[]{ quote, author, rating, verified }
+  ),
+  "trustItems": select(
+    _type == "trustBar" => items[]->{ icon, headline, subheadline, active }
   ),
   columns,
   // productCarousel

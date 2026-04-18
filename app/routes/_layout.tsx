@@ -8,7 +8,6 @@ const VisualEditing = lazy(() =>
   import('@sanity/visual-editing/react-router').then(m => ({ default: m.VisualEditing })),
 )
 import { Navbar }          from '~/components/store/Navbar'
-import { TrustBar }        from '~/components/store/TrustBar'
 import { SiteBanner }      from '~/components/store/SiteBanner'
 import { Footer }          from '~/components/store/Footer'
 import { CookieConsent }   from '~/components/store/CookieConsent'
@@ -99,7 +98,6 @@ export default function StoreLayout() {
 
       {announcementBar && <AnnouncementBar block={announcementBar} />}
       <Navbar cart={cart ?? null} cartCount={cartCount} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} isCustomerLoggedIn={isCustomerLoggedIn} customerFirstName={customerFirstName} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} wishlistCount={wishlistCount} />
-      <TrustBar />
       <SiteBanner banner={siteBanner} />
       <main className="flex-1">
         <Outlet context={{ buyButtonText }} />
