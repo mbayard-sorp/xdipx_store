@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { useFetcher, useLoaderData, useOutletContext, redirect } from 'react-router'
+import { Link, useFetcher, useLoaderData, useOutletContext, redirect } from 'react-router'
 import { requireCustomer } from '~/lib/customer-session.server'
 import { customerAPI } from '~/lib/customer-api.server'
 import { StatusPill } from '~/components/account/StatusPill'
@@ -7,6 +7,7 @@ import { OrderTrackingStepper } from '~/components/account/OrderTrackingStepper'
 import { addLinesToCart, createCart, getCart } from '~/lib/shopify.server'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
 import type { OrderDetail } from '~/lib/shopify.server'
+import { isOrderWithinReturnWindow } from '~/lib/returns.server'
 import type { AccountOutletContext } from './_layout.account'
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -32,7 +33,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('Order not found', { status: 404 })
   }
 
-  return { order, tokenType }
+  const fulfilled = order.fulfillmentStatus?.toLowerCase() === 'fulfilled'
+  const notCanceled = !order.canceledAt
+  const withinWindow = isOrderWithinReturnWindow(null, order.processedAt)
+  const returnEligible = fulfilled && notCanceled && withinWindow
+
+  return { order, tokenType, returnEligible }
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -83,7 +89,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function OrderDetailRoute() {
-  const { order } = useLoaderData<typeof loader>()
+  const { order, returnEligible } = useLoaderData<typeof loader>()
   useOutletContext<AccountOutletContext>() // ensure type contract holds
   const reorderFetcher = useFetcher<typeof action>()
   const reordering = reorderFetcher.state !== 'idle'
@@ -267,6 +273,15 @@ export default function OrderDetailRoute() {
               {reordering ? 'Adding to cart…' : <>Reorder <span aria-hidden="true">♥</span></>}
             </button>
           </reorderFetcher.Form>
+          {returnEligible && (
+            <Link
+              to={`/account/returns/new?orderId=${encodeURIComponent(order.id)}`}
+              className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              Start a return
+            </Link>
+          )}
           <a
             href="mailto:support@xdipx.com"
             className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"

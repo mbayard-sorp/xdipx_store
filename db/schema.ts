@@ -267,6 +267,53 @@ export const draftOrders = pgTable('draft_orders', {
   phoneIdx:   index('draft_orders_phone_idx').on(t.phone, t.createdAt),
   createdIdx: index('draft_orders_created_idx').on(t.createdAt),
 }))
+export const returns = pgTable('returns', {
+  id:                       serial('id').primaryKey(),
+  shopifyReturnId:          varchar('shopify_return_id', { length: 60 }).notNull(),
+  shopifyOrderId:           varchar('shopify_order_id', { length: 60 }).notNull(),
+  customerGid:              varchar('customer_gid', { length: 60 }).notNull(),
+  status:                   varchar('status', { length: 20 }).default('requested').notNull(),
+  reason:                   varchar('reason', { length: 40 }),
+  reasonNote:               text('reason_note'),
+  lineItems:                json('line_items').$type<Array<{
+    fulfillmentLineItemId:  string
+    orderLineItemId:        string
+    title:                  string
+    variantTitle:           string | null
+    quantity:               number
+    unitPriceCents:         number
+  }>>().notNull(),
+  shopifyReverseDeliveryId: varchar('shopify_reverse_delivery_id', { length: 60 }),
+  labelUrl:                 text('label_url'),
+  labelCostCents:           integer('label_cost_cents'),
+  labelCostEstimatedCents:  integer('label_cost_estimated_cents'),
+  trackingNumber:           varchar('tracking_number', { length: 60 }),
+  trackingStatus:           varchar('tracking_status', { length: 40 }),
+  refundAmountCents:        integer('refund_amount_cents'),
+  shopifyRefundId:          varchar('shopify_refund_id', { length: 60 }),
+  createdAt:                timestamp('created_at').defaultNow().notNull(),
+  updatedAt:                timestamp('updated_at').defaultNow().notNull(),
+  labelPurchasedAt:         timestamp('label_purchased_at'),
+  receivedAt:               timestamp('received_at'),
+  refundedAt:               timestamp('refunded_at'),
+  closedAt:                 timestamp('closed_at'),
+}, t => ({
+  shopifyReturnUq: uniqueIndex('returns_shopify_return_uniq').on(t.shopifyReturnId),
+  customerIdx:     index('returns_customer_idx').on(t.customerGid, t.createdAt),
+  orderIdx:        index('returns_order_idx').on(t.shopifyOrderId),
+  statusIdx:       index('returns_status_idx').on(t.status),
+}))
+
+export type ReturnStatus =
+  | 'requested'
+  | 'approved'
+  | 'label_sent'
+  | 'in_transit'
+  | 'received'
+  | 'refunded'
+  | 'closed'
+  | 'denied'
+  | 'canceled'
 
 export const productCopurchase = pgTable('product_copurchase', {
   id:         serial('id').primaryKey(),

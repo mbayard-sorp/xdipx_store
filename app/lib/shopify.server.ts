@@ -3365,6 +3365,512 @@ export async function searchProducts(params: {
   }
 }
 
+// ─── Returns / RMA (Admin API 2024-10) ────────────────────────────────────
+//
+// Self-service returns flow: customer picks items → Shopify `returnCreate`
+// (return starts in OPEN state, customer already approved) →
+// `reverseDeliveryCreateWithShipping` generates the prepaid label →
+// on warehouse receipt `refundCreate` issues refund minus label cost →
+// `returnClose` finalizes. See app/lib/returns.server.ts for orchestration.
+//
+// These wrappers throw on GraphQL errors; callers are expected to also
+// inspect `userErrors` on the payload and translate to user-facing messages.
+
+export type ReturnReasonCode =
+  | 'COLOR'
+  | 'DEFECTIVE'
+  | 'NOT_AS_DESCRIBED'
+  | 'OTHER'
+  | 'SIZE_TOO_LARGE'
+  | 'SIZE_TOO_SMALL'
+  | 'STYLE'
+  | 'UNKNOWN'
+  | 'UNWANTED'
+  | 'WRONG_ITEM'
+
+export interface ReturnableLineItem {
+  fulfillmentLineItemId: string
+  orderLineItemId:       string           // order LineItem id — needed for refundCreate
+  quantity:              number
+  title:                 string
+  variantTitle:          string | null
+  imageUrl:              string | null
+  unitPrice:             { amount: string; currencyCode: string } | null
+}
+
+export interface ReturnableFulfillment {
+  id:                   string           // ReturnableFulfillment id
+  fulfillmentId:        string
+  lineItems:            ReturnableLineItem[]
+  reverseFulfillmentOrderId: string | null
+}
+
+/**
+ * Fetch returnable fulfillments + associated reverseFulfillmentOrder for an order.
+ * This tells us what can still be returned (excluding items already in a return).
+ */
+export async function getReturnableFulfillments(
+  orderId: string,
+): Promise<ReturnableFulfillment[]> {
+  const data = await adminGraphQL<{
+    order: {
+      returnableFulfillments: {
+        edges: {
+          node: {
+            id: string
+            fulfillment: { id: string }
+            returnableFulfillmentLineItems: {
+              edges: {
+                node: {
+                  quantity: number
+                  fulfillmentLineItem: {
+                    id: string
+                    lineItem: {
+                      id: string
+                      title: string
+                      variantTitle: string | null
+                      image: { url: string } | null
+                      originalUnitPriceSet: { shopMoney: { amount: string; currencyCode: string } }
+                    }
+                  }
+                }
+              }[]
+            }
+          }
+        }[]
+      }
+      reverseFulfillmentOrders: {
+        edges: {
+          node: {
+            id: string
+            order: { id: string }
+            reverseDeliveries: { edges: { node: { id: string } }[] }
+            lineItems: {
+              edges: {
+                node: {
+                  fulfillmentLineItem: { id: string }
+                }
+              }[]
+            }
+          }
+        }[]
+      }
+    } | null
+  }>(`
+    query ReturnableFulfillments($id: ID!) {
+      order(id: $id) {
+        returnableFulfillments(first: 10) {
+          edges {
+            node {
+              id
+              fulfillment { id }
+              returnableFulfillmentLineItems(first: 50) {
+                edges {
+                  node {
+                    quantity
+                    fulfillmentLineItem {
+                      id
+                      lineItem {
+                        id
+                        title
+                        variantTitle
+                        image { url }
+                        originalUnitPriceSet { shopMoney { amount currencyCode } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        reverseFulfillmentOrders(first: 10) {
+          edges {
+            node {
+              id
+              lineItems(first: 50) {
+                edges { node { fulfillmentLineItem { id } } }
+              }
+            }
+          }
+        }
+      }
+    }
+  `, { id: orderId })
+
+  if (!data.order) return []
+
+  // Build a map of fulfillmentLineItemId → reverseFulfillmentOrderId
+  // so returnCreate can target the correct one.
+  const fliToRfoId = new Map<string, string>()
+  for (const { node: rfo } of data.order.reverseFulfillmentOrders.edges) {
+    for (const { node: li } of rfo.lineItems.edges) {
+      fliToRfoId.set(li.fulfillmentLineItem.id, rfo.id)
+    }
+  }
+
+  return data.order.returnableFulfillments.edges.map(({ node: rf }) => {
+    const lineItems: ReturnableLineItem[] = rf.returnableFulfillmentLineItems.edges.map(
+      ({ node: rfli }) => ({
+        fulfillmentLineItemId: rfli.fulfillmentLineItem.id,
+        orderLineItemId:       rfli.fulfillmentLineItem.lineItem.id,
+        quantity:              rfli.quantity,
+        title:                 rfli.fulfillmentLineItem.lineItem.title,
+        variantTitle:          rfli.fulfillmentLineItem.lineItem.variantTitle,
+        imageUrl:              rfli.fulfillmentLineItem.lineItem.image?.url ?? null,
+        unitPrice:             {
+          amount:       rfli.fulfillmentLineItem.lineItem.originalUnitPriceSet.shopMoney.amount,
+          currencyCode: rfli.fulfillmentLineItem.lineItem.originalUnitPriceSet.shopMoney.currencyCode,
+        },
+      }),
+    )
+    // Pull RFO id from the first line item (all items in a returnableFulfillment
+    // map to the same reverseFulfillmentOrder).
+    const reverseFulfillmentOrderId =
+      lineItems[0] ? fliToRfoId.get(lineItems[0].fulfillmentLineItemId) ?? null : null
+    return {
+      id:            rf.id,
+      fulfillmentId: rf.fulfillment.id,
+      lineItems,
+      reverseFulfillmentOrderId,
+    }
+  })
+}
+
+export interface CreateReturnInput {
+  orderId: string
+  lineItems: Array<{
+    fulfillmentLineItemId: string
+    quantity:              number
+    returnReason:          ReturnReasonCode
+    returnReasonNote?:     string
+  }>
+  notifyCustomer?: boolean
+}
+
+export interface CreateReturnResult {
+  returnId:                  string
+  reverseFulfillmentOrderId: string | null
+}
+
+/**
+ * Create a return in OPEN state. Call AFTER the customer has confirmed in the
+ * wizard (no separate approve step needed).
+ */
+export async function createReturn(
+  input: CreateReturnInput,
+): Promise<{ ok: true; data: CreateReturnResult } | { ok: false; error: string }> {
+  const data = await adminGraphQL<{
+    returnCreate: {
+      return: {
+        id: string
+        reverseFulfillmentOrders: { edges: { node: { id: string } }[] }
+      } | null
+      userErrors: { field: string[] | null; message: string }[]
+    }
+  }>(`
+    mutation ReturnCreate($returnInput: ReturnInput!) {
+      returnCreate(returnInput: $returnInput) {
+        return {
+          id
+          reverseFulfillmentOrders(first: 1) {
+            edges { node { id } }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `, {
+    returnInput: {
+      orderId: input.orderId,
+      returnLineItems: input.lineItems.map(li => ({
+        fulfillmentLineItemId: li.fulfillmentLineItemId,
+        quantity:              li.quantity,
+        returnReason:          li.returnReason,
+        returnReasonNote:      li.returnReasonNote ?? '',
+      })),
+      notifyCustomer: input.notifyCustomer ?? false,
+    },
+  })
+
+  const err = data.returnCreate.userErrors[0]
+  if (err) return { ok: false, error: err.message }
+  if (!data.returnCreate.return) return { ok: false, error: 'returnCreate returned no return' }
+
+  return {
+    ok: true,
+    data: {
+      returnId:                  data.returnCreate.return.id,
+      reverseFulfillmentOrderId: data.returnCreate.return.reverseFulfillmentOrders.edges[0]?.node.id ?? null,
+    },
+  }
+}
+
+export interface BuyReturnLabelInput {
+  reverseFulfillmentOrderId: string
+  reverseDeliveryLineItems: Array<{
+    fulfillmentLineItemId: string
+    quantity:              number
+  }>
+  /** Parcel for label pricing. Dims in inches, weight in ounces. */
+  parcel: {
+    lengthIn: number
+    widthIn:  number
+    heightIn: number
+    weightOz: number
+  }
+  notifyCustomer?: boolean
+}
+
+export interface BuyReturnLabelResult {
+  reverseDeliveryId: string
+  labelUrl:          string | null
+  trackingNumber:    string | null
+  trackingUrl:       string | null
+  labelCostCents:    number | null
+}
+
+/**
+ * Buy a return label via Shopify Shipping. The warehouse destination is the
+ * order's fulfillment origin (Shopify resolves it automatically from the
+ * reverseFulfillmentOrder). Label cost is billed on your Shopify invoice.
+ *
+ * Note: Shopify's `reverseDeliveryCreateWithShipping` does not expose a
+ * rate-preview primitive; the label price is determined at purchase time.
+ * We show the customer an ESTIMATE in the wizard and record the ACTUAL
+ * cost after this call returns, then deduct from the refund.
+ *
+ * The reverseFulfillmentOrderId maps the label to Nalpac's receiving address,
+ * which Shopify derives from the location associated with the reverse order.
+ */
+export async function buyReturnLabel(
+  input: BuyReturnLabelInput,
+): Promise<{ ok: true; data: BuyReturnLabelResult } | { ok: false; error: string }> {
+  // TODO(phase-3): wire `labelInput.price` once we verify the exact
+  // `ReverseDeliveryLabelInput` shape against a dev-store test. For now we
+  // let Shopify Shipping auto-rate and read cost back from the response.
+  const data = await adminGraphQL<{
+    reverseDeliveryCreateWithShipping: {
+      reverseDelivery: {
+        id: string
+        deliverable: {
+          __typename: string
+          label?: { public_file_url?: string | null; publicFileUrl?: string | null }
+          tracking?: { number?: string | null; url?: string | null }
+        } | null
+      } | null
+      userErrors: { field: string[] | null; message: string }[]
+    }
+  }>(`
+    mutation ReverseDeliveryCreateWithShipping(
+      $reverseFulfillmentOrderId: ID!
+      $reverseDeliveryLineItems: [ReverseDeliveryLineItemInput!]!
+      $notifyCustomer: Boolean
+    ) {
+      reverseDeliveryCreateWithShipping(
+        reverseFulfillmentOrderId: $reverseFulfillmentOrderId
+        reverseDeliveryLineItems: $reverseDeliveryLineItems
+        notifyCustomer: $notifyCustomer
+      ) {
+        reverseDelivery {
+          id
+          deliverable {
+            __typename
+            ... on ReverseDeliveryShippingDeliverable {
+              label { publicFileUrl }
+              tracking { number url }
+            }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `, {
+    reverseFulfillmentOrderId: input.reverseFulfillmentOrderId,
+    reverseDeliveryLineItems: input.reverseDeliveryLineItems.map(li => ({
+      reverseFulfillmentOrderLineItemId: li.fulfillmentLineItemId,
+      quantity: li.quantity,
+    })),
+    notifyCustomer: input.notifyCustomer ?? false,
+  })
+
+  const err = data.reverseDeliveryCreateWithShipping.userErrors[0]
+  if (err) return { ok: false, error: err.message }
+
+  const rd = data.reverseDeliveryCreateWithShipping.reverseDelivery
+  if (!rd) return { ok: false, error: 'reverseDeliveryCreateWithShipping returned no delivery' }
+
+  const label = rd.deliverable?.label
+  const tracking = rd.deliverable?.tracking
+  return {
+    ok: true,
+    data: {
+      reverseDeliveryId: rd.id,
+      labelUrl:          label?.publicFileUrl ?? label?.public_file_url ?? null,
+      trackingNumber:    tracking?.number ?? null,
+      trackingUrl:       tracking?.url ?? null,
+      // Shopify Admin GraphQL (2024-10) does not expose the purchased label's
+      // price on `ReverseDeliveryShippingDeliverable` — cost is only visible
+      // via the Shopify Shipping invoice. We keep the pre-purchase estimate
+      // authoritative for the refund-minus-label calculation. If/when Shopify
+      // exposes `shippingLabel.totalPriceSet` on reverse deliveries, wire it
+      // here and overwrite `labelCostCents` in returns.server.ts.
+      labelCostCents:    null,
+    },
+  }
+}
+
+export interface CreateRefundInput {
+  orderId: string
+  note?:   string
+  refundLineItems: Array<{
+    lineItemId:   string         // Order line item id (NOT fulfillmentLineItemId)
+    quantity:     number
+    restockType?: 'NO_RESTOCK' | 'RETURN' | 'CANCEL'
+    locationId?:  string
+  }>
+  /** Positive number in major currency units (e.g. dollars). Undefined → no shipping refund. */
+  shippingAmount?: number
+  currencyCode:   string
+  notify?:        boolean
+}
+
+/**
+ * Issue a refund. For return-minus-label flow, pass refundLineItems with the
+ * item totals and OMIT shippingAmount (we keep shipping on the customer side).
+ * To deduct the label cost, subtract it from the line-item amounts before
+ * building refundLineItems (or use a negative adjustment transaction — see
+ * returns.server.ts issueRefund helper).
+ */
+export async function createRefund(
+  input: CreateRefundInput,
+): Promise<{ ok: true; refundId: string } | { ok: false; error: string }> {
+  const data = await adminGraphQL<{
+    refundCreate: {
+      refund: { id: string } | null
+      userErrors: { field: string[] | null; message: string }[]
+    }
+  }>(`
+    mutation RefundCreate($input: RefundInput!) {
+      refundCreate(input: $input) {
+        refund { id }
+        userErrors { field message }
+      }
+    }
+  `, {
+    input: {
+      orderId: input.orderId,
+      note:    input.note ?? 'xdipx self-service return',
+      notify:  input.notify ?? true,
+      currency: input.currencyCode,
+      refundLineItems: input.refundLineItems.map(li => ({
+        lineItemId:  li.lineItemId,
+        quantity:    li.quantity,
+        restockType: li.restockType ?? 'RETURN',
+        ...(li.locationId ? { locationId: li.locationId } : {}),
+      })),
+      ...(input.shippingAmount != null
+        ? { shipping: { amount: input.shippingAmount.toFixed(2) } }
+        : {}),
+    },
+  })
+
+  const err = data.refundCreate.userErrors[0]
+  if (err) return { ok: false, error: err.message }
+  if (!data.refundCreate.refund) return { ok: false, error: 'refundCreate returned no refund' }
+
+  return { ok: true, refundId: data.refundCreate.refund.id }
+}
+
+/**
+ * Close a return once the refund has been issued.
+ */
+export async function closeReturn(
+  returnId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const data = await adminGraphQL<{
+    returnClose: {
+      return: { id: string; status: string } | null
+      userErrors: { field: string[] | null; message: string }[]
+    }
+  }>(`
+    mutation ReturnClose($id: ID!) {
+      returnClose(id: $id) {
+        return { id status }
+        userErrors { field message }
+      }
+    }
+  `, { id: returnId })
+
+  const err = data.returnClose.userErrors[0]
+  if (err) return { ok: false, error: err.message }
+  return { ok: true }
+}
+
+/**
+ * Fetch a return's current state (used by webhook + admin lookups).
+ */
+export async function getReturn(returnId: string): Promise<{
+  id: string
+  status: string
+  reverseDeliveries: Array<{
+    id: string
+    trackingNumber: string | null
+    trackingUrl:    string | null
+    deliveredAt:    string | null
+  }>
+} | null> {
+  const data = await adminGraphQL<{
+    return: {
+      id: string
+      status: string
+      reverseDeliveries: {
+        edges: {
+          node: {
+            id: string
+            deliverable: {
+              __typename: string
+              tracking?: { number: string | null; url: string | null } | null
+            } | null
+          }
+        }[]
+      }
+    } | null
+  }>(`
+    query GetReturn($id: ID!) {
+      return(id: $id) {
+        id
+        status
+        reverseDeliveries(first: 5) {
+          edges {
+            node {
+              id
+              deliverable {
+                __typename
+                ... on ReverseDeliveryShippingDeliverable {
+                  tracking { number url }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `, { id: returnId })
+
+  if (!data.return) return null
+  return {
+    id: data.return.id,
+    status: data.return.status,
+    reverseDeliveries: data.return.reverseDeliveries.edges.map(({ node }) => ({
+      id:             node.id,
+      trackingNumber: node.deliverable?.tracking?.number ?? null,
+      trackingUrl:    node.deliverable?.tracking?.url ?? null,
+      deliveredAt:    null, // Shopify exposes delivery state via webhook, not query
+    })),
+  }
+}
+
 // Returns storefront collections (id included for productFilters usage)
 export async function getStorefrontCollections(
   first = 50,

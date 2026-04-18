@@ -265,6 +265,75 @@ async function handleInventoryUpdate(level: ShopifyInventoryLevel): Promise<void
   }
 }
 
+// ─── Returns: tracking + auto-refund ──────────────────────────────────────
+//
+// Shopify fires `returns/update` when a return's status changes AND when the
+// attached reverse delivery's tracking updates. We refetch the return on each
+// fire to get current state, then:
+//   - update tracking info on our row
+//   - if the reverse delivery is "delivered" OR Shopify marks the return as
+//     "received" / processed, kick the refund + close pipeline
+// Idempotent — markReceivedAndRefund short-circuits on already-refunded rows.
+
+interface ShopifyReturnWebhook {
+  id: number
+  admin_graphql_api_id?: string
+  status?: string
+  order_id?: number
+}
+
+async function handleReturnsUpdate(payload: ShopifyReturnWebhook): Promise<void> {
+  const returnGid =
+    payload.admin_graphql_api_id ?? `gid://shopify/Return/${payload.id}`
+
+  const { getReturn } = await import('../app/lib/shopify.server.js')
+  const { recordLabelTracking, markReceivedAndRefund } =
+    await import('../app/lib/returns.server.js')
+
+  const current = await getReturn(returnGid).catch(() => null)
+  if (!current) {
+    console.warn('[webhook:returns-update] return not found in Shopify:', returnGid)
+    return
+  }
+
+  // Update tracking from the first reverse delivery (we only buy one per RMA).
+  const rd = current.reverseDeliveries[0]
+  if (rd?.trackingNumber) {
+    await recordLabelTracking(returnGid, {
+      trackingNumber: rd.trackingNumber,
+      // Shopify's Return query doesn't expose granular tracking states;
+      // we just flip status → in_transit. Actual delivery triggers refund below.
+      trackingStatus: 'in_transit',
+    }).catch(err => console.error('[webhook:returns-update] tracking update failed:', err))
+  }
+
+  // Terminal state → refund + close. Shopify return statuses we care about:
+  //   OPEN → nothing to do
+  //   CLOSED → already refunded, nothing to do (our row will also be closed)
+  //   DECLINED / CANCELED → mark row, no refund
+  //   processed (via reverse delivery delivered) → fire refund
+  const status = (current.status ?? '').toUpperCase()
+  if (status === 'DECLINED' || status === 'CANCELED') {
+    const { db } = await import('../app/lib/db.server.js')
+    const { returns } = await import('../db/schema.js')
+    await db.update(returns)
+      .set({ status: status === 'DECLINED' ? 'denied' : 'canceled', updatedAt: new Date() })
+      .where(eq(returns.shopifyReturnId, returnGid))
+    return
+  }
+
+  // Fire refund when Shopify signals the return is complete. We check both
+  // the top-level status AND (defensively) the webhook payload status.
+  const terminalSignals = ['CLOSED', 'RECEIVED', 'PROCESSED']
+  const webhookStatus = (payload.status ?? '').toUpperCase()
+  if (terminalSignals.includes(status) || terminalSignals.includes(webhookStatus)) {
+    const result = await markReceivedAndRefund(returnGid, { currencyCode: 'USD' })
+    if (!result.ok) {
+      console.error('[webhook:returns-update] refund failed:', result.error)
+    }
+  }
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────
 
 export function createWebhookRoutes() {
@@ -329,6 +398,21 @@ export function createWebhookRoutes() {
 
     handleInventoryUpdate(level).catch(err =>
       console.error('[webhook:inventory-update]', err),
+    )
+  })
+
+  router.post('/returns-update', async (req: Request, res: Response) => {
+    if (!verifyShopifyWebhook(req)) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const payload = JSON.parse((req.body as Buffer).toString()) as ShopifyReturnWebhook
+
+    res.json({ ok: true })
+
+    handleReturnsUpdate(payload).catch(err =>
+      console.error('[webhook:returns-update]', err),
     )
   })
 
