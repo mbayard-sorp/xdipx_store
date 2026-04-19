@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { lazy, Suspense } from 'react'
 import type { LoaderFunctionArgs } from 'react-router'
-import { Link, Outlet, useLoaderData, useRevalidator } from 'react-router'
+import { Link, Outlet, useLoaderData, useRevalidator, useRouteLoaderData } from 'react-router'
 
 // Lazy-load Sanity visual editing — only shipped to users in preview mode.
 const VisualEditing = lazy(() =>
@@ -76,6 +76,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export default function StoreLayout() {
   const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, isCustomerLoggedIn, customerFirstName, customerIdHash, menuItems, upsells, wishlistCount } = useLoaderData<typeof loader>()
+  const rootData = useRouteLoaderData<{ ENV?: { GA4_ID?: string } }>('root')
+  const ga4Id = rootData?.ENV?.GA4_ID ?? ''
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -101,7 +103,7 @@ export default function StoreLayout() {
       <Footer socialLinks={socialLinks} footerColumns={footerColumns} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} />
       <CookieConsent />
       <Analytics
-        ga4Id={typeof window !== 'undefined' ? (window as unknown as { ENV?: { GA4_ID?: string } }).ENV?.GA4_ID ?? '' : ''}
+        ga4Id={ga4Id}
         isLoggedIn={isCustomerLoggedIn}
         {...(customerIdHash ? { customerIdHash } : {})}
       />
