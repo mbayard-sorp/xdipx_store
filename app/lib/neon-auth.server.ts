@@ -50,10 +50,19 @@ export async function neonAuthSignIn(
       headers: authHeaders(),
       body: JSON.stringify({ email, password }),
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      console.error('[neon-auth] sign-in failed', {
+        status: res.status,
+        origin: authHeaders().Origin,
+        body: body.slice(0, 200),
+      })
+      return null
+    }
     const data = (await res.json()) as SignInResponse
     return data.user ?? null
-  } catch {
+  } catch (e) {
+    console.error('[neon-auth] sign-in threw', e)
     return null
   }
 }
