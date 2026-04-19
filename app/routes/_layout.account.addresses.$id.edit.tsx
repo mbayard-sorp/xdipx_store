@@ -26,9 +26,23 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const api = customerAPI({ token, tokenType })
   const addresses = await api.getAddresses()
-  const address = addresses.find((a) => a.id === decodedId)
+  // Shopify address GIDs embed a `customer_access_token` query string that
+  // changes between requests. Match on the GID base (before the `?`) so the
+  // token mismatch doesn't break the lookup.
+  const gidBase = (s: string) => s.split('?')[0]
+  const targetBase = gidBase(decodedId)
+  const address = addresses.find((a) => gidBase(a.id) === targetBase)
 
-  if (!address) throw new Response('Address not found', { status: 404 })
+  if (!address) {
+    console.error('[addresses/edit] address not found', {
+      tokenType,
+      rawId,
+      decodedId,
+      targetBase,
+      addressIds: addresses.map((a) => a.id),
+    })
+    throw new Response('Address not found', { status: 404 })
+  }
 
   const countries = await getCountries()
   return { address, countries }
@@ -40,7 +54,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const rawId = params['id']
   if (!rawId) throw new Response('Address not found', { status: 404 })
-  const decodedId = decodeURIComponent(rawId)
+  // Strip embedded customer_access_token query string; Shopify accepts the
+  // bare MailingAddress GID on mutations.
+  const decodedId = decodeURIComponent(rawId).split('?')[0] ?? ''
 
   const api = customerAPI({ token, tokenType })
   const form = await request.formData()

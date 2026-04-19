@@ -16,8 +16,7 @@ import { AnnouncementBar } from '~/components/cms/AnnouncementBar'
 import { getHomepageSections, getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
 import { getCustomerToken } from '~/lib/customer-session.server'
 import { customerAPI } from '~/lib/customer-api.server'
-import { getCartIdFromCookie } from '~/lib/cart.server'
-import { getAccessoryProducts, getCart, getMainMenu } from '~/lib/shopify.server'
+import { getAccessoryProducts, getMainMenu } from '~/lib/shopify.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { getHeartedProductIds } from '~/lib/wishlist.server'
 import type { Product } from '~/types'
@@ -25,15 +24,13 @@ import type { AnnouncementBarBlock, MegaMenuBanner, SocialLink, FooterColumn, Si
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const preview  = isPreviewRequest(request)
-  const cartId   = getCartIdFromCookie(request)
   // pinnedIds live in KV and resolve in ~1–5ms — fetch them outside the main
   // Promise.all so we can fan accessories in parallel with everything else.
   const pinnedIds = (await getPinnedAccessoryIds()) ?? []
-  const [cms, settings, customerToken, cart, menuItems, upsells] = await Promise.all([
+  const [cms, settings, customerToken, menuItems, upsells] = await Promise.all([
     getHomepageSections(preview),
     getSiteSettings(),
     getCustomerToken(request),
-    cartId ? getCart(cartId) : Promise.resolve(null),
     getMainMenu(),
     pinnedIds.length ? getAccessoryProducts(pinnedIds.slice(0, 4)) : Promise.resolve<Product[]>([]),
   ])
@@ -74,12 +71,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customerIdHash = loggedIn && customerToken
     ? createHash('sha256').update(customerToken.token).digest('hex').slice(0, 12)
     : null
-  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, isCustomerLoggedIn: loggedIn, customerFirstName, customerIdHash, cart, menuItems, upsells, heartedProductIds, wishlistCount }
+  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, isCustomerLoggedIn: loggedIn, customerFirstName, customerIdHash, menuItems, upsells, heartedProductIds, wishlistCount }
 }
 
 export default function StoreLayout() {
-  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, isCustomerLoggedIn, customerFirstName, customerIdHash, cart, menuItems, upsells, wishlistCount } = useLoaderData<typeof loader>()
-  const cartCount = cart?.totalQuantity ?? 0
+  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, isCustomerLoggedIn, customerFirstName, customerIdHash, menuItems, upsells, wishlistCount } = useLoaderData<typeof loader>()
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -97,7 +93,7 @@ export default function StoreLayout() {
       )}
 
       {announcementBar && <AnnouncementBar block={announcementBar} />}
-      <Navbar cart={cart ?? null} cartCount={cartCount} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} isCustomerLoggedIn={isCustomerLoggedIn} customerFirstName={customerFirstName} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} wishlistCount={wishlistCount} />
+      <Navbar logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} isCustomerLoggedIn={isCustomerLoggedIn} customerFirstName={customerFirstName} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} wishlistCount={wishlistCount} />
       <SiteBanner banner={siteBanner} />
       <main className="flex-1">
         <Outlet context={{ buyButtonText }} />

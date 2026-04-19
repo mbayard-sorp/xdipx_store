@@ -57,6 +57,48 @@ export async function kvDel(key: string): Promise<void> {
   memStore.delete(key)
 }
 
+// ─── Two-tier cache (in-memory L1 + KV L2) ────────────────────────────────
+// Cuts Shopify/Sanity API calls on hot read paths. Short TTLs keep admin
+// changes visible quickly; `invalidateCache(prefix)` lets admin flows bust
+// a class of keys after a mutation.
+
+type CacheEntry<T> = { data: T; ts: number }
+
+const _g2 = globalThis as unknown as { __readCache?: Map<string, CacheEntry<unknown>> }
+if (!_g2.__readCache) _g2.__readCache = new Map()
+const readCache = _g2.__readCache
+
+export async function cached<T>(
+  key: string,
+  ttlSeconds: number,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const ttlMs  = ttlSeconds * 1000
+  const now    = Date.now()
+  const l1     = readCache.get(key) as CacheEntry<T> | undefined
+  if (l1 && now - l1.ts < ttlMs) return l1.data
+  const l2 = await kvGet<CacheEntry<T>>(key)
+  if (l2 && now - l2.ts < ttlMs) {
+    readCache.set(key, l2)
+    return l2.data
+  }
+  const data  = await fn()
+  const entry = { data, ts: now }
+  readCache.set(key, entry)
+  // Slightly longer KV TTL than L1 TTL — lets new instances warm from KV
+  // before hitting origin even if L1 expired.
+  await kvSet(key, entry, ttlSeconds + 60)
+  return data
+}
+
+export function invalidateCache(prefix: string): void {
+  for (const k of readCache.keys()) {
+    if (k.startsWith(prefix)) readCache.delete(k)
+  }
+  // KV keys expire naturally via TTL; for immediate invalidation add kvDel
+  // calls in the admin mutation path.
+}
+
 // ─── Named KV Keys ────────────────────────────────────────────────────────
 
 export const KV_KEYS = {

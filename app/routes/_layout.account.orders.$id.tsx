@@ -283,7 +283,7 @@ export default function OrderDetailRoute() {
             </Link>
           )}
           <a
-            href="mailto:support@xdipx.com"
+            href="mailto:hello@xdipx.com"
             className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >

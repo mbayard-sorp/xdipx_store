@@ -1,7 +1,11 @@
 import crypto from 'node:crypto'
 import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore } from '~/types'
 import { toHTML } from '@portabletext/to-html'
-import { kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+import { cached, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+
+// Short TTL for read-through product caches — long enough to dedupe burst
+// traffic, short enough for admin edits to appear on the next page load.
+const READ_TTL = 60
 
 const COLLECTION_CURSOR_TTL = 300 // 5 minutes — collection order is stable short-term
 
@@ -417,13 +421,15 @@ export async function getApprovedDeal(): Promise<Deal | null> {
 }
 
 export async function getProductByHandle(handle: string): Promise<Product | null> {
-  const data = await storefront<{ product: ShopifyProductNode | null }>(`
-    query GetProduct($handle: String!) {
-      product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
-    }
-  `, { handle })
-  if (!data.product) return null
-  return nodeToProduct(data.product)
+  return cached(`shopify:p:${handle}`, READ_TTL, async () => {
+    const data = await storefront<{ product: ShopifyProductNode | null }>(`
+      query GetProduct($handle: String!) {
+        product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
+      }
+    `, { handle })
+    if (!data.product) return null
+    return nodeToProduct(data.product)
+  })
 }
 
 /**
@@ -584,31 +590,35 @@ export async function getProductsByIds(ids: string[]): Promise<Product[]> {
 }
 
 export async function getProductsByTag(tag: string, limit = 6): Promise<Product[]> {
-  const data = await storefront<{
-    products: { edges: { node: ShopifyProductNode }[] }
-  }>(`
-    query GetProductsByTag($query: String!, $first: Int!) {
-      products(first: $first, query: $query) {
-        edges { node { ${PRODUCT_CORE_FRAGMENT} } }
-      }
-    }
-  `, { query: `tag:${tag}`, first: limit })
-  return data.products.edges.map(e => nodeToProduct(e.node))
-}
-
-export async function getCollectionProducts(handle: string, limit = 8): Promise<Product[]> {
-  const data = await storefront<{
-    collection: { products: { edges: { node: ShopifyProductNode }[] } } | null
-  }>(`
-    query GetCollectionProducts($handle: String!, $first: Int!) {
-      collection(handle: $handle) {
-        products(first: $first, sortKey: MANUAL) {
+  return cached(`shopify:tag:${tag}:${limit}`, READ_TTL, async () => {
+    const data = await storefront<{
+      products: { edges: { node: ShopifyProductNode }[] }
+    }>(`
+      query GetProductsByTag($query: String!, $first: Int!) {
+        products(first: $first, query: $query) {
           edges { node { ${PRODUCT_CORE_FRAGMENT} } }
         }
       }
-    }
-  `, { handle, first: limit })
-  return (data.collection?.products.edges ?? []).map(e => nodeToProduct(e.node))
+    `, { query: `tag:${tag}`, first: limit })
+    return data.products.edges.map(e => nodeToProduct(e.node))
+  })
+}
+
+export async function getCollectionProducts(handle: string, limit = 8): Promise<Product[]> {
+  return cached(`shopify:col:${handle}:${limit}`, READ_TTL, async () => {
+    const data = await storefront<{
+      collection: { products: { edges: { node: ShopifyProductNode }[] } } | null
+    }>(`
+      query GetCollectionProducts($handle: String!, $first: Int!) {
+        collection(handle: $handle) {
+          products(first: $first, sortKey: MANUAL) {
+            edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+          }
+        }
+      }
+    `, { handle, first: limit })
+    return (data.collection?.products.edges ?? []).map(e => nodeToProduct(e.node))
+  })
 }
 
 export async function getProductsByHandles(handles: string[]): Promise<Product[]> {
@@ -618,20 +628,22 @@ export async function getProductsByHandles(handles: string[]): Promise<Product[]
 }
 
 export async function getBonusDeal(): Promise<Product | null> {
-  const data = await storefront<{
-    collection: { products: { edges: { node: ShopifyProductNode }[] } } | null
-  }>(`
-    query GetBonusDeal {
-      collection(handle: "bonus-deal") {
-        products(first: 1) {
-          edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+  return cached('shopify:bonus-deal', READ_TTL, async () => {
+    const data = await storefront<{
+      collection: { products: { edges: { node: ShopifyProductNode }[] } } | null
+    }>(`
+      query GetBonusDeal {
+        collection(handle: "bonus-deal") {
+          products(first: 1) {
+            edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+          }
         }
       }
-    }
-  `)
-  const node = data.collection?.products.edges[0]?.node
-  if (!node) return null
-  return nodeToProduct(node)
+    `)
+    const node = data.collection?.products.edges[0]?.node
+    if (!node) return null
+    return nodeToProduct(node)
+  })
 }
 
 export async function getRecentVaultDeals(limit = 7): Promise<VaultDeal[]> {
@@ -742,27 +754,30 @@ export interface ShopifyMenuItem {
 }
 
 export async function getMainMenu(): Promise<ShopifyMenuItem[]> {
-  const data = await storefront<{
-    menu: { items: ShopifyMenuItem[] } | null
-  }>(`
-    query GetMenu {
-      menu(handle: "main-menu") {
-        items {
-          title
-          url
+  // Menu is site-wide — cache longer (5 min). Admin menu edits are rare.
+  return cached('shopify:menu:main-menu', 300, async () => {
+    const data = await storefront<{
+      menu: { items: ShopifyMenuItem[] } | null
+    }>(`
+      query GetMenu {
+        menu(handle: "main-menu") {
           items {
             title
             url
             items {
               title
               url
+              items {
+                title
+                url
+              }
             }
           }
         }
       }
-    }
-  `)
-  return data.menu?.items ?? []
+    `)
+    return data.menu?.items ?? []
+  })
 }
 
 // Fetch all Shopify collections for the admin collection picker.
@@ -817,9 +832,12 @@ export async function getShopifyCollections(): Promise<ShopifyCollectionSummary[
 
 export async function getAccessoryProducts(ids: string[]): Promise<Product[]> {
   if (!ids.length) return []
-  const queries = ids.map((id, i) => `p${i}: product(id: "${id}") { ${PRODUCT_CORE_FRAGMENT} }`).join('\n')
-  const data = await storefront<Record<string, ShopifyProductNode | null>>(`query { ${queries} }`)
-  return Object.values(data).filter((n): n is ShopifyProductNode => n !== null).map(n => nodeToProduct(n))
+  const sortedKey = [...ids].sort().join(',')
+  return cached(`shopify:acc:${sortedKey}`, READ_TTL, async () => {
+    const queries = ids.map((id, i) => `p${i}: product(id: "${id}") { ${PRODUCT_CORE_FRAGMENT} }`).join('\n')
+    const data = await storefront<Record<string, ShopifyProductNode | null>>(`query { ${queries} }`)
+    return Object.values(data).filter((n): n is ShopifyProductNode => n !== null).map(n => nodeToProduct(n))
+  })
 }
 
 // ─── Admin Product Search (for admin pickers) ─────────────────────────────
@@ -3412,71 +3430,54 @@ export interface ReturnableFulfillment {
 export async function getReturnableFulfillments(
   orderId: string,
 ): Promise<ReturnableFulfillment[]> {
+  // `returnableFulfillments` is a ROOT query (takes orderId as an argument),
+  // not a field on Order. We don't pre-fetch reverseFulfillmentOrderId here —
+  // it comes back in the returnCreate mutation response.
   const data = await adminGraphQL<{
-    order: {
-      returnableFulfillments: {
-        edges: {
-          node: {
-            id: string
-            fulfillment: { id: string }
-            returnableFulfillmentLineItems: {
-              edges: {
-                node: {
-                  quantity: number
-                  fulfillmentLineItem: {
+    returnableFulfillments: {
+      edges: {
+        node: {
+          id: string
+          fulfillment: { id: string }
+          returnableFulfillmentLineItems: {
+            edges: {
+              node: {
+                quantity: number
+                fulfillmentLineItem: {
+                  id: string
+                  lineItem: {
                     id: string
-                    lineItem: {
-                      id: string
-                      title: string
-                      variantTitle: string | null
-                      image: { url: string } | null
-                      originalUnitPriceSet: { shopMoney: { amount: string; currencyCode: string } }
-                    }
+                    title: string
+                    variantTitle: string | null
+                    image: { url: string } | null
+                    originalUnitPriceSet: { shopMoney: { amount: string; currencyCode: string } }
                   }
                 }
-              }[]
-            }
+              }
+            }[]
           }
-        }[]
-      }
-      reverseFulfillmentOrders: {
-        edges: {
-          node: {
-            id: string
-            order: { id: string }
-            reverseDeliveries: { edges: { node: { id: string } }[] }
-            lineItems: {
-              edges: {
-                node: {
-                  fulfillmentLineItem: { id: string }
-                }
-              }[]
-            }
-          }
-        }[]
-      }
-    } | null
+        }
+      }[]
+    }
   }>(`
-    query ReturnableFulfillments($id: ID!) {
-      order(id: $id) {
-        returnableFulfillments(first: 10) {
-          edges {
-            node {
-              id
-              fulfillment { id }
-              returnableFulfillmentLineItems(first: 50) {
-                edges {
-                  node {
-                    quantity
-                    fulfillmentLineItem {
+    query ReturnableFulfillments($orderId: ID!) {
+      returnableFulfillments(first: 10, orderId: $orderId) {
+        edges {
+          node {
+            id
+            fulfillment { id }
+            returnableFulfillmentLineItems(first: 50) {
+              edges {
+                node {
+                  quantity
+                  fulfillmentLineItem {
+                    id
+                    lineItem {
                       id
-                      lineItem {
-                        id
-                        title
-                        variantTitle
-                        image { url }
-                        originalUnitPriceSet { shopMoney { amount currencyCode } }
-                      }
+                      title
+                      variantTitle
+                      image { url }
+                      originalUnitPriceSet { shopMoney { amount currencyCode } }
                     }
                   }
                 }
@@ -3484,32 +3485,11 @@ export async function getReturnableFulfillments(
             }
           }
         }
-        reverseFulfillmentOrders(first: 10) {
-          edges {
-            node {
-              id
-              lineItems(first: 50) {
-                edges { node { fulfillmentLineItem { id } } }
-              }
-            }
-          }
-        }
       }
     }
-  `, { id: orderId })
+  `, { orderId })
 
-  if (!data.order) return []
-
-  // Build a map of fulfillmentLineItemId → reverseFulfillmentOrderId
-  // so returnCreate can target the correct one.
-  const fliToRfoId = new Map<string, string>()
-  for (const { node: rfo } of data.order.reverseFulfillmentOrders.edges) {
-    for (const { node: li } of rfo.lineItems.edges) {
-      fliToRfoId.set(li.fulfillmentLineItem.id, rfo.id)
-    }
-  }
-
-  return data.order.returnableFulfillments.edges.map(({ node: rf }) => {
+  return data.returnableFulfillments.edges.map(({ node: rf }) => {
     const lineItems: ReturnableLineItem[] = rf.returnableFulfillmentLineItems.edges.map(
       ({ node: rfli }) => ({
         fulfillmentLineItemId: rfli.fulfillmentLineItem.id,
@@ -3524,15 +3504,12 @@ export async function getReturnableFulfillments(
         },
       }),
     )
-    // Pull RFO id from the first line item (all items in a returnableFulfillment
-    // map to the same reverseFulfillmentOrder).
-    const reverseFulfillmentOrderId =
-      lineItems[0] ? fliToRfoId.get(lineItems[0].fulfillmentLineItemId) ?? null : null
+    // reverseFulfillmentOrderId is populated by returnCreate's response, not here.
     return {
       id:            rf.id,
       fulfillmentId: rf.fulfillment.id,
       lineItems,
-      reverseFulfillmentOrderId,
+      reverseFulfillmentOrderId: null,
     }
   })
 }
@@ -3551,6 +3528,8 @@ export interface CreateReturnInput {
 export interface CreateReturnResult {
   returnId:                  string
   reverseFulfillmentOrderId: string | null
+  /** Map of fulfillmentLineItem.id → reverseFulfillmentOrderLineItem.id for this return. */
+  fliToRfoLineItemId: Record<string, string>
 }
 
 /**
@@ -3564,7 +3543,21 @@ export async function createReturn(
     returnCreate: {
       return: {
         id: string
-        reverseFulfillmentOrders: { edges: { node: { id: string } }[] }
+        reverseFulfillmentOrders: {
+          edges: {
+            node: {
+              id: string
+              lineItems: {
+                edges: {
+                  node: {
+                    id: string
+                    fulfillmentLineItem: { id: string }
+                  }
+                }[]
+              }
+            }
+          }[]
+        }
       } | null
       userErrors: { field: string[] | null; message: string }[]
     }
@@ -3574,7 +3567,19 @@ export async function createReturn(
         return {
           id
           reverseFulfillmentOrders(first: 1) {
-            edges { node { id } }
+            edges {
+              node {
+                id
+                lineItems(first: 50) {
+                  edges {
+                    node {
+                      id
+                      fulfillmentLineItem { id }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
         userErrors { field message }
@@ -3597,100 +3602,92 @@ export async function createReturn(
   if (err) return { ok: false, error: err.message }
   if (!data.returnCreate.return) return { ok: false, error: 'returnCreate returned no return' }
 
+  const rfoNode = data.returnCreate.return.reverseFulfillmentOrders.edges[0]?.node
+  const fliToRfoLineItemId: Record<string, string> = {}
+  for (const { node: li } of rfoNode?.lineItems.edges ?? []) {
+    fliToRfoLineItemId[li.fulfillmentLineItem.id] = li.id
+  }
+
   return {
     ok: true,
     data: {
       returnId:                  data.returnCreate.return.id,
-      reverseFulfillmentOrderId: data.returnCreate.return.reverseFulfillmentOrders.edges[0]?.node.id ?? null,
+      reverseFulfillmentOrderId: rfoNode?.id ?? null,
+      fliToRfoLineItemId,
     },
   }
 }
 
-export interface BuyReturnLabelInput {
+export interface RegisterReverseDeliveryInput {
   reverseFulfillmentOrderId: string
   reverseDeliveryLineItems: Array<{
-    fulfillmentLineItemId: string
-    quantity:              number
+    /** reverseFulfillmentOrderLineItem.id — NOT fulfillmentLineItem.id */
+    reverseFulfillmentOrderLineItemId: string
+    quantity:                          number
   }>
-  /** Parcel for label pricing. Dims in inches, weight in ounces. */
-  parcel: {
-    lengthIn: number
-    widthIn:  number
-    heightIn: number
-    weightOz: number
-  }
+  /** URL of the EasyPost-purchased label PDF. */
+  labelFileUrl: string
+  /** Carrier tracking number from EasyPost. */
+  trackingNumber: string
+  /** Public tracking URL from EasyPost. */
+  trackingUrl?: string
+  /** Carrier identifier, e.g. "USPS". */
+  carrierIdentifier?: string
   notifyCustomer?: boolean
 }
 
-export interface BuyReturnLabelResult {
+export interface RegisterReverseDeliveryResult {
   reverseDeliveryId: string
-  labelUrl:          string | null
-  trackingNumber:    string | null
-  trackingUrl:       string | null
-  labelCostCents:    number | null
 }
 
 /**
- * Buy a return label via Shopify Shipping. The warehouse destination is the
- * order's fulfillment origin (Shopify resolves it automatically from the
- * reverseFulfillmentOrder). Label cost is billed on your Shopify invoice.
+ * Register an externally-purchased return label (from EasyPost) with Shopify.
  *
- * Note: Shopify's `reverseDeliveryCreateWithShipping` does not expose a
- * rate-preview primitive; the label price is determined at purchase time.
- * We show the customer an ESTIMATE in the wizard and record the ACTUAL
- * cost after this call returns, then deduct from the refund.
- *
- * The reverseFulfillmentOrderId maps the label to Nalpac's receiving address,
- * which Shopify derives from the location associated with the reverse order.
+ * Shopify's `reverseDeliveryCreateWithShipping` does NOT buy Shopify Shipping
+ * labels via public API — it only records a label file URL and/or tracking
+ * info. We purchase via EasyPost (see app/lib/easypost.server.ts) then call
+ * this to attach the label + tracking to the Shopify return so merchants see
+ * it in the admin and customers see it in their notifications.
  */
-export async function buyReturnLabel(
-  input: BuyReturnLabelInput,
-): Promise<{ ok: true; data: BuyReturnLabelResult } | { ok: false; error: string }> {
-  // TODO(phase-3): wire `labelInput.price` once we verify the exact
-  // `ReverseDeliveryLabelInput` shape against a dev-store test. For now we
-  // let Shopify Shipping auto-rate and read cost back from the response.
+export async function registerReverseDelivery(
+  input: RegisterReverseDeliveryInput,
+): Promise<{ ok: true; data: RegisterReverseDeliveryResult } | { ok: false; error: string }> {
   const data = await adminGraphQL<{
     reverseDeliveryCreateWithShipping: {
-      reverseDelivery: {
-        id: string
-        deliverable: {
-          __typename: string
-          label?: { public_file_url?: string | null; publicFileUrl?: string | null }
-          tracking?: { number?: string | null; url?: string | null }
-        } | null
-      } | null
+      reverseDelivery: { id: string } | null
       userErrors: { field: string[] | null; message: string }[]
     }
   }>(`
     mutation ReverseDeliveryCreateWithShipping(
       $reverseFulfillmentOrderId: ID!
       $reverseDeliveryLineItems: [ReverseDeliveryLineItemInput!]!
+      $labelInput: ReverseDeliveryLabelInput
+      $trackingInput: ReverseDeliveryTrackingInput
       $notifyCustomer: Boolean
     ) {
       reverseDeliveryCreateWithShipping(
         reverseFulfillmentOrderId: $reverseFulfillmentOrderId
         reverseDeliveryLineItems: $reverseDeliveryLineItems
+        labelInput: $labelInput
+        trackingInput: $trackingInput
         notifyCustomer: $notifyCustomer
       ) {
-        reverseDelivery {
-          id
-          deliverable {
-            __typename
-            ... on ReverseDeliveryShippingDeliverable {
-              label { publicFileUrl }
-              tracking { number url }
-            }
-          }
-        }
+        reverseDelivery { id }
         userErrors { field message }
       }
     }
   `, {
     reverseFulfillmentOrderId: input.reverseFulfillmentOrderId,
     reverseDeliveryLineItems: input.reverseDeliveryLineItems.map(li => ({
-      reverseFulfillmentOrderLineItemId: li.fulfillmentLineItemId,
+      reverseFulfillmentOrderLineItemId: li.reverseFulfillmentOrderLineItemId,
       quantity: li.quantity,
     })),
+    labelInput: { fileUrl: input.labelFileUrl },
+    trackingInput: {
+      number: input.trackingNumber,
+      ...(input.trackingUrl ? { url: input.trackingUrl } : {}),
+      ...(input.carrierIdentifier ? { carrierIdentifier: input.carrierIdentifier } : {}),
+    },
     notifyCustomer: input.notifyCustomer ?? false,
   })
 
@@ -3700,24 +3697,7 @@ export async function buyReturnLabel(
   const rd = data.reverseDeliveryCreateWithShipping.reverseDelivery
   if (!rd) return { ok: false, error: 'reverseDeliveryCreateWithShipping returned no delivery' }
 
-  const label = rd.deliverable?.label
-  const tracking = rd.deliverable?.tracking
-  return {
-    ok: true,
-    data: {
-      reverseDeliveryId: rd.id,
-      labelUrl:          label?.publicFileUrl ?? label?.public_file_url ?? null,
-      trackingNumber:    tracking?.number ?? null,
-      trackingUrl:       tracking?.url ?? null,
-      // Shopify Admin GraphQL (2024-10) does not expose the purchased label's
-      // price on `ReverseDeliveryShippingDeliverable` — cost is only visible
-      // via the Shopify Shipping invoice. We keep the pre-purchase estimate
-      // authoritative for the refund-minus-label calculation. If/when Shopify
-      // exposes `shippingLabel.totalPriceSet` on reverse deliveries, wire it
-      // here and overwrite `labelCostCents` in returns.server.ts.
-      labelCostCents:    null,
-    },
-  }
+  return { ok: true, data: { reverseDeliveryId: rd.id } }
 }
 
 export interface CreateRefundInput {
