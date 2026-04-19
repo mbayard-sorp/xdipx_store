@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useLocation } from 'react-router'
+import { Link, useFetcher, useLocation } from 'react-router'
 import { AnimatePresence, motion } from 'motion/react'
 import { CartDrawer } from '~/components/store/CartDrawer'
 import { DesktopMegaMenu, MobileMegaMenu } from '~/components/store/MegaMenu'
@@ -9,8 +9,6 @@ import type { MegaMenuBanner } from '~/types/cms'
 import type { ShopifyMenuItem } from '~/lib/shopify.server'
 
 interface NavbarProps {
-  cart?: Cart | null
-  cartCount?: number
   logoUrl?: string | undefined
   logoAlt?: string
   isCustomerLoggedIn?: boolean
@@ -22,7 +20,16 @@ interface NavbarProps {
 }
 
 
-export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx', isCustomerLoggedIn = false, customerFirstName, menuItems = [], megaMenuBanners = [], upsells = [], wishlistCount = 0 }: NavbarProps) {
+export function Navbar({ logoUrl, logoAlt = 'xdipx', isCustomerLoggedIn = false, customerFirstName, menuItems = [], megaMenuBanners = [], upsells = [], wishlistCount = 0 }: NavbarProps) {
+  // Cart is loaded per-user via fetcher (keeps parent HTML/data edge-cacheable).
+  const cartFetcher = useFetcher<{ cart: Cart | null }>()
+  const cart: Cart | null = cartFetcher.data?.cart ?? null
+  const cartCount = cart?.totalQuantity ?? 0
+  useEffect(() => {
+    if (cartFetcher.state === 'idle' && cartFetcher.data === undefined) {
+      cartFetcher.load('/api/cart')
+    }
+  }, [cartFetcher])
   const location = useLocation()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [cartOpen,   setCartOpen]   = useState(false)
@@ -36,13 +43,21 @@ export function Navbar({ cart = null, cartCount = 0, logoUrl, logoAlt = 'xdipx',
   // Open cart drawer whenever any part of the site signals an item was added,
   // then auto-close after 3 seconds if the user hasn't hovered into it.
   useEffect(() => {
-    const handler = () => {
+    const onAdded = () => {
+      cartFetcher.load('/api/cart')
       openCart()
       if (autoCloseTimerRef.current) clearTimeout(autoCloseTimerRef.current)
       autoCloseTimerRef.current = setTimeout(() => setCartOpen(false), 3000)
     }
-    window.addEventListener('xdipx:cart-added', handler)
-    return () => window.removeEventListener('xdipx:cart-added', handler)
+    const onUpdated = () => {
+      cartFetcher.load('/api/cart')
+    }
+    window.addEventListener('xdipx:cart-added',   onAdded)
+    window.addEventListener('xdipx:cart-updated', onUpdated)
+    return () => {
+      window.removeEventListener('xdipx:cart-added',   onAdded)
+      window.removeEventListener('xdipx:cart-updated', onUpdated)
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

@@ -36,7 +36,28 @@ async function kvSet(key, value, _exSeconds) {
   }
   memStore.set(key, value);
 }
-var _kv, _g, memStore, KV_KEYS;
+async function cached(key, ttlSeconds, fn) {
+  const ttlMs = ttlSeconds * 1e3;
+  const now = Date.now();
+  const l1 = readCache.get(key);
+  if (l1 && now - l1.ts < ttlMs) return l1.data;
+  const l2 = await kvGet(key);
+  if (l2 && now - l2.ts < ttlMs) {
+    readCache.set(key, l2);
+    return l2.data;
+  }
+  const data = await fn();
+  const entry = { data, ts: now };
+  readCache.set(key, entry);
+  await kvSet(key, entry, ttlSeconds + 60);
+  return data;
+}
+function invalidateCache(prefix) {
+  for (const k of readCache.keys()) {
+    if (k.startsWith(prefix)) readCache.delete(k);
+  }
+}
+var _kv, _g, memStore, _g2, readCache, KV_KEYS;
 var init_kv_server = __esm({
   "app/lib/kv.server.ts"() {
     "use strict";
@@ -44,6 +65,9 @@ var init_kv_server = __esm({
     _g = globalThis;
     if (!_g.__kvMemStore) _g.__kvMemStore = /* @__PURE__ */ new Map();
     memStore = _g.__kvMemStore;
+    _g2 = globalThis;
+    if (!_g2.__readCache) _g2.__readCache = /* @__PURE__ */ new Map();
+    readCache = _g2.__readCache;
     KV_KEYS = {
       feedCache: "nalpac:feed:cache",
       feedCacheTimestamp: "nalpac:feed:timestamp",
@@ -77,6 +101,7 @@ __export(schema_exports, {
   pipelineSettings: () => pipelineSettings,
   productCopurchase: () => productCopurchase,
   referrals: () => referrals,
+  returns: () => returns,
   smsAgeConsent: () => smsAgeConsent,
   smsMessages: () => smsMessages,
   smsOptouts: () => smsOptouts,
@@ -101,7 +126,7 @@ import {
   uniqueIndex,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, productCopurchase;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, productCopurchase;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -335,6 +360,35 @@ var init_schema = __esm({
       phoneIdx: index("draft_orders_phone_idx").on(t.phone, t.createdAt),
       createdIdx: index("draft_orders_created_idx").on(t.createdAt)
     }));
+    returns = pgTable("returns", {
+      id: serial("id").primaryKey(),
+      shopifyReturnId: varchar("shopify_return_id", { length: 60 }).notNull(),
+      shopifyOrderId: varchar("shopify_order_id", { length: 60 }).notNull(),
+      customerGid: varchar("customer_gid", { length: 60 }).notNull(),
+      status: varchar("status", { length: 20 }).default("requested").notNull(),
+      reason: varchar("reason", { length: 40 }),
+      reasonNote: text("reason_note"),
+      lineItems: json("line_items").$type().notNull(),
+      shopifyReverseDeliveryId: varchar("shopify_reverse_delivery_id", { length: 60 }),
+      labelUrl: text("label_url"),
+      labelCostCents: integer("label_cost_cents"),
+      labelCostEstimatedCents: integer("label_cost_estimated_cents"),
+      trackingNumber: varchar("tracking_number", { length: 60 }),
+      trackingStatus: varchar("tracking_status", { length: 40 }),
+      refundAmountCents: integer("refund_amount_cents"),
+      shopifyRefundId: varchar("shopify_refund_id", { length: 60 }),
+      createdAt: timestamp("created_at").defaultNow().notNull(),
+      updatedAt: timestamp("updated_at").defaultNow().notNull(),
+      labelPurchasedAt: timestamp("label_purchased_at"),
+      receivedAt: timestamp("received_at"),
+      refundedAt: timestamp("refunded_at"),
+      closedAt: timestamp("closed_at")
+    }, (t) => ({
+      shopifyReturnUq: uniqueIndex("returns_shopify_return_uniq").on(t.shopifyReturnId),
+      customerIdx: index("returns_customer_idx").on(t.customerGid, t.createdAt),
+      orderIdx: index("returns_order_idx").on(t.shopifyOrderId),
+      statusIdx: index("returns_status_idx").on(t.status)
+    }));
     productCopurchase = pgTable("product_copurchase", {
       id: serial("id").primaryKey(),
       handleA: varchar("handle_a", { length: 255 }).notNull(),
@@ -375,10 +429,13 @@ __export(shopify_server_exports, {
   associateImageWithVariant: () => associateImageWithVariant,
   attachVideoToProduct: () => attachVideoToProduct,
   cartBuyerIdentityUpdate: () => cartBuyerIdentityUpdate,
+  closeReturn: () => closeReturn,
   createCart: () => createCart,
   createCustomerAccessToken: () => createCustomerAccessToken,
   createDraftOrder: () => createDraftOrder,
   createDraftProduct: () => createDraftProduct,
+  createRefund: () => createRefund,
+  createReturn: () => createReturn,
   createShopifyProductFromFeed: () => createShopifyProductFromFeed,
   createShopifyProductWithVariants: () => createShopifyProductWithVariants,
   createStagedVideoUpload: () => createStagedVideoUpload,
@@ -423,6 +480,8 @@ __export(shopify_server_exports, {
   getProductsByIds: () => getProductsByIds,
   getProductsByTag: () => getProductsByTag,
   getRecentVaultDeals: () => getRecentVaultDeals,
+  getReturn: () => getReturn,
+  getReturnableFulfillments: () => getReturnableFulfillments,
   getShopifyCollections: () => getShopifyCollections,
   getStorefrontCollections: () => getStorefrontCollections,
   getStorefrontCustomer: () => getStorefrontCustomer,
@@ -433,6 +492,7 @@ __export(shopify_server_exports, {
   pollMediaReady: () => pollMediaReady,
   predictiveSearch: () => predictiveSearch,
   pushProductToShopify: () => pushProductToShopify,
+  registerReverseDelivery: () => registerReverseDelivery,
   removeFromCart: () => removeFromCart,
   reorderProductImages: () => reorderProductImages,
   searchAdminProducts: () => searchAdminProducts,
@@ -677,13 +737,15 @@ async function getApprovedDeal() {
   return nodeToDeal(data.product);
 }
 async function getProductByHandle(handle) {
-  const data = await storefront(`
-    query GetProduct($handle: String!) {
-      product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
-    }
-  `, { handle });
-  if (!data.product) return null;
-  return nodeToProduct(data.product);
+  return cached(`shopify:p:${handle}`, READ_TTL, async () => {
+    const data = await storefront(`
+      query GetProduct($handle: String!) {
+        product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
+      }
+    `, { handle });
+    if (!data.product) return null;
+    return nodeToProduct(data.product);
+  });
 }
 async function getDealByShopifyId(numericId) {
   const id = numericId.replace("gid://shopify/Product/", "");
@@ -803,26 +865,30 @@ async function getProductsByIds(ids) {
   return (data.nodes ?? []).filter((n) => n.__typename === "Product").map((n) => nodeToProduct(n));
 }
 async function getProductsByTag(tag, limit = 6) {
-  const data = await storefront(`
-    query GetProductsByTag($query: String!, $first: Int!) {
-      products(first: $first, query: $query) {
-        edges { node { ${PRODUCT_CORE_FRAGMENT} } }
-      }
-    }
-  `, { query: `tag:${tag}`, first: limit });
-  return data.products.edges.map((e) => nodeToProduct(e.node));
-}
-async function getCollectionProducts(handle, limit = 8) {
-  const data = await storefront(`
-    query GetCollectionProducts($handle: String!, $first: Int!) {
-      collection(handle: $handle) {
-        products(first: $first, sortKey: MANUAL) {
+  return cached(`shopify:tag:${tag}:${limit}`, READ_TTL, async () => {
+    const data = await storefront(`
+      query GetProductsByTag($query: String!, $first: Int!) {
+        products(first: $first, query: $query) {
           edges { node { ${PRODUCT_CORE_FRAGMENT} } }
         }
       }
-    }
-  `, { handle, first: limit });
-  return (data.collection?.products.edges ?? []).map((e) => nodeToProduct(e.node));
+    `, { query: `tag:${tag}`, first: limit });
+    return data.products.edges.map((e) => nodeToProduct(e.node));
+  });
+}
+async function getCollectionProducts(handle, limit = 8) {
+  return cached(`shopify:col:${handle}:${limit}`, READ_TTL, async () => {
+    const data = await storefront(`
+      query GetCollectionProducts($handle: String!, $first: Int!) {
+        collection(handle: $handle) {
+          products(first: $first, sortKey: MANUAL) {
+            edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+          }
+        }
+      }
+    `, { handle, first: limit });
+    return (data.collection?.products.edges ?? []).map((e) => nodeToProduct(e.node));
+  });
 }
 async function getProductsByHandles(handles) {
   if (handles.length === 0) return [];
@@ -830,18 +896,20 @@ async function getProductsByHandles(handles) {
   return results.filter((p) => p !== null);
 }
 async function getBonusDeal() {
-  const data = await storefront(`
-    query GetBonusDeal {
-      collection(handle: "bonus-deal") {
-        products(first: 1) {
-          edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+  return cached("shopify:bonus-deal", READ_TTL, async () => {
+    const data = await storefront(`
+      query GetBonusDeal {
+        collection(handle: "bonus-deal") {
+          products(first: 1) {
+            edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+          }
         }
       }
-    }
-  `);
-  const node = data.collection?.products.edges[0]?.node;
-  if (!node) return null;
-  return nodeToProduct(node);
+    `);
+    const node = data.collection?.products.edges[0]?.node;
+    if (!node) return null;
+    return nodeToProduct(node);
+  });
 }
 async function getRecentVaultDeals(limit = 7) {
   const data = await storefront(`
@@ -873,9 +941,9 @@ async function getVaultDeals(page = 1, limit = 20) {
 async function getCollectionDeals(handle, page = 1, limit = 20) {
   let after = null;
   if (page > 1) {
-    const cached = await kvGet(KV_KEYS.collectionCursor(handle, page));
-    if (cached) {
-      after = cached;
+    const cached2 = await kvGet(KV_KEYS.collectionCursor(handle, page));
+    if (cached2) {
+      after = cached2;
     } else {
       for (let p = 1; p < page; p++) {
         const skip = await storefront(`
@@ -911,25 +979,27 @@ async function getCollectionDeals(handle, page = 1, limit = 20) {
   };
 }
 async function getMainMenu() {
-  const data = await storefront(`
-    query GetMenu {
-      menu(handle: "main-menu") {
-        items {
-          title
-          url
+  return cached("shopify:menu:main-menu", 300, async () => {
+    const data = await storefront(`
+      query GetMenu {
+        menu(handle: "main-menu") {
           items {
             title
             url
             items {
               title
               url
+              items {
+                title
+                url
+              }
             }
           }
         }
       }
-    }
-  `);
-  return data.menu?.items ?? [];
+    `);
+    return data.menu?.items ?? [];
+  });
 }
 async function getShopifyCollections() {
   const data = await adminGraphQL(`
@@ -959,9 +1029,12 @@ async function getShopifyCollections() {
 }
 async function getAccessoryProducts(ids) {
   if (!ids.length) return [];
-  const queries = ids.map((id, i) => `p${i}: product(id: "${id}") { ${PRODUCT_CORE_FRAGMENT} }`).join("\n");
-  const data = await storefront(`query { ${queries} }`);
-  return Object.values(data).filter((n) => n !== null).map((n) => nodeToProduct(n));
+  const sortedKey = [...ids].sort().join(",");
+  return cached(`shopify:acc:${sortedKey}`, READ_TTL, async () => {
+    const queries = ids.map((id, i) => `p${i}: product(id: "${id}") { ${PRODUCT_CORE_FRAGMENT} }`).join("\n");
+    const data = await storefront(`query { ${queries} }`);
+    return Object.values(data).filter((n) => n !== null).map((n) => nodeToProduct(n));
+  });
 }
 async function searchAdminProducts(query, limit = 20) {
   const gqlQuery = query.trim() ? `title:*${query.trim()}*` : "status:active";
@@ -2359,6 +2432,229 @@ async function searchProducts(params) {
     pageInfo: data.search.pageInfo
   };
 }
+async function getReturnableFulfillments(orderId) {
+  const data = await adminGraphQL(`
+    query ReturnableFulfillments($orderId: ID!) {
+      returnableFulfillments(first: 10, orderId: $orderId) {
+        edges {
+          node {
+            id
+            fulfillment { id }
+            returnableFulfillmentLineItems(first: 50) {
+              edges {
+                node {
+                  quantity
+                  fulfillmentLineItem {
+                    id
+                    lineItem {
+                      id
+                      title
+                      variantTitle
+                      image { url }
+                      originalUnitPriceSet { shopMoney { amount currencyCode } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `, { orderId });
+  return data.returnableFulfillments.edges.map(({ node: rf }) => {
+    const lineItems = rf.returnableFulfillmentLineItems.edges.map(
+      ({ node: rfli }) => ({
+        fulfillmentLineItemId: rfli.fulfillmentLineItem.id,
+        orderLineItemId: rfli.fulfillmentLineItem.lineItem.id,
+        quantity: rfli.quantity,
+        title: rfli.fulfillmentLineItem.lineItem.title,
+        variantTitle: rfli.fulfillmentLineItem.lineItem.variantTitle,
+        imageUrl: rfli.fulfillmentLineItem.lineItem.image?.url ?? null,
+        unitPrice: {
+          amount: rfli.fulfillmentLineItem.lineItem.originalUnitPriceSet.shopMoney.amount,
+          currencyCode: rfli.fulfillmentLineItem.lineItem.originalUnitPriceSet.shopMoney.currencyCode
+        }
+      })
+    );
+    return {
+      id: rf.id,
+      fulfillmentId: rf.fulfillment.id,
+      lineItems,
+      reverseFulfillmentOrderId: null
+    };
+  });
+}
+async function createReturn(input) {
+  const data = await adminGraphQL(`
+    mutation ReturnCreate($returnInput: ReturnInput!) {
+      returnCreate(returnInput: $returnInput) {
+        return {
+          id
+          reverseFulfillmentOrders(first: 1) {
+            edges {
+              node {
+                id
+                lineItems(first: 50) {
+                  edges {
+                    node {
+                      id
+                      fulfillmentLineItem { id }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `, {
+    returnInput: {
+      orderId: input.orderId,
+      returnLineItems: input.lineItems.map((li) => ({
+        fulfillmentLineItemId: li.fulfillmentLineItemId,
+        quantity: li.quantity,
+        returnReason: li.returnReason,
+        returnReasonNote: li.returnReasonNote ?? ""
+      })),
+      notifyCustomer: input.notifyCustomer ?? false
+    }
+  });
+  const err = data.returnCreate.userErrors[0];
+  if (err) return { ok: false, error: err.message };
+  if (!data.returnCreate.return) return { ok: false, error: "returnCreate returned no return" };
+  const rfoNode = data.returnCreate.return.reverseFulfillmentOrders.edges[0]?.node;
+  const fliToRfoLineItemId = {};
+  for (const { node: li } of rfoNode?.lineItems.edges ?? []) {
+    fliToRfoLineItemId[li.fulfillmentLineItem.id] = li.id;
+  }
+  return {
+    ok: true,
+    data: {
+      returnId: data.returnCreate.return.id,
+      reverseFulfillmentOrderId: rfoNode?.id ?? null,
+      fliToRfoLineItemId
+    }
+  };
+}
+async function registerReverseDelivery(input) {
+  const data = await adminGraphQL(`
+    mutation ReverseDeliveryCreateWithShipping(
+      $reverseFulfillmentOrderId: ID!
+      $reverseDeliveryLineItems: [ReverseDeliveryLineItemInput!]!
+      $labelInput: ReverseDeliveryLabelInput
+      $trackingInput: ReverseDeliveryTrackingInput
+      $notifyCustomer: Boolean
+    ) {
+      reverseDeliveryCreateWithShipping(
+        reverseFulfillmentOrderId: $reverseFulfillmentOrderId
+        reverseDeliveryLineItems: $reverseDeliveryLineItems
+        labelInput: $labelInput
+        trackingInput: $trackingInput
+        notifyCustomer: $notifyCustomer
+      ) {
+        reverseDelivery { id }
+        userErrors { field message }
+      }
+    }
+  `, {
+    reverseFulfillmentOrderId: input.reverseFulfillmentOrderId,
+    reverseDeliveryLineItems: input.reverseDeliveryLineItems.map((li) => ({
+      reverseFulfillmentOrderLineItemId: li.reverseFulfillmentOrderLineItemId,
+      quantity: li.quantity
+    })),
+    labelInput: { fileUrl: input.labelFileUrl },
+    trackingInput: {
+      number: input.trackingNumber,
+      ...input.trackingUrl ? { url: input.trackingUrl } : {},
+      ...input.carrierIdentifier ? { carrierIdentifier: input.carrierIdentifier } : {}
+    },
+    notifyCustomer: input.notifyCustomer ?? false
+  });
+  const err = data.reverseDeliveryCreateWithShipping.userErrors[0];
+  if (err) return { ok: false, error: err.message };
+  const rd = data.reverseDeliveryCreateWithShipping.reverseDelivery;
+  if (!rd) return { ok: false, error: "reverseDeliveryCreateWithShipping returned no delivery" };
+  return { ok: true, data: { reverseDeliveryId: rd.id } };
+}
+async function createRefund(input) {
+  const data = await adminGraphQL(`
+    mutation RefundCreate($input: RefundInput!) {
+      refundCreate(input: $input) {
+        refund { id }
+        userErrors { field message }
+      }
+    }
+  `, {
+    input: {
+      orderId: input.orderId,
+      note: input.note ?? "xdipx self-service return",
+      notify: input.notify ?? true,
+      currency: input.currencyCode,
+      refundLineItems: input.refundLineItems.map((li) => ({
+        lineItemId: li.lineItemId,
+        quantity: li.quantity,
+        restockType: li.restockType ?? "RETURN",
+        ...li.locationId ? { locationId: li.locationId } : {}
+      })),
+      ...input.shippingAmount != null ? { shipping: { amount: input.shippingAmount.toFixed(2) } } : {}
+    }
+  });
+  const err = data.refundCreate.userErrors[0];
+  if (err) return { ok: false, error: err.message };
+  if (!data.refundCreate.refund) return { ok: false, error: "refundCreate returned no refund" };
+  return { ok: true, refundId: data.refundCreate.refund.id };
+}
+async function closeReturn(returnId) {
+  const data = await adminGraphQL(`
+    mutation ReturnClose($id: ID!) {
+      returnClose(id: $id) {
+        return { id status }
+        userErrors { field message }
+      }
+    }
+  `, { id: returnId });
+  const err = data.returnClose.userErrors[0];
+  if (err) return { ok: false, error: err.message };
+  return { ok: true };
+}
+async function getReturn(returnId) {
+  const data = await adminGraphQL(`
+    query GetReturn($id: ID!) {
+      return(id: $id) {
+        id
+        status
+        reverseDeliveries(first: 5) {
+          edges {
+            node {
+              id
+              deliverable {
+                __typename
+                ... on ReverseDeliveryShippingDeliverable {
+                  tracking { number url }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `, { id: returnId });
+  if (!data.return) return null;
+  return {
+    id: data.return.id,
+    status: data.return.status,
+    reverseDeliveries: data.return.reverseDeliveries.edges.map(({ node }) => ({
+      id: node.id,
+      trackingNumber: node.deliverable?.tracking?.number ?? null,
+      trackingUrl: node.deliverable?.tracking?.url ?? null,
+      deliveredAt: null
+      // Shopify exposes delivery state via webhook, not query
+    }))
+  };
+}
 async function getStorefrontCollections(first = 50) {
   const data = await storefront(`
     query GetStorefrontCollections($first: Int!) {
@@ -2467,11 +2763,12 @@ async function sendDraftOrderInvoice(draftOrderId, opts) {
   }
   return { invoiceUrl: res.draftOrderInvoiceSend.draftOrder?.invoiceUrl ?? null };
 }
-var COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT;
+var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
     "use strict";
     init_kv_server();
+    READ_TTL = 60;
     COLLECTION_CURSOR_TTL = 300;
     STOREFRONT_ENDPOINT = `https://${process.env["SHOPIFY_STORE_DOMAIN"]}/api/2024-10/graphql.json`;
     ADMIN_ENDPOINT = `https://${process.env["SHOPIFY_STORE_DOMAIN"]}/admin/api/2024-10`;
@@ -4173,17 +4470,18 @@ function isPreviewRequest(request) {
 }
 async function getHomepageSections(preview = false) {
   if (!projectId) return null;
-  if (!preview && _cache && Date.now() - _cache.ts < 6e4) return _cache.data;
-  try {
-    const client2 = getClient(false, preview);
-    if (!client2) return null;
-    const data = await client2.fetch(HOMEPAGE_GROQ);
-    if (data && !preview) _cache = { data, ts: Date.now() };
-    return data ?? null;
-  } catch (err) {
-    console.error("[sanity] getHomepageSections error:", err);
-    return _cache?.data ?? null;
-  }
+  const fetcher = async () => {
+    try {
+      const client2 = getClient(false, preview);
+      if (!client2) return null;
+      return await client2.fetch(HOMEPAGE_GROQ) ?? null;
+    } catch (err) {
+      console.error("[sanity] getHomepageSections error:", err);
+      return null;
+    }
+  };
+  if (preview) return fetcher();
+  return cached("sanity:homepage", 60, fetcher);
 }
 async function upsertAnnouncementBar(messages) {
   const client2 = getClient(true);
@@ -4192,7 +4490,7 @@ async function upsertAnnouncementBar(messages) {
   await client2.patch("singleton.homepage").setIfMissing({ sections: [] }).set({
     'sections[_type=="announcementBar"].messages': messages
   }).commit();
-  _cache = null;
+  invalidateCache("sanity:homepage");
 }
 async function addCmsBlock(block) {
   const client2 = getClient(true);
@@ -4200,7 +4498,7 @@ async function addCmsBlock(block) {
   const key = `${block._type}-${Date.now()}`;
   await client2.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
   await client2.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{ ...block, _key: key }]).commit();
-  _cache = null;
+  invalidateCache("sanity:homepage");
 }
 async function updateCmsBlock(key, patch) {
   const client2 = getClient(true);
@@ -4210,16 +4508,16 @@ async function updateCmsBlock(key, patch) {
       Object.entries(patch).map(([field, value]) => [`sections[_key=="${key}"].${field}`, value])
     )
   ).commit();
-  _cache = null;
+  invalidateCache("sanity:homepage");
 }
 async function removeCmsBlock(key) {
   const client2 = getClient(true);
   if (!client2) throw new Error("Sanity not configured");
   await client2.patch("singleton.homepage").unset([`sections[_key=="${key}"]`]).commit();
-  _cache = null;
+  invalidateCache("sanity:homepage");
 }
 function invalidateCmsCache() {
-  _cache = null;
+  invalidateCache("sanity:homepage");
 }
 async function uploadImageToSanity(writeClient, imageUrl, filename) {
   if (!writeClient) return null;
@@ -4286,29 +4584,29 @@ async function upsertProductPage(params) {
 }
 async function getSiteSettings() {
   if (!projectId) return null;
-  if (_settingsCache && Date.now() - _settingsCache.ts < 3e5) return _settingsCache.data;
-  try {
-    const client2 = getClient();
-    if (!client2) return null;
-    const data = await client2.fetch(
-      `*[_id == "singleton.siteSettings"][0]{
-        _id,
-        "logoUrl": logo.asset->url,
-        "logoAlt": logo.alt,
-        buyButtonText,
-        "siteBanner": siteBanner{ enabled, link, "imageUrl": image.asset->url, "imageAlt": coalesce(alt, image.alt) },
-        megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
-        socialLinks[],
-        footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
-        footerColumns[] { _key, heading, links[] { _key, label, url } }
-      }`
-    );
-    if (data) _settingsCache = { data, ts: Date.now() };
-    return data ?? null;
-  } catch (err) {
-    console.error("[sanity] getSiteSettings error:", err);
-    return _settingsCache?.data ?? null;
-  }
+  return cached("sanity:site-settings", 300, async () => {
+    try {
+      const client2 = getClient();
+      if (!client2) return null;
+      const data = await client2.fetch(
+        `*[_id == "singleton.siteSettings"][0]{
+          _id,
+          "logoUrl": logo.asset->url,
+          "logoAlt": logo.alt,
+          buyButtonText,
+          "siteBanner": siteBanner{ enabled, link, "imageUrl": image.asset->url, "imageAlt": coalesce(alt, image.alt) },
+          megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
+          socialLinks[],
+          footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
+          footerColumns[] { _key, heading, links[] { _key, label, url } }
+        }`
+      );
+      return data ?? null;
+    } catch (err) {
+      console.error("[sanity] getSiteSettings error:", err);
+      return null;
+    }
+  });
 }
 async function getProductPageBlocks(handle) {
   if (!projectId) return [];
@@ -4409,8 +4707,8 @@ async function getBlogPosts(opts = {}) {
   const start = (page - 1) * perPage;
   const end = start + perPage;
   const cacheKey = `posts:${page}:${perPage}:${opts.category ?? ""}:${opts.featured ?? ""}`;
-  const cached = getCachedBlog(cacheKey, BLOG_CACHE_TTL);
-  if (cached) return cached;
+  const cached2 = getCachedBlog(cacheKey, BLOG_CACHE_TTL);
+  if (cached2) return cached2;
   try {
     const client2 = getClient();
     if (!client2) return { posts: [], total: 0 };
@@ -4448,8 +4746,8 @@ async function getBlogPost(slug, preview = false) {
   if (!projectId) return null;
   const cacheKey = `post:${slug}`;
   if (!preview) {
-    const cached = getCachedBlog(cacheKey, BLOG_CACHE_TTL);
-    if (cached) return cached;
+    const cached2 = getCachedBlog(cacheKey, BLOG_CACHE_TTL);
+    if (cached2) return cached2;
   }
   try {
     const client2 = getClient(false, preview);
@@ -4494,8 +4792,8 @@ async function getBlogPost(slug, preview = false) {
 async function getBlogCategories() {
   if (!projectId) return [];
   const cacheKey = "blogCategories";
-  const cached = getCachedBlog(cacheKey, BLOG_CAT_CACHE_TTL);
-  if (cached) return cached;
+  const cached2 = getCachedBlog(cacheKey, BLOG_CAT_CACHE_TTL);
+  if (cached2) return cached2;
   try {
     const client2 = getClient();
     if (!client2) return [];
@@ -4541,10 +4839,11 @@ async function getProductHandlesForSitemap() {
     return [];
   }
 }
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, _cache, HOMEPAGE_GROQ, _settingsCache, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION;
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, HOMEPAGE_GROQ, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION;
 var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
+    init_kv_server();
     CONTENT_BLOCKS_PROJECTION = `
   _type, _key, active, order,
   // announcementBar
@@ -4587,14 +4886,12 @@ var init_sanity_server = __esm({
     projectId = process.env["SANITY_PROJECT_ID"];
     dataset = process.env["SANITY_DATASET"] ?? "production";
     apiVersion = "2024-10-01";
-    _cache = null;
     HOMEPAGE_GROQ = `
   *[_id == "singleton.homepage"][0]{
     _id,
     "sections": sections[active == true] | order(order asc) { ${CONTENT_BLOCKS_PROJECTION} }
   }
 `;
-    _settingsCache = null;
     _blogCache = /* @__PURE__ */ new Map();
     BLOG_CACHE_TTL = 6e4;
     BLOG_CAT_CACHE_TTL = 3e5;
@@ -4655,8 +4952,8 @@ function cleanDescription(raw) {
   return clean.replace(/\s+/g, " ").trim();
 }
 async function fetchNalpacFeed() {
-  const cached = await kvGet(KV_KEYS.feedCache);
-  if (cached) return cached;
+  const cached2 = await kvGet(KV_KEYS.feedCache);
+  if (cached2) return cached2;
   const feedUrl = await getPipelineSetting("feedUrl") || process.env["NALPAC_FEED_URL"] || "";
   if (!feedUrl) throw new Error("No feed URL configured. Set NALPAC_FEED_URL env var or configure in Admin \u2192 Settings.");
   const res = await fetch(feedUrl);

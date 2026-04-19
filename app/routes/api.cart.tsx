@@ -1,8 +1,17 @@
-import type { ActionFunctionArgs } from 'react-router'
+import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
-import { addToCart, addLinesToCart, createCart, removeFromCart, updateCartLine } from '~/lib/shopify.server'
+import { addToCart, addLinesToCart, createCart, getCart, removeFromCart, updateCartLine } from '~/lib/shopify.server'
 import { getBundleByHandle, bundleCartLines } from '~/lib/bundles.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const cartId = getCartIdFromCookie(request)
+  const cart   = cartId ? await getCart(cartId) : null
+  return Response.json(
+    { cart },
+    { headers: { 'Cache-Control': 'private, no-store' } },
+  )
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   const rl = await checkRateLimit(request, 'cart', 60, 60)
