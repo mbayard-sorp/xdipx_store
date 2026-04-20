@@ -13,7 +13,7 @@ import { Footer }          from '~/components/store/Footer'
 import { CookieConsent }   from '~/components/store/CookieConsent'
 import { Analytics }       from '~/components/store/Analytics'
 import { MobileTabBar }    from '~/components/store/MobileTabBar'
-import { EmmaFab }         from '~/components/store/EmmaFab'
+import { AskEmmaWidget }   from '~/components/store/AskEmmaWidget'
 import { AnnouncementBar } from '~/components/cms/AnnouncementBar'
 import { getHomepageSections, getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
 import { getAccessoryProducts, getMainMenu } from '~/lib/shopify.server'
@@ -58,8 +58,9 @@ export default function StoreLayout() {
   const rootData = useRouteLoaderData<{ ENV?: { GA4_ID?: string } }>('root')
   const ga4Id = rootData?.ENV?.GA4_ID ?? ''
 
-  // Hide mobile shell on PDP (pinned PDP CTA takes the bottom instead) and on
-  // auth-gated / admin routes. Everything else gets the bar + FAB on mobile.
+  // Hide mobile tab bar and Emma widget on PDP (pinned "Dip In" CTA owns the
+  // bottom) and on the checkout flow. Everything else gets both on mobile; on
+  // desktop AskEmmaWidget is always visible via its own internal positioning.
   const isPdp        = pathname.startsWith('/products/')
   const isCheckout   = pathname.startsWith('/checkout-extras')
   const showMobileShell = !isPdp && !isCheckout
@@ -89,7 +90,7 @@ export default function StoreLayout() {
           </main>
           <Footer socialLinks={socialLinks} footerColumns={footerColumns} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} />
           {showMobileShell && <MobileTabBar />}
-          {showMobileShell && <EmmaFab />}
+          {showMobileShell && <AskEmmaWidget />}
           <CookieConsent />
           <Analytics ga4Id={ga4Id} />
 

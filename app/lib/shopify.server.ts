@@ -1099,6 +1099,33 @@ export async function createCart(): Promise<Cart> {
   return rawCartToCart(data.cartCreate.cart)
 }
 
+/**
+ * Create a cart pre-populated with line items and return it.
+ * Used by the chat agent's buildCheckoutLink tool — we can't use `/cart/VAR:QTY`
+ * permalinks because Shopify disables those while the storefront is password-
+ * protected (returns 410). A Storefront-API-created cart works regardless.
+ */
+export async function createCartWithLines(
+  lines: { variantId: string; quantity: number }[],
+): Promise<Cart> {
+  const data = await storefront<{ cartCreate: { cart: RawCart | null; userErrors: { field: string[]; message: string }[] } }>(
+    `mutation CartCreateWithLines($lines: [CartLineInput!]!) {
+       cartCreate(input: { lines: $lines }) {
+         cart { ${CART_FRAGMENT} }
+         userErrors { field message }
+       }
+     }`,
+    {
+      lines: lines.map((l) => ({ merchandiseId: l.variantId, quantity: l.quantity })),
+    },
+  )
+  if (!data.cartCreate.cart) {
+    const msg = data.cartCreate.userErrors?.[0]?.message || 'cart_create_failed'
+    throw new Error(msg)
+  }
+  return rawCartToCart(data.cartCreate.cart)
+}
+
 export async function getCart(cartId: string): Promise<Cart | null> {
   const data = await storefront<{ cart: RawCart | null }>(`
     query GetCart($id: ID!) { cart(id: $id) { ${CART_FRAGMENT} } }
