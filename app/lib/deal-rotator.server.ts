@@ -187,6 +187,16 @@ export async function activateDeal(
       JSON.stringify(copy),
       'json',
     )
+    // Mirror the Emma signature into xdipx.tagline so any surface that still
+    // reads the tagline metafield picks up Emma's voice on activation.
+    if (copy.aside) {
+      await updateProductMetafield(
+        deal.shopifyProductId,
+        'tagline',
+        copy.aside,
+        'single_line_text_field',
+      )
+    }
 
     // Index the pick into Sanity so Emma gets smarter as deals flow.
     // Non-blocking inside the same try — we've already written the source of

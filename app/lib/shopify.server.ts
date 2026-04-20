@@ -561,6 +561,15 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     try { return JSON.parse(raw) as T } catch { return fallback }
   }
 
+  // Emma hero copy (Claude-generated on deal activation). Only populated when
+  // both the variant and headline are present — otherwise we let the route
+  // fall through to the Sanity/default hero copy.
+  const emmaHeroRaw = mfJSON<Partial<import('~/types').EmmaHeroCopy>>('emma_hero', {})
+  const emmaHero = emmaHeroRaw?.headline && emmaHeroRaw?.variant
+    ? (emmaHeroRaw as import('~/types').EmmaHeroCopy)
+    : null
+  const mapRestricted = mfVal('map_restricted') === 'true'
+
   const variant = product.variants[0]
   const gid = `gid://shopify/Product/${product.id}`
 
@@ -595,6 +604,8 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     ...(mfVal('original_description') ? { rawDescription: mfVal('original_description') } : {}),
     ...(mfVal('deal_score') ? { dealScore: parseFloat(mfVal('deal_score')) } : {}),
     ...(mfVal('nalpac_sku') ? { nalpacSku: mfVal('nalpac_sku') } : {}),
+    ...(emmaHero ? { emmaHero } : {}),
+    mapRestricted,
     variantId: variant ? `gid://shopify/ProductVariant/${variant.id}` : '',
     variants: product.variants.map(v => {
       // Reconstruct selectedOptions from option1/option2/option3 + product.options
@@ -1176,6 +1187,15 @@ export async function getVariantCost(variantGid: string): Promise<number | null>
   )
   const cost = parseFloat(inventory_item?.cost ?? '')
   return isNaN(cost) ? null : cost
+}
+
+/** Returns every variant GID for a product. Used to sync pricing across all variants. */
+export async function getProductVariantGids(shopifyProductId: string): Promise<string[]> {
+  const numericId = shopifyProductId.replace('gid://shopify/Product/', '')
+  const { product } = await shopifyAdmin<{
+    product: { variants: { id: number }[] } | null
+  }>(`/products/${numericId}.json?fields=variants`)
+  return (product?.variants ?? []).map(v => `gid://shopify/ProductVariant/${v.id}`)
 }
 
 export async function updateVariantPricing(variantGid: string, price: string, compareAtPrice: string, wholesaleCost?: string): Promise<void> {

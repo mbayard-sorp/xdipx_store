@@ -10,7 +10,7 @@ import {
   getDealByShopifyId, updateProductMetafield,
   getVariantCost, pushProductToShopify, getAccessoryProductsAdmin,
   getProductAdminImages, updateProductTags, fetchAllDealProducts,
-  updateVariantPricing,
+  updateVariantPricing, getProductVariantGids,
 } from '~/lib/shopify.server'
 import type { AdminProductImage } from '~/lib/shopify.server'
 import { generateCopy, generateSEOTitle } from '~/lib/claude.server'
@@ -365,14 +365,35 @@ export async function action({ request }: ActionFunctionArgs) {
       ? parseFloat(vaultPriceOverride).toFixed(2)
       : null
 
+    const dealPriceNum = parseFloat(dealPrice || '0') || 0
+    const msrpNum      = parseFloat(msrp      || '0') || 0
+
     await db.update(dealHistory).set({
-      dealPrice:     (parseFloat(dealPrice     || '0') || 0).toFixed(2),
-      msrp:          (parseFloat(msrp          || '0') || 0).toFixed(2),
+      dealPrice:     dealPriceNum.toFixed(2),
+      msrp:          msrpNum.toFixed(2),
       wholesaleCost: (parseFloat(wholesaleCost || '0') || 0).toFixed(2),
       mapPrice:      (parseFloat(mapPrice      || '0') || 0).toFixed(2),
       pctOffMsrp:    clampedPct.toFixed(2),
       vaultPrice:    vaultVal,
     }).where(eq(dealHistory.shopifyProductId, productId))
+
+    // Push pricing to every Shopify variant so the storefront reflects the
+    // change immediately. Previously this only staged the config in Drizzle
+    // and deferred the push to activateDeal() — mismatch with editorial UX.
+    if (dealPriceNum > 0) {
+      try {
+        const variantGids = await getProductVariantGids(productIdRaw)
+        const compareAt = msrpNum > 0 ? msrpNum.toFixed(2) : ''
+        await Promise.all(
+          variantGids.map(gid =>
+            updateVariantPricing(gid, dealPriceNum.toFixed(2), compareAt),
+          ),
+        )
+      } catch (err) {
+        console.error('[admin/deals] save-pricing variant push failed:', err)
+        return { ok: false, error: err instanceof Error ? err.message : 'Shopify push failed' }
+      }
+    }
 
     return { ok: true }
   }
@@ -624,6 +645,44 @@ function ReadinessChecklist({ deal }: {
         ))}
       </div>
     </div>
+  )
+}
+
+// ─── Emma Hero Regen ────────────────────────────────────────────────────
+
+function EmmaHeroRegen({ productId }: { productId: string }) {
+  const fetcher = useFetcher<{ ok: boolean; error?: string; copy?: { eyebrow: string; headline: string; body: string; aside: string; pullQuote?: string } }>()
+  const busy = fetcher.state !== 'idle'
+  const copy = fetcher.data?.ok ? fetcher.data.copy : null
+  return (
+    <fetcher.Form method="post" action="/api/admin/emma-hero/regenerate" className="space-y-2">
+      <input type="hidden" name="productId" value={productId} />
+      <button
+        type="submit"
+        disabled={busy}
+        className={
+          busy
+            ? 'w-full py-2.5 rounded-xl text-sm font-semibold bg-ink/10 text-ink/40 cursor-not-allowed'
+            : 'w-full py-2.5 rounded-xl text-sm font-semibold bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
+        }
+      >
+        {busy ? 'Regenerating Emma hero…' : '♥ Regenerate Emma hero'}
+      </button>
+      {fetcher.data?.error && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          ⚠ {fetcher.data.error}
+        </p>
+      )}
+      {copy && (
+        <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-2 space-y-1">
+          <p className="uppercase tracking-wide text-ink/50 font-semibold">{copy.eyebrow}</p>
+          <p className="font-bold text-ink">{copy.headline}</p>
+          <p className="text-ink/75">{copy.body}</p>
+          {copy.pullQuote && <p className="italic text-ink/80">“{copy.pullQuote}”</p>}
+          <p className="text-muted font-mono">{copy.aside}</p>
+        </div>
+      )}
+    </fetcher.Form>
   )
 }
 
@@ -1445,6 +1504,9 @@ export default function AdminDealsPage() {
 
                   {/* Tags (editable) */}
                   <TagsEditor deal={editorData.deal} editId={editId!} />
+
+                  {/* Emma hero (Claude-generated voice copy) */}
+                  <EmmaHeroRegen productId={editorData.deal.shopifyProductId} />
 
                   {/* Copy & Content (collapsible) */}
                   <div>

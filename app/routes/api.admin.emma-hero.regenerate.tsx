@@ -22,6 +22,12 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const copy = await generateEmmaHero({ deal, variant })
     await updateProductMetafield(productId, 'emma_hero', JSON.stringify(copy), 'json')
+    // Mirror the Emma signature into xdipx.tagline so anything that still reads
+    // the tagline metafield (PDP header, legacy cards) picks up Emma's voice
+    // automatically.
+    if (copy.aside) {
+      await updateProductMetafield(productId, 'tagline', copy.aside, 'single_line_text_field')
+    }
     return { ok: true, copy }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Generation failed' }

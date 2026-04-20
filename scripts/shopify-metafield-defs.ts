@@ -86,11 +86,13 @@ const DEFS: MetafieldDef[] = [
 ]
 
 const STORE = process.env['SHOPIFY_STORE_DOMAIN']
-const TOKEN = process.env['SHOPIFY_ADMIN_TOKEN']
-const VERSION = process.env['SHOPIFY_ADMIN_API_VERSION'] ?? '2025-01'
+// Match the app's env var (SHOPIFY_ADMIN_ACCESS_TOKEN) and also accept the
+// legacy SHOPIFY_ADMIN_TOKEN name so existing scripts keep working.
+const TOKEN = process.env['SHOPIFY_ADMIN_ACCESS_TOKEN'] ?? process.env['SHOPIFY_ADMIN_TOKEN']
+const VERSION = process.env['SHOPIFY_ADMIN_API_VERSION'] ?? '2024-10'
 
 if (!STORE || !TOKEN) {
-  console.error('ERROR: SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_TOKEN must be set in .env')
+  console.error('ERROR: SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_ACCESS_TOKEN must be set in .env')
   process.exit(1)
 }
 
@@ -118,7 +120,16 @@ async function gql<T>(query: string, variables: Record<string, unknown>): Promis
 const CHECK_QUERY = `
   query CheckDef($ns: String!, $key: String!) {
     metafieldDefinitions(first: 1, namespace: $ns, key: $key, ownerType: PRODUCT) {
-      nodes { id name }
+      nodes { id name access { storefront } }
+    }
+  }
+`
+
+const UPDATE_MUTATION = `
+  mutation UpdateDef($def: MetafieldDefinitionUpdateInput!) {
+    metafieldDefinitionUpdate(definition: $def) {
+      updatedDefinition { id key }
+      userErrors { field message }
     }
   }
 `
@@ -133,12 +144,38 @@ const CREATE_MUTATION = `
 `
 
 async function ensureDef(def: MetafieldDef) {
-  const existing = await gql<{ metafieldDefinitions: { nodes: Array<{ id: string; name: string }> } }>(
-    CHECK_QUERY,
-    { ns: 'xdipx', key: def.key }
-  )
-  if (existing.metafieldDefinitions.nodes.length > 0) {
-    console.log(`  ✓ xdipx.${def.key} — already exists`)
+  const existing = await gql<{
+    metafieldDefinitions: {
+      nodes: Array<{ id: string; name: string; access: { storefront: string | null } }>
+    }
+  }>(CHECK_QUERY, { ns: 'xdipx', key: def.key })
+  const node = existing.metafieldDefinitions.nodes[0]
+  if (node) {
+    if (node.access?.storefront !== 'PUBLIC_READ') {
+      // Patch existing def to grant Storefront API access. Without this, the
+      // Storefront API returns null for the metafield even when a value exists.
+      const updated = await gql<{
+        metafieldDefinitionUpdate: {
+          updatedDefinition: { id: string } | null
+          userErrors: Array<{ field: string[]; message: string }>
+        }
+      }>(UPDATE_MUTATION, {
+        def: {
+          namespace:  'xdipx',
+          key:        def.key,
+          ownerType:  'PRODUCT',
+          access:     { storefront: 'PUBLIC_READ' },
+        },
+      })
+      const errs = updated.metafieldDefinitionUpdate.userErrors
+      if (errs.length > 0) {
+        console.error(`  ✗ xdipx.${def.key} — update failed: ${errs.map(e => e.message).join('; ')}`)
+      } else {
+        console.log(`  ↻ xdipx.${def.key} — granted storefront access`)
+      }
+    } else {
+      console.log(`  ✓ xdipx.${def.key} — already exists`)
+    }
     return
   }
   const created = await gql<{
@@ -155,6 +192,9 @@ async function ensureDef(def: MetafieldDef) {
       type:        def.type,
       ownerType:   'PRODUCT',
       validations: def.validations ?? [],
+      // Expose to Storefront API — without this, storefront queries return null
+      // for the metafield even when a value is set.
+      access: { storefront: 'PUBLIC_READ' },
     },
   })
   const errors = created.metafieldDefinitionCreate.userErrors

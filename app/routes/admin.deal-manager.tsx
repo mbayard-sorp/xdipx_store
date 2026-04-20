@@ -409,45 +409,7 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
           </p>
         )}
       </generateFetcher.Form>
-
-      <EmmaHeroRegen productId={deal.shopifyProductId} />
     </div>
-  )
-}
-
-function EmmaHeroRegen({ productId }: { productId: string }) {
-  const fetcher = useFetcher<{ ok: boolean; error?: string; copy?: { eyebrow: string; headline: string; body: string; aside: string; pullQuote?: string } }>()
-  const busy = fetcher.state !== 'idle'
-  const copy = fetcher.data?.ok ? fetcher.data.copy : null
-  return (
-    <fetcher.Form method="post" action="/api/admin/emma-hero/regenerate" className="mt-3 space-y-2">
-      <input type="hidden" name="productId" value={productId} />
-      <button
-        type="submit"
-        disabled={busy}
-        className={
-          busy
-            ? 'w-full py-2.5 rounded-xl text-sm font-semibold bg-ink/10 text-ink/40 cursor-not-allowed'
-            : 'w-full py-2.5 rounded-xl text-sm font-semibold bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
-        }
-      >
-        {busy ? 'Regenerating Emma hero…' : '♥ Regenerate Emma hero'}
-      </button>
-      {fetcher.data?.error && (
-        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          ⚠ {fetcher.data.error}
-        </p>
-      )}
-      {copy && (
-        <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-2 space-y-1">
-          <p className="uppercase tracking-wide text-ink/50 font-semibold">{copy.eyebrow}</p>
-          <p className="font-bold text-ink">{copy.headline}</p>
-          <p className="text-ink/75">{copy.body}</p>
-          {copy.pullQuote && <p className="italic text-ink/80">“{copy.pullQuote}”</p>}
-          <p className="text-muted font-mono">{copy.aside}</p>
-        </div>
-      )}
-    </fetcher.Form>
   )
 }
 
