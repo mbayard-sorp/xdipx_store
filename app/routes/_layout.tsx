@@ -13,8 +13,7 @@ import { CookieConsent }   from '~/components/store/CookieConsent'
 import { Analytics }       from '~/components/store/Analytics'
 import { AnnouncementBar } from '~/components/cms/AnnouncementBar'
 import { getHomepageSections, getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
-import { getCartIdFromCookie } from '~/lib/cart.server'
-import { getAccessoryProducts, getCart, getMainMenu } from '~/lib/shopify.server'
+import { getAccessoryProducts, getMainMenu } from '~/lib/shopify.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { SessionProvider } from '~/lib/session-context'
 import type { Product } from '~/types'
@@ -22,14 +21,12 @@ import type { AnnouncementBarBlock, MegaMenuBanner, SocialLink, FooterColumn, Si
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const preview  = isPreviewRequest(request)
-  const cartId   = getCartIdFromCookie(request)
   // pinnedIds live in KV and resolve in ~1–5ms — fetch them outside the main
   // Promise.all so we can fan accessories in parallel with everything else.
   const pinnedIds = (await getPinnedAccessoryIds()) ?? []
-  const [cms, settings, cart, menuItems, upsells] = await Promise.all([
+  const [cms, settings, menuItems, upsells] = await Promise.all([
     getHomepageSections(preview),
     getSiteSettings(),
-    cartId ? getCart(cartId) : Promise.resolve(null),
     getMainMenu(),
     pinnedIds.length ? getAccessoryProducts(pinnedIds.slice(0, 4)) : Promise.resolve<Product[]>([]),
   ])
@@ -49,12 +46,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const footerDisclaimer = settings?.footerDisclaimer ?? null
   const buyButtonText = settings?.buyButtonText || 'I Want It ❤️'
   const siteBanner: SiteBannerData | null = settings?.siteBanner ?? null
-  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, cart, menuItems, upsells }
+  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells }
 }
 
 export default function StoreLayout() {
-  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, cart, menuItems, upsells } = useLoaderData<typeof loader>()
-  const cartCount = cart?.totalQuantity ?? 0
+  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells } = useLoaderData<typeof loader>()
 
   return (
     <SessionProvider>
@@ -73,7 +69,7 @@ export default function StoreLayout() {
         )}
 
         {announcementBar && <AnnouncementBar block={announcementBar} />}
-        <Navbar cart={cart ?? null} cartCount={cartCount} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} />
+        <Navbar logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} />
         <SiteBanner banner={siteBanner} />
         <main className="flex-1">
           <Outlet context={{ buyButtonText }} />

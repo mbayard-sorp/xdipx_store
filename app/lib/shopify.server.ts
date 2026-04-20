@@ -1,7 +1,11 @@
 import crypto from 'node:crypto'
 import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore } from '~/types'
 import { toHTML } from '@portabletext/to-html'
-import { kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+import { cached, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+
+// Short TTL for read-through product caches — long enough to dedupe burst
+// traffic, short enough for admin edits to appear on the next page load.
+const READ_TTL = 60
 
 const COLLECTION_CURSOR_TTL = 300 // 5 minutes — collection order is stable short-term
 
@@ -417,13 +421,15 @@ export async function getApprovedDeal(): Promise<Deal | null> {
 }
 
 export async function getProductByHandle(handle: string): Promise<Product | null> {
-  const data = await storefront<{ product: ShopifyProductNode | null }>(`
-    query GetProduct($handle: String!) {
-      product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
-    }
-  `, { handle })
-  if (!data.product) return null
-  return nodeToProduct(data.product)
+  return cached(`shopify:p:${handle}`, READ_TTL, async () => {
+    const data = await storefront<{ product: ShopifyProductNode | null }>(`
+      query GetProduct($handle: String!) {
+        product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
+      }
+    `, { handle })
+    if (!data.product) return null
+    return nodeToProduct(data.product)
+  })
 }
 
 /**
@@ -584,31 +590,35 @@ export async function getProductsByIds(ids: string[]): Promise<Product[]> {
 }
 
 export async function getProductsByTag(tag: string, limit = 6): Promise<Product[]> {
-  const data = await storefront<{
-    products: { edges: { node: ShopifyProductNode }[] }
-  }>(`
-    query GetProductsByTag($query: String!, $first: Int!) {
-      products(first: $first, query: $query) {
-        edges { node { ${PRODUCT_CORE_FRAGMENT} } }
-      }
-    }
-  `, { query: `tag:${tag}`, first: limit })
-  return data.products.edges.map(e => nodeToProduct(e.node))
-}
-
-export async function getCollectionProducts(handle: string, limit = 8): Promise<Product[]> {
-  const data = await storefront<{
-    collection: { products: { edges: { node: ShopifyProductNode }[] } } | null
-  }>(`
-    query GetCollectionProducts($handle: String!, $first: Int!) {
-      collection(handle: $handle) {
-        products(first: $first, sortKey: MANUAL) {
+  return cached(`shopify:tag:${tag}:${limit}`, READ_TTL, async () => {
+    const data = await storefront<{
+      products: { edges: { node: ShopifyProductNode }[] }
+    }>(`
+      query GetProductsByTag($query: String!, $first: Int!) {
+        products(first: $first, query: $query) {
           edges { node { ${PRODUCT_CORE_FRAGMENT} } }
         }
       }
-    }
-  `, { handle, first: limit })
-  return (data.collection?.products.edges ?? []).map(e => nodeToProduct(e.node))
+    `, { query: `tag:${tag}`, first: limit })
+    return data.products.edges.map(e => nodeToProduct(e.node))
+  })
+}
+
+export async function getCollectionProducts(handle: string, limit = 8): Promise<Product[]> {
+  return cached(`shopify:col:${handle}:${limit}`, READ_TTL, async () => {
+    const data = await storefront<{
+      collection: { products: { edges: { node: ShopifyProductNode }[] } } | null
+    }>(`
+      query GetCollectionProducts($handle: String!, $first: Int!) {
+        collection(handle: $handle) {
+          products(first: $first, sortKey: MANUAL) {
+            edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+          }
+        }
+      }
+    `, { handle, first: limit })
+    return (data.collection?.products.edges ?? []).map(e => nodeToProduct(e.node))
+  })
 }
 
 export async function getProductsByHandles(handles: string[]): Promise<Product[]> {
@@ -618,20 +628,22 @@ export async function getProductsByHandles(handles: string[]): Promise<Product[]
 }
 
 export async function getBonusDeal(): Promise<Product | null> {
-  const data = await storefront<{
-    collection: { products: { edges: { node: ShopifyProductNode }[] } } | null
-  }>(`
-    query GetBonusDeal {
-      collection(handle: "bonus-deal") {
-        products(first: 1) {
-          edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+  return cached('shopify:bonus-deal', READ_TTL, async () => {
+    const data = await storefront<{
+      collection: { products: { edges: { node: ShopifyProductNode }[] } } | null
+    }>(`
+      query GetBonusDeal {
+        collection(handle: "bonus-deal") {
+          products(first: 1) {
+            edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+          }
         }
       }
-    }
-  `)
-  const node = data.collection?.products.edges[0]?.node
-  if (!node) return null
-  return nodeToProduct(node)
+    `)
+    const node = data.collection?.products.edges[0]?.node
+    if (!node) return null
+    return nodeToProduct(node)
+  })
 }
 
 export async function getRecentVaultDeals(limit = 7): Promise<VaultDeal[]> {
@@ -742,27 +754,30 @@ export interface ShopifyMenuItem {
 }
 
 export async function getMainMenu(): Promise<ShopifyMenuItem[]> {
-  const data = await storefront<{
-    menu: { items: ShopifyMenuItem[] } | null
-  }>(`
-    query GetMenu {
-      menu(handle: "main-menu") {
-        items {
-          title
-          url
+  // Menu is site-wide — cache longer (5 min). Admin menu edits are rare.
+  return cached('shopify:menu:main-menu', 300, async () => {
+    const data = await storefront<{
+      menu: { items: ShopifyMenuItem[] } | null
+    }>(`
+      query GetMenu {
+        menu(handle: "main-menu") {
           items {
             title
             url
             items {
               title
               url
+              items {
+                title
+                url
+              }
             }
           }
         }
       }
-    }
-  `)
-  return data.menu?.items ?? []
+    `)
+    return data.menu?.items ?? []
+  })
 }
 
 // Fetch all Shopify collections for the admin collection picker.
@@ -817,9 +832,12 @@ export async function getShopifyCollections(): Promise<ShopifyCollectionSummary[
 
 export async function getAccessoryProducts(ids: string[]): Promise<Product[]> {
   if (!ids.length) return []
-  const queries = ids.map((id, i) => `p${i}: product(id: "${id}") { ${PRODUCT_CORE_FRAGMENT} }`).join('\n')
-  const data = await storefront<Record<string, ShopifyProductNode | null>>(`query { ${queries} }`)
-  return Object.values(data).filter((n): n is ShopifyProductNode => n !== null).map(n => nodeToProduct(n))
+  const sortedKey = [...ids].sort().join(',')
+  return cached(`shopify:acc:${sortedKey}`, READ_TTL, async () => {
+    const queries = ids.map((id, i) => `p${i}: product(id: "${id}") { ${PRODUCT_CORE_FRAGMENT} }`).join('\n')
+    const data = await storefront<Record<string, ShopifyProductNode | null>>(`query { ${queries} }`)
+    return Object.values(data).filter((n): n is ShopifyProductNode => n !== null).map(n => nodeToProduct(n))
+  })
 }
 
 // ─── Admin Product Search (for admin pickers) ─────────────────────────────

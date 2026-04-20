@@ -1,5 +1,6 @@
 import { createClient } from '@sanity/client'
 import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage } from '~/types/cms'
+import { cached, invalidateCache } from '~/lib/kv.server'
 
 // Shared field projection reused by homepage + product page queries
 const CONTENT_BLOCKS_PROJECTION = `
@@ -61,9 +62,9 @@ export function isPreviewRequest(request: Request): boolean {
   return cookie.includes('__sanity_preview=1')
 }
 
-// ─── In-memory cache (60s TTL) ────────────────────────────────────────────
-
-let _cache: { data: HomepageSections; ts: number } | null = null
+// ─── Two-tier cache (memory + KV) ─────────────────────────────────────────
+// Uses the shared `cached()` helper so new Fluid Compute instances warm from
+// KV instead of paying the Sanity round-trip on first request.
 
 const HOMEPAGE_GROQ = `
   *[_id == "singleton.homepage"][0]{
@@ -75,19 +76,20 @@ const HOMEPAGE_GROQ = `
 export async function getHomepageSections(preview = false): Promise<HomepageSections | null> {
   if (!projectId) return null
 
-  // Skip cache in preview mode to always serve latest drafts
-  if (!preview && _cache && Date.now() - _cache.ts < 60_000) return _cache.data
-
-  try {
-    const client = getClient(false, preview)
-    if (!client) return null
-    const data = await client.fetch<HomepageSections>(HOMEPAGE_GROQ)
-    if (data && !preview) _cache = { data, ts: Date.now() }
-    return data ?? null
-  } catch (err) {
-    console.error('[sanity] getHomepageSections error:', err)
-    return _cache?.data ?? null
+  const fetcher = async (): Promise<HomepageSections | null> => {
+    try {
+      const client = getClient(false, preview)
+      if (!client) return null
+      return (await client.fetch<HomepageSections>(HOMEPAGE_GROQ)) ?? null
+    } catch (err) {
+      console.error('[sanity] getHomepageSections error:', err)
+      return null
+    }
   }
+
+  // Always serve latest drafts in preview — bypass cache.
+  if (preview) return fetcher()
+  return cached('sanity:homepage', 60, fetcher)
 }
 
 // ─── Mutation helpers (for admin / AI agent use) ──────────────────────────
@@ -103,7 +105,7 @@ export async function upsertAnnouncementBar(messages: AnnouncementMessage[]): Pr
       'sections[_type=="announcementBar"].messages': messages,
     })
     .commit()
-  _cache = null
+  invalidateCache('sanity:homepage')
 }
 
 export async function addCmsBlock(block: Omit<ContentBlock, '_key'>): Promise<void> {
@@ -117,7 +119,7 @@ export async function addCmsBlock(block: Omit<ContentBlock, '_key'>): Promise<vo
     .setIfMissing({ sections: [] })
     .append('sections', [{ ...block, _key: key }])
     .commit()
-  _cache = null
+  invalidateCache('sanity:homepage')
 }
 
 export async function updateCmsBlock(key: string, patch: Record<string, unknown>): Promise<void> {
@@ -133,7 +135,7 @@ export async function updateCmsBlock(key: string, patch: Record<string, unknown>
       )
     )
     .commit()
-  _cache = null
+  invalidateCache('sanity:homepage')
 }
 
 export async function removeCmsBlock(key: string): Promise<void> {
@@ -143,11 +145,11 @@ export async function removeCmsBlock(key: string): Promise<void> {
     .patch('singleton.homepage')
     .unset([`sections[_key=="${key}"]`])
     .commit()
-  _cache = null
+  invalidateCache('sanity:homepage')
 }
 
 export function invalidateCmsCache(): void {
-  _cache = null
+  invalidateCache('sanity:homepage')
 }
 
 // ─── Shopify → Sanity product sync ───────────────────────────────────────────
@@ -254,33 +256,31 @@ export async function upsertProductPage(params: {
 
 // ─── Site Settings ────────────────────────────────────────────────────────────
 
-let _settingsCache: { data: SiteSettings; ts: number } | null = null
-
 export async function getSiteSettings(): Promise<SiteSettings | null> {
   if (!projectId) return null
-  if (_settingsCache && Date.now() - _settingsCache.ts < 300_000) return _settingsCache.data
-  try {
-    const client = getClient()
-    if (!client) return null
-    const data = await client.fetch<SiteSettings>(
-      `*[_id == "singleton.siteSettings"][0]{
-        _id,
-        "logoUrl": logo.asset->url,
-        "logoAlt": logo.alt,
-        buyButtonText,
-        "siteBanner": siteBanner{ enabled, link, "imageUrl": image.asset->url, "imageAlt": coalesce(alt, image.alt) },
-        megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
-        socialLinks[],
-        footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
-        footerColumns[] { _key, heading, links[] { _key, label, url } }
-      }`
-    )
-    if (data) _settingsCache = { data, ts: Date.now() }
-    return data ?? null
-  } catch (err) {
-    console.error('[sanity] getSiteSettings error:', err)
-    return _settingsCache?.data ?? null
-  }
+  return cached('sanity:site-settings', 300, async () => {
+    try {
+      const client = getClient()
+      if (!client) return null
+      const data = await client.fetch<SiteSettings>(
+        `*[_id == "singleton.siteSettings"][0]{
+          _id,
+          "logoUrl": logo.asset->url,
+          "logoAlt": logo.alt,
+          buyButtonText,
+          "siteBanner": siteBanner{ enabled, link, "imageUrl": image.asset->url, "imageAlt": coalesce(alt, image.alt) },
+          megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
+          socialLinks[],
+          footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
+          footerColumns[] { _key, heading, links[] { _key, label, url } }
+        }`
+      )
+      return data ?? null
+    } catch (err) {
+      console.error('[sanity] getSiteSettings error:', err)
+      return null
+    }
+  })
 }
 
 // ─── Product Page Content ─────────────────────────────────────────────────────

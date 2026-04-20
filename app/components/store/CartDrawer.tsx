@@ -181,6 +181,7 @@ function CartLineItem({ line }: { line: CartLine }) {
   const removeFetcher  = useFetcher()
   const updateFetcher  = useFetcher()
   const wasRemoving    = useRef(false)
+  const wasUpdating    = useRef(false)
 
   const isRemoving  = removeFetcher.state !== 'idle'
   const isUpdating  = updateFetcher.state !== 'idle'
@@ -188,7 +189,7 @@ function CartLineItem({ line }: { line: CartLine }) {
   const image       = line.merchandise.product.images[0]
   const variantTitle = line.merchandise.title === 'Default Title' ? null : line.merchandise.title
 
-  // GA4: remove_from_cart on success
+  // GA4: remove_from_cart on success + notify Navbar to refetch cart
   useEffect(() => {
     if (removeFetcher.state === 'submitting') {
       wasRemoving.current = true
@@ -201,8 +202,19 @@ function CartLineItem({ line }: { line: CartLine }) {
         price,
         quantity: line.quantity,
       })
+      window.dispatchEvent(new CustomEvent('xdipx:cart-updated'))
     }
   }, [removeFetcher.state])
+
+  // Notify Navbar to refetch cart after quantity update
+  useEffect(() => {
+    if (updateFetcher.state === 'submitting') {
+      wasUpdating.current = true
+    } else if (updateFetcher.state === 'idle' && wasUpdating.current) {
+      wasUpdating.current = false
+      window.dispatchEvent(new CustomEvent('xdipx:cart-updated'))
+    }
+  }, [updateFetcher.state])
 
   const changeQty = (delta: number) => {
     const newQty = line.quantity + delta

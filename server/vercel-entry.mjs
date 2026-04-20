@@ -36,7 +36,28 @@ async function kvSet(key, value, _exSeconds) {
   }
   memStore.set(key, value);
 }
-var _kv, _g, memStore, KV_KEYS;
+async function cached(key, ttlSeconds, fn) {
+  const ttlMs = ttlSeconds * 1e3;
+  const now = Date.now();
+  const l1 = readCache.get(key);
+  if (l1 && now - l1.ts < ttlMs) return l1.data;
+  const l2 = await kvGet(key);
+  if (l2 && now - l2.ts < ttlMs) {
+    readCache.set(key, l2);
+    return l2.data;
+  }
+  const data = await fn();
+  const entry = { data, ts: now };
+  readCache.set(key, entry);
+  await kvSet(key, entry, ttlSeconds + 60);
+  return data;
+}
+function invalidateCache(prefix) {
+  for (const k of readCache.keys()) {
+    if (k.startsWith(prefix)) readCache.delete(k);
+  }
+}
+var _kv, _g, memStore, _g2, readCache, KV_KEYS;
 var init_kv_server = __esm({
   "app/lib/kv.server.ts"() {
     "use strict";
@@ -44,6 +65,9 @@ var init_kv_server = __esm({
     _g = globalThis;
     if (!_g.__kvMemStore) _g.__kvMemStore = /* @__PURE__ */ new Map();
     memStore = _g.__kvMemStore;
+    _g2 = globalThis;
+    if (!_g2.__readCache) _g2.__readCache = /* @__PURE__ */ new Map();
+    readCache = _g2.__readCache;
     KV_KEYS = {
       feedCache: "nalpac:feed:cache",
       feedCacheTimestamp: "nalpac:feed:timestamp",
@@ -713,13 +737,15 @@ async function getApprovedDeal() {
   return nodeToDeal(data.product);
 }
 async function getProductByHandle(handle) {
-  const data = await storefront(`
-    query GetProduct($handle: String!) {
-      product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
-    }
-  `, { handle });
-  if (!data.product) return null;
-  return nodeToProduct(data.product);
+  return cached(`shopify:p:${handle}`, READ_TTL, async () => {
+    const data = await storefront(`
+      query GetProduct($handle: String!) {
+        product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
+      }
+    `, { handle });
+    if (!data.product) return null;
+    return nodeToProduct(data.product);
+  });
 }
 async function getDealByShopifyId(numericId) {
   const id = numericId.replace("gid://shopify/Product/", "");
@@ -839,26 +865,30 @@ async function getProductsByIds(ids) {
   return (data.nodes ?? []).filter((n) => n.__typename === "Product").map((n) => nodeToProduct(n));
 }
 async function getProductsByTag(tag, limit = 6) {
-  const data = await storefront(`
-    query GetProductsByTag($query: String!, $first: Int!) {
-      products(first: $first, query: $query) {
-        edges { node { ${PRODUCT_CORE_FRAGMENT} } }
-      }
-    }
-  `, { query: `tag:${tag}`, first: limit });
-  return data.products.edges.map((e) => nodeToProduct(e.node));
-}
-async function getCollectionProducts(handle, limit = 8) {
-  const data = await storefront(`
-    query GetCollectionProducts($handle: String!, $first: Int!) {
-      collection(handle: $handle) {
-        products(first: $first, sortKey: MANUAL) {
+  return cached(`shopify:tag:${tag}:${limit}`, READ_TTL, async () => {
+    const data = await storefront(`
+      query GetProductsByTag($query: String!, $first: Int!) {
+        products(first: $first, query: $query) {
           edges { node { ${PRODUCT_CORE_FRAGMENT} } }
         }
       }
-    }
-  `, { handle, first: limit });
-  return (data.collection?.products.edges ?? []).map((e) => nodeToProduct(e.node));
+    `, { query: `tag:${tag}`, first: limit });
+    return data.products.edges.map((e) => nodeToProduct(e.node));
+  });
+}
+async function getCollectionProducts(handle, limit = 8) {
+  return cached(`shopify:col:${handle}:${limit}`, READ_TTL, async () => {
+    const data = await storefront(`
+      query GetCollectionProducts($handle: String!, $first: Int!) {
+        collection(handle: $handle) {
+          products(first: $first, sortKey: MANUAL) {
+            edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+          }
+        }
+      }
+    `, { handle, first: limit });
+    return (data.collection?.products.edges ?? []).map((e) => nodeToProduct(e.node));
+  });
 }
 async function getProductsByHandles(handles) {
   if (handles.length === 0) return [];
@@ -866,18 +896,20 @@ async function getProductsByHandles(handles) {
   return results.filter((p) => p !== null);
 }
 async function getBonusDeal() {
-  const data = await storefront(`
-    query GetBonusDeal {
-      collection(handle: "bonus-deal") {
-        products(first: 1) {
-          edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+  return cached("shopify:bonus-deal", READ_TTL, async () => {
+    const data = await storefront(`
+      query GetBonusDeal {
+        collection(handle: "bonus-deal") {
+          products(first: 1) {
+            edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+          }
         }
       }
-    }
-  `);
-  const node = data.collection?.products.edges[0]?.node;
-  if (!node) return null;
-  return nodeToProduct(node);
+    `);
+    const node = data.collection?.products.edges[0]?.node;
+    if (!node) return null;
+    return nodeToProduct(node);
+  });
 }
 async function getRecentVaultDeals(limit = 7) {
   const data = await storefront(`
@@ -909,9 +941,9 @@ async function getVaultDeals(page = 1, limit = 20) {
 async function getCollectionDeals(handle, page = 1, limit = 20) {
   let after = null;
   if (page > 1) {
-    const cached = await kvGet(KV_KEYS.collectionCursor(handle, page));
-    if (cached) {
-      after = cached;
+    const cached2 = await kvGet(KV_KEYS.collectionCursor(handle, page));
+    if (cached2) {
+      after = cached2;
     } else {
       for (let p = 1; p < page; p++) {
         const skip = await storefront(`
@@ -947,25 +979,27 @@ async function getCollectionDeals(handle, page = 1, limit = 20) {
   };
 }
 async function getMainMenu() {
-  const data = await storefront(`
-    query GetMenu {
-      menu(handle: "main-menu") {
-        items {
-          title
-          url
+  return cached("shopify:menu:main-menu", 300, async () => {
+    const data = await storefront(`
+      query GetMenu {
+        menu(handle: "main-menu") {
           items {
             title
             url
             items {
               title
               url
+              items {
+                title
+                url
+              }
             }
           }
         }
       }
-    }
-  `);
-  return data.menu?.items ?? [];
+    `);
+    return data.menu?.items ?? [];
+  });
 }
 async function getShopifyCollections() {
   const data = await adminGraphQL(`
@@ -995,9 +1029,12 @@ async function getShopifyCollections() {
 }
 async function getAccessoryProducts(ids) {
   if (!ids.length) return [];
-  const queries = ids.map((id, i) => `p${i}: product(id: "${id}") { ${PRODUCT_CORE_FRAGMENT} }`).join("\n");
-  const data = await storefront(`query { ${queries} }`);
-  return Object.values(data).filter((n) => n !== null).map((n) => nodeToProduct(n));
+  const sortedKey = [...ids].sort().join(",");
+  return cached(`shopify:acc:${sortedKey}`, READ_TTL, async () => {
+    const queries = ids.map((id, i) => `p${i}: product(id: "${id}") { ${PRODUCT_CORE_FRAGMENT} }`).join("\n");
+    const data = await storefront(`query { ${queries} }`);
+    return Object.values(data).filter((n) => n !== null).map((n) => nodeToProduct(n));
+  });
 }
 async function searchAdminProducts(query, limit = 20) {
   const gqlQuery = query.trim() ? `title:*${query.trim()}*` : "status:active";
@@ -2726,11 +2763,12 @@ async function sendDraftOrderInvoice(draftOrderId, opts) {
   }
   return { invoiceUrl: res.draftOrderInvoiceSend.draftOrder?.invoiceUrl ?? null };
 }
-var COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT;
+var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
     "use strict";
     init_kv_server();
+    READ_TTL = 60;
     COLLECTION_CURSOR_TTL = 300;
     STOREFRONT_ENDPOINT = `https://${process.env["SHOPIFY_STORE_DOMAIN"]}/api/2024-10/graphql.json`;
     ADMIN_ENDPOINT = `https://${process.env["SHOPIFY_STORE_DOMAIN"]}/admin/api/2024-10`;
@@ -4432,17 +4470,18 @@ function isPreviewRequest(request) {
 }
 async function getHomepageSections(preview = false) {
   if (!projectId) return null;
-  if (!preview && _cache && Date.now() - _cache.ts < 6e4) return _cache.data;
-  try {
-    const client2 = getClient(false, preview);
-    if (!client2) return null;
-    const data = await client2.fetch(HOMEPAGE_GROQ);
-    if (data && !preview) _cache = { data, ts: Date.now() };
-    return data ?? null;
-  } catch (err) {
-    console.error("[sanity] getHomepageSections error:", err);
-    return _cache?.data ?? null;
-  }
+  const fetcher = async () => {
+    try {
+      const client2 = getClient(false, preview);
+      if (!client2) return null;
+      return await client2.fetch(HOMEPAGE_GROQ) ?? null;
+    } catch (err) {
+      console.error("[sanity] getHomepageSections error:", err);
+      return null;
+    }
+  };
+  if (preview) return fetcher();
+  return cached("sanity:homepage", 60, fetcher);
 }
 async function upsertAnnouncementBar(messages) {
   const client2 = getClient(true);
@@ -4451,7 +4490,7 @@ async function upsertAnnouncementBar(messages) {
   await client2.patch("singleton.homepage").setIfMissing({ sections: [] }).set({
     'sections[_type=="announcementBar"].messages': messages
   }).commit();
-  _cache = null;
+  invalidateCache("sanity:homepage");
 }
 async function addCmsBlock(block) {
   const client2 = getClient(true);
@@ -4459,7 +4498,7 @@ async function addCmsBlock(block) {
   const key = `${block._type}-${Date.now()}`;
   await client2.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
   await client2.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{ ...block, _key: key }]).commit();
-  _cache = null;
+  invalidateCache("sanity:homepage");
 }
 async function updateCmsBlock(key, patch) {
   const client2 = getClient(true);
@@ -4469,16 +4508,16 @@ async function updateCmsBlock(key, patch) {
       Object.entries(patch).map(([field, value]) => [`sections[_key=="${key}"].${field}`, value])
     )
   ).commit();
-  _cache = null;
+  invalidateCache("sanity:homepage");
 }
 async function removeCmsBlock(key) {
   const client2 = getClient(true);
   if (!client2) throw new Error("Sanity not configured");
   await client2.patch("singleton.homepage").unset([`sections[_key=="${key}"]`]).commit();
-  _cache = null;
+  invalidateCache("sanity:homepage");
 }
 function invalidateCmsCache() {
-  _cache = null;
+  invalidateCache("sanity:homepage");
 }
 async function uploadImageToSanity(writeClient, imageUrl, filename) {
   if (!writeClient) return null;
@@ -4545,29 +4584,29 @@ async function upsertProductPage(params) {
 }
 async function getSiteSettings() {
   if (!projectId) return null;
-  if (_settingsCache && Date.now() - _settingsCache.ts < 3e5) return _settingsCache.data;
-  try {
-    const client2 = getClient();
-    if (!client2) return null;
-    const data = await client2.fetch(
-      `*[_id == "singleton.siteSettings"][0]{
-        _id,
-        "logoUrl": logo.asset->url,
-        "logoAlt": logo.alt,
-        buyButtonText,
-        "siteBanner": siteBanner{ enabled, link, "imageUrl": image.asset->url, "imageAlt": coalesce(alt, image.alt) },
-        megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
-        socialLinks[],
-        footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
-        footerColumns[] { _key, heading, links[] { _key, label, url } }
-      }`
-    );
-    if (data) _settingsCache = { data, ts: Date.now() };
-    return data ?? null;
-  } catch (err) {
-    console.error("[sanity] getSiteSettings error:", err);
-    return _settingsCache?.data ?? null;
-  }
+  return cached("sanity:site-settings", 300, async () => {
+    try {
+      const client2 = getClient();
+      if (!client2) return null;
+      const data = await client2.fetch(
+        `*[_id == "singleton.siteSettings"][0]{
+          _id,
+          "logoUrl": logo.asset->url,
+          "logoAlt": logo.alt,
+          buyButtonText,
+          "siteBanner": siteBanner{ enabled, link, "imageUrl": image.asset->url, "imageAlt": coalesce(alt, image.alt) },
+          megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
+          socialLinks[],
+          footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
+          footerColumns[] { _key, heading, links[] { _key, label, url } }
+        }`
+      );
+      return data ?? null;
+    } catch (err) {
+      console.error("[sanity] getSiteSettings error:", err);
+      return null;
+    }
+  });
 }
 async function getProductPageBlocks(handle) {
   if (!projectId) return [];
@@ -4668,8 +4707,8 @@ async function getBlogPosts(opts = {}) {
   const start = (page - 1) * perPage;
   const end = start + perPage;
   const cacheKey = `posts:${page}:${perPage}:${opts.category ?? ""}:${opts.featured ?? ""}`;
-  const cached = getCachedBlog(cacheKey, BLOG_CACHE_TTL);
-  if (cached) return cached;
+  const cached2 = getCachedBlog(cacheKey, BLOG_CACHE_TTL);
+  if (cached2) return cached2;
   try {
     const client2 = getClient();
     if (!client2) return { posts: [], total: 0 };
@@ -4707,8 +4746,8 @@ async function getBlogPost(slug, preview = false) {
   if (!projectId) return null;
   const cacheKey = `post:${slug}`;
   if (!preview) {
-    const cached = getCachedBlog(cacheKey, BLOG_CACHE_TTL);
-    if (cached) return cached;
+    const cached2 = getCachedBlog(cacheKey, BLOG_CACHE_TTL);
+    if (cached2) return cached2;
   }
   try {
     const client2 = getClient(false, preview);
@@ -4753,8 +4792,8 @@ async function getBlogPost(slug, preview = false) {
 async function getBlogCategories() {
   if (!projectId) return [];
   const cacheKey = "blogCategories";
-  const cached = getCachedBlog(cacheKey, BLOG_CAT_CACHE_TTL);
-  if (cached) return cached;
+  const cached2 = getCachedBlog(cacheKey, BLOG_CAT_CACHE_TTL);
+  if (cached2) return cached2;
   try {
     const client2 = getClient();
     if (!client2) return [];
@@ -4800,10 +4839,11 @@ async function getProductHandlesForSitemap() {
     return [];
   }
 }
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, _cache, HOMEPAGE_GROQ, _settingsCache, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION;
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, HOMEPAGE_GROQ, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION;
 var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
+    init_kv_server();
     CONTENT_BLOCKS_PROJECTION = `
   _type, _key, active, order,
   // announcementBar
@@ -4846,14 +4886,12 @@ var init_sanity_server = __esm({
     projectId = process.env["SANITY_PROJECT_ID"];
     dataset = process.env["SANITY_DATASET"] ?? "production";
     apiVersion = "2024-10-01";
-    _cache = null;
     HOMEPAGE_GROQ = `
   *[_id == "singleton.homepage"][0]{
     _id,
     "sections": sections[active == true] | order(order asc) { ${CONTENT_BLOCKS_PROJECTION} }
   }
 `;
-    _settingsCache = null;
     _blogCache = /* @__PURE__ */ new Map();
     BLOG_CACHE_TTL = 6e4;
     BLOG_CAT_CACHE_TTL = 3e5;
@@ -4914,8 +4952,8 @@ function cleanDescription(raw) {
   return clean.replace(/\s+/g, " ").trim();
 }
 async function fetchNalpacFeed() {
-  const cached = await kvGet(KV_KEYS.feedCache);
-  if (cached) return cached;
+  const cached2 = await kvGet(KV_KEYS.feedCache);
+  if (cached2) return cached2;
   const feedUrl = await getPipelineSetting("feedUrl") || process.env["NALPAC_FEED_URL"] || "";
   if (!feedUrl) throw new Error("No feed URL configured. Set NALPAC_FEED_URL env var or configure in Admin \u2192 Settings.");
   const res = await fetch(feedUrl);
