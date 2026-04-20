@@ -7,18 +7,18 @@ import {
   updateConsent,
   setUserProperties,
 } from '~/lib/analytics.client'
+import { useSession } from '~/lib/session-context'
 
 const CONSENT_KEY = 'xdipx_consent'
 
 interface AnalyticsProps {
   ga4Id: string
-  isLoggedIn: boolean
-  customerIdHash?: string
 }
 
-export function Analytics({ ga4Id, isLoggedIn, customerIdHash }: AnalyticsProps) {
+export function Analytics({ ga4Id }: AnalyticsProps) {
   const location = useLocation()
   const prevPath = useRef('')
+  const { isCustomerLoggedIn, customerIdHash, isLoaded } = useSession()
 
   // ── Check existing consent on mount ─────────────────────────────────────
   useEffect(() => {
@@ -58,14 +58,15 @@ export function Analytics({ ga4Id, isLoggedIn, customerIdHash }: AnalyticsProps)
     }
   }, [ga4Id, location.pathname, location.search])
 
-  // ── User properties ─────────────────────────────────────────────────────
+  // ── User properties — wait for session to resolve so we don't log
+  //    "logged_in: false" on the first pageview for a logged-in user.
   useEffect(() => {
-    if (!ga4Id) return
+    if (!ga4Id || !isLoaded) return
     setUserProperties({
-      logged_in: isLoggedIn,
+      logged_in: isCustomerLoggedIn,
       ...(customerIdHash ? { customer_id_hash: customerIdHash } : {}),
     })
-  }, [ga4Id, isLoggedIn, customerIdHash])
+  }, [ga4Id, isLoaded, isCustomerLoggedIn, customerIdHash])
 
   return null
 }
