@@ -10,7 +10,7 @@ function StarRating({ rating }: { rating: number }) {
       {Array.from({ length: 5 }).map((_, i) => (
         <span
           key={i}
-          className={i < rating ? 'text-brand-orange' : 'text-brand-charcoal/20'}
+          className={i < rating ? 'text-coral-2' : 'text-ink/20'}
           aria-hidden="true"
         >
           ★
@@ -26,10 +26,10 @@ export function Testimonials({ block }: TestimonialsProps) {
   if (!items.length) return null
 
   return (
-    <section className="py-12 px-4 bg-brand-mist">
+    <section className="py-12 px-4 bg-cream-2">
       <div className="max-w-6xl mx-auto">
         <h2
-          className="text-2xl font-bold text-brand-charcoal mb-8 text-center"
+          className="text-2xl font-bold text-ink mb-8 text-center"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {heading}
@@ -44,12 +44,12 @@ export function Testimonials({ block }: TestimonialsProps) {
           {items.map((item, i) => (
             <article key={i} className="bg-white rounded-2xl p-6 shadow-sm">
               <StarRating rating={item.rating} />
-              <blockquote className="mt-4 text-brand-charcoal/80 text-sm leading-relaxed italic">
+              <blockquote className="mt-4 text-ink/80 text-sm leading-relaxed italic">
                 "{item.quote}"
               </blockquote>
               <footer className="mt-4 flex items-center gap-2">
                 <p
-                  className="text-brand-charcoal font-semibold text-sm"
+                  className="text-ink font-semibold text-sm"
                   style={{ fontFamily: 'var(--font-display)' }}
                 >
                   {item.author}

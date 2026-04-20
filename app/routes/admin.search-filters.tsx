@@ -231,12 +231,12 @@ export default function AdminSearchFiltersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1
-            className="text-2xl font-bold text-brand-charcoal"
+            className="text-2xl font-bold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Search Filters
           </h1>
-          <p className="text-sm text-brand-charcoal/50 mt-1">
+          <p className="text-sm text-ink/50 mt-1">
             Curate which product tags appear as filter options in the search sidebar.
           </p>
         </div>
@@ -244,14 +244,14 @@ export default function AdminSearchFiltersPage() {
           <button
             type="button"
             onClick={handleExport}
-            className="px-4 py-2 text-sm font-semibold text-brand-charcoal bg-white border border-brand-mist rounded-full hover:border-brand-purple/40 hover:text-brand-purple transition-colors"
+            className="px-4 py-2 text-sm font-semibold text-ink bg-white border border-cream-2 rounded-full hover:border-sage/40 hover:text-sage transition-colors"
           >
             Export CSV
           </button>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="px-4 py-2 text-sm font-semibold text-brand-charcoal bg-white border border-brand-mist rounded-full hover:border-brand-purple/40 hover:text-brand-purple transition-colors"
+            className="px-4 py-2 text-sm font-semibold text-ink bg-white border border-cream-2 rounded-full hover:border-sage/40 hover:text-sage transition-colors"
           >
             Import CSV
           </button>
@@ -268,10 +268,10 @@ export default function AdminSearchFiltersPage() {
       {pendingImport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
-            <h2 className="text-lg font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+            <h2 className="text-lg font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
               Replace taxonomy?
             </h2>
-            <p className="text-sm text-brand-charcoal/70">
+            <p className="text-sm text-ink/70">
               Importing will replace the entire current taxonomy with the CSV contents.
               Any unsaved edits will be lost. The server will validate rows and report any errors.
             </p>
@@ -279,14 +279,14 @@ export default function AdminSearchFiltersPage() {
               <button
                 type="button"
                 onClick={() => setPendingImport(null)}
-                className="px-4 py-2 text-sm font-semibold text-brand-charcoal/70 hover:text-brand-charcoal transition-colors"
+                className="px-4 py-2 text-sm font-semibold text-ink/70 hover:text-ink transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={confirmImport}
-                className="px-4 py-2 bg-brand-gradient text-white text-sm font-bold rounded-full hover:opacity-90 transition-opacity"
+                className="px-4 py-2 bg-coral text-white text-sm font-bold rounded-full hover:opacity-90 transition-opacity"
               >
                 Replace &amp; save
               </button>
@@ -304,7 +304,7 @@ export default function AdminSearchFiltersPage() {
             <div className="flex items-center gap-3 px-6 py-4">
               <button
                 onClick={() => toggleCollapsed(gi)}
-                className="w-6 h-6 flex items-center justify-center rounded-lg text-brand-charcoal/40 hover:text-brand-purple transition-colors shrink-0"
+                className="w-6 h-6 flex items-center justify-center rounded-lg text-ink/40 hover:text-sage transition-colors shrink-0"
                 aria-label={isCollapsed ? 'Expand group' : 'Collapse group'}
               >
                 <svg
@@ -320,10 +320,10 @@ export default function AdminSearchFiltersPage() {
                 onClick={() => toggleCollapsed(gi)}
                 className="flex-1 min-w-0 text-left"
               >
-                <span className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+                <span className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
                   {group.label || 'Untitled Group'}
                 </span>
-                <span className="text-xs text-brand-charcoal/40 ml-2">
+                <span className="text-xs text-ink/40 ml-2">
                   {group.tags.length} tag{group.tags.length !== 1 ? 's' : ''}
                 </span>
                 {group.defaultExpanded === false && (
@@ -334,7 +334,7 @@ export default function AdminSearchFiltersPage() {
                 <button
                   onClick={() => moveGroup(gi, -1)}
                   disabled={gi === 0}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg text-brand-charcoal/30 hover:text-brand-purple hover:bg-brand-mist transition-colors disabled:opacity-20 disabled:hover:text-brand-charcoal/30 disabled:hover:bg-transparent"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-ink/30 hover:text-sage hover:bg-cream-2 transition-colors disabled:opacity-20 disabled:hover:text-ink/30 disabled:hover:bg-transparent"
                   title="Move up"
                 >
                   <ArrowUpIcon />
@@ -342,14 +342,14 @@ export default function AdminSearchFiltersPage() {
                 <button
                   onClick={() => moveGroup(gi, 1)}
                   disabled={gi === groups.length - 1}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg text-brand-charcoal/30 hover:text-brand-purple hover:bg-brand-mist transition-colors disabled:opacity-20 disabled:hover:text-brand-charcoal/30 disabled:hover:bg-transparent"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-ink/30 hover:text-sage hover:bg-cream-2 transition-colors disabled:opacity-20 disabled:hover:text-ink/30 disabled:hover:bg-transparent"
                   title="Move down"
                 >
                   <ArrowDownIcon />
                 </button>
                 <button
                   onClick={() => removeGroup(gi)}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg text-brand-charcoal/30 hover:text-brand-coral hover:bg-red-50 transition-colors"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-ink/30 hover:text-coral hover:bg-red-50 transition-colors"
                   title="Remove group"
                 >
                   <TrashIcon />
@@ -359,11 +359,11 @@ export default function AdminSearchFiltersPage() {
 
             {/* Collapsible body */}
             {!isCollapsed && (
-              <div className="px-6 pb-6 space-y-4 border-t border-brand-mist/50 pt-4">
+              <div className="px-6 pb-6 space-y-4 border-t border-cream-2/50 pt-4">
                 {/* Group label + ID */}
                 <div className="flex gap-3">
                   <div className="flex-1">
-                    <label className="block text-xs font-semibold text-brand-charcoal/50 mb-1">
+                    <label className="block text-xs font-semibold text-ink/50 mb-1">
                       Group Label
                     </label>
                     <input
@@ -371,18 +371,18 @@ export default function AdminSearchFiltersPage() {
                       value={group.label}
                       onChange={e => updateGroup(gi, { label: e.target.value })}
                       placeholder="e.g. Category"
-                      className="w-full border border-brand-mist rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30"
+                      className="w-full border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
                     />
                   </div>
                   <div className="w-36">
-                    <label className="block text-xs font-semibold text-brand-charcoal/50 mb-1">
+                    <label className="block text-xs font-semibold text-ink/50 mb-1">
                       ID <span className="font-normal">(auto)</span>
                     </label>
                     <input
                       type="text"
                       value={group.id}
                       readOnly
-                      className="w-full border border-brand-mist rounded-xl px-3 py-2 text-sm bg-brand-mist/30 text-brand-charcoal/50"
+                      className="w-full border border-cream-2 rounded-xl px-3 py-2 text-sm bg-cream-2/30 text-ink/50"
                     />
                   </div>
                 </div>
@@ -393,18 +393,18 @@ export default function AdminSearchFiltersPage() {
                     type="checkbox"
                     checked={group.defaultExpanded !== false}
                     onChange={e => updateGroup(gi, { defaultExpanded: e.target.checked })}
-                    className="accent-brand-purple w-3.5 h-3.5 rounded"
+                    className="accent-sage w-3.5 h-3.5 rounded"
                   />
-                  <span className="text-sm text-brand-charcoal/70">Expanded by default on search page</span>
+                  <span className="text-sm text-ink/70">Expanded by default on search page</span>
                 </label>
 
                 {/* Tags */}
                 <div className="space-y-2">
-                  <label className="block text-xs font-semibold text-brand-charcoal/50">
+                  <label className="block text-xs font-semibold text-ink/50">
                     Tags
                   </label>
                   {group.tags.length === 0 && (
-                    <p className="text-xs text-brand-charcoal/30 italic">No tags yet. Add one below.</p>
+                    <p className="text-xs text-ink/30 italic">No tags yet. Add one below.</p>
                   )}
                   {group.tags.map((tag, ti) => (
                     <div key={ti} className="flex items-center gap-2">
@@ -413,17 +413,17 @@ export default function AdminSearchFiltersPage() {
                         value={tag.tag}
                         onChange={e => updateTag(gi, ti, { tag: e.target.value })}
                         placeholder="cat:vibrators"
-                        className="flex-1 border border-brand-mist rounded-xl px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-purple/30"
+                        className="flex-1 border border-cream-2 rounded-xl px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sage/30"
                       />
                       <input
                         type="text"
                         value={tag.label}
                         onChange={e => updateTag(gi, ti, { label: e.target.value })}
                         placeholder="Vibrators"
-                        className="flex-1 border border-brand-mist rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30"
+                        className="flex-1 border border-cream-2 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
                       />
                       <span
-                        className={`text-xs tabular-nums shrink-0 w-8 text-center ${(tagCounts[tag.tag] ?? 0) === 0 ? 'text-amber-500 font-medium' : 'text-brand-charcoal/40'}`}
+                        className={`text-xs tabular-nums shrink-0 w-8 text-center ${(tagCounts[tag.tag] ?? 0) === 0 ? 'text-amber-500 font-medium' : 'text-ink/40'}`}
                         title={`${tagCounts[tag.tag] ?? 0} products match "${tag.tag}"`}
                       >
                         {tagCounts[tag.tag] ?? 0}
@@ -431,7 +431,7 @@ export default function AdminSearchFiltersPage() {
                       <button
                         onClick={() => moveTag(gi, ti, -1)}
                         disabled={ti === 0}
-                        className="w-6 h-6 flex items-center justify-center rounded text-brand-charcoal/25 hover:text-brand-purple transition-colors disabled:opacity-20"
+                        className="w-6 h-6 flex items-center justify-center rounded text-ink/25 hover:text-sage transition-colors disabled:opacity-20"
                         title="Move up"
                       >
                         <ArrowUpIcon />
@@ -439,14 +439,14 @@ export default function AdminSearchFiltersPage() {
                       <button
                         onClick={() => moveTag(gi, ti, 1)}
                         disabled={ti === group.tags.length - 1}
-                        className="w-6 h-6 flex items-center justify-center rounded text-brand-charcoal/25 hover:text-brand-purple transition-colors disabled:opacity-20"
+                        className="w-6 h-6 flex items-center justify-center rounded text-ink/25 hover:text-sage transition-colors disabled:opacity-20"
                         title="Move down"
                       >
                         <ArrowDownIcon />
                       </button>
                       <button
                         onClick={() => removeTag(gi, ti)}
-                        className="w-6 h-6 flex items-center justify-center rounded text-brand-charcoal/25 hover:text-brand-coral transition-colors"
+                        className="w-6 h-6 flex items-center justify-center rounded text-ink/25 hover:text-coral transition-colors"
                         title="Remove tag"
                       >
                         <XIcon />
@@ -455,7 +455,7 @@ export default function AdminSearchFiltersPage() {
                   ))}
                   <button
                     onClick={() => addTag(gi)}
-                    className="text-xs font-semibold text-brand-purple hover:text-brand-purple-light transition-colors"
+                    className="text-xs font-semibold text-sage hover:text-sun transition-colors"
                   >
                     + Add tag
                   </button>
@@ -469,14 +469,14 @@ export default function AdminSearchFiltersPage() {
       {/* Add group */}
       <button
         onClick={addGroup}
-        className="w-full py-3 border-2 border-dashed border-brand-mist rounded-2xl text-sm font-semibold text-brand-charcoal/40 hover:text-brand-purple hover:border-brand-purple/30 transition-colors"
+        className="w-full py-3 border-2 border-dashed border-cream-2 rounded-2xl text-sm font-semibold text-ink/40 hover:text-sage hover:border-sage/30 transition-colors"
       >
         + Add Filter Group
       </button>
 
       {/* Save bar */}
       <div className="sticky bottom-4 z-10">
-        <div className="bg-white rounded-2xl shadow-lg border border-brand-mist p-4 flex items-center justify-between gap-4">
+        <div className="bg-white rounded-2xl shadow-lg border border-cream-2 p-4 flex items-center justify-between gap-4">
           <div className="text-sm">
             {saveResult && 'ok' in saveResult && saveResult.ok ? (
               'imported' in saveResult && saveResult.imported ? (
@@ -491,13 +491,13 @@ export default function AdminSearchFiltersPage() {
             ) : isDirty ? (
               <span className="text-amber-600 font-medium">Unsaved changes</span>
             ) : (
-              <span className="text-brand-charcoal/40">No changes</span>
+              <span className="text-ink/40">No changes</span>
             )}
           </div>
           <button
             onClick={handleSave}
             disabled={!isDirty || isSaving}
-            className="px-6 py-2.5 bg-brand-gradient text-white text-sm font-bold rounded-full hover:opacity-90 transition-opacity disabled:opacity-40"
+            className="px-6 py-2.5 bg-coral text-white text-sm font-bold rounded-full hover:opacity-90 transition-opacity disabled:opacity-40"
           >
             {isSaving ? 'Saving...' : 'Save Filters'}
           </button>

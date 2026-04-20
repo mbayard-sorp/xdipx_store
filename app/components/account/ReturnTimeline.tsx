@@ -49,11 +49,11 @@ export function ReturnTimeline({ status }: { status: ReturnStatus | string }): R
         const done = i < current
         const active = i === current
         const dotColor = done
-          ? 'bg-brand-purple border-brand-purple'
+          ? 'bg-sage border-sage'
           : active
-          ? 'bg-brand-coral border-brand-coral'
-          : 'bg-white border-brand-mist'
-        const lineColor = i < current ? 'bg-brand-purple' : 'bg-brand-mist'
+          ? 'bg-coral border-coral'
+          : 'bg-white border-cream-2'
+        const lineColor = i < current ? 'bg-sage' : 'bg-cream-2'
 
         return (
           <li key={step.key} className="flex-1 relative">
@@ -76,7 +76,7 @@ export function ReturnTimeline({ status }: { status: ReturnStatus | string }): R
               </span>
               <span
                 className={`mt-1.5 text-[10px] leading-tight ${
-                  active || done ? 'text-brand-charcoal font-semibold' : 'text-brand-charcoal/40'
+                  active || done ? 'text-ink font-semibold' : 'text-ink/40'
                 }`}
               >
                 {step.label}

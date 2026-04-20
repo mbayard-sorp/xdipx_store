@@ -96,7 +96,7 @@ function PreviewPhase({
         <button
           onClick={onStart}
           disabled={isSubmitting || job.total === 0}
-          className="px-6 py-2.5 rounded-xl bg-brand-gradient text-white font-semibold text-sm disabled:opacity-50 shadow-sm"
+          className="px-6 py-2.5 rounded-xl bg-coral text-white font-semibold text-sm disabled:opacity-50 shadow-sm"
         >
           {isSubmitting ? 'Starting…' : `Start Import (${job.total} products)`}
         </button>
@@ -140,7 +140,7 @@ function ProgressPhase({
         </div>
         <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
           <div
-            className="h-full bg-brand-gradient transition-all duration-300 rounded-full"
+            className="h-full bg-coral transition-all duration-300 rounded-full"
             style={{ width: `${pct}%` }}
           />
         </div>
@@ -169,7 +169,7 @@ function ProgressPhase({
           <button
             onClick={onResume}
             disabled={isSubmitting}
-            className="px-5 py-2 rounded-xl bg-brand-gradient text-white text-sm font-semibold shadow-sm"
+            className="px-5 py-2 rounded-xl bg-coral text-white text-sm font-semibold shadow-sm"
           >
             Resume
           </button>

@@ -58,7 +58,7 @@ export function ReviewList({
   return (
     <section className="mt-8">
       <h2
-        className="text-xl font-bold text-brand-charcoal mb-4"
+        className="text-xl font-bold text-ink mb-4"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Customer Reviews
@@ -75,8 +75,8 @@ export function ReviewList({
             className={[
               'shrink-0 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors',
               filter === tab.value
-                ? 'bg-brand-purple text-white border-brand-purple'
-                : 'border-brand-mist text-brand-charcoal/60 hover:border-brand-purple/40',
+                ? 'bg-sage text-white border-sage'
+                : 'border-cream-2 text-ink/60 hover:border-sage/40',
             ].join(' ')}
             style={{ fontFamily: 'var(--font-display)' }}
             prefetch="intent"
@@ -88,13 +88,13 @@ export function ReviewList({
 
       {/* Sort + count */}
       <div className="flex items-center justify-between mb-4">
-        <span className="text-sm text-brand-charcoal/50">
+        <span className="text-sm text-ink/50">
           {total} review{total !== 1 ? 's' : ''}
         </span>
-        <label className="flex items-center gap-2 text-sm text-brand-charcoal/60">
+        <label className="flex items-center gap-2 text-sm text-ink/60">
           Sort:
           <select
-            className="border border-brand-mist rounded-lg px-2 py-1 text-sm text-brand-charcoal bg-white"
+            className="border border-cream-2 rounded-lg px-2 py-1 text-sm text-ink bg-white"
             value={sort}
             onChange={e => {
               window.location.href = buildReviewUrl(pathname, search, { reviewSort: e.target.value, reviewPage: 1 })
@@ -109,12 +109,12 @@ export function ReviewList({
 
       {/* Reviews */}
       {reviews.length === 0 ? (
-        <div className="text-center py-12 text-brand-charcoal/40">
+        <div className="text-center py-12 text-ink/40">
           <p className="text-4xl mb-3" aria-hidden="true">♥</p>
           <p className="font-medium">No reviews yet — be the first!</p>
           <Link
             to={`/review?productId=${productId}`}
-            className="inline-block mt-4 bg-brand-gradient text-white font-semibold text-sm px-6 py-2.5 rounded-full hover:opacity-90 transition-opacity"
+            className="inline-block mt-4 bg-coral text-white font-semibold text-sm px-6 py-2.5 rounded-full hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Write a Review ♥
@@ -134,19 +134,19 @@ export function ReviewList({
           {page > 1 && (
             <Link
               to={buildReviewUrl(pathname, search, { reviewPage: page - 1 })}
-              className="px-4 py-2 text-sm border border-brand-mist rounded-full text-brand-charcoal/60 hover:border-brand-purple/40 transition-colors"
+              className="px-4 py-2 text-sm border border-cream-2 rounded-full text-ink/60 hover:border-sage/40 transition-colors"
               prefetch="intent"
             >
               ← Prev
             </Link>
           )}
-          <span className="text-sm text-brand-charcoal/50">
+          <span className="text-sm text-ink/50">
             {page} / {totalPages}
           </span>
           {page < totalPages && (
             <Link
               to={buildReviewUrl(pathname, search, { reviewPage: page + 1 })}
-              className="px-4 py-2 text-sm border border-brand-mist rounded-full text-brand-charcoal/60 hover:border-brand-purple/40 transition-colors"
+              className="px-4 py-2 text-sm border border-cream-2 rounded-full text-ink/60 hover:border-sage/40 transition-colors"
               prefetch="intent"
             >
               Next →

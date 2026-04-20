@@ -15,7 +15,7 @@ const DEFAULTS: Record<string, string> = {
   ivrFarewellMaxDuration: '',
   ivrFarewellSilent: '',
   ivrFeelings: 'so happy,thrilled,super excited,really glad,pumped,stoked,delighted',
-  ivrActivities: 'browsing the vault,curating today\'s deal,testing out some new arrivals,organizing the stockroom',
+  ivrActivities: 'browsing the shelf,curating Emma\'s next pick,testing out some new arrivals,organizing the stockroom',
 }
 
 export async function loader(_: LoaderFunctionArgs) {
@@ -70,27 +70,27 @@ export default function AdminIvrPage() {
       <fetcher.Form method="post" className="space-y-1">
         <input type="hidden" name="intent" value="save-setting" />
         <input type="hidden" name="key" value={settingKey} />
-        <label className="block text-sm font-semibold text-brand-charcoal">{label}</label>
-        {description && <p className="text-xs text-brand-charcoal/50">{description}</p>}
+        <label className="block text-sm font-semibold text-ink">{label}</label>
+        {description && <p className="text-xs text-ink/50">{description}</p>}
         <div className={`${multiline ? 'flex flex-col gap-2' : 'flex gap-3 items-center'} pt-1`}>
           {multiline ? (
             <textarea
               name="value"
               defaultValue={settings[settingKey] ?? ''}
               rows={rows ?? 4}
-              className="w-full border border-brand-mist rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30 font-body leading-relaxed"
+              className="w-full border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30 font-body leading-relaxed"
             />
           ) : (
             <input
               type={type}
               name="value"
               defaultValue={settings[settingKey] ?? ''}
-              className="flex-1 border border-brand-mist rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30"
+              className="flex-1 border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
             />
           )}
           <button
             type="submit"
-            className={`text-sm font-semibold px-4 py-2 bg-brand-mist text-brand-purple rounded-full hover:bg-brand-purple/10 transition-colors whitespace-nowrap ${multiline ? 'self-start' : ''}`}
+            className={`text-sm font-semibold px-4 py-2 bg-cream-2 text-sage rounded-full hover:bg-sage/10 transition-colors whitespace-nowrap ${multiline ? 'self-start' : ''}`}
           >
             Save
           </button>
@@ -109,7 +109,7 @@ export default function AdminIvrPage() {
   return (
     <div className="max-w-2xl space-y-8">
       <h1
-        className="text-2xl font-bold text-brand-charcoal"
+        className="text-2xl font-bold text-ink"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         IVR
@@ -118,7 +118,7 @@ export default function AdminIvrPage() {
       {/* Greeting & Placeholders */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
         <h2
-          className="text-base font-bold text-brand-charcoal"
+          className="text-base font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Greeting
@@ -145,21 +145,21 @@ export default function AdminIvrPage() {
           settingKey="ivrActivities"
           multiline
           rows={3}
-          description="Comma-separated list of activities for the {activity} placeholder. e.g. browsing the vault, curating today's deal"
+          description="Comma-separated list of activities for the {activity} placeholder. e.g. browsing the shelf, curating Emma's next pick"
         />
 
-        <div className="rounded-xl bg-brand-mist/50 px-4 py-3 space-y-1">
-          <p className="text-xs font-semibold text-brand-charcoal/60 uppercase tracking-wide">
+        <div className="rounded-xl bg-cream-2/50 px-4 py-3 space-y-1">
+          <p className="text-xs font-semibold text-ink/60 uppercase tracking-wide">
             Preview (random pick)
           </p>
-          <p className="text-sm text-brand-charcoal italic">&ldquo;{greeting}&rdquo;</p>
+          <p className="text-sm text-ink italic">&ldquo;{greeting}&rdquo;</p>
         </div>
       </section>
 
       {/* Voice & Personality */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
         <h2
-          className="text-base font-bold text-brand-charcoal"
+          className="text-base font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Voice & Personality
@@ -177,7 +177,7 @@ export default function AdminIvrPage() {
       {/* Farewells */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
         <h2
-          className="text-base font-bold text-brand-charcoal"
+          className="text-base font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Farewells

@@ -110,7 +110,7 @@ export default function AdminUsers() {
   return (
     <div className="max-w-4xl space-y-8">
       <h1
-        className="text-2xl font-bold text-brand-charcoal"
+        className="text-2xl font-bold text-ink"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Admin Users
@@ -119,7 +119,7 @@ export default function AdminUsers() {
       {/* ─── Invite Form ─────────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl p-6 shadow-sm">
         <h2
-          className="text-lg font-semibold text-brand-charcoal mb-4"
+          className="text-lg font-semibold text-ink mb-4"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Add Admin User
@@ -130,14 +130,14 @@ export default function AdminUsers() {
             name="name"
             placeholder="Full name"
             required
-            className="px-4 py-2.5 rounded-xl border border-brand-mist bg-brand-cream text-brand-charcoal placeholder-brand-charcoal/40 focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+            className="px-4 py-2.5 rounded-xl border border-cream-2 bg-cream text-ink placeholder-ink/40 focus:outline-none focus:ring-2 focus:ring-coral/30"
           />
           <input
             name="email"
             type="email"
             placeholder="Email"
             required
-            className="px-4 py-2.5 rounded-xl border border-brand-mist bg-brand-cream text-brand-charcoal placeholder-brand-charcoal/40 focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+            className="px-4 py-2.5 rounded-xl border border-cream-2 bg-cream text-ink placeholder-ink/40 focus:outline-none focus:ring-2 focus:ring-coral/30"
           />
           <input
             name="password"
@@ -145,11 +145,11 @@ export default function AdminUsers() {
             placeholder="Temporary password (8+ chars)"
             required
             minLength={8}
-            className="px-4 py-2.5 rounded-xl border border-brand-mist bg-brand-cream text-brand-charcoal placeholder-brand-charcoal/40 focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+            className="px-4 py-2.5 rounded-xl border border-cream-2 bg-cream text-ink placeholder-ink/40 focus:outline-none focus:ring-2 focus:ring-coral/30"
           />
           <select
             name="role"
-            className="px-4 py-2.5 rounded-xl border border-brand-mist bg-brand-cream text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+            className="px-4 py-2.5 rounded-xl border border-cream-2 bg-cream text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
           >
             <option value="admin">Admin</option>
             <option value="owner">Owner</option>
@@ -158,7 +158,7 @@ export default function AdminUsers() {
             <button
               type="submit"
               disabled={busy}
-              className="bg-brand-gradient text-white font-bold px-6 py-2.5 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="bg-coral text-white font-bold px-6 py-2.5 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {busy ? 'Adding...' : 'Add User'}
@@ -177,7 +177,7 @@ export default function AdminUsers() {
       {/* ─── User List ────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl p-6 shadow-sm">
         <h2
-          className="text-lg font-semibold text-brand-charcoal mb-4"
+          className="text-lg font-semibold text-ink mb-4"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Current Users ({users.length})
@@ -185,7 +185,7 @@ export default function AdminUsers() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-brand-charcoal/50 border-b border-brand-mist">
+              <tr className="text-left text-ink/50 border-b border-cream-2">
                 <th className="pb-3 font-medium">Name</th>
                 <th className="pb-3 font-medium">Email</th>
                 <th className="pb-3 font-medium">Role</th>
@@ -193,7 +193,7 @@ export default function AdminUsers() {
                 <th className="pb-3 font-medium">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-brand-mist/50">
+            <tbody className="divide-y divide-cream-2/50">
               {users.map((user) => (
                 <UserRow
                   key={user.id}
@@ -220,16 +220,16 @@ function UserRow({
   const removeFetcher = useFetcher()
 
   return (
-    <tr className="text-brand-charcoal">
+    <tr className="text-ink">
       <td className="py-3 pr-4">
         <span className="font-medium">{user.name}</span>
         {isCurrentUser && (
-          <span className="ml-2 text-xs text-brand-purple bg-brand-mist px-2 py-0.5 rounded-full">
+          <span className="ml-2 text-xs text-sage bg-cream-2 px-2 py-0.5 rounded-full">
             you
           </span>
         )}
       </td>
-      <td className="py-3 pr-4 text-brand-charcoal/70">{user.email}</td>
+      <td className="py-3 pr-4 text-ink/70">{user.email}</td>
       <td className="py-3 pr-4">
         {isCurrentUser ? (
           <span className="capitalize">{user.role}</span>
@@ -241,7 +241,7 @@ function UserRow({
               name="role"
               defaultValue={user.role}
               onChange={(e) => e.target.form?.requestSubmit()}
-              className="bg-transparent border border-brand-mist rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+              className="bg-transparent border border-cream-2 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-coral/30"
             >
               <option value="admin">Admin</option>
               <option value="owner">Owner</option>
@@ -249,7 +249,7 @@ function UserRow({
           </roleFetcher.Form>
         )}
       </td>
-      <td className="py-3 pr-4 text-brand-charcoal/50 text-xs">
+      <td className="py-3 pr-4 text-ink/50 text-xs">
         {user.lastLoginAt
           ? new Date(user.lastLoginAt).toLocaleDateString('en-US', {
               month: 'short',

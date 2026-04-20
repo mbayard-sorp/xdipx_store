@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore } from '~/types'
+import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore, ProductTypeDial } from '~/types'
 import { toHTML } from '@portabletext/to-html'
 import { cached, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
 
@@ -89,6 +89,15 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "mood_image_url" }
     { namespace: "xdipx", key: "accessory_product_ids" }
     { namespace: "xdipx", key: "specifications" }
+    { namespace: "xdipx", key: "map_restricted" }
+    { namespace: "xdipx", key: "hero_video" }
+    { namespace: "xdipx", key: "mood_tags" }
+    { namespace: "xdipx", key: "audience_tags" }
+    { namespace: "xdipx", key: "matters_tags" }
+    { namespace: "xdipx", key: "product_type_dial" }
+    { namespace: "xdipx", key: "sensation_dial" }
+    { namespace: "xdipx", key: "pairing_why" }
+    { namespace: "xdipx", key: "emma_hero" }
     { namespace: "custom", key: "original_description" }
   ]) {
     namespace key value
@@ -138,6 +147,10 @@ const CARD_METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "original_price" }
     { namespace: "xdipx", key: "category" }
     { namespace: "xdipx", key: "deal_status" }
+    { namespace: "xdipx", key: "mood_tags" }
+    { namespace: "xdipx", key: "audience_tags" }
+    { namespace: "xdipx", key: "matters_tags" }
+    { namespace: "xdipx", key: "hero_video" }
   ]) {
     namespace key value
   }
@@ -185,6 +198,10 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
   const mf = node.metafields
   const variant = node.variants.edges[0]?.node
   const dealPrice = parseFloat(variant?.price.amount ?? '0')
+  const moodTags     = parseMetafieldJSON<string[]>(mf, 'mood_tags',     [])
+  const audienceTags = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
+  const mattersTags  = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
+  const heroVideo    = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
   return {
     id: node.id,
     handle: node.handle,
@@ -197,6 +214,12 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
     category: (parseMetafield(mf, 'category') || 'both') as Deal['category'],
     dealStatus: 'archived' as const,
     qty: variant?.quantityAvailable ?? 0,
+    ...(moodTags.length     > 0 ? { moodTags }     : {}),
+    ...(audienceTags.length > 0 ? { audienceTags } : {}),
+    ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
+    ...(heroVideo?.src && typeof heroVideo.duration === 'number'
+      ? { heroVideo: { src: heroVideo.src, duration: heroVideo.duration, ...(heroVideo.poster ? { poster: heroVideo.poster } : {}) } }
+      : {}),
   }
 }
 
@@ -284,6 +307,11 @@ interface ShopifyProductNode {
 
 function nodeToProduct(node: ShopifyProductNode): Product {
   const variant = node.variants.edges[0]?.node
+  const mf = node.metafields
+  const moodTags     = parseMetafieldJSON<string[]>(mf, 'mood_tags',     [])
+  const audienceTags = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
+  const mattersTags  = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
+  const heroVideo    = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
   return {
     id: node.id,
     handle: node.handle,
@@ -304,12 +332,29 @@ function nodeToProduct(node: ShopifyProductNode): Product {
     ...(variant?.compareAtPrice ? { compareAtPrice: parseFloat(variant.compareAtPrice.amount) } : {}),
     brand: node.vendor,
     tags: node.tags,
+    ...(moodTags.length     > 0 ? { moodTags }     : {}),
+    ...(audienceTags.length > 0 ? { audienceTags } : {}),
+    ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
+    ...(heroVideo?.src && typeof heroVideo.duration === 'number'
+      ? { heroVideo: { src: heroVideo.src, duration: heroVideo.duration, ...(heroVideo.poster ? { poster: heroVideo.poster } : {}) } }
+      : {}),
   }
 }
 
 function nodeToDeal(node: ShopifyProductNode): Deal {
   const mf = node.metafields
   const variant = node.variants.edges[0]?.node
+
+  // v2 redesign metafield parsing (all optional)
+  const mapRestrictedRaw = parseMetafield(mf, 'map_restricted')
+  const heroVideo        = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
+  const productTypeDial  = parseMetafield(mf, 'product_type_dial') as ProductTypeDial | ''
+  const sensationDial    = parseMetafieldJSON<Deal['sensationDial']>(mf, 'sensation_dial', {})
+  const pairingWhy       = parseMetafieldJSON<Record<string, string>>(mf, 'pairing_why', {})
+  const moodTags         = parseMetafieldJSON<string[]>(mf, 'mood_tags',     [])
+  const audienceTags     = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
+  const mattersTags      = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
+  const emmaHero         = parseMetafieldJSON<Partial<import('~/types').EmmaHeroCopy>>(mf, 'emma_hero', {})
 
   return {
     id: node.id,
@@ -355,6 +400,20 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     })),
     options: node.options,
     // rating populated by Judge.me integration — omitted until available
+    // v2 metafields
+    ...(mapRestrictedRaw === 'true' ? { mapRestricted: true } : {}),
+    ...(heroVideo?.src && typeof heroVideo.duration === 'number'
+      ? { heroVideo: { src: heroVideo.src, duration: heroVideo.duration, ...(heroVideo.poster ? { poster: heroVideo.poster } : {}) } }
+      : {}),
+    ...(moodTags.length     > 0 ? { moodTags }     : {}),
+    ...(audienceTags.length > 0 ? { audienceTags } : {}),
+    ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
+    ...(productTypeDial ? { productTypeDial } : {}),
+    ...(sensationDial && Object.keys(sensationDial).length > 0 ? { sensationDial } : {}),
+    ...(pairingWhy    && Object.keys(pairingWhy).length > 0    ? { pairingWhy } : {}),
+    ...(emmaHero?.headline && emmaHero?.variant
+      ? { emmaHero: emmaHero as import('~/types').EmmaHeroCopy }
+      : {}),
   }
 }
 
@@ -502,6 +561,15 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     try { return JSON.parse(raw) as T } catch { return fallback }
   }
 
+  // Emma hero copy (Claude-generated on deal activation). Only populated when
+  // both the variant and headline are present — otherwise we let the route
+  // fall through to the Sanity/default hero copy.
+  const emmaHeroRaw = mfJSON<Partial<import('~/types').EmmaHeroCopy>>('emma_hero', {})
+  const emmaHero = emmaHeroRaw?.headline && emmaHeroRaw?.variant
+    ? (emmaHeroRaw as import('~/types').EmmaHeroCopy)
+    : null
+  const mapRestricted = mfVal('map_restricted') === 'true'
+
   const variant = product.variants[0]
   const gid = `gid://shopify/Product/${product.id}`
 
@@ -536,6 +604,8 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     ...(mfVal('original_description') ? { rawDescription: mfVal('original_description') } : {}),
     ...(mfVal('deal_score') ? { dealScore: parseFloat(mfVal('deal_score')) } : {}),
     ...(mfVal('nalpac_sku') ? { nalpacSku: mfVal('nalpac_sku') } : {}),
+    ...(emmaHero ? { emmaHero } : {}),
+    mapRestricted,
     variantId: variant ? `gid://shopify/ProductVariant/${variant.id}` : '',
     variants: product.variants.map(v => {
       // Reconstruct selectedOptions from option1/option2/option3 + product.options
@@ -1117,6 +1187,15 @@ export async function getVariantCost(variantGid: string): Promise<number | null>
   )
   const cost = parseFloat(inventory_item?.cost ?? '')
   return isNaN(cost) ? null : cost
+}
+
+/** Returns every variant GID for a product. Used to sync pricing across all variants. */
+export async function getProductVariantGids(shopifyProductId: string): Promise<string[]> {
+  const numericId = shopifyProductId.replace('gid://shopify/Product/', '')
+  const { product } = await shopifyAdmin<{
+    product: { variants: { id: number }[] } | null
+  }>(`/products/${numericId}.json?fields=variants`)
+  return (product?.variants ?? []).map(v => `gid://shopify/ProductVariant/${v.id}`)
 }
 
 export async function updateVariantPricing(variantGid: string, price: string, compareAtPrice: string, wholesaleCost?: string): Promise<void> {

@@ -12,10 +12,10 @@ type StepState = 'complete' | 'active' | 'failed' | 'future'
 interface Step { key: string; label: string; state: StepState }
 
 const CIRCLE: Record<StepState, string> = {
-  complete: 'bg-brand-gradient text-white border border-transparent',
-  active:   'border-2 border-brand-coral bg-brand-cream text-brand-coral',
+  complete: 'bg-coral text-white border border-transparent',
+  active:   'border-2 border-coral bg-cream text-coral',
   failed:   'border-2 border-red-400 bg-red-50 text-red-500',
-  future:   'border border-brand-mist bg-white text-brand-charcoal/30',
+  future:   'border border-cream-2 bg-white text-ink/30',
 }
 
 const SHIPPED_FULFILLMENT = new Set([
@@ -72,7 +72,7 @@ function stateLabel(state: StepState): string {
  */
 function segmentClass(prev: StepState | undefined, next: StepState | undefined): string {
   const reached = (s: StepState | undefined) => s === 'complete' || s === 'active'
-  return reached(prev) && reached(next) ? 'bg-brand-coral/60' : 'bg-brand-mist'
+  return reached(prev) && reached(next) ? 'bg-coral/60' : 'bg-cream-2'
 }
 
 export function OrderTrackingStepper({
@@ -90,7 +90,7 @@ export function OrderTrackingStepper({
   return (
     <nav
       aria-label="Order tracking"
-      className="bg-white border border-brand-mist rounded-2xl p-4 md:p-5"
+      className="bg-white border border-cream-2 rounded-2xl p-4 md:p-5"
     >
       {/* Desktop: horizontal */}
       <ol className="hidden md:flex items-start justify-between gap-2 relative">
@@ -107,7 +107,7 @@ export function OrderTrackingStepper({
               )}
               <StepCircle step={step} index={i} />
               <span className={`mt-2 text-[11px] font-semibold text-center ${
-                step.state === 'future' ? 'text-brand-charcoal/40' : 'text-brand-charcoal'
+                step.state === 'future' ? 'text-ink/40' : 'text-ink'
               }`}>
                 {step.label}
               </span>
@@ -133,7 +133,7 @@ export function OrderTrackingStepper({
               </div>
               <p
                 className={`text-sm font-semibold pb-5 ${
-                  step.state === 'future' ? 'text-brand-charcoal/40' : 'text-brand-charcoal'
+                  step.state === 'future' ? 'text-ink/40' : 'text-ink'
                 }`}
                 style={{ fontFamily: 'var(--font-display)' }}
               >
@@ -145,10 +145,10 @@ export function OrderTrackingStepper({
       </ol>
 
       {(trackingNumber || trackingUrl) && (
-        <div className="mt-4 pt-4 border-t border-brand-mist text-xs text-brand-charcoal/60">
+        <div className="mt-4 pt-4 border-t border-cream-2 text-xs text-ink/60">
           {carrier && (
             <>
-              <span className="font-semibold text-brand-charcoal">{carrier}:</span>{' '}
+              <span className="font-semibold text-ink">{carrier}:</span>{' '}
             </>
           )}
           {trackingNumber ? (
@@ -163,7 +163,7 @@ export function OrderTrackingStepper({
                 href={trackingUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-semibold text-brand-purple hover:text-brand-purple-light transition-colors"
+                className="font-semibold text-sage hover:text-sun transition-colors"
               >
                 Track &rarr;
               </a>

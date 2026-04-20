@@ -25,6 +25,12 @@ export default defineConfig({
               .icon(() => '🏠')
               .child(S.document().schemaType('homepageSections').documentId('singleton.homepage')),
             S.listItem()
+              .title("Emma's hero")
+              .id('emmaHeroSettings')
+              .icon(() => '✨')
+              .child(S.document().schemaType('emmaHeroSettings').documentId('singleton.emmaHero')),
+            S.documentTypeListItem('emmaPreset').title("Emma's presets").icon(() => '🎯'),
+            S.listItem()
               .title('Site Settings')
               .id('siteSettings')
               .icon(() => '⚙️')

@@ -36,6 +36,43 @@ export interface ProductVariant {
   quantityAvailable: number
 }
 
+// v2 redesign — sensation dial + hero video
+export type ProductTypeDial = 'air-pulsation' | 'vibrator' | 'wand' | 'lube' | 'wear'
+
+export interface SensationDial {
+  intensity?:      number
+  quietness?:      number
+  softness?:       number
+  suction?:        number
+  buildup?:        number
+  learningCurve?:  number
+  patternVariety?: number
+  reach?:          number
+  slipperiness?:   number
+  longevity?:      number
+  fit?:            number
+  [key: string]:   number | undefined
+}
+
+export interface HeroVideo {
+  src:      string
+  poster?:  string
+  duration: number
+}
+
+export type EmmaHeroVariant = 'loving' | 'bundle' | 'quote'
+
+export interface EmmaHeroCopy {
+  variant:     EmmaHeroVariant
+  eyebrow:     string
+  headline:    string
+  body:        string
+  aside:       string
+  pullQuote?:  string
+  generatedAt: string
+  voiceHash:   string
+}
+
 export interface Deal {
   id: string
   shopifyProductId: string
@@ -72,6 +109,16 @@ export interface Deal {
   sellingPlanGroups?: SellingPlanGroup[]
   tags: string[]
   rating?: { value: number; count: number }
+  // v2 redesign metafields (all optional — legacy products skip gracefully)
+  mapRestricted?:   boolean
+  heroVideo?:       HeroVideo
+  moodTags?:        string[]
+  audienceTags?:    string[]
+  mattersTags?:     string[]
+  productTypeDial?: ProductTypeDial
+  sensationDial?:   SensationDial
+  pairingWhy?:      Record<string, string>
+  emmaHero?:        EmmaHeroCopy
 }
 
 export interface Product {
@@ -90,6 +137,12 @@ export interface Product {
   category?: string
   sellingPlanGroups?: SellingPlanGroup[]
   rating?: { value: number; count: number }
+  // v2 redesign — Ask Emma tag facets
+  moodTags?:     string[]
+  audienceTags?: string[]
+  mattersTags?:  string[]
+  // v2 redesign — 9:16 card hero video
+  heroVideo?:    HeroVideo
 }
 
 export interface VaultDeal {
@@ -104,6 +157,12 @@ export interface VaultDeal {
   category: string
   dealStatus: 'draft' | 'scheduled' | 'live' | 'archived'
   qty: number
+  // v2 redesign — tag facets for Ask Emma filtering
+  moodTags?:     string[]
+  audienceTags?: string[]
+  mattersTags?:  string[]
+  // v2 redesign — 9:16 card hero video
+  heroVideo?:    HeroVideo
 }
 
 // ─── Bundles ──────────────────────────────────────────────────────────────
@@ -183,6 +242,29 @@ export interface Cart {
   cost: {
     subtotalAmount: { amount: string; currencyCode: string }
     totalAmount:    { amount: string; currencyCode: string }
+  }
+}
+
+// ─── Emma Cart Context (drawer personalization) ──────────────────────────
+
+export type EmmaCartVariant =
+  | 'first-timer'
+  | 'repeat'
+  | 'gift'
+  | 'free-ship-adjacent'
+  | 'back-after-abandon'
+
+export interface EmmaCartContext {
+  variant:      EmmaCartVariant
+  greeting:     string
+  body:         string
+  contextFacts: string[]
+  pairing:      Product | null
+  pairingWhy:   string
+  freeShip: {
+    threshold: number
+    remaining: number
+    progress:  number
   }
 }
 

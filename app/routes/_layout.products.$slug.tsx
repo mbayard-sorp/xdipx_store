@@ -5,11 +5,13 @@ import { ProductImageGallery, type GalleryItem } from '~/components/store/Produc
 import {
   getDealByHandle, getProductsByTag,
   getCollectionProducts, getProductsByHandles,
+  getProductsByIds,
 } from '~/lib/shopify.server'
 import { getProductPageBlocks } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
+import { getDialAggregates, type DialAggregate } from '~/lib/dial-votes.server'
 import BundleHero from '~/components/store/BundleHero'
 import BundleSaveCard from '~/components/store/BundleSaveCard'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
@@ -17,6 +19,9 @@ import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredD
 import { ProductTabs }            from '~/components/store/ProductTabs'
 import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
 import FrequentlyBoughtWith       from '~/components/store/FrequentlyBoughtWith'
+import { SensationDial }          from '~/components/store/SensationDial'
+import { PairsWith, type PairsWithItem } from '~/components/store/PairsWith'
+import { VariantSelector }        from '~/components/store/VariantSelector'
 import { SocialProofBar }         from '~/components/store/SocialProofBar'
 import { StockIndicator }         from '~/components/store/StockIndicator'
 import { WaitlistButton }         from '~/components/store/WaitlistButton'
@@ -54,6 +59,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       pdpBlocks: [],
       carouselProductMap: {},
       fbtProducts: [],
+      pairsWithItems: [] as PairsWithItem[],
+      dialAggregates: {} as Record<string, DialAggregate>,
       companionBundle: null,
       reviews: [],
       reviewTotal: 0,
@@ -72,12 +79,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const reviewSort   = url.searchParams.get('reviewSort')   ?? 'newest'
   const reviewFilter = url.searchParams.get('reviewFilter') ?? 'all'
 
-  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle] = await Promise.all([
+  const hasDial = !!(deal.sensationDial && deal.productTypeDial)
+  const hasPairing = !!(deal.pairingWhy && Object.keys(deal.pairingWhy).length > 0 && deal.accessoryProductIds.length > 0)
+
+  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, dialAggregates, pairProducts] = await Promise.all([
     getProductPageBlocks(slug),
     getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
     getFrequentlyBoughtWith(slug, 4),
     getBundleCompanionFor(slug),
+    hasDial ? getDialAggregates(deal.shopifyProductId) : Promise.resolve({} as Record<string, DialAggregate>),
+    hasPairing ? getProductsByIds(deal.accessoryProductIds) : Promise.resolve([]),
   ])
 
   const fbtProducts = fbtHandles.length > 0
@@ -88,6 +100,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         price:  p.price,
         compareAtPrice: p.compareAtPrice ?? null,
       }))
+    : []
+
+  const pairsWithItems: PairsWithItem[] = hasPairing
+    ? pairProducts
+        .map(p => {
+          const variantId = p.variants[0]?.id
+          if (!variantId) return null
+          const why = deal.pairingWhy?.[p.id]
+          return {
+            shopifyProductId: p.id,
+            handle:           p.handle,
+            title:            p.title,
+            image:            p.images[0]?.url ?? null,
+            price:            p.price,
+            compareAtPrice:   p.compareAtPrice ?? null,
+            variantId,
+            ...(why ? { why } : {}),
+          } satisfies PairsWithItem
+        })
+        .filter((x): x is PairsWithItem => x !== null)
+        .slice(0, 3)
     : []
 
   // Resolve Shopify products for any productCarousel blocks
@@ -118,6 +151,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     pdpBlocks,
     carouselProductMap,
     fbtProducts,
+    pairsWithItems,
+    dialAggregates,
     companionBundle,
     reviews:       reviewData.reviews,
     reviewTotal:   reviewData.total,
@@ -188,7 +223,7 @@ export default function ProductPageRoute() {
               aria-hidden="true"
               className="absolute inset-0 w-full h-full object-cover"
             />
-            <div className="absolute inset-0 bg-gradient-to-r from-brand-cream/97 via-brand-cream/90 to-brand-cream/60" />
+            <div className="absolute inset-0 bg-gradient-to-r from-cream/97 via-cream/90 to-cream/60" />
             <BundleHero bundle={data.bundle} buyButtonText={buyButtonText} />
           </div>
         ) : (
@@ -208,6 +243,8 @@ function ProductPage() {
   const pdpBlocks = loaderData.pdpBlocks
   const carouselProductMap = loaderData.carouselProductMap
   const fbtProducts = loaderData.fbtProducts
+  const pairsWithItems = loaderData.pairsWithItems
+  const dialAggregatesLoaded = loaderData.dialAggregates
   const companionBundle = loaderData.companionBundle
   const reviews = loaderData.reviews
   const reviewTotal = loaderData.reviewTotal
@@ -217,6 +254,23 @@ function ProductPage() {
   const aggregate = loaderData.aggregate
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
+  const voteFetcher = useFetcher<{ ok: boolean; aggregates?: Record<string, DialAggregate>; error?: string }>()
+  const [dialAggregates, setDialAggregates] = useState<Record<string, DialAggregate>>(dialAggregatesLoaded)
+  const isLoggedIn = typeof document !== 'undefined' && document.cookie.includes('customer_access_token')
+
+  useEffect(() => {
+    if (voteFetcher.state === 'idle' && voteFetcher.data?.ok && voteFetcher.data.aggregates) {
+      setDialAggregates(voteFetcher.data.aggregates)
+    }
+  }, [voteFetcher.state, voteFetcher.data])
+
+  const handleDialVote = useCallback((dimension: string, vote: 1 | -1) => {
+    const fd = new FormData()
+    fd.set('shopifyProductId', deal.shopifyProductId)
+    fd.set('dimension',        dimension)
+    fd.set('vote',             String(vote))
+    voteFetcher.submit(fd, { method: 'post', action: '/api/pdp-vote' })
+  }, [deal.shopifyProductId, voteFetcher])
 
   const [searchParams, setSearchParams] = useSearchParams()
   const variants     = deal.variants ?? []
@@ -235,18 +289,28 @@ function ProductPage() {
   const [showSticky,    setShowSticky]    = useState(false)
   const ctaRef = useRef<HTMLButtonElement>(null)
 
-  // Build unified gallery: first image → videos → remaining images
+  // Build unified gallery: hero video (9:16) → first image → videos → remaining images
   const allMedia = useMemo<GalleryItem[]>(() => {
-    const videos = (deal.videos ?? []).map(v => ({
-      kind: 'video' as const,
+    const heroVideoItem: GalleryItem | null = deal.heroVideo
+      ? {
+          kind:       'video',
+          previewUrl: deal.heroVideo.poster ?? deal.images[0]?.url ?? '',
+          sources:    [{ url: deal.heroVideo.src, mimeType: 'video/mp4' }],
+          aspect:     'portrait',
+          duration:   deal.heroVideo.duration,
+        }
+      : null
+    const videos = (deal.videos ?? []).map<GalleryItem>(v => ({
+      kind:       'video',
       previewUrl: v.previewImageUrl,
-      sources: v.sources,
+      sources:    v.sources,
       ...(v.aspect ? { aspect: v.aspect } : {}),
     }))
-    const images = deal.images.map(img => ({ kind: 'image' as const, url: img.url, altText: img.altText }))
+    const images = deal.images.map<GalleryItem>(img => ({ kind: 'image', url: img.url, altText: img.altText }))
     const [first, ...rest] = images
-    return first ? [first, ...videos, ...rest] : [...videos]
-  }, [deal.videos, deal.images])
+    const base = first ? [first, ...videos, ...rest] : [...videos]
+    return heroVideoItem ? [heroVideoItem, ...base] : base
+  }, [deal.videos, deal.images, deal.heroVideo])
 
   // When a variant is selected, jump to its image and update URL
   const handleVariantSelect = useCallback((variantId: string) => {
@@ -367,34 +431,77 @@ function ProductPage() {
         <div className="space-y-4">
           {/* Brand + title */}
           <div>
-            <p className="text-brand-charcoal/50 text-sm font-medium uppercase tracking-widest">
+            <p className="text-ink/50 text-sm font-medium uppercase tracking-widest">
               {deal.brand}
             </p>
             <h1
-              className="text-2xl md:text-3xl font-bold text-brand-charcoal mt-1 leading-snug"
+              className="text-2xl md:text-3xl font-bold text-ink mt-1 leading-snug"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {deal.seoTitle}
             </h1>
-            {deal.tagline && (
-              <p className="text-brand-charcoal/70 mt-2 italic">{deal.tagline}</p>
+            {deal.tagline && !deal.emmaHero && (
+              <p className="text-ink/70 mt-2 italic">{deal.tagline}</p>
             )}
           </div>
+
+          {/* Emma voice block — reuses hero copy generated at deal activation */}
+          {deal.emmaHero && (
+            <div className="bg-cream-2 border border-line rounded-2xl p-5 space-y-2">
+              <p
+                className="text-xs tracking-widest uppercase text-coral font-semibold"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                <span aria-hidden="true">♥</span> {deal.emmaHero.eyebrow}
+              </p>
+              <h2
+                className="text-lg md:text-xl font-bold text-ink leading-snug"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                {deal.emmaHero.headline}
+              </h2>
+              <p className="text-ink/80 text-sm leading-relaxed">
+                {deal.emmaHero.body}
+              </p>
+              {deal.emmaHero.aside && (
+                <p className="text-muted text-xs italic pt-1">
+                  {deal.emmaHero.aside}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window === 'undefined') return
+                  window.dispatchEvent(new CustomEvent('emma:open', {
+                    detail: {
+                      reason: 'why-this-pick',
+                      productHandle: deal.handle,
+                      productTitle:  deal.seoTitle,
+                    },
+                  }))
+                }}
+                className="text-sm text-ink underline underline-offset-4 decoration-ink/30 hover:decoration-ink transition-colors"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                Ask Emma why →
+              </button>
+            </div>
+          )}
 
           {/* Price */}
           <div className="flex items-center gap-3 flex-wrap">
             <span
-              className="text-4xl font-black text-brand-gradient"
+              className="text-4xl font-black text-coral"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               ${price.toFixed(2)}
             </span>
             {deal.msrp > price && (
               <>
-                <span className="text-brand-charcoal/40 text-xl line-through">
+                <span className="text-ink/40 text-xl line-through">
                   ${deal.msrp.toFixed(2)}
                 </span>
-                <span className="bg-brand-gradient text-white text-sm font-bold px-3 py-1 rounded-full">
+                <span className="bg-coral text-white text-sm font-bold px-3 py-1 rounded-full">
                   {discount}% off
                 </span>
               </>
@@ -409,8 +516,8 @@ function ProductPage() {
           {deal.featureBullets.length > 0 && (
             <ul className="space-y-1.5">
               {deal.featureBullets.map((bullet, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-brand-charcoal/80">
-                  <span className="text-brand-purple mt-0.5 shrink-0" aria-hidden="true">♥</span>
+                <li key={i} className="flex items-start gap-2 text-sm text-ink/80">
+                  <span className="text-sage mt-0.5 shrink-0" aria-hidden="true">♥</span>
                   {bullet}
                 </li>
               ))}
@@ -419,7 +526,7 @@ function ProductPage() {
 
           {/* Works for */}
           {(worksFor[0] || worksFor[1] || worksFor[2]) && (
-            <div className="flex items-center gap-2 text-sm text-brand-charcoal/60 flex-wrap">
+            <div className="flex items-center gap-2 text-sm text-ink/60 flex-wrap">
               <span>Works for:</span>
               {worksFor[0] && <WorksForBadge label="Him"     emoji="♂" />}
               {worksFor[1] && <WorksForBadge label="Her"     emoji="♀" />}
@@ -428,49 +535,13 @@ function ProductPage() {
           )}
 
           {/* Variant selector */}
-          {multiVariant && options.length > 0 && (
-            <div className="space-y-3">
-              {options.map(opt => (
-                <div key={opt.name}>
-                  <p className="text-sm font-semibold text-brand-charcoal mb-2" style={{ fontFamily: 'var(--font-display)' }}>
-                    {opt.name}
-                    {selectedVariant && (
-                      <span className="font-normal text-brand-charcoal/50 ml-2">
-                        {selectedVariant.selectedOptions.find(o => o.name === opt.name)?.value}
-                      </span>
-                    )}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {opt.values.map(val => {
-                      const match = variants.find(v =>
-                        v.selectedOptions.some(o => o.name === opt.name && o.value === val),
-                      )
-                      const isSelected  = match?.id === selectedId
-                      const isAvailable = match?.availableForSale ?? false
-                      return (
-                        <button
-                          key={val}
-                          type="button"
-                          onClick={() => match && handleVariantSelect(match.id)}
-                          disabled={!isAvailable}
-                          className={[
-                            'px-4 py-2 rounded-full text-sm font-medium border-2 transition-all',
-                            isSelected
-                              ? 'border-brand-coral bg-brand-coral/10 text-brand-coral font-semibold'
-                              : isAvailable
-                                ? 'border-brand-mist text-brand-charcoal hover:border-brand-coral/40'
-                                : 'border-brand-mist text-brand-charcoal/30 cursor-not-allowed line-through',
-                          ].join(' ')}
-                          style={{ fontFamily: 'var(--font-display)' }}
-                        >
-                          {val}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
+          {multiVariant && (
+            <VariantSelector
+              variants={variants}
+              options={options}
+              selectedVariantId={selectedId}
+              onVariantSelect={handleVariantSelect}
+            />
           )}
 
           {/* Subscription selector */}
@@ -491,38 +562,52 @@ function ProductPage() {
               {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
 
               <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-brand-charcoal/70" htmlFor="qty">Qty</label>
-                <div className="flex items-center border border-brand-mist rounded-full overflow-hidden bg-white">
+                <label className="text-sm font-medium text-ink/70" htmlFor="qty">Qty</label>
+                <div className="flex items-center border border-cream-2 rounded-full overflow-hidden bg-white">
                   <button
                     type="button"
                     onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                    className="min-w-[44px] min-h-[44px] flex items-center justify-center text-brand-charcoal hover:bg-brand-mist transition-colors text-lg"
+                    className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
                     aria-label="Decrease quantity"
                   >−</button>
                   <input id="qty" type="hidden" name="quantity" value={quantity} />
-                  <span className="px-4 text-sm font-semibold text-brand-charcoal tabular-nums">{quantity}</span>
+                  <span className="px-4 text-sm font-semibold text-ink tabular-nums">{quantity}</span>
                   <button
                     type="button"
                     onClick={() => setQuantity(q => Math.min(3, q + 1))}
-                    className="min-w-[44px] min-h-[44px] flex items-center justify-center text-brand-charcoal hover:bg-brand-mist transition-colors text-lg"
+                    className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
                     aria-label="Increase quantity"
                   >+</button>
                 </div>
-                <span className="text-xs text-brand-charcoal/40">Max 3</span>
+                <span className="text-xs text-ink/40">Max 3</span>
               </div>
 
               <button
                 ref={ctaRef}
                 type="submit"
                 disabled={isPending}
-                className="w-full py-4 rounded-full font-bold text-lg bg-brand-gradient text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-brand-coral/20 transition-all"
+                className="w-full py-4 rounded-full font-bold text-lg bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20 transition-all"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
                 {isPending ? 'Adding...' : buyButtonText}
               </button>
+              <p className="text-[11px] text-muted text-center uppercase tracking-wide">
+                plain box · billed as DIPCOM · free ship $99+
+              </p>
             </fetcher.Form>
           ) : (
             <WaitlistButton productHandle={deal.handle} />
+          )}
+
+          {/* Sensation dial + voting */}
+          {deal.productTypeDial && deal.sensationDial && (
+            <SensationDial
+              type={deal.productTypeDial}
+              values={deal.sensationDial}
+              agreeByDimension={dialAggregates}
+              onVote={handleDialVote}
+              votingLocked={!isLoggedIn}
+            />
           )}
 
         </div>
@@ -557,14 +642,17 @@ function ProductPage() {
             aria-hidden="true"
             className="absolute inset-0 w-full h-full object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-r from-brand-cream/97 via-brand-cream/90 to-brand-cream/60" />
+          <div className="absolute inset-0 bg-gradient-to-r from-cream/97 via-cream/90 to-cream/60" />
           {heroContent}
         </div>
       ) : heroContent}
 
       <div className="max-w-6xl mx-auto px-4">
         <RecentlyBrowsed currentHandle={deal.handle} />
-        <FrequentlyBoughtWith products={fbtProducts} />
+        {pairsWithItems.length > 0
+          ? <PairsWith items={pairsWithItems} />
+          : <FrequentlyBoughtWith products={fbtProducts} />
+        }
         {companionBundle && (
           <BundleSaveCard bundle={companionBundle} buyButtonText={buyButtonText} />
         )}
@@ -583,24 +671,24 @@ function ProductPage() {
 
       {/* Sticky mobile CTA */}
       {inStock && showSticky && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-white border-t border-brand-mist px-4 py-3 flex items-center gap-3 shadow-lg shadow-brand-charcoal/10">
+        <div className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-white border-t border-cream-2 px-4 py-3 flex items-center gap-3 shadow-lg shadow-ink/10">
           {deal.images[0] && (
             <img
               src={deal.images[0].url}
               alt=""
               aria-hidden="true"
-              className="w-12 h-12 rounded-xl object-cover bg-brand-mist shrink-0"
+              className="w-12 h-12 rounded-xl object-cover bg-cream-2 shrink-0"
             />
           )}
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-brand-charcoal/60 truncate">{deal.brand}</p>
+            <p className="text-xs text-ink/60 truncate">{deal.brand}</p>
             <p
-              className="text-sm font-bold text-brand-charcoal truncate"
+              className="text-sm font-bold text-ink truncate"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               ${price.toFixed(2)}
               {deal.msrp > price && (
-                <span className="text-brand-charcoal/40 line-through ml-2 font-normal">
+                <span className="text-ink/40 line-through ml-2 font-normal">
                   ${deal.msrp.toFixed(2)}
                 </span>
               )}
@@ -614,7 +702,7 @@ function ProductPage() {
             <button
               type="submit"
               disabled={isPending}
-              className="bg-brand-gradient text-white font-bold text-sm px-5 py-2.5 rounded-full hover:opacity-90 transition-opacity shrink-0"
+              className="bg-coral text-white font-bold text-sm px-5 py-2.5 rounded-full hover:opacity-90 transition-opacity shrink-0"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {isPending ? 'Adding...' : buyButtonText}
@@ -636,7 +724,7 @@ function ProductPage() {
 
 function WorksForBadge({ label, emoji }: { label: string; emoji: string }) {
   return (
-    <span className="inline-flex items-center gap-1 bg-brand-mist px-2.5 py-0.5 rounded-full text-xs font-medium text-brand-charcoal/70">
+    <span className="inline-flex items-center gap-1 bg-cream-2 px-2.5 py-0.5 rounded-full text-xs font-medium text-ink/70">
       <span aria-hidden="true">{emoji}</span>
       {label}
     </span>

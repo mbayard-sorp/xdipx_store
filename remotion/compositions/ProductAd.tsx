@@ -36,7 +36,7 @@ const BG         = '#0D0D0D'
 const WHITE      = '#FFFFFF'
 const ORANGE     = '#FF8C00'
 const RED_ORANGE = '#FF4500'
-const PURPLE     = '#7B2FBE'
+const PURPLE     = '#7C8F78'
 const GRADIENT   = `linear-gradient(90deg, ${RED_ORANGE}, ${ORANGE})`
 const FONT       = '"Plus Jakarta Sans", "Outfit", system-ui, -apple-system, sans-serif'
 

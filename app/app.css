@@ -1,39 +1,38 @@
 @import "tailwindcss";
 
 /*
-  xdipx Design Tokens
-  Import Poppins + Inter from Google Fonts (loaded in root.tsx <Links>)
+  xdipx Design Tokens (v2 — Emma editorial system)
+  Fonts: Archivo (display) + Inter (body) loaded in app/root.tsx <Links>
 */
 
 @theme {
-  /* Brand Colors */
-  --color-brand-coral:         #F04E37;
-  --color-brand-orange:        #FF8C38;
-  --color-brand-purple:        #7B2FBE;
-  --color-brand-purple-light:  #A855F7;
-  --color-brand-cream:         #FFF8F4;
-  --color-brand-charcoal:      #1E1A2E;
-  --color-brand-mist:          #F5EEF8;
+  /* Surface */
+  --color-cream:   #FAF4EA;
+  --color-cream-2: #F2EADD;
+  --color-paper:   #FFFFFF;
+
+  /* Ink */
+  --color-ink:   #151211;
+  --color-ink-2: #2A2421;
+  --color-muted: #6F645C;
+  --color-line:  #E5DBC9;
+
+  /* Accent */
+  --color-coral:       #FF4B1F;
+  --color-coral-2:     #FF6A3D;
+  --color-coral-deep:  #D93A15;
+  --color-sage:        #7C8F78;
+  --color-sun:         #F5B841;
 
   /* Typography */
-  --font-display: 'Poppins', sans-serif;
-  --font-body:    'Inter', sans-serif;
+  --font-display: 'Archivo', sans-serif;
+  --font-body:    'Inter',   sans-serif;
 
-  /* Brand Gradient */
-  --background-image-brand-gradient: linear-gradient(to right, #F04E37, #FF8C38);
-}
-
-/* Gradient text utility */
-.text-brand-gradient {
-  background: var(--background-image-brand-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* Gradient background utility */
-.bg-brand-gradient {
-  background: var(--background-image-brand-gradient);
+  /* Radii */
+  --radius-sm: 6px;
+  --radius:    12px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
 }
 
 /* Rich HTML content rendered from AI copy (full story, both ways, specs) */
@@ -67,21 +66,11 @@
   text-align: left;
   font-weight: 600;
   padding: 0.5rem 0.75rem;
-  background: var(--color-brand-mist);
+  background: var(--color-cream-2);
 }
 .prose td {
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--color-brand-mist) 60%, transparent);
-}
-
-/* Animated countdown pulse */
-@keyframes countdown-pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.7; }
-}
-
-.countdown-pulse {
-  animation: countdown-pulse 2s ease-in-out infinite;
+  border-bottom: 1px solid var(--color-line);
 }
 
 /* Smooth fade-in for age gate */
@@ -128,8 +117,8 @@
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .card-lift:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 12px 32px rgba(123, 47, 190, 0.15);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(21, 18, 17, 0.12);
 }
 
 /* Drag-apart spacer animation for deal table */

@@ -163,6 +163,71 @@ export async function activateDeal(
   // Set live status in Shopify
   await setDealStatus(deal.shopifyProductId, 'live')
 
+  // Emma hero copy — generated from pipelineSettings.brandVoice (non-blocking).
+  // Fetched via getDailyDeal() since we just flipped this product to live status.
+  try {
+    const { getDailyDeal } = await import('./shopify.server')
+    const { generateEmmaHero } = await import('./claude.server')
+    const fullDeal = await getDailyDeal().catch(() => null)
+    const seedDeal = fullDeal ?? {
+      seoTitle: deal.seoTitle ?? '',
+      tagline: '',
+      fullStory: '',
+      brand: '',
+      category: 'both' as const,
+      dealPrice,
+      msrp,
+      mapRestricted: false,
+    }
+    const variant = seedDeal.mapRestricted ? 'quote' : 'loving'
+    const copy = await generateEmmaHero({ deal: seedDeal, variant })
+    await updateProductMetafield(
+      deal.shopifyProductId,
+      'emma_hero',
+      JSON.stringify(copy),
+      'json',
+    )
+    // Mirror the Emma signature into xdipx.tagline so any surface that still
+    // reads the tagline metafield picks up Emma's voice on activation.
+    if (copy.aside) {
+      await updateProductMetafield(
+        deal.shopifyProductId,
+        'tagline',
+        copy.aside,
+        'single_line_text_field',
+      )
+    }
+
+    // Index the pick into Sanity so Emma gets smarter as deals flow.
+    // Non-blocking inside the same try — we've already written the source of
+    // truth (Shopify metafield); Sanity is the searchable replica.
+    if (fullDeal?.handle) {
+      try {
+        const { upsertEmmaPick } = await import('./sanity.server')
+        await upsertEmmaPick({
+          productId:     deal.shopifyProductId,
+          productHandle: fullDeal.handle,
+          productTitle:  fullDeal.seoTitle ?? deal.seoTitle ?? undefined,
+          brand:         fullDeal.brand ?? undefined,
+          category:      fullDeal.category ?? undefined,
+          dealDate:      estDate(0),
+          variant:       copy.variant,
+          eyebrow:       copy.eyebrow,
+          headline:      copy.headline,
+          body:          copy.body,
+          aside:         copy.aside,
+          pullQuote:     copy.pullQuote,
+          voiceHash:     copy.voiceHash,
+          generatedAt:   copy.generatedAt,
+        })
+      } catch (sanityErr) {
+        console.error('[deal-rotator] Emma pick Sanity index failed (non-blocking):', sanityErr)
+      }
+    }
+  } catch (err) {
+    console.error('[deal-rotator] Emma hero generation failed (non-blocking):', err)
+  }
+
   // Update DB
   await db
     .update(dealHistory)

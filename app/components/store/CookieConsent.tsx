@@ -36,7 +36,7 @@ export function CookieConsent() {
 
   return (
     <div
-      className="fixed bottom-4 left-4 right-4 md:left-auto md:right-6 md:max-w-sm z-50 bg-brand-charcoal text-white rounded-2xl p-5 shadow-2xl fade-in"
+      className="fixed bottom-4 left-4 right-4 md:left-auto md:right-6 md:max-w-sm z-50 bg-ink text-white rounded-2xl p-5 shadow-2xl fade-in"
       role="dialog"
       aria-label="Cookie consent"
     >
@@ -47,7 +47,7 @@ export function CookieConsent() {
       <div className="flex gap-2">
         <button
           onClick={() => accept('all')}
-          className="flex-1 bg-brand-gradient text-white text-sm font-bold py-2 rounded-full hover:opacity-90 transition-opacity"
+          className="flex-1 bg-coral text-white text-sm font-bold py-2 rounded-full hover:opacity-90 transition-opacity"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Accept all

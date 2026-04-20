@@ -108,7 +108,7 @@ export function PricingPanel({ productId, config, shopifyCost, variants }: Props
 
   const moneyInput = (name: string, value: string, onChange: (v: string) => void) => (
     <div className="relative">
-      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-brand-charcoal/40">$</span>
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-ink/40">$</span>
       <input
         type="number"
         name={name}
@@ -116,7 +116,7 @@ export function PricingPanel({ productId, config, shopifyCost, variants }: Props
         onChange={e => onChange(e.target.value)}
         step="0.01"
         min="0"
-        className="w-full border border-brand-mist rounded-xl pl-6 pr-3 py-2 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+        className="w-full border border-cream-2 rounded-xl pl-6 pr-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
       />
     </div>
   )
@@ -131,107 +131,107 @@ export function PricingPanel({ productId, config, shopifyCost, variants }: Props
         step="0.1"
         min="0"
         max="100"
-        className="w-full border border-brand-mist rounded-xl pl-3 pr-7 py-2 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+        className="w-full border border-cream-2 rounded-xl pl-3 pr-7 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
       />
-      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-brand-charcoal/40">%</span>
+      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-ink/40">%</span>
     </div>
   )
 
   return (
-    <div className="border-t border-brand-mist mt-3 pt-3 space-y-4">
+    <div className="border-t border-cream-2 mt-3 pt-3 space-y-4">
       {variants && variants.length > 1 && (
         <VariantPricingSection variants={variants} />
       )}
 
       {/* Section 1: Deal Pricing */}
       <section>
-        <h4 className="text-xs font-bold uppercase tracking-wide text-brand-charcoal/70 mb-2"
+        <h4 className="text-xs font-bold uppercase tracking-wide text-ink/70 mb-2"
             style={{ fontFamily: 'var(--font-display)' }}>
           Deal Pricing
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <label className="text-xs font-medium text-brand-charcoal/50 block mb-1">Deal Price</label>
+            <label className="text-xs font-medium text-ink/50 block mb-1">Deal Price</label>
             {moneyInput('dealPrice', dealPrice, setDealPrice)}
           </div>
           <div>
-            <label className="text-xs font-medium text-brand-charcoal/50 block mb-1">Profit Margin</label>
-            <div className="px-3 py-2 text-sm text-brand-charcoal/70 border border-dashed border-brand-mist rounded-xl bg-brand-mist/30">
-              {fmtPct(dealMarginPct)} <span className="text-brand-charcoal/40">(calculated)</span>
+            <label className="text-xs font-medium text-ink/50 block mb-1">Profit Margin</label>
+            <div className="px-3 py-2 text-sm text-ink/70 border border-dashed border-cream-2 rounded-xl bg-cream-2/30">
+              {fmtPct(dealMarginPct)} <span className="text-ink/40">(calculated)</span>
             </div>
           </div>
         </div>
         <div className="mt-3">
-          <label className="text-xs font-medium text-brand-charcoal/50 block mb-1">
-            Vault Price Override <span className="text-brand-charcoal/40">(leave empty for auto-calc)</span>
+          <label className="text-xs font-medium text-ink/50 block mb-1">
+            Vault Price Override <span className="text-ink/40">(leave empty for auto-calc)</span>
           </label>
           {moneyInput('vaultPriceOverride', vaultOverride, setVaultOverride)}
         </div>
-        <p className="text-xs text-brand-charcoal/60 mt-2">
+        <p className="text-xs text-ink/60 mt-2">
           Profit/Per: <strong className={profitClass(dealProfit)}>{fmtMoney(dealProfit)}</strong>
           &nbsp;·&nbsp;Margin: <strong className={profitClass(dealMarginPct)}>{fmtPct(dealMarginPct)}</strong>
         </p>
       </section>
 
       {/* Section 2: Everyday Pricing */}
-      <section className="border-t border-brand-mist pt-4">
-        <h4 className="text-xs font-bold uppercase tracking-wide text-brand-charcoal/70 mb-2"
+      <section className="border-t border-cream-2 pt-4">
+        <h4 className="text-xs font-bold uppercase tracking-wide text-ink/70 mb-2"
             style={{ fontFamily: 'var(--font-display)' }}>
           Everyday Pricing
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <label className="text-xs font-medium text-brand-charcoal/50 block mb-1">MSRP</label>
+            <label className="text-xs font-medium text-ink/50 block mb-1">MSRP</label>
             {moneyInput('msrp', msrp, setMsrp)}
           </div>
           <div>
-            <label className="text-xs font-medium text-brand-charcoal/50 block mb-1">% off MSRP</label>
+            <label className="text-xs font-medium text-ink/50 block mb-1">% off MSRP</label>
             {pctInput('pctOffMsrp', pctOffMsrp, setPctOffMsrp)}
           </div>
         </div>
-        <p className="text-xs text-brand-charcoal/60 mt-2">
-          Everyday Price: <strong className="text-brand-charcoal">{fmtMoney(everydayPrice)}</strong>
+        <p className="text-xs text-ink/60 mt-2">
+          Everyday Price: <strong className="text-ink">{fmtMoney(everydayPrice)}</strong>
         </p>
       </section>
 
       {/* Section 3: Cost & Margins */}
-      <section className="border-t border-brand-mist pt-4">
-        <h4 className="text-xs font-bold uppercase tracking-wide text-brand-charcoal/70 mb-2"
+      <section className="border-t border-cream-2 pt-4">
+        <h4 className="text-xs font-bold uppercase tracking-wide text-ink/70 mb-2"
             style={{ fontFamily: 'var(--font-display)' }}>
           Cost &amp; Margins
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <label className="text-xs font-medium text-brand-charcoal/50 block mb-1">Wholesale Cost</label>
+            <label className="text-xs font-medium text-ink/50 block mb-1">Wholesale Cost</label>
             {moneyInput('wholesaleCost', wholesaleCost, setWholesaleCost)}
           </div>
           <div>
-            <label className="text-xs font-medium text-brand-charcoal/50 block mb-1">MAP</label>
+            <label className="text-xs font-medium text-ink/50 block mb-1">MAP</label>
             {moneyInput('mapPrice', mapPrice, setMapPrice)}
           </div>
         </div>
         {shopifyCost !== null && (
-          <div className="flex items-center gap-2 text-xs text-brand-charcoal/50 mt-2">
+          <div className="flex items-center gap-2 text-xs text-ink/50 mt-2">
             <span>Shopify cost on file:</span>
-            <span className="font-semibold text-brand-charcoal">${shopifyCost.toFixed(2)}</span>
+            <span className="font-semibold text-ink">${shopifyCost.toFixed(2)}</span>
             {shopifyCost !== wholesaleN && (
               <span className="text-amber-600 font-medium">⚠ differs from wholesale cost above</span>
             )}
           </div>
         )}
-        <p className="text-xs text-brand-charcoal/60 mt-2">
+        <p className="text-xs text-ink/60 mt-2">
           Profit/Unit: <strong className={profitClass(unitProfit)}>{fmtMoney(unitProfit)}</strong>
           &nbsp;·&nbsp;Margin: <strong className={profitClass(unitMarginPct)}>{fmtPct(unitMarginPct)}</strong>
-          &nbsp;·&nbsp;Cost: <strong className="text-brand-charcoal">{fmtMoney(wholesaleN)}</strong>
+          &nbsp;·&nbsp;Cost: <strong className="text-ink">{fmtMoney(wholesaleN)}</strong>
         </p>
       </section>
 
-      <div className="flex items-center justify-between border-t border-brand-mist pt-3">
+      <div className="flex items-center justify-between border-t border-cream-2 pt-3">
         <span className={
-          saving ? 'text-xs text-brand-charcoal/50' :
+          saving ? 'text-xs text-ink/50' :
           isDirty ? 'text-xs text-amber-600 font-medium' :
           saved ? 'text-xs text-green-600 font-medium' :
-          'text-xs text-brand-charcoal/40'
+          'text-xs text-ink/40'
         }>
           {statusText}
         </span>
@@ -241,8 +241,8 @@ export function PricingPanel({ productId, config, shopifyCost, variants }: Props
           disabled={saving}
           className={
             saving
-              ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
-              : 'text-xs font-bold px-3 py-1.5 rounded-full bg-brand-mist text-brand-purple hover:bg-brand-purple/10 transition-colors'
+              ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-ink/10 text-ink/40 cursor-not-allowed'
+              : 'text-xs font-bold px-3 py-1.5 rounded-full bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
           }
         >
           Save Pricing
@@ -348,7 +348,7 @@ function VariantPricingSection({ variants }: { variants: ProductVariant[] }) {
 
   const moneyInput = (name: string, value: string, onChange: (v: string) => void) => (
     <div className="relative">
-      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-brand-charcoal/40">$</span>
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-ink/40">$</span>
       <input
         type="number"
         name={name}
@@ -356,7 +356,7 @@ function VariantPricingSection({ variants }: { variants: ProductVariant[] }) {
         onChange={e => onChange(e.target.value)}
         step="0.01"
         min="0"
-        className="w-full border border-brand-mist rounded-xl pl-6 pr-3 py-2 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+        className="w-full border border-cream-2 rounded-xl pl-6 pr-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
       />
     </div>
   )
@@ -370,17 +370,17 @@ function VariantPricingSection({ variants }: { variants: ProductVariant[] }) {
     ''
 
   return (
-    <section className="rounded-xl border border-brand-mist bg-brand-mist/30 p-4">
+    <section className="rounded-xl border border-cream-2 bg-cream-2/30 p-4">
       <div className="flex items-center justify-between mb-1">
-        <h4 className="text-xs font-bold uppercase tracking-wide text-brand-charcoal/70"
+        <h4 className="text-xs font-bold uppercase tracking-wide text-ink/70"
             style={{ fontFamily: 'var(--font-display)' }}>
           Variant Pricing
         </h4>
-        <span className="text-[10px] uppercase tracking-wide text-brand-charcoal/40">
+        <span className="text-[10px] uppercase tracking-wide text-ink/40">
           Pushes to Shopify
         </span>
       </div>
-      <p className="text-xs text-brand-charcoal/60 mb-3">
+      <p className="text-xs text-ink/60 mb-3">
         Edit each variant's price and compare-at price. Saves push directly to Shopify.
       </p>
 
@@ -401,12 +401,12 @@ function VariantPricingSection({ variants }: { variants: ProductVariant[] }) {
               onClick={() => setSelectedId(v.id)}
               className={
                 isSel
-                  ? 'text-xs font-semibold px-3 py-1.5 rounded-full bg-brand-purple text-white'
-                  : 'text-xs font-medium px-3 py-1.5 rounded-full bg-white text-brand-charcoal/70 border border-brand-mist hover:bg-brand-mist/60 transition-colors'
+                  ? 'text-xs font-semibold px-3 py-1.5 rounded-full bg-sage text-white'
+                  : 'text-xs font-medium px-3 py-1.5 rounded-full bg-white text-ink/70 border border-cream-2 hover:bg-cream-2/60 transition-colors'
               }
             >
               {variantLabel(v)}
-              <span className={isSel ? 'ml-1.5 text-white/70' : 'ml-1.5 text-brand-charcoal/40'}>
+              <span className={isSel ? 'ml-1.5 text-white/70' : 'ml-1.5 text-ink/40'}>
                 ${priceNow}
               </span>
             </button>
@@ -418,12 +418,12 @@ function VariantPricingSection({ variants }: { variants: ProductVariant[] }) {
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-brand-charcoal/50 block mb-1">Price</label>
+              <label className="text-xs font-medium text-ink/50 block mb-1">Price</label>
               {moneyInput('variantPrice', selected.price, v => updateField('price', v))}
             </div>
             <div>
-              <label className="text-xs font-medium text-brand-charcoal/50 block mb-1">
-                Compare At <span className="text-brand-charcoal/40">(optional)</span>
+              <label className="text-xs font-medium text-ink/50 block mb-1">
+                Compare At <span className="text-ink/40">(optional)</span>
               </label>
               {moneyInput('variantCompareAtPrice', selected.compareAtPrice, v => updateField('compareAtPrice', v))}
             </div>
@@ -431,10 +431,10 @@ function VariantPricingSection({ variants }: { variants: ProductVariant[] }) {
 
           <div className="flex items-center justify-between mt-3">
             <span className={
-              saving || syncing ? 'text-xs text-brand-charcoal/50' :
+              saving || syncing ? 'text-xs text-ink/50' :
               isSelectedDirty ? 'text-xs text-amber-600 font-medium' :
               (saveFetcher.data?.ok || syncFetcher.data?.ok) ? 'text-xs text-green-600 font-medium' :
-              'text-xs text-brand-charcoal/40'
+              'text-xs text-ink/40'
             }>
               {saveStatus}
             </span>
@@ -445,8 +445,8 @@ function VariantPricingSection({ variants }: { variants: ProductVariant[] }) {
                 disabled={saving || syncing}
                 className={
                   saving || syncing
-                    ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
-                    : 'text-xs font-bold px-3 py-1.5 rounded-full bg-white text-brand-charcoal border border-brand-mist hover:bg-brand-mist/60 transition-colors'
+                    ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-ink/10 text-ink/40 cursor-not-allowed'
+                    : 'text-xs font-bold px-3 py-1.5 rounded-full bg-white text-ink border border-cream-2 hover:bg-cream-2/60 transition-colors'
                 }
               >
                 Apply to all {variants.length} variants
@@ -457,8 +457,8 @@ function VariantPricingSection({ variants }: { variants: ProductVariant[] }) {
                 disabled={saving || syncing}
                 className={
                   saving || syncing
-                    ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
-                    : 'text-xs font-bold px-3 py-1.5 rounded-full bg-brand-purple text-white hover:bg-brand-purple/90 transition-colors'
+                    ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-ink/10 text-ink/40 cursor-not-allowed'
+                    : 'text-xs font-bold px-3 py-1.5 rounded-full bg-sage text-white hover:bg-sage/90 transition-colors'
                 }
               >
                 Save Variant

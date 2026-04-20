@@ -165,13 +165,13 @@ export function AdminNav({ logoUrl, adminUser }: { logoUrl: string | null; admin
     : NAV_ITEMS
 
   return (
-    <aside className="w-56 bg-brand-charcoal min-h-screen flex flex-col py-6 px-4 shrink-0">
+    <aside className="w-56 bg-ink min-h-screen flex flex-col py-6 px-4 shrink-0">
       <Link to="/" className="block mb-8">
         {logoUrl ? (
           <img src={logoUrl} alt="xdipx" className="h-8 w-auto" />
         ) : (
           <span
-            className="text-2xl font-black text-brand-gradient select-none"
+            className="text-2xl font-black text-coral select-none"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             xdipx
@@ -196,7 +196,7 @@ export function AdminNav({ logoUrl, adminUser }: { logoUrl: string | null; admin
               className={[
                 'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all',
                 active
-                  ? 'bg-brand-gradient text-white shadow-sm'
+                  ? 'bg-coral text-white shadow-sm'
                   : 'text-white/60 hover:text-white hover:bg-white/10',
               ].join(' ')}
               style={{ fontFamily: 'var(--font-display)' }}
@@ -204,7 +204,7 @@ export function AdminNav({ logoUrl, adminUser }: { logoUrl: string | null; admin
               <Icon />
               {label}
               {badge != null && (
-                <span className="ml-auto bg-brand-coral text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                <span className="ml-auto bg-coral text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
                   {badge > 99 ? '99+' : badge}
                 </span>
               )}

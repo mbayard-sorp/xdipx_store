@@ -66,23 +66,23 @@ export default function AdminReviewExport() {
   return (
     <div className="max-w-lg">
       <h1
-        className="text-2xl font-bold text-brand-charcoal mb-8"
+        className="text-2xl font-bold text-ink mb-8"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Export Reviews
       </h1>
 
-      <div className="bg-white rounded-2xl border border-brand-mist p-6 space-y-6">
+      <div className="bg-white rounded-2xl border border-cream-2 p-6 space-y-6">
         <div className="grid grid-cols-2 gap-4 text-sm">
-          <div className="bg-brand-mist rounded-xl p-3">
-            <p className="text-xs text-brand-charcoal/50">Total reviews</p>
-            <p className="text-2xl font-black text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          <div className="bg-cream-2 rounded-xl p-3">
+            <p className="text-xs text-ink/50">Total reviews</p>
+            <p className="text-2xl font-black text-ink" style={{ fontFamily: 'var(--font-display)' }}>
               {stats.totalReviews}
             </p>
           </div>
-          <div className="bg-brand-mist rounded-xl p-3">
-            <p className="text-xs text-brand-charcoal/50">Approved</p>
-            <p className="text-2xl font-black text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          <div className="bg-cream-2 rounded-xl p-3">
+            <p className="text-xs text-ink/50">Approved</p>
+            <p className="text-2xl font-black text-ink" style={{ fontFamily: 'var(--font-display)' }}>
               {stats.approvedReviews}
             </p>
           </div>
@@ -90,12 +90,12 @@ export default function AdminReviewExport() {
 
         <Form method="post" className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-brand-charcoal mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
+            <label className="block text-sm font-medium text-ink mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
               Filter by status
             </label>
             <select
               name="status"
-              className="border border-brand-mist rounded-xl px-3 py-2 text-sm text-brand-charcoal w-full focus:outline-none focus:border-brand-purple"
+              className="border border-cream-2 rounded-xl px-3 py-2 text-sm text-ink w-full focus:outline-none focus:border-sage"
             >
               <option value="all">All reviews</option>
               <option value="approved">Approved only</option>
@@ -106,16 +106,16 @@ export default function AdminReviewExport() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-brand-charcoal mb-2" style={{ fontFamily: 'var(--font-display)' }}>
+            <label className="block text-sm font-medium text-ink mb-2" style={{ fontFamily: 'var(--font-display)' }}>
               Format
             </label>
             <div className="flex gap-4">
-              <label className="flex items-center gap-2 text-sm text-brand-charcoal/70">
-                <input type="radio" name="format" value="csv" defaultChecked className="accent-brand-purple" />
+              <label className="flex items-center gap-2 text-sm text-ink/70">
+                <input type="radio" name="format" value="csv" defaultChecked className="accent-sage" />
                 CSV
               </label>
-              <label className="flex items-center gap-2 text-sm text-brand-charcoal/70">
-                <input type="radio" name="format" value="json" className="accent-brand-purple" />
+              <label className="flex items-center gap-2 text-sm text-ink/70">
+                <input type="radio" name="format" value="json" className="accent-sage" />
                 JSON
               </label>
             </div>
@@ -123,7 +123,7 @@ export default function AdminReviewExport() {
 
           <button
             type="submit"
-            className="w-full bg-brand-gradient text-white font-semibold py-3 rounded-full hover:opacity-90 transition-opacity"
+            className="w-full bg-coral text-white font-semibold py-3 rounded-full hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Download Export ♥

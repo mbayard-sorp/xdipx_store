@@ -190,12 +190,12 @@ export default function CollectionsManager() {
       {/* Header */}
       <div className="mb-6">
         <h1
-          className="text-2xl font-bold text-brand-charcoal"
+          className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Collections Manager
         </h1>
-        <p className="text-sm text-brand-charcoal/50 mt-1">
+        <p className="text-sm text-ink/50 mt-1">
           Browse Shopify collections, edit descriptions, and generate category images.
         </p>
       </div>
@@ -203,7 +203,7 @@ export default function CollectionsManager() {
       {/* Search */}
       <div className="mb-4">
         <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-charcoal/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8" />
             <path d="M21 21l-4.35-4.35" />
           </svg>
@@ -212,7 +212,7 @@ export default function CollectionsManager() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search collections..."
-            className="w-full pl-9 pr-3 py-2 text-sm border border-brand-mist rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-brand-purple/30 text-brand-charcoal"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-cream-2 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-sage/30 text-ink"
           />
         </div>
       </div>
@@ -221,10 +221,10 @@ export default function CollectionsManager() {
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
         {/* Column headers */}
         <div
-          className="hidden md:grid px-5 py-3 bg-brand-mist text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wide gap-3"
+          className="hidden md:grid px-5 py-3 bg-cream-2 text-xs font-semibold text-ink/50 uppercase tracking-wide gap-3"
           style={{ gridTemplateColumns: '1fr 10rem 5rem 3rem' }}
         >
-          <button type="button" onClick={() => toggleSort('title')} className="flex items-center gap-1 text-left hover:text-brand-charcoal transition-colors">
+          <button type="button" onClick={() => toggleSort('title')} className="flex items-center gap-1 text-left hover:text-ink transition-colors">
             Collection
             {sortKey === 'title' && (
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${sortDir === 'desc' ? 'rotate-180' : ''}`}>
@@ -232,7 +232,7 @@ export default function CollectionsManager() {
               </svg>
             )}
           </button>
-          <button type="button" onClick={() => toggleSort('handle')} className="flex items-center gap-1 text-left hover:text-brand-charcoal transition-colors">
+          <button type="button" onClick={() => toggleSort('handle')} className="flex items-center gap-1 text-left hover:text-ink transition-colors">
             Handle
             {sortKey === 'handle' && (
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${sortDir === 'desc' ? 'rotate-180' : ''}`}>
@@ -240,7 +240,7 @@ export default function CollectionsManager() {
               </svg>
             )}
           </button>
-          <button type="button" onClick={() => toggleSort('productsCount')} className="flex items-center gap-1 justify-center hover:text-brand-charcoal transition-colors">
+          <button type="button" onClick={() => toggleSort('productsCount')} className="flex items-center gap-1 justify-center hover:text-ink transition-colors">
             Products
             {sortKey === 'productsCount' && (
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${sortDir === 'desc' ? 'rotate-180' : ''}`}>
@@ -252,7 +252,7 @@ export default function CollectionsManager() {
         </div>
 
         {filtered.length === 0 && (
-          <p className="px-5 py-10 text-center text-sm text-brand-charcoal/40">
+          <p className="px-5 py-10 text-center text-sm text-ink/40">
             {search ? `No collections matching "${search}".` : 'No collections found in Shopify.'}
           </p>
         )}
@@ -261,12 +261,12 @@ export default function CollectionsManager() {
           const isExpanded = expandedHandle === c.handle
           const imageUrl = collectionImages[c.handle]
           return (
-            <div key={c.handle} className="border-t border-brand-mist">
+            <div key={c.handle} className="border-t border-cream-2">
               {/* Row */}
               <button
                 type="button"
                 onClick={() => toggleRow(c.handle)}
-                className="w-full px-5 py-3.5 flex items-center md:grid gap-3 text-left hover:bg-brand-mist/40 transition-colors"
+                className="w-full px-5 py-3.5 flex items-center md:grid gap-3 text-left hover:bg-cream-2/40 transition-colors"
                 style={{ gridTemplateColumns: '1fr 10rem 5rem 3rem' }}
               >
                 <div className="flex items-center gap-3 min-w-0">
@@ -277,24 +277,24 @@ export default function CollectionsManager() {
                       className="w-8 h-8 rounded object-cover shrink-0"
                     />
                   ) : (
-                    <div className="w-8 h-8 rounded bg-brand-mist flex items-center justify-center shrink-0">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-charcoal/20">
+                    <div className="w-8 h-8 rounded bg-cream-2 flex items-center justify-center shrink-0">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ink/20">
                         <rect x="3" y="3" width="18" height="18" rx="2" />
                         <circle cx="8.5" cy="8.5" r="1.5" />
                         <polyline points="21 15 16 10 5 21" />
                       </svg>
                     </div>
                   )}
-                  <span className="text-sm font-medium text-brand-charcoal truncate">{c.title}</span>
+                  <span className="text-sm font-medium text-ink truncate">{c.title}</span>
                 </div>
-                <span className="text-xs font-mono text-brand-charcoal/40 hidden md:block">{c.handle}</span>
-                <span className="text-xs font-semibold text-brand-charcoal/60 text-center hidden md:block">
+                <span className="text-xs font-mono text-ink/40 hidden md:block">{c.handle}</span>
+                <span className="text-xs font-semibold text-ink/60 text-center hidden md:block">
                   {c.productsCount}
                 </span>
                 <svg
                   width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                  className={`text-brand-charcoal/30 transition-transform shrink-0 ml-auto md:ml-0 ${isExpanded ? 'rotate-180' : ''}`}
+                  className={`text-ink/30 transition-transform shrink-0 ml-auto md:ml-0 ${isExpanded ? 'rotate-180' : ''}`}
                 >
                   <path d="M6 9l6 6 6-6" />
                 </svg>
@@ -372,11 +372,11 @@ function ExpandedPanel({
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null)
 
   return (
-    <div className="px-5 pb-5 space-y-5 bg-brand-mist/20">
+    <div className="px-5 pb-5 space-y-5 bg-cream-2/20">
       {/* Description editor */}
       <div className="bg-white rounded-xl p-4 shadow-sm">
         <h3
-          className="text-xs font-bold text-brand-charcoal/50 uppercase tracking-wide mb-2"
+          className="text-xs font-bold text-ink/50 uppercase tracking-wide mb-2"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Description
@@ -388,14 +388,14 @@ function ExpandedPanel({
             name="description"
             defaultValue={collection.descriptionHtml}
             rows={4}
-            className="w-full text-sm border border-brand-mist rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-brand-purple/30 text-brand-charcoal resize-y"
+            className="w-full text-sm border border-cream-2 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-sage/30 text-ink resize-y"
             placeholder="Collection description (HTML supported)"
           />
           <div className="flex items-center gap-3 mt-2">
             <button
               type="submit"
               disabled={descFetcher.state !== 'idle'}
-              className="text-xs font-semibold px-4 py-1.5 bg-brand-gradient text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="text-xs font-semibold px-4 py-1.5 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {descFetcher.state !== 'idle' ? 'Saving...' : 'Save Description'}
@@ -411,21 +411,21 @@ function ExpandedPanel({
       <div className="bg-white rounded-xl p-4 shadow-sm">
         <div className="flex items-center gap-2 mb-2">
           <h3
-            className="text-xs font-bold text-brand-charcoal/50 uppercase tracking-wide"
+            className="text-xs font-bold text-ink/50 uppercase tracking-wide"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Products in Collection ({products.length})
           </h3>
-          <span className="text-[11px] text-brand-charcoal/30">— click product to browse images, then select references</span>
+          <span className="text-[11px] text-ink/30">— click product to browse images, then select references</span>
           {selectedRefImages.size > 0 && (
             <>
-              <span className="ml-auto text-[11px] font-medium text-brand-coral">
+              <span className="ml-auto text-[11px] font-medium text-coral">
                 {selectedRefImages.size} selected
               </span>
               <button
                 type="button"
                 onClick={onClearRefImages}
-                className="text-[11px] text-brand-charcoal/40 hover:text-red-500 transition-colors"
+                className="text-[11px] text-ink/40 hover:text-red-500 transition-colors"
               >
                 Clear
               </button>
@@ -433,9 +433,9 @@ function ExpandedPanel({
           )}
         </div>
         {loadingProducts ? (
-          <div className="py-6 text-center text-sm text-brand-charcoal/40">Loading products...</div>
+          <div className="py-6 text-center text-sm text-ink/40">Loading products...</div>
         ) : products.length === 0 ? (
-          <div className="py-6 text-center text-sm text-brand-charcoal/40">No products in this collection.</div>
+          <div className="py-6 text-center text-sm text-ink/40">No products in this collection.</div>
         ) : (
           <div>
             {/* Product thumbnail grid */}
@@ -452,18 +452,18 @@ function ExpandedPanel({
                     className={[
                       'group relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-all',
                       isExpanded
-                        ? 'border-brand-purple ring-2 ring-brand-purple/20'
+                        ? 'border-sage ring-2 ring-sage/20'
                         : hasSelected
-                          ? 'border-brand-coral ring-2 ring-brand-coral/20'
-                          : 'border-transparent hover:border-brand-mist',
+                          ? 'border-coral ring-2 ring-coral/20'
+                          : 'border-transparent hover:border-cream-2',
                     ].join(' ')}
                     title={p.title}
                   >
                     {thumbUrl ? (
                       <img src={thumbUrl} alt={p.title} className="w-full h-full object-cover" />
                     ) : (
-                      <div className="w-full h-full bg-brand-mist flex items-center justify-center">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-charcoal/20">
+                      <div className="w-full h-full bg-cream-2 flex items-center justify-center">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ink/20">
                           <rect x="3" y="3" width="18" height="18" rx="2" />
                           <circle cx="8.5" cy="8.5" r="1.5" />
                           <polyline points="21 15 16 10 5 21" />
@@ -478,12 +478,12 @@ function ExpandedPanel({
                     )}
                     {/* Selected count badge */}
                     {hasSelected && (
-                      <span className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-brand-coral text-white text-[9px] font-bold flex items-center justify-center shadow">
+                      <span className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-coral text-white text-[9px] font-bold flex items-center justify-center shadow">
                         ✓
                       </span>
                     )}
                     {/* Tooltip */}
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-brand-charcoal text-white text-[10px] rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-ink text-white text-[10px] rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
                       {p.title}
                     </div>
                   </button>
@@ -496,8 +496,8 @@ function ExpandedPanel({
               const product = products.find(p => p.id === expandedProductId)
               if (!product || product.images.length === 0) return null
               return (
-                <div className="mt-3 pt-3 border-t border-brand-mist/50">
-                  <p className="text-[11px] font-medium text-brand-charcoal/60 mb-2">
+                <div className="mt-3 pt-3 border-t border-cream-2/50">
+                  <p className="text-[11px] font-medium text-ink/60 mb-2">
                     {product.title} — {product.images.length} image{product.images.length !== 1 ? 's' : ''} (click to select as reference)
                   </p>
                   <div className="flex flex-wrap gap-3 py-2" style={{ overflow: 'visible' }}>
@@ -511,8 +511,8 @@ function ExpandedPanel({
                           className={[
                             'relative shrink-0 w-20 h-20 rounded-lg border-2 transition-all duration-200 origin-center hover:scale-150 hover:z-10',
                             selected
-                              ? 'border-brand-coral ring-2 ring-brand-coral/20'
-                              : 'border-transparent hover:border-brand-mist',
+                              ? 'border-coral ring-2 ring-coral/20'
+                              : 'border-transparent hover:border-cream-2',
                           ].join(' ')}
                           title={`Image ${idx + 1}${selected ? ' (selected)' : ''}`}
                         >
@@ -522,8 +522,8 @@ function ExpandedPanel({
                             className="w-full h-full object-cover rounded-md"
                           />
                           {selected && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-brand-coral/20 rounded-md">
-                              <span className="w-5 h-5 rounded-full bg-brand-coral text-white text-[10px] font-bold flex items-center justify-center shadow">
+                            <div className="absolute inset-0 flex items-center justify-center bg-coral/20 rounded-md">
+                              <span className="w-5 h-5 rounded-full bg-coral text-white text-[10px] font-bold flex items-center justify-center shadow">
                                 ✓
                               </span>
                             </div>
@@ -542,7 +542,7 @@ function ExpandedPanel({
       {/* Category image generator */}
       <div className="bg-white rounded-xl p-4 shadow-sm">
         <h3
-          className="text-xs font-bold text-brand-charcoal/50 uppercase tracking-wide mb-3"
+          className="text-xs font-bold text-ink/50 uppercase tracking-wide mb-3"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Category Image
@@ -551,11 +551,11 @@ function ExpandedPanel({
         {/* Current image */}
         {currentImageUrl && (
           <div className="mb-3">
-            <p className="text-xs text-brand-charcoal/40 mb-1">Current image:</p>
+            <p className="text-xs text-ink/40 mb-1">Current image:</p>
             <img
               src={currentImageUrl}
               alt={collection.title}
-              className="w-40 h-28 rounded-lg object-cover border border-brand-mist"
+              className="w-40 h-28 rounded-lg object-cover border border-cream-2"
             />
           </div>
         )}
@@ -566,14 +566,14 @@ function ExpandedPanel({
             value={prompt}
             onChange={e => setPrompt(e.target.value)}
             rows={2}
-            className="w-full text-sm border border-brand-mist rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-brand-purple/30 text-brand-charcoal resize-y"
+            className="w-full text-sm border border-cream-2 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-sage/30 text-ink resize-y"
             placeholder={`Describe the category image for "${collection.title}"...`}
           />
           <div className="flex items-center gap-3">
             <select
               value={style}
               onChange={e => setStyle(e.target.value)}
-              className="text-xs border border-brand-mist rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-brand-purple/30 text-brand-charcoal"
+              className="text-xs border border-cream-2 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sage/30 text-ink"
             >
               {STYLES.map(s => (
                 <option key={s.value} value={s.value}>{s.label}</option>
@@ -583,7 +583,7 @@ function ExpandedPanel({
               type="button"
               onClick={onGenerate}
               disabled={!prompt.trim() || generating}
-              className="text-xs font-semibold px-4 py-1.5 bg-brand-purple text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1.5"
+              className="text-xs font-semibold px-4 py-1.5 bg-sage text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1.5"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {generating ? (
@@ -598,7 +598,7 @@ function ExpandedPanel({
             </button>
           </div>
           {selectedRefImages.size > 0 && (
-            <p className="text-[11px] text-brand-coral/70">
+            <p className="text-[11px] text-coral/70">
               {selectedRefImages.size} reference image{selectedRefImages.size !== 1 ? 's' : ''} will be included in generation.
             </p>
           )}
@@ -615,7 +615,7 @@ function ExpandedPanel({
         {/* Generated images */}
         {generatedImages.length > 0 && (
           <div>
-            <p className="text-xs text-brand-charcoal/50 mb-2 font-medium">Generated — click to set as collection image:</p>
+            <p className="text-xs text-ink/50 mb-2 font-medium">Generated — click to set as collection image:</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {generatedImages.map((img, i) => (
                 <button
@@ -623,7 +623,7 @@ function ExpandedPanel({
                   type="button"
                   onClick={() => onSetImage(i)}
                   disabled={settingImage !== null}
-                  className="relative group rounded-lg overflow-hidden border-2 border-transparent hover:border-brand-purple transition-colors disabled:opacity-50"
+                  className="relative group rounded-lg overflow-hidden border-2 border-transparent hover:border-sage transition-colors disabled:opacity-50"
                 >
                   <img
                     src={`data:${img.mimeType};base64,${img.base64}`}
@@ -637,7 +637,7 @@ function ExpandedPanel({
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                       </svg>
                     ) : (
-                      <span className="text-white text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity bg-brand-purple/80 px-2 py-1 rounded">
+                      <span className="text-white text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity bg-sage/80 px-2 py-1 rounded">
                         Set as Image
                       </span>
                     )}

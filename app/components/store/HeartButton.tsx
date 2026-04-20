@@ -136,7 +136,7 @@ export function HeartButton({
   const baseClasses =
     variant === 'overlay'
       ? `absolute top-2 right-2 z-10 flex items-center justify-center ${sizeClasses} rounded-full bg-white/90 backdrop-blur-sm shadow-md hover:bg-white transition-colors`
-      : `inline-flex items-center justify-center ${sizeClasses} rounded-full bg-brand-mist hover:bg-brand-purple hover:text-white transition-colors`
+      : `inline-flex items-center justify-center ${sizeClasses} rounded-full bg-cream-2 hover:bg-sage hover:text-white transition-colors`
 
   return (
     <>
@@ -158,7 +158,7 @@ export function HeartButton({
           strokeWidth={hearted ? 0 : 2}
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={hearted ? 'text-brand-purple' : 'text-brand-charcoal/70'}
+          className={hearted ? 'text-sage' : 'text-ink/70'}
           aria-hidden="true"
         >
           <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
@@ -170,13 +170,13 @@ export function HeartButton({
           <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
             {/* Expanding ring burst */}
             <motion.div
-              className="absolute rounded-full border-2 border-brand-purple/40"
+              className="absolute rounded-full border-2 border-sage/40"
               initial={{ width: 0, height: 0, opacity: 1 }}
               animate={{ width: 180, height: 180, opacity: 0 }}
               transition={{ duration: 0.7, ease: 'easeOut' }}
             />
             <motion.div
-              className="absolute rounded-full border border-brand-coral/30"
+              className="absolute rounded-full border border-coral/30"
               initial={{ width: 0, height: 0, opacity: 1 }}
               animate={{ width: 120, height: 120, opacity: 0 }}
               transition={{ duration: 0.5, ease: 'easeOut', delay: 0.08 }}
@@ -186,7 +186,7 @@ export function HeartButton({
             {Array.from({ length: 8 }).map((_, i) => (
               <motion.div
                 key={i}
-                className={`absolute w-1.5 h-1.5 rounded-full ${i % 2 === 0 ? 'bg-brand-purple' : 'bg-brand-coral'}`}
+                className={`absolute w-1.5 h-1.5 rounded-full ${i % 2 === 0 ? 'bg-sage' : 'bg-coral'}`}
                 initial={{ x: 0, y: 0, opacity: 1, scale: 1 }}
                 animate={{
                   x: Math.cos((i * Math.PI * 2) / 8) * 70,
@@ -207,7 +207,7 @@ export function HeartButton({
               transition={{ type: 'spring', stiffness: 500, damping: 15, mass: 0.8 }}
             >
               <motion.div
-                className="bg-white/95 backdrop-blur-md rounded-2xl px-4 py-3 border border-brand-purple/20 text-sm text-brand-charcoal"
+                className="bg-white/95 backdrop-blur-md rounded-2xl px-4 py-3 border border-sage/20 text-sm text-ink"
                 style={{ fontFamily: 'var(--font-display)' }}
                 animate={{
                   boxShadow: [
@@ -226,7 +226,7 @@ export function HeartButton({
                     height={18}
                     viewBox="0 0 24 24"
                     fill="currentColor"
-                    className="text-brand-purple shrink-0"
+                    className="text-sage shrink-0"
                     aria-hidden="true"
                     animate={{ rotate: [0, -15, 15, -10, 10, 0], scale: [1, 1.3, 1] }}
                     transition={{ duration: 0.5, delay: 0.15 }}
@@ -239,7 +239,7 @@ export function HeartButton({
                       Added to{' '}
                       <Link
                         to={`/account/wishlists/${toast.listId}`}
-                        className="underline decoration-brand-purple/40 hover:text-brand-purple transition-colors"
+                        className="underline decoration-sage/40 hover:text-sage transition-colors"
                         onClick={e => e.stopPropagation()}
                       >
                         {toast.listName}
@@ -250,7 +250,7 @@ export function HeartButton({
                       Saved &mdash;{' '}
                       <Link
                         to="/account/login"
-                        className="underline decoration-brand-purple/40 hover:text-brand-purple transition-colors"
+                        className="underline decoration-sage/40 hover:text-sage transition-colors"
                         onClick={e => e.stopPropagation()}
                       >
                         sign in
@@ -264,7 +264,7 @@ export function HeartButton({
                     type="button"
                     onClick={e => { e.stopPropagation(); setToast(null) }}
                     aria-label="Close"
-                    className="ml-1 text-brand-charcoal/30 hover:text-brand-charcoal transition-colors shrink-0"
+                    className="ml-1 text-ink/30 hover:text-ink transition-colors shrink-0"
                   >
                     <svg aria-hidden="true" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                       <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />

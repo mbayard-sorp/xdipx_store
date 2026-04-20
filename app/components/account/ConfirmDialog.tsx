@@ -93,7 +93,7 @@ export function ConfirmDialog({
   return (
     // Scrim
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-brand-charcoal/40 backdrop-blur-sm px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm px-4"
       onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}
       aria-hidden="false"
     >
@@ -108,7 +108,7 @@ export function ConfirmDialog({
       >
         <h2
           id={titleId}
-          className="text-lg font-bold text-brand-charcoal"
+          className="text-lg font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {title}
@@ -117,7 +117,7 @@ export function ConfirmDialog({
         {description && (
           <p
             id={descriptionId}
-            className="text-sm text-brand-charcoal/70 leading-relaxed"
+            className="text-sm text-ink/70 leading-relaxed"
           >
             {description}
           </p>
@@ -128,7 +128,7 @@ export function ConfirmDialog({
             ref={cancelRef}
             type="button"
             onClick={onCancel}
-            className="flex-1 py-2.5 rounded-full text-sm font-semibold text-brand-charcoal bg-brand-mist hover:bg-brand-mist/70 transition-colors"
+            className="flex-1 py-2.5 rounded-full text-sm font-semibold text-ink bg-cream-2 hover:bg-cream-2/70 transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {cancelLabel}
@@ -139,7 +139,7 @@ export function ConfirmDialog({
             className={`flex-1 py-2.5 rounded-full text-sm font-bold text-white transition-opacity hover:opacity-90 ${
               variant === 'destructive'
                 ? 'bg-red-500'
-                : 'bg-brand-gradient'
+                : 'bg-coral'
             }`}
             style={{ fontFamily: 'var(--font-display)' }}
           >

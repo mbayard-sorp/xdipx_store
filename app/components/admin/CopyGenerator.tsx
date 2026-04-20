@@ -65,7 +65,7 @@ export function CopyGenerator({ product, onUse }: CopyGeneratorProps) {
         <div key={field.key} className="bg-white rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <h3
-              className="font-semibold text-brand-charcoal"
+              className="font-semibold text-ink"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {field.label}
@@ -73,7 +73,7 @@ export function CopyGenerator({ product, onUse }: CopyGeneratorProps) {
             <button
               onClick={() => generate(field)}
               disabled={isPending && active === field.key}
-              className="text-xs font-bold px-3 py-1.5 bg-brand-gradient text-white rounded-full hover:opacity-90 disabled:opacity-60 transition-opacity"
+              className="text-xs font-bold px-3 py-1.5 bg-coral text-white rounded-full hover:opacity-90 disabled:opacity-60 transition-opacity"
             >
               {isPending && active === field.key ? '✨ Generating...' : '✨ Generate'}
             </button>
@@ -81,32 +81,32 @@ export function CopyGenerator({ product, onUse }: CopyGeneratorProps) {
 
           {results[field.key] ? (
             <div>
-              <pre className="text-sm text-brand-charcoal/80 whitespace-pre-wrap bg-brand-mist rounded-xl p-4 leading-relaxed">
+              <pre className="text-sm text-ink/80 whitespace-pre-wrap bg-cream-2 rounded-xl p-4 leading-relaxed">
                 {results[field.key]}
               </pre>
               <div className="flex gap-2 mt-2">
                 <button
                   onClick={() => onUse?.(field.key, results[field.key]!)}
-                  className="text-xs font-semibold px-3 py-1.5 bg-brand-purple text-white rounded-full hover:opacity-90 transition-opacity"
+                  className="text-xs font-semibold px-3 py-1.5 bg-sage text-white rounded-full hover:opacity-90 transition-opacity"
                 >
                   Use this ♥
                 </button>
                 <button
                   onClick={() => { navigator.clipboard.writeText(results[field.key]!) }}
-                  className="text-xs text-brand-charcoal/50 hover:text-brand-charcoal transition-colors"
+                  className="text-xs text-ink/50 hover:text-ink transition-colors"
                 >
                   Copy
                 </button>
                 <button
                   onClick={() => generate(field)}
-                  className="text-xs text-brand-charcoal/50 hover:text-brand-charcoal transition-colors"
+                  className="text-xs text-ink/50 hover:text-ink transition-colors"
                 >
                   Regenerate
                 </button>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-brand-charcoal/40 italic">
+            <p className="text-sm text-ink/40 italic">
               Click Generate to create copy for this field.
             </p>
           )}

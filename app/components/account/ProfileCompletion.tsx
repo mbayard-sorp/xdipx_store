@@ -56,14 +56,14 @@ export function ProfileCompletion({ customer }: ProfileCompletionProps) {
     <div className="bg-white rounded-2xl shadow-sm p-4">
       <div className="flex items-center justify-between gap-3">
         <h3
-          className="text-sm font-bold text-brand-charcoal"
+          className="text-sm font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Profile completion
         </h3>
-        <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-brand-mist text-brand-purple inline-flex items-center gap-1.5">
+        <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-cream-2 text-sage inline-flex items-center gap-1.5">
           <span
-            className="inline-block w-1.5 h-1.5 rounded-full bg-brand-purple"
+            className="inline-block w-1.5 h-1.5 rounded-full bg-sage"
             aria-hidden="true"
           />
           {completed}/{total}
@@ -74,10 +74,10 @@ export function ProfileCompletion({ customer }: ProfileCompletionProps) {
           <li key={c.key}>
             <Link
               to={c.to}
-              className="flex items-center gap-2 text-sm text-brand-charcoal/60 hover:text-brand-charcoal transition-colors min-h-[32px]"
+              className="flex items-center gap-2 text-sm text-ink/60 hover:text-ink transition-colors min-h-[32px]"
             >
               <span
-                className="inline-block w-3.5 h-3.5 rounded-full border border-brand-charcoal/30 shrink-0"
+                className="inline-block w-3.5 h-3.5 rounded-full border border-ink/30 shrink-0"
                 aria-hidden="true"
               />
               <span>{c.label}</span>

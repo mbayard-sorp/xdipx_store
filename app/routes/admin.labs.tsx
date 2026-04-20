@@ -476,18 +476,18 @@ export default function AdminLabsPage() {
   return (
     <div className="max-w-3xl space-y-8">
       <h1
-        className="text-2xl font-bold text-brand-charcoal"
+        className="text-2xl font-bold text-ink"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Labs
       </h1>
-      <p className="text-sm text-brand-charcoal/60">
+      <p className="text-sm text-ink/60">
         AI video generation powered by Google Veo and LTX Video. Search for a product, describe your video idea, and generate cinematic clips.
       </p>
 
       {/* ── Section 1: Product Search ─────────────────────────────────── */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
-        <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <h2 className="text-base font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Select Product
         </h2>
 
@@ -497,26 +497,26 @@ export default function AdminLabsPage() {
             value={query}
             onChange={e => { setQuery(e.target.value); if (selectedProduct && e.target.value !== selectedProduct.title) setSelectedProduct(null) }}
             placeholder="Search products..."
-            className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30"
+            className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
           />
 
           {showDropdown && results.length > 0 && (
-            <div className="absolute z-20 mt-1 w-full bg-white rounded-xl shadow-lg border border-brand-mist max-h-72 overflow-y-auto">
+            <div className="absolute z-20 mt-1 w-full bg-white rounded-xl shadow-lg border border-cream-2 max-h-72 overflow-y-auto">
               {results.map(product => (
                 <button
                   key={product.id}
                   type="button"
                   onClick={() => selectProduct(product)}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-brand-mist/50 transition-colors text-left"
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-cream-2/50 transition-colors text-left"
                 >
                   {product.image ? (
                     <img src={product.image} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
                   ) : (
-                    <div className="w-10 h-10 rounded-lg bg-brand-mist shrink-0" />
+                    <div className="w-10 h-10 rounded-lg bg-cream-2 shrink-0" />
                   )}
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-brand-charcoal truncate">{product.title}</div>
-                    <div className="text-xs text-brand-charcoal/50">
+                    <div className="text-sm font-medium text-ink truncate">{product.title}</div>
+                    <div className="text-xs text-ink/50">
                       ${product.price.toFixed(2)}
                       {product.compareAtPrice ? <span className="line-through ml-2">${product.compareAtPrice.toFixed(2)}</span> : null}
                     </div>
@@ -530,7 +530,7 @@ export default function AdminLabsPage() {
         {/* Selected product card with images */}
         {selectedProduct && images.length > 0 && (
           <div className="pt-2">
-            <p className="text-xs text-brand-charcoal/50 mb-2 font-medium">Product Images ({images.length})</p>
+            <p className="text-xs text-ink/50 mb-2 font-medium">Product Images ({images.length})</p>
             <div className="grid grid-cols-5 gap-2">
               {images.map(img => (
                 <button
@@ -539,14 +539,14 @@ export default function AdminLabsPage() {
                   onClick={() => setStartingImageUrl(prev => prev === img.src ? null : img.src)}
                   className={`relative rounded-lg overflow-hidden border-2 transition-all aspect-square ${
                     startingImageUrl === img.src
-                      ? 'border-brand-purple ring-2 ring-brand-purple/30'
-                      : 'border-transparent hover:border-brand-mist'
+                      ? 'border-sage ring-2 ring-sage/30'
+                      : 'border-transparent hover:border-cream-2'
                   }`}
                 >
                   <img src={img.src} alt={img.alt ?? ''} className="w-full h-full object-cover" />
                   {startingImageUrl === img.src && (
-                    <div className="absolute inset-0 bg-brand-purple/20 flex items-center justify-center">
-                      <span className="text-white text-xs font-bold bg-brand-purple rounded-full px-2 py-0.5">Start Frame</span>
+                    <div className="absolute inset-0 bg-sage/20 flex items-center justify-center">
+                      <span className="text-white text-xs font-bold bg-sage rounded-full px-2 py-0.5">Start Frame</span>
                     </div>
                   )}
                 </button>
@@ -554,15 +554,15 @@ export default function AdminLabsPage() {
             </div>
             {startingImageUrl && (
               <div className="mt-3 space-y-2">
-                <p className="text-xs font-medium text-brand-charcoal/60">Image Mode</p>
+                <p className="text-xs font-medium text-ink/60">Image Mode</p>
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => setImageMode('reference')}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                       imageMode === 'reference'
-                        ? 'bg-brand-purple text-white'
-                        : 'bg-brand-mist text-brand-charcoal/60 hover:text-brand-charcoal'
+                        ? 'bg-sage text-white'
+                        : 'bg-cream-2 text-ink/60 hover:text-ink'
                     }`}
                   >
                     Reference (visual context)
@@ -572,14 +572,14 @@ export default function AdminLabsPage() {
                     onClick={() => setImageMode('start_frame')}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                       imageMode === 'start_frame'
-                        ? 'bg-brand-purple text-white'
-                        : 'bg-brand-mist text-brand-charcoal/60 hover:text-brand-charcoal'
+                        ? 'bg-sage text-white'
+                        : 'bg-cream-2 text-ink/60 hover:text-ink'
                     }`}
                   >
                     Start Frame (first frame)
                   </button>
                 </div>
-                <p className="text-xs text-brand-purple">
+                <p className="text-xs text-sage">
                   {imageMode === 'reference'
                     ? 'Reference mode: Veo uses the image as visual context but generates the video freely.'
                     : 'Start frame mode: Veo animates directly from the selected image as the first frame.'}
@@ -595,14 +595,14 @@ export default function AdminLabsPage() {
         <CollapsibleSection title="Google Veo" badge="purple" open={veoOpen} onToggle={() => setVeoOpen(o => !o)}>
           {/* Prompt */}
           <div className="space-y-1">
-            <label className="block text-sm font-semibold text-brand-charcoal">Video Idea</label>
-            <p className="text-xs text-brand-charcoal/50">Describe your video concept. Claude will enhance it with camera, lighting, and audio cues for Veo.</p>
+            <label className="block text-sm font-semibold text-ink">Video Idea</label>
+            <p className="text-xs text-ink/50">Describe your video concept. Claude will enhance it with camera, lighting, and audio cues for Veo.</p>
             <textarea
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
               rows={4}
               placeholder="e.g., A warm, intimate scene with soft golden lighting. The camera slowly pans across silk fabric as someone whispers 'You deserve this.'"
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30 resize-y"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30 resize-y"
             />
           </div>
 
@@ -664,7 +664,7 @@ export default function AdminLabsPage() {
             type="button"
             onClick={handleGenerate}
             disabled={!prompt.trim() || genStatus === 'enhancing' || genStatus === 'generating'}
-            className="w-full py-3 px-6 bg-brand-gradient text-white font-bold rounded-xl text-sm transition-all hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full py-3 px-6 bg-coral text-white font-bold rounded-xl text-sm transition-all hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {genStatus === 'enhancing' ? 'Enhancing prompt...' :
@@ -676,18 +676,18 @@ export default function AdminLabsPage() {
           {(genStatus === 'enhancing' || genStatus === 'generating') && (
             <div className="space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-5 h-5 border-2 border-brand-purple border-t-transparent rounded-full animate-spin" />
-                <span className="text-sm text-brand-charcoal/70">
+                <div className="w-5 h-5 border-2 border-sage border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm text-ink/70">
                   {genStatus === 'enhancing' ? 'Enhancing prompt with Claude...' : `Generating video with Veo... (${elapsed}s)`}
                 </span>
               </div>
               {enhancedPrompt && (
-                <div className="bg-brand-mist/50 rounded-xl p-4">
-                  <p className="text-xs font-semibold text-brand-charcoal/50 mb-1">Enhanced Prompt</p>
-                  <p className="text-sm text-brand-charcoal leading-relaxed">{enhancedPrompt}</p>
+                <div className="bg-cream-2/50 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-ink/50 mb-1">Enhanced Prompt</p>
+                  <p className="text-sm text-ink leading-relaxed">{enhancedPrompt}</p>
                 </div>
               )}
-              <p className="text-xs text-brand-charcoal/40">
+              <p className="text-xs text-ink/40">
                 Veo generation typically takes 30 seconds to 6 minutes. The page will update automatically.
               </p>
             </div>
@@ -712,9 +712,9 @@ export default function AdminLabsPage() {
           {genStatus === 'complete' && videoUrls.length > 0 && (
             <div className="space-y-4">
               {enhancedPrompt && (
-                <div className="bg-brand-mist/50 rounded-xl p-4">
-                  <p className="text-xs font-semibold text-brand-charcoal/50 mb-1">Enhanced Prompt</p>
-                  <p className="text-sm text-brand-charcoal leading-relaxed">{enhancedPrompt}</p>
+                <div className="bg-cream-2/50 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-ink/50 mb-1">Enhanced Prompt</p>
+                  <p className="text-sm text-ink leading-relaxed">{enhancedPrompt}</p>
                 </div>
               )}
               <div className={`grid gap-6 ${videoUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
@@ -729,8 +729,8 @@ export default function AdminLabsPage() {
                         Uploaded to Shopify
                       </div>
                     ) : uploadStatus[i] === 'uploading' ? (
-                      <div className="flex items-center gap-2 text-sm text-brand-charcoal/60">
-                        <div className="w-4 h-4 border-2 border-brand-purple border-t-transparent rounded-full animate-spin" />
+                      <div className="flex items-center gap-2 text-sm text-ink/60">
+                        <div className="w-4 h-4 border-2 border-sage border-t-transparent rounded-full animate-spin" />
                         Uploading to Shopify...
                       </div>
                     ) : (
@@ -738,7 +738,7 @@ export default function AdminLabsPage() {
                         <button
                           type="button"
                           onClick={() => handleUpload(i)}
-                          className="w-full py-2.5 px-4 bg-brand-purple text-white font-semibold rounded-xl text-sm hover:bg-brand-purple-light transition-colors"
+                          className="w-full py-2.5 px-4 bg-sage text-white font-semibold rounded-xl text-sm hover:bg-sun transition-colors"
                           style={{ fontFamily: 'var(--font-display)' }}
                         >
                           Upload to Shopify
@@ -771,23 +771,23 @@ export default function AdminLabsPage() {
           )}
 
           {/* Prompting Guide (collapsible) */}
-          <div className="border border-brand-mist rounded-xl overflow-hidden">
+          <div className="border border-cream-2 rounded-xl overflow-hidden">
             <button
               type="button"
               onClick={() => setLtxGuideOpen(o => !o)}
-              className="w-full flex items-center justify-between px-4 py-3 bg-brand-mist/30 hover:bg-brand-mist/50 transition-colors text-left"
+              className="w-full flex items-center justify-between px-4 py-3 bg-cream-2/30 hover:bg-cream-2/50 transition-colors text-left"
             >
-              <span className="text-sm font-semibold text-brand-charcoal flex items-center gap-2">
-                <svg className="w-4 h-4 text-brand-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" /></svg>
+              <span className="text-sm font-semibold text-ink flex items-center gap-2">
+                <svg className="w-4 h-4 text-sage" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" /></svg>
                 LTX Prompting Guide
               </span>
-              <svg className={`w-4 h-4 text-brand-charcoal/50 transition-transform ${ltxGuideOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              <svg className={`w-4 h-4 text-ink/50 transition-transform ${ltxGuideOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
             </button>
             {ltxGuideOpen && (
-              <div className="px-4 py-3 space-y-3 text-xs text-brand-charcoal/70 border-t border-brand-mist">
-                <p className="font-semibold text-brand-charcoal text-sm">The product image IS the first frame. Don't re-describe it — describe what happens next.</p>
+              <div className="px-4 py-3 space-y-3 text-xs text-ink/70 border-t border-cream-2">
+                <p className="font-semibold text-ink text-sm">The product image IS the first frame. Don't re-describe it — describe what happens next.</p>
                 <div className="space-y-2">
-                  <p className="font-semibold text-brand-charcoal">Three layers, in order:</p>
+                  <p className="font-semibold text-ink">Three layers, in order:</p>
                   <ol className="list-decimal list-inside space-y-1 ml-1">
                     <li><strong>Subject Action</strong> — What moves and how. Name the subject first, then the physical change. No vague labels like "epic" or "stunning."</li>
                     <li><strong>Camera Movement</strong> — Specific terms: slow dolly in, gentle jib up, rack focus. Not "dynamic" or "cinematic."</li>
@@ -795,7 +795,7 @@ export default function AdminLabsPage() {
                   </ol>
                 </div>
                 <div className="space-y-1">
-                  <p className="font-semibold text-brand-charcoal">Scaling:</p>
+                  <p className="font-semibold text-ink">Scaling:</p>
                   <ul className="list-disc list-inside ml-1 space-y-0.5">
                     <li>6-8s: 3-5 tight sentences</li>
                     <li>10-15s: 5-8 sentences with progression</li>
@@ -809,14 +809,14 @@ export default function AdminLabsPage() {
 
           {/* Prompt */}
           <div className="space-y-1">
-            <label className="block text-sm font-semibold text-brand-charcoal">Video Idea</label>
-            <p className="text-xs text-brand-charcoal/50">Write your prompt directly or start with a rough idea and hit "Enhance with Claude" to expand it.</p>
+            <label className="block text-sm font-semibold text-ink">Video Idea</label>
+            <p className="text-xs text-ink/50">Write your prompt directly or start with a rough idea and hit "Enhance with Claude" to expand it.</p>
             <textarea
               value={ltxPrompt}
               onChange={e => { setLtxPrompt(e.target.value); setLtxPromptEnhanced(false) }}
               rows={4}
               placeholder="e.g., Product slowly rises off the surface, camera dollies in, warm golden light intensifies from behind"
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30 resize-y"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30 resize-y"
             />
             {/* Enhance button */}
             <div className="flex items-center gap-3">
@@ -824,11 +824,11 @@ export default function AdminLabsPage() {
                 type="button"
                 onClick={handleLtxEnhancePrompt}
                 disabled={!ltxPrompt.trim() || !selectedProduct || ltxEnhanceStatus === 'enhancing'}
-                className="px-4 py-1.5 text-xs font-semibold text-brand-purple border border-brand-purple/30 rounded-lg hover:bg-brand-purple/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                className="px-4 py-1.5 text-xs font-semibold text-sage border border-sage/30 rounded-lg hover:bg-sage/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
               >
                 {ltxEnhanceStatus === 'enhancing' ? (
                   <>
-                    <div className="w-3 h-3 border-2 border-brand-purple border-t-transparent rounded-full animate-spin" />
+                    <div className="w-3 h-3 border-2 border-sage border-t-transparent rounded-full animate-spin" />
                     Enhancing...
                   </>
                 ) : (
@@ -914,7 +914,7 @@ export default function AdminLabsPage() {
             type="button"
             onClick={handleLtxGenerate}
             disabled={!ltxPrompt.trim() || !startingImageUrl || ltxGenStatus === 'generating'}
-            className="w-full py-3 px-6 bg-brand-gradient text-white font-bold rounded-xl text-sm transition-all hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full py-3 px-6 bg-coral text-white font-bold rounded-xl text-sm transition-all hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {ltxGenStatus === 'generating' ? 'Generating...' : 'Generate Video'}
@@ -925,11 +925,11 @@ export default function AdminLabsPage() {
             <div className="space-y-4">
               <div className="flex items-center gap-3">
                 <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                <span className="text-sm text-brand-charcoal/70">
+                <span className="text-sm text-ink/70">
                   Generating video with LTX... ({ltxElapsed}s)
                 </span>
               </div>
-              <p className="text-xs text-brand-charcoal/40">
+              <p className="text-xs text-ink/40">
                 LTX generation typically takes 30-120 seconds. The page will update when complete.
               </p>
             </div>
@@ -954,9 +954,9 @@ export default function AdminLabsPage() {
           {ltxGenStatus === 'complete' && ltxVideoUrl && (
             <div className="space-y-4">
               {ltxEnhancedPrompt && (
-                <div className="bg-brand-mist/50 rounded-xl p-4">
-                  <p className="text-xs font-semibold text-brand-charcoal/50 mb-1">Enhanced Prompt</p>
-                  <p className="text-sm text-brand-charcoal leading-relaxed">{ltxEnhancedPrompt}</p>
+                <div className="bg-cream-2/50 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-ink/50 mb-1">Enhanced Prompt</p>
+                  <p className="text-sm text-ink leading-relaxed">{ltxEnhancedPrompt}</p>
                 </div>
               )}
               <div className="space-y-3">
@@ -974,7 +974,7 @@ export default function AdminLabsPage() {
 
                 {/* ── Add Audio Section ──────────────────────────────── */}
                 <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                  <p className="text-xs font-semibold text-brand-charcoal/70">Add Audio (ElevenLabs)</p>
+                  <p className="text-xs font-semibold text-ink/70">Add Audio (ElevenLabs)</p>
 
                   {/* Audio type selector */}
                   <div className="flex gap-2">
@@ -990,7 +990,7 @@ export default function AdminLabsPage() {
                         className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all ${
                           ltxAudioType === opt.value
                             ? 'bg-blue-600 text-white'
-                            : 'bg-white text-brand-charcoal/60 hover:bg-blue-50 border border-brand-mist'
+                            : 'bg-white text-ink/60 hover:bg-blue-50 border border-cream-2'
                         }`}
                       >
                         <span className="mr-1">{opt.icon}</span> {opt.label}
@@ -1010,7 +1010,7 @@ export default function AdminLabsPage() {
                           ? 'Describe the sound effect (e.g., "soft ambient spa sounds with gentle water flowing")'
                           : 'Describe the music mood (e.g., "upbeat lo-fi chill, warm and inviting, gentle piano")'
                     }
-                    className="w-full border border-brand-mist rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/30 resize-y bg-white"
+                    className="w-full border border-cream-2 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/30 resize-y bg-white"
                   />
 
                   {/* Generate audio button */}
@@ -1025,7 +1025,7 @@ export default function AdminLabsPage() {
                   </button>
 
                   {ltxAudioStatus === 'generating' && (
-                    <div className="flex items-center gap-2 text-sm text-brand-charcoal/60">
+                    <div className="flex items-center gap-2 text-sm text-ink/60">
                       <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                       {ltxAudioType === 'music' ? 'Composing music' : ltxAudioType === 'sfx' ? 'Generating sound effects' : 'Synthesizing voiceover'}... this may take 10-30s
                     </div>
@@ -1045,7 +1045,7 @@ export default function AdminLabsPage() {
                     Uploaded to Shopify
                   </div>
                 ) : ltxUploadStatus === 'uploading' ? (
-                  <div className="flex items-center gap-2 text-sm text-brand-charcoal/60">
+                  <div className="flex items-center gap-2 text-sm text-ink/60">
                     <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                     Uploading to Shopify...
                   </div>
@@ -1097,15 +1097,15 @@ function CollapsibleSection({ title, open, onToggle, badge, children }: {
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="w-full flex items-center justify-between px-6 py-4 hover:bg-brand-mist/30 transition-colors"
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-cream-2/30 transition-colors"
       >
         <div className="flex items-center gap-3">
-          <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          <h2 className="text-base font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
             {title}
           </h2>
           {badge && (
             <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-              badge === 'purple' ? 'bg-brand-purple/10 text-brand-purple' : 'bg-blue-100 text-blue-600'
+              badge === 'purple' ? 'bg-sage/10 text-sage' : 'bg-blue-100 text-blue-600'
             }`}>
               {badge === 'purple' ? 'Google' : 'LTX'}
             </span>
@@ -1114,7 +1114,7 @@ function CollapsibleSection({ title, open, onToggle, badge, children }: {
         <svg
           width="20" height="20" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-          className={`text-brand-charcoal/40 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          className={`text-ink/40 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
         >
           <polyline points="6 9 12 15 18 9" />
         </svg>
@@ -1135,7 +1135,7 @@ function RadioGroup({ label, value, onChange, options, hint }: {
 }) {
   return (
     <div className="space-y-2">
-      <label className="block text-sm font-semibold text-brand-charcoal">{label}</label>
+      <label className="block text-sm font-semibold text-ink">{label}</label>
       <div className="flex flex-wrap gap-2">
         {options.map(opt => (
           <button
@@ -1145,17 +1145,17 @@ function RadioGroup({ label, value, onChange, options, hint }: {
             disabled={opt.disabled}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
               value === opt.value
-                ? 'bg-brand-purple text-white'
+                ? 'bg-sage text-white'
                 : opt.disabled
                   ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  : 'bg-brand-mist text-brand-charcoal hover:bg-brand-purple/10'
+                  : 'bg-cream-2 text-ink hover:bg-sage/10'
             }`}
           >
             {opt.label}
           </button>
         ))}
       </div>
-      {hint && <p className="text-xs text-brand-charcoal/40">{hint}</p>}
+      {hint && <p className="text-xs text-ink/40">{hint}</p>}
     </div>
   )
 }
