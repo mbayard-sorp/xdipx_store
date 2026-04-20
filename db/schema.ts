@@ -333,6 +333,56 @@ export type ReturnStatus =
   | 'denied'
   | 'canceled'
 
+export const emmaChatSessions = pgTable('emma_chat_sessions', {
+  id:                  serial('id').primaryKey(),
+  cookieId:            varchar('cookie_id', { length: 40 }).notNull(),
+  customerGid:         varchar('customer_gid', { length: 60 }),
+  ipHash:              varchar('ip_hash', { length: 64 }),
+  userAgent:           varchar('user_agent', { length: 255 }),
+  turnCount:           integer('turn_count').default(0).notNull(),
+  firstProductHandle:  varchar('first_product_handle', { length: 255 }),
+  checkoutUrlShared:   text('checkout_url_shared'),
+  checkoutSharedAt:    timestamp('checkout_shared_at'),
+  createdAt:           timestamp('created_at').defaultNow().notNull(),
+  lastActivityAt:      timestamp('last_activity_at').defaultNow().notNull(),
+}, t => ({
+  cookieUq:    uniqueIndex('emma_sessions_cookie_uniq').on(t.cookieId),
+  customerIdx: index('emma_sessions_customer_idx').on(t.customerGid),
+  createdIdx:  index('emma_sessions_created_idx').on(t.createdAt),
+}))
+
+export interface EmmaQuickReplyLog {
+  question: string
+  options: string[]
+  mode: string
+}
+
+export const emmaChatTurns = pgTable('emma_chat_turns', {
+  id:         serial('id').primaryKey(),
+  sessionId:  integer('session_id').notNull().references(() => emmaChatSessions.id, { onDelete: 'cascade' }),
+  role:       varchar('role', { length: 10 }).notNull(),
+  text:       text('text').notNull(),
+  hidden:     boolean('hidden').default(false).notNull(),
+  products:   json('products').$type<string[]>(),
+  quickReply: json('quick_reply').$type<EmmaQuickReplyLog | null>(),
+  latencyMs:  integer('latency_ms'),
+  createdAt:  timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  sessionIdx: index('emma_turns_session_idx').on(t.sessionId, t.createdAt),
+}))
+
+export const emmaChatEvents = pgTable('emma_chat_events', {
+  id:         serial('id').primaryKey(),
+  sessionId:  integer('session_id').notNull().references(() => emmaChatSessions.id, { onDelete: 'cascade' }),
+  turnId:     integer('turn_id'),
+  kind:       varchar('kind', { length: 30 }).notNull(),
+  payload:    json('payload'),
+  createdAt:  timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  sessionIdx: index('emma_events_session_idx').on(t.sessionId, t.createdAt),
+  kindIdx:    index('emma_events_kind_idx').on(t.kind, t.createdAt),
+}))
+
 export const productCopurchase = pgTable('product_copurchase', {
   id:         serial('id').primaryKey(),
   handleA:    varchar('handle_a', { length: 255 }).notNull(),

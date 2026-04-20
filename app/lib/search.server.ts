@@ -93,6 +93,20 @@ export interface PredictiveResult {
 
 // ─── Query helpers ──────────────────────────────────────────────────────────
 
+// Narrow synonym map for category words where prefix matching isn't enough
+// (e.g. "lube*" won't match "lubricant"). Keep this short — broad stemming
+// belongs in a real search index, not here.
+const QUERY_SYNONYMS: Record<string, string[]> = {
+  lube: ['lubricant', 'lubricants'],
+  lubes: ['lubricant', 'lubricants'],
+  lubricant: ['lube'],
+  lubricants: ['lube'],
+  vibrator: ['vibe', 'vibes'],
+  vibrators: ['vibe', 'vibes'],
+  vibe: ['vibrator', 'vibrators'],
+  vibes: ['vibrator', 'vibrators'],
+}
+
 // GROQ `match` does word-prefix matching, not stemming. Typing "dildos" won't
 // match products titled "Dildo". Build a small set of prefix patterns that
 // covers trailing -s / -es / -ies pluralization in either direction.
@@ -105,6 +119,9 @@ export function buildQueryPatterns(query: string): string[] {
   if (lower.length > 4 && lower.endsWith('ies')) patterns.add(`${lower.slice(0, -3)}y*`)
   if (lower.length > 3 && lower.endsWith('es')) patterns.add(`${lower.slice(0, -2)}*`)
   if (lower.length > 3 && lower.endsWith('s'))  patterns.add(`${lower.slice(0, -1)}*`)
+
+  const synonyms = QUERY_SYNONYMS[lower]
+  if (synonyms) for (const s of synonyms) patterns.add(`${s}*`)
 
   return Array.from(patterns)
 }
