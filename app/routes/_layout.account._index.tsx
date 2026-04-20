@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import type { MetaFunction } from 'react-router'
-import { Link, useOutletContext, useRouteLoaderData, useSearchParams } from 'react-router'
+import { Link, useOutletContext, useSearchParams } from 'react-router'
 import type { StorefrontOrder } from '~/lib/shopify.server'
 import type { AccountOutletContext } from './_layout.account'
 import { trackLogin, trackSignUp } from '~/lib/analytics.client'
@@ -9,15 +9,13 @@ import { ProfileCompletion } from '~/components/account/ProfileCompletion'
 import { StatusPill } from '~/components/account/StatusPill'
 import { EmptyState } from '~/components/account/EmptyState'
 import { MergeLocalHearts } from '~/components/store/MergeLocalHearts'
+import { useSession } from '~/lib/session-context'
 
 export const meta: MetaFunction = () => [{ title: 'Account — xdipx' }]
 
 export default function AccountDashboard() {
   const { customer } = useOutletContext<AccountOutletContext>()
-  const layoutData = useRouteLoaderData('routes/_layout') as
-    | { wishlistCount?: number }
-    | undefined
-  const wishlistCount = layoutData?.wishlistCount ?? 0
+  const { wishlistCount } = useSession()
   const recentOrder = customer.orders[0] ?? null
   const [searchParams, setSearchParams] = useSearchParams()
 

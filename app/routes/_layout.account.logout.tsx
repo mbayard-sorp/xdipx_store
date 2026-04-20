@@ -17,7 +17,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const headers = await logoutCustomerSession(request)
-  throw redirect('/', { headers })
+  throw redirect('/?from=logout', { headers })
 }
 
 export default function Logout() {

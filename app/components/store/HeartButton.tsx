@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link, useFetcher, useRouteLoaderData } from 'react-router'
+import { Link, useFetcher } from 'react-router'
 import { AnimatePresence, motion } from 'motion/react'
+import { dispatchSessionUpdated, useSession } from '~/lib/session-context'
 
 type LocalHeart = { shopifyProductId: string; handle: string; ts: number }
 
@@ -45,11 +46,9 @@ export function HeartButton({
   size = 'md',
   initialHearted,
 }: HeartButtonProps) {
-  const layoutData = useRouteLoaderData('routes/_layout') as
-    | { heartedProductIds?: string[]; isCustomerLoggedIn?: boolean }
-    | undefined
-  const heartedFromLoader = layoutData?.heartedProductIds?.includes(shopifyProductId) ?? false
-  const isLoggedIn = layoutData?.isCustomerLoggedIn ?? false
+  const { heartedProductIds, isCustomerLoggedIn, isLoaded: isSessionLoaded } = useSession()
+  const heartedFromLoader = heartedProductIds.includes(shopifyProductId)
+  const isLoggedIn = isCustomerLoggedIn
 
   const fetcher = useFetcher<{ ok: boolean; hearted?: boolean; listId?: number; listName?: string }>()
   const [hearted, setHearted] = useState<boolean>(initialHearted ?? heartedFromLoader)
@@ -59,17 +58,19 @@ export function HeartButton({
     listId?: number
   } | null>(null)
 
-  // Keep in sync with loader state when it changes (e.g., after navigation / revalidate)
+  // Keep in sync with session state when it resolves / changes (e.g., after login).
   useEffect(() => {
-    if (initialHearted === undefined) setHearted(heartedFromLoader)
-  }, [heartedFromLoader, initialHearted])
+    if (initialHearted === undefined && isSessionLoaded) setHearted(heartedFromLoader)
+  }, [heartedFromLoader, initialHearted, isSessionLoaded])
 
-  // For logged-out users, initialize from localStorage on mount.
+  // For logged-out users, initialize from localStorage once the session
+  // resolves (so we don't briefly render the heart "on" before we know the
+  // user is actually signed out).
   useEffect(() => {
-    if (isLoggedIn) return
+    if (!isSessionLoaded || isLoggedIn) return
     const local = readLocalHearts()
     setHearted(local.some(h => h.shopifyProductId === shopifyProductId))
-  }, [isLoggedIn, shopifyProductId])
+  }, [isSessionLoaded, isLoggedIn, shopifyProductId])
 
   useEffect(() => {
     if (fetcher.data && fetcher.state === 'idle') {
@@ -80,6 +81,9 @@ export function HeartButton({
         if (fetcher.data.hearted && fetcher.data.listId && fetcher.data.listName) {
           setToast({ type: 'logged-in', listName: fetcher.data.listName, listId: fetcher.data.listId })
         }
+        // Wishlist count in the session changed — tell the SessionProvider to
+        // refetch so the account menu badge stays accurate.
+        dispatchSessionUpdated()
       }
     }
   }, [fetcher.data, fetcher.state])
