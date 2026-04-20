@@ -145,5 +145,7 @@ export async function getPinnedAccessoryIds(): Promise<string[]> {
 }
 
 export async function setPinnedAccessoryIds(ids: string[]): Promise<void> {
-  await kvSet(KV_KEYS.pinnedAccessoryIds, ids, 86400)
+  // Persistent admin config — no TTL. Previous 24h TTL silently dropped upsells
+  // from the cart drawer one day after being set.
+  await kvSet(KV_KEYS.pinnedAccessoryIds, ids)
 }

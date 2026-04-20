@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react'
 import type { LoaderFunctionArgs } from 'react-router'
-import { Link, Outlet, useLoaderData, useLocation, useRevalidator } from 'react-router'
+import { Link, Outlet, useLoaderData, useLocation, useRevalidator, useRouteLoaderData } from 'react-router'
 
 // Lazy-load Sanity visual editing — only shipped to users in preview mode.
 const VisualEditing = lazy(() =>
@@ -55,6 +55,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function StoreLayout() {
   const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells } = useLoaderData<typeof loader>()
   const { pathname } = useLocation()
+  const rootData = useRouteLoaderData<{ ENV?: { GA4_ID?: string } }>('root')
+  const ga4Id = rootData?.ENV?.GA4_ID ?? ''
 
   // Hide mobile shell on PDP (pinned PDP CTA takes the bottom instead) and on
   // auth-gated / admin routes. Everything else gets the bar + FAB on mobile.
@@ -89,9 +91,7 @@ export default function StoreLayout() {
           {showMobileShell && <MobileTabBar />}
           {showMobileShell && <EmmaFab />}
           <CookieConsent />
-          <Analytics
-            ga4Id={typeof window !== 'undefined' ? (window as unknown as { ENV?: { GA4_ID?: string } }).ENV?.GA4_ID ?? '' : ''}
-          />
+          <Analytics ga4Id={ga4Id} />
 
           {/* Visual editing overlays — only active when Sanity studio is open */}
           {preview && <LivePreview />}

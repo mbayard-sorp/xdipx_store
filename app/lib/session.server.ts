@@ -75,7 +75,10 @@ export async function loginAdmin(
 ): Promise<Headers | null> {
   // 1. Authenticate with Neon Auth
   const neonUser = await neonAuthSignIn(email, password)
-  if (!neonUser) return null
+  if (!neonUser) {
+    console.error('[loginAdmin] neon-auth returned null', { email })
+    return null
+  }
 
   // 2. Check admin_roles table for authorization
   const [role] = await db
@@ -84,7 +87,10 @@ export async function loginAdmin(
     .where(eq(adminRoles.neonAuthUserId, neonUser.id))
     .limit(1)
 
-  if (!role) return null // authenticated but not an admin
+  if (!role) {
+    console.error('[loginAdmin] no admin_roles row', { email, neonUserId: neonUser.id })
+    return null
+  }
 
   // 3. Update last login
   await db

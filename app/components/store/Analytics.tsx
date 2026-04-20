@@ -18,6 +18,7 @@ interface AnalyticsProps {
 export function Analytics({ ga4Id }: AnalyticsProps) {
   const location = useLocation()
   const prevPath = useRef('')
+  const consentGranted = useRef(false)
   const { isCustomerLoggedIn, customerIdHash, isLoaded } = useSession()
 
   // ── Check existing consent on mount ─────────────────────────────────────
@@ -27,7 +28,9 @@ export function Analytics({ ga4Id }: AnalyticsProps) {
       const stored = localStorage.getItem(CONSENT_KEY)
       if (stored) {
         const { type } = JSON.parse(stored) as { type: string }
-        updateConsent(type === 'all')
+        const granted = type === 'all'
+        updateConsent(granted)
+        consentGranted.current = granted
       }
     } catch { /* ignore parse errors */ }
   }, [ga4Id])
@@ -38,15 +41,22 @@ export function Analytics({ ga4Id }: AnalyticsProps) {
     function onConsentUpdate() {
       try {
         const stored = localStorage.getItem(CONSENT_KEY)
-        if (stored) {
-          const { type } = JSON.parse(stored) as { type: string }
-          updateConsent(type === 'all')
+        if (!stored) return
+        const { type } = JSON.parse(stored) as { type: string }
+        const granted = type === 'all'
+        const wasDenied = !consentGranted.current
+        updateConsent(granted)
+        consentGranted.current = granted
+        // Consent flipped denied → granted: re-fire page_view for current path,
+        // since the initial page_view was dropped while consent was denied.
+        if (granted && wasDenied) {
+          trackPageView(location.pathname + location.search)
         }
       } catch { /* ignore */ }
     }
     window.addEventListener('xdipx:consent-update', onConsentUpdate)
     return () => window.removeEventListener('xdipx:consent-update', onConsentUpdate)
-  }, [ga4Id])
+  }, [ga4Id, location.pathname, location.search])
 
   // ── SPA page view tracking ──────────────────────────────────────────────
   useEffect(() => {
