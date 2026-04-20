@@ -187,6 +187,33 @@ export async function activateDeal(
       JSON.stringify(copy),
       'json',
     )
+
+    // Index the pick into Sanity so Emma gets smarter as deals flow.
+    // Non-blocking inside the same try — we've already written the source of
+    // truth (Shopify metafield); Sanity is the searchable replica.
+    if (fullDeal?.handle) {
+      try {
+        const { upsertEmmaPick } = await import('./sanity.server')
+        await upsertEmmaPick({
+          productId:     deal.shopifyProductId,
+          productHandle: fullDeal.handle,
+          productTitle:  fullDeal.seoTitle ?? deal.seoTitle ?? undefined,
+          brand:         fullDeal.brand ?? undefined,
+          category:      fullDeal.category ?? undefined,
+          dealDate:      estDate(0),
+          variant:       copy.variant,
+          eyebrow:       copy.eyebrow,
+          headline:      copy.headline,
+          body:          copy.body,
+          aside:         copy.aside,
+          pullQuote:     copy.pullQuote,
+          voiceHash:     copy.voiceHash,
+          generatedAt:   copy.generatedAt,
+        })
+      } catch (sanityErr) {
+        console.error('[deal-rotator] Emma pick Sanity index failed (non-blocking):', sanityErr)
+      }
+    }
   } catch (err) {
     console.error('[deal-rotator] Emma hero generation failed (non-blocking):', err)
   }

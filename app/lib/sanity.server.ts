@@ -304,6 +304,52 @@ export async function upsertProductPage(params: {
   return { created }
 }
 
+// ─── Emma Picks (generated hero copy) ─────────────────────────────────────────
+// One doc per featured product. Regenerating a pick replaces the whole doc so
+// the content stays authoritative and the dataset stays searchable over time.
+
+export async function upsertEmmaPick(params: {
+  productId: string
+  productHandle: string
+  productTitle?: string | undefined
+  brand?: string | undefined
+  category?: string | undefined
+  dealDate: string
+  variant: 'loving' | 'bundle' | 'quote'
+  eyebrow: string
+  headline: string
+  body: string
+  aside: string
+  pullQuote?: string | undefined
+  voiceHash: string
+  generatedAt: string
+}): Promise<void> {
+  const writeClient = getClient(true)
+  if (!writeClient) throw new Error('Sanity not configured — SANITY_API_TOKEN or SANITY_PROJECT_ID missing')
+
+  const doc: Record<string, unknown> = {
+    _id: `emmaPick-${params.productHandle}`,
+    _type: 'emmaPick',
+    productId: params.productId,
+    productHandle: params.productHandle,
+    dealDate: params.dealDate,
+    variant: params.variant,
+    eyebrow: params.eyebrow,
+    headline: params.headline,
+    body: params.body,
+    aside: params.aside,
+    voiceHash: params.voiceHash,
+    generatedAt: params.generatedAt,
+  }
+  if (params.productTitle !== undefined) doc.productTitle = params.productTitle
+  if (params.brand !== undefined) doc.brand = params.brand
+  if (params.category !== undefined) doc.category = params.category
+  if (params.pullQuote !== undefined) doc.pullQuote = params.pullQuote
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await writeClient.createOrReplace(doc as any)
+}
+
 // ─── Site Settings ────────────────────────────────────────────────────────────
 
 export async function getSiteSettings(): Promise<SiteSettings | null> {

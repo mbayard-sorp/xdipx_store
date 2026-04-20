@@ -15,6 +15,12 @@ export function EmmaFab({ bottomOffset = 72 }: EmmaFabProps) {
     if (num) setTextNumber(num)
   }, [])
 
+  useEffect(() => {
+    const onOpen = () => setOpen(true)
+    window.addEventListener('emma:open', onOpen)
+    return () => window.removeEventListener('emma:open', onOpen)
+  }, [])
+
   return (
     <>
       <button

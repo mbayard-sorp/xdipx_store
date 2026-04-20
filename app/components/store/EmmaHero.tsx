@@ -117,13 +117,19 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
             >
               Take a peek →
             </Link>
-            <Link
-              to={`/products/${deal.handle}#emma`}
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window === 'undefined') return
+                window.dispatchEvent(new CustomEvent('emma:open', {
+                  detail: { reason: 'why-this-pick', productHandle: deal.handle, productTitle: deal.seoTitle },
+                }))
+              }}
               className="inline-flex items-center gap-2 border border-ink/20 hover:border-ink/60 text-ink font-medium px-6 py-3 rounded-full transition-colors"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Ask Emma why
-            </Link>
+            </button>
           </div>
 
           <p className="text-muted text-xs mt-3 font-mono">

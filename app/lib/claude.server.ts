@@ -734,9 +734,9 @@ const EMMA_SYSTEM_PROMPT = `You are Emma — the editorial voice of xdipx.com, a
 function emmaHeroFallback(deal: Pick<Deal, 'seoTitle' | 'tagline' | 'brand'>, variant: EmmaHeroVariant, voiceHash: string): EmmaHeroCopy {
   const base: EmmaHeroCopy = {
     variant,
-    eyebrow: variant === 'quote' ? 'Currently loving' : 'Currently loving',
-    headline: deal.tagline || `Okay — this ${deal.brand} one won me over.`,
-    body: `I've been testing this for a bit and I'm genuinely surprised. It's the kind of pick I keep coming back to.`,
+    eyebrow: 'Kinda obsessed',
+    headline: deal.tagline || `This ${deal.brand} one quietly made it into my rotation.`,
+    body: `Slow-burn build, surprisingly gentle finish. If you want something that feels considered — not gimmicky — this is the one.`,
     aside: `— Emma · still on my desk`,
     generatedAt: new Date().toISOString(),
     voiceHash,
@@ -776,9 +776,9 @@ ${mapLine}
 
 Return ONLY this JSON (no markdown):
 {
-  "eyebrow":   "2–4 words, e.g. 'Currently loving' or 'This week's pick'",
-  "headline":  "one punchy Emma-voice sentence (8–14 words). First-person. Warm, specific. Never starts with the product name.",
-  "body":      "2–3 sentences (35–60 words). Why Emma keeps reaching for it. Specific, sensory, warm. Never clinical. Never 'buy now'.",
+  "eyebrow":   "A DYNAMIC FEELING in Emma's own voice — 2–4 words, first-person, informal. Examples: 'Kinda obsessed', 'Low-key amazed', 'Still thinking about this', 'Quietly sold', 'Actually impressed'. No period. Do NOT use 'Currently loving' or generic editorial phrases like 'This week's pick'. Must feel like a quick reaction, not a label.",
+  "headline":  "ONE sentence (8–14 words) that explains WHY Emma is featuring this pick right now — the reason it earned the slot. First-person, specific, warm. Never starts with the product name. Never 'buy now'. Example shape: 'Something about how quiet this one is just broke my brain.'",
+  "body":      "1–2 short sentences (25–45 words total) — the highlights a shopper should know. What it feels like, what stands out, what surprised her. Tight and specific. No marketing bloat. No clinical language.",
   "aside":     "'— Emma · <3–6 word aside>', e.g. '— Emma · still on my desk'"${variant === 'quote' ? `,
   "pullQuote": "one short pull-quote (6–12 words) — in quotes — a friend-to-friend endorsement. No price or discount language."` : ''}
 }`

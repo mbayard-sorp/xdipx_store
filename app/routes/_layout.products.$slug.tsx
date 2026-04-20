@@ -440,10 +440,53 @@ function ProductPage() {
             >
               {deal.seoTitle}
             </h1>
-            {deal.tagline && (
+            {deal.tagline && !deal.emmaHero && (
               <p className="text-ink/70 mt-2 italic">{deal.tagline}</p>
             )}
           </div>
+
+          {/* Emma voice block — reuses hero copy generated at deal activation */}
+          {deal.emmaHero && (
+            <div className="bg-cream-2 border border-line rounded-2xl p-5 space-y-2">
+              <p
+                className="text-xs tracking-widest uppercase text-coral font-semibold"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                <span aria-hidden="true">♥</span> {deal.emmaHero.eyebrow}
+              </p>
+              <h2
+                className="text-lg md:text-xl font-bold text-ink leading-snug"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                {deal.emmaHero.headline}
+              </h2>
+              <p className="text-ink/80 text-sm leading-relaxed">
+                {deal.emmaHero.body}
+              </p>
+              {deal.emmaHero.aside && (
+                <p className="text-muted text-xs italic pt-1">
+                  {deal.emmaHero.aside}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window === 'undefined') return
+                  window.dispatchEvent(new CustomEvent('emma:open', {
+                    detail: {
+                      reason: 'why-this-pick',
+                      productHandle: deal.handle,
+                      productTitle:  deal.seoTitle,
+                    },
+                  }))
+                }}
+                className="text-sm text-ink underline underline-offset-4 decoration-ink/30 hover:decoration-ink transition-colors"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                Ask Emma why →
+              </button>
+            </div>
+          )}
 
           {/* Price */}
           <div className="flex items-center gap-3 flex-wrap">
