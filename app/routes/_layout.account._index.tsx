@@ -48,12 +48,12 @@ export default function AccountDashboard() {
       {/* Desktop greeting (mobile header already shows this) */}
       <section className="hidden lg:block">
         <h1
-          className="text-2xl font-bold text-brand-charcoal"
+          className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          Hi, {customer.firstName || 'friend'} <span className="text-brand-purple">♥</span>
+          Hi, {customer.firstName || 'friend'} <span className="text-sage">♥</span>
         </h1>
-        <p className="text-sm text-brand-charcoal/50 mt-0.5">{customer.email}</p>
+        <p className="text-sm text-ink/50 mt-0.5">{customer.email}</p>
       </section>
 
       {/* Profile completion (renders null when nothing is pending) */}
@@ -93,7 +93,7 @@ export default function AccountDashboard() {
       {recentOrder ? (
         <section>
           <h2
-            className="text-base font-bold text-brand-charcoal mb-3"
+            className="text-base font-bold text-ink mb-3"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Most recent order
@@ -110,21 +110,21 @@ export default function AccountDashboard() {
 
       {/* Klaviyo nudge — only when marketing is OFF */}
       {!customer.acceptsMarketing && (
-        <section className="bg-brand-mist rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+        <section className="bg-cream-2 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="flex-1">
             <p
-              className="text-sm font-bold text-brand-charcoal"
+              className="text-sm font-bold text-ink"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Want tomorrow's deal in your inbox?
             </p>
-            <p className="text-xs text-brand-charcoal/60 mt-1">
+            <p className="text-xs text-ink/60 mt-1">
               One email a day, midnight sharp. No spam, just flings.
             </p>
           </div>
           <Link
             to="/account/preferences"
-            className="shrink-0 inline-flex items-center justify-center px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-brand-gradient hover:opacity-90 transition-opacity"
+            className="shrink-0 inline-flex items-center justify-center px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-coral hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Dip me in ♥
@@ -155,11 +155,11 @@ function RecentOrderCard({ order }: { order: StorefrontOrder }) {
     <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-brand-charcoal">
+          <p className="text-sm font-semibold text-ink">
             Order #{order.orderNumber}{' '}
-            <span className="text-brand-charcoal/40">· {date}</span>
+            <span className="text-ink/40">· {date}</span>
           </p>
-          <p className="text-xs text-brand-charcoal/60 mt-1 truncate">
+          <p className="text-xs text-ink/60 mt-1 truncate">
             {lineItemSummary}
           </p>
           <div className="flex gap-1.5 mt-2 flex-wrap">
@@ -167,14 +167,14 @@ function RecentOrderCard({ order }: { order: StorefrontOrder }) {
             <StatusPill value={fulfillmentStatus} kind="fulfillment" />
           </div>
         </div>
-        <p className="text-sm font-bold text-brand-charcoal whitespace-nowrap">
+        <p className="text-sm font-bold text-ink whitespace-nowrap">
           ${parseFloat(totalPrice.amount).toFixed(2)}
         </p>
       </div>
-      <div className="pt-3 border-t border-brand-mist">
+      <div className="pt-3 border-t border-cream-2">
         <Link
           to={`/account/orders/${encodeURIComponent(order.id)}`}
-          className="text-sm font-semibold text-brand-purple hover:text-brand-purple-light transition-colors"
+          className="text-sm font-semibold text-sage hover:text-sun transition-colors"
         >
           View order &rarr;
         </Link>

@@ -15,7 +15,7 @@ export default function AdminDashboard() {
   return (
     <div>
       <h1
-        className="text-2xl font-bold text-brand-charcoal mb-8"
+        className="text-2xl font-bold text-ink mb-8"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Dashboard

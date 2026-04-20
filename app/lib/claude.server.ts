@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { GenerateCopyRequest, GenerateCopyResult, ProductScore } from '~/types'
+import { createHash } from 'node:crypto'
+import type { Deal, EmmaHeroCopy, EmmaHeroVariant, GenerateCopyRequest, GenerateCopyResult, ProductScore } from '~/types'
+import { getPipelineSetting } from './feed-processor.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] })
 
@@ -721,6 +723,104 @@ export interface BlogSEOSuggestion {
   seoTitle: string
   seoDescription: string
   suggestedTags: string[]
+}
+
+// ─── Emma Hero (homepage) ─────────────────────────────────────────────────
+
+const DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful — suggestive is fine, explicit is not. Never use "sex" as an adjective — use "intimate", "pleasure", or "wellness". Never "Buy now" — use "Take a peek →" or "I'll take it ♥". Never surface a countdown or "until midnight." Always include a short first-person aside ("been living on my desk," "telling everyone about this combo"). Never assume the reader's experience level.`
+
+const EMMA_SYSTEM_PROMPT = `You are Emma — the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You test everything you recommend. You write in first person, warm and specific, like a note to a friend.`
+
+function emmaHeroFallback(deal: Pick<Deal, 'seoTitle' | 'tagline' | 'brand'>, variant: EmmaHeroVariant, voiceHash: string): EmmaHeroCopy {
+  const base: EmmaHeroCopy = {
+    variant,
+    eyebrow: variant === 'quote' ? 'Currently loving' : 'Currently loving',
+    headline: deal.tagline || `Okay — this ${deal.brand} one won me over.`,
+    body: `I've been testing this for a bit and I'm genuinely surprised. It's the kind of pick I keep coming back to.`,
+    aside: `— Emma · still on my desk`,
+    generatedAt: new Date().toISOString(),
+    voiceHash,
+  }
+  if (variant === 'quote') base.pullQuote = `"This one earned its spot."`
+  return base
+}
+
+export async function generateEmmaHero(opts: {
+  deal: Pick<Deal, 'seoTitle' | 'tagline' | 'fullStory' | 'brand' | 'category' | 'dealPrice' | 'msrp' | 'mapRestricted'>
+  variant?: EmmaHeroVariant
+  /** Optional override — otherwise pulled from pipelineSettings.brandVoice. */
+  brandVoice?: string
+}): Promise<EmmaHeroCopy> {
+  const variant = opts.variant ?? (opts.deal.mapRestricted ? 'quote' : 'loving')
+  const brandVoice = opts.brandVoice ?? (await getPipelineSetting('brandVoice')) ?? DEFAULT_BRAND_VOICE
+  const voiceHash = createHash('sha1').update(brandVoice).digest('hex').slice(0, 12)
+
+  const discountPct = opts.deal.msrp > 0 && opts.deal.dealPrice > 0
+    ? Math.round(((opts.deal.msrp - opts.deal.dealPrice) / opts.deal.msrp) * 100)
+    : 0
+  const mapLine = opts.deal.mapRestricted
+    ? 'MAP-restricted — no discount claims, no percent-off language, no struck prices.'
+    : discountPct > 0 ? `Currently ${discountPct}% off MSRP — you may allude to value, but never in "buy now" or countdown language.` : ''
+
+  const system = `${EMMA_SYSTEM_PROMPT}\n\n${brandVoice}`
+
+  const user = `Write the Emma hero block for the homepage of xdipx.com. Variant: "${variant}".
+
+Product context (do NOT echo — rewrite in Emma's voice):
+- Title: ${opts.deal.seoTitle}
+- Brand: ${opts.deal.brand}
+- Category: ${opts.deal.category}
+${opts.deal.tagline ? `- Existing tagline (for context only): ${opts.deal.tagline}` : ''}
+${opts.deal.fullStory ? `- Full story (context only, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
+${mapLine}
+
+Return ONLY this JSON (no markdown):
+{
+  "eyebrow":   "2–4 words, e.g. 'Currently loving' or 'This week's pick'",
+  "headline":  "one punchy Emma-voice sentence (8–14 words). First-person. Warm, specific. Never starts with the product name.",
+  "body":      "2–3 sentences (35–60 words). Why Emma keeps reaching for it. Specific, sensory, warm. Never clinical. Never 'buy now'.",
+  "aside":     "'— Emma · <3–6 word aside>', e.g. '— Emma · still on my desk'"${variant === 'quote' ? `,
+  "pullQuote": "one short pull-quote (6–12 words) — in quotes — a friend-to-friend endorsement. No price or discount language."` : ''}
+}`
+
+  async function attempt(tries = 2): Promise<EmmaHeroCopy> {
+    for (let i = 0; i < tries; i++) {
+      try {
+        const msg = await client.messages.create({
+          model: MODEL,
+          max_tokens: 800,
+          system,
+          messages: [{ role: 'user', content: user }],
+        })
+        const block = msg.content[0]
+        if (block?.type !== 'text') throw new Error('non-text response')
+        const parsed = JSON.parse(stripFences(block.text)) as Partial<EmmaHeroCopy>
+        if (parsed.eyebrow && parsed.headline && parsed.body && parsed.aside) {
+          const out: EmmaHeroCopy = {
+            variant,
+            eyebrow:  parsed.eyebrow,
+            headline: parsed.headline,
+            body:     parsed.body,
+            aside:    parsed.aside,
+            generatedAt: new Date().toISOString(),
+            voiceHash,
+          }
+          if (variant === 'quote' && parsed.pullQuote) out.pullQuote = parsed.pullQuote
+          return out
+        }
+      } catch (err) {
+        if (i === tries - 1) throw err
+      }
+    }
+    throw new Error('unreachable')
+  }
+
+  try {
+    return await attempt(2)
+  } catch (err) {
+    console.error('[generateEmmaHero] falling back to hardcoded copy:', err)
+    return emmaHeroFallback(opts.deal, variant, voiceHash)
+  }
 }
 
 export async function generateBlogSEO(

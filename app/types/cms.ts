@@ -310,6 +310,32 @@ export interface BlogHomepage {
   heroImageAlt?: string
 }
 
+// v2 redesign — Emma hero settings (additive singleton)
+export type EmmaHeroVariant = 'loving' | 'bundle' | 'quote'
+
+export interface EmmaHeroSettings {
+  heroVariant?: EmmaHeroVariant
+  eyebrow?: string
+  headline?: string
+  body?: string
+  aside?: string
+  pullQuote?: string
+  pairProductHandle?: string
+}
+
+// v2 redesign — Emma presets (Ask Emma rail)
+export interface EmmaPreset {
+  label:         string
+  slug:          string
+  narratorCopy?: string
+  moodTags?:     string[]
+  audienceTags?: string[]
+  mattersTags?:  string[]
+  priceMax?:     number
+  featured?:     boolean
+  order?:        number
+}
+
 export interface BlogCategory {
   name: string
   slug: string

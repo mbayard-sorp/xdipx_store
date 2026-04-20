@@ -17,14 +17,14 @@ export default function AboutPage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-16">
       <h1
-        className="text-4xl font-black text-brand-gradient mb-6"
+        className="text-4xl font-black text-coral mb-6"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         xdipx
       </h1>
 
-      <div className="prose prose-sm max-w-none text-brand-charcoal/80 space-y-5">
-        <p className="text-lg text-brand-charcoal font-medium leading-relaxed">
+      <div className="prose prose-sm max-w-none text-ink/80 space-y-5">
+        <p className="text-lg text-ink font-medium leading-relaxed">
           Look, we all have a drawer. Let's make it a great one.
         </p>
 
@@ -52,14 +52,14 @@ export default function AboutPage() {
       <div className="mt-10 flex flex-col sm:flex-row gap-4">
         <a
           href="/"
-          className="bg-brand-gradient text-white font-bold px-6 py-3 rounded-full text-center hover:opacity-90 transition-opacity"
+          className="bg-coral text-white font-bold px-6 py-3 rounded-full text-center hover:opacity-90 transition-opacity"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           See today's deal ♥
         </a>
         <a
           href="mailto:hello@xdipx.com"
-          className="border border-brand-mist text-brand-charcoal/70 font-medium px-6 py-3 rounded-full text-center hover:bg-brand-mist transition-colors"
+          className="border border-cream-2 text-ink/70 font-medium px-6 py-3 rounded-full text-center hover:bg-cream-2 transition-colors"
         >
           Say hi
         </a>

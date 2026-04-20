@@ -9,7 +9,7 @@ export function PlayTogetherBanner({ block }: PlayTogetherBannerProps) {
   const { heading, body, ctaLabel, ctaLink, image, imagePosition = 'right' } = block
 
   return (
-    <section className="py-12 px-4 bg-brand-mist">
+    <section className="py-12 px-4 bg-cream-2">
       <div
         className={[
           'max-w-5xl mx-auto flex flex-col md:flex-row items-center gap-10',
@@ -18,19 +18,19 @@ export function PlayTogetherBanner({ block }: PlayTogetherBannerProps) {
       >
         {/* Copy */}
         <div className="flex-1 text-center md:text-left">
-          <p className="text-brand-purple text-xs font-semibold uppercase tracking-widest mb-2">
+          <p className="text-sage text-xs font-semibold uppercase tracking-widest mb-2">
             ♥ For Couples
           </p>
           <h2
-            className="text-2xl md:text-3xl font-bold text-brand-charcoal mb-4"
+            className="text-2xl md:text-3xl font-bold text-ink mb-4"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {heading}
           </h2>
-          <p className="text-brand-charcoal/70 mb-6 leading-relaxed">{body}</p>
+          <p className="text-ink/70 mb-6 leading-relaxed">{body}</p>
           <Link
             to={ctaLink}
-            className="inline-block bg-brand-gradient text-white font-bold px-7 py-3 rounded-full hover:opacity-90 hover:scale-[1.02] transition-all shadow-md shadow-brand-coral/20"
+            className="inline-block bg-coral text-white font-bold px-7 py-3 rounded-full hover:opacity-90 hover:scale-[1.02] transition-all shadow-md shadow-coral/20"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {ctaLabel}

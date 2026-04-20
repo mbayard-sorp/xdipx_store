@@ -55,17 +55,17 @@ export default function ReturnsList() {
           <li key={r.id}>
             <Link
               to={`/account/returns/${r.id}`}
-              className="block bg-white border border-brand-mist rounded-2xl p-4 md:p-5 hover:border-brand-purple/30 transition-colors"
+              className="block bg-white border border-cream-2 rounded-2xl p-4 md:p-5 hover:border-sage/30 transition-colors"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <p
-                    className="text-sm font-bold text-brand-charcoal"
+                    className="text-sm font-bold text-ink"
                     style={{ fontFamily: 'var(--font-display)' }}
                   >
                     {r.rma}
                   </p>
-                  <p className="text-xs text-brand-charcoal/50 mt-0.5">
+                  <p className="text-xs text-ink/50 mt-0.5">
                     {new Date(r.createdAt).toLocaleDateString('en-US', {
                       month: 'long',
                       day: 'numeric',
@@ -79,7 +79,7 @@ export default function ReturnsList() {
                   </div>
                 </div>
                 {r.refundAmountCents != null && (
-                  <p className="text-sm font-semibold text-brand-charcoal tabular-nums shrink-0">
+                  <p className="text-sm font-semibold text-ink tabular-nums shrink-0">
                     ${(r.refundAmountCents / 100).toFixed(2)}
                   </p>
                 )}
@@ -96,12 +96,12 @@ function Heading() {
   return (
     <section className="hidden lg:block">
       <h1
-        className="text-2xl font-bold text-brand-charcoal"
+        className="text-2xl font-bold text-ink"
         style={{ fontFamily: 'var(--font-display)' }}
       >
-        Returns <span className="text-brand-purple">♥</span>
+        Returns <span className="text-sage">♥</span>
       </h1>
-      <p className="text-sm text-brand-charcoal/50 mt-0.5">
+      <p className="text-sm text-ink/50 mt-0.5">
         Track refunds and print return labels.
       </p>
     </section>

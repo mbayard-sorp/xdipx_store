@@ -8,8 +8,10 @@ import {
   getAllHandlesForCustomer,
   mergeLocalHearts,
   moveItem,
+  regenerateShareLink,
   removeItem,
   renameList,
+  setGiftMode,
   setListShared,
 } from '~/lib/wishlist.server'
 import {
@@ -113,6 +115,19 @@ export async function action({ request }: ActionFunctionArgs) {
         const listId = Number(form.get('listId'))
         const shared = form.get('shared') === 'true'
         const row = await setListShared(customerGid, listId, shared)
+        return Response.json({ ok: true, list: row })
+      }
+
+      case 'set-gift-mode': {
+        const listId = Number(form.get('listId'))
+        const giftMode = form.get('giftMode') === 'true'
+        const row = await setGiftMode(customerGid, listId, giftMode)
+        return Response.json({ ok: true, list: row })
+      }
+
+      case 'regenerate-share': {
+        const listId = Number(form.get('listId'))
+        const row = await regenerateShareLink(customerGid, listId)
         return Response.json({ ok: true, list: row })
       }
 

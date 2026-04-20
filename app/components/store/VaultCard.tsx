@@ -2,6 +2,7 @@ import { Link } from 'react-router'
 import type { VaultDeal } from '~/types'
 import { WaitlistButton } from './WaitlistButton'
 import { HeartButton } from './HeartButton'
+import { CardVideo } from './CardVideo'
 import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
 interface VaultCardProps {
@@ -24,38 +25,40 @@ export function VaultCard({ deal }: VaultCardProps) {
         size="sm"
       />
       <Link to={`/products/${deal.handle}`} className="block">
-        <div className="aspect-square overflow-hidden bg-brand-mist relative">
-          {deal.images[0] ? (
+        <div className="aspect-[4/5] overflow-hidden bg-cream-2 relative">
+          {deal.heroVideo?.src ? (
+            <CardVideo cardId={deal.id} video={deal.heroVideo} title={deal.seoTitle} />
+          ) : deal.images[0] ? (
             <img
               src={shopifyImageUrl(deal.images[0].url, 480) || deal.images[0].url}
               srcSet={shopifyImageSrcSet(deal.images[0].url, [240, 360, 480, 720])}
               sizes="(min-width: 768px) 25vw, 50vw"
               alt={deal.images[0].altText || deal.seoTitle}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+              className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-300"
               loading="lazy"
               decoding="async"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-brand-charcoal/10 text-5xl">♥</div>
+            <div className="w-full h-full flex items-center justify-center text-ink/10 text-5xl">♥</div>
           )}
         </div>
 
         <div className="p-4">
-          <p className="text-brand-charcoal/50 text-xs uppercase tracking-wide mb-1">{deal.brand}</p>
+          <p className="text-ink/50 text-xs uppercase tracking-wide mb-1">{deal.brand}</p>
           <h3
-            className="font-semibold text-brand-charcoal text-sm leading-snug line-clamp-2 group-hover:text-brand-coral transition-colors"
+            className="font-semibold text-ink text-sm leading-snug line-clamp-2 group-hover:text-coral transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {deal.seoTitle}
           </h3>
 
           <div className="flex items-center gap-2 mt-2">
-            <span className="text-brand-gradient font-bold">${deal.dealPrice.toFixed(2)}</span>
+            <span className="text-coral font-bold">${deal.dealPrice.toFixed(2)}</span>
             {deal.msrp > deal.dealPrice && (
-              <span className="text-brand-charcoal/40 text-sm line-through">${deal.msrp.toFixed(2)}</span>
+              <span className="text-ink/40 text-sm line-through">${deal.msrp.toFixed(2)}</span>
             )}
             {discount > 0 && (
-              <span className="text-brand-coral text-xs font-semibold">{discount}% off</span>
+              <span className="text-coral text-xs font-semibold">{discount}% off</span>
             )}
           </div>
         </div>

@@ -26,11 +26,11 @@ export default function AdminPhoneOrders() {
   return (
     <div className="mx-auto max-w-6xl p-6">
       <h1 className="font-display text-2xl mb-4">Phone & SMS orders</h1>
-      <p className="text-sm text-brand-charcoal/70 mb-4">
+      <p className="text-sm text-ink/70 mb-4">
         Draft orders created via IVR / SMS. Payment happens in Shopify checkout — watch the Shopify admin for paid state.
       </p>
       {rows.length === 0 ? (
-        <p className="text-brand-charcoal/60">No draft orders yet.</p>
+        <p className="text-ink/60">No draft orders yet.</p>
       ) : (
         <table className="w-full border-collapse text-sm">
           <thead>
@@ -51,11 +51,11 @@ export default function AdminPhoneOrders() {
                 <td className="py-2 pr-3 whitespace-nowrap">{new Date(r.createdAt).toLocaleString()}</td>
                 <td className="py-2 pr-3 uppercase text-xs">{r.channel}</td>
                 <td className="py-2 pr-3 font-mono text-xs">
-                  <a href={`tel:${r.phone}`} className="text-brand-purple">{r.phone}</a>
+                  <a href={`tel:${r.phone}`} className="text-sage">{r.phone}</a>
                 </td>
                 <td className="py-2 pr-3">
                   <div>{r.customerName ?? '—'}</div>
-                  <div className="text-xs text-brand-charcoal/60">{r.email ?? ''}</div>
+                  <div className="text-xs text-ink/60">{r.email ?? ''}</div>
                 </td>
                 <td className="py-2 pr-3 text-xs">
                   {(r.lineItems ?? []).map((li, i) => (
@@ -66,7 +66,7 @@ export default function AdminPhoneOrders() {
                 <td className="py-2 pr-3">{r.status}</td>
                 <td className="py-2 pr-3">
                   {r.shopifyInvoiceUrl ? (
-                    <a href={r.shopifyInvoiceUrl} target="_blank" rel="noreferrer" className="text-brand-coral underline">
+                    <a href={r.shopifyInvoiceUrl} target="_blank" rel="noreferrer" className="text-coral underline">
                       open
                     </a>
                   ) : '—'}

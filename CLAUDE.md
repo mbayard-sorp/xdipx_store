@@ -2,9 +2,11 @@
 
 ## What This Is
 
-Daily flash-sale storefront for sexual wellness products. One featured deal per day (like meh.com). Built on React Router v7 framework mode + Express + Shopify headless.
+Editorially-curated sexual-wellness storefront. Emma picks a featured product on an irregular cadence ("Emma's picks"); the cron infra still rotates at midnight, but the UI never surfaces a countdown or "until midnight" language. Built on React Router v7 framework mode + Express + Shopify headless.
 
 **Live goal:** $2,000/month profit within 3 months of launch.
+
+**Voice:** Emma — a trusted, funny friend. Never "Buy now" — "Take a peek →" / "I'll take it ♥". Never "sex" as an adjective — intimate, pleasure, wellness, slow-burn. Never countdowns. Always an Emma aside on hero/cards ("been living on my desk," etc.).
 
 ## Critical Patterns — Read Before Writing Any Code
 
@@ -67,28 +69,34 @@ Build and test at 375px first. Most traffic will be mobile. Use responsive class
 | KV Cache | Vercel KV |
 | Analytics | Google Analytics 4 |
 
-## Brand Design Tokens
+## Brand Design Tokens (v2 — Emma editorial)
 
-Colors live in `app/app.css` as `@theme` variables:
+Colors live in `app/app.css` as `@theme` variables. Tailwind utilities use the token name directly (`bg-cream`, `text-ink`, `bg-coral`).
 
 | Token | Value | Use |
 |---|---|---|
-| `brand-coral` | `#F04E37` | Primary CTA, logo left |
-| `brand-orange` | `#FF8C38` | Gradient end, logo right |
-| `brand-purple` | `#7B2FBE` | Hearts, accent, active states |
-| `brand-purple-light` | `#A855F7` | Hover states, tags |
-| `brand-cream` | `#FFF8F4` | Page background |
-| `brand-charcoal` | `#1E1A2E` | Body text |
-| `brand-mist` | `#F5EEF8` | Light section backgrounds |
+| `cream` | `#FAF4EA` | Page background |
+| `cream-2` | `#F2EADD` | Secondary surface, card backs |
+| `paper` | `#FFFFFF` | Paper surface, modals |
+| `ink` | `#151211` | Primary text, dark surfaces |
+| `ink-2` | `#2A2421` | Secondary dark surface |
+| `muted` | `#6F645C` | Secondary text, metadata |
+| `line` | `#E5DBC9` | Dividers, borders |
+| `coral` | `#FF4B1F` | Primary CTA, hero accent |
+| `coral-2` | `#FF6A3D` | Hover / secondary coral |
+| `coral-deep` | `#D93A15` | Active state / pressed |
+| `sage` | `#7C8F78` | Accent — hearts, tags, quiet states |
+| `sun` | `#F5B841` | Editor's pick / warm callouts |
 
-Gradient: `bg-brand-gradient` → `linear-gradient(to right, #F04E37, #FF8C38)`
-Gradient text: `.text-brand-gradient` (CSS class in app.css)
+Radii: `--radius-sm 6`, `--radius 12`, `--radius-lg 20`, `--radius-xl 28`.
 
 Fonts:
-- `font-display` → `Poppins` (headlines, CTAs, nav)
-- `font-body` → `Inter` (body copy)
+- `font-display` → `Archivo` (headlines, CTAs, nav — use 700–900 for display)
+- `font-body` → `Inter` (body copy, 400–600)
 
-Brand motif: `♥` purple heart — use as bullet points, CTA labels ("Dip In ♥"), section dividers.
+Brand motif: `♥` — use in CTA labels ("I'll take it ♥"), Emma asides, section dividers.
+
+**Coral is the hero color.** No brand gradient anymore — flat coral or coral-on-cream. Do not reintroduce purple or orange.
 
 ## File Structure (Key Files)
 
@@ -170,6 +178,14 @@ db/
 - `tagline`, `full_story`, `works_for_him`, `works_for_her`, `feature_bullets` (JSON)
 - `accessory_product_ids` (JSON), `mood_image_url`, `category`, `nalpac_sku`, `seo_meta_description`
 
+**v2 redesign additions** (created via `scripts/shopify-metafield-defs.ts`):
+- `map_restricted` (boolean) — suppress struck-price UI when true
+- `hero_video` (json) — `{ src, poster, duration }` for 9:16 hero video
+- `mood_tags`, `audience_tags`, `matters_tags` (list.text) — Ask Emma taxonomy
+- `product_type_dial` (text) — one of `air-pulsation | vibrator | wand | lube | wear`
+- `sensation_dial` (json) — per-dimension 1–5 ratings
+- `pairing_why` (json) — `{ [accessoryId]: "Emma voice copy" }` for Pairs-with
+
 ## URL / Canonical Strategy (Day-1 Non-Negotiable)
 
 1. `/products/{slug}` is the canonical URL for every product — never changes
@@ -189,10 +205,10 @@ db/
 
 Cron routes protected by `x-cron-secret` header matching `CRON_SECRET` env var.
 
-## Claude API Voice
+## Claude API Voice — Emma persona
 
 System prompt (always include):
-> You are the voice of xdipx.com — a daily flash-sale site for sexual wellness products. Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep all copy tasteful — suggestive is fine, explicit is not. Never use "sex" as an adjective — use "intimate", "pleasure", or "wellness". Never assume the reader's experience level.
+> You are Emma — the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. Brand voice: playful, cheeky, warm, curious, personal. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic, and who tests everything she recommends. Keep copy tasteful — suggestive is fine, explicit is not. Never use "sex" as an adjective — use "intimate", "pleasure", "wellness", "slow-burn", or "satisfaction". Never "Buy now" — use "Take a peek →", "Show me", or "I'll take it ♥". Never surface a countdown or "until midnight." Always include a short first-person aside on hero/cards ("been living on my desk," "telling everyone about this combo"). Never assume the reader's experience level.
 
 Model: `claude-sonnet-4-20250514`
 
@@ -211,15 +227,18 @@ React Router v7 framework mode IS the same framework as Shopify Oxygen/Hydrogen.
 ## Phase 1 Launch Checklist
 
 - [ ] Age gate renders before all content, persists 30 days
-- [ ] Homepage daily deal loads from Shopify via loader
-- [ ] Countdown timer accurate, resets at midnight
-- [ ] "Dip In ♥" → checkout-extras → Shopify checkout end-to-end
+- [ ] Homepage Emma hero loads from Shopify via loader (no countdown surface)
+- [ ] "I'll take it ♥" → checkout-extras → Shopify checkout end-to-end
 - [ ] Email subscribe posts to Klaviyo
 - [ ] Admin: login, queue, deal editor, AI generation, approval toggle
-- [ ] Cron rotates deal at midnight
+- [ ] Cron rotates pick at midnight (infra only — UI never surfaces timing)
 - [ ] Order webhook writes wholesale cost metafield
 - [ ] UTM + ref capture on all page loads
 - [ ] JSON-LD on homepage, product pages, FAQ
 - [ ] Canonical tags correct on all pages
 - [ ] Mobile responsive at 375px
 - [ ] Nalpac app installed on Shopify backend
+
+## Sanity schema — additive only
+
+For v2 redesign features that need Sanity schema changes, create **new** document types / blocks / fields in new files. Do not modify existing schema. Loaders read from new doc types with fallback to old. Protects already-published content and lets the team switch over intentionally.

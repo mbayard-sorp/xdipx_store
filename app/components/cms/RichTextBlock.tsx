@@ -3,10 +3,10 @@ import type { RichTextBlock as RichTextBlockType } from '~/types/cms'
 
 const BG_CLASSES: Record<RichTextBlockType['bgColor'], string> = {
   white:    'bg-white',
-  cream:    'bg-brand-cream',
-  mist:     'bg-brand-mist',
-  charcoal: 'bg-brand-charcoal text-white',
-  purple:   'bg-brand-purple text-white',
+  cream:    'bg-cream',
+  mist:     'bg-cream-2',
+  charcoal: 'bg-ink text-white',
+  purple:   'bg-sage text-white',
 }
 
 const WIDTH_CLASSES: Record<RichTextBlockType['maxWidth'], string> = {
@@ -27,7 +27,7 @@ const ptComponents = {
       <h4 className="font-display font-semibold text-lg mt-6 mb-2">{children}</h4>
     ),
     blockquote: ({ children }: any) => (
-      <blockquote className="border-l-4 border-brand-purple pl-4 my-6 italic opacity-80">
+      <blockquote className="border-l-4 border-sage pl-4 my-6 italic opacity-80">
         {children}
       </blockquote>
     ),

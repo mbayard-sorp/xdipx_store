@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useFetcher, useLoaderData, useNavigate } from 'react-router'
+import { Link, useFetcher, useLoaderData, useNavigate, useRouteLoaderData } from 'react-router'
+import { PersonalizedSearchRail } from '~/components/store/PersonalizedSearchRail'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { searchAll, getSearchVendors } from '~/lib/search.server'
 import type { ContentResult, SearchProductResult } from '~/lib/search.server'
@@ -88,6 +89,8 @@ export default function SearchPage() {
   const {
     q, sort, page, searchResult, taxonomy, vendorList, liveDealHandle, bannerBlocks, activeFilters,
   } = useLoaderData<typeof loader>()
+  const layoutData = useRouteLoaderData('routes/_layout') as { customerFirstName?: string | null } | undefined
+  const firstName = layoutData?.customerFirstName ?? ''
   const navigate = useNavigate()
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false)
 
@@ -193,6 +196,37 @@ export default function SearchPage() {
 
   const hasContentResults = pages.length > 0 || blogPosts.length > 0
 
+  // PersonalizedSearchRail refinements — top tag/vendor facets not already active.
+  const personalizedRefinements = useMemo(() => {
+    const out: { label: string; href: string }[] = []
+    if (!q) return out
+    const tagCounts = facets?.tagCounts ?? {}
+    const topTags = Object.entries(tagCounts)
+      .sort(([, a], [, b]) => (b as number) - (a as number))
+      .slice(0, 4)
+      .map(([tag]) => tag)
+    for (const tag of topTags) {
+      if (activeFilters.tags.includes(tag)) continue
+      out.push({
+        label: `${tagLabelMap.get(tag) ?? tag}`,
+        href: buildUrl({ tag: [...activeFilters.tags, tag] }),
+      })
+      if (out.length >= 4) break
+    }
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, facets, taxonomy, activeFilters.tags])
+
+  const personalizedCategories = useMemo(
+    () => [
+      { label: 'For him',     href: '/for-him' },
+      { label: 'For her',     href: '/for-her' },
+      { label: 'Emma\'s picks', href: '/' },
+      { label: 'The Notebook', href: '/notebook' },
+    ],
+    [],
+  )
+
   const filterSidebar = (
     <div className="space-y-6">
       {/* Curated tag filter groups from admin taxonomy */}
@@ -209,12 +243,12 @@ export default function SearchPage() {
                       type="checkbox"
                       checked={checked}
                       onChange={() => toggleArrayFilter('tag', t.tag)}
-                      className="accent-brand-purple w-3.5 h-3.5 rounded"
+                      className="accent-sage w-3.5 h-3.5 rounded"
                     />
-                    <span className={`text-sm transition-colors ${checked ? 'text-brand-purple font-medium' : 'text-brand-charcoal/70 group-hover:text-brand-purple'}`}>
+                    <span className={`text-sm transition-colors ${checked ? 'text-sage font-medium' : 'text-ink/70 group-hover:text-sage'}`}>
                       {t.label}
                     </span>
-                    <span className="text-xs text-brand-charcoal/30 ml-auto">({count ?? 0})</span>
+                    <span className="text-xs text-ink/30 ml-auto">({count ?? 0})</span>
                   </label>
                 </li>
               )
@@ -239,12 +273,12 @@ export default function SearchPage() {
                         type="checkbox"
                         checked={checked}
                         onChange={() => toggleArrayFilter('feature', feature)}
-                        className="accent-brand-purple w-3.5 h-3.5 rounded"
+                        className="accent-sage w-3.5 h-3.5 rounded"
                       />
-                      <span className={`text-sm capitalize transition-colors ${checked ? 'text-brand-purple font-medium' : 'text-brand-charcoal/70 group-hover:text-brand-purple'}`}>
+                      <span className={`text-sm capitalize transition-colors ${checked ? 'text-sage font-medium' : 'text-ink/70 group-hover:text-sage'}`}>
                         {feature.replace(/-/g, ' ')}
                       </span>
-                      <span className="text-xs text-brand-charcoal/30 ml-auto">({count})</span>
+                      <span className="text-xs text-ink/30 ml-auto">({count})</span>
                     </label>
                   </li>
                 )
@@ -268,12 +302,12 @@ export default function SearchPage() {
                         type="checkbox"
                         checked={checked}
                         onChange={() => toggleArrayFilter('experience', level)}
-                        className="accent-brand-purple w-3.5 h-3.5 rounded"
+                        className="accent-sage w-3.5 h-3.5 rounded"
                       />
-                      <span className={`text-sm capitalize transition-colors ${checked ? 'text-brand-purple font-medium' : 'text-brand-charcoal/70 group-hover:text-brand-purple'}`}>
+                      <span className={`text-sm capitalize transition-colors ${checked ? 'text-sage font-medium' : 'text-ink/70 group-hover:text-sage'}`}>
                         {level}
                       </span>
-                      <span className="text-xs text-brand-charcoal/30 ml-auto">({count})</span>
+                      <span className="text-xs text-ink/30 ml-auto">({count})</span>
                     </label>
                   </li>
                 )
@@ -296,12 +330,12 @@ export default function SearchPage() {
                       type="checkbox"
                       checked={checked}
                       onChange={() => toggleArrayFilter('vendor', v.vendor)}
-                      className="accent-brand-purple w-3.5 h-3.5 rounded"
+                      className="accent-sage w-3.5 h-3.5 rounded"
                     />
-                    <span className={`text-sm transition-colors ${checked ? 'text-brand-purple font-medium' : 'text-brand-charcoal/70 group-hover:text-brand-purple'}`}>
+                    <span className={`text-sm transition-colors ${checked ? 'text-sage font-medium' : 'text-ink/70 group-hover:text-sage'}`}>
                       {v.vendor}
                     </span>
-                    <span className="text-xs text-brand-charcoal/30 ml-auto">({count})</span>
+                    <span className="text-xs text-ink/30 ml-auto">({count})</span>
                   </label>
                 </li>
               )
@@ -324,17 +358,17 @@ export default function SearchPage() {
               <li key={bucket.label} className="flex items-center gap-2">
                 <button
                   onClick={() => active ? setPriceRange(null, null) : setPriceRange(bucket.min, bucket.max)}
-                  className={`text-sm transition-colors ${active ? 'text-brand-purple font-semibold' : 'text-brand-charcoal/70 hover:text-brand-purple'}`}
+                  className={`text-sm transition-colors ${active ? 'text-sage font-semibold' : 'text-ink/70 hover:text-sage'}`}
                 >
                   {bucket.label}
                 </button>
-                <span className="text-xs text-brand-charcoal/30 ml-auto">({bucket.count})</span>
+                <span className="text-xs text-ink/30 ml-auto">({bucket.count})</span>
               </li>
             )
           })}
           {(activeFilters.priceMin || activeFilters.priceMax) && (
             <li>
-              <button onClick={() => setPriceRange(null, null)} className="text-xs text-brand-charcoal/40 hover:text-brand-coral transition-colors">
+              <button onClick={() => setPriceRange(null, null)} className="text-xs text-ink/40 hover:text-coral transition-colors">
                 Clear price filter
               </button>
             </li>
@@ -345,18 +379,18 @@ export default function SearchPage() {
   )
 
   return (
-    <div className="min-h-screen bg-brand-cream">
+    <div className="min-h-screen bg-cream">
       <div className="max-w-6xl mx-auto px-4 py-8">
 
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-start gap-3 flex-wrap">
             <h1
-              className="text-2xl font-bold text-brand-charcoal"
+              className="text-2xl font-bold text-ink"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {q ? (
-                <>Search results for <span className="text-brand-gradient">&ldquo;{q}&rdquo;</span></>
+                <>Search results for <span className="text-coral">&ldquo;{q}&rdquo;</span></>
               ) : (
                 'All Products'
               )}
@@ -364,7 +398,7 @@ export default function SearchPage() {
             {q && (
               <button
                 onClick={clearQuery}
-                className="inline-flex items-center gap-1.5 bg-white border border-brand-mist text-brand-purple text-xs font-semibold px-3 py-1.5 rounded-full hover:border-brand-coral hover:text-brand-coral transition-colors"
+                className="inline-flex items-center gap-1.5 bg-white border border-cream-2 text-sage text-xs font-semibold px-3 py-1.5 rounded-full hover:border-coral hover:text-coral transition-colors"
                 aria-label="Clear search query"
               >
                 Clear search
@@ -373,14 +407,14 @@ export default function SearchPage() {
             )}
           </div>
           {totalProducts > 0 && (
-            <p className="text-sm text-brand-charcoal/50 mt-1">
+            <p className="text-sm text-ink/50 mt-1">
               {totalProducts} product{totalProducts !== 1 ? 's' : ''}
               {q && (
                 <>
                   {' · '}
                   <button
                     onClick={clearQuery}
-                    className="text-brand-purple hover:text-brand-coral underline underline-offset-2 transition-colors"
+                    className="text-sage hover:text-coral underline underline-offset-2 transition-colors"
                   >
                     Clear search to see all
                   </button>
@@ -414,7 +448,7 @@ export default function SearchPage() {
               )}
               <button
                 onClick={() => navigate(buildUrl({ vendor: null, tag: null, feature: null, experience: null, price_min: null, price_max: null }))}
-                className="text-xs text-brand-charcoal/40 hover:text-brand-coral transition-colors underline underline-offset-2"
+                className="text-xs text-ink/40 hover:text-coral transition-colors underline underline-offset-2"
               >
                 Clear all
               </button>
@@ -438,7 +472,7 @@ export default function SearchPage() {
               <ContentSection title="Pages" items={pages} linkPrefix="/pages/" />
             )}
             {blogPosts.length > 0 && (
-              <ContentSection title="Articles" items={blogPosts} linkPrefix="/blog/" />
+              <ContentSection title="Articles" items={blogPosts} linkPrefix="/notebook/" />
             )}
           </div>
         )}
@@ -446,7 +480,13 @@ export default function SearchPage() {
         <div className="flex gap-8">
 
           {/* ── Sidebar (desktop) ─────────────────────────────────────── */}
-          <aside className="hidden lg:block w-56 shrink-0">
+          <aside className="hidden lg:block w-60 shrink-0 space-y-8">
+            <PersonalizedSearchRail
+              firstName={firstName}
+              query={q}
+              refinements={personalizedRefinements}
+              categories={personalizedCategories}
+            />
             {filterSidebar}
           </aside>
 
@@ -457,22 +497,22 @@ export default function SearchPage() {
             <div className="flex items-center justify-between mb-5 gap-4">
               <button
                 onClick={() => setFilterDrawerOpen(true)}
-                className="lg:hidden flex items-center gap-2 px-4 py-2 border border-brand-mist rounded-xl text-sm font-medium text-brand-charcoal hover:border-brand-purple/40 transition-colors"
+                className="lg:hidden flex items-center gap-2 px-4 py-2 border border-cream-2 rounded-xl text-sm font-medium text-ink hover:border-sage/40 transition-colors"
               >
                 <FilterIcon className="w-4 h-4" />
                 Filter & Sort
                 {hasActiveFilters && (
-                  <span className="w-2 h-2 rounded-full bg-brand-purple" />
+                  <span className="w-2 h-2 rounded-full bg-sage" />
                 )}
               </button>
 
               <div className="hidden lg:flex items-center gap-2 ml-auto">
-                <label htmlFor="sort-select" className="text-sm text-brand-charcoal/50">Sort:</label>
+                <label htmlFor="sort-select" className="text-sm text-ink/50">Sort:</label>
                 <select
                   id="sort-select"
                   value={sort}
                   onChange={e => setSort(e.target.value)}
-                  className="border border-brand-mist rounded-xl px-3 py-2 text-sm text-brand-charcoal bg-white focus:ring-2 focus:ring-brand-purple/40 focus:border-brand-purple/50 focus:outline-none"
+                  className="border border-cream-2 rounded-xl px-3 py-2 text-sm text-ink bg-white focus:ring-2 focus:ring-sage/40 focus:border-sage/50 focus:outline-none"
                 >
                   {SORT_OPTIONS.map(o => (
                     <option key={o.value} value={o.value}>{o.label}</option>
@@ -500,21 +540,21 @@ export default function SearchPage() {
       {filterDrawerOpen && (
         <>
           <div
-            className="fixed inset-0 z-50 bg-brand-charcoal/40 backdrop-blur-sm lg:hidden"
+            className="fixed inset-0 z-50 bg-ink/40 backdrop-blur-sm lg:hidden"
             onClick={() => setFilterDrawerOpen(false)}
             aria-hidden="true"
           />
-          <div className="fixed bottom-0 left-0 right-0 z-50 bg-brand-cream rounded-t-2xl shadow-2xl lg:hidden max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-brand-mist">
+          <div className="fixed bottom-0 left-0 right-0 z-50 bg-cream rounded-t-2xl shadow-2xl lg:hidden max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-cream-2">
               <h2
-                className="font-bold text-brand-charcoal"
+                className="font-bold text-ink"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
                 Filter & Sort
               </h2>
               <button
                 onClick={() => setFilterDrawerOpen(false)}
-                className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-brand-mist transition-colors"
+                className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-cream-2 transition-colors"
                 aria-label="Close filters"
               >
                 <svg viewBox="0 0 14 14" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -530,7 +570,7 @@ export default function SearchPage() {
                     <li key={o.value}>
                       <button
                         onClick={() => { setSort(o.value); setFilterDrawerOpen(false) }}
-                        className={`text-sm transition-colors ${sort === o.value ? 'text-brand-purple font-semibold' : 'text-brand-charcoal/70 hover:text-brand-purple'}`}
+                        className={`text-sm transition-colors ${sort === o.value ? 'text-sage font-semibold' : 'text-ink/70 hover:text-sage'}`}
                       >
                         {o.label}
                       </button>
@@ -541,10 +581,10 @@ export default function SearchPage() {
               {filterSidebar}
             </div>
 
-            <div className="px-5 py-4 border-t border-brand-mist">
+            <div className="px-5 py-4 border-t border-cream-2">
               <button
                 onClick={() => setFilterDrawerOpen(false)}
-                className="w-full py-3 bg-brand-gradient text-white font-bold rounded-full text-sm hover:opacity-90 transition-opacity"
+                className="w-full py-3 bg-coral text-white font-bold rounded-full text-sm hover:opacity-90 transition-opacity"
               >
                 Show {totalProducts} result{totalProducts !== 1 ? 's' : ''} ♥
               </button>
@@ -618,17 +658,18 @@ function InfiniteProductGrid({
   return (
     <>
       <ul className="grid grid-cols-2 sm:grid-cols-3 gap-4 auto-rows-fr">
-        {items.map(product => (
+        {items.map((product, i) => (
           <SearchTile
             key={product.handle}
             product={product}
             isLiveDeal={!!liveDealHandle && product.handle === liveDealHandle}
+            emmaPick={i < 3}
           />
         ))}
       </ul>
       {hasNext && (
         <div ref={sentinelRef} className="mt-8 flex justify-center">
-          <div className="text-xs text-brand-charcoal/40">Loading more…</div>
+          <div className="text-xs text-ink/40">Loading more…</div>
         </div>
       )}
     </>
@@ -637,7 +678,7 @@ function InfiniteProductGrid({
 
 // ─── Product tile ───────────────────────────────────────────────────────────
 
-function SearchTile({ product, isLiveDeal }: { product: SearchProductResult; isLiveDeal: boolean }) {
+function SearchTile({ product, isLiveDeal, emmaPick }: { product: SearchProductResult; isLiveDeal: boolean; emmaPick?: boolean }) {
   const addToCart = useFetcher<{ ok?: boolean }>()
   const [justAdded, setJustAdded] = useState(false)
   const wasSubmitting = useRef(false)
@@ -684,7 +725,7 @@ function SearchTile({ product, isLiveDeal }: { product: SearchProductResult; isL
         to={`/products/${product.handle}`}
         className="group flex flex-col h-full bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
       >
-        <div className="aspect-square overflow-hidden bg-brand-mist relative">
+        <div className="aspect-square overflow-hidden bg-cream-2 relative">
           {product.featuredImage ? (
             <ProductTileMedia
               imageUrl={product.featuredImage.url}
@@ -692,11 +733,20 @@ function SearchTile({ product, isLiveDeal }: { product: SearchProductResult; isL
               video={video}
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-brand-charcoal/10 text-5xl">♥</div>
+            <div className="w-full h-full flex items-center justify-center text-ink/10 text-5xl">♥</div>
           )}
           {discount >= 10 && (
-            <span className="absolute top-2 left-2 z-10 bg-brand-purple text-white text-xs font-bold px-2 py-0.5 rounded-full">
+            <span className="absolute top-2 left-2 z-10 bg-sage text-white text-xs font-bold px-2 py-0.5 rounded-full">
               {discount}% off
+            </span>
+          )}
+          {emmaPick && !isLiveDeal && (
+            <span
+              className="absolute top-2 right-2 z-10 bg-coral text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm"
+              style={{ fontFamily: 'var(--font-display)' }}
+              aria-label="Emma's pick"
+            >
+              ★ Emma
             </span>
           )}
           {isLiveDeal && <LiveDealBadge />}
@@ -708,7 +758,7 @@ function SearchTile({ product, isLiveDeal }: { product: SearchProductResult; isL
             disabled={addToCart.state !== 'idle'}
             aria-label={canAtc ? `Add ${product.title} to cart` : `View ${product.title}`}
             className={`absolute bottom-2 right-2 z-10 inline-flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-1.5 text-white text-xs font-bold shadow-md transition-all ${
-              justAdded ? 'bg-brand-purple scale-105' : 'bg-brand-coral hover:bg-brand-coral/90 hover:scale-105'
+              justAdded ? 'bg-sage scale-105' : 'bg-coral hover:bg-coral/90 hover:scale-105'
             } ${addToCart.state !== 'idle' ? 'opacity-70' : ''}`}
           >
             {justAdded ? (
@@ -729,19 +779,19 @@ function SearchTile({ product, isLiveDeal }: { product: SearchProductResult; isL
           </button>
         </div>
         <div className="p-3 flex flex-col flex-1">
-          <p className="text-xs text-brand-charcoal/50 truncate">{product.vendor}</p>
+          <p className="text-xs text-ink/50 truncate">{product.vendor}</p>
           <h3
-            className="text-sm font-semibold text-brand-charcoal line-clamp-2 group-hover:text-brand-coral transition-colors mt-0.5 min-h-[2.5rem]"
+            className="text-sm font-semibold text-ink line-clamp-2 group-hover:text-coral transition-colors mt-0.5 min-h-[2.5rem]"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {product.title}
           </h3>
           <div className="flex items-center gap-2 mt-auto pt-2">
             {price != null && (
-              <span className="text-sm font-bold text-brand-gradient">${price.toFixed(2)}</span>
+              <span className="text-sm font-bold text-coral">${price.toFixed(2)}</span>
             )}
             {compareAt != null && price != null && compareAt > price && (
-              <span className="text-xs text-brand-charcoal/40 line-through">${compareAt.toFixed(2)}</span>
+              <span className="text-xs text-ink/40 line-through">${compareAt.toFixed(2)}</span>
             )}
           </div>
         </div>
@@ -763,7 +813,7 @@ function ContentSection({
 }) {
   return (
     <div className="bg-white rounded-2xl p-4 shadow-sm">
-      <h2 className="text-xs font-bold text-brand-charcoal/40 uppercase tracking-widest mb-3">{title}</h2>
+      <h2 className="text-xs font-bold text-ink/40 uppercase tracking-widest mb-3">{title}</h2>
       <ul className="space-y-2">
         {items.map(item => (
           <li key={item.slug}>
@@ -771,15 +821,15 @@ function ContentSection({
               to={`${linkPrefix}${item.slug}`}
               className="group flex items-start gap-3 py-1"
             >
-              <span className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center rounded bg-brand-mist text-brand-purple text-[10px] font-bold">
+              <span className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center rounded bg-cream-2 text-sage text-[10px] font-bold">
                 {item._type === 'blogPost' ? '✎' : '◇'}
               </span>
               <div className="min-w-0">
-                <p className="text-sm font-medium text-brand-charcoal group-hover:text-brand-coral transition-colors line-clamp-1">
+                <p className="text-sm font-medium text-ink group-hover:text-coral transition-colors line-clamp-1">
                   {item.title}
                 </p>
                 {(item.excerpt || item.seoDescription) && (
-                  <p className="text-xs text-brand-charcoal/50 line-clamp-1 mt-0.5">
+                  <p className="text-xs text-ink/50 line-clamp-1 mt-0.5">
                     {item.excerpt || item.seoDescription}
                   </p>
                 )}
@@ -809,20 +859,20 @@ function FilterSection({ title, children, collapsible = false, defaultExpanded =
           onClick={() => setExpanded(!expanded)}
           className="flex items-center justify-between w-full mb-3 group"
         >
-          <h3 className="text-xs font-bold text-brand-charcoal uppercase tracking-wider group-hover:text-brand-purple transition-colors">
+          <h3 className="text-xs font-bold text-ink uppercase tracking-wider group-hover:text-sage transition-colors">
             {title}
           </h3>
           <svg
             width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`text-brand-charcoal/30 group-hover:text-brand-purple transition-transform ${expanded ? 'rotate-180' : ''}`}
+            className={`text-ink/30 group-hover:text-sage transition-transform ${expanded ? 'rotate-180' : ''}`}
             aria-hidden="true"
           >
             <polyline points="6 9 12 15 18 9" />
           </svg>
         </button>
       ) : (
-        <h3 className="text-xs font-bold text-brand-charcoal uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-bold text-ink uppercase tracking-wider mb-3">
           {title}
         </h3>
       )}
@@ -833,11 +883,11 @@ function FilterSection({ title, children, collapsible = false, defaultExpanded =
 
 function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1.5 bg-brand-mist text-brand-purple text-xs px-3 py-1 rounded-full">
+    <span className="inline-flex items-center gap-1.5 bg-cream-2 text-sage text-xs px-3 py-1 rounded-full">
       {label}
       <button
         onClick={onRemove}
-        className="hover:text-brand-coral transition-colors"
+        className="hover:text-coral transition-colors"
         aria-label={`Remove filter: ${label}`}
       >
         ×
@@ -851,19 +901,19 @@ function NoResults({ query, onClear }: { query: string; onClear?: () => void }) 
     <div className="text-center py-16">
       <p className="text-4xl mb-4">♥</p>
       <h2
-        className="text-lg font-bold text-brand-charcoal mb-2"
+        className="text-lg font-bold text-ink mb-2"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         No products found{query ? ` for "${query}"` : ''}
       </h2>
-      <p className="text-sm text-brand-charcoal/50 mb-6">
+      <p className="text-sm text-ink/50 mb-6">
         Try a broader search or browse our categories
       </p>
       <div className="flex flex-wrap justify-center gap-3">
         {onClear && (
           <button
             onClick={onClear}
-            className="px-5 py-2 border border-brand-coral text-brand-coral font-medium rounded-full text-sm hover:bg-brand-coral hover:text-white transition-colors"
+            className="px-5 py-2 border border-coral text-coral font-medium rounded-full text-sm hover:bg-coral hover:text-white transition-colors"
           >
             Clear search
           </button>
@@ -877,7 +927,7 @@ function NoResults({ query, onClear }: { query: string; onClear?: () => void }) 
           <Link
             key={to}
             to={to}
-            className="px-5 py-2 border border-brand-mist rounded-full text-sm font-medium text-brand-charcoal hover:border-brand-purple/40 hover:text-brand-purple transition-colors"
+            className="px-5 py-2 border border-cream-2 rounded-full text-sm font-medium text-ink hover:border-sage/40 hover:text-sage transition-colors"
           >
             {label}
           </Link>

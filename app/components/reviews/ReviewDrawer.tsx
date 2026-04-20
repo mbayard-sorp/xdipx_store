@@ -82,16 +82,16 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
         aria-label="Review details"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-brand-mist shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-cream-2 shrink-0">
           <h2
-            className="font-bold text-brand-charcoal"
+            className="font-bold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Review Detail
           </h2>
           <button
             onClick={onClose}
-            className="text-brand-charcoal/40 hover:text-brand-charcoal text-xl leading-none"
+            className="text-ink/40 hover:text-ink text-xl leading-none"
             aria-label="Close panel"
           >
             ×
@@ -105,16 +105,16 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
           <div className="flex items-start gap-3">
             <div
               className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0"
-              style={{ background: '#7B2FBE', fontFamily: 'var(--font-display)' }}
+              style={{ background: '#7C8F78', fontFamily: 'var(--font-display)' }}
               aria-hidden="true"
             >
               {review.reviewerName.slice(0, 2).toUpperCase()}
             </div>
             <div>
-              <p className="font-semibold text-sm text-brand-charcoal">{review.reviewerName}</p>
-              <p className="text-xs text-brand-charcoal/50">{review.reviewerEmail}</p>
+              <p className="font-semibold text-sm text-ink">{review.reviewerName}</p>
+              <p className="text-xs text-ink/50">{review.reviewerEmail}</p>
               {review.shopifyOrderId && (
-                <p className="text-xs text-brand-charcoal/40">Order: {review.shopifyOrderId}</p>
+                <p className="text-xs text-ink/40">Order: {review.shopifyOrderId}</p>
               )}
               <div className="flex gap-2 mt-1 flex-wrap">
                 {review.isVerifiedPurchase && (
@@ -124,7 +124,7 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
                   <span className="text-[10px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">Incentivized</span>
                 )}
                 {review.source !== 'organic' && (
-                  <span className="text-[10px] text-brand-charcoal/40 bg-brand-mist px-2 py-0.5 rounded-full capitalize">{review.source}</span>
+                  <span className="text-[10px] text-ink/40 bg-cream-2 px-2 py-0.5 rounded-full capitalize">{review.source}</span>
                 )}
               </div>
             </div>
@@ -135,18 +135,18 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
 
           {/* Current status */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-brand-charcoal/50">Status:</span>
+            <span className="text-xs text-ink/50">Status:</span>
             <span className="text-xs font-semibold capitalize">{STATUS_LABEL[review.status] ?? review.status}</span>
           </div>
 
           {/* Title + body */}
           {review.title && (
-            <h3 className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+            <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
               {review.title}
             </h3>
           )}
           {review.body && (
-            <p className="text-sm text-brand-charcoal/80 leading-relaxed">{review.body}</p>
+            <p className="text-sm text-ink/80 leading-relaxed">{review.body}</p>
           )}
 
           {/* Media */}
@@ -157,7 +157,7 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
                   key={m.id}
                   type="button"
                   onClick={() => setLightboxIndex(i)}
-                  className="w-16 h-16 rounded-lg overflow-hidden bg-brand-mist border border-brand-mist hover:border-brand-purple/40 transition-colors"
+                  className="w-16 h-16 rounded-lg overflow-hidden bg-cream-2 border border-cream-2 hover:border-sage/40 transition-colors"
                   aria-label={`View ${m.mediaType} ${i + 1}`}
                 >
                   {m.mediaType === 'image' ? (
@@ -175,7 +175,7 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
 
           {/* Feature toggle */}
           <div className="flex items-center justify-between">
-            <span className="text-sm text-brand-charcoal/60">Featured review</span>
+            <span className="text-sm text-ink/60">Featured review</span>
             <actionFetcher.Form method="post" action="/api/reviews/admin">
               <input type="hidden" name="intent"    value="feature" />
               <input type="hidden" name="reviewId"  value={review.id} />
@@ -184,7 +184,7 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
                 type="submit"
                 className={[
                   'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-                  review.isFeatured ? 'bg-brand-purple' : 'bg-brand-mist',
+                  review.isFeatured ? 'bg-sage' : 'bg-cream-2',
                 ].join(' ')}
                 aria-label={review.isFeatured ? 'Unfeature review' : 'Feature review'}
               >
@@ -199,7 +199,7 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
           {/* Reply section */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+              <p className="text-sm font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
                 Seller reply
               </p>
               <div className="flex gap-2">
@@ -207,7 +207,7 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
                   type="button"
                   onClick={handleAISuggest}
                   disabled={aiSuggestFetcher.state !== 'idle'}
-                  className="text-xs text-brand-purple hover:text-brand-purple-light transition-colors disabled:opacity-50"
+                  className="text-xs text-sage hover:text-sun transition-colors disabled:opacity-50"
                 >
                   {aiSuggestFetcher.state !== 'idle' ? 'Generating...' : '✨ AI Suggest'}
                 </button>
@@ -215,7 +215,7 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
                   <button
                     type="button"
                     onClick={() => setReplyMode(true)}
-                    className="text-xs text-brand-charcoal/50 hover:text-brand-charcoal transition-colors"
+                    className="text-xs text-ink/50 hover:text-ink transition-colors"
                   >
                     {review.replyBody ? 'Edit' : 'Add reply'}
                   </button>
@@ -224,7 +224,7 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
             </div>
 
             {review.replyBody && !replyMode && (
-              <div className="bg-brand-mist rounded-xl p-3 text-sm text-brand-charcoal/80 italic">
+              <div className="bg-cream-2 rounded-xl p-3 text-sm text-ink/80 italic">
                 {review.replyBody}
               </div>
             )}
@@ -235,7 +235,7 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
                   value={reply}
                   onChange={e => setReply(e.target.value)}
                   rows={4}
-                  className="w-full border border-brand-mist rounded-xl px-3 py-2 text-sm text-brand-charcoal focus:outline-none focus:border-brand-purple transition-colors resize-none"
+                  className="w-full border border-cream-2 rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:border-sage transition-colors resize-none"
                   placeholder="Write a warm, on-brand reply..."
                 />
                 <div className="flex gap-2">
@@ -243,14 +243,14 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
                     type="button"
                     onClick={handleReply}
                     disabled={replyFetcher.state !== 'idle'}
-                    className="text-xs font-semibold bg-brand-gradient text-white px-4 py-1.5 rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
+                    className="text-xs font-semibold bg-coral text-white px-4 py-1.5 rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
                   >
                     {replyFetcher.state !== 'idle' ? 'Saving...' : 'Save reply'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setReplyMode(false)}
-                    className="text-xs text-brand-charcoal/50 hover:text-brand-charcoal transition-colors"
+                    className="text-xs text-ink/50 hover:text-ink transition-colors"
                   >
                     Cancel
                   </button>
@@ -261,7 +261,7 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
         </div>
 
         {/* Action buttons */}
-        <div className="px-6 py-4 border-t border-brand-mist shrink-0">
+        <div className="px-6 py-4 border-t border-cream-2 shrink-0">
           <div className="flex gap-2 flex-wrap">
             {review.status !== 'approved' && (
               <button

@@ -52,7 +52,7 @@ export default function AdminReviewsDashboard() {
   return (
     <div>
       <h1
-        className="text-2xl font-bold text-brand-charcoal mb-8"
+        className="text-2xl font-bold text-ink mb-8"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Reviews
@@ -87,9 +87,9 @@ export default function AdminReviewsDashboard() {
       {/* Charts row */}
       <div className="grid lg:grid-cols-2 gap-6 mb-8">
         {/* Reviews / day bar chart */}
-        <div className="bg-white rounded-2xl border border-brand-mist p-5">
+        <div className="bg-white rounded-2xl border border-cream-2 p-5">
           <p
-            className="text-xs font-semibold text-brand-charcoal/50 uppercase tracking-widest mb-4"
+            className="text-xs font-semibold text-ink/50 uppercase tracking-widest mb-4"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Reviews (last 30 days)
@@ -109,7 +109,7 @@ export default function AdminReviewsDashboard() {
                     y={chartH - h}
                     width={barW}
                     height={h}
-                    fill="#7B2FBE"
+                    fill="#7C8F78"
                     opacity={0.7}
                     rx={1}
                   />
@@ -117,14 +117,14 @@ export default function AdminReviewsDashboard() {
               })}
             </svg>
           ) : (
-            <p className="text-brand-charcoal/40 text-sm text-center py-4">No data yet</p>
+            <p className="text-ink/40 text-sm text-center py-4">No data yet</p>
           )}
         </div>
 
         {/* Rating donut */}
-        <div className="bg-white rounded-2xl border border-brand-mist p-5">
+        <div className="bg-white rounded-2xl border border-cream-2 p-5">
           <p
-            className="text-xs font-semibold text-brand-charcoal/50 uppercase tracking-widest mb-4"
+            className="text-xs font-semibold text-ink/50 uppercase tracking-widest mb-4"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Status breakdown
@@ -140,8 +140,8 @@ export default function AdminReviewsDashboard() {
               return (
                 <div key={label} className="flex items-center gap-3">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
-                  <span className="text-xs text-brand-charcoal/70 w-16">{label}</span>
-                  <div className="flex-1 h-1.5 bg-brand-mist rounded-full overflow-hidden">
+                  <span className="text-xs text-ink/70 w-16">{label}</span>
+                  <div className="flex-1 h-1.5 bg-cream-2 rounded-full overflow-hidden">
                     <div
                       className="h-full rounded-full"
                       style={{
@@ -150,7 +150,7 @@ export default function AdminReviewsDashboard() {
                       }}
                     />
                   </div>
-                  <span className="text-xs text-brand-charcoal/50 w-6 text-right">{count}</span>
+                  <span className="text-xs text-ink/50 w-6 text-right">{count}</span>
                 </div>
               )
             })}
@@ -159,17 +159,17 @@ export default function AdminReviewsDashboard() {
       </div>
 
       {/* Recent pending reviews */}
-      <div className="bg-white rounded-2xl border border-brand-mist p-5">
+      <div className="bg-white rounded-2xl border border-cream-2 p-5">
         <div className="flex items-center justify-between mb-4">
           <p
-            className="font-bold text-brand-charcoal"
+            className="font-bold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Pending Reviews
           </p>
           <a
             href="/admin/reviews/queue"
-            className="text-xs text-brand-purple hover:text-brand-purple-light transition-colors font-medium"
+            className="text-xs text-sage hover:text-sun transition-colors font-medium"
           >
             View all →
           </a>
@@ -177,16 +177,16 @@ export default function AdminReviewsDashboard() {
 
         <div className="space-y-3">
           {recent.length === 0 && (
-            <p className="text-brand-charcoal/40 text-sm text-center py-6">No pending reviews ♥</p>
+            <p className="text-ink/40 text-sm text-center py-6">No pending reviews ♥</p>
           )}
           {recent.map(review => (
             <div
               key={review.id}
-              className="flex items-center gap-3 py-3 border-b border-brand-mist last:border-0"
+              className="flex items-center gap-3 py-3 border-b border-cream-2 last:border-0"
             >
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-brand-charcoal truncate">{review.reviewerName}</p>
-                <p className="text-xs text-brand-charcoal/50 truncate">
+                <p className="text-sm font-medium text-ink truncate">{review.reviewerName}</p>
+                <p className="text-xs text-ink/50 truncate">
                   {review.title ?? review.body?.slice(0, 60) ?? 'No content'}
                 </p>
               </div>
@@ -214,7 +214,7 @@ export default function AdminReviewsDashboard() {
                 <button
                   type="button"
                   onClick={() => setActiveReview(review)}
-                  className="text-xs text-brand-purple hover:text-brand-purple-light transition-colors font-medium"
+                  className="text-xs text-sage hover:text-sun transition-colors font-medium"
                 >
                   View
                 </button>

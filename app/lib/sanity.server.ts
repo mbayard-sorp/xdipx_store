@@ -1,5 +1,5 @@
 import { createClient } from '@sanity/client'
-import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage } from '~/types/cms'
+import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPreset } from '~/types/cms'
 import { cached, invalidateCache } from '~/lib/kv.server'
 
 // Shared field projection reused by homepage + product page queries
@@ -72,6 +72,56 @@ const HOMEPAGE_GROQ = `
     "sections": sections[active == true] | order(order asc) { ${CONTENT_BLOCKS_PROJECTION} }
   }
 `
+
+// v2 redesign — Emma hero settings singleton
+const EMMA_HERO_GROQ = `
+  *[_id == "singleton.emmaHero"][0]{
+    heroVariant, eyebrow, headline, body, aside, pullQuote, pairProductHandle
+  }
+`
+
+export async function getEmmaHeroSettings(preview = false): Promise<EmmaHeroSettings | null> {
+  if (!projectId) return null
+
+  const fetcher = async (): Promise<EmmaHeroSettings | null> => {
+    try {
+      const client = getClient(false, preview)
+      if (!client) return null
+      return (await client.fetch<EmmaHeroSettings>(EMMA_HERO_GROQ)) ?? null
+    } catch (err) {
+      console.error('[sanity] getEmmaHeroSettings error:', err)
+      return null
+    }
+  }
+
+  if (preview) return fetcher()
+  return cached('sanity:emma-hero', 60, fetcher)
+}
+
+// v2 redesign — Emma presets for Ask Emma rail
+const EMMA_PRESETS_GROQ = `
+  *[_type == "emmaPreset"] | order(order asc, label asc){
+    label, "slug": slug.current, narratorCopy, moodTags, audienceTags, mattersTags, priceMax, featured, order
+  }
+`
+
+export async function getEmmaPresets(preview = false): Promise<EmmaPreset[]> {
+  if (!projectId) return []
+
+  const fetcher = async (): Promise<EmmaPreset[]> => {
+    try {
+      const client = getClient(false, preview)
+      if (!client) return []
+      return (await client.fetch<EmmaPreset[]>(EMMA_PRESETS_GROQ)) ?? []
+    } catch (err) {
+      console.error('[sanity] getEmmaPresets error:', err)
+      return []
+    }
+  }
+
+  if (preview) return fetcher()
+  return cached('sanity:emma-presets', 300, fetcher)
+}
 
 export async function getHomepageSections(preview = false): Promise<HomepageSections | null> {
   if (!projectId) return null
@@ -404,6 +454,7 @@ export async function getBlogPosts(opts: {
   perPage?: number
   category?: string
   featured?: boolean
+  authorSlug?: string
 } = {}): Promise<{ posts: BlogPostCard[]; total: number }> {
   if (!projectId) return { posts: [], total: 0 }
 
@@ -412,7 +463,7 @@ export async function getBlogPosts(opts: {
   const start = (page - 1) * perPage
   const end = start + perPage
 
-  const cacheKey = `posts:${page}:${perPage}:${opts.category ?? ''}:${opts.featured ?? ''}`
+  const cacheKey = `posts:${page}:${perPage}:${opts.category ?? ''}:${opts.featured ?? ''}:${opts.authorSlug ?? ''}`
   const cached = getCachedBlog<{ posts: BlogPostCard[]; total: number }>(cacheKey, BLOG_CACHE_TTL)
   if (cached) return cached
 
@@ -429,6 +480,10 @@ export async function getBlogPosts(opts: {
     }
     if (opts.featured) {
       filter += ` && featured == true`
+    }
+    if (opts.authorSlug) {
+      filter += ` && author->slug.current == $authorSlug`
+      params.authorSlug = opts.authorSlug
     }
 
     const [rawPosts, total] = await Promise.all([
@@ -507,6 +562,26 @@ export async function getBlogPost(slug: string, preview = false): Promise<BlogPo
     return post
   } catch (err) {
     console.error('[sanity] getBlogPost error:', err)
+    return null
+  }
+}
+
+export async function getBlogAuthor(slug: string): Promise<(BlogAuthor & { joinedAt?: string; postCount?: number }) | null> {
+  if (!projectId) return null
+  try {
+    const client = getClient()
+    if (!client) return null
+    const data = await client.fetch<(BlogAuthor & { joinedAt?: string; postCount?: number }) | null>(
+      `*[_type == "blogAuthor" && slug.current == $slug][0] {
+        name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role,
+        "joinedAt": coalesce(joinedAt, _createdAt),
+        "postCount": count(*[_type == "blogPost" && status == "published" && author._ref == ^._id])
+      }`,
+      { slug },
+    )
+    return data ?? null
+  } catch (err) {
+    console.error('[sanity] getBlogAuthor error:', err)
     return null
   }
 }

@@ -48,7 +48,7 @@ function ClickThroughGate({ onConfirm }: { onConfirm: () => void }) {
       <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
         <button
           onClick={onConfirm}
-          className="flex-1 bg-white text-brand-coral font-bold py-3 px-6 rounded-full text-lg transition-all hover:scale-105 hover:shadow-lg"
+          className="flex-1 bg-white text-coral font-bold py-3 px-6 rounded-full text-lg transition-all hover:scale-105 hover:shadow-lg"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Yes, let me in ♥
@@ -125,7 +125,7 @@ function DobEntryGate({ onConfirm }: { onConfirm: () => void }) {
 
       <button
         type="submit"
-        className="bg-white text-brand-coral font-bold py-3 px-8 rounded-full text-lg transition-all hover:scale-105 hover:shadow-lg"
+        className="bg-white text-coral font-bold py-3 px-8 rounded-full text-lg transition-all hover:scale-105 hover:shadow-lg"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Enter ♥
@@ -157,7 +157,7 @@ export function AgeGate({ verificationLevel = 'click_through' }: AgeGateProps) {
   return (
     <div
       className="fixed inset-0 z-[9999] flex flex-col items-center justify-center px-6"
-      style={{ background: 'linear-gradient(135deg, #F04E37 0%, #FF8C38 50%, #7B2FBE 100%)' }}
+      style={{ background: 'linear-gradient(135deg, #FF4B1F 0%, #FF6A3D 50%, #7C8F78 100%)' }}
       aria-modal="true"
       aria-label="Age verification"
     >

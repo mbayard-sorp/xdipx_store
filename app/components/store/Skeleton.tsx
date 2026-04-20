@@ -5,7 +5,7 @@
 function Shimmer({ className = '' }: { className?: string }) {
   return (
     <div
-      className={`animate-pulse rounded-lg bg-brand-mist ${className}`}
+      className={`animate-pulse rounded-lg bg-cream-2 ${className}`}
       aria-hidden="true"
     />
   )

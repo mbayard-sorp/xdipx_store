@@ -88,11 +88,11 @@ export function AccountMobileHeader({ customer }: AccountMobileHeaderProps) {
   const isProfilePage = pathname.replace(/\/+$/, '') === '/account/profile'
 
   return (
-    <div className="lg:hidden sticky top-14 z-[59] bg-brand-cream/95 backdrop-blur-sm border-b border-brand-mist h-12 flex items-center px-4 gap-3">
+    <div className="lg:hidden sticky top-14 z-[59] bg-cream/95 backdrop-blur-sm border-b border-cream-2 h-12 flex items-center px-4 gap-3">
       {/* Left: avatar OR back arrow */}
       {section.isDashboard ? (
         <div
-          className="w-8 h-8 rounded-full bg-brand-gradient text-white flex items-center justify-center text-sm font-bold shrink-0"
+          className="w-8 h-8 rounded-full bg-coral text-white flex items-center justify-center text-sm font-bold shrink-0"
           style={{ fontFamily: 'var(--font-display)' }}
           aria-hidden="true"
         >
@@ -102,7 +102,7 @@ export function AccountMobileHeader({ customer }: AccountMobileHeaderProps) {
         <Link
           to="/account"
           aria-label="Back to account"
-          className="w-8 h-8 -ml-1 flex items-center justify-center text-brand-charcoal/70 hover:text-brand-charcoal rounded-full"
+          className="w-8 h-8 -ml-1 flex items-center justify-center text-ink/70 hover:text-ink rounded-full"
         >
           <BackIcon />
         </Link>
@@ -110,7 +110,7 @@ export function AccountMobileHeader({ customer }: AccountMobileHeaderProps) {
 
       {/* Center: title */}
       <p
-        className="flex-1 text-sm font-bold text-brand-charcoal truncate"
+        className="flex-1 text-sm font-bold text-ink truncate"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         {section.title}
@@ -121,7 +121,7 @@ export function AccountMobileHeader({ customer }: AccountMobileHeaderProps) {
         <Link
           to="/account/profile"
           aria-label="Profile settings"
-          className="w-8 h-8 flex items-center justify-center text-brand-charcoal/60 hover:text-brand-charcoal rounded-full shrink-0"
+          className="w-8 h-8 flex items-center justify-center text-ink/60 hover:text-ink rounded-full shrink-0"
         >
           <GearIcon />
         </Link>

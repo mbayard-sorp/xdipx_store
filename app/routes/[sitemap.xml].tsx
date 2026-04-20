@@ -15,7 +15,7 @@ export async function loader() {
   const urls: SitemapUrl[] = [
     // Static pages
     { loc: `${base}/`, lastmod: undefined, changefreq: 'daily', priority: '1.0' },
-    { loc: `${base}/blog`, lastmod: undefined, changefreq: 'daily', priority: '0.8' },
+    { loc: `${base}/notebook`, lastmod: undefined, changefreq: 'daily', priority: '0.8' },
     { loc: `${base}/faq`, lastmod: undefined, changefreq: 'monthly', priority: '0.3' },
     { loc: `${base}/about`, lastmod: undefined, changefreq: 'monthly', priority: '0.3' },
     { loc: `${base}/vault`, lastmod: undefined, changefreq: 'daily', priority: '0.6' },
@@ -32,7 +32,7 @@ export async function loader() {
 
     // Blog posts
     ...blogPosts.map(p => ({
-      loc: `${base}/blog/${p.slug}`,
+      loc: `${base}/notebook/${p.slug}`,
       lastmod: (p._updatedAt ?? p.publishedAt)?.split('T')[0],
       changefreq: 'weekly',
       priority: '0.7',
@@ -40,7 +40,7 @@ export async function loader() {
 
     // Blog categories
     ...categories.map(c => ({
-      loc: `${base}/blog/category/${c.slug}`,
+      loc: `${base}/notebook/category/${c.slug}`,
       lastmod: undefined,
       changefreq: 'weekly',
       priority: '0.5',

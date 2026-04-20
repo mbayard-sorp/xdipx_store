@@ -26,9 +26,9 @@ export function AnnouncementBar({ block }: AnnouncementBarProps) {
   if (!messages.length) return null
 
   const bgClass =
-    bgStyle === 'gradient' ? 'bg-brand-gradient' :
-    bgStyle === 'purple'   ? 'bg-brand-purple' :
-    'bg-brand-charcoal'
+    bgStyle === 'gradient' ? 'bg-coral' :
+    bgStyle === 'purple'   ? 'bg-sage' :
+    'bg-ink'
 
   const msg = messages[index]!
 

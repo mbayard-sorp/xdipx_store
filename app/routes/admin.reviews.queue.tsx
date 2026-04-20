@@ -125,14 +125,14 @@ export default function AdminReviewQueue() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1
-          className="text-2xl font-bold text-brand-charcoal"
+          className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Review Queue
         </h1>
         <a
           href="/admin/reviews/export"
-          className="text-xs text-brand-purple hover:text-brand-purple-light transition-colors font-medium"
+          className="text-xs text-sage hover:text-sun transition-colors font-medium"
         >
           Export →
         </a>
@@ -147,8 +147,8 @@ export default function AdminReviewQueue() {
             className={[
               'shrink-0 text-xs font-medium px-4 py-1.5 rounded-full transition-colors',
               status === tab.value
-                ? 'bg-brand-charcoal text-white'
-                : 'bg-brand-mist text-brand-charcoal/60 hover:bg-brand-mist/80',
+                ? 'bg-ink text-white'
+                : 'bg-cream-2 text-ink/60 hover:bg-cream-2/80',
             ].join(' ')}
             style={{ fontFamily: 'var(--font-display)' }}
           >
@@ -165,12 +165,12 @@ export default function AdminReviewQueue() {
           type="search"
           defaultValue={search}
           placeholder="Search reviewer, title, body..."
-          className="flex-1 border border-brand-mist rounded-xl px-4 py-2 text-sm text-brand-charcoal focus:outline-none focus:border-brand-purple transition-colors"
+          className="flex-1 border border-cream-2 rounded-xl px-4 py-2 text-sm text-ink focus:outline-none focus:border-sage transition-colors"
         />
         <select
           name="sort"
           defaultValue={sort}
-          className="border border-brand-mist rounded-xl px-3 py-2 text-sm text-brand-charcoal"
+          className="border border-cream-2 rounded-xl px-3 py-2 text-sm text-ink"
         >
           <option value="newest">Newest</option>
           <option value="oldest">Oldest</option>
@@ -180,7 +180,7 @@ export default function AdminReviewQueue() {
         </select>
         <button
           type="submit"
-          className="bg-brand-mist text-brand-charcoal px-4 py-2 rounded-xl text-sm hover:bg-brand-mist/70 transition-colors"
+          className="bg-cream-2 text-ink px-4 py-2 rounded-xl text-sm hover:bg-cream-2/70 transition-colors"
         >
           Search
         </button>
@@ -188,7 +188,7 @@ export default function AdminReviewQueue() {
 
       {/* Bulk action bar */}
       {selectedIds.length > 0 && (
-        <div className="flex items-center gap-3 mb-4 bg-brand-charcoal text-white px-4 py-3 rounded-xl">
+        <div className="flex items-center gap-3 mb-4 bg-ink text-white px-4 py-3 rounded-xl">
           <span className="text-sm font-medium">{selectedIds.length} selected</span>
           <div className="flex gap-2 ml-auto">
             {['approve', 'reject', 'spam', 'delete'].map(op => (
@@ -219,16 +219,16 @@ export default function AdminReviewQueue() {
           {page > 1 && (
             <a
               href={buildUrl({ page: page - 1 })}
-              className="text-sm text-brand-charcoal/60 hover:text-brand-charcoal px-4 py-2 border border-brand-mist rounded-full"
+              className="text-sm text-ink/60 hover:text-ink px-4 py-2 border border-cream-2 rounded-full"
             >
               ← Prev
             </a>
           )}
-          <span className="text-sm text-brand-charcoal/50">{page} / {totalPages}</span>
+          <span className="text-sm text-ink/50">{page} / {totalPages}</span>
           {page < totalPages && (
             <a
               href={buildUrl({ page: page + 1 })}
-              className="text-sm text-brand-charcoal/60 hover:text-brand-charcoal px-4 py-2 border border-brand-mist rounded-full"
+              className="text-sm text-ink/60 hover:text-ink px-4 py-2 border border-cream-2 rounded-full"
             >
               Next →
             </a>

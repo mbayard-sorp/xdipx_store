@@ -1,11 +1,5 @@
+import { Link } from 'react-router'
 import type { BlogPost } from '~/types/cms'
-
-const CATEGORY_COLORS: Record<string, string> = {
-  coral:    'bg-brand-coral text-white',
-  orange:   'bg-brand-orange text-white',
-  purple:   'bg-brand-purple text-white',
-  charcoal: 'bg-brand-charcoal text-white',
-}
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', {
@@ -17,70 +11,67 @@ function formatDate(iso: string) {
 
 export function BlogHero({ post, readingTime }: { post: BlogPost; readingTime: number }) {
   return (
-    <header className="relative overflow-hidden rounded-2xl mb-8">
-      {post.heroImageUrl ? (
-        <>
-          <img
-            src={post.heroImageUrl}
-            alt={post.heroImageAlt ?? post.title}
-            className="w-full aspect-[21/9] sm:aspect-[3/1] object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-brand-charcoal/80 via-brand-charcoal/30 to-transparent" />
-          <div className="absolute bottom-0 left-0 right-0 p-5 sm:p-8">
-            <HeroMeta post={post} readingTime={readingTime} light />
-          </div>
-        </>
-      ) : (
-        <div className="bg-brand-mist p-5 sm:p-8">
-          <HeroMeta post={post} readingTime={readingTime} light={false} />
-        </div>
-      )}
-    </header>
-  )
-}
-
-function HeroMeta({ post, readingTime, light }: { post: BlogPost; readingTime: number; light: boolean }) {
-  const textColor = light ? 'text-white' : 'text-brand-charcoal'
-  const mutedColor = light ? 'text-white/70' : 'text-brand-charcoal/60'
-
-  return (
-    <div>
+    <header className="max-w-3xl mx-auto">
       {post.category && (
-        <span
-          className={`inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full mb-3 ${
-            CATEGORY_COLORS[post.category.color ?? 'purple'] ?? CATEGORY_COLORS.purple
-          }`}
+        <Link
+          to={`/notebook/category/${post.category.slug}`}
+          className="inline-block text-[10px] font-mono uppercase tracking-wider bg-coral text-white px-2.5 py-1 rounded-full mb-4 hover:bg-coral-deep transition-colors"
         >
           {post.category.name}
-        </span>
+        </Link>
       )}
 
-      <h1 className={`font-display font-bold text-2xl sm:text-4xl lg:text-5xl leading-tight mb-3 ${textColor}`}>
+      <h1
+        className="text-ink text-3xl sm:text-5xl leading-[1.05] mb-4"
+        style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}
+      >
         {post.title}
       </h1>
 
-      <div className={`flex flex-wrap items-center gap-3 text-sm ${mutedColor}`}>
+      {post.excerpt && (
+        <p className="text-ink/70 text-base sm:text-lg leading-snug mb-6 max-w-2xl">
+          {post.excerpt}
+        </p>
+      )}
+
+      <div className="flex items-center gap-3 pb-6 border-b border-line">
         {post.author && (
-          <div className="flex items-center gap-2">
+          <Link to={`/notebook/by/${post.author.slug}`} className="flex items-center gap-2 hover:text-coral transition-colors">
             {post.author.avatarUrl ? (
               <img
                 src={post.author.avatarUrl}
                 alt={post.author.name}
-                className="w-7 h-7 rounded-full object-cover"
+                className="w-8 h-8 rounded-full object-cover border border-line"
               />
             ) : (
-              <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center text-xs font-semibold">
+              <div
+                className="w-8 h-8 rounded-full bg-coral text-white flex items-center justify-center font-bold"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
                 {post.author.name.charAt(0)}
               </div>
             )}
-            <span className="font-medium">{post.author.name}</span>
-          </div>
+            <div className="text-xs">
+              <div className="font-mono text-ink">{post.author.name}</div>
+              {post.author.role && (
+                <div className="font-mono text-muted">{post.author.role}</div>
+              )}
+            </div>
+          </Link>
         )}
-        <span>·</span>
-        <span>{formatDate(post.publishedAt)}</span>
-        <span>·</span>
-        <span>{readingTime} min read</span>
+        <span className="text-muted">·</span>
+        <span className="text-xs font-mono text-muted">{formatDate(post.publishedAt)}</span>
+        <span className="text-muted">·</span>
+        <span className="text-xs font-mono text-muted">{readingTime} min read</span>
       </div>
-    </div>
+
+      {post.heroImageUrl && (
+        <img
+          src={post.heroImageUrl}
+          alt={post.heroImageAlt ?? post.title}
+          className="w-full aspect-[16/9] object-cover mt-8 rounded-lg"
+        />
+      )}
+    </header>
   )
 }

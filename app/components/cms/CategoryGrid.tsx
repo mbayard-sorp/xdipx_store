@@ -19,7 +19,7 @@ export function CategoryGrid({ block }: CategoryGridProps) {
     <section className="py-12 px-4 bg-white">
       <div className="max-w-6xl mx-auto">
         <h2
-          className="text-2xl font-bold text-brand-charcoal mb-6 text-center"
+          className="text-2xl font-bold text-ink mb-6 text-center"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {heading}
@@ -28,7 +28,7 @@ export function CategoryGrid({ block }: CategoryGridProps) {
         <div className={`grid ${colClass} gap-3 md:gap-4`}>
           {items.map((item, i) => (
             <Link key={i} to={item.link} className="group">
-              <div className="bg-brand-mist rounded-2xl overflow-hidden aspect-square relative hover:shadow-md transition-shadow">
+              <div className="bg-cream-2 rounded-2xl overflow-hidden aspect-square relative hover:shadow-md transition-shadow">
                 {item.image?.url ? (
                   <img
                     src={item.image.url}
@@ -42,7 +42,7 @@ export function CategoryGrid({ block }: CategoryGridProps) {
                   </div>
                 )}
                 {/* Gradient overlay + label */}
-                <div className="absolute inset-0 bg-gradient-to-t from-brand-charcoal/70 via-transparent to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-ink/70 via-transparent to-transparent" />
                 <p
                   className="absolute bottom-0 left-0 right-0 text-white text-xs sm:text-sm font-bold p-3 text-center"
                   style={{ fontFamily: 'var(--font-display)' }}

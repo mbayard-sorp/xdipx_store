@@ -10,7 +10,7 @@ export function TrustBar({ items }: TrustBarProps) {
   if (visible.length === 0) return null
 
   return (
-    <div className="bg-white border-y border-brand-mist py-3 px-4 overflow-hidden">
+    <div className="bg-white border-y border-cream-2 py-3 px-4 overflow-hidden">
       {/* Desktop: static row */}
       <ul className="hidden md:flex max-w-6xl mx-auto items-center justify-between gap-2">
         {visible.map((item, i) => (
@@ -35,18 +35,18 @@ function TrustItemEl({ item }: { item: TrustItem }) {
   const Icon = ICON_MAP[item.icon] ?? LockIcon
   return (
     <li className="flex items-center gap-2 shrink-0 px-1">
-      <span className="text-brand-purple shrink-0" aria-hidden="true">
+      <span className="text-sage shrink-0" aria-hidden="true">
         <Icon />
       </span>
       <div>
         <p
-          className="text-brand-charcoal text-xs font-semibold leading-tight whitespace-nowrap"
+          className="text-ink text-xs font-semibold leading-tight whitespace-nowrap"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {item.headline}
         </p>
         {item.subheadline && (
-          <p className="text-brand-charcoal/50 text-[11px] leading-tight whitespace-nowrap">
+          <p className="text-ink/50 text-[11px] leading-tight whitespace-nowrap">
             {item.subheadline}
           </p>
         )}

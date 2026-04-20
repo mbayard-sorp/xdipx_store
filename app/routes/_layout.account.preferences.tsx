@@ -326,18 +326,18 @@ export default function PreferencesPage() {
       {/* Main card — Email updates */}
       <section className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
         <h2
-          className="text-base font-bold text-brand-charcoal"
+          className="text-base font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Email updates
         </h2>
 
         {rows.length === 0 ? (
-          <p className="text-sm text-brand-charcoal/60 py-2">
+          <p className="text-sm text-ink/60 py-2">
             No email preferences configured yet.
           </p>
         ) : (
-          <div className="divide-y divide-brand-mist">
+          <div className="divide-y divide-cream-2">
             {rows.map((row) => {
               const fetcher = fetcherForRow(row.key)
               const labelId = `${baseId}-${row.key}`
@@ -351,12 +351,12 @@ export default function PreferencesPage() {
                   <div className="flex-1 min-w-0 pr-2">
                     <p
                       id={labelId}
-                      className="text-sm font-semibold text-brand-charcoal"
+                      className="text-sm font-semibold text-ink"
                       style={{ fontFamily: 'var(--font-display)' }}
                     >
                       {row.label}
                     </p>
-                    <p className="text-xs text-brand-charcoal/60 mt-0.5">
+                    <p className="text-xs text-ink/60 mt-0.5">
                       {row.description}
                     </p>
                   </div>
@@ -374,10 +374,10 @@ export default function PreferencesPage() {
       </section>
 
       {/* Unsubscribe from all — soft CTA block */}
-      <section className="bg-brand-mist/50 rounded-2xl p-5 space-y-3 text-center">
-        <p className="text-sm text-brand-charcoal/60">
+      <section className="bg-cream-2/50 rounded-2xl p-5 space-y-3 text-center">
+        <p className="text-sm text-ink/60">
           We never share your email. Unsubscribe from everything with one tap{' '}
-          <span className="text-brand-purple">♥</span>
+          <span className="text-sage">♥</span>
         </p>
         <div>
           <button
@@ -421,12 +421,12 @@ function PageHeading({ email }: { email: string }) {
   return (
     <section className="hidden lg:block">
       <h1
-        className="text-2xl font-bold text-brand-charcoal"
+        className="text-2xl font-bold text-ink"
         style={{ fontFamily: 'var(--font-display)' }}
       >
-        Preferences <span className="text-brand-purple">♥</span>
+        Preferences <span className="text-sage">♥</span>
       </h1>
-      <p className="text-sm text-brand-charcoal/50 mt-0.5">{email}</p>
+      <p className="text-sm text-ink/50 mt-0.5">{email}</p>
     </section>
   )
 }

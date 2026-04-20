@@ -102,13 +102,13 @@ export function ProductPicker({
       {selected.length > 0 && (
         <div className="space-y-2">
           {selected.map(p => (
-            <div key={p.id} className="flex items-center gap-3 bg-brand-mist rounded-xl px-3 py-2">
+            <div key={p.id} className="flex items-center gap-3 bg-cream-2 rounded-xl px-3 py-2">
               {p.image && (
                 <img src={p.image} alt={p.title} className="w-10 h-10 object-cover rounded-lg shrink-0" />
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-brand-charcoal truncate">{p.title}</p>
-                <p className="text-xs text-brand-charcoal/50">
+                <p className="text-sm font-medium text-ink truncate">{p.title}</p>
+                <p className="text-xs text-ink/50">
                   {p.price != null && `$${p.price.toFixed(2)}`}
                   {p.inventoryQuantity != null && ` · ${p.inventoryQuantity} in stock`}
                 </p>
@@ -116,7 +116,7 @@ export function ProductPicker({
               <button
                 type="button"
                 onClick={() => remove(p.id)}
-                className="shrink-0 text-brand-charcoal/40 hover:text-red-500 transition-colors text-lg leading-none"
+                className="shrink-0 text-ink/40 hover:text-red-500 transition-colors text-lg leading-none"
                 aria-label="Remove"
               >
                 ✕
@@ -127,27 +127,27 @@ export function ProductPicker({
       )}
 
       {selected.length === 0 && (
-        <p className="text-sm text-brand-charcoal/40 italic">No products selected.</p>
+        <p className="text-sm text-ink/40 italic">No products selected.</p>
       )}
 
       {/* Search input */}
       <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-charcoal/30 text-sm">🔍</span>
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink/30 text-sm">🔍</span>
         <input
           type="text"
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder="Search products by name…"
-          className="w-full border border-brand-mist rounded-xl pl-8 pr-10 py-2.5 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+          className="w-full border border-cream-2 rounded-xl pl-8 pr-10 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
         />
         {searching && !query && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-brand-charcoal/40">Searching…</span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink/40">Searching…</span>
         )}
         {query && (
           <button
             type="button"
             onClick={() => setQuery('')}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-charcoal/40 hover:text-brand-charcoal transition-colors"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-ink/40 hover:text-ink transition-colors"
             aria-label="Clear search"
           >
             ✕
@@ -163,22 +163,22 @@ export function ProductPicker({
 
       {/* Search results */}
       {results.length > 0 && (
-        <div className="border border-brand-mist rounded-xl overflow-hidden divide-y divide-brand-mist">
+        <div className="border border-cream-2 rounded-xl overflow-hidden divide-y divide-cream-2">
           {results.map(p => {
             const already = isSelected(p.id)
             return (
-              <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 bg-white hover:bg-brand-mist/40 transition-colors">
+              <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 bg-white hover:bg-cream-2/40 transition-colors">
                 {p.image && (
                   <img src={p.image} alt={p.title} className="w-10 h-10 object-cover rounded-lg shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-brand-charcoal truncate">{p.title}</p>
-                  <div className="flex flex-wrap gap-x-3 text-xs text-brand-charcoal/50 mt-0.5">
-                    <span>Price: <strong className="text-brand-charcoal">${p.price.toFixed(2)}</strong></span>
+                  <p className="text-sm font-medium text-ink truncate">{p.title}</p>
+                  <div className="flex flex-wrap gap-x-3 text-xs text-ink/50 mt-0.5">
+                    <span>Price: <strong className="text-ink">${p.price.toFixed(2)}</strong></span>
                     {p.compareAtPrice && <span>MSRP: ${p.compareAtPrice.toFixed(2)}</span>}
                     {p.wholesaleCost != null && <span>Cost: <strong className="text-green-600">${p.wholesaleCost.toFixed(2)}</strong></span>}
                     {p.mapPrice != null && <span>MAP: ${p.mapPrice.toFixed(2)}</span>}
-                    <span>Stock: <strong className={p.inventoryQuantity < 5 ? 'text-red-500' : 'text-brand-charcoal'}>{p.inventoryQuantity}</strong></span>
+                    <span>Stock: <strong className={p.inventoryQuantity < 5 ? 'text-red-500' : 'text-ink'}>{p.inventoryQuantity}</strong></span>
                   </div>
                 </div>
                 <button
@@ -188,7 +188,7 @@ export function ProductPicker({
                   className={
                     already
                       ? 'shrink-0 text-xs font-bold px-3 py-1.5 rounded-full bg-green-100 text-green-700 cursor-default'
-                      : 'shrink-0 text-xs font-bold px-3 py-1.5 rounded-full bg-brand-purple/10 text-brand-purple hover:bg-brand-purple/20 transition-colors'
+                      : 'shrink-0 text-xs font-bold px-3 py-1.5 rounded-full bg-sage/10 text-sage hover:bg-sage/20 transition-colors'
                   }
                 >
                   {already ? '✓ Added' : '+ Add'}
@@ -206,8 +206,8 @@ export function ProductPicker({
         disabled={saving}
         className={
           saving
-            ? 'w-full py-2.5 rounded-xl text-sm font-bold bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
-            : 'w-full py-2.5 rounded-xl text-sm font-bold bg-brand-gradient text-white hover:opacity-90 transition-opacity'
+            ? 'w-full py-2.5 rounded-xl text-sm font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+            : 'w-full py-2.5 rounded-xl text-sm font-bold bg-coral text-white hover:opacity-90 transition-opacity'
         }
       >
         {saving ? 'Saving…' : 'Save Changes'}

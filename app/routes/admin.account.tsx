@@ -57,7 +57,7 @@ export default function AdminAccount() {
   return (
     <div className="max-w-lg space-y-8">
       <h1
-        className="text-2xl font-bold text-brand-charcoal"
+        className="text-2xl font-bold text-ink"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         My Account
@@ -66,23 +66,23 @@ export default function AdminAccount() {
       {/* ─── Profile Info ─────────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl p-6 shadow-sm">
         <h2
-          className="text-lg font-semibold text-brand-charcoal mb-4"
+          className="text-lg font-semibold text-ink mb-4"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Profile
         </h2>
         <dl className="space-y-3 text-sm">
           <div className="flex gap-4">
-            <dt className="text-brand-charcoal/50 w-20">Name</dt>
-            <dd className="text-brand-charcoal font-medium">{user?.name}</dd>
+            <dt className="text-ink/50 w-20">Name</dt>
+            <dd className="text-ink font-medium">{user?.name}</dd>
           </div>
           <div className="flex gap-4">
-            <dt className="text-brand-charcoal/50 w-20">Email</dt>
-            <dd className="text-brand-charcoal font-medium">{user?.email}</dd>
+            <dt className="text-ink/50 w-20">Email</dt>
+            <dd className="text-ink font-medium">{user?.email}</dd>
           </div>
           <div className="flex gap-4">
-            <dt className="text-brand-charcoal/50 w-20">Role</dt>
-            <dd className="text-brand-charcoal font-medium capitalize">{user?.role}</dd>
+            <dt className="text-ink/50 w-20">Role</dt>
+            <dd className="text-ink font-medium capitalize">{user?.role}</dd>
           </div>
         </dl>
       </div>
@@ -90,7 +90,7 @@ export default function AdminAccount() {
       {/* ─── Change Password ──────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl p-6 shadow-sm">
         <h2
-          className="text-lg font-semibold text-brand-charcoal mb-4"
+          className="text-lg font-semibold text-ink mb-4"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Change Password
@@ -102,7 +102,7 @@ export default function AdminAccount() {
             placeholder="Current password"
             required
             autoComplete="current-password"
-            className="w-full px-4 py-2.5 rounded-xl border border-brand-mist bg-brand-cream text-brand-charcoal placeholder-brand-charcoal/40 focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+            className="w-full px-4 py-2.5 rounded-xl border border-cream-2 bg-cream text-ink placeholder-ink/40 focus:outline-none focus:ring-2 focus:ring-coral/30"
           />
           <input
             name="newPassword"
@@ -111,7 +111,7 @@ export default function AdminAccount() {
             required
             minLength={8}
             autoComplete="new-password"
-            className="w-full px-4 py-2.5 rounded-xl border border-brand-mist bg-brand-cream text-brand-charcoal placeholder-brand-charcoal/40 focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+            className="w-full px-4 py-2.5 rounded-xl border border-cream-2 bg-cream text-ink placeholder-ink/40 focus:outline-none focus:ring-2 focus:ring-coral/30"
           />
           <input
             name="confirmPassword"
@@ -120,7 +120,7 @@ export default function AdminAccount() {
             required
             minLength={8}
             autoComplete="new-password"
-            className="w-full px-4 py-2.5 rounded-xl border border-brand-mist bg-brand-cream text-brand-charcoal placeholder-brand-charcoal/40 focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+            className="w-full px-4 py-2.5 rounded-xl border border-cream-2 bg-cream text-ink placeholder-ink/40 focus:outline-none focus:ring-2 focus:ring-coral/30"
           />
 
           {fetcher.data?.error && (
@@ -133,7 +133,7 @@ export default function AdminAccount() {
           <button
             type="submit"
             disabled={busy}
-            className="bg-brand-gradient text-white font-bold px-6 py-2.5 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="bg-coral text-white font-bold px-6 py-2.5 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {busy ? 'Updating...' : 'Update Password'}

@@ -116,28 +116,28 @@ export default function OrderDetailRoute() {
       {/* Desktop heading — mobile sub-header already shows "Order detail" */}
       <section className="hidden lg:block">
         <h1
-          className="text-2xl font-bold text-brand-charcoal"
+          className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Order #{order.orderNumber}{' '}
-          <span className="text-brand-purple">♥</span>
+          <span className="text-sage">♥</span>
         </h1>
-        <p className="text-sm text-brand-charcoal/50 mt-0.5">
+        <p className="text-sm text-ink/50 mt-0.5">
           Placed {processedDate}
         </p>
       </section>
 
       {/* Top summary card */}
-      <section className="bg-white border border-brand-mist rounded-2xl p-4 md:p-5">
+      <section className="bg-white border border-cream-2 rounded-2xl p-4 md:p-5">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0">
             <p
-              className="text-sm font-bold text-brand-charcoal lg:hidden"
+              className="text-sm font-bold text-ink lg:hidden"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Order #{order.orderNumber}
             </p>
-            <p className="text-xs text-brand-charcoal/60 mt-0.5">
+            <p className="text-xs text-ink/60 mt-0.5">
               Placed {processedDate}
             </p>
             <div className="flex gap-1.5 mt-2 flex-wrap">
@@ -145,9 +145,9 @@ export default function OrderDetailRoute() {
               <StatusPill value={order.fulfillmentStatus} kind="fulfillment" />
             </div>
           </div>
-          <p className="text-lg font-bold text-brand-charcoal tabular-nums shrink-0">
+          <p className="text-lg font-bold text-ink tabular-nums shrink-0">
             ${parseFloat(order.totalPrice.amount).toFixed(2)}{' '}
-            <span className="text-[11px] font-normal text-brand-charcoal/40">
+            <span className="text-[11px] font-normal text-ink/40">
               {order.totalPrice.currencyCode}
             </span>
           </p>
@@ -182,7 +182,7 @@ export default function OrderDetailRoute() {
       {/* Line items */}
       <section>
         <SectionHeading>Items</SectionHeading>
-        <ul className="bg-white border border-brand-mist rounded-2xl divide-y divide-brand-mist overflow-hidden">
+        <ul className="bg-white border border-cream-2 rounded-2xl divide-y divide-cream-2 overflow-hidden">
           {order.lineItems.map((li, i) => (
             <li key={`${li.title}-${i}`} className="flex items-start gap-3 p-4">
               {li.imageUrl ? (
@@ -190,29 +190,29 @@ export default function OrderDetailRoute() {
                   src={li.imageUrl}
                   alt={li.title}
                   loading="lazy"
-                  className="w-12 h-12 rounded-xl object-cover border border-brand-mist shrink-0"
+                  className="w-12 h-12 rounded-xl object-cover border border-cream-2 shrink-0"
                 />
               ) : (
                 <div
-                  className="w-12 h-12 rounded-xl bg-brand-mist shrink-0"
+                  className="w-12 h-12 rounded-xl bg-cream-2 shrink-0"
                   aria-hidden="true"
                 />
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-brand-charcoal truncate">
+                <p className="text-sm font-semibold text-ink truncate">
                   {li.title}
                 </p>
                 {li.variantTitle && li.variantTitle !== 'Default Title' && (
-                  <p className="text-xs text-brand-charcoal/50 mt-0.5 truncate">
+                  <p className="text-xs text-ink/50 mt-0.5 truncate">
                     {li.variantTitle}
                   </p>
                 )}
-                <p className="text-xs text-brand-charcoal/60 mt-1">
+                <p className="text-xs text-ink/60 mt-1">
                   &times; {li.quantity}
                 </p>
               </div>
               {li.unitPrice && (
-                <p className="text-sm font-semibold text-brand-charcoal tabular-nums shrink-0">
+                <p className="text-sm font-semibold text-ink tabular-nums shrink-0">
                   ${parseFloat(li.unitPrice.amount).toFixed(2)}
                 </p>
               )}
@@ -224,20 +224,20 @@ export default function OrderDetailRoute() {
       {/* Payment summary */}
       <section>
         <SectionHeading>Summary</SectionHeading>
-        <div className="bg-white border border-brand-mist rounded-2xl p-4 md:p-5 space-y-2 text-sm">
+        <div className="bg-white border border-cream-2 rounded-2xl p-4 md:p-5 space-y-2 text-sm">
           <SummaryRow label="Subtotal" amount={order.subtotalPrice} />
           <SummaryRow label="Shipping" amount={order.totalShippingPrice} />
           <SummaryRow label="Tax" amount={order.totalTax} />
-          <div className="pt-2 border-t border-brand-mist flex items-center justify-between">
+          <div className="pt-2 border-t border-cream-2 flex items-center justify-between">
             <span
-              className="text-sm font-bold text-brand-charcoal"
+              className="text-sm font-bold text-ink"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Total
             </span>
-            <span className="text-sm font-bold text-brand-charcoal tabular-nums">
+            <span className="text-sm font-bold text-ink tabular-nums">
               ${parseFloat(order.totalPrice.amount).toFixed(2)}{' '}
-              <span className="text-[11px] font-normal text-brand-charcoal/40">
+              <span className="text-[11px] font-normal text-ink/40">
                 {order.totalPrice.currencyCode}
               </span>
             </span>
@@ -249,7 +249,7 @@ export default function OrderDetailRoute() {
       {order.shippingAddress && order.shippingAddress.formatted.length > 0 && (
         <section>
           <SectionHeading>Shipping to</SectionHeading>
-          <address className="bg-white border border-brand-mist rounded-2xl p-4 md:p-5 not-italic text-sm text-brand-charcoal/80 space-y-0.5">
+          <address className="bg-white border border-cream-2 rounded-2xl p-4 md:p-5 not-italic text-sm text-ink/80 space-y-0.5">
             {order.shippingAddress.formatted.map((line, i) => (
               <p key={i}>{line}</p>
             ))}
@@ -267,7 +267,7 @@ export default function OrderDetailRoute() {
             <button
               type="submit"
               disabled={reordering}
-              className="w-full text-center px-5 py-3 rounded-full text-sm font-semibold text-white bg-brand-gradient hover:opacity-90 transition-opacity disabled:opacity-60"
+              className="w-full text-center px-5 py-3 rounded-full text-sm font-semibold text-white bg-coral hover:opacity-90 transition-opacity disabled:opacity-60"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {reordering ? 'Adding to cart…' : <>Reorder <span aria-hidden="true">♥</span></>}
@@ -276,7 +276,7 @@ export default function OrderDetailRoute() {
           {returnEligible && (
             <Link
               to={`/account/returns/new?orderId=${encodeURIComponent(order.id)}`}
-              className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"
+              className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-ink border border-cream-2 bg-white hover:bg-cream-2/40 transition-colors"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Start a return
@@ -284,7 +284,7 @@ export default function OrderDetailRoute() {
           )}
           <a
             href="mailto:hello@xdipx.com"
-            className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"
+            className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-ink border border-cream-2 bg-white hover:bg-cream-2/40 transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Need help?
@@ -293,7 +293,7 @@ export default function OrderDetailRoute() {
       </section>
 
       {/* Reassurance strip */}
-      <p className="text-[11px] text-brand-charcoal/50 text-center pt-1">
+      <p className="text-[11px] text-ink/50 text-center pt-1">
         <span aria-hidden="true">♥</span> Shipped in plain packaging. Discreet billing.
       </p>
     </div>
@@ -303,7 +303,7 @@ export default function OrderDetailRoute() {
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
     <h2
-      className="text-sm font-bold text-brand-charcoal mb-2"
+      className="text-sm font-bold text-ink mb-2"
       style={{ fontFamily: 'var(--font-display)' }}
     >
       {children}
@@ -321,8 +321,8 @@ function SummaryRow({
   if (!amount) return null
   return (
     <div className="flex items-center justify-between">
-      <span className="text-brand-charcoal/60">{label}</span>
-      <span className="text-brand-charcoal tabular-nums">
+      <span className="text-ink/60">{label}</span>
+      <span className="text-ink tabular-nums">
         ${parseFloat(amount.amount).toFixed(2)}
       </span>
     </div>

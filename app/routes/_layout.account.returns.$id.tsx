@@ -66,21 +66,21 @@ export default function ReturnDetail() {
     <div className="space-y-6">
       <section className="hidden lg:block">
         <h1
-          className="text-2xl font-bold text-brand-charcoal"
+          className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          {data.rma} <span className="text-brand-purple">♥</span>
+          {data.rma} <span className="text-sage">♥</span>
         </h1>
-        <p className="text-sm text-brand-charcoal/50 mt-0.5">
+        <p className="text-sm text-ink/50 mt-0.5">
           Started {new Date(data.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
         </p>
       </section>
 
-      <section className="bg-white border border-brand-mist rounded-2xl p-4 md:p-5 space-y-4">
+      <section className="bg-white border border-cream-2 rounded-2xl p-4 md:p-5 space-y-4">
         <div className="flex items-center justify-between">
           <ReturnStatusPill status={data.status} />
           {data.trackingNumber && (
-            <p className="text-[11px] text-brand-charcoal/50 tabular-nums">
+            <p className="text-[11px] text-ink/50 tabular-nums">
               Tracking: {data.trackingNumber}
             </p>
           )}
@@ -91,8 +91,8 @@ export default function ReturnDetail() {
       {data.labelUrl && (data.status === 'label_sent' || data.status === 'in_transit' || data.status === 'approved') && (
         <section>
           <SectionHeading>Your return label</SectionHeading>
-          <div className="bg-white border border-brand-mist rounded-2xl p-4 md:p-5 space-y-3">
-            <p className="text-sm text-brand-charcoal/70">
+          <div className="bg-white border border-cream-2 rounded-2xl p-4 md:p-5 space-y-3">
+            <p className="text-sm text-ink/70">
               Print this label, stick it on your package, and drop it off at USPS. We'll email you when
               the warehouse receives it.
             </p>
@@ -100,12 +100,12 @@ export default function ReturnDetail() {
               href={data.labelUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center justify-center px-5 py-3 rounded-full text-sm font-semibold text-white bg-brand-gradient hover:opacity-90 transition-opacity"
+              className="inline-flex items-center justify-center px-5 py-3 rounded-full text-sm font-semibold text-white bg-coral hover:opacity-90 transition-opacity"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Download label ♥
             </a>
-            <p className="text-[11px] text-brand-charcoal/50">
+            <p className="text-[11px] text-ink/50">
               Ship to: Nalpac, 1365 Jarvis St, Ferndale, MI 48220
             </p>
           </div>
@@ -124,17 +124,17 @@ export default function ReturnDetail() {
 
       <section>
         <SectionHeading>Items</SectionHeading>
-        <ul className="bg-white border border-brand-mist rounded-2xl divide-y divide-brand-mist overflow-hidden">
+        <ul className="bg-white border border-cream-2 rounded-2xl divide-y divide-cream-2 overflow-hidden">
           {data.lineItems.map((li, i) => (
             <li key={i} className="p-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-brand-charcoal truncate">{li.title}</p>
+                <p className="text-sm font-semibold text-ink truncate">{li.title}</p>
                 {li.variantTitle && li.variantTitle !== 'Default Title' && (
-                  <p className="text-xs text-brand-charcoal/50 mt-0.5 truncate">{li.variantTitle}</p>
+                  <p className="text-xs text-ink/50 mt-0.5 truncate">{li.variantTitle}</p>
                 )}
-                <p className="text-xs text-brand-charcoal/60 mt-1">&times; {li.quantity}</p>
+                <p className="text-xs text-ink/60 mt-1">&times; {li.quantity}</p>
               </div>
-              <p className="text-sm font-semibold text-brand-charcoal tabular-nums shrink-0">
+              <p className="text-sm font-semibold text-ink tabular-nums shrink-0">
                 ${((li.unitPriceCents * li.quantity) / 100).toFixed(2)}
               </p>
             </li>
@@ -144,22 +144,22 @@ export default function ReturnDetail() {
 
       <section>
         <SectionHeading>Refund breakdown</SectionHeading>
-        <div className="bg-white border border-brand-mist rounded-2xl p-4 md:p-5 space-y-2 text-sm">
+        <div className="bg-white border border-cream-2 rounded-2xl p-4 md:p-5 space-y-2 text-sm">
           <Row label="Items total" amountCents={data.itemsTotalCents} />
           <Row
             label={`Return shipping${data.labelCostCents == null ? ' (estimated)' : ''}`}
             amountCents={-data.labelCostFinalCents}
           />
-          <div className="pt-2 border-t border-brand-mist flex items-center justify-between">
-            <span className="text-sm font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          <div className="pt-2 border-t border-cream-2 flex items-center justify-between">
+            <span className="text-sm font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
               {data.status === 'refunded' ? 'Refunded' : 'Estimated refund'}
             </span>
-            <span className="text-sm font-bold text-brand-charcoal tabular-nums">
+            <span className="text-sm font-bold text-ink tabular-nums">
               ${((data.refundAmountCents ?? data.estimatedRefundCents) / 100).toFixed(2)}
             </span>
           </div>
           {data.refundedAt && (
-            <p className="text-[11px] text-brand-charcoal/50 pt-1">
+            <p className="text-[11px] text-ink/50 pt-1">
               Refunded on {new Date(data.refundedAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
             </p>
           )}
@@ -169,14 +169,14 @@ export default function ReturnDetail() {
       <section className="flex flex-col sm:flex-row gap-3 pt-2">
         <Link
           to="/account/returns"
-          className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"
+          className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-ink border border-cream-2 bg-white hover:bg-cream-2/40 transition-colors"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           All returns
         </Link>
         <a
           href="mailto:hello@xdipx.com"
-          className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"
+          className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-ink border border-cream-2 bg-white hover:bg-cream-2/40 transition-colors"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Need help?
@@ -188,7 +188,7 @@ export default function ReturnDetail() {
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="text-sm font-bold text-brand-charcoal mb-2" style={{ fontFamily: 'var(--font-display)' }}>
+    <h2 className="text-sm font-bold text-ink mb-2" style={{ fontFamily: 'var(--font-display)' }}>
       {children}
     </h2>
   )
@@ -198,8 +198,8 @@ function Row({ label, amountCents }: { label: string; amountCents: number }) {
   const sign = amountCents < 0 ? '−' : ''
   return (
     <div className="flex items-center justify-between">
-      <span className="text-brand-charcoal/60">{label}</span>
-      <span className="text-brand-charcoal tabular-nums">
+      <span className="text-ink/60">{label}</span>
+      <span className="text-ink tabular-nums">
         {sign}${Math.abs(amountCents / 100).toFixed(2)}
       </span>
     </div>

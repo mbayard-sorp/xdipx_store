@@ -110,12 +110,12 @@ export default function OrdersList() {
       {/* Desktop heading (mobile sub-header already shows "Orders") */}
       <section className="hidden lg:block">
         <h1
-          className="text-2xl font-bold text-brand-charcoal"
+          className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          Orders <span className="text-brand-purple">♥</span>
+          Orders <span className="text-sage">♥</span>
         </h1>
-        <p className="text-sm text-brand-charcoal/50 mt-0.5">
+        <p className="text-sm text-ink/50 mt-0.5">
           {customer.email}
         </p>
       </section>
@@ -126,7 +126,7 @@ export default function OrdersList() {
           Search orders by order number
         </label>
         <span
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-charcoal/30"
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-ink/30"
           aria-hidden="true"
         >
           <SearchIcon />
@@ -137,7 +137,7 @@ export default function OrdersList() {
           name="q"
           defaultValue={filters.q}
           placeholder="Search order number"
-          className="w-full border border-brand-mist rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50 bg-white"
+          className="w-full border border-cream-2 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50 bg-white"
         />
         {/* Keep the active status filter across searches */}
         {filters.status !== 'all' && (
@@ -155,8 +155,8 @@ export default function OrdersList() {
               to={buildFilterHref(f.value)}
               className={`shrink-0 text-xs font-semibold px-4 py-2 rounded-full transition-colors ${
                 active
-                  ? 'bg-brand-gradient text-white'
-                  : 'bg-brand-mist text-brand-charcoal/70 hover:bg-brand-mist/70'
+                  ? 'bg-coral text-white'
+                  : 'bg-cream-2 text-ink/70 hover:bg-cream-2/70'
               }`}
               style={active ? { fontFamily: 'var(--font-display)' } : undefined}
               aria-current={active ? 'page' : undefined}
@@ -170,19 +170,19 @@ export default function OrdersList() {
       {/* Orders list / empty state */}
       {orders.length === 0 ? (
         hasFilters ? (
-          <div className="bg-white border border-brand-mist rounded-2xl px-6 py-10 text-center space-y-3">
+          <div className="bg-white border border-cream-2 rounded-2xl px-6 py-10 text-center space-y-3">
             <p
-              className="text-base font-semibold text-brand-charcoal"
+              className="text-base font-semibold text-ink"
               style={{ fontFamily: 'var(--font-display)' }}
             >
-              No orders match your filters <span className="text-brand-purple">♥</span>
+              No orders match your filters <span className="text-sage">♥</span>
             </p>
-            <p className="text-sm text-brand-charcoal/60">
+            <p className="text-sm text-ink/60">
               Try clearing them to see everything.
             </p>
             <Link
               to="/account/orders"
-              className="inline-flex items-center justify-center mt-1 px-5 py-2.5 rounded-full text-sm font-semibold text-brand-charcoal bg-brand-mist hover:bg-brand-mist/70 transition-colors"
+              className="inline-flex items-center justify-center mt-1 px-5 py-2.5 rounded-full text-sm font-semibold text-ink bg-cream-2 hover:bg-cream-2/70 transition-colors"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Clear filters
@@ -210,7 +210,7 @@ export default function OrdersList() {
         <div className="flex justify-center pt-2">
           <Link
             to={buildNextHref(pageInfo.endCursor)}
-            className="px-5 py-2.5 rounded-full text-sm font-semibold text-brand-charcoal bg-white border border-brand-mist hover:bg-brand-mist/40 transition-colors"
+            className="px-5 py-2.5 rounded-full text-sm font-semibold text-ink bg-white border border-cream-2 hover:bg-cream-2/40 transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Load next &rarr;
@@ -220,7 +220,7 @@ export default function OrdersList() {
 
       {/* Shop OAuth hint (Customer Account API returns a single page) */}
       {isAccountAPI && orders.length > 0 && (
-        <p className="text-[11px] text-brand-charcoal/40 text-center pt-1">
+        <p className="text-[11px] text-ink/40 text-center pt-1">
           Showing recent orders only. Sign in with email for full history.
         </p>
       )}

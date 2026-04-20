@@ -282,15 +282,15 @@ function SaveableField({
 
   const buttonLabel = fetcher.state === 'submitting' ? 'Saving…' : saved ? '✓ Saved!' : 'Save'
   const buttonClass = fetcher.state === 'submitting'
-    ? 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
+    ? 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-ink/10 text-ink/40 cursor-not-allowed'
     : saved
       ? 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-green-100 text-green-700 transition-colors'
-      : 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-brand-mist text-brand-purple hover:bg-brand-purple/10 transition-colors'
+      : 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
 
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm">
-      <h3 className="font-semibold text-brand-charcoal mb-1" style={{ fontFamily: 'var(--font-display)' }}>{label}</h3>
-      {hint && <p className="text-xs text-brand-charcoal/40 mb-3">{hint}</p>}
+      <h3 className="font-semibold text-ink mb-1" style={{ fontFamily: 'var(--font-display)' }}>{label}</h3>
+      {hint && <p className="text-xs text-ink/40 mb-3">{hint}</p>}
       <fetcher.Form method="post" className="flex flex-col gap-2">
         <input type="hidden" name="intent"    value={intent} />
         <input type="hidden" name="productId" value={productId} />
@@ -300,7 +300,7 @@ function SaveableField({
           name="value"
           defaultValue={defaultValue}
           rows={rows}
-          className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm text-brand-charcoal resize-y focus:outline-none focus:ring-2 focus:ring-brand-coral/30 font-mono"
+          className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm text-ink resize-y focus:outline-none focus:ring-2 focus:ring-coral/30 font-mono"
         />
         <button type="submit" disabled={fetcher.state === 'submitting'} className={buttonClass}>
           {buttonLabel}
@@ -331,11 +331,11 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 shadow-sm space-y-4">
       <div>
-        <h3 className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Original Product Description
           <span className="ml-2 text-xs font-normal text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">custom.original_description</span>
         </h3>
-        <p className="text-xs text-brand-charcoal/50 mt-1">
+        <p className="text-xs text-ink/50 mt-1">
           Raw text from Nalpac feed. Edit if needed, then click "Generate All Fields" to regenerate all copy from this source.
         </p>
       </div>
@@ -350,14 +350,14 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
           defaultValue={deal.rawDescription ?? ''}
           placeholder={placeholder}
           rows={8}
-          className="w-full border border-amber-200 rounded-xl px-4 py-3 text-xs text-brand-charcoal resize-y bg-white font-mono focus:outline-none focus:ring-2 focus:ring-amber-400/40"
+          className="w-full border border-amber-200 rounded-xl px-4 py-3 text-xs text-ink resize-y bg-white font-mono focus:outline-none focus:ring-2 focus:ring-amber-400/40"
         />
         <button
           type="submit"
           disabled={isSaving}
           className={
             isSaving
-              ? 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
+              ? 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-ink/10 text-ink/40 cursor-not-allowed'
               : saved
                 ? 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-green-100 text-green-700'
                 : 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors'
@@ -390,8 +390,8 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
           disabled={isGenerating}
           className={
             isGenerating
-              ? 'w-full py-3 rounded-xl text-sm font-bold bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
-              : 'w-full py-3 rounded-xl text-sm font-bold bg-gradient-to-r from-brand-coral to-brand-orange text-white hover:opacity-90 transition-opacity'
+              ? 'w-full py-3 rounded-xl text-sm font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : 'w-full py-3 rounded-xl text-sm font-bold bg-gradient-to-r from-coral to-coral-2 text-white hover:opacity-90 transition-opacity'
           }
         >
           {isGenerating
@@ -399,7 +399,7 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
             : '✨ Generate All Fields from Original Description'}
         </button>
         {isGenerating && (
-          <p className="text-xs text-brand-charcoal/50 text-center mt-2">
+          <p className="text-xs text-ink/50 text-center mt-2">
             Tagline · Full Story · Works For Him · Works For Her · Specs · Box Contents · Bullets · SEO Meta
           </p>
         )}
@@ -409,7 +409,45 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
           </p>
         )}
       </generateFetcher.Form>
+
+      <EmmaHeroRegen productId={deal.shopifyProductId} />
     </div>
+  )
+}
+
+function EmmaHeroRegen({ productId }: { productId: string }) {
+  const fetcher = useFetcher<{ ok: boolean; error?: string; copy?: { eyebrow: string; headline: string; body: string; aside: string; pullQuote?: string } }>()
+  const busy = fetcher.state !== 'idle'
+  const copy = fetcher.data?.ok ? fetcher.data.copy : null
+  return (
+    <fetcher.Form method="post" action="/api/admin/emma-hero/regenerate" className="mt-3 space-y-2">
+      <input type="hidden" name="productId" value={productId} />
+      <button
+        type="submit"
+        disabled={busy}
+        className={
+          busy
+            ? 'w-full py-2.5 rounded-xl text-sm font-semibold bg-ink/10 text-ink/40 cursor-not-allowed'
+            : 'w-full py-2.5 rounded-xl text-sm font-semibold bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
+        }
+      >
+        {busy ? 'Regenerating Emma hero…' : '♥ Regenerate Emma hero'}
+      </button>
+      {fetcher.data?.error && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          ⚠ {fetcher.data.error}
+        </p>
+      )}
+      {copy && (
+        <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-2 space-y-1">
+          <p className="uppercase tracking-wide text-ink/50 font-semibold">{copy.eyebrow}</p>
+          <p className="font-bold text-ink">{copy.headline}</p>
+          <p className="text-ink/75">{copy.body}</p>
+          {copy.pullQuote && <p className="italic text-ink/80">“{copy.pullQuote}”</p>}
+          <p className="text-muted font-mono">{copy.aside}</p>
+        </div>
+      )}
+    </fetcher.Form>
   )
 }
 
@@ -432,22 +470,22 @@ function CollapsibleSection({
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-brand-mist/40 transition-colors"
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-cream-2/40 transition-colors"
       >
         <div>
-          <span className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          <span className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
             {title}
           </span>
           {subtitle && (
-            <span className="ml-3 text-xs text-brand-charcoal/40">{subtitle}</span>
+            <span className="ml-3 text-xs text-ink/40">{subtitle}</span>
           )}
         </div>
-        <span className={`text-brand-charcoal/40 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
+        <span className={`text-ink/40 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
           ▼
         </span>
       </button>
       {open && (
-        <div className="px-5 pb-5 space-y-4 border-t border-brand-mist">
+        <div className="px-5 pb-5 space-y-4 border-t border-cream-2">
           {children}
         </div>
       )}
@@ -486,13 +524,13 @@ function DraggableSection({
       onDragOver={e => { e.preventDefault(); onDragOver(sectionKey) }}
       onDragLeave={onDragLeave}
       onDrop={e => { e.preventDefault(); onDrop(sectionKey) }}
-      className={`relative group transition-all duration-150 ${isDragOver ? 'ring-2 ring-brand-coral/40 ring-offset-2 rounded-2xl' : ''}`}
+      className={`relative group transition-all duration-150 ${isDragOver ? 'ring-2 ring-coral/40 ring-offset-2 rounded-2xl' : ''}`}
     >
       {/* Drag handle */}
       <div
         draggable
         onDragStart={() => onDragStart(sectionKey)}
-        className="absolute -left-8 top-3 w-6 h-6 flex items-center justify-center cursor-grab active:cursor-grabbing text-brand-charcoal/20 hover:text-brand-charcoal/50 opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute -left-8 top-3 w-6 h-6 flex items-center justify-center cursor-grab active:cursor-grabbing text-ink/20 hover:text-ink/50 opacity-0 group-hover:opacity-100 transition-opacity"
         title="Drag to reorder"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -545,7 +583,7 @@ function DateNavigator({ targetDate, todayEST }: { targetDate: string; todayEST:
       <button
         type="button"
         onClick={() => shiftDay(-1)}
-        className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-brand-mist text-brand-charcoal/60 hover:bg-brand-mist hover:text-brand-charcoal transition-colors text-lg"
+        className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-cream-2 text-ink/60 hover:bg-cream-2 hover:text-ink transition-colors text-lg"
         aria-label="Previous day"
       >
         &larr;
@@ -554,13 +592,13 @@ function DateNavigator({ targetDate, todayEST }: { targetDate: string; todayEST:
         type="date"
         value={targetDate}
         onChange={e => goToDate(e.target.value)}
-        className="border border-brand-mist rounded-xl px-3 py-1.5 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+        className="border border-cream-2 rounded-xl px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
       />
-      <span className="text-sm font-medium text-brand-charcoal/70">{displayDate}</span>
+      <span className="text-sm font-medium text-ink/70">{displayDate}</span>
       <button
         type="button"
         onClick={() => shiftDay(1)}
-        className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-brand-mist text-brand-charcoal/60 hover:bg-brand-mist hover:text-brand-charcoal transition-colors text-lg"
+        className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-cream-2 text-ink/60 hover:bg-cream-2 hover:text-ink transition-colors text-lg"
         aria-label="Next day"
       >
         &rarr;
@@ -569,7 +607,7 @@ function DateNavigator({ targetDate, todayEST }: { targetDate: string; todayEST:
         <button
           type="button"
           onClick={() => goToDate(todayEST)}
-          className="ml-1 text-xs font-bold px-3 py-1.5 rounded-full bg-brand-purple/10 text-brand-purple hover:bg-brand-purple/20 transition-colors"
+          className="ml-1 text-xs font-bold px-3 py-1.5 rounded-full bg-sage/10 text-sage hover:bg-sage/20 transition-colors"
         >
           Today
         </button>
@@ -594,10 +632,10 @@ function PinnedToCartPanel({ pinnedAccessories, targetDate }: { pinnedAccessorie
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
       <div>
-        <h3 className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Pinned to Cart
         </h3>
-        <p className="text-xs text-brand-charcoal/40 mt-1">
+        <p className="text-xs text-ink/40 mt-1">
           Products shown in the cart slide-out for all deals. Up to 4 displayed.
         </p>
       </div>
@@ -643,7 +681,7 @@ function TagsEditor({ deal, targetDate }: {
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Product Tags
         </h3>
         <button
@@ -652,10 +690,10 @@ function TagsEditor({ deal, targetDate }: {
           disabled={fetcher.state === 'submitting'}
           className={
             fetcher.state === 'submitting'
-              ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
+              ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-ink/10 text-ink/40 cursor-not-allowed'
               : saved
                 ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-green-100 text-green-700'
-                : 'text-xs font-bold px-3 py-1.5 rounded-full bg-brand-mist text-brand-purple hover:bg-brand-purple/10 transition-colors'
+                : 'text-xs font-bold px-3 py-1.5 rounded-full bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
           }
         >
           {fetcher.state === 'submitting' ? 'Saving…' : saved ? '✓ Saved!' : 'Save Tags'}
@@ -663,12 +701,12 @@ function TagsEditor({ deal, targetDate }: {
       </div>
       <div className="flex flex-wrap gap-2 mb-3">
         {tags.map(tag => (
-          <span key={tag} className="inline-flex items-center gap-1 bg-brand-mist text-brand-charcoal text-xs font-medium px-2.5 py-1 rounded-full">
+          <span key={tag} className="inline-flex items-center gap-1 bg-cream-2 text-ink text-xs font-medium px-2.5 py-1 rounded-full">
             {tag}
             <button
               type="button"
               onClick={() => removeTag(tag)}
-              className="text-brand-charcoal/40 hover:text-red-500 transition-colors leading-none ml-0.5"
+              className="text-ink/40 hover:text-red-500 transition-colors leading-none ml-0.5"
               aria-label={`Remove ${tag}`}
             >
               ✕
@@ -676,7 +714,7 @@ function TagsEditor({ deal, targetDate }: {
           </span>
         ))}
         {tags.length === 0 && (
-          <span className="text-xs text-brand-charcoal/40 italic">No tags</span>
+          <span className="text-xs text-ink/40 italic">No tags</span>
         )}
       </div>
       <div className="flex gap-2">
@@ -686,12 +724,12 @@ function TagsEditor({ deal, targetDate }: {
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
           placeholder="Add a tag…"
-          className="flex-1 border border-brand-mist rounded-xl px-3 py-2 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+          className="flex-1 border border-cream-2 rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
         />
         <button
           type="button"
           onClick={addTag}
-          className="text-xs font-bold px-3 py-2 rounded-xl bg-brand-mist text-brand-purple hover:bg-brand-purple/10 transition-colors"
+          className="text-xs font-bold px-3 py-2 rounded-xl bg-cream-2 text-sage hover:bg-sage/10 transition-colors"
         >
           + Add
         </button>
@@ -712,8 +750,8 @@ function PromptSettingField({ label, settingKey, defaultValue, rows = 3 }: {
   const saved = fetcher.state === 'idle' && fetcher.data?.ok === true
 
   return (
-    <div className="border border-brand-mist rounded-xl p-4">
-      <p className="font-semibold text-brand-charcoal/60 uppercase tracking-wider mb-2">{label}</p>
+    <div className="border border-cream-2 rounded-xl p-4">
+      <p className="font-semibold text-ink/60 uppercase tracking-wider mb-2">{label}</p>
       <fetcher.Form method="post" className="space-y-2">
         <input type="hidden" name="intent" value="save-setting" />
         <input type="hidden" name="key" value={settingKey} />
@@ -721,7 +759,7 @@ function PromptSettingField({ label, settingKey, defaultValue, rows = 3 }: {
           name="value"
           defaultValue={defaultValue}
           rows={rows}
-          className="w-full border border-brand-mist rounded-lg px-3 py-2 text-xs text-brand-charcoal font-mono resize-y focus:outline-none focus:ring-2 focus:ring-brand-purple/30 bg-white"
+          className="w-full border border-cream-2 rounded-lg px-3 py-2 text-xs text-ink font-mono resize-y focus:outline-none focus:ring-2 focus:ring-sage/30 bg-white"
         />
         <div className="flex justify-end">
           <button
@@ -729,10 +767,10 @@ function PromptSettingField({ label, settingKey, defaultValue, rows = 3 }: {
             disabled={fetcher.state === 'submitting'}
             className={
               fetcher.state === 'submitting'
-                ? 'text-xs font-bold px-3 py-1 rounded-full bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
+                ? 'text-xs font-bold px-3 py-1 rounded-full bg-ink/10 text-ink/40 cursor-not-allowed'
                 : saved
                   ? 'text-xs font-bold px-3 py-1 rounded-full bg-green-100 text-green-700'
-                  : 'text-xs font-bold px-3 py-1 rounded-full bg-brand-mist text-brand-purple hover:bg-brand-purple/10 transition-colors'
+                  : 'text-xs font-bold px-3 py-1 rounded-full bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
             }
           >
             {fetcher.state === 'submitting' ? 'Saving…' : saved ? '✓ Saved!' : 'Save'}
@@ -872,43 +910,43 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
       <button
         type="button"
         onClick={() => setVideoSectionOpen(o => !o)}
-        className="w-full px-6 pt-6 pb-4 flex items-center justify-between text-left hover:bg-brand-mist/40 transition-colors"
+        className="w-full px-6 pt-6 pb-4 flex items-center justify-between text-left hover:bg-cream-2/40 transition-colors"
       >
         <div className="flex items-center gap-3">
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #F04E37, #FF8C38)' }}
+            style={{ background: 'linear-gradient(135deg, #FF4B1F, #FF6A3D)' }}
           >
             <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
             </svg>
           </div>
           <div>
-            <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+            <h2 className="text-base font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
               Video Generator
             </h2>
-            <p className="text-xs text-brand-charcoal/50 mt-0.5">
+            <p className="text-xs text-ink/50 mt-0.5">
               Generate a product ad video for this deal
             </p>
           </div>
         </div>
-        <span className={`text-brand-charcoal/40 transition-transform duration-200 ${videoSectionOpen ? 'rotate-180' : ''}`}>
+        <span className={`text-ink/40 transition-transform duration-200 ${videoSectionOpen ? 'rotate-180' : ''}`}>
           ▼
         </span>
       </button>
 
-      {videoSectionOpen && <div className="p-6 pt-0 space-y-6 border-t border-brand-mist">
+      {videoSectionOpen && <div className="p-6 pt-0 space-y-6 border-t border-cream-2">
         {/* Prompt customisation */}
         <form onSubmit={handleGenerate} className="space-y-4">
           <div>
             <label
               htmlFor="video-custom-prompt"
-              className="block text-sm font-semibold text-brand-charcoal mb-1"
+              className="block text-sm font-semibold text-ink mb-1"
             >
               Custom direction
-              <span className="ml-2 text-xs font-normal text-brand-charcoal/40">(optional)</span>
+              <span className="ml-2 text-xs font-normal text-ink/40">(optional)</span>
             </label>
-            <p className="text-xs text-brand-charcoal/50 mb-2">
+            <p className="text-xs text-ink/50 mb-2">
               Guide the tone, reference a specific feature, set a scene. Claude handles the rest.
             </p>
             <textarea
@@ -918,14 +956,14 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
               placeholder={'e.g. "Make the skeptic sound like a tired husband who secretly wants one" or "Focus on the air-pulse feature, reference blooming flowers"'}
               rows={3}
               disabled={generating}
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-brand-purple/30 placeholder:text-brand-charcoal/30 disabled:opacity-50 disabled:cursor-not-allowed transition-shadow"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-sage/30 placeholder:text-ink/30 disabled:opacity-50 disabled:cursor-not-allowed transition-shadow"
             />
           </div>
 
           {/* Duration, Format + Voice selectors */}
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label htmlFor="video-duration" className="block text-xs font-semibold text-brand-charcoal/60 mb-1 uppercase tracking-wider">
+              <label htmlFor="video-duration" className="block text-xs font-semibold text-ink/60 mb-1 uppercase tracking-wider">
                 Duration
               </label>
               <div className="relative">
@@ -938,15 +976,15 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
                   max={60}
                   step={1}
                   disabled={generating}
-                  className="w-full border border-brand-mist rounded-xl px-3 py-2.5 pr-10 text-sm bg-white text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-purple/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full border border-cream-2 rounded-xl px-3 py-2.5 pr-10 text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-sage/30 disabled:opacity-50 disabled:cursor-not-allowed"
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-brand-charcoal/40 pointer-events-none">
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink/40 pointer-events-none">
                   sec
                 </span>
               </div>
             </div>
             <div>
-              <label htmlFor="video-format" className="block text-xs font-semibold text-brand-charcoal/60 mb-1 uppercase tracking-wider">
+              <label htmlFor="video-format" className="block text-xs font-semibold text-ink/60 mb-1 uppercase tracking-wider">
                 Format
               </label>
               <select
@@ -954,7 +992,7 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
                 value={selectedFormat}
                 onChange={e => setSelectedFormat(e.target.value)}
                 disabled={generating}
-                className="w-full border border-brand-mist rounded-xl px-3 py-2.5 text-sm bg-white text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-purple/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full border border-cream-2 rounded-xl px-3 py-2.5 text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-sage/30 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="auto">Auto (category-based)</option>
                 <option value="sitcom_sketch">Sitcom Sketch</option>
@@ -966,7 +1004,7 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
               </select>
             </div>
             <div>
-              <label htmlFor="video-voice" className="block text-xs font-semibold text-brand-charcoal/60 mb-1 uppercase tracking-wider">
+              <label htmlFor="video-voice" className="block text-xs font-semibold text-ink/60 mb-1 uppercase tracking-wider">
                 Voice
               </label>
               <select
@@ -974,7 +1012,7 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
                 value={selectedVoice}
                 onChange={e => setSelectedVoice(e.target.value)}
                 disabled={generating}
-                className="w-full border border-brand-mist rounded-xl px-3 py-2.5 text-sm bg-white text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-purple/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full border border-cream-2 rounded-xl px-3 py-2.5 text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-sage/30 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="Rachel">Rachel</option>
                 <option value="Bella">Bella</option>
@@ -986,10 +1024,10 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
           {/* Custom format text input */}
           {selectedFormat === 'custom' && (
             <div>
-              <label htmlFor="video-custom-format" className="block text-sm font-semibold text-brand-charcoal mb-1">
+              <label htmlFor="video-custom-format" className="block text-sm font-semibold text-ink mb-1">
                 Custom narrator persona
               </label>
-              <p className="text-xs text-brand-charcoal/50 mb-2">
+              <p className="text-xs text-ink/50 mb-2">
                 Describe the narrator character. e.g. "a nature documentary narrator who is clearly out of their depth"
               </p>
               <input
@@ -999,7 +1037,7 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
                 onChange={e => setCustomFormatText(e.target.value)}
                 placeholder="narrator is a..."
                 disabled={generating}
-                className="w-full border border-brand-mist rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30 placeholder:text-brand-charcoal/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full border border-cream-2 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30 placeholder:text-ink/30 disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
           )}
@@ -1007,8 +1045,8 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
           <button
             type="submit"
             disabled={generating}
-            className="relative flex items-center gap-2.5 px-6 py-2.5 rounded-full text-sm font-semibold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-brand-coral/40 focus:ring-offset-2"
-            style={{ background: 'linear-gradient(to right, #F04E37, #FF8C38)' }}
+            className="relative flex items-center gap-2.5 px-6 py-2.5 rounded-full text-sm font-semibold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-coral/40 focus:ring-offset-2"
+            style={{ background: 'linear-gradient(to right, #FF4B1F, #FF6A3D)' }}
           >
             {generating ? (
               <>
@@ -1044,41 +1082,41 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
         {result?.ok && result.previewUrl && (
           <div className="space-y-5 pt-2">
             {/* Divider */}
-            <div className="border-t border-brand-mist" />
+            <div className="border-t border-cream-2" />
 
             {/* Script metadata */}
             <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="rounded-lg bg-brand-mist/60 px-3 py-2">
-                <span className="font-semibold text-brand-charcoal/50 uppercase tracking-wider">Format</span>
-                <p className="text-brand-charcoal font-medium mt-0.5 capitalize">{result.format?.replace(/_/g, ' ')}</p>
+              <div className="rounded-lg bg-cream-2/60 px-3 py-2">
+                <span className="font-semibold text-ink/50 uppercase tracking-wider">Format</span>
+                <p className="text-ink font-medium mt-0.5 capitalize">{result.format?.replace(/_/g, ' ')}</p>
               </div>
-              <div className="rounded-lg bg-brand-mist/60 px-3 py-2">
-                <span className="font-semibold text-brand-charcoal/50 uppercase tracking-wider">Voice</span>
-                <p className="text-brand-charcoal font-medium mt-0.5">{result.voiceName ?? 'Bella'}</p>
+              <div className="rounded-lg bg-cream-2/60 px-3 py-2">
+                <span className="font-semibold text-ink/50 uppercase tracking-wider">Voice</span>
+                <p className="text-ink font-medium mt-0.5">{result.voiceName ?? 'Bella'}</p>
               </div>
-              <div className="rounded-lg bg-brand-mist/60 px-3 py-2 col-span-2">
-                <span className="font-semibold text-brand-charcoal/50 uppercase tracking-wider">Why this format</span>
-                <p className="text-brand-charcoal mt-0.5 leading-relaxed">{result.formatRationale}</p>
+              <div className="rounded-lg bg-cream-2/60 px-3 py-2 col-span-2">
+                <span className="font-semibold text-ink/50 uppercase tracking-wider">Why this format</span>
+                <p className="text-ink mt-0.5 leading-relaxed">{result.formatRationale}</p>
               </div>
             </div>
 
             {/* Narrator script + reactions */}
             {result.narratorScript && (
               <div className="space-y-3">
-                <p className="text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Narrator script</p>
-                <div className="rounded-xl bg-brand-charcoal/5 border border-brand-mist px-4 py-3">
-                  <p className="text-sm text-brand-charcoal leading-relaxed italic">
+                <p className="text-xs font-semibold text-ink/50 uppercase tracking-wider">Narrator script</p>
+                <div className="rounded-xl bg-ink/5 border border-cream-2 px-4 py-3">
+                  <p className="text-sm text-ink leading-relaxed italic">
                     &ldquo;{result.narratorScript}&rdquo;
                   </p>
                 </div>
 
                 {result.reactionText && result.reactionText.length > 0 && (
                   <>
-                    <p className="text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider pt-1">Reactions</p>
+                    <p className="text-xs font-semibold text-ink/50 uppercase tracking-wider pt-1">Reactions</p>
                     <div className="flex flex-col gap-2">
                       {result.reactionText.map((r, i) => (
                         <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
-                          <span className="text-xs bg-brand-cream border border-brand-mist rounded-full px-3 py-1.5 text-brand-charcoal/70">
+                          <span className="text-xs bg-cream border border-cream-2 rounded-full px-3 py-1.5 text-ink/70">
                             {r}
                           </span>
                         </div>
@@ -1088,7 +1126,7 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
                 )}
 
                 {result.endTagline && (
-                  <p className="text-xs text-brand-charcoal/40 text-center pt-1 italic">
+                  <p className="text-xs text-ink/40 text-center pt-1 italic">
                     End card: &ldquo;{result.endTagline}&rdquo;
                   </p>
                 )}
@@ -1096,7 +1134,7 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
             )}
 
             {/* Video player */}
-            <div className="rounded-2xl overflow-hidden bg-brand-charcoal aspect-square relative">
+            <div className="rounded-2xl overflow-hidden bg-ink aspect-square relative">
               <video
                 ref={videoRef}
                 src={result.previewUrl}
@@ -1113,8 +1151,8 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
                 <button
                   onClick={handlePublish}
                   disabled={publishing}
-                  className="flex-1 flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-purple/40 focus:ring-offset-2"
-                  style={{ background: '#7B2FBE' }}
+                  className="flex-1 flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-sage/40 focus:ring-offset-2"
+                  style={{ background: '#7C8F78' }}
                 >
                   {publishing ? (
                     <>
@@ -1137,7 +1175,7 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
                 <button
                   onClick={() => handleGenerate()}
                   disabled={generating}
-                  className="px-5 py-2.5 rounded-full text-sm font-semibold text-brand-charcoal bg-brand-mist hover:bg-brand-mist/70 transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-charcoal/20 focus:ring-offset-2"
+                  className="px-5 py-2.5 rounded-full text-sm font-semibold text-ink bg-cream-2 hover:bg-cream-2/70 transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-ink/20 focus:ring-offset-2"
                 >
                   Regenerate
                 </button>
@@ -1176,11 +1214,11 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
         )}
 
         {/* Prompt Details — expandable + editable */}
-        <div className="border-t border-brand-mist pt-4">
+        <div className="border-t border-cream-2 pt-4">
           <button
             type="button"
             onClick={() => setPromptDetailsOpen(o => !o)}
-            className="flex items-center gap-2 text-xs font-semibold text-brand-charcoal/50 hover:text-brand-charcoal/70 transition-colors"
+            className="flex items-center gap-2 text-xs font-semibold text-ink/50 hover:text-ink/70 transition-colors"
           >
             <span className={`transition-transform duration-200 ${promptDetailsOpen ? 'rotate-180' : ''}`}>&#x25BC;</span>
             Prompt Details
@@ -1281,8 +1319,8 @@ function DealManager() {
       <div className="space-y-6 max-w-4xl">
         <DateNavigator targetDate={targetDate} todayEST={todayEST} />
         <div>
-          <h1 className="text-2xl font-bold text-brand-charcoal mb-2" style={{ fontFamily: 'var(--font-display)' }}>Deal Manager</h1>
-          <p className="text-brand-charcoal/50">No deal scheduled for this date. Use the Schedule or Queue to assign one.</p>
+          <h1 className="text-2xl font-bold text-ink mb-2" style={{ fontFamily: 'var(--font-display)' }}>Deal Manager</h1>
+          <p className="text-ink/50">No deal scheduled for this date. Use the Schedule or Queue to assign one.</p>
         </div>
       </div>
     )
@@ -1303,8 +1341,8 @@ function DealManager() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>Deal Manager</h1>
-          <p className="text-brand-charcoal/60">{deal.seoTitle} — {deal.brand}</p>
+          <h1 className="text-2xl font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>Deal Manager</h1>
+          <p className="text-ink/60">{deal.seoTitle} — {deal.brand}</p>
         </div>
         <div className="flex gap-3">
           <approveFetcher.Form method="post">
@@ -1360,16 +1398,16 @@ function DealManager() {
                     <img src={deal.images[0].url} alt={deal.seoTitle} className="w-24 h-24 object-cover rounded-xl shrink-0" />
                   )}
                   <div>
-                    <p className="font-bold text-brand-charcoal">{deal.seoTitle}</p>
-                    <p className="text-brand-charcoal/60 text-sm mt-1 italic">{deal.tagline}</p>
+                    <p className="font-bold text-ink">{deal.seoTitle}</p>
+                    <p className="text-ink/60 text-sm mt-1 italic">{deal.tagline}</p>
                     <div className="flex items-center gap-2 mt-2">
-                      <span className="text-brand-gradient font-black text-xl" style={{ fontFamily: 'var(--font-display)' }}>${deal.dealPrice.toFixed(2)}</span>
-                      <span className="text-brand-charcoal/40 line-through">${deal.msrp.toFixed(2)}</span>
-                      <span className="text-xs bg-brand-gradient text-white px-2 py-0.5 rounded-full font-bold">
+                      <span className="text-coral font-black text-xl" style={{ fontFamily: 'var(--font-display)' }}>${deal.dealPrice.toFixed(2)}</span>
+                      <span className="text-ink/40 line-through">${deal.msrp.toFixed(2)}</span>
+                      <span className="text-xs bg-coral text-white px-2 py-0.5 rounded-full font-bold">
                         {deal.msrp > 0 ? Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100) : 0}% off
                       </span>
                     </div>
-                    <p className="text-xs text-brand-charcoal/50 mt-1">
+                    <p className="text-xs text-ink/50 mt-1">
                       Status: <strong>{deal.dealStatus}</strong> · SKU: {deal.sku} · Qty: {deal.qty}
                     </p>
                   </div>
@@ -1386,21 +1424,21 @@ function DealManager() {
 
                 {/* Variants — merged into hero card */}
                 {(deal.variants?.length ?? 0) > 1 && (
-                  <div className="mt-4 border-t border-brand-mist pt-4">
+                  <div className="mt-4 border-t border-cream-2 pt-4">
                     <button
                       type="button"
                       onClick={() => setVariantsOpen(o => !o)}
-                      className="flex items-center gap-2 text-sm font-semibold text-brand-charcoal hover:text-brand-charcoal/80 transition-colors"
+                      className="flex items-center gap-2 text-sm font-semibold text-ink hover:text-ink/80 transition-colors"
                       style={{ fontFamily: 'var(--font-display)' }}
                     >
                       Variants ({deal.variants!.length})
-                      <span className={`text-brand-charcoal/40 transition-transform duration-200 text-xs ${variantsOpen ? 'rotate-180' : ''}`}>&#x25BC;</span>
+                      <span className={`text-ink/40 transition-transform duration-200 text-xs ${variantsOpen ? 'rotate-180' : ''}`}>&#x25BC;</span>
                     </button>
                     {variantsOpen && (
                       <div className="mt-3 overflow-x-auto">
                         <table className="w-full text-sm">
                           <thead>
-                            <tr className="text-left text-xs text-brand-charcoal/50 border-b border-brand-mist">
+                            <tr className="text-left text-xs text-ink/50 border-b border-cream-2">
                               <th className="py-2 pr-3">Image</th>
                               {deal.options?.map(o => <th key={o.name} className="py-2 pr-3">{o.name}</th>)}
                               <th className="py-2 pr-3">Price</th>
@@ -1408,19 +1446,19 @@ function DealManager() {
                               <th className="py-2 pr-3">Status</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-brand-mist/50">
+                          <tbody className="divide-y divide-cream-2/50">
                             {deal.variants!.map(v => (
                               <tr key={v.id} className={!v.availableForSale ? 'opacity-50' : ''}>
                                 <td className="py-2 pr-3">
                                   {v.image ? (
                                     <img src={v.image.url} alt={v.title} className="w-10 h-10 object-cover rounded-lg" />
                                   ) : (
-                                    <div className="w-10 h-10 bg-brand-mist rounded-lg flex items-center justify-center text-brand-charcoal/20 text-xs">—</div>
+                                    <div className="w-10 h-10 bg-cream-2 rounded-lg flex items-center justify-center text-ink/20 text-xs">—</div>
                                   )}
                                 </td>
                                 {deal.options?.map(o => {
                                   const val = v.selectedOptions.find(so => so.name === o.name)?.value
-                                  return <td key={o.name} className="py-2 pr-3 font-medium text-brand-charcoal">{val ?? '—'}</td>
+                                  return <td key={o.name} className="py-2 pr-3 font-medium text-ink">{val ?? '—'}</td>
                                 })}
                                 <td className="py-2 pr-3 tabular-nums">${parseFloat(v.price).toFixed(2)}</td>
                                 <td className="py-2 pr-3 tabular-nums">
@@ -1509,11 +1547,11 @@ function DealManager() {
           pickers: (
             <DraggableSection key="pickers" sectionKey="pickers" {...dragProps}>
               <div>
-                <div className="border-t border-brand-mist pt-2 mb-6">
-                  <h2 className="text-lg font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+                <div className="border-t border-cream-2 pt-2 mb-6">
+                  <h2 className="text-lg font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
                     Cart Upsells
                   </h2>
-                  <p className="text-sm text-brand-charcoal/50 mt-1">
+                  <p className="text-sm text-ink/50 mt-1">
                     Manage products shown in the cart slide-out.
                   </p>
                 </div>

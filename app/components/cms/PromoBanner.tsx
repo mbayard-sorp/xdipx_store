@@ -9,17 +9,17 @@ export function PromoBanner({ block }: PromoBannerProps) {
   const { headline, subtext, ctaLabel, ctaLink, layout, bgStyle, image } = block
 
   const bgClass =
-    bgStyle === 'gradient' ? 'bg-brand-gradient text-white' :
-    bgStyle === 'purple'   ? 'bg-brand-purple text-white' :
-    bgStyle === 'mist'     ? 'bg-brand-mist text-brand-charcoal' :
-    bgStyle === 'cream'    ? 'bg-brand-cream text-brand-charcoal' :
-    'bg-brand-charcoal text-white'                                // charcoal default
+    bgStyle === 'gradient' ? 'bg-coral text-white' :
+    bgStyle === 'purple'   ? 'bg-sage text-white' :
+    bgStyle === 'mist'     ? 'bg-cream-2 text-ink' :
+    bgStyle === 'cream'    ? 'bg-cream text-ink' :
+    'bg-ink text-white'                                // charcoal default
 
   const isLight = bgStyle === 'mist' || bgStyle === 'cream'
 
   const ctaClass = isLight
-    ? 'bg-brand-gradient text-white hover:opacity-90'
-    : 'bg-white text-brand-charcoal hover:bg-brand-cream'
+    ? 'bg-coral text-white hover:opacity-90'
+    : 'bg-white text-ink hover:bg-cream'
 
   if (layout === 'full-bleed' && image?.url) {
     return (
@@ -30,7 +30,7 @@ export function PromoBanner({ block }: PromoBannerProps) {
           className="absolute inset-0 w-full h-full object-cover"
           loading="lazy"
         />
-        <div className="absolute inset-0 bg-brand-charcoal/60" />
+        <div className="absolute inset-0 bg-ink/60" />
         <div className="relative z-10 max-w-3xl mx-auto text-center text-white">
           <h2
             className="text-3xl md:text-4xl font-bold mb-3"
@@ -41,7 +41,7 @@ export function PromoBanner({ block }: PromoBannerProps) {
           {subtext && <p className="text-white/80 mb-6">{subtext}</p>}
           <Link
             to={ctaLink}
-            className="inline-block bg-brand-gradient text-white font-bold px-8 py-3 rounded-full hover:opacity-90 transition-opacity shadow-lg"
+            className="inline-block bg-coral text-white font-bold px-8 py-3 rounded-full hover:opacity-90 transition-opacity shadow-lg"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {ctaLabel}

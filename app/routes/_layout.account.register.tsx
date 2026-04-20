@@ -150,12 +150,12 @@ export default function AccountRegisterPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1
-            className="text-3xl font-black text-brand-charcoal"
+            className="text-3xl font-black text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Create your account ♥
           </h1>
-          <p className="text-brand-charcoal/60 mt-2 text-sm">
+          <p className="text-ink/60 mt-2 text-sm">
             Join the daily drop — it's free.
           </p>
         </div>
@@ -183,7 +183,7 @@ export default function AccountRegisterPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full flex items-center justify-center gap-3 bg-white border border-brand-mist hover:bg-gray-50 text-brand-charcoal font-semibold py-3 px-4 rounded-full transition-colors disabled:opacity-60"
+              className="w-full flex items-center justify-center gap-3 bg-white border border-cream-2 hover:bg-gray-50 text-ink font-semibold py-3 px-4 rounded-full transition-colors disabled:opacity-60"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               <GoogleIcon />
@@ -211,10 +211,10 @@ export default function AccountRegisterPage() {
         {hasSocialButtons && (
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-brand-mist" />
+              <div className="w-full border-t border-cream-2" />
             </div>
             <div className="relative flex justify-center">
-              <span className="bg-brand-cream px-3 text-xs text-brand-charcoal/40 uppercase tracking-widest">
+              <span className="bg-cream px-3 text-xs text-ink/40 uppercase tracking-widest">
                 or
               </span>
             </div>
@@ -231,7 +231,7 @@ export default function AccountRegisterPage() {
         {/* Email / password form */}
         <fetcher.Form method="post" className="space-y-4">
           <div>
-            <label className="block text-sm font-semibold text-brand-charcoal mb-1" htmlFor="firstName">
+            <label className="block text-sm font-semibold text-ink mb-1" htmlFor="firstName">
               First name
             </label>
             <input
@@ -240,11 +240,11 @@ export default function AccountRegisterPage() {
               type="text"
               autoComplete="given-name"
               required
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50"
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-brand-charcoal mb-1" htmlFor="lastName">
+            <label className="block text-sm font-semibold text-ink mb-1" htmlFor="lastName">
               Last name
             </label>
             <input
@@ -253,11 +253,11 @@ export default function AccountRegisterPage() {
               type="text"
               autoComplete="family-name"
               required
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50"
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-brand-charcoal mb-1" htmlFor="email">
+            <label className="block text-sm font-semibold text-ink mb-1" htmlFor="email">
               Email
             </label>
             <input
@@ -266,11 +266,11 @@ export default function AccountRegisterPage() {
               type="email"
               autoComplete="email"
               required
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50"
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-brand-charcoal mb-1" htmlFor="password">
+            <label className="block text-sm font-semibold text-ink mb-1" htmlFor="password">
               Password
             </label>
             <input
@@ -280,16 +280,16 @@ export default function AccountRegisterPage() {
               autoComplete="new-password"
               required
               minLength={8}
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50"
             />
           </div>
 
-          <label className="flex items-start gap-3 text-sm text-brand-charcoal/80 cursor-pointer">
+          <label className="flex items-start gap-3 text-sm text-ink/80 cursor-pointer">
             <input
               type="checkbox"
               name="acceptsMarketing"
               defaultChecked
-              className="mt-0.5 h-4 w-4 rounded border-brand-mist text-brand-purple focus:ring-brand-purple/50"
+              className="mt-0.5 h-4 w-4 rounded border-cream-2 text-sage focus:ring-sage/50"
             />
             <span>Yes, send me the daily deal email</span>
           </label>
@@ -297,16 +297,16 @@ export default function AccountRegisterPage() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-brand-gradient text-white font-bold py-3 rounded-full hover:opacity-90 transition-opacity disabled:opacity-60"
+            className="w-full bg-coral text-white font-bold py-3 rounded-full hover:opacity-90 transition-opacity disabled:opacity-60"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {isLoading ? 'Creating account…' : 'Create account'}
           </button>
         </fetcher.Form>
 
-        <p className="text-center text-xs text-brand-charcoal/40 mt-6">
+        <p className="text-center text-xs text-ink/40 mt-6">
           Already have an account?{' '}
-          <Link to="/account/login" className="text-brand-purple hover:underline">
+          <Link to="/account/login" className="text-sage hover:underline">
             Sign in
           </Link>
         </p>

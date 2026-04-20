@@ -41,21 +41,21 @@ export function OrderCard({ order }: OrderCardProps): ReactElement {
   return (
     <article
       aria-labelledby={headingId}
-      className="border border-brand-mist rounded-2xl p-4 space-y-3 bg-white"
+      className="border border-cream-2 rounded-2xl p-4 space-y-3 bg-white"
     >
       {/* Header row — clickable title + date */}
       <Link
         to={detailHref}
-        className="flex items-start justify-between gap-3 -m-1 p-1 rounded-xl hover:bg-brand-mist/40 transition-colors"
+        className="flex items-start justify-between gap-3 -m-1 p-1 rounded-xl hover:bg-cream-2/40 transition-colors"
       >
         <p
           id={headingId}
-          className="text-sm font-bold text-brand-charcoal"
+          className="text-sm font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Order #{orderNumber}
         </p>
-        <p className="text-xs text-brand-charcoal/50 shrink-0">{date}</p>
+        <p className="text-xs text-ink/50 shrink-0">{date}</p>
       </Link>
 
       {/* Thumbs row */}
@@ -65,7 +65,7 @@ export function OrderCard({ order }: OrderCardProps): ReactElement {
             <LineThumb key={`${li.title}-${i}`} src={li.imageUrl} alt={li.title} />
           ))}
           {extra > 0 && (
-            <span className="text-[11px] font-semibold text-brand-charcoal/60 bg-brand-mist rounded-full px-2.5 py-1">
+            <span className="text-[11px] font-semibold text-ink/60 bg-cream-2 rounded-full px-2.5 py-1">
               +{extra} more
             </span>
           )}
@@ -79,24 +79,24 @@ export function OrderCard({ order }: OrderCardProps): ReactElement {
       </div>
 
       {/* Bottom row — total + actions */}
-      <div className="flex items-center justify-between gap-3 pt-3 border-t border-brand-mist">
-        <p className="text-sm font-bold text-brand-charcoal tabular-nums">
+      <div className="flex items-center justify-between gap-3 pt-3 border-t border-cream-2">
+        <p className="text-sm font-bold text-ink tabular-nums">
           {totalLabel}{' '}
-          <span className="text-[11px] font-normal text-brand-charcoal/40">
+          <span className="text-[11px] font-normal text-ink/40">
             {totalPrice.currencyCode}
           </span>
         </p>
         <div className="flex items-center gap-2">
           <Link
             to={detailHref}
-            className="text-xs font-semibold text-brand-purple hover:text-brand-purple-light transition-colors px-3 py-2 rounded-full"
+            className="text-xs font-semibold text-sage hover:text-sun transition-colors px-3 py-2 rounded-full"
             aria-label={`Track order ${orderNumber}`}
           >
             Track &rarr;
           </Link>
           <Link
             to="/"
-            className="text-xs font-semibold text-white bg-brand-gradient hover:opacity-90 transition-opacity px-3.5 py-2 rounded-full"
+            className="text-xs font-semibold text-white bg-coral hover:opacity-90 transition-opacity px-3.5 py-2 rounded-full"
             style={{ fontFamily: 'var(--font-display)' }}
             aria-label={`Reorder from order ${orderNumber}`}
             // TODO phase 3.1: once StorefrontOrder.lineItems exposes
@@ -119,7 +119,7 @@ function LineThumb({ src, alt }: { src: string | null; alt: string }): ReactElem
   if (!src) {
     return (
       <div
-        className="w-9 h-9 rounded-xl bg-brand-mist shrink-0"
+        className="w-9 h-9 rounded-xl bg-cream-2 shrink-0"
         aria-hidden="true"
       />
     )
@@ -129,7 +129,7 @@ function LineThumb({ src, alt }: { src: string | null; alt: string }): ReactElem
       src={src}
       alt={alt}
       loading="lazy"
-      className="w-9 h-9 rounded-xl object-cover shrink-0 border border-brand-mist"
+      className="w-9 h-9 rounded-xl object-cover shrink-0 border border-cream-2"
     />
   )
 }

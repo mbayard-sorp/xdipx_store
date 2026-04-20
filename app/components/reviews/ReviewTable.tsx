@@ -50,31 +50,31 @@ export function ReviewTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-brand-mist bg-white">
+    <div className="overflow-x-auto rounded-2xl border border-cream-2 bg-white">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-brand-mist text-left">
+          <tr className="border-b border-cream-2 text-left">
             <th className="px-4 py-3 w-8">
               <input
                 type="checkbox"
                 checked={allSelected}
                 onChange={toggleAll}
                 aria-label="Select all reviews"
-                className="rounded border-brand-mist"
+                className="rounded border-cream-2"
               />
             </th>
-            <th className="px-4 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Reviewer</th>
-            <th className="px-4 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Rating</th>
-            <th className="px-4 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Title / Preview</th>
-            <th className="px-4 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Status</th>
-            <th className="px-4 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Date</th>
-            <th className="px-4 py-3 text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Actions</th>
+            <th className="px-4 py-3 text-xs font-semibold text-ink/50 uppercase tracking-wider">Reviewer</th>
+            <th className="px-4 py-3 text-xs font-semibold text-ink/50 uppercase tracking-wider">Rating</th>
+            <th className="px-4 py-3 text-xs font-semibold text-ink/50 uppercase tracking-wider">Title / Preview</th>
+            <th className="px-4 py-3 text-xs font-semibold text-ink/50 uppercase tracking-wider">Status</th>
+            <th className="px-4 py-3 text-xs font-semibold text-ink/50 uppercase tracking-wider">Date</th>
+            <th className="px-4 py-3 text-xs font-semibold text-ink/50 uppercase tracking-wider">Actions</th>
           </tr>
         </thead>
         <tbody>
           {reviews.length === 0 && (
             <tr>
-              <td colSpan={7} className="px-4 py-12 text-center text-brand-charcoal/40">
+              <td colSpan={7} className="px-4 py-12 text-center text-ink/40">
                 No reviews found.
               </td>
             </tr>
@@ -82,7 +82,7 @@ export function ReviewTable({
           {reviews.map(review => (
             <tr
               key={review.id}
-              className="border-b border-brand-mist last:border-0 hover:bg-brand-mist/40 transition-colors"
+              className="border-b border-cream-2 last:border-0 hover:bg-cream-2/40 transition-colors"
             >
               <td className="px-4 py-3">
                 <input
@@ -90,12 +90,12 @@ export function ReviewTable({
                   checked={selectedIds.includes(review.id)}
                   onChange={() => toggleOne(review.id)}
                   aria-label={`Select review by ${review.reviewerName}`}
-                  className="rounded border-brand-mist"
+                  className="rounded border-cream-2"
                 />
               </td>
               <td className="px-4 py-3">
                 <div>
-                  <p className="font-medium text-brand-charcoal text-xs">{review.reviewerName}</p>
+                  <p className="font-medium text-ink text-xs">{review.reviewerName}</p>
                   {review.isVerifiedPurchase && (
                     <span className="text-[10px] text-green-600">✓ Verified</span>
                   )}
@@ -106,10 +106,10 @@ export function ReviewTable({
               </td>
               <td className="px-4 py-3 max-w-xs">
                 {review.title && (
-                  <p className="font-semibold text-xs text-brand-charcoal truncate">{review.title}</p>
+                  <p className="font-semibold text-xs text-ink truncate">{review.title}</p>
                 )}
                 {review.body && (
-                  <p className="text-xs text-brand-charcoal/50 truncate">
+                  <p className="text-xs text-ink/50 truncate">
                     {review.body.slice(0, 80)}
                   </p>
                 )}
@@ -117,19 +117,19 @@ export function ReviewTable({
               <td className="px-4 py-3">
                 <span className={[
                   'text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize',
-                  STATUS_STYLES[review.status] ?? 'bg-brand-mist text-brand-charcoal',
+                  STATUS_STYLES[review.status] ?? 'bg-cream-2 text-ink',
                 ].join(' ')}>
                   {review.status}
                 </span>
               </td>
-              <td className="px-4 py-3 text-xs text-brand-charcoal/50 whitespace-nowrap">
+              <td className="px-4 py-3 text-xs text-ink/50 whitespace-nowrap">
                 {relativeDate(review.createdAt)}
               </td>
               <td className="px-4 py-3">
                 <button
                   type="button"
                   onClick={() => onView(review)}
-                  className="text-xs font-medium text-brand-purple hover:text-brand-purple-light transition-colors"
+                  className="text-xs font-medium text-sage hover:text-sun transition-colors"
                   style={{ fontFamily: 'var(--font-display)' }}
                 >
                   View →
@@ -141,7 +141,7 @@ export function ReviewTable({
       </table>
 
       {total > reviews.length && (
-        <div className="px-4 py-2 border-t border-brand-mist text-xs text-brand-charcoal/40 text-right">
+        <div className="px-4 py-2 border-t border-cream-2 text-xs text-ink/40 text-right">
           Showing {reviews.length} of {total}
         </div>
       )}

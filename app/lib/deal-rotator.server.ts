@@ -163,6 +163,34 @@ export async function activateDeal(
   // Set live status in Shopify
   await setDealStatus(deal.shopifyProductId, 'live')
 
+  // Emma hero copy — generated from pipelineSettings.brandVoice (non-blocking).
+  // Fetched via getDailyDeal() since we just flipped this product to live status.
+  try {
+    const { getDailyDeal } = await import('./shopify.server')
+    const { generateEmmaHero } = await import('./claude.server')
+    const fullDeal = await getDailyDeal().catch(() => null)
+    const seedDeal = fullDeal ?? {
+      seoTitle: deal.seoTitle ?? '',
+      tagline: '',
+      fullStory: '',
+      brand: '',
+      category: 'both' as const,
+      dealPrice,
+      msrp,
+      mapRestricted: false,
+    }
+    const variant = seedDeal.mapRestricted ? 'quote' : 'loving'
+    const copy = await generateEmmaHero({ deal: seedDeal, variant })
+    await updateProductMetafield(
+      deal.shopifyProductId,
+      'emma_hero',
+      JSON.stringify(copy),
+      'json',
+    )
+  } catch (err) {
+    console.error('[deal-rotator] Emma hero generation failed (non-blocking):', err)
+  }
+
   // Update DB
   await db
     .update(dealHistory)

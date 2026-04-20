@@ -39,7 +39,7 @@ export function ShareButtons({ url, title, image, variant = 'inline' }: ShareBut
 
   if (variant === 'overlay') {
     const iconCls =
-      'w-8 h-8 rounded-full bg-white/90 backdrop-blur hover:bg-brand-purple hover:text-white flex items-center justify-center text-brand-charcoal/70 shadow-sm transition-colors shrink-0'
+      'w-8 h-8 rounded-full bg-white/90 backdrop-blur hover:bg-sage hover:text-white flex items-center justify-center text-ink/70 shadow-sm transition-colors shrink-0'
     return (
       <div
         className="group flex items-center"
@@ -111,13 +111,13 @@ export function ShareButtons({ url, title, image, variant = 'inline' }: ShareBut
 
   return (
     <div className="flex items-center gap-3 flex-wrap">
-      <span className="text-sm font-medium text-brand-charcoal/60">Share</span>
+      <span className="text-sm font-medium text-ink/60">Share</span>
 
       {canNativeShare && (
         <button
           type="button"
           onClick={nativeShare}
-          className="w-9 h-9 rounded-full bg-brand-mist hover:bg-brand-purple hover:text-white flex items-center justify-center text-brand-charcoal/70 transition-colors"
+          className="w-9 h-9 rounded-full bg-cream-2 hover:bg-sage hover:text-white flex items-center justify-center text-ink/70 transition-colors"
           aria-label="Share"
           data-share-image={image ?? undefined}
         >
@@ -131,7 +131,7 @@ export function ShareButtons({ url, title, image, variant = 'inline' }: ShareBut
         href={`https://x.com/intent/tweet?url=${encodedUrl}&text=${encodedTitle}`}
         target="_blank"
         rel="noopener noreferrer"
-        className="w-9 h-9 rounded-full bg-brand-mist hover:bg-brand-purple hover:text-white flex items-center justify-center text-brand-charcoal/70 transition-colors"
+        className="w-9 h-9 rounded-full bg-cream-2 hover:bg-sage hover:text-white flex items-center justify-center text-ink/70 transition-colors"
         aria-label="Share on X"
       >
         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -143,7 +143,7 @@ export function ShareButtons({ url, title, image, variant = 'inline' }: ShareBut
         href={`https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`}
         target="_blank"
         rel="noopener noreferrer"
-        className="w-9 h-9 rounded-full bg-brand-mist hover:bg-brand-purple hover:text-white flex items-center justify-center text-brand-charcoal/70 transition-colors"
+        className="w-9 h-9 rounded-full bg-cream-2 hover:bg-sage hover:text-white flex items-center justify-center text-ink/70 transition-colors"
         aria-label="Share on Facebook"
       >
         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -155,7 +155,7 @@ export function ShareButtons({ url, title, image, variant = 'inline' }: ShareBut
         href={`https://wa.me/?text=${encodedTitle}%20${encodedUrl}`}
         target="_blank"
         rel="noopener noreferrer"
-        className="w-9 h-9 rounded-full bg-brand-mist hover:bg-brand-purple hover:text-white flex items-center justify-center text-brand-charcoal/70 transition-colors"
+        className="w-9 h-9 rounded-full bg-cream-2 hover:bg-sage hover:text-white flex items-center justify-center text-ink/70 transition-colors"
         aria-label="Share on WhatsApp"
       >
         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -166,7 +166,7 @@ export function ShareButtons({ url, title, image, variant = 'inline' }: ShareBut
       <button
         type="button"
         onClick={copyLink}
-        className="w-9 h-9 rounded-full bg-brand-mist hover:bg-brand-purple hover:text-white flex items-center justify-center text-brand-charcoal/70 transition-colors"
+        className="w-9 h-9 rounded-full bg-cream-2 hover:bg-sage hover:text-white flex items-center justify-center text-ink/70 transition-colors"
         aria-label="Copy link"
       >
         {copied ? (
@@ -182,7 +182,7 @@ export function ShareButtons({ url, title, image, variant = 'inline' }: ShareBut
 
       <a
         href={`mailto:?subject=${encodedTitle}&body=${encodedUrl}`}
-        className="w-9 h-9 rounded-full bg-brand-mist hover:bg-brand-purple hover:text-white flex items-center justify-center text-brand-charcoal/70 transition-colors"
+        className="w-9 h-9 rounded-full bg-cream-2 hover:bg-sage hover:text-white flex items-center justify-center text-ink/70 transition-colors"
         aria-label="Share via email"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">

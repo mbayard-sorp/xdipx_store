@@ -48,11 +48,11 @@ function ConfirmDeletePopover({ onConfirm, onCancel }: { onConfirm: () => void; 
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 rounded-xl backdrop-blur-sm">
       <div className="bg-white rounded-xl p-3 shadow-xl text-center w-40">
-        <p className="text-xs font-semibold text-brand-charcoal mb-2">Remove image?</p>
+        <p className="text-xs font-semibold text-ink mb-2">Remove image?</p>
         <div className="flex gap-2">
           <button
             onClick={onCancel}
-            className="flex-1 py-1 text-xs rounded-lg border border-brand-mist text-brand-charcoal/60 hover:bg-brand-mist transition-colors"
+            className="flex-1 py-1 text-xs rounded-lg border border-cream-2 text-ink/60 hover:bg-cream-2 transition-colors"
           >
             Cancel
           </button>
@@ -115,9 +115,9 @@ function ImageTile({
       onDrop={e => { e.preventDefault(); onDrop(index) }}
       onDragEnd={onDragEnd}
       className={[
-        'relative group aspect-square rounded-xl overflow-hidden border bg-brand-mist/30 cursor-grab active:cursor-grabbing transition-all',
+        'relative group aspect-square rounded-xl overflow-hidden border bg-cream-2/30 cursor-grab active:cursor-grabbing transition-all',
         isDragging ? 'opacity-40 scale-95' : '',
-        isDragOver ? 'border-brand-coral ring-2 ring-brand-coral/40' : 'border-brand-mist',
+        isDragOver ? 'border-coral ring-2 ring-coral/40' : 'border-cream-2',
       ].join(' ')}
     >
       <img
@@ -132,7 +132,7 @@ function ImageTile({
           <button
             onClick={onMoveLeft}
             title="Move left"
-            className="w-6 h-6 flex items-center justify-center bg-white/90 rounded-md text-brand-charcoal hover:bg-white text-xs shadow transition-colors"
+            className="w-6 h-6 flex items-center justify-center bg-white/90 rounded-md text-ink hover:bg-white text-xs shadow transition-colors"
           >
             ←
           </button>
@@ -141,7 +141,7 @@ function ImageTile({
           <button
             onClick={onMoveRight}
             title="Move right"
-            className="w-6 h-6 flex items-center justify-center bg-white/90 rounded-md text-brand-charcoal hover:bg-white text-xs shadow transition-colors"
+            className="w-6 h-6 flex items-center justify-center bg-white/90 rounded-md text-ink hover:bg-white text-xs shadow transition-colors"
           >
             →
           </button>
@@ -153,7 +153,7 @@ function ImageTile({
         <button
           onClick={onImprove}
           title="Improve with AI"
-          className="w-7 h-7 flex items-center justify-center bg-white/90 rounded-md text-brand-purple hover:bg-white shadow text-xs transition-colors"
+          className="w-7 h-7 flex items-center justify-center bg-white/90 rounded-md text-sage hover:bg-white shadow text-xs transition-colors"
         >
           ✨
         </button>
@@ -186,9 +186,9 @@ function ImageTile({
 function ImageSkeleton() {
   return (
     <div className="aspect-square rounded-xl overflow-hidden relative">
-      <div className="absolute inset-0 bg-gradient-to-r from-brand-mist via-brand-cream to-brand-mist bg-[length:200%_100%] animate-pulse" />
+      <div className="absolute inset-0 bg-gradient-to-r from-cream-2 via-cream to-cream-2 bg-[length:200%_100%] animate-pulse" />
       <div className="absolute inset-0 flex items-center justify-center">
-        <div className="text-brand-charcoal/20 text-xs">Generating…</div>
+        <div className="text-ink/20 text-xs">Generating…</div>
       </div>
     </div>
   )
@@ -238,7 +238,7 @@ function GeneratedCard({
       {/* Thumbnail card */}
       <div
         ref={cardRef}
-        className="relative shrink-0 w-36 aspect-square rounded-xl overflow-hidden border-2 border-transparent hover:border-brand-purple/30 transition-colors group"
+        className="relative shrink-0 w-36 aspect-square rounded-xl overflow-hidden border-2 border-transparent hover:border-sage/30 transition-colors group"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={() => setHovered(false)}
       >
@@ -252,7 +252,7 @@ function GeneratedCard({
               'w-7 h-7 flex items-center justify-center rounded-lg text-xs font-bold shadow',
               img.inQueue
                 ? 'bg-green-500 text-white cursor-default'
-                : 'bg-white text-brand-purple hover:bg-brand-purple hover:text-white transition-colors',
+                : 'bg-white text-sage hover:bg-sage hover:text-white transition-colors',
             ].join(' ')}
           >
             {img.inQueue ? '✓' : '+'}
@@ -260,7 +260,7 @@ function GeneratedCard({
           <button
             onClick={onRegenerate}
             title="Regenerate this slot"
-            className="w-7 h-7 flex items-center justify-center rounded-lg bg-white text-brand-charcoal hover:bg-brand-mist text-xs shadow transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded-lg bg-white text-ink hover:bg-cream-2 text-xs shadow transition-colors"
           >
             ↻
           </button>
@@ -283,7 +283,7 @@ function GeneratedCard({
       <AnimatePresence>
         {hovered && (
           <motion.div
-            className="fixed z-[200] rounded-2xl overflow-hidden shadow-2xl border-2 border-brand-purple/20 pointer-events-auto"
+            className="fixed z-[200] rounded-2xl overflow-hidden shadow-2xl border-2 border-sage/20 pointer-events-auto"
             style={{ top: pos.top, left: pos.left, width: 600, height: 600 }}
             initial={{ opacity: 0, scale: 0.92 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -303,7 +303,7 @@ function GeneratedCard({
                   'px-4 py-2 rounded-full text-sm font-bold shadow transition-colors',
                   img.inQueue
                     ? 'bg-green-500 text-white cursor-default'
-                    : 'bg-white text-brand-purple hover:bg-brand-purple hover:text-white',
+                    : 'bg-white text-sage hover:bg-sage hover:text-white',
                 ].join(' ')}
               >
                 {img.inQueue ? '✓ In queue' : '+ Add to queue'}
@@ -362,7 +362,7 @@ function ModalVariantTile({ variant, onUse }: { variant: GeneratedImage; onUse: 
           disabled={variant.inQueue}
           className={[
             'absolute bottom-2 inset-x-2 py-1.5 rounded-lg text-xs font-bold text-white transition-colors',
-            variant.inQueue ? 'bg-green-500 cursor-default' : 'bg-brand-gradient hover:opacity-90',
+            variant.inQueue ? 'bg-green-500 cursor-default' : 'bg-coral hover:opacity-90',
           ].join(' ')}
         >
           {variant.inQueue ? '✓ Queued' : 'Use This'}
@@ -372,7 +372,7 @@ function ModalVariantTile({ variant, onUse }: { variant: GeneratedImage; onUse: 
       <AnimatePresence>
         {hovered && (
           <motion.div
-            className="fixed z-[300] rounded-2xl overflow-hidden shadow-2xl border-2 border-brand-purple/20 pointer-events-auto"
+            className="fixed z-[300] rounded-2xl overflow-hidden shadow-2xl border-2 border-sage/20 pointer-events-auto"
             style={{ top: pos.top, left: pos.left, width: 600, height: 600 }}
             initial={{ opacity: 0, scale: 0.92 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -388,7 +388,7 @@ function ModalVariantTile({ variant, onUse }: { variant: GeneratedImage; onUse: 
                 disabled={variant.inQueue}
                 className={[
                   'px-6 py-2.5 rounded-full text-sm font-bold text-white shadow transition-colors',
-                  variant.inQueue ? 'bg-green-500 cursor-default' : 'bg-brand-gradient hover:opacity-90',
+                  variant.inQueue ? 'bg-green-500 cursor-default' : 'bg-coral hover:opacity-90',
                 ].join(' ')}
               >
                 {variant.inQueue ? '✓ Added to queue' : 'Use This'}
@@ -467,18 +467,18 @@ function ImprovementModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] bg-brand-charcoal/60 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-[100] bg-ink/60 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-brand-cream rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-cream rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-brand-mist">
-          <h3 className="font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-cream-2">
+          <h3 className="font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
             ✨ Improve Image
           </h3>
           <button
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-brand-mist text-brand-charcoal/50 transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-2 text-ink/50 transition-colors"
           >
             ✕
           </button>
@@ -488,17 +488,17 @@ function ImprovementModal({
           {/* Two-column: original + variants */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <p className="text-xs font-semibold text-brand-charcoal/50 mb-2 uppercase tracking-wide">Original</p>
+              <p className="text-xs font-semibold text-ink/50 mb-2 uppercase tracking-wide">Original</p>
               <img
                 src={state.image.src}
                 alt={state.image.alt ?? 'Original'}
-                className="w-full aspect-square object-cover rounded-xl border border-brand-mist"
+                className="w-full aspect-square object-cover rounded-xl border border-cream-2"
               />
             </div>
             <div>
-              <p className="text-xs font-semibold text-brand-charcoal/50 mb-2 uppercase tracking-wide">Improved Variants</p>
+              <p className="text-xs font-semibold text-ink/50 mb-2 uppercase tracking-wide">Improved Variants</p>
               {state.generating ? (
-                <div className="w-full aspect-square rounded-xl bg-brand-mist animate-pulse flex items-center justify-center text-sm text-brand-charcoal/40">
+                <div className="w-full aspect-square rounded-xl bg-cream-2 animate-pulse flex items-center justify-center text-sm text-ink/40">
                   Generating…
                 </div>
               ) : state.variants.length > 0 ? (
@@ -508,7 +508,7 @@ function ImprovementModal({
                   ))}
                 </div>
               ) : (
-                <div className="w-full aspect-square rounded-xl border-2 border-dashed border-brand-mist flex items-center justify-center text-sm text-brand-charcoal/30">
+                <div className="w-full aspect-square rounded-xl border-2 border-dashed border-cream-2 flex items-center justify-center text-sm text-ink/30">
                   Generate to see results
                 </div>
               )}
@@ -517,7 +517,7 @@ function ImprovementModal({
 
           {/* Improvement prompt */}
           <div>
-            <label className="block text-xs font-semibold text-brand-charcoal/60 mb-1.5">
+            <label className="block text-xs font-semibold text-ink/60 mb-1.5">
               Improvement Direction
             </label>
             {state.suggestions.length > 0 && (
@@ -526,7 +526,7 @@ function ImprovementModal({
                   <button
                     key={s}
                     onClick={() => onChange({ prompt: s })}
-                    className="px-2.5 py-1 text-xs rounded-full bg-brand-mist text-brand-charcoal/70 border border-brand-mist hover:border-brand-purple/30 hover:text-brand-purple transition-colors"
+                    className="px-2.5 py-1 text-xs rounded-full bg-cream-2 text-ink/70 border border-cream-2 hover:border-sage/30 hover:text-sage transition-colors"
                   >
                     {s}
                   </button>
@@ -538,7 +538,7 @@ function ImprovementModal({
               onChange={e => onChange({ prompt: e.target.value })}
               rows={2}
               placeholder="e.g. Make the background warmer, add soft bokeh, enhance product sharpness"
-              className="w-full border border-brand-mist rounded-xl px-3 py-2 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30 resize-y"
+              className="w-full border border-cream-2 rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30 resize-y"
             />
           </div>
 
@@ -551,14 +551,14 @@ function ImprovementModal({
             <button
               onClick={handleSuggestImprovements}
               disabled={state.loadingSuggestions}
-              className="flex-1 py-2 rounded-xl text-sm font-semibold border border-brand-mist text-brand-charcoal/70 hover:bg-brand-mist transition-colors disabled:opacity-50"
+              className="flex-1 py-2 rounded-xl text-sm font-semibold border border-cream-2 text-ink/70 hover:bg-cream-2 transition-colors disabled:opacity-50"
             >
               {state.loadingSuggestions ? 'Suggesting…' : '💡 Suggest Improvements'}
             </button>
             <button
               onClick={handleGenerate}
               disabled={state.generating || !state.prompt.trim()}
-              className="flex-1 py-2 rounded-xl text-sm font-bold bg-gradient-to-r from-brand-coral to-brand-orange text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex-1 py-2 rounded-xl text-sm font-bold bg-gradient-to-r from-coral to-coral-2 text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {state.generating ? '✨ Generating…' : '✨ Generate Improved'}
             </button>
@@ -624,18 +624,18 @@ function UploadQueueBar({
   const getItemState = (tempId: string) => results.find(r => r.tempId === tempId)
 
   return (
-    <div className="border-t border-brand-mist pt-4">
+    <div className="border-t border-cream-2 pt-4">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-sm font-semibold text-brand-charcoal">
+        <p className="text-sm font-semibold text-ink">
           Upload Queue
-          <span className="ml-2 text-xs font-normal text-brand-charcoal/50">
+          <span className="ml-2 text-xs font-normal text-ink/50">
             {queue.length} image{queue.length !== 1 ? 's' : ''} ready
           </span>
         </p>
         <button
           onClick={onClear}
           disabled={uploading}
-          className="text-xs text-brand-charcoal/40 hover:text-red-500 transition-colors disabled:opacity-40"
+          className="text-xs text-ink/40 hover:text-red-500 transition-colors disabled:opacity-40"
         >
           Clear queue
         </button>
@@ -673,7 +673,7 @@ function UploadQueueBar({
       <button
         onClick={handleUpload}
         disabled={uploading || queue.length === 0}
-        className="w-full py-3 rounded-xl text-sm font-bold bg-gradient-to-r from-brand-coral to-brand-orange text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full py-3 rounded-xl text-sm font-bold bg-gradient-to-r from-coral to-coral-2 text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {uploading ? '⬆ Uploading to Shopify…' : `⬆ Upload ${queue.length} Image${queue.length !== 1 ? 's' : ''} to Shopify`}
       </button>
@@ -933,37 +933,37 @@ export function ImageManager({
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-brand-mist/40 transition-colors"
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-cream-2/40 transition-colors"
       >
         <div className="flex items-center gap-3">
-          <span className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          <span className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
             🖼 Image Manager
           </span>
-          <span className="text-xs bg-brand-mist text-brand-charcoal/60 px-2 py-0.5 rounded-full font-medium">
+          <span className="text-xs bg-cream-2 text-ink/60 px-2 py-0.5 rounded-full font-medium">
             {images.length} image{images.length !== 1 ? 's' : ''}
           </span>
           {reordering && (
-            <span className="text-xs text-brand-charcoal/40">Saving order…</span>
+            <span className="text-xs text-ink/40">Saving order…</span>
           )}
         </div>
-        <span className={`text-brand-charcoal/40 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
+        <span className={`text-ink/40 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
           ▼
         </span>
       </button>
 
       {open && (
-        <div className="px-5 pb-5 space-y-6 border-t border-brand-mist pt-5">
+        <div className="px-5 pb-5 space-y-6 border-t border-cream-2 pt-5">
 
           {/* ── Section 1: Existing Images ─────────────────────────────────── */}
           <div>
-            <h4 className="text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wide mb-3">
+            <h4 className="text-xs font-semibold text-ink/50 uppercase tracking-wide mb-3">
               Shopify Images
             </h4>
             {images.length > 0 ? (
               <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
                 {images.map((img, idx) => (
                   deletingIds.has(img.id) ? (
-                    <div key={img.id} className="aspect-square rounded-xl bg-brand-mist animate-pulse" />
+                    <div key={img.id} className="aspect-square rounded-xl bg-cream-2 animate-pulse" />
                   ) : (
                     <ImageTile
                       key={img.id}
@@ -994,7 +994,7 @@ export function ImageManager({
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-brand-charcoal/40 italic py-4 text-center">
+              <p className="text-sm text-ink/40 italic py-4 text-center">
                 No images yet. Generate and upload below.
               </p>
             )}
@@ -1003,13 +1003,13 @@ export function ImageManager({
           {/* ── Section 2: Prompt Suggestions ─────────────────────────────── */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h4 className="text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wide">
+              <h4 className="text-xs font-semibold text-ink/50 uppercase tracking-wide">
                 AI Prompt Suggestions
               </h4>
               <button
                 onClick={fetchPrompts}
                 disabled={loadingPrompts}
-                className="text-xs text-brand-purple hover:text-brand-purple/70 transition-colors disabled:opacity-50"
+                className="text-xs text-sage hover:text-sage/70 transition-colors disabled:opacity-50"
               >
                 {loadingPrompts ? 'Loading…' : '↻ Refresh'}
               </button>
@@ -1018,7 +1018,7 @@ export function ImageManager({
             {loadingPrompts ? (
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="shrink-0 h-8 w-40 rounded-full bg-brand-mist animate-pulse" />
+                  <div key={i} className="shrink-0 h-8 w-40 rounded-full bg-cream-2 animate-pulse" />
                 ))}
               </div>
             ) : promptError ? (
@@ -1032,8 +1032,8 @@ export function ImageManager({
                     className={[
                       'shrink-0 px-3 py-1.5 text-xs rounded-full border transition-all',
                       activePrompt === p
-                        ? 'bg-brand-purple text-white border-brand-purple'
-                        : 'bg-white border-brand-mist text-brand-charcoal/70 hover:border-brand-purple/30 hover:text-brand-purple',
+                        ? 'bg-sage text-white border-sage'
+                        : 'bg-white border-cream-2 text-ink/70 hover:border-sage/30 hover:text-sage',
                     ].join(' ')}
                   >
                     {p}
@@ -1048,7 +1048,7 @@ export function ImageManager({
               onChange={e => setActivePrompt(e.target.value)}
               rows={3}
               placeholder="Or write your own prompt… e.g. 'Minimalist studio shot with warm coral tones, soft shadows, single product centered'"
-              className="w-full mt-3 border border-brand-mist rounded-xl px-4 py-3 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30 resize-y"
+              className="w-full mt-3 border border-cream-2 rounded-xl px-4 py-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30 resize-y"
             />
           </div>
 
@@ -1057,11 +1057,11 @@ export function ImageManager({
             <div className={`grid gap-3 ${multiVariant ? 'grid-cols-3' : 'grid-cols-2'}`}>
               {/* Style */}
               <div>
-                <label className="block text-xs font-medium text-brand-charcoal/50 mb-1">Style</label>
+                <label className="block text-xs font-medium text-ink/50 mb-1">Style</label>
                 <select
                   value={style}
                   onChange={e => setStyle(e.target.value)}
-                  className="w-full border border-brand-mist rounded-xl px-3 py-2 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30 bg-white"
+                  className="w-full border border-cream-2 rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30 bg-white"
                 >
                   {STYLES.map(s => (
                     <option key={s.value} value={s.value}>{s.label}</option>
@@ -1070,7 +1070,7 @@ export function ImageManager({
               </div>
               {/* Count */}
               <div>
-                <label className="block text-xs font-medium text-brand-charcoal/50 mb-1">Generate</label>
+                <label className="block text-xs font-medium text-ink/50 mb-1">Generate</label>
                 <div className="flex gap-2">
                   {[1, 2, 4].map(n => (
                     <button
@@ -1080,8 +1080,8 @@ export function ImageManager({
                       className={[
                         'flex-1 py-2 rounded-xl text-sm font-semibold border transition-all',
                         genCount === n
-                          ? 'bg-brand-purple text-white border-brand-purple'
-                          : 'bg-white border-brand-mist text-brand-charcoal/60 hover:border-brand-purple/30',
+                          ? 'bg-sage text-white border-sage'
+                          : 'bg-white border-cream-2 text-ink/60 hover:border-sage/30',
                       ].join(' ')}
                     >
                       {n}
@@ -1092,11 +1092,11 @@ export function ImageManager({
               {/* Variant target */}
               {multiVariant && (
                 <div>
-                  <label className="block text-xs font-medium text-brand-charcoal/50 mb-1">For Variant</label>
+                  <label className="block text-xs font-medium text-ink/50 mb-1">For Variant</label>
                   <select
                     value={targetVariantId}
                     onChange={e => setTargetVariantId(e.target.value)}
-                    className="w-full border border-brand-mist rounded-xl px-3 py-2 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30 bg-white"
+                    className="w-full border border-cream-2 rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30 bg-white"
                   >
                     <option value="">All variants (product-level)</option>
                     {deal.variants?.map(v => (
@@ -1113,22 +1113,22 @@ export function ImageManager({
             {/* Reference Images row */}
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-medium text-brand-charcoal/60">Feature the product from:</span>
+                <span className="text-xs font-medium text-ink/60">Feature the product from:</span>
                 {referenceImageIds.size > 0 ? (
                   <button
                     type="button"
                     onClick={() => setReferenceImageIds(new Set())}
-                    className="text-xs text-brand-charcoal/40 hover:text-red-500 transition-colors"
+                    className="text-xs text-ink/40 hover:text-red-500 transition-colors"
                   >
                     Clear
                   </button>
                 ) : (
-                  <span className="text-xs text-brand-charcoal/30 italic">None selected</span>
+                  <span className="text-xs text-ink/30 italic">None selected</span>
                 )}
                 {referenceImageIds.size === 1 && (
                   <span
                     title="Only the first selected image will be used to identify the product"
-                    className="ml-auto text-[10px] text-brand-charcoal/30 cursor-help underline decoration-dotted"
+                    className="ml-auto text-[10px] text-ink/30 cursor-help underline decoration-dotted"
                   >
                     1 reference active ⓘ
                   </span>
@@ -1154,8 +1154,8 @@ export function ImageManager({
                         className={[
                           'relative shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 transition-all',
                           selected
-                            ? 'border-brand-coral ring-2 ring-brand-coral/20'
-                            : 'border-transparent hover:border-brand-mist',
+                            ? 'border-coral ring-2 ring-coral/20'
+                            : 'border-transparent hover:border-cream-2',
                         ].join(' ')}
                         title={selected ? 'Remove as reference' : 'Use as reference'}
                       >
@@ -1165,8 +1165,8 @@ export function ImageManager({
                           className="w-full h-full object-cover"
                         />
                         {selected && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-brand-coral/20">
-                            <span className="w-5 h-5 rounded-full bg-brand-coral text-white text-[10px] font-bold flex items-center justify-center shadow">
+                          <div className="absolute inset-0 flex items-center justify-center bg-coral/20">
+                            <span className="w-5 h-5 rounded-full bg-coral text-white text-[10px] font-bold flex items-center justify-center shadow">
                               ✓
                             </span>
                           </div>
@@ -1176,14 +1176,14 @@ export function ImageManager({
                   })}
                 </div>
               ) : (
-                <p className="text-xs text-brand-charcoal/30 italic">No existing images to use as references.</p>
+                <p className="text-xs text-ink/30 italic">No existing images to use as references.</p>
               )}
             </div>
 
             <button
               onClick={handleGenerate}
               disabled={generating || !activePrompt.trim()}
-              className="w-full py-3 rounded-xl text-sm font-bold bg-gradient-to-r from-brand-coral to-brand-orange text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-3 rounded-xl text-sm font-bold bg-gradient-to-r from-coral to-coral-2 text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {generating ? '✨ Generating…' : '✨ Generate Images'}
             </button>

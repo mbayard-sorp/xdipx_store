@@ -18,10 +18,10 @@ interface ProductCarouselProps {
 
 const BG_CLASSES: Record<string, string> = {
   white:    'bg-white',
-  cream:    'bg-brand-cream',
-  mist:     'bg-brand-mist',
-  charcoal: 'bg-brand-charcoal',
-  purple:   'bg-brand-purple',
+  cream:    'bg-cream',
+  mist:     'bg-cream-2',
+  charcoal: 'bg-ink',
+  purple:   'bg-sage',
 }
 
 function isDark(bg: string) {
@@ -65,12 +65,12 @@ export function ProductCarousel({
         <div className="flex items-end justify-between mb-6">
           <div>
             {eyebrow && (
-              <p className={`text-xs font-semibold uppercase tracking-widest mb-1 ${dark ? 'text-white/60' : 'text-brand-purple'}`}>
+              <p className={`text-xs font-semibold uppercase tracking-widest mb-1 ${dark ? 'text-white/60' : 'text-sage'}`}>
                 {eyebrow}
               </p>
             )}
             <h2
-              className={`text-2xl font-bold ${dark ? 'text-white' : 'text-brand-charcoal'}`}
+              className={`text-2xl font-bold ${dark ? 'text-white' : 'text-ink'}`}
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {heading}
@@ -86,7 +86,7 @@ export function ProductCarousel({
                   className={`hidden sm:flex items-center justify-center w-9 h-9 rounded-full border transition-colors shadow-sm ${
                     dark
                       ? 'border-white/20 bg-white/10 text-white hover:border-white/40 hover:text-white'
-                      : 'border-brand-mist bg-white text-brand-charcoal hover:border-brand-purple hover:text-brand-purple'
+                      : 'border-cream-2 bg-white text-ink hover:border-sage hover:text-sage'
                   }`}
                 >
                   ←
@@ -97,7 +97,7 @@ export function ProductCarousel({
                   className={`hidden sm:flex items-center justify-center w-9 h-9 rounded-full border transition-colors shadow-sm ${
                     dark
                       ? 'border-white/20 bg-white/10 text-white hover:border-white/40 hover:text-white'
-                      : 'border-brand-mist bg-white text-brand-charcoal hover:border-brand-purple hover:text-brand-purple'
+                      : 'border-cream-2 bg-white text-ink hover:border-sage hover:text-sage'
                   }`}
                 >
                   →
@@ -110,7 +110,7 @@ export function ProductCarousel({
                 className={`text-sm font-semibold transition-colors ml-1 ${
                   dark
                     ? 'text-white/80 hover:text-white'
-                    : 'text-brand-purple hover:text-brand-purple-light'
+                    : 'text-sage hover:text-sun'
                 }`}
                 style={{ fontFamily: 'var(--font-display)' }}
               >
@@ -164,8 +164,8 @@ function ProductCard({ product, className = '' }: { product: Product; className?
       to={`/products/${product.handle}`}
       className={`group ${className}`}
     >
-      <article className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg hover:shadow-brand-purple/10 transition-all duration-300 card-lift h-full">
-        <div className="relative aspect-square bg-brand-mist overflow-hidden">
+      <article className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg hover:shadow-sage/10 transition-all duration-300 card-lift h-full">
+        <div className="relative aspect-square bg-cream-2 overflow-hidden">
           {firstImage ? (
             <ProductTileMedia
               imageUrl={firstImage.url}
@@ -173,28 +173,28 @@ function ProductCard({ product, className = '' }: { product: Product; className?
               video={video}
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-brand-charcoal/10 text-4xl">
+            <div className="w-full h-full flex items-center justify-center text-ink/10 text-4xl">
               ♥
             </div>
           )}
           {onSale && (
-            <span className="absolute top-2 left-2 bg-brand-gradient text-white text-xs font-bold px-2 py-0.5 rounded-full z-10">
+            <span className="absolute top-2 left-2 bg-coral text-white text-xs font-bold px-2 py-0.5 rounded-full z-10">
               SALE
             </span>
           )}
         </div>
         <div className="p-4">
-          <p className="text-brand-charcoal/50 text-xs">{product.brand}</p>
+          <p className="text-ink/50 text-xs">{product.brand}</p>
           <p
-            className="font-semibold text-brand-charcoal text-sm mt-0.5 line-clamp-2 group-hover:text-brand-coral transition-colors"
+            className="font-semibold text-ink text-sm mt-0.5 line-clamp-2 group-hover:text-coral transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {product.title}
           </p>
           <div className="flex items-center gap-2 mt-2">
-            <span className="text-brand-gradient font-bold text-sm">${price.toFixed(2)}</span>
+            <span className="text-coral font-bold text-sm">${price.toFixed(2)}</span>
             {onSale && (
-              <span className="text-brand-charcoal/40 text-xs line-through">${compare!.toFixed(2)}</span>
+              <span className="text-ink/40 text-xs line-through">${compare!.toFixed(2)}</span>
             )}
           </div>
         </div>

@@ -29,11 +29,11 @@ export function AccountSidebar({ customer }: AccountSidebarProps) {
   ]
 
   return (
-    <aside className="hidden lg:flex flex-col w-[260px] shrink-0 sticky top-14 h-[calc(100vh-3.5rem)] border-r border-brand-mist bg-brand-cream px-5 py-8">
+    <aside className="hidden lg:flex flex-col w-[260px] shrink-0 sticky top-14 h-[calc(100vh-3.5rem)] border-r border-cream-2 bg-cream px-5 py-8">
       {/* Profile block */}
       <div className="flex items-center gap-3">
         <div
-          className="w-11 h-11 rounded-full bg-brand-gradient text-white flex items-center justify-center font-bold text-lg shrink-0"
+          className="w-11 h-11 rounded-full bg-coral text-white flex items-center justify-center font-bold text-lg shrink-0"
           style={{ fontFamily: 'var(--font-display)' }}
           aria-hidden="true"
         >
@@ -41,17 +41,17 @@ export function AccountSidebar({ customer }: AccountSidebarProps) {
         </div>
         <div className="min-w-0">
           <p
-            className="text-sm font-bold text-brand-charcoal truncate"
+            className="text-sm font-bold text-ink truncate"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            Hi, {customer.firstName || 'friend'} <span className="text-brand-purple">♥</span>
+            Hi, {customer.firstName || 'friend'} <span className="text-sage">♥</span>
           </p>
-          <p className="text-xs text-brand-charcoal/50 truncate">{customer.email}</p>
+          <p className="text-xs text-ink/50 truncate">{customer.email}</p>
         </div>
       </div>
 
       {/* Section label */}
-      <p className="mt-8 mb-2 text-[10px] font-semibold uppercase tracking-widest text-brand-charcoal/40">
+      <p className="mt-8 mb-2 text-[10px] font-semibold uppercase tracking-widest text-ink/40">
         Account
       </p>
 
@@ -63,10 +63,10 @@ export function AccountSidebar({ customer }: AccountSidebarProps) {
       </nav>
 
       {/* Bottom — sign out */}
-      <div className="mt-auto pt-6 border-t border-brand-mist">
+      <div className="mt-auto pt-6 border-t border-cream-2">
         <Link
           to="/account/logout"
-          className="flex items-center gap-2 text-sm text-brand-charcoal/50 hover:text-brand-charcoal transition-colors min-h-[44px] px-3 rounded-xl hover:bg-brand-mist/40"
+          className="flex items-center gap-2 text-sm text-ink/50 hover:text-ink transition-colors min-h-[44px] px-3 rounded-xl hover:bg-cream-2/40"
         >
           <LogoutIcon />
           <span>Sign out</span>
@@ -84,8 +84,8 @@ function NavItemLink({ item }: { item: NavItem }): ReactNode {
       className={({ isActive }) =>
         `relative flex items-center justify-between gap-3 px-3 py-2.5 min-h-[44px] rounded-xl transition-colors ${
           isActive
-            ? 'bg-brand-mist/60 text-brand-charcoal font-semibold'
-            : 'text-brand-charcoal/60 hover:bg-brand-mist/40 hover:text-brand-charcoal'
+            ? 'bg-cream-2/60 text-ink font-semibold'
+            : 'text-ink/60 hover:bg-cream-2/40 hover:text-ink'
         }`
       }
     >
@@ -93,13 +93,13 @@ function NavItemLink({ item }: { item: NavItem }): ReactNode {
         <>
           {isActive && (
             <span
-              className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-brand-coral"
+              className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-coral"
               aria-hidden="true"
             />
           )}
           <span>{item.label}</span>
           {typeof item.count === 'number' && item.count > 0 && (
-            <span className="text-[11px] font-semibold text-brand-charcoal/40 tabular-nums">
+            <span className="text-[11px] font-semibold text-ink/40 tabular-nums">
               {item.count}
             </span>
           )}

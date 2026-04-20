@@ -211,12 +211,12 @@ export default function ReturnWizard() {
     <div className="space-y-6">
       <section className="hidden lg:block">
         <h1
-          className="text-2xl font-bold text-brand-charcoal"
+          className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          Start a return <span className="text-brand-purple">♥</span>
+          Start a return <span className="text-sage">♥</span>
         </h1>
-        <p className="text-sm text-brand-charcoal/50 mt-0.5">
+        <p className="text-sm text-ink/50 mt-0.5">
           Order #{order.orderNumber}
         </p>
       </section>
@@ -227,7 +227,7 @@ export default function ReturnWizard() {
 
         <section className="space-y-3">
           <SectionHeading>What are you sending back?</SectionHeading>
-          <ul className="bg-white border border-brand-mist rounded-2xl divide-y divide-brand-mist overflow-hidden">
+          <ul className="bg-white border border-cream-2 rounded-2xl divide-y divide-cream-2 overflow-hidden">
             {allItems.map(item => (
               <ItemRow key={item.fulfillmentLineItemId} item={item} />
             ))}
@@ -236,12 +236,12 @@ export default function ReturnWizard() {
 
         <section>
           <SectionHeading>Before you submit</SectionHeading>
-          <div className="bg-white border border-brand-mist rounded-2xl p-4 md:p-5 space-y-3 text-sm text-brand-charcoal/80">
+          <div className="bg-white border border-cream-2 rounded-2xl p-4 md:p-5 space-y-3 text-sm text-ink/80">
             <label className="flex items-start gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 name="hygieneAttested"
-                className="mt-0.5 h-4 w-4 rounded border-brand-mist accent-brand-purple"
+                className="mt-0.5 h-4 w-4 rounded border-cream-2 accent-sage"
               />
               <span>
                 I confirm these items are <strong>unopened and in their original packaging</strong>.
@@ -253,7 +253,7 @@ export default function ReturnWizard() {
               <input
                 type="checkbox"
                 name="labelCostAck"
-                className="mt-0.5 h-4 w-4 rounded border-brand-mist accent-brand-purple"
+                className="mt-0.5 h-4 w-4 rounded border-cream-2 accent-sage"
               />
               <span>
                 I understand the <strong>return shipping cost will be deducted from my refund</strong>{' '}
@@ -273,21 +273,21 @@ export default function ReturnWizard() {
           <button
             type="submit"
             disabled={submitting}
-            className="flex-1 px-5 py-3 rounded-full text-sm font-semibold text-white bg-brand-gradient hover:opacity-90 transition-opacity disabled:opacity-60"
+            className="flex-1 px-5 py-3 rounded-full text-sm font-semibold text-white bg-coral hover:opacity-90 transition-opacity disabled:opacity-60"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {submitting ? 'Creating return…' : 'Create return & get label ♥'}
           </button>
           <Link
             to={`/account/orders/${encodeURIComponent(order.id)}`}
-            className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-brand-charcoal border border-brand-mist bg-white hover:bg-brand-mist/40 transition-colors"
+            className="flex-1 text-center px-5 py-3 rounded-full text-sm font-semibold text-ink border border-cream-2 bg-white hover:bg-cream-2/40 transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Cancel
           </Link>
         </section>
 
-        <p className="text-[11px] text-brand-charcoal/50 text-center">
+        <p className="text-[11px] text-ink/50 text-center">
           Returns ship to our warehouse in Ferndale, MI. USPS Ground Advantage, ~3–5 business days.
         </p>
       </Form>
@@ -313,18 +313,18 @@ function ItemRow({ item }: { item: ReturnableLineItem }) {
             src={item.imageUrl}
             alt={item.title}
             loading="lazy"
-            className="w-12 h-12 rounded-xl object-cover border border-brand-mist shrink-0"
+            className="w-12 h-12 rounded-xl object-cover border border-cream-2 shrink-0"
           />
         ) : (
-          <div className="w-12 h-12 rounded-xl bg-brand-mist shrink-0" aria-hidden="true" />
+          <div className="w-12 h-12 rounded-xl bg-cream-2 shrink-0" aria-hidden="true" />
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-brand-charcoal truncate">{item.title}</p>
+          <p className="text-sm font-semibold text-ink truncate">{item.title}</p>
           {item.variantTitle && item.variantTitle !== 'Default Title' && (
-            <p className="text-xs text-brand-charcoal/50 mt-0.5 truncate">{item.variantTitle}</p>
+            <p className="text-xs text-ink/50 mt-0.5 truncate">{item.variantTitle}</p>
           )}
           {item.unitPrice && (
-            <p className="text-xs text-brand-charcoal/60 mt-1 tabular-nums">
+            <p className="text-xs text-ink/60 mt-1 tabular-nums">
               ${parseFloat(item.unitPrice.amount).toFixed(2)} each · up to {item.quantity} returnable
             </p>
           )}
@@ -333,11 +333,11 @@ function ItemRow({ item }: { item: ReturnableLineItem }) {
 
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
-          <span className="text-[11px] font-semibold text-brand-charcoal/60">Quantity</span>
+          <span className="text-[11px] font-semibold text-ink/60">Quantity</span>
           <select
             name={`qty__${item.fulfillmentLineItemId}`}
             defaultValue="0"
-            className="mt-1 block w-full text-sm border border-brand-mist rounded-xl px-3 py-2 bg-white"
+            className="mt-1 block w-full text-sm border border-cream-2 rounded-xl px-3 py-2 bg-white"
           >
             <option value="0">— don't return —</option>
             {Array.from({ length: item.quantity }, (_, i) => i + 1).map(n => (
@@ -346,11 +346,11 @@ function ItemRow({ item }: { item: ReturnableLineItem }) {
           </select>
         </label>
         <label className="block">
-          <span className="text-[11px] font-semibold text-brand-charcoal/60">Reason</span>
+          <span className="text-[11px] font-semibold text-ink/60">Reason</span>
           <select
             name={`reason__${item.fulfillmentLineItemId}`}
             defaultValue="UNWANTED"
-            className="mt-1 block w-full text-sm border border-brand-mist rounded-xl px-3 py-2 bg-white"
+            className="mt-1 block w-full text-sm border border-cream-2 rounded-xl px-3 py-2 bg-white"
           >
             {REASONS.map(r => (
               <option key={r.code} value={r.code}>{r.label}</option>
@@ -360,14 +360,14 @@ function ItemRow({ item }: { item: ReturnableLineItem }) {
       </div>
 
       <label className="block">
-        <span className="text-[11px] font-semibold text-brand-charcoal/60">
+        <span className="text-[11px] font-semibold text-ink/60">
           Anything else you want to tell us? (optional)
         </span>
         <textarea
           name={`note__${item.fulfillmentLineItemId}`}
           rows={2}
           maxLength={500}
-          className="mt-1 block w-full text-sm border border-brand-mist rounded-xl px-3 py-2 bg-white resize-none"
+          className="mt-1 block w-full text-sm border border-cream-2 rounded-xl px-3 py-2 bg-white resize-none"
         />
       </label>
     </li>
@@ -377,20 +377,20 @@ function ItemRow({ item }: { item: ReturnableLineItem }) {
 function OutOfWindow({ orderNumber }: { orderNumber: number }) {
   return (
     <div className="space-y-6">
-      <div className="bg-white border border-brand-mist rounded-2xl p-6 text-center space-y-3">
+      <div className="bg-white border border-cream-2 rounded-2xl p-6 text-center space-y-3">
         <p
-          className="text-base font-semibold text-brand-charcoal"
+          className="text-base font-semibold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          Return window has passed <span className="text-brand-purple">♥</span>
+          Return window has passed <span className="text-sage">♥</span>
         </p>
-        <p className="text-sm text-brand-charcoal/60">
+        <p className="text-sm text-ink/60">
           Order #{orderNumber} is outside our 30-day return window. Reach out to support if there's a
           problem with the product and we'll see what we can do.
         </p>
         <a
           href="mailto:hello@xdipx.com"
-          className="inline-flex mt-2 px-5 py-2.5 rounded-full text-sm font-semibold text-brand-charcoal bg-brand-mist hover:bg-brand-mist/70 transition-colors"
+          className="inline-flex mt-2 px-5 py-2.5 rounded-full text-sm font-semibold text-ink bg-cream-2 hover:bg-cream-2/70 transition-colors"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Email support
@@ -403,20 +403,20 @@ function OutOfWindow({ orderNumber }: { orderNumber: number }) {
 function NothingReturnable({ orderNumber }: { orderNumber: number }) {
   return (
     <div className="space-y-6">
-      <div className="bg-white border border-brand-mist rounded-2xl p-6 text-center space-y-3">
+      <div className="bg-white border border-cream-2 rounded-2xl p-6 text-center space-y-3">
         <p
-          className="text-base font-semibold text-brand-charcoal"
+          className="text-base font-semibold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          Nothing to return here <span className="text-brand-purple">♥</span>
+          Nothing to return here <span className="text-sage">♥</span>
         </p>
-        <p className="text-sm text-brand-charcoal/60">
+        <p className="text-sm text-ink/60">
           Order #{orderNumber} doesn't have any returnable items right now. This usually means items
           haven't been delivered yet, or a return is already in progress.
         </p>
         <Link
           to="/account/returns"
-          className="inline-flex mt-2 px-5 py-2.5 rounded-full text-sm font-semibold text-brand-charcoal bg-brand-mist hover:bg-brand-mist/70 transition-colors"
+          className="inline-flex mt-2 px-5 py-2.5 rounded-full text-sm font-semibold text-ink bg-cream-2 hover:bg-cream-2/70 transition-colors"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           See my returns
@@ -429,7 +429,7 @@ function NothingReturnable({ orderNumber }: { orderNumber: number }) {
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
     <h2
-      className="text-sm font-bold text-brand-charcoal mb-2"
+      className="text-sm font-bold text-ink mb-2"
       style={{ fontFamily: 'var(--font-display)' }}
     >
       {children}

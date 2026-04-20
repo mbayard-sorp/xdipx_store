@@ -14,3 +14,5 @@ studio/npm run dev/
 .env.preview-*
 .claude/launch.json
 ivr_descriptors.csv
+# v2 redesign handoff — reference assets, too large to commit
+/redesign/

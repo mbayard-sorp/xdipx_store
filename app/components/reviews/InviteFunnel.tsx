@@ -12,18 +12,18 @@ function pct(numerator: number, denominator: number): string {
 
 export function InviteFunnel({ sent, opened, clicked, completed }: InviteFunnelProps) {
   const stages = [
-    { label: 'Sent',      count: sent,      pctOf: sent,      color: '#7B2FBE' },
-    { label: 'Opened',    count: opened,    pctOf: sent,      color: '#A855F7' },
-    { label: 'Clicked',   count: clicked,   pctOf: opened,    color: '#FF8C38' },
-    { label: 'Reviewed',  count: completed, pctOf: clicked,   color: '#F04E37' },
+    { label: 'Sent',      count: sent,      pctOf: sent,      color: '#7C8F78' },
+    { label: 'Opened',    count: opened,    pctOf: sent,      color: '#F5B841' },
+    { label: 'Clicked',   count: clicked,   pctOf: opened,    color: '#FF6A3D' },
+    { label: 'Reviewed',  count: completed, pctOf: clicked,   color: '#FF4B1F' },
   ]
 
   const maxCount = sent || 1
 
   return (
-    <div className="bg-white rounded-2xl border border-brand-mist p-5">
+    <div className="bg-white rounded-2xl border border-cream-2 p-5">
       <p
-        className="text-xs font-semibold text-brand-charcoal/50 uppercase tracking-widest mb-4"
+        className="text-xs font-semibold text-ink/50 uppercase tracking-widest mb-4"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Invite Funnel
@@ -37,11 +37,11 @@ export function InviteFunnel({ sent, opened, clicked, completed }: InviteFunnelP
           return (
             <div key={stage.label}>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-brand-charcoal">
+                <span className="text-xs font-medium text-ink">
                   {stage.label}
                 </span>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs text-brand-charcoal/50">
+                  <span className="text-xs text-ink/50">
                     {i > 0 && `${conversion} → `}
                   </span>
                   <span
@@ -52,7 +52,7 @@ export function InviteFunnel({ sent, opened, clicked, completed }: InviteFunnelP
                   </span>
                 </div>
               </div>
-              <div className="h-2 bg-brand-mist rounded-full overflow-hidden">
+              <div className="h-2 bg-cream-2 rounded-full overflow-hidden">
                 <div
                   className="h-full rounded-full transition-all duration-700"
                   style={{ width, background: stage.color }}
@@ -63,9 +63,9 @@ export function InviteFunnel({ sent, opened, clicked, completed }: InviteFunnelP
         })}
       </div>
 
-      <div className="mt-4 pt-3 border-t border-brand-mist flex justify-between text-xs text-brand-charcoal/50">
+      <div className="mt-4 pt-3 border-t border-cream-2 flex justify-between text-xs text-ink/50">
         <span>Overall conversion</span>
-        <span className="font-semibold text-brand-charcoal">{pct(completed, sent)}</span>
+        <span className="font-semibold text-ink">{pct(completed, sent)}</span>
       </div>
     </div>
   )
