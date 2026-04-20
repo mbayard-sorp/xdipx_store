@@ -7,7 +7,7 @@ export function SocialProofBar({ viewers = 0, soldToday = 0 }: SocialProofBarPro
   if (viewers === 0 && soldToday === 0) return null
 
   return (
-    <div className="flex flex-wrap items-center gap-3 text-xs text-brand-charcoal/60">
+    <div className="flex flex-wrap items-center gap-3 text-xs text-ink/60">
       {viewers > 0 && (
         <span className="flex items-center gap-1">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" aria-hidden="true" />
@@ -15,11 +15,11 @@ export function SocialProofBar({ viewers = 0, soldToday = 0 }: SocialProofBarPro
         </span>
       )}
       {viewers > 0 && soldToday > 0 && (
-        <span className="text-brand-charcoal/30" aria-hidden="true">·</span>
+        <span className="text-ink/30" aria-hidden="true">·</span>
       )}
       {soldToday > 0 && (
         <span className="flex items-center gap-1">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-coral" aria-hidden="true" />
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-coral" aria-hidden="true" />
           {soldToday} sold today
         </span>
       )}

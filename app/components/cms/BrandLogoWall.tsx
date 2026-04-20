@@ -10,10 +10,10 @@ export function BrandLogoWall({ block }: BrandLogoWallProps) {
   if (!logos.length) return null
 
   return (
-    <section className="py-10 px-4 bg-white border-t border-brand-mist">
+    <section className="py-10 px-4 bg-white border-t border-cream-2">
       <div className="max-w-5xl mx-auto">
         {heading && (
-          <p className="text-center text-brand-charcoal/40 text-xs font-semibold uppercase tracking-widest mb-6">
+          <p className="text-center text-ink/40 text-xs font-semibold uppercase tracking-widest mb-6">
             {heading}
           </p>
         )}
@@ -37,7 +37,7 @@ export function BrandLogoWall({ block }: BrandLogoWallProps) {
             ) : (
               <span
                 key={i}
-                className="text-brand-charcoal/30 text-sm font-bold tracking-wide uppercase"
+                className="text-ink/30 text-sm font-bold tracking-wide uppercase"
               >
                 {logo.emoji ?? logo.brand}
               </span>

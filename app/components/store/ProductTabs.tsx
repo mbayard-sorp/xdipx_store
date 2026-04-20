@@ -18,10 +18,10 @@ interface ProductTabsProps {
   reviewFilter?:   string
 }
 
-type Tab = 'The Full Story' | "What's In The Box" | 'Both Ways ♥' | 'Specs' | 'Reviews'
+type Tab = "Emma's take" | 'In the box' | 'Both ways ♥' | 'Specs' | 'Reviews'
 
 const proseBody =
-  'prose prose-sm max-w-none text-brand-charcoal/80 leading-relaxed'
+  'prose prose-sm max-w-none text-ink/80 leading-relaxed'
 
 export function ProductTabs({
   fullStory, boxContents, forHim, forHer, specifications,
@@ -32,14 +32,14 @@ export function ProductTabs({
   const hasForEither = Boolean(forHim || forHer)
 
   const visibleTabs: Tab[] = [
-    ...(fullStory ? ['The Full Story' as Tab] : []),
-    "What's In The Box",
-    ...(hasForEither ? ['Both Ways ♥' as Tab] : []),
+    ...(fullStory ? ["Emma's take" as Tab] : []),
+    'In the box',
+    ...(hasForEither ? ['Both ways ♥' as Tab] : []),
     ...(specifications ? ['Specs' as Tab] : []),
     ...(productId ? ['Reviews' as Tab] : []),
   ]
 
-  const [active, setActive] = useState<Tab>(visibleTabs[0] ?? "What's In The Box")
+  const [active, setActive] = useState<Tab>(visibleTabs[0] ?? 'In the box')
 
   const panelClass = (tab: Tab) => (active === tab ? '' : 'hidden')
   const panelId = (tab: Tab) => `tabpanel-${tab.replace(/\W+/g, '-').toLowerCase()}`
@@ -50,7 +50,7 @@ export function ProductTabs({
       <div
         role="tablist"
         aria-label="Product details"
-        className="flex gap-1 border-b border-brand-mist overflow-x-auto scrollbar-hide"
+        className="flex gap-1 border-b border-cream-2 overflow-x-auto scrollbar-hide"
       >
         {visibleTabs.map(tab => {
           const isActive = active === tab
@@ -66,8 +66,8 @@ export function ProductTabs({
               className={[
                 'px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-all',
                 isActive
-                  ? 'border-brand-coral text-brand-coral'
-                  : 'border-transparent text-brand-charcoal/60 hover:text-brand-charcoal',
+                  ? 'border-coral text-coral'
+                  : 'border-transparent text-ink/60 hover:text-ink',
               ].join(' ')}
               style={{ fontFamily: 'var(--font-display)' }}
             >
@@ -80,31 +80,31 @@ export function ProductTabs({
       <div className="py-6">
         {fullStory && (
           <section
-            id={panelId('The Full Story')}
+            id={panelId("Emma's take")}
             role="tabpanel"
-            aria-labelledby={tabId('The Full Story')}
-            className={panelClass('The Full Story')}
+            aria-labelledby={tabId("Emma's take")}
+            className={panelClass("Emma's take")}
           >
             <div className={proseBody} dangerouslySetInnerHTML={{ __html: fullStory }} />
           </section>
         )}
 
         <section
-          id={panelId("What's In The Box")}
+          id={panelId('In the box')}
           role="tabpanel"
-          aria-labelledby={tabId("What's In The Box")}
-          className={panelClass("What's In The Box")}
+          aria-labelledby={tabId('In the box')}
+          className={panelClass('In the box')}
         >
           <ul className="space-y-2">
             {boxContents.length > 0 ? (
               boxContents.map((item, i) => (
-                <li key={i} className="flex items-start gap-3 text-sm text-brand-charcoal/80">
-                  <span className="text-brand-purple mt-0.5 shrink-0" aria-hidden="true">♥</span>
+                <li key={i} className="flex items-start gap-3 text-sm text-ink/80">
+                  <span className="text-sage mt-0.5 shrink-0" aria-hidden="true">♥</span>
                   {item}
                 </li>
               ))
             ) : (
-              <li className="text-sm text-brand-charcoal/50">
+              <li className="text-sm text-ink/50">
                 Box contents not yet available.
               </li>
             )}
@@ -113,19 +113,19 @@ export function ProductTabs({
 
         {hasForEither && (
           <section
-            id={panelId('Both Ways ♥')}
+            id={panelId('Both ways ♥')}
             role="tabpanel"
-            aria-labelledby={tabId('Both Ways ♥')}
-            className={panelClass('Both Ways ♥')}
+            aria-labelledby={tabId('Both ways ♥')}
+            className={panelClass('Both ways ♥')}
           >
             <div className="grid md:grid-cols-2 gap-6">
               {forHim && (
                 <div>
                   <h3
-                    className="font-bold text-brand-charcoal mb-2 flex items-center gap-2"
+                    className="font-bold text-ink mb-2 flex items-center gap-2"
                     style={{ fontFamily: 'var(--font-display)' }}
                   >
-                    <span className="text-brand-purple" aria-hidden="true">♥</span> For Him
+                    <span className="text-sage" aria-hidden="true">♥</span> For Him
                   </h3>
                   <div className={proseBody} dangerouslySetInnerHTML={{ __html: forHim }} />
                 </div>
@@ -133,10 +133,10 @@ export function ProductTabs({
               {forHer && (
                 <div>
                   <h3
-                    className="font-bold text-brand-charcoal mb-2 flex items-center gap-2"
+                    className="font-bold text-ink mb-2 flex items-center gap-2"
                     style={{ fontFamily: 'var(--font-display)' }}
                   >
-                    <span className="text-brand-purple" aria-hidden="true">♥</span> For Her
+                    <span className="text-sage" aria-hidden="true">♥</span> For Her
                   </h3>
                   <div className={proseBody} dangerouslySetInnerHTML={{ __html: forHer }} />
                 </div>
@@ -153,7 +153,7 @@ export function ProductTabs({
             className={panelClass('Specs')}
           >
             <div
-              className={`${proseBody} [&_table]:w-full [&_table]:text-sm [&_th]:text-left [&_th]:font-semibold [&_th]:py-2 [&_th]:px-3 [&_th]:bg-brand-mist [&_td]:py-2 [&_td]:px-3 [&_tr]:border-b [&_tr]:border-brand-mist/60`}
+              className={`${proseBody} [&_table]:w-full [&_table]:text-sm [&_th]:text-left [&_th]:font-semibold [&_th]:py-2 [&_th]:px-3 [&_th]:bg-cream-2 [&_td]:py-2 [&_td]:px-3 [&_tr]:border-b [&_tr]:border-cream-2/60`}
               dangerouslySetInnerHTML={{ __html: specifications }}
             />
           </section>
@@ -178,15 +178,15 @@ export function ProductTabs({
                   filter={reviewFilter}
                 />
               ) : (
-                <div className="text-center py-8 bg-brand-mist/40 rounded-2xl">
+                <div className="text-center py-8 bg-cream-2/40 rounded-2xl">
                   <p className="text-3xl mb-2" aria-hidden="true">♥</p>
-                  <p className="text-brand-charcoal/50 text-sm">No reviews yet — be the first!</p>
+                  <p className="text-ink/50 text-sm">No reviews yet — be the first!</p>
                 </div>
               )}
 
-              <div className="border-t border-brand-mist pt-8">
+              <div className="border-t border-cream-2 pt-8">
                 <h3
-                  className="text-lg font-bold text-brand-charcoal mb-6"
+                  className="text-lg font-bold text-ink mb-6"
                   style={{ fontFamily: 'var(--font-display)' }}
                 >
                   Share your experience ♥

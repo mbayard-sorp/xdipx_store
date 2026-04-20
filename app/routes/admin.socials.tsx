@@ -145,7 +145,7 @@ export default function AdminSocialsPage() {
   }
 
   const charCount = tweetText.length
-  const charColor = charCount > 280 ? 'text-red-500' : charCount > 240 ? 'text-amber-500' : 'text-brand-charcoal/40'
+  const charColor = charCount > 280 ? 'text-red-500' : charCount > 240 ? 'text-amber-500' : 'text-ink/40'
 
   const discountPct = liveDeal?.msrp && liveDeal?.dealPrice
     ? Math.round(100 - (parseFloat(liveDeal.dealPrice) / parseFloat(liveDeal.msrp)) * 100)
@@ -153,18 +153,18 @@ export default function AdminSocialsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold font-display text-brand-charcoal">Socials</h1>
+      <h1 className="text-2xl font-bold font-display text-ink">Socials</h1>
 
       {/* ── Quick Post ───────────────────────────────── */}
       <section className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-lg font-semibold font-display text-brand-charcoal mb-4">
+        <h2 className="text-lg font-semibold font-display text-ink mb-4">
           Quick Post to X
         </h2>
 
         {liveDeal ? (
           <div className="space-y-4">
             {/* Deal preview */}
-            <div className="flex items-start gap-4 p-4 bg-brand-mist rounded-xl">
+            <div className="flex items-start gap-4 p-4 bg-cream-2 rounded-xl">
               {liveDealImage && (
                 <img
                   src={liveDealImage}
@@ -173,16 +173,16 @@ export default function AdminSocialsPage() {
                 />
               )}
               <div className="min-w-0">
-                <p className="font-semibold text-brand-charcoal truncate">
+                <p className="font-semibold text-ink truncate">
                   {liveDeal.seoTitle ?? liveDeal.sku}
                 </p>
-                <p className="text-sm text-brand-charcoal/60">
+                <p className="text-sm text-ink/60">
                   ${liveDeal.dealPrice}
                   {liveDeal.msrp && (
                     <span className="line-through ml-2">${liveDeal.msrp}</span>
                   )}
                   {discountPct > 0 && (
-                    <span className="ml-2 text-brand-coral font-semibold">{discountPct}% off</span>
+                    <span className="ml-2 text-coral font-semibold">{discountPct}% off</span>
                   )}
                 </p>
               </div>
@@ -202,7 +202,7 @@ export default function AdminSocialsPage() {
               <button
                 type="submit"
                 disabled={generateFetcher.state !== 'idle'}
-                className="px-4 py-2 bg-brand-mist text-brand-purple rounded-full text-sm font-medium hover:bg-brand-purple/10 transition-colors disabled:opacity-50"
+                className="px-4 py-2 bg-cream-2 text-sage rounded-full text-sm font-medium hover:bg-sage/10 transition-colors disabled:opacity-50"
               >
                 {generateFetcher.state !== 'idle' ? 'Generating...' : 'Generate Tweet with AI'}
               </button>
@@ -215,14 +215,14 @@ export default function AdminSocialsPage() {
                 onChange={(e) => setTweetText(e.target.value)}
                 rows={4}
                 placeholder="Write your tweet or generate one with AI..."
-                className="w-full rounded-xl border border-gray-200 p-3 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-purple/30 resize-none"
+                className="w-full rounded-xl border border-gray-200 p-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-sage/30 resize-none"
               />
               <div className="flex items-center justify-between mt-1">
                 <span className={`text-xs font-medium ${charColor}`}>
                   {charCount}/280
                 </span>
                 {generateData?.copy?.threadReply && (
-                  <span className="text-xs text-brand-purple">
+                  <span className="text-xs text-sage">
                     Thread reply also generated
                   </span>
                 )}
@@ -236,9 +236,9 @@ export default function AdminSocialsPage() {
                   type="checkbox"
                   checked={includeImage}
                   onChange={(e) => setIncludeImage(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-brand-purple focus:ring-brand-purple/30"
+                  className="w-4 h-4 rounded border-gray-300 text-sage focus:ring-sage/30"
                 />
-                <span className="text-sm text-brand-charcoal/70">Attach product image</span>
+                <span className="text-sm text-ink/70">Attach product image</span>
                 {includeImage && (
                   <img
                     src={liveDealImage}
@@ -260,7 +260,7 @@ export default function AdminSocialsPage() {
               <button
                 type="submit"
                 disabled={postFetcher.state !== 'idle' || !tweetText.trim() || charCount > 280}
-                className="px-6 py-2.5 bg-brand-gradient text-white rounded-full text-sm font-semibold font-display shadow-sm hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-6 py-2.5 bg-coral text-white rounded-full text-sm font-semibold font-display shadow-sm hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {postFetcher.state !== 'idle' ? 'Posting...' : 'Post to X'}
               </button>
@@ -281,17 +281,17 @@ export default function AdminSocialsPage() {
             )}
           </div>
         ) : (
-          <p className="text-brand-charcoal/50 text-sm">No live deal right now. Activate a deal first.</p>
+          <p className="text-ink/50 text-sm">No live deal right now. Activate a deal first.</p>
         )}
       </section>
 
       {/* ── Settings ─────────────────────────────────── */}
       <section className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-lg font-semibold font-display text-brand-charcoal mb-3">
+        <h2 className="text-lg font-semibold font-display text-ink mb-3">
           Settings
         </h2>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-brand-charcoal/70">Auto-post on deal activation:</span>
+          <span className="text-sm text-ink/70">Auto-post on deal activation:</span>
           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
             autoPostEnabled
               ? 'bg-green-100 text-green-700'
@@ -301,19 +301,19 @@ export default function AdminSocialsPage() {
             {autoPostEnabled ? 'Enabled' : 'Disabled'}
           </span>
         </div>
-        <p className="text-xs text-brand-charcoal/40 mt-2">
+        <p className="text-xs text-ink/40 mt-2">
           Toggle via <code className="bg-gray-100 px-1 rounded">X_AUTO_POST_ENABLED</code> environment variable in Vercel.
         </p>
       </section>
 
       {/* ── Post History ─────────────────────────────── */}
       <section className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-lg font-semibold font-display text-brand-charcoal mb-4">
+        <h2 className="text-lg font-semibold font-display text-ink mb-4">
           Post History
         </h2>
 
         {posts.length === 0 ? (
-          <p className="text-brand-charcoal/50 text-sm">No posts yet.</p>
+          <p className="text-ink/50 text-sm">No posts yet.</p>
         ) : (
           <div className="space-y-3">
             {posts.map((post) => (
@@ -322,7 +322,7 @@ export default function AdminSocialsPage() {
                 className="flex items-start gap-4 p-4 rounded-xl border border-gray-100 hover:border-gray-200 transition-colors"
               >
                 {/* Platform icon */}
-                <div className="w-8 h-8 rounded-full bg-brand-charcoal flex items-center justify-center shrink-0 mt-0.5">
+                <div className="w-8 h-8 rounded-full bg-ink flex items-center justify-center shrink-0 mt-0.5">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M4 4l11.733 16h4.267l-11.733-16z" />
                     <path d="M4 20l6.768-6.768M17.5 4l-6.768 6.768" />
@@ -331,13 +331,13 @@ export default function AdminSocialsPage() {
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-brand-charcoal whitespace-pre-wrap break-words">
+                  <p className="text-sm text-ink whitespace-pre-wrap break-words">
                     {post.tweetText.length > 200
                       ? `${post.tweetText.slice(0, 200)}...`
                       : post.tweetText
                     }
                   </p>
-                  <div className="flex items-center gap-3 mt-2 text-xs text-brand-charcoal/40">
+                  <div className="flex items-center gap-3 mt-2 text-xs text-ink/40">
                     <span>
                       {post.createdAt
                         ? new Date(post.createdAt).toLocaleDateString('en-US', {
@@ -364,7 +364,7 @@ export default function AdminSocialsPage() {
                         href={`https://x.com/xdipx/status/${post.externalPostId}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs text-brand-purple hover:underline"
+                        className="text-xs text-sage hover:underline"
                       >
                         View
                       </a>
@@ -384,7 +384,7 @@ export default function AdminSocialsPage() {
                           </deleteFetcher.Form>
                           <button
                             onClick={() => setDeleteConfirmId(null)}
-                            className="text-xs text-brand-charcoal/40 hover:underline"
+                            className="text-xs text-ink/40 hover:underline"
                           >
                             Cancel
                           </button>
@@ -407,7 +407,7 @@ export default function AdminSocialsPage() {
                       <button
                         type="submit"
                         disabled={retryFetcher.state !== 'idle'}
-                        className="text-xs text-brand-purple hover:underline disabled:opacity-50"
+                        className="text-xs text-sage hover:underline disabled:opacity-50"
                       >
                         Retry
                       </button>

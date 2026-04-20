@@ -41,16 +41,16 @@ export const links: LinksFunction = () => [
   { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
   // Preconnect for Google Analytics
   { rel: 'preconnect', href: 'https://www.googletagmanager.com' },
-  // Poppins (display) + Inter (body) — preload the stylesheet request so it
+  // Archivo (display) + Inter (body) — preload the stylesheet request so it
   // starts alongside HTML parsing instead of waiting for the parser to reach it.
   {
     rel: 'preload',
     as: 'style',
-    href: 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap',
+    href: 'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&display=swap',
   },
   {
     rel: 'stylesheet',
-    href: 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap',
+    href: 'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&display=swap',
   },
   { rel: 'stylesheet', href: stylesheet },
 ]
@@ -71,10 +71,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     utm,
     refCode,
     ENV: {
-      GA4_ID:          process.env['GA4_MEASUREMENT_ID'] ?? '',
-      GTM_ID:          process.env['GTM_CONTAINER_ID'] ?? '',
-      AGE_GATE_LEVEL:  process.env['AGE_GATE_LEVEL'] ?? 'click_through',
-      SENTRY_DSN:      process.env['SENTRY_DSN'] ?? '',
+      GA4_ID:            process.env['GA4_MEASUREMENT_ID'] ?? '',
+      GTM_ID:            process.env['GTM_CONTAINER_ID']   ?? '',
+      AGE_GATE_LEVEL:    process.env['AGE_GATE_LEVEL']     ?? 'click_through',
+      SENTRY_DSN:        process.env['SENTRY_DSN']         ?? '',
+      EMMA_TEXT_NUMBER:  process.env['EMMA_TEXT_NUMBER']   ?? '',
     },
   }
 }
@@ -90,7 +91,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     : (process.env['GTM_CONTAINER_ID'] ?? '')
 
   return (
-    <html lang="en" className="bg-brand-cream">
+    <html lang="en" className="bg-cream">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -123,7 +124,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         )}
       </head>
       <body
-        className="font-body text-brand-charcoal antialiased"
+        className="font-body text-ink antialiased"
         style={{ fontFamily: 'var(--font-body)' }}
       >
         {gtmId && (
@@ -174,19 +175,19 @@ export function ErrorBoundary() {
   }
 
   return (
-    <div className="min-h-screen bg-brand-cream flex items-center justify-center px-4">
+    <div className="min-h-screen bg-cream flex items-center justify-center px-4">
       <div className="text-center max-w-md">
         <div className="text-5xl mb-6">♥</div>
         <h1
-          className="text-3xl font-bold mb-3 text-brand-gradient"
+          className="text-3xl font-bold mb-3 text-coral"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {heading}
         </h1>
-        <p className="text-brand-charcoal/70 mb-8">{message}</p>
+        <p className="text-ink/70 mb-8">{message}</p>
         <a
           href="/"
-          className="inline-block bg-brand-gradient text-white font-semibold px-8 py-3 rounded-full transition-opacity hover:opacity-90"
+          className="inline-block bg-coral text-white font-semibold px-8 py-3 rounded-full transition-opacity hover:opacity-90"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Back to today's deal ♥

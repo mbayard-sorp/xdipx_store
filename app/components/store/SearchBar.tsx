@@ -152,20 +152,20 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
     return (
       <>
         {text.slice(0, idx)}
-        <strong className="font-bold text-brand-charcoal">{text.slice(idx, idx + query.length)}</strong>
+        <strong className="font-bold text-ink">{text.slice(idx, idx + query.length)}</strong>
         {text.slice(idx + query.length)}
       </>
     )
   }
 
   const megaDropdown = (
-    <div className="bg-white border border-brand-mist rounded-2xl shadow-xl overflow-hidden">
+    <div className="bg-white border border-cream-2 rounded-2xl shadow-xl overflow-hidden">
       {/* View all results banner — subtle purple accent */}
       {results.totalProducts > 0 && !isLoading && (
         <Link
           to={`/search?q=${encodeURIComponent(query)}`}
           onClick={handleResultClick}
-          className="flex items-center gap-2 px-5 py-2.5 bg-brand-purple/5 text-brand-purple text-sm font-semibold hover:bg-brand-purple/10 transition-colors border-b border-brand-mist"
+          className="flex items-center gap-2 px-5 py-2.5 bg-sage/5 text-sage text-sm font-semibold hover:bg-sage/10 transition-colors border-b border-cream-2"
         >
           <SearchIcon className="w-4 h-4 shrink-0" />
           View all {results.totalProducts} result{results.totalProducts === 1 ? '' : 's'} for &ldquo;{query}&rdquo;
@@ -176,18 +176,18 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
         <div className="p-4 flex gap-4 animate-pulse">
           {[0, 1, 2].map(i => (
             <div key={i} className="flex-1 space-y-2">
-              <div className="aspect-square rounded-xl bg-brand-mist" />
-              <div className="h-3 bg-brand-mist rounded w-4/5" />
-              <div className="h-3 bg-brand-mist rounded w-1/2" />
+              <div className="aspect-square rounded-xl bg-cream-2" />
+              <div className="h-3 bg-cream-2 rounded w-4/5" />
+              <div className="h-3 bg-cream-2 rounded w-1/2" />
             </div>
           ))}
         </div>
       ) : topProducts.length === 0 ? (
-        <p className="px-5 py-5 text-sm text-brand-charcoal/50 text-center">
+        <p className="px-5 py-5 text-sm text-ink/50 text-center">
           No results found for &ldquo;{query}&rdquo;
         </p>
       ) : (
-        <div className="flex divide-x divide-brand-mist">
+        <div className="flex divide-x divide-cream-2">
           {/* Left: product tiles with price */}
           <div className="flex-1 p-4">
             <ul className="grid grid-cols-3 gap-3">
@@ -202,7 +202,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                       onClick={handleResultClick}
                       className="group block"
                     >
-                      <div className="aspect-square rounded-xl overflow-hidden bg-brand-mist mb-2">
+                      <div className="aspect-square rounded-xl overflow-hidden bg-cream-2 mb-2">
                         {product.previewImageUrl ? (
                           <img
                             src={product.previewImageUrl}
@@ -210,20 +210,20 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                           />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-brand-charcoal/10 text-2xl">♥</div>
+                          <div className="w-full h-full flex items-center justify-center text-ink/10 text-2xl">♥</div>
                         )}
                       </div>
                       {product.vendor && (
-                        <p className="text-[11px] text-brand-charcoal/50 truncate leading-tight">{product.vendor}</p>
+                        <p className="text-[11px] text-ink/50 truncate leading-tight">{product.vendor}</p>
                       )}
-                      <p className="text-xs font-medium text-brand-charcoal line-clamp-2 leading-snug group-hover:text-brand-coral transition-colors mb-1">
+                      <p className="text-xs font-medium text-ink line-clamp-2 leading-snug group-hover:text-coral transition-colors mb-1">
                         {highlight(product.title)}
                       </p>
                       {price && (
                         <p className="flex items-baseline gap-1.5">
-                          <span className={`text-sm font-bold ${onSale ? 'text-brand-coral' : 'text-brand-charcoal'}`}>{price}</span>
+                          <span className={`text-sm font-bold ${onSale ? 'text-coral' : 'text-ink'}`}>{price}</span>
                           {onSale && compare && (
-                            <span className="text-[11px] text-brand-charcoal/40 line-through">{compare}</span>
+                            <span className="text-[11px] text-ink/40 line-through">{compare}</span>
                           )}
                         </p>
                       )}
@@ -239,7 +239,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
             <div className="w-48 shrink-0 p-4">
               {topCategories.length > 0 && (
                 <div className="mb-4">
-                  <p className="text-[10px] font-bold text-brand-charcoal/40 uppercase tracking-widest mb-2">
+                  <p className="text-[10px] font-bold text-ink/40 uppercase tracking-widest mb-2">
                     Categories
                   </p>
                   <ul className="space-y-2">
@@ -248,7 +248,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                         <Link
                           to={`/search?q=${encodeURIComponent(cat.label)}`}
                           onClick={handleResultClick}
-                          className="text-sm text-brand-charcoal/70 hover:text-brand-purple transition-colors leading-tight block"
+                          className="text-sm text-ink/70 hover:text-sage transition-colors leading-tight block"
                         >
                           {highlight(cat.label)}
                         </Link>
@@ -258,7 +258,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                 </div>
               )}
               <div>
-                <p className="text-[10px] font-bold text-brand-charcoal/40 uppercase tracking-widest mb-2">
+                <p className="text-[10px] font-bold text-ink/40 uppercase tracking-widest mb-2">
                   Popular searches
                 </p>
                 <ul className="space-y-2">
@@ -267,7 +267,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                       <Link
                         to={`/search?q=${encodeURIComponent(term)}`}
                         onClick={handleResultClick}
-                        className="text-sm text-brand-charcoal/70 hover:text-brand-purple transition-colors leading-tight block"
+                        className="text-sm text-ink/70 hover:text-sage transition-colors leading-tight block"
                       >
                         {term}
                       </Link>
@@ -293,8 +293,8 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
           style={{ willChange: 'width' }}
         >
           {isExpanded ? (
-            <div className="w-full flex items-center gap-2 px-3 h-10 bg-white border border-brand-mist focus-within:border-brand-purple/50 focus-within:ring-2 focus-within:ring-brand-purple/20 rounded-full transition-all">
-              <SearchIcon className="w-4 h-4 text-brand-charcoal/40 shrink-0" />
+            <div className="w-full flex items-center gap-2 px-3 h-10 bg-white border border-cream-2 focus-within:border-sage/50 focus-within:ring-2 focus-within:ring-sage/20 rounded-full transition-all">
+              <SearchIcon className="w-4 h-4 text-ink/40 shrink-0" />
               <input
                 ref={inputRef}
                 type="search"
@@ -302,7 +302,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
                 placeholder="Search products…"
-                className="flex-1 text-sm text-brand-charcoal bg-transparent outline-none placeholder:text-brand-charcoal/40 min-w-0 [&::-webkit-search-cancel-button]:hidden"
+                className="flex-1 text-sm text-ink bg-transparent outline-none placeholder:text-ink/40 min-w-0 [&::-webkit-search-cancel-button]:hidden"
                 aria-label="Search products"
                 aria-autocomplete="list"
                 aria-expanded={showDropdown}
@@ -310,7 +310,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
               {query && (
                 <button
                   onClick={() => { setQuery(''); setResults({ products: [], totalProducts: 0, categories: [] }); inputRef.current?.focus() }}
-                  className="text-brand-charcoal/30 hover:text-brand-charcoal/60 transition-colors"
+                  className="text-ink/30 hover:text-ink/60 transition-colors"
                   aria-label="Clear search"
                 >
                   <XIcon className="w-3.5 h-3.5" />
@@ -320,10 +320,10 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
           ) : (
             <button
               onClick={expand}
-              className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-brand-mist transition-colors"
+              className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-cream-2 transition-colors"
               aria-label="Open search"
             >
-              <SearchIcon className="w-[18px] h-[18px] text-brand-charcoal/60" />
+              <SearchIcon className="w-[18px] h-[18px] text-ink/60" />
             </button>
           )}
         </motion.div>
@@ -347,10 +347,10 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
       {/* ── Mobile search icon ─────────────────────────────────────────── */}
       <button
         onClick={() => setMobileOpen(true)}
-        className="md:hidden flex items-center justify-center w-11 h-11 rounded-full hover:bg-brand-mist transition-colors"
+        className="md:hidden flex items-center justify-center w-11 h-11 rounded-full hover:bg-cream-2 transition-colors"
         aria-label="Open search"
       >
-        <SearchIcon className="w-[18px] h-[18px] text-brand-charcoal/60" />
+        <SearchIcon className="w-[18px] h-[18px] text-ink/60" />
       </button>
 
       {/* ── Mobile full-screen overlay ─────────────────────────────────── */}
@@ -361,12 +361,12 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-[80] bg-brand-cream/98 backdrop-blur-sm flex flex-col md:hidden"
+            className="fixed inset-0 z-[80] bg-cream/98 backdrop-blur-sm flex flex-col md:hidden"
           >
             {/* Header */}
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-brand-mist">
-              <div className="flex-1 flex items-center gap-2 px-3 h-10 bg-white border border-brand-mist focus-within:border-brand-purple/50 focus-within:ring-2 focus-within:ring-brand-purple/20 rounded-full">
-                <SearchIcon className="w-4 h-4 text-brand-charcoal/40 shrink-0" />
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-cream-2">
+              <div className="flex-1 flex items-center gap-2 px-3 h-10 bg-white border border-cream-2 focus-within:border-sage/50 focus-within:ring-2 focus-within:ring-sage/20 rounded-full">
+                <SearchIcon className="w-4 h-4 text-ink/40 shrink-0" />
                 <input
                   ref={mobileInputRef}
                   type="search"
@@ -374,13 +374,13 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                   onChange={handleChange}
                   onKeyDown={handleKeyDown}
                   placeholder="Search products…"
-                  className="flex-1 text-sm text-brand-charcoal bg-transparent outline-none placeholder:text-brand-charcoal/40 min-w-0 [&::-webkit-search-cancel-button]:hidden"
+                  className="flex-1 text-sm text-ink bg-transparent outline-none placeholder:text-ink/40 min-w-0 [&::-webkit-search-cancel-button]:hidden"
                   aria-label="Search products"
                 />
                 {query && (
                   <button
                     onClick={() => { setQuery(''); setResults({ products: [], totalProducts: 0, categories: [] }); mobileInputRef.current?.focus() }}
-                    className="text-brand-charcoal/30 hover:text-brand-charcoal/60 transition-colors"
+                    className="text-ink/30 hover:text-ink/60 transition-colors"
                     aria-label="Clear search"
                   >
                     <XIcon className="w-3.5 h-3.5" />
@@ -389,7 +389,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
               </div>
               <button
                 onClick={closeMobile}
-                className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-brand-mist transition-colors text-brand-charcoal/60"
+                className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-cream-2 transition-colors text-ink/60"
                 aria-label="Close search"
               >
                 <XIcon className="w-4 h-4" />
@@ -405,7 +405,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                     <Link
                       to={`/search?q=${encodeURIComponent(query)}`}
                       onClick={handleResultClick}
-                      className="flex items-center justify-center gap-2 w-full px-5 py-3 mb-4 bg-brand-purple/5 text-brand-purple text-sm font-semibold rounded-full hover:bg-brand-purple/10 transition-colors"
+                      className="flex items-center justify-center gap-2 w-full px-5 py-3 mb-4 bg-sage/5 text-sage text-sm font-semibold rounded-full hover:bg-sage/10 transition-colors"
                     >
                       <SearchIcon className="w-4 h-4" />
                       View all {results.totalProducts} result{results.totalProducts === 1 ? '' : 's'} for &ldquo;{query}&rdquo;
@@ -422,19 +422,19 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                         return (
                           <li key={product.handle}>
                             <Link to={`/products/${product.handle}`} onClick={handleResultClick} className="group block">
-                              <div className="aspect-square rounded-xl overflow-hidden bg-brand-mist mb-2">
+                              <div className="aspect-square rounded-xl overflow-hidden bg-cream-2 mb-2">
                                 {product.previewImageUrl ? (
                                   <img src={product.previewImageUrl} alt={product.title} className="w-full h-full object-cover" />
                                 ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-brand-charcoal/10 text-2xl">♥</div>
+                                  <div className="w-full h-full flex items-center justify-center text-ink/10 text-2xl">♥</div>
                                 )}
                               </div>
-                              <p className="text-xs font-medium text-brand-charcoal line-clamp-2 leading-snug mb-1">{product.title}</p>
+                              <p className="text-xs font-medium text-ink line-clamp-2 leading-snug mb-1">{product.title}</p>
                               {price && (
                                 <p className="flex items-baseline gap-1.5">
-                                  <span className={`text-sm font-bold ${onSale ? 'text-brand-coral' : 'text-brand-charcoal'}`}>{price}</span>
+                                  <span className={`text-sm font-bold ${onSale ? 'text-coral' : 'text-ink'}`}>{price}</span>
                                   {onSale && compare && (
-                                    <span className="text-[11px] text-brand-charcoal/40 line-through">{compare}</span>
+                                    <span className="text-[11px] text-ink/40 line-through">{compare}</span>
                                   )}
                                 </p>
                               )}
@@ -448,14 +448,14 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                   {/* Categories */}
                   {topCategories.length > 0 && (
                     <div className="mb-4">
-                      <p className="text-[10px] font-bold text-brand-charcoal/40 uppercase tracking-widest mb-3">Categories</p>
+                      <p className="text-[10px] font-bold text-ink/40 uppercase tracking-widest mb-3">Categories</p>
                       <ul className="space-y-3">
                         {topCategories.map(cat => (
                           <li key={cat.label}>
                             <Link
                               to={`/search?q=${encodeURIComponent(cat.label)}`}
                               onClick={handleResultClick}
-                              className="text-sm text-brand-charcoal/70 hover:text-brand-purple transition-colors"
+                              className="text-sm text-ink/70 hover:text-sage transition-colors"
                             >
                               {highlight(cat.label)}
                             </Link>
@@ -467,14 +467,14 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
 
                   {/* Popular searches */}
                   <div>
-                    <p className="text-[10px] font-bold text-brand-charcoal/40 uppercase tracking-widest mb-3">Popular searches</p>
+                    <p className="text-[10px] font-bold text-ink/40 uppercase tracking-widest mb-3">Popular searches</p>
                     <ul className="space-y-3">
                       {POPULAR_SEARCHES.map(term => (
                         <li key={term}>
                           <Link
                             to={`/search?q=${encodeURIComponent(term)}`}
                             onClick={handleResultClick}
-                            className="text-sm text-brand-charcoal/70 hover:text-brand-purple transition-colors"
+                            className="text-sm text-ink/70 hover:text-sage transition-colors"
                           >
                             {term}
                           </Link>
@@ -484,7 +484,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                   </div>
                 </div>
               ) : (
-                <div className="px-6 py-12 text-center text-brand-charcoal/40 text-sm">
+                <div className="px-6 py-12 text-center text-ink/40 text-sm">
                   Start typing to search products…
                 </div>
               )}

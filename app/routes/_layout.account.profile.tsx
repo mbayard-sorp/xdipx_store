@@ -435,26 +435,26 @@ export default function ProfilePage() {
       <div className="space-y-6">
         <PageHeading email={customer.email} />
 
-        <div className="bg-white border border-brand-mist rounded-2xl px-6 py-8 text-center space-y-3">
+        <div className="bg-white border border-cream-2 rounded-2xl px-6 py-8 text-center space-y-3">
           <p
-            className="text-base font-semibold text-brand-charcoal"
+            className="text-base font-semibold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            Profile editing isn't available for Shop-login sessions yet <span className="text-brand-purple">♥</span>
+            Profile editing isn't available for Shop-login sessions yet <span className="text-sage">♥</span>
           </p>
-          <p className="text-sm text-brand-charcoal/60">
+          <p className="text-sm text-ink/60">
             Sign in with email and password to edit your profile details.
           </p>
         </div>
 
         <section className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
           <h2
-            className="text-base font-bold text-brand-charcoal"
+            className="text-base font-bold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Email
           </h2>
-          <p className="text-sm text-brand-charcoal/80">{customer.email}</p>
+          <p className="text-sm text-ink/80">{customer.email}</p>
         </section>
       </div>
     )
@@ -468,7 +468,7 @@ export default function ProfilePage() {
       {/* Card 1 — Personal details */}
       <section className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
         <h2
-          className="text-base font-bold text-brand-charcoal"
+          className="text-base font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Personal details
@@ -523,7 +523,7 @@ export default function ProfilePage() {
             <button
               type="submit"
               disabled={personalFetcher.state !== 'idle'}
-              className="px-5 py-2.5 rounded-full text-sm font-bold text-white bg-brand-gradient hover:opacity-90 transition-opacity disabled:opacity-60"
+              className="px-5 py-2.5 rounded-full text-sm font-bold text-white bg-coral hover:opacity-90 transition-opacity disabled:opacity-60"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {personalFetcher.state !== 'idle' ? 'Saving…' : 'Save ♥'}
@@ -536,13 +536,13 @@ export default function ProfilePage() {
       <section className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
         <div>
           <h2
-            className="text-base font-bold text-brand-charcoal"
+            className="text-base font-bold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Tell us about you
           </h2>
-          <p className="text-xs text-brand-charcoal/50 mt-0.5">
-            Helps us personalize your deals <span className="text-brand-purple">♥</span>
+          <p className="text-xs text-ink/50 mt-0.5">
+            Helps us personalize your deals <span className="text-sage">♥</span>
           </p>
         </div>
 
@@ -588,12 +588,12 @@ export default function ProfilePage() {
               className={inputClass}
             />
           </FieldGroup>
-          <p className="text-xs text-brand-charcoal/40 -mt-2">
+          <p className="text-xs text-ink/40 -mt-2">
             xdipx.com accounts are only available for customers 18 years or over.
           </p>
 
           <div className="space-y-2">
-            <p className="text-sm font-medium text-brand-charcoal">Anniversaries</p>
+            <p className="text-sm font-medium text-ink">Anniversaries</p>
             <input type="hidden" name="anniv_count" value={annivRows.length} />
 
             {annivRows.map((row, i) => (
@@ -620,7 +620,7 @@ export default function ProfilePage() {
                 <button
                   type="button"
                   onClick={() => setAnnivRows(prev => prev.filter((_, j) => j !== i))}
-                  className="mt-3 text-brand-charcoal/30 hover:text-red-400 transition-colors text-lg leading-none"
+                  className="mt-3 text-ink/30 hover:text-red-400 transition-colors text-lg leading-none"
                   aria-label="Remove anniversary"
                 >
                   ×
@@ -631,7 +631,7 @@ export default function ProfilePage() {
             <button
               type="button"
               onClick={() => setAnnivRows(prev => [...prev, { name: '', date: '' }])}
-              className="text-sm text-brand-purple hover:text-brand-purple-light transition-colors font-medium"
+              className="text-sm text-sage hover:text-sun transition-colors font-medium"
             >
               + Add anniversary
             </button>
@@ -641,7 +641,7 @@ export default function ProfilePage() {
             <p role="alert" className="text-sm text-red-600">{extrasError}</p>
           )}
 
-          <p className="text-xs text-brand-charcoal/40 leading-relaxed">
+          <p className="text-xs text-ink/40 leading-relaxed">
             We never share this information with any other companies for marketing purposes other than our own.
             This helps us give you a better experience of the xdipx.com website, and also lets us provide you
             with information about products and topics that are most relevant to you.
@@ -651,7 +651,7 @@ export default function ProfilePage() {
             <button
               type="submit"
               disabled={extrasFetcher.state !== 'idle'}
-              className="px-5 py-2.5 rounded-full text-sm font-bold text-white bg-brand-gradient hover:opacity-90 transition-opacity disabled:opacity-60"
+              className="px-5 py-2.5 rounded-full text-sm font-bold text-white bg-coral hover:opacity-90 transition-opacity disabled:opacity-60"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {extrasFetcher.state !== 'idle' ? 'Saving…' : 'Save ♥'}
@@ -664,7 +664,7 @@ export default function ProfilePage() {
 
       <section className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
         <h2
-          className="text-base font-bold text-brand-charcoal"
+          className="text-base font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Email
@@ -672,11 +672,11 @@ export default function ProfilePage() {
 
         {!editingEmail ? (
           <div className="flex items-center justify-between gap-4 flex-wrap">
-            <p className="text-sm text-brand-charcoal/80 break-all">{customer.email}</p>
+            <p className="text-sm text-ink/80 break-all">{customer.email}</p>
             <button
               type="button"
               onClick={() => setEditingEmail(true)}
-              className="shrink-0 px-4 py-2 rounded-full text-sm font-semibold text-brand-charcoal bg-brand-mist hover:bg-brand-mist/70 transition-colors"
+              className="shrink-0 px-4 py-2 rounded-full text-sm font-semibold text-ink bg-cream-2 hover:bg-cream-2/70 transition-colors"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Change email
@@ -722,7 +722,7 @@ export default function ProfilePage() {
               <button
                 type="button"
                 onClick={() => setEditingEmail(false)}
-                className="px-4 py-2.5 rounded-full text-sm font-semibold text-brand-charcoal bg-brand-mist hover:bg-brand-mist/70 transition-colors"
+                className="px-4 py-2.5 rounded-full text-sm font-semibold text-ink bg-cream-2 hover:bg-cream-2/70 transition-colors"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
                 Cancel
@@ -730,7 +730,7 @@ export default function ProfilePage() {
               <button
                 type="submit"
                 disabled={emailFetcher.state !== 'idle'}
-                className="px-5 py-2.5 rounded-full text-sm font-bold text-white bg-brand-gradient hover:opacity-90 transition-opacity disabled:opacity-60"
+                className="px-5 py-2.5 rounded-full text-sm font-bold text-white bg-coral hover:opacity-90 transition-opacity disabled:opacity-60"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
                 {emailFetcher.state !== 'idle' ? 'Updating…' : 'Update email'}
@@ -743,7 +743,7 @@ export default function ProfilePage() {
       {/* Card 4 — Password */}
       <section className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
         <h2
-          className="text-base font-bold text-brand-charcoal"
+          className="text-base font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Password
@@ -796,7 +796,7 @@ export default function ProfilePage() {
             <button
               type="submit"
               disabled={passwordFetcher.state !== 'idle'}
-              className="px-5 py-2.5 rounded-full text-sm font-bold text-white bg-brand-gradient hover:opacity-90 transition-opacity disabled:opacity-60"
+              className="px-5 py-2.5 rounded-full text-sm font-bold text-white bg-coral hover:opacity-90 transition-opacity disabled:opacity-60"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {passwordFetcher.state !== 'idle' ? 'Updating…' : 'Update password'}
@@ -808,7 +808,7 @@ export default function ProfilePage() {
       {/* Card 5 — Marketing */}
       <section className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
         <h2
-          className="text-base font-bold text-brand-charcoal"
+          className="text-base font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Marketing
@@ -818,11 +818,11 @@ export default function ProfilePage() {
           <div className="flex-1 min-w-0">
             <p
               id="marketing-label"
-              className="text-sm font-semibold text-brand-charcoal"
+              className="text-sm font-semibold text-ink"
             >
-              Email me about deals and drops <span className="text-brand-purple">♥</span>
+              Email me about deals and drops <span className="text-sage">♥</span>
             </p>
-            <p className="text-xs text-brand-charcoal/60 mt-0.5">
+            <p className="text-xs text-ink/60 mt-0.5">
               One deal a day, midnight sharp. Unsubscribe anytime.
             </p>
           </div>
@@ -844,10 +844,10 @@ export default function ProfilePage() {
         >
           Danger zone
         </h2>
-        <p className="text-xs text-brand-charcoal/70 leading-relaxed">
+        <p className="text-xs text-ink/70 leading-relaxed">
           This removes your profile, addresses, and marketing subscriptions.
           Past orders stay with xdipx for tax and shipping records. This can't
-          be undone <span className="text-brand-purple">♥</span>
+          be undone <span className="text-sage">♥</span>
         </p>
 
         {deleteError && (
@@ -859,7 +859,7 @@ export default function ProfilePage() {
             type="button"
             onClick={() => setConfirmDelete(true)}
             disabled={deleteFetcher.state !== 'idle'}
-            className="px-5 py-2.5 rounded-full text-sm font-bold text-red-700 bg-brand-mist hover:bg-brand-mist/70 border border-red-200 transition-colors disabled:opacity-60"
+            className="px-5 py-2.5 rounded-full text-sm font-bold text-red-700 bg-cream-2 hover:bg-cream-2/70 border border-red-200 transition-colors disabled:opacity-60"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {deleteFetcher.state !== 'idle' ? 'Deleting…' : 'Delete my account'}
@@ -896,12 +896,12 @@ function PageHeading({ email }: { email: string }) {
   return (
     <section className="hidden lg:block">
       <h1
-        className="text-2xl font-bold text-brand-charcoal"
+        className="text-2xl font-bold text-ink"
         style={{ fontFamily: 'var(--font-display)' }}
       >
-        Profile <span className="text-brand-purple">♥</span>
+        Profile <span className="text-sage">♥</span>
       </h1>
-      <p className="text-sm text-brand-charcoal/50 mt-0.5">{email}</p>
+      <p className="text-sm text-ink/50 mt-0.5">{email}</p>
     </section>
   )
 }
@@ -942,7 +942,7 @@ function PasswordField({
         type="button"
         onClick={onToggleVisible}
         aria-label={visible ? 'Hide password' : 'Show password'}
-        className="absolute inset-y-0 right-0 flex items-center justify-center w-11 text-brand-charcoal/60 hover:text-brand-charcoal"
+        className="absolute inset-y-0 right-0 flex items-center justify-center w-11 text-ink/60 hover:text-ink"
       >
         {visible ? (
           <svg aria-hidden="true" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">

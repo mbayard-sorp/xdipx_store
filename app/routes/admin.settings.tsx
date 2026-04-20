@@ -155,11 +155,11 @@ export default function AdminSettingsPage() {
       <fetcher.Form method="post" className="space-y-1">
         <input type="hidden" name="intent" value="save-setting" />
         <input type="hidden" name="key"    value={settingKey} />
-        <label className="block text-sm font-semibold text-brand-charcoal">
+        <label className="block text-sm font-semibold text-ink">
           {label}
         </label>
         {description && (
-          <p className="text-xs text-brand-charcoal/50">{description}</p>
+          <p className="text-xs text-ink/50">{description}</p>
         )}
         <div className={`${multiline ? 'flex flex-col gap-2' : 'flex gap-3 items-center'} pt-1`}>
           {multiline ? (
@@ -167,21 +167,21 @@ export default function AdminSettingsPage() {
               name="value"
               defaultValue={settings[settingKey] ?? ''}
               rows={rows ?? 4}
-              className="w-full border border-brand-mist rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30 font-body leading-relaxed"
+              className="w-full border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30 font-body leading-relaxed"
             />
           ) : (
             <input
               type={type}
               name="value"
               defaultValue={settings[settingKey] ?? ''}
-              className={`${inputWidth ?? 'flex-1'} border border-brand-mist rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30`}
+              className={`${inputWidth ?? 'flex-1'} border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30`}
               min={min}
               max={max}
             />
           )}
           <button
             type="submit"
-            className={`text-sm font-semibold px-4 py-2 bg-brand-mist text-brand-purple rounded-full hover:bg-brand-purple/10 transition-colors whitespace-nowrap ${multiline ? 'self-start' : ''}`}
+            className={`text-sm font-semibold px-4 py-2 bg-cream-2 text-sage rounded-full hover:bg-sage/10 transition-colors whitespace-nowrap ${multiline ? 'self-start' : ''}`}
           >
             Save
           </button>
@@ -193,7 +193,7 @@ export default function AdminSettingsPage() {
   return (
     <div className="max-w-2xl space-y-8">
       <h1
-        className="text-2xl font-bold text-brand-charcoal"
+        className="text-2xl font-bold text-ink"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Settings
@@ -201,7 +201,7 @@ export default function AdminSettingsPage() {
 
       {/* Analytics */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
-        <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <h2 className="text-base font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Analytics
         </h2>
 
@@ -214,7 +214,7 @@ export default function AdminSettingsPage() {
 
       {/* Feed Settings */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
-        <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <h2 className="text-base font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Feed Settings
         </h2>
 
@@ -249,10 +249,10 @@ export default function AdminSettingsPage() {
           description="When a deal ends, the new Everyday Price will be MSRP less the value below when it leaves the buy box."
         />
 
-        <div className="flex items-center gap-6 text-sm text-brand-charcoal/60 pt-2 border-t border-brand-mist">
+        <div className="flex items-center gap-6 text-sm text-ink/60 pt-2 border-t border-cream-2">
           <span>
             Last feed run:{' '}
-            <span className="font-medium text-brand-charcoal">
+            <span className="font-medium text-ink">
               {feedTimestamp
                 ? new Date(feedTimestamp).toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' ET'
                 : 'Never'}
@@ -260,17 +260,17 @@ export default function AdminSettingsPage() {
           </span>
           <span>
             Candidates in cache:{' '}
-            <span className="font-medium text-brand-charcoal">{candidateCount}</span>
+            <span className="font-medium text-ink">{candidateCount}</span>
           </span>
         </div>
       </section>
 
       {/* Pipeline */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
-        <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <h2 className="text-base font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Pipeline
         </h2>
-        <p className="text-sm text-brand-charcoal/60">
+        <p className="text-sm text-ink/60">
           Manually run the full pipeline: fetch feed → select deal → create Shopify product →
           generate AI copy → push metafields → stage for review.
         </p>
@@ -284,11 +284,11 @@ export default function AdminSettingsPage() {
           description="Only select products with at least this much profit per unit (deal price − wholesale cost). Enter a dollar amount, e.g. 10 for $10 minimum."
         />
 
-        <div className="pt-2 border-t border-brand-mist">
+        <div className="pt-2 border-t border-cream-2">
           <pipelineFetcher.Form method="post" className="flex items-end gap-3">
             <input type="hidden" name="intent" value="run-pipeline" />
             <div>
-              <label className="block text-xs font-semibold text-brand-charcoal/50 mb-1">
+              <label className="block text-xs font-semibold text-ink/50 mb-1">
                 Min Gross Margin
               </label>
               <div className="relative w-28">
@@ -299,15 +299,15 @@ export default function AdminSettingsPage() {
                   min="0"
                   max="99"
                   step="1"
-                  className="w-full border border-brand-mist rounded-xl pl-3 pr-7 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/30"
+                  className="w-full border border-cream-2 rounded-xl pl-3 pr-7 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-brand-charcoal/40">%</span>
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-ink/40">%</span>
               </div>
             </div>
             <button
               type="submit"
               disabled={pipelineFetcher.state !== 'idle'}
-              className="text-sm font-semibold px-5 py-2.5 bg-brand-gradient text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="text-sm font-semibold px-5 py-2.5 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               {pipelineFetcher.state !== 'idle' ? '⏳ Running…' : '▶ Run Pipeline Now'}
             </button>
@@ -331,11 +331,11 @@ export default function AdminSettingsPage() {
       {/* ── Sanity Sync ──────────────────────────────────────────────────────── */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
         <div>
-          <h2 className="text-base font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+          <h2 className="text-base font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
             Sanity Product Sync
           </h2>
-          <p className="text-sm text-brand-charcoal/60 mt-1">
-            Creates a Sanity <code className="text-xs bg-brand-mist px-1 py-0.5 rounded">productPage</code> stub
+          <p className="text-sm text-ink/60 mt-1">
+            Creates a Sanity <code className="text-xs bg-cream-2 px-1 py-0.5 rounded">productPage</code> stub
             for every Shopify product that doesn't have one yet. Safe to run multiple times — existing docs are skipped.
             New products added to Shopify in future will sync automatically via webhook.
           </p>
@@ -346,7 +346,7 @@ export default function AdminSettingsPage() {
           <button
             type="submit"
             disabled={fetcher.state !== 'idle'}
-            className="text-sm font-semibold px-5 py-2.5 bg-brand-mist text-brand-purple rounded-full hover:bg-brand-purple/10 transition-colors disabled:opacity-50"
+            className="text-sm font-semibold px-5 py-2.5 bg-cream-2 text-sage rounded-full hover:bg-sage/10 transition-colors disabled:opacity-50"
           >
             {fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'sync-sanity'
               ? '⏳ Syncing…'

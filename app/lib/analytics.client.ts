@@ -154,10 +154,6 @@ export function trackDealView(handle: string, title: string, price: number) {
   gtag('event', 'deal_view', { deal_handle: handle, deal_title: title, deal_price: price })
 }
 
-export function trackCountdownUrgency(hoursRemaining: number) {
-  gtag('event', 'countdown_urgency', { hours_remaining: hoursRemaining })
-}
-
 export function trackVaultBrowse(tab: string, page: number) {
   gtag('event', 'vault_browse', { vault_tab: tab, vault_page: page })
 }

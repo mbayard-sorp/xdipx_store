@@ -17,7 +17,7 @@ export function BonusDealSection({ block, product }: BonusDealSectionProps) {
   const heading = block.heading || 'Because one deal is never enough.'
 
   return (
-    <section className="py-10 px-4 bg-brand-charcoal">
+    <section className="py-10 px-4 bg-ink">
       <div className="max-w-4xl mx-auto">
         <p
           className="text-sm uppercase tracking-widest text-center mb-2 text-white/50"
@@ -51,7 +51,7 @@ export function BonusDealSection({ block, product }: BonusDealSectionProps) {
               {product.title}
             </h3>
             <div className="flex items-center gap-2 justify-center sm:justify-start mt-2">
-              <span className="text-brand-orange font-black text-2xl" style={{ fontFamily: 'var(--font-display)' }}>
+              <span className="text-coral-2 font-black text-2xl" style={{ fontFamily: 'var(--font-display)' }}>
                 ${price.toFixed(2)}
               </span>
               {compare && compare > price && (
@@ -62,7 +62,7 @@ export function BonusDealSection({ block, product }: BonusDealSectionProps) {
 
           <Link
             to={`/products/${product.handle}`}
-            className="bg-brand-gradient text-white font-bold px-6 py-3 rounded-full whitespace-nowrap transition-opacity hover:opacity-90 shrink-0"
+            className="bg-coral text-white font-bold px-6 py-3 rounded-full whitespace-nowrap transition-opacity hover:opacity-90 shrink-0"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {variant?.availableForSale !== false ? 'Grab It ♥' : 'View Deal'}

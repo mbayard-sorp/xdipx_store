@@ -133,12 +133,12 @@ export default function AccountLoginPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1
-            className="text-3xl font-black text-brand-charcoal"
+            className="text-3xl font-black text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Welcome back ♥
           </h1>
-          <p className="text-brand-charcoal/60 mt-2 text-sm">Sign in to see your orders.</p>
+          <p className="text-ink/60 mt-2 text-sm">Sign in to see your orders.</p>
         </div>
 
         {/* Shop accelerated login */}
@@ -164,7 +164,7 @@ export default function AccountLoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full flex items-center justify-center gap-3 bg-white border border-brand-mist hover:bg-gray-50 text-brand-charcoal font-semibold py-3 px-4 rounded-full transition-colors disabled:opacity-60"
+              className="w-full flex items-center justify-center gap-3 bg-white border border-cream-2 hover:bg-gray-50 text-ink font-semibold py-3 px-4 rounded-full transition-colors disabled:opacity-60"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               <GoogleIcon />
@@ -192,10 +192,10 @@ export default function AccountLoginPage() {
         {hasSocialButtons && (
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-brand-mist" />
+              <div className="w-full border-t border-cream-2" />
             </div>
             <div className="relative flex justify-center">
-              <span className="bg-brand-cream px-3 text-xs text-brand-charcoal/40 uppercase tracking-widest">
+              <span className="bg-cream px-3 text-xs text-ink/40 uppercase tracking-widest">
                 or
               </span>
             </div>
@@ -212,7 +212,7 @@ export default function AccountLoginPage() {
         {/* Email / password form */}
         <fetcher.Form method="post" className="space-y-4">
           <div>
-            <label className="block text-sm font-semibold text-brand-charcoal mb-1" htmlFor="email">
+            <label className="block text-sm font-semibold text-ink mb-1" htmlFor="email">
               Email
             </label>
             <input
@@ -221,11 +221,11 @@ export default function AccountLoginPage() {
               type="email"
               autoComplete="email"
               required
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50"
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-brand-charcoal mb-1" htmlFor="password">
+            <label className="block text-sm font-semibold text-ink mb-1" htmlFor="password">
               Password
             </label>
             <input
@@ -234,28 +234,28 @@ export default function AccountLoginPage() {
               type="password"
               autoComplete="current-password"
               required
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50"
             />
           </div>
 
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-brand-gradient text-white font-bold py-3 rounded-full hover:opacity-90 transition-opacity disabled:opacity-60"
+            className="w-full bg-coral text-white font-bold py-3 rounded-full hover:opacity-90 transition-opacity disabled:opacity-60"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {isLoading ? 'Signing in…' : 'Sign in'}
           </button>
         </fetcher.Form>
 
-        <p className="text-center text-xs text-brand-charcoal/40 mt-6">
+        <p className="text-center text-xs text-ink/40 mt-6">
           Don't have an account?{' '}
-          <Link to="/account/register" className="text-brand-purple hover:underline">
+          <Link to="/account/register" className="text-sage hover:underline">
             Create one
           </Link>
         </p>
-        <p className="text-center text-xs text-brand-charcoal/40 mt-2">
-          <Link to="/account/recover" className="text-brand-purple hover:underline">
+        <p className="text-center text-xs text-ink/40 mt-2">
+          <Link to="/account/recover" className="text-sage hover:underline">
             Forgot password?
           </Link>
         </p>

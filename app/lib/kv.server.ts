@@ -115,6 +115,8 @@ export const KV_KEYS = {
   liveDealHandle:         'live-deal:handle',
   fbt:                    (handle: string) => `fbt:${handle}`,
   collectionCursor:       (handle: string, page: number) => `vault:cursor:${handle}:p${page}`,
+  // v2 redesign — dial vote aggregates (5-min TTL)
+  dialAggregate:          (shopifyProductId: string) => `dial:agg:${shopifyProductId}`,
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────

@@ -133,15 +133,15 @@ function DealCard({
     <div
       draggable
       onDragStart={() => onDragStart(String(deal.id))}
-      className="bg-white border border-brand-mist rounded-xl px-3 py-2 cursor-grab active:cursor-grabbing shadow-sm hover:shadow-md transition-shadow select-none"
+      className="bg-white border border-cream-2 rounded-xl px-3 py-2 cursor-grab active:cursor-grabbing shadow-sm hover:shadow-md transition-shadow select-none"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-brand-charcoal truncate leading-tight">
+          <p className="text-sm font-semibold text-ink truncate leading-tight">
             {deal.seoTitle ?? deal.sku}
           </p>
           {!compact && (
-            <p className="text-xs text-brand-charcoal/50 mt-0.5 truncate">{deal.brand}</p>
+            <p className="text-xs text-ink/50 mt-0.5 truncate">{deal.brand}</p>
           )}
         </div>
         <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${statusColor[deal.status] ?? 'bg-gray-100 text-gray-500'}`}>
@@ -151,7 +151,7 @@ function DealCard({
 
       {!compact && deal.dealPrice && (
         <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-xs font-bold text-brand-coral">${parseFloat(deal.dealPrice).toFixed(2)}</span>
+          <span className="text-xs font-bold text-coral">${parseFloat(deal.dealPrice).toFixed(2)}</span>
           {deal.wholesaleCost && (
             <span className="text-xs text-green-600 font-medium">
               +${(parseFloat(deal.dealPrice) - parseFloat(deal.wholesaleCost)).toFixed(2)} profit
@@ -212,18 +212,18 @@ function DaySlot({
       className={[
         'rounded-2xl border-2 p-3 transition-colors min-h-[88px]',
         dragOver
-          ? 'border-brand-coral bg-brand-coral/5'
+          ? 'border-coral bg-coral/5'
           : isToday
-            ? 'border-brand-purple bg-brand-mist'
+            ? 'border-sage bg-cream-2'
             : 'border-transparent bg-white/60',
       ].join(' ')}
     >
       <div className="flex items-center gap-2 mb-2">
-        <span className={`text-xs font-semibold ${isToday ? 'text-brand-purple' : 'text-brand-charcoal/50'}`}>
+        <span className={`text-xs font-semibold ${isToday ? 'text-sage' : 'text-ink/50'}`}>
           {isToday ? '⭐ Today' : formatDate(date)}
         </span>
         {isToday && (
-          <span className="text-xs text-brand-charcoal/40">{formatDate(date)}</span>
+          <span className="text-xs text-ink/40">{formatDate(date)}</span>
         )}
       </div>
 
@@ -232,7 +232,7 @@ function DaySlot({
       ) : (
         <div className={[
           'rounded-xl border-2 border-dashed px-3 py-3 text-xs text-center transition-colors',
-          dragOver ? 'border-brand-coral/50 text-brand-coral' : 'border-brand-charcoal/15 text-brand-charcoal/30',
+          dragOver ? 'border-coral/50 text-coral' : 'border-ink/15 text-ink/30',
         ].join(' ')}>
           {dragOver ? 'Drop to schedule' : 'No deal scheduled'}
         </div>
@@ -270,12 +270,12 @@ export default function AdminSchedulePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1
-            className="text-2xl font-bold text-brand-charcoal"
+            className="text-2xl font-bold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Sales Schedule
           </h1>
-          <p className="text-sm text-brand-charcoal/50 mt-0.5">
+          <p className="text-sm text-ink/50 mt-0.5">
             Next 14 days — drag deals to reschedule. Deals go live at midnight EST.
           </p>
         </div>
@@ -303,17 +303,17 @@ export default function AdminSchedulePage() {
         {/* ── Unscheduled sidebar ──────────────────────────────────────── */}
         <aside className="w-64 shrink-0 bg-white rounded-2xl shadow-sm p-4">
           <h2
-            className="text-sm font-bold text-brand-charcoal mb-3"
+            className="text-sm font-bold text-ink mb-3"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Unscheduled Deals
           </h2>
-          <p className="text-xs text-brand-charcoal/40 mb-3">
+          <p className="text-xs text-ink/40 mb-3">
             Drag any deal onto a calendar slot to schedule it.
           </p>
 
           {unscheduled.length === 0 ? (
-            <p className="text-xs text-brand-charcoal/30 text-center py-8">
+            <p className="text-xs text-ink/30 text-center py-8">
               No unscheduled deals
             </p>
           ) : (

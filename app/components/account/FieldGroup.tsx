@@ -44,7 +44,7 @@ export function FieldGroup({
     <div className={className}>
       <label
         htmlFor={id}
-        className="block text-sm font-semibold text-brand-charcoal mb-1"
+        className="block text-sm font-semibold text-ink mb-1"
       >
         {label}
       </label>
@@ -59,7 +59,7 @@ export function FieldGroup({
       {helper && !error && (
         <p
           id={helperId}
-          className="mt-1 text-xs text-brand-charcoal/50"
+          className="mt-1 text-xs text-ink/50"
         >
           {helper}
         </p>
@@ -94,4 +94,4 @@ export function fieldDescribedBy(
 
 /** Shared input class — reuse across AddressForm inputs */
 export const inputClass =
-  'w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50 bg-white'
+  'w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50 bg-white'

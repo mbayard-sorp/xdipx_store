@@ -73,8 +73,8 @@ export function SubscriptionSelector({
           className={[
             'rounded-xl border-2 px-3 py-2.5 text-sm font-semibold transition-all text-left',
             !isSubscription
-              ? 'border-brand-coral bg-brand-coral/10 text-brand-charcoal'
-              : 'border-brand-mist text-brand-charcoal/50 hover:border-brand-charcoal/20',
+              ? 'border-coral bg-coral/10 text-ink'
+              : 'border-cream-2 text-ink/50 hover:border-ink/20',
           ].join(' ')}
           style={{ fontFamily: 'var(--font-display)' }}
         >
@@ -91,8 +91,8 @@ export function SubscriptionSelector({
           className={[
             'rounded-xl border-2 px-3 py-2.5 text-sm font-semibold transition-all text-left',
             isSubscription
-              ? 'border-brand-purple bg-brand-purple/10 text-brand-charcoal'
-              : 'border-brand-mist text-brand-charcoal/50 hover:border-brand-charcoal/20',
+              ? 'border-sage bg-sage/10 text-ink'
+              : 'border-cream-2 text-ink/50 hover:border-ink/20',
           ].join(' ')}
           style={{ fontFamily: 'var(--font-display)' }}
         >
@@ -106,7 +106,7 @@ export function SubscriptionSelector({
       {/* Frequency selector */}
       {isSubscription && allPlans.length > 1 && (
         <div className="space-y-1.5">
-          <p className="text-xs font-medium text-brand-charcoal/60 uppercase tracking-wide">
+          <p className="text-xs font-medium text-ink/60 uppercase tracking-wide">
             Delivery frequency
           </p>
           <div className="flex flex-wrap gap-2">
@@ -121,8 +121,8 @@ export function SubscriptionSelector({
                   className={[
                     'px-3 py-1.5 text-sm rounded-full border-2 font-medium transition-all',
                     isActive
-                      ? 'border-brand-purple text-brand-purple bg-brand-purple/5'
-                      : 'border-brand-mist text-brand-charcoal/60 hover:border-brand-charcoal/20',
+                      ? 'border-sage text-sage bg-sage/5'
+                      : 'border-cream-2 text-ink/60 hover:border-ink/20',
                   ].join(' ')}
                 >
                   {plan.name}
@@ -135,7 +135,7 @@ export function SubscriptionSelector({
 
       {/* Savings callout */}
       {isSubscription && savings > 0 && (
-        <p className="text-xs font-semibold text-brand-purple flex items-center gap-1.5">
+        <p className="text-xs font-semibold text-sage flex items-center gap-1.5">
           <HeartIcon />
           You save ${savings.toFixed(2)} per delivery
         </p>

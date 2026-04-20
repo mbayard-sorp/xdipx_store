@@ -17,7 +17,7 @@ const currentYear = new Date().getFullYear()
 
 export function Footer({ socialLinks = [], footerColumns = [], logoUrl, logoAlt = 'xdipx', tagline, discreetHeading, discreetBody, copyright, disclaimer }: FooterProps) {
   return (
-    <footer className="bg-brand-charcoal text-white/80 pt-12 pb-8 px-4">
+    <footer className="bg-ink text-white/80 pt-12 pb-8 px-4">
       <div className="max-w-6xl mx-auto">
 
         {/* Top: logo + columns */}
@@ -36,7 +36,7 @@ export function Footer({ socialLinks = [], footerColumns = [], logoUrl, logoAlt 
                 />
               ) : (
                 <span
-                  className="text-3xl font-black text-brand-gradient select-none"
+                  className="text-3xl font-black text-coral select-none"
                   style={{ fontFamily: 'var(--font-display)' }}
                 >
                   xdipx

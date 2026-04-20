@@ -8,8 +8,8 @@ import { trackVaultBrowse, trackViewItemList } from '~/lib/analytics.client'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 
 export const meta: MetaFunction = () => [
-  { title: 'The Vault — Past Deals | xdipx' },
-  { name: 'description', content: 'Browse every xdipx deal — missed one? It might be back in stock.' },
+  { title: 'The Shelf — Previous Picks | xdipx' },
+  { name: 'description', content: "The shelf — every pick Emma's featured. Some still available." },
   { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/vault' },
 ]
 
@@ -78,12 +78,12 @@ export default function VaultPage() {
       ]} />
       <div className="mb-8">
         <h1
-          className="text-3xl font-bold text-brand-charcoal"
+          className="text-3xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          The Vault ♥
+          The shelf · previous picks ♥
         </h1>
-        <p className="text-brand-charcoal/60 mt-1">Every deal we've ever run. Some still available.</p>
+        <p className="text-ink/60 mt-1">Every pick Emma's featured. Some still available.</p>
       </div>
 
       {/* Filter tabs — URL-driven, linkable */}
@@ -95,8 +95,8 @@ export default function VaultPage() {
             className={[
               'shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-all',
               activeTabId === tab.id
-                ? 'bg-brand-gradient text-white'
-                : 'bg-white border border-brand-mist text-brand-charcoal/70 hover:border-brand-purple/30',
+                ? 'bg-coral text-white'
+                : 'bg-white border border-cream-2 text-ink/70 hover:border-sage/30',
             ].join(' ')}
           >
             {tab.label}
@@ -111,7 +111,7 @@ export default function VaultPage() {
           ))}
         </div>
       ) : (
-        <p className="text-center text-brand-charcoal/40 py-16">No deals match this filter.</p>
+        <p className="text-center text-ink/40 py-16">No deals match this filter.</p>
       )}
 
       {/* Pagination */}
@@ -119,7 +119,7 @@ export default function VaultPage() {
         {page > 1 && (
           <Link
             to={pageHref(page - 1)}
-            className="px-5 py-2 rounded-full border border-brand-mist text-brand-charcoal/70 hover:bg-brand-mist transition-colors text-sm"
+            className="px-5 py-2 rounded-full border border-cream-2 text-ink/70 hover:bg-cream-2 transition-colors text-sm"
           >
             ← Previous
           </Link>
@@ -127,7 +127,7 @@ export default function VaultPage() {
         {hasNextPage && (
           <Link
             to={pageHref(page + 1)}
-            className="px-5 py-2 rounded-full bg-brand-gradient text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+            className="px-5 py-2 rounded-full bg-coral text-white text-sm font-semibold hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Next page →

@@ -66,12 +66,12 @@ export default function AccountActivatePage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1
-            className="text-3xl font-black text-brand-charcoal"
+            className="text-3xl font-black text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Activate your account ♥
           </h1>
-          <p className="text-brand-charcoal/60 mt-2 text-sm">
+          <p className="text-ink/60 mt-2 text-sm">
             Set a password to finish creating your account.
           </p>
         </div>
@@ -84,7 +84,7 @@ export default function AccountActivatePage() {
 
         <fetcher.Form method="post" className="space-y-4">
           <div>
-            <label className="block text-sm font-semibold text-brand-charcoal mb-1" htmlFor="password">
+            <label className="block text-sm font-semibold text-ink mb-1" htmlFor="password">
               Password
             </label>
             <input
@@ -94,11 +94,11 @@ export default function AccountActivatePage() {
               autoComplete="new-password"
               required
               minLength={8}
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50"
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-brand-charcoal mb-1" htmlFor="passwordConfirm">
+            <label className="block text-sm font-semibold text-ink mb-1" htmlFor="passwordConfirm">
               Confirm password
             </label>
             <input
@@ -108,22 +108,22 @@ export default function AccountActivatePage() {
               autoComplete="new-password"
               required
               minLength={8}
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50"
             />
           </div>
 
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-brand-gradient text-white font-bold py-3 rounded-full hover:opacity-90 transition-opacity disabled:opacity-60"
+            className="w-full bg-coral text-white font-bold py-3 rounded-full hover:opacity-90 transition-opacity disabled:opacity-60"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {isLoading ? 'Activating…' : 'Activate account'}
           </button>
         </fetcher.Form>
 
-        <p className="text-center text-xs text-brand-charcoal/40 mt-6">
-          <Link to="/account/login" className="text-brand-purple hover:underline">
+        <p className="text-center text-xs text-ink/40 mt-6">
+          <Link to="/account/login" className="text-sage hover:underline">
             Back to sign in
           </Link>
         </p>

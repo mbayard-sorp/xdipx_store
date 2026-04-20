@@ -32,7 +32,7 @@ export function BlogStructuredData({ post, readingTime }: { post: BlogPost; read
     },
     mainEntityOfPage: {
       '@type': 'WebPage',
-      '@id': `https://xdipx.com/blog/${post.slug}`,
+      '@id': `https://xdipx.com/notebook/${post.slug}`,
     },
     ...(post.tags?.length ? { keywords: post.tags.join(', ') } : {}),
   }

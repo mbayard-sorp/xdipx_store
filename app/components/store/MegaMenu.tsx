@@ -69,10 +69,10 @@ export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuIte
                 className={[
                   'px-3 py-1.5 rounded-full text-sm font-medium transition-all relative',
                   isAccent
-                    ? 'text-brand-coral hover:text-brand-coral font-semibold'
+                    ? 'text-coral hover:text-coral font-semibold'
                     : activeIndex === idx
-                      ? 'text-brand-purple font-semibold'
-                      : 'text-brand-charcoal/70 hover:text-brand-purple',
+                      ? 'text-sage font-semibold'
+                      : 'text-ink/70 hover:text-sage',
                 ].join(' ')}
                 style={{ fontFamily: 'var(--font-display)' }}
                 aria-expanded={activeIndex === idx}
@@ -81,7 +81,7 @@ export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuIte
               >
                 {item.title}
                 {activeIndex === idx && (
-                  <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-brand-purple rounded-full" />
+                  <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-sage rounded-full" />
                 )}
               </button>
             ) : (
@@ -90,8 +90,8 @@ export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuIte
                 className={[
                   'px-3 py-1.5 rounded-full text-sm font-medium transition-all',
                   isAccent
-                    ? 'text-brand-coral hover:text-brand-coral font-semibold'
-                    : 'text-brand-charcoal/70 hover:text-brand-purple',
+                    ? 'text-coral hover:text-coral font-semibold'
+                    : 'text-ink/70 hover:text-sage',
                 ].join(' ')}
                 style={{ fontFamily: 'var(--font-display)' }}
               >
@@ -107,14 +107,14 @@ export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuIte
         <>
           {/* Overlay behind panel */}
           <div
-            className="fixed inset-0 top-14 bg-brand-charcoal/20 z-40"
+            className="fixed inset-0 top-14 bg-ink/20 z-40"
             onClick={() => setActiveIndex(null)}
             aria-hidden="true"
           />
 
           {/* Panel */}
           <div
-            className="absolute left-0 right-0 top-full z-50 bg-white border-b border-brand-mist shadow-lg"
+            className="absolute left-0 right-0 top-full z-50 bg-white border-b border-cream-2 shadow-lg"
             onMouseEnter={cancelClose}
             onMouseLeave={scheduleClose}
             role="region"
@@ -167,7 +167,7 @@ function MegaMenuColumns({
             <Link
               to={toRelativePath(col.url)}
               onClick={onNavigate}
-              className="text-xs font-semibold uppercase tracking-wider text-brand-charcoal/50 mb-3 block hover:text-brand-purple transition-colors"
+              className="text-xs font-semibold uppercase tracking-wider text-ink/50 mb-3 block hover:text-sage transition-colors"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {col.title}
@@ -179,7 +179,7 @@ function MegaMenuColumns({
                     <Link
                       to={toRelativePath(item.url)}
                       onClick={onNavigate}
-                      className="text-sm text-brand-charcoal/70 hover:text-brand-purple transition-colors block py-0.5"
+                      className="text-sm text-ink/70 hover:text-sage transition-colors block py-0.5"
                     >
                       {item.title}
                     </Link>
@@ -190,7 +190,7 @@ function MegaMenuColumns({
                   <Link
                     to={toRelativePath(col.url)}
                     onClick={onNavigate}
-                    className="text-sm text-brand-purple font-medium hover:text-brand-purple/80 transition-colors block py-0.5 mt-2"
+                    className="text-sm text-sage font-medium hover:text-sage/80 transition-colors block py-0.5 mt-2"
                   >
                     All {col.title.toLowerCase()} <span aria-hidden="true">&rarr;</span>
                   </Link>
@@ -270,8 +270,8 @@ export function MobileMegaMenu({ items, onNavigate }: { items: ShopifyMenuItem[]
                 className={[
                   'w-full flex items-center px-4 py-3 rounded-xl text-base font-medium transition-all',
                   isAccent
-                    ? 'text-brand-coral font-semibold'
-                    : 'text-brand-charcoal hover:bg-brand-mist hover:text-brand-purple',
+                    ? 'text-coral font-semibold'
+                    : 'text-ink hover:bg-cream-2 hover:text-sage',
                 ].join(' ')}
                 style={{ fontFamily: 'var(--font-display)' }}
               >
@@ -288,10 +288,10 @@ export function MobileMegaMenu({ items, onNavigate }: { items: ShopifyMenuItem[]
               className={[
                 'w-full flex items-center justify-between px-4 py-3 rounded-xl text-base font-medium transition-all',
                 isAccent
-                  ? 'text-brand-coral font-semibold'
+                  ? 'text-coral font-semibold'
                   : isOpen
-                    ? 'bg-brand-mist text-brand-purple font-semibold'
-                    : 'text-brand-charcoal hover:bg-brand-mist hover:text-brand-purple',
+                    ? 'bg-cream-2 text-sage font-semibold'
+                    : 'text-ink hover:bg-cream-2 hover:text-sage',
               ].join(' ')}
               style={{ fontFamily: 'var(--font-display)' }}
               aria-expanded={isOpen}
@@ -307,7 +307,7 @@ export function MobileMegaMenu({ items, onNavigate }: { items: ShopifyMenuItem[]
                     <Link
                       to={toRelativePath(col.url)}
                       onClick={onNavigate}
-                      className="text-xs font-semibold uppercase tracking-wider text-brand-charcoal/40 px-3 mb-1.5 block hover:text-brand-purple transition-colors"
+                      className="text-xs font-semibold uppercase tracking-wider text-ink/40 px-3 mb-1.5 block hover:text-sage transition-colors"
                       style={{ fontFamily: 'var(--font-display)' }}
                     >
                       {col.title}
@@ -319,7 +319,7 @@ export function MobileMegaMenu({ items, onNavigate }: { items: ShopifyMenuItem[]
                             <Link
                               to={toRelativePath(link.url)}
                               onClick={onNavigate}
-                              className="block px-3 py-1.5 rounded-lg text-sm text-brand-charcoal/70 hover:text-brand-purple hover:bg-brand-mist/50 transition-colors"
+                              className="block px-3 py-1.5 rounded-lg text-sm text-ink/70 hover:text-sage hover:bg-cream-2/50 transition-colors"
                             >
                               {link.title}
                             </Link>

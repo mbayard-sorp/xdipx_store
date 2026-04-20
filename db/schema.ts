@@ -165,12 +165,17 @@ export const wishlists = pgTable('wishlists', {
   id:          serial('id').primaryKey(),
   customerGid: varchar('customer_gid', { length: 60 }).notNull(),
   name:        varchar('name', { length: 100 }).notNull(),
+  note:        text('note'),
+  privacy:     varchar('privacy', { length: 20 }).default('private').notNull(),
+  giftMode:    boolean('gift_mode').default(false).notNull(),
+  shareToken:  varchar('share_token', { length: 48 }),
   isDefault:   boolean('is_default').default(false).notNull(),
   publicSlug:  varchar('public_slug', { length: 20 }),
   createdAt:   timestamp('created_at').defaultNow().notNull(),
   updatedAt:   timestamp('updated_at').defaultNow().notNull(),
 }, t => ({
   slugUnique:      uniqueIndex('wishlists_slug_uniq').on(t.publicSlug),
+  shareTokenUq:    uniqueIndex('wishlists_share_token_uniq').on(t.shareToken),
   customerIdx:     index('wishlists_customer_idx').on(t.customerGid),
   customerNameUq:  uniqueIndex('wishlists_customer_name').on(t.customerGid, t.name),
 }))
@@ -180,10 +185,23 @@ export const wishlistItems = pgTable('wishlist_items', {
   wishlistId:       integer('wishlist_id').notNull().references(() => wishlists.id, { onDelete: 'cascade' }),
   shopifyProductId: varchar('shopify_product_id', { length: 64 }).notNull(),
   handle:           varchar('handle', { length: 255 }).notNull(),
+  variantSelection: json('variant_selection').$type<Record<string, string>>(),
   addedAt:          timestamp('added_at').defaultNow().notNull(),
 }, t => ({
   itemUnique: uniqueIndex('wishlist_items_unique').on(t.wishlistId, t.shopifyProductId),
   listIdx:    index('wishlist_items_list_idx').on(t.wishlistId),
+}))
+
+export const pdpDialVotes = pgTable('pdp_dial_votes', {
+  id:               serial('id').primaryKey(),
+  shopifyProductId: varchar('shopify_product_id', { length: 64 }).notNull(),
+  dimension:        varchar('dimension', { length: 40 }).notNull(),
+  customerGid:      varchar('customer_gid', { length: 60 }).notNull(),
+  vote:             integer('vote').notNull(),
+  createdAt:        timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  voteUnique:    uniqueIndex('pdp_dial_votes_uniq').on(t.shopifyProductId, t.dimension, t.customerGid),
+  productIdx:    index('pdp_dial_votes_product_idx').on(t.shopifyProductId),
 }))
 
 export const callLog = pgTable('call_log', {
