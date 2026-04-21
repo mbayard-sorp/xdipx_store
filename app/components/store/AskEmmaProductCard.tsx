@@ -17,7 +17,7 @@ export function AskEmmaProductCard({ card, onVariantPick, onTellMore }: Props) {
   const canQuickAdd = !hasPicker && card.inStock && !!card.variantId
 
   return (
-    <div className="overflow-hidden rounded-xl border border-brand-mist bg-white transition-all hover:border-brand-purple/40 hover:shadow-sm">
+    <div className="overflow-hidden rounded-xl border border-line bg-white transition-all hover:border-coral/40 hover:shadow-sm">
       <div className="flex items-center gap-2 p-2">
         <Link
           to={card.url}
@@ -25,7 +25,7 @@ export function AskEmmaProductCard({ card, onVariantPick, onTellMore }: Props) {
           aria-label={`${card.title} — open product page`}
           className="group flex flex-1 items-center gap-3 min-w-0 text-left"
         >
-          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-brand-mist">
+          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-cream-2">
             {card.imageUrl ? (
               <img
                 src={card.imageUrl}
@@ -36,7 +36,7 @@ export function AskEmmaProductCard({ card, onVariantPick, onTellMore }: Props) {
                 className="h-full w-full object-cover"
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center text-brand-charcoal/20">
+              <div className="flex h-full w-full items-center justify-center text-ink/20">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
                   <rect x="3" y="3" width="18" height="18" rx="2" />
                   <path d="M3 9h18M9 21V9" />
@@ -46,18 +46,18 @@ export function AskEmmaProductCard({ card, onVariantPick, onTellMore }: Props) {
           </div>
 
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-brand-charcoal group-hover:text-brand-coral">
+            <p className="truncate text-sm font-semibold text-ink group-hover:text-coral">
               {card.title}
             </p>
             <div className="flex items-center gap-1.5">
-              <span className="text-sm font-bold text-brand-coral">{priceLabel}</span>
+              <span className="text-sm font-bold text-coral">{priceLabel}</span>
               {showPct && (
-                <span className="rounded-full bg-brand-gradient px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                <span className="rounded-full bg-gradient-to-r from-coral to-coral-2 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
                   {card.pctOff}% off
                 </span>
               )}
               {!card.inStock && (
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-brand-charcoal/50">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-ink/50">
                   sold out
                 </span>
               )}
@@ -69,8 +69,8 @@ export function AskEmmaProductCard({ card, onVariantPick, onTellMore }: Props) {
       </div>
 
       {hasPicker && (
-        <div className="border-t border-brand-mist px-2 py-2">
-          <p className="mb-1.5 px-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-charcoal/50">
+        <div className="border-t border-line px-2 py-2">
+          <p className="mb-1.5 px-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink/50">
             Pick an option to add
           </p>
           <div className="flex flex-wrap gap-1">
@@ -80,7 +80,7 @@ export function AskEmmaProductCard({ card, onVariantPick, onTellMore }: Props) {
                 type="button"
                 onClick={() => onVariantPick!(card, v)}
                 disabled={!v.inStock}
-                className="rounded-full border border-brand-purple/30 bg-white px-2.5 py-1 text-[11px] font-medium text-brand-purple transition hover:border-brand-purple hover:bg-brand-purple hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:border-brand-charcoal/20 disabled:bg-brand-mist disabled:text-brand-charcoal/40 disabled:hover:bg-brand-mist disabled:hover:text-brand-charcoal/40"
+                className="rounded-full border border-coral/30 bg-white px-2.5 py-1 text-[11px] font-medium text-coral transition hover:border-coral hover:bg-ink hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:border-ink/20 disabled:bg-cream-2 disabled:text-ink/40 disabled:hover:bg-cream-2 disabled:hover:text-ink/40"
               >
                 {v.label}
                 {pricesDiffer && <span className="ml-1 opacity-70">· {formatPrice(v.price)}</span>}
@@ -124,7 +124,7 @@ function QuickAddButton({ variantId, title }: { variantId: string; title: string
         type="submit"
         disabled={isPending || added}
         aria-label={added ? `${title} added to cart` : `Add ${title} to cart`}
-        className="relative flex h-9 w-9 items-center justify-center rounded-full bg-brand-gradient text-white shadow-sm transition hover:shadow-md active:scale-95 disabled:cursor-not-allowed disabled:opacity-80"
+        className="relative flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-r from-coral to-coral-2 text-white shadow-sm transition hover:shadow-md active:scale-95 disabled:cursor-not-allowed disabled:opacity-80"
       >
         {added ? (
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -137,7 +137,7 @@ function QuickAddButton({ variantId, title }: { variantId: string; title: string
               <path d="M3 6h18" />
               <path d="M16 10a4 4 0 0 1-8 0" />
             </svg>
-            <span className="absolute -right-1.5 -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white text-brand-coral" aria-hidden="true">
+            <span className="absolute -right-1.5 -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white text-coral" aria-hidden="true">
               <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
