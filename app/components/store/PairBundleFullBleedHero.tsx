@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useFetcher } from 'react-router'
 import type { Deal, PairBundleCopy, ProductVariant } from '~/types'
 import { PairBundleHeroCarousel } from './PairBundleHeroCarousel'
 import { splitUnderscores, renderWithHighlight } from './pairBundleText'
 
-interface PairBundleHeroProps {
+interface PairBundleFullBleedHeroProps {
   primary:     Deal
   partner:     Deal
   copy:        PairBundleCopy
@@ -275,9 +275,23 @@ function MobilePairItem({
           </p>
         )}
         <div className="flex items-center justify-between gap-3">
-          <span className="text-[17px] font-bold" style={{ fontFamily: 'var(--font-display)' }}>
-            {fmtPrice(deal.dealPrice)}
-          </span>
+          <div className="flex items-baseline gap-2">
+            <span className="text-[17px] font-bold" style={{ fontFamily: 'var(--font-display)' }}>
+              {fmtPrice(deal.dealPrice)}
+            </span>
+            {!deal.mapRestricted && deal.msrp > 0 && deal.dealPrice < deal.msrp && (
+              <span
+                className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10.5px] font-extrabold uppercase tracking-[0.08em]"
+                style={{
+                  background: 'var(--color-coral-soft)',
+                  color:      'var(--color-coral-deep)',
+                  fontFamily: 'var(--font-body)',
+                }}
+              >
+                {Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)}% off MSRP
+              </span>
+            )}
+          </div>
           <button
             type="button"
             onClick={onToggle}
@@ -285,7 +299,7 @@ function MobilePairItem({
             style={{ fontFamily: 'var(--font-body)' }}
             aria-expanded={open}
           >
-            {optionGroups.length > 0 ? 'Pick size' : 'Adjust qty'}
+            {optionGroups.length > 0 ? `Pick ${optionGroups[0]![0].toLowerCase()}` : 'Adjust qty'}
             <span
               className="inline-block text-[10px] transition-transform duration-200"
               style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
@@ -363,7 +377,7 @@ function DesktopPairItem({
 
       <Link
         to={`/products/${deal.handle}`}
-        className="relative flex-1 flex items-center justify-center -mx-10 pt-6 pb-4 min-h-[320px] overflow-hidden"
+        className="relative flex items-start justify-center -mx-10 pt-6 pb-4 overflow-hidden"
       >
         {img ? (
           <>
@@ -390,7 +404,7 @@ function DesktopPairItem({
         ) : null}
       </Link>
 
-      <div className="pt-[18px]" style={{ borderTop: '1px dashed var(--color-line-2)' }}>
+      <div className="pt-[18px] flex-1 flex flex-col" style={{ borderTop: '1px dashed var(--color-line-2)' }}>
         {brandEb && (
           <div className="mb-1.5 text-muted" style={{ fontFamily: 'var(--font-body)', fontWeight: 800, fontSize: '10.5px', letterSpacing: '0.16em', textTransform: 'uppercase' }}>
             {brandEb}
@@ -413,12 +427,26 @@ function DesktopPairItem({
         )}
 
         <div
-          className="flex items-baseline justify-between gap-[18px] pt-2.5 mt-2.5"
+          className="flex items-baseline justify-between gap-[18px] pt-2.5 mt-auto"
           style={{ borderTop: '1px solid var(--color-line)' }}
         >
-          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '22px', letterSpacing: '-0.01em' }}>
-            {fmtPrice(deal.dealPrice)}
-          </span>
+          <div className="flex items-baseline gap-2.5">
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '22px', letterSpacing: '-0.01em' }}>
+              {fmtPrice(deal.dealPrice)}
+            </span>
+            {!deal.mapRestricted && deal.msrp > 0 && deal.dealPrice < deal.msrp && (
+              <span
+                className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[11px] font-extrabold uppercase tracking-[0.08em]"
+                style={{
+                  background: 'var(--color-coral-soft)',
+                  color:      'var(--color-coral-deep)',
+                  fontFamily: 'var(--font-body)',
+                }}
+              >
+                {Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)}% off MSRP
+              </span>
+            )}
+          </div>
           <button
             type="button"
             onClick={onToggle}
@@ -432,7 +460,7 @@ function DesktopPairItem({
             }}
             aria-expanded={open}
           >
-            {optionGroups.length > 0 ? 'Pick size' : 'Adjust qty'}
+            {optionGroups.length > 0 ? `Pick ${optionGroups[0]![0].toLowerCase()}` : 'Adjust qty'}
             <span
               className="inline-block text-[10px] transition-transform duration-200"
               style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
@@ -449,7 +477,7 @@ function DesktopPairItem({
 /* =============================================================
    The hero
    ============================================================= */
-export function PairBundleHero({ primary, partner, copy, discountPct }: PairBundleHeroProps) {
+export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }: PairBundleFullBleedHeroProps) {
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
 
@@ -459,6 +487,30 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
   const [qtyB, setQtyB] = useState(1)
   const [openA, setOpenA] = useState(false)
   const [openB, setOpenB] = useState(false)
+
+  const landingRef = useRef<HTMLButtonElement>(null)
+  const [landingInView, setLandingInView] = useState(false)
+  useEffect(() => {
+    if (!landingRef.current) return
+    const obs = new IntersectionObserver(
+      entries => setLandingInView(entries[0]?.isIntersecting ?? false),
+      { threshold: 0, rootMargin: '0px 0px 120px 0px' },
+    )
+    obs.observe(landingRef.current)
+    return () => obs.disconnect()
+  }, [])
+
+  const mobileLandingRef = useRef<HTMLButtonElement>(null)
+  const [mobileLandingInView, setMobileLandingInView] = useState(false)
+  useEffect(() => {
+    if (!mobileLandingRef.current) return
+    const obs = new IntersectionObserver(
+      entries => setMobileLandingInView(entries[0]?.isIntersecting ?? false),
+      { threshold: 0, rootMargin: '0px 0px 40px 0px' },
+    )
+    obs.observe(mobileLandingRef.current)
+    return () => obs.disconnect()
+  }, [])
 
   const combinedDeal = primary.dealPrice * qtyA + partner.dealPrice * qtyB
   const pct          = Math.max(0, Math.min(50, Math.round(discountPct)))
@@ -473,21 +525,23 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
 
   return (
     <section className="bg-cream">
-      <div className="max-w-6xl mx-auto px-4 pt-8 md:pt-14">
 
-        {/* Shared cart form — targeted by all CTAs via form="pair-bundle-form" */}
-        <fetcher.Form id="pair-bundle-form" method="post" action="/api/cart" className="hidden">
-          <input type="hidden" name="intent" value="addMany" />
-          <input type="hidden" name="variantId_0" value={primaryPicker.variantId} />
-          <input type="hidden" name="quantity_0"  value={qtyA} />
-          <input type="hidden" name="variantId_1" value={partnerPicker.variantId} />
-          <input type="hidden" name="quantity_1"  value={qtyB} />
-          <input type="hidden" name="cartTag"     value="pair_bundle" />
-        </fetcher.Form>
+      {/* Shared cart form — targeted by all CTAs via form="pair-bundle-form" */}
+      <fetcher.Form id="pair-bundle-form" method="post" action="/api/cart" className="hidden">
+        <input type="hidden" name="intent" value="addMany" />
+        <input type="hidden" name="variantId_0" value={primaryPicker.variantId} />
+        <input type="hidden" name="quantity_0"  value={qtyA} />
+        <input type="hidden" name="variantId_1" value={partnerPicker.variantId} />
+        <input type="hidden" name="quantity_1"  value={qtyB} />
+        <input type="hidden" name="cartTag"     value="pair_bundle" />
+      </fetcher.Form>
 
-        {/* ================= MOBILE ================= */}
+      {/* ===== TOP HALF (eyebrow → tied stage) ===== */}
+      <div className="px-4">
+
+        {/* ================= MOBILE (top) ================= */}
         <div className="md:hidden">
-          <div className="relative bg-paper rounded-[var(--radius-xl)] border border-line p-6 overflow-hidden">
+          <div className="relative bg-paper border border-line border-b-0 p-6">
             <div className="flex flex-wrap items-start justify-between gap-4 mb-2.5">
               <span
                 className="inline-flex items-center gap-1.5 px-[13px] py-1.5 rounded-full text-[11.5px] font-extrabold uppercase tracking-[0.12em]"
@@ -599,16 +653,12 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
                 />
               </div>
             </div>
-
           </div>
         </div>
-
-        {/* ================= DESKTOP (hi-fi) ================= */}
+        {/* ================= DESKTOP (top: header + tied stage) ================= */}
         <article
-          className="hidden md:block relative bg-paper overflow-hidden"
+          className="hidden md:block relative bg-paper"
           style={{
-            border:       '1.5px solid var(--color-ink)',
-            borderRadius: '10px',
             boxShadow:    '0 30px 60px -30px rgba(21,18,17,0.2)',
           }}
         >
@@ -816,24 +866,22 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
               </div>
             </div>
           </section>
-
         </article>
       </div>
 
-      {/* ================= CAROUSEL (full-bleed) ================= */}
       <PairBundleHeroCarousel
         whyCards={whyCards}
-        emmaQuote={copy.emmaQuote ?? ''}
+        emmaQuote=""
         momentTitle={copy.momentTitle ?? 'how to make this pair click'}
         moments={copy.moments ?? []}
       />
 
-      {/* ================= BOTTOM HALF ================= */}
-      <div className="max-w-6xl mx-auto px-4 pb-8 md:pb-14 pt-6 md:pt-8">
+      {/* ===== BOTTOM HALF (buy bar → signature) ===== */}
+      <div className="px-4 pb-8 md:pb-14">
 
         {/* ================= MOBILE (bottom) ================= */}
         <div className="md:hidden">
-          <div className="relative bg-paper rounded-[var(--radius-xl)] border border-line p-6 overflow-hidden">
+          <div className="relative bg-paper border border-line border-t-0 p-6">
             <div
               className="grid grid-cols-1 gap-5 p-6 rounded-[16px] bg-cream-2"
               style={{ border: '1.2px solid var(--color-ink)' }}
@@ -859,30 +907,73 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
                     save {fmtPrice(savings)} as a pair
                   </span>
                 )}
-                <p className="w-full text-[11.5px] text-muted mt-0.5" style={{ fontFamily: 'var(--font-body)' }}>
-                  Shipping free on this pair · plain packaging · 30-day returns
-                </p>
               </div>
+
+              <button
+                ref={mobileLandingRef}
+                type="submit"
+                form="pair-bundle-form"
+                disabled={isPending}
+                className="w-full inline-flex items-center justify-between gap-2.5 px-5 py-3.5 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
+                style={{
+                  border:     '1.5px solid var(--color-ink)',
+                  boxShadow:  '3px 3px 0 var(--color-ink)',
+                  fontFamily: 'var(--font-body)',
+                  fontWeight: 800,
+                  fontSize:   '14.5px',
+                }}
+              >
+                <span>{isPending ? 'Adding…' : 'I\u2019ll take both \u2665'}</span>
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '15px' }}>
+                  {fmtPrice(bundlePrice)}
+                </span>
+              </button>
+
+              <p className="text-[11.5px] text-muted text-center" style={{ fontFamily: 'var(--font-body)' }}>
+                Shipping free on this pair · plain packaging · 30-day returns
+              </p>
             </div>
 
-            {copy.bannerLine && (
-              <p className="text-center mt-5 italic text-[13px] text-muted" style={{ fontFamily: 'var(--font-body)' }}>
-                {copy.bannerLine}
-              </p>
+            {copy.emmaQuote && (
+              <div className="mt-6 text-center">
+                <span
+                  aria-hidden="true"
+                  className="block text-coral leading-none mb-1 select-none"
+                  style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 800, fontSize: '44px' }}
+                >
+                  &ldquo;
+                </span>
+                <p
+                  className="text-ink italic leading-[1.4]"
+                  style={{ fontFamily: 'var(--font-display)', fontWeight: 400, fontSize: '19px', letterSpacing: '-0.005em' }}
+                >
+                  {renderWithHighlight(copy.emmaQuote)}
+                </p>
+                <p className="mt-2.5 text-coral-deep" style={{ fontFamily: 'var(--font-script)', fontSize: '18px' }}>
+                  — Emma
+                </p>
+              </div>
             )}
           </div>
 
-          {/* Mobile sticky CTA */}
+          {/* Mobile sticky CTA — fixed above MobileTabBar; fades once the inline CTA scrolls in */}
           <div
-            className="sticky bottom-0 left-0 right-0 -mx-4 px-4 pt-6 pb-3.5 mt-4 z-20"
+            aria-hidden={mobileLandingInView}
+            className="fixed left-0 right-0 px-4 pt-6 pb-3.5 z-[54]"
             style={{
-              background: 'linear-gradient(180deg, rgba(250,244,234,0) 0%, var(--color-cream) 30%)',
+              bottom:         'calc(52px + env(safe-area-inset-bottom))',
+              background:     'linear-gradient(180deg, rgba(250,244,234,0) 0%, var(--color-cream) 30%)',
+              opacity:        mobileLandingInView ? 0 : 1,
+              transform:      mobileLandingInView ? 'translateY(8px)' : 'translateY(0)',
+              pointerEvents:  mobileLandingInView ? 'none' : 'auto',
+              transition:     'opacity 200ms ease-out, transform 250ms ease-out',
             }}
           >
             <button
               type="submit"
               form="pair-bundle-form"
               disabled={isPending}
+              tabIndex={mobileLandingInView ? -1 : 0}
               className="w-full inline-flex items-center justify-between gap-2.5 px-5 py-4 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
               style={{
                 border:     '1.5px solid var(--color-ink)',
@@ -900,12 +991,10 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
           </div>
         </div>
 
-        {/* ================= DESKTOP (bottom) ================= */}
+        {/* ================= DESKTOP (bottom: buy bar + signature) ================= */}
         <article
-          className="hidden md:block relative bg-paper overflow-hidden"
+          className="hidden md:block relative bg-paper"
           style={{
-            border:       '1.5px solid var(--color-ink)',
-            borderRadius: '10px',
             boxShadow:    '0 30px 60px -30px rgba(21,18,17,0.2)',
           }}
         >
@@ -989,6 +1078,7 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
 
             <div className="flex flex-col gap-2 items-end">
               <button
+                ref={landingRef}
                 type="submit"
                 form="pair-bundle-form"
                 disabled={isPending}
@@ -1010,17 +1100,103 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
             </div>
           </section>
 
-          {/* ---------- SIGNATURE ---------- */}
-          {copy.bannerLine && (
-            <footer
-              className="flex items-center justify-center gap-3 px-10 py-[18px] bg-paper text-muted italic"
-              style={{ fontFamily: 'var(--font-display)', fontSize: '14px' }}
+          {/* ---------- EMMA PULL QUOTE ---------- */}
+          {copy.emmaQuote && (
+            <section
+              className="relative px-10 py-12 bg-paper text-center overflow-hidden"
+              style={{ borderTop: '1px dashed var(--color-line-2)' }}
             >
-              <span className="text-coral font-bold not-italic" style={{ fontFamily: 'var(--font-body)' }}>—</span>
-              <span>{copy.bannerLine}</span>
-            </footer>
+              {primary.images[0] && (
+                <Link
+                  to={`/products/${primary.handle}`}
+                  aria-label={primary.seoTitle}
+                  className="hidden lg:block absolute left-8 xl:left-16 top-1/2 -translate-y-1/2 transition-transform duration-300 hover:scale-[1.04] hover:-rotate-1"
+                  style={{ transform: 'translateY(-50%) rotate(-4deg)' }}
+                >
+                  <img
+                    src={primary.images[0].url}
+                    alt=""
+                    className="w-[120px] xl:w-[140px] h-auto"
+                    style={{ filter: 'drop-shadow(0 14px 24px rgba(21,18,17,0.18))' }}
+                    loading="lazy"
+                  />
+                </Link>
+              )}
+
+              {partner.images[0] && (
+                <Link
+                  to={`/products/${partner.handle}`}
+                  aria-label={partner.seoTitle}
+                  className="hidden lg:block absolute right-8 xl:right-16 top-1/2 -translate-y-1/2 transition-transform duration-300 hover:scale-[1.04] hover:rotate-1"
+                  style={{ transform: 'translateY(-50%) rotate(4deg)' }}
+                >
+                  <img
+                    src={partner.images[0].url}
+                    alt=""
+                    className="w-[120px] xl:w-[140px] h-auto"
+                    style={{ filter: 'drop-shadow(0 14px 24px rgba(21,18,17,0.18))' }}
+                    loading="lazy"
+                  />
+                </Link>
+              )}
+
+              <span
+                aria-hidden="true"
+                className="block text-coral leading-none mb-2 select-none"
+                style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 800, fontSize: '60px' }}
+              >
+                &ldquo;
+              </span>
+              <p
+                className="text-ink italic leading-[1.35] max-w-3xl mx-auto"
+                style={{ fontFamily: 'var(--font-display)', fontWeight: 400, fontSize: 'clamp(20px, 2.2vw, 28px)', letterSpacing: '-0.01em' }}
+              >
+                {renderWithHighlight(copy.emmaQuote)}
+              </p>
+              <p className="mt-5 text-coral-deep" style={{ fontFamily: 'var(--font-script)', fontSize: '22px' }}>
+                — Emma
+              </p>
+              <div aria-hidden="true" className="mt-3 mx-auto h-[2px] w-14 bg-coral" />
+            </section>
           )}
         </article>
+      </div>
+
+      {/* Desktop floating CTA — lands when the buy bar scrolls into view */}
+      <div
+        aria-hidden={landingInView}
+        className="hidden md:block fixed bottom-4 right-[84px] z-[54]"
+        style={{
+          opacity:        landingInView ? 0 : 1,
+          transform:      landingInView ? 'translateY(12px) scale(0.96)' : 'translateY(0) scale(1)',
+          pointerEvents:  landingInView ? 'none' : 'auto',
+          transition:     'opacity 250ms ease-out, transform 300ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+      >
+        <button
+          type="submit"
+          form="pair-bundle-form"
+          disabled={isPending}
+          tabIndex={landingInView ? -1 : 0}
+          className="inline-flex items-center gap-2.5 rounded-full bg-coral text-cream hover:-translate-x-px hover:-translate-y-px disabled:opacity-60 disabled:cursor-not-allowed"
+          style={{
+            padding:    '14px 22px',
+            border:     '2px solid var(--color-ink)',
+            boxShadow:  '4px 4px 0 var(--color-ink)',
+            fontFamily: 'var(--font-body)',
+            fontWeight: 800,
+            fontSize:   '14.5px',
+            transition: 'transform 100ms ease-out, box-shadow 100ms ease-out',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.boxShadow = '5px 5px 0 var(--color-ink)' }}
+          onMouseLeave={e => { e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-ink)' }}
+        >
+          <span>{isPending ? 'Adding…' : "I\u2019ll take both"}</span>
+          <span style={{ color: 'var(--color-butter)', fontSize: '15px' }}>♥</span>
+          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '15px' }}>
+            {fmtPrice(bundlePrice)}
+          </span>
+        </button>
       </div>
     </section>
   )

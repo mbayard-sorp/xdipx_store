@@ -170,7 +170,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const homepageSettings = {
-    template: (templateSettingRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle',
+    template: (templateSettingRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed',
     showFreeShipping: (templateSettingRows.find(r => r.key === 'homepage_show_free_shipping')?.value ?? 'true') === 'true',
     pairProductHandle: pairHandle,
     pairDiscountPct,
@@ -715,7 +715,7 @@ function ReadinessChecklist({ deal }: {
 // ─── Homepage Template Toggle ───────────────────────────────────────────
 
 type HomepageSettings = {
-  template:          'default' | 'quiet_endorsement' | 'pair_bundle'
+  template:          'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed'
   showFreeShipping:  boolean
   pairProductHandle: string
   pairDiscountPct:   number
@@ -749,7 +749,9 @@ function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
     ? 'Quiet endorsement'
     : settings.template === 'pair_bundle'
       ? 'Pair bundle'
-      : 'Default'
+      : settings.template === 'pair_bundle_fullbleed'
+        ? 'Pair bundle · Full Bleed'
+        : 'Default'
 
   return (
     <div ref={ref} className="relative shrink-0">
@@ -781,6 +783,7 @@ function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
               <option value="default">Default (Emma hero)</option>
               <option value="quiet_endorsement">Quiet endorsement</option>
               <option value="pair_bundle">Pair bundle</option>
+              <option value="pair_bundle_fullbleed">Pair bundle · Full Bleed</option>
             </select>
           </div>
           <label className="flex items-center gap-2 text-sm text-ink cursor-pointer">
@@ -792,7 +795,7 @@ function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
             />
             Show <span className="italic">· free shipping</span> on banner
           </label>
-          {settings.template === 'pair_bundle' && (
+          {(settings.template === 'pair_bundle' || settings.template === 'pair_bundle_fullbleed') && (
             <div>
               <label className="block text-[11px] uppercase tracking-wide font-bold text-ink/50 mb-1">
                 Pair discount %
@@ -1681,8 +1684,8 @@ export default function AdminDealsPage() {
         onBumpToBottom={handleBumpToBottom}
       />
 
-      {/* Pair Slot Card — shown only when pair_bundle template is active */}
-      {homepageSettings.template === 'pair_bundle' && (
+      {/* Pair Slot Card — shown when either pair_bundle template is active */}
+      {(homepageSettings.template === 'pair_bundle' || homepageSettings.template === 'pair_bundle_fullbleed') && (
         <PairSlotCard
           pairProduct={homepageSettings.pairProduct}
           onDrop={handlePairDrop}
