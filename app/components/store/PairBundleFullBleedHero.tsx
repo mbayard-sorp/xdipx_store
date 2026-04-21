@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useFetcher } from 'react-router'
 import type { Deal, PairBundleCopy, ProductVariant } from '~/types'
+import { PairBundleHeroCarousel } from './PairBundleHeroCarousel'
+import { splitUnderscores, renderWithHighlight } from './pairBundleText'
 
 interface PairBundleFullBleedHeroProps {
   primary:     Deal
@@ -11,22 +13,6 @@ interface PairBundleFullBleedHeroProps {
 
 const fmtPrice = (n: number) =>
   `$${Number.isInteger(n) ? n.toFixed(0) : n.toFixed(2)}`
-
-function splitUnderscores(body: string): Array<{ text: string; emph: boolean }> {
-  const parts = body.split(/(_[^_]+_)/g)
-  return parts.map(part => {
-    if (part.startsWith('_') && part.endsWith('_')) return { text: part.slice(1, -1), emph: true }
-    return { text: part, emph: false }
-  })
-}
-
-function renderWithHighlight(body: string, coralClass = 'text-coral') {
-  return splitUnderscores(body).map((p, i) =>
-    p.emph
-      ? <span key={i} className={coralClass}>{p.text}</span>
-      : <span key={i}>{p.text}</span>,
-  )
-}
 
 function renderDekWithPill(body: string) {
   return splitUnderscores(body).map((p, i) => {
@@ -514,6 +500,18 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
     return () => obs.disconnect()
   }, [])
 
+  const mobileLandingRef = useRef<HTMLButtonElement>(null)
+  const [mobileLandingInView, setMobileLandingInView] = useState(false)
+  useEffect(() => {
+    if (!mobileLandingRef.current) return
+    const obs = new IntersectionObserver(
+      entries => setMobileLandingInView(entries[0]?.isIntersecting ?? false),
+      { threshold: 0, rootMargin: '0px 0px 40px 0px' },
+    )
+    obs.observe(mobileLandingRef.current)
+    return () => obs.disconnect()
+  }, [])
+
   const combinedDeal = primary.dealPrice * qtyA + partner.dealPrice * qtyB
   const pct          = Math.max(0, Math.min(50, Math.round(discountPct)))
   const bundlePrice  = Math.round(combinedDeal * (1 - pct / 100) * 100) / 100
@@ -527,21 +525,23 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
 
   return (
     <section className="bg-cream">
-      <div className="px-4 pb-8 md:pb-14">
 
-        {/* Shared cart form — targeted by all CTAs via form="pair-bundle-form" */}
-        <fetcher.Form id="pair-bundle-form" method="post" action="/api/cart" className="hidden">
-          <input type="hidden" name="intent" value="addMany" />
-          <input type="hidden" name="variantId_0" value={primaryPicker.variantId} />
-          <input type="hidden" name="quantity_0"  value={qtyA} />
-          <input type="hidden" name="variantId_1" value={partnerPicker.variantId} />
-          <input type="hidden" name="quantity_1"  value={qtyB} />
-          <input type="hidden" name="cartTag"     value="pair_bundle" />
-        </fetcher.Form>
+      {/* Shared cart form — targeted by all CTAs via form="pair-bundle-form" */}
+      <fetcher.Form id="pair-bundle-form" method="post" action="/api/cart" className="hidden">
+        <input type="hidden" name="intent" value="addMany" />
+        <input type="hidden" name="variantId_0" value={primaryPicker.variantId} />
+        <input type="hidden" name="quantity_0"  value={qtyA} />
+        <input type="hidden" name="variantId_1" value={partnerPicker.variantId} />
+        <input type="hidden" name="quantity_1"  value={qtyB} />
+        <input type="hidden" name="cartTag"     value="pair_bundle" />
+      </fetcher.Form>
 
-        {/* ================= MOBILE ================= */}
+      {/* ===== TOP HALF (eyebrow → tied stage) ===== */}
+      <div className="px-4">
+
+        {/* ================= MOBILE (top) ================= */}
         <div className="md:hidden">
-          <div className="relative bg-paper border border-line p-6">
+          <div className="relative bg-paper border border-line border-b-0 p-6">
             <div className="flex flex-wrap items-start justify-between gap-4 mb-2.5">
               <span
                 className="inline-flex items-center gap-1.5 px-[13px] py-1.5 rounded-full text-[11.5px] font-extrabold uppercase tracking-[0.12em]"
@@ -653,116 +653,9 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
                 />
               </div>
             </div>
-
-            {whyCards.length > 0 && (
-              <ol className="flex flex-col gap-3 mb-6 list-none">
-                {whyCards.map((c, i) => (
-                  <li
-                    key={i}
-                    className="flex items-start gap-3.5 p-4 rounded-[14px] bg-paper"
-                    style={{ border: '1.2px solid var(--color-line-2)' }}
-                  >
-                    <span
-                      className="shrink-0 italic leading-none text-coral"
-                      style={{
-                        fontFamily:    'var(--font-display)',
-                        fontStyle:     'italic',
-                        fontWeight:    800,
-                        fontSize:      '30px',
-                        letterSpacing: '-0.02em',
-                        minWidth:      '40px',
-                      }}
-                      aria-hidden="true"
-                    >
-                      {String(i + 1).padStart(2, '0')}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div
-                        className="text-ink mb-1 leading-tight"
-                        style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '15px' }}
-                      >
-                        {c.head}
-                      </div>
-                      <p
-                        className="text-ink-2 leading-[1.45]"
-                        style={{ fontFamily: 'var(--font-body)', fontSize: '12.5px' }}
-                      >
-                        {c.body}
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
-
-            <div
-              className="grid grid-cols-1 gap-5 p-6 rounded-[16px] bg-cream-2"
-              style={{ border: '1.2px solid var(--color-ink)' }}
-            >
-              <div className="flex flex-wrap items-baseline gap-3.5">
-                <span className="text-coral" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '38px', letterSpacing: '-0.01em' }}>
-                  {fmtPrice(bundlePrice)}
-                </span>
-                {showStrike && (
-                  <span className="text-muted line-through text-[18px]" style={{ fontFamily: 'var(--font-display)' }}>
-                    {fmtPrice(combinedDeal)}
-                  </span>
-                )}
-                {savings > 0 && (
-                  <span
-                    className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-[0.04em]"
-                    style={{
-                      background: 'var(--color-butter)',
-                      border:     '1.2px solid var(--color-ink)',
-                      fontFamily: 'var(--font-body)',
-                    }}
-                  >
-                    save {fmtPrice(savings)} as a pair
-                  </span>
-                )}
-                <p className="w-full text-[11.5px] text-muted mt-0.5" style={{ fontFamily: 'var(--font-body)' }}>
-                  Shipping free on this pair · plain packaging · 30-day returns
-                </p>
-              </div>
-            </div>
-
-            {copy.bannerLine && (
-              <p className="text-center mt-5 italic text-[13px] text-muted" style={{ fontFamily: 'var(--font-body)' }}>
-                {copy.bannerLine}
-              </p>
-            )}
-          </div>
-
-          {/* Mobile sticky CTA — fixed above MobileTabBar so it stays visible */}
-          <div
-            className="fixed left-0 right-0 px-4 pt-6 pb-3.5 z-[54]"
-            style={{
-              bottom:     'calc(52px + env(safe-area-inset-bottom))',
-              background: 'linear-gradient(180deg, rgba(250,244,234,0) 0%, var(--color-cream) 30%)',
-            }}
-          >
-            <button
-              type="submit"
-              form="pair-bundle-form"
-              disabled={isPending}
-              className="w-full inline-flex items-center justify-between gap-2.5 px-5 py-4 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
-              style={{
-                border:     '1.5px solid var(--color-ink)',
-                boxShadow:  '3px 3px 0 var(--color-ink)',
-                fontFamily: 'var(--font-body)',
-                fontWeight: 800,
-                fontSize:   '14.5px',
-              }}
-            >
-              <span>{isPending ? 'Adding…' : 'I\u2019ll take both \u2665'}</span>
-              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '16px' }}>
-                {fmtPrice(bundlePrice)}
-              </span>
-            </button>
           </div>
         </div>
-
-        {/* ================= DESKTOP (hi-fi) ================= */}
+        {/* ================= DESKTOP (top: header + tied stage) ================= */}
         <article
           className="hidden md:block relative bg-paper"
           style={{
@@ -973,94 +866,138 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
               </div>
             </div>
           </section>
+        </article>
+      </div>
 
-          {/* ---------- WHY ---------- */}
-          {whyCards.length > 0 && (
-            <section
-              className="bg-paper px-10 py-8"
-              style={{
-                borderTop:    '1px solid var(--color-line)',
-                borderBottom: '1px solid var(--color-line)',
-              }}
+      <PairBundleHeroCarousel
+        whyCards={whyCards}
+        emmaQuote=""
+        momentTitle={copy.momentTitle ?? 'how to make this pair click'}
+        moments={copy.moments ?? []}
+      />
+
+      {/* ===== BOTTOM HALF (buy bar → signature) ===== */}
+      <div className="px-4 pb-8 md:pb-14">
+
+        {/* ================= MOBILE (bottom) ================= */}
+        <div className="md:hidden">
+          <div className="relative bg-paper border border-line border-t-0 p-6">
+            <div
+              className="grid grid-cols-1 gap-5 p-6 rounded-[16px] bg-cream-2"
+              style={{ border: '1.2px solid var(--color-ink)' }}
             >
-              <div className="flex items-baseline justify-between gap-5 mb-[18px]">
-                <div>
+              <div className="flex flex-wrap items-baseline gap-3.5">
+                <span className="text-coral" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '38px', letterSpacing: '-0.01em' }}>
+                  {fmtPrice(bundlePrice)}
+                </span>
+                {showStrike && (
+                  <span className="text-muted line-through text-[18px]" style={{ fontFamily: 'var(--font-display)' }}>
+                    {fmtPrice(combinedDeal)}
+                  </span>
+                )}
+                {savings > 0 && (
                   <span
-                    className="italic"
+                    className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-[0.04em]"
                     style={{
-                      fontFamily:    'var(--font-display)',
-                      fontWeight:    500,
-                      fontStyle:     'italic',
-                      fontSize:      '22px',
-                      letterSpacing: '-0.01em',
+                      background: 'var(--color-butter)',
+                      border:     '1.2px solid var(--color-ink)',
+                      fontFamily: 'var(--font-body)',
                     }}
                   >
-                    Why they&#39;re{' '}
-                    <em
-                      style={{
-                        fontStyle:  'italic',
-                        fontWeight: 600,
-                        color:      'var(--color-coral)',
-                      }}
-                    >
-                      better together
-                    </em>
+                    save {fmtPrice(savings)} as a pair
                   </span>
-                  <span
-                    className="ml-2.5 text-muted"
-                    style={{ fontFamily: 'var(--font-script)', fontSize: '17px' }}
-                  >
-                    — the short, honest version
-                  </span>
-                </div>
+                )}
               </div>
 
-              <div
-                className="grid grid-cols-3 overflow-hidden"
-                style={{ border: '1px dashed var(--color-line-2)', borderRadius: '6px' }}
+              <button
+                ref={mobileLandingRef}
+                type="submit"
+                form="pair-bundle-form"
+                disabled={isPending}
+                className="w-full inline-flex items-center justify-between gap-2.5 px-5 py-3.5 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
+                style={{
+                  border:     '1.5px solid var(--color-ink)',
+                  boxShadow:  '3px 3px 0 var(--color-ink)',
+                  fontFamily: 'var(--font-body)',
+                  fontWeight: 800,
+                  fontSize:   '14.5px',
+                }}
               >
-                {whyCards.map((c, i) => (
-                  <div
-                    key={i}
-                    className="px-[22px] py-[18px] relative"
-                    style={{ borderRight: i < whyCards.length - 1 ? '1px dashed var(--color-line-2)' : 'none' }}
-                  >
-                    <div
-                      className="mb-1 italic"
-                      style={{
-                        fontFamily:    'var(--font-display)',
-                        fontWeight:    700,
-                        fontStyle:     'italic',
-                        fontSize:      '28px',
-                        color:         'var(--color-coral)',
-                        letterSpacing: '-0.02em',
-                      }}
-                    >
-                      {String(i + 1).padStart(2, '0')}
-                    </div>
-                    <div
-                      className="mb-1"
-                      style={{
-                        fontFamily:    'var(--font-display)',
-                        fontWeight:    700,
-                        fontSize:      '15px',
-                        letterSpacing: '-0.005em',
-                      }}
-                    >
-                      {c.head}
-                    </div>
-                    <div
-                      className="text-muted"
-                      style={{ fontFamily: 'var(--font-body)', fontSize: '12.5px', lineHeight: 1.5 }}
-                    >
-                      {c.body}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+                <span>{isPending ? 'Adding…' : 'I\u2019ll take both \u2665'}</span>
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '15px' }}>
+                  {fmtPrice(bundlePrice)}
+                </span>
+              </button>
 
+              <p className="text-[11.5px] text-muted text-center" style={{ fontFamily: 'var(--font-body)' }}>
+                Shipping free on this pair · plain packaging · 30-day returns
+              </p>
+            </div>
+
+            {copy.emmaQuote && (
+              <div className="mt-6 text-center">
+                <span
+                  aria-hidden="true"
+                  className="block text-coral leading-none mb-1 select-none"
+                  style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 800, fontSize: '44px' }}
+                >
+                  &ldquo;
+                </span>
+                <p
+                  className="text-ink italic leading-[1.4]"
+                  style={{ fontFamily: 'var(--font-display)', fontWeight: 400, fontSize: '19px', letterSpacing: '-0.005em' }}
+                >
+                  {renderWithHighlight(copy.emmaQuote)}
+                </p>
+                <p className="mt-2.5 text-coral-deep" style={{ fontFamily: 'var(--font-script)', fontSize: '18px' }}>
+                  — Emma
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Mobile sticky CTA — fixed above MobileTabBar; fades once the inline CTA scrolls in */}
+          <div
+            aria-hidden={mobileLandingInView}
+            className="fixed left-0 right-0 px-4 pt-6 pb-3.5 z-[54]"
+            style={{
+              bottom:         'calc(52px + env(safe-area-inset-bottom))',
+              background:     'linear-gradient(180deg, rgba(250,244,234,0) 0%, var(--color-cream) 30%)',
+              opacity:        mobileLandingInView ? 0 : 1,
+              transform:      mobileLandingInView ? 'translateY(8px)' : 'translateY(0)',
+              pointerEvents:  mobileLandingInView ? 'none' : 'auto',
+              transition:     'opacity 200ms ease-out, transform 250ms ease-out',
+            }}
+          >
+            <button
+              type="submit"
+              form="pair-bundle-form"
+              disabled={isPending}
+              tabIndex={mobileLandingInView ? -1 : 0}
+              className="w-full inline-flex items-center justify-between gap-2.5 px-5 py-4 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
+              style={{
+                border:     '1.5px solid var(--color-ink)',
+                boxShadow:  '3px 3px 0 var(--color-ink)',
+                fontFamily: 'var(--font-body)',
+                fontWeight: 800,
+                fontSize:   '14.5px',
+              }}
+            >
+              <span>{isPending ? 'Adding…' : 'I\u2019ll take both \u2665'}</span>
+              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '16px' }}>
+                {fmtPrice(bundlePrice)}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* ================= DESKTOP (bottom: buy bar + signature) ================= */}
+        <article
+          className="hidden md:block relative bg-paper"
+          style={{
+            boxShadow:    '0 30px 60px -30px rgba(21,18,17,0.2)',
+          }}
+        >
           {/* ---------- BUY BAR (climax) ---------- */}
           <section
             className="relative grid grid-cols-[1fr_auto] gap-8 px-10 py-8 items-center"
@@ -1163,15 +1100,64 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
             </div>
           </section>
 
-          {/* ---------- SIGNATURE ---------- */}
-          {copy.bannerLine && (
-            <footer
-              className="flex items-center justify-center gap-3 px-10 py-[18px] bg-paper text-muted italic"
-              style={{ fontFamily: 'var(--font-display)', fontSize: '14px' }}
+          {/* ---------- EMMA PULL QUOTE ---------- */}
+          {copy.emmaQuote && (
+            <section
+              className="relative px-10 py-12 bg-paper text-center overflow-hidden"
+              style={{ borderTop: '1px dashed var(--color-line-2)' }}
             >
-              <span className="text-coral font-bold not-italic" style={{ fontFamily: 'var(--font-body)' }}>—</span>
-              <span>{copy.bannerLine}</span>
-            </footer>
+              {primary.images[0] && (
+                <Link
+                  to={`/products/${primary.handle}`}
+                  aria-label={primary.seoTitle}
+                  className="hidden lg:block absolute left-8 xl:left-16 top-1/2 -translate-y-1/2 transition-transform duration-300 hover:scale-[1.04] hover:-rotate-1"
+                  style={{ transform: 'translateY(-50%) rotate(-4deg)' }}
+                >
+                  <img
+                    src={primary.images[0].url}
+                    alt=""
+                    className="w-[120px] xl:w-[140px] h-auto"
+                    style={{ filter: 'drop-shadow(0 14px 24px rgba(21,18,17,0.18))' }}
+                    loading="lazy"
+                  />
+                </Link>
+              )}
+
+              {partner.images[0] && (
+                <Link
+                  to={`/products/${partner.handle}`}
+                  aria-label={partner.seoTitle}
+                  className="hidden lg:block absolute right-8 xl:right-16 top-1/2 -translate-y-1/2 transition-transform duration-300 hover:scale-[1.04] hover:rotate-1"
+                  style={{ transform: 'translateY(-50%) rotate(4deg)' }}
+                >
+                  <img
+                    src={partner.images[0].url}
+                    alt=""
+                    className="w-[120px] xl:w-[140px] h-auto"
+                    style={{ filter: 'drop-shadow(0 14px 24px rgba(21,18,17,0.18))' }}
+                    loading="lazy"
+                  />
+                </Link>
+              )}
+
+              <span
+                aria-hidden="true"
+                className="block text-coral leading-none mb-2 select-none"
+                style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 800, fontSize: '60px' }}
+              >
+                &ldquo;
+              </span>
+              <p
+                className="text-ink italic leading-[1.35] max-w-3xl mx-auto"
+                style={{ fontFamily: 'var(--font-display)', fontWeight: 400, fontSize: 'clamp(20px, 2.2vw, 28px)', letterSpacing: '-0.01em' }}
+              >
+                {renderWithHighlight(copy.emmaQuote)}
+              </p>
+              <p className="mt-5 text-coral-deep" style={{ fontFamily: 'var(--font-script)', fontSize: '22px' }}>
+                — Emma
+              </p>
+              <div aria-hidden="true" className="mt-3 mx-auto h-[2px] w-14 bg-coral" />
+            </section>
           )}
         </article>
       </div>
