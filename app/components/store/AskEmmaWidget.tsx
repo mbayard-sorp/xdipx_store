@@ -267,7 +267,7 @@ export function AskEmmaWidget() {
             exit={{ opacity: 0, y: 16, scale: 0.96 }}
             transition={{ type: 'tween', duration: 0.2, ease: 'easeOut' }}
             style={{ transformOrigin: 'bottom right' }}
-            className="fixed z-[60] flex flex-col overflow-hidden rounded-2xl bg-brand-cream shadow-2xl ring-1 ring-black/5
+            className="fixed z-[60] flex flex-col overflow-hidden rounded-2xl bg-cream shadow-2xl ring-1 ring-black/5
               inset-x-2 bottom-2 top-auto max-h-[88vh] sm:inset-auto sm:bottom-24 sm:right-4 sm:h-[min(580px,calc(100vh-8rem))] sm:w-[380px] sm:max-h-none"
           >
             <header
@@ -327,7 +327,7 @@ export function AskEmmaWidget() {
                 e.preventDefault()
                 send()
               }}
-              className="flex items-end gap-2 border-t border-brand-mist bg-white px-3 py-3"
+              className="flex items-end gap-2 border-t border-line bg-white px-3 py-3"
             >
               <textarea
                 ref={inputRef}
@@ -336,7 +336,7 @@ export function AskEmmaWidget() {
                 onKeyDown={onKeyDown}
                 rows={1}
                 placeholder="Ask Emma anything…"
-                className="max-h-32 min-h-[44px] flex-1 resize-none rounded-xl border border-brand-mist bg-brand-cream px-3 py-2.5 text-sm text-brand-charcoal placeholder:text-brand-charcoal/40 focus:border-brand-purple/60 focus:outline-none focus:ring-2 focus:ring-brand-purple/20"
+                className="max-h-32 min-h-[44px] flex-1 resize-none rounded-xl border border-line bg-cream px-3 py-2.5 text-sm text-ink placeholder:text-ink/40 focus:border-coral/60 focus:outline-none focus:ring-2 focus:ring-coral/20"
               />
               <button
                 type="submit"
@@ -374,8 +374,8 @@ export function AskEmmaWidget() {
         )}
         {hasUnread && !open && (
           <span className="absolute right-1 top-1 flex h-3 w-3">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-purple opacity-75" />
-            <span className="relative inline-flex h-3 w-3 rounded-full bg-brand-purple ring-2 ring-white" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ink opacity-75" />
+            <span className="relative inline-flex h-3 w-3 rounded-full bg-ink ring-2 ring-white" />
           </span>
         )}
         {!open && (
@@ -407,7 +407,7 @@ function Bubble({
     if (turn.hidden) return null
     return (
       <div className="flex justify-end">
-        <div className="max-w-[82%] rounded-2xl rounded-br-md bg-brand-purple px-3.5 py-2 text-sm text-white">
+        <div className="max-w-[82%] rounded-2xl rounded-br-md bg-ink px-3.5 py-2 text-sm text-white">
           {turn.text}
         </div>
       </div>
@@ -449,10 +449,10 @@ function AssistantBubble({
 }) {
   return (
     <div className="flex flex-col items-start gap-2">
-      <div className="max-w-[90%] rounded-2xl rounded-bl-md bg-brand-mist px-3.5 py-2 text-sm text-brand-charcoal">
+      <div className="max-w-[90%] rounded-2xl rounded-bl-md bg-cream-2 px-3.5 py-2 text-sm text-ink">
         <MarkdownText text={text} />
         {showCaret && (
-          <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-[2px] animate-pulse bg-brand-purple/60 align-middle" aria-hidden="true" />
+          <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-[2px] animate-pulse bg-ink/60 align-middle" aria-hidden="true" />
         )}
       </div>
       {quickReply && onQuickReply && (
@@ -480,7 +480,7 @@ function QuickReply({ payload, onPick }: { payload: QuickReplyPayload; onPick: (
   if (payload.mode === 'single') {
     return (
       <div className="w-full">
-        <p className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-brand-charcoal/60">
+        <p className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-ink/60">
           {payload.question}
         </p>
         <div className="flex flex-wrap gap-1.5">
@@ -489,7 +489,7 @@ function QuickReply({ payload, onPick }: { payload: QuickReplyPayload; onPick: (
               key={opt}
               type="button"
               onClick={() => onPick(opt)}
-              className="rounded-full border border-brand-purple/30 bg-white px-3 py-1.5 text-xs font-medium text-brand-purple transition hover:border-brand-purple hover:bg-brand-purple hover:text-white active:scale-95"
+              className="rounded-full border border-coral/30 bg-white px-3 py-1.5 text-xs font-medium text-coral transition hover:border-coral hover:bg-ink hover:text-white active:scale-95"
             >
               {opt}
             </button>
@@ -515,8 +515,8 @@ function QuickReply({ payload, onPick }: { payload: QuickReplyPayload; onPick: (
   }
 
   return (
-    <div className="w-full rounded-xl border border-brand-mist bg-white p-2.5">
-      <p className="mb-2 px-0.5 text-[11px] font-semibold uppercase tracking-wide text-brand-charcoal/60">
+    <div className="w-full rounded-xl border border-line bg-white p-2.5">
+      <p className="mb-2 px-0.5 text-[11px] font-semibold uppercase tracking-wide text-ink/60">
         {payload.question}
       </p>
       <div className="flex flex-col gap-1.5">
@@ -528,12 +528,12 @@ function QuickReply({ payload, onPick }: { payload: QuickReplyPayload; onPick: (
               type="button"
               onClick={() => toggle(opt)}
               className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition ${
-                on ? 'bg-brand-purple/10 text-brand-purple' : 'hover:bg-brand-mist text-brand-charcoal'
+                on ? 'bg-ink/10 text-coral' : 'hover:bg-cream-2 text-ink'
               }`}
             >
               <span
                 className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                  on ? 'border-brand-purple bg-brand-purple text-white' : 'border-brand-charcoal/30 bg-white'
+                  on ? 'border-coral bg-ink text-white' : 'border-ink/30 bg-white'
                 }`}
                 aria-hidden="true"
               >
@@ -552,7 +552,7 @@ function QuickReply({ payload, onPick }: { payload: QuickReplyPayload; onPick: (
         type="button"
         onClick={submit}
         disabled={selected.size === 0}
-        className="mt-2 w-full rounded-lg bg-brand-purple px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+        className="mt-2 w-full rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
       >
         Send {selected.size > 0 ? `(${selected.size})` : ''}
       </button>
@@ -577,11 +577,11 @@ function markLatestQuickReplyAnswered(turns: Turn[]): Turn[] {
 function TypingBubble() {
   return (
     <div className="flex justify-start">
-      <div className="rounded-2xl rounded-bl-md bg-brand-mist px-4 py-3">
+      <div className="rounded-2xl rounded-bl-md bg-cream-2 px-4 py-3">
         <div className="flex items-center gap-1">
-          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-purple/60 [animation-delay:-0.3s]" />
-          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-purple/60 [animation-delay:-0.15s]" />
-          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-purple/60" />
+          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink/60 [animation-delay:-0.3s]" />
+          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink/60 [animation-delay:-0.15s]" />
+          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink/60" />
         </div>
       </div>
     </div>
@@ -618,7 +618,7 @@ function renderInline(line: string) {
       const [, label, href] = linkMatch
       const internalPath = toInternalPath(href!)
       const className =
-        'font-semibold text-brand-purple underline decoration-brand-purple/40 underline-offset-2 hover:text-brand-coral hover:decoration-brand-coral/50'
+        'font-semibold text-coral underline decoration-ink/40 underline-offset-2 hover:text-coral hover:decoration-coral/50'
       if (internalPath) {
         return [
           <Link key={`l-${i}`} to={internalPath} className={className}>
