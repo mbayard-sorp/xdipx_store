@@ -318,6 +318,22 @@ export async function rotateDeal(): Promise<{
   // 4. Activate next deal
   if (nextDeal) {
     await activateDeal(nextDeal)
+
+    // 5. Precompute Emma context-row picks for all active groups against the
+    //    newly-live deal. Non-blocking — a failure here must not leave the
+    //    site without a live deal. Lazy-on-miss in the homepage loader is
+    //    the safety net if this call fails.
+    try {
+      const { getDailyDeal } = await import('./shopify.server')
+      const live = await getDailyDeal().catch(() => null)
+      if (live?.handle) {
+        const { generatePicksForActiveGroups } = await import('./emma-picks.server')
+        const res = await generatePicksForActiveGroups(live.handle, 'midnight')
+        console.log('[deal-rotator] emma picks precomputed:', res)
+      }
+    } catch (err) {
+      console.error('[deal-rotator] emma picks precompute failed (non-blocking):', err)
+    }
   }
 
   return {
