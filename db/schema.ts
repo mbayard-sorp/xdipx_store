@@ -383,6 +383,19 @@ export const emmaChatEvents = pgTable('emma_chat_events', {
   kindIdx:    index('emma_events_kind_idx').on(t.kind, t.createdAt),
 }))
 
+export const ivrVoices = pgTable('ivr_voices', {
+  id:        serial('id').primaryKey(),
+  name:      varchar('name', { length: 100 }).notNull(),
+  voiceId:   varchar('voice_id', { length: 100 }).notNull(),
+  notes:     text('notes').default('').notNull(),
+  active:    boolean('active').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, t => ({
+  voiceIdUq: uniqueIndex('ivr_voices_voice_id_uniq').on(t.voiceId),
+  activeIdx: index('ivr_voices_active_idx').on(t.active),
+}))
+
 export const productCopurchase = pgTable('product_copurchase', {
   id:         serial('id').primaryKey(),
   handleA:    varchar('handle_a', { length: 255 }).notNull(),
