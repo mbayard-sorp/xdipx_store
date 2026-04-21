@@ -12,7 +12,7 @@ import { kvGet, KV_KEYS } from '~/lib/kv.server'
 import { getHomepageSections, getEmmaHeroSettings } from '~/lib/sanity.server'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
-import { getPicksForRender }     from '~/lib/emma-picks.server'
+import { getEmmaContextRows }    from '~/lib/emma-rails.server'
 import { getCartIdFromCookie }   from '~/lib/cart.server'
 import { EmmaHero }              from '~/components/store/EmmaHero'
 import { BundleHero }            from '~/components/store/BundleHero'
@@ -136,7 +136,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     kvGet<number>(KV_KEYS.viewerCount(deal.handle)).then(n => n ?? 0),
     getProductReviews(deal.shopifyProductId, { sort: 'newest', page: 1, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
-    getPicksForRender({ dealHandle: deal.handle, sessionSeed }).catch(err => {
+    getEmmaContextRows({ dealHandle: deal.handle, sessionSeed }).catch(err => {
       console.error('[homepage] emma context rows failed:', err)
       return []
     }),
@@ -308,7 +308,7 @@ export default function Homepage() {
 
       {/* ── Emma context rows (AI-personalized rails under the hero) ──────── */}
       {emmaContextRows && emmaContextRows.length > 0 && emmaContextRows.map(row => (
-        <EmmaContextRow key={row.group.id} row={row} />
+        <EmmaContextRow key={row.rail.id} row={row} />
       ))}
 
       {/* ── CMS content blocks (ordered by Sanity `order` field) ──────────── */}

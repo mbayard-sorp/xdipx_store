@@ -319,7 +319,7 @@ export async function rotateDeal(): Promise<{
   if (nextDeal) {
     await activateDeal(nextDeal)
 
-    // 5. Precompute Emma context-row picks for all active groups against the
+    // 5. Precompute Emma context rails for all active rails against the
     //    newly-live deal. Non-blocking — a failure here must not leave the
     //    site without a live deal. Lazy-on-miss in the homepage loader is
     //    the safety net if this call fails.
@@ -327,12 +327,12 @@ export async function rotateDeal(): Promise<{
       const { getDailyDeal } = await import('./shopify.server')
       const live = await getDailyDeal().catch(() => null)
       if (live?.handle) {
-        const { generatePicksForActiveGroups } = await import('./emma-picks.server')
-        const res = await generatePicksForActiveGroups(live.handle, 'midnight')
-        console.log('[deal-rotator] emma picks precomputed:', res)
+        const { regenerateActiveRails } = await import('./emma-rails.server')
+        const res = await regenerateActiveRails(live.handle, 'midnight')
+        console.log('[deal-rotator] emma rails precomputed:', res)
       }
     } catch (err) {
-      console.error('[deal-rotator] emma picks precompute failed (non-blocking):', err)
+      console.error('[deal-rotator] emma rails precompute failed (non-blocking):', err)
     }
   }
 

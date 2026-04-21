@@ -8,14 +8,14 @@
  */
 import { useRef } from 'react'
 import { Link } from 'react-router'
-import type { RenderRow } from '~/lib/emma-picks.server'
+import type { RenderRow } from '~/lib/emma-rails.server'
 import ProductTileMedia from '~/components/store/ProductTileMedia'
 
 interface EmmaContextRowProps {
   row: RenderRow
 }
 
-const KIND_EYEBROW: Record<RenderRow['group']['kind'], string> = {
+const KIND_EYEBROW: Record<RenderRow['rail']['kind'], string> = {
   pairing:     "Emma's pairing",
   alternative: "Not for you? Emma suggests",
   adjacent:    "Same vibe",
@@ -26,7 +26,7 @@ export function EmmaContextRow({ row }: EmmaContextRowProps) {
 
   if (!row.picks.length) return null
 
-  const eyebrow = KIND_EYEBROW[row.group.kind]
+  const eyebrow = KIND_EYEBROW[row.rail.kind]
 
   function scroll(dir: 'left' | 'right') {
     const el = scrollRef.current
@@ -46,7 +46,7 @@ export function EmmaContextRow({ row }: EmmaContextRowProps) {
               className="text-2xl font-bold text-ink"
               style={{ fontFamily: 'var(--font-display)' }}
             >
-              {row.group.name}
+              {row.rail.name}
             </h2>
           </div>
           <div className="flex items-center gap-2">
