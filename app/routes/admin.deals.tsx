@@ -1,13 +1,13 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher, useSearchParams, redirect } from 'react-router'
-import { Fragment, useMemo, useRef, useState, type DragEvent } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useCountdown } from '~/hooks/useCountdown'
 import { db } from '~/lib/db.server'
 import { dealHistory, pipelineSettings } from '../../db/schema'
 import { eq, like, asc, min, max, count, sql, inArray, and, isNull } from 'drizzle-orm'
 import {
   getAdminProductData,
-  getDealByShopifyId, updateProductMetafield,
+  getDealByShopifyId, getDealByHandle, updateProductMetafield,
   getVariantCost, pushProductToShopify, getAccessoryProductsAdmin,
   getProductAdminImages, updateProductTags, fetchAllDealProducts,
   updateVariantPricing, getProductVariantGids,
@@ -139,6 +139,44 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
+  // Homepage template toggle + free-shipping flag (global; stored in pipelineSettings).
+  const templateSettingRows = await db
+    .select()
+    .from(pipelineSettings)
+    .where(inArray(pipelineSettings.key, [
+      'homepage_template',
+      'homepage_show_free_shipping',
+      'homepage_pair_product_handle',
+      'homepage_pair_discount_pct',
+    ]))
+  const pairHandle = (templateSettingRows.find(r => r.key === 'homepage_pair_product_handle')?.value ?? '').trim()
+  const pairDiscountPct = parseInt(templateSettingRows.find(r => r.key === 'homepage_pair_discount_pct')?.value ?? '10', 10) || 10
+
+  // Resolve paired product (lightweight — for toolbar slot display)
+  let pairProduct: { title: string; brand: string; handle: string; dealPrice: number; image: string | null } | null = null
+  if (pairHandle) {
+    try {
+      const deal = await getDealByHandle(pairHandle)
+      if (deal) {
+        pairProduct = {
+          title: deal.seoTitle,
+          brand: deal.brand,
+          handle: deal.handle,
+          dealPrice: deal.dealPrice,
+          image: deal.images[0]?.url ?? null,
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  const homepageSettings = {
+    template: (templateSettingRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle',
+    showFreeShipping: (templateSettingRows.find(r => r.key === 'homepage_show_free_shipping')?.value ?? 'true') === 'true',
+    pairProductHandle: pairHandle,
+    pairDiscountPct,
+    pairProduct,
+  }
+
   // Full export list — all pending/live deals (and the live row), unpaginated,
   // minimal fields only. Used by the "Export CSV" button.
   const allDealsForExport = await db
@@ -156,7 +194,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     deals, shopifyDataMap, editorData, editId, liveDealRow: liveDealRow ?? null,
-    page: safePage, totalPages, totalFiltered, allDealsForExport,
+    page: safePage, totalPages, totalFiltered, allDealsForExport, homepageSettings,
   }
 }
 
@@ -323,6 +361,32 @@ export async function action({ request }: ActionFunctionArgs) {
       .values({ key, value, updatedAt: new Date() })
       .onConflictDoUpdate({ target: pipelineSettings.key, set: { value, updatedAt: new Date() } })
     return { ok: true }
+  }
+
+  if (intent === 'save-pair-product') {
+    // Accepts either a dealId (from drag-drop) → resolves to Shopify handle, or
+    // an empty string to clear. Writes pipelineSettings.homepage_pair_product_handle.
+    const dealIdRaw = (form.get('dealId') as string | null)?.trim() ?? ''
+    let handle = ''
+    if (dealIdRaw) {
+      const id = parseInt(dealIdRaw, 10)
+      if (Number.isFinite(id)) {
+        const row = await db.select().from(dealHistory).where(eq(dealHistory.id, id)).limit(1)
+        const productId = row[0]?.shopifyProductId
+        if (productId) {
+          const numericId = productId.replace('gid://shopify/Product/', '')
+          try {
+            const deal = await getDealByShopifyId(numericId)
+            if (deal?.handle) handle = deal.handle
+          } catch { /* ignore */ }
+        }
+      }
+    }
+    await db
+      .insert(pipelineSettings)
+      .values({ key: 'homepage_pair_product_handle', value: handle, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: pipelineSettings.key, set: { value: handle, updatedAt: new Date() } })
+    return { ok: true, handle }
   }
 
   if (intent === 'save-field') {
@@ -648,6 +712,407 @@ function ReadinessChecklist({ deal }: {
   )
 }
 
+// ─── Homepage Template Toggle ───────────────────────────────────────────
+
+type HomepageSettings = {
+  template:          'default' | 'quiet_endorsement' | 'pair_bundle'
+  showFreeShipping:  boolean
+  pairProductHandle: string
+  pairDiscountPct:   number
+  pairProduct:       { title: string; brand: string; handle: string; dealPrice: number; image: string | null } | null
+}
+
+function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
+  const fetcher = useFetcher<{ ok: boolean }>()
+  const saving  = fetcher.state !== 'idle'
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const save = (key: string, value: string) => {
+    const fd = new FormData()
+    fd.set('intent', 'save-setting')
+    fd.set('key',    key)
+    fd.set('value',  value)
+    fetcher.submit(fd, { method: 'post' })
+  }
+
+  const label = settings.template === 'quiet_endorsement'
+    ? 'Quiet endorsement'
+    : settings.template === 'pair_bundle'
+      ? 'Pair bundle'
+      : 'Default'
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-ink bg-white border border-cream-2 rounded-xl hover:border-sage/40 hover:text-sage transition-colors"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3"  width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+        Homepage: {label}
+        {saving && <span className="text-ink/30">…</span>}
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-72 bg-white border border-cream-2 rounded-xl shadow-lg p-4 z-20 space-y-3">
+          <div>
+            <label className="block text-[11px] uppercase tracking-wide font-bold text-ink/50 mb-1">
+              Template
+            </label>
+            <select
+              value={settings.template}
+              onChange={e => save('homepage_template', e.target.value)}
+              className="w-full px-2 py-1.5 text-sm border border-cream-2 rounded-lg bg-white text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
+            >
+              <option value="default">Default (Emma hero)</option>
+              <option value="quiet_endorsement">Quiet endorsement</option>
+              <option value="pair_bundle">Pair bundle</option>
+            </select>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-ink cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.showFreeShipping}
+              onChange={e => save('homepage_show_free_shipping', e.target.checked ? 'true' : 'false')}
+              className="accent-coral"
+            />
+            Show <span className="italic">· free shipping</span> on banner
+          </label>
+          {settings.template === 'pair_bundle' && (
+            <div>
+              <label className="block text-[11px] uppercase tracking-wide font-bold text-ink/50 mb-1">
+                Pair discount %
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={50}
+                defaultValue={settings.pairDiscountPct}
+                onBlur={e => save('homepage_pair_discount_pct', String(parseInt(e.target.value, 10) || 0))}
+                className="w-24 px-2 py-1.5 text-sm border border-cream-2 rounded-lg bg-white text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
+              />
+              <p className="text-[11px] text-ink/40 mt-1">Match this to your Shopify Automatic Discount rule on cart attribute <code>pair_bundle=live</code>.</p>
+            </div>
+          )}
+          <p className="text-[11px] text-ink/40 leading-relaxed">
+            Applies to whichever deal is currently live. Bundle hero always wins.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Quiet Endorsement Editor Panel ─────────────────────────────────────
+
+function QuietEndorsementPanel({ deal }: {
+  deal: NonNullable<Awaited<ReturnType<typeof getDealByShopifyId>>>
+}) {
+  const genFetcher  = useFetcher<{ result?: { type: string; content: { eyebrow: string; subhead: string; body: string; bannerHeadline: string } }; error?: string }>()
+  const saveFetcher = useFetcher<{ ok: boolean }>()
+
+  const initial = deal.quietEndorsementCopy ?? null
+  const [copy, setCopy] = useState<{ eyebrow: string; subhead: string; body: string; bannerHeadline: string } | null>(initial)
+
+  const generated = genFetcher.data?.result?.content
+  useEffect(() => {
+    if (generated) setCopy(generated)
+  }, [generated])
+
+  const generating = genFetcher.state !== 'idle'
+  const saving     = saveFetcher.state !== 'idle'
+  const saved      = saveFetcher.state === 'idle' && saveFetcher.data?.ok === true
+
+  const handleGenerate = () => {
+    const fd = new FormData()
+    fd.set('type', 'quiet_endorsement')
+    fd.set('product', JSON.stringify({
+      title:         deal.seoTitle ?? deal.sku,
+      brand:         deal.brand,
+      description:   deal.fullStory ?? deal.metaDescription ?? '',
+      categories:    [deal.category],
+      dealPrice:     deal.dealPrice,
+      msrp:          deal.msrp,
+      mapRestricted: deal.mapRestricted ?? false,
+    }))
+    genFetcher.submit(fd, { method: 'post', action: '/api/generate-copy' })
+  }
+
+  const handleSave = () => {
+    if (!copy) return
+    const fd = new FormData()
+    fd.set('intent',    'save-field')
+    fd.set('productId', deal.shopifyProductId)
+    fd.set('key',       'quiet_endorsement_copy')
+    fd.set('type',      'json')
+    fd.set('value',     JSON.stringify(copy))
+    saveFetcher.submit(fd, { method: 'post' })
+  }
+
+  return (
+    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+          Quiet endorsement copy
+        </h3>
+        <span className="text-[11px] text-ink/40">homepage alt template</span>
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={generating}
+          className={
+            generating
+              ? 'flex-1 py-2 rounded-xl text-xs font-semibold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : 'flex-1 py-2 rounded-xl text-xs font-semibold bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
+          }
+        >
+          {generating ? 'Generating…' : '♥ Generate quiet-endorsement copy'}
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!copy || saving}
+          className={
+            !copy || saving
+              ? 'px-4 py-2 rounded-xl text-xs font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : saved
+                ? 'px-4 py-2 rounded-xl text-xs font-bold bg-green-100 text-green-700'
+                : 'px-4 py-2 rounded-xl text-xs font-bold bg-coral text-white hover:opacity-90 transition-opacity'
+          }
+        >
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Use this ♥'}
+        </button>
+      </div>
+      {genFetcher.data?.error && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          ⚠ {genFetcher.data.error}
+        </p>
+      )}
+      {copy && (
+        <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-2 space-y-1.5">
+          <p className="uppercase tracking-wide text-ink/50 font-semibold">{copy.eyebrow}</p>
+          <p className="text-ink/60 italic">{copy.subhead}</p>
+          <p className="text-ink">{copy.body}</p>
+          <p className="text-ink/70 font-mono">banner: {copy.bannerHeadline}</p>
+        </div>
+      )}
+      {!copy && (
+        <p className="text-xs text-ink/40 italic">
+          No copy yet — generate above, then save to make it visible on the quiet-endorsement homepage.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── Pair Bundle Editor Panel ───────────────────────────────────────────
+
+function PairBundlePanel({ deal, pairSettings }: {
+  deal: NonNullable<Awaited<ReturnType<typeof getDealByShopifyId>>>
+  pairSettings: { handle: string; product: HomepageSettings['pairProduct'] }
+}) {
+  const genFetcher  = useFetcher<{ result?: { type: string; content: import('~/types').PairBundleCopy }; error?: string }>()
+  const saveFetcher = useFetcher<{ ok: boolean }>()
+
+  const initial = deal.pairBundleCopy ?? null
+  const [copy, setCopy] = useState<import('~/types').PairBundleCopy | null>(initial)
+
+  const generated = genFetcher.data?.result?.content
+  useEffect(() => {
+    if (generated) {
+      setCopy({ ...generated, pairedHandle: pairSettings.handle || generated.pairedHandle || '' })
+    }
+  }, [generated, pairSettings.handle])
+
+  const hasPair     = Boolean(pairSettings.handle && pairSettings.product)
+  const generating  = genFetcher.state !== 'idle'
+  const saving      = saveFetcher.state !== 'idle'
+  const saved       = saveFetcher.state === 'idle' && saveFetcher.data?.ok === true
+  const pairChanged = copy?.pairedHandle && pairSettings.handle && copy.pairedHandle !== pairSettings.handle
+
+  const handleGenerate = () => {
+    if (!hasPair) return
+    const fd = new FormData()
+    fd.set('type', 'pair_bundle')
+    fd.set('product', JSON.stringify({
+      title:       deal.seoTitle ?? deal.sku,
+      brand:       deal.brand,
+      description: deal.fullStory ?? deal.metaDescription ?? '',
+      categories:  [deal.category],
+      dealPrice:   deal.dealPrice,
+      msrp:        deal.msrp,
+      partner: {
+        title:       pairSettings.product!.title,
+        brand:       pairSettings.product!.brand,
+        description: '',
+        categories:  [],
+        dealPrice:   pairSettings.product!.dealPrice,
+      },
+    }))
+    genFetcher.submit(fd, { method: 'post', action: '/api/generate-copy' })
+  }
+
+  const handleSave = () => {
+    if (!copy) return
+    const toSave: import('~/types').PairBundleCopy = {
+      ...copy,
+      pairedHandle: pairSettings.handle,
+      generatedAt:  copy.generatedAt || new Date().toISOString(),
+    }
+    const fd = new FormData()
+    fd.set('intent',    'save-field')
+    fd.set('productId', deal.shopifyProductId)
+    fd.set('key',       'pair_bundle_copy')
+    fd.set('type',      'json')
+    fd.set('value',     JSON.stringify(toSave))
+    saveFetcher.submit(fd, { method: 'post' })
+  }
+
+  return (
+    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+          Pair bundle copy
+        </h3>
+        <span className="text-[11px] text-ink/40">homepage alt template</span>
+      </div>
+      {!hasPair && (
+        <p className="text-xs text-ink/50 bg-cream-2/60 border border-line rounded-lg px-3 py-2">
+          Set a pair in the toolbar first — drag a deal into the pair slot to nominate a partner.
+        </p>
+      )}
+      {hasPair && (
+        <p className="text-xs text-ink/60">
+          Pairing with <strong className="text-ink">{pairSettings.product!.title}</strong>
+        </p>
+      )}
+      {pairChanged && (
+        <p className="text-xs text-coral bg-coral/5 border border-coral/20 rounded-lg px-3 py-2">
+          Pair changed since last save — regenerate to refresh the story.
+        </p>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={!hasPair || generating}
+          className={
+            !hasPair || generating
+              ? 'flex-1 py-2 rounded-xl text-xs font-semibold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : 'flex-1 py-2 rounded-xl text-xs font-semibold bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
+          }
+        >
+          {generating ? 'Generating…' : '♥ Generate pair-bundle copy'}
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!copy || !hasPair || saving}
+          className={
+            !copy || !hasPair || saving
+              ? 'px-4 py-2 rounded-xl text-xs font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : saved
+                ? 'px-4 py-2 rounded-xl text-xs font-bold bg-green-100 text-green-700'
+                : 'px-4 py-2 rounded-xl text-xs font-bold bg-coral text-white hover:opacity-90 transition-opacity'
+          }
+        >
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Use this ♥'}
+        </button>
+      </div>
+      {genFetcher.data?.error && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          ⚠ {genFetcher.data.error}
+        </p>
+      )}
+      {copy && (
+        <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-2 space-y-2">
+          <div className="space-y-1">
+            <p className="uppercase tracking-wide text-ink/50 font-semibold">{copy.eyebrow}</p>
+            <p className="text-ink/60 italic">{copy.subhead}</p>
+            <p className="text-ink font-semibold">{copy.headline}</p>
+            <p className="text-ink">{copy.body}</p>
+          </div>
+
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1 pt-2 border-t border-line/60">
+            <dt className="text-ink/50 uppercase tracking-wide text-[10px]">Primary tag</dt>
+            <dd className="text-ink" style={{ fontFamily: 'var(--font-script)' }}>{copy.primaryTag}</dd>
+            <dt className="text-ink/50 uppercase tracking-wide text-[10px]">Partner tag</dt>
+            <dd className="text-ink" style={{ fontFamily: 'var(--font-script)' }}>{copy.partnerTag}</dd>
+            <dt className="text-ink/50 uppercase tracking-wide text-[10px]">Knot caption</dt>
+            <dd className="text-ink" style={{ fontFamily: 'var(--font-script)' }}>{copy.knotCaption}</dd>
+          </dl>
+
+          {copy.whyCards?.length > 0 && (
+            <div className="pt-2 border-t border-line/60 space-y-1.5">
+              <p className="text-ink/50 uppercase tracking-wide text-[10px] font-semibold">Why cards</p>
+              <ol className="space-y-1.5 list-none">
+                {copy.whyCards.map((card, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-coral font-bold italic shrink-0">{String(i + 1).padStart(2, '0')}</span>
+                    <div>
+                      <p className="text-ink font-semibold">{card.head}</p>
+                      <p className="text-ink/70">{card.body}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {copy.emmaQuote && (
+            <div className="pt-2 border-t border-line/60 space-y-1">
+              <p className="text-ink/50 uppercase tracking-wide text-[10px] font-semibold">Emma quote</p>
+              <p className="text-ink italic leading-relaxed">“{copy.emmaQuote}”</p>
+            </div>
+          )}
+
+          {copy.moments?.length > 0 && (
+            <div className="pt-2 border-t border-line/60 space-y-1.5">
+              <p className="text-ink/50 uppercase tracking-wide text-[10px] font-semibold">
+                Moments{copy.momentTitle ? ` — ${copy.momentTitle}` : ''}
+              </p>
+              <ol className="space-y-1.5 list-none">
+                {copy.moments.map((m, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-coral font-bold shrink-0">{i + 1}.</span>
+                    <div>
+                      <p className="text-ink font-semibold">{m.lead}</p>
+                      <p className="text-ink/70">{m.body}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          <p className="text-ink/70 italic pt-2 border-t border-line/60">{copy.bannerLine}</p>
+        </div>
+      )}
+      {!copy && (
+        <p className="text-xs text-ink/40 italic">
+          No copy yet — generate above, then save to make it visible on the pair-bundle homepage.
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ─── Emma Hero Regen ────────────────────────────────────────────────────
 
 function EmmaHeroRegen({ productId }: { productId: string }) {
@@ -780,6 +1245,69 @@ function TagsEditor({ deal, editId }: {
   )
 }
 
+// ─── Pair Slot Card ─────────────────────────────────────────────────────
+
+function PairSlotCard({ pairProduct, onDrop, onClear }: {
+  pairProduct: HomepageSettings['pairProduct']
+  onDrop:  (dealId: number) => void
+  onClear: () => void
+}) {
+  const [dragOver, setDragOver] = useState(false)
+  const handlers = {
+    onDragOver: (e: DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(true) },
+    onDragEnter: () => setDragOver(true),
+    onDragLeave: () => setDragOver(false),
+    onDrop: (e: DragEvent) => {
+      e.preventDefault()
+      setDragOver(false)
+      const id = parseInt(e.dataTransfer.getData('text/plain'))
+      if (!isNaN(id)) onDrop(id)
+    },
+  }
+
+  if (!pairProduct) {
+    return (
+      <div
+        className={`mb-5 border-2 border-dashed rounded-2xl p-6 text-center transition-all ${
+          dragOver ? 'border-coral ring-2 ring-coral bg-coral/5' : 'border-ink/20'
+        }`}
+        {...handlers}
+      >
+        <p className="text-xs uppercase tracking-wide font-bold text-ink/50">Pair slot</p>
+        <p className="text-sm font-medium text-ink/50 mt-1">Drop a deal here to pair with the live deal</p>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={`mb-5 rounded-2xl p-4 bg-white border flex items-center gap-4 transition-all ${
+        dragOver ? 'border-coral ring-2 ring-coral' : 'border-cream-2'
+      }`}
+      {...handlers}
+    >
+      <div className="w-16 h-16 rounded-xl overflow-hidden bg-cream-2 shrink-0">
+        {pairProduct.image
+          ? <img src={pairProduct.image} alt={pairProduct.title} className="w-full h-full object-cover" />
+          : <div className="w-full h-full" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] uppercase tracking-wide font-bold text-ink/50">Paired with</p>
+        <p className="text-sm font-semibold text-ink truncate" style={{ fontFamily: 'var(--font-display)' }}>{pairProduct.title}</p>
+        <p className="text-xs text-ink/60">{pairProduct.brand} · ${pairProduct.dealPrice}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onClear}
+        className="text-xs font-bold px-3 py-1.5 rounded-full text-ink/50 hover:text-red-500 hover:bg-red-50 transition-colors"
+        title="Clear pair"
+      >
+        ✕ clear
+      </button>
+    </div>
+  )
+}
+
 // ─── Live Deal Card ─────────────────────────────────────────────────────
 
 function LiveDealCard({ liveDealRow, shopifyData, onDrop, onClick, onBumpToBottom }: {
@@ -906,7 +1434,7 @@ function LiveDealCard({ liveDealRow, shopifyData, onDrop, onClick, onBumpToBotto
 export default function AdminDealsPage() {
   const {
     deals, shopifyDataMap, editorData, editId, liveDealRow,
-    page, totalPages, totalFiltered, allDealsForExport,
+    page, totalPages, totalFiltered, allDealsForExport, homepageSettings,
   } = useLoaderData<typeof loader>()
   const reorderFetcher  = useFetcher()
   const moveFetcher     = useFetcher()
@@ -971,6 +1499,20 @@ export default function AdminDealsPage() {
   function handleMoveToTop(dealId: number) {
     moveFetcher.submit(
       { intent: 'move-to-top', id: String(dealId) },
+      { method: 'post' },
+    )
+  }
+
+  function handlePairDrop(dealId: number) {
+    moveFetcher.submit(
+      { intent: 'save-pair-product', dealId: String(dealId) },
+      { method: 'post' },
+    )
+  }
+
+  function handlePairClear() {
+    moveFetcher.submit(
+      { intent: 'save-pair-product', dealId: '' },
       { method: 'post' },
     )
   }
@@ -1139,6 +1681,15 @@ export default function AdminDealsPage() {
         onBumpToBottom={handleBumpToBottom}
       />
 
+      {/* Pair Slot Card — shown only when pair_bundle template is active */}
+      {homepageSettings.template === 'pair_bundle' && (
+        <PairSlotCard
+          pairProduct={homepageSettings.pairProduct}
+          onDrop={handlePairDrop}
+          onClear={handlePairClear}
+        />
+      )}
+
       {/* Search bar + Move to top dropzone */}
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1">
@@ -1164,6 +1715,7 @@ export default function AdminDealsPage() {
             </button>
           )}
         </div>
+        <HomepageTemplateToggle settings={homepageSettings} />
         <div
           className={`shrink-0 px-4 py-2 rounded-xl border-2 border-dashed flex items-center gap-1.5 text-xs font-semibold transition-all ${
             moveToTopDragOver ? 'border-sage ring-2 ring-sage bg-sage/5 text-sage' : 'border-ink/15 text-ink/30'
@@ -1507,6 +2059,15 @@ export default function AdminDealsPage() {
 
                   {/* Emma hero (Claude-generated voice copy) */}
                   <EmmaHeroRegen productId={editorData.deal.shopifyProductId} />
+
+                  {/* Quiet endorsement copy (alt homepage template) */}
+                  <QuietEndorsementPanel deal={editorData.deal} />
+
+                  {/* Pair bundle copy (alt homepage template) */}
+                  <PairBundlePanel
+                    deal={editorData.deal}
+                    pairSettings={{ handle: homepageSettings.pairProductHandle, product: homepageSettings.pairProduct }}
+                  />
 
                   {/* Copy & Content (collapsible) */}
                   <div>

@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
-import { addToCart, addLinesToCart, createCart, getCart, getCustomerProfile, getAccessoryProducts, removeFromCart, updateCartLine } from '~/lib/shopify.server'
+import { addToCart, addLinesToCart, createCart, getCart, getCustomerProfile, getAccessoryProducts, removeFromCart, setCartAttributes, updateCartLine } from '~/lib/shopify.server'
 import { getBundleByHandle, bundleCartLines } from '~/lib/bundles.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import { getCustomerToken } from '~/lib/customer-session.server'
@@ -92,6 +92,14 @@ export async function action({ request }: ActionFunctionArgs) {
       } catch {
         return Response.json({ ok: false, error: 'Could not add items' }, { status: 400, headers })
       }
+    }
+    // Optional: tag the cart with a custom attribute so a pre-configured
+    // Shopify Automatic Discount rule can target it (e.g. pair_bundle=live).
+    const cartTag = (form.get('cartTag') as string | null)?.trim()
+    if (cartTag && cartId) {
+      try {
+        await setCartAttributes(cartId, [{ key: cartTag, value: 'live' }])
+      } catch { /* attribute is a nice-to-have — don't fail the add */ }
     }
     return Response.json({ ok: true, added: lines.length }, { headers })
   }

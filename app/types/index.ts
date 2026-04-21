@@ -73,6 +73,35 @@ export interface EmmaHeroCopy {
   voiceHash:   string
 }
 
+/** Quiet-endorsement homepage template copy (Haiku-generated, stored per product). */
+export interface QuietEndorsementCopy {
+  eyebrow:        string
+  subhead:        string
+  body:           string
+  bannerHeadline: string
+}
+
+export interface PairBundleCopyWhyCard { head: string; body: string }
+export interface PairBundleCopyMoment  { lead: string; body: string }
+
+/** Pair-bundle homepage template copy (Haiku-generated per primary product). */
+export interface PairBundleCopy {
+  eyebrow:      string
+  subhead:      string
+  headline:     string
+  body:         string
+  bannerLine:   string
+  pairedHandle: string
+  generatedAt:  string
+  primaryTag:   string
+  partnerTag:   string
+  knotCaption:  string
+  whyCards:     PairBundleCopyWhyCard[]
+  emmaQuote:    string
+  momentTitle:  string
+  moments:      PairBundleCopyMoment[]
+}
+
 export interface Deal {
   id: string
   shopifyProductId: string
@@ -110,15 +139,17 @@ export interface Deal {
   tags: string[]
   rating?: { value: number; count: number }
   // v2 redesign metafields (all optional — legacy products skip gracefully)
-  mapRestricted?:   boolean
-  heroVideo?:       HeroVideo
-  moodTags?:        string[]
-  audienceTags?:    string[]
-  mattersTags?:     string[]
-  productTypeDial?: ProductTypeDial
-  sensationDial?:   SensationDial
-  pairingWhy?:      Record<string, string>
-  emmaHero?:        EmmaHeroCopy
+  mapRestricted?:          boolean
+  heroVideo?:              HeroVideo
+  moodTags?:               string[]
+  audienceTags?:           string[]
+  mattersTags?:            string[]
+  productTypeDial?:        ProductTypeDial
+  sensationDial?:          SensationDial
+  pairingWhy?:             Record<string, string>
+  emmaHero?:               EmmaHeroCopy
+  quietEndorsementCopy?:   QuietEndorsementCopy
+  pairBundleCopy?:         PairBundleCopy
 }
 
 export interface Product {
@@ -360,7 +391,7 @@ export interface DailyProfitSummaryRow {
 // ─── Admin ─────────────────────────────────────────────────────────────────
 
 export interface GenerateCopyRequest {
-  type: 'tagline' | 'full_story' | 'both_ways' | 'bullets' | 'box_contents' | 'email_subjects' | 'seo_meta' | 'specifications'
+  type: 'tagline' | 'full_story' | 'both_ways' | 'bullets' | 'box_contents' | 'email_subjects' | 'seo_meta' | 'specifications' | 'quiet_endorsement' | 'pair_bundle'
   product: {
     title: string
     brand: string
@@ -368,12 +399,20 @@ export interface GenerateCopyRequest {
     categories: string[]
     dealPrice?: number
     msrp?: number
+    mapRestricted?: boolean
+    partner?: {
+      title:       string
+      brand:       string
+      description: string
+      categories:  string[]
+      dealPrice?:  number
+    }
   }
 }
 
 export interface GenerateCopyResult {
   type: string
-  content: string | string[] | { forHim: string; forHer: string }
+  content: string | string[] | { forHim: string; forHer: string } | QuietEndorsementCopy | PairBundleCopy
 }
 
 // ─── Klaviyo ──────────────────────────────────────────────────────────────

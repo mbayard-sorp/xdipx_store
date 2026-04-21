@@ -21,12 +21,16 @@
   --color-coral:       #FF4B1F;
   --color-coral-2:     #FF6A3D;
   --color-coral-deep:  #D93A15;
+  --color-coral-soft:  #FFE8DF;
   --color-sage:        #7C8F78;
   --color-sun:         #F5B841;
+  --color-butter:      #FFE28C;
+  --color-line-2:      #D8CCB5;
 
   /* Typography */
   --font-display: 'Archivo', sans-serif;
   --font-body:    'Inter',   sans-serif;
+  --font-script:  'Caveat',  cursive;
 
   /* Radii */
   --radius-sm: 6px;

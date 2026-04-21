@@ -203,6 +203,185 @@ ${productContext}`
       return { type, content: [`1x ${product.title}`, '1x User manual'] }
     }
 
+    case 'quiet_endorsement': {
+      const mapNote = product.mapRestricted
+        ? 'This product is MAP-restricted — do NOT reference a discount or a strike price. The hook must be Emma\'s endorsement, not the price.'
+        : 'You may reference a pleasant price or value if it flows naturally, but the hook should still be Emma\'s endorsement, not the discount.'
+      const primaryPrompt = `Write the four short strings for Emma's "quiet endorsement" homepage template. Emma voice: a trusted, funny friend who has actually tried this and quietly can't stop thinking about it. Never "Buy now" — never countdowns — never "sex" as an adjective. Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction".
+${mapNote}
+
+Return ONLY a raw JSON object (no markdown) with these exact keys:
+- eyebrow: a tag line ≤ 60 chars, two short phrases joined by " · " (middle dot, U+00B7). Example shape: "quiet endorsement · works for MAP-restricted".
+- subhead: one short line, lowercase, casual — something like "updated whenever I change my mind".
+- body: 1–2 sentences (≤ 200 chars total). First person, Emma voice. Wrap one 1–4 word phrase in underscores like _slow-burn energy_ so the UI can highlight it in coral. End with a soft curiosity nudge ("Come see.", "Worth a peek.", etc).
+- bannerHeadline: ≤ 30 chars, italic-editorial feel, product name in Emma's words. Use " · " as separator if you have two parts. Example: "Slowburn · the Hush".
+
+${productContext}`
+      const retryPrompt = `Return ONLY raw JSON. No markdown, no prose before or after. Shape: {"eyebrow": "...", "subhead": "...", "body": "...", "bannerHeadline": "..."}. Follow Emma voice rules. ${productContext}`
+
+      const isValid = (v: unknown): v is import('~/types').QuietEndorsementCopy => {
+        if (!v || typeof v !== 'object') return false
+        const obj = v as Record<string, unknown>
+        return typeof obj.eyebrow === 'string' && obj.eyebrow.trim().length > 0
+          && typeof obj.subhead === 'string' && obj.subhead.trim().length > 0
+          && typeof obj.body === 'string' && obj.body.trim().length > 0
+          && typeof obj.bannerHeadline === 'string' && obj.bannerHeadline.trim().length > 0
+      }
+
+      const raw = await generate(primaryPrompt, 512, MODEL_FAST)
+      try {
+        const parsed = JSON.parse(stripFences(raw))
+        if (isValid(parsed)) return { type, content: parsed }
+      } catch { /* fall through */ }
+
+      const retried = await generate(retryPrompt, 512, MODEL_FAST)
+      try {
+        const parsed = JSON.parse(stripFences(retried))
+        if (isValid(parsed)) return { type, content: parsed }
+      } catch { /* fall through */ }
+
+      return {
+        type,
+        content: {
+          eyebrow:        product.mapRestricted ? 'quiet endorsement · works for MAP-restricted' : 'quiet endorsement · editor\u2019s pick',
+          subhead:        'updated whenever I change my mind',
+          body:           `I\u2019ve been a little obsessed with this one \u2014 it\u2019s got a kind of _slow-burn energy_ I wasn\u2019t expecting. Come see.`,
+          bannerHeadline: `${product.brand || 'Emma\u2019s pick'} \u00B7 ${product.title}`.slice(0, 30),
+        },
+      }
+    }
+
+    case 'pair_bundle': {
+      const partner = product.partner
+      const nowISO  = () => new Date().toISOString()
+
+      const staticFallback = (): import('~/types').PairBundleCopy => ({
+        eyebrow:      'emma recommends · a pair',
+        subhead:      'better together · save when you grab both',
+        headline:     'These two were made for each other.',
+        body:         `One sets the mood, the other carries it. It\u2019s the kind of _slow-burn pairing_ that just clicks. Come see.`,
+        bannerLine:   '\u2014 Emma \u00B7 picked this pair because they click \u00B7 swaps it when something better lands',
+        pairedHandle: '',
+        generatedAt:  nowISO(),
+        primaryTag:   'this one',
+        partnerTag:   'and this',
+        knotCaption:  'tied together on purpose',
+        whyCards: [
+          { head: 'One handles the fun part.', body: 'The rumble, the tease, the main event. Dialed in and ready to go.' },
+          { head: 'The other handles the smart part.', body: 'Keeps everything gliding, safe on toys, easy on skin. No drama, no cleanup headache.' },
+          { head: 'Together they buy you time.', body: 'Less stop-and-start, more flow. You\u2019ll feel the difference in the first few minutes.' },
+        ],
+        emmaQuote:    `This is the pair I\u2019d hand a friend who asked \u201Cjust pick something for me.\u201D One does the work, one does the _finish_, and together they feel intentional. That\u2019s the whole point of a good pair.`,
+        momentTitle:  'how to make this pair click',
+        moments: [
+          { lead: 'Start with the lube.', body: 'A little goes a long way \u2014 warm it in your hands first so it lands smooth instead of startling.' },
+          { lead: 'Then bring in the other.', body: 'Let the rhythm build before you ramp up. The pair wants you unhurried.' },
+        ],
+      })
+
+      if (!partner) {
+        return {
+          type,
+          content: {
+            ...staticFallback(),
+            body:       `Set a pair in the toolbar first \u2014 I\u2019ll write this once I can see both.`,
+            bannerLine: '\u2014 Emma \u00B7 waiting on a pairing',
+          },
+        }
+      }
+
+      const pairContext = `Primary product:\n- Title: ${product.title}\n- Brand: ${product.brand}\n- Description: ${product.description}\n- Categories: ${product.categories.join(', ')}${product.dealPrice ? `\n- Deal price: $${product.dealPrice}` : ''}\n\nPartner product:\n- Title: ${partner.title}\n- Brand: ${partner.brand}\n- Description: ${partner.description}\n- Categories: ${partner.categories.join(', ')}${partner.dealPrice ? `\n- Deal price: $${partner.dealPrice}` : ''}`
+
+      const voiceRules = `VOICE RULES (strict):
+- Emma is a persona \u2014 she does NOT claim to have personally used or tested any product.
+- NEVER say: "I tried", "I tested", "I've been using", "been living with", "spent X weeks", "I reached for this", "since April", "a month of use", or any similar first-person use claim.
+- NEVER invent usage stats ("238 pairs grabbed", "top 5%", "my #1").
+- Emma curates, pairs, and recommends \u2014 she speaks about why things WOULD click, not what she felt.
+- OK to say: "picks this pair", "I\u2019d hand this to a friend", "why they click", "made for each other", "the slow one", "the fix-it one", "a pairing that works".
+- Do NOT name the brands. Do NOT restate the product titles. Do NOT surface countdowns or "until midnight".
+- Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction" \u2014 never "sex" as an adjective.`
+
+      const shapeSpec = `Return ONLY a raw JSON object (no markdown fences, no prose around it) with EXACTLY these keys:
+
+{
+  "eyebrow":     string  // \u2264 60 chars, two short phrases joined by " \u00B7 " (middle dot U+00B7). e.g. "emma recommends \u00B7 a powerful pair"
+  "subhead":     string  // \u2264 70 chars, lowercase, casual. e.g. "better together \u00B7 save when you grab both"
+  "headline":    string  // 6\u201310 words, editorial italic feel, the hook. e.g. "These two were made for each other."
+  "body":        string  // 25\u201345 words, 2 sentences. Wrap ONE 1\u20134 word phrase in underscores like _slow-burn energy_. Describe both products' ROLES (one does X, the other does Y). End with a soft curiosity nudge.
+  "bannerLine":  string  // one short italic Emma sign-off, no testimony. e.g. "\u2014 Emma \u00B7 picks this pair for slow-burn nights \u00B7 swaps it when something better lands"
+  "primaryTag":  string  // 2\u20133 lowercase words, curator voice, describes the primary's ROLE. e.g. "the buzz one" or "the slow one"
+  "partnerTag":  string  // 2\u20133 lowercase words, curator voice, describes the partner's ROLE. e.g. "the glide one" or "the fix-it one"
+  "knotCaption": string  // 3\u20136 words, short label for why they're tied together. e.g. "tied together on purpose" or "one better idea"
+  "whyCards": [          // EXACTLY 3 entries explaining why the pairing works
+    { "head": string,    // 5\u20139 words ending in a period. Short editorial hook. e.g. "One handles the fun part."
+      "body": string }   // 15\u201325 words, no testimony, factual + evocative
+  ],
+  "emmaQuote":   string  // 35\u201360 words, 2\u20133 sentences, first-person curator voice ("this is the pair I'd hand a friend"). Supports 1\u20132 _emphasis_ spans. NEVER "tried/tested/used".
+  "momentTitle": string  // 5\u20138 words, italic feel. e.g. "how to make this pair click"
+  "moments": [           // 2 or 3 entries \u2014 a quick how-to for the pair
+    { "lead": string,    // 4\u20137 words, will render bold. e.g. "Start with the lube."
+      "body": string }   // 15\u201322 words continuing the step in Emma voice
+  ]
+}
+
+The whyCards array MUST have length 3. The moments array MUST have length 2 or 3. No extra keys. No nulls.`
+
+      const primaryPrompt = `Write Emma's "pair bundle" editorial module copy \u2014 two curated products sold together at a better price.
+
+${voiceRules}
+
+${shapeSpec}
+
+${pairContext}`
+
+      const retryPrompt = `Return ONLY raw JSON matching this exact shape: {"eyebrow","subhead","headline","body","bannerLine","primaryTag","partnerTag","knotCaption","whyCards":[{"head","body"},{"head","body"},{"head","body"}],"emmaQuote","momentTitle","moments":[{"lead","body"},{"lead","body"}]}.\n\n${voiceRules}\n\n${pairContext}`
+
+      type Raw = Omit<import('~/types').PairBundleCopy, 'pairedHandle' | 'generatedAt'>
+
+      const isStr = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0
+      const isCard = (v: unknown): v is { head: string; body: string } =>
+        !!v && typeof v === 'object' && isStr((v as Record<string, unknown>).head) && isStr((v as Record<string, unknown>).body)
+      const isMoment = (v: unknown): v is { lead: string; body: string } =>
+        !!v && typeof v === 'object' && isStr((v as Record<string, unknown>).lead) && isStr((v as Record<string, unknown>).body)
+
+      const isValid = (v: unknown): v is Raw => {
+        if (!v || typeof v !== 'object') return false
+        const o = v as Record<string, unknown>
+        return isStr(o.eyebrow)
+          && isStr(o.subhead)
+          && isStr(o.headline)
+          && isStr(o.body)
+          && isStr(o.bannerLine)
+          && isStr(o.primaryTag)
+          && isStr(o.partnerTag)
+          && isStr(o.knotCaption)
+          && isStr(o.emmaQuote)
+          && isStr(o.momentTitle)
+          && Array.isArray(o.whyCards) && o.whyCards.length === 3 && o.whyCards.every(isCard)
+          && Array.isArray(o.moments) && (o.moments.length === 2 || o.moments.length === 3) && o.moments.every(isMoment)
+      }
+
+      const wrap = (copy: Raw): import('~/types').PairBundleCopy => ({
+        ...copy,
+        pairedHandle: '',
+        generatedAt:  nowISO(),
+      })
+
+      const raw = await generate(primaryPrompt, 1800, MODEL_FAST)
+      try {
+        const parsed = JSON.parse(stripFences(raw))
+        if (isValid(parsed)) return { type, content: wrap(parsed) }
+      } catch { /* fall through */ }
+
+      const retried = await generate(retryPrompt, 1800, MODEL_FAST)
+      try {
+        const parsed = JSON.parse(stripFences(retried))
+        if (isValid(parsed)) return { type, content: wrap(parsed) }
+      } catch { /* fall through */ }
+
+      return { type, content: staticFallback() }
+    }
+
     case 'specifications': {
       const primaryPrompt = `Extract and format the technical specifications from this product description into clean, readable HTML. Use a <table> with two columns (spec name + value) if there are 4+ specs, otherwise use a <ul> list. Include: dimensions, materials, power source, charge time, run time, waterproofing, colors, and any other objective specs. If a spec is not mentioned, omit it. No fluff or marketing copy — just the facts. Return only the HTML, no markdown, no wrapper tags.\n\n${productContext}`
       const retryPrompt   = `Return ONLY HTML starting with <table> or <ul> containing the technical specs from this product description. No markdown, no explanation, no preamble.\n\n${productContext}`

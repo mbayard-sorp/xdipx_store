@@ -46,11 +46,11 @@ export const links: LinksFunction = () => [
   {
     rel: 'preload',
     as: 'style',
-    href: 'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&display=swap',
+    href: 'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&family=Caveat:wght@500;700&display=swap',
   },
   {
     rel: 'stylesheet',
-    href: 'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&display=swap',
+    href: 'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&family=Caveat:wght@500;700&display=swap',
   },
   { rel: 'stylesheet', href: stylesheet },
 ]
