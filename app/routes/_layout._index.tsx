@@ -16,6 +16,7 @@ import { EmmaHero }              from '~/components/store/EmmaHero'
 import { BundleHero }            from '~/components/store/BundleHero'
 import { QuietEndorsementHero }  from '~/components/store/QuietEndorsementHero'
 import { PairBundleHero }        from '~/components/store/PairBundleHero'
+import { PairBundleFullBleedHero } from '~/components/store/PairBundleFullBleedHero'
 import { ProductCarousel }       from '~/components/cms/ProductCarousel'
 import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }  from '~/components/cms/ContentBlockRenderer'
@@ -68,14 +69,14 @@ export async function loader(_args: LoaderFunctionArgs) {
   ])
 
   const homepageSettings = {
-    template: (templateRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle',
+    template: (templateRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed',
     showFreeShipping: (templateRows.find(r => r.key === 'homepage_show_free_shipping')?.value ?? 'true') === 'true',
     pairProductHandle: (templateRows.find(r => r.key === 'homepage_pair_product_handle')?.value ?? '').trim(),
     pairDiscountPct: parseInt(templateRows.find(r => r.key === 'homepage_pair_discount_pct')?.value ?? '10', 10) || 10,
   }
 
-  // Resolve pair deal only when the pair_bundle template is active
-  const pairBundleDeal = homepageSettings.template === 'pair_bundle' && homepageSettings.pairProductHandle
+  // Resolve pair deal only when a pair_bundle template is active
+  const pairBundleDeal = (homepageSettings.template === 'pair_bundle' || homepageSettings.template === 'pair_bundle_fullbleed') && homepageSettings.pairProductHandle
     ? await getDealByHandle(homepageSettings.pairProductHandle)
     : null
 
@@ -239,6 +240,16 @@ export default function Homepage() {
       ) : deal && homepageSettings.template === 'pair_bundle' && pairBundleDeal && deal.pairBundleCopy ? (
         <>
           <PairBundleHero
+            primary={deal}
+            partner={pairBundleDeal}
+            copy={deal.pairBundleCopy}
+            discountPct={homepageSettings.pairDiscountPct}
+          />
+          <ProductStructuredData deal={deal} />
+        </>
+      ) : deal && homepageSettings.template === 'pair_bundle_fullbleed' && pairBundleDeal && deal.pairBundleCopy ? (
+        <>
+          <PairBundleFullBleedHero
             primary={deal}
             partner={pairBundleDeal}
             copy={deal.pairBundleCopy}
