@@ -98,6 +98,8 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "sensation_dial" }
     { namespace: "xdipx", key: "pairing_why" }
     { namespace: "xdipx", key: "emma_hero" }
+    { namespace: "xdipx", key: "quiet_endorsement_copy" }
+    { namespace: "xdipx", key: "pair_bundle_copy" }
     { namespace: "custom", key: "original_description" }
   ]) {
     namespace key value
@@ -355,6 +357,8 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
   const audienceTags     = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
   const mattersTags      = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
   const emmaHero         = parseMetafieldJSON<Partial<import('~/types').EmmaHeroCopy>>(mf, 'emma_hero', {})
+  const quietEndorsementCopy = parseMetafieldJSON<Partial<import('~/types').QuietEndorsementCopy>>(mf, 'quiet_endorsement_copy', {})
+  const pairBundleCopy       = parseMetafieldJSON<Partial<import('~/types').PairBundleCopy>>(mf, 'pair_bundle_copy', {})
 
   return {
     id: node.id,
@@ -413,6 +417,12 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     ...(pairingWhy    && Object.keys(pairingWhy).length > 0    ? { pairingWhy } : {}),
     ...(emmaHero?.headline && emmaHero?.variant
       ? { emmaHero: emmaHero as import('~/types').EmmaHeroCopy }
+      : {}),
+    ...(quietEndorsementCopy?.eyebrow && quietEndorsementCopy?.body && quietEndorsementCopy?.bannerHeadline
+      ? { quietEndorsementCopy: quietEndorsementCopy as import('~/types').QuietEndorsementCopy }
+      : {}),
+    ...(pairBundleCopy?.headline && pairBundleCopy?.body && pairBundleCopy?.pairedHandle
+      ? { pairBundleCopy: pairBundleCopy as import('~/types').PairBundleCopy }
       : {}),
   }
 }
@@ -568,6 +578,14 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
   const emmaHero = emmaHeroRaw?.headline && emmaHeroRaw?.variant
     ? (emmaHeroRaw as import('~/types').EmmaHeroCopy)
     : null
+  const quietEndorsementCopyRaw = mfJSON<Partial<import('~/types').QuietEndorsementCopy>>('quiet_endorsement_copy', {})
+  const quietEndorsementCopy = quietEndorsementCopyRaw?.eyebrow && quietEndorsementCopyRaw?.body && quietEndorsementCopyRaw?.bannerHeadline
+    ? (quietEndorsementCopyRaw as import('~/types').QuietEndorsementCopy)
+    : null
+  const pairBundleCopyRaw = mfJSON<Partial<import('~/types').PairBundleCopy>>('pair_bundle_copy', {})
+  const pairBundleCopy = pairBundleCopyRaw?.headline && pairBundleCopyRaw?.body && pairBundleCopyRaw?.pairedHandle
+    ? (pairBundleCopyRaw as import('~/types').PairBundleCopy)
+    : null
   const mapRestricted = mfVal('map_restricted') === 'true'
 
   const variant = product.variants[0]
@@ -605,6 +623,8 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     ...(mfVal('deal_score') ? { dealScore: parseFloat(mfVal('deal_score')) } : {}),
     ...(mfVal('nalpac_sku') ? { nalpacSku: mfVal('nalpac_sku') } : {}),
     ...(emmaHero ? { emmaHero } : {}),
+    ...(quietEndorsementCopy ? { quietEndorsementCopy } : {}),
+    ...(pairBundleCopy ? { pairBundleCopy } : {}),
     mapRestricted,
     variantId: variant ? `gid://shopify/ProductVariant/${variant.id}` : '',
     variants: product.variants.map(v => {
@@ -1166,6 +1186,24 @@ export async function addLinesToCart(
   })
   if (!data.cartLinesAdd.cart) throw new Error('Cart not found or lines could not be added')
   return rawCartToCart(data.cartLinesAdd.cart)
+}
+
+/**
+ * Set custom attributes on a cart. Used to tag carts for Shopify Automatic
+ * Discount rules (e.g. pair_bundle=live triggers a pre-configured % off rule).
+ */
+export async function setCartAttributes(
+  cartId: string,
+  attributes: { key: string; value: string }[],
+): Promise<void> {
+  await storefront(`
+    mutation CartAttributesUpdate($cartId: ID!, $attributes: [AttributeInput!]!) {
+      cartAttributesUpdate(cartId: $cartId, attributes: $attributes) {
+        cart { id }
+        userErrors { field message }
+      }
+    }
+  `, { cartId, attributes })
 }
 
 export async function removeFromCart(cartId: string, lineIds: string[]): Promise<Cart> {

@@ -6,14 +6,16 @@ import {
   getCollectionProducts, getProductsByHandles,
 } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
-import { dealHistory } from '../../db/schema'
-import { eq } from 'drizzle-orm'
+import { dealHistory, pipelineSettings } from '../../db/schema'
+import { eq, inArray } from 'drizzle-orm'
 import { kvGet, KV_KEYS } from '~/lib/kv.server'
 import { getHomepageSections, getEmmaHeroSettings } from '~/lib/sanity.server'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { EmmaHero }              from '~/components/store/EmmaHero'
 import { BundleHero }            from '~/components/store/BundleHero'
+import { QuietEndorsementHero }  from '~/components/store/QuietEndorsementHero'
+import { PairBundleHero }        from '~/components/store/PairBundleHero'
 import { ProductCarousel }       from '~/components/cms/ProductCarousel'
 import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }  from '~/components/cms/ContentBlockRenderer'
@@ -50,14 +52,32 @@ export async function loader(_args: LoaderFunctionArgs) {
   // Read the live-deal row first (indexed, cheap); then fan out the Shopify
   // fetch alongside the other branches so it overlaps rather than chains.
   const dbDeal = await getLiveDealRow()
-  const [deal, forHim, forHer, bonusDeal, cmsData, emmaHero] = await Promise.all([
+  const [deal, forHim, forHer, bonusDeal, cmsData, emmaHero, templateRows] = await Promise.all([
     dbDeal?.shopifyProductId ? getDealByShopifyId(dbDeal.shopifyProductId) : Promise.resolve(null),
     getProductsByTag('for-him', 8),
     getProductsByTag('for-her', 8),
     getBonusDeal(),
     getHomepageSections(),
     getEmmaHeroSettings(),
+    db.select().from(pipelineSettings).where(inArray(pipelineSettings.key, [
+      'homepage_template',
+      'homepage_show_free_shipping',
+      'homepage_pair_product_handle',
+      'homepage_pair_discount_pct',
+    ])),
   ])
+
+  const homepageSettings = {
+    template: (templateRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle',
+    showFreeShipping: (templateRows.find(r => r.key === 'homepage_show_free_shipping')?.value ?? 'true') === 'true',
+    pairProductHandle: (templateRows.find(r => r.key === 'homepage_pair_product_handle')?.value ?? '').trim(),
+    pairDiscountPct: parseInt(templateRows.find(r => r.key === 'homepage_pair_discount_pct')?.value ?? '10', 10) || 10,
+  }
+
+  // Resolve pair deal only when the pair_bundle template is active
+  const pairBundleDeal = homepageSettings.template === 'pair_bundle' && homepageSettings.pairProductHandle
+    ? await getDealByHandle(homepageSettings.pairProductHandle)
+    : null
 
   // Resolve optional pair product for bundle variant (Shopify handle → Deal)
   const pairDeal = emmaHero?.heroVariant === 'bundle' && emmaHero.pairProductHandle
@@ -96,7 +116,7 @@ export async function loader(_args: LoaderFunctionArgs) {
     return {
       deal: null, bundle: null, forHim, forHer, bonusDeal,
       viewers: 0, soldToday: 0, cmsData, carouselProductMap,
-      emmaHero: null, pairDeal: null,
+      emmaHero: null, pairDeal: null, homepageSettings, pairBundleDeal: null,
     }
   }
 
@@ -112,7 +132,7 @@ export async function loader(_args: LoaderFunctionArgs) {
     reviews: reviewData.reviews,
     reviewTotal: reviewData.total,
     aggregate: aggregate ?? null,
-    emmaHero, pairDeal,
+    emmaHero, pairDeal, homepageSettings, pairBundleDeal,
   }
 }
 
@@ -150,7 +170,7 @@ export default function Homepage() {
   const {
     deal, bundle, forHim, forHer, bonusDeal,
     cmsData, carouselProductMap,
-    emmaHero, pairDeal,
+    emmaHero, pairDeal, homepageSettings, pairBundleDeal,
   } = useLoaderData<typeof loader>()
   const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
 
@@ -216,6 +236,21 @@ export default function Homepage() {
     <>
       {bundle ? (
         <BundleHero bundle={bundle} buyButtonText={buyButtonText} />
+      ) : deal && homepageSettings.template === 'pair_bundle' && pairBundleDeal && deal.pairBundleCopy ? (
+        <>
+          <PairBundleHero
+            primary={deal}
+            partner={pairBundleDeal}
+            copy={deal.pairBundleCopy}
+            discountPct={homepageSettings.pairDiscountPct}
+          />
+          <ProductStructuredData deal={deal} />
+        </>
+      ) : deal && homepageSettings.template === 'quiet_endorsement' && deal.quietEndorsementCopy ? (
+        <>
+          <QuietEndorsementHero deal={deal} showFreeShipping={homepageSettings.showFreeShipping} />
+          <ProductStructuredData deal={deal} />
+        </>
       ) : deal ? (
         <>
           <EmmaHero

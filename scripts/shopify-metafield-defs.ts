@@ -83,6 +83,20 @@ const DEFS: MetafieldDef[] = [
     description: 'JSON { variant, eyebrow, headline, body, aside, pullQuote?, generatedAt, voiceHash } — generated from pipelineSettings.brandVoice on deal activation.',
     type:        'json',
   },
+  // Alt-template "quiet endorsement" homepage — Haiku-generated per product
+  {
+    key:         'quiet_endorsement_copy',
+    name:        'Quiet endorsement copy',
+    description: 'JSON { eyebrow, subhead, body, bannerHeadline } — Haiku-generated Emma copy for the alt "quiet endorsement" homepage template.',
+    type:        'json',
+  },
+  // Alt-template "pair bundle" homepage — Haiku-generated per primary product
+  {
+    key:         'pair_bundle_copy',
+    name:        'Pair bundle copy',
+    description: 'JSON { eyebrow, subhead, headline, body, bannerLine, pairedHandle, generatedAt } — Haiku-generated Emma copy for the alt "pair bundle" homepage template. Tied to a specific partner product by pairedHandle.',
+    type:        'json',
+  },
 ]
 
 const STORE = process.env['SHOPIFY_STORE_DOMAIN']
