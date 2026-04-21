@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Link, useFetcher } from 'react-router'
 import type { Deal, PairBundleCopy, ProductVariant } from '~/types'
+import { PairBundleHeroCarousel } from './PairBundleHeroCarousel'
+import { splitUnderscores, renderWithHighlight } from './pairBundleText'
 
 interface PairBundleHeroProps {
   primary:     Deal
@@ -11,22 +13,6 @@ interface PairBundleHeroProps {
 
 const fmtPrice = (n: number) =>
   `$${Number.isInteger(n) ? n.toFixed(0) : n.toFixed(2)}`
-
-function splitUnderscores(body: string): Array<{ text: string; emph: boolean }> {
-  const parts = body.split(/(_[^_]+_)/g)
-  return parts.map(part => {
-    if (part.startsWith('_') && part.endsWith('_')) return { text: part.slice(1, -1), emph: true }
-    return { text: part, emph: false }
-  })
-}
-
-function renderWithHighlight(body: string, coralClass = 'text-coral') {
-  return splitUnderscores(body).map((p, i) =>
-    p.emph
-      ? <span key={i} className={coralClass}>{p.text}</span>
-      : <span key={i}>{p.text}</span>,
-  )
-}
 
 function renderDekWithPill(body: string) {
   return splitUnderscores(body).map((p, i) => {
@@ -487,7 +473,7 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
 
   return (
     <section className="bg-cream">
-      <div className="max-w-6xl mx-auto px-4 py-8 md:py-14">
+      <div className="max-w-6xl mx-auto px-4 pt-8 md:pt-14">
 
         {/* Shared cart form — targeted by all CTAs via form="pair-bundle-form" */}
         <fetcher.Form id="pair-bundle-form" method="post" action="/api/cart" className="hidden">
@@ -614,110 +600,6 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
               </div>
             </div>
 
-            {whyCards.length > 0 && (
-              <ol className="flex flex-col gap-3 mb-6 list-none">
-                {whyCards.map((c, i) => (
-                  <li
-                    key={i}
-                    className="flex items-start gap-3.5 p-4 rounded-[14px] bg-paper"
-                    style={{ border: '1.2px solid var(--color-line-2)' }}
-                  >
-                    <span
-                      className="shrink-0 italic leading-none text-coral"
-                      style={{
-                        fontFamily:    'var(--font-display)',
-                        fontStyle:     'italic',
-                        fontWeight:    800,
-                        fontSize:      '30px',
-                        letterSpacing: '-0.02em',
-                        minWidth:      '40px',
-                      }}
-                      aria-hidden="true"
-                    >
-                      {String(i + 1).padStart(2, '0')}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div
-                        className="text-ink mb-1 leading-tight"
-                        style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '15px' }}
-                      >
-                        {c.head}
-                      </div>
-                      <p
-                        className="text-ink-2 leading-[1.45]"
-                        style={{ fontFamily: 'var(--font-body)', fontSize: '12.5px' }}
-                      >
-                        {c.body}
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
-
-            <div
-              className="grid grid-cols-1 gap-5 p-6 rounded-[16px] bg-cream-2"
-              style={{ border: '1.2px solid var(--color-ink)' }}
-            >
-              <div className="flex flex-wrap items-baseline gap-3.5">
-                <span className="text-coral" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '38px', letterSpacing: '-0.01em' }}>
-                  {fmtPrice(bundlePrice)}
-                </span>
-                {showStrike && (
-                  <span className="text-muted line-through text-[18px]" style={{ fontFamily: 'var(--font-display)' }}>
-                    {fmtPrice(combinedDeal)}
-                  </span>
-                )}
-                {savings > 0 && (
-                  <span
-                    className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-[0.04em]"
-                    style={{
-                      background: 'var(--color-butter)',
-                      border:     '1.2px solid var(--color-ink)',
-                      fontFamily: 'var(--font-body)',
-                    }}
-                  >
-                    save {fmtPrice(savings)} as a pair
-                  </span>
-                )}
-                <p className="w-full text-[11.5px] text-muted mt-0.5" style={{ fontFamily: 'var(--font-body)' }}>
-                  Shipping free on this pair · plain packaging · 30-day returns
-                </p>
-              </div>
-            </div>
-
-            {copy.bannerLine && (
-              <p className="text-center mt-5 italic text-[13px] text-muted" style={{ fontFamily: 'var(--font-body)' }}>
-                {copy.bannerLine}
-              </p>
-            )}
-          </div>
-
-          {/* Mobile sticky CTA */}
-          <div
-            className="sticky bottom-0 left-0 right-0 -mx-4 px-4 pt-6 pb-3.5 mt-4 z-20"
-            style={{
-              background: 'linear-gradient(180deg, rgba(250,244,234,0) 0%, var(--color-cream) 30%)',
-            }}
-          >
-            <button
-              type="submit"
-              form="pair-bundle-form"
-              disabled={isPending}
-              className="w-full inline-flex items-center justify-between gap-2.5 px-5 py-4 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
-              style={{
-                border:     '1.5px solid var(--color-ink)',
-                boxShadow:  '3px 3px 0 var(--color-ink)',
-                fontFamily: 'var(--font-body)',
-                fontWeight: 800,
-                fontSize:   '14.5px',
-              }}
-            >
-              <span>{isPending ? 'Adding…' : 'I\u2019ll take both \u2665'}</span>
-              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '16px' }}>
-                {fmtPrice(bundlePrice)}
-              </span>
-            </button>
           </div>
         </div>
 
@@ -935,93 +817,98 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
             </div>
           </section>
 
-          {/* ---------- WHY ---------- */}
-          {whyCards.length > 0 && (
-            <section
-              className="bg-paper px-10 py-8"
-              style={{
-                borderTop:    '1px solid var(--color-line)',
-                borderBottom: '1px solid var(--color-line)',
-              }}
+        </article>
+      </div>
+
+      {/* ================= CAROUSEL (full-bleed) ================= */}
+      <PairBundleHeroCarousel
+        whyCards={whyCards}
+        emmaQuote={copy.emmaQuote ?? ''}
+        momentTitle={copy.momentTitle ?? 'how to make this pair click'}
+        moments={copy.moments ?? []}
+      />
+
+      {/* ================= BOTTOM HALF ================= */}
+      <div className="max-w-6xl mx-auto px-4 pb-8 md:pb-14 pt-6 md:pt-8">
+
+        {/* ================= MOBILE (bottom) ================= */}
+        <div className="md:hidden">
+          <div className="relative bg-paper rounded-[var(--radius-xl)] border border-line p-6 overflow-hidden">
+            <div
+              className="grid grid-cols-1 gap-5 p-6 rounded-[16px] bg-cream-2"
+              style={{ border: '1.2px solid var(--color-ink)' }}
             >
-              <div className="flex items-baseline justify-between gap-5 mb-[18px]">
-                <div>
+              <div className="flex flex-wrap items-baseline gap-3.5">
+                <span className="text-coral" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '38px', letterSpacing: '-0.01em' }}>
+                  {fmtPrice(bundlePrice)}
+                </span>
+                {showStrike && (
+                  <span className="text-muted line-through text-[18px]" style={{ fontFamily: 'var(--font-display)' }}>
+                    {fmtPrice(combinedDeal)}
+                  </span>
+                )}
+                {savings > 0 && (
                   <span
-                    className="italic"
+                    className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-[0.04em]"
                     style={{
-                      fontFamily:    'var(--font-display)',
-                      fontWeight:    500,
-                      fontStyle:     'italic',
-                      fontSize:      '22px',
-                      letterSpacing: '-0.01em',
+                      background: 'var(--color-butter)',
+                      border:     '1.2px solid var(--color-ink)',
+                      fontFamily: 'var(--font-body)',
                     }}
                   >
-                    Why they&#39;re{' '}
-                    <em
-                      style={{
-                        fontStyle:  'italic',
-                        fontWeight: 600,
-                        color:      'var(--color-coral)',
-                      }}
-                    >
-                      better together
-                    </em>
+                    save {fmtPrice(savings)} as a pair
                   </span>
-                  <span
-                    className="ml-2.5 text-muted"
-                    style={{ fontFamily: 'var(--font-script)', fontSize: '17px' }}
-                  >
-                    — the short, honest version
-                  </span>
-                </div>
+                )}
+                <p className="w-full text-[11.5px] text-muted mt-0.5" style={{ fontFamily: 'var(--font-body)' }}>
+                  Shipping free on this pair · plain packaging · 30-day returns
+                </p>
               </div>
+            </div>
 
-              <div
-                className="grid grid-cols-3 overflow-hidden"
-                style={{ border: '1px dashed var(--color-line-2)', borderRadius: '6px' }}
-              >
-                {whyCards.map((c, i) => (
-                  <div
-                    key={i}
-                    className="px-[22px] py-[18px] relative"
-                    style={{ borderRight: i < whyCards.length - 1 ? '1px dashed var(--color-line-2)' : 'none' }}
-                  >
-                    <div
-                      className="mb-1 italic"
-                      style={{
-                        fontFamily:    'var(--font-display)',
-                        fontWeight:    700,
-                        fontStyle:     'italic',
-                        fontSize:      '28px',
-                        color:         'var(--color-coral)',
-                        letterSpacing: '-0.02em',
-                      }}
-                    >
-                      {String(i + 1).padStart(2, '0')}
-                    </div>
-                    <div
-                      className="mb-1"
-                      style={{
-                        fontFamily:    'var(--font-display)',
-                        fontWeight:    700,
-                        fontSize:      '15px',
-                        letterSpacing: '-0.005em',
-                      }}
-                    >
-                      {c.head}
-                    </div>
-                    <div
-                      className="text-muted"
-                      style={{ fontFamily: 'var(--font-body)', fontSize: '12.5px', lineHeight: 1.5 }}
-                    >
-                      {c.body}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+            {copy.bannerLine && (
+              <p className="text-center mt-5 italic text-[13px] text-muted" style={{ fontFamily: 'var(--font-body)' }}>
+                {copy.bannerLine}
+              </p>
+            )}
+          </div>
 
+          {/* Mobile sticky CTA */}
+          <div
+            className="sticky bottom-0 left-0 right-0 -mx-4 px-4 pt-6 pb-3.5 mt-4 z-20"
+            style={{
+              background: 'linear-gradient(180deg, rgba(250,244,234,0) 0%, var(--color-cream) 30%)',
+            }}
+          >
+            <button
+              type="submit"
+              form="pair-bundle-form"
+              disabled={isPending}
+              className="w-full inline-flex items-center justify-between gap-2.5 px-5 py-4 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
+              style={{
+                border:     '1.5px solid var(--color-ink)',
+                boxShadow:  '3px 3px 0 var(--color-ink)',
+                fontFamily: 'var(--font-body)',
+                fontWeight: 800,
+                fontSize:   '14.5px',
+              }}
+            >
+              <span>{isPending ? 'Adding…' : 'I\u2019ll take both \u2665'}</span>
+              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '16px' }}>
+                {fmtPrice(bundlePrice)}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* ================= DESKTOP (bottom) ================= */}
+        <article
+          className="hidden md:block relative bg-paper overflow-hidden"
+          style={{
+            border:       '1.5px solid var(--color-ink)',
+            borderRadius: '10px',
+            boxShadow:    '0 30px 60px -30px rgba(21,18,17,0.2)',
+          }}
+        >
           {/* ---------- BUY BAR (climax) ---------- */}
           <section
             className="relative grid grid-cols-[1fr_auto] gap-8 px-10 py-8 items-center"
