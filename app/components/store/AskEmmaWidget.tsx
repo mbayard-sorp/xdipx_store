@@ -25,6 +25,8 @@ interface ChatApiResponse {
 }
 
 const STORAGE_KEY = 'xdipx:emma:state:v1'
+const TAGLINE_KEY = 'xdipx:emma:tagline:v1'
+const DEFAULT_TAGLINE = 'here to help you find what you\u2019re into \u2665'
 const GREETING = "Hey — I'm Emma. Tell me what you're curious about and I'll show you what's good today. ♥"
 
 // iMessage-ish cadence. The typing pill is shown for at least MIN_TYPING_MS, then
@@ -44,6 +46,7 @@ export function AskEmmaWidget() {
   const [draft, setDraft] = useState('')
   const [hasUnread, setHasUnread] = useState(false)
   const [isRevealing, setIsRevealing] = useState(false)
+  const [tagline, setTagline] = useState(DEFAULT_TAGLINE)
   const fetcher = useFetcher<ChatApiResponse>()
   const revalidator = useRevalidator()
   const listRef = useRef<HTMLDivElement>(null)
@@ -70,6 +73,29 @@ export function AskEmmaWidget() {
     } catch {
       // ignore
     }
+
+    // Rotating Emma tagline — cached in sessionStorage so it stays stable across
+    // route changes in a single browser session but refreshes on a new tab/session.
+    try {
+      const cached = sessionStorage.getItem(TAGLINE_KEY)
+      if (cached) {
+        setTagline(cached)
+        return
+      }
+    } catch { /* privacy mode — fall through to fetch */ }
+
+    const controller = new AbortController()
+    fetch('/api/emma-tagline', { signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { tagline?: string } | null) => {
+        const line = data?.tagline?.trim()
+        if (line) {
+          setTagline(line)
+          try { sessionStorage.setItem(TAGLINE_KEY, line) } catch { /* ignore */ }
+        }
+      })
+      .catch(() => { /* keep default */ })
+    return () => controller.abort()
   }, [])
 
   // Persist state whenever it changes. Strip transient `reveal` so persisted
@@ -282,7 +308,7 @@ export function AskEmmaWidget() {
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400 ring-1 ring-white/80" />
                   </span>
                 </p>
-                <p className="mt-1 text-[11px] opacity-90">Online · here to help you find what you&rsquo;re into ♥</p>
+                <p className="mt-1 text-[11px] opacity-90">Online · {tagline}</p>
               </div>
               <div className="flex items-center gap-1">
                 {turns.length > 0 && (
