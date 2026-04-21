@@ -58,9 +58,8 @@ export default function StoreLayout() {
   const rootData = useRouteLoaderData<{ ENV?: { GA4_ID?: string } }>('root')
   const ga4Id = rootData?.ENV?.GA4_ID ?? ''
 
-  // Hide mobile tab bar and Emma widget on PDP (pinned "Dip In" CTA owns the
-  // bottom) and on the checkout flow. Everything else gets both on mobile; on
-  // desktop AskEmmaWidget is always visible via its own internal positioning.
+  // Hide the mobile tab bar on PDP (pinned "Dip In" CTA owns the bottom) and on
+  // the checkout flow. The AskEmmaWidget renders on every page.
   const isPdp        = pathname.startsWith('/products/')
   const isCheckout   = pathname.startsWith('/checkout-extras')
   const showMobileShell = !isPdp && !isCheckout
@@ -90,7 +89,7 @@ export default function StoreLayout() {
           </main>
           <Footer socialLinks={socialLinks} footerColumns={footerColumns} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} />
           {showMobileShell && <MobileTabBar />}
-          {showMobileShell && <AskEmmaWidget />}
+          <AskEmmaWidget />
           <CookieConsent />
           <Analytics ga4Id={ga4Id} />
 

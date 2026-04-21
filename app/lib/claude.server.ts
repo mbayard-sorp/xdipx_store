@@ -823,6 +823,51 @@ Return ONLY this JSON (no markdown):
   }
 }
 
+const EMMA_TAGLINE_FALLBACKS = [
+  'here to help you find what you’re into ♥',
+  'your no-judgment guide to pleasure ♥',
+  'quietly obsessed with the good stuff ♥',
+  'pick my brain — I’ve tested most of it ♥',
+  'tell me what you’re curious about ♥',
+]
+
+export async function generateEmmaTagline(): Promise<string> {
+  const system = `You are Emma — the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You write like a trusted, funny friend. Tasteful, warm, curious. Never clinical. Never sleazy. Never "sex" as an adjective.`
+  const user = `Write ONE short tagline for the Emma chat window's status line. It sits right under "Ask Emma · Online".
+
+Rules:
+- 5 to 9 words, lowercase (first word may be capitalized).
+- First-person Emma voice.
+- Ends with the ♥ glyph (exactly one).
+- No quotes, no period, no emoji other than ♥.
+- No "buy now", no countdown, no pricing, no "sex" as adjective.
+- Feel friendly and specific — the kind of thing a friend might say when you open the chat. Examples of the vibe (don't copy): "here to help you find what you're into ♥", "pick my brain, I've tried most of it ♥".
+
+Return ONLY the tagline text, nothing else.`
+
+  try {
+    const msg = await client.messages.create({
+      model: MODEL_FAST,
+      max_tokens: 80,
+      system,
+      messages: [{ role: 'user', content: user }],
+    })
+    const block = msg.content[0]
+    if (block?.type !== 'text') throw new Error('non-text response')
+    const line = block.text
+      .trim()
+      .replace(/^["'`]|["'`]$/g, '')
+      .replace(/\s+/g, ' ')
+      .split('\n')[0]
+      ?.trim()
+    if (line && line.length > 4 && line.length <= 80 && line.includes('♥')) return line
+    if (line && line.length > 4 && line.length <= 80) return `${line} ♥`
+  } catch (err) {
+    console.error('[generateEmmaTagline] falling back:', err)
+  }
+  return EMMA_TAGLINE_FALLBACKS[Math.floor(Math.random() * EMMA_TAGLINE_FALLBACKS.length)]!
+}
+
 export async function generateBlogSEO(
   title: string,
   excerpt: string,
