@@ -5,7 +5,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { Review, ReviewAIAnalysis } from '~/types/reviews'
 
-const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] })
+const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 const MODEL  = 'claude-sonnet-4-20250514'
 
 const SYSTEM_PROMPT = `You are the voice of xdipx.com — a daily flash-sale site for sexual wellness products.
