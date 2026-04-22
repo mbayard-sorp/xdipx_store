@@ -7,7 +7,7 @@ import {
   getCollectionProducts, getProductsByHandles,
   getProductsByIds,
 } from '~/lib/shopify.server'
-import { getProductPageBlocks } from '~/lib/sanity.server'
+import { getProductPageBlocks, getEditor } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
@@ -68,6 +68,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       reviewSort: 'newest',
       reviewFilter: 'all',
       aggregate: null,
+      editor: null,
     }
   }
 
@@ -82,7 +83,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const hasDial = !!(deal.sensationDial && deal.productTypeDial)
   const hasPairing = !!(deal.pairingWhy && Object.keys(deal.pairingWhy).length > 0 && deal.accessoryProductIds.length > 0)
 
-  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, dialAggregates, pairProducts] = await Promise.all([
+  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, dialAggregates, pairProducts, editor] = await Promise.all([
     getProductPageBlocks(slug),
     getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
@@ -90,6 +91,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     getBundleCompanionFor(slug),
     hasDial ? getDialAggregates(deal.shopifyProductId) : Promise.resolve({} as Record<string, DialAggregate>),
     hasPairing ? getProductsByIds(deal.accessoryProductIds) : Promise.resolve([]),
+    getEditor(),
   ])
 
   const fbtProducts = fbtHandles.length > 0
@@ -161,6 +163,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     reviewFilter,
     aggregate:     aggregate ?? null,
     bundle: null,
+    editor,
   }
 }
 
@@ -252,6 +255,7 @@ function ProductPage() {
   const reviewSort = loaderData.reviewSort
   const reviewFilter = loaderData.reviewFilter
   const aggregate = loaderData.aggregate
+  const editor = loaderData.editor
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
   const voteFetcher = useFetcher<{ ok: boolean; aggregates?: Record<string, DialAggregate>; error?: string }>()
@@ -711,7 +715,7 @@ function ProductPage() {
         </div>
       )}
 
-      <ProductStructuredData deal={deal} />
+      <ProductStructuredData deal={deal} editor={editor} />
       <BreadcrumbStructuredData items={[
         { name: 'Home',          url: 'https://xdipx.com/' },
         ...(deal.category === 'for-him' ? [{ name: 'For Him', url: 'https://xdipx.com/for-him' }] : []),

@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import type { Deal } from '~/types'
+import type { Editor } from '~/types/cms'
 
 export type EmmaHeroVariant = 'loving' | 'bundle' | 'quote'
 
@@ -21,34 +22,111 @@ interface EmmaHeroProps {
   /** Combined bundle price when `pairDeal` is present. Optional; otherwise sum. */
   bundlePrice?:      number
   bundleCompareAt?:  number
+  /** Editor persona (Emma) — when present, renders byline + secondary CTA. */
+  editor?:   Editor | null
 }
 
-export function EmmaHero({ deal, variant = 'loving', mapRestricted = false, copy, pairDeal = null, bundlePrice, bundleCompareAt }: EmmaHeroProps) {
+export function EmmaHero({ deal, variant = 'loving', mapRestricted = false, copy, pairDeal = null, bundlePrice, bundleCompareAt, editor }: EmmaHeroProps) {
+  const common = { deal, mapRestricted, copy, editor: editor ?? null }
   if (variant === 'bundle' && pairDeal) {
     return (
       <HeroBundle
-        deal={deal}
+        {...common}
         pair={pairDeal}
         {...(bundlePrice     !== undefined ? { bundlePrice }     : {})}
         {...(bundleCompareAt !== undefined ? { bundleCompareAt } : {})}
-        {...(copy            !== undefined ? { copy }            : {})}
       />
     )
   }
   if (variant === 'quote') {
-    return <HeroQuote deal={deal} mapRestricted={mapRestricted} copy={copy} />
+    return <HeroQuote {...common} />
   }
-  return <HeroLoving deal={deal} mapRestricted={mapRestricted} copy={copy} />
+  return <HeroLoving {...common} />
+}
+
+// ── Shared: Emma byline (avatar + name) ─────────────────────────────────────
+
+function EmmaByline({ editor }: { editor: Editor | null }) {
+  if (!editor?.photoUrl) return null
+  const sinceLabel = editor.picksSince ? formatPicksSince(editor.picksSince) : null
+  return (
+    <div className="flex items-center gap-3">
+      <img
+        src={editor.photoUrl}
+        alt={editor.photoAlt ?? editor.name}
+        className="w-10 h-10 rounded-full object-cover border border-line"
+        loading="eager"
+        width={40}
+        height={40}
+      />
+      <div className="leading-tight">
+        <p
+          className="text-ink text-sm font-semibold"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          {editor.name}'s pick
+        </p>
+        {sinceLabel && (
+          <p className="text-muted text-[11px]">editor since {sinceLabel}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function formatPicksSince(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+}
+
+// ── Shared: inline review rating ────────────────────────────────────────────
+
+const MIN_REVIEW_COUNT = 3
+
+function InlineRating({ deal }: { deal: Deal }) {
+  const rating = deal.rating
+  if (!rating || rating.count < MIN_REVIEW_COUNT) return null
+  const value = rating.value.toFixed(1)
+  return (
+    <Link
+      to={`/products/${deal.handle}#reviews`}
+      className="inline-flex items-center gap-1.5 text-sm text-ink/80 hover:text-ink"
+      aria-label={`${value} out of 5 stars, ${rating.count} reviews`}
+    >
+      <span className="text-coral tracking-[0.05em]" aria-hidden="true">
+        {'♥'.repeat(Math.round(rating.value))}
+        <span className="text-coral/25">{'♥'.repeat(5 - Math.round(rating.value))}</span>
+      </span>
+      <span className="font-semibold">{value}</span>
+      <span className="text-muted">· {rating.count} reviews</span>
+    </Link>
+  )
+}
+
+// ── Shared: Emma aside (script font, intimate first-person note) ────────────
+
+function EmmaAside({ text }: { text: string }) {
+  return (
+    <p
+      className="text-ink/80 text-xl md:text-2xl leading-snug italic"
+      style={{ fontFamily: 'var(--font-script)' }}
+    >
+      <span className="text-coral not-italic mr-1" aria-hidden="true">♥</span>
+      {text}
+    </p>
+  )
 }
 
 // ── Variant 1: Currently loving ─────────────────────────────────────────────
-function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: boolean; copy?: EmmaHeroProps['copy'] }) {
+function HeroLoving({ deal, mapRestricted, copy, editor }: { deal: Deal; mapRestricted: boolean; copy?: EmmaHeroProps['copy']; editor: Editor | null }) {
   const savings = deal.msrp > deal.dealPrice ? deal.msrp - deal.dealPrice : 0
   const showDiscount = !mapRestricted && savings > 0
   const discountPct = showDiscount && deal.msrp > 0
     ? Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)
     : 0
   const image = deal.images[0]
+  const asideText = copy?.aside ?? `— ${editor?.name ?? 'Emma'} · changes when I find something new worth telling you about`
   return (
     <section className="bg-cream">
       <div className="max-w-6xl mx-auto px-4 py-8 md:py-14 grid gap-6 md:grid-cols-[1.25fr_1fr]">
@@ -73,6 +151,8 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
         </div>
 
         <div className="flex flex-col justify-center gap-4 md:py-6">
+          <EmmaByline editor={editor} />
+
           <div className="flex items-center gap-2">
             <span className="text-coral text-xl leading-none" aria-hidden="true">♥</span>
             <span
@@ -109,6 +189,8 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
             )}
           </div>
 
+          <InlineRating deal={deal} />
+
           <div className="flex flex-wrap gap-2 mt-1">
             <Link
               to={`/products/${deal.handle}`}
@@ -117,11 +199,18 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
             >
               Take a peek →
             </Link>
+            {editor && (
+              <Link
+                to="/about"
+                className="inline-flex items-center gap-2 border border-ink/20 hover:border-ink/60 text-ink font-medium px-6 py-3 rounded-full transition-colors"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                How {editor.name} picks →
+              </Link>
+            )}
           </div>
 
-          <p className="text-muted text-xs mt-3 font-mono">
-            {copy?.aside ?? "— Emma · changes when I find something new worth telling you about"}
-          </p>
+          <EmmaAside text={asideText} />
         </div>
       </div>
     </section>
@@ -129,12 +218,14 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
 }
 
 // ── Variant 2: Emma recommends — a pair ─────────────────────────────────────
-function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
+function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy, editor }: {
   deal: Deal
   pair: Deal
   bundlePrice?: number
   bundleCompareAt?: number
   copy?: EmmaHeroProps['copy']
+  editor: Editor | null
+  mapRestricted?: boolean
 }) {
   const price    = bundlePrice    ?? deal.dealPrice + pair.dealPrice
   const compare  = bundleCompareAt ?? deal.msrp + pair.msrp
@@ -142,10 +233,13 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
   const image1   = deal.images[0]
   const image2   = pair.images[0]
   const combinedSlug = [deal.handle, pair.handle].sort().join('--')
+  const asideText = copy?.aside ?? `— ${editor?.name ?? 'Emma'} · picked this pairing recently · will change it when I'm into something new`
 
   return (
     <section className="bg-cream-2">
       <div className="max-w-6xl mx-auto px-4 py-8 md:py-14 flex flex-col gap-6">
+        <EmmaByline editor={editor} />
+
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-coral text-xl leading-none" aria-hidden="true">♥</span>
           <span
@@ -219,38 +313,49 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
           </Link>
         </div>
 
-        <p className="text-muted text-xs font-mono">
-          {copy?.aside ?? '— Emma · picked this pairing recently · will change it when I\'m into something new'}
-        </p>
+        <EmmaAside text={asideText} />
       </div>
     </section>
   )
 }
 
 // ── Variant 3: Emma says ────────────────────────────────────────────────────
-function HeroQuote({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: boolean; copy?: EmmaHeroProps['copy'] }) {
+function HeroQuote({ deal, mapRestricted, copy, editor }: { deal: Deal; mapRestricted: boolean; copy?: EmmaHeroProps['copy']; editor: Editor | null }) {
   const showDiscount = !mapRestricted && deal.msrp > deal.dealPrice
   const discountPct = showDiscount && deal.msrp > 0
     ? Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)
     : 0
   const image = deal.images[0]
-  const defaultQuote = `I've been a little obsessed with this one — it's got a kind of slow-burn energy I wasn't expecting. Come see.`
+  const defaultQuote = deal.tagline || `Kinda obsessed with this one. Come see why.`
   return (
     <section className="bg-cream">
       <div className="max-w-6xl mx-auto px-4 py-8 md:py-14 grid gap-6 md:grid-cols-[1.1fr_0.9fr]">
         <div className="bg-paper border border-line rounded-[var(--radius-lg)] p-6 md:p-10 flex flex-col gap-4">
           <div className="flex items-center gap-3">
-            <span className="w-10 h-10 rounded-full bg-coral text-white inline-flex items-center justify-center font-bold" style={{ fontFamily: 'var(--font-display)' }} aria-hidden="true">
-              E
-            </span>
+            {editor?.photoUrl ? (
+              <img
+                src={editor.photoUrl}
+                alt={editor.photoAlt ?? editor.name}
+                className="w-10 h-10 rounded-full object-cover border border-line"
+                loading="eager"
+                width={40}
+                height={40}
+              />
+            ) : (
+              <span className="w-10 h-10 rounded-full bg-coral text-white inline-flex items-center justify-center font-bold" style={{ fontFamily: 'var(--font-display)' }} aria-hidden="true">
+                {editor?.name?.[0] ?? 'E'}
+              </span>
+            )}
             <div>
               <p
                 className="text-muted text-[11px] tracking-[0.18em] uppercase font-semibold"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
-                {copy?.eyebrow ?? 'Emma says'}
+                {copy?.eyebrow ?? `${editor?.name ?? 'Emma'} says`}
               </p>
-              <p className="text-muted text-xs font-mono">updated whenever I change my mind</p>
+              <p className="text-muted text-xs">
+                tested and recommended
+              </p>
             </div>
           </div>
 
@@ -260,6 +365,8 @@ function HeroQuote({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: b
           >
             “{copy?.pullQuote ?? defaultQuote}”
           </blockquote>
+
+          <InlineRating deal={deal} />
 
           <div className="flex flex-wrap gap-2 mt-1">
             <Link

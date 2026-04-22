@@ -207,14 +207,14 @@ ${productContext}`
       const mapNote = product.mapRestricted
         ? 'This product is MAP-restricted — do NOT reference a discount or a strike price. The hook must be Emma\'s endorsement, not the price.'
         : 'You may reference a pleasant price or value if it flows naturally, but the hook should still be Emma\'s endorsement, not the discount.'
-      const primaryPrompt = `Write the four short strings for Emma's "quiet endorsement" homepage template. Emma voice: a trusted, funny friend who has actually tried this and quietly can't stop thinking about it. Never "Buy now" — never countdowns — never "sex" as an adjective. Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction".
+      const primaryPrompt = `Write the four short strings for Emma's "quiet endorsement" homepage template. Emma voice: a trusted, funny friend who has actually tried this and quietly can't stop thinking about it. Never "Buy now" — never countdowns — never "sex" as an adjective. Use "intimate", "pleasure", "wellness", or "satisfaction" instead.
 ${mapNote}
 
 Return ONLY a raw JSON object (no markdown) with these exact keys:
 - eyebrow: a tag line ≤ 60 chars, two short phrases joined by " · " (middle dot, U+00B7). Example shape: "quiet endorsement · works for MAP-restricted".
 - subhead: one short line, lowercase, casual — something like "updated whenever I change my mind".
-- body: 1–2 sentences (≤ 200 chars total). First person, Emma voice. Wrap one 1–4 word phrase in underscores like _slow-burn energy_ so the UI can highlight it in coral. End with a soft curiosity nudge ("Come see.", "Worth a peek.", etc).
-- bannerHeadline: ≤ 30 chars, italic-editorial feel, product name in Emma's words. Use " · " as separator if you have two parts. Example: "Slowburn · the Hush".
+- body: 1–2 sentences (≤ 200 chars total). First person, Emma voice. Wrap ONE 1–4 word phrase in underscores (e.g. _word word_) so the UI can highlight it in coral — pick a FRESH phrase that fits THIS product specifically; do NOT reuse generic phrases like "slow-burn" or "quiet confidence". End with a soft curiosity nudge ("Come see.", "Worth a peek.", etc).
+- bannerHeadline: ≤ 30 chars, italic-editorial feel, product name in Emma's words. Use " · " as separator if you have two parts.
 
 ${productContext}`
       const retryPrompt = `Return ONLY raw JSON. No markdown, no prose before or after. Shape: {"eyebrow": "...", "subhead": "...", "body": "...", "bannerHeadline": "..."}. Follow Emma voice rules. ${productContext}`
@@ -245,7 +245,7 @@ ${productContext}`
         content: {
           eyebrow:        product.mapRestricted ? 'quiet endorsement · works for MAP-restricted' : 'quiet endorsement · editor\u2019s pick',
           subhead:        'updated whenever I change my mind',
-          body:           `I\u2019ve been a little obsessed with this one \u2014 it\u2019s got a kind of _slow-burn energy_ I wasn\u2019t expecting. Come see.`,
+          body:           `I\u2019ve been a little obsessed with this one \u2014 it\u2019s got a kind of _quiet pull_ I wasn\u2019t expecting. Come see.`,
           bannerHeadline: `${product.brand || 'Emma\u2019s pick'} \u00B7 ${product.title}`.slice(0, 30),
         },
       }
@@ -259,7 +259,7 @@ ${productContext}`
         eyebrow:      'emma recommends · a pair',
         subhead:      'better together · save when you grab both',
         headline:     'These two were made for each other.',
-        body:         `One sets the mood, the other carries it. It\u2019s the kind of _slow-burn pairing_ that just clicks. Come see.`,
+        body:         `One sets the mood, the other carries it. It\u2019s the kind of _pairing that clicks_ without you thinking about it. Come see.`,
         bannerLine:   '\u2014 Emma \u00B7 picked this pair because they click \u00B7 swaps it when something better lands',
         pairedHandle: '',
         generatedAt:  nowISO(),
@@ -299,7 +299,8 @@ ${productContext}`
 - Emma curates, pairs, and recommends \u2014 she speaks about why things WOULD click, not what she felt.
 - OK to say: "picks this pair", "I\u2019d hand this to a friend", "why they click", "made for each other", "the slow one", "the fix-it one", "a pairing that works".
 - Do NOT name the brands. Do NOT restate the product titles. Do NOT surface countdowns or "until midnight".
-- Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction" \u2014 never "sex" as an adjective.`
+- Use "intimate", "pleasure", "wellness", or "satisfaction" \u2014 never "sex" as an adjective.
+- Do NOT reuse generic phrases like "slow-burn", "quiet confidence", or "kinda obsessed". Pick fresh, product-specific words every time.`
 
       const shapeSpec = `Return ONLY a raw JSON object (no markdown fences, no prose around it) with EXACTLY these keys:
 
@@ -307,8 +308,8 @@ ${productContext}`
   "eyebrow":     string  // \u2264 60 chars, two short phrases joined by " \u00B7 " (middle dot U+00B7). e.g. "emma recommends \u00B7 a powerful pair"
   "subhead":     string  // \u2264 70 chars, lowercase, casual. e.g. "better together \u00B7 save when you grab both"
   "headline":    string  // 6\u201310 words, editorial italic feel, the hook. e.g. "These two were made for each other."
-  "body":        string  // 25\u201345 words, 2 sentences. Wrap ONE 1\u20134 word phrase in underscores like _slow-burn energy_. Describe both products' ROLES (one does X, the other does Y). End with a soft curiosity nudge.
-  "bannerLine":  string  // one short italic Emma sign-off, no testimony. e.g. "\u2014 Emma \u00B7 picks this pair for slow-burn nights \u00B7 swaps it when something better lands"
+  "body":        string  // 25\u201345 words, 2 sentences. Wrap ONE 1\u20134 word phrase in underscores (e.g. _word word_) \u2014 pick a FRESH phrase specific to THIS pair; do NOT reuse "slow-burn" or "quiet confidence". Describe both products' ROLES (one does X, the other does Y). End with a soft curiosity nudge.
+  "bannerLine":  string  // one short italic Emma sign-off, no testimony. Pattern: "\u2014 Emma \u00B7 {curator verb phrase} \u00B7 {soft caveat}". Fresh phrasing per pair; do NOT reuse "slow-burn".
   "primaryTag":  string  // 2\u20133 lowercase words, curator voice, describes the primary's ROLE. e.g. "the buzz one" or "the slow one"
   "partnerTag":  string  // 2\u20133 lowercase words, curator voice, describes the partner's ROLE. e.g. "the glide one" or "the fix-it one"
   "knotCaption": string  // 3\u20136 words, short label for why they're tied together. e.g. "tied together on purpose" or "one better idea"
@@ -915,7 +916,7 @@ function emmaHeroFallback(deal: Pick<Deal, 'seoTitle' | 'tagline' | 'brand'>, va
     variant,
     eyebrow: 'Kinda obsessed',
     headline: deal.tagline || `This ${deal.brand} one quietly made it into my rotation.`,
-    body: `Slow-burn build, surprisingly gentle finish. If you want something that feels considered — not gimmicky — this is the one.`,
+    body: `Thoughtful build, surprisingly gentle finish. If you want something that feels considered — not gimmicky — this is the one.`,
     aside: `— Emma · still on my desk`,
     generatedAt: new Date().toISOString(),
     voiceHash,
@@ -957,7 +958,7 @@ Return ONLY this JSON (no markdown):
 {
   "eyebrow":   "A DYNAMIC FEELING in Emma's own voice — 2–4 words, first-person, informal. Examples: 'Kinda obsessed', 'Low-key amazed', 'Still thinking about this', 'Quietly sold', 'Actually impressed'. No period. Do NOT use 'Currently loving' or generic editorial phrases like 'This week's pick'. Must feel like a quick reaction, not a label.",
   "headline":  "ONE sentence (8–14 words) that explains WHY Emma is featuring this pick right now — the reason it earned the slot. First-person, specific, warm. Never starts with the product name. Never 'buy now'. Example shape: 'Something about how quiet this one is just broke my brain.'",
-  "body":      "1–2 short sentences (25–45 words total) — the highlights a shopper should know. What it feels like, what stands out, what surprised her. Tight and specific. No marketing bloat. No clinical language.",
+  "body":      "1–2 short sentences (25–45 words total) — Emma's first-person take on why she picked THIS one specifically. What surprised her, what stands out, what it feels like in use. Must sound like a real person reviewing, not a product description. Tight and specific. No marketing bloat. No clinical language.",
   "aside":     "'— Emma · <3–6 word aside>', e.g. '— Emma · still on my desk'"${variant === 'quote' ? `,
   "pullQuote": "one short pull-quote (6–12 words) — in quotes — a friend-to-friend endorsement. No price or discount language."` : ''}
 }`

@@ -14,6 +14,7 @@ import blogProductEmbed   from '../schemas/blocks/blogProductEmbed.js'
 import blogCta            from '../schemas/blocks/blogCta.js'
 import blogVideoEmbed     from '../schemas/blocks/blogVideoEmbed.js'
 import richText           from '../schemas/blocks/richText.js'
+import editorBio          from '../schemas/blocks/editorBio.js'
 import homepageSections   from '../schemas/homepageSections.js'
 import siteSettings       from '../schemas/siteSettings.js'
 import productPage        from '../schemas/productPage.js'
@@ -26,6 +27,7 @@ import blogHomepage       from '../schemas/blogHomepage.js'
 import emmaHeroSettings   from '../schemas/emmaHeroSettings.js'
 import emmaPreset         from '../schemas/emmaPreset.js'
 import emmaPick           from '../schemas/emmaPick.js'
+import editor             from '../schemas/editor.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -48,6 +50,8 @@ export const schemaTypes = [
   emmaPreset,
   // v2 redesign — Emma-voice picks indexed per featured product (Claude-generated)
   emmaPick,
+  // Editor persona singleton (name, photo, bio) — powers byline + /about E-E-A-T
+  editor,
   // Block object types
   announcementBar,
   promoBanner,
@@ -59,6 +63,7 @@ export const schemaTypes = [
   testimonials,
   bonusDeal,
   trustBar,
+  editorBio,
   // Blog block object types
   blogImage,
   blogPullQuote,

@@ -29,6 +29,11 @@ export default defineConfig({
               .id('emmaHeroSettings')
               .icon(() => '✨')
               .child(S.document().schemaType('emmaHeroSettings').documentId('singleton.emmaHero')),
+            S.listItem()
+              .title('Editor (Emma)')
+              .id('editor')
+              .icon(() => '👩')
+              .child(S.document().schemaType('editor').documentId('singleton.editor')),
             S.documentTypeListItem('emmaPreset').title("Emma's presets").icon(() => '🎯'),
             S.listItem()
               .title('Site Settings')

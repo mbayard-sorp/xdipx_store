@@ -1,20 +1,27 @@
 import { getBlogPostsForSitemap, getBlogCategories, getPageList, getProductHandlesForSitemap } from '~/lib/sanity.server'
+import { db } from '~/lib/db.server'
+import { dealHistory } from '../../db/schema'
+import { eq } from 'drizzle-orm'
 
 export async function loader() {
-  const [blogPosts, categories, pages, products] = await Promise.all([
+  const [blogPosts, categories, pages, products, liveDealRows] = await Promise.all([
     getBlogPostsForSitemap(),
     getBlogCategories(),
     getPageList(),
     getProductHandlesForSitemap(),
+    db.select().from(dealHistory).where(eq(dealHistory.status, 'live')).limit(1),
   ])
 
   const base = 'https://xdipx.com'
+  const homepageLastmod = liveDealRows[0]?.dealDate
+    ? new Date(liveDealRows[0]!.dealDate).toISOString().split('T')[0]
+    : undefined
 
   type SitemapUrl = { loc: string; lastmod: string | undefined; changefreq: string; priority: string }
 
   const urls: SitemapUrl[] = [
     // Static pages
-    { loc: `${base}/`, lastmod: undefined, changefreq: 'daily', priority: '1.0' },
+    { loc: `${base}/`, lastmod: homepageLastmod, changefreq: 'daily', priority: '1.0' },
     { loc: `${base}/notebook`, lastmod: undefined, changefreq: 'daily', priority: '0.8' },
     { loc: `${base}/faq`, lastmod: undefined, changefreq: 'monthly', priority: '0.3' },
     { loc: `${base}/about`, lastmod: undefined, changefreq: 'monthly', priority: '0.3' },

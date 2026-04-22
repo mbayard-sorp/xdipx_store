@@ -9,7 +9,7 @@ import { db } from '~/lib/db.server'
 import { dealHistory, pipelineSettings } from '../../db/schema'
 import { eq, inArray } from 'drizzle-orm'
 import { kvGet, KV_KEYS } from '~/lib/kv.server'
-import { getHomepageSections, getEmmaHeroSettings } from '~/lib/sanity.server'
+import { getHomepageSections, getEmmaHeroSettings, getEditor } from '~/lib/sanity.server'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { EmmaHero }              from '~/components/store/EmmaHero'
@@ -53,13 +53,14 @@ export async function loader(_args: LoaderFunctionArgs) {
   // Read the live-deal row first (indexed, cheap); then fan out the Shopify
   // fetch alongside the other branches so it overlaps rather than chains.
   const dbDeal = await getLiveDealRow()
-  const [deal, forHim, forHer, bonusDeal, cmsData, emmaHero, templateRows] = await Promise.all([
+  const [deal, forHim, forHer, bonusDeal, cmsData, emmaHero, editor, templateRows] = await Promise.all([
     dbDeal?.shopifyProductId ? getDealByShopifyId(dbDeal.shopifyProductId) : Promise.resolve(null),
     getProductsByTag('for-him', 8),
     getProductsByTag('for-her', 8),
     getBonusDeal(),
     getHomepageSections(),
     getEmmaHeroSettings(),
+    getEditor(),
     db.select().from(pipelineSettings).where(inArray(pipelineSettings.key, [
       'homepage_template',
       'homepage_show_free_shipping',
@@ -118,6 +119,7 @@ export async function loader(_args: LoaderFunctionArgs) {
       deal: null, bundle: null, forHim, forHer, bonusDeal,
       viewers: 0, soldToday: 0, cmsData, carouselProductMap,
       emmaHero: null, pairDeal: null, homepageSettings, pairBundleDeal: null,
+      editor,
     }
   }
 
@@ -134,6 +136,7 @@ export async function loader(_args: LoaderFunctionArgs) {
     reviewTotal: reviewData.total,
     aggregate: aggregate ?? null,
     emmaHero, pairDeal, homepageSettings, pairBundleDeal,
+    editor,
   }
 }
 
@@ -172,6 +175,7 @@ export default function Homepage() {
     deal, bundle, forHim, forHer, bonusDeal,
     cmsData, carouselProductMap,
     emmaHero, pairDeal, homepageSettings, pairBundleDeal,
+    editor,
   } = useLoaderData<typeof loader>()
   const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
 
@@ -245,7 +249,7 @@ export default function Homepage() {
             copy={deal.pairBundleCopy}
             discountPct={homepageSettings.pairDiscountPct}
           />
-          <ProductStructuredData deal={deal} />
+          <ProductStructuredData deal={deal} editor={editor} />
         </>
       ) : deal && homepageSettings.template === 'pair_bundle_fullbleed' && pairBundleDeal && deal.pairBundleCopy ? (
         <>
@@ -260,7 +264,7 @@ export default function Homepage() {
       ) : deal && homepageSettings.template === 'quiet_endorsement' && deal.quietEndorsementCopy ? (
         <>
           <QuietEndorsementHero deal={deal} showFreeShipping={homepageSettings.showFreeShipping} />
-          <ProductStructuredData deal={deal} />
+          <ProductStructuredData deal={deal} editor={editor} />
         </>
       ) : deal ? (
         <>
@@ -270,9 +274,10 @@ export default function Homepage() {
             mapRestricted={mapRestricted}
             {...(heroCopy ? { copy: heroCopy } : {})}
             pairDeal={pairDeal}
+            editor={editor}
           />
 
-          <ProductStructuredData deal={deal} />
+          <ProductStructuredData deal={deal} editor={editor} />
         </>
       ) : (
         <div className="max-w-2xl mx-auto px-4 py-24 text-center">

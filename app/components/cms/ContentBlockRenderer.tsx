@@ -11,6 +11,7 @@ import { Testimonials }       from './Testimonials'
 import { BonusDealSection }   from './BonusDealSection'
 import { RichTextBlock }      from './RichTextBlock'
 import { TrustBarBlock }      from './TrustBarBlock'
+import { EditorBioBlock }     from './EditorBioBlock'
 
 interface ContentBlockRendererProps {
   block: ContentBlock
@@ -47,6 +48,8 @@ export function ContentBlockRenderer({ block, carouselProductMap, bonusDealProdu
       return <TrustBarBlock block={block} />
     case 'richText':
       return <RichTextBlock block={block} />
+    case 'editorBio':
+      return <EditorBioBlock block={block} />
     default:
       return null
   }
