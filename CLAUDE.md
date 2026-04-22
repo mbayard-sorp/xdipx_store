@@ -224,6 +224,10 @@ React Router v7 framework mode IS the same framework as Shopify Oxygen/Hydrogen.
 **Keep all Shopify calls in `app/lib/shopify.server.ts`** — single file to swap.
 **Keep all Vercel-specific code in `server/index.ts`** — never import `@vercel/kv` inside `app/`.
 
+## Worktree setup
+
+`.env*` files are gitignored, so new worktrees start without DB / API credentials. Run `bash scripts/setup-worktree.sh` inside any new worktree to symlink `.env`, `.env.local`, `.env.preview`, and `.env.preview-ivr` from the main repo root. The global `using-git-worktrees` skill runs this automatically after `npm install`.
+
 ## Phase 1 Launch Checklist
 
 - [ ] Age gate renders before all content, persists 30 days

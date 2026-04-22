@@ -25,16 +25,17 @@ interface ChatApiResponse {
 }
 
 const STORAGE_KEY = 'xdipx:emma:state:v1'
-const TAGLINE_KEY = 'xdipx:emma:tagline:v1'
+const TAGLINE_KEY = 'xdipx:emma:tagline:v2'
+const TAGLINE_TTL_MS = 5 * 60 * 1000
 const DEFAULT_TAGLINE = 'here to help you find what you\u2019re into \u2665'
 const GREETING = "Hey — I'm Emma. Tell me what you're curious about and I'll show you what's good today. ♥"
 
 // iMessage-ish cadence. The typing pill is shown for at least MIN_TYPING_MS, then
 // the text reveals at REVEAL_CPS chars/sec up to REVEAL_MAX_MS.
 const MIN_TYPING_MS = 900
-const REVEAL_CPS = 55
-const REVEAL_MAX_MS = 1800
-const REVEAL_MIN_MS = 400
+const REVEAL_CPS = 28
+const REVEAL_MAX_MS = 3800
+const REVEAL_MIN_MS = 700
 
 export function AskEmmaWidget() {
   const location = useLocation()
@@ -42,6 +43,7 @@ export function AskEmmaWidget() {
 
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
+  const [cartOpen, setCartOpen] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
   const [draft, setDraft] = useState('')
   const [hasUnread, setHasUnread] = useState(false)
@@ -74,15 +76,24 @@ export function AskEmmaWidget() {
       // ignore
     }
 
-    // Rotating Emma tagline — cached in sessionStorage so it stays stable across
-    // route changes in a single browser session but refreshes on a new tab/session.
+    // Rotating Emma tagline — cached in sessionStorage with a short TTL so the
+    // headline visibly refreshes while someone is browsing, without hammering
+    // the Claude API on every route change.
+    let cached: string | null = null
     try {
-      const cached = sessionStorage.getItem(TAGLINE_KEY)
-      if (cached) {
-        setTagline(cached)
-        return
+      const raw = sessionStorage.getItem(TAGLINE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as { tagline?: unknown; fetchedAt?: unknown }
+        const line = typeof parsed.tagline === 'string' ? parsed.tagline : null
+        const fetchedAt = typeof parsed.fetchedAt === 'number' ? parsed.fetchedAt : 0
+        if (line && Date.now() - fetchedAt < TAGLINE_TTL_MS) cached = line
       }
-    } catch { /* privacy mode — fall through to fetch */ }
+    } catch { /* privacy mode or bad JSON — fall through to fetch */ }
+
+    if (cached) {
+      setTagline(cached)
+      return
+    }
 
     const controller = new AbortController()
     fetch('/api/emma-tagline', { signal: controller.signal })
@@ -91,11 +102,26 @@ export function AskEmmaWidget() {
         const line = data?.tagline?.trim()
         if (line) {
           setTagline(line)
-          try { sessionStorage.setItem(TAGLINE_KEY, line) } catch { /* ignore */ }
+          try {
+            sessionStorage.setItem(TAGLINE_KEY, JSON.stringify({ tagline: line, fetchedAt: Date.now() }))
+          } catch { /* ignore */ }
         }
       })
       .catch(() => { /* keep default */ })
     return () => controller.abort()
+  }, [])
+
+  // Listen for cart drawer open/close so Emma can slide left while it's visible.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onOpened = () => setCartOpen(true)
+    const onClosed = () => setCartOpen(false)
+    window.addEventListener('xdipx:cart-opened', onOpened)
+    window.addEventListener('xdipx:cart-closed', onClosed)
+    return () => {
+      window.removeEventListener('xdipx:cart-opened', onOpened)
+      window.removeEventListener('xdipx:cart-closed', onClosed)
+    }
   }, [])
 
   // Persist state whenever it changes. Strip transient `reveal` so persisted
@@ -234,7 +260,12 @@ export function AskEmmaWidget() {
     pendingSubmitRef.current = true
     submittedAtRef.current = Date.now()
     fetcher.submit(
-      JSON.stringify({ message: msg, history: historyForServer, hidden: opts.hidden === true }),
+      JSON.stringify({
+        message: msg,
+        history: historyForServer,
+        hidden: opts.hidden === true,
+        pageContext: { pathname: location.pathname },
+      }),
       { method: 'post', action: '/api/ask-emma', encType: 'application/json' },
     )
   }
@@ -293,8 +324,10 @@ export function AskEmmaWidget() {
             exit={{ opacity: 0, y: 16, scale: 0.96 }}
             transition={{ type: 'tween', duration: 0.2, ease: 'easeOut' }}
             style={{ transformOrigin: 'bottom right' }}
-            className="fixed z-[60] flex flex-col overflow-hidden rounded-2xl bg-cream shadow-2xl ring-1 ring-black/5
-              inset-x-2 bottom-2 top-auto max-h-[88vh] sm:inset-auto sm:bottom-24 sm:right-4 sm:h-[min(580px,calc(100vh-8rem))] sm:w-[380px] sm:max-h-none"
+            className={`fixed z-[60] flex flex-col overflow-hidden rounded-2xl bg-cream shadow-2xl ring-1 ring-black/5
+              inset-x-2 bottom-2 top-auto max-h-[88vh] sm:inset-auto sm:bottom-24 sm:h-[min(580px,calc(100vh-8rem))] sm:w-[380px] sm:max-h-none transition-[right] duration-300 ease-out ${
+              cartOpen ? 'sm:right-[25rem]' : 'sm:right-4'
+            }`}
           >
             <header
               className="flex items-center justify-between px-4 py-3 text-white"
@@ -386,7 +419,9 @@ export function AskEmmaWidget() {
         onClick={toggleOpen}
         aria-label={open ? 'Close chat with Emma' : 'Open chat with Emma'}
         aria-expanded={open}
-        className="fixed bottom-4 right-4 z-[55] flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
+        className={`fixed bottom-[calc(120px+env(safe-area-inset-bottom))] md:bottom-4 z-[55] flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition-[right,transform] duration-300 ease-out hover:scale-105 active:scale-95 ${
+          cartOpen ? 'right-4 md:right-[25rem]' : 'right-4'
+        }`}
         style={{ background: 'linear-gradient(to right, #F04E37, #FF8C38)' }}
       >
         {open ? (

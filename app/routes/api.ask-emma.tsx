@@ -21,13 +21,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({ error: 'invalid_json' }, { status: 400 })
   }
 
-  const body = (payload ?? {}) as { message?: unknown; history?: unknown; hidden?: unknown }
+  const body = (payload ?? {}) as { message?: unknown; history?: unknown; hidden?: unknown; pageContext?: unknown }
   const message = typeof body.message === 'string' ? body.message.trim() : ''
   if (!message) return Response.json({ error: 'empty_message' }, { status: 400 })
   if (message.length > 1000) {
     return Response.json({ error: 'message_too_long' }, { status: 400 })
   }
   const hidden = body.hidden === true
+  const pageContext = sanitizePageContext(body.pageContext)
 
   const history = sanitizeHistory(body.history)
   const nextHistory: ChatTurn[] = [...history, { role: 'user', text: message }]
@@ -51,6 +52,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       onCartCreated: (id: string) => {
         newCartId = id
       },
+      ...(pageContext ? { pageContext } : {}),
     })
     const latencyMs = Date.now() - startedAt
 
@@ -84,6 +86,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { status: 500 },
     )
   }
+}
+
+function sanitizePageContext(raw: unknown): { pathname: string } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const p = (raw as { pathname?: unknown }).pathname
+  if (typeof p !== 'string') return undefined
+  // Only accept same-origin paths. No query/hash — the path alone is enough
+  // for Emma to pick up context, and stripping keeps the prompt deterministic.
+  const clean = p.split('?')[0]?.split('#')[0]?.trim() ?? ''
+  if (!clean.startsWith('/') || clean.length > 200) return undefined
+  return { pathname: clean }
 }
 
 function sanitizeHistory(raw: unknown): ChatTurn[] {

@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { CHAT_SYSTEM_PROMPT } from './prompt'
 import { QA_TOOL_DEFINITIONS, runQaTool, type AgentContext, type ToolResult } from './tools.server'
 import type { IvrProductCard } from '~/lib/ivr-search.server'
-import { getProductsByHandles } from '~/lib/shopify.server'
+import { getProductByHandle, getProductsByHandles } from '~/lib/shopify.server'
 import type { ChatTurn, ChatProductCard, ChatReply, QuickReplyPayload } from './chat-types'
 
 export type { ChatTurn, ChatProductCard, ChatReply, QuickReplyPayload }
@@ -31,6 +31,11 @@ export async function generateChatReply(
     content: t.text,
   }))
 
+  // Resolve page-context into a one-line system-prompt addendum so Emma can
+  // reference what the shopper is looking at without re-pitching from scratch.
+  const pageAddendum = await buildPageAddendum(ctx.pageContext)
+  const systemPrompt = pageAddendum ? `${CHAT_SYSTEM_PROMPT}\n\n${pageAddendum}` : CHAT_SYSTEM_PROMPT
+
   const collected = new Map<string, IvrProductCard>()
   let quickReply: QuickReplyPayload | undefined
   let cartUpdated = false
@@ -54,7 +59,7 @@ export async function generateChatReply(
     const res = await client.messages.create({
       model: MODEL,
       max_tokens: 700,
-      system: CHAT_SYSTEM_PROMPT,
+      system: systemPrompt,
       tools: QA_TOOL_DEFINITIONS,
       messages,
     })
@@ -102,7 +107,7 @@ export async function generateChatReply(
         const follow = await client.messages.create({
           model: MODEL,
           max_tokens: 400,
-          system: CHAT_SYSTEM_PROMPT + '\n\nRespond in plain text only — no further tool calls. Never reference pills, buttons, instructions, or what you are about to say.',
+          system: systemPrompt + '\n\nRespond in plain text only — no further tool calls. Never reference pills, buttons, instructions, or what you are about to say.',
           messages,
         })
         const followText = follow.content.find((b): b is Anthropic.TextBlock => b.type === 'text')
@@ -131,7 +136,7 @@ export async function generateChatReply(
   const final = await client.messages.create({
     model: MODEL,
     max_tokens: 400,
-    system: CHAT_SYSTEM_PROMPT + '\n\nRespond in plain text only — no further tool calls.',
+    system: systemPrompt + '\n\nRespond in plain text only — no further tool calls.',
     messages,
   })
   const block = final.content.find((b): b is Anthropic.TextBlock => b.type === 'text')
@@ -144,6 +149,48 @@ export async function generateChatReply(
     ...(quickReply ? { quickReply } : {}),
     ...(cartUpdated ? { cartUpdated: true } : {}),
   }
+}
+
+/**
+ * Turn the shopper's current page into a one-line system-prompt addendum.
+ * Only resolves products for /products/{handle} (the expensive case) so we
+ * don't pay Shopify round-trips for routes that don't benefit from extra
+ * context. Other routes get a short "shopper is on X" note.
+ */
+async function buildPageAddendum(
+  pageContext: AgentContext['pageContext'],
+): Promise<string | null> {
+  const pathname = pageContext?.pathname?.trim()
+  if (!pathname) return null
+
+  const productMatch = pathname.match(/^\/products\/([a-z0-9][a-z0-9-]*)\/?$/i)
+  if (productMatch && productMatch[1]) {
+    const handle = productMatch[1]
+    try {
+      const product = await getProductByHandle(handle)
+      if (product) {
+        return `CURRENT PAGE: The shopper is on the product page for "${product.title}" (handle: ${handle}, URL: /products/${handle}). When they ask ambiguous questions ("how big is it?", "tell me more", "is it waterproof?"), assume they mean THIS product — call getProductDetails with the handle above and answer directly. Do not re-run searchProducts or ask who it's for unless the shopper explicitly steers to a different product. You can reference the product naturally ("this one", "the ${product.title}") without re-pitching from scratch.`
+      }
+    } catch (err) {
+      console.warn('[chat.server] pageContext product lookup failed', { handle, err })
+    }
+    // Handle didn't resolve — still useful context that they're on a PDP.
+    return `CURRENT PAGE: The shopper is on a product detail page (${pathname}).`
+  }
+
+  const collectionMatch = pathname.match(/^\/collections\/([a-z0-9][a-z0-9-]*)\/?$/i)
+  if (collectionMatch) {
+    return `CURRENT PAGE: The shopper is browsing the collection page at ${pathname}. If they ask ambiguous questions ("any good ones?", "what's popular here?"), assume they mean this collection.`
+  }
+
+  const friendly = pathname === '/' ? 'the homepage'
+    : pathname === '/vault' ? 'the Vault (past deals archive)'
+    : pathname === '/for-her' ? 'the For Her landing page'
+    : pathname === '/for-him' ? 'the For Him landing page'
+    : pathname === '/faq' ? 'the FAQ page'
+    : pathname === '/about' ? 'the About page'
+    : `the page at ${pathname}`
+  return `CURRENT PAGE: The shopper is on ${friendly}.`
 }
 
 /**

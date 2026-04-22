@@ -112,6 +112,12 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
     setCartOpen(true)
   }
 
+  // Broadcast drawer open/close so peers (Emma widget) can shift out of the way.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(new CustomEvent(cartOpen ? 'xdipx:cart-opened' : 'xdipx:cart-closed'))
+  }, [cartOpen])
+
   const scheduleClose = () => {
     closeTimerRef.current = setTimeout(() => setCartOpen(false), 400)
   }
