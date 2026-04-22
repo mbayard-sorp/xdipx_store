@@ -4125,7 +4125,11 @@ export async function createDraftOrder(input: {
       email: input.customer.email,
       phone: input.customer.phone,
       note: input.note ?? `xdipx ${input.channel} order`,
-      tags: [`channel:${input.channel}`, 'phone-order'],
+      tags: [
+        `channel:${input.channel}`,
+        'phone-order',
+        ...(input.channel === 'voice' ? ['emma-order-ivr'] : []),
+      ],
       lineItems: input.lineItems.map(li => ({ variantId: li.variantId, quantity: li.quantity })),
       shippingAddress: {
         firstName: firstName ?? '',

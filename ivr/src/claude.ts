@@ -45,6 +45,8 @@ if (!apiKey) {
 
 const client = new Anthropic({ apiKey: apiKey ?? '' })
 
+export const anthropic = client
+
 // ElevenLabs reads markdown markers literally ("asterisk asterisk"). Strip the
 // formatting characters that have no spoken meaning before forwarding deltas
 // to Twilio. Punctuation that affects prosody (.,?!:;-) is preserved.
