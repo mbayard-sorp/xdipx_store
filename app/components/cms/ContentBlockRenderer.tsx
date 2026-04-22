@@ -5,6 +5,7 @@ import { PromoBanner }        from './PromoBanner'
 import { EditorialTiles }     from './EditorialTiles'
 import { CategoryGrid }       from './CategoryGrid'
 import { ProductCarousel }    from './ProductCarousel'
+import { EmmaCuratedRail }    from './EmmaCuratedRail'
 import { PlayTogetherBanner } from './PlayTogetherBanner'
 import { BrandLogoWall }      from './BrandLogoWall'
 import { Testimonials }       from './Testimonials'
@@ -31,6 +32,13 @@ export function ContentBlockRenderer({ block, carouselProductMap, bonusDealProdu
     case 'productCarousel':
       return (
         <ProductCarousel
+          block={block}
+          products={carouselProductMap[block._key] ?? []}
+        />
+      )
+    case 'emmaCuratedRail':
+      return (
+        <EmmaCuratedRail
           block={block}
           products={carouselProductMap[block._key] ?? []}
         />

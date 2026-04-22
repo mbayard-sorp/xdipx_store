@@ -1243,6 +1243,35 @@ export async function updateProductMetafield(
   })
 }
 
+/**
+ * Write Emma-voice pairing_why blurbs to a product's xdipx.pairing_why metafield.
+ * Stored as a JSON object keyed by accessory product GID. Merges into existing
+ * blurbs — the admin can curate per-accessory copy without losing other entries.
+ */
+export async function setPairingWhy(
+  productId: string,
+  blurbs: Record<string, string>,
+  opts: { merge?: boolean } = { merge: true },
+): Promise<void> {
+  const numericId = productId.replace('gid://shopify/Product/', '')
+  let merged = blurbs
+  if (opts.merge !== false) {
+    const { metafields } = await shopifyAdmin<{
+      metafields: { namespace: string; key: string; value: string }[]
+    }>(`/products/${numericId}/metafields.json?namespace=xdipx&key=pairing_why`)
+    const existing = metafields?.[0]?.value
+    if (existing) {
+      try {
+        const prev = JSON.parse(existing) as Record<string, string>
+        merged = { ...prev, ...blurbs }
+      } catch {
+        // Malformed JSON — overwrite cleanly
+      }
+    }
+  }
+  await updateProductMetafield(productId, 'pairing_why', JSON.stringify(merged), 'json')
+}
+
 export async function getVariantCost(variantGid: string): Promise<number | null> {
   const id = variantGid.replace('gid://shopify/ProductVariant/', '')
   const { variant } = await shopifyAdmin<{ variant: { inventory_item_id: string } }>(`/variants/${id}.json`)

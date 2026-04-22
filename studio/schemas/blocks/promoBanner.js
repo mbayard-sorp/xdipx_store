@@ -7,7 +7,7 @@ export default {
   type: 'object',
   fields: [
     { name: 'active',   title: 'Active', type: 'boolean', initialValue: true },
-    { name: 'order',    title: 'Order',  type: 'number',  initialValue: 10 },
+    { name: 'order',    title: 'Order',  type: 'number',  initialValue: 10, hidden: true },
     { name: 'headline', title: 'Headline', type: 'string' },
     { name: 'subtext',  title: 'Subtext',  type: 'string' },
     { name: 'ctaLabel', title: 'CTA Label', type: 'string' },
@@ -30,7 +30,7 @@ export default {
     prepare({ title, active, order }) {
       return {
         title: title ?? '(no headline)',
-        subtitle: `Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+        subtitle: `${active ? 'Visible' : 'Hidden'}`,
       }
     },
   },

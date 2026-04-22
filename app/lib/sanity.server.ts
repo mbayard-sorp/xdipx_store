@@ -2,7 +2,10 @@ import { createClient } from '@sanity/client'
 import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPreset } from '~/types/cms'
 import { cached, invalidateCache } from '~/lib/kv.server'
 
-// Shared field projection reused by homepage + product page queries
+// Shared field projection reused by homepage + product page queries.
+// Inline blocks project all their own fields; reference entries (emmaCuratedRail)
+// dereference and surface as flattened block-shaped objects with _type == 'emmaCuratedRail'.
+// Only "live" rails surface — drafts and archived rails are filtered out post-projection.
 const CONTENT_BLOCKS_PROJECTION = `
   _type, _key, active, order,
   // announcementBar
@@ -49,12 +52,13 @@ const apiVersion = '2024-10-01'
 
 // ─── Client ───────────────────────────────────────────────────────────────
 
-function getClient(withToken = false, preview = false) {
+function getClient(withToken = false, preview = false, perspective?: 'raw' | 'published' | 'previewDrafts') {
   if (!projectId) return null
   // Always include the API token — the dataset requires auth for reads.
   // Use CDN for normal reads (fast), bypass CDN for writes + preview (fresh).
+  const resolvedPerspective = perspective ?? (preview ? 'previewDrafts' : 'published')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return createClient({ projectId, dataset, apiVersion, useCdn: !withToken && !preview, token: process.env['SANITY_API_TOKEN'], perspective: preview ? 'previewDrafts' : 'published' } as any)
+  return createClient({ projectId, dataset, apiVersion, useCdn: !withToken && !preview, token: process.env['SANITY_API_TOKEN'], perspective: resolvedPerspective } as any)
 }
 
 export function isPreviewRequest(request: Request): boolean {
@@ -66,10 +70,27 @@ export function isPreviewRequest(request: Request): boolean {
 // Uses the shared `cached()` helper so new Fluid Compute instances warm from
 // KV instead of paying the Sanity round-trip on first request.
 
+// Resolve mixed inline blocks + emmaCuratedRail references in a single pass.
+// References get dereferenced and flattened to look like inline blocks; status
+// and active are read from the dereferenced rail document.
+const SECTIONS_WITH_REFS_PROJECTION = `
+  sections[]{
+    _key,
+    ...select(
+      _type == "reference" => @->{
+        _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
+        "productHandles": productHandles[]{ handle },
+        layout, bgStyle, ctaLink, ctaLabel
+      },
+      { ${CONTENT_BLOCKS_PROJECTION} }
+    )
+  }[active == true && (status == "live" || !defined(status))]
+`
+
 const HOMEPAGE_GROQ = `
   *[_id == "singleton.homepage"][0]{
     _id,
-    "sections": sections[active == true] | order(order asc) { ${CONTENT_BLOCKS_PROJECTION} }
+    "sections": ${SECTIONS_WITH_REFS_PROJECTION}
   }
 `
 
@@ -388,7 +409,17 @@ export async function getProductPageBlocks(handle: string): Promise<ContentBlock
     if (!client) return []
     const data = await client.fetch<{ sections: ContentBlock[] } | null>(
       `*[_type == "productPage" && shopifyHandle == $handle][0]{
-        "sections": contentBlocks[active == true] | order(order asc) { ${CONTENT_BLOCKS_PROJECTION} }
+        "sections": contentBlocks[]{
+          _key,
+          ...select(
+            _type == "reference" => @->{
+              _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
+              "productHandles": productHandles[]{ handle },
+              layout, bgStyle, ctaLink, ctaLabel
+            },
+            { ${CONTENT_BLOCKS_PROJECTION} }
+          )
+        }[active == true && (status == "live" || !defined(status))]
       }`,
       { handle }
     )
@@ -669,6 +700,291 @@ export async function getBlogPostsForSitemap(): Promise<{ slug: string; publishe
     console.error('[sanity] getBlogPostsForSitemap error:', err)
     return []
   }
+}
+
+// ─── Emma Curated Rails (agent-generated, draft → live) ──────────────────────
+
+export interface EmmaRailDraftInput {
+  heading: string
+  eyebrow?: string
+  emmaAside?: string
+  productHandles: string[]
+  layout?: 'carousel' | 'grid' | 'grid-3'
+  bgStyle?: 'white' | 'cream' | 'mist' | 'charcoal' | 'purple'
+  ctaLink?: string
+  ctaLabel?: string
+  target: 'homepage' | 'pdp'
+  rationale?: string
+  sourceDealId: string
+  order?: number
+}
+
+export interface EmmaRailDocument extends EmmaRailDraftInput {
+  _id: string
+  status: 'draft' | 'approved' | 'live' | 'archived'
+  active: boolean
+  generatedAt: string
+}
+
+/**
+ * Create a new Emma rail as a draft (drafts.<id>). Returns the draft _id so the
+ * admin flyout can edit it before publishing.
+ */
+export async function createEmmaRailDraft(input: EmmaRailDraftInput): Promise<{ _id: string }> {
+  const writeClient = getClient(true)
+  if (!writeClient) throw new Error('Sanity not configured')
+
+  // Sanity doc IDs only allow [a-zA-Z0-9_.-]. Strip the gid:// prefix and
+  // replace illegal chars (slashes, colons) with dashes.
+  const safeDealId = input.sourceDealId
+    .replace(/^gid:\/\/shopify\/Product\//, '')
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+  const baseId = `emmaRail-${safeDealId}-${input.target}-${Date.now()}`
+  const draftId = `drafts.${baseId}`
+
+  const doc: Record<string, unknown> = {
+    _id: draftId,
+    _type: 'emmaCuratedRail',
+    active: true,
+    status: 'draft',
+    order: input.order ?? 50,
+    heading: input.heading,
+    target: input.target,
+    sourceDealId: input.sourceDealId,
+    generatedAt: new Date().toISOString(),
+    productHandles: input.productHandles.map((handle, i) => ({
+      _type: 'productRef',
+      _key: `ph-${i}-${Math.random().toString(36).slice(2, 8)}`,
+      handle,
+    })),
+    layout: input.layout ?? 'carousel',
+    bgStyle: input.bgStyle ?? 'cream',
+  }
+  if (input.eyebrow !== undefined)   doc.eyebrow   = input.eyebrow
+  if (input.emmaAside !== undefined) doc.emmaAside = input.emmaAside
+  if (input.ctaLink !== undefined)   doc.ctaLink   = input.ctaLink
+  if (input.ctaLabel !== undefined)  doc.ctaLabel  = input.ctaLabel
+  if (input.rationale !== undefined) doc.rationale = input.rationale
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await writeClient.create(doc as any)
+  return { _id: draftId }
+}
+
+/**
+ * Patch a rail document by id. Accepts both draft and published ids.
+ */
+export async function patchEmmaRail(
+  id: string,
+  patch: Partial<{
+    heading: string
+    eyebrow: string
+    emmaAside: string
+    productHandles: string[]
+    layout: 'carousel' | 'grid' | 'grid-3'
+    bgStyle: 'white' | 'cream' | 'mist' | 'charcoal' | 'purple'
+    ctaLink: string
+    ctaLabel: string
+    status: 'draft' | 'approved' | 'live' | 'archived'
+    active: boolean
+    order: number
+    target: 'homepage' | 'pdp'
+  }>,
+): Promise<void> {
+  const writeClient = getClient(true)
+  if (!writeClient) throw new Error('Sanity not configured')
+
+  const set: Record<string, unknown> = { ...patch }
+  if (patch.productHandles) {
+    set.productHandles = patch.productHandles.map((handle, i) => ({
+      _type: 'productRef',
+      _key: `ph-${i}-${Math.random().toString(36).slice(2, 8)}`,
+      handle,
+    }))
+  }
+  await writeClient.patch(id).set(set).commit()
+  invalidateCache('sanity:homepage')
+}
+
+/**
+ * Publish a draft (drafts.<id> → <id>) — Sanity's standard publish flow.
+ * Then patches status to 'live' on the published doc.
+ */
+export async function publishEmmaRailDraft(draftId: string): Promise<{ _id: string }> {
+  const writeClient = getClient(true)
+  if (!writeClient) throw new Error('Sanity not configured')
+
+  if (!draftId.startsWith('drafts.')) {
+    // Already published — just bump status
+    await writeClient.patch(draftId).set({ status: 'live' }).commit()
+    invalidateCache('sanity:homepage')
+    return { _id: draftId }
+  }
+
+  const publishedId = draftId.slice('drafts.'.length)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const draft = await writeClient.getDocument(draftId) as any
+  if (!draft) throw new Error(`Draft not found: ${draftId}`)
+
+  // Strip _id and _rev so Sanity assigns the published id
+  const { _id: _omit, _rev: _omitRev, ...rest } = draft
+
+  await writeClient
+    .transaction()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .createOrReplace({ ...(rest as any), _id: publishedId, status: 'live' })
+    .delete(draftId)
+    .commit()
+
+  invalidateCache('sanity:homepage')
+  return { _id: publishedId }
+}
+
+/**
+ * Insert a reference to a rail document into homepageSections.sections[].
+ */
+export async function addRailRefToHomepage(railId: string): Promise<void> {
+  const writeClient = getClient(true)
+  if (!writeClient) throw new Error('Sanity not configured')
+  await writeClient.createIfNotExists({
+    _id: 'singleton.homepage',
+    _type: 'homepageSections',
+    sections: [],
+  })
+  await writeClient
+    .patch('singleton.homepage')
+    .setIfMissing({ sections: [] })
+    .append('sections', [{
+      _type: 'emmaCuratedRailRef',
+      _key: `rail-${railId}-${Date.now()}`,
+      _ref: railId,
+    }])
+    .commit()
+  invalidateCache('sanity:homepage')
+}
+
+/**
+ * Insert a reference to a rail document into a productPage's contentBlocks[].
+ * Uses the productPage doc's shopifyHandle to locate the doc.
+ */
+export async function addRailRefToProductPage(handle: string, railId: string): Promise<void> {
+  const writeClient = getClient(true)
+  if (!writeClient) throw new Error('Sanity not configured')
+  const doc = await writeClient.fetch<{ _id: string } | null>(
+    `*[_type == "productPage" && shopifyHandle == $handle][0]{ _id }`,
+    { handle },
+  )
+  if (!doc) throw new Error(`No productPage for handle "${handle}"`)
+  await writeClient
+    .patch(doc._id)
+    .setIfMissing({ contentBlocks: [] })
+    .append('contentBlocks', [{
+      _type: 'emmaCuratedRailRef',
+      _key: `rail-${railId}-${Date.now()}`,
+      _ref: railId,
+    }])
+    .commit()
+}
+
+/**
+ * Remove a rail reference from homepageSections.sections[].
+ */
+export async function removeRailRefFromHomepage(railId: string): Promise<void> {
+  const writeClient = getClient(true)
+  if (!writeClient) throw new Error('Sanity not configured')
+  await writeClient
+    .patch('singleton.homepage')
+    .unset([`sections[_ref=="${railId}"]`])
+    .commit()
+  invalidateCache('sanity:homepage')
+}
+
+/**
+ * Query rails by source deal id. Used by the lifecycle hooks (archive on
+ * rotation, un-archive on recycled deal).
+ */
+export async function getRailsByDealId(
+  dealId: string,
+  opts?: { target?: 'homepage' | 'pdp'; status?: EmmaRailDocument['status'] },
+): Promise<{ _id: string; target: 'homepage' | 'pdp'; status: EmmaRailDocument['status'] }[]> {
+  if (!projectId) return []
+  const writeClient = getClient(true)
+  if (!writeClient) return []
+  let filter = `_type == "emmaCuratedRail" && sourceDealId == $dealId && !(_id in path("drafts.**"))`
+  if (opts?.target) filter += ` && target == "${opts.target}"`
+  if (opts?.status) filter += ` && status == "${opts.status}"`
+  return writeClient.fetch<{ _id: string; target: 'homepage' | 'pdp'; status: EmmaRailDocument['status'] }[]>(
+    `*[${filter}]{ _id, target, status }`,
+    { dealId },
+  )
+}
+
+/**
+ * Archive all homepage-targeted live rails for a deal. Called by the rotator
+ * when the deal stops being today's pick. Rails flip status="archived" and
+ * are pulled out of homepageSections. PDP rails are left alone (they're
+ * evergreen cross-sells on the canonical product URL).
+ */
+export async function archiveHomepageRailsForDeal(dealId: string): Promise<{ archived: string[] }> {
+  const writeClient = getClient(true)
+  if (!writeClient) return { archived: [] }
+  const rails = await getRailsByDealId(dealId, { target: 'homepage', status: 'live' })
+  if (!rails.length) return { archived: [] }
+  const archived: string[] = []
+  for (const r of rails) {
+    try {
+      await writeClient.patch(r._id).set({ status: 'archived', active: false }).commit()
+      await removeRailRefFromHomepage(r._id)
+      archived.push(r._id)
+    } catch (err) {
+      console.error('[sanity] archiveHomepageRailsForDeal failed for', r._id, err)
+    }
+  }
+  invalidateCache('sanity:homepage')
+  return { archived }
+}
+
+/**
+ * Un-archive previously archived homepage rails for a recycled deal. Returns
+ * the rail ids that were re-livened so the caller can decide whether to skip
+ * regeneration (if any rails were restored, the deal already has homepage rails).
+ */
+export async function unarchiveHomepageRailsForDeal(dealId: string): Promise<{ unarchived: string[] }> {
+  const writeClient = getClient(true)
+  if (!writeClient) return { unarchived: [] }
+  const rails = await getRailsByDealId(dealId, { target: 'homepage', status: 'archived' })
+  if (!rails.length) return { unarchived: [] }
+  const unarchived: string[] = []
+  for (const r of rails) {
+    try {
+      await writeClient.patch(r._id).set({ status: 'live', active: true }).commit()
+      await addRailRefToHomepage(r._id)
+      unarchived.push(r._id)
+    } catch (err) {
+      console.error('[sanity] unarchiveHomepageRailsForDeal failed for', r._id, err)
+    }
+  }
+  invalidateCache('sanity:homepage')
+  return { unarchived }
+}
+
+/**
+ * Fetch full rail draft documents for a deal — used by the admin flyout to
+ * show drafts pending review. Returns drafts and any unpublished (status==draft) docs.
+ */
+export async function getRailDraftsForDeal(dealId: string): Promise<EmmaRailDocument[]> {
+  if (!projectId) return []
+  // Need raw perspective so drafts.* documents come back too.
+  const writeClient = getClient(true, false, 'raw')
+  if (!writeClient) return []
+  return writeClient.fetch<EmmaRailDocument[]>(
+    `*[_type == "emmaCuratedRail" && sourceDealId == $dealId] | order(generatedAt desc){
+      _id, status, active, order, heading, eyebrow, emmaAside, target,
+      "productHandles": productHandles[].handle,
+      layout, bgStyle, ctaLink, ctaLabel, sourceDealId, generatedAt, rationale
+    }`,
+    { dealId },
+  )
 }
 
 export async function getProductHandlesForSitemap(): Promise<{ handle: string; _updatedAt: string }[]> {

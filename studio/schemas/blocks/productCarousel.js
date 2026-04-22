@@ -4,7 +4,7 @@ export default {
   type: 'object',
   fields: [
     { name: 'active',       title: 'Active',       type: 'boolean', initialValue: true },
-    { name: 'order',        title: 'Order',        type: 'number',  initialValue: 40 },
+    { name: 'order',        title: 'Order',        type: 'number',  initialValue: 40, hidden: true },
     { name: 'heading',      title: 'Heading',      type: 'string' },
     { name: 'eyebrow',      title: 'Eyebrow',      type: 'string' },
 
@@ -110,7 +110,7 @@ export default {
         : `Tag: ${tag ?? '?'}`
       return {
         title: title ?? '(no heading)',
-        subtitle: `${sourceLabel} · Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+        subtitle: `${sourceLabel} · ${active ? 'Visible' : 'Hidden'}`,
       }
     },
   },

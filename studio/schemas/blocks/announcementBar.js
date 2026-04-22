@@ -5,8 +5,8 @@ export default {
   fields: [
     { name: 'active', title: 'Active', type: 'boolean', initialValue: true,
       description: 'Uncheck to hide this section without deleting it.' },
-    { name: 'order',  title: 'Display Order', type: 'number', initialValue: 0,
-      description: 'Lower numbers appear first on the page.' },
+    { name: 'order',  title: 'Display Order', type: 'number', initialValue: 0, hidden: true,
+      description: 'Deprecated — drag to reorder in the Homepage Sections array.' },
     {
       name: 'bgStyle', title: 'Background Color', type: 'string',
       options: { list: ['charcoal', 'gradient', 'purple'] },
@@ -36,7 +36,7 @@ export default {
     prepare({ title, active, order }) {
       return {
         title: title ?? '(no messages)',
-        subtitle: `Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+        subtitle: `${active ? 'Visible' : 'Hidden'}`,
       }
     },
   },

@@ -15,6 +15,8 @@ export default {
         { type: 'editorialTiles'     },
         { type: 'categoryGrid'       },
         { type: 'productCarousel'    },
+        { type: 'reference', name: 'emmaCuratedRailRef', title: 'Emma Curated Rail',
+          to: [{ type: 'emmaCuratedRail' }] },
         { type: 'playTogetherBanner' },
         { type: 'brandLogoWall'      },
         { type: 'testimonials'       },
