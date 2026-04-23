@@ -35,6 +35,42 @@ async function generate(
   return block.text
 }
 
+/**
+ * Reusable low-level call for short, one-shot generations (contextual asides,
+ * microcopy, etc.). Lets callers override the system prompt while sharing the
+ * same Anthropic client + error handling. Supports a wall-clock timeout so
+ * PDP renders don't hang on slow model responses.
+ */
+export async function generateWithSystem(opts: {
+  system:     string
+  user:       string
+  model?:     string
+  maxTokens?: number
+  timeoutMs?: number
+}): Promise<string> {
+  const { system, user, model = MODEL_FAST, maxTokens = 128, timeoutMs } = opts
+  const call = client.messages.create({
+    model,
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: 'user', content: user }],
+  })
+  const msg = timeoutMs
+    ? await Promise.race([
+        call,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Claude request timed out')), timeoutMs),
+        ),
+      ])
+    : await call
+  const block = msg.content[0]
+  if (block?.type !== 'text') throw new Error('Unexpected Claude response type')
+  return block.text
+}
+
+/** Exported brand-voice system prompt so callers composing their own user prompts can speak in brand voice. */
+export const BRAND_VOICE_SYSTEM_PROMPT = SYSTEM_PROMPT
+
 /** Strip markdown code fences that Claude sometimes wraps JSON in. */
 function stripFences(raw: string): string {
   return raw.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim()
