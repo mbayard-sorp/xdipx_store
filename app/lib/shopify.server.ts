@@ -1853,14 +1853,16 @@ export async function setMediaAsPrimary(shopifyProductGid: string, mediaId: stri
 }
 
 /**
- * Upload a JPEG thumbnail buffer to Shopify as a product image via staged upload.
- * Returns the new media GID.
+ * Upload an image buffer to Shopify as a product image via staged upload.
+ * Returns the new media GID. `mimeType` defaults to `image/jpeg` for
+ * backwards compatibility; pass `image/png` for images with transparency.
  */
 export async function uploadThumbnailToProduct(
   shopifyProductGid: string,
   imageBuffer: Buffer,
   filename: string,
   altText: string,
+  mimeType: 'image/jpeg' | 'image/png' = 'image/jpeg',
 ): Promise<string> {
   // 1. Create staged upload target for the image
   const staged = await adminGraphQL<{
@@ -1878,7 +1880,7 @@ export async function uploadThumbnailToProduct(
   `, {
     input: [{
       filename,
-      mimeType:   'image/jpeg',
+      mimeType,
       httpMethod: 'POST',
       resource:   'IMAGE',
       fileSize:   String(imageBuffer.length),
@@ -1896,7 +1898,7 @@ export async function uploadThumbnailToProduct(
   // 2. POST image to staged URL
   const form = new FormData()
   for (const param of target.parameters) form.append(param.name, param.value)
-  form.append('file', new Blob([new Uint8Array(imageBuffer)], { type: 'image/jpeg' }), filename)
+  form.append('file', new Blob([new Uint8Array(imageBuffer)], { type: mimeType }), filename)
 
   const uploadRes = await fetch(target.url, { method: 'POST', body: form })
   if (!uploadRes.ok) {
@@ -1955,6 +1957,36 @@ export async function getProductAdminImages(numericId: string): Promise<AdminPro
 export async function deleteProductImage(numericProductId: string, imageId: number): Promise<void> {
   const id = numericProductId.replace('gid://shopify/Product/', '')
   await shopifyAdmin<unknown>(`/products/${id}/images/${imageId}.json`, 'DELETE')
+}
+
+/**
+ * Delete media (images/videos) from a product by GID. Use this for media created
+ * via productCreateMedia — the REST /products/{id}/images/{id}.json path does not
+ * accept media GIDs.
+ */
+export async function deleteProductMedia(
+  shopifyProductGid: string,
+  mediaGids: string[],
+): Promise<void> {
+  if (mediaGids.length === 0) return
+  const data = await adminGraphQL<{
+    productDeleteMedia: {
+      deletedMediaIds: string[]
+      mediaUserErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation ProductDeleteMedia($productId: ID!, $mediaIds: [ID!]!) {
+      productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {
+        deletedMediaIds
+        mediaUserErrors { field message }
+      }
+    }
+  `, { productId: shopifyProductGid, mediaIds: mediaGids })
+
+  if (data.productDeleteMedia.mediaUserErrors.length > 0) {
+    const errs = data.productDeleteMedia.mediaUserErrors.map(e => e.message).join('; ')
+    throw new Error(`Shopify productDeleteMedia error: ${errs}`)
+  }
 }
 
 export async function reorderProductImages(

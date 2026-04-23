@@ -14,5 +14,6 @@ studio/npm run dev/
 .env.preview-*
 .claude/launch.json
 ivr_descriptors.csv
+scripts/.bg-removal-checkpoint.json
 # v2 redesign handoff — reference assets, too large to commit
 /redesign/

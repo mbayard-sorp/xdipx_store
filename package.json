@@ -12,6 +12,7 @@
     "db:seed": "tsx db/seed.ts",
     "emma:log": "tsx scripts/inspect-emma-log.ts",
     "sanity:sync": "tsx scripts/sync-products-to-sanity.ts",
+    "bg:remove": "tsx scripts/remove-product-bg.ts",
     "postinstall": "[ \"$VERCEL\" = \"1\" ] && npm run build || true"
   },
   "dependencies": {
