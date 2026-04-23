@@ -228,12 +228,11 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       msrp,
     }
 
-    const [taglineResult, fullStoryResult, bothWaysResult, bulletsResult, boxResult, seoResult, specsResult] =
+    const [taglineResult, fullStoryResult, bothWaysResult, boxResult, seoResult, specsResult] =
       await Promise.allSettled([
         generateCopy({ type: 'tagline',      product: copyProduct }),
         generateCopy({ type: 'full_story',   product: copyProduct }),
         generateCopy({ type: 'both_ways',    product: copyProduct }),
-        generateCopy({ type: 'bullets',      product: copyProduct }),
         generateCopy({ type: 'box_contents', product: copyProduct }),
         generateCopy({ type: 'seo_meta',     product: copyProduct }),
         generateCopy({ type: 'specifications', product: copyProduct }),
@@ -244,7 +243,6 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
     const bothWays     = bothWaysResult.status === 'fulfilled'
       ? (bothWaysResult.value.content as { forHim: string; forHer: string })
       : { forHim: '', forHer: '' }
-    const bullets      = bulletsResult.status === 'fulfilled' ? (bulletsResult.value.content as string[]) : []
     const boxContents  = boxResult.status === 'fulfilled' ? (boxResult.value.content as string[]) : []
     const seoMeta      = seoResult.status === 'fulfilled' ? (seoResult.value.content as string) : ''
     const specs        = specsResult.status === 'fulfilled' ? (specsResult.value.content as string) : ''
@@ -259,7 +257,6 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       fullStory,
       worksForHim:     bothWays.forHim,
       worksForHer:     bothWays.forHer,
-      featureBullets:  bullets,
       boxContents,
       seoMetaDescription: seoMeta,
       specifications:  specs,

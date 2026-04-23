@@ -402,14 +402,6 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: true }
   }
 
-  if (intent === 'save-bullets') {
-    const productId = form.get('productId') as string
-    const raw       = (form.get('value') as string | null) ?? ''
-    const bullets   = raw.split('\n').map(l => l.trim()).filter(Boolean)
-    await updateProductMetafield(productId, 'feature_bullets', JSON.stringify(bullets), 'json')
-    return { ok: true }
-  }
-
   if (intent === 'save-box-contents') {
     const productId = form.get('productId') as string
     const raw       = (form.get('value') as string | null) ?? ''
@@ -509,12 +501,11 @@ export async function action({ request }: ActionFunctionArgs) {
       const productContext = { title: seoTitle, brand, description: rawDesc, categories, dealPrice, msrp }
 
       const specsResult = await generateCopy({ type: 'specifications', product: productContext })
-      const [taglineResult, storyResult, bothWaysResult, bulletsResult, seoMetaResult, boxContentsResult] =
+      const [taglineResult, storyResult, bothWaysResult, seoMetaResult, boxContentsResult] =
         await Promise.all([
           generateCopy({ type: 'tagline',      product: productContext }),
           generateCopy({ type: 'full_story',   product: productContext }),
           generateCopy({ type: 'both_ways',    product: productContext }),
-          generateCopy({ type: 'bullets',      product: productContext }),
           generateCopy({ type: 'seo_meta',     product: productContext }),
           generateCopy({ type: 'box_contents', product: productContext }),
         ])
@@ -522,7 +513,6 @@ export async function action({ request }: ActionFunctionArgs) {
       const tagline     = Array.isArray(taglineResult.content) ? (taglineResult.content[0] ?? '') : taglineResult.content as string
       const fullStory   = storyResult.content as string
       const bothWays    = bothWaysResult.content as { forHim: string; forHer: string }
-      const bullets     = bulletsResult.content as string[]
       const seoMeta     = seoMetaResult.content as string
       const specs       = specsResult.content as string
       const boxContents = boxContentsResult.content as string[]
@@ -532,7 +522,7 @@ export async function action({ request }: ActionFunctionArgs) {
         shopifyProductId: numericId,
         tagline, fullStory, description: fullStory,
         worksForHim: bothWays.forHim, worksForHer: bothWays.forHer,
-        featureBullets: bullets, seoMetaDescription: seoMeta,
+        seoMetaDescription: seoMeta,
         specifications: specs, boxContents,
       })
 
@@ -2382,7 +2372,6 @@ export default function AdminDealsPage() {
                         <SaveableField label="Works For Her" fieldKey="works_for_her" fieldType="multi_line_text_field" defaultValue={editorData.deal.worksForHer} productId={editorData.deal.shopifyProductId} rows={3} />
                         <SaveableField label="Specifications" fieldKey="specifications" fieldType="multi_line_text_field" defaultValue={editorData.deal.specifications ?? ''} productId={editorData.deal.shopifyProductId} rows={5} />
                         <SaveableField label="What's In The Box" intent="save-box-contents" defaultValue={(editorData.deal.boxContents ?? []).join('\n')} productId={editorData.deal.shopifyProductId} rows={4} hint="One item per line" />
-                        <SaveableField label="Feature Bullets" intent="save-bullets" defaultValue={(editorData.deal.featureBullets ?? []).join('\n')} productId={editorData.deal.shopifyProductId} rows={4} hint="One bullet per line" />
                         <SaveableField label="SEO Meta Description" fieldKey="seo_meta_description" fieldType="multi_line_text_field" defaultValue={editorData.deal.metaDescription} productId={editorData.deal.shopifyProductId} rows={2} />
                       </div>
                     )}

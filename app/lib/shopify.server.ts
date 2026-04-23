@@ -75,7 +75,6 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "full_story" }
     { namespace: "xdipx", key: "works_for_him" }
     { namespace: "xdipx", key: "works_for_her" }
-    { namespace: "xdipx", key: "feature_bullets" }
     { namespace: "xdipx", key: "box_contents" }
     { namespace: "xdipx", key: "deal_status" }
     { namespace: "xdipx", key: "deal_date" }
@@ -370,7 +369,6 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     fullStory: parseMetafield(mf, 'full_story') || node.description,
     worksForHim: parseMetafield(mf, 'works_for_him'),
     worksForHer: parseMetafield(mf, 'works_for_her'),
-    featureBullets: parseMetafieldJSON<string[]>(mf, 'feature_bullets', []),
     boxContents: parseMetafieldJSON<string[]>(mf, 'box_contents', []),
     images: parseImages(node.images.edges),
     videos: parseVideos(node.media),
@@ -601,7 +599,6 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     fullStory: mfVal('full_story') || product.body_html,
     worksForHim: mfVal('works_for_him'),
     worksForHer: mfVal('works_for_her'),
-    featureBullets: mfJSON<string[]>('feature_bullets', []),
     boxContents: mfJSON<string[]>('box_contents', []),
     images: product.images.map(img => ({ url: img.src, altText: img.alt ?? '' })),
     videos,
@@ -1390,7 +1387,6 @@ export interface ProductPageDoc {
   fullStory?: unknown           // string (legacy) or portable text blocks
   worksForHim?: unknown        // string (legacy) or portable text blocks
   worksForHer?: unknown        // string (legacy) or portable text blocks
-  featureBullets?: string[] | undefined
   boxContents?: string[] | undefined
   moodImageUrl?: string | undefined
   category?: string | undefined
@@ -1467,13 +1463,6 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   add('original_price',   doc.originalPrice?.toString(),       'number_decimal')
   add('wholesale_cost',   doc.wholesaleCost?.toString(),       'number_decimal')
   add('map_price',        doc.mapPrice?.toString(),            'number_decimal')
-
-  if (!doc.featureBullets?.length) throw new Error('pushProductToShopify: featureBullets is empty')
-  metafields.push({
-    namespace: 'xdipx', key: 'feature_bullets', ownerId: gid,
-    value: JSON.stringify(doc.featureBullets),
-    type: 'json',
-  })
 
   if (!doc.boxContents?.length) throw new Error('pushProductToShopify: boxContents is empty')
   metafields.push({

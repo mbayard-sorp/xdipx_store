@@ -112,7 +112,6 @@ export interface Deal {
   fullStory: string
   worksForHim: string
   worksForHer: string
-  featureBullets: string[]
   boxContents: string[]
   specifications?: string
   images: ProductImage[]
@@ -391,7 +390,7 @@ export interface DailyProfitSummaryRow {
 // ─── Admin ─────────────────────────────────────────────────────────────────
 
 export interface GenerateCopyRequest {
-  type: 'tagline' | 'full_story' | 'both_ways' | 'bullets' | 'box_contents' | 'email_subjects' | 'seo_meta' | 'specifications' | 'quiet_endorsement' | 'pair_bundle'
+  type: 'tagline' | 'full_story' | 'both_ways' | 'box_contents' | 'email_subjects' | 'seo_meta' | 'specifications' | 'quiet_endorsement' | 'pair_bundle'
   product: {
     title: string
     brand: string

@@ -527,18 +527,6 @@ function ProductPage() {
           {/* Social proof */}
           <SocialProofBar />
 
-          {/* Feature bullets */}
-          {deal.featureBullets.length > 0 && (
-            <ul className="space-y-1.5">
-              {deal.featureBullets.map((bullet, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-ink/80">
-                  <span className="text-sage mt-0.5 shrink-0" aria-hidden="true">♥</span>
-                  {bullet}
-                </li>
-              ))}
-            </ul>
-          )}
-
           {/* Works for */}
           {(worksFor[0] || worksFor[1] || worksFor[2]) && (
             <div className="flex items-center gap-2 text-sm text-ink/60 flex-wrap">

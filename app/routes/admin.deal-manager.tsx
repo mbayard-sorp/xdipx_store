@@ -110,14 +110,6 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: true }
   }
 
-  if (intent === 'save-bullets') {
-    const productId = form.get('productId') as string
-    const raw       = form.get('value') as string
-    const bullets   = raw.split('\n').map(l => l.trim()).filter(Boolean)
-    await updateProductMetafield(productId, 'feature_bullets', JSON.stringify(bullets), 'json')
-    return { ok: true }
-  }
-
   if (intent === 'save-box-contents') {
     const productId = form.get('productId') as string
     const raw       = form.get('value') as string
@@ -195,12 +187,11 @@ export async function action({ request }: ActionFunctionArgs) {
       // Extract specs first (sequential) so full_story can omit them
       const specsResult = await generateCopy({ type: 'specifications', product: productContext })
 
-      const [taglineResult, storyResult, bothWaysResult, bulletsResult, seoMetaResult, boxContentsResult] =
+      const [taglineResult, storyResult, bothWaysResult, seoMetaResult, boxContentsResult] =
         await Promise.all([
           generateCopy({ type: 'tagline',      product: productContext }),
           generateCopy({ type: 'full_story',   product: productContext }),
           generateCopy({ type: 'both_ways',    product: productContext }),
-          generateCopy({ type: 'bullets',      product: productContext }),
           generateCopy({ type: 'seo_meta',     product: productContext }),
           generateCopy({ type: 'box_contents', product: productContext }),
         ])
@@ -210,7 +201,6 @@ export async function action({ request }: ActionFunctionArgs) {
         : taglineResult.content as string
       const fullStory   = storyResult.content as string
       const bothWays    = bothWaysResult.content as { forHim: string; forHer: string }
-      const bullets     = bulletsResult.content as string[]
       const seoMeta     = seoMetaResult.content as string
       const specs       = specsResult.content as string
       const boxContents = boxContentsResult.content as string[]
@@ -223,7 +213,6 @@ export async function action({ request }: ActionFunctionArgs) {
         description:    fullStory,
         worksForHim:    bothWays.forHim,
         worksForHer:    bothWays.forHer,
-        featureBullets: bullets,
         seoMetaDescription: seoMeta,
         specifications: specs,
         boxContents,
@@ -823,7 +812,6 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
       if (deal.worksForHer)    fd.set('worksForHer',    deal.worksForHer)
       if (deal.specifications) fd.set('specifications', deal.specifications)
       if (deal.boxContents?.length) fd.set('whatsInTheBox', deal.boxContents.join(', '))
-      if (deal.featureBullets?.length) fd.set('featureBullets', JSON.stringify(deal.featureBullets))
 
       const res = await fetch('/api/generate-video', { method: 'POST', body: fd })
       const data = await res.json() as GenerateVideoResponse
@@ -1292,7 +1280,6 @@ function DealManager() {
   const liveLabel    = liveFetcher.state === 'submitting'    ? 'Setting live…' : liveFetcher.data?.ok ? '🟢 Live!' : 'Set Live'
   const isLive = deal.dealStatus === 'live'
 
-  const featureBulletsDefault = deal.featureBullets.join('\n')
   const boxContentsDefault    = deal.boxContents.join('\n')
 
   return (
@@ -1485,14 +1472,6 @@ function DealManager() {
                   productId={deal.shopifyProductId}
                   rows={5}
                   intent="save-box-contents"
-                />
-                <SaveableField
-                  label="Feature Bullets"
-                  hint="One bullet per line. Shown in the hero panel."
-                  defaultValue={featureBulletsDefault}
-                  productId={deal.shopifyProductId}
-                  rows={5}
-                  intent="save-bullets"
                 />
                 <SaveableField
                   label="SEO Meta Description"

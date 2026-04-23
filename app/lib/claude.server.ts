@@ -127,31 +127,6 @@ ${productContext}`
       }
     }
 
-    case 'bullets': {
-      const primaryPrompt = `Write 4–6 feature bullet points for this product. Short, specific, benefit-first. No fluff. Return as a JSON array of strings.\n\n${productContext}`
-      const retryPrompt   = `Return ONLY a JSON array of 4 to 5 short benefit strings. Example: ["Dual motors for blended stimulation", "Whisper-quiet for total privacy"]. Nothing else — no markdown, no prose.\n\n${productContext}`
-
-      const raw = await generate(primaryPrompt, 1024, MODEL_FAST)
-      try {
-        const parsed = JSON.parse(stripFences(raw)) as string[]
-        if (Array.isArray(parsed) && parsed.length >= 3) return { type, content: parsed }
-      } catch { /* fall through */ }
-
-      const retried = await generate(retryPrompt, 1024, MODEL_FAST)
-      try {
-        const parsed = JSON.parse(stripFences(retried)) as string[]
-        if (Array.isArray(parsed) && parsed.length >= 3) return { type, content: parsed }
-      } catch { /* fall through */ }
-
-      // Fallback: extract lines from description
-      const lines = product.description
-        .split(/[.!?\n]/)
-        .map(s => s.trim())
-        .filter(s => s.length > 20 && s.length < 120)
-        .slice(0, 4)
-      return { type, content: lines.length >= 3 ? lines : [`${product.title} by ${product.brand}`, 'Rechargeable and body-safe', 'Ships discreetly'] }
-    }
-
     case 'email_subjects': {
       const raw = await generate(
         `Write 5 email subject lines for today's daily deal email. Max 50 chars each. Playful, urgent, curiosity-driven. Return as a JSON array of strings.\n\n${productContext}`,
@@ -551,7 +526,6 @@ export async function generateVideoContent(product: {
   worksForHer?: string
   specifications?: string
   whatsInTheBox?: string
-  featureBullets?: string[]
   /** Optional freeform instruction appended to the Claude prompt — for admin overrides */
   customPrompt?: string
   /** Pin to a specific format instead of auto-selecting */
@@ -567,9 +541,6 @@ export async function generateVideoContent(product: {
   const worksForHer = product.worksForHer ? stripHtml(product.worksForHer).slice(0, 200) : ''
   const specs       = product.specifications ? stripHtml(product.specifications).slice(0, 200) : ''
   const inTheBox    = product.whatsInTheBox  ? stripHtml(product.whatsInTheBox).slice(0, 150)  : ''
-  const bullets     = product.featureBullets
-    ? product.featureBullets.map(b => stripHtml(b).slice(0, 80)).filter(Boolean).join(', ')
-    : ''
 
   const productContext = [
     `Product: ${product.title}`,
@@ -582,7 +553,6 @@ export async function generateVideoContent(product: {
     worksForHer       ? `Works for her: ${worksForHer}`                            : '',
     specs             ? `Specifications: ${specs}`                                 : '',
     inTheBox          ? `What's in the box: ${inTheBox}`                           : '',
-    bullets           ? `Features: ${bullets}`                                     : '',
   ].filter(Boolean).join('\n')
 
   const formatDescriptions: Partial<Record<VOFormat, string>> = {
@@ -609,7 +579,7 @@ Brand voice: playful, cheeky, warm. PG-13 strictly — suggest, never show. Innu
 Product:
 ${productContext}
 
-Use the product details above to make the narrator script and reaction text feel specific to THIS product — not generic wellness copy. Mine the full story, feature bullets, and specs for details that are funny, surprising, or unusually specific. A narrator referencing an actual feature ("7 settings" or "whisper quiet" or "USB rechargeable") is always funnier and more trustworthy than one speaking in generalities. Specificity = credibility = conversion.
+Use the product details above to make the narrator script and reaction text feel specific to THIS product — not generic wellness copy. Mine the full story and specs for details that are funny, surprising, or unusually specific. A narrator referencing an actual feature ("7 settings" or "whisper quiet" or "USB rechargeable") is always funnier and more trustworthy than one speaking in generalities. Specificity = credibility = conversion.
 
 If works-for-him and works-for-her are both present, the narrator should feel warm and inclusive toward both without assuming who is watching. If only one is present, subtly orient the tone toward that audience without being exclusionary.
 
