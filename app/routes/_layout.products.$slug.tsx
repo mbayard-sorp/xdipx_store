@@ -679,11 +679,11 @@ function ProductPage() {
       ) : heroContent}
 
       <div className="max-w-6xl mx-auto px-4">
-        <RecentlyBrowsed currentHandle={deal.handle} />
         {pairsWithItems.length > 0
           ? <PairsWith items={pairsWithItems} />
           : <FrequentlyBoughtWith products={fbtProducts} />
         }
+        <RecentlyBrowsed currentHandle={deal.handle} />
         {companionBundle && (
           <BundleSaveCard bundle={companionBundle} buyButtonText={buyButtonText} />
         )}
