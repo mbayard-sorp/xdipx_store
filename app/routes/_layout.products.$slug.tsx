@@ -599,7 +599,7 @@ function ProductPage() {
         <div className="space-y-4">
           {/* Brand + title */}
           <div>
-            <p className="text-ink/50 text-sm font-medium uppercase tracking-widest flex items-center gap-1.5 flex-wrap">
+            <div className="text-ink/50 text-sm font-medium uppercase tracking-widest flex items-center gap-1.5 flex-wrap">
               <span>{deal.brand}</span>
               {deal.productTypeDial && (
                 <>
@@ -616,7 +616,7 @@ function ProductPage() {
                   </span>
                 </>
               )}
-            </p>
+            </div>
             <h1
               className="text-2xl md:text-3xl font-bold text-ink mt-1 leading-snug"
               style={{ fontFamily: 'var(--font-display)' }}
