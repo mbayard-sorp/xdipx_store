@@ -1,3 +1,6 @@
+import { bgStyleField } from '../../lib/bgStyleField'
+import { withImageGenerator } from '../../lib/withImageGenerator'
+
 export default {
   name: 'categoryGrid',
   title: 'Category Grid',
@@ -6,6 +9,7 @@ export default {
     { name: 'active',  title: 'Active',  type: 'boolean', initialValue: true },
     { name: 'order',   title: 'Order',   type: 'number',  initialValue: 30, hidden: true },
     { name: 'heading', title: 'Heading', type: 'string',  initialValue: 'Shop by Category' },
+    bgStyleField({ initialValue: 'white' }),
     {
       name: 'columns', title: 'Columns', type: 'number',
       options: { list: [3, 4, 6] }, initialValue: 4,
@@ -18,7 +22,8 @@ export default {
           { name: 'label', title: 'Label',    type: 'string' },
           { name: 'link',  title: 'Link URL', type: 'string' },
           { name: 'emoji', title: 'Emoji (fallback)', type: 'string' },
-          { name: 'image', title: 'Image', type: 'image', options: { hotspot: true } },
+          // AI image generation — adds imagePrompt sibling + wraps 'image' input
+          ...withImageGenerator('image'),
         ],
         preview: { select: { title: 'label', media: 'image' } },
       }],

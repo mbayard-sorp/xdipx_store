@@ -1,3 +1,5 @@
+import { bgStyleField } from '../../lib/bgStyleField'
+
 export default {
   name: 'bonusDeal',
   title: 'Bonus Deal',
@@ -7,6 +9,7 @@ export default {
     { name: 'order',   title: 'Order',   type: 'number',  initialValue: 50, hidden: true },
     { name: 'heading', title: 'Heading', type: 'string',  description: 'Defaults to "Because one deal is never enough."' },
     { name: 'eyebrow', title: 'Eyebrow', type: 'string',  description: 'Defaults to "Bonus Deal"' },
+    bgStyleField({ initialValue: 'white' }),
   ],
   preview: {
     select: { title: 'heading', active: 'active', order: 'order' },

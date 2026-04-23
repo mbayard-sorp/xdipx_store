@@ -1,3 +1,4 @@
+import { ImageGeneratorInput } from '../components/ImageGeneratorInput'
 import { withImageGenerator } from '../lib/withImageGenerator'
 
 const BLOG_RICH_TEXT = {
@@ -162,12 +163,21 @@ export default {
       validation: Rule => Rule.max(160),
     },
     {
+      name: 'ogImagePrompt',
+      title: 'OG image prompt',
+      type: 'text',
+      rows: 3,
+      group: 'seo',
+      description: 'Describe the social sharing image to generate (optional).',
+    },
+    {
       name: 'ogImage',
       title: 'Open Graph Image',
       type: 'image',
       group: 'seo',
       options: { hotspot: true },
       description: 'Custom social sharing image. Falls back to hero image if not set.',
+      components: { input: ImageGeneratorInput },
     },
     {
       name: 'noIndex',

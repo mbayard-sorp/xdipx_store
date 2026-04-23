@@ -1,3 +1,4 @@
+import { ImageGeneratorInput } from '../../components/ImageGeneratorInput'
 import { withImageGenerator } from '../../lib/withImageGenerator'
 
 export default {
@@ -35,10 +36,19 @@ export default {
       initialValue: 'full-width',
     },
     {
+      name: 'secondImagePrompt',
+      title: 'Second image prompt',
+      type: 'text',
+      rows: 3,
+      description: 'Describe the second image to generate (optional).',
+      hidden: ({ parent }) => parent?.layout !== 'side-by-side',
+    },
+    {
       name: 'secondImage',
       title: 'Second Image (Side by Side)',
       type: 'image',
       options: { hotspot: true },
+      components: { input: ImageGeneratorInput },
       hidden: ({ parent }) => parent?.layout !== 'side-by-side',
     },
     {

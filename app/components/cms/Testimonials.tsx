@@ -1,4 +1,5 @@
 import type { TestimonialsBlock } from '~/types/cms'
+import { bgClass, isDarkBg } from './bgStyle'
 
 interface TestimonialsProps {
   block: TestimonialsBlock
@@ -25,11 +26,14 @@ export function Testimonials({ block }: TestimonialsProps) {
 
   if (!items.length) return null
 
+  const style = block.bgStyle ?? 'mist'
+  const dark  = isDarkBg(style)
+
   return (
-    <section className="py-12 px-4 bg-cream-2">
+    <section className={`py-12 px-4 ${bgClass(style)}`}>
       <div className="max-w-6xl mx-auto">
         <h2
-          className="text-2xl font-bold text-ink mb-8 text-center"
+          className={`text-2xl font-bold mb-8 text-center ${dark ? 'text-white' : 'text-ink'}`}
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {heading}

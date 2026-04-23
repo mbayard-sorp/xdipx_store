@@ -60,6 +60,7 @@ export interface EditorialTilesBlock {
   eyebrow?: string
   heading: string
   tiles: EditorialTile[]
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Category Grid ────────────────────────────────────────────────────────
@@ -79,6 +80,7 @@ export interface CategoryGridBlock {
   heading: string
   items: CategoryGridItem[]
   columns: 3 | 4 | 6
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Product Carousel ─────────────────────────────────────────────────────
@@ -137,6 +139,7 @@ export interface PlayTogetherBannerBlock {
   ctaLink: string
   image?: SanityImageAsset
   imagePosition: 'left' | 'right'
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Brand Logo Wall ──────────────────────────────────────────────────────
@@ -155,6 +158,7 @@ export interface BrandLogoWallBlock {
   order: number
   heading?: string
   logos: BrandLogo[]
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Testimonials ─────────────────────────────────────────────────────────
@@ -173,6 +177,7 @@ export interface TestimonialsBlock {
   order: number
   heading: string
   items: TestimonialItem[]
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Bonus Deal ──────────────────────────────────────────────────────────
@@ -184,6 +189,7 @@ export interface BonusDealBlock {
   order: number
   heading?: string
   eyebrow?: string
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Trust Bar ───────────────────────────────────────────────────────────
@@ -203,6 +209,7 @@ export interface TrustBarBlock {
   active: boolean
   order: number
   trustItems?: TrustItem[]
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Rich Text ───────────────────────────────────────────────────────────

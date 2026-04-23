@@ -1,3 +1,5 @@
+import { bgStyleField } from '../../lib/bgStyleField'
+
 export default {
   name: 'trustBar',
   title: 'Trust Bar',
@@ -5,6 +7,7 @@ export default {
   fields: [
     { name: 'active', title: 'Active', type: 'boolean', initialValue: true },
     { name: 'order',  title: 'Order',  type: 'number',  initialValue: 50, hidden: true },
+    bgStyleField({ initialValue: 'white' }),
     {
       name: 'items',
       title: 'Linked Trust Items',

@@ -1,3 +1,5 @@
+import { bgStyleField } from '../../lib/bgStyleField'
+
 export default {
   name: 'testimonials',
   title: 'Testimonials',
@@ -6,6 +8,7 @@ export default {
     { name: 'active',  title: 'Active',  type: 'boolean', initialValue: true },
     { name: 'order',   title: 'Order',   type: 'number',  initialValue: 70, hidden: true },
     { name: 'heading', title: 'Heading', type: 'string',  initialValue: 'What customers are saying ♥' },
+    bgStyleField({ initialValue: 'cream' }),
     {
       name: 'items', title: 'Reviews', type: 'array',
       of: [{

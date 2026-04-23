@@ -1,3 +1,5 @@
+import { ImageGeneratorInput } from '../../components/ImageGeneratorInput'
+
 export default {
   name: 'richText',
   title: 'Rich Text',
@@ -52,6 +54,7 @@ export default {
         {
           type: 'image',
           options: { hotspot: true },
+          components: { input: ImageGeneratorInput },
           fields: [
             { name: 'alt', title: 'Alt text', type: 'string' },
             { name: 'caption', title: 'Caption', type: 'string' },
