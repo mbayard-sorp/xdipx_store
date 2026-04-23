@@ -39,6 +39,7 @@ import type { ProductCarouselBlock } from '~/types/cms'
 import { trackViewItem, trackAddToCart } from '~/lib/analytics.client'
 import { ShareButtons } from '~/components/common/ShareButtons'
 import { HeartButton } from '~/components/store/HeartButton'
+import { Toast } from '~/components/account/Toast'
 import { buildSocialMeta } from '~/lib/social-meta'
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
@@ -306,11 +307,13 @@ function ProductPage() {
   }>()
   const [productVoteAggregate, setProductVoteAggregate] = useState<ProductVoteAggregate>(productVoteAggregateLoaded)
   const [customerVote, setCustomerVote] = useState<1 | -1 | null>(customerProductVoteLoaded)
+  const [voteToast, setVoteToast] = useState<{ vote: 1 | -1; key: number } | null>(null)
 
   useEffect(() => {
     if (voteFetcher.state !== 'idle' || !voteFetcher.data) return
     if (voteFetcher.data.ok && voteFetcher.data.aggregate) {
       setProductVoteAggregate(voteFetcher.data.aggregate)
+      setVoteToast({ vote: customerVote ?? 1, key: Date.now() })
       return
     }
     // Guest tried to vote — bounce through login with pendingVote so we can
@@ -318,7 +321,7 @@ function ProductPage() {
     if (!voteFetcher.data.ok && voteFetcher.data.loginUrl) {
       window.location.assign(voteFetcher.data.loginUrl)
     }
-  }, [voteFetcher.state, voteFetcher.data])
+  }, [voteFetcher.state, voteFetcher.data, customerVote])
 
   const submitProductVote = useCallback((vote: 1 | -1) => {
     const fd = new FormData()
@@ -748,6 +751,14 @@ function ProductPage() {
         ...(deal.category === 'for-her' ? [{ name: 'For Her', url: 'https://xdipx.com/for-her' }] : []),
         { name: deal.seoTitle,   url: `https://xdipx.com/products/${deal.handle}` },
       ]} />
+
+      {voteToast && (
+        <Toast
+          key={voteToast.key}
+          message={voteToast.vote === 1 ? 'Thanks — vote recorded ♥' : 'Got it — noted.'}
+          onDismiss={() => setVoteToast(null)}
+        />
+      )}
     </>
   )
 }
