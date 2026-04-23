@@ -101,6 +101,29 @@ export interface ProductCarouselBlock {
   bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
+// ─── Emma Curated Rail (agent-generated cross-sell) ──────────────────────
+
+export interface EmmaCuratedRailBlock {
+  _type: 'emmaCuratedRail'
+  _key: string
+  _id?: string
+  active: boolean
+  order: number
+  heading: string
+  eyebrow?: string
+  emmaAside?: string
+  productHandles?: { handle: string }[]
+  layout?: 'carousel' | 'grid' | 'grid-3'
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
+  ctaLink?: string
+  ctaLabel?: string
+  target?: 'homepage' | 'pdp'
+  status?: 'draft' | 'approved' | 'live' | 'archived'
+  sourceDealId?: string
+  generatedAt?: string
+  rationale?: string
+}
+
 // ─── Play Together Banner ─────────────────────────────────────────────────
 
 export interface PlayTogetherBannerBlock {
@@ -202,6 +225,7 @@ export type ContentBlock =
   | EditorialTilesBlock
   | CategoryGridBlock
   | ProductCarouselBlock
+  | EmmaCuratedRailBlock
   | PlayTogetherBannerBlock
   | BrandLogoWallBlock
   | TestimonialsBlock
@@ -277,6 +301,7 @@ export type PageSection =
   | EditorialTilesBlock
   | CategoryGridBlock
   | ProductCarouselBlock
+  | EmmaCuratedRailBlock
   | PlayTogetherBannerBlock
   | BrandLogoWallBlock
   | TestimonialsBlock

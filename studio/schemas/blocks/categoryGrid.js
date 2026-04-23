@@ -4,7 +4,7 @@ export default {
   type: 'object',
   fields: [
     { name: 'active',  title: 'Active',  type: 'boolean', initialValue: true },
-    { name: 'order',   title: 'Order',   type: 'number',  initialValue: 30 },
+    { name: 'order',   title: 'Order',   type: 'number',  initialValue: 30, hidden: true },
     { name: 'heading', title: 'Heading', type: 'string',  initialValue: 'Shop by Category' },
     {
       name: 'columns', title: 'Columns', type: 'number',
@@ -30,7 +30,7 @@ export default {
       const n = Array.isArray(items) ? items.length : 0
       return {
         title: title ?? '(no heading)',
-        subtitle: `${n} categor${n !== 1 ? 'ies' : 'y'} · Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+        subtitle: `${n} categor${n !== 1 ? 'ies' : 'y'} · ${active ? 'Visible' : 'Hidden'}`,
       }
     },
   },

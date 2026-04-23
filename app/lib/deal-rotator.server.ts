@@ -122,6 +122,18 @@ export async function transitionToVaultPricing(
       vaultPrice: vaultPrice > 0 ? vaultPrice.toFixed(2) : null,
     })
     .where(and(eq(dealHistory.id, deal.id), eq(dealHistory.status, 'live')))
+
+  // Archive Emma-curated homepage rails for this deal — they're tied to the
+  // editorial moment. PDP rails persist on the canonical product URL.
+  try {
+    const { archiveHomepageRailsForDeal } = await import('./sanity.server')
+    const { archived } = await archiveHomepageRailsForDeal(deal.shopifyProductId)
+    if (archived.length) {
+      console.log('[deal-rotator] Archived homepage rails:', archived.length)
+    }
+  } catch (err) {
+    console.error('[deal-rotator] Rail archive failed (non-blocking):', err)
+  }
 }
 
 /**
@@ -162,6 +174,19 @@ export async function activateDeal(
 
   // Set live status in Shopify
   await setDealStatus(deal.shopifyProductId, 'live')
+
+  // Recycled-deal path: if this product was a previous deal, restore any
+  // archived homepage rails instead of regenerating. Saves tokens, preserves
+  // editorial history for repeat picks.
+  try {
+    const { unarchiveHomepageRailsForDeal } = await import('./sanity.server')
+    const { unarchived } = await unarchiveHomepageRailsForDeal(deal.shopifyProductId)
+    if (unarchived.length) {
+      console.log('[deal-rotator] Un-archived homepage rails:', unarchived.length)
+    }
+  } catch (err) {
+    console.error('[deal-rotator] Rail un-archive failed (non-blocking):', err)
+  }
 
   // Emma hero copy — generated from pipelineSettings.brandVoice (non-blocking).
   // Fetched via getDailyDeal() since we just flipped this product to live status.

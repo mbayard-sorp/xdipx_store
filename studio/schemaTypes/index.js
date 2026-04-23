@@ -27,6 +27,7 @@ import emmaHeroSettings   from '../schemas/emmaHeroSettings.js'
 import emmaPreset         from '../schemas/emmaPreset.js'
 import emmaPick           from '../schemas/emmaPick.js'
 import emmaContextRail    from '../schemas/emmaContextRail.js'
+import emmaCuratedRail    from '../schemas/blocks/emmaCuratedRail.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -51,6 +52,8 @@ export const schemaTypes = [
   emmaPick,
   // v2 redesign — Emma context rails (AI-curated product rails under the hero)
   emmaContextRail,
+  // v2 redesign — Emma-curated rails (agent-generated, draft→approve→live)
+  emmaCuratedRail,
   // Block object types
   announcementBar,
   promoBanner,

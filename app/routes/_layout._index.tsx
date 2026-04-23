@@ -116,6 +116,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
   }
 
+  // Resolve Shopify products for any Emma-curated rail blocks (manual handles only)
+  const emmaRailBlocks = (cmsData?.sections ?? []).filter(
+    (s): s is import('~/types/cms').EmmaCuratedRailBlock => s._type === 'emmaCuratedRail',
+  )
+  if (emmaRailBlocks.length > 0) {
+    const results = await Promise.all(
+      emmaRailBlocks.map(b =>
+        b.productHandles?.length
+          ? getProductsByHandles(b.productHandles.map(p => p.handle))
+          : Promise.resolve([] as Product[]),
+      ),
+    )
+    emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
+  }
+
   if (!deal) {
     return {
       deal: null, bundle: null, forHim, forHer, bonusDeal,

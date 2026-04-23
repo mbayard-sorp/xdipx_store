@@ -4,7 +4,7 @@ export default {
   type: 'object',
   fields: [
     { name: 'active',  title: 'Active',  type: 'boolean', initialValue: true },
-    { name: 'order',   title: 'Order',   type: 'number',  initialValue: 50 },
+    { name: 'order',   title: 'Order',   type: 'number',  initialValue: 50, hidden: true },
     { name: 'heading', title: 'Heading', type: 'string',  description: 'Defaults to "Because one deal is never enough."' },
     { name: 'eyebrow', title: 'Eyebrow', type: 'string',  description: 'Defaults to "Bonus Deal"' },
   ],
@@ -13,7 +13,7 @@ export default {
     prepare({ title, active, order }) {
       return {
         title: title || 'Because one deal is never enough.',
-        subtitle: `${active ? '✅' : '⛔'} Order: ${order ?? '—'}`,
+        subtitle: `${active ? 'Visible' : 'Hidden'}`,
       }
     },
   },

@@ -4,7 +4,7 @@ export default {
   type: 'object',
   fields: [
     { name: 'active',        title: 'Active',        type: 'boolean', initialValue: true },
-    { name: 'order',         title: 'Order',         type: 'number',  initialValue: 50 },
+    { name: 'order',         title: 'Order',         type: 'number',  initialValue: 50, hidden: true },
     { name: 'heading',       title: 'Heading',       type: 'string' },
     { name: 'body',          title: 'Body',          type: 'text' },
     { name: 'ctaLabel',      title: 'CTA Label',     type: 'string' },
@@ -20,7 +20,7 @@ export default {
     prepare({ title, media, active, order }) {
       return {
         title: title ?? '(no heading)',
-        subtitle: `Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+        subtitle: `${active ? 'Visible' : 'Hidden'}`,
         media,
       }
     },

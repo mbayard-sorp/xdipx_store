@@ -4,7 +4,7 @@ export default {
   type: 'object',
   fields: [
     { name: 'active',  title: 'Active',  type: 'boolean', initialValue: true },
-    { name: 'order',   title: 'Order',   type: 'number',  initialValue: 60 },
+    { name: 'order',   title: 'Order',   type: 'number',  initialValue: 60, hidden: true },
     { name: 'heading', title: 'Heading', type: 'string',  initialValue: 'Top brands we carry' },
     {
       name: 'logos', title: 'Brand Logos', type: 'array',
@@ -26,7 +26,7 @@ export default {
       const n = Array.isArray(logos) ? logos.length : 0
       return {
         title: title ?? '(no heading)',
-        subtitle: `${n} brand${n !== 1 ? 's' : ''} · Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+        subtitle: `${n} brand${n !== 1 ? 's' : ''} · ${active ? 'Visible' : 'Hidden'}`,
       }
     },
   },
