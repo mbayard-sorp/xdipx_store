@@ -467,11 +467,11 @@ function AssistantBubble({
 }: {
   text: string
   products: ChatProductCard[]
-  quickReply?: QuickReplyPayload
-  onQuickReply?: (msg: string) => void
-  onVariantPick?: (card: ChatProductCard, variant: ChatVariantOption) => void
-  onTellMore?: (card: ChatProductCard) => void
-  showCaret?: boolean
+  quickReply?: QuickReplyPayload | undefined
+  onQuickReply?: ((msg: string) => void) | undefined
+  onVariantPick?: ((card: ChatProductCard, variant: ChatVariantOption) => void) | undefined
+  onTellMore?: ((card: ChatProductCard) => void) | undefined
+  showCaret?: boolean | undefined
 }) {
   return (
     <div className="flex flex-col items-start gap-2">
