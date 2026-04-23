@@ -75,7 +75,7 @@ export function SensationDial({
   const agreePct  = aggregate?.agreePct  ?? 0
 
   return (
-    <section className="bg-paper rounded-[var(--radius-lg)] border border-line p-5 md:p-6">
+    <section className="bg-paper/10 rounded-[var(--radius-lg)] border border-line p-5 md:p-6">
       <header className="mb-4">
         <h3
           className="text-base md:text-lg font-bold text-ink"
