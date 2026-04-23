@@ -11,7 +11,13 @@ import { getProductPageBlocks } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
-import { getDialAggregates, type DialAggregate } from '~/lib/dial-votes.server'
+import {
+  getProductVoteAggregate,
+  getCustomerProductVote,
+  type ProductVoteAggregate,
+} from '~/lib/dial-votes.server'
+import { getCustomerToken } from '~/lib/customer-session.server'
+import { customerAPI } from '~/lib/customer-api.server'
 import BundleHero from '~/components/store/BundleHero'
 import BundleSaveCard from '~/components/store/BundleSaveCard'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
@@ -60,7 +66,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       carouselProductMap: {},
       fbtProducts: [],
       pairsWithItems: [] as PairsWithItem[],
-      dialAggregates: {} as Record<string, DialAggregate>,
+      productVoteAggregate: { agrees: 0, disagrees: 0, agreePct: 0 } as ProductVoteAggregate,
+      customerProductVote: null as (1 | -1 | null),
+      isLoggedIn: false,
       companionBundle: null,
       reviews: [],
       reviewTotal: 0,
@@ -82,13 +90,30 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const hasDial = !!(deal.sensationDial && deal.productTypeDial)
   const hasPairing = !!(deal.pairingWhy && Object.keys(deal.pairingWhy).length > 0 && deal.accessoryProductIds.length > 0)
 
-  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, dialAggregates, pairProducts] = await Promise.all([
+  // Resolve current customer (for sticky vote state + gating). Failures here
+  // are non-fatal — PDP still renders for anonymous users.
+  const customerToken = await getCustomerToken(request)
+  let customerGid: string | null = null
+  if (customerToken) {
+    try {
+      const profile = await customerAPI(customerToken).getProfile()
+      customerGid = profile?.id ?? null
+    } catch { /* treat as anonymous */ }
+  }
+  const isLoggedIn = !!customerGid
+
+  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts] = await Promise.all([
     getProductPageBlocks(slug),
     getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
     getFrequentlyBoughtWith(slug, 4),
     getBundleCompanionFor(slug),
-    hasDial ? getDialAggregates(deal.shopifyProductId) : Promise.resolve({} as Record<string, DialAggregate>),
+    hasDial
+      ? getProductVoteAggregate(deal.shopifyProductId)
+      : Promise.resolve({ agrees: 0, disagrees: 0, agreePct: 0 } as ProductVoteAggregate),
+    hasDial && customerGid
+      ? getCustomerProductVote(deal.shopifyProductId, customerGid)
+      : Promise.resolve(null as (1 | -1 | null)),
     hasPairing ? getProductsByIds(deal.accessoryProductIds) : Promise.resolve([]),
   ])
 
@@ -167,7 +192,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     carouselProductMap,
     fbtProducts,
     pairsWithItems,
-    dialAggregates,
+    productVoteAggregate,
+    customerProductVote,
+    isLoggedIn,
     companionBundle,
     reviews:       reviewData.reviews,
     reviewTotal:   reviewData.total,
@@ -259,7 +286,9 @@ function ProductPage() {
   const carouselProductMap = loaderData.carouselProductMap
   const fbtProducts = loaderData.fbtProducts
   const pairsWithItems = loaderData.pairsWithItems
-  const dialAggregatesLoaded = loaderData.dialAggregates
+  const productVoteAggregateLoaded = loaderData.productVoteAggregate
+  const customerProductVoteLoaded  = loaderData.customerProductVote
+  const isLoggedIn                 = loaderData.isLoggedIn
   const companionBundle = loaderData.companionBundle
   const reviews = loaderData.reviews
   const reviewTotal = loaderData.reviewTotal
@@ -269,25 +298,62 @@ function ProductPage() {
   const aggregate = loaderData.aggregate
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
-  const voteFetcher = useFetcher<{ ok: boolean; aggregates?: Record<string, DialAggregate>; error?: string }>()
-  const [dialAggregates, setDialAggregates] = useState<Record<string, DialAggregate>>(dialAggregatesLoaded)
-  const isLoggedIn = typeof document !== 'undefined' && document.cookie.includes('customer_access_token')
+  const voteFetcher = useFetcher<{
+    ok: boolean
+    aggregate?: ProductVoteAggregate
+    loginUrl?: string
+    error?: string
+  }>()
+  const [productVoteAggregate, setProductVoteAggregate] = useState<ProductVoteAggregate>(productVoteAggregateLoaded)
+  const [customerVote, setCustomerVote] = useState<1 | -1 | null>(customerProductVoteLoaded)
 
   useEffect(() => {
-    if (voteFetcher.state === 'idle' && voteFetcher.data?.ok && voteFetcher.data.aggregates) {
-      setDialAggregates(voteFetcher.data.aggregates)
+    if (voteFetcher.state !== 'idle' || !voteFetcher.data) return
+    if (voteFetcher.data.ok && voteFetcher.data.aggregate) {
+      setProductVoteAggregate(voteFetcher.data.aggregate)
+      return
+    }
+    // Guest tried to vote — bounce through login with pendingVote so we can
+    // replay after sign-in.
+    if (!voteFetcher.data.ok && voteFetcher.data.loginUrl) {
+      window.location.assign(voteFetcher.data.loginUrl)
     }
   }, [voteFetcher.state, voteFetcher.data])
 
-  const handleDialVote = useCallback((dimension: string, vote: 1 | -1) => {
+  const submitProductVote = useCallback((vote: 1 | -1) => {
     const fd = new FormData()
+    fd.set('intent',           'product-vote')
     fd.set('shopifyProductId', deal.shopifyProductId)
-    fd.set('dimension',        dimension)
+    fd.set('handle',           deal.handle)
     fd.set('vote',             String(vote))
     voteFetcher.submit(fd, { method: 'post', action: '/api/pdp-vote' })
-  }, [deal.shopifyProductId, voteFetcher])
+  }, [deal.shopifyProductId, deal.handle, voteFetcher])
+
+  const handleAggregateVote = useCallback((vote: 1 | -1) => {
+    setCustomerVote(vote) // optimistic sticky state; reverts if 401 redirects away
+    submitProductVote(vote)
+  }, [submitProductVote])
 
   const [searchParams, setSearchParams] = useSearchParams()
+
+  // Replay a pending vote after guest sign-in: ?pendingVote=1|-1 is set by
+  // api.pdp-vote's 401 loginUrl and preserved through the login redirect.
+  const replayedRef = useRef(false)
+  useEffect(() => {
+    if (replayedRef.current || !isLoggedIn) return
+    const pending = searchParams.get('pendingVote')
+    if (pending !== '1' && pending !== '-1') return
+    const vote = pending === '1' ? 1 : -1
+    replayedRef.current = true
+    setCustomerVote(vote)
+    submitProductVote(vote)
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.delete('pendingVote')
+      return next
+    }, { replace: true })
+  }, [isLoggedIn, searchParams, setSearchParams, submitProductVote])
+
   const variants     = deal.variants ?? []
   const options      = deal.options  ?? []
   const multiVariant = variants.length > 1
@@ -594,22 +660,20 @@ function ProductPage() {
               >
                 {isPending ? 'Adding...' : buyButtonText}
               </button>
-              <p className="text-[11px] text-muted text-center uppercase tracking-wide">
-                plain box · billed as DIPCOM · free ship $99+
-              </p>
             </fetcher.Form>
           ) : (
             <WaitlistButton productHandle={deal.handle} />
           )}
 
-          {/* Sensation dial + voting */}
+          {/* How it feels — sensation dial + aggregate vote */}
           {deal.productTypeDial && deal.sensationDial && (
             <SensationDial
               type={deal.productTypeDial}
               values={deal.sensationDial}
-              agreeByDimension={dialAggregates}
-              onVote={handleDialVote}
-              votingLocked={!isLoggedIn}
+              aggregate={productVoteAggregate}
+              customerVote={customerVote}
+              onAggregateVote={handleAggregateVote}
+              voting={voteFetcher.state !== 'idle'}
             />
           )}
 

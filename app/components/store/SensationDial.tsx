@@ -41,19 +41,39 @@ const DIMENSIONS_BY_TYPE: Record<ProductTypeDial, ReadonlyArray<{ key: keyof Sen
   ],
 }
 
+export interface SensationDialAggregate {
+  agrees:    number
+  disagrees: number
+  agreePct:  number
+}
+
 interface SensationDialProps {
   type:   ProductTypeDial
   values: SensationDialValues
-  /** Optional vote aggregates keyed by dimension. */
-  agreeByDimension?: Record<string, { agreePct: number; votes: number }>
-  /** Click handler — receives the dimension key for inline voting UI. */
-  onVote?: (dimension: string, vote: 1 | -1) => void
-  /** Whether voting is gated (user not signed in). */
-  votingLocked?: boolean
+  /** Product-level aggregate vote totals. */
+  aggregate?: SensationDialAggregate
+  /** Current customer's own vote, for sticky-pressed state. */
+  customerVote?: 1 | -1 | null
+  /** Click handler — receives +1 or -1 for the whole product. */
+  onAggregateVote?: (vote: 1 | -1) => void
+  /** Whether voting is actively posting (disable buttons). */
+  voting?: boolean
 }
 
-export function SensationDial({ type, values, agreeByDimension, onVote, votingLocked }: SensationDialProps) {
+export function SensationDial({
+  type,
+  values,
+  aggregate,
+  customerVote,
+  onAggregateVote,
+  voting,
+}: SensationDialProps) {
   const dims = DIMENSIONS_BY_TYPE[type]
+  const agrees    = aggregate?.agrees    ?? 0
+  const disagrees = aggregate?.disagrees ?? 0
+  const total     = agrees + disagrees
+  const agreePct  = aggregate?.agreePct  ?? 0
+
   return (
     <section className="bg-paper rounded-[var(--radius-lg)] border border-line p-5 md:p-6">
       <header className="mb-4 flex items-baseline justify-between gap-3">
@@ -61,7 +81,7 @@ export function SensationDial({ type, values, agreeByDimension, onVote, votingLo
           className="text-base md:text-lg font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          Sensation dial
+          How it feels
         </h3>
         <span className="text-[11px] uppercase tracking-wide text-muted">
           Emma's read · 1–5
@@ -72,9 +92,8 @@ export function SensationDial({ type, values, agreeByDimension, onVote, votingLo
         {dims.map(({ key, label }) => {
           const value = Math.max(0, Math.min(5, Math.round(values[key] ?? 0)))
           if (!value) return null
-          const agree = agreeByDimension?.[key as string]
           return (
-            <li key={key as string} className="grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-3">
+            <li key={key as string} className="grid grid-cols-[minmax(0,9rem)_1fr] items-center gap-3">
               <span
                 className="text-sm font-medium text-ink"
                 style={{ fontFamily: 'var(--font-display)' }}
@@ -97,67 +116,87 @@ export function SensationDial({ type, values, agreeByDimension, onVote, votingLo
                   />
                 ))}
               </div>
-              {onVote ? (
-                <DialVotePair
-                  dimension={key as string}
-                  onVote={onVote}
-                  {...(votingLocked !== undefined ? { locked: votingLocked } : {})}
-                  {...(agree?.agreePct !== undefined ? { agreePct: agree.agreePct } : {})}
-                  {...(agree?.votes !== undefined ? { votes: agree.votes } : {})}
-                />
-              ) : (
-                agree && agree.votes > 0 ? (
-                  <span className="text-[11px] text-muted whitespace-nowrap">
-                    {agree.agreePct}% agree · {agree.votes}
-                  </span>
-                ) : <span aria-hidden="true" className="w-0" />
-              )}
             </li>
           )
         })}
       </ul>
+
+      {onAggregateVote && (
+        <footer className="mt-5 pt-4 border-t border-line">
+          <p
+            className="text-xs uppercase tracking-wide text-muted"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Does this feel right to you?
+          </p>
+          <p className="mt-1 text-sm text-ink/80">
+            <span className="text-sage mr-1" aria-hidden="true">♥</span>
+            If you've tried it, tell me — I read every vote.
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <AggregateVoteChip
+              direction={1}
+              label="Agrees"
+              count={agrees}
+              active={customerVote === 1}
+              disabled={!!voting}
+              onClick={() => onAggregateVote(1)}
+            />
+            <AggregateVoteChip
+              direction={-1}
+              label="Disagrees"
+              count={disagrees}
+              active={customerVote === -1}
+              disabled={!!voting}
+              onClick={() => onAggregateVote(-1)}
+            />
+            {total > 0 && (
+              <span className="ml-1 text-[11px] text-muted">
+                {agreePct}% agree overall
+              </span>
+            )}
+          </div>
+        </footer>
+      )}
     </section>
   )
 }
 
-function DialVotePair({
-  dimension,
-  onVote,
-  locked,
-  agreePct,
-  votes,
+function AggregateVoteChip({
+  direction,
+  label,
+  count,
+  active,
+  disabled,
+  onClick,
 }: {
-  dimension: string
-  onVote:    (dimension: string, vote: 1 | -1) => void
-  locked?:   boolean
-  agreePct?: number
-  votes?:    number
+  direction: 1 | -1
+  label:     string
+  count:     number
+  active:    boolean
+  disabled:  boolean
+  onClick:   () => void
 }) {
+  const emoji = direction === 1 ? '👍' : '👎'
   return (
-    <div className="flex items-center gap-2 text-[11px] text-muted whitespace-nowrap">
-      {votes !== undefined && votes > 0 && (
-        <span aria-label={`${agreePct}% agree`}>
-          {agreePct}%
-        </span>
-      )}
-      <button
-        type="button"
-        onClick={() => onVote(dimension, 1)}
-        disabled={locked}
-        className="w-7 h-7 rounded-full border border-line hover:border-coral hover:text-coral transition-colors disabled:opacity-40 disabled:hover:border-line disabled:hover:text-muted"
-        aria-label={`Agree with ${dimension} rating`}
-      >
-        👍
-      </button>
-      <button
-        type="button"
-        onClick={() => onVote(dimension, -1)}
-        disabled={locked}
-        className="w-7 h-7 rounded-full border border-line hover:border-coral hover:text-coral transition-colors disabled:opacity-40 disabled:hover:border-line disabled:hover:text-muted"
-        aria-label={`Disagree with ${dimension} rating`}
-      >
-        👎
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      aria-label={`${label}: ${count} ${direction === 1 ? 'thumbs up' : 'thumbs down'}`}
+      className={[
+        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm transition-colors',
+        active
+          ? 'border-coral bg-coral/10 text-coral'
+          : 'border-line text-ink hover:border-coral hover:text-coral',
+        disabled ? 'opacity-50 cursor-not-allowed hover:border-line hover:text-ink' : '',
+      ].join(' ')}
+    >
+      <span aria-hidden="true">{emoji}</span>
+      <span className="font-medium">{label}</span>
+      <span className="text-muted">· {count}</span>
+    </button>
   )
 }
