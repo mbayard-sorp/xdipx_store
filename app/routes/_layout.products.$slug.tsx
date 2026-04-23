@@ -590,6 +590,18 @@ function ProductPage() {
             <StockIndicator qty={qty} isDigital={isDigital} />
           </div>
 
+          {/* How it feels — sensation dial + aggregate vote */}
+          {deal.productTypeDial && deal.sensationDial && (
+            <SensationDial
+              type={deal.productTypeDial}
+              values={deal.sensationDial}
+              aggregate={productVoteAggregate}
+              customerVote={customerVote}
+              onAggregateVote={handleAggregateVote}
+              voting={voteFetcher.state !== 'idle'}
+            />
+          )}
+
           {/* Social proof */}
           <SocialProofBar />
 
@@ -663,18 +675,6 @@ function ProductPage() {
             </fetcher.Form>
           ) : (
             <WaitlistButton productHandle={deal.handle} />
-          )}
-
-          {/* How it feels — sensation dial + aggregate vote */}
-          {deal.productTypeDial && deal.sensationDial && (
-            <SensationDial
-              type={deal.productTypeDial}
-              values={deal.sensationDial}
-              aggregate={productVoteAggregate}
-              customerVote={customerVote}
-              onAggregateVote={handleAggregateVote}
-              voting={voteFetcher.state !== 'idle'}
-            />
           )}
 
         </div>
