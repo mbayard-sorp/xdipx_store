@@ -39,6 +39,7 @@ export interface ProductVariant {
 // v2 redesign — sensation dial + hero video
 export type ProductTypeDial = 'air-pulsation' | 'vibrator' | 'wand' | 'lube' | 'wear'
 
+/** @deprecated Use SensationDialV2 — kept for read-fallback only. */
 export interface SensationDial {
   intensity?:      number
   quietness?:      number
@@ -53,6 +54,20 @@ export interface SensationDial {
   fit?:            number
   [key: string]:   number | undefined
 }
+
+export type DialValue = 1 | 2 | 3 | 4 | 5
+
+export interface SensationDialItem {
+  label:    string
+  value:    DialValue
+  proposed?: boolean
+}
+
+export interface SensationDialV2 {
+  items: SensationDialItem[]
+}
+
+export type CareInstructions = string[]
 
 export interface HeroVideo {
   src:      string
@@ -145,7 +160,12 @@ export interface Deal {
   audienceTags?:           string[]
   mattersTags?:            string[]
   productTypeDial?:        ProductTypeDial
+  /** @deprecated Use sensationDialV2 — read-fallback only. */
   sensationDial?:          SensationDial
+  sensationDialV2?:        SensationDialV2
+  careInstructions?:       CareInstructions
+  /** Sanitized HTML from Shopify product.descriptionHtml — Emma's take, rendered in PDP tab #1. */
+  descriptionHtml?:        string
   pairingWhy?:             Record<string, string>
   emmaHero?:               EmmaHeroCopy
   quietEndorsementCopy?:   QuietEndorsementCopy
@@ -463,7 +483,7 @@ export interface BulkImportJob {
   processed: number
   skipped: number
   failed: number
-  errors: { sku: string; message: string }[]
+  errors: { sku: string; message: string; level?: 'error' | 'warning' }[]
   parseErrors: { sku: string; message: string }[]
   groups: MasterProductGroup[]
   currentIndex: number

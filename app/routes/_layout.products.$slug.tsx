@@ -79,7 +79,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const reviewSort   = url.searchParams.get('reviewSort')   ?? 'newest'
   const reviewFilter = url.searchParams.get('reviewFilter') ?? 'all'
 
-  const hasDial = !!(deal.sensationDial && deal.productTypeDial)
+  const hasDial = !!((deal.sensationDialV2?.items?.length ?? 0) > 0 || (deal.sensationDial && deal.productTypeDial))
   const hasPairing = !!(deal.pairingWhy && Object.keys(deal.pairingWhy).length > 0 && deal.accessoryProductIds.length > 0)
 
   const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, dialAggregates, pairProducts] = await Promise.all([
@@ -455,53 +455,11 @@ function ProductPage() {
             >
               {deal.seoTitle}
             </h1>
-            {deal.tagline && !deal.emmaHero && (
+            {deal.tagline && (
               <p className="text-ink/70 mt-2 italic">{deal.tagline}</p>
             )}
           </div>
-
-          {/* Emma voice block — reuses hero copy generated at deal activation */}
-          {deal.emmaHero && (
-            <div className="bg-cream-2 border border-line rounded-2xl p-5 space-y-2">
-              <p
-                className="text-xs tracking-widest uppercase text-coral font-semibold"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                <span aria-hidden="true">♥</span> {deal.emmaHero.eyebrow}
-              </p>
-              <h2
-                className="text-lg md:text-xl font-bold text-ink leading-snug"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                {deal.emmaHero.headline}
-              </h2>
-              <p className="text-ink/80 text-sm leading-relaxed">
-                {deal.emmaHero.body}
-              </p>
-              {deal.emmaHero.aside && (
-                <p className="text-muted text-xs italic pt-1">
-                  {deal.emmaHero.aside}
-                </p>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  if (typeof window === 'undefined') return
-                  window.dispatchEvent(new CustomEvent('emma:open', {
-                    detail: {
-                      reason: 'why-this-pick',
-                      productHandle: deal.handle,
-                      productTitle:  deal.seoTitle,
-                    },
-                  }))
-                }}
-                className="text-sm text-ink underline underline-offset-4 decoration-ink/30 hover:decoration-ink transition-colors"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                Ask Emma why →
-              </button>
-            </div>
-          )}
+          {/* Emma's take now lives in the tabs (sourced from Shopify product description). */}
 
           {/* Price */}
           <div className="flex items-center gap-3 flex-wrap">
@@ -614,26 +572,33 @@ function ProductPage() {
             <WaitlistButton productHandle={deal.handle} />
           )}
 
+          {/* Quiet trust strip — 4 cells, hardcoded copy per plan */}
+          <ul className="grid grid-cols-2 gap-x-4 gap-y-2 text-[12px] text-ink/70 pt-1">
+            <li className="flex items-center gap-1.5"><span className="text-sage">✓</span> Plain envelope</li>
+            <li className="flex items-center gap-1.5"><span className="text-sage">✓</span> 365-day returns</li>
+            <li className="flex items-center gap-1.5"><span className="text-sage">✓</span> 2-year warranty</li>
+            <li className="flex items-center gap-1.5"><span className="text-sage">✓</span> Lifetime battery swaps</li>
+          </ul>
+
           {/* Sensation dial + voting */}
-          {deal.productTypeDial && deal.sensationDial && (
+          {deal.sensationDialV2?.items?.length ? (
             <SensationDial
-              type={deal.productTypeDial}
-              values={deal.sensationDial}
-              agreeByDimension={dialAggregates}
+              items={deal.sensationDialV2.items}
+              {...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {})}
+              aggregates={dialAggregates}
               onVote={handleDialVote}
-              votingLocked={!isLoggedIn}
+              isLoggedIn={isLoggedIn}
             />
-          )}
+          ) : null}
 
         </div>
       </div>
 
-      {/* Tabbed content */}
+      {/* Tabbed content — Emma's take · Specs · In the box · Care · Reviews */}
       <ProductTabs
-        fullStory={deal.fullStory}
+        descriptionHtml={deal.descriptionHtml ?? ''}
         boxContents={deal.boxContents ?? []}
-        forHim={deal.worksForHim}
-        forHer={deal.worksForHer}
+        careInstructions={deal.careInstructions ?? []}
         {...(deal.specifications ? { specifications: deal.specifications } : {})}
         productId={deal.shopifyProductId}
         reviews={reviews}

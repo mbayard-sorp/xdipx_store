@@ -198,18 +198,38 @@ function ProgressPhase({
         )}
       </div>
 
-      {job.errors.length > 0 && (
-        <details className="bg-red-50 border border-red-200 rounded-xl p-4">
-          <summary className="text-red-700 text-sm font-semibold cursor-pointer">
-            {job.errors.length} import error{job.errors.length !== 1 ? 's' : ''}
-          </summary>
-          <ul className="mt-3 space-y-1 max-h-48 overflow-y-auto">
-            {job.errors.map((e, i) => (
-              <li key={i} className="text-red-800 text-xs font-mono">{e.sku}: {e.message}</li>
-            ))}
-          </ul>
-        </details>
-      )}
+      {job.errors.length > 0 && (() => {
+        const hardErrors = job.errors.filter(e => e.level !== 'warning')
+        const warnings   = job.errors.filter(e => e.level === 'warning')
+        return (
+          <>
+            {hardErrors.length > 0 && (
+              <details className="bg-red-50 border border-red-200 rounded-xl p-4">
+                <summary className="text-red-700 text-sm font-semibold cursor-pointer">
+                  {hardErrors.length} import error{hardErrors.length !== 1 ? 's' : ''}
+                </summary>
+                <ul className="mt-3 space-y-1 max-h-48 overflow-y-auto">
+                  {hardErrors.map((e, i) => (
+                    <li key={i} className="text-red-800 text-xs font-mono">{e.sku}: {e.message}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {warnings.length > 0 && (
+              <details className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <summary className="text-amber-700 text-sm font-semibold cursor-pointer">
+                  {warnings.length} warning{warnings.length !== 1 ? 's' : ''} (non-fatal — product imported, downstream sync failed)
+                </summary>
+                <ul className="mt-3 space-y-1 max-h-48 overflow-y-auto">
+                  {warnings.map((e, i) => (
+                    <li key={i} className="text-amber-800 text-xs font-mono">{e.sku}: {e.message}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
+        )
+      })()}
     </div>
   )
 }

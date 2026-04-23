@@ -1,6 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'node:crypto'
-import type { Deal, EmmaHeroCopy, EmmaHeroVariant, GenerateCopyRequest, GenerateCopyResult, ProductScore } from '~/types'
+import type {
+  Deal, EmmaHeroCopy, EmmaHeroVariant, GenerateCopyRequest, GenerateCopyResult, ProductScore,
+  SensationDialV2, SensationDialItem, DialValue, ProductTypeDial, CareInstructions,
+} from '~/types'
 import { getPipelineSetting } from './feed-processor.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] })
@@ -1074,6 +1077,482 @@ Return only the JSON object, no markdown.`,
       suggestedTags: [],
     }
   }
+}
+
+// ─── PDP redesign — Emma's take, Care, Sensation dial v2 ────────────────────
+
+/**
+ * Generate Emma's first-person "take" on a product as one rich HTML paragraph.
+ * Output is intended to overwrite Shopify product.descriptionHtml — the editor
+ * can hand-tweak in Shopify admin afterward.
+ */
+export async function generateEmmaTake(opts: {
+  deal: Pick<Deal, 'seoTitle' | 'tagline' | 'fullStory' | 'brand' | 'category' | 'productTypeDial'>
+  brandVoice?: string
+}): Promise<string> {
+  const brandVoice = opts.brandVoice ?? (await getPipelineSetting('brandVoice')) ?? DEFAULT_BRAND_VOICE
+  const system = `${EMMA_SYSTEM_PROMPT}\n\n${brandVoice}`
+
+  const user = `Write Emma's "take" on this product. It will appear in the Emma's take tab on the product page — a friend-to-friend honest read.
+
+Product:
+- Title: ${opts.deal.seoTitle}
+- Brand: ${opts.deal.brand}
+- Category: ${opts.deal.category}
+${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ''}
+${opts.deal.tagline ? `- Tagline (context): ${opts.deal.tagline}` : ''}
+${opts.deal.fullStory ? `- Existing story (context, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 600)}` : ''}
+
+Cover, in this order, in your own voice (no headings, just flowing paragraphs):
+1. Who this clicks for — what they're after, what they'll like.
+2. Who might want to skip — be specific. Honest. No marketing fudge.
+3. How to get the most out of it — a tip Emma would whisper to a friend.
+
+Constraints:
+- 120–200 words total. Two short paragraphs maximum.
+- Return clean HTML — only <p>, <em>, <strong> tags. No headings, no <ul>, no inline styles, no class attrs.
+- First-person Emma voice throughout. No "Buy now". No countdowns. No clinical language.
+- Do NOT mention price, MAP, or discounts.
+- Do NOT echo the product title in the first sentence.
+
+Return ONLY the HTML — no markdown, no fences, no preamble.`
+
+  try {
+    const msg = await client.messages.create({
+      model: MODEL,
+      max_tokens: 800,
+      system,
+      messages: [{ role: 'user', content: user }],
+    })
+    const block = msg.content[0]
+    if (block?.type !== 'text') throw new Error('non-text response')
+    return stripFences(block.text).trim()
+  } catch (err) {
+    console.error('[generateEmmaTake] failed:', err)
+    throw err
+  }
+}
+
+/**
+ * Generate 3–5 short imperative care bullets for a product. Haiku-fast.
+ */
+export async function generateCareInstructions(opts: {
+  deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'specifications'>
+}): Promise<CareInstructions> {
+  const user = `Write 3 to 5 short care instructions for this product. Each is one short imperative sentence — under 14 words.
+
+Product:
+- Title: ${opts.deal.seoTitle}
+- Brand: ${opts.deal.brand}
+- Category: ${opts.deal.category}
+${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ''}
+${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 500)}` : ''}
+
+Cover what actually matters for this object — cleaning, charging/storage, lube compatibility (where relevant), what to avoid. Practical, not clinical.
+
+Return ONLY a JSON array of strings. Example: ["Wipe with mild soap and warm water after each use.", "Air-dry before storing in the included pouch."]
+No markdown, no fences, no commentary.`
+
+  try {
+    const msg = await client.messages.create({
+      model: MODEL_FAST,
+      max_tokens: 400,
+      system: EMMA_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: user }],
+    })
+    const block = msg.content[0]
+    if (block?.type !== 'text') throw new Error('non-text response')
+    const parsed = JSON.parse(stripFences(block.text)) as unknown
+    if (!Array.isArray(parsed)) throw new Error('expected array')
+    const bullets = parsed
+      .filter((x): x is string => typeof x === 'string')
+      .map(s => s.trim())
+      .filter(s => s.length > 0 && s.length <= 140)
+      .slice(0, 5)
+    if (bullets.length < 3) throw new Error(`only ${bullets.length} valid bullets returned`)
+    return bullets
+  } catch (err) {
+    console.error('[generateCareInstructions] failed:', err)
+    throw err
+  }
+}
+
+/**
+ * Generate the v2 sensation dial for a product. Reads the current registry of
+ * preferred labels for the product type and asks Haiku to prefer them — but
+ * propose a new label (with `proposed: true`) if it fits this product better.
+ */
+export async function generateSensationDialV2(opts: {
+  deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'fullStory' | 'specifications' | 'tagline'>
+  /** Current preferred labels for this product type (from Sanity dialRegistry). */
+  preferredLabels: string[]
+}): Promise<SensationDialV2> {
+  const type: ProductTypeDial = opts.deal.productTypeDial ?? 'vibrator'
+
+  const labelList = opts.preferredLabels.length > 0
+    ? opts.preferredLabels.map(l => `- ${l}`).join('\n')
+    : '(none — invent appropriate labels)'
+
+  const user = `Build the "How it feels" sensation dial for this product. 5 to 6 dimensions, each scored 1 to 5 (5 = most).
+
+Product:
+- Title: ${opts.deal.seoTitle}
+- Brand: ${opts.deal.brand}
+- Category: ${opts.deal.category}
+- Type: ${type}
+${opts.deal.tagline ? `- Tagline: ${opts.deal.tagline}` : ''}
+${opts.deal.fullStory ? `- Story (context, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 500)}` : ''}
+${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
+
+Preferred labels for this product type (use these when they fit):
+${labelList}
+
+If a different label clearly fits this product better than any of the preferred ones, propose the new label and set "proposed": true. Otherwise reuse a preferred label exactly as written and omit "proposed". Do not propose a synonym of a preferred label — propose only when the dimension is genuinely different.
+
+Return ONLY this JSON shape (no markdown, no fences):
+{
+  "items": [
+    { "label": "Intensity", "value": 4 },
+    { "label": "Quietness", "value": 5 },
+    { "label": "Suction strength", "value": 3, "proposed": true }
+  ]
+}
+
+Rules:
+- 5 or 6 items, no duplicates.
+- Each "value" is an integer 1–5.
+- Keep labels under 24 chars, sentence case, no trailing punctuation.
+- Honest scoring — don't max everything.`
+
+  const msg = await client.messages.create({
+    model: MODEL_FAST,
+    max_tokens: 600,
+    system: EMMA_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: user }],
+  })
+  const block = msg.content[0]
+  if (block?.type !== 'text') throw new Error('non-text response')
+
+  const parsed = JSON.parse(stripFences(block.text)) as { items?: Array<{ label?: unknown; value?: unknown; proposed?: unknown }> }
+  if (!parsed.items || !Array.isArray(parsed.items)) throw new Error('missing items array')
+
+  const seen = new Set<string>()
+  const items: SensationDialItem[] = []
+  for (const raw of parsed.items) {
+    const label = typeof raw.label === 'string' ? raw.label.trim() : ''
+    const value = typeof raw.value === 'number' ? Math.round(raw.value) : NaN
+    if (!label || label.length > 30) continue
+    if (!Number.isFinite(value) || value < 1 || value > 5) continue
+    const key = label.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    const item: SensationDialItem = { label, value: value as DialValue }
+    if (raw.proposed === true) item.proposed = true
+    items.push(item)
+    if (items.length >= 6) break
+  }
+  if (items.length < 5) throw new Error(`only ${items.length} valid dial items returned`)
+
+  return { items }
+}
+
+// ─── Bulk-import — product type classifier + Ask Emma tag generator ─────────
+
+const PRODUCT_TYPE_DIALS: ProductTypeDial[] = ['air-pulsation', 'vibrator', 'wand', 'lube', 'wear']
+
+/**
+ * Classify a product into one of the five `product_type_dial` buckets so the
+ * sensation-dial generator can pull the right preferred labels. Defaults to
+ * 'vibrator' if Haiku is unsure — never returns null.
+ */
+export async function inferProductTypeDial(input: {
+  title: string
+  brand: string
+  description: string
+  categories: string[]
+}): Promise<ProductTypeDial> {
+  const user = `Classify the product into ONE of these buckets (return exactly one):
+- air-pulsation  (clitoral suction / air-pulse / pressure-wave devices)
+- vibrator       (internal/external vibrators, rabbits, bullets, couples vibes)
+- wand           (large-format wand massagers, corded or rechargeable)
+- lube           (lubricants, gels, oils, intimate moisturizers)
+- wear           (lingerie, harnesses, panties, apparel, restraints, accessories worn on the body)
+
+Product:
+- Title: ${input.title}
+- Brand: ${input.brand}
+- Categories: ${input.categories.join(', ') || '(none)'}
+- Description (truncated): ${input.description.slice(0, 500)}
+
+Return ONLY this JSON: { "type": "vibrator" }
+No markdown. No commentary.`
+
+  try {
+    const msg = await client.messages.create({
+      model: MODEL_FAST,
+      max_tokens: 60,
+      system: EMMA_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: user }],
+    })
+    const block = msg.content[0]
+    if (block?.type !== 'text') throw new Error('non-text response')
+    const parsed = JSON.parse(stripFences(block.text)) as { type?: unknown }
+    const t = typeof parsed.type === 'string' ? parsed.type.trim().toLowerCase() : ''
+    if (PRODUCT_TYPE_DIALS.includes(t as ProductTypeDial)) return t as ProductTypeDial
+  } catch (err) {
+    console.error('[inferProductTypeDial] failed, defaulting to vibrator:', err)
+  }
+  return 'vibrator'
+}
+
+export type AskEmmaAxis = 'mood' | 'audience' | 'matters'
+
+const ASK_EMMA_AXIS_GUIDANCE: Record<AskEmmaAxis, string> = {
+  mood:     'How using this feels — the energy a shopper would gravitate to. Pick 1–3 that genuinely fit.',
+  audience: 'Who this is for — solo, couples, or gifting. Pick 1–2.',
+  matters:  'Practical features a shopper might filter on — quietness, travel-friendliness, beginner-friendliness, waterproof, rechargeable, hands-free, soft-touch material. Pick 2–4 that are TRUE for this product.',
+}
+
+/**
+ * Generate slugified Ask Emma tags for a single axis. Strongly prefers the
+ * supplied vocabulary so URL params like `?matters=soft-touch` round-trip
+ * cleanly through the Collection filter rail. Model may propose new slugs
+ * when none of the preferred labels fit; appended in admin triage (separate UI).
+ */
+export async function generateAskEmmaTags(opts: {
+  deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'tagline' | 'fullStory' | 'specifications'>
+  axis: AskEmmaAxis
+  /** Current vocabulary for this axis (from Sanity askEmmaVocabulary). */
+  preferredLabels: string[]
+}): Promise<string[]> {
+  const { deal, axis, preferredLabels } = opts
+
+  const labelList = preferredLabels.length > 0
+    ? preferredLabels.map(l => `- ${l}`).join('\n')
+    : '(none — invent appropriate slugs)'
+
+  const user = `Pick the Ask Emma tags for the "${axis}" axis on this product. ${ASK_EMMA_AXIS_GUIDANCE[axis]}
+
+Product:
+- Title: ${deal.seoTitle}
+- Brand: ${deal.brand}
+- Category: ${deal.category}
+${deal.productTypeDial ? `- Type: ${deal.productTypeDial}` : ''}
+${deal.tagline ? `- Tagline: ${deal.tagline}` : ''}
+${deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
+${deal.specifications ? `- Specs (HTML, context): ${deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 300)}` : ''}
+
+Preferred slugs for "${axis}" (use these whenever they fit):
+${labelList}
+
+Rules:
+- Return slugs in lowercase kebab-case (e.g. "soft-touch", not "Soft touch").
+- Reuse a preferred slug exactly when it fits.
+- Only invent a new slug if none of the preferred ones fit. Keep new slugs short (≤ 24 chars), generic enough to apply to other products.
+- Do NOT invent synonyms of preferred slugs.
+- Honest tagging — don't tag every option. If unsure, leave it out.
+
+Return ONLY this JSON (no markdown): { "tags": ["slug-one", "slug-two"] }`
+
+  try {
+    const msg = await client.messages.create({
+      model: MODEL_FAST,
+      max_tokens: 200,
+      system: EMMA_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: user }],
+    })
+    const block = msg.content[0]
+    if (block?.type !== 'text') throw new Error('non-text response')
+    const parsed = JSON.parse(stripFences(block.text)) as { tags?: unknown }
+    if (!Array.isArray(parsed.tags)) return []
+
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const raw of parsed.tags) {
+      if (typeof raw !== 'string') continue
+      const slug = raw.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      if (!slug || slug.length > 32 || seen.has(slug)) continue
+      seen.add(slug)
+      out.push(slug)
+      if (out.length >= 5) break
+    }
+    return out
+  } catch (err) {
+    console.error(`[generateAskEmmaTags:${axis}] failed:`, err)
+    return []
+  }
+}
+
+// ─── IVR / voice-surface generators ──────────────────────────────────────────
+// Purpose-built fields for chat / IVR / SMS where descriptionHtml can't render.
+// Vocabularies are intentionally tight so Emma can speak them naturally aloud
+// and downstream surfaces can match user intent without fuzzy NLP.
+
+export const IVR_EXPERIENCE_LEVELS = ['first-time', 'curious', 'experienced', 'advanced', 'any'] as const
+export type IvrExperience = typeof IVR_EXPERIENCE_LEVELS[number]
+
+export const IVR_USE_CASES = ['date-night', 'travel', 'everyday', 'discovery', 'gift', 'celebration'] as const
+export const IVR_FEATURES  = ['app-controlled', 'waterproof', 'rechargeable', 'quiet', 'travel-size', 'hands-free', 'soft-touch', 'pinpoint', 'full-coverage'] as const
+
+type IvrDealCtx = Pick<
+  Deal,
+  'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'tagline' | 'fullStory' | 'specifications'
+>
+
+function ivrProductBlock(deal: IvrDealCtx): string {
+  return [
+    `- Title: ${deal.seoTitle}`,
+    `- Brand: ${deal.brand}`,
+    `- Category: ${deal.category}`,
+    deal.productTypeDial ? `- Type: ${deal.productTypeDial}` : '',
+    deal.tagline ? `- Tagline: ${deal.tagline}` : '',
+    deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : '',
+    deal.specifications ? `- Specs (context): ${deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 250)}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+/** Single experience-level enum: who this product fits best. */
+export async function generateIvrExperience(opts: { deal: IvrDealCtx }): Promise<IvrExperience> {
+  const user = `Pick the experience level this product fits best. One of: ${IVR_EXPERIENCE_LEVELS.join(' | ')}.
+
+Use "first-time" for beginner-friendly products (gentle, simple controls, low intensity).
+Use "curious" for someone exploring beyond the basics — slightly more ambitious but still approachable.
+Use "experienced" for people comfortable with the category looking for variety or upgrades.
+Use "advanced" for high-intensity, niche, or technique-heavy products.
+Use "any" only when the product genuinely fits across all levels.
+
+${ivrProductBlock(opts.deal)}
+
+Return ONLY this JSON (no markdown): { "level": "first-time" }`
+
+  try {
+    const msg = await client.messages.create({
+      model: MODEL_FAST,
+      max_tokens: 60,
+      system: EMMA_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: user }],
+    })
+    const block = msg.content[0]
+    if (block?.type !== 'text') throw new Error('non-text response')
+    const parsed = JSON.parse(stripFences(block.text)) as { level?: unknown }
+    const lvl = typeof parsed.level === 'string' ? parsed.level.trim().toLowerCase() : ''
+    if ((IVR_EXPERIENCE_LEVELS as readonly string[]).includes(lvl)) return lvl as IvrExperience
+  } catch (err) {
+    console.error('[generateIvrExperience] failed:', err)
+  }
+  return 'any'
+}
+
+/** 1–3 use-case slugs from a fixed vocabulary, voice-friendly. */
+export async function generateIvrUseCase(opts: { deal: IvrDealCtx }): Promise<string[]> {
+  const user = `Pick 1–3 use cases this product fits, from this exact vocabulary:
+${IVR_USE_CASES.map(s => `- ${s}`).join('\n')}
+
+Honest tagging — only pick what genuinely fits. Skip rather than stretch.
+
+${ivrProductBlock(opts.deal)}
+
+Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`
+
+  try {
+    const msg = await client.messages.create({
+      model: MODEL_FAST,
+      max_tokens: 100,
+      system: EMMA_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: user }],
+    })
+    const block = msg.content[0]
+    if (block?.type !== 'text') throw new Error('non-text response')
+    const parsed = JSON.parse(stripFences(block.text)) as { useCases?: unknown }
+    if (!Array.isArray(parsed.useCases)) return []
+    const allowed = new Set<string>(IVR_USE_CASES as readonly string[])
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const raw of parsed.useCases) {
+      if (typeof raw !== 'string') continue
+      const slug = raw.trim().toLowerCase()
+      if (!allowed.has(slug) || seen.has(slug)) continue
+      seen.add(slug)
+      out.push(slug)
+      if (out.length >= 3) break
+    }
+    return out
+  } catch (err) {
+    console.error('[generateIvrUseCase] failed:', err)
+    return []
+  }
+}
+
+/** 2–4 feature slugs from a fixed voice-surface vocabulary. */
+export async function generateIvrFeatures(opts: { deal: IvrDealCtx }): Promise<string[]> {
+  const user = `Pick 2–4 features that are TRUE for this product, from this exact vocabulary:
+${IVR_FEATURES.map(s => `- ${s}`).join('\n')}
+
+Honest tagging — these will be spoken aloud by Emma when filtering ("looking for something quiet and waterproof"). Don't tag something the product doesn't actually have.
+
+${ivrProductBlock(opts.deal)}
+
+Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`
+
+  try {
+    const msg = await client.messages.create({
+      model: MODEL_FAST,
+      max_tokens: 120,
+      system: EMMA_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: user }],
+    })
+    const block = msg.content[0]
+    if (block?.type !== 'text') throw new Error('non-text response')
+    const parsed = JSON.parse(stripFences(block.text)) as { features?: unknown }
+    if (!Array.isArray(parsed.features)) return []
+    const allowed = new Set<string>(IVR_FEATURES as readonly string[])
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const raw of parsed.features) {
+      if (typeof raw !== 'string') continue
+      const slug = raw.trim().toLowerCase()
+      if (!allowed.has(slug) || seen.has(slug)) continue
+      seen.add(slug)
+      out.push(slug)
+      if (out.length >= 4) break
+    }
+    return out
+  } catch (err) {
+    console.error('[generateIvrFeatures] failed:', err)
+    return []
+  }
+}
+
+/** ≤ 120-char Emma-voice summary, designed to be read aloud. Plain text only. */
+export async function generateIvrVoiceSummary(opts: { deal: IvrDealCtx }): Promise<string> {
+  const user = `Write ONE short Emma-voice sentence summarising this product, designed to be read aloud over the phone or in a chat reply. Hard cap: 120 characters total (count spaces). Aim for 90–110. Plain text only — no HTML, no markdown, no bullet lists, no emojis. Conversational, specific, first-person.
+
+Good (109 chars): "Pocket wand with real punch — seven settings, whisper-quiet low end, and a battery that lasts a weekend."
+Bad: "Premium wireless rechargeable wand vibrator with multiple speeds and waterproof design." (catalog-y)
+Bad: "This silicone-based lube stays put through longer sessions and I reach for it constantly because it's clean." (too long, runs past 120)
+
+${ivrProductBlock(opts.deal)}
+
+Return ONLY this JSON (no markdown): { "summary": "..." }`
+
+  try {
+    const msg = await client.messages.create({
+      model: MODEL_FAST,
+      max_tokens: 200,
+      system: EMMA_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: user }],
+    })
+    const block = msg.content[0]
+    if (block?.type !== 'text') throw new Error('non-text response')
+    const parsed = JSON.parse(stripFences(block.text)) as { summary?: unknown }
+    if (typeof parsed.summary === 'string') {
+      return parsed.summary.trim().replace(/\s+/g, ' ').slice(0, 120)
+    }
+  } catch (err) {
+    console.error('[generateIvrVoiceSummary] failed:', err)
+  }
+  return ''
 }
 
 // ─── Emma Curated Rails (agentic, tool-use loop) ─────────────────────────────

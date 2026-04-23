@@ -27,6 +27,8 @@ import emmaHeroSettings   from '../schemas/emmaHeroSettings.js'
 import emmaPreset         from '../schemas/emmaPreset.js'
 import emmaPick           from '../schemas/emmaPick.js'
 import emmaCuratedRail    from '../schemas/blocks/emmaCuratedRail.js'
+import dialRegistry       from '../schemas/dialRegistry.js'
+import askEmmaVocabulary  from '../schemas/askEmmaVocabulary.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -51,6 +53,10 @@ export const schemaTypes = [
   emmaPick,
   // v2 redesign — Emma-curated rails (agent-generated, draft→approve→live)
   emmaCuratedRail,
+  // PDP redesign — sensation dial label registry (singleton)
+  dialRegistry,
+  // Bulk-import — Ask Emma vocabulary singleton (mood/audience/matters tag pools)
+  askEmmaVocabulary,
   // Block object types
   announcementBar,
   promoBanner,

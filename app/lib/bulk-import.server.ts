@@ -6,23 +6,26 @@
  */
 
 import { parse } from 'csv-parse/sync'
-import { eq } from 'drizzle-orm'
+import { eq, max } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { dealHistory } from '../../db/schema'
-import { generateSEOTitle, generateCopy } from '~/lib/claude.server'
+import { generateSEOTitle } from '~/lib/claude.server'
+import { generateProductContent } from '~/lib/emma-orchestrator.server'
 import { cleanDescription } from '~/lib/feed-processor.server'
 import {
   findProductBySKU,
   createShopifyProductFromFeed,
   createShopifyProductWithVariants,
+  getProductHandleById,
   pushProductToShopify,
 } from '~/lib/shopify.server'
+import { upsertProductPage } from '~/lib/sanity.server'
 import type { BulkImportRow, BulkVariantRow, MasterProductGroup } from '~/types'
 import type { ProductScore } from '~/types'
 
 // ─── Category inference (mirrors deal-pipeline.server.ts) ─────────────────────
 
-function inferCategory(categories: string[]): string {
+function inferCategory(categories: string[]): 'for-him' | 'for-her' | 'both' | 'couples' {
   const forHimCats  = ['Vagina Strokers', 'Body Molds', 'Prostate Toys', 'Masturbators', 'Hands-Free Masturbators']
   const forHerCats  = ['Dual Action and Rabbits', 'Finger and Clit', 'Air Pulse and Suction', 'Bullets and Eggs']
   const coupleCats  = ['Couples and Wearable', 'Remote', 'Top Couples Toys', 'Restraints']
@@ -148,6 +151,8 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
   shopifyProductId?: string
   skipped?: boolean
   error?: string
+  /** Non-fatal issues — Shopify row succeeded but something downstream (e.g. Sanity sync) didn't. */
+  warnings?: { stage: string; message: string }[]
 }> {
   const { masterRow, variants, isSingleVariant } = group
   const masterSku = masterRow.SKU
@@ -215,65 +220,71 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       )
     }
 
-    // 4. Generate SEO title
+    // 4. Generate SEO title (caller-side; orchestrator wires it through to generators)
     const seoTitle = await generateSEOTitle(masterRow['Product Title'], masterRow.Brand)
 
-    // 5. Generate copy — all 7 types; catch individual failures
-    const copyProduct = {
-      title:       masterRow['Product Title'],
-      brand:       masterRow.Brand,
-      description,
-      categories,
-      dealPrice,
-      msrp,
-    }
-
-    const [taglineResult, fullStoryResult, bothWaysResult, bulletsResult, boxResult, seoResult, specsResult] =
-      await Promise.allSettled([
-        generateCopy({ type: 'tagline',      product: copyProduct }),
-        generateCopy({ type: 'full_story',   product: copyProduct }),
-        generateCopy({ type: 'both_ways',    product: copyProduct }),
-        generateCopy({ type: 'bullets',      product: copyProduct }),
-        generateCopy({ type: 'box_contents', product: copyProduct }),
-        generateCopy({ type: 'seo_meta',     product: copyProduct }),
-        generateCopy({ type: 'specifications', product: copyProduct }),
-      ])
-
-    const taglines     = taglineResult.status === 'fulfilled' ? taglineResult.value.content : []
-    const fullStory    = fullStoryResult.status === 'fulfilled' ? (fullStoryResult.value.content as string) : `<p>${description.slice(0, 400)}</p>`
-    const bothWays     = bothWaysResult.status === 'fulfilled'
-      ? (bothWaysResult.value.content as { forHim: string; forHer: string })
-      : { forHim: '', forHer: '' }
-    const bullets      = bulletsResult.status === 'fulfilled' ? (bulletsResult.value.content as string[]) : []
-    const boxContents  = boxResult.status === 'fulfilled' ? (boxResult.value.content as string[]) : []
-    const seoMeta      = seoResult.status === 'fulfilled' ? (seoResult.value.content as string) : ''
-    const specs        = specsResult.status === 'fulfilled' ? (specsResult.value.content as string) : ''
-
-    const tagline = Array.isArray(taglines) ? (taglines[0] ?? '') : (taglines as string)
-
-    // 6. Push all metafields to Shopify
-    await pushProductToShopify({
-      shopifyProductId: numericId,
+    // 5. Run the Emma orchestrator — Sonnet tool-use loop that decides which
+    //    content generators to call (Emma's take, dial v2, care, mood/audience/
+    //    matters tags, mood image, etc.) and returns a consolidated payload.
+    //    Note: full_story is no longer generated — the PDP reads descriptionHtml.
+    const { writes, telemetry } = await generateProductContent({
+      product: {
+        title:       masterRow['Product Title'],
+        brand:       masterRow.Brand,
+        description,
+        categories,
+        dealPrice,
+        msrp,
+      },
       seoTitle,
-      tagline,
-      fullStory,
-      worksForHim:     bothWays.forHim,
-      worksForHer:     bothWays.forHer,
-      featureBullets:  bullets,
-      boxContents,
-      seoMetaDescription: seoMeta,
-      specifications:  specs,
       category,
-      dealStatus:      'pending',
-      dealDate:        '2099-12-31',
-      originalPrice:   msrp,
-      wholesaleCost:   wholesale,
-      mapPrice:        map,
-      nalpacSku:       masterSku,
-      rawDescription:  rawDesc,
     })
 
-    // 7. Insert DB row — sentinel date so it sorts to bottom of queue
+    console.info(
+      `[bulk-import] ${masterSku} orchestrator: tokens=${telemetry.totalTokens} ` +
+      `duration=${telemetry.durationMs}ms turns=${telemetry.turns} ` +
+      `tools=[${telemetry.toolCalls.map(c => `${c.name}${c.ok ? '' : '!'}`).join(',')}]`,
+    )
+
+    // 6. Push all metafields to Shopify (full_story deliberately omitted)
+    await pushProductToShopify({
+      shopifyProductId:   numericId,
+      seoTitle,
+      tagline:            writes.tagline,
+      featureBullets:     writes.featureBullets,
+      ...(writes.worksForHim      !== undefined ? { worksForHim:      writes.worksForHim }      : {}),
+      ...(writes.worksForHer      !== undefined ? { worksForHer:      writes.worksForHer }      : {}),
+      ...(writes.boxContents      !== undefined ? { boxContents:      writes.boxContents }      : {}),
+      ...(writes.specifications   !== undefined ? { specifications:   writes.specifications }   : {}),
+      seoMetaDescription: writes.seoMetaDescription,
+      descriptionHtml:    writes.descriptionHtml,
+      ...(writes.careInstructions !== undefined ? { careInstructions: writes.careInstructions } : {}),
+      ...(writes.sensationDialV2  !== undefined ? { sensationDialV2:  writes.sensationDialV2 }  : {}),
+      productTypeDial:    writes.productTypeDial,
+      moodTags:           writes.moodTags,
+      audienceTags:       writes.audienceTags,
+      mattersTags:        writes.mattersTags,
+      ...(writes.emmaHero         !== undefined ? { emmaHero:         writes.emmaHero }         : {}),
+      ...(writes.moodImageUrl     !== undefined ? { moodImageUrl:     writes.moodImageUrl }     : {}),
+      category,
+      dealStatus:         'pending_approval',
+      dealDate:           '2099-12-31',
+      originalPrice:      msrp,
+      wholesaleCost:      wholesale,
+      mapPrice:           map,
+      nalpacSku:          masterSku,
+      rawDescription:     rawDesc,
+    })
+
+    // 7. Insert DB row — lands at the bottom of the queue (max sortOrder + 1).
+    //    dealDate is still NOT NULL on the schema, so a sentinel is required;
+    //    queue activation now reads status='queued' ORDER BY sortOrder ASC
+    //    (see deal-rotator.server.ts).
+    const [{ maxSort = 0 } = {}] = await db
+      .select({ maxSort: max(dealHistory.sortOrder) })
+      .from(dealHistory)
+    const nextSortOrder = (maxSort ?? 0) + 1
+
     await db.insert(dealHistory).values({
       sku:              masterSku,
       seoTitle,
@@ -286,11 +297,85 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       mapPrice:         map.toFixed(2),
       unitsAvailable:   qty,
       dealScore:        null,
-      status:           'pending',
+      status:           'queued',
+      sortOrder:        nextSortOrder,
       shopifyProductId: numericId,
     }).onConflictDoNothing()
 
-    return { success: true, sku: masterSku, shopifyProductId: numericId }
+    // 8. Create the Sanity productPage doc so search, content blocks, IVR,
+    //    and sitemap surfaces pick up the new product. Best-effort — a Sanity
+    //    hiccup should not kill a successful Shopify import, but we surface
+    //    it as a warning so the admin UI can show it instead of swallowing.
+    const warnings: { stage: string; message: string }[] = []
+    try {
+      const handle = await getProductHandleById(numericId)
+      if (!handle) {
+        const msg = 'could not resolve Shopify handle — skipping Sanity sync'
+        console.warn(`[bulk-import] ${masterSku} ${msg}`)
+        warnings.push({ stage: 'sanity', message: msg })
+      } else {
+        const gid = `gid://shopify/Product/${numericId}`
+        const upsertParams: Parameters<typeof upsertProductPage>[0] = {
+          handle,
+          shopifyProductId: gid,
+          title:            masterRow['Product Title'],
+          vendor:           masterRow.Brand,
+          tags:             categories,                  // Mirror sub-categories so Studio editors can filter
+          tagline:          writes.tagline,
+          featureBullets:   writes.featureBullets,
+          description,
+          seoTitle,
+          seoDescription:   writes.seoMetaDescription,
+          category,
+          mapPrice:         dealPrice,
+          originalPrice:    msrp,
+          productTypeDial:  writes.productTypeDial,
+          moodTags:         writes.moodTags,
+          audienceTags:     writes.audienceTags,
+          mattersTags:      writes.mattersTags,
+          // IVR / voice surfaces — populated by the orchestrator's IVR tools.
+          ...(writes.ivrExperience    !== undefined ? { ivrExperience:    writes.ivrExperience    } : {}),
+          ...(writes.ivrUseCase       !== undefined ? { ivrUseCase:       writes.ivrUseCase       } : {}),
+          ...(writes.ivrFeatures      !== undefined ? { ivrFeatures:      writes.ivrFeatures      } : {}),
+          ...(writes.ivrVoiceSummary  !== undefined ? { ivrVoiceSummary:  writes.ivrVoiceSummary  } : {}),
+        }
+        if (images[0])              upsertParams.imageUrl     = images[0]
+        if (writes.moodImageUrl)    upsertParams.moodImageUrl = writes.moodImageUrl
+
+        // One retry on transient failure (network, short-lived auth hiccup).
+        let lastErr: unknown
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            const { created } = await upsertProductPage(upsertParams)
+            console.info(`[bulk-import] ${masterSku} sanity: ${created ? 'created' : 'updated'} productPage-${handle}`)
+            lastErr = null
+            break
+          } catch (err) {
+            lastErr = err
+            if (attempt === 1) {
+              console.warn(`[bulk-import] ${masterSku} sanity sync attempt 1 failed, retrying in 500ms:`, err instanceof Error ? err.message : err)
+              await new Promise(r => setTimeout(r, 500))
+            }
+          }
+        }
+        if (lastErr) {
+          const msg = `sanity sync failed after retry: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`
+          console.error(`[bulk-import] ${masterSku} ${msg}`)
+          warnings.push({ stage: 'sanity', message: msg })
+        }
+      }
+    } catch (err) {
+      const msg = `sanity sync threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`
+      console.error(`[bulk-import] ${masterSku} ${msg}`)
+      warnings.push({ stage: 'sanity', message: msg })
+    }
+
+    return {
+      success:          true,
+      sku:              masterSku,
+      shopifyProductId: numericId,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[bulk-import] Failed SKU ${masterSku}:`, message)

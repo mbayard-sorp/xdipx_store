@@ -29,6 +29,16 @@ export default defineConfig({
               .id('emmaHeroSettings')
               .icon(() => '✨')
               .child(S.document().schemaType('emmaHeroSettings').documentId('singleton.emmaHero')),
+            S.listItem()
+              .title('Sensation dial labels')
+              .id('dialRegistry')
+              .icon(() => '🎚️')
+              .child(S.document().schemaType('dialRegistry').documentId('singleton.dialRegistry')),
+            S.listItem()
+              .title('Ask Emma vocabulary')
+              .id('askEmmaVocabulary')
+              .icon(() => '💬')
+              .child(S.document().schemaType('askEmmaVocabulary').documentId('singleton.askEmmaVocabulary')),
             S.documentTypeListItem('emmaPreset').title("Emma's presets").icon(() => '🎯'),
             S.documentTypeListItem('emmaCuratedRail').title('Emma curated rails').icon(() => '♥'),
             S.listItem()

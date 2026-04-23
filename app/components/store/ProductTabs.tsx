@@ -1,59 +1,60 @@
 import { useState } from 'react'
 import type { Review, ReviewAggregate } from '~/types/reviews'
+import type { CareInstructions } from '~/types'
 import { ReviewList } from '~/components/reviews/ReviewList'
 import { ReviewForm } from '~/components/reviews/ReviewForm'
 
 interface ProductTabsProps {
-  fullStory:       string
-  boxContents:     string[]
-  forHim:          string
-  forHer:          string
-  specifications?: string | undefined
-  productId?:      string
-  reviews?:        Review[]
-  aggregate?:      ReviewAggregate | null
-  reviewTotal?:    number
-  reviewPage?:     number
-  reviewSort?:     string
-  reviewFilter?:   string
+  /** Sanitized HTML — pulled from Shopify product.descriptionHtml. Renders as "Emma's take". */
+  descriptionHtml?: string
+  boxContents?:     string[]
+  /** Emma-generated short bullets, 3–5 items. */
+  careInstructions?: CareInstructions
+  specifications?:  string
+  productId?:       string
+  reviews?:         Review[]
+  aggregate?:       ReviewAggregate | null
+  reviewTotal?:     number
+  reviewPage?:      number
+  reviewSort?:      string
+  reviewFilter?:    string
 }
 
-type Tab = "Emma's take" | 'In the box' | 'Both ways ♥' | 'Specs' | 'Reviews'
+type Tab = "Emma's take" | 'Specs' | 'In the box' | 'Care' | 'Reviews'
 
-const proseBody =
-  'prose prose-sm max-w-none text-ink/80 leading-relaxed'
+const proseBody = 'prose prose-sm max-w-none text-ink/80 leading-relaxed'
 
 export function ProductTabs({
-  fullStory, boxContents, forHim, forHer, specifications,
+  descriptionHtml, boxContents = [], careInstructions = [], specifications,
   productId, reviews = [], aggregate, reviewTotal = 0,
   reviewPage = 1, reviewSort = 'newest', reviewFilter = 'all',
 }: ProductTabsProps) {
   const reviewCount = aggregate?.approvedCount ?? 0
-  const hasForEither = Boolean(forHim || forHer)
 
   const visibleTabs: Tab[] = [
-    ...(fullStory ? ["Emma's take" as Tab] : []),
-    'In the box',
-    ...(hasForEither ? ['Both ways ♥' as Tab] : []),
+    ...(descriptionHtml ? ["Emma's take" as Tab] : []),
     ...(specifications ? ['Specs' as Tab] : []),
+    ...(boxContents.length > 0 ? ['In the box' as Tab] : []),
+    ...(careInstructions.length > 0 ? ['Care' as Tab] : []),
     ...(productId ? ['Reviews' as Tab] : []),
   ]
 
-  const [active, setActive] = useState<Tab>(visibleTabs[0] ?? 'In the box')
+  const [active, setActive] = useState<Tab>(visibleTabs[0] ?? 'Reviews')
 
   const panelClass = (tab: Tab) => (active === tab ? '' : 'hidden')
   const panelId = (tab: Tab) => `tabpanel-${tab.replace(/\W+/g, '-').toLowerCase()}`
-  const tabId = (tab: Tab) => `tab-${tab.replace(/\W+/g, '-').toLowerCase()}`
+  const tabId   = (tab: Tab) => `tab-${tab.replace(/\W+/g, '-').toLowerCase()}`
 
   return (
     <div className="mt-10">
       <div
         role="tablist"
         aria-label="Product details"
-        className="flex gap-1 border-b border-cream-2 overflow-x-auto scrollbar-hide"
+        className="flex gap-2 border-b border-line overflow-x-auto scrollbar-hide"
       >
         {visibleTabs.map(tab => {
           const isActive = active === tab
+          const label = tab === 'Reviews' && reviewCount > 0 ? `Reviews · ${reviewCount}` : tab
           return (
             <button
               key={tab}
@@ -64,84 +65,28 @@ export function ProductTabs({
               aria-controls={panelId(tab)}
               onClick={() => setActive(tab)}
               className={[
-                'px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-all',
+                'px-3 py-2 text-[13px] font-bold whitespace-nowrap rounded-full transition-all',
                 isActive
-                  ? 'border-coral text-coral'
-                  : 'border-transparent text-ink/60 hover:text-ink',
+                  ? 'bg-coral text-white'
+                  : 'text-ink/60 hover:text-ink hover:bg-cream-2',
               ].join(' ')}
               style={{ fontFamily: 'var(--font-display)' }}
             >
-              {tab === 'Reviews' && reviewCount > 0 ? `Reviews (${reviewCount})` : tab}
+              {label}
             </button>
           )
         })}
       </div>
 
       <div className="py-6">
-        {fullStory && (
+        {descriptionHtml && (
           <section
             id={panelId("Emma's take")}
             role="tabpanel"
             aria-labelledby={tabId("Emma's take")}
             className={panelClass("Emma's take")}
           >
-            <div className={proseBody} dangerouslySetInnerHTML={{ __html: fullStory }} />
-          </section>
-        )}
-
-        <section
-          id={panelId('In the box')}
-          role="tabpanel"
-          aria-labelledby={tabId('In the box')}
-          className={panelClass('In the box')}
-        >
-          <ul className="space-y-2">
-            {boxContents.length > 0 ? (
-              boxContents.map((item, i) => (
-                <li key={i} className="flex items-start gap-3 text-sm text-ink/80">
-                  <span className="text-sage mt-0.5 shrink-0" aria-hidden="true">♥</span>
-                  {item}
-                </li>
-              ))
-            ) : (
-              <li className="text-sm text-ink/50">
-                Box contents not yet available.
-              </li>
-            )}
-          </ul>
-        </section>
-
-        {hasForEither && (
-          <section
-            id={panelId('Both ways ♥')}
-            role="tabpanel"
-            aria-labelledby={tabId('Both ways ♥')}
-            className={panelClass('Both ways ♥')}
-          >
-            <div className="grid md:grid-cols-2 gap-6">
-              {forHim && (
-                <div>
-                  <h3
-                    className="font-bold text-ink mb-2 flex items-center gap-2"
-                    style={{ fontFamily: 'var(--font-display)' }}
-                  >
-                    <span className="text-sage" aria-hidden="true">♥</span> For Him
-                  </h3>
-                  <div className={proseBody} dangerouslySetInnerHTML={{ __html: forHim }} />
-                </div>
-              )}
-              {forHer && (
-                <div>
-                  <h3
-                    className="font-bold text-ink mb-2 flex items-center gap-2"
-                    style={{ fontFamily: 'var(--font-display)' }}
-                  >
-                    <span className="text-sage" aria-hidden="true">♥</span> For Her
-                  </h3>
-                  <div className={proseBody} dangerouslySetInnerHTML={{ __html: forHer }} />
-                </div>
-              )}
-            </div>
+            <div className={proseBody} dangerouslySetInnerHTML={{ __html: descriptionHtml }} />
           </section>
         )}
 
@@ -156,6 +101,42 @@ export function ProductTabs({
               className={`${proseBody} [&_table]:w-full [&_table]:text-sm [&_th]:text-left [&_th]:font-semibold [&_th]:py-2 [&_th]:px-3 [&_th]:bg-cream-2 [&_td]:py-2 [&_td]:px-3 [&_tr]:border-b [&_tr]:border-cream-2/60`}
               dangerouslySetInnerHTML={{ __html: specifications }}
             />
+          </section>
+        )}
+
+        {boxContents.length > 0 && (
+          <section
+            id={panelId('In the box')}
+            role="tabpanel"
+            aria-labelledby={tabId('In the box')}
+            className={panelClass('In the box')}
+          >
+            <ul className="space-y-2">
+              {boxContents.map((item, i) => (
+                <li key={i} className="flex items-start gap-3 text-sm text-ink/80">
+                  <span className="text-sage mt-0.5 shrink-0" aria-hidden="true">♥</span>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {careInstructions.length > 0 && (
+          <section
+            id={panelId('Care')}
+            role="tabpanel"
+            aria-labelledby={tabId('Care')}
+            className={panelClass('Care')}
+          >
+            <ul className="space-y-2.5">
+              {careInstructions.map((bullet, i) => (
+                <li key={i} className="flex items-start gap-3 text-sm text-ink/80 leading-relaxed">
+                  <span className="text-sage mt-0.5 shrink-0" aria-hidden="true">·</span>
+                  {bullet}
+                </li>
+              ))}
+            </ul>
           </section>
         )}
 

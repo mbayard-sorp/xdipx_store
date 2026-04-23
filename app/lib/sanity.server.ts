@@ -226,25 +226,44 @@ export function invalidateCmsCache(): void {
 // ─── Shopify → Sanity product sync ───────────────────────────────────────────
 
 /**
- * Creates a productPage document in Sanity for a Shopify product if one doesn't
- * already exist. Safe to call repeatedly — uses createIfNotExists (no-op if
- * the doc is already there).
+ * Wraps a plain string into a single-block portable-text array so it fits
+ * schema fields typed as `array of block`. Search (search.server.ts,
+ * ivr-search.server.ts) queries `pt::text(description)` — storing a raw
+ * string throws an "expected array" schema error in Studio.
  */
+function stringToPortableText(text: string): { _type: 'block'; _key: string; style: 'normal'; markDefs: []; children: { _type: 'span'; _key: string; text: string; marks: [] }[] }[] {
+  const trimmed = text.trim()
+  if (!trimmed) return []
+  return [{
+    _type: 'block',
+    _key: `d${Math.random().toString(36).slice(2, 10)}`,
+    style: 'normal',
+    markDefs: [],
+    children: [{
+      _type: 'span',
+      _key: `s${Math.random().toString(36).slice(2, 10)}`,
+      text: trimmed,
+      marks: [],
+    }],
+  }]
+}
+
 async function uploadImageToSanity(
   writeClient: ReturnType<typeof getClient>,
   imageUrl: string,
   filename: string,
 ): Promise<string | null> {
   if (!writeClient) return null
-  try {
-    const res = await fetch(imageUrl)
-    if (!res.ok) return null
-    const buffer = Buffer.from(await res.arrayBuffer())
-    const asset = await writeClient.assets.upload('image', buffer, { filename }) as { url: string }
-    return asset.url ?? null
-  } catch {
-    return null
+  // Surface failures: previously this swallowed errors silently and the caller
+  // had no way to retry or warn. Now we throw on fetch/upload failure and let
+  // the caller decide (bulk-import wraps the whole upsert in retry+warnings).
+  const res = await fetch(imageUrl)
+  if (!res.ok) {
+    throw new Error(`image fetch ${res.status} ${imageUrl}`)
   }
+  const buffer = Buffer.from(await res.arrayBuffer())
+  const asset = await writeClient.assets.upload('image', buffer, { filename }) as { url: string }
+  return asset.url ?? null
 }
 
 export async function upsertProductPage(params: {
@@ -252,24 +271,42 @@ export async function upsertProductPage(params: {
   shopifyProductId: string
   title: string
   imageUrl?: string | undefined
+  /** PDP hero background image (Shopify CDN URL). Stored on the productPage as `moodImageUrl`. */
+  moodImageUrl?: string | undefined
   // Enriched fields for search
   vendor?: string | undefined
   tags?: string[] | undefined
   tagline?: string | undefined
   description?: string | undefined
+  seoTitle?: string | undefined
   seoDescription?: string | undefined
   featureBullets?: string[] | undefined
   category?: string | undefined
-  price?: number | undefined
-  compareAtPrice?: number | undefined
+  /** Today's price / MAP. Maps to productPage.mapPrice in the schema. */
+  mapPrice?: number | undefined
+  /** MSRP / compare-at. Maps to productPage.originalPrice in the schema. */
+  originalPrice?: number | undefined
+  // Emma discovery — auto-filled by bulk-import orchestrator. Drives chat / IVR / SMS filters.
+  productTypeDial?: 'air-pulsation' | 'vibrator' | 'wand' | 'lube' | 'wear' | undefined
+  moodTags?: string[] | undefined
+  audienceTags?: string[] | undefined
+  mattersTags?: string[] | undefined
+  // IVR / voice surfaces — purpose-built for IVR / chat / SMS where descriptionHtml can't render.
+  ivrExperience?: string | undefined
+  ivrUseCase?: string[] | undefined
+  ivrFeatures?: string[] | undefined
+  ivrVoiceSummary?: string | undefined
 }): Promise<{ created: boolean }> {
-  const writeClient = getClient(true)
+  // Use 'raw' perspective so drafts.* docs come back too — without it, the image block
+  // can't see a draft that's masking the published version in Studio.
+  const writeClient = getClient(true, false, 'raw')
   if (!writeClient) throw new Error('Sanity not configured — SANITY_API_TOKEN or SANITY_PROJECT_ID missing')
 
   // Check by shopifyHandle first — the doc may exist with a different _id
-  // (e.g. manually created docs use "product-{handle}" not "productPage-{handle}")
+  // (e.g. manually created docs use "product-{handle}" not "productPage-{handle}").
+  // Prefer the published version when both exist so our subsequent patches target it first.
   const existing = await writeClient.fetch<{ _id: string; previewImageUrl?: string } | null>(
-    `*[_type == "productPage" && shopifyHandle == $handle][0]{ _id, previewImageUrl }`,
+    `*[_type == "productPage" && shopifyHandle == $handle] | order(_id asc)[0]{ _id, previewImageUrl }`,
     { handle: params.handle },
   )
 
@@ -296,28 +333,55 @@ export async function upsertProductPage(params: {
   if (params.vendor !== undefined) searchFields.vendor = params.vendor
   if (params.tags !== undefined) searchFields.tags = params.tags
   if (params.tagline !== undefined) searchFields.tagline = params.tagline
-  if (params.description !== undefined) searchFields.description = params.description
+  // description is a portable-text array in the schema (searchable via pt::text).
+  // Wrap the raw string in a single block so it round-trips cleanly and search still hits.
+  if (params.description !== undefined) searchFields.description = stringToPortableText(params.description)
   if (params.seoDescription !== undefined) searchFields.seoDescription = params.seoDescription
   if (params.featureBullets !== undefined) searchFields.featureBullets = params.featureBullets
   if (params.category !== undefined) searchFields.category = params.category
-  if (params.price !== undefined) searchFields.price = params.price
-  if (params.compareAtPrice !== undefined) searchFields.compareAtPrice = params.compareAtPrice
+  if (params.mapPrice !== undefined) searchFields.mapPrice = params.mapPrice
+  if (params.originalPrice !== undefined) searchFields.originalPrice = params.originalPrice
+  if (params.seoTitle !== undefined) searchFields.seoTitle = params.seoTitle
+  if (params.moodImageUrl !== undefined) searchFields.moodImageUrl = params.moodImageUrl
+  if (params.productTypeDial !== undefined) searchFields.productTypeDial = params.productTypeDial
+  if (params.moodTags !== undefined) searchFields.moodTags = params.moodTags
+  if (params.audienceTags !== undefined) searchFields.audienceTags = params.audienceTags
+  if (params.mattersTags !== undefined) searchFields.mattersTags = params.mattersTags
+  if (params.ivrExperience !== undefined) searchFields.ivrExperience = params.ivrExperience
+  if (params.ivrUseCase !== undefined) searchFields.ivrUseCase = params.ivrUseCase
+  if (params.ivrFeatures !== undefined) searchFields.ivrFeatures = params.ivrFeatures
+  if (params.ivrVoiceSummary !== undefined) searchFields.ivrVoiceSummary = params.ivrVoiceSummary
 
   if (Object.keys(searchFields).length > 0) {
     await writeClient.patch(docId).set(searchFields).commit()
   }
 
-  // Upload image to Sanity's own CDN so Studio can render it (Shopify CDN is blocked by Studio CSP)
+  // Upload image to Sanity's own CDN so Studio can render it (Shopify CDN is blocked by Studio CSP).
+  // Patch BOTH the published doc and any draft so Studio shows the image whether the doc has
+  // pending edits or not — without this, a draft started in Studio masks the published image.
   if (params.imageUrl) {
-    const alreadyHasSanityImage = existing?.previewImageUrl?.includes('cdn.sanity.io')
-    if (!alreadyHasSanityImage) {
-      const sanityUrl = await uploadImageToSanity(
-        writeClient,
-        params.imageUrl,
-        `${params.handle}-preview.jpg`,
-      )
-      if (sanityUrl) {
-        await writeClient.patch(docId).set({ previewImageUrl: sanityUrl }).commit()
+    const publishedId = docId.replace(/^drafts\./, '')
+    const draftId     = `drafts.${publishedId}`
+    const states = await writeClient.fetch<{ _id: string; previewImageUrl?: string }[]>(
+      `*[_id in [$pub, $dft]]{ _id, previewImageUrl }`,
+      { pub: publishedId, dft: draftId },
+    )
+    const pub = states.find(s => !s._id.startsWith('drafts.'))
+    const dft = states.find(s =>  s._id.startsWith('drafts.'))
+    // Reuse the published image if it's already on Sanity's CDN; otherwise upload fresh.
+    let sanityUrl: string | null = null
+    if (pub?.previewImageUrl?.includes('cdn.sanity.io')) {
+      sanityUrl = pub.previewImageUrl
+    } else {
+      sanityUrl = await uploadImageToSanity(writeClient, params.imageUrl, `${params.handle}-preview.jpg`)
+    }
+    if (sanityUrl) {
+      // Patch whichever docs are missing the image (don't create a spurious draft).
+      if (pub && pub.previewImageUrl !== sanityUrl) {
+        await writeClient.patch(publishedId).set({ previewImageUrl: sanityUrl }).commit()
+      }
+      if (dft && dft.previewImageUrl !== sanityUrl) {
+        await writeClient.patch(draftId).set({ previewImageUrl: sanityUrl }).commit()
       }
     }
   }
