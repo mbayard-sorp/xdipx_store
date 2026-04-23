@@ -572,16 +572,6 @@ function ProductPage() {
           {/* Social proof */}
           <SocialProofBar />
 
-          {/* Works for */}
-          {(worksFor[0] || worksFor[1] || worksFor[2]) && (
-            <div className="flex items-center gap-2 text-sm text-ink/60 flex-wrap">
-              <span>Works for:</span>
-              {worksFor[0] && <WorksForBadge label="Him"     emoji="♂" />}
-              {worksFor[1] && <WorksForBadge label="Her"     emoji="♀" />}
-              {worksFor[2] && <WorksForBadge label="Couples" emoji="🫶" />}
-            </div>
-          )}
-
           {/* Variant selector */}
           {multiVariant && (
             <VariantSelector
@@ -604,40 +594,38 @@ function ProductPage() {
 
           {/* Qty + Add to cart */}
           {inStock ? (
-            <fetcher.Form method="post" action="/api/cart" className="space-y-3">
+            <fetcher.Form method="post" action="/api/cart" className="flex items-stretch gap-3">
               <input type="hidden" name="intent"    value="add-item" />
               <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
               {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
-
-              <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-ink/70" htmlFor="qty">Qty</label>
-                <div className="flex items-center border border-cream-2 rounded-full overflow-hidden bg-white">
-                  <button
-                    type="button"
-                    onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                    className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
-                    aria-label="Decrease quantity"
-                  >−</button>
-                  <input id="qty" type="hidden" name="quantity" value={quantity} />
-                  <span className="px-4 text-sm font-semibold text-ink tabular-nums">{quantity}</span>
-                  <button
-                    type="button"
-                    onClick={() => setQuantity(q => Math.min(3, q + 1))}
-                    className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
-                    aria-label="Increase quantity"
-                  >+</button>
-                </div>
-              </div>
 
               <button
                 ref={ctaRef}
                 type="submit"
                 disabled={isPending}
-                className="w-full py-4 rounded-full font-bold text-lg bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20 transition-all"
+                className="flex-1 py-4 rounded-full font-bold text-lg bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20 transition-all"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
                 {isPending ? 'Adding...' : buyButtonText}
               </button>
+
+              <div className="flex items-center border border-cream-2 rounded-full overflow-hidden bg-white shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
+                  aria-label="Decrease quantity"
+                >−</button>
+                <label htmlFor="qty" className="sr-only">Quantity</label>
+                <input id="qty" type="hidden" name="quantity" value={quantity} />
+                <span className="px-3 text-sm font-semibold text-ink tabular-nums" aria-live="polite">{quantity}</span>
+                <button
+                  type="button"
+                  onClick={() => setQuantity(q => Math.min(3, q + 1))}
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
+                  aria-label="Increase quantity"
+                >+</button>
+              </div>
             </fetcher.Form>
           ) : (
             <WaitlistButton productHandle={deal.handle} />
