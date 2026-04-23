@@ -212,7 +212,7 @@ export function ProductImageGallery({
       {/* Main image / video */}
       <div
         ref={containerRef}
-        className={`relative rounded-2xl overflow-hidden shadow-sm select-none aspect-square ${isPortrait && isVideoActive ? 'bg-ink' : 'bg-cream-2'}`}
+        className={`relative rounded-lg overflow-hidden shadow-sm select-none aspect-square ${isPortrait && isVideoActive ? 'bg-ink' : 'bg-cream-2'}`}
       >
         {/* Video element — always mounted when a video is active so videoRef
             is available for imperative play() inside the click handler */}
