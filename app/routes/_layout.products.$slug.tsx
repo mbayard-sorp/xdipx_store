@@ -523,7 +523,7 @@ function ProductPage() {
             </h1>
             {deal.emmaHero?.headline ? (
               <h2
-                className="text-lg md:text-xl font-bold text-ink mt-2 leading-snug"
+                className="text-lg md:text-xl text-ink mt-2 leading-snug"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
                 {deal.emmaHero.headline}
