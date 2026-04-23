@@ -40,16 +40,13 @@ export function PairsWith({ items, bundleTotal }: PairsWithProps) {
 
   return (
     <section className="mt-12 mb-6">
-      <header className="mb-4 flex items-baseline justify-between gap-3">
+      <header className="mb-4">
         <h2
           className="text-2xl md:text-3xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Pairs great with
         </h2>
-        <span className="text-[11px] uppercase tracking-wide text-muted">
-          Emma's picks
-        </span>
       </header>
 
       <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
