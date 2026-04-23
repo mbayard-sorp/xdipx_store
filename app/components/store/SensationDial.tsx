@@ -76,16 +76,13 @@ export function SensationDial({
 
   return (
     <section className="bg-paper rounded-[var(--radius-lg)] border border-line p-5 md:p-6">
-      <header className="mb-4 flex items-baseline justify-between gap-3">
+      <header className="mb-4">
         <h3
           className="text-base md:text-lg font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           How it feels
         </h3>
-        <span className="text-[11px] uppercase tracking-wide text-muted">
-          Emma's read · 1–5
-        </span>
       </header>
 
       <ul className="space-y-3">
