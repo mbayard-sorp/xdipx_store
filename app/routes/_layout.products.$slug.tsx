@@ -624,7 +624,6 @@ function ProductPage() {
                     aria-label="Increase quantity"
                   >+</button>
                 </div>
-                <span className="text-xs text-ink/40">Max 3</span>
               </div>
 
               <button
