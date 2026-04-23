@@ -4,7 +4,7 @@ export default {
   type: 'object',
   fields: [
     { name: 'active',  title: 'Active',  type: 'boolean', initialValue: true },
-    { name: 'order',   title: 'Order',   type: 'number',  initialValue: 20 },
+    { name: 'order',   title: 'Order',   type: 'number',  initialValue: 20, hidden: true },
     { name: 'eyebrow', title: 'Eyebrow', type: 'string' },
     { name: 'heading', title: 'Heading', type: 'string' },
     {
@@ -29,7 +29,7 @@ export default {
       const n = Array.isArray(count) ? count.length : 0
       return {
         title: title ?? '(no heading)',
-        subtitle: `${n} tile${n !== 1 ? 's' : ''} · Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+        subtitle: `${n} tile${n !== 1 ? 's' : ''} · ${active ? 'Visible' : 'Hidden'}`,
       }
     },
   },

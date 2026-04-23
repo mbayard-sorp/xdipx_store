@@ -26,6 +26,7 @@ import blogHomepage       from '../schemas/blogHomepage.js'
 import emmaHeroSettings   from '../schemas/emmaHeroSettings.js'
 import emmaPreset         from '../schemas/emmaPreset.js'
 import emmaPick           from '../schemas/emmaPick.js'
+import emmaCuratedRail    from '../schemas/blocks/emmaCuratedRail.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -48,6 +49,8 @@ export const schemaTypes = [
   emmaPreset,
   // v2 redesign — Emma-voice picks indexed per featured product (Claude-generated)
   emmaPick,
+  // v2 redesign — Emma-curated rails (agent-generated, draft→approve→live)
+  emmaCuratedRail,
   // Block object types
   announcementBar,
   promoBanner,

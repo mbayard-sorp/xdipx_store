@@ -30,6 +30,7 @@ export default defineConfig({
               .icon(() => '✨')
               .child(S.document().schemaType('emmaHeroSettings').documentId('singleton.emmaHero')),
             S.documentTypeListItem('emmaPreset').title("Emma's presets").icon(() => '🎯'),
+            S.documentTypeListItem('emmaCuratedRail').title('Emma curated rails').icon(() => '♥'),
             S.listItem()
               .title('Site Settings')
               .id('siteSettings')

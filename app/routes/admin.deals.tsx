@@ -14,6 +14,7 @@ import {
 } from '~/lib/shopify.server'
 import type { AdminProductImage } from '~/lib/shopify.server'
 import { generateCopy, generateSEOTitle } from '~/lib/claude.server'
+import { getRailDraftsForDeal } from '~/lib/sanity.server'
 import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
 import { ImageManager } from '~/components/admin/ImageManager'
 import { PricingPanel } from '~/components/admin/PricingPanel'
@@ -83,6 +84,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     productImages: AdminProductImage[]
     promptSettings: Record<string, string>
     dbDealId: number
+    railDrafts: Awaited<ReturnType<typeof getRailDraftsForDeal>>
     pricingConfig: {
       dealPrice: number
       msrp: number
@@ -106,9 +108,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         const promptSettings: Record<string, string> = {}
         for (const row of promptRows) promptSettings[row.key] = row.value
 
-        const [productImages, pinnedAccessoryIds] = await Promise.all([
+        const [productImages, pinnedAccessoryIds, railDrafts] = await Promise.all([
           deal ? getProductAdminImages(dbDeal.shopifyProductId) : Promise.resolve([] as AdminProductImage[]),
           getPinnedAccessoryIds(),
+          deal ? getRailDraftsForDeal(deal.id).catch(() => []) : Promise.resolve([] as Awaited<ReturnType<typeof getRailDraftsForDeal>>),
         ])
         const pinnedAccessories = pinnedAccessoryIds.length
           ? await getAccessoryProductsAdmin(pinnedAccessoryIds)
@@ -123,6 +126,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           productImages,
           promptSettings,
           dbDealId: dbDeal.id,
+          railDrafts,
           pricingConfig: {
             dealPrice:          parseFloat(dbDeal.dealPrice ?? '0') || 0,
             msrp:               parseFloat(dbDeal.msrp ?? '0') || 0,
@@ -596,6 +600,274 @@ function SaveableField({
           {buttonLabel}
         </button>
       </fetcher.Form>
+    </div>
+  )
+}
+
+// ─── RailGenerationPanel ─────────────────────────────────────────────────
+// Two-step Emma rail generation: ♥ Generate rails → review/edit drafts → publish.
+// POSTs to /api/generate-rails and /api/publish-rails (both admin-auth-gated).
+
+interface RailDraftView {
+  _id: string
+  status?: 'draft' | 'approved' | 'live' | 'archived'
+  active?: boolean
+  order?: number
+  heading: string
+  eyebrow?: string
+  emmaAside?: string
+  target: 'homepage' | 'pdp'
+  productHandles?: string[]
+  layout?: 'carousel' | 'grid' | 'grid-3'
+  bgStyle?: 'white' | 'cream' | 'mist' | 'charcoal' | 'purple'
+  ctaLink?: string
+  ctaLabel?: string
+  rationale?: string
+  generatedAt?: string
+}
+
+function RailGenerationPanel({
+  productId,
+  hasCopy,
+  initialDrafts,
+}: {
+  productId: string
+  hasCopy: boolean
+  initialDrafts: RailDraftView[]
+}) {
+  const [drafts, setDrafts]   = useState<RailDraftView[]>(initialDrafts)
+  const [genState, setGen]    = useState<'idle' | 'generating' | 'error'>('idle')
+  const [genError, setGenErr] = useState<string | null>(null)
+  const [pubState, setPub]    = useState<'idle' | 'publishing' | 'success' | 'error'>('idle')
+  const [pubError, setPubErr] = useState<string | null>(null)
+  const [meta, setMeta]       = useState<{ pool?: number; turns?: number } | null>(null)
+
+  async function handleGenerate() {
+    setGen('generating')
+    setGenErr(null)
+    try {
+      const res = await fetch('/api/generate-rails', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ dealId: productId }),
+      })
+      const data = await res.json() as { drafts?: RailDraftView[]; error?: string; candidatePoolSize?: number; turns?: number }
+      if (!res.ok) {
+        setGen('error')
+        setGenErr(data.error ?? `HTTP ${res.status}`)
+        return
+      }
+      setDrafts(data.drafts ?? [])
+      setMeta({ pool: data.candidatePoolSize ?? 0, turns: data.turns ?? 0 })
+      setGen('idle')
+    } catch (err) {
+      setGen('error')
+      setGenErr(err instanceof Error ? err.message : 'Generation failed')
+    }
+  }
+
+  function patchDraft(id: string, patch: Partial<RailDraftView>) {
+    setDrafts(prev => prev.map(d => d._id === id ? { ...d, ...patch } : d))
+  }
+
+  async function handlePublishAll() {
+    const toPublish = drafts.filter(d => d.status === 'draft')
+    if (toPublish.length === 0) return
+    setPub('publishing')
+    setPubErr(null)
+    try {
+      const res = await fetch('/api/publish-rails', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          dealId: productId,
+          rails: toPublish.map(d => ({
+            _id: d._id,
+            target: d.target,
+            heading: d.heading,
+            eyebrow: d.eyebrow,
+            emmaAside: d.emmaAside,
+            productHandles: d.productHandles,
+            layout: d.layout,
+            bgStyle: d.bgStyle,
+            ctaLabel: d.ctaLabel,
+            ctaLink: d.ctaLink,
+            order: d.order,
+          })),
+        }),
+      })
+      const data = await res.json() as { published?: unknown[]; errors?: { error: string }[]; drafts?: RailDraftView[] }
+      if (!res.ok) {
+        setPub('error')
+        setPubErr((data as { error?: string }).error ?? `HTTP ${res.status}`)
+        return
+      }
+      if (data.errors?.length) {
+        setPub('error')
+        setPubErr(data.errors.map(e => e.error).join('; '))
+        if (data.drafts) setDrafts(data.drafts)
+        return
+      }
+      setDrafts(data.drafts ?? [])
+      setPub('success')
+      setTimeout(() => setPub('idle'), 2500)
+    } catch (err) {
+      setPub('error')
+      setPubErr(err instanceof Error ? err.message : 'Publish failed')
+    }
+  }
+
+  const pendingDrafts = drafts.filter(d => d.status === 'draft')
+  const liveRails     = drafts.filter(d => d.status === 'live')
+
+  return (
+    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+          ♥ Emma Rails
+        </h3>
+        {meta && (
+          <span className="text-[11px] text-ink/40">
+            pool {meta.pool} · {meta.turns} turns
+          </span>
+        )}
+      </div>
+
+      {!hasCopy ? (
+        <p className="text-sm text-ink/50">Generate deal copy first — rails draw on the deal's tags and audience.</p>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={genState === 'generating'}
+            className={
+              genState === 'generating'
+                ? 'w-full py-2.5 rounded-xl text-sm font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+                : 'w-full py-2.5 rounded-xl text-sm font-bold bg-coral text-white hover:opacity-90 transition-opacity'
+            }
+          >
+            {genState === 'generating' ? 'Emma is curating... (~30s)' : drafts.length ? '♥ Regenerate Rails' : '♥ Generate Rails'}
+          </button>
+
+          {genError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">{genError}</div>
+          )}
+
+          {pendingDrafts.length > 0 && (
+            <div className="space-y-3 pt-2 border-t border-cream-2">
+              <p className="text-xs font-semibold text-ink/60 uppercase tracking-wide">Pending review · {pendingDrafts.length}</p>
+              {pendingDrafts.map(draft => (
+                <RailDraftCard key={draft._id} draft={draft} onPatch={patch => patchDraft(draft._id, patch)} />
+              ))}
+
+              <button
+                type="button"
+                onClick={handlePublishAll}
+                disabled={pubState === 'publishing'}
+                className={
+                  pubState === 'publishing'
+                    ? 'w-full py-2 rounded-xl text-sm font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+                    : pubState === 'success'
+                    ? 'w-full py-2 rounded-xl text-sm font-bold bg-sage text-white'
+                    : 'w-full py-2 rounded-xl text-sm font-bold bg-ink text-white hover:opacity-90 transition-opacity'
+                }
+              >
+                {pubState === 'publishing' ? 'Publishing...' : pubState === 'success' ? '✓ Published' : 'Publish all rails'}
+              </button>
+
+              {pubError && (
+                <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">{pubError}</div>
+              )}
+            </div>
+          )}
+
+          {liveRails.length > 0 && (
+            <div className="space-y-2 pt-3 border-t border-cream-2">
+              <p className="text-xs font-semibold text-ink/60 uppercase tracking-wide">Live · {liveRails.length}</p>
+              {liveRails.map(d => (
+                <div key={d._id} className="text-xs text-ink/60 flex justify-between">
+                  <span>{d.target === 'homepage' ? '🏠' : '📦'} {d.heading}</span>
+                  <span className="text-sage font-semibold">live</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function RailDraftCard({
+  draft,
+  onPatch,
+}: {
+  draft: RailDraftView
+  onPatch: (patch: Partial<RailDraftView>) => void
+}) {
+  const handles = draft.productHandles ?? []
+  function removeHandle(idx: number) {
+    onPatch({ productHandles: handles.filter((_, i) => i !== idx) })
+  }
+  return (
+    <div className="border border-cream-2 rounded-xl p-3 space-y-2 bg-cream/20">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-bold uppercase tracking-wide text-ink/50">
+          {draft.target === 'homepage' ? '🏠 Homepage' : '📦 PDP'}
+        </span>
+        <select
+          value={draft.target}
+          onChange={e => onPatch({ target: e.target.value as 'homepage' | 'pdp' })}
+          className="text-[11px] border border-cream-2 rounded px-2 py-0.5"
+        >
+          <option value="homepage">Homepage</option>
+          <option value="pdp">PDP</option>
+        </select>
+      </div>
+
+      <input
+        type="text"
+        value={draft.heading}
+        onChange={e => onPatch({ heading: e.target.value })}
+        placeholder="Heading"
+        className="w-full text-sm font-semibold border border-cream-2 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-coral/40"
+      />
+
+      <input
+        type="text"
+        value={draft.eyebrow ?? ''}
+        onChange={e => onPatch({ eyebrow: e.target.value })}
+        placeholder="Eyebrow (optional)"
+        className="w-full text-xs border border-cream-2 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-coral/40"
+      />
+
+      <textarea
+        value={draft.emmaAside ?? ''}
+        onChange={e => onPatch({ emmaAside: e.target.value })}
+        placeholder="Emma aside"
+        rows={2}
+        className="w-full text-xs italic text-ink/70 border border-cream-2 rounded-lg px-2 py-1 resize-y focus:outline-none focus:ring-1 focus:ring-coral/40"
+      />
+
+      <div className="flex flex-wrap gap-1.5">
+        {handles.map((h, i) => (
+          <span key={`${h}-${i}`} className="inline-flex items-center gap-1 text-[11px] bg-paper border border-cream-2 rounded-full px-2 py-0.5">
+            {h}
+            <button
+              type="button"
+              onClick={() => removeHandle(i)}
+              className="text-ink/40 hover:text-coral"
+              aria-label={`Remove ${h}`}
+            >×</button>
+          </span>
+        ))}
+        {handles.length === 0 && <span className="text-[11px] text-red-600">No products — rail won't publish</span>}
+      </div>
+
+      {draft.rationale && (
+        <p className="text-[11px] text-ink/40 italic">Why: {draft.rationale}</p>
+      )}
     </div>
   )
 }
@@ -2070,6 +2342,13 @@ export default function AdminDealsPage() {
                   <PairBundlePanel
                     deal={editorData.deal}
                     pairSettings={{ handle: homepageSettings.pairProductHandle, product: homepageSettings.pairProduct }}
+                  />
+
+                  {/* Emma-curated rails (agent-generated cross-sell) */}
+                  <RailGenerationPanel
+                    productId={editorData.deal.shopifyProductId}
+                    hasCopy={Boolean(editorData.deal.tagline)}
+                    initialDrafts={editorData.railDrafts}
                   />
 
                   {/* Copy & Content (collapsible) */}

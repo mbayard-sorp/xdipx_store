@@ -1075,3 +1075,133 @@ Return only the JSON object, no markdown.`,
     }
   }
 }
+
+// ─── Emma Curated Rails (agentic, tool-use loop) ─────────────────────────────
+
+import {
+  RAIL_TOOLS,
+  buildCandidatePool,
+  createRailGenState,
+  executeRailTool,
+  type RailProposal,
+  type PairingWhyProposal,
+} from '~/lib/emma-rail-tools.server'
+
+export interface GenerateRailsResult {
+  rails: RailProposal[]
+  pairingWhy: PairingWhyProposal[]
+  candidatePoolSize: number
+  turns: number
+}
+
+/**
+ * Multi-turn agent loop where Emma reasons over the catalog and proposes rails.
+ * Stops when the model emits stop_reason "end_turn" or hits MAX_TURNS.
+ */
+export async function generateRails(opts: {
+  deal: Deal
+  partner?: Deal
+  accessories?: { id: string; title: string; brand?: string }[]
+  brandVoice?: string
+}): Promise<GenerateRailsResult> {
+  const { deal, partner, accessories = [] } = opts
+  const brandVoice = opts.brandVoice ?? (await getPipelineSetting('brandVoice')) ?? DEFAULT_BRAND_VOICE
+
+  const pool = await buildCandidatePool(deal, partner)
+  const state = createRailGenState([deal.handle, partner?.handle].filter(Boolean) as string[])
+
+  const dealContext = [
+    `Title: ${deal.seoTitle}`,
+    `Brand: ${deal.brand}`,
+    `Category: ${deal.category}`,
+    deal.tagline ? `Tagline: ${deal.tagline}` : '',
+    deal.audienceTags?.length ? `Audience tags: ${deal.audienceTags.join(', ')}` : '',
+    deal.moodTags?.length     ? `Mood tags: ${deal.moodTags.join(', ')}` : '',
+    deal.mattersTags?.length  ? `Matters tags: ${deal.mattersTags.join(', ')}` : '',
+  ].filter(Boolean).join('\n')
+
+  const partnerContext = partner ? `\n\nPaired with:\n- Title: ${partner.seoTitle}\n- Brand: ${partner.brand}\n- Category: ${partner.category}` : ''
+
+  const accessoryContext = accessories.length
+    ? `\n\nAccessories that need pairing_why blurbs (call propose_pairing_why once each):\n${accessories.map(a => `- ${a.id} — ${a.title}${a.brand ? ` (${a.brand})` : ''}`).join('\n')}`
+    : ''
+
+  const system = `${EMMA_SYSTEM_PROMPT}\n\n${brandVoice}
+
+You are curating cross-sell rails for an editorial storefront. Your goal: propose 2 rails for the product detail page (target: "pdp") and 1 rail for the homepage (target: "homepage"). Each rail must include 4–8 products, a short Emma-voice aside, and a one-sentence rationale.
+
+Rules:
+- Use list_candidate_pool first to see what's available. Only fall back to query_products_by_tag/collection if the pool is thin.
+- Never include the primary deal product or its pair partner in any rail.
+- Each rail should have a clear theme (a mood, an audience, a use case) — not a random grab bag.
+- The "emmaAside" is first-person and short ("been pairing these all month", "the trio I keep recommending").
+- The rail "heading" is a confident editorial label, 3–7 words. Never "buy now" / "shop now".
+- After all rails and pairing_why blurbs are proposed, simply stop responding (end_turn). Do not summarize.`
+
+  const userPrompt = `Deal context:\n${dealContext}${partnerContext}${accessoryContext}\n\nStart by inspecting list_candidate_pool, then propose 2 PDP rails + 1 homepage rail using propose_rail.${accessories.length ? ' Then propose one pairing_why blurb per accessory.' : ''}`
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messages: any[] = [{ role: 'user', content: userPrompt }]
+  const MAX_TURNS = 8
+  let turn = 0
+
+  console.log(`[generateRails] starting. pool=${pool.length} deal=${deal.handle}${partner ? ` partner=${partner.handle}` : ''}`)
+
+  while (turn < MAX_TURNS) {
+    turn++
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 4096,
+      system,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tools: RAIL_TOOLS as any,
+      messages,
+    })
+
+    messages.push({ role: 'assistant', content: response.content })
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const textParts = response.content.filter((b: any) => b.type === 'text') as { text: string }[]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolUses = response.content.filter((b: any) => b.type === 'tool_use') as { name: string; input: unknown }[]
+    console.log(
+      `[generateRails] turn ${turn}: stop=${response.stop_reason} tools=[${toolUses.map(t => t.name).join(', ') || 'none'}]${textParts[0]?.text ? ` text="${textParts[0].text.slice(0, 120).replace(/\s+/g, ' ')}"` : ''}`,
+    )
+
+    if (response.stop_reason === 'end_turn' || response.stop_reason === 'max_tokens') break
+
+    if (toolUses.length === 0) break
+
+    const toolResults = await Promise.all(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (toolUses as any[]).map(async tu => {
+        try {
+          const result = await executeRailTool(tu.name, tu.input, state, pool)
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: tu.id,
+            content: JSON.stringify(result),
+          }
+        } catch (err) {
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: tu.id,
+            is_error: true,
+            content: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
+          }
+        }
+      }),
+    )
+
+    messages.push({ role: 'user', content: toolResults })
+  }
+
+  console.log(`[generateRails] completed in ${turn} turns. ${state.rails.length} rails, ${state.pairingWhy.length} blurbs.`)
+
+  return {
+    rails: state.rails,
+    pairingWhy: state.pairingWhy,
+    candidatePoolSize: pool.length,
+    turns: turn,
+  }
+}

@@ -4,7 +4,7 @@ export default {
   type: 'object',
   fields: [
     { name: 'active', title: 'Active', type: 'boolean', initialValue: true },
-    { name: 'order', title: 'Order', type: 'number', initialValue: 10 },
+    { name: 'order', title: 'Order', type: 'number', initialValue: 10, hidden: true },
     {
       name: 'body',
       title: 'Body',
@@ -99,7 +99,7 @@ export default {
         .slice(0, 80)
       return {
         title: text || '(empty rich text)',
-        subtitle: `Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+        subtitle: `${active ? 'Visible' : 'Hidden'}`,
       }
     },
   },
