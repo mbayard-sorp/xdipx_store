@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore, ProductTypeDial } from '~/types'
+import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore, ProductTypeDial, SellingPlan, SellingPlanGroup } from '~/types'
 import { toHTML } from '@portabletext/to-html'
 import { cached, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
 
@@ -133,6 +133,34 @@ const PRODUCT_CORE_FRAGMENT = `
         compareAtPrice { amount currencyCode }
         availableForSale
         quantityAvailable
+      }
+    }
+  }
+  sellingPlanGroups(first: 5) {
+    edges {
+      node {
+        name
+        appName
+        options { name values }
+        sellingPlans(first: 10) {
+          edges {
+            node {
+              id
+              name
+              description
+              recurringDeliveries
+              options { name value }
+              priceAdjustments {
+                adjustmentValue {
+                  __typename
+                  ... on SellingPlanPercentagePriceAdjustment { adjustmentPercentage }
+                  ... on SellingPlanFixedAmountPriceAdjustment { adjustmentAmount { amount currencyCode } }
+                  ... on SellingPlanFixedPriceAdjustment       { price           { amount currencyCode } }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -292,6 +320,29 @@ interface ShopifyMediaNode {
   sources?: { url: string; mimeType: string; height: number; width: number }[]
 }
 
+interface ShopifySellingPlanAdjustmentValue {
+  __typename: string
+  adjustmentPercentage?: number
+  adjustmentAmount?: { amount: string; currencyCode: string }
+  price?: { amount: string; currencyCode: string }
+}
+
+interface ShopifySellingPlanNode {
+  id: string
+  name: string
+  description: string | null
+  recurringDeliveries: boolean
+  options: { name: string; value: string }[]
+  priceAdjustments: { adjustmentValue: ShopifySellingPlanAdjustmentValue }[]
+}
+
+interface ShopifySellingPlanGroupNode {
+  name: string
+  appName: string
+  options: { name: string; values: string[] }[]
+  sellingPlans: { edges: { node: ShopifySellingPlanNode }[] }
+}
+
 interface ShopifyProductNode {
   id: string
   handle: string
@@ -304,6 +355,43 @@ interface ShopifyProductNode {
   options: { name: string; values: string[] }[]
   variants: { edges: { node: ShopifyVariantNode }[] }
   metafields: ({ namespace: string; key: string; value: string } | null)[]
+  sellingPlanGroups?: { edges: { node: ShopifySellingPlanGroupNode }[] }
+}
+
+function parseSellingPlanGroups(
+  raw?: { edges: { node: ShopifySellingPlanGroupNode }[] },
+): SellingPlanGroup[] | undefined {
+  if (!raw?.edges?.length) return undefined
+  const groups: SellingPlanGroup[] = raw.edges.map(({ node }) => ({
+    name: node.name,
+    appName: node.appName,
+    options: node.options ?? [],
+    sellingPlans: node.sellingPlans.edges.map(({ node: sp }) => {
+      const plan: SellingPlan = {
+        id: sp.id,
+        name: sp.name,
+        options: sp.options ?? [],
+        recurringDeliveries: sp.recurringDeliveries,
+        priceAdjustments: sp.priceAdjustments.map(pa => {
+          const v = pa.adjustmentValue
+          if (v.__typename === 'SellingPlanPercentagePriceAdjustment' && typeof v.adjustmentPercentage === 'number') {
+            return { adjustmentValue: { __typename: 'SellingPlanPercentagePriceAdjustment', adjustmentPercentage: v.adjustmentPercentage } }
+          }
+          if (v.__typename === 'SellingPlanFixedAmountPriceAdjustment' && v.adjustmentAmount) {
+            return { adjustmentValue: { __typename: 'SellingPlanFixedAmountPriceAdjustment', adjustmentAmount: v.adjustmentAmount } }
+          }
+          if (v.__typename === 'SellingPlanFixedPriceAdjustment' && v.price) {
+            return { adjustmentValue: { __typename: 'SellingPlanFixedPriceAdjustment', price: v.price } }
+          }
+          // Fallback — 0% adjustment keeps typings happy without inventing a price.
+          return { adjustmentValue: { __typename: 'SellingPlanPercentagePriceAdjustment', adjustmentPercentage: 0 } }
+        }),
+      }
+      if (sp.description) plan.description = sp.description
+      return plan
+    }),
+  }))
+  return groups.filter(g => g.sellingPlans.length > 0)
 }
 
 function nodeToProduct(node: ShopifyProductNode): Product {
@@ -358,6 +446,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
   const emmaHero         = parseMetafieldJSON<Partial<import('~/types').EmmaHeroCopy>>(mf, 'emma_hero', {})
   const quietEndorsementCopy = parseMetafieldJSON<Partial<import('~/types').QuietEndorsementCopy>>(mf, 'quiet_endorsement_copy', {})
   const pairBundleCopy       = parseMetafieldJSON<Partial<import('~/types').PairBundleCopy>>(mf, 'pair_bundle_copy', {})
+  const sellingPlanGroups    = parseSellingPlanGroups(node.sellingPlanGroups)
 
   return {
     id: node.id,
@@ -422,6 +511,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     ...(pairBundleCopy?.headline && pairBundleCopy?.body && pairBundleCopy?.pairedHandle
       ? { pairBundleCopy: pairBundleCopy as import('~/types').PairBundleCopy }
       : {}),
+    ...(sellingPlanGroups && sellingPlanGroups.length > 0 ? { sellingPlanGroups } : {}),
   }
 }
 
@@ -1067,6 +1157,13 @@ const CART_FRAGMENT = `
             product { id title handle images(first: 1) { edges { node { url altText } } } }
           }
         }
+        sellingPlanAllocation {
+          sellingPlan { id name }
+          priceAdjustments {
+            compareAtPrice { amount currencyCode }
+            price          { amount currencyCode }
+          }
+        }
       }
     }
   }
@@ -1077,10 +1174,35 @@ const CART_FRAGMENT = `
 `
 
 interface CartResponse { cart: RawCart }
+interface RawCartLineSellingPlanAllocation {
+  sellingPlan: { id: string; name: string }
+  priceAdjustments: Array<{
+    compareAtPrice: { amount: string; currencyCode: string }
+    price:          { amount: string; currencyCode: string }
+  }>
+}
 interface RawCart {
   id: string; checkoutUrl: string; totalQuantity: number
-  lines: { edges: { node: { id: string; quantity: number; merchandise: { id: string; title: string; price: { amount: string; currencyCode: string }; product: { id: string; title: string; handle: string; images: { edges: { node: { url: string; altText: string | null } }[] } } } } }[] }
+  lines: { edges: { node: { id: string; quantity: number; merchandise: { id: string; title: string; price: { amount: string; currencyCode: string }; product: { id: string; title: string; handle: string; images: { edges: { node: { url: string; altText: string | null } }[] } } }; sellingPlanAllocation: RawCartLineSellingPlanAllocation | null } }[] }
   cost: { subtotalAmount: { amount: string; currencyCode: string }; totalAmount: { amount: string; currencyCode: string } }
+}
+
+function mapSellingPlanAllocation(
+  raw: RawCartLineSellingPlanAllocation | null,
+): CartLine['sellingPlanAllocation'] {
+  if (!raw) return undefined
+  const adj = raw.priceAdjustments[0]
+  const allocation: NonNullable<CartLine['sellingPlanAllocation']> = {
+    sellingPlan: { id: raw.sellingPlan.id, name: raw.sellingPlan.name },
+  }
+  if (adj) {
+    const compareAt = parseFloat(adj.compareAtPrice.amount)
+    const price     = parseFloat(adj.price.amount)
+    if (compareAt > 0 && price < compareAt) {
+      allocation.discountPct = Math.round(((compareAt - price) / compareAt) * 100)
+    }
+  }
+  return allocation
 }
 
 function rawCartToCart(raw: RawCart): Cart {
@@ -1088,21 +1210,26 @@ function rawCartToCart(raw: RawCart): Cart {
     id: raw.id,
     checkoutUrl: raw.checkoutUrl,
     totalQuantity: raw.totalQuantity,
-    lines: raw.lines.edges.map((e): CartLine => ({
-      id: e.node.id,
-      quantity: e.node.quantity,
-      merchandise: {
-        id: e.node.merchandise.id,
-        title: e.node.merchandise.title,
-        price: e.node.merchandise.price,
-        product: {
-          id: e.node.merchandise.product.id,
-          title: e.node.merchandise.product.title,
-          handle: e.node.merchandise.product.handle,
-          images: parseImages(e.node.merchandise.product.images.edges),
+    lines: raw.lines.edges.map((e): CartLine => {
+      const allocation = mapSellingPlanAllocation(e.node.sellingPlanAllocation)
+      const line: CartLine = {
+        id: e.node.id,
+        quantity: e.node.quantity,
+        merchandise: {
+          id: e.node.merchandise.id,
+          title: e.node.merchandise.title,
+          price: e.node.merchandise.price,
+          product: {
+            id: e.node.merchandise.product.id,
+            title: e.node.merchandise.product.title,
+            handle: e.node.merchandise.product.handle,
+            images: parseImages(e.node.merchandise.product.images.edges),
+          },
         },
-      },
-    })),
+      }
+      if (allocation) line.sellingPlanAllocation = allocation
+      return line
+    }),
     cost: raw.cost,
   }
 }

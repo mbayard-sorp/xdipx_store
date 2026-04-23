@@ -261,6 +261,7 @@ export interface CartLine {
   }
   sellingPlanAllocation?: {
     sellingPlan: { id: string; name: string }
+    discountPct?: number
   }
 }
 

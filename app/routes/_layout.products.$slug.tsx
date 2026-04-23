@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { Suspense, useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { useLoaderData, useOutletContext, useFetcher, useSearchParams } from 'react-router'
+import { Await, data, useLoaderData, useOutletContext, useFetcher, useSearchParams } from 'react-router'
 import { ProductImageGallery, type GalleryItem } from '~/components/store/ProductImageGallery'
+import { StarRating } from '~/components/reviews/StarRating'
 import {
   getDealByHandle, getProductsByTag,
   getCollectionProducts, getProductsByHandles,
@@ -18,6 +19,13 @@ import {
 } from '~/lib/dial-votes.server'
 import { getCustomerToken } from '~/lib/customer-session.server'
 import { customerAPI } from '~/lib/customer-api.server'
+import { getCartIdFromCookie } from '~/lib/cart.server'
+import { getCart } from '~/lib/shopify.server'
+import { getEmmaAside, type EmmaAsideResult } from '~/lib/emma-aside.server'
+import { parseBrowseCookie, buildBrowseCookie } from '~/lib/browse-history.server'
+import { EmmaContextualAside } from '~/components/store/EmmaContextualAside'
+import { EmmaContextualAsideSkeleton } from '~/components/store/EmmaContextualAsideSkeleton'
+import { getFallbackAside } from '~/lib/emma-aside-templates'
 import BundleHero from '~/components/store/BundleHero'
 import BundleSaveCard from '~/components/store/BundleSaveCard'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
@@ -31,7 +39,8 @@ import { VariantSelector }        from '~/components/store/VariantSelector'
 import { SocialProofBar }         from '~/components/store/SocialProofBar'
 import { StockIndicator }         from '~/components/store/StockIndicator'
 import { WaitlistButton }         from '~/components/store/WaitlistButton'
-import { SubscriptionSelector, getSubscriptionPrice } from '~/components/store/SubscriptionSelector'
+import { SubscriptionSelector } from '~/components/store/SubscriptionSelector'
+import { getSubscriptionPrice, getBestSubscriptionOffer } from '~/lib/selling-plan'
 import { EmailSubscribe }         from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }   from '~/components/cms/ContentBlockRenderer'
 import type { Product } from '~/types'
@@ -77,6 +86,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       reviewSort: 'newest',
       reviewFilter: 'all',
       aggregate: null,
+      emmaAsidePromise: Promise.resolve<EmmaAsideResult>({ text: '', source: 'fallback' }),
     }
   }
 
@@ -149,6 +159,45 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .slice(0, 3)
     : []
 
+  // ── Emma contextual aside (deferred: returned un-awaited for streaming) ───
+  // Gather extra context: cart lines + recently-browsed titles.
+  const cartId = getCartIdFromCookie(request)
+  const cartLinesPromise = cartId
+    ? getCart(cartId).then(c => (c?.lines ?? []).map(l => ({
+        title:    l.merchandise.title,
+        quantity: l.quantity,
+      })))
+    : Promise.resolve([] as Array<{ title: string; quantity: number }>)
+
+  const previousBrowseIds = parseBrowseCookie(request)
+  // Strip the current product from the browse context (we're looking at it now).
+  const otherBrowseIds = previousBrowseIds.filter(id => id !== deal.shopifyProductId).slice(0, 4)
+  const browseProductsPromise = otherBrowseIds.length > 0
+    ? getProductsByIds(otherBrowseIds).then(list => list.map(p => ({ title: p.title })))
+    : Promise.resolve([] as Array<{ title: string }>)
+
+  const emmaAsidePromise: Promise<EmmaAsideResult> = Promise.all([cartLinesPromise, browseProductsPromise])
+    .then(([cartLines, browseProducts]) =>
+      getEmmaAside({
+        product: {
+          id:               deal.id,
+          shopifyProductId: deal.shopifyProductId,
+          seoTitle:         deal.seoTitle,
+          brand:            deal.brand,
+          tagline:          deal.tagline,
+          ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
+        },
+        cartLines,
+        browseProducts,
+        pairsWithProducts: pairsWithItems.map(p => ({ title: p.title })),
+        userGid:           customerGid,
+      }),
+    )
+    .catch((): EmmaAsideResult => ({
+      text:   getFallbackAside({ id: deal.id, ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}) }),
+      source: 'fallback',
+    }))
+
   // Resolve Shopify products for any productCarousel blocks
   const carouselBlocks = pdpBlocks.filter(
     (b): b is ProductCarouselBlock => b._type === 'productCarousel',
@@ -186,25 +235,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
   }
 
-  return {
-    type: 'product' as const,
-    deal,
-    pdpBlocks,
-    carouselProductMap,
-    fbtProducts,
-    pairsWithItems,
-    productVoteAggregate,
-    customerProductVote,
-    isLoggedIn,
-    companionBundle,
-    reviews:       reviewData.reviews,
-    reviewTotal:   reviewData.total,
-    reviewPage,
-    reviewSort,
-    reviewFilter,
-    aggregate:     aggregate ?? null,
-    bundle: null,
-  }
+  const browseCookieHeader = buildBrowseCookie(deal.shopifyProductId, previousBrowseIds)
+
+  return data(
+    {
+      type: 'product' as const,
+      deal,
+      pdpBlocks,
+      carouselProductMap,
+      fbtProducts,
+      pairsWithItems,
+      productVoteAggregate,
+      customerProductVote,
+      isLoggedIn,
+      companionBundle,
+      reviews:       reviewData.reviews,
+      reviewTotal:   reviewData.total,
+      reviewPage,
+      reviewSort,
+      reviewFilter,
+      aggregate:     aggregate ?? null,
+      bundle: null,
+      emmaAsidePromise,
+    },
+    { headers: { 'Set-Cookie': browseCookieHeader } },
+  )
 }
 
 // ─── Meta ─────────────────────────────────────────────────────────────────────
@@ -297,6 +352,7 @@ function ProductPage() {
   const reviewSort = loaderData.reviewSort
   const reviewFilter = loaderData.reviewFilter
   const aggregate = loaderData.aggregate
+  const emmaAsidePromise = loaderData.emmaAsidePromise
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
   const voteFetcher = useFetcher<{
@@ -429,6 +485,9 @@ function ProductPage() {
   const discount = deal.msrp > 0 && deal.msrp > price
     ? Math.round(((deal.msrp - price) / deal.msrp) * 100)
     : 0
+  const subscriptionOffer = !selectedPlanId
+    ? getBestSubscriptionOffer(deal.sellingPlanGroups, basePrice)
+    : null
 
   const worksFor: [boolean, boolean, boolean] = [
     deal.category === 'for-him'  || deal.category === 'both' || deal.category === 'couples',
@@ -485,38 +544,78 @@ function ProductPage() {
     <section className="max-w-6xl mx-auto px-4 py-8 relative">
       <div className="grid md:grid-cols-2 gap-8 lg:gap-12 items-start">
 
-        {/* ── Left: Media gallery ─────────────────────────────────────── */}
-        <ProductImageGallery
-          items={allMedia}
-          alt={deal.seoTitle}
-          activeIndex={activeImg}
-          onSelectIndex={setActiveImg}
-          shareOverlay={
-            <ShareButtons
-              url={`https://xdipx.com/products/${deal.handle}`}
-              title={deal.seoTitle}
-              image={deal.images[0]?.url ?? null}
-              variant="overlay"
-            />
-          }
-          heartOverlay={
-            <HeartButton
-              shopifyProductId={deal.shopifyProductId}
-              handle={deal.handle}
-              productTitle={deal.seoTitle}
-              price={deal.dealPrice}
-              variant="overlay"
-              size="md"
-            />
-          }
-        />
+        {/* ── Left: Media gallery + Emma aside ─────────────────────────── */}
+        <div className="space-y-4">
+          <ProductImageGallery
+            items={allMedia}
+            alt={deal.seoTitle}
+            activeIndex={activeImg}
+            onSelectIndex={setActiveImg}
+            shareOverlay={
+              <ShareButtons
+                url={`https://xdipx.com/products/${deal.handle}`}
+                title={deal.seoTitle}
+                image={deal.images[0]?.url ?? null}
+                variant="overlay"
+              />
+            }
+            heartOverlay={
+              <HeartButton
+                shopifyProductId={deal.shopifyProductId}
+                handle={deal.handle}
+                productTitle={deal.seoTitle}
+                price={deal.dealPrice}
+                variant="overlay"
+                size="md"
+              />
+            }
+          />
+
+          {/* Contextual Emma aside — centered below the gallery. Streamed via deferred loader data. */}
+          <div className="flex justify-center">
+            <div className="w-full max-w-[520px]">
+              <Suspense fallback={<EmmaContextualAsideSkeleton />}>
+                <Await
+                  resolve={emmaAsidePromise}
+                  errorElement={
+                    <EmmaContextualAside
+                      text={getFallbackAside({
+                        id: deal.id,
+                        ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
+                      })}
+                    />
+                  }
+                >
+                  {(result: EmmaAsideResult) =>
+                    result.text ? <EmmaContextualAside text={result.text} /> : null
+                  }
+                </Await>
+              </Suspense>
+            </div>
+          </div>
+        </div>
 
         {/* ── Right: Product info ─────────────────────────────────────── */}
         <div className="space-y-4">
           {/* Brand + title */}
           <div>
-            <p className="text-ink/50 text-sm font-medium uppercase tracking-widest">
-              {deal.brand}
+            <p className="text-ink/50 text-sm font-medium uppercase tracking-widest flex items-center gap-1.5 flex-wrap">
+              <span>{deal.brand}</span>
+              {deal.productTypeDial && (
+                <>
+                  <span aria-hidden="true">•</span>
+                  <span>{deal.productTypeDial}</span>
+                </>
+              )}
+              {aggregate && aggregate.approvedCount > 0 && (
+                <>
+                  <span aria-hidden="true">•</span>
+                  <span className="inline-flex items-center gap-1 normal-case tracking-normal">
+                    <StarRating value={Math.round(aggregate.averageRating)} size="sm" readonly />
+                    <span className="text-ink/60">({aggregate.approvedCount})</span>
+                  </span>
+                </>
+              )}
             </p>
             <h1
               className="text-2xl md:text-3xl font-bold text-ink mt-1 leading-snug"
@@ -557,6 +656,16 @@ function ProductPage() {
             <StockIndicator qty={qty} isDigital={isDigital} />
           </div>
 
+          {/* Subscription teaser */}
+          {subscriptionOffer && (
+            <p className="text-sm text-ink/70">
+              or <span className="font-semibold text-ink">${subscriptionOffer.price.toFixed(2)}</span>{' '}
+              with subscription ·{' '}
+              <span className="text-coral font-semibold">save {subscriptionOffer.discountPct}%</span>{' '}
+              <span className="text-sage" aria-hidden="true">♥</span>
+            </p>
+          )}
+
           {/* How it feels — sensation dial + aggregate vote */}
           {deal.productTypeDial && deal.sensationDial && (
             <SensationDial
@@ -572,24 +681,26 @@ function ProductPage() {
           {/* Social proof */}
           <SocialProofBar />
 
-          {/* Variant selector */}
-          {multiVariant && (
-            <VariantSelector
-              variants={variants}
-              options={options}
-              selectedVariantId={selectedId}
-              onVariantSelect={handleVariantSelect}
-            />
-          )}
-
-          {/* Subscription selector */}
-          {deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0 && (
-            <SubscriptionSelector
-              sellingPlanGroups={deal.sellingPlanGroups}
-              basePrice={basePrice}
-              selectedPlanId={selectedPlanId}
-              onPlanChange={setSelectedPlanId}
-            />
+          {/* Variant + subscription pills — shared row */}
+          {(multiVariant || (deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0)) && (
+            <div className="flex flex-wrap items-start gap-2">
+              {multiVariant && (
+                <VariantSelector
+                  variants={variants}
+                  options={options}
+                  selectedVariantId={selectedId}
+                  onVariantSelect={handleVariantSelect}
+                />
+              )}
+              {deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0 && (
+                <SubscriptionSelector
+                  sellingPlanGroups={deal.sellingPlanGroups}
+                  basePrice={basePrice}
+                  selectedPlanId={selectedPlanId}
+                  onPlanChange={setSelectedPlanId}
+                />
+              )}
+            </div>
           )}
 
           {/* Qty + Add to cart */}
