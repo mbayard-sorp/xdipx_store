@@ -1,7 +1,3 @@
--- Product-level aggregate votes for the PDP sensation dial.
--- One vote per (product, customer); flipping updates the existing row.
--- The older pdp_dial_votes (per-dimension) table is intentionally left in
--- place for now — a later cleanup migration can drop it.
 CREATE TABLE IF NOT EXISTS pdp_product_votes (
   id                  SERIAL PRIMARY KEY,
   shopify_product_id  VARCHAR(64) NOT NULL,
