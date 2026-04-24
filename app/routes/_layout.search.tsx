@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useFetcher, useLoaderData, useNavigate, useRouteLoaderData } from 'react-router'
-import { PersonalizedSearchRail } from '~/components/store/PersonalizedSearchRail'
+import { Link, useFetcher, useLoaderData, useNavigate } from 'react-router'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { searchAll, getSearchVendors } from '~/lib/search.server'
 import type { ContentResult, SearchProductResult } from '~/lib/search.server'
 import { getLiveDealHandle } from '~/lib/shopify.server'
-import { getPage } from '~/lib/sanity.server'
+import { getPage, getEmmaPresets } from '~/lib/sanity.server'
+import { readRecentHandles } from '~/lib/recent-views.server'
+import { AskEmmaRail } from '~/components/store/AskEmmaRail'
+import { EmmaDiscoveryRail } from '~/components/store/EmmaDiscoveryRail'
+import { LetMeLookAgainCTA } from '~/components/store/LetMeLookAgainCTA'
+import { EmmaEncouragementStrip } from '~/components/store/EmmaEncouragementStrip'
 import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -47,7 +51,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const priceMin   = url.searchParams.get('price_min')
   const priceMax   = url.searchParams.get('price_max')
 
-  const [searchResult, taxonomyRow, vendorList, liveDealHandle, bannerPage] = await Promise.all([
+  // Ask-Emma taxonomy params — drive the new rail. AskEmmaRail writes a single
+  // comma-separated value per key (e.g. ?mood=soft,playful), so parse as CSV.
+  const csvToArr = (s: string | null) => (s ?? '').split(',').map(x => x.trim()).filter(Boolean)
+  const moods      = csvToArr(url.searchParams.get('mood'))
+  const audiences  = csvToArr(url.searchParams.get('audience'))
+  const matters    = csvToArr(url.searchParams.get('matters'))
+  const budgetMaxS = url.searchParams.get('budgetMax')
+  const budgetMax  = budgetMaxS ? parseFloat(budgetMaxS) : null
+
+  const [searchResult, taxonomyRow, vendorList, liveDealHandle, bannerPage, presets] = await Promise.all([
     searchAll({
       query: q,
       tags,
@@ -56,6 +69,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       experience,
       priceMin: priceMin ? parseFloat(priceMin) : null,
       priceMax: priceMax ? parseFloat(priceMax) : null,
+      moods,
+      audiences,
+      matters,
+      budgetMax,
       sort,
       page,
     }),
@@ -63,7 +80,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     getSearchVendors(),
     getLiveDealHandle(),
     getPage('search-banner'),
+    getEmmaPresets(),
   ])
+
+  const recentViews = readRecentHandles(request)
 
   const bannerBlocks: ContentBlock[] = bannerPage?.sections?.filter(s => s.active !== false) ?? []
 
@@ -81,20 +101,60 @@ export async function loader({ request }: LoaderFunctionArgs) {
     vendorList,
     liveDealHandle,
     bannerBlocks,
-    activeFilters: { vendors, tags, features, experience, priceMin, priceMax },
+    presets,
+    recentViews,
+    activeFilters: { vendors, tags, features, experience, priceMin, priceMax, moods, audiences, matters, budgetMax },
   }
 }
 
 export default function SearchPage() {
   const {
     q, sort, page, searchResult, taxonomy, vendorList, liveDealHandle, bannerBlocks, activeFilters,
+    presets, recentViews,
   } = useLoaderData<typeof loader>()
-  const layoutData = useRouteLoaderData('routes/_layout') as { customerFirstName?: string | null } | undefined
-  const firstName = layoutData?.customerFirstName ?? ''
   const navigate = useNavigate()
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false)
+  const [starred, setStarred] = useState<Record<string, string>>({})
 
   const { products: initialProducts, pages, blogPosts, totalProducts, hasNextPage: initialHasNextPage, facets } = searchResult
+
+  // Emma discovery candidates — top 20 products with just the fields Haiku needs.
+  const candidates = useMemo(
+    () => initialProducts.slice(0, 20).map(p => ({
+      handle: p.handle,
+      title:  p.title,
+      vendor: p.vendor ?? null,
+      price:  p.price ? parseFloat(p.price) : 0,
+      tags:   [],
+      moodTags:    p.moodTags    ?? [],
+      mattersTags: p.mattersTags ?? [],
+    })),
+    [initialProducts],
+  )
+
+  // Derive Emma-rail facets + budget bounds from the current result set.
+  const emmaFacets = useMemo(() => {
+    const moods = new Set<string>()
+    const audiences = new Set<string>()
+    const matters = new Set<string>()
+    let pMin = Infinity
+    let pMax = 0
+    for (const p of initialProducts) {
+      p.moodTags?.forEach(t => moods.add(t))
+      p.audienceTags?.forEach(t => audiences.add(t))
+      p.mattersTags?.forEach(t => matters.add(t))
+      const price = p.price ? parseFloat(p.price) : 0
+      if (price > 0 && price < pMin) pMin = price
+      if (price > pMax) pMax = price
+    }
+    return {
+      moods:     Array.from(moods).sort(),
+      audiences: Array.from(audiences).sort(),
+      matters:   Array.from(matters).sort(),
+      priceMin:  Number.isFinite(pMin) ? pMin : 0,
+      priceMax:  Math.max(pMax, 50),
+    }
+  }, [initialProducts])
 
   // ── GA4: search + view_search_results ─────────────────────────────────
   useEffect(() => {
@@ -115,6 +175,10 @@ export default function SearchPage() {
     activeFilters.experience.forEach(e => params.append('experience', e))
     if (activeFilters.priceMin) params.set('price_min', activeFilters.priceMin)
     if (activeFilters.priceMax) params.set('price_max', activeFilters.priceMax)
+    activeFilters.moods.forEach(m => params.append('mood', m))
+    activeFilters.audiences.forEach(a => params.append('audience', a))
+    activeFilters.matters.forEach(m => params.append('matters', m))
+    if (activeFilters.budgetMax != null) params.set('budgetMax', String(activeFilters.budgetMax))
 
     for (const [key, val] of Object.entries(updates)) {
       params.delete(key)
@@ -195,37 +259,6 @@ export default function SearchPage() {
     activeFilters.priceMax != null
 
   const hasContentResults = pages.length > 0 || blogPosts.length > 0
-
-  // PersonalizedSearchRail refinements — top tag/vendor facets not already active.
-  const personalizedRefinements = useMemo(() => {
-    const out: { label: string; href: string }[] = []
-    if (!q) return out
-    const tagCounts = facets?.tagCounts ?? {}
-    const topTags = Object.entries(tagCounts)
-      .sort(([, a], [, b]) => (b as number) - (a as number))
-      .slice(0, 4)
-      .map(([tag]) => tag)
-    for (const tag of topTags) {
-      if (activeFilters.tags.includes(tag)) continue
-      out.push({
-        label: `${tagLabelMap.get(tag) ?? tag}`,
-        href: buildUrl({ tag: [...activeFilters.tags, tag] }),
-      })
-      if (out.length >= 4) break
-    }
-    return out
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, facets, taxonomy, activeFilters.tags])
-
-  const personalizedCategories = useMemo(
-    () => [
-      { label: 'For him',     href: '/for-him' },
-      { label: 'For her',     href: '/for-her' },
-      { label: 'Emma\'s picks', href: '/' },
-      { label: 'The Notebook', href: '/notebook' },
-    ],
-    [],
-  )
 
   const filterSidebar = (
     <div className="space-y-6">
@@ -480,12 +513,21 @@ export default function SearchPage() {
         <div className="flex gap-8">
 
           {/* ── Sidebar (desktop) ─────────────────────────────────────── */}
-          <aside className="hidden lg:block w-60 shrink-0 space-y-8">
-            <PersonalizedSearchRail
-              firstName={firstName}
+          <aside className="hidden lg:flex lg:flex-col gap-6 w-[260px] shrink-0">
+            <EmmaDiscoveryRail
+              surface="search"
               query={q}
-              refinements={personalizedRefinements}
-              categories={personalizedCategories}
+              candidates={candidates}
+              recentViews={recentViews}
+              onStarredChange={setStarred}
+            />
+            <AskEmmaRail
+              availableMoods={emmaFacets.moods}
+              availableAudiences={emmaFacets.audiences}
+              availableMatters={emmaFacets.matters}
+              priceMin={emmaFacets.priceMin}
+              priceMax={emmaFacets.priceMax}
+              presets={presets}
             />
             {filterSidebar}
           </aside>
@@ -493,11 +535,11 @@ export default function SearchPage() {
           {/* ── Main content ──────────────────────────────────────────── */}
           <div className="flex-1 min-w-0">
 
-            {/* Sort bar */}
-            <div className="flex items-center justify-between mb-5 gap-4">
+            {/* Sort bar + Emma encouragement strip */}
+            <div className="flex items-center mb-5 gap-3">
               <button
                 onClick={() => setFilterDrawerOpen(true)}
-                className="lg:hidden flex items-center gap-2 px-4 py-2 border border-cream-2 rounded-xl text-sm font-medium text-ink hover:border-sage/40 transition-colors"
+                className="lg:hidden flex items-center gap-2 px-4 py-2 border border-cream-2 rounded-xl text-sm font-medium text-ink hover:border-sage/40 transition-colors shrink-0"
               >
                 <FilterIcon className="w-4 h-4" />
                 Filter & Sort
@@ -506,7 +548,9 @@ export default function SearchPage() {
                 )}
               </button>
 
-              <div className="hidden lg:flex items-center gap-2 ml-auto">
+              <EmmaEncouragementStrip surface="search" query={q} />
+
+              <div className="hidden lg:flex items-center gap-2 shrink-0">
                 <label htmlFor="sort-select" className="text-sm text-ink/50">Sort:</label>
                 <select
                   id="sort-select"
@@ -530,6 +574,20 @@ export default function SearchPage() {
                 initialPage={page}
                 initialHasNextPage={initialHasNextPage}
                 liveDealHandle={liveDealHandle}
+                starred={starred}
+              />
+            )}
+
+            {initialProducts.length > 0 && (
+              <LetMeLookAgainCTA
+                query={q}
+                filters={{
+                  moods:     activeFilters.moods,
+                  audiences: activeFilters.audiences,
+                  matters:   activeFilters.matters,
+                  budgetMax: activeFilters.budgetMax,
+                }}
+                className="mt-8"
               />
             )}
           </div>
@@ -603,11 +661,13 @@ function InfiniteProductGrid({
   initialPage,
   initialHasNextPage,
   liveDealHandle,
+  starred,
 }: {
   initialProducts: SearchProductResult[]
   initialPage: number
   initialHasNextPage: boolean
   liveDealHandle: string | null
+  starred: Record<string, string>
 }) {
   const fetcher = useFetcher<{ searchResult: { products: SearchProductResult[]; hasNextPage: boolean } }>()
   const [items, setItems] = useState<SearchProductResult[]>(initialProducts)
@@ -658,12 +718,12 @@ function InfiniteProductGrid({
   return (
     <>
       <ul className="grid grid-cols-2 sm:grid-cols-3 gap-4 auto-rows-fr">
-        {items.map((product, i) => (
+        {items.map(product => (
           <SearchTile
             key={product.handle}
             product={product}
             isLiveDeal={!!liveDealHandle && product.handle === liveDealHandle}
-            emmaPick={i < 3}
+            {...(starred[product.handle] ? { starredReason: starred[product.handle]! } : {})}
           />
         ))}
       </ul>
@@ -678,7 +738,7 @@ function InfiniteProductGrid({
 
 // ─── Product tile ───────────────────────────────────────────────────────────
 
-function SearchTile({ product, isLiveDeal, emmaPick }: { product: SearchProductResult; isLiveDeal: boolean; emmaPick?: boolean }) {
+function SearchTile({ product, isLiveDeal, starredReason }: { product: SearchProductResult; isLiveDeal: boolean; starredReason?: string }) {
   const addToCart = useFetcher<{ ok?: boolean }>()
   const [justAdded, setJustAdded] = useState(false)
   const wasSubmitting = useRef(false)
@@ -740,14 +800,22 @@ function SearchTile({ product, isLiveDeal, emmaPick }: { product: SearchProductR
               {discount}% off
             </span>
           )}
-          {emmaPick && !isLiveDeal && (
-            <span
-              className="absolute top-2 right-2 z-10 bg-coral text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm"
-              style={{ fontFamily: 'var(--font-display)' }}
-              aria-label="Emma's pick"
-            >
-              ★ Emma
-            </span>
+          {starredReason && !isLiveDeal && (
+            <div className="absolute top-2 right-2 z-10 group/starred">
+              <span
+                className="inline-flex items-center gap-1 bg-coral text-paper text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm"
+                style={{ fontFamily: 'var(--font-display)' }}
+                aria-label={`Emma's pick: ${starredReason}`}
+              >
+                ★ Emma
+              </span>
+              <span
+                className="hidden group-hover/starred:block absolute top-full right-0 mt-1 w-44 p-2 rounded-md bg-ink text-paper text-[11px] leading-snug shadow-lg z-20"
+                role="tooltip"
+              >
+                {starredReason}
+              </span>
+            </div>
           )}
           {isLiveDeal && <LiveDealBadge />}
 
