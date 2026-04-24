@@ -1,10 +1,57 @@
-import type { MetaFunction } from 'react-router'
+import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
+import { useLoaderData } from 'react-router'
+import { getEditor, getPage, isPreviewRequest } from '~/lib/sanity.server'
+import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
+import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
+import type { Product } from '~/types'
+import type { ProductCarouselBlock } from '~/types/cms'
 
-export const meta: MetaFunction = () => [
-  { title: 'About xdipx' },
-  { name: 'description', content: 'xdipx — one deal every day for intimate wellness. Playful, discreet, for everyone.' },
-  { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/about' },
-]
+export async function loader({ request }: LoaderFunctionArgs) {
+  const preview = isPreviewRequest(request)
+  // editor is fetched only for the Person JSON-LD @id anchor; visible bio
+  // comes from an editorBio block inside the Sanity page doc.
+  const [editor, page] = await Promise.all([
+    getEditor(preview),
+    getPage('about', preview),
+  ])
+
+  // Resolve Shopify products for any productCarousel blocks on the about page.
+  const carouselBlocks = ((page?.sections ?? []) as unknown[]).filter(
+    (s): s is ProductCarouselBlock => (s as { _type?: string })._type === 'productCarousel',
+  )
+  const carouselProductMap: Record<string, Product[]> = {}
+  if (carouselBlocks.length > 0) {
+    const results = await Promise.all(
+      carouselBlocks.map(b => {
+        const limit = b.productLimit ?? 8
+        const source = b.source ?? 'tag'
+        if (source === 'collection' && b.collectionHandle) {
+          return getCollectionProducts(b.collectionHandle, limit)
+        }
+        if (source === 'manual' && b.productHandles?.length) {
+          return getProductsByHandles(b.productHandles.map(p => p.handle))
+        }
+        return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([])
+      }),
+    )
+    carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
+  }
+
+  return { editor, page, carouselProductMap }
+}
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  const editorName = data?.editor?.name ?? 'Emma'
+  const title = data?.page?.seoTitle
+    ?? `About xdipx — meet ${editorName}, our editor`
+  const description = data?.page?.seoDescription
+    ?? `${editorName} picks, tests, and writes every xdipx feature herself. Sexual wellness, editorially curated.`
+  return [
+    { title },
+    { name: 'description', content: description },
+    { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/about' },
+  ]
+}
 
 export function headers() {
   return {
@@ -14,56 +61,55 @@ export function headers() {
 }
 
 export default function AboutPage() {
+  const { editor, page, carouselProductMap } = useLoaderData<typeof loader>()
+
+  // Person JSON-LD — kept in the route (not the Sanity block) so the @id
+  // "https://xdipx.com/about#emma" stays stable regardless of which editorBio
+  // variant the editor picks, and so Product structured data cross-references
+  // never break.
+  const personSchema = editor
+    ? {
+        '@context': 'https://schema.org',
+        '@type':    'Person',
+        '@id':      'https://xdipx.com/about#emma',
+        name:       editor.name,
+        jobTitle:   editor.role,
+        ...(editor.photoUrl ? { image: editor.photoUrl } : {}),
+        url:        'https://xdipx.com/about',
+        ...(editor.shortBio ? { description: editor.shortBio } : {}),
+        worksFor: {
+          '@type': 'Organization',
+          '@id':   'https://xdipx.com/#organization',
+          name:    'xdipx',
+          url:     'https://xdipx.com',
+        },
+        ...(editor.instagram || editor.email
+          ? {
+              sameAs: [
+                ...(editor.instagram ? [editor.instagram] : []),
+                ...(editor.email ? [`mailto:${editor.email}`] : []),
+              ],
+            }
+          : {}),
+      }
+    : null
+
   return (
-    <div className="max-w-2xl mx-auto px-4 py-16">
-      <h1
-        className="text-4xl font-black text-coral mb-6"
-        style={{ fontFamily: 'var(--font-display)' }}
-      >
-        xdipx
-      </h1>
+    <>
+      {page?.sections?.map(block => (
+        <ContentBlockRenderer
+          key={block._key}
+          block={block}
+          carouselProductMap={carouselProductMap}
+        />
+      ))}
 
-      <div className="prose prose-sm max-w-none text-ink/80 space-y-5">
-        <p className="text-lg text-ink font-medium leading-relaxed">
-          Look, we all have a drawer. Let's make it a great one.
-        </p>
-
-        <p>
-          xdipx is a daily deal site for sexual wellness products. One featured deal every day.
-          Launched at midnight. Gone in 24 hours. No catches, no codes — the price is the deal.
-        </p>
-
-        <p>
-          The name is a palindrome. Reads the same forwards and backwards — just like our ethos.
-          xdipx is built for everyone, from every angle. ♥
-        </p>
-
-        <p>
-          We source from established brands through licensed distributors. Everything ships in
-          plain, unmarked packaging. Billing appears as "XD Inc." Your business is your business.
-        </p>
-
-        <p>
-          We believe the conversation around pleasure and wellness has been way too awkward for
-          way too long. We're fixing that — one playful deal at a time.
-        </p>
-      </div>
-
-      <div className="mt-10 flex flex-col sm:flex-row gap-4">
-        <a
-          href="/"
-          className="bg-coral text-white font-bold px-6 py-3 rounded-full text-center hover:opacity-90 transition-opacity"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          See today's deal ♥
-        </a>
-        <a
-          href="mailto:hello@xdipx.com"
-          className="border border-cream-2 text-ink/70 font-medium px-6 py-3 rounded-full text-center hover:bg-cream-2 transition-colors"
-        >
-          Say hi
-        </a>
-      </div>
-    </div>
+      {personSchema ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(personSchema) }}
+        />
+      ) : null}
+    </>
   )
 }
