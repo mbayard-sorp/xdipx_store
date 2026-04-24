@@ -35,7 +35,8 @@ import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
 import FrequentlyBoughtWith       from '~/components/store/FrequentlyBoughtWith'
 import { SensationDial }          from '~/components/store/SensationDial'
 import { PairsWith, type PairsWithItem } from '~/components/store/PairsWith'
-import { VariantSelector }        from '~/components/store/VariantSelector'
+import { VariantSelector, resolveVariant } from '~/components/store/VariantSelector'
+import { getSwatchMap } from '~/lib/swatches.server'
 import { SocialProofBar }         from '~/components/store/SocialProofBar'
 import { StockIndicator }         from '~/components/store/StockIndicator'
 import { WaitlistButton }         from '~/components/store/WaitlistButton'
@@ -72,6 +73,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       type: 'bundle' as const,
       bundle,
       deal: null,
+      swatches: {} as Record<string, string>,
       pdpBlocks: [],
       carouselProductMap: {},
       fbtProducts: [],
@@ -113,7 +115,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
   const isLoggedIn = !!customerGid
 
-  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts] = await Promise.all([
+  const colorLabels = (deal.options ?? [])
+    .filter(o => o.name.toLowerCase() === 'color' || o.name.toLowerCase() === 'colour')
+    .flatMap(o => o.values)
+
+  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts, swatches] = await Promise.all([
     getProductPageBlocks(slug),
     getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
@@ -126,6 +132,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ? getCustomerProductVote(deal.shopifyProductId, customerGid)
       : Promise.resolve(null as (1 | -1 | null)),
     hasPairing ? getProductsByIds(deal.accessoryProductIds) : Promise.resolve([]),
+    colorLabels.length > 0 ? getSwatchMap(colorLabels) : Promise.resolve({} as Record<string, string>),
   ])
 
   const fbtProducts = fbtHandles.length > 0
@@ -241,6 +248,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     {
       type: 'product' as const,
       deal,
+      swatches,
       pdpBlocks,
       carouselProductMap,
       fbtProducts,
@@ -352,6 +360,7 @@ function ProductPage() {
   const reviewSort = loaderData.reviewSort
   const reviewFilter = loaderData.reviewFilter
   const aggregate = loaderData.aggregate
+  const swatches  = loaderData.swatches ?? {}
   const emmaAsidePromise = loaderData.emmaAsidePromise
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
@@ -422,7 +431,11 @@ function ProductPage() {
   const urlVariant = urlVariantId ? variants.find(v => v.id === urlVariantId) : undefined
   const initialVariant = urlVariant
     ?? variants.find(v => v.availableForSale) ?? variants[0]
-  const [selectedId, setSelectedId] = useState(initialVariant?.id ?? deal.variantId)
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>(() => {
+    const seed: Record<string, string> = {}
+    for (const opt of initialVariant?.selectedOptions ?? []) seed[opt.name] = opt.value
+    return seed
+  })
   const [quantity,   setQuantity]   = useState(1)
   const [activeImg,     setActiveImg]     = useState(0)
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
@@ -452,35 +465,52 @@ function ProductPage() {
     return heroVideoItem ? [heroVideoItem, ...base] : base
   }, [deal.videos, deal.images, deal.heroVideo])
 
-  // When a variant is selected, jump to its image and update URL
-  const handleVariantSelect = useCallback((variantId: string) => {
-    setSelectedId(variantId)
-    // Update URL param for shareable links (replace, don't push)
-    setSearchParams(prev => {
-      const next = new URLSearchParams(prev)
-      next.set('variant', variantId)
-      return next
-    }, { replace: true })
-    // Jump gallery to variant's image
-    const v = variants.find(vr => vr.id === variantId)
-    if (v?.image) {
-      const idx = allMedia.findIndex(
-        m => m.kind === 'image' && m.url === v.image!.url,
-      )
-      if (idx >= 0) {
-        setActiveImg(idx)
+  const optionNames = useMemo(() => options.map(o => o.name), [options])
+
+  const handleSelectionChange = useCallback((next: Record<string, string>) => {
+    setSelectedOptions(next)
+
+    // For gallery preview, try exact match first; fall back to any variant that
+    // matches the color axis (so picking Sage swaps the image even if size is
+    // still unset).
+    const exact = resolveVariant(variants, next, optionNames)
+    let preview = exact
+    if (!preview) {
+      const colorName = optionNames.find(n => n.toLowerCase() === 'color' || n.toLowerCase() === 'colour')
+      const colorVal = colorName ? next[colorName] : undefined
+      if (colorName && colorVal) {
+        preview = variants.find(v =>
+          v.availableForSale &&
+          v.selectedOptions.some(o => o.name === colorName && o.value === colorVal),
+        ) ?? variants.find(v =>
+          v.selectedOptions.some(o => o.name === colorName && o.value === colorVal),
+        )
       }
     }
-  }, [variants, allMedia, setSearchParams])
+    if (preview?.image) {
+      const idx = allMedia.findIndex(m => m.kind === 'image' && m.url === preview!.image!.url)
+      if (idx >= 0) setActiveImg(idx)
+    }
 
-  const selectedVariant = variants.find(v => v.id === selectedId) ?? variants[0]
+    // Only stamp ?variant= when we've resolved a concrete variant.
+    if (exact) {
+      setSearchParams(prev => {
+        const nextParams = new URLSearchParams(prev)
+        nextParams.set('variant', exact.id)
+        return nextParams
+      }, { replace: true })
+    }
+  }, [variants, optionNames, allMedia, setSearchParams])
+
+  const selectedVariant = resolveVariant(variants, selectedOptions, optionNames) ?? (multiVariant ? undefined : variants[0])
   const basePrice = selectedVariant ? parseFloat(selectedVariant.price) : deal.dealPrice
   const activePlan = selectedPlanId
     ? deal.sellingPlanGroups?.flatMap(g => g.sellingPlans).find(p => p.id === selectedPlanId)
     : undefined
   const price    = activePlan ? getSubscriptionPrice(basePrice, activePlan) : basePrice
   const isDigital = deal.handle === 'egift-card'
-  const inStock  = isDigital ? true : (selectedVariant?.availableForSale ?? deal.qty > 0)
+  const needsSelection = multiVariant && !selectedVariant
+  const inStock  = isDigital ? true : (selectedVariant?.availableForSale ?? (multiVariant ? false : deal.qty > 0))
   const qty      = selectedVariant?.quantityAvailable ?? deal.qty
   const discount = deal.msrp > 0 && deal.msrp > price
     ? Math.round(((deal.msrp - price) / deal.msrp) * 100)
@@ -653,7 +683,9 @@ function ProductPage() {
                 </span>
               </>
             )}
-            <StockIndicator qty={qty} isDigital={isDigital} />
+            {needsSelection
+              ? <span className="text-[13px] text-muted italic">Pick a size to see availability</span>
+              : <StockIndicator qty={qty} isDigital={isDigital} />}
           </div>
 
           {/* Subscription teaser */}
@@ -688,8 +720,9 @@ function ProductPage() {
                 <VariantSelector
                   variants={variants}
                   options={options}
-                  selectedVariantId={selectedId}
-                  onVariantSelect={handleVariantSelect}
+                  selectedOptions={selectedOptions}
+                  onSelectionChange={handleSelectionChange}
+                  swatches={swatches}
                 />
               )}
               {deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0 && (
@@ -704,7 +737,7 @@ function ProductPage() {
           )}
 
           {/* Qty + Add to cart */}
-          {inStock ? (
+          {inStock || needsSelection ? (
             <fetcher.Form method="post" action="/api/cart" className="flex items-stretch gap-3">
               <input type="hidden" name="intent"    value="add-item" />
               <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
@@ -713,11 +746,18 @@ function ProductPage() {
               <button
                 ref={ctaRef}
                 type="submit"
-                disabled={isPending}
-                className="flex-1 py-4 rounded-full font-bold text-lg bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20 transition-all"
+                disabled={isPending || needsSelection}
+                className={[
+                  'flex-1 py-4 rounded-full font-bold text-lg transition-all',
+                  needsSelection
+                    ? 'bg-ink/10 text-ink/50 cursor-not-allowed'
+                    : 'bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20',
+                ].join(' ')}
                 style={{ fontFamily: 'var(--font-display)' }}
               >
-                {isPending ? 'Adding...' : buyButtonText}
+                {needsSelection
+                  ? `Pick a ${options.find(o => !selectedOptions[o.name])?.name.toLowerCase() ?? 'size'}`
+                  : isPending ? 'Adding...' : buyButtonText}
               </button>
 
               <div className="flex items-center border border-cream-2 rounded-full overflow-hidden bg-white shrink-0">
