@@ -544,6 +544,8 @@ export async function runQaTool(
       }
 
       const address2 = String(input['address2'] ?? '').trim()
+      const customMessageRaw = typeof input['customMessage'] === 'string' ? input['customMessage'].trim() : ''
+      const customMessage = customMessageRaw ? customMessageRaw.slice(0, 500) : undefined
       let draft: Awaited<ReturnType<typeof createDraftOrder>>
       try {
         draft = await createDraftOrder({
@@ -558,6 +560,7 @@ export async function runQaTool(
             country: 'US',
           },
           channel: ctx.channel,
+          ...(customMessage ? { note: customMessage } : {}),
         })
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -578,7 +581,10 @@ export async function runQaTool(
       // secure checkout link.
       let emailSent = false
       try {
-        await sendDraftOrderInvoice(draft.id, { to: email })
+        await sendDraftOrderInvoice(draft.id, {
+          to: email,
+          ...(customMessage ? { customMessage } : {}),
+        })
         emailSent = true
       } catch (err) {
         console.error('[ai-agent] failed to send draft invoice email', err)

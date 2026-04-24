@@ -508,6 +508,70 @@ async function callQaTool(tool, input, ctx) {
   return await res.json();
 }
 
+// src/emma-note.ts
+var MODEL = "claude-haiku-4-5-20251001";
+var MAX_TOKENS = 200;
+var TIMEOUT_MS = 4e3;
+var MAX_TRANSCRIPT_CHARS = 4e3;
+var SYSTEM_PROMPT = `You are Emma, the editorial voice of xdipx.com \u2014 a trusted, funny friend who tests everything she recommends. You just finished a phone call with a customer and their order is on its way out.
+
+Write a short personal note (\u226460 words, 1\u20132 sentences) that will be attached to the Shopify invoice email. It must:
+- Reference one concrete thing from the actual conversation (a product, use-case, concern, joke \u2014 something specific).
+- Sound warm, first-person, cheeky but tasteful. Like a text from a friend.
+- NOT include a greeting (Shopify prefaces with "Hi NAME,") or a sign-off.
+- NOT say "Buy now" \u2014 use "enjoy", "excited for you", etc.
+- NEVER use "sex" as an adjective \u2014 use intimate, pleasure, wellness, slow-burn.
+- NEVER mention midnight, countdowns, or timing.
+- Use "\u2665" sparingly (at most once).
+
+Output only the note text. No quotes, no labels, no markdown.`;
+function buildTranscript(session) {
+  const lines = [];
+  if (session.summary) lines.push(`[Earlier in the call]
+${session.summary}`);
+  for (const t of session.history) lines.push(turnToText(t));
+  const joined = lines.join("\n").trim();
+  if (joined.length <= MAX_TRANSCRIPT_CHARS) return joined;
+  return joined.slice(joined.length - MAX_TRANSCRIPT_CHARS);
+}
+async function generateEmmaOrderNote(session) {
+  const transcript = buildTranscript(session);
+  if (!transcript) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await anthropic.messages.create(
+      {
+        model: MODEL,
+        max_tokens: MAX_TOKENS,
+        system: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: `Call transcript:
+
+${transcript}
+
+Write the note now.`
+          }
+        ]
+      },
+      { signal: controller.signal }
+    );
+    const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+    if (!text) return null;
+    return text.length > 500 ? text.slice(0, 500) : text;
+  } catch (err) {
+    console.warn(
+      `[ivr] generateEmmaOrderNote failed callSid=${session.callSid}`,
+      err instanceof Error ? `${err.name}: ${err.message}` : err
+    );
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // src/tools/index.ts
 var MAX_ORDER_LOOKUPS_PER_CALL = 15;
 var TOOL_DEFINITIONS = [
@@ -713,7 +777,18 @@ async function runTool(name, _input, ctx) {
     case "listCollections":
     case "lookupReturningCustomer":
     case "createDraftOrder": {
-      const result = await callQaTool(name, _input ?? {}, {
+      const baseInput = _input ?? {};
+      let toolInput = baseInput;
+      if (name === "createDraftOrder") {
+        const emmaNote = await generateEmmaOrderNote(ctx.session);
+        if (emmaNote) {
+          toolInput = { ...baseInput, customMessage: emmaNote };
+          console.log(
+            `[ivr] emma-note generated callSid=${ctx.session.callSid} chars=${emmaNote.length}`
+          );
+        }
+      }
+      const result = await callQaTool(name, toolInput, {
         channel: "voice",
         ...ctx.session.fromNumber ? { phone: ctx.session.fromNumber } : {}
       });
@@ -765,8 +840,8 @@ var IVR_LIMITS = {
 };
 
 // src/claude.ts
-var MODEL = "claude-haiku-4-5-20251001";
-var MAX_TOKENS = 800;
+var MODEL2 = "claude-haiku-4-5-20251001";
+var MAX_TOKENS2 = 800;
 var MAX_TOOL_HOPS = 20;
 var SEND_INTENT_RE = /\b(sending|sent|send(ing)?\s+(it|that|the\s+(link|order))|email(ing)?\s+(you|it|that|the)|text(ing)?\s+(you|it|that)|on\s+(its|it's|the)\s+way|right\s+over|shooting\s+(it|that)\s+over|check\s+your\s+(phone|email|inbox|text|messages)|went\s+to\s+your\s+(email|inbox|phone|text)|link\s+(just\s+)?(went|sent|emailed)|just\s+went\s+to\s+your)\b/i;
 var apiKey = process.env["ANTHROPIC_API_KEY"];
@@ -774,6 +849,7 @@ if (!apiKey) {
   console.warn("[ivr] ANTHROPIC_API_KEY not set \u2014 Claude calls will fail");
 }
 var client = new Anthropic({ apiKey: apiKey ?? "" });
+var anthropic = client;
 function stripForTTS(s) {
   return s.replace(/[*_`~#]+/g, "");
 }
@@ -877,8 +953,8 @@ async function runOneHop(session, controller, cb, toolChoice) {
   const messages = session.buildMessages();
   const stream = client.messages.stream(
     {
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
+      model: MODEL2,
+      max_tokens: MAX_TOKENS2,
       // cache_control is GA on the Messages API; SDK 0.32.1 types lag, so cast.
       system: [
         {
