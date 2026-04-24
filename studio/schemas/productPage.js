@@ -35,6 +35,7 @@ export default {
     { name: 'product',  title: 'Product',        default: true },
     { name: 'copy',     title: 'Copy & Story'                  },
     { name: 'deal',     title: 'Deal Settings'                 },
+    { name: 'emma',     title: 'Emma Discovery'                },
     { name: 'ivr',      title: 'IVR / Voice'                   },
     { name: 'bundle',   title: 'Bundle'                        },
     { name: 'content',  title: 'Content Blocks'                },
@@ -240,6 +241,56 @@ export default {
       type: 'boolean',
       group: 'product',
       description: 'Set automatically when the linked Shopify product is no longer active. Archived docs are excluded from search.',
+    },
+
+    // ── Emma Discovery (auto-filled by orchestrator on bulk import) ─────────
+    // These tags drive Emma's chat / IVR / SMS surfaces — search.server.ts and
+    // ivr-search.server.ts query *[_type == "productPage"] with these filters.
+    // Vocabulary is managed in the askEmmaVocabulary singleton; orchestrator
+    // slugifies on write so URL params (?mood=, ?audience=, ?matters=) match.
+    {
+      name: 'productTypeDial',
+      title: 'Product Type (Dial)',
+      type: 'string',
+      group: 'emma',
+      description: 'Coarse type used by sensation dial + chat narrowing ("any wands?").',
+      options: {
+        list: [
+          { title: 'Air pulsation', value: 'air-pulsation' },
+          { title: 'Vibrator',      value: 'vibrator'      },
+          { title: 'Wand',          value: 'wand'          },
+          { title: 'Lube',          value: 'lube'          },
+          { title: 'Wear',          value: 'wear'          },
+        ],
+        layout: 'radio',
+      },
+    },
+    {
+      name: 'moodTags',
+      title: 'Mood Tags',
+      type: 'array',
+      group: 'emma',
+      description: 'Vibe — slow-and-intimate, playful, etc. Used by Ask Emma rail + chat. Slugs only (kebab-case).',
+      of: [{ type: 'string' }],
+      options: { layout: 'tags' },
+    },
+    {
+      name: 'audienceTags',
+      title: 'Audience Tags',
+      type: 'array',
+      group: 'emma',
+      description: 'Who it\u2019s for — me, us, gift. Drives the "Who\u2019s it for?" filter.',
+      of: [{ type: 'string' }],
+      options: { layout: 'tags' },
+    },
+    {
+      name: 'mattersTags',
+      title: 'Matters Tags',
+      type: 'array',
+      group: 'emma',
+      description: 'Constraints that matter — quiet, soft-touch, travel-size, waterproof, etc.',
+      of: [{ type: 'string' }],
+      options: { layout: 'tags' },
     },
 
     // ── IVR / Voice Discovery ─────────────────────────────────────────────────

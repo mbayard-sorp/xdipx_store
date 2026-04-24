@@ -30,6 +30,8 @@ import emmaPick           from '../schemas/emmaPick.js'
 import emmaContextRail    from '../schemas/emmaContextRail.js'
 import emmaCuratedRail    from '../schemas/blocks/emmaCuratedRail.js'
 import editor             from '../schemas/editor.js'
+import dialRegistry       from '../schemas/dialRegistry.js'
+import askEmmaVocabulary  from '../schemas/askEmmaVocabulary.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -59,6 +61,10 @@ export const schemaTypes = [
   // Editor (Emma) singleton — avatar + name + bio. Powers cart drawer avatar,
   // hero byline, /about E-E-A-T, and editor bio cards. Single source of truth.
   editor,
+  // PDP redesign — sensation dial label registry (singleton)
+  dialRegistry,
+  // Bulk-import — Ask Emma vocabulary singleton (mood/audience/matters tag pools)
+  askEmmaVocabulary,
   // Block object types
   announcementBar,
   promoBanner,
