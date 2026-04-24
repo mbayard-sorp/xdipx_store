@@ -13,7 +13,9 @@ import {
   addLinesToCart,
   createCartWithLines,
   createDraftOrder,
+  findCollectionsByQuery,
   findCustomerByPhone,
+  getCollectionProducts,
   getProductByHandle,
   getStorefrontCollections,
   sendDraftOrderInvoice,
@@ -61,6 +63,8 @@ export interface AgentContext {
   onCartCreated?: (cartId: string) => void
   /** Called whenever a tool mutates cart contents so the widget can pop the drawer. */
   onCartMutated?: () => void
+  /** Current page the shopper is on. chat.server.ts hydrates this into the system prompt so Emma can reference the page naturally. */
+  pageContext?: { pathname: string } | undefined
 }
 
 export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
@@ -128,8 +132,23 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'listCollections',
     description:
-      "List the browsable collections on xdipx. Use when the user asks 'what do you sell' or 'what categories do you have'.",
+      "List the browsable collections on xdipx. Use when the user asks 'what do you sell' or 'what categories do you have'. For a targeted lookup by category or brand, prefer findCollection.",
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'findCollection',
+    description:
+      "Find the best-matching Shopify collection (category or brand) for a shopper's query and return a few preview products. Use this when a shopper asks about a broad category ('lingerie', 'bondage', 'anal', 'blindfolds') or a brand ('Lelo', 'Lovense', 'b-Vibe', 'LELO'). Returns collection handle + title + preview products. You can then either (a) pitch 1-2 of the previewed products, or (b) link the shopper to the collection PLP at /collections/{handle} for the full browsable page when there are many results. Always prefer this over refusing from memory — the store carries lingerie, apparel, bondage, restraints, and every major brand.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: "Category or brand keyword (e.g. 'lingerie', 'bondage', 'lelo', 'blindfolds', 'bodysuit')." },
+        limit: { type: 'number', description: 'Max collections to return. 1–3. Default 2.' },
+        previewCount: { type: 'number', description: 'How many preview products per collection. 1–4. Default 3.' },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
   },
   {
     name: 'lookupReturningCustomer',
@@ -161,20 +180,21 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'addItemsToCart',
     description:
-      "Add one or more products to the shopper's active cart on xdipx.com. Use this the moment the user commits ('I'll take it', 'add to cart', 'yes and add lube', 'let's check out') — pass the variant GIDs from searchProducts/getProductDetails. The cart drawer pops open automatically after your reply, so keep your reply short — a one-sentence acknowledgement like 'Added! Your cart's ready when you are.' Do NOT share URLs, do NOT paste links, do NOT call buildCheckoutLink — the drawer handles checkout from here. Chat-only.",
+      "Add one or more products to the shopper's active cart on xdipx.com. Use this the moment the user commits ('I'll take it', 'add to cart', 'yes and add lube', 'let's check out'). ALWAYS pass the product handle from searchProducts/getProductDetails — the server will resolve the current variant. Only pass variantId when the UI provided one via a variant-pill tap ('variantId: gid://...'). Do NOT invent or guess variantIds. The cart drawer pops open automatically after your reply, so keep your reply short — a one-sentence acknowledgement like 'Added! Your cart's ready when you are.' Do NOT share URLs, do NOT paste links, do NOT call buildCheckoutLink — the drawer handles checkout from here. Chat-only.",
     input_schema: {
       type: 'object',
       properties: {
         items: {
           type: 'array',
-          description: 'Line items keyed by Shopify variant GID. Max 5 items.',
+          description: 'Line items. Max 5. Each must include handle; variantId is optional and only used when the UI passed one via a variant-pill tap.',
           items: {
             type: 'object',
             properties: {
-              variantId: { type: 'string', description: "Shopify variant GID, e.g. 'gid://shopify/ProductVariant/1234'." },
+              handle: { type: 'string', description: 'Product handle from searchProducts/getProductDetails (e.g. "lovense-osci-3"). Required.' },
+              variantId: { type: 'string', description: "Optional Shopify variant GID — only pass when the UI supplied one via variant-pill (user message contained 'variantId: gid://...'). Leave empty otherwise." },
               quantity:  { type: 'number', description: 'Integer quantity, 1–5. Defaults to 1.' },
             },
-            required: ['variantId'],
+            required: ['handle'],
             additionalProperties: false,
           },
         },
@@ -376,6 +396,27 @@ export async function runQaTool(
       }
     }
 
+    if (name === 'findCollection') {
+      const query = String(input['query'] ?? '').trim()
+      if (!query) return { ok: false, error: 'empty query' }
+      const limit = Math.max(1, Math.min(3, Number(input['limit'] ?? 2)))
+      const previewCount = Math.max(1, Math.min(4, Number(input['previewCount'] ?? 3)))
+      const matches = await findCollectionsByQuery(query, limit)
+      if (matches.length === 0) return { ok: true, data: { query, collections: [] } }
+      const results = await Promise.all(
+        matches.map(async (m) => {
+          const products = await getCollectionProducts(m.handle, previewCount)
+          return {
+            handle: m.handle,
+            title: m.title,
+            url: `/collections/${m.handle}`,
+            preview: products.map(productToCard),
+          }
+        }),
+      )
+      return { ok: true, data: { query, collections: results } }
+    }
+
     if (name === 'lookupReturningCustomer') {
       if (!ctx.phone) return { ok: false, error: 'no_caller_phone' }
       const c = await findCustomerByPhone(ctx.phone)
@@ -418,16 +459,43 @@ export async function runQaTool(
       if (rawItems.length > MAX_ITEMS_PER_ORDER) {
         return { ok: false, error: 'too_many_items', message: `Max ${MAX_ITEMS_PER_ORDER} line items.` }
       }
+      // Resolve each line's variant server-side. Haiku has been observed to
+      // hallucinate variant GIDs, so we treat its variantId as a hint — the
+      // handle is the source of truth. We fetch live product data, prefer
+      // Haiku's variantId only if it matches a real variant, otherwise fall
+      // back to the first in-stock variant (or first variant if nothing is
+      // in stock).
       const lines: { variantId: string; quantity: number }[] = []
       for (const it of rawItems) {
-        const gid = String(it['variantId'] ?? '')
-        const normalized = gid.startsWith('gid://') ? gid : `gid://shopify/ProductVariant/${gid.match(/(\d+)$/)?.[1] ?? ''}`
-        if (!/gid:\/\/shopify\/ProductVariant\/\d+/.test(normalized)) {
-          return { ok: false, error: 'bad_variant_id', message: `Invalid variantId: ${gid}` }
-        }
+        const handle = String(it['handle'] ?? '').trim()
+        const hintedGidRaw = String(it['variantId'] ?? '').trim()
+        const hintedGid = hintedGidRaw
+          ? (hintedGidRaw.startsWith('gid://')
+              ? hintedGidRaw
+              : `gid://shopify/ProductVariant/${hintedGidRaw.match(/(\d+)$/)?.[1] ?? ''}`)
+          : ''
         const qtyRaw = Number(it['quantity'] ?? 1)
         const qty = Number.isFinite(qtyRaw) ? Math.max(1, Math.min(5, Math.floor(qtyRaw))) : 1
-        lines.push({ variantId: normalized, quantity: qty })
+
+        if (!handle) {
+          return { ok: false, error: 'missing_handle', message: 'Each item needs a product handle.' }
+        }
+
+        const product = await getProductByHandle(handle)
+        if (!product || product.variants.length === 0) {
+          return { ok: false, error: 'product_not_found', message: `No variants found for handle "${handle}". Re-run searchProducts.` }
+        }
+
+        const match = hintedGid ? product.variants.find((v) => v.id === hintedGid) : undefined
+        const fallback = product.variants.find((v) => v.availableForSale) ?? product.variants[0]
+        const chosen = match ?? fallback
+        if (!chosen?.id || !/gid:\/\/shopify\/ProductVariant\/\d+/.test(chosen.id)) {
+          return { ok: false, error: 'variant_unavailable', message: `Couldn't resolve a variant for "${handle}".` }
+        }
+        if (hintedGid && !match) {
+          console.warn('[addItemsToCart] ignored hallucinated variantId', { handle, hintedGid, resolved: chosen.id })
+        }
+        lines.push({ variantId: chosen.id, quantity: qty })
       }
       // Try the existing cart first (when the shopper already has one). If Shopify
       // has expired or deleted it — common with stale cookies or after the dev DB

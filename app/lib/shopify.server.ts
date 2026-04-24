@@ -4140,20 +4140,61 @@ export async function getReturn(returnId: string): Promise<{
   }
 }
 
-// Returns storefront collections (id included for productFilters usage)
+// Returns storefront collections (id included for productFilters usage).
+// Shop has ~100+ collections (category + brand), so default bumped from 50 → 150.
 export async function getStorefrontCollections(
-  first = 50,
+  first = 150,
 ): Promise<{ id: string; handle: string; title: string }[]> {
-  const data = await storefront<{
-    collections: { edges: { node: { id: string; handle: string; title: string } }[] }
-  }>(`
-    query GetStorefrontCollections($first: Int!) {
-      collections(first: $first, sortKey: TITLE) {
-        edges { node { id handle title } }
+  return cached(`shopify:collections:${first}`, READ_TTL, async () => {
+    const data = await storefront<{
+      collections: { edges: { node: { id: string; handle: string; title: string } }[] }
+    }>(`
+      query GetStorefrontCollections($first: Int!) {
+        collections(first: $first, sortKey: TITLE) {
+          edges { node { id handle title } }
+        }
       }
-    }
-  `, { first })
-  return data.collections.edges.map(e => e.node)
+    `, { first })
+    return data.collections.edges.map(e => e.node)
+  })
+}
+
+// Keyword-match storefront collections by handle + title. Used by Emma's
+// findCollection tool to route shoppers to the right category/brand PLP
+// (e.g. "lingerie" → "lingerie", "lelo" → "lelo", "bondage" → "all-bondage").
+// Ranks exact-handle > starts-with > includes and drops collections with no
+// products so we never point a shopper at an empty page.
+export async function findCollectionsByQuery(
+  query: string,
+  limit = 5,
+): Promise<{ handle: string; title: string; productCount: number }[]> {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+  const all = await getStorefrontCollections(150)
+  const matches = all
+    .map((c) => {
+      const handle = c.handle.toLowerCase()
+      const title = c.title.toLowerCase()
+      let score = 0
+      if (handle === q) score = 100
+      else if (handle.startsWith(q)) score = 70
+      else if (handle.includes(q)) score = 50
+      if (title === q) score = Math.max(score, 95)
+      else if (title.startsWith(q)) score = Math.max(score, 65)
+      else if (title.includes(q)) score = Math.max(score, 45)
+      return { c, score }
+    })
+    .filter((m) => m.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit * 2) // pull extras so we can drop empties
+  const hydrated: { handle: string; title: string; productCount: number }[] = []
+  for (const m of matches) {
+    const products = await getCollectionProducts(m.c.handle, 1)
+    if (products.length === 0) continue
+    hydrated.push({ handle: m.c.handle, title: m.c.title, productCount: products.length })
+    if (hydrated.length >= limit) break
+  }
+  return hydrated
 }
 
 // ─── Draft Orders (phone/SMS ordering) ────────────────────────────────────
