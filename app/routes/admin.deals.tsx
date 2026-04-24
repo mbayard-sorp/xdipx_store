@@ -1416,6 +1416,227 @@ function EmmaHeroRegen({ productId }: { productId: string }) {
   )
 }
 
+// ─── PDP v2 — Emma's take · Care · Sensation dial ──────────────────────
+
+type DialItem = { label: string; value: number; proposed?: boolean }
+
+function PdpReviseEmmaContent({
+  productId, productTypeDial,
+}: { productId: string; productTypeDial: string | null }) {
+  const takeFetcher  = useFetcher<{ ok: boolean; html?: string; error?: string; written?: boolean }>()
+  const careFetcher  = useFetcher<{ ok: boolean; bullets?: string[]; error?: string; written?: boolean }>()
+  const dialFetcher  = useFetcher<{
+    ok: boolean
+    error?: string
+    written?: boolean
+    dial?: { items: DialItem[] }
+    proposed?: string[]
+    preferredLabels?: string[]
+  }>()
+  const acceptFetcher = useFetcher<{ ok: boolean; error?: string; registry?: string[] }>()
+  const renameFetcher = useFetcher<{ ok: boolean; error?: string; dial?: { items: DialItem[] } }>()
+
+  const proposed = dialFetcher.data?.ok ? (dialFetcher.data.proposed ?? []) : []
+  const preferred = dialFetcher.data?.ok ? (dialFetcher.data.preferredLabels ?? []) : []
+
+  return (
+    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+      <div>
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+          PDP v2 · Emma's take · Care · Dial
+        </h3>
+        <p className="text-xs text-muted mt-1">
+          Dry-run previews the copy without writing to Shopify. Save writes the metafield (or product description for the take).
+        </p>
+      </div>
+
+      {/* Emma's take */}
+      <div className="border border-line rounded-xl p-4 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="font-bold text-sm text-ink">Emma's take</h4>
+          <div className="flex gap-2">
+            <takeFetcher.Form method="post" action="/api/admin/emma-take/regenerate">
+              <input type="hidden" name="productId" value={productId} />
+              <input type="hidden" name="dryRun" value="1" />
+              <button
+                type="submit"
+                disabled={takeFetcher.state !== 'idle'}
+                className="text-xs px-3 py-1.5 rounded-lg bg-cream-2 text-ink hover:bg-line/40 disabled:opacity-50"
+              >
+                {takeFetcher.state !== 'idle' ? 'Generating…' : 'Preview'}
+              </button>
+            </takeFetcher.Form>
+            <takeFetcher.Form method="post" action="/api/admin/emma-take/regenerate">
+              <input type="hidden" name="productId" value={productId} />
+              <button
+                type="submit"
+                disabled={takeFetcher.state !== 'idle'}
+                className="text-xs px-3 py-1.5 rounded-lg bg-coral text-white hover:bg-coral-deep disabled:opacity-50"
+              >
+                Generate &amp; save
+              </button>
+            </takeFetcher.Form>
+          </div>
+        </div>
+        {takeFetcher.data?.error && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {takeFetcher.data.error}</p>
+        )}
+        {takeFetcher.data?.ok && takeFetcher.data.html && (
+          <div
+            className="text-xs prose prose-sm max-w-none text-ink/80 bg-cream-2/50 border border-line rounded-lg px-3 py-2"
+            dangerouslySetInnerHTML={{ __html: takeFetcher.data.html }}
+          />
+        )}
+        {takeFetcher.data?.ok && takeFetcher.data.written && (
+          <p className="text-[11px] text-sage">Written to Shopify product description.</p>
+        )}
+      </div>
+
+      {/* Care instructions */}
+      <div className="border border-line rounded-xl p-4 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="font-bold text-sm text-ink">Care instructions</h4>
+          <div className="flex gap-2">
+            <careFetcher.Form method="post" action="/api/admin/care-instructions/regenerate">
+              <input type="hidden" name="productId" value={productId} />
+              <input type="hidden" name="dryRun" value="1" />
+              <button
+                type="submit"
+                disabled={careFetcher.state !== 'idle'}
+                className="text-xs px-3 py-1.5 rounded-lg bg-cream-2 text-ink hover:bg-line/40 disabled:opacity-50"
+              >
+                {careFetcher.state !== 'idle' ? 'Generating…' : 'Preview'}
+              </button>
+            </careFetcher.Form>
+            <careFetcher.Form method="post" action="/api/admin/care-instructions/regenerate">
+              <input type="hidden" name="productId" value={productId} />
+              <button
+                type="submit"
+                disabled={careFetcher.state !== 'idle'}
+                className="text-xs px-3 py-1.5 rounded-lg bg-coral text-white hover:bg-coral-deep disabled:opacity-50"
+              >
+                Generate &amp; save
+              </button>
+            </careFetcher.Form>
+          </div>
+        </div>
+        {careFetcher.data?.error && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {careFetcher.data.error}</p>
+        )}
+        {careFetcher.data?.ok && careFetcher.data.bullets && (
+          <ul className="text-xs space-y-1 bg-cream-2/50 border border-line rounded-lg px-3 py-2">
+            {careFetcher.data.bullets.map((b, i) => (
+              <li key={i} className="flex gap-2"><span className="text-sage">·</span>{b}</li>
+            ))}
+          </ul>
+        )}
+        {careFetcher.data?.ok && careFetcher.data.written && (
+          <p className="text-[11px] text-sage">Written to xdipx.care_instructions.</p>
+        )}
+      </div>
+
+      {/* Sensation dial v2 */}
+      <div className="border border-line rounded-xl p-4 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h4 className="font-bold text-sm text-ink">Sensation dial v2</h4>
+            <p className="text-[11px] text-muted">
+              {productTypeDial ? `Type: ${productTypeDial}` : 'No xdipx.product_type_dial set — required.'}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <dialFetcher.Form method="post" action="/api/admin/sensation-dial/regenerate">
+              <input type="hidden" name="productId" value={productId} />
+              <input type="hidden" name="dryRun" value="1" />
+              <button
+                type="submit"
+                disabled={!productTypeDial || dialFetcher.state !== 'idle'}
+                className="text-xs px-3 py-1.5 rounded-lg bg-cream-2 text-ink hover:bg-line/40 disabled:opacity-50"
+              >
+                {dialFetcher.state !== 'idle' ? 'Generating…' : 'Preview'}
+              </button>
+            </dialFetcher.Form>
+            <dialFetcher.Form method="post" action="/api/admin/sensation-dial/regenerate">
+              <input type="hidden" name="productId" value={productId} />
+              <button
+                type="submit"
+                disabled={!productTypeDial || dialFetcher.state !== 'idle'}
+                className="text-xs px-3 py-1.5 rounded-lg bg-coral text-white hover:bg-coral-deep disabled:opacity-50"
+              >
+                Generate &amp; save
+              </button>
+            </dialFetcher.Form>
+          </div>
+        </div>
+        {dialFetcher.data?.error && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {dialFetcher.data.error}</p>
+        )}
+        {dialFetcher.data?.ok && dialFetcher.data.dial && (
+          <ul className="text-xs space-y-1 bg-cream-2/50 border border-line rounded-lg px-3 py-2">
+            {dialFetcher.data.dial.items.map((it, i) => (
+              <li key={i} className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  {it.label}
+                  {it.proposed && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-sun/30 text-ink-2">new</span>}
+                </span>
+                <span className="font-mono text-ink/60">{it.value}/5</span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* Triage proposed labels */}
+        {productTypeDial && proposed.length > 0 && (
+          <div className="mt-2 space-y-2">
+            <p className="text-[11px] text-muted uppercase tracking-wider">Proposed labels — accept or rename</p>
+            {proposed.map(label => (
+              <div key={label} className="flex flex-wrap items-center gap-2 bg-sun/10 border border-sun/30 rounded-lg px-3 py-2">
+                <span className="text-xs font-bold text-ink">{label}</span>
+                <acceptFetcher.Form method="post" action="/api/admin/dial-registry/append" className="contents">
+                  <input type="hidden" name="productId" value={productId} />
+                  <input type="hidden" name="productTypeDial" value={productTypeDial} />
+                  <input type="hidden" name="label" value={label} />
+                  <button
+                    type="submit"
+                    disabled={acceptFetcher.state !== 'idle'}
+                    className="text-[11px] px-2 py-1 rounded bg-sage text-white hover:bg-sage/80 disabled:opacity-50"
+                  >
+                    Accept → registry
+                  </button>
+                </acceptFetcher.Form>
+                <renameFetcher.Form method="post" action="/api/admin/sensation-dial/rename-label" className="contents">
+                  <input type="hidden" name="productId" value={productId} />
+                  <input type="hidden" name="fromLabel" value={label} />
+                  <select name="toLabel" className="text-[11px] px-2 py-1 rounded border border-line bg-white" required>
+                    <option value="">Rename to…</option>
+                    {preferred.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                  <button
+                    type="submit"
+                    disabled={renameFetcher.state !== 'idle'}
+                    className="text-[11px] px-2 py-1 rounded bg-cream-2 text-ink hover:bg-line/40 disabled:opacity-50"
+                  >
+                    Rename
+                  </button>
+                </renameFetcher.Form>
+              </div>
+            ))}
+          </div>
+        )}
+        {acceptFetcher.data?.ok && (
+          <p className="text-[11px] text-sage">Registry updated · {acceptFetcher.data.registry?.length ?? 0} labels.</p>
+        )}
+        {renameFetcher.data?.ok && (
+          <p className="text-[11px] text-sage">Label renamed on this product.</p>
+        )}
+        {dialFetcher.data?.ok && dialFetcher.data.written && (
+          <p className="text-[11px] text-sage">Written to xdipx.sensation_dial_v2.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Tags Editor ────────────────────────────────────────────────────────
 
 function TagsEditor({ deal, editId }: {
@@ -2324,6 +2545,12 @@ export default function AdminDealsPage() {
 
                   {/* Emma hero (Claude-generated voice copy) */}
                   <EmmaHeroRegen productId={editorData.deal.shopifyProductId} />
+
+                  {/* PDP v2 — Emma's take, Care, Sensation dial */}
+                  <PdpReviseEmmaContent
+                    productId={editorData.deal.shopifyProductId}
+                    productTypeDial={editorData.deal.productTypeDial ?? null}
+                  />
 
                   {/* Quiet endorsement copy (alt homepage template) */}
                   <QuietEndorsementPanel deal={editorData.deal} />

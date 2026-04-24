@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore, ProductTypeDial, SellingPlan, SellingPlanGroup } from '~/types'
+import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore, ProductTypeDial, SellingPlan, SellingPlanGroup, SensationDial, SensationDialV2, SensationDialItem, DialValue, CareInstructions, EmmaHeroCopy } from '~/types'
 import { toHTML } from '@portabletext/to-html'
 import { cached, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
 
@@ -95,6 +95,8 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "matters_tags" }
     { namespace: "xdipx", key: "product_type_dial" }
     { namespace: "xdipx", key: "sensation_dial" }
+    { namespace: "xdipx", key: "sensation_dial_v2" }
+    { namespace: "xdipx", key: "care_instructions" }
     { namespace: "xdipx", key: "pairing_why" }
     { namespace: "xdipx", key: "emma_hero" }
     { namespace: "xdipx", key: "quiet_endorsement_copy" }
@@ -106,7 +108,7 @@ const METAFIELDS_FRAGMENT = `
 `
 
 const PRODUCT_CORE_FRAGMENT = `
-  id handle title vendor tags description
+  id handle title vendor tags description descriptionHtml
   images(first: 10) {
     edges { node { url altText } }
   }
@@ -268,6 +270,63 @@ function parseImages(edges: { node: { url: string; altText: string | null } }[])
   return edges.map(e => ({ url: e.node.url, altText: e.node.altText ?? '' }))
 }
 
+// ─── Sensation dial v1 → v2 projection ────────────────────────────────────
+// Legacy fixed-key labels per dimension. Used only when sensation_dial_v2 is
+// absent — lets old products keep rendering while migration proceeds.
+const LEGACY_DIAL_LABELS: Record<string, string> = {
+  intensity:      'Intensity',
+  quietness:      'Quietness',
+  softness:       'Softness',
+  suction:        'Suction strength',
+  buildup:        'Buildup speed',
+  learningCurve:  'Learning curve',
+  patternVariety: 'Pattern variety',
+  reach:          'Reach',
+  slipperiness:   'Slipperiness',
+  longevity:      'Longevity',
+  fit:            'Fit',
+}
+
+function clampDialValue(n: number): DialValue {
+  const v = Math.round(n)
+  if (v <= 1) return 1
+  if (v >= 5) return 5
+  return v as DialValue
+}
+
+function projectLegacyDial(legacy: SensationDial | undefined): SensationDialV2 | undefined {
+  if (!legacy) return undefined
+  const items: SensationDialItem[] = []
+  for (const [key, value] of Object.entries(legacy)) {
+    if (typeof value !== 'number') continue
+    const label = LEGACY_DIAL_LABELS[key] ?? key
+    items.push({ label, value: clampDialValue(value) })
+  }
+  return items.length > 0 ? { items } : undefined
+}
+
+function normalizeSensationDialV2(raw: unknown): SensationDialV2 | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as { items?: unknown }
+  if (!Array.isArray(r.items)) return undefined
+  const items: SensationDialItem[] = []
+  for (const it of r.items) {
+    if (!it || typeof it !== 'object') continue
+    const o = it as { label?: unknown; value?: unknown; proposed?: unknown }
+    if (typeof o.label !== 'string' || typeof o.value !== 'number') continue
+    const item: SensationDialItem = { label: o.label, value: clampDialValue(o.value) }
+    if (o.proposed === true) item.proposed = true
+    items.push(item)
+  }
+  return items.length > 0 ? { items } : undefined
+}
+
+function normalizeCareInstructions(raw: unknown): CareInstructions | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out = raw.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+  return out.length > 0 ? out : undefined
+}
+
 /** Shopify Storefront API returns video CDN URLs on the store's custom domain
  *  (e.g. xdipx.com/cdn/shop/videos/...). When the custom domain points at
  *  Vercel instead of Shopify those paths 404.  Rewrite to cdn.shopify.com. */
@@ -350,6 +409,7 @@ interface ShopifyProductNode {
   vendor: string
   tags: string[]
   description: string
+  descriptionHtml?: string
   images: { edges: { node: { url: string; altText: string | null } }[] }
   media?: { edges: { node: ShopifyMediaNode }[] }
   options: { name: string; values: string[] }[]
@@ -439,6 +499,9 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
   const heroVideo        = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
   const productTypeDial  = parseMetafield(mf, 'product_type_dial') as ProductTypeDial | ''
   const sensationDial    = parseMetafieldJSON<Deal['sensationDial']>(mf, 'sensation_dial', {})
+  const sensationDialV2  = normalizeSensationDialV2(parseMetafieldJSON<unknown>(mf, 'sensation_dial_v2', null))
+    ?? projectLegacyDial(sensationDial as SensationDial | undefined)
+  const careInstructions = normalizeCareInstructions(parseMetafieldJSON<unknown>(mf, 'care_instructions', null))
   const pairingWhy       = parseMetafieldJSON<Record<string, string>>(mf, 'pairing_why', {})
   const moodTags         = parseMetafieldJSON<string[]>(mf, 'mood_tags',     [])
   const audienceTags     = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
@@ -501,6 +564,9 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
     ...(productTypeDial ? { productTypeDial } : {}),
     ...(sensationDial && Object.keys(sensationDial).length > 0 ? { sensationDial } : {}),
+    ...(sensationDialV2 ? { sensationDialV2 } : {}),
+    ...(careInstructions ? { careInstructions } : {}),
+    ...(node.descriptionHtml ? { descriptionHtml: node.descriptionHtml } : {}),
     ...(pairingWhy    && Object.keys(pairingWhy).length > 0    ? { pairingWhy } : {}),
     ...(emmaHero?.headline && emmaHero?.variant
       ? { emmaHero: emmaHero as import('~/types').EmmaHeroCopy }
@@ -590,6 +656,22 @@ export async function getProductByHandle(handle: string): Promise<Product | null
 }
 
 /**
+ * Fetch just the Shopify handle for a numeric product ID. Lightweight GET.
+ * Returns null if the product no longer exists.
+ */
+export async function getProductHandleById(numericId: string): Promise<string | null> {
+  const id = String(numericId).replace('gid://shopify/Product/', '')
+  try {
+    const { product } = await shopifyAdmin<{ product: { id: number; handle: string } | null }>(
+      `/products/${id}.json?fields=id,handle`,
+    )
+    return product?.handle ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Fetch a deal by numeric Shopify product ID via Admin REST (no CDN cache).
  * Used by admin pages and homepage so they always reflect current state.
  */
@@ -676,6 +758,15 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     : null
   const mapRestricted = mfVal('map_restricted') === 'true'
 
+  // v2 dial + care
+  const productTypeDialAdmin = mfVal('product_type_dial') as ProductTypeDial | ''
+  const legacyDialAdmin = mfJSON<SensationDial>('sensation_dial', {} as SensationDial)
+  const sensationDialV2Admin =
+    normalizeSensationDialV2(mfJSON<unknown>('sensation_dial_v2', null))
+    ?? projectLegacyDial(Object.keys(legacyDialAdmin).length > 0 ? legacyDialAdmin : undefined)
+  const careInstructionsAdmin = normalizeCareInstructions(mfJSON<unknown>('care_instructions', null))
+  const pairingWhyAdmin = mfJSON<Record<string, string>>('pairing_why', {})
+
   const variant = product.variants[0]
   const gid = `gid://shopify/Product/${product.id}`
 
@@ -712,6 +803,12 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     ...(emmaHero ? { emmaHero } : {}),
     ...(quietEndorsementCopy ? { quietEndorsementCopy } : {}),
     ...(pairBundleCopy ? { pairBundleCopy } : {}),
+    ...(productTypeDialAdmin ? { productTypeDial: productTypeDialAdmin } : {}),
+    ...(Object.keys(legacyDialAdmin).length > 0 ? { sensationDial: legacyDialAdmin } : {}),
+    ...(sensationDialV2Admin ? { sensationDialV2: sensationDialV2Admin } : {}),
+    ...(careInstructionsAdmin ? { careInstructions: careInstructionsAdmin } : {}),
+    ...(pairingWhyAdmin && Object.keys(pairingWhyAdmin).length > 0 ? { pairingWhy: pairingWhyAdmin } : {}),
+    ...(product.body_html ? { descriptionHtml: product.body_html } : {}),
     mapRestricted,
     variantId: variant ? `gid://shopify/ProductVariant/${variant.id}` : '',
     variants: product.variants.map(v => {
@@ -1367,6 +1464,17 @@ export async function updateProductMetafield(
   })
 }
 
+/** Update the canonical Shopify product.descriptionHtml (body_html). */
+export async function updateProductDescriptionHtml(
+  productId: string,
+  bodyHtml: string,
+): Promise<void> {
+  const numericId = productId.replace('gid://shopify/Product/', '')
+  await shopifyAdmin(`/products/${numericId}.json`, 'PUT', {
+    product: { id: Number(numericId), body_html: bodyHtml },
+  })
+}
+
 /**
  * Write Emma-voice pairing_why blurbs to a product's xdipx.pairing_why metafield.
  * Stored as a JSON object keyed by accessory product GID. Merges into existing
@@ -1515,6 +1623,7 @@ export interface ProductPageDoc {
   worksForHim?: unknown        // string (legacy) or portable text blocks
   worksForHer?: unknown        // string (legacy) or portable text blocks
   boxContents?: string[] | undefined
+  featureBullets?: string[] | undefined          // xdipx.feature_bullets (json)
   moodImageUrl?: string | undefined
   category?: string | undefined
   dealStatus?: string | undefined
@@ -1528,6 +1637,15 @@ export interface ProductPageDoc {
   seoMetaDescription?: string | undefined
   specifications?: string | undefined
   rawDescription?: string | undefined
+  // v2 redesign — Emma agentic content
+  descriptionHtml?: string | undefined            // Shopify body_html (Emma's take)
+  careInstructions?: string[] | undefined         // xdipx.care_instructions (json)
+  sensationDialV2?: SensationDialV2 | undefined   // xdipx.sensation_dial_v2 (json)
+  productTypeDial?: string | undefined            // xdipx.product_type_dial (single_line_text_field)
+  moodTags?: string[] | undefined                 // xdipx.mood_tags (list.text)
+  audienceTags?: string[] | undefined             // xdipx.audience_tags (list.text)
+  mattersTags?: string[] | undefined              // xdipx.matters_tags (list.text)
+  emmaHero?: EmmaHeroCopy | undefined             // xdipx.emma_hero (json)
 }
 
 export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
@@ -1548,7 +1666,9 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
       ...(doc.title      !== undefined ? { title:    doc.title                } : {}),
       ...(doc.vendor     !== undefined ? { vendor:   doc.vendor               } : {}),
       ...(doc.tags       !== undefined ? { tags:     doc.tags                 } : {}),
-      ...(doc.description !== undefined ? { descriptionHtml: ptToHtml(doc.description) } : {}),
+      ...(doc.descriptionHtml !== undefined
+        ? { descriptionHtml: doc.descriptionHtml }
+        : doc.description !== undefined ? { descriptionHtml: ptToHtml(doc.description) } : {}),
       ...((doc.seoTitle || doc.seoDescription) ? {
         seo: {
           ...(doc.seoTitle       ? { title:       doc.seoTitle       } : {}),
@@ -1579,10 +1699,14 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   }
 
   add('tagline',          doc.tagline,               'single_line_text_field', true)
-  add('full_story',       ptToHtml(doc.fullStory),   'multi_line_text_field',  true)
-  add('works_for_him',    ptToHtml(doc.worksForHim), 'multi_line_text_field',  true)
-  add('works_for_her',    ptToHtml(doc.worksForHer), 'multi_line_text_field',  true)
+  // Optional: legacy field, no longer generated by the bulk-import orchestrator. Editors may hand-fill.
+  add('full_story',       ptToHtml(doc.fullStory),   'multi_line_text_field')
+  // Deprecated by v2 PDP redesign — Emma's take in body_html replaced these.
+  // Kept optional so editor hand-fills on legacy products still write through.
+  add('works_for_him',    ptToHtml(doc.worksForHim), 'multi_line_text_field')
+  add('works_for_her',    ptToHtml(doc.worksForHer), 'multi_line_text_field')
   add('mood_image_url',   doc.moodImageUrl,                    'single_line_text_field')
+  add('product_type_dial', doc.productTypeDial,                'single_line_text_field')
   add('category',         doc.category,                        'single_line_text_field')
   add('deal_status',      doc.dealStatus,                      'single_line_text_field')
   add('deal_date',        doc.dealDate,                        'date')
@@ -1591,12 +1715,21 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   add('wholesale_cost',   doc.wholesaleCost?.toString(),       'number_decimal')
   add('map_price',        doc.mapPrice?.toString(),            'number_decimal')
 
-  if (!doc.boxContents?.length) throw new Error('pushProductToShopify: boxContents is empty')
+  if (!doc.featureBullets?.length) throw new Error('pushProductToShopify: featureBullets is empty')
   metafields.push({
-    namespace: 'xdipx', key: 'box_contents', ownerId: gid,
-    value: JSON.stringify(doc.boxContents),
+    namespace: 'xdipx', key: 'feature_bullets', ownerId: gid,
+    value: JSON.stringify(doc.featureBullets),
     type: 'json',
   })
+
+  // box_contents is optional — orchestrator legitimately omits it for some types (e.g. lube).
+  if (doc.boxContents?.length) {
+    metafields.push({
+      namespace: 'xdipx', key: 'box_contents', ownerId: gid,
+      value: JSON.stringify(doc.boxContents),
+      type: 'json',
+    })
+  }
 
   if (doc.accessoryProductIds !== undefined) {
     metafields.push({
@@ -1608,6 +1741,50 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   add('deal_score',           doc.dealScore?.toString(),        'number_decimal')
   add('seo_meta_description', doc.seoMetaDescription,           'multi_line_text_field',  true)
   add('specifications',       doc.specifications,               'multi_line_text_field',  true)
+
+  // v2 redesign — Emma agentic content metafields
+  if (doc.careInstructions?.length) {
+    metafields.push({
+      namespace: 'xdipx', key: 'care_instructions', ownerId: gid,
+      value: JSON.stringify(doc.careInstructions),
+      type: 'json',
+    })
+  }
+  if (doc.sensationDialV2?.items?.length) {
+    metafields.push({
+      namespace: 'xdipx', key: 'sensation_dial_v2', ownerId: gid,
+      value: JSON.stringify(doc.sensationDialV2),
+      type: 'json',
+    })
+  }
+  if (doc.moodTags?.length) {
+    metafields.push({
+      namespace: 'xdipx', key: 'mood_tags', ownerId: gid,
+      value: JSON.stringify(doc.moodTags),
+      type: 'list.single_line_text_field',
+    })
+  }
+  if (doc.audienceTags?.length) {
+    metafields.push({
+      namespace: 'xdipx', key: 'audience_tags', ownerId: gid,
+      value: JSON.stringify(doc.audienceTags),
+      type: 'list.single_line_text_field',
+    })
+  }
+  if (doc.mattersTags?.length) {
+    metafields.push({
+      namespace: 'xdipx', key: 'matters_tags', ownerId: gid,
+      value: JSON.stringify(doc.mattersTags),
+      type: 'list.single_line_text_field',
+    })
+  }
+  if (doc.emmaHero) {
+    metafields.push({
+      namespace: 'xdipx', key: 'emma_hero', ownerId: gid,
+      value: JSON.stringify(doc.emmaHero),
+      type: 'json',
+    })
+  }
 
   // Store original Nalpac description in the custom namespace metafield
   if (doc.rawDescription) {
@@ -1730,7 +1907,7 @@ export async function createShopifyProductFromFeed(product: ProductScore): Promi
     })
   }
 
-  return res.product.id
+  return String(res.product.id)
 }
 
 /**
@@ -1809,7 +1986,7 @@ export async function createShopifyProductWithVariants(
     }
   }
 
-  return res.product.id
+  return String(res.product.id)
 }
 
 // ─── Video / Media upload ─────────────────────────────────────────────────────
@@ -2051,6 +2228,114 @@ export async function uploadThumbnailToProduct(
   const mediaId = data.productCreateMedia.media[0]?.id
   if (!mediaId) throw new Error('Shopify returned no media ID after image upload')
   return mediaId
+}
+
+/**
+ * Upload a JPEG buffer to Shopify Files (not attached to any product) and
+ * return its public CDN URL. Used by the bulk-import orchestrator's mood-image
+ * tool: the resulting URL is written to the product's xdipx.mood_image_url
+ * metafield so the PDP hero can render it as a full-bleed background.
+ */
+export async function uploadMoodImageToShopifyFiles(
+  imageBuffer: Buffer,
+  filename: string,
+): Promise<string> {
+  const staged = await adminGraphQL<{
+    stagedUploadsCreate: {
+      stagedTargets: StagedTarget[]
+      userErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation StagedUploadsCreate($input: [StagedUploadInput!]!) {
+      stagedUploadsCreate(input: $input) {
+        stagedTargets { url resourceUrl parameters { name value } }
+        userErrors { field message }
+      }
+    }
+  `, {
+    input: [{
+      filename,
+      mimeType:   'image/jpeg',
+      httpMethod: 'POST',
+      resource:   'FILE',
+      fileSize:   String(imageBuffer.length),
+    }],
+  })
+
+  if (staged.stagedUploadsCreate.userErrors.length > 0) {
+    const errs = staged.stagedUploadsCreate.userErrors.map(e => e.message).join('; ')
+    throw new Error(`Shopify stagedUploadsCreate (mood image file) error: ${errs}`)
+  }
+
+  const target = staged.stagedUploadsCreate.stagedTargets[0]
+  if (!target) throw new Error('Shopify returned no staged upload target for mood image')
+
+  const form = new FormData()
+  for (const param of target.parameters) form.append(param.name, param.value)
+  form.append('file', new Blob([new Uint8Array(imageBuffer)], { type: 'image/jpeg' }), filename)
+
+  const uploadRes = await fetch(target.url, { method: 'POST', body: form })
+  if (!uploadRes.ok) {
+    throw new Error(`Staged mood-image upload failed: ${uploadRes.status} ${await uploadRes.text()}`)
+  }
+
+  // Register as a Generic File so it gets a permanent CDN URL.
+  const created = await adminGraphQL<{
+    fileCreate: {
+      files: { id: string; fileStatus: string; url?: string; image?: { url: string } }[]
+      userErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation FileCreate($files: [FileCreateInput!]!) {
+      fileCreate(files: $files) {
+        files {
+          id
+          fileStatus
+          ... on GenericFile { url }
+          ... on MediaImage { image { url } }
+        }
+        userErrors { field message }
+      }
+    }
+  `, {
+    files: [{
+      originalSource:   target.resourceUrl,
+      contentType:      'IMAGE',
+      alt:              filename,
+    }],
+  })
+
+  if (created.fileCreate.userErrors.length > 0) {
+    const errs = created.fileCreate.userErrors.map(e => e.message).join('; ')
+    throw new Error(`Shopify fileCreate (mood image) error: ${errs}`)
+  }
+
+  const file = created.fileCreate.files[0] as
+    | { id: string; url?: string; image?: { url?: string } }
+    | undefined
+  const url = file?.url ?? file?.image?.url
+  if (!url) {
+    // The file was created but has not yet been processed. Poll once briefly.
+    const fileId = file?.id
+    if (!fileId) throw new Error('Shopify fileCreate returned no file id')
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 500))
+      const polled = await adminGraphQL<{
+        node: { id: string; url?: string; image?: { url?: string } } | null
+      }>(`
+        query PollFile($id: ID!) {
+          node(id: $id) {
+            ... on GenericFile { id url }
+            ... on MediaImage  { id image { url } }
+          }
+        }
+      `, { id: fileId })
+      const u = polled.node?.url ?? polled.node?.image?.url
+      if (u) return u
+    }
+    throw new Error('Shopify fileCreate: no URL after polling')
+  }
+  return url
 }
 
 // ─── Admin Image Management ───────────────────────────────────────────────────

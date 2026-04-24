@@ -97,9 +97,16 @@ export async function action({ request }: ActionFunctionArgs) {
       job.skipped++
     } else if (!result.success) {
       job.failed++
-      job.errors.push({ sku: result.sku, message: result.error ?? 'Unknown error' })
+      job.errors.push({ sku: result.sku, message: result.error ?? 'Unknown error', level: 'error' })
     } else {
       job.processed++
+      // Surface non-fatal warnings (e.g. Sanity sync failed but Shopify succeeded)
+      // so the admin UI can show them in amber rather than swallowing into console.
+      if (result.warnings?.length) {
+        for (const w of result.warnings) {
+          job.errors.push({ sku: result.sku, message: `[${w.stage}] ${w.message}`, level: 'warning' })
+        }
+      }
     }
 
     if (job.currentIndex >= job.groups.length) {
