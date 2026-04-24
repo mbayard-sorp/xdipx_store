@@ -10,6 +10,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { and, eq, gte, sql } from 'drizzle-orm'
 import { twiml, verifyTwilioRequest, withTimeout, xmlEscape } from '~/lib/twilio.server'
 import { db } from '~/lib/db.server'
+import { normalizeForTTS } from '~/lib/tts-normalize'
 import { callLog, pipelineSettings } from '../../db/schema'
 import { getActiveIvrVoiceId } from '~/lib/ivr-voice.server'
 
@@ -42,9 +43,14 @@ type CallEndReason =
 const BUSINESS_HOURS = process.env['IVR_BUSINESS_HOURS'] ?? ''
 const BUSINESS_TZ = process.env['IVR_BUSINESS_TZ'] ?? 'America/Chicago'
 
+// All human-authored strings here pass through normalizeForTTS so punctuation
+// quirks (smart quotes, em-dashes, stray URLs, markdown) can't leak into what
+// Polly actually speaks. Brand name is always "ex-dip-ex" (three syllables,
+// matching xdipx) — never "ex-dip". The normalizer turns word-internal
+// hyphens into spaces so Polly reads it as "ex dip ex".
 const REJECT_TWIML = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna">We've got too many calls from this number right now. Try again in an hour, or reach us online at ex-dip dot com.</Say>
+  <Say voice="Polly.Joanna">${xmlEscape(normalizeForTTS("We've got too many calls from this number right now. Try again in an hour, or reach us online at ex-dip-ex dot com."))}</Say>
   <Hangup/>
 </Response>`
 
@@ -53,15 +59,15 @@ function afterHoursTwiml(): string {
   const cb = appUrl ? `${appUrl}/api/twilio/recording-status` : '/api/twilio/recording-status'
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna">Hey — you've reached ex-dip. We're closed right now but leave a message after the beep and we'll get back to you first thing.</Say>
+  <Say voice="Polly.Joanna">${xmlEscape(normalizeForTTS("Hey — you've reached ex-dip-ex. We're closed right now but leave a message after the beep and we'll get back to you first thing."))}</Say>
   <Record maxLength="120" playBeep="true" trim="trim-silence" recordingStatusCallback="${xmlEscape(cb)}"/>
-  <Say voice="Polly.Joanna">Thanks — talk soon.</Say>
+  <Say voice="Polly.Joanna">${xmlEscape(normalizeForTTS('Thanks — talk soon.'))}</Say>
   <Hangup/>
 </Response>`
 }
 
 const DEFAULT_GREETING =
-  "Hey, you've reached ex-dip. I'm {feeling} you called. This call may be recorded. What's going on?"
+  "Hey, you've reached ex-dip-ex. I'm {feeling} you called. This call may be recorded. What's going on?"
 
 const DEFAULT_FEELINGS = 'so happy,thrilled,super excited,really glad,pumped,stoked,delighted'
 const DEFAULT_ACTIVITIES = "browsing the vault,curating today's deal,testing out some new arrivals,organizing the stockroom"
@@ -79,7 +85,11 @@ function resolveGreeting(
 ): string {
   const feeling = pickRandom(feelingsCsv, 'happy')
   const activity = pickRandom(activitiesCsv, 'working')
-  return template.replace('{feeling}', feeling).replace('{activity}', activity)
+  const interpolated = template.replace('{feeling}', feeling).replace('{activity}', activity)
+  // Normalize before the string reaches either the ConversationRelay greeting
+  // query param (ElevenLabs) or static Polly Say. Covers DB-sourced quirks in
+  // ivrGreeting / ivrFeelings / ivrActivities.
+  return normalizeForTTS(interpolated)
 }
 
 async function getGreeting(): Promise<string> {

@@ -16,10 +16,10 @@ type VoiceRow = {
 export const meta: MetaFunction = () => [{ title: 'IVR — xdipx Admin' }]
 
 const DEFAULTS: Record<string, string> = {
-  ivrGreeting: "Hey, you've reached ex-dip. I'm {feeling} you called. This call may be recorded. What's going on?",
+  ivrGreeting: "Hey, you've reached ex-dip-ex. I'm {feeling} you called. This call may be recorded. What's going on?",
   brandVoice:
     "Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Your goal is to welcome first-time buyers and delight experienced ones. Keep all copy tasteful — suggestive is fine, explicit is not. Always signal discretion, value, and trust. Never use \"sex\" as an adjective — use \"intimate\", \"pleasure\", or \"wellness\". Never assume the reader's experience level.",
-  ivrFarewellGoodbye: "Thanks for calling ex-dip — have a great one!",
+  ivrFarewellGoodbye: "Thanks for calling ex-dip-ex — have a great one!",
   ivrFarewellMaxPrompts:
     "I really like you — but it might be easier if you send an email to hello at exdipex dot com and we can help you directly. Once again that's hello at exdipex dot com.",
   ivrFarewellMaxDuration: '',
