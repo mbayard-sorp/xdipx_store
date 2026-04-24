@@ -1,4 +1,5 @@
-import { Link } from 'react-router'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useFetcher } from 'react-router'
 import type { VaultDeal } from '~/types'
 import { WaitlistButton } from './WaitlistButton'
 import { HeartButton } from './HeartButton'
@@ -7,15 +8,65 @@ import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
 interface VaultCardProps {
   deal: VaultDeal
+  starred?: { reason: string }
 }
 
-export function VaultCard({ deal }: VaultCardProps) {
+export function VaultCard({ deal, starred }: VaultCardProps) {
   const discount = deal.msrp > 0
     ? Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)
     : 0
 
+  const addToCart = useFetcher<{ ok: boolean }>()
+  const [justAdded, setJustAdded] = useState(false)
+  const wasSubmitting = useRef(false)
+
+  useEffect(() => {
+    if (addToCart.state === 'submitting') wasSubmitting.current = true
+    else if (addToCart.state === 'idle' && wasSubmitting.current) {
+      wasSubmitting.current = false
+      if (addToCart.data?.ok) {
+        setJustAdded(true)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('xdipx:cart-added'))
+        }
+        const t = setTimeout(() => setJustAdded(false), 1200)
+        return () => clearTimeout(t)
+      }
+    }
+  }, [addToCart.state, addToCart.data])
+
+  const canAtc = deal.qty > 0 && !deal.hasMultipleVariants && !!deal.defaultVariantId
+
+  function handleAtcClick(e: React.MouseEvent<HTMLButtonElement>) {
+    if (!canAtc || !deal.defaultVariantId) return
+    e.preventDefault()
+    e.stopPropagation()
+    const form = new FormData()
+    form.set('intent',    'add-item')
+    form.set('variantId', deal.defaultVariantId)
+    form.set('quantity',  '1')
+    addToCart.submit(form, { method: 'post', action: '/api/cart' })
+  }
+
   return (
     <article className="bg-white rounded-2xl overflow-hidden shadow-sm card-lift group relative">
+      {starred && (
+        <div className="absolute top-2 left-2 z-10 group/starred">
+          <span
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-coral text-paper text-[11px] font-semibold shadow-sm"
+            style={{ fontFamily: 'var(--font-display)' }}
+            aria-label={`Emma's pick: ${starred.reason}`}
+          >
+            ★ Emma
+          </span>
+          <span
+            className="hidden group-hover/starred:block absolute top-full left-0 mt-1 w-44 p-2 rounded-md bg-ink text-paper text-[11px] leading-snug shadow-lg z-20"
+            role="tooltip"
+          >
+            {starred.reason}
+          </span>
+        </div>
+      )}
       <HeartButton
         shopifyProductId={deal.id}
         handle={deal.handle}
@@ -41,6 +92,37 @@ export function VaultCard({ deal }: VaultCardProps) {
           ) : (
             <div className="w-full h-full flex items-center justify-center text-ink/10 text-5xl">♥</div>
           )}
+
+          {canAtc && (
+            <button
+              type="button"
+              onClick={handleAtcClick}
+              disabled={addToCart.state !== 'idle'}
+              aria-label={`Add ${deal.seoTitle} to cart`}
+              className={[
+                'absolute bottom-2 right-2 z-10 inline-flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-1.5 text-white text-xs font-bold shadow-md transition-all',
+                justAdded ? 'bg-sage scale-105' : 'bg-coral hover:bg-coral/90 hover:scale-105',
+                addToCart.state !== 'idle' ? 'opacity-70' : '',
+              ].join(' ')}
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              {justAdded ? (
+                <>
+                  <span aria-hidden="true">♥</span>
+                  <span>Added</span>
+                </>
+              ) : (
+                <>
+                  <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" />
+                    <line x1="3" y1="6" x2="21" y2="6" />
+                    <path d="M16 10a4 4 0 01-8 0" />
+                  </svg>
+                  <span>+ Add</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         <div className="p-4">
@@ -64,22 +146,11 @@ export function VaultCard({ deal }: VaultCardProps) {
         </div>
       </Link>
 
-      {/* Availability + waitlist */}
-      <div className="px-4 pb-4">
-        {deal.qty > 5 ? (
-          <span className="text-xs text-green-600 font-medium flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-green-500" />
-            In Stock
-          </span>
-        ) : deal.qty > 0 ? (
-          <span className="text-xs text-yellow-600 font-medium flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-yellow-500" />
-            Low Stock
-          </span>
-        ) : (
+      {deal.qty === 0 && (
+        <div className="px-4 pb-4">
           <WaitlistButton productHandle={deal.handle} />
-        )}
-      </div>
+        </div>
+      )}
     </article>
   )
 }

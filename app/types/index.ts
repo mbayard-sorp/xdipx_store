@@ -207,6 +207,8 @@ export interface VaultDeal {
   category: string
   dealStatus: 'draft' | 'scheduled' | 'live' | 'archived'
   qty: number
+  defaultVariantId?:    string | null
+  hasMultipleVariants?: boolean
   // v2 redesign — tag facets for Ask Emma filtering
   moodTags?:     string[]
   audienceTags?: string[]
