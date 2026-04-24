@@ -363,7 +363,11 @@ export function ProductImageGallery({
         )}
 
         {/* Heart overlay slot (self-positioned via variant="overlay") */}
-        {heartOverlay && <div className="z-20">{heartOverlay}</div>}
+        {heartOverlay && (
+          <div className="absolute inset-0 z-30 pointer-events-none">
+            {heartOverlay}
+          </div>
+        )}
       </div>
 
       {/* Mobile dot indicators */}
