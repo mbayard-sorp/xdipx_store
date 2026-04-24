@@ -2,6 +2,14 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'node:crypto'
 import type { Deal, EmmaHeroCopy, EmmaHeroVariant, GenerateCopyRequest, GenerateCopyResult, ProductScore } from '~/types'
 import { getPipelineSetting } from './feed-processor.server'
+import {
+  RAIL_TOOLS,
+  buildCandidatePool,
+  createRailGenState,
+  executeRailTool,
+  type RailProposal,
+  type PairingWhyProposal,
+} from '~/lib/emma-rail-tools.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
@@ -1082,16 +1090,162 @@ Return only the JSON object, no markdown.`,
   }
 }
 
-// ─── Emma Curated Rails (agentic, tool-use loop) ─────────────────────────────
+// ─── Emma context-group picker ──────────────────────────────────────────────
+// Used by the homepage "Emma picks" rails. Called at midnight deal rotation
+// (plus admin/brief-change/lazy fallbacks) — never per page view. Uses prompt
+// caching: SYSTEM_PROMPT + hero context block are cache_control-tagged so the
+// first group per deal pays full cost and subsequent groups read from cache.
 
-import {
-  RAIL_TOOLS,
-  buildCandidatePool,
-  createRailGenState,
-  executeRailTool,
-  type RailProposal,
-  type PairingWhyProposal,
-} from '~/lib/emma-rail-tools.server'
+export interface ContextPickCandidate {
+  id:          string          // Shopify product GID
+  handle:      string
+  title:       string
+  brand?:      string
+  tags?:       string[]
+  productType?: string
+  price?:      number
+  blurb?:      string          // 1-line description
+}
+
+export interface ContextPickInput {
+  hero: {
+    handle:      string
+    title:       string
+    brand?:      string
+    tagline?:    string
+    category?:   string
+    tags?:       string[]
+    dealPrice?:  number
+    moodTags?:   string[]
+    audienceTags?: string[]
+    mattersTags?: string[]
+  }
+  group: {
+    name:        string
+    kind:        'pairing' | 'alternative' | 'adjacent'
+    emmaContext: string
+  }
+  candidates:    ContextPickCandidate[]
+  maxPicks:      number
+}
+
+export interface ContextPickResult {
+  picks: Array<{ id: string; pairingWhy: string }>
+  tokens: {
+    input:  number
+    output: number
+    cacheCreation: number
+    cacheRead:     number
+  }
+}
+
+function kindBrief(kind: ContextPickInput['group']['kind']): string {
+  switch (kind) {
+    case 'pairing':     return 'Pick products that go WELL WITH the hero deal — complements, add-ons, or things that make the hero better.'
+    case 'alternative': return 'Pick products that someone who skipped the hero deal might love instead — same vibe or satisfaction, different form factor.'
+    case 'adjacent':    return 'Pick products that share the hero\u2019s mood or moment — adjacent in category, not direct pairs or alternatives.'
+  }
+}
+
+export async function pickForContextGroup(input: ContextPickInput): Promise<ContextPickResult> {
+  const hero = input.hero
+  const heroBlock = [
+    `HERO DEAL (what\u2019s in the sale box right now)`,
+    `Title: ${hero.title}`,
+    hero.brand    ? `Brand: ${hero.brand}` : '',
+    hero.tagline  ? `Tagline: ${hero.tagline}` : '',
+    hero.category ? `Category: ${hero.category}` : '',
+    hero.dealPrice != null ? `Deal price: $${hero.dealPrice.toFixed(2)}` : '',
+    hero.tags?.length         ? `Tags: ${hero.tags.join(', ')}` : '',
+    hero.moodTags?.length     ? `Mood: ${hero.moodTags.join(', ')}` : '',
+    hero.audienceTags?.length ? `Audience: ${hero.audienceTags.join(', ')}` : '',
+    hero.mattersTags?.length  ? `Matters: ${hero.mattersTags.join(', ')}` : '',
+  ].filter(Boolean).join('\n')
+
+  const candidateLines = input.candidates.map((c, i) => {
+    const bits = [
+      `${i + 1}. id=${c.id}`,
+      `handle=${c.handle}`,
+      `title="${c.title}"`,
+      c.brand       ? `brand=${c.brand}` : '',
+      c.productType ? `type=${c.productType}` : '',
+      c.price != null ? `price=$${c.price.toFixed(2)}` : '',
+      c.tags?.length ? `tags=[${c.tags.slice(0, 6).join(',')}]` : '',
+      c.blurb       ? `blurb=${c.blurb.slice(0, 120)}` : '',
+    ].filter(Boolean)
+    return bits.join(' | ')
+  }).join('\n')
+
+  const userPrompt = `GROUP BRIEF
+Name: ${input.group.name}
+Kind: ${input.group.kind} \u2014 ${kindBrief(input.group.kind)}
+Context from editor: ${input.group.emmaContext}
+
+CANDIDATES (pick from these only; exclude the hero deal):
+${candidateLines}
+
+TASK
+Pick the best ${input.maxPicks} products from the candidates above. For each pick, write Emma\u2019s 12\u201320 word first-person aside explaining why it fits with the hero deal in *this* group\u2019s context.
+
+Voice rules (must follow):
+- First person ("been testing these side by side", "I keep coming back to this one").
+- Never "Buy now", "limited time", "until midnight", or any countdown language.
+- Never use "sex" as an adjective \u2014 use intimate, pleasure, wellness, slow-burn.
+- Never assume the reader\u2019s experience level.
+- Tasteful and warm. Suggestive OK, explicit not OK.
+- Use \u2665 sparingly (at most one per group).
+
+Return STRICT JSON only, no markdown fences:
+{ "picks": [{ "id": "<product GID>", "pairingWhy": "<12\u201320 word aside>" }, ...] }
+
+Return exactly ${input.maxPicks} picks, ordered best\u2192worst. Use only ids from the candidates list.`
+
+  const msg = await client.messages.create({
+    model: MODEL_FAST,
+    max_tokens: 1500,
+    // Cache the brand voice + hero context across groups within the same deal
+    // rotation. Ephemeral cache TTL ~5m; a midnight pass finishes in seconds.
+    system: [
+      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: heroBlock,     cache_control: { type: 'ephemeral' } },
+    ],
+    messages: [{ role: 'user', content: userPrompt }],
+  })
+
+  const block = msg.content[0]
+  if (block?.type !== 'text') throw new Error('pickForContextGroup: unexpected response type')
+
+  let parsed: { picks: Array<{ id: string; pairingWhy: string }> }
+  try {
+    parsed = JSON.parse(stripFences(block.text)) as typeof parsed
+  } catch {
+    const match = block.text.match(/\{[\s\S]*"picks"[\s\S]*\}/)
+    if (!match) throw new Error('pickForContextGroup: could not parse JSON response')
+    parsed = JSON.parse(match[0]) as typeof parsed
+  }
+
+  const validIds = new Set(input.candidates.map(c => c.id))
+  const picks = (parsed.picks ?? [])
+    .filter(p => p && typeof p.id === 'string' && typeof p.pairingWhy === 'string' && validIds.has(p.id))
+    .slice(0, input.maxPicks)
+
+  const usage = msg.usage as (typeof msg.usage) & {
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?:     number
+  }
+
+  return {
+    picks,
+    tokens: {
+      input:         usage?.input_tokens ?? 0,
+      output:        usage?.output_tokens ?? 0,
+      cacheCreation: usage?.cache_creation_input_tokens ?? 0,
+      cacheRead:     usage?.cache_read_input_tokens ?? 0,
+    },
+  }
+}
+
+// ─── Emma Curated Rails (agentic, tool-use loop) ─────────────────────────────
 
 export interface GenerateRailsResult {
   rails: RailProposal[]

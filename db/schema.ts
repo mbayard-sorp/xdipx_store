@@ -426,3 +426,4 @@ export const productCopurchase = pgTable('product_copurchase', {
   handleAIdx: index('copurchase_a_idx').on(t.handleA),
   handleBIdx: index('copurchase_b_idx').on(t.handleB),
 }))
+

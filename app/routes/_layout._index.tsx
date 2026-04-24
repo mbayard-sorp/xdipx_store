@@ -12,12 +12,15 @@ import { kvGet, KV_KEYS } from '~/lib/kv.server'
 import { getHomepageSections, getEmmaHeroSettings } from '~/lib/sanity.server'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
+import { getEmmaContextRows }    from '~/lib/emma-rails.server'
+import { getCartIdFromCookie }   from '~/lib/cart.server'
 import { EmmaHero }              from '~/components/store/EmmaHero'
 import { BundleHero }            from '~/components/store/BundleHero'
 import { QuietEndorsementHero }  from '~/components/store/QuietEndorsementHero'
 import { PairBundleHero }        from '~/components/store/PairBundleHero'
 import { PairBundleFullBleedHero } from '~/components/store/PairBundleFullBleedHero'
 import { ProductCarousel }       from '~/components/cms/ProductCarousel'
+import { EmmaContextRow }        from '~/components/home/EmmaContextRow'
 import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }  from '~/components/cms/ContentBlockRenderer'
 import { ProductStructuredData } from '~/components/seo/ProductStructuredData'
@@ -49,7 +52,7 @@ export function headers() {
   }
 }
 
-export async function loader(_args: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   // Read the live-deal row first (indexed, cheap); then fan out the Shopify
   // fetch alongside the other branches so it overlaps rather than chains.
   const dbDeal = await getLiveDealRow()
@@ -133,13 +136,25 @@ export async function loader(_args: LoaderFunctionArgs) {
       deal: null, bundle: null, forHim, forHer, bonusDeal,
       viewers: 0, soldToday: 0, cmsData, carouselProductMap,
       emmaHero: null, pairDeal: null, homepageSettings, pairBundleDeal: null,
+      emmaContextRows: [],
     }
   }
 
-  const [viewers, reviewData, aggregate] = await Promise.all([
+  // Session seed: prefer the cart cookie (stable per visitor once they engage);
+  // anon visitors fall back to a 60s rotating bucket so the edge-cached window
+  // naturally reshuffles on each revalidation. Cheap enough to compute inline.
+  const cartId  = getCartIdFromCookie(request)
+  const minuteBucket = Math.floor(Date.now() / 60_000)
+  const sessionSeed = cartId ?? `anon-${minuteBucket}`
+
+  const [viewers, reviewData, aggregate, emmaContextRows] = await Promise.all([
     kvGet<number>(KV_KEYS.viewerCount(deal.handle)).then(n => n ?? 0),
     getProductReviews(deal.shopifyProductId, { sort: 'newest', page: 1, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
+    getEmmaContextRows({ dealHandle: deal.handle, sessionSeed }).catch(err => {
+      console.error('[homepage] emma context rows failed:', err)
+      return []
+    }),
   ])
 
   return {
@@ -149,6 +164,7 @@ export async function loader(_args: LoaderFunctionArgs) {
     reviewTotal: reviewData.total,
     aggregate: aggregate ?? null,
     emmaHero, pairDeal, homepageSettings, pairBundleDeal,
+    emmaContextRows,
   }
 }
 
@@ -187,6 +203,7 @@ export default function Homepage() {
     deal, bundle, forHim, forHer, bonusDeal,
     cmsData, carouselProductMap,
     emmaHero, pairDeal, homepageSettings, pairBundleDeal,
+    emmaContextRows,
   } = useLoaderData<typeof loader>()
   const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
 
@@ -303,6 +320,11 @@ export default function Homepage() {
           </p>
         </div>
       )}
+
+      {/* ── Emma context rows (AI-personalized rails under the hero) ──────── */}
+      {emmaContextRows && emmaContextRows.length > 0 && emmaContextRows.map(row => (
+        <EmmaContextRow key={row.rail.id} row={row} />
+      ))}
 
       {/* ── CMS content blocks (ordered by Sanity `order` field) ──────────── */}
       {contentBlocks.map(block => (

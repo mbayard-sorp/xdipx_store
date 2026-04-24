@@ -123,6 +123,45 @@ export function createCronRoutes() {
   })
 
   /**
+   * POST /cron/regenerate-emma-rail
+   * Body: { railId: string, dealHandle?: string, trigger?: 'admin' | 'brief_change' | 'agent' }
+   * Regenerates one Emma context rail's picks against the current (or given)
+   * live deal. Used by Studio actions, admins, and agents via MCP/HTTP.
+   */
+  router.post('/regenerate-emma-rail', guard, async (req, res) => {
+    try {
+      const railId = typeof req.body?.railId === 'string' ? req.body.railId : null
+      if (!railId) {
+        res.status(400).json({ error: 'railId required' })
+        return
+      }
+      const trigger: 'admin' | 'brief_change' | 'agent' =
+        req.body?.trigger === 'brief_change' || req.body?.trigger === 'agent'
+          ? req.body.trigger
+          : 'admin'
+
+      // Resolve deal handle: body override, else current live deal.
+      let dealHandle = typeof req.body?.dealHandle === 'string' ? req.body.dealHandle : null
+      if (!dealHandle) {
+        const { getDailyDeal } = await import('../app/lib/shopify.server.js')
+        const live = await getDailyDeal().catch(() => null)
+        dealHandle = live?.handle ?? null
+      }
+      if (!dealHandle) {
+        res.status(400).json({ error: 'no_live_deal' })
+        return
+      }
+
+      const { regenerateRailById } = await import('../app/lib/emma-rails.server.js')
+      const result = await regenerateRailById(railId, dealHandle, trigger)
+      res.json({ ok: result.ok, ...(result as object) })
+    } catch (err) {
+      console.error('[cron:regenerate-emma-rail]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/inventory-check
    * Schedule: every 5 min — check if live deal is sold out, rotate if so
    */
