@@ -16,6 +16,7 @@ import { DEFAULT_BRAND_VOICE } from './settings.ts'
 import type { AnyContentBlockParam, Session } from './session.ts'
 import { TOOL_DEFINITIONS, runTool } from './tools/index.ts'
 import { IVR_LIMITS } from './config.ts'
+import { normalizeForTTS } from './tts-normalize.ts'
 
 const MODEL = 'claude-haiku-4-5-20251001'
 // Must fit a full tool_use JSON payload (createDraftOrder: items array +
@@ -45,12 +46,9 @@ if (!apiKey) {
 
 const client = new Anthropic({ apiKey: apiKey ?? '' })
 
-// ElevenLabs reads markdown markers literally ("asterisk asterisk"). Strip the
-// formatting characters that have no spoken meaning before forwarding deltas
-// to Twilio. Punctuation that affects prosody (.,?!:;-) is preserved.
-function stripForTTS(s: string): string {
-  return s.replace(/[*_`~#]+/g, '')
-}
+// Shared normalizer covers markdown, stray punctuation, smart quotes, emoji,
+// and URL-ish tokens that TTS engines verbalize literally. See
+// ivr/src/tts-normalize.ts (mirrored from app/lib/tts-normalize.ts).
 
 export interface StreamCallbacks {
   onToken: (token: string) => void
@@ -207,7 +205,7 @@ async function runOneHop(
   let ttsBuffer = ''
   stream.on('text', (delta) => {
     textBuf += delta
-    const spoken = stripForTTS(delta)
+    const spoken = normalizeForTTS(delta)
     if (!spoken) return
     ttsBuffer += spoken
     // Only flush when the buffer has word content — prevents standalone

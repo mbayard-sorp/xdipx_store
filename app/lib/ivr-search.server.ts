@@ -9,6 +9,7 @@ import { createClient } from '@sanity/client'
 import { buildQueryPatterns, fieldMatchAny } from './search.server'
 import { applyMapRule, type DisplayPrice } from './ai-agent/tools.server'
 import { getProductsByHandles, searchProducts as shopifySearch } from './shopify.server'
+import { normalizeForTTS } from './tts-normalize'
 import type { Product } from '~/types'
 
 // ─── Sanity client (read-only, CDN) ──────────────────────────────────────────
@@ -82,12 +83,14 @@ function toIvrCard(
         }))
       : undefined
 
+  // Belt-and-suspenders: normalize on read as well so Sanity docs authored
+  // before the write-side fix still sound clean when Claude speaks them.
   return {
-    title: p.title,
+    title: normalizeForTTS(p.title),
     handle: p.handle,
     category: sanityFields?.category ?? p.category ?? '',
-    tagline: sanityFields?.tagline ?? p.metaDescription ?? '',
-    voiceSummary: sanityFields?.voiceSummary ?? '',
+    tagline: normalizeForTTS(sanityFields?.tagline ?? p.metaDescription ?? ''),
+    voiceSummary: normalizeForTTS(sanityFields?.voiceSummary ?? ''),
     inStock: inStockVariants.length > 0,
     price: disp.price,
     pctOff: disp.pctOffMsrp,

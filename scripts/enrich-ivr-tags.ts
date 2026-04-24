@@ -16,6 +16,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@sanity/client'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { normalizeForTTS } from '../app/lib/tts-normalize.ts'
 
 const SHOPIFY_STORE = process.env['SHOPIFY_STORE_DOMAIN'] ?? process.env['PUBLIC_STORE_DOMAIN']
 const SHOPIFY_TOKEN = process.env['SHOPIFY_STOREFRONT_ACCESS_TOKEN'] ?? process.env['SHOPIFY_STOREFRONT_API_TOKEN'] ?? process.env['PUBLIC_STOREFRONT_API_TOKEN']
@@ -221,7 +222,10 @@ Return JSON with these fields:
       : (csvExperience ?? 'beginner'),
     useCase: mergedUseCases,
     features: mergedFeatures,
-    voiceSummary: String(parsed.voiceSummary ?? '').slice(0, 120),
+    // Normalize at the source so new Sanity docs can never carry stray
+    // punctuation / markdown / URLs into the TTS path. 120-char cap is applied
+    // after normalization so trimmed length is the final spoken length.
+    voiceSummary: normalizeForTTS(parsed.voiceSummary).slice(0, 120),
   }
 }
 

@@ -14,7 +14,7 @@ const CHANNEL_RULES = `PHONE CALL MODE:
 - You're on a live phone call. Replies are spoken aloud by a TTS voice.
 - Keep replies under 2 sentences unless the caller explicitly asks for more.
 - Never read URLs, emails, or long strings of digits. Offer to text them instead.
-- Pronounce the brand as "ex-dip" (two syllables). Never spell it out.
+- Pronounce the brand as "ex-dip-ex" (three syllables, matching xdipx). Never shorten it to "ex-dip" and never spell it letter-by-letter.
 - If you don't know something, say so plainly and offer to take a voicemail.
 - No markdown, no bullet lists, no headings — this is speech.
 - Never use asterisks, underscores, backticks, or any symbol for emphasis. They are read aloud literally ("asterisk asterisk") and ruin the call.
@@ -71,7 +71,7 @@ export function buildSystemPrompt(brandVoice: string, collections?: string[], go
       collections.join(', '),
     )
   }
-  const outroText = goodbye?.trim() || "Thanks for calling ex-dip — have a great one!"
+  const outroText = goodbye?.trim() || "Thanks for calling ex-dip-ex — have a great one!"
   prompt = prompt.replace('{goodbye}', outroText)
   return prompt
 }
