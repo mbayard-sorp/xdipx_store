@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   isRouteErrorResponse,
   Links,
@@ -20,6 +21,18 @@ const BOTID_PROTECTED_ROUTES = [
   { path: '/admin/login',   method: 'POST' },
   { path: '/api/reviews',   method: 'POST' },
 ]
+
+// botid serializes its runtime via Function.toString(), which produces
+// different source on Node vs the browser. SSR-rendering it causes a
+// hydration mismatch in <Layout> that breaks event handlers on the page
+// (e.g. the wishlist heart). Mount it after hydration instead — the
+// script still loads in time for any protected POST.
+function BotIdMount() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+  if (!mounted) return null
+  return <BotIdClient protect={BOTID_PROTECTED_ROUTES} />
+}
 
 if (typeof window !== 'undefined') {
   const dsn = (window as unknown as { ENV?: { SENTRY_DSN?: string } }).ENV?.SENTRY_DSN
@@ -97,7 +110,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
-        <BotIdClient protect={BOTID_PROTECTED_ROUTES} />
+        <BotIdMount />
         {(ga4Id || gtmId) && (
           <script
             dangerouslySetInnerHTML={{

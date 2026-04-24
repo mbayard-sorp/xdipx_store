@@ -99,6 +99,12 @@ export function HeartButton({
     e.preventDefault()
     e.stopPropagation()
 
+    // Session hasn't resolved yet — ignore the click rather than fall through
+    // to the localStorage path. Otherwise a logged-in user clicking before
+    // /api/session lands writes to localStorage (no DB persist) and then the
+    // effect that mirrors heartedFromLoader reverts the optimistic toggle.
+    if (!isSessionLoaded) return
+
     const next = !hearted
     setHearted(next) // optimistic
     if (!next) setToast(null) // dismiss on un-heart
