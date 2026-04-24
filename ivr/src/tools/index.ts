@@ -10,6 +10,7 @@ import { lookupOrder } from './orders.ts'
 import { sendDealLinkSMS } from './sms.ts'
 import { recordVoicemail } from './voicemail.ts'
 import { callQaTool } from './catalog.ts'
+import { generateEmmaOrderNote } from '../emma-note.ts'
 
 const MAX_ORDER_LOOKUPS_PER_CALL = 15
 
@@ -240,7 +241,18 @@ export async function runTool(
     case 'listCollections':
     case 'lookupReturningCustomer':
     case 'createDraftOrder': {
-      const result = await callQaTool(name, (_input ?? {}) as Record<string, unknown>, {
+      const baseInput = (_input ?? {}) as Record<string, unknown>
+      let toolInput: Record<string, unknown> = baseInput
+      if (name === 'createDraftOrder') {
+        const emmaNote = await generateEmmaOrderNote(ctx.session)
+        if (emmaNote) {
+          toolInput = { ...baseInput, customMessage: emmaNote }
+          console.log(
+            `[ivr] emma-note generated callSid=${ctx.session.callSid} chars=${emmaNote.length}`,
+          )
+        }
+      }
+      const result = await callQaTool(name, toolInput, {
         channel: 'voice',
         ...(ctx.session.fromNumber ? { phone: ctx.session.fromNumber } : {}),
       })

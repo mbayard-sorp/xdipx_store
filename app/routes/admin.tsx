@@ -19,7 +19,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function AdminLayout() {
   const { logoUrl, adminUser } = useLoaderData<typeof loader>()
   return (
-    <div className="flex min-h-screen bg-brand-mist">
+    <div className="flex min-h-screen bg-cream-2">
       <AdminNav logoUrl={logoUrl} adminUser={adminUser} />
       <div className="flex-1 p-8 overflow-auto">
         <Outlet />

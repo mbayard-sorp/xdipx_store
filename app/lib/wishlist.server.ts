@@ -347,6 +347,49 @@ export async function moveItem(
   await db.delete(wishlistItems).where(eq(wishlistItems.id, item.id))
 }
 
+export async function setGiftMode(
+  customerGid: string,
+  listId: number,
+  giftMode: boolean,
+): Promise<WishlistRow> {
+  const list = await db.query.wishlists.findFirst({
+    where: and(eq(wishlists.id, listId), eq(wishlists.customerGid, customerGid)),
+  })
+  if (!list) throw new Error('List not found')
+  const rows = await db
+    .update(wishlists)
+    .set({ giftMode, updatedAt: new Date() })
+    .where(eq(wishlists.id, listId))
+    .returning()
+  return rows[0]!
+}
+
+export async function regenerateShareLink(
+  customerGid: string,
+  listId: number,
+): Promise<WishlistRow> {
+  const list = await db.query.wishlists.findFirst({
+    where: and(eq(wishlists.id, listId), eq(wishlists.customerGid, customerGid)),
+  })
+  if (!list) throw new Error('List not found')
+  if (!list.publicSlug) throw new Error('List is not shared')
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const slug = generateSlug()
+      const rows = await db
+        .update(wishlists)
+        .set({ publicSlug: slug, updatedAt: new Date() })
+        .where(eq(wishlists.id, listId))
+        .returning()
+      return rows[0]!
+    } catch (err) {
+      if (attempt === 4) throw err
+    }
+  }
+  throw new Error('Could not regenerate link')
+}
+
 /**
  * Merge localStorage hearts (captured while logged-out) into the default list.
  * Called after login/register. Idempotent.

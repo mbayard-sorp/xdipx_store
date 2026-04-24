@@ -1,19 +1,20 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher, useSearchParams, redirect } from 'react-router'
-import { Fragment, useMemo, useRef, useState, type DragEvent } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useCountdown } from '~/hooks/useCountdown'
 import { db } from '~/lib/db.server'
 import { dealHistory, pipelineSettings } from '../../db/schema'
 import { eq, like, asc, min, max, count, sql, inArray, and, isNull } from 'drizzle-orm'
 import {
   getAdminProductData,
-  getDealByShopifyId, updateProductMetafield,
+  getDealByShopifyId, getDealByHandle, updateProductMetafield,
   getVariantCost, pushProductToShopify, getAccessoryProductsAdmin,
   getProductAdminImages, updateProductTags, fetchAllDealProducts,
-  updateVariantPricing,
+  updateVariantPricing, getProductVariantGids,
 } from '~/lib/shopify.server'
 import type { AdminProductImage } from '~/lib/shopify.server'
 import { generateCopy, generateSEOTitle } from '~/lib/claude.server'
+import { getRailDraftsForDeal } from '~/lib/sanity.server'
 import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
 import { ImageManager } from '~/components/admin/ImageManager'
 import { PricingPanel } from '~/components/admin/PricingPanel'
@@ -83,6 +84,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     productImages: AdminProductImage[]
     promptSettings: Record<string, string>
     dbDealId: number
+    railDrafts: Awaited<ReturnType<typeof getRailDraftsForDeal>>
     pricingConfig: {
       dealPrice: number
       msrp: number
@@ -106,9 +108,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         const promptSettings: Record<string, string> = {}
         for (const row of promptRows) promptSettings[row.key] = row.value
 
-        const [productImages, pinnedAccessoryIds] = await Promise.all([
+        const [productImages, pinnedAccessoryIds, railDrafts] = await Promise.all([
           deal ? getProductAdminImages(dbDeal.shopifyProductId) : Promise.resolve([] as AdminProductImage[]),
           getPinnedAccessoryIds(),
+          deal ? getRailDraftsForDeal(deal.id).catch(() => []) : Promise.resolve([] as Awaited<ReturnType<typeof getRailDraftsForDeal>>),
         ])
         const pinnedAccessories = pinnedAccessoryIds.length
           ? await getAccessoryProductsAdmin(pinnedAccessoryIds)
@@ -123,6 +126,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           productImages,
           promptSettings,
           dbDealId: dbDeal.id,
+          railDrafts,
           pricingConfig: {
             dealPrice:          parseFloat(dbDeal.dealPrice ?? '0') || 0,
             msrp:               parseFloat(dbDeal.msrp ?? '0') || 0,
@@ -137,6 +141,44 @@ export async function loader({ request }: LoaderFunctionArgs) {
         // editorData stays null — editor panel shows "No deal data found"
       }
     }
+  }
+
+  // Homepage template toggle + free-shipping flag (global; stored in pipelineSettings).
+  const templateSettingRows = await db
+    .select()
+    .from(pipelineSettings)
+    .where(inArray(pipelineSettings.key, [
+      'homepage_template',
+      'homepage_show_free_shipping',
+      'homepage_pair_product_handle',
+      'homepage_pair_discount_pct',
+    ]))
+  const pairHandle = (templateSettingRows.find(r => r.key === 'homepage_pair_product_handle')?.value ?? '').trim()
+  const pairDiscountPct = parseInt(templateSettingRows.find(r => r.key === 'homepage_pair_discount_pct')?.value ?? '10', 10) || 10
+
+  // Resolve paired product (lightweight — for toolbar slot display)
+  let pairProduct: { title: string; brand: string; handle: string; dealPrice: number; image: string | null } | null = null
+  if (pairHandle) {
+    try {
+      const deal = await getDealByHandle(pairHandle)
+      if (deal) {
+        pairProduct = {
+          title: deal.seoTitle,
+          brand: deal.brand,
+          handle: deal.handle,
+          dealPrice: deal.dealPrice,
+          image: deal.images[0]?.url ?? null,
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  const homepageSettings = {
+    template: (templateSettingRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed',
+    showFreeShipping: (templateSettingRows.find(r => r.key === 'homepage_show_free_shipping')?.value ?? 'true') === 'true',
+    pairProductHandle: pairHandle,
+    pairDiscountPct,
+    pairProduct,
   }
 
   // Full export list — all pending/live deals (and the live row), unpaginated,
@@ -156,7 +198,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     deals, shopifyDataMap, editorData, editId, liveDealRow: liveDealRow ?? null,
-    page: safePage, totalPages, totalFiltered, allDealsForExport,
+    page: safePage, totalPages, totalFiltered, allDealsForExport, homepageSettings,
   }
 }
 
@@ -325,20 +367,38 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: true }
   }
 
+  if (intent === 'save-pair-product') {
+    // Accepts either a dealId (from drag-drop) → resolves to Shopify handle, or
+    // an empty string to clear. Writes pipelineSettings.homepage_pair_product_handle.
+    const dealIdRaw = (form.get('dealId') as string | null)?.trim() ?? ''
+    let handle = ''
+    if (dealIdRaw) {
+      const id = parseInt(dealIdRaw, 10)
+      if (Number.isFinite(id)) {
+        const row = await db.select().from(dealHistory).where(eq(dealHistory.id, id)).limit(1)
+        const productId = row[0]?.shopifyProductId
+        if (productId) {
+          const numericId = productId.replace('gid://shopify/Product/', '')
+          try {
+            const deal = await getDealByShopifyId(numericId)
+            if (deal?.handle) handle = deal.handle
+          } catch { /* ignore */ }
+        }
+      }
+    }
+    await db
+      .insert(pipelineSettings)
+      .values({ key: 'homepage_pair_product_handle', value: handle, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: pipelineSettings.key, set: { value: handle, updatedAt: new Date() } })
+    return { ok: true, handle }
+  }
+
   if (intent === 'save-field') {
     const productId = form.get('productId') as string
     const key       = form.get('key') as string
     const value     = form.get('value') as string
     const type      = (form.get('type') as string) || 'single_line_text_field'
     await updateProductMetafield(productId, key, value, type)
-    return { ok: true }
-  }
-
-  if (intent === 'save-bullets') {
-    const productId = form.get('productId') as string
-    const raw       = (form.get('value') as string | null) ?? ''
-    const bullets   = raw.split('\n').map(l => l.trim()).filter(Boolean)
-    await updateProductMetafield(productId, 'feature_bullets', JSON.stringify(bullets), 'json')
     return { ok: true }
   }
 
@@ -365,14 +425,35 @@ export async function action({ request }: ActionFunctionArgs) {
       ? parseFloat(vaultPriceOverride).toFixed(2)
       : null
 
+    const dealPriceNum = parseFloat(dealPrice || '0') || 0
+    const msrpNum      = parseFloat(msrp      || '0') || 0
+
     await db.update(dealHistory).set({
-      dealPrice:     (parseFloat(dealPrice     || '0') || 0).toFixed(2),
-      msrp:          (parseFloat(msrp          || '0') || 0).toFixed(2),
+      dealPrice:     dealPriceNum.toFixed(2),
+      msrp:          msrpNum.toFixed(2),
       wholesaleCost: (parseFloat(wholesaleCost || '0') || 0).toFixed(2),
       mapPrice:      (parseFloat(mapPrice      || '0') || 0).toFixed(2),
       pctOffMsrp:    clampedPct.toFixed(2),
       vaultPrice:    vaultVal,
     }).where(eq(dealHistory.shopifyProductId, productId))
+
+    // Push pricing to every Shopify variant so the storefront reflects the
+    // change immediately. Previously this only staged the config in Drizzle
+    // and deferred the push to activateDeal() — mismatch with editorial UX.
+    if (dealPriceNum > 0) {
+      try {
+        const variantGids = await getProductVariantGids(productIdRaw)
+        const compareAt = msrpNum > 0 ? msrpNum.toFixed(2) : ''
+        await Promise.all(
+          variantGids.map(gid =>
+            updateVariantPricing(gid, dealPriceNum.toFixed(2), compareAt),
+          ),
+        )
+      } catch (err) {
+        console.error('[admin/deals] save-pricing variant push failed:', err)
+        return { ok: false, error: err instanceof Error ? err.message : 'Shopify push failed' }
+      }
+    }
 
     return { ok: true }
   }
@@ -420,12 +501,11 @@ export async function action({ request }: ActionFunctionArgs) {
       const productContext = { title: seoTitle, brand, description: rawDesc, categories, dealPrice, msrp }
 
       const specsResult = await generateCopy({ type: 'specifications', product: productContext })
-      const [taglineResult, storyResult, bothWaysResult, bulletsResult, seoMetaResult, boxContentsResult] =
+      const [taglineResult, storyResult, bothWaysResult, seoMetaResult, boxContentsResult] =
         await Promise.all([
           generateCopy({ type: 'tagline',      product: productContext }),
           generateCopy({ type: 'full_story',   product: productContext }),
           generateCopy({ type: 'both_ways',    product: productContext }),
-          generateCopy({ type: 'bullets',      product: productContext }),
           generateCopy({ type: 'seo_meta',     product: productContext }),
           generateCopy({ type: 'box_contents', product: productContext }),
         ])
@@ -433,7 +513,6 @@ export async function action({ request }: ActionFunctionArgs) {
       const tagline     = Array.isArray(taglineResult.content) ? (taglineResult.content[0] ?? '') : taglineResult.content as string
       const fullStory   = storyResult.content as string
       const bothWays    = bothWaysResult.content as { forHim: string; forHer: string }
-      const bullets     = bulletsResult.content as string[]
       const seoMeta     = seoMetaResult.content as string
       const specs       = specsResult.content as string
       const boxContents = boxContentsResult.content as string[]
@@ -443,7 +522,7 @@ export async function action({ request }: ActionFunctionArgs) {
         shopifyProductId: numericId,
         tagline, fullStory, description: fullStory,
         worksForHim: bothWays.forHim, worksForHer: bothWays.forHer,
-        featureBullets: bullets, seoMetaDescription: seoMeta,
+        seoMetaDescription: seoMeta,
         specifications: specs, boxContents,
       })
 
@@ -487,15 +566,15 @@ function SaveableField({
 
   const buttonLabel = fetcher.state === 'submitting' ? 'Saving...' : saved ? 'Saved!' : 'Save'
   const buttonClass = fetcher.state === 'submitting'
-    ? 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
+    ? 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-ink/10 text-ink/40 cursor-not-allowed'
     : saved
       ? 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-green-100 text-green-700 transition-colors'
-      : 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-brand-mist text-brand-purple hover:bg-brand-purple/10 transition-colors'
+      : 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
 
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm">
-      <h3 className="font-semibold text-brand-charcoal mb-1" style={{ fontFamily: 'var(--font-display)' }}>{label}</h3>
-      {hint && <p className="text-xs text-brand-charcoal/40 mb-3">{hint}</p>}
+      <h3 className="font-semibold text-ink mb-1" style={{ fontFamily: 'var(--font-display)' }}>{label}</h3>
+      {hint && <p className="text-xs text-ink/40 mb-3">{hint}</p>}
       <fetcher.Form method="post" className="flex flex-col gap-2">
         <input type="hidden" name="intent"    value={intent} />
         <input type="hidden" name="productId" value={productId} />
@@ -505,12 +584,280 @@ function SaveableField({
           name="value"
           defaultValue={defaultValue}
           rows={rows}
-          className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm text-brand-charcoal resize-y focus:outline-none focus:ring-2 focus:ring-brand-coral/30 font-mono"
+          className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm text-ink resize-y focus:outline-none focus:ring-2 focus:ring-coral/30 font-mono"
         />
         <button type="submit" disabled={fetcher.state === 'submitting'} className={buttonClass}>
           {buttonLabel}
         </button>
       </fetcher.Form>
+    </div>
+  )
+}
+
+// ─── RailGenerationPanel ─────────────────────────────────────────────────
+// Two-step Emma rail generation: ♥ Generate rails → review/edit drafts → publish.
+// POSTs to /api/generate-rails and /api/publish-rails (both admin-auth-gated).
+
+interface RailDraftView {
+  _id: string
+  status?: 'draft' | 'approved' | 'live' | 'archived'
+  active?: boolean
+  order?: number
+  heading: string
+  eyebrow?: string
+  emmaAside?: string
+  target: 'homepage' | 'pdp'
+  productHandles?: string[]
+  layout?: 'carousel' | 'grid' | 'grid-3'
+  bgStyle?: 'white' | 'cream' | 'mist' | 'charcoal' | 'purple'
+  ctaLink?: string
+  ctaLabel?: string
+  rationale?: string
+  generatedAt?: string
+}
+
+function RailGenerationPanel({
+  productId,
+  hasCopy,
+  initialDrafts,
+}: {
+  productId: string
+  hasCopy: boolean
+  initialDrafts: RailDraftView[]
+}) {
+  const [drafts, setDrafts]   = useState<RailDraftView[]>(initialDrafts)
+  const [genState, setGen]    = useState<'idle' | 'generating' | 'error'>('idle')
+  const [genError, setGenErr] = useState<string | null>(null)
+  const [pubState, setPub]    = useState<'idle' | 'publishing' | 'success' | 'error'>('idle')
+  const [pubError, setPubErr] = useState<string | null>(null)
+  const [meta, setMeta]       = useState<{ pool?: number; turns?: number } | null>(null)
+
+  async function handleGenerate() {
+    setGen('generating')
+    setGenErr(null)
+    try {
+      const res = await fetch('/api/generate-rails', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ dealId: productId }),
+      })
+      const data = await res.json() as { drafts?: RailDraftView[]; error?: string; candidatePoolSize?: number; turns?: number }
+      if (!res.ok) {
+        setGen('error')
+        setGenErr(data.error ?? `HTTP ${res.status}`)
+        return
+      }
+      setDrafts(data.drafts ?? [])
+      setMeta({ pool: data.candidatePoolSize ?? 0, turns: data.turns ?? 0 })
+      setGen('idle')
+    } catch (err) {
+      setGen('error')
+      setGenErr(err instanceof Error ? err.message : 'Generation failed')
+    }
+  }
+
+  function patchDraft(id: string, patch: Partial<RailDraftView>) {
+    setDrafts(prev => prev.map(d => d._id === id ? { ...d, ...patch } : d))
+  }
+
+  async function handlePublishAll() {
+    const toPublish = drafts.filter(d => d.status === 'draft')
+    if (toPublish.length === 0) return
+    setPub('publishing')
+    setPubErr(null)
+    try {
+      const res = await fetch('/api/publish-rails', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          dealId: productId,
+          rails: toPublish.map(d => ({
+            _id: d._id,
+            target: d.target,
+            heading: d.heading,
+            eyebrow: d.eyebrow,
+            emmaAside: d.emmaAside,
+            productHandles: d.productHandles,
+            layout: d.layout,
+            bgStyle: d.bgStyle,
+            ctaLabel: d.ctaLabel,
+            ctaLink: d.ctaLink,
+            order: d.order,
+          })),
+        }),
+      })
+      const data = await res.json() as { published?: unknown[]; errors?: { error: string }[]; drafts?: RailDraftView[] }
+      if (!res.ok) {
+        setPub('error')
+        setPubErr((data as { error?: string }).error ?? `HTTP ${res.status}`)
+        return
+      }
+      if (data.errors?.length) {
+        setPub('error')
+        setPubErr(data.errors.map(e => e.error).join('; '))
+        if (data.drafts) setDrafts(data.drafts)
+        return
+      }
+      setDrafts(data.drafts ?? [])
+      setPub('success')
+      setTimeout(() => setPub('idle'), 2500)
+    } catch (err) {
+      setPub('error')
+      setPubErr(err instanceof Error ? err.message : 'Publish failed')
+    }
+  }
+
+  const pendingDrafts = drafts.filter(d => d.status === 'draft')
+  const liveRails     = drafts.filter(d => d.status === 'live')
+
+  return (
+    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+          ♥ Emma Rails
+        </h3>
+        {meta && (
+          <span className="text-[11px] text-ink/40">
+            pool {meta.pool} · {meta.turns} turns
+          </span>
+        )}
+      </div>
+
+      {!hasCopy ? (
+        <p className="text-sm text-ink/50">Generate deal copy first — rails draw on the deal's tags and audience.</p>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={genState === 'generating'}
+            className={
+              genState === 'generating'
+                ? 'w-full py-2.5 rounded-xl text-sm font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+                : 'w-full py-2.5 rounded-xl text-sm font-bold bg-coral text-white hover:opacity-90 transition-opacity'
+            }
+          >
+            {genState === 'generating' ? 'Emma is curating... (~30s)' : drafts.length ? '♥ Regenerate Rails' : '♥ Generate Rails'}
+          </button>
+
+          {genError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">{genError}</div>
+          )}
+
+          {pendingDrafts.length > 0 && (
+            <div className="space-y-3 pt-2 border-t border-cream-2">
+              <p className="text-xs font-semibold text-ink/60 uppercase tracking-wide">Pending review · {pendingDrafts.length}</p>
+              {pendingDrafts.map(draft => (
+                <RailDraftCard key={draft._id} draft={draft} onPatch={patch => patchDraft(draft._id, patch)} />
+              ))}
+
+              <button
+                type="button"
+                onClick={handlePublishAll}
+                disabled={pubState === 'publishing'}
+                className={
+                  pubState === 'publishing'
+                    ? 'w-full py-2 rounded-xl text-sm font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+                    : pubState === 'success'
+                    ? 'w-full py-2 rounded-xl text-sm font-bold bg-sage text-white'
+                    : 'w-full py-2 rounded-xl text-sm font-bold bg-ink text-white hover:opacity-90 transition-opacity'
+                }
+              >
+                {pubState === 'publishing' ? 'Publishing...' : pubState === 'success' ? '✓ Published' : 'Publish all rails'}
+              </button>
+
+              {pubError && (
+                <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">{pubError}</div>
+              )}
+            </div>
+          )}
+
+          {liveRails.length > 0 && (
+            <div className="space-y-2 pt-3 border-t border-cream-2">
+              <p className="text-xs font-semibold text-ink/60 uppercase tracking-wide">Live · {liveRails.length}</p>
+              {liveRails.map(d => (
+                <div key={d._id} className="text-xs text-ink/60 flex justify-between">
+                  <span>{d.target === 'homepage' ? '🏠' : '📦'} {d.heading}</span>
+                  <span className="text-sage font-semibold">live</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function RailDraftCard({
+  draft,
+  onPatch,
+}: {
+  draft: RailDraftView
+  onPatch: (patch: Partial<RailDraftView>) => void
+}) {
+  const handles = draft.productHandles ?? []
+  function removeHandle(idx: number) {
+    onPatch({ productHandles: handles.filter((_, i) => i !== idx) })
+  }
+  return (
+    <div className="border border-cream-2 rounded-xl p-3 space-y-2 bg-cream/20">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-bold uppercase tracking-wide text-ink/50">
+          {draft.target === 'homepage' ? '🏠 Homepage' : '📦 PDP'}
+        </span>
+        <select
+          value={draft.target}
+          onChange={e => onPatch({ target: e.target.value as 'homepage' | 'pdp' })}
+          className="text-[11px] border border-cream-2 rounded px-2 py-0.5"
+        >
+          <option value="homepage">Homepage</option>
+          <option value="pdp">PDP</option>
+        </select>
+      </div>
+
+      <input
+        type="text"
+        value={draft.heading}
+        onChange={e => onPatch({ heading: e.target.value })}
+        placeholder="Heading"
+        className="w-full text-sm font-semibold border border-cream-2 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-coral/40"
+      />
+
+      <input
+        type="text"
+        value={draft.eyebrow ?? ''}
+        onChange={e => onPatch({ eyebrow: e.target.value })}
+        placeholder="Eyebrow (optional)"
+        className="w-full text-xs border border-cream-2 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-coral/40"
+      />
+
+      <textarea
+        value={draft.emmaAside ?? ''}
+        onChange={e => onPatch({ emmaAside: e.target.value })}
+        placeholder="Emma aside"
+        rows={2}
+        className="w-full text-xs italic text-ink/70 border border-cream-2 rounded-lg px-2 py-1 resize-y focus:outline-none focus:ring-1 focus:ring-coral/40"
+      />
+
+      <div className="flex flex-wrap gap-1.5">
+        {handles.map((h, i) => (
+          <span key={`${h}-${i}`} className="inline-flex items-center gap-1 text-[11px] bg-paper border border-cream-2 rounded-full px-2 py-0.5">
+            {h}
+            <button
+              type="button"
+              onClick={() => removeHandle(i)}
+              className="text-ink/40 hover:text-coral"
+              aria-label={`Remove ${h}`}
+            >×</button>
+          </span>
+        ))}
+        {handles.length === 0 && <span className="text-[11px] text-red-600">No products — rail won't publish</span>}
+      </div>
+
+      {draft.rationale && (
+        <p className="text-[11px] text-ink/40 italic">Why: {draft.rationale}</p>
+      )}
     </div>
   )
 }
@@ -530,7 +877,7 @@ function RawDescriptionPanel({ deal, categories, editId }: {
 
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
-      <h3 className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+      <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
         Raw Description
       </h3>
       <saveFetcher.Form method="post" className="flex flex-col gap-2">
@@ -541,17 +888,17 @@ function RawDescriptionPanel({ deal, categories, editId }: {
           name="value"
           defaultValue={deal.rawDescription ?? ''}
           rows={8}
-          className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm text-brand-charcoal resize-y focus:outline-none focus:ring-2 focus:ring-brand-coral/30 font-mono"
+          className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm text-ink resize-y focus:outline-none focus:ring-2 focus:ring-coral/30 font-mono"
         />
         <button
           type="submit"
-          className="self-end text-xs font-bold px-3 py-1.5 rounded-full bg-brand-mist text-brand-purple hover:bg-brand-purple/10 transition-colors"
+          className="self-end text-xs font-bold px-3 py-1.5 rounded-full bg-cream-2 text-sage hover:bg-sage/10 transition-colors"
         >
           {saveFetcher.state === 'submitting' ? 'Saving...' : hasSaved ? 'Saved!' : 'Save Description'}
         </button>
       </saveFetcher.Form>
 
-      <generateFetcher.Form method="post" className="pt-2 border-t border-brand-mist">
+      <generateFetcher.Form method="post" className="pt-2 border-t border-cream-2">
         <input type="hidden" name="intent"         value="generate-all" />
         <input type="hidden" name="productId"       value={deal.shopifyProductId} />
         <input type="hidden" name="rawDescription"  value={deal.rawDescription ?? ''} />
@@ -566,14 +913,14 @@ function RawDescriptionPanel({ deal, categories, editId }: {
           disabled={generateFetcher.state !== 'idle' || !deal.rawDescription}
           className={
             generateFetcher.state !== 'idle' || !deal.rawDescription
-              ? 'w-full py-2.5 rounded-xl text-sm font-bold bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
-              : 'w-full py-2.5 rounded-xl text-sm font-bold bg-brand-gradient text-white hover:opacity-90 transition-opacity'
+              ? 'w-full py-2.5 rounded-xl text-sm font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : 'w-full py-2.5 rounded-xl text-sm font-bold bg-coral text-white hover:opacity-90 transition-opacity'
           }
         >
           {generateFetcher.state !== 'idle' ? 'Generating... (~30s)' : 'Generate All Fields'}
         </button>
         {!deal.rawDescription && (
-          <p className="text-xs text-brand-charcoal/40 mt-2 text-center">Save a raw description first</p>
+          <p className="text-xs text-ink/40 mt-2 text-center">Save a raw description first</p>
         )}
       </generateFetcher.Form>
 
@@ -627,6 +974,448 @@ function ReadinessChecklist({ deal }: {
   )
 }
 
+// ─── Homepage Template Toggle ───────────────────────────────────────────
+
+type HomepageSettings = {
+  template:          'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed'
+  showFreeShipping:  boolean
+  pairProductHandle: string
+  pairDiscountPct:   number
+  pairProduct:       { title: string; brand: string; handle: string; dealPrice: number; image: string | null } | null
+}
+
+function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
+  const fetcher = useFetcher<{ ok: boolean }>()
+  const saving  = fetcher.state !== 'idle'
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const save = (key: string, value: string) => {
+    const fd = new FormData()
+    fd.set('intent', 'save-setting')
+    fd.set('key',    key)
+    fd.set('value',  value)
+    fetcher.submit(fd, { method: 'post' })
+  }
+
+  const label = settings.template === 'quiet_endorsement'
+    ? 'Quiet endorsement'
+    : settings.template === 'pair_bundle'
+      ? 'Pair bundle'
+      : settings.template === 'pair_bundle_fullbleed'
+        ? 'Pair bundle · Full Bleed'
+        : 'Default'
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-ink bg-white border border-cream-2 rounded-xl hover:border-sage/40 hover:text-sage transition-colors"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3"  width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+        Homepage: {label}
+        {saving && <span className="text-ink/30">…</span>}
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-72 bg-white border border-cream-2 rounded-xl shadow-lg p-4 z-20 space-y-3">
+          <div>
+            <label className="block text-[11px] uppercase tracking-wide font-bold text-ink/50 mb-1">
+              Template
+            </label>
+            <select
+              value={settings.template}
+              onChange={e => save('homepage_template', e.target.value)}
+              className="w-full px-2 py-1.5 text-sm border border-cream-2 rounded-lg bg-white text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
+            >
+              <option value="default">Default (Emma hero)</option>
+              <option value="quiet_endorsement">Quiet endorsement</option>
+              <option value="pair_bundle">Pair bundle</option>
+              <option value="pair_bundle_fullbleed">Pair bundle · Full Bleed</option>
+            </select>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-ink cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.showFreeShipping}
+              onChange={e => save('homepage_show_free_shipping', e.target.checked ? 'true' : 'false')}
+              className="accent-coral"
+            />
+            Show <span className="italic">· free shipping</span> on banner
+          </label>
+          {(settings.template === 'pair_bundle' || settings.template === 'pair_bundle_fullbleed') && (
+            <div>
+              <label className="block text-[11px] uppercase tracking-wide font-bold text-ink/50 mb-1">
+                Pair discount %
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={50}
+                defaultValue={settings.pairDiscountPct}
+                onBlur={e => save('homepage_pair_discount_pct', String(parseInt(e.target.value, 10) || 0))}
+                className="w-24 px-2 py-1.5 text-sm border border-cream-2 rounded-lg bg-white text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
+              />
+              <p className="text-[11px] text-ink/40 mt-1">Match this to your Shopify Automatic Discount rule on cart attribute <code>pair_bundle=live</code>.</p>
+            </div>
+          )}
+          <p className="text-[11px] text-ink/40 leading-relaxed">
+            Applies to whichever deal is currently live. Bundle hero always wins.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Quiet Endorsement Editor Panel ─────────────────────────────────────
+
+function QuietEndorsementPanel({ deal }: {
+  deal: NonNullable<Awaited<ReturnType<typeof getDealByShopifyId>>>
+}) {
+  const genFetcher  = useFetcher<{ result?: { type: string; content: { eyebrow: string; subhead: string; body: string; bannerHeadline: string } }; error?: string }>()
+  const saveFetcher = useFetcher<{ ok: boolean }>()
+
+  const initial = deal.quietEndorsementCopy ?? null
+  const [copy, setCopy] = useState<{ eyebrow: string; subhead: string; body: string; bannerHeadline: string } | null>(initial)
+
+  const generated = genFetcher.data?.result?.content
+  useEffect(() => {
+    if (generated) setCopy(generated)
+  }, [generated])
+
+  const generating = genFetcher.state !== 'idle'
+  const saving     = saveFetcher.state !== 'idle'
+  const saved      = saveFetcher.state === 'idle' && saveFetcher.data?.ok === true
+
+  const handleGenerate = () => {
+    const fd = new FormData()
+    fd.set('type', 'quiet_endorsement')
+    fd.set('product', JSON.stringify({
+      title:         deal.seoTitle ?? deal.sku,
+      brand:         deal.brand,
+      description:   deal.fullStory ?? deal.metaDescription ?? '',
+      categories:    [deal.category],
+      dealPrice:     deal.dealPrice,
+      msrp:          deal.msrp,
+      mapRestricted: deal.mapRestricted ?? false,
+    }))
+    genFetcher.submit(fd, { method: 'post', action: '/api/generate-copy' })
+  }
+
+  const handleSave = () => {
+    if (!copy) return
+    const fd = new FormData()
+    fd.set('intent',    'save-field')
+    fd.set('productId', deal.shopifyProductId)
+    fd.set('key',       'quiet_endorsement_copy')
+    fd.set('type',      'json')
+    fd.set('value',     JSON.stringify(copy))
+    saveFetcher.submit(fd, { method: 'post' })
+  }
+
+  return (
+    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+          Quiet endorsement copy
+        </h3>
+        <span className="text-[11px] text-ink/40">homepage alt template</span>
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={generating}
+          className={
+            generating
+              ? 'flex-1 py-2 rounded-xl text-xs font-semibold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : 'flex-1 py-2 rounded-xl text-xs font-semibold bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
+          }
+        >
+          {generating ? 'Generating…' : '♥ Generate quiet-endorsement copy'}
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!copy || saving}
+          className={
+            !copy || saving
+              ? 'px-4 py-2 rounded-xl text-xs font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : saved
+                ? 'px-4 py-2 rounded-xl text-xs font-bold bg-green-100 text-green-700'
+                : 'px-4 py-2 rounded-xl text-xs font-bold bg-coral text-white hover:opacity-90 transition-opacity'
+          }
+        >
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Use this ♥'}
+        </button>
+      </div>
+      {genFetcher.data?.error && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          ⚠ {genFetcher.data.error}
+        </p>
+      )}
+      {copy && (
+        <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-2 space-y-1.5">
+          <p className="uppercase tracking-wide text-ink/50 font-semibold">{copy.eyebrow}</p>
+          <p className="text-ink/60 italic">{copy.subhead}</p>
+          <p className="text-ink">{copy.body}</p>
+          <p className="text-ink/70 font-mono">banner: {copy.bannerHeadline}</p>
+        </div>
+      )}
+      {!copy && (
+        <p className="text-xs text-ink/40 italic">
+          No copy yet — generate above, then save to make it visible on the quiet-endorsement homepage.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── Pair Bundle Editor Panel ───────────────────────────────────────────
+
+function PairBundlePanel({ deal, pairSettings }: {
+  deal: NonNullable<Awaited<ReturnType<typeof getDealByShopifyId>>>
+  pairSettings: { handle: string; product: HomepageSettings['pairProduct'] }
+}) {
+  const genFetcher  = useFetcher<{ result?: { type: string; content: import('~/types').PairBundleCopy }; error?: string }>()
+  const saveFetcher = useFetcher<{ ok: boolean }>()
+
+  const initial = deal.pairBundleCopy ?? null
+  const [copy, setCopy] = useState<import('~/types').PairBundleCopy | null>(initial)
+
+  const generated = genFetcher.data?.result?.content
+  useEffect(() => {
+    if (generated) {
+      setCopy({ ...generated, pairedHandle: pairSettings.handle || generated.pairedHandle || '' })
+    }
+  }, [generated, pairSettings.handle])
+
+  const hasPair     = Boolean(pairSettings.handle && pairSettings.product)
+  const generating  = genFetcher.state !== 'idle'
+  const saving      = saveFetcher.state !== 'idle'
+  const saved       = saveFetcher.state === 'idle' && saveFetcher.data?.ok === true
+  const pairChanged = copy?.pairedHandle && pairSettings.handle && copy.pairedHandle !== pairSettings.handle
+
+  const handleGenerate = () => {
+    if (!hasPair) return
+    const fd = new FormData()
+    fd.set('type', 'pair_bundle')
+    fd.set('product', JSON.stringify({
+      title:       deal.seoTitle ?? deal.sku,
+      brand:       deal.brand,
+      description: deal.fullStory ?? deal.metaDescription ?? '',
+      categories:  [deal.category],
+      dealPrice:   deal.dealPrice,
+      msrp:        deal.msrp,
+      partner: {
+        title:       pairSettings.product!.title,
+        brand:       pairSettings.product!.brand,
+        description: '',
+        categories:  [],
+        dealPrice:   pairSettings.product!.dealPrice,
+      },
+    }))
+    genFetcher.submit(fd, { method: 'post', action: '/api/generate-copy' })
+  }
+
+  const handleSave = () => {
+    if (!copy) return
+    const toSave: import('~/types').PairBundleCopy = {
+      ...copy,
+      pairedHandle: pairSettings.handle,
+      generatedAt:  copy.generatedAt || new Date().toISOString(),
+    }
+    const fd = new FormData()
+    fd.set('intent',    'save-field')
+    fd.set('productId', deal.shopifyProductId)
+    fd.set('key',       'pair_bundle_copy')
+    fd.set('type',      'json')
+    fd.set('value',     JSON.stringify(toSave))
+    saveFetcher.submit(fd, { method: 'post' })
+  }
+
+  return (
+    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+          Pair bundle copy
+        </h3>
+        <span className="text-[11px] text-ink/40">homepage alt template</span>
+      </div>
+      {!hasPair && (
+        <p className="text-xs text-ink/50 bg-cream-2/60 border border-line rounded-lg px-3 py-2">
+          Set a pair in the toolbar first — drag a deal into the pair slot to nominate a partner.
+        </p>
+      )}
+      {hasPair && (
+        <p className="text-xs text-ink/60">
+          Pairing with <strong className="text-ink">{pairSettings.product!.title}</strong>
+        </p>
+      )}
+      {pairChanged && (
+        <p className="text-xs text-coral bg-coral/5 border border-coral/20 rounded-lg px-3 py-2">
+          Pair changed since last save — regenerate to refresh the story.
+        </p>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={!hasPair || generating}
+          className={
+            !hasPair || generating
+              ? 'flex-1 py-2 rounded-xl text-xs font-semibold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : 'flex-1 py-2 rounded-xl text-xs font-semibold bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
+          }
+        >
+          {generating ? 'Generating…' : '♥ Generate pair-bundle copy'}
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!copy || !hasPair || saving}
+          className={
+            !copy || !hasPair || saving
+              ? 'px-4 py-2 rounded-xl text-xs font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : saved
+                ? 'px-4 py-2 rounded-xl text-xs font-bold bg-green-100 text-green-700'
+                : 'px-4 py-2 rounded-xl text-xs font-bold bg-coral text-white hover:opacity-90 transition-opacity'
+          }
+        >
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Use this ♥'}
+        </button>
+      </div>
+      {genFetcher.data?.error && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          ⚠ {genFetcher.data.error}
+        </p>
+      )}
+      {copy && (
+        <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-2 space-y-2">
+          <div className="space-y-1">
+            <p className="uppercase tracking-wide text-ink/50 font-semibold">{copy.eyebrow}</p>
+            <p className="text-ink/60 italic">{copy.subhead}</p>
+            <p className="text-ink font-semibold">{copy.headline}</p>
+            <p className="text-ink">{copy.body}</p>
+          </div>
+
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1 pt-2 border-t border-line/60">
+            <dt className="text-ink/50 uppercase tracking-wide text-[10px]">Primary tag</dt>
+            <dd className="text-ink" style={{ fontFamily: 'var(--font-script)' }}>{copy.primaryTag}</dd>
+            <dt className="text-ink/50 uppercase tracking-wide text-[10px]">Partner tag</dt>
+            <dd className="text-ink" style={{ fontFamily: 'var(--font-script)' }}>{copy.partnerTag}</dd>
+            <dt className="text-ink/50 uppercase tracking-wide text-[10px]">Knot caption</dt>
+            <dd className="text-ink" style={{ fontFamily: 'var(--font-script)' }}>{copy.knotCaption}</dd>
+          </dl>
+
+          {copy.whyCards?.length > 0 && (
+            <div className="pt-2 border-t border-line/60 space-y-1.5">
+              <p className="text-ink/50 uppercase tracking-wide text-[10px] font-semibold">Why cards</p>
+              <ol className="space-y-1.5 list-none">
+                {copy.whyCards.map((card, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-coral font-bold italic shrink-0">{String(i + 1).padStart(2, '0')}</span>
+                    <div>
+                      <p className="text-ink font-semibold">{card.head}</p>
+                      <p className="text-ink/70">{card.body}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {copy.emmaQuote && (
+            <div className="pt-2 border-t border-line/60 space-y-1">
+              <p className="text-ink/50 uppercase tracking-wide text-[10px] font-semibold">Emma quote</p>
+              <p className="text-ink italic leading-relaxed">“{copy.emmaQuote}”</p>
+            </div>
+          )}
+
+          {copy.moments?.length > 0 && (
+            <div className="pt-2 border-t border-line/60 space-y-1.5">
+              <p className="text-ink/50 uppercase tracking-wide text-[10px] font-semibold">
+                Moments{copy.momentTitle ? ` — ${copy.momentTitle}` : ''}
+              </p>
+              <ol className="space-y-1.5 list-none">
+                {copy.moments.map((m, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-coral font-bold shrink-0">{i + 1}.</span>
+                    <div>
+                      <p className="text-ink font-semibold">{m.lead}</p>
+                      <p className="text-ink/70">{m.body}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          <p className="text-ink/70 italic pt-2 border-t border-line/60">{copy.bannerLine}</p>
+        </div>
+      )}
+      {!copy && (
+        <p className="text-xs text-ink/40 italic">
+          No copy yet — generate above, then save to make it visible on the pair-bundle homepage.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── Emma Hero Regen ────────────────────────────────────────────────────
+
+function EmmaHeroRegen({ productId }: { productId: string }) {
+  const fetcher = useFetcher<{ ok: boolean; error?: string; copy?: { eyebrow: string; headline: string; body: string; aside: string; pullQuote?: string } }>()
+  const busy = fetcher.state !== 'idle'
+  const copy = fetcher.data?.ok ? fetcher.data.copy : null
+  return (
+    <fetcher.Form method="post" action="/api/admin/emma-hero/regenerate" className="space-y-2">
+      <input type="hidden" name="productId" value={productId} />
+      <button
+        type="submit"
+        disabled={busy}
+        className={
+          busy
+            ? 'w-full py-2.5 rounded-xl text-sm font-semibold bg-ink/10 text-ink/40 cursor-not-allowed'
+            : 'w-full py-2.5 rounded-xl text-sm font-semibold bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
+        }
+      >
+        {busy ? 'Regenerating Emma hero…' : '♥ Regenerate Emma hero'}
+      </button>
+      {fetcher.data?.error && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          ⚠ {fetcher.data.error}
+        </p>
+      )}
+      {copy && (
+        <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-2 space-y-1">
+          <p className="uppercase tracking-wide text-ink/50 font-semibold">{copy.eyebrow}</p>
+          <p className="font-bold text-ink">{copy.headline}</p>
+          <p className="text-ink/75">{copy.body}</p>
+          {copy.pullQuote && <p className="italic text-ink/80">“{copy.pullQuote}”</p>}
+          <p className="text-muted font-mono">{copy.aside}</p>
+        </div>
+      )}
+    </fetcher.Form>
+  )
+}
+
 // ─── Tags Editor ────────────────────────────────────────────────────────
 
 function TagsEditor({ deal, editId }: {
@@ -659,12 +1448,12 @@ function TagsEditor({ deal, editId }: {
     tag.startsWith('brand:') ? 'bg-purple-100 text-purple-700'
     : tag.startsWith('deal-status-') ? 'bg-blue-100 text-blue-700'
     : tag.startsWith('nalpac-sku-') ? 'bg-gray-100 text-gray-600'
-    : 'bg-brand-mist text-brand-charcoal/70'
+    : 'bg-cream-2 text-ink/70'
 
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Tags
         </h3>
         <button
@@ -673,10 +1462,10 @@ function TagsEditor({ deal, editId }: {
           disabled={fetcher.state === 'submitting'}
           className={
             fetcher.state === 'submitting'
-              ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-brand-charcoal/10 text-brand-charcoal/40 cursor-not-allowed'
+              ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-ink/10 text-ink/40 cursor-not-allowed'
               : saved
                 ? 'text-xs font-bold px-3 py-1.5 rounded-full bg-green-100 text-green-700'
-                : 'text-xs font-bold px-3 py-1.5 rounded-full bg-brand-mist text-brand-purple hover:bg-brand-purple/10 transition-colors'
+                : 'text-xs font-bold px-3 py-1.5 rounded-full bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
           }
         >
           {fetcher.state === 'submitting' ? 'Saving…' : saved ? '✓ Saved!' : 'Save Tags'}
@@ -697,7 +1486,7 @@ function TagsEditor({ deal, editId }: {
           </span>
         ))}
         {tags.length === 0 && (
-          <span className="text-xs text-brand-charcoal/40 italic">No tags</span>
+          <span className="text-xs text-ink/40 italic">No tags</span>
         )}
       </div>
       <div className="flex gap-2">
@@ -707,16 +1496,79 @@ function TagsEditor({ deal, editId }: {
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
           placeholder="Add a tag…"
-          className="flex-1 border border-brand-mist rounded-xl px-3 py-2 text-sm text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+          className="flex-1 border border-cream-2 rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
         />
         <button
           type="button"
           onClick={addTag}
-          className="text-xs font-bold px-3 py-2 rounded-xl bg-brand-mist text-brand-purple hover:bg-brand-purple/10 transition-colors"
+          className="text-xs font-bold px-3 py-2 rounded-xl bg-cream-2 text-sage hover:bg-sage/10 transition-colors"
         >
           + Add
         </button>
       </div>
+    </div>
+  )
+}
+
+// ─── Pair Slot Card ─────────────────────────────────────────────────────
+
+function PairSlotCard({ pairProduct, onDrop, onClear }: {
+  pairProduct: HomepageSettings['pairProduct']
+  onDrop:  (dealId: number) => void
+  onClear: () => void
+}) {
+  const [dragOver, setDragOver] = useState(false)
+  const handlers = {
+    onDragOver: (e: DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(true) },
+    onDragEnter: () => setDragOver(true),
+    onDragLeave: () => setDragOver(false),
+    onDrop: (e: DragEvent) => {
+      e.preventDefault()
+      setDragOver(false)
+      const id = parseInt(e.dataTransfer.getData('text/plain'))
+      if (!isNaN(id)) onDrop(id)
+    },
+  }
+
+  if (!pairProduct) {
+    return (
+      <div
+        className={`mb-5 border-2 border-dashed rounded-2xl p-6 text-center transition-all ${
+          dragOver ? 'border-coral ring-2 ring-coral bg-coral/5' : 'border-ink/20'
+        }`}
+        {...handlers}
+      >
+        <p className="text-xs uppercase tracking-wide font-bold text-ink/50">Pair slot</p>
+        <p className="text-sm font-medium text-ink/50 mt-1">Drop a deal here to pair with the live deal</p>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={`mb-5 rounded-2xl p-4 bg-white border flex items-center gap-4 transition-all ${
+        dragOver ? 'border-coral ring-2 ring-coral' : 'border-cream-2'
+      }`}
+      {...handlers}
+    >
+      <div className="w-16 h-16 rounded-xl overflow-hidden bg-cream-2 shrink-0">
+        {pairProduct.image
+          ? <img src={pairProduct.image} alt={pairProduct.title} className="w-full h-full object-cover" />
+          : <div className="w-full h-full" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] uppercase tracking-wide font-bold text-ink/50">Paired with</p>
+        <p className="text-sm font-semibold text-ink truncate" style={{ fontFamily: 'var(--font-display)' }}>{pairProduct.title}</p>
+        <p className="text-xs text-ink/60">{pairProduct.brand} · ${pairProduct.dealPrice}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onClear}
+        className="text-xs font-bold px-3 py-1.5 rounded-full text-ink/50 hover:text-red-500 hover:bg-red-50 transition-colors"
+        title="Clear pair"
+      >
+        ✕ clear
+      </button>
     </div>
   )
 }
@@ -764,12 +1616,12 @@ function LiveDealCard({ liveDealRow, shopifyData, onDrop, onClick, onBumpToBotto
     return (
       <div
         className={`mb-5 border-2 border-dashed rounded-2xl p-8 text-center transition-all ${
-          dragOver ? 'border-brand-purple ring-2 ring-brand-purple bg-brand-purple/5' : 'border-brand-charcoal/20'
+          dragOver ? 'border-sage ring-2 ring-sage bg-sage/5' : 'border-ink/20'
         }`}
         {...dropHandlers}
       >
-        <p className="text-sm font-medium text-brand-charcoal/40">No deal is currently live</p>
-        <p className="text-xs text-brand-charcoal/30 mt-1">Drag a deal here to go live</p>
+        <p className="text-sm font-medium text-ink/40">No deal is currently live</p>
+        <p className="text-xs text-ink/30 mt-1">Drag a deal here to go live</p>
       </div>
     )
   }
@@ -784,41 +1636,41 @@ function LiveDealCard({ liveDealRow, shopifyData, onDrop, onClick, onBumpToBotto
     <div className="mb-5 flex gap-3">
       {/* Live deal info — clickable to open editor */}
       <div
-        className={`flex-1 bg-white rounded-2xl shadow-sm p-5 transition-all cursor-pointer hover:shadow-md ${dragOver ? 'ring-2 ring-brand-purple' : ''}`}
+        className={`flex-1 bg-white rounded-2xl shadow-sm p-5 transition-all cursor-pointer hover:shadow-md ${dragOver ? 'ring-2 ring-sage' : ''}`}
         onClick={onClick}
         {...dropHandlers}
       >
-        <p className="text-[10px] font-bold uppercase tracking-wide text-brand-coral mb-3">Live Now</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-coral mb-3">Live Now</p>
         <div className="flex items-center gap-4">
           {thumbUrl ? (
             <img src={thumbUrl} alt="" className="w-20 h-20 object-cover rounded-xl shrink-0" />
           ) : (
-            <div className="w-20 h-20 rounded-xl bg-brand-mist flex items-center justify-center shrink-0">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-brand-charcoal/20">
+            <div className="w-20 h-20 rounded-xl bg-cream-2 flex items-center justify-center shrink-0">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-ink/20">
                 <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
               </svg>
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <p className="font-bold text-brand-charcoal truncate">{liveDealRow.seoTitle ?? liveDealRow.sku}</p>
-            <p className="text-xs text-brand-charcoal/50 truncate">{liveDealRow.brand} · {liveDealRow.sku}</p>
+            <p className="font-bold text-ink truncate">{liveDealRow.seoTitle ?? liveDealRow.sku}</p>
+            <p className="text-xs text-ink/50 truncate">{liveDealRow.brand} · {liveDealRow.sku}</p>
             <div className="flex items-center gap-3 mt-1.5 text-xs">
-              {dealPrice != null && <span className="font-bold text-brand-coral tabular-nums">${dealPrice.toFixed(2)}</span>}
-              {msrp != null && <span className="line-through text-brand-charcoal/40 tabular-nums">${msrp.toFixed(2)}</span>}
+              {dealPrice != null && <span className="font-bold text-coral tabular-nums">${dealPrice.toFixed(2)}</span>}
+              {msrp != null && <span className="line-through text-ink/40 tabular-nums">${msrp.toFixed(2)}</span>}
               {margin !== null && (
                 <span className={`font-semibold tabular-nums ${margin >= 0.4 ? 'text-green-600' : margin >= 0.25 ? 'text-yellow-600' : 'text-red-500'}`}>
                   {Math.round(margin * 100)}%
                 </span>
               )}
-              <span className="text-brand-charcoal/60 tabular-nums">{liveDealRow.unitsAvailable ?? 0} units</span>
+              <span className="text-ink/60 tabular-nums">{liveDealRow.unitsAvailable ?? 0} units</span>
             </div>
           </div>
           {mounted && (
-            <div className={`text-right shrink-0 ${isUrgent ? 'text-brand-coral' : 'text-brand-charcoal'}`}>
+            <div className={`text-right shrink-0 ${isUrgent ? 'text-coral' : 'text-ink'}`}>
               <p className="text-2xl font-bold tabular-nums" style={{ fontFamily: 'var(--font-display)' }}>
                 {pad(timeLeft.hours)}:{pad(timeLeft.minutes)}:{pad(timeLeft.seconds)}
               </p>
-              <p className="text-[10px] text-brand-charcoal/40 uppercase tracking-wide">remaining</p>
+              <p className="text-[10px] text-ink/40 uppercase tracking-wide">remaining</p>
             </div>
           )}
         </div>
@@ -827,14 +1679,14 @@ function LiveDealCard({ liveDealRow, shopifyData, onDrop, onClick, onBumpToBotto
       {/* Bump to bottom dropzone */}
       <div
         className={`shrink-0 w-24 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-1 text-center transition-all ${
-          bumpDragOver ? 'border-brand-purple ring-2 ring-brand-purple bg-brand-purple/5' : 'border-brand-charcoal/15'
+          bumpDragOver ? 'border-sage ring-2 ring-sage bg-sage/5' : 'border-ink/15'
         }`}
         {...bumpDropHandlers}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${bumpDragOver ? 'text-brand-purple' : 'text-brand-charcoal/30'}`}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${bumpDragOver ? 'text-sage' : 'text-ink/30'}`}>
           <polyline points="7 13 12 18 17 13" /><polyline points="7 6 12 11 17 6" />
         </svg>
-        <span className={`text-[10px] font-semibold leading-tight ${bumpDragOver ? 'text-brand-purple' : 'text-brand-charcoal/30'}`}>
+        <span className={`text-[10px] font-semibold leading-tight ${bumpDragOver ? 'text-sage' : 'text-ink/30'}`}>
           Bump to bottom
         </span>
       </div>
@@ -847,7 +1699,7 @@ function LiveDealCard({ liveDealRow, shopifyData, onDrop, onClick, onBumpToBotto
 export default function AdminDealsPage() {
   const {
     deals, shopifyDataMap, editorData, editId, liveDealRow,
-    page, totalPages, totalFiltered, allDealsForExport,
+    page, totalPages, totalFiltered, allDealsForExport, homepageSettings,
   } = useLoaderData<typeof loader>()
   const reorderFetcher  = useFetcher()
   const moveFetcher     = useFetcher()
@@ -912,6 +1764,20 @@ export default function AdminDealsPage() {
   function handleMoveToTop(dealId: number) {
     moveFetcher.submit(
       { intent: 'move-to-top', id: String(dealId) },
+      { method: 'post' },
+    )
+  }
+
+  function handlePairDrop(dealId: number) {
+    moveFetcher.submit(
+      { intent: 'save-pair-product', dealId: String(dealId) },
+      { method: 'post' },
+    )
+  }
+
+  function handlePairClear() {
+    moveFetcher.submit(
+      { intent: 'save-pair-product', dealId: '' },
       { method: 'post' },
     )
   }
@@ -1012,21 +1878,21 @@ export default function AdminDealsPage() {
 
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <h1 className="text-2xl font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Deals
         </h1>
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={handleExportOrder}
-            className="px-4 py-2 text-sm font-semibold text-brand-charcoal bg-white border border-brand-mist rounded-full hover:border-brand-purple/40 hover:text-brand-purple transition-colors"
+            className="px-4 py-2 text-sm font-semibold text-ink bg-white border border-cream-2 rounded-full hover:border-sage/40 hover:text-sage transition-colors"
           >
             Export CSV
           </button>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="px-4 py-2 text-sm font-semibold text-brand-charcoal bg-white border border-brand-mist rounded-full hover:border-brand-purple/40 hover:text-brand-purple transition-colors"
+            className="px-4 py-2 text-sm font-semibold text-ink bg-white border border-cream-2 rounded-full hover:border-sage/40 hover:text-sage transition-colors"
           >
             Import CSV
           </button>
@@ -1043,10 +1909,10 @@ export default function AdminDealsPage() {
       {pendingImport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
-            <h2 className="text-lg font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+            <h2 className="text-lg font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
               Replace deal order?
             </h2>
-            <p className="text-sm text-brand-charcoal/70">
+            <p className="text-sm text-ink/70">
               Importing will replace the sort order of all pending/live deals with the CSV contents
               (~{pendingImport.rowCount} row{pendingImport.rowCount !== 1 ? 's' : ''}).
               The server will validate deal IDs and report errors before applying.
@@ -1055,14 +1921,14 @@ export default function AdminDealsPage() {
               <button
                 type="button"
                 onClick={() => setPendingImport(null)}
-                className="px-4 py-2 text-sm font-semibold text-brand-charcoal/70 hover:text-brand-charcoal transition-colors"
+                className="px-4 py-2 text-sm font-semibold text-ink/70 hover:text-ink transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={confirmImportOrder}
-                className="px-4 py-2 bg-brand-gradient text-white text-sm font-bold rounded-full hover:opacity-90 transition-opacity"
+                className="px-4 py-2 bg-coral text-white text-sm font-bold rounded-full hover:opacity-90 transition-opacity"
               >
                 Replace &amp; save
               </button>
@@ -1080,10 +1946,19 @@ export default function AdminDealsPage() {
         onBumpToBottom={handleBumpToBottom}
       />
 
+      {/* Pair Slot Card — shown when either pair_bundle template is active */}
+      {(homepageSettings.template === 'pair_bundle' || homepageSettings.template === 'pair_bundle_fullbleed') && (
+        <PairSlotCard
+          pairProduct={homepageSettings.pairProduct}
+          onDrop={handlePairDrop}
+          onClear={handlePairClear}
+        />
+      )}
+
       {/* Search bar + Move to top dropzone */}
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-charcoal/30">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-3 top-1/2 -translate-y-1/2 text-ink/30">
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
           </svg>
           <input
@@ -1091,13 +1966,13 @@ export default function AdminDealsPage() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search by title, SKU, or brand..."
-            className="w-full pl-9 pr-8 py-2 text-sm border border-brand-mist rounded-xl bg-white text-brand-charcoal focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+            className="w-full pl-9 pr-8 py-2 text-sm border border-cream-2 rounded-xl bg-white text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
           />
           {search && (
             <button
               type="button"
               onClick={() => setSearch('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-brand-charcoal/30 hover:text-brand-charcoal/60"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink/30 hover:text-ink/60"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -1105,9 +1980,10 @@ export default function AdminDealsPage() {
             </button>
           )}
         </div>
+        <HomepageTemplateToggle settings={homepageSettings} />
         <div
           className={`shrink-0 px-4 py-2 rounded-xl border-2 border-dashed flex items-center gap-1.5 text-xs font-semibold transition-all ${
-            moveToTopDragOver ? 'border-brand-purple ring-2 ring-brand-purple bg-brand-purple/5 text-brand-purple' : 'border-brand-charcoal/15 text-brand-charcoal/30'
+            moveToTopDragOver ? 'border-sage ring-2 ring-sage bg-sage/5 text-sage' : 'border-ink/15 text-ink/30'
           }`}
           onDragOver={(e: DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setMoveToTopDragOver(true) }}
           onDragEnter={() => setMoveToTopDragOver(true)}
@@ -1140,7 +2016,7 @@ export default function AdminDealsPage() {
             <col style={{ width: '80px' }} />
           </colgroup>
           <thead>
-            <tr className="bg-brand-mist text-brand-charcoal/60 text-xs uppercase tracking-wide">
+            <tr className="bg-cream-2 text-ink/60 text-xs uppercase tracking-wide">
               <th className="px-3 py-3 text-left rounded-l-xl">Product</th>
               <th className="px-3 py-3 text-left">Images</th>
               <th className="px-3 py-3 text-right">Deal Price</th>
@@ -1154,7 +2030,7 @@ export default function AdminDealsPage() {
           <tbody>
             {filteredDeals.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-brand-charcoal/40 text-sm">
+                <td colSpan={8} className="px-4 py-10 text-center text-ink/40 text-sm">
                   {search ? 'No deals match your search.' : 'No deals in the queue.'}
                 </td>
               </tr>
@@ -1177,7 +2053,7 @@ export default function AdminDealsPage() {
                   {isDragTarget && (
                     <tr>
                       <td colSpan={8} className="p-0">
-                        <div className="h-1 bg-brand-purple rounded-full mx-2 animate-expand-in" />
+                        <div className="h-1 bg-sage rounded-full mx-2 animate-expand-in" />
                       </td>
                     </tr>
                   )}
@@ -1223,27 +2099,27 @@ export default function AdminDealsPage() {
                     } : undefined}
                   >
                     {/* Product info */}
-                    <td className={`px-3 py-3 min-w-0 bg-white rounded-l-xl ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
-                      <p className="font-medium text-brand-charcoal truncate">{deal.seoTitle ?? deal.sku}</p>
-                      <p className="text-xs text-brand-charcoal/50 truncate">{deal.brand} · {deal.sku}</p>
+                    <td className={`px-3 py-3 min-w-0 bg-white rounded-l-xl ${editId === String(deal.id) ? 'ring-2 ring-inset ring-sage/20' : ''}`}>
+                      <p className="font-medium text-ink truncate">{deal.seoTitle ?? deal.sku}</p>
+                      <p className="text-xs text-ink/50 truncate">{deal.brand} · {deal.sku}</p>
                     </td>
 
                     {/* Images — flexes to fill remaining space; clips when tight */}
-                    <td className={`px-3 py-3 bg-white overflow-hidden ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                    <td className={`px-3 py-3 bg-white overflow-hidden ${editId === String(deal.id) ? 'ring-2 ring-inset ring-sage/20' : ''}`}>
                       {shopifyData?.images?.length ? (
                         <div className="flex gap-1 items-center overflow-hidden w-full">
                           {shopifyData.images.slice(0, 3).map((url, i) => (
                             <img key={i} src={url} alt="" className="w-9 h-9 object-cover rounded-lg shrink-0 transition-transform duration-150 hover:scale-[2] hover:z-10 hover:relative hover:shadow-lg hover:rounded-xl" />
                           ))}
                           {shopifyData.images.length > 3 && (
-                            <span className="text-[10px] font-semibold text-brand-charcoal/50 shrink-0 pl-0.5">
+                            <span className="text-[10px] font-semibold text-ink/50 shrink-0 pl-0.5">
                               +{shopifyData.images.length - 3}
                             </span>
                           )}
                         </div>
                       ) : (
-                        <div className="w-9 h-9 rounded-lg bg-brand-mist flex items-center justify-center shrink-0">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-brand-charcoal/20">
+                        <div className="w-9 h-9 rounded-lg bg-cream-2 flex items-center justify-center shrink-0">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-ink/20">
                             <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
                           </svg>
                         </div>
@@ -1251,15 +2127,15 @@ export default function AdminDealsPage() {
                     </td>
 
                     {/* Deal Price */}
-                    <td className={`px-3 py-3 text-right font-semibold text-brand-charcoal text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                    <td className={`px-3 py-3 text-right font-semibold text-ink text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-sage/20' : ''}`}>
                       {dealPrice != null ? `$${dealPrice.toFixed(2)}` : '\u2014'}
                     </td>
                     {/* Wholesale Cost */}
-                    <td className={`px-3 py-3 text-right text-brand-charcoal/70 text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                    <td className={`px-3 py-3 text-right text-ink/70 text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-sage/20' : ''}`}>
                       {wholesale != null ? `$${wholesale.toFixed(2)}` : '\u2014'}
                     </td>
                     {/* Margin */}
-                    <td className={`px-3 py-3 text-right font-semibold text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                    <td className={`px-3 py-3 text-right font-semibold text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-sage/20' : ''}`}>
                       {margin !== null
                         ? <span className={margin >= 0.4 ? 'text-green-600' : margin >= 0.25 ? 'text-yellow-600' : 'text-red-500'}>
                             {Math.round(margin * 100)}%
@@ -1267,15 +2143,15 @@ export default function AdminDealsPage() {
                         : '\u2014'}
                     </td>
                     {/* MSRP */}
-                    <td className={`px-3 py-3 text-right text-brand-charcoal/60 text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                    <td className={`px-3 py-3 text-right text-ink/60 text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-sage/20' : ''}`}>
                       {msrp ? `$${msrp.toFixed(2)}` : '\u2014'}
                     </td>
                     {/* MAP */}
-                    <td className={`px-3 py-3 text-right text-brand-charcoal/60 text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                    <td className={`px-3 py-3 text-right text-ink/60 text-xs tabular-nums bg-white ${editId === String(deal.id) ? 'ring-2 ring-inset ring-sage/20' : ''}`}>
                       {mapPrice && mapPrice > 0 ? `$${mapPrice.toFixed(2)}` : ''}
                     </td>
                     {/* Inventory */}
-                    <td className={`px-3 py-3 text-right text-brand-charcoal/70 text-xs tabular-nums bg-white rounded-r-xl ${editId === String(deal.id) ? 'ring-2 ring-inset ring-brand-purple/20' : ''}`}>
+                    <td className={`px-3 py-3 text-right text-ink/70 text-xs tabular-nums bg-white rounded-r-xl ${editId === String(deal.id) ? 'ring-2 ring-inset ring-sage/20' : ''}`}>
                       {deal.unitsAvailable ?? '\u2014'}
                     </td>
                   </tr>
@@ -1285,7 +2161,7 @@ export default function AdminDealsPage() {
           </tbody>
         </table>
         <div className="bg-white rounded-2xl mt-1 px-4 py-2.5 flex items-center justify-between">
-          <span className="text-xs text-brand-charcoal/40">
+          <span className="text-xs text-ink/40">
             {totalFiltered > 0
               ? `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, totalFiltered)} of ${totalFiltered} deal${totalFiltered !== 1 ? 's' : ''}`
               : 'No deals'}
@@ -1295,7 +2171,7 @@ export default function AdminDealsPage() {
               <button
                 onClick={() => goToPage(page - 1)}
                 disabled={page <= 1}
-                className="text-xs font-semibold px-2.5 py-1 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-brand-mist transition-colors text-brand-charcoal/60"
+                className="text-xs font-semibold px-2.5 py-1 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-cream-2 transition-colors text-ink/60"
               >
                 Prev
               </button>
@@ -1309,15 +2185,15 @@ export default function AdminDealsPage() {
                 }, [])
                 .map((item, i) =>
                   item === 'gap' ? (
-                    <span key={`gap-${i}`} className="text-xs text-brand-charcoal/30 px-1">…</span>
+                    <span key={`gap-${i}`} className="text-xs text-ink/30 px-1">…</span>
                   ) : (
                     <button
                       key={item}
                       onClick={() => goToPage(item)}
                       className={`text-xs font-semibold w-7 h-7 rounded-lg transition-colors ${
                         item === page
-                          ? 'bg-brand-charcoal text-white'
-                          : 'text-brand-charcoal/60 hover:bg-brand-mist'
+                          ? 'bg-ink text-white'
+                          : 'text-ink/60 hover:bg-cream-2'
                       }`}
                     >
                       {item}
@@ -1327,7 +2203,7 @@ export default function AdminDealsPage() {
               <button
                 onClick={() => goToPage(page + 1)}
                 disabled={page >= totalPages}
-                className="text-xs font-semibold px-2.5 py-1 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-brand-mist transition-colors text-brand-charcoal/60"
+                className="text-xs font-semibold px-2.5 py-1 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-cream-2 transition-colors text-ink/60"
               >
                 Next
               </button>
@@ -1341,10 +2217,10 @@ export default function AdminDealsPage() {
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setPendingConfirm(null)} />
           <div className="relative bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full">
-            <p className="text-sm font-medium text-brand-charcoal mb-1">{pendingConfirm.label}</p>
-            <p className="text-sm text-brand-charcoal/60 mb-5">{pendingConfirm.message}</p>
+            <p className="text-sm font-medium text-ink mb-1">{pendingConfirm.label}</p>
+            <p className="text-sm text-ink/60 mb-5">{pendingConfirm.message}</p>
             <div className="flex gap-3 justify-end">
-              <button onClick={() => setPendingConfirm(null)} className="px-4 py-2 text-sm font-semibold text-brand-charcoal/60 hover:text-brand-charcoal rounded-xl transition-colors">
+              <button onClick={() => setPendingConfirm(null)} className="px-4 py-2 text-sm font-semibold text-ink/60 hover:text-ink rounded-xl transition-colors">
                 Cancel
               </button>
               <confirmFetcher.Form method="post" onSubmit={() => setPendingConfirm(null)} className="inline">
@@ -1356,7 +2232,7 @@ export default function AdminDealsPage() {
                   className={`px-4 py-2 text-sm font-semibold rounded-xl transition-colors ${
                     pendingConfirm.intent === 'delete'
                       ? 'bg-red-500 text-white hover:bg-red-600'
-                      : 'bg-brand-gradient text-white hover:opacity-90'
+                      : 'bg-coral text-white hover:opacity-90'
                   }`}
                 >
                   {pendingConfirm.label}
@@ -1377,24 +2253,24 @@ export default function AdminDealsPage() {
           />
 
           {/* Panel */}
-          <div className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl bg-brand-cream shadow-2xl overflow-y-auto">
+          <div className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl bg-cream shadow-2xl overflow-y-auto">
             {/* Close bar */}
-            <div className="sticky top-0 z-10 bg-brand-cream/95 backdrop-blur-sm border-b border-brand-mist px-6 py-3 flex items-center gap-3">
+            <div className="sticky top-0 z-10 bg-cream/95 backdrop-blur-sm border-b border-cream-2 px-6 py-3 flex items-center gap-3">
               {editorData?.deal ? (
                 <>
                   {editorData.productImages[0] ? (
                     <img
                       src={editorData.productImages[0].src}
                       alt={editorData.productImages[0].alt ?? ''}
-                      className="w-12 h-12 rounded-xl object-cover border border-brand-mist shrink-0"
+                      className="w-12 h-12 rounded-xl object-cover border border-cream-2 shrink-0"
                     />
                   ) : (
-                    <div className="w-12 h-12 rounded-xl bg-brand-mist shrink-0 flex items-center justify-center text-brand-charcoal/30 text-xs">
+                    <div className="w-12 h-12 rounded-xl bg-cream-2 shrink-0 flex items-center justify-center text-ink/30 text-xs">
                       No img
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-brand-charcoal truncate leading-tight"
+                    <p className="text-sm font-semibold text-ink truncate leading-tight"
                        style={{ fontFamily: 'var(--font-display)' }}>
                       {editorData.deal.seoTitle ?? editorData.deal.sku}
                     </p>
@@ -1408,7 +2284,7 @@ export default function AdminDealsPage() {
               )}
               <button
                 onClick={closeEditor}
-                className="p-2 hover:bg-brand-mist rounded-xl transition-colors shrink-0"
+                className="p-2 hover:bg-cream-2 rounded-xl transition-colors shrink-0"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -1421,7 +2297,7 @@ export default function AdminDealsPage() {
                 <>
                   {/* Pricing */}
                   <div className="bg-white rounded-2xl p-5 shadow-sm">
-                    <h3 className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+                    <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
                       Pricing
                     </h3>
                     <PricingPanel
@@ -1434,7 +2310,7 @@ export default function AdminDealsPage() {
 
                   {/* Images */}
                   <div className="bg-white rounded-2xl p-5 shadow-sm">
-                    <h3 className="font-semibold text-brand-charcoal mb-3" style={{ fontFamily: 'var(--font-display)' }}>
+                    <h3 className="font-semibold text-ink mb-3" style={{ fontFamily: 'var(--font-display)' }}>
                       Images
                     </h3>
                     <ImageManager
@@ -1446,13 +2322,32 @@ export default function AdminDealsPage() {
                   {/* Tags (editable) */}
                   <TagsEditor deal={editorData.deal} editId={editId!} />
 
+                  {/* Emma hero (Claude-generated voice copy) */}
+                  <EmmaHeroRegen productId={editorData.deal.shopifyProductId} />
+
+                  {/* Quiet endorsement copy (alt homepage template) */}
+                  <QuietEndorsementPanel deal={editorData.deal} />
+
+                  {/* Pair bundle copy (alt homepage template) */}
+                  <PairBundlePanel
+                    deal={editorData.deal}
+                    pairSettings={{ handle: homepageSettings.pairProductHandle, product: homepageSettings.pairProduct }}
+                  />
+
+                  {/* Emma-curated rails (agent-generated cross-sell) */}
+                  <RailGenerationPanel
+                    productId={editorData.deal.shopifyProductId}
+                    hasCopy={Boolean(editorData.deal.tagline)}
+                    initialDrafts={editorData.railDrafts}
+                  />
+
                   {/* Copy & Content (collapsible) */}
                   <div>
                     <button
                       type="button"
                       onClick={() => setContentOpen(!contentOpen)}
                       aria-expanded={contentOpen}
-                      className="flex items-center gap-2 w-full text-left py-2 text-sm font-semibold text-brand-charcoal hover:text-brand-charcoal/80 transition-colors"
+                      className="flex items-center gap-2 w-full text-left py-2 text-sm font-semibold text-ink hover:text-ink/80 transition-colors"
                     >
                       <svg
                         width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1462,7 +2357,7 @@ export default function AdminDealsPage() {
                         <polyline points="6 9 12 15 18 9" />
                       </svg>
                       Copy & Content
-                      {!contentOpen && <span className="text-xs font-normal text-brand-charcoal/40 ml-1">9 fields</span>}
+                      {!contentOpen && <span className="text-xs font-normal text-ink/40 ml-1">9 fields</span>}
                     </button>
                     {contentOpen && (
                       <div className="space-y-5 pt-2">
@@ -1477,14 +2372,13 @@ export default function AdminDealsPage() {
                         <SaveableField label="Works For Her" fieldKey="works_for_her" fieldType="multi_line_text_field" defaultValue={editorData.deal.worksForHer} productId={editorData.deal.shopifyProductId} rows={3} />
                         <SaveableField label="Specifications" fieldKey="specifications" fieldType="multi_line_text_field" defaultValue={editorData.deal.specifications ?? ''} productId={editorData.deal.shopifyProductId} rows={5} />
                         <SaveableField label="What's In The Box" intent="save-box-contents" defaultValue={(editorData.deal.boxContents ?? []).join('\n')} productId={editorData.deal.shopifyProductId} rows={4} hint="One item per line" />
-                        <SaveableField label="Feature Bullets" intent="save-bullets" defaultValue={(editorData.deal.featureBullets ?? []).join('\n')} productId={editorData.deal.shopifyProductId} rows={4} hint="One bullet per line" />
                         <SaveableField label="SEO Meta Description" fieldKey="seo_meta_description" fieldType="multi_line_text_field" defaultValue={editorData.deal.metaDescription} productId={editorData.deal.shopifyProductId} rows={2} />
                       </div>
                     )}
                   </div>
                 </>
               ) : (
-                <div className="text-center py-20 text-brand-charcoal/40">
+                <div className="text-center py-20 text-ink/40">
                   <p className="text-sm">No deal data found for this entry.</p>
                   <p className="text-xs mt-1">The Shopify product may not exist yet.</p>
                 </div>

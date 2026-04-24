@@ -48,12 +48,12 @@ export function WaitlistButton({ productHandle, className = '' }: WaitlistButton
 
   if (joined) {
     return (
-      <div className={`rounded-xl border border-brand-purple/20 bg-brand-mist px-4 py-3 ${className}`}>
-        <p className="flex items-center gap-2 text-sm font-semibold text-brand-purple" style={{ fontFamily: 'var(--font-display)' }}>
+      <div className={`rounded-xl border border-sage/20 bg-cream-2 px-4 py-3 ${className}`}>
+        <p className="flex items-center gap-2 text-sm font-semibold text-sage" style={{ fontFamily: 'var(--font-display)' }}>
           <CheckIcon />
           You're on the list!
         </p>
-        <p className="text-xs text-brand-charcoal/60 mt-1">
+        <p className="text-xs text-ink/60 mt-1">
           We'll email you as soon as this product is back in stock.
         </p>
       </div>
@@ -74,7 +74,7 @@ export function WaitlistButton({ productHandle, className = '' }: WaitlistButton
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? 'waitlist-error' : undefined}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleNotifyClick() } }}
-              className="flex-1 min-w-0 px-3 py-2 text-sm rounded-full border border-brand-mist bg-white text-brand-charcoal placeholder:text-brand-charcoal/50 focus:outline-none focus:border-brand-purple transition-colors"
+              className="flex-1 min-w-0 px-3 py-2 text-sm rounded-full border border-cream-2 bg-white text-ink placeholder:text-ink/50 focus:outline-none focus:border-sage transition-colors"
             />
           </>
         )}
@@ -83,10 +83,10 @@ export function WaitlistButton({ productHandle, className = '' }: WaitlistButton
           onClick={handleNotifyClick}
           disabled={isPending}
           className={[
-            'text-sm font-semibold px-4 py-2 rounded-full transition-all disabled:opacity-60',
+            'py-4 rounded-full font-bold text-lg transition-all disabled:opacity-60 shadow-md shadow-muted/20',
             showInput
-              ? 'shrink-0 bg-brand-purple text-white hover:bg-brand-purple-light'
-              : 'border-2 border-brand-purple text-brand-purple hover:bg-brand-purple hover:text-white',
+              ? 'shrink-0 px-6 bg-muted text-white hover:opacity-90'
+              : 'flex-1 bg-muted text-white hover:opacity-90 hover:scale-[1.01]',
           ].join(' ')}
           style={{ fontFamily: 'var(--font-display)' }}
         >

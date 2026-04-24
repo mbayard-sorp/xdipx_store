@@ -20,15 +20,15 @@ function relativeTime(iso: string): string {
 
 export function SellerReply({ replyBody, replyAt }: SellerReplyProps) {
   return (
-    <div className="ml-4 mt-3 bg-brand-mist rounded-xl px-4 py-3 border-l-4 border-brand-purple">
+    <div className="ml-4 mt-3 bg-cream-2 rounded-xl px-4 py-3 border-l-4 border-sage">
       <p
-        className="text-xs font-semibold text-brand-purple mb-1"
+        className="text-xs font-semibold text-sage mb-1"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Response from xdipx ♥
       </p>
-      <p className="text-sm text-brand-charcoal/80 leading-relaxed">{replyBody}</p>
-      <p className="text-xs text-brand-charcoal/40 mt-1">{relativeTime(replyAt)}</p>
+      <p className="text-sm text-ink/80 leading-relaxed">{replyBody}</p>
+      <p className="text-xs text-ink/40 mt-1">{relativeTime(replyAt)}</p>
     </div>
   )
 }

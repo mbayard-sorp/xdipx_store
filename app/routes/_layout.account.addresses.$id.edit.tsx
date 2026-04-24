@@ -118,10 +118,10 @@ export default function EditAddressPage() {
       {/* Desktop heading */}
       <section className="hidden lg:block">
         <h1
-          className="text-2xl font-bold text-brand-charcoal"
+          className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          Edit address <span className="text-brand-purple">♥</span>
+          Edit address <span className="text-sage">♥</span>
         </h1>
       </section>
 

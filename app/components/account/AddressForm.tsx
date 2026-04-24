@@ -191,9 +191,9 @@ export function AddressForm({
           name="setDefault"
           value="on"
           defaultChecked={false}
-          className="h-4 w-4 rounded border-brand-mist text-brand-purple focus:ring-brand-purple/50 accent-brand-purple"
+          className="h-4 w-4 rounded border-cream-2 text-sage focus:ring-sage/50 accent-sage"
         />
-        <span className="text-sm font-semibold text-brand-charcoal">
+        <span className="text-sm font-semibold text-ink">
           Set as default address
         </span>
       </label>
@@ -201,18 +201,18 @@ export function AddressForm({
       {/* ── Sticky save bar (mobile) / inline save button (desktop) ─────────
           On mobile the bar sticks to the bottom of the viewport.
           On md+ it's a normal inline button row.                          */}
-      <div className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-brand-mist px-4 py-3 md:static md:border-0 md:bg-transparent md:p-0">
+      <div className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-cream-2 px-4 py-3 md:static md:border-0 md:bg-transparent md:p-0">
         <div className="flex gap-3 max-w-lg mx-auto md:max-w-none md:mx-0 md:justify-start">
           <button
             type="submit"
-            className="flex-1 md:flex-none md:px-8 bg-brand-gradient text-white font-bold py-3 rounded-full hover:opacity-90 transition-opacity"
+            className="flex-1 md:flex-none md:px-8 bg-coral text-white font-bold py-3 rounded-full hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {isEditing ? 'Save changes' : 'Add address'} ♥
           </button>
           <Link
             to="/account/addresses"
-            className="flex-1 md:flex-none md:px-8 flex items-center justify-center text-sm font-semibold text-brand-charcoal/60 hover:text-brand-charcoal bg-brand-mist rounded-full py-3 transition-colors"
+            className="flex-1 md:flex-none md:px-8 flex items-center justify-center text-sm font-semibold text-ink/60 hover:text-ink bg-cream-2 rounded-full py-3 transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Cancel

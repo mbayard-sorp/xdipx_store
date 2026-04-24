@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore } from '~/types'
+import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore, ProductTypeDial, SellingPlan, SellingPlanGroup } from '~/types'
 import { toHTML } from '@portabletext/to-html'
 import { cached, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
 
@@ -75,7 +75,6 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "full_story" }
     { namespace: "xdipx", key: "works_for_him" }
     { namespace: "xdipx", key: "works_for_her" }
-    { namespace: "xdipx", key: "feature_bullets" }
     { namespace: "xdipx", key: "box_contents" }
     { namespace: "xdipx", key: "deal_status" }
     { namespace: "xdipx", key: "deal_date" }
@@ -89,6 +88,17 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "mood_image_url" }
     { namespace: "xdipx", key: "accessory_product_ids" }
     { namespace: "xdipx", key: "specifications" }
+    { namespace: "xdipx", key: "map_restricted" }
+    { namespace: "xdipx", key: "hero_video" }
+    { namespace: "xdipx", key: "mood_tags" }
+    { namespace: "xdipx", key: "audience_tags" }
+    { namespace: "xdipx", key: "matters_tags" }
+    { namespace: "xdipx", key: "product_type_dial" }
+    { namespace: "xdipx", key: "sensation_dial" }
+    { namespace: "xdipx", key: "pairing_why" }
+    { namespace: "xdipx", key: "emma_hero" }
+    { namespace: "xdipx", key: "quiet_endorsement_copy" }
+    { namespace: "xdipx", key: "pair_bundle_copy" }
     { namespace: "custom", key: "original_description" }
   ]) {
     namespace key value
@@ -126,6 +136,34 @@ const PRODUCT_CORE_FRAGMENT = `
       }
     }
   }
+  sellingPlanGroups(first: 5) {
+    edges {
+      node {
+        name
+        appName
+        options { name values }
+        sellingPlans(first: 10) {
+          edges {
+            node {
+              id
+              name
+              description
+              recurringDeliveries
+              options { name value }
+              priceAdjustments {
+                adjustmentValue {
+                  __typename
+                  ... on SellingPlanPercentagePriceAdjustment { adjustmentPercentage }
+                  ... on SellingPlanFixedAmountPriceAdjustment { adjustmentAmount { amount currencyCode } }
+                  ... on SellingPlanFixedPriceAdjustment       { price           { amount currencyCode } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
   ${METAFIELDS_FRAGMENT}
 `
 
@@ -138,6 +176,10 @@ const CARD_METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "original_price" }
     { namespace: "xdipx", key: "category" }
     { namespace: "xdipx", key: "deal_status" }
+    { namespace: "xdipx", key: "mood_tags" }
+    { namespace: "xdipx", key: "audience_tags" }
+    { namespace: "xdipx", key: "matters_tags" }
+    { namespace: "xdipx", key: "hero_video" }
   ]) {
     namespace key value
   }
@@ -185,6 +227,10 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
   const mf = node.metafields
   const variant = node.variants.edges[0]?.node
   const dealPrice = parseFloat(variant?.price.amount ?? '0')
+  const moodTags     = parseMetafieldJSON<string[]>(mf, 'mood_tags',     [])
+  const audienceTags = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
+  const mattersTags  = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
+  const heroVideo    = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
   return {
     id: node.id,
     handle: node.handle,
@@ -197,6 +243,12 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
     category: (parseMetafield(mf, 'category') || 'both') as Deal['category'],
     dealStatus: 'archived' as const,
     qty: variant?.quantityAvailable ?? 0,
+    ...(moodTags.length     > 0 ? { moodTags }     : {}),
+    ...(audienceTags.length > 0 ? { audienceTags } : {}),
+    ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
+    ...(heroVideo?.src && typeof heroVideo.duration === 'number'
+      ? { heroVideo: { src: heroVideo.src, duration: heroVideo.duration, ...(heroVideo.poster ? { poster: heroVideo.poster } : {}) } }
+      : {}),
   }
 }
 
@@ -268,6 +320,29 @@ interface ShopifyMediaNode {
   sources?: { url: string; mimeType: string; height: number; width: number }[]
 }
 
+interface ShopifySellingPlanAdjustmentValue {
+  __typename: string
+  adjustmentPercentage?: number
+  adjustmentAmount?: { amount: string; currencyCode: string }
+  price?: { amount: string; currencyCode: string }
+}
+
+interface ShopifySellingPlanNode {
+  id: string
+  name: string
+  description: string | null
+  recurringDeliveries: boolean
+  options: { name: string; value: string }[]
+  priceAdjustments: { adjustmentValue: ShopifySellingPlanAdjustmentValue }[]
+}
+
+interface ShopifySellingPlanGroupNode {
+  name: string
+  appName: string
+  options: { name: string; values: string[] }[]
+  sellingPlans: { edges: { node: ShopifySellingPlanNode }[] }
+}
+
 interface ShopifyProductNode {
   id: string
   handle: string
@@ -280,10 +355,52 @@ interface ShopifyProductNode {
   options: { name: string; values: string[] }[]
   variants: { edges: { node: ShopifyVariantNode }[] }
   metafields: ({ namespace: string; key: string; value: string } | null)[]
+  sellingPlanGroups?: { edges: { node: ShopifySellingPlanGroupNode }[] }
+}
+
+function parseSellingPlanGroups(
+  raw?: { edges: { node: ShopifySellingPlanGroupNode }[] },
+): SellingPlanGroup[] | undefined {
+  if (!raw?.edges?.length) return undefined
+  const groups: SellingPlanGroup[] = raw.edges.map(({ node }) => ({
+    name: node.name,
+    appName: node.appName,
+    options: node.options ?? [],
+    sellingPlans: node.sellingPlans.edges.map(({ node: sp }) => {
+      const plan: SellingPlan = {
+        id: sp.id,
+        name: sp.name,
+        options: sp.options ?? [],
+        recurringDeliveries: sp.recurringDeliveries,
+        priceAdjustments: sp.priceAdjustments.map(pa => {
+          const v = pa.adjustmentValue
+          if (v.__typename === 'SellingPlanPercentagePriceAdjustment' && typeof v.adjustmentPercentage === 'number') {
+            return { adjustmentValue: { __typename: 'SellingPlanPercentagePriceAdjustment', adjustmentPercentage: v.adjustmentPercentage } }
+          }
+          if (v.__typename === 'SellingPlanFixedAmountPriceAdjustment' && v.adjustmentAmount) {
+            return { adjustmentValue: { __typename: 'SellingPlanFixedAmountPriceAdjustment', adjustmentAmount: v.adjustmentAmount } }
+          }
+          if (v.__typename === 'SellingPlanFixedPriceAdjustment' && v.price) {
+            return { adjustmentValue: { __typename: 'SellingPlanFixedPriceAdjustment', price: v.price } }
+          }
+          // Fallback — 0% adjustment keeps typings happy without inventing a price.
+          return { adjustmentValue: { __typename: 'SellingPlanPercentagePriceAdjustment', adjustmentPercentage: 0 } }
+        }),
+      }
+      if (sp.description) plan.description = sp.description
+      return plan
+    }),
+  }))
+  return groups.filter(g => g.sellingPlans.length > 0)
 }
 
 function nodeToProduct(node: ShopifyProductNode): Product {
   const variant = node.variants.edges[0]?.node
+  const mf = node.metafields
+  const moodTags     = parseMetafieldJSON<string[]>(mf, 'mood_tags',     [])
+  const audienceTags = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
+  const mattersTags  = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
+  const heroVideo    = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
   return {
     id: node.id,
     handle: node.handle,
@@ -304,12 +421,32 @@ function nodeToProduct(node: ShopifyProductNode): Product {
     ...(variant?.compareAtPrice ? { compareAtPrice: parseFloat(variant.compareAtPrice.amount) } : {}),
     brand: node.vendor,
     tags: node.tags,
+    ...(moodTags.length     > 0 ? { moodTags }     : {}),
+    ...(audienceTags.length > 0 ? { audienceTags } : {}),
+    ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
+    ...(heroVideo?.src && typeof heroVideo.duration === 'number'
+      ? { heroVideo: { src: heroVideo.src, duration: heroVideo.duration, ...(heroVideo.poster ? { poster: heroVideo.poster } : {}) } }
+      : {}),
   }
 }
 
 function nodeToDeal(node: ShopifyProductNode): Deal {
   const mf = node.metafields
   const variant = node.variants.edges[0]?.node
+
+  // v2 redesign metafield parsing (all optional)
+  const mapRestrictedRaw = parseMetafield(mf, 'map_restricted')
+  const heroVideo        = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
+  const productTypeDial  = parseMetafield(mf, 'product_type_dial') as ProductTypeDial | ''
+  const sensationDial    = parseMetafieldJSON<Deal['sensationDial']>(mf, 'sensation_dial', {})
+  const pairingWhy       = parseMetafieldJSON<Record<string, string>>(mf, 'pairing_why', {})
+  const moodTags         = parseMetafieldJSON<string[]>(mf, 'mood_tags',     [])
+  const audienceTags     = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
+  const mattersTags      = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
+  const emmaHero         = parseMetafieldJSON<Partial<import('~/types').EmmaHeroCopy>>(mf, 'emma_hero', {})
+  const quietEndorsementCopy = parseMetafieldJSON<Partial<import('~/types').QuietEndorsementCopy>>(mf, 'quiet_endorsement_copy', {})
+  const pairBundleCopy       = parseMetafieldJSON<Partial<import('~/types').PairBundleCopy>>(mf, 'pair_bundle_copy', {})
+  const sellingPlanGroups    = parseSellingPlanGroups(node.sellingPlanGroups)
 
   return {
     id: node.id,
@@ -321,7 +458,6 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     fullStory: parseMetafield(mf, 'full_story') || node.description,
     worksForHim: parseMetafield(mf, 'works_for_him'),
     worksForHer: parseMetafield(mf, 'works_for_her'),
-    featureBullets: parseMetafieldJSON<string[]>(mf, 'feature_bullets', []),
     boxContents: parseMetafieldJSON<string[]>(mf, 'box_contents', []),
     images: parseImages(node.images.edges),
     videos: parseVideos(node.media),
@@ -355,6 +491,27 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     })),
     options: node.options,
     // rating populated by Judge.me integration — omitted until available
+    // v2 metafields
+    ...(mapRestrictedRaw === 'true' ? { mapRestricted: true } : {}),
+    ...(heroVideo?.src && typeof heroVideo.duration === 'number'
+      ? { heroVideo: { src: heroVideo.src, duration: heroVideo.duration, ...(heroVideo.poster ? { poster: heroVideo.poster } : {}) } }
+      : {}),
+    ...(moodTags.length     > 0 ? { moodTags }     : {}),
+    ...(audienceTags.length > 0 ? { audienceTags } : {}),
+    ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
+    ...(productTypeDial ? { productTypeDial } : {}),
+    ...(sensationDial && Object.keys(sensationDial).length > 0 ? { sensationDial } : {}),
+    ...(pairingWhy    && Object.keys(pairingWhy).length > 0    ? { pairingWhy } : {}),
+    ...(emmaHero?.headline && emmaHero?.variant
+      ? { emmaHero: emmaHero as import('~/types').EmmaHeroCopy }
+      : {}),
+    ...(quietEndorsementCopy?.eyebrow && quietEndorsementCopy?.body && quietEndorsementCopy?.bannerHeadline
+      ? { quietEndorsementCopy: quietEndorsementCopy as import('~/types').QuietEndorsementCopy }
+      : {}),
+    ...(pairBundleCopy?.headline && pairBundleCopy?.body && pairBundleCopy?.pairedHandle
+      ? { pairBundleCopy: pairBundleCopy as import('~/types').PairBundleCopy }
+      : {}),
+    ...(sellingPlanGroups && sellingPlanGroups.length > 0 ? { sellingPlanGroups } : {}),
   }
 }
 
@@ -502,6 +659,23 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     try { return JSON.parse(raw) as T } catch { return fallback }
   }
 
+  // Emma hero copy (Claude-generated on deal activation). Only populated when
+  // both the variant and headline are present — otherwise we let the route
+  // fall through to the Sanity/default hero copy.
+  const emmaHeroRaw = mfJSON<Partial<import('~/types').EmmaHeroCopy>>('emma_hero', {})
+  const emmaHero = emmaHeroRaw?.headline && emmaHeroRaw?.variant
+    ? (emmaHeroRaw as import('~/types').EmmaHeroCopy)
+    : null
+  const quietEndorsementCopyRaw = mfJSON<Partial<import('~/types').QuietEndorsementCopy>>('quiet_endorsement_copy', {})
+  const quietEndorsementCopy = quietEndorsementCopyRaw?.eyebrow && quietEndorsementCopyRaw?.body && quietEndorsementCopyRaw?.bannerHeadline
+    ? (quietEndorsementCopyRaw as import('~/types').QuietEndorsementCopy)
+    : null
+  const pairBundleCopyRaw = mfJSON<Partial<import('~/types').PairBundleCopy>>('pair_bundle_copy', {})
+  const pairBundleCopy = pairBundleCopyRaw?.headline && pairBundleCopyRaw?.body && pairBundleCopyRaw?.pairedHandle
+    ? (pairBundleCopyRaw as import('~/types').PairBundleCopy)
+    : null
+  const mapRestricted = mfVal('map_restricted') === 'true'
+
   const variant = product.variants[0]
   const gid = `gid://shopify/Product/${product.id}`
 
@@ -515,7 +689,6 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     fullStory: mfVal('full_story') || product.body_html,
     worksForHim: mfVal('works_for_him'),
     worksForHer: mfVal('works_for_her'),
-    featureBullets: mfJSON<string[]>('feature_bullets', []),
     boxContents: mfJSON<string[]>('box_contents', []),
     images: product.images.map(img => ({ url: img.src, altText: img.alt ?? '' })),
     videos,
@@ -536,6 +709,10 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     ...(mfVal('original_description') ? { rawDescription: mfVal('original_description') } : {}),
     ...(mfVal('deal_score') ? { dealScore: parseFloat(mfVal('deal_score')) } : {}),
     ...(mfVal('nalpac_sku') ? { nalpacSku: mfVal('nalpac_sku') } : {}),
+    ...(emmaHero ? { emmaHero } : {}),
+    ...(quietEndorsementCopy ? { quietEndorsementCopy } : {}),
+    ...(pairBundleCopy ? { pairBundleCopy } : {}),
+    mapRestricted,
     variantId: variant ? `gid://shopify/ProductVariant/${variant.id}` : '',
     variants: product.variants.map(v => {
       // Reconstruct selectedOptions from option1/option2/option3 + product.options
@@ -980,6 +1157,13 @@ const CART_FRAGMENT = `
             product { id title handle images(first: 1) { edges { node { url altText } } } }
           }
         }
+        sellingPlanAllocation {
+          sellingPlan { id name }
+          priceAdjustments {
+            compareAtPrice { amount currencyCode }
+            price          { amount currencyCode }
+          }
+        }
       }
     }
   }
@@ -990,10 +1174,35 @@ const CART_FRAGMENT = `
 `
 
 interface CartResponse { cart: RawCart }
+interface RawCartLineSellingPlanAllocation {
+  sellingPlan: { id: string; name: string }
+  priceAdjustments: Array<{
+    compareAtPrice: { amount: string; currencyCode: string }
+    price:          { amount: string; currencyCode: string }
+  }>
+}
 interface RawCart {
   id: string; checkoutUrl: string; totalQuantity: number
-  lines: { edges: { node: { id: string; quantity: number; merchandise: { id: string; title: string; price: { amount: string; currencyCode: string }; product: { id: string; title: string; handle: string; images: { edges: { node: { url: string; altText: string | null } }[] } } } } }[] }
+  lines: { edges: { node: { id: string; quantity: number; merchandise: { id: string; title: string; price: { amount: string; currencyCode: string }; product: { id: string; title: string; handle: string; images: { edges: { node: { url: string; altText: string | null } }[] } } }; sellingPlanAllocation: RawCartLineSellingPlanAllocation | null } }[] }
   cost: { subtotalAmount: { amount: string; currencyCode: string }; totalAmount: { amount: string; currencyCode: string } }
+}
+
+function mapSellingPlanAllocation(
+  raw: RawCartLineSellingPlanAllocation | null,
+): CartLine['sellingPlanAllocation'] {
+  if (!raw) return undefined
+  const adj = raw.priceAdjustments[0]
+  const allocation: NonNullable<CartLine['sellingPlanAllocation']> = {
+    sellingPlan: { id: raw.sellingPlan.id, name: raw.sellingPlan.name },
+  }
+  if (adj) {
+    const compareAt = parseFloat(adj.compareAtPrice.amount)
+    const price     = parseFloat(adj.price.amount)
+    if (compareAt > 0 && price < compareAt) {
+      allocation.discountPct = Math.round(((compareAt - price) / compareAt) * 100)
+    }
+  }
+  return allocation
 }
 
 function rawCartToCart(raw: RawCart): Cart {
@@ -1001,21 +1210,26 @@ function rawCartToCart(raw: RawCart): Cart {
     id: raw.id,
     checkoutUrl: raw.checkoutUrl,
     totalQuantity: raw.totalQuantity,
-    lines: raw.lines.edges.map((e): CartLine => ({
-      id: e.node.id,
-      quantity: e.node.quantity,
-      merchandise: {
-        id: e.node.merchandise.id,
-        title: e.node.merchandise.title,
-        price: e.node.merchandise.price,
-        product: {
-          id: e.node.merchandise.product.id,
-          title: e.node.merchandise.product.title,
-          handle: e.node.merchandise.product.handle,
-          images: parseImages(e.node.merchandise.product.images.edges),
+    lines: raw.lines.edges.map((e): CartLine => {
+      const allocation = mapSellingPlanAllocation(e.node.sellingPlanAllocation)
+      const line: CartLine = {
+        id: e.node.id,
+        quantity: e.node.quantity,
+        merchandise: {
+          id: e.node.merchandise.id,
+          title: e.node.merchandise.title,
+          price: e.node.merchandise.price,
+          product: {
+            id: e.node.merchandise.product.id,
+            title: e.node.merchandise.product.title,
+            handle: e.node.merchandise.product.handle,
+            images: parseImages(e.node.merchandise.product.images.edges),
+          },
         },
-      },
-    })),
+      }
+      if (allocation) line.sellingPlanAllocation = allocation
+      return line
+    }),
     cost: raw.cost,
   }
 }
@@ -1026,6 +1240,33 @@ export async function createCart(): Promise<Cart> {
       cartCreate { cart { ${CART_FRAGMENT} } }
     }
   `)
+  return rawCartToCart(data.cartCreate.cart)
+}
+
+/**
+ * Create a cart pre-populated with line items and return it.
+ * Used by the chat agent's buildCheckoutLink tool — we can't use `/cart/VAR:QTY`
+ * permalinks because Shopify disables those while the storefront is password-
+ * protected (returns 410). A Storefront-API-created cart works regardless.
+ */
+export async function createCartWithLines(
+  lines: { variantId: string; quantity: number }[],
+): Promise<Cart> {
+  const data = await storefront<{ cartCreate: { cart: RawCart | null; userErrors: { field: string[]; message: string }[] } }>(
+    `mutation CartCreateWithLines($lines: [CartLineInput!]!) {
+       cartCreate(input: { lines: $lines }) {
+         cart { ${CART_FRAGMENT} }
+         userErrors { field message }
+       }
+     }`,
+    {
+      lines: lines.map((l) => ({ merchandiseId: l.variantId, quantity: l.quantity })),
+    },
+  )
+  if (!data.cartCreate.cart) {
+    const msg = data.cartCreate.userErrors?.[0]?.message || 'cart_create_failed'
+    throw new Error(msg)
+  }
   return rawCartToCart(data.cartCreate.cart)
 }
 
@@ -1071,6 +1312,24 @@ export async function addLinesToCart(
   return rawCartToCart(data.cartLinesAdd.cart)
 }
 
+/**
+ * Set custom attributes on a cart. Used to tag carts for Shopify Automatic
+ * Discount rules (e.g. pair_bundle=live triggers a pre-configured % off rule).
+ */
+export async function setCartAttributes(
+  cartId: string,
+  attributes: { key: string; value: string }[],
+): Promise<void> {
+  await storefront(`
+    mutation CartAttributesUpdate($cartId: ID!, $attributes: [AttributeInput!]!) {
+      cartAttributesUpdate(cartId: $cartId, attributes: $attributes) {
+        cart { id }
+        userErrors { field message }
+      }
+    }
+  `, { cartId, attributes })
+}
+
 export async function removeFromCart(cartId: string, lineIds: string[]): Promise<Cart> {
   const data = await storefront<{ cartLinesRemove: CartResponse }>(`
     mutation RemoveFromCart($cartId: ID!, $lineIds: [ID!]!) {
@@ -1108,6 +1367,35 @@ export async function updateProductMetafield(
   })
 }
 
+/**
+ * Write Emma-voice pairing_why blurbs to a product's xdipx.pairing_why metafield.
+ * Stored as a JSON object keyed by accessory product GID. Merges into existing
+ * blurbs — the admin can curate per-accessory copy without losing other entries.
+ */
+export async function setPairingWhy(
+  productId: string,
+  blurbs: Record<string, string>,
+  opts: { merge?: boolean } = { merge: true },
+): Promise<void> {
+  const numericId = productId.replace('gid://shopify/Product/', '')
+  let merged = blurbs
+  if (opts.merge !== false) {
+    const { metafields } = await shopifyAdmin<{
+      metafields: { namespace: string; key: string; value: string }[]
+    }>(`/products/${numericId}/metafields.json?namespace=xdipx&key=pairing_why`)
+    const existing = metafields?.[0]?.value
+    if (existing) {
+      try {
+        const prev = JSON.parse(existing) as Record<string, string>
+        merged = { ...prev, ...blurbs }
+      } catch {
+        // Malformed JSON — overwrite cleanly
+      }
+    }
+  }
+  await updateProductMetafield(productId, 'pairing_why', JSON.stringify(merged), 'json')
+}
+
 export async function getVariantCost(variantGid: string): Promise<number | null> {
   const id = variantGid.replace('gid://shopify/ProductVariant/', '')
   const { variant } = await shopifyAdmin<{ variant: { inventory_item_id: string } }>(`/variants/${id}.json`)
@@ -1117,6 +1405,15 @@ export async function getVariantCost(variantGid: string): Promise<number | null>
   )
   const cost = parseFloat(inventory_item?.cost ?? '')
   return isNaN(cost) ? null : cost
+}
+
+/** Returns every variant GID for a product. Used to sync pricing across all variants. */
+export async function getProductVariantGids(shopifyProductId: string): Promise<string[]> {
+  const numericId = shopifyProductId.replace('gid://shopify/Product/', '')
+  const { product } = await shopifyAdmin<{
+    product: { variants: { id: number }[] } | null
+  }>(`/products/${numericId}.json?fields=variants`)
+  return (product?.variants ?? []).map(v => `gid://shopify/ProductVariant/${v.id}`)
 }
 
 export async function updateVariantPricing(variantGid: string, price: string, compareAtPrice: string, wholesaleCost?: string): Promise<void> {
@@ -1217,7 +1514,6 @@ export interface ProductPageDoc {
   fullStory?: unknown           // string (legacy) or portable text blocks
   worksForHim?: unknown        // string (legacy) or portable text blocks
   worksForHer?: unknown        // string (legacy) or portable text blocks
-  featureBullets?: string[] | undefined
   boxContents?: string[] | undefined
   moodImageUrl?: string | undefined
   category?: string | undefined
@@ -1294,13 +1590,6 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   add('original_price',   doc.originalPrice?.toString(),       'number_decimal')
   add('wholesale_cost',   doc.wholesaleCost?.toString(),       'number_decimal')
   add('map_price',        doc.mapPrice?.toString(),            'number_decimal')
-
-  if (!doc.featureBullets?.length) throw new Error('pushProductToShopify: featureBullets is empty')
-  metafields.push({
-    namespace: 'xdipx', key: 'feature_bullets', ownerId: gid,
-    value: JSON.stringify(doc.featureBullets),
-    type: 'json',
-  })
 
   if (!doc.boxContents?.length) throw new Error('pushProductToShopify: boxContents is empty')
   metafields.push({
@@ -1680,14 +1969,16 @@ export async function setMediaAsPrimary(shopifyProductGid: string, mediaId: stri
 }
 
 /**
- * Upload a JPEG thumbnail buffer to Shopify as a product image via staged upload.
- * Returns the new media GID.
+ * Upload an image buffer to Shopify as a product image via staged upload.
+ * Returns the new media GID. `mimeType` defaults to `image/jpeg` for
+ * backwards compatibility; pass `image/png` for images with transparency.
  */
 export async function uploadThumbnailToProduct(
   shopifyProductGid: string,
   imageBuffer: Buffer,
   filename: string,
   altText: string,
+  mimeType: 'image/jpeg' | 'image/png' = 'image/jpeg',
 ): Promise<string> {
   // 1. Create staged upload target for the image
   const staged = await adminGraphQL<{
@@ -1705,7 +1996,7 @@ export async function uploadThumbnailToProduct(
   `, {
     input: [{
       filename,
-      mimeType:   'image/jpeg',
+      mimeType,
       httpMethod: 'POST',
       resource:   'IMAGE',
       fileSize:   String(imageBuffer.length),
@@ -1723,7 +2014,7 @@ export async function uploadThumbnailToProduct(
   // 2. POST image to staged URL
   const form = new FormData()
   for (const param of target.parameters) form.append(param.name, param.value)
-  form.append('file', new Blob([new Uint8Array(imageBuffer)], { type: 'image/jpeg' }), filename)
+  form.append('file', new Blob([new Uint8Array(imageBuffer)], { type: mimeType }), filename)
 
   const uploadRes = await fetch(target.url, { method: 'POST', body: form })
   if (!uploadRes.ok) {
@@ -1782,6 +2073,36 @@ export async function getProductAdminImages(numericId: string): Promise<AdminPro
 export async function deleteProductImage(numericProductId: string, imageId: number): Promise<void> {
   const id = numericProductId.replace('gid://shopify/Product/', '')
   await shopifyAdmin<unknown>(`/products/${id}/images/${imageId}.json`, 'DELETE')
+}
+
+/**
+ * Delete media (images/videos) from a product by GID. Use this for media created
+ * via productCreateMedia — the REST /products/{id}/images/{id}.json path does not
+ * accept media GIDs.
+ */
+export async function deleteProductMedia(
+  shopifyProductGid: string,
+  mediaGids: string[],
+): Promise<void> {
+  if (mediaGids.length === 0) return
+  const data = await adminGraphQL<{
+    productDeleteMedia: {
+      deletedMediaIds: string[]
+      mediaUserErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation ProductDeleteMedia($productId: ID!, $mediaIds: [ID!]!) {
+      productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {
+        deletedMediaIds
+        mediaUserErrors { field message }
+      }
+    }
+  `, { productId: shopifyProductGid, mediaIds: mediaGids })
+
+  if (data.productDeleteMedia.mediaUserErrors.length > 0) {
+    const errs = data.productDeleteMedia.mediaUserErrors.map(e => e.message).join('; ')
+    throw new Error(`Shopify productDeleteMedia error: ${errs}`)
+  }
 }
 
 export async function reorderProductImages(
@@ -3851,20 +4172,61 @@ export async function getReturn(returnId: string): Promise<{
   }
 }
 
-// Returns storefront collections (id included for productFilters usage)
+// Returns storefront collections (id included for productFilters usage).
+// Shop has ~100+ collections (category + brand), so default bumped from 50 → 150.
 export async function getStorefrontCollections(
-  first = 50,
+  first = 150,
 ): Promise<{ id: string; handle: string; title: string }[]> {
-  const data = await storefront<{
-    collections: { edges: { node: { id: string; handle: string; title: string } }[] }
-  }>(`
-    query GetStorefrontCollections($first: Int!) {
-      collections(first: $first, sortKey: TITLE) {
-        edges { node { id handle title } }
+  return cached(`shopify:collections:${first}`, READ_TTL, async () => {
+    const data = await storefront<{
+      collections: { edges: { node: { id: string; handle: string; title: string } }[] }
+    }>(`
+      query GetStorefrontCollections($first: Int!) {
+        collections(first: $first, sortKey: TITLE) {
+          edges { node { id handle title } }
+        }
       }
-    }
-  `, { first })
-  return data.collections.edges.map(e => e.node)
+    `, { first })
+    return data.collections.edges.map(e => e.node)
+  })
+}
+
+// Keyword-match storefront collections by handle + title. Used by Emma's
+// findCollection tool to route shoppers to the right category/brand PLP
+// (e.g. "lingerie" → "lingerie", "lelo" → "lelo", "bondage" → "all-bondage").
+// Ranks exact-handle > starts-with > includes and drops collections with no
+// products so we never point a shopper at an empty page.
+export async function findCollectionsByQuery(
+  query: string,
+  limit = 5,
+): Promise<{ handle: string; title: string; productCount: number }[]> {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+  const all = await getStorefrontCollections(150)
+  const matches = all
+    .map((c) => {
+      const handle = c.handle.toLowerCase()
+      const title = c.title.toLowerCase()
+      let score = 0
+      if (handle === q) score = 100
+      else if (handle.startsWith(q)) score = 70
+      else if (handle.includes(q)) score = 50
+      if (title === q) score = Math.max(score, 95)
+      else if (title.startsWith(q)) score = Math.max(score, 65)
+      else if (title.includes(q)) score = Math.max(score, 45)
+      return { c, score }
+    })
+    .filter((m) => m.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit * 2) // pull extras so we can drop empties
+  const hydrated: { handle: string; title: string; productCount: number }[] = []
+  for (const m of matches) {
+    const products = await getCollectionProducts(m.c.handle, 1)
+    if (products.length === 0) continue
+    hydrated.push({ handle: m.c.handle, title: m.c.title, productCount: products.length })
+    if (hydrated.length >= limit) break
+  }
+  return hydrated
 }
 
 // ─── Draft Orders (phone/SMS ordering) ────────────────────────────────────
@@ -3981,7 +4343,11 @@ export async function createDraftOrder(input: {
       email: input.customer.email,
       phone: input.customer.phone,
       note: input.note ?? `xdipx ${input.channel} order`,
-      tags: [`channel:${input.channel}`, 'phone-order'],
+      tags: [
+        `channel:${input.channel}`,
+        'phone-order',
+        ...(input.channel === 'voice' ? ['emma-order-ivr'] : []),
+      ],
       lineItems: input.lineItems.map(li => ({ variantId: li.variantId, quantity: li.quantity })),
       shippingAddress: {
         firstName: firstName ?? '',

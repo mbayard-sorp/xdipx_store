@@ -60,6 +60,7 @@ export interface EditorialTilesBlock {
   eyebrow?: string
   heading: string
   tiles: EditorialTile[]
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Category Grid ────────────────────────────────────────────────────────
@@ -79,6 +80,7 @@ export interface CategoryGridBlock {
   heading: string
   items: CategoryGridItem[]
   columns: 3 | 4 | 6
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Product Carousel ─────────────────────────────────────────────────────
@@ -101,6 +103,29 @@ export interface ProductCarouselBlock {
   bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
+// ─── Emma Curated Rail (agent-generated cross-sell) ──────────────────────
+
+export interface EmmaCuratedRailBlock {
+  _type: 'emmaCuratedRail'
+  _key: string
+  _id?: string
+  active: boolean
+  order: number
+  heading: string
+  eyebrow?: string
+  emmaAside?: string
+  productHandles?: { handle: string }[]
+  layout?: 'carousel' | 'grid' | 'grid-3'
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
+  ctaLink?: string
+  ctaLabel?: string
+  target?: 'homepage' | 'pdp'
+  status?: 'draft' | 'approved' | 'live' | 'archived'
+  sourceDealId?: string
+  generatedAt?: string
+  rationale?: string
+}
+
 // ─── Play Together Banner ─────────────────────────────────────────────────
 
 export interface PlayTogetherBannerBlock {
@@ -114,6 +139,7 @@ export interface PlayTogetherBannerBlock {
   ctaLink: string
   image?: SanityImageAsset
   imagePosition: 'left' | 'right'
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Brand Logo Wall ──────────────────────────────────────────────────────
@@ -132,6 +158,7 @@ export interface BrandLogoWallBlock {
   order: number
   heading?: string
   logos: BrandLogo[]
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Testimonials ─────────────────────────────────────────────────────────
@@ -150,6 +177,7 @@ export interface TestimonialsBlock {
   order: number
   heading: string
   items: TestimonialItem[]
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Bonus Deal ──────────────────────────────────────────────────────────
@@ -161,6 +189,7 @@ export interface BonusDealBlock {
   order: number
   heading?: string
   eyebrow?: string
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
 // ─── Trust Bar ───────────────────────────────────────────────────────────
@@ -180,6 +209,36 @@ export interface TrustBarBlock {
   active: boolean
   order: number
   trustItems?: TrustItem[]
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
+}
+
+// ─── Editor Bio Card ─────────────────────────────────────────────────────
+
+export type EditorBioVariant = 'hero' | 'card' | 'quote'
+
+export interface EditorBioBlock {
+  _type: 'editorBio'
+  _key: string
+  active: boolean
+  order: number
+  variant: EditorBioVariant
+  eyebrow?: string
+  headingOverride?: string
+  hideLongBio?: boolean
+  hideSocials?: boolean
+  bgStyle?: 'cream' | 'paper' | 'cream-2'
+  showCta?: boolean
+  editor?: {
+    name: string
+    role: string
+    photoUrl: string | null
+    photoAlt: string | null
+    shortBio: string | null
+    longBio: unknown[] | null
+    picksSince: string | null
+    instagram: string | null
+    email: string | null
+  } | null
 }
 
 // ─── Rich Text ───────────────────────────────────────────────────────────
@@ -202,12 +261,14 @@ export type ContentBlock =
   | EditorialTilesBlock
   | CategoryGridBlock
   | ProductCarouselBlock
+  | EmmaCuratedRailBlock
   | PlayTogetherBannerBlock
   | BrandLogoWallBlock
   | TestimonialsBlock
   | BonusDealBlock
   | TrustBarBlock
   | RichTextBlock
+  | EditorBioBlock
 
 export interface HomepageSections {
   _id: string
@@ -277,11 +338,13 @@ export type PageSection =
   | EditorialTilesBlock
   | CategoryGridBlock
   | ProductCarouselBlock
+  | EmmaCuratedRailBlock
   | PlayTogetherBannerBlock
   | BrandLogoWallBlock
   | TestimonialsBlock
   | TrustBarBlock
   | RichTextBlock
+  | EditorBioBlock
 
 export interface SanityPage {
   _id: string
@@ -308,6 +371,52 @@ export interface BlogHomepage {
   subtext?: string
   heroImageUrl?: string
   heroImageAlt?: string
+}
+
+// v2 redesign — Emma hero settings (additive singleton)
+export type EmmaHeroVariant = 'loving' | 'bundle' | 'quote'
+
+export interface EmmaHeroSettings {
+  heroVariant?: EmmaHeroVariant
+  eyebrow?: string
+  headline?: string
+  body?: string
+  aside?: string
+  pullQuote?: string
+  pairProductHandle?: string
+}
+
+// v2 redesign — Emma persona singleton (avatar + display name)
+export interface EmmaPersona {
+  avatarUrl:   string | null
+  avatarAlt:   string | null
+  displayName: string | null
+}
+
+// Editor persona singleton — powers hero byline + /about E-E-A-T
+export interface Editor {
+  name: string
+  role: string
+  photoUrl: string | null
+  photoAlt: string | null
+  shortBio: string | null
+  longBio: unknown[] | null
+  picksSince: string | null
+  instagram: string | null
+  email: string | null
+}
+
+// v2 redesign — Emma presets (Ask Emma rail)
+export interface EmmaPreset {
+  label:         string
+  slug:          string
+  narratorCopy?: string
+  moodTags?:     string[]
+  audienceTags?: string[]
+  mattersTags?:  string[]
+  priceMax?:     number
+  featured?:     boolean
+  order?:        number
 }
 
 export interface BlogCategory {

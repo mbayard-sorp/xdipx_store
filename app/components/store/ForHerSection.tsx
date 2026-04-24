@@ -9,21 +9,21 @@ export function ForHerSection({ products }: ForHerSectionProps) {
   if (!products.length) return null
 
   return (
-    <section className="py-12 px-4 bg-brand-mist">
+    <section className="py-12 px-4 bg-cream-2">
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2
-              className="text-2xl font-bold text-brand-charcoal"
+              className="text-2xl font-bold text-ink"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Made for her. Obviously. ♥
             </h2>
-            <p className="text-brand-charcoal/50 text-sm">The good stuff, curated.</p>
+            <p className="text-ink/50 text-sm">The good stuff, curated.</p>
           </div>
           <Link
             to="/for-her"
-            className="text-sm font-semibold text-brand-purple hover:text-brand-purple-light transition-colors hidden sm:block"
+            className="text-sm font-semibold text-sage hover:text-sun transition-colors hidden sm:block"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             See all →
@@ -34,7 +34,7 @@ export function ForHerSection({ products }: ForHerSectionProps) {
           {products.map(product => (
             <Link to={`/products/${product.handle}`} key={product.id} className="group">
               <article className="bg-white rounded-2xl overflow-hidden shadow-sm card-lift">
-                <div className="aspect-square bg-brand-cream overflow-hidden">
+                <div className="aspect-square bg-cream overflow-hidden">
                   {product.images[0] ? (
                     <img
                       src={product.images[0].url}
@@ -43,21 +43,21 @@ export function ForHerSection({ products }: ForHerSectionProps) {
                       loading="lazy"
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-brand-charcoal/10 text-4xl">♥</div>
+                    <div className="w-full h-full flex items-center justify-center text-ink/10 text-4xl">♥</div>
                   )}
                 </div>
                 <div className="p-4">
-                  <p className="text-brand-charcoal/50 text-xs">{product.brand}</p>
+                  <p className="text-ink/50 text-xs">{product.brand}</p>
                   <p
-                    className="font-semibold text-brand-charcoal text-sm mt-0.5 line-clamp-2"
+                    className="font-semibold text-ink text-sm mt-0.5 line-clamp-2"
                     style={{ fontFamily: 'var(--font-display)' }}
                   >
                     {product.title}
                   </p>
                   <div className="flex items-center gap-2 mt-2">
-                    <span className="text-brand-gradient font-bold text-sm">${product.price.toFixed(2)}</span>
+                    <span className="text-coral font-bold text-sm">${product.price.toFixed(2)}</span>
                     {product.compareAtPrice && product.compareAtPrice > product.price && (
-                      <span className="text-brand-charcoal/40 text-xs line-through">${product.compareAtPrice.toFixed(2)}</span>
+                      <span className="text-ink/40 text-xs line-through">${product.compareAtPrice.toFixed(2)}</span>
                     )}
                   </div>
                 </div>

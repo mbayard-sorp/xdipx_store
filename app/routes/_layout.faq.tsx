@@ -72,19 +72,19 @@ export default function FAQPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-12">
       <h1
-        className="text-3xl font-bold text-brand-charcoal mb-2"
+        className="text-3xl font-bold text-ink mb-2"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Questions ♥
       </h1>
-      <p className="text-brand-charcoal/60 mb-10">
+      <p className="text-ink/60 mb-10">
         We're an open book. Here's everything you might want to know.
       </p>
 
       {FAQ_SECTIONS.map(section => (
         <div key={section.heading} className="mb-8">
           <h2
-            className="text-sm uppercase tracking-widest font-semibold text-brand-purple mb-3"
+            className="text-sm uppercase tracking-widest font-semibold text-sage mb-3"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {section.heading}
@@ -97,10 +97,10 @@ export default function FAQPage() {
         </div>
       ))}
 
-      <div className="mt-10 bg-brand-mist rounded-2xl p-6 text-center">
-        <p className="text-brand-charcoal/70">
+      <div className="mt-10 bg-cream-2 rounded-2xl p-6 text-center">
+        <p className="text-ink/70">
           Still have a question?{' '}
-          <a href="mailto:hello@xdipx.com" className="text-brand-purple font-semibold hover:underline">
+          <a href="mailto:hello@xdipx.com" className="text-sage font-semibold hover:underline">
             Email us
           </a>
           . We respond fast. ♥
@@ -122,20 +122,20 @@ function FAQItem({ q, a }: { q: string; a: string }) {
         aria-expanded={open}
       >
         <span
-          className="font-semibold text-brand-charcoal text-sm"
+          className="font-semibold text-ink text-sm"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {q}
         </span>
         <span
-          className={`text-brand-purple text-lg transition-transform ${open ? 'rotate-45' : ''}`}
+          className={`text-sage text-lg transition-transform ${open ? 'rotate-45' : ''}`}
           aria-hidden="true"
         >
           +
         </span>
       </button>
       {open && (
-        <div className="px-5 pb-4 text-sm text-brand-charcoal/70 leading-relaxed border-t border-brand-mist pt-3">
+        <div className="px-5 pb-4 text-sm text-ink/70 leading-relaxed border-t border-cream-2 pt-3">
           {a}
         </div>
       )}

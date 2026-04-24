@@ -77,6 +77,22 @@ export default function WishlistDetail() {
     mutateFetcher.submit(fd, { method: 'post', action: '/api/wishlist' })
   }
 
+  function handleToggleGiftMode() {
+    const fd = new FormData()
+    fd.set('intent', 'set-gift-mode')
+    fd.set('listId', String(list.id))
+    fd.set('giftMode', list.giftMode ? 'false' : 'true')
+    mutateFetcher.submit(fd, { method: 'post', action: '/api/wishlist' })
+  }
+
+  function handleRegenerate() {
+    const fd = new FormData()
+    fd.set('intent', 'regenerate-share')
+    fd.set('listId', String(list.id))
+    mutateFetcher.submit(fd, { method: 'post', action: '/api/wishlist' })
+    setCopied(false)
+  }
+
   function handleCopy() {
     if (!shareUrl) return
     navigator.clipboard
@@ -120,8 +136,8 @@ export default function WishlistDetail() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2 text-xs text-brand-charcoal/50">
-        <Link to="/account/wishlists" className="hover:text-brand-purple">
+      <div className="flex items-center gap-2 text-xs text-ink/50">
+        <Link to="/account/wishlists" className="hover:text-sage">
           ← All wishlists
         </Link>
       </div>
@@ -142,11 +158,11 @@ export default function WishlistDetail() {
                   value={draftName}
                   onChange={e => setDraftName(e.target.value)}
                   maxLength={100}
-                  className="flex-1 rounded-full border border-brand-mist px-3 py-1.5 text-base focus:outline-none focus:ring-2 focus:ring-brand-purple/40"
+                  className="flex-1 rounded-full border border-cream-2 px-3 py-1.5 text-base focus:outline-none focus:ring-2 focus:ring-sage/40"
                 />
                 <button
                   type="submit"
-                  className="text-sm font-semibold text-brand-purple px-3"
+                  className="text-sm font-semibold text-sage px-3"
                 >
                   Save
                 </button>
@@ -156,25 +172,25 @@ export default function WishlistDetail() {
                     setIsRenaming(false)
                     setDraftName(list.name)
                   }}
-                  className="text-sm font-semibold text-brand-charcoal/50 px-3"
+                  className="text-sm font-semibold text-ink/50 px-3"
                 >
                   Cancel
                 </button>
               </form>
             ) : (
               <h1
-                className="text-2xl font-bold text-brand-charcoal"
+                className="text-2xl font-bold text-ink"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
                 {list.name}
                 {list.isDefault && (
-                  <span className="ml-2 text-[11px] font-semibold text-brand-purple uppercase tracking-wide">
+                  <span className="ml-2 text-[11px] font-semibold text-sage uppercase tracking-wide">
                     Default
                   </span>
                 )}
               </h1>
             )}
-            <p className="text-sm text-brand-charcoal/50 mt-0.5">
+            <p className="text-sm text-ink/50 mt-0.5">
               {list.items.length} {list.items.length === 1 ? 'item' : 'items'}
             </p>
           </div>
@@ -182,7 +198,7 @@ export default function WishlistDetail() {
             <button
               type="button"
               onClick={() => setIsRenaming(true)}
-              className="text-sm font-semibold text-brand-charcoal/60 hover:text-brand-charcoal"
+              className="text-sm font-semibold text-ink/60 hover:text-ink"
             >
               Rename
             </button>
@@ -195,12 +211,12 @@ export default function WishlistDetail() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <p
-              className="text-sm font-bold text-brand-charcoal"
+              className="text-sm font-bold text-ink"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {isShared ? 'Shared' : 'Private'}
             </p>
-            <p className="text-xs text-brand-charcoal/60 mt-0.5">
+            <p className="text-xs text-ink/60 mt-0.5">
               {isShared
                 ? 'Anyone with the link can view this list.'
                 : 'Only you can see this list.'}
@@ -212,8 +228,8 @@ export default function WishlistDetail() {
             disabled={mutateFetcher.state !== 'idle'}
             className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${
               isShared
-                ? 'bg-brand-mist text-brand-charcoal hover:bg-brand-mist/70'
-                : 'bg-brand-gradient text-white hover:opacity-90'
+                ? 'bg-cream-2 text-ink hover:bg-cream-2/70'
+                : 'bg-coral text-white hover:opacity-90'
             }`}
             style={{ fontFamily: 'var(--font-display)' }}
           >
@@ -222,29 +238,90 @@ export default function WishlistDetail() {
         </div>
 
         {isShared && shareUrl && (
-          <div className="flex items-center gap-2 pt-2 border-t border-brand-mist">
-            <input
-              readOnly
-              value={shareUrl}
-              onFocus={e => e.currentTarget.select()}
-              className="flex-1 min-w-0 text-xs bg-brand-mist/40 rounded-full px-3 py-1.5 font-mono text-brand-charcoal/80"
-            />
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="shrink-0 text-xs font-semibold text-brand-purple hover:text-brand-purple-light px-2"
-            >
-              {copied ? 'Copied!' : 'Copy'}
-            </button>
-            <Link
-              to={`/wishlists/${list.publicSlug}`}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 text-xs font-semibold text-brand-charcoal/60 hover:text-brand-charcoal px-2"
-            >
-              View
-            </Link>
-          </div>
+          <>
+            <div className="flex items-center gap-2 pt-2 border-t border-line">
+              <input
+                readOnly
+                value={shareUrl}
+                onFocus={e => e.currentTarget.select()}
+                className="flex-1 min-w-0 text-xs bg-cream-2 rounded-full px-3 py-1.5 font-mono text-ink/80"
+              />
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="shrink-0 text-xs font-semibold text-coral hover:text-coral-deep px-2"
+              >
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+              <Link
+                to={`/wishlists/${list.publicSlug}`}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 text-xs font-semibold text-ink/60 hover:text-ink px-2"
+              >
+                View
+              </Link>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-line">
+              <div className="min-w-0">
+                <p
+                  className="text-sm font-bold text-ink"
+                  style={{ fontFamily: 'var(--font-display)' }}
+                >
+                  Gift mode
+                  {list.giftMode && (
+                    <span className="ml-2 text-[10px] font-mono text-coral uppercase tracking-wider">
+                      On
+                    </span>
+                  )}
+                </p>
+                <p className="text-xs text-ink/60 mt-0.5">
+                  {list.giftMode
+                    ? 'Prices hidden on the shared view — surprise-proof.'
+                    : 'Hide prices so gift-givers don\'t see what you paid.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleGiftMode}
+                disabled={mutateFetcher.state !== 'idle'}
+                aria-pressed={list.giftMode}
+                className={`shrink-0 w-11 h-6 rounded-full relative transition-colors ${
+                  list.giftMode ? 'bg-coral' : 'bg-cream-2'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                    list.giftMode ? 'translate-x-5' : ''
+                  }`}
+                />
+                <span className="sr-only">Toggle gift mode</span>
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-line">
+              <div className="min-w-0">
+                <p
+                  className="text-sm font-bold text-ink"
+                  style={{ fontFamily: 'var(--font-display)' }}
+                >
+                  Regenerate link
+                </p>
+                <p className="text-xs text-ink/60 mt-0.5">
+                  Kills the current link. Anyone who had it won't be able to view anymore.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleRegenerate}
+                disabled={mutateFetcher.state !== 'idle'}
+                className="shrink-0 text-xs font-semibold text-ink/70 hover:text-coral border border-line hover:border-coral px-3 py-1.5 rounded-full transition-colors"
+              >
+                Regenerate
+              </button>
+            </div>
+          </>
         )}
       </section>
 
@@ -261,17 +338,17 @@ export default function WishlistDetail() {
       {list.items.length === 0 ? (
         <div className="bg-white rounded-2xl p-8 text-center shadow-sm">
           <p
-            className="text-base font-bold text-brand-charcoal mb-1"
+            className="text-base font-bold text-ink mb-1"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             This list is empty ♥
           </p>
-          <p className="text-sm text-brand-charcoal/60">
+          <p className="text-sm text-ink/60">
             Heart a product anywhere on the site to add it here.
           </p>
           <Link
             to="/"
-            className="inline-flex items-center justify-center mt-4 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-brand-gradient hover:opacity-90 transition-opacity"
+            className="inline-flex items-center justify-center mt-4 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-coral hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Browse deals ♥
@@ -293,7 +370,7 @@ export default function WishlistDetail() {
 
       {/* Delete list */}
       {!list.isDefault && (
-        <section className="pt-6 border-t border-brand-mist">
+        <section className="pt-6 border-t border-cream-2">
           <button
             type="button"
             onClick={() => setConfirmDeleteList(true)}
@@ -368,7 +445,7 @@ function WishlistItemCard({
 
   return (
     <li className="bg-white rounded-2xl overflow-hidden shadow-sm flex flex-col">
-      <div className="relative aspect-square bg-brand-mist overflow-hidden">
+      <div className="relative aspect-square bg-cream-2 overflow-hidden">
         <Link to={`/products/${item.handle}`} className="block w-full h-full">
           {image ? (
             <img
@@ -378,7 +455,7 @@ function WishlistItemCard({
               loading="lazy"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-4xl text-brand-charcoal/10">
+            <div className="w-full h-full flex items-center justify-center text-4xl text-ink/10">
               ♥
             </div>
           )}
@@ -390,7 +467,7 @@ function WishlistItemCard({
             disabled={isAdding}
             aria-label={`Add ${product?.title ?? item.handle} to cart`}
             className={`absolute bottom-2 right-2 z-10 inline-flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-1.5 text-white text-xs font-bold shadow-md transition-all ${
-              justAdded ? 'bg-brand-purple scale-105' : 'bg-brand-coral hover:bg-brand-coral/90 hover:scale-105'
+              justAdded ? 'bg-sage scale-105' : 'bg-coral hover:bg-coral/90 hover:scale-105'
             } ${isAdding ? 'opacity-70' : ''}`}
             style={{ fontFamily: 'var(--font-display)' }}
           >
@@ -424,24 +501,24 @@ function WishlistItemCard({
       <div className="p-3 flex-1 flex flex-col gap-2">
         <Link to={`/products/${item.handle}`} className="block">
           {product?.brand && (
-            <p className="text-[11px] text-brand-charcoal/50 uppercase tracking-wide">
+            <p className="text-[11px] text-ink/50 uppercase tracking-wide">
               {product.brand}
             </p>
           )}
           <p
-            className="text-sm font-semibold text-brand-charcoal line-clamp-2"
+            className="text-sm font-semibold text-ink line-clamp-2"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {product?.title || item.handle}
           </p>
           {product?.price !== undefined && (
-            <p className="text-sm font-bold text-brand-gradient mt-1">
+            <p className="text-sm font-bold text-coral mt-1">
               ${product.price.toFixed(2)}
             </p>
           )}
         </Link>
 
-        <div className="flex items-center gap-2 mt-auto pt-2 border-t border-brand-mist text-xs">
+        <div className="flex items-center gap-2 mt-auto pt-2 border-t border-cream-2 text-xs">
           <button
             type="button"
             onClick={onRemove}
@@ -451,17 +528,17 @@ function WishlistItemCard({
           </button>
           {otherLists.length > 0 && (
             <>
-              <span className="text-brand-charcoal/20">·</span>
+              <span className="text-ink/20">·</span>
               <div className="relative">
                 <button
                   type="button"
                   onClick={() => setShowMove(s => !s)}
-                  className="font-semibold text-brand-charcoal/60 hover:text-brand-charcoal"
+                  className="font-semibold text-ink/60 hover:text-ink"
                 >
                   Move ▾
                 </button>
                 {showMove && (
-                  <div className="absolute left-0 bottom-full mb-1 z-10 bg-white shadow-lg rounded-xl border border-brand-mist min-w-[160px] py-1">
+                  <div className="absolute left-0 bottom-full mb-1 z-10 bg-white shadow-lg rounded-xl border border-cream-2 min-w-[160px] py-1">
                     {otherLists.map(l => (
                       <button
                         key={l.id}
@@ -470,7 +547,7 @@ function WishlistItemCard({
                           onMove(l.id)
                           setShowMove(false)
                         }}
-                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-brand-mist truncate"
+                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-cream-2 truncate"
                       >
                         {l.name}
                       </button>

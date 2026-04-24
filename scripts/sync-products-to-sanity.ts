@@ -270,12 +270,6 @@ async function main() {
       dealScore:        mfNum(p, 'deal_score'),
     }
 
-    // feature_bullets is stored as JSON in Shopify
-    const bulletsRaw = mf(p, 'feature_bullets')
-    if (bulletsRaw) {
-      try { fields['featureBullets'] = JSON.parse(bulletsRaw) } catch { /* ignore */ }
-    }
-
     // Remove undefined values so we don't overwrite with null
     const cleanFields = Object.fromEntries(
       Object.entries(fields).filter(([, v]) => v !== undefined)

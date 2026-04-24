@@ -94,18 +94,18 @@ export default function WishlistsIndex() {
       <section className="hidden lg:flex items-center justify-between">
         <div>
           <h1
-            className="text-2xl font-bold text-brand-charcoal"
+            className="text-2xl font-bold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            Wishlists <span className="text-brand-purple">♥</span>
+            Wishlists <span className="text-sage">♥</span>
           </h1>
-          <p className="text-sm text-brand-charcoal/50 mt-0.5">{customer.email}</p>
+          <p className="text-sm text-ink/50 mt-0.5">{customer.email}</p>
         </div>
         {!showCreate && (
           <button
             type="button"
             onClick={() => setShowCreate(true)}
-            className="text-sm font-semibold text-white bg-brand-gradient px-4 py-2 rounded-full hover:opacity-90 transition-opacity"
+            className="text-sm font-semibold text-white bg-coral px-4 py-2 rounded-full hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             + New list
@@ -118,7 +118,7 @@ export default function WishlistsIndex() {
           <button
             type="button"
             onClick={() => setShowCreate(true)}
-            className="text-sm font-semibold text-white bg-brand-gradient px-4 py-2 rounded-full hover:opacity-90 transition-opacity"
+            className="text-sm font-semibold text-white bg-coral px-4 py-2 rounded-full hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             + New list
@@ -137,13 +137,13 @@ export default function WishlistsIndex() {
             required
             maxLength={100}
             placeholder="List name (e.g. Gifts for him)"
-            className="flex-1 rounded-full border border-brand-mist px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/40"
+            className="flex-1 rounded-full border border-cream-2 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/40"
           />
           <div className="flex gap-2">
             <button
               type="submit"
               disabled={isBusy}
-              className="px-4 py-2 rounded-full bg-brand-gradient text-white text-sm font-semibold disabled:opacity-60"
+              className="px-4 py-2 rounded-full bg-coral text-white text-sm font-semibold disabled:opacity-60"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Create
@@ -151,7 +151,7 @@ export default function WishlistsIndex() {
             <button
               type="button"
               onClick={() => setShowCreate(false)}
-              className="px-4 py-2 rounded-full bg-brand-mist text-brand-charcoal text-sm font-semibold"
+              className="px-4 py-2 rounded-full bg-cream-2 text-ink text-sm font-semibold"
             >
               Cancel
             </button>
@@ -250,39 +250,39 @@ function WishlistCard({
                 value={draftName}
                 onChange={e => setDraftName(e.target.value)}
                 maxLength={100}
-                className="flex-1 rounded-full border border-brand-mist px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/40"
+                className="flex-1 rounded-full border border-cream-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sage/40"
               />
               <button
                 type="submit"
-                className="text-xs font-semibold text-brand-purple px-2"
+                className="text-xs font-semibold text-sage px-2"
               >
                 Save
               </button>
               <button
                 type="button"
                 onClick={onCancelRename}
-                className="text-xs font-semibold text-brand-charcoal/50 px-2"
+                className="text-xs font-semibold text-ink/50 px-2"
               >
                 Cancel
               </button>
             </form>
           ) : (
             <h2
-              className="text-base font-bold text-brand-charcoal truncate"
+              className="text-base font-bold text-ink truncate"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {list.name}
               {list.isDefault && (
-                <span className="ml-2 text-[10px] font-semibold text-brand-purple uppercase tracking-wide">
+                <span className="ml-2 text-[10px] font-semibold text-sage uppercase tracking-wide">
                   Default
                 </span>
               )}
             </h2>
           )}
-          <p className="text-xs text-brand-charcoal/50 mt-0.5">
+          <p className="text-xs text-ink/50 mt-0.5">
             {list.itemCount} {list.itemCount === 1 ? 'item' : 'items'}
             <span className="mx-1.5">·</span>
-            <span className={isShared ? 'text-brand-purple' : ''}>
+            <span className={isShared ? 'text-sage' : ''}>
               {isShared ? 'Shared' : 'Private'}
             </span>
           </p>
@@ -297,7 +297,7 @@ function WishlistCard({
               <Link
                 key={h}
                 to={`/products/${h}`}
-                className="w-14 h-14 rounded-lg bg-brand-mist overflow-hidden flex items-center justify-center text-brand-charcoal/20 text-xl"
+                className="w-14 h-14 rounded-lg bg-cream-2 overflow-hidden flex items-center justify-center text-ink/20 text-xl"
                 title={h}
               >
                 {img ? (
@@ -314,41 +314,41 @@ function WishlistCard({
             )
           })}
           {list.itemCount > 3 && (
-            <div className="w-14 h-14 rounded-lg bg-brand-mist flex items-center justify-center text-xs font-semibold text-brand-charcoal/60">
+            <div className="w-14 h-14 rounded-lg bg-cream-2 flex items-center justify-center text-xs font-semibold text-ink/60">
               +{list.itemCount - 3}
             </div>
           )}
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-brand-mist">
+      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-cream-2">
         <Link
           to={`/account/wishlists/${list.id}`}
-          className="text-xs font-semibold text-brand-purple hover:text-brand-purple-light transition-colors"
+          className="text-xs font-semibold text-sage hover:text-sun transition-colors"
         >
           Open &rarr;
         </Link>
-        <span className="text-brand-charcoal/20">·</span>
+        <span className="text-ink/20">·</span>
         {!isRenaming && (
           <button
             type="button"
             onClick={onStartRename}
-            className="text-xs font-semibold text-brand-charcoal/60 hover:text-brand-charcoal"
+            className="text-xs font-semibold text-ink/60 hover:text-ink"
           >
             Rename
           </button>
         )}
-        <span className="text-brand-charcoal/20">·</span>
+        <span className="text-ink/20">·</span>
         <button
           type="button"
           onClick={onToggleShare}
-          className="text-xs font-semibold text-brand-charcoal/60 hover:text-brand-charcoal"
+          className="text-xs font-semibold text-ink/60 hover:text-ink"
         >
           {isShared ? 'Make private' : 'Share'}
         </button>
         {!list.isDefault && (
           <>
-            <span className="text-brand-charcoal/20">·</span>
+            <span className="text-ink/20">·</span>
             <button
               type="button"
               onClick={onDelete}

@@ -40,17 +40,17 @@ export function ReviewForm({
         <div
           className="text-6xl mb-4 animate-bounce inline-block"
           aria-hidden="true"
-          style={{ color: '#7B2FBE' }}
+          style={{ color: '#7C8F78' }}
         >
           ♥
         </div>
         <h2
-          className="text-2xl font-bold text-brand-charcoal mb-2"
+          className="text-2xl font-bold text-ink mb-2"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Thank you!
         </h2>
-        <p className="text-brand-charcoal/60">
+        <p className="text-ink/60">
           Your review has been submitted and is pending approval.
         </p>
       </div>
@@ -80,13 +80,13 @@ export function ReviewForm({
   return (
     <div className="max-w-lg mx-auto">
       {productTitle && (
-        <p className="text-sm text-brand-charcoal/50 mb-1" style={{ fontFamily: 'var(--font-display)' }}>
+        <p className="text-sm text-ink/50 mb-1" style={{ fontFamily: 'var(--font-display)' }}>
           Reviewing
         </p>
       )}
       {productTitle && (
         <h1
-          className="text-xl font-bold text-brand-charcoal mb-6"
+          className="text-xl font-bold text-ink mb-6"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {productTitle}
@@ -111,8 +111,8 @@ export function ReviewForm({
 
         {/* Star rating */}
         <div>
-          <label className="block text-sm font-semibold text-brand-charcoal mb-2" style={{ fontFamily: 'var(--font-display)' }}>
-            Your rating <span className="text-brand-coral">*</span>
+          <label className="block text-sm font-semibold text-ink mb-2" style={{ fontFamily: 'var(--font-display)' }}>
+            Your rating <span className="text-coral">*</span>
           </label>
           <StarRating value={rating} onChange={setRating} size="lg" />
           {errors?.rating && (
@@ -122,8 +122,8 @@ export function ReviewForm({
 
         {/* Reviewer name */}
         <div>
-          <label htmlFor="reviewerName" className="block text-sm font-semibold text-brand-charcoal mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
-            Your name <span className="text-brand-coral">*</span>
+          <label htmlFor="reviewerName" className="block text-sm font-semibold text-ink mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
+            Your name <span className="text-coral">*</span>
           </label>
           <input
             id="reviewerName"
@@ -132,7 +132,7 @@ export function ReviewForm({
             required
             defaultValue={prefillName}
             placeholder="Jane D."
-            className="w-full border border-brand-mist rounded-xl px-4 py-2.5 text-sm text-brand-charcoal focus:outline-none focus:border-brand-purple transition-colors"
+            className="w-full border border-cream-2 rounded-xl px-4 py-2.5 text-sm text-ink focus:outline-none focus:border-sage transition-colors"
           />
           {errors?.reviewerName && (
             <p className="text-xs text-red-500 mt-1">{errors.reviewerName}</p>
@@ -141,9 +141,9 @@ export function ReviewForm({
 
         {/* Email */}
         <div>
-          <label htmlFor="reviewerEmail" className="block text-sm font-semibold text-brand-charcoal mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
-            Email <span className="text-brand-coral">*</span>
-            <span className="text-brand-charcoal/40 font-normal ml-1">(not published)</span>
+          <label htmlFor="reviewerEmail" className="block text-sm font-semibold text-ink mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
+            Email <span className="text-coral">*</span>
+            <span className="text-ink/40 font-normal ml-1">(not published)</span>
           </label>
           <input
             id="reviewerEmail"
@@ -151,7 +151,7 @@ export function ReviewForm({
             type="email"
             required
             placeholder="you@example.com"
-            className="w-full border border-brand-mist rounded-xl px-4 py-2.5 text-sm text-brand-charcoal focus:outline-none focus:border-brand-purple transition-colors"
+            className="w-full border border-cream-2 rounded-xl px-4 py-2.5 text-sm text-ink focus:outline-none focus:border-sage transition-colors"
           />
           {errors?.reviewerEmail && (
             <p className="text-xs text-red-500 mt-1">{errors.reviewerEmail}</p>
@@ -160,7 +160,7 @@ export function ReviewForm({
 
         {/* Title */}
         <div>
-          <label htmlFor="title" className="block text-sm font-semibold text-brand-charcoal mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
+          <label htmlFor="title" className="block text-sm font-semibold text-ink mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
             Review title
           </label>
           <input
@@ -169,13 +169,13 @@ export function ReviewForm({
             type="text"
             placeholder="One great sentence..."
             maxLength={150}
-            className="w-full border border-brand-mist rounded-xl px-4 py-2.5 text-sm text-brand-charcoal focus:outline-none focus:border-brand-purple transition-colors"
+            className="w-full border border-cream-2 rounded-xl px-4 py-2.5 text-sm text-ink focus:outline-none focus:border-sage transition-colors"
           />
         </div>
 
         {/* Body */}
         <div>
-          <label htmlFor="body" className="block text-sm font-semibold text-brand-charcoal mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
+          <label htmlFor="body" className="block text-sm font-semibold text-ink mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
             Your review
           </label>
           <textarea
@@ -183,7 +183,7 @@ export function ReviewForm({
             name="body"
             rows={5}
             placeholder="Tell us what you thought — the good, the great, and anything you'd change..."
-            className="w-full border border-brand-mist rounded-xl px-4 py-2.5 text-sm text-brand-charcoal focus:outline-none focus:border-brand-purple transition-colors resize-none"
+            className="w-full border border-cream-2 rounded-xl px-4 py-2.5 text-sm text-ink focus:outline-none focus:border-sage transition-colors resize-none"
           />
           {errors?.body && (
             <p className="text-xs text-red-500 mt-1">{errors.body}</p>
@@ -192,7 +192,7 @@ export function ReviewForm({
 
         {/* Media */}
         <div>
-          <label className="block text-sm font-semibold text-brand-charcoal mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
+          <label className="block text-sm font-semibold text-ink mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
             Add photos or video
           </label>
           <MediaUploader onChange={setMediaFiles} maxFiles={5} maxMb={10} />
@@ -205,13 +205,13 @@ export function ReviewForm({
         <button
           type="submit"
           disabled={isSubmitting || rating === 0}
-          className="w-full py-3.5 rounded-full font-bold bg-brand-gradient text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-brand-coral/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full py-3.5 rounded-full font-bold bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {isSubmitting ? 'Submitting...' : 'Submit Review ♥'}
         </button>
 
-        <p className="text-xs text-brand-charcoal/40 text-center">
+        <p className="text-xs text-ink/40 text-center">
           Reviews are moderated and may take 24 hours to appear.
         </p>
       </form>

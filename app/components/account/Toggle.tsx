@@ -18,7 +18,7 @@ interface ToggleProps {
  * - Space / Enter toggles via the native <button> default keyboard behavior
  *   (we still include an explicit handler for belt-and-suspenders)
  * - 44x24 track + 20x20 thumb; smooth 150ms translate transition
- * - brand-purple when on, brand-mist when off
+ * - sage when on, cream-2 when off
  * - Wrapped in a 44px minimum touch target (p-2.5 around the visual track)
  */
 export function Toggle({ checked, onChange, labelId, disabled = false }: ToggleProps) {
@@ -42,7 +42,7 @@ export function Toggle({ checked, onChange, labelId, disabled = false }: ToggleP
       onKeyDown={handleKeyDown}
       className={`
         inline-flex items-center justify-center p-2.5 rounded-full shrink-0
-        focus:outline-none focus:ring-2 focus:ring-brand-purple/50
+        focus:outline-none focus:ring-2 focus:ring-sage/50
         ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
       `}
     >
@@ -50,7 +50,7 @@ export function Toggle({ checked, onChange, labelId, disabled = false }: ToggleP
         aria-hidden="true"
         className={`
           relative inline-block w-11 h-6 rounded-full transition-colors duration-150
-          ${checked ? 'bg-brand-purple' : 'bg-brand-mist'}
+          ${checked ? 'bg-sage' : 'bg-cream-2'}
         `}
       >
         <span

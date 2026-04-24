@@ -46,7 +46,6 @@ export interface VideoGenerationInput {
   fullStory?: string
   worksForHim?: string
   worksForHer?: string
-  featureBullets?: string[]
   specifications?: string
   whatsInTheBox?: string     // boxContents joined as a string
   durationSeconds?: number   // video length — defaults to 10s (300 frames @ 30fps)
@@ -337,7 +336,6 @@ export async function generateProductVideo(
     ...(input.fullStory      ? { fullStory:      input.fullStory }      : {}),
     ...(input.worksForHim    ? { worksForHim:    input.worksForHim }    : {}),
     ...(input.worksForHer    ? { worksForHer:    input.worksForHer }    : {}),
-    ...(input.featureBullets ? { featureBullets: input.featureBullets } : {}),
     ...(input.specifications ? { specifications: input.specifications } : {}),
     ...(input.whatsInTheBox  ? { whatsInTheBox:  input.whatsInTheBox }  : {}),
   })

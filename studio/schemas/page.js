@@ -47,6 +47,7 @@ export default {
         { type: 'testimonials'       },
         { type: 'trustBar'           },
         { type: 'richText'           },
+        { type: 'editorBio'          },
       ],
     },
   ],

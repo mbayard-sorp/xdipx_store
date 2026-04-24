@@ -1,4 +1,5 @@
 import type { BrandLogoWallBlock } from '~/types/cms'
+import { bgClass, isDarkBg } from './bgStyle'
 
 interface BrandLogoWallProps {
   block: BrandLogoWallBlock
@@ -9,11 +10,14 @@ export function BrandLogoWall({ block }: BrandLogoWallProps) {
 
   if (!logos.length) return null
 
+  const style = block.bgStyle ?? 'white'
+  const dark  = isDarkBg(style)
+
   return (
-    <section className="py-10 px-4 bg-white border-t border-brand-mist">
+    <section className={`py-10 px-4 border-t border-cream-2 ${bgClass(style)}`}>
       <div className="max-w-5xl mx-auto">
         {heading && (
-          <p className="text-center text-brand-charcoal/40 text-xs font-semibold uppercase tracking-widest mb-6">
+          <p className={`text-center text-xs font-semibold uppercase tracking-widest mb-6 ${dark ? 'text-white/50' : 'text-ink/40'}`}>
             {heading}
           </p>
         )}
@@ -37,7 +41,7 @@ export function BrandLogoWall({ block }: BrandLogoWallProps) {
             ) : (
               <span
                 key={i}
-                className="text-brand-charcoal/30 text-sm font-bold tracking-wide uppercase"
+                className="text-ink/30 text-sm font-bold tracking-wide uppercase"
               >
                 {logo.emoji ?? logo.brand}
               </span>

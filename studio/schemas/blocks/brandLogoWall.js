@@ -1,11 +1,15 @@
+import { bgStyleField } from '../../lib/bgStyleField'
+import { withImageGenerator } from '../../lib/withImageGenerator'
+
 export default {
   name: 'brandLogoWall',
   title: 'Brand Logo Wall',
   type: 'object',
   fields: [
     { name: 'active',  title: 'Active',  type: 'boolean', initialValue: true },
-    { name: 'order',   title: 'Order',   type: 'number',  initialValue: 60 },
+    { name: 'order',   title: 'Order',   type: 'number',  initialValue: 60, hidden: true },
     { name: 'heading', title: 'Heading', type: 'string',  initialValue: 'Top brands we carry' },
+    bgStyleField({ initialValue: 'white' }),
     {
       name: 'logos', title: 'Brand Logos', type: 'array',
       of: [{
@@ -14,7 +18,8 @@ export default {
           { name: 'brand', title: 'Brand Name', type: 'string' },
           { name: 'emoji', title: 'Emoji (fallback)', type: 'string' },
           { name: 'link',  title: 'Link URL', type: 'string' },
-          { name: 'logo',  title: 'Logo Image', type: 'image' },
+          // AI image generation — adds imagePrompt sibling + wraps 'logo' image input
+          ...withImageGenerator('logo'),
         ],
         preview: { select: { title: 'brand', media: 'logo' } },
       }],
@@ -26,7 +31,7 @@ export default {
       const n = Array.isArray(logos) ? logos.length : 0
       return {
         title: title ?? '(no heading)',
-        subtitle: `${n} brand${n !== 1 ? 's' : ''} · Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+        subtitle: `${n} brand${n !== 1 ? 's' : ''} · ${active ? 'Visible' : 'Hidden'}`,
       }
     },
   },

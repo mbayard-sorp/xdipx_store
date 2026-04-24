@@ -63,13 +63,13 @@ export function Toast({ message, children, onDismiss, variant = 'success', showC
       `}
     >
       <div
-        className="flex items-center gap-3 bg-white rounded-2xl shadow-lg border border-brand-mist px-4 py-3 text-sm text-brand-charcoal"
+        className="flex items-center gap-3 bg-white rounded-2xl shadow-lg border border-cream-2 px-4 py-3 text-sm text-ink"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         {variant === 'success' ? (
           <svg
             aria-hidden="true"
-            className="w-4 h-4 text-brand-purple shrink-0"
+            className="w-4 h-4 text-sage shrink-0"
             viewBox="0 0 20 20"
             fill="currentColor"
           >
@@ -94,7 +94,7 @@ export function Toast({ message, children, onDismiss, variant = 'success', showC
               setTimeout(() => onDismissRef.current(), 200)
             }}
             aria-label="Close"
-            className="ml-2 text-brand-charcoal/40 hover:text-brand-charcoal transition-colors shrink-0"
+            className="ml-2 text-ink/40 hover:text-ink transition-colors shrink-0"
           >
             <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
               <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />

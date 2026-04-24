@@ -6,6 +6,7 @@ import {
   getCustomerToken,
   setOAuthPending,
   setSocialOAuthPending,
+  safeRedirectTo,
 } from '~/lib/customer-session.server'
 import {
   SHOP_OAUTH_ENABLED,
@@ -27,10 +28,29 @@ import { getCartIdFromCookie, linkCartToCustomer } from '~/lib/cart.server'
 
 export const meta: MetaFunction = () => [{ title: 'Sign in — xdipx' }]
 
-// Already logged in → go to account
+/**
+ * Combines a validated `redirectTo` with an optional `pendingVote` param,
+ * producing a single safe path we can stash in the OAuth session or use
+ * after email/password login. Returns null if `redirectTo` is unsafe.
+ */
+function buildPostLoginTarget(redirectTo: string | null, pendingVote: string | null): string | null {
+  const safe = safeRedirectTo(redirectTo)
+  if (!safe) return null
+  if (pendingVote !== '1' && pendingVote !== '-1') return safe
+  const sep = safe.includes('?') ? '&' : '?'
+  return `${safe}${sep}pendingVote=${pendingVote}`
+}
+
+// Already logged in → follow redirectTo if present, else /account
 export async function loader({ request }: LoaderFunctionArgs) {
-  const existing = await getCustomerToken(request)
-  if (existing) throw redirect('/account')
+  const url         = new URL(request.url)
+  const redirectTo  = url.searchParams.get('redirectTo')
+  const pendingVote = url.searchParams.get('pendingVote')
+  const existing    = await getCustomerToken(request)
+  if (existing) {
+    const target = buildPostLoginTarget(redirectTo, pendingVote) ?? '/account'
+    throw redirect(target)
+  }
   return {
     shopOAuthEnabled:     SHOP_OAUTH_ENABLED,
     googleOAuthEnabled:   GOOGLE_OAUTH_ENABLED,
@@ -42,6 +62,10 @@ export async function action({ request }: ActionFunctionArgs) {
   const form   = await request.formData()
   const intent = form.get('intent') as string
 
+  const redirectTo  = (form.get('redirectTo')  as string | null) ?? null
+  const pendingVote = (form.get('pendingVote') as string | null) ?? null
+  const postLogin   = buildPostLoginTarget(redirectTo, pendingVote)
+
   // ── Shop OAuth ───────────────────────────────────────────────────────────
   if (intent === 'shop-login') {
     if (!SHOP_OAUTH_ENABLED) return { error: 'Shop login is not configured.' }
@@ -51,7 +75,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const redirectUri  = new URL('/api/customer-callback', new URL(request.url).origin).toString()
     const loginUrl     = await getShopLoginUrl(redirectUri, state, codeVerifier)
 
-    const headers = await setOAuthPending(request, state, codeVerifier)
+    const headers = await setOAuthPending(request, state, codeVerifier, postLogin)
     headers.set('Location', loginUrl)
     return new Response(null, { status: 302, headers })
   }
@@ -65,7 +89,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const redirectUri  = new URL('/api/google-callback', new URL(request.url).origin).toString()
     const loginUrl     = await getGoogleLoginUrl(redirectUri, state, codeVerifier)
 
-    const headers = await setSocialOAuthPending(request, state, codeVerifier)
+    const headers = await setSocialOAuthPending(request, state, codeVerifier, postLogin)
     headers.set('Location', loginUrl)
     return new Response(null, { status: 302, headers })
   }
@@ -78,7 +102,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const redirectUri = new URL('/api/facebook-callback', new URL(request.url).origin).toString()
     const loginUrl    = getFacebookLoginUrl(redirectUri, state)
 
-    const headers = await setSocialOAuthPending(request, state)
+    const headers = await setSocialOAuthPending(request, state, undefined, postLogin)
     headers.set('Location', loginUrl)
     return new Response(null, { status: 302, headers })
   }
@@ -105,7 +129,7 @@ export async function action({ request }: ActionFunctionArgs) {
     console.error('[login] cart link failed:', err)
   }
 
-  throw redirect('/account?from=login', { headers })
+  throw redirect(postLogin ?? '/account?from=login', { headers })
 }
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
@@ -126,6 +150,9 @@ export default function AccountLoginPage() {
     fetcherError ??
     (oauthError ? OAUTH_ERROR_MESSAGES[oauthError] ?? 'Sign-in failed. Please try again.' : null)
 
+  const redirectToParam  = searchParams.get('redirectTo')  ?? ''
+  const pendingVoteParam = searchParams.get('pendingVote') ?? ''
+
   const hasSocialButtons = shopOAuthEnabled || googleOAuthEnabled || facebookOAuthEnabled
 
   return (
@@ -133,18 +160,20 @@ export default function AccountLoginPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1
-            className="text-3xl font-black text-brand-charcoal"
+            className="text-3xl font-black text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Welcome back ♥
           </h1>
-          <p className="text-brand-charcoal/60 mt-2 text-sm">Sign in to see your orders.</p>
+          <p className="text-ink/60 mt-2 text-sm">Sign in to see your orders.</p>
         </div>
 
         {/* Shop accelerated login */}
         {shopOAuthEnabled && (
           <fetcher.Form method="post" className="mb-3">
             <input type="hidden" name="intent" value="shop-login" />
+            <input type="hidden" name="redirectTo" value={redirectToParam} />
+            <input type="hidden" name="pendingVote" value={pendingVoteParam} />
             <button
               type="submit"
               disabled={isLoading}
@@ -161,10 +190,12 @@ export default function AccountLoginPage() {
         {googleOAuthEnabled && (
           <fetcher.Form method="post" className="mb-3">
             <input type="hidden" name="intent" value="google-login" />
+            <input type="hidden" name="redirectTo" value={redirectToParam} />
+            <input type="hidden" name="pendingVote" value={pendingVoteParam} />
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full flex items-center justify-center gap-3 bg-white border border-brand-mist hover:bg-gray-50 text-brand-charcoal font-semibold py-3 px-4 rounded-full transition-colors disabled:opacity-60"
+              className="w-full flex items-center justify-center gap-3 bg-white border border-cream-2 hover:bg-gray-50 text-ink font-semibold py-3 px-4 rounded-full transition-colors disabled:opacity-60"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               <GoogleIcon />
@@ -177,6 +208,8 @@ export default function AccountLoginPage() {
         {facebookOAuthEnabled && (
           <fetcher.Form method="post" className="mb-3">
             <input type="hidden" name="intent" value="facebook-login" />
+            <input type="hidden" name="redirectTo" value={redirectToParam} />
+            <input type="hidden" name="pendingVote" value={pendingVoteParam} />
             <button
               type="submit"
               disabled={isLoading}
@@ -192,10 +225,10 @@ export default function AccountLoginPage() {
         {hasSocialButtons && (
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-brand-mist" />
+              <div className="w-full border-t border-cream-2" />
             </div>
             <div className="relative flex justify-center">
-              <span className="bg-brand-cream px-3 text-xs text-brand-charcoal/40 uppercase tracking-widest">
+              <span className="bg-cream px-3 text-xs text-ink/40 uppercase tracking-widest">
                 or
               </span>
             </div>
@@ -211,8 +244,10 @@ export default function AccountLoginPage() {
 
         {/* Email / password form */}
         <fetcher.Form method="post" className="space-y-4">
+          <input type="hidden" name="redirectTo" value={redirectToParam} />
+          <input type="hidden" name="pendingVote" value={pendingVoteParam} />
           <div>
-            <label className="block text-sm font-semibold text-brand-charcoal mb-1" htmlFor="email">
+            <label className="block text-sm font-semibold text-ink mb-1" htmlFor="email">
               Email
             </label>
             <input
@@ -221,11 +256,11 @@ export default function AccountLoginPage() {
               type="email"
               autoComplete="email"
               required
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50"
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-brand-charcoal mb-1" htmlFor="password">
+            <label className="block text-sm font-semibold text-ink mb-1" htmlFor="password">
               Password
             </label>
             <input
@@ -234,28 +269,28 @@ export default function AccountLoginPage() {
               type="password"
               autoComplete="current-password"
               required
-              className="w-full border border-brand-mist rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple/50"
+              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sage/50"
             />
           </div>
 
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-brand-gradient text-white font-bold py-3 rounded-full hover:opacity-90 transition-opacity disabled:opacity-60"
+            className="w-full bg-coral text-white font-bold py-3 rounded-full hover:opacity-90 transition-opacity disabled:opacity-60"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {isLoading ? 'Signing in…' : 'Sign in'}
           </button>
         </fetcher.Form>
 
-        <p className="text-center text-xs text-brand-charcoal/40 mt-6">
+        <p className="text-center text-xs text-ink/40 mt-6">
           Don't have an account?{' '}
-          <Link to="/account/register" className="text-brand-purple hover:underline">
+          <Link to="/account/register" className="text-sage hover:underline">
             Create one
           </Link>
         </p>
-        <p className="text-center text-xs text-brand-charcoal/40 mt-2">
-          <Link to="/account/recover" className="text-brand-purple hover:underline">
+        <p className="text-center text-xs text-ink/40 mt-2">
+          <Link to="/account/recover" className="text-sage hover:underline">
             Forgot password?
           </Link>
         </p>

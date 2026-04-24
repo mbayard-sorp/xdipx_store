@@ -19,14 +19,14 @@ export function HelpfulVote({ reviewId, helpfulYes, helpfulNo }: HelpfulVoteProp
 
   return (
     <div className="flex items-center gap-3 mt-3">
-      <span className="text-xs text-brand-charcoal/40">Helpful?</span>
+      <span className="text-xs text-ink/40">Helpful?</span>
       <fetcher.Form method="post" action={`/api/reviews/${reviewId}/helpful`} className="flex gap-2">
         <button
           name="vote"
           value="yes"
           type="submit"
           disabled={voted}
-          className="inline-flex items-center gap-1 text-xs text-brand-charcoal/60 hover:text-brand-purple transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-1 text-xs text-ink/60 hover:text-sage transition-colors disabled:opacity-50"
           aria-label="Mark review as helpful"
         >
           <span aria-hidden="true">👍</span>
@@ -37,7 +37,7 @@ export function HelpfulVote({ reviewId, helpfulYes, helpfulNo }: HelpfulVoteProp
           value="no"
           type="submit"
           disabled={voted}
-          className="inline-flex items-center gap-1 text-xs text-brand-charcoal/60 hover:text-brand-coral transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-1 text-xs text-ink/60 hover:text-coral transition-colors disabled:opacity-50"
           aria-label="Mark review as not helpful"
         >
           <span aria-hidden="true">👎</span>

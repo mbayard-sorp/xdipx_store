@@ -38,13 +38,13 @@ export function ReviewCard({ review, showAiSummary = true }: ReviewCardProps) {
   const media = review.media ?? []
 
   return (
-    <article className="bg-white rounded-xl border border-brand-mist p-5">
+    <article className="bg-white rounded-xl border border-cream-2 p-5">
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
         {/* Avatar */}
         <div
           className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0"
-          style={{ background: '#7B2FBE', fontFamily: 'var(--font-display)' }}
+          style={{ background: '#7C8F78', fontFamily: 'var(--font-display)' }}
           aria-hidden="true"
         >
           {initials(review.reviewerName)}
@@ -52,7 +52,7 @@ export function ReviewCard({ review, showAiSummary = true }: ReviewCardProps) {
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-sm text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+            <span className="font-semibold text-sm text-ink" style={{ fontFamily: 'var(--font-display)' }}>
               {review.reviewerName}
             </span>
             {review.isVerifiedPurchase && (
@@ -68,26 +68,26 @@ export function ReviewCard({ review, showAiSummary = true }: ReviewCardProps) {
           </div>
           <div className="flex items-center gap-2 mt-0.5">
             <StarRating value={review.rating} readonly size="sm" />
-            <span className="text-xs text-brand-charcoal/40">{relativeTime(review.createdAt)}</span>
+            <span className="text-xs text-ink/40">{relativeTime(review.createdAt)}</span>
           </div>
         </div>
       </div>
 
       {/* Title */}
       {review.title && (
-        <h3 className="font-semibold text-brand-charcoal mb-1.5 text-sm" style={{ fontFamily: 'var(--font-display)' }}>
+        <h3 className="font-semibold text-ink mb-1.5 text-sm" style={{ fontFamily: 'var(--font-display)' }}>
           {review.title}
         </h3>
       )}
 
       {/* Body */}
       {body && (
-        <div className="text-sm text-brand-charcoal/80 leading-relaxed">
+        <div className="text-sm text-ink/80 leading-relaxed">
           <p>{displayBody}</p>
           {needsTruncation && (
             <button
               onClick={() => setExpanded(e => !e)}
-              className="text-brand-purple text-xs font-medium mt-1 hover:underline"
+              className="text-sage text-xs font-medium mt-1 hover:underline"
             >
               {expanded ? 'Read less' : 'Read more'}
             </button>
@@ -97,7 +97,7 @@ export function ReviewCard({ review, showAiSummary = true }: ReviewCardProps) {
 
       {/* AI summary */}
       {showAiSummary && review.aiSummary && (
-        <p className="text-xs text-brand-charcoal/50 italic mt-2 pl-3 border-l-2 border-brand-mist">
+        <p className="text-xs text-ink/50 italic mt-2 pl-3 border-l-2 border-cream-2">
           {review.aiSummary}
         </p>
       )}
@@ -110,7 +110,7 @@ export function ReviewCard({ review, showAiSummary = true }: ReviewCardProps) {
               key={m.id}
               type="button"
               onClick={() => setLightboxIndex(i)}
-              className="w-14 h-14 rounded-lg overflow-hidden bg-brand-mist border border-brand-mist hover:border-brand-purple/40 transition-colors"
+              className="w-14 h-14 rounded-lg overflow-hidden bg-cream-2 border border-cream-2 hover:border-sage/40 transition-colors"
               aria-label={`View ${m.mediaType} ${i + 1}`}
             >
               {m.mediaType === 'image' ? (

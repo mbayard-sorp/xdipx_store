@@ -46,6 +46,8 @@ if (!apiKey) {
 
 const client = new Anthropic({ apiKey: apiKey ?? '' })
 
+export const anthropic = client
+
 // Shared normalizer covers markdown, stray punctuation, smart quotes, emoji,
 // and URL-ish tokens that TTS engines verbalize literally. See
 // ivr/src/tts-normalize.ts (mirrored from app/lib/tts-normalize.ts).

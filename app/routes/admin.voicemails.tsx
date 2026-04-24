@@ -61,7 +61,7 @@ export default function AdminVoicemails() {
     <div>
       <div className="flex items-baseline justify-between mb-6">
         <h1
-          className="text-2xl font-bold text-brand-charcoal"
+          className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Voicemails
@@ -76,8 +76,8 @@ export default function AdminVoicemails() {
                 className={[
                   'px-3 py-1.5 rounded-full font-medium capitalize transition-colors',
                   active
-                    ? 'bg-brand-purple text-white'
-                    : 'bg-white text-brand-charcoal hover:bg-brand-mist',
+                    ? 'bg-sage text-white'
+                    : 'bg-white text-ink hover:bg-cream-2',
                 ].join(' ')}
               >
                 {s}
@@ -88,7 +88,7 @@ export default function AdminVoicemails() {
       </div>
 
       {rows.length === 0 ? (
-        <p className="text-brand-charcoal/60 italic">
+        <p className="text-ink/60 italic">
           No {filter} voicemails.
         </p>
       ) : (
@@ -113,10 +113,10 @@ function VoicemailCard({
 }) {
   const callback = vm.callbackNumber ?? vm.fromNumber
   return (
-    <li className="bg-white rounded-2xl p-4 shadow-sm border border-brand-mist">
+    <li className="bg-white rounded-2xl p-4 shadow-sm border border-cream-2">
       <div className="flex items-start gap-4">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 text-xs text-brand-charcoal/60 mb-1">
+          <div className="flex items-center gap-2 text-xs text-ink/60 mb-1">
             <span>{fmtDate(vm.createdAt)}</span>
             <span>•</span>
             <span>from {fmtPhone(vm.fromNumber)}</span>
@@ -129,7 +129,7 @@ function VoicemailCard({
           </div>
 
           <p
-            className="text-brand-charcoal font-medium mb-2"
+            className="text-ink font-medium mb-2"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {vm.summary}
@@ -138,7 +138,7 @@ function VoicemailCard({
           <div className="flex items-center gap-3 text-sm mb-3">
             <a
               href={`tel:${callback}`}
-              className="text-brand-purple hover:underline font-medium"
+              className="text-sage hover:underline font-medium"
             >
               Call back {fmtPhone(callback)}
             </a>
@@ -154,10 +154,10 @@ function VoicemailCard({
           )}
 
           <details>
-            <summary className="text-xs text-brand-charcoal/60 cursor-pointer hover:text-brand-charcoal">
+            <summary className="text-xs text-ink/60 cursor-pointer hover:text-ink">
               Transcript
             </summary>
-            <pre className="mt-2 p-3 bg-brand-mist rounded-lg text-xs whitespace-pre-wrap font-body text-brand-charcoal/80 max-h-64 overflow-auto">
+            <pre className="mt-2 p-3 bg-cream-2 rounded-lg text-xs whitespace-pre-wrap font-body text-ink/80 max-h-64 overflow-auto">
               {vm.transcript}
             </pre>
           </details>
@@ -171,7 +171,7 @@ function VoicemailCard({
               type="submit"
               name="status"
               value={s}
-              className="text-xs px-3 py-1.5 rounded-lg bg-brand-mist hover:bg-brand-purple hover:text-white text-brand-charcoal font-medium capitalize transition-colors"
+              className="text-xs px-3 py-1.5 rounded-lg bg-cream-2 hover:bg-sage hover:text-white text-ink font-medium capitalize transition-colors"
             >
               Mark {s}
             </button>

@@ -58,7 +58,7 @@ export function SubscriptionContractCard({
   return (
     <Link
       to={detailHref}
-      className="block border border-brand-mist rounded-2xl p-4 bg-white hover:bg-brand-mist/30 transition-colors"
+      className="block border border-cream-2 rounded-2xl p-4 bg-white hover:bg-cream-2/30 transition-colors"
     >
       <div className="flex items-start gap-3">
         {/* Product image */}
@@ -67,11 +67,11 @@ export function SubscriptionContractCard({
             src={primaryLine.imageUrl}
             alt={primaryLine.title}
             loading="lazy"
-            className="w-14 h-14 rounded-xl object-cover border border-brand-mist shrink-0"
+            className="w-14 h-14 rounded-xl object-cover border border-cream-2 shrink-0"
           />
         ) : (
           <div
-            className="w-14 h-14 rounded-xl bg-brand-mist shrink-0"
+            className="w-14 h-14 rounded-xl bg-cream-2 shrink-0"
             aria-hidden="true"
           />
         )}
@@ -79,25 +79,25 @@ export function SubscriptionContractCard({
         <div className="flex-1 min-w-0">
           {/* Title + extra count */}
           <p
-            className="text-sm font-bold text-brand-charcoal truncate"
+            className="text-sm font-bold text-ink truncate"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {primaryLine?.title ?? 'Subscription'}
             {extraCount > 0 && (
-              <span className="text-xs font-normal text-brand-charcoal/50 ml-1">
+              <span className="text-xs font-normal text-ink/50 ml-1">
                 +{extraCount} more
               </span>
             )}
           </p>
 
           {/* Cadence */}
-          <p className="text-xs text-brand-charcoal/60 mt-0.5">{cadence}</p>
+          <p className="text-xs text-ink/60 mt-0.5">{cadence}</p>
 
           {/* Status + next charge */}
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             <SubscriptionStatusPill status={status} />
             {nextDate && (
-              <span className="text-[11px] text-brand-charcoal/50">
+              <span className="text-[11px] text-ink/50">
                 Next: {nextDate}
               </span>
             )}
@@ -106,9 +106,9 @@ export function SubscriptionContractCard({
 
         {/* Subtotal */}
         {subtotalAmount && (
-          <p className="text-sm font-bold text-brand-charcoal tabular-nums shrink-0">
+          <p className="text-sm font-bold text-ink tabular-nums shrink-0">
             ${parseFloat(subtotalAmount.amount).toFixed(2)}
-            <span className="text-[11px] font-normal text-brand-charcoal/40 ml-0.5">
+            <span className="text-[11px] font-normal text-ink/40 ml-0.5">
               {subtotalAmount.currencyCode}
             </span>
           </p>

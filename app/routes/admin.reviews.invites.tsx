@@ -76,7 +76,7 @@ export default function AdminReviewInvites() {
   return (
     <div className="space-y-6">
       <h1
-        className="text-2xl font-bold text-brand-charcoal"
+        className="text-2xl font-bold text-ink"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Review Invites
@@ -91,9 +91,9 @@ export default function AdminReviewInvites() {
       />
 
       {/* Manual invite form */}
-      <div className="bg-white rounded-2xl border border-brand-mist p-5">
+      <div className="bg-white rounded-2xl border border-cream-2 p-5">
         <p
-          className="font-semibold text-brand-charcoal mb-4 text-sm"
+          className="font-semibold text-ink mb-4 text-sm"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Send Manual Invite
@@ -107,20 +107,20 @@ export default function AdminReviewInvites() {
             { name: 'reviewerName',     label: 'Name',         placeholder: 'Jane D.' },
           ].map(f => (
             <div key={f.name}>
-              <label className="block text-xs font-medium text-brand-charcoal/60 mb-1">{f.label}</label>
+              <label className="block text-xs font-medium text-ink/60 mb-1">{f.label}</label>
               <input
                 name={f.name}
                 type="text"
                 placeholder={f.placeholder}
                 required
-                className="w-full border border-brand-mist rounded-xl px-3 py-2 text-sm text-brand-charcoal focus:outline-none focus:border-brand-purple transition-colors"
+                className="w-full border border-cream-2 rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:border-sage transition-colors"
               />
             </div>
           ))}
           <div className="sm:col-span-2">
             <button
               type="submit"
-              className="bg-brand-gradient text-white font-semibold text-sm px-6 py-2.5 rounded-full hover:opacity-90 transition-opacity"
+              className="bg-coral text-white font-semibold text-sm px-6 py-2.5 rounded-full hover:opacity-90 transition-opacity"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Send Invite ♥
@@ -130,42 +130,42 @@ export default function AdminReviewInvites() {
       </div>
 
       {/* Invite table */}
-      <div className="bg-white rounded-2xl border border-brand-mist overflow-hidden">
+      <div className="bg-white rounded-2xl border border-cream-2 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-brand-mist">
-              <th className="px-4 py-3 text-left text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Recipient</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Product</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Status</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider">Sent</th>
+            <tr className="border-b border-cream-2">
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink/50 uppercase tracking-wider">Recipient</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink/50 uppercase tracking-wider">Product</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink/50 uppercase tracking-wider">Status</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink/50 uppercase tracking-wider">Sent</th>
             </tr>
           </thead>
           <tbody>
             {invites.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-12 text-center text-brand-charcoal/40">
+                <td colSpan={4} className="px-4 py-12 text-center text-ink/40">
                   No invites sent yet.
                 </td>
               </tr>
             )}
             {invites.map(invite => (
-              <tr key={invite.id} className="border-b border-brand-mist last:border-0 hover:bg-brand-mist/40 transition-colors">
+              <tr key={invite.id} className="border-b border-cream-2 last:border-0 hover:bg-cream-2/40 transition-colors">
                 <td className="px-4 py-3">
-                  <p className="font-medium text-xs text-brand-charcoal">{invite.reviewerName}</p>
-                  <p className="text-xs text-brand-charcoal/40">{invite.reviewerEmail}</p>
+                  <p className="font-medium text-xs text-ink">{invite.reviewerName}</p>
+                  <p className="text-xs text-ink/40">{invite.reviewerEmail}</p>
                 </td>
                 <td className="px-4 py-3">
-                  <p className="font-mono text-xs text-brand-charcoal/50">{invite.shopifyProductId.slice(-8)}</p>
+                  <p className="font-mono text-xs text-ink/50">{invite.shopifyProductId.slice(-8)}</p>
                 </td>
                 <td className="px-4 py-3">
                   <span className={[
                     'text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize',
-                    STATUS_BADGE[invite.status] ?? 'bg-brand-mist text-brand-charcoal',
+                    STATUS_BADGE[invite.status] ?? 'bg-cream-2 text-ink',
                   ].join(' ')}>
                     {invite.status}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-xs text-brand-charcoal/50 whitespace-nowrap">
+                <td className="px-4 py-3 text-xs text-ink/50 whitespace-nowrap">
                   {formatDate(invite.sentAt)}
                 </td>
               </tr>
@@ -174,13 +174,13 @@ export default function AdminReviewInvites() {
         </table>
 
         {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-brand-mist flex items-center justify-center gap-3">
+          <div className="px-4 py-3 border-t border-cream-2 flex items-center justify-center gap-3">
             {page > 1 && (
-              <a href={`/admin/reviews/invites?page=${page - 1}`} className="text-sm text-brand-charcoal/60 hover:text-brand-charcoal">← Prev</a>
+              <a href={`/admin/reviews/invites?page=${page - 1}`} className="text-sm text-ink/60 hover:text-ink">← Prev</a>
             )}
-            <span className="text-sm text-brand-charcoal/50">{page} / {totalPages}</span>
+            <span className="text-sm text-ink/50">{page} / {totalPages}</span>
             {page < totalPages && (
-              <a href={`/admin/reviews/invites?page=${page + 1}`} className="text-sm text-brand-charcoal/60 hover:text-brand-charcoal">Next →</a>
+              <a href={`/admin/reviews/invites?page=${page + 1}`} className="text-sm text-ink/60 hover:text-ink">Next →</a>
             )}
           </div>
         )}

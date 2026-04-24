@@ -25,6 +25,18 @@ export default defineConfig({
               .icon(() => '🏠')
               .child(S.document().schemaType('homepageSections').documentId('singleton.homepage')),
             S.listItem()
+              .title("Emma's hero")
+              .id('emmaHeroSettings')
+              .icon(() => '✨')
+              .child(S.document().schemaType('emmaHeroSettings').documentId('singleton.emmaHero')),
+            S.documentTypeListItem('emmaPreset').title("Emma's presets").icon(() => '🎯'),
+            S.documentTypeListItem('emmaCuratedRail').title('Emma curated rails').icon(() => '♥'),
+            S.listItem()
+              .title('Editor (Emma)')
+              .id('editor')
+              .icon(() => '👩')
+              .child(S.document().schemaType('editor').documentId('singleton.editor')),
+            S.listItem()
               .title('Site Settings')
               .id('siteSettings')
               .icon(() => '⚙️')

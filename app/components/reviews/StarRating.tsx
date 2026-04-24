@@ -53,8 +53,8 @@ export function StarRating({ value, onChange, size = 'md', readonly = false }: S
             >
               <defs>
                 <linearGradient id="starGrad" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%"   stopColor="#F04E37" />
-                  <stop offset="100%" stopColor="#FF8C38" />
+                  <stop offset="0%"   stopColor="#FF4B1F" />
+                  <stop offset="100%" stopColor="#FF6A3D" />
                 </linearGradient>
               </defs>
               <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14 2 9.27l6.91-1.01L12 2z" />

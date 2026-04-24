@@ -56,7 +56,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     console.error('[facebook-callback] cart link failed:', err)
   }
 
-  throw redirect('/account', { headers })
+  throw redirect(pending.redirectTo ?? '/account', { headers })
 }
 
 export default function FacebookCallback() { return null }

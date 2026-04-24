@@ -10,8 +10,12 @@
  */
 import type Anthropic from '@anthropic-ai/sdk'
 import {
+  addLinesToCart,
+  createCartWithLines,
   createDraftOrder,
+  findCollectionsByQuery,
   findCustomerByPhone,
+  getCollectionProducts,
   getProductByHandle,
   getStorefrontCollections,
   sendDraftOrderInvoice,
@@ -50,7 +54,17 @@ function normalizeState(raw: string): string {
 
 export interface AgentContext {
   phone?: string
-  channel: 'voice' | 'sms'
+  /** Optional logged-in Shopify customer id — used by future chat tools. */
+  customerId?: string
+  channel: 'voice' | 'sms' | 'chat'
+  /** Current cart id from the site cookie. Chat's addItemsToCart uses this to mutate the shopper's real cart instead of creating a parallel one. */
+  cartId?: string | null
+  /** Called when a tool creates a new cart so the action can set the cookie. */
+  onCartCreated?: (cartId: string) => void
+  /** Called whenever a tool mutates cart contents so the widget can pop the drawer. */
+  onCartMutated?: () => void
+  /** Current page the shopper is on. chat.server.ts hydrates this into the system prompt so Emma can reference the page naturally. */
+  pageContext?: { pathname: string } | undefined
 }
 
 export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
@@ -118,14 +132,101 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'listCollections',
     description:
-      "List the browsable collections on xdipx. Use when the user asks 'what do you sell' or 'what categories do you have'.",
+      "List the browsable collections on xdipx. Use when the user asks 'what do you sell' or 'what categories do you have'. For a targeted lookup by category or brand, prefer findCollection.",
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'findCollection',
+    description:
+      "Find the best-matching Shopify collection (category or brand) for a shopper's query and return a few preview products. Use this when a shopper asks about a broad category ('lingerie', 'bondage', 'anal', 'blindfolds') or a brand ('Lelo', 'Lovense', 'b-Vibe', 'LELO'). Returns collection handle + title + preview products. You can then either (a) pitch 1-2 of the previewed products, or (b) link the shopper to the collection PLP at /collections/{handle} for the full browsable page when there are many results. Always prefer this over refusing from memory — the store carries lingerie, apparel, bondage, restraints, and every major brand.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: "Category or brand keyword (e.g. 'lingerie', 'bondage', 'lelo', 'blindfolds', 'bodysuit')." },
+        limit: { type: 'number', description: 'Max collections to return. 1–3. Default 2.' },
+        previewCount: { type: 'number', description: 'How many preview products per collection. 1–4. Default 3.' },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
   },
   {
     name: 'lookupReturningCustomer',
     description:
       "Check whether the caller/texter already has an account on xdipx, so you can skip re-collecting their shipping address. Uses the caller's phone number automatically — do not ask the user for it. Returns name, email, and default shipping address if found.",
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'askQuickChoice',
+    description:
+      "Chat-only. Show the user a set of tappable choice pills (single-select) or checkboxes (multi-select) to narrow their intent when their opening message is vague. Use at MOST once near the start of a conversation — don't pepper the user with repeated menus. Pair with a short, warm prose reply that introduces the choice. Valid modes: 'single' (one pill tap = next message) or 'multi' (user picks several + hits Send).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: "Short question shown above the pills, e.g. 'What vibe are you after?'. Under 140 chars." },
+        options: {
+          type: 'array',
+          description: '3–5 short labels. Keep each under 30 chars. Order matters — put the most common first.',
+          items: { type: 'string' },
+          minItems: 2,
+          maxItems: 6,
+        },
+        mode: { type: 'string', enum: ['single', 'multi'], description: "'single' for one-tap pills, 'multi' for checkboxes." },
+      },
+      required: ['question', 'options', 'mode'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'addItemsToCart',
+    description:
+      "Add one or more products to the shopper's active cart on xdipx.com. Use this the moment the user commits ('I'll take it', 'add to cart', 'yes and add lube', 'let's check out'). ALWAYS pass the product handle from searchProducts/getProductDetails — the server will resolve the current variant. Only pass variantId when the UI provided one via a variant-pill tap ('variantId: gid://...'). Do NOT invent or guess variantIds. The cart drawer pops open automatically after your reply, so keep your reply short — a one-sentence acknowledgement like 'Added! Your cart's ready when you are.' Do NOT share URLs, do NOT paste links, do NOT call buildCheckoutLink — the drawer handles checkout from here. Chat-only.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          description: 'Line items. Max 5. Each must include handle; variantId is optional and only used when the UI passed one via a variant-pill tap.',
+          items: {
+            type: 'object',
+            properties: {
+              handle: { type: 'string', description: 'Product handle from searchProducts/getProductDetails (e.g. "lovense-osci-3"). Required.' },
+              variantId: { type: 'string', description: "Optional Shopify variant GID — only pass when the UI supplied one via variant-pill (user message contained 'variantId: gid://...'). Leave empty otherwise." },
+              quantity:  { type: 'number', description: 'Integer quantity, 1–5. Defaults to 1.' },
+            },
+            required: ['handle'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['items'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'buildCheckoutLink',
+    description:
+      "SMS-only fallback for building a direct checkout link when no cart drawer is available. DO NOT USE ON WEB CHAT — on web, always call addItemsToCart instead so the shopper's real cart is updated and the drawer opens. Only viable on SMS where there's no cart UI to open.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          description: 'Line items keyed by Shopify variant GID. Max 5 items.',
+          items: {
+            type: 'object',
+            properties: {
+              variantId: { type: 'string', description: "Shopify variant GID, e.g. 'gid://shopify/ProductVariant/1234'." },
+              quantity:  { type: 'number', description: 'Integer quantity, 1–5. Defaults to 1.' },
+            },
+            required: ['variantId'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['items'],
+      additionalProperties: false,
+    },
   },
   {
     name: 'createDraftOrder',
@@ -295,6 +396,27 @@ export async function runQaTool(
       }
     }
 
+    if (name === 'findCollection') {
+      const query = String(input['query'] ?? '').trim()
+      if (!query) return { ok: false, error: 'empty query' }
+      const limit = Math.max(1, Math.min(3, Number(input['limit'] ?? 2)))
+      const previewCount = Math.max(1, Math.min(4, Number(input['previewCount'] ?? 3)))
+      const matches = await findCollectionsByQuery(query, limit)
+      if (matches.length === 0) return { ok: true, data: { query, collections: [] } }
+      const results = await Promise.all(
+        matches.map(async (m) => {
+          const products = await getCollectionProducts(m.handle, previewCount)
+          return {
+            handle: m.handle,
+            title: m.title,
+            url: `/collections/${m.handle}`,
+            preview: products.map(productToCard),
+          }
+        }),
+      )
+      return { ok: true, data: { query, collections: results } }
+    }
+
     if (name === 'lookupReturningCustomer') {
       if (!ctx.phone) return { ok: false, error: 'no_caller_phone' }
       const c = await findCustomerByPhone(ctx.phone)
@@ -311,7 +433,140 @@ export async function runQaTool(
       }
     }
 
+    if (name === 'askQuickChoice') {
+      if (ctx.channel !== 'chat') {
+        return { ok: false, error: 'unsupported_channel', message: 'Quick choices only work in web chat.' }
+      }
+      const question = typeof input['question'] === 'string' ? input['question'].slice(0, 140).trim() : ''
+      const rawOpts = Array.isArray(input['options']) ? input['options'] as unknown[] : []
+      const options = rawOpts
+        .filter((o): o is string => typeof o === 'string' && o.trim().length > 0)
+        .map((o) => o.slice(0, 40).trim())
+        .slice(0, 6)
+      const mode = input['mode'] === 'multi' ? 'multi' : 'single'
+      if (!question || options.length < 2) {
+        return { ok: false, error: 'bad_input', message: 'Provide a question and at least 2 options.' }
+      }
+      return { ok: true, data: { question, options, mode, rendered: true } }
+    }
+
+    if (name === 'addItemsToCart') {
+      if (ctx.channel !== 'chat') {
+        return { ok: false, error: 'unsupported_channel', message: 'addItemsToCart is web-chat-only; use buildCheckoutLink on SMS or createDraftOrder on phone.' }
+      }
+      const rawItems = Array.isArray(input['items']) ? (input['items'] as Array<Record<string, unknown>>) : []
+      if (rawItems.length === 0) return { ok: false, error: 'no_items' }
+      if (rawItems.length > MAX_ITEMS_PER_ORDER) {
+        return { ok: false, error: 'too_many_items', message: `Max ${MAX_ITEMS_PER_ORDER} line items.` }
+      }
+      // Resolve each line's variant server-side. Haiku has been observed to
+      // hallucinate variant GIDs, so we treat its variantId as a hint — the
+      // handle is the source of truth. We fetch live product data, prefer
+      // Haiku's variantId only if it matches a real variant, otherwise fall
+      // back to the first in-stock variant (or first variant if nothing is
+      // in stock).
+      const lines: { variantId: string; quantity: number }[] = []
+      for (const it of rawItems) {
+        const handle = String(it['handle'] ?? '').trim()
+        const hintedGidRaw = String(it['variantId'] ?? '').trim()
+        const hintedGid = hintedGidRaw
+          ? (hintedGidRaw.startsWith('gid://')
+              ? hintedGidRaw
+              : `gid://shopify/ProductVariant/${hintedGidRaw.match(/(\d+)$/)?.[1] ?? ''}`)
+          : ''
+        const qtyRaw = Number(it['quantity'] ?? 1)
+        const qty = Number.isFinite(qtyRaw) ? Math.max(1, Math.min(5, Math.floor(qtyRaw))) : 1
+
+        if (!handle) {
+          return { ok: false, error: 'missing_handle', message: 'Each item needs a product handle.' }
+        }
+
+        const product = await getProductByHandle(handle)
+        if (!product || product.variants.length === 0) {
+          return { ok: false, error: 'product_not_found', message: `No variants found for handle "${handle}". Re-run searchProducts.` }
+        }
+
+        const match = hintedGid ? product.variants.find((v) => v.id === hintedGid) : undefined
+        const fallback = product.variants.find((v) => v.availableForSale) ?? product.variants[0]
+        const chosen = match ?? fallback
+        if (!chosen?.id || !/gid:\/\/shopify\/ProductVariant\/\d+/.test(chosen.id)) {
+          return { ok: false, error: 'variant_unavailable', message: `Couldn't resolve a variant for "${handle}".` }
+        }
+        if (hintedGid && !match) {
+          console.warn('[addItemsToCart] ignored hallucinated variantId', { handle, hintedGid, resolved: chosen.id })
+        }
+        lines.push({ variantId: chosen.id, quantity: qty })
+      }
+      // Try the existing cart first (when the shopper already has one). If Shopify
+      // has expired or deleted it — common with stale cookies or after the dev DB
+      // refresh — we fall through and mint a fresh cart with the lines in one shot.
+      let cart
+      const existingCartId = ctx.cartId ?? null
+      if (existingCartId) {
+        try {
+          cart = await addLinesToCart(existingCartId, lines)
+        } catch (err) {
+          console.warn('[addItemsToCart] existing cart failed, minting a new one', err)
+        }
+      }
+      if (!cart) {
+        try {
+          cart = await createCartWithLines(lines)
+          ctx.onCartCreated?.(cart.id)
+        } catch (err) {
+          console.error('[addItemsToCart] createCartWithLines failed', err)
+          return { ok: false, error: 'cart_add_failed', message: "Couldn't add those to the cart — please try again." }
+        }
+      }
+      ctx.onCartMutated?.()
+      return {
+        ok: true,
+        data: {
+          cartId: cart.id,
+          totalQuantity: cart.totalQuantity,
+          addedCount: lines.length,
+        },
+      }
+    }
+
+    if (name === 'buildCheckoutLink') {
+      // Web chat should ALWAYS use addItemsToCart. Keep buildCheckoutLink for SMS only.
+      if (ctx.channel === 'chat') {
+        return { ok: false, error: 'use_add_items_to_cart', message: 'On web chat, call addItemsToCart instead. Never share checkout URLs in chat.' }
+      }
+      if (ctx.channel !== 'sms') {
+        return { ok: false, error: 'unsupported_channel', message: 'buildCheckoutLink is SMS-only.' }
+      }
+      const rawItems = Array.isArray(input['items']) ? (input['items'] as Array<Record<string, unknown>>) : []
+      if (rawItems.length === 0) return { ok: false, error: 'no_items' }
+      if (rawItems.length > MAX_ITEMS_PER_ORDER) {
+        return { ok: false, error: 'too_many_items', message: `Max ${MAX_ITEMS_PER_ORDER} line items.` }
+      }
+      const lines: { variantId: string; quantity: number }[] = []
+      for (const it of rawItems) {
+        const gid = String(it['variantId'] ?? '')
+        // Accept either a full GID or the bare numeric id.
+        const normalized = gid.startsWith('gid://') ? gid : `gid://shopify/ProductVariant/${gid.match(/(\d+)$/)?.[1] ?? ''}`
+        if (!/gid:\/\/shopify\/ProductVariant\/\d+/.test(normalized)) {
+          return { ok: false, error: 'bad_variant_id', message: `Invalid variantId: ${gid}` }
+        }
+        const qtyRaw = Number(it['quantity'] ?? 1)
+        const qty = Number.isFinite(qtyRaw) ? Math.max(1, Math.min(5, Math.floor(qtyRaw))) : 1
+        lines.push({ variantId: normalized, quantity: qty })
+      }
+      try {
+        const cart = await createCartWithLines(lines)
+        return { ok: true, data: { url: cart.checkoutUrl, itemCount: lines.length } }
+      } catch (err) {
+        console.error('[buildCheckoutLink] cartCreate failed', err)
+        return { ok: false, error: 'cart_create_failed', message: 'Couldn\'t build a checkout link — please try again.' }
+      }
+    }
+
     if (name === 'createDraftOrder') {
+      if (ctx.channel === 'chat') {
+        return { ok: false, error: 'unsupported_channel', message: 'Draft orders are only available on phone/SMS. Send the user to checkout instead.' }
+      }
       if (!ctx.phone) return { ok: false, error: 'no_caller_phone' }
       const items = Array.isArray(input['items']) ? (input['items'] as Array<Record<string, unknown>>) : []
       if (items.length === 0) return { ok: false, error: 'no_items' }
@@ -357,6 +612,8 @@ export async function runQaTool(
       }
 
       const address2 = String(input['address2'] ?? '').trim()
+      const customMessageRaw = typeof input['customMessage'] === 'string' ? input['customMessage'].trim() : ''
+      const customMessage = customMessageRaw ? customMessageRaw.slice(0, 500) : undefined
       let draft: Awaited<ReturnType<typeof createDraftOrder>>
       try {
         draft = await createDraftOrder({
@@ -371,6 +628,7 @@ export async function runQaTool(
             country: 'US',
           },
           channel: ctx.channel,
+          ...(customMessage ? { note: customMessage } : {}),
         })
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -391,7 +649,10 @@ export async function runQaTool(
       // secure checkout link.
       let emailSent = false
       try {
-        await sendDraftOrderInvoice(draft.id, { to: email })
+        await sendDraftOrderInvoice(draft.id, {
+          to: email,
+          ...(customMessage ? { customMessage } : {}),
+        })
         emailSent = true
       } catch (err) {
         console.error('[ai-agent] failed to send draft invoice email', err)

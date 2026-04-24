@@ -175,8 +175,8 @@ const STATUS_COLOR: Record<string, string> = {
   archived:       'bg-gray-100 text-gray-500',
 }
 
-const FILTER_ACTIVE = 'bg-brand-charcoal text-white'
-const FILTER_IDLE   = 'bg-white text-brand-charcoal/60 hover:text-brand-charcoal border border-brand-mist'
+const FILTER_ACTIVE = 'bg-ink text-white'
+const FILTER_IDLE   = 'bg-white text-ink/60 hover:text-ink border border-cream-2'
 
 type PendingConfirm = {
   intent: string
@@ -257,13 +257,13 @@ export default function AdminQueuePage() {
       )}
 
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <h1 className="text-2xl font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Deal Queue
         </h1>
         <div className="flex gap-3">
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="run-feed" />
-            <button type="submit" className="text-sm font-semibold px-4 py-2 bg-brand-mist text-brand-purple rounded-full hover:bg-brand-purple/10 transition-colors">
+            <button type="submit" className="text-sm font-semibold px-4 py-2 bg-cream-2 text-sage rounded-full hover:bg-sage/10 transition-colors">
               {fetcher.state !== 'idle' ? '⏳ Loading...' : '🔄 Import from Feed'}
             </button>
           </fetcher.Form>
@@ -274,13 +274,13 @@ export default function AdminQueuePage() {
               label: 'Simulate Rotation',
               message: 'This archives the live deal and activates the next approved one. Continue?',
             })}
-            className="text-sm font-semibold px-4 py-2 bg-brand-mist text-brand-charcoal rounded-full hover:bg-brand-charcoal/10 transition-colors"
+            className="text-sm font-semibold px-4 py-2 bg-cream-2 text-ink rounded-full hover:bg-ink/10 transition-colors"
           >
             ⏩ Simulate Rotation
           </button>
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="auto-schedule" />
-            <button type="submit" className="text-sm font-semibold px-4 py-2 bg-brand-gradient text-white rounded-full hover:opacity-90 transition-opacity">
+            <button type="submit" className="text-sm font-semibold px-4 py-2 bg-coral text-white rounded-full hover:opacity-90 transition-opacity">
               ✨ Auto-Schedule 30 Days
             </button>
           </fetcher.Form>
@@ -289,7 +289,7 @@ export default function AdminQueuePage() {
 
       {/* Status filter pills */}
       <div className="flex items-center gap-2 mb-5 flex-wrap">
-        <span className="text-xs font-semibold text-brand-charcoal/40 uppercase tracking-wide mr-1">Show:</span>
+        <span className="text-xs font-semibold text-ink/40 uppercase tracking-wide mr-1">Show:</span>
         {ALL_STATUSES.map(status => (
           <button
             key={status}
@@ -298,7 +298,7 @@ export default function AdminQueuePage() {
           >
             {STATUS_LABELS[status]}
             {(counts[status] ?? 0) > 0 && (
-              <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ${activeFilters.has(status) ? 'bg-white/20' : 'bg-brand-mist'}`}>
+              <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ${activeFilters.has(status) ? 'bg-white/20' : 'bg-cream-2'}`}>
                 {counts[status]}
               </span>
             )}
@@ -323,7 +323,7 @@ export default function AdminQueuePage() {
             <col style={{ width: '70px' }} />
           </colgroup>
           <thead>
-            <tr className="bg-brand-mist text-brand-charcoal/60 text-xs uppercase tracking-wide">
+            <tr className="bg-cream-2 text-ink/60 text-xs uppercase tracking-wide">
               <th className="px-3 py-3 text-left">Date</th>
               <th className="px-1 py-3"></th>
               <th className="px-3 py-3 text-left">Product</th>
@@ -341,7 +341,7 @@ export default function AdminQueuePage() {
           <tbody>
             {visibleDeals.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-4 py-10 text-center text-brand-charcoal/40 text-sm">
+                <td colSpan={12} className="px-4 py-10 text-center text-ink/40 text-sm">
                   No deals match the selected filters.
                 </td>
               </tr>
@@ -363,8 +363,8 @@ export default function AdminQueuePage() {
                 <React.Fragment key={deal.id}>
                   <tr
                     className={[
-                      'border-t border-brand-mist transition-colors cursor-pointer select-none',
-                      isExpanded ? 'bg-brand-mist/40' : 'hover:bg-brand-mist/30',
+                      'border-t border-cream-2 transition-colors cursor-pointer select-none',
+                      isExpanded ? 'bg-cream-2/40' : 'hover:bg-cream-2/30',
                     ].join(' ')}
                     onClick={e => {
                       const target = e.target as HTMLElement
@@ -376,11 +376,11 @@ export default function AdminQueuePage() {
                     <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
                       {deal.dealDate === '2099-12-31' ? (
                         <div className="flex flex-col gap-1">
-                          <span className="text-xs text-brand-charcoal/40 italic">Unscheduled</span>
+                          <span className="text-xs text-ink/40 italic">Unscheduled</span>
                           <input
                             type="date"
                             onChange={e => setEditedDates(prev => ({ ...prev, [deal.id]: e.target.value }))}
-                            className="text-xs border border-brand-mist rounded-lg px-2 py-1 w-full bg-transparent focus:outline-none focus:ring-1 focus:ring-brand-purple/50 text-brand-charcoal/70"
+                            className="text-xs border border-cream-2 rounded-lg px-2 py-1 w-full bg-transparent focus:outline-none focus:ring-1 focus:ring-sage/50 text-ink/70"
                           />
                         </div>
                       ) : (
@@ -388,7 +388,7 @@ export default function AdminQueuePage() {
                           type="date"
                           defaultValue={deal.dealDate}
                           onChange={e => setEditedDates(prev => ({ ...prev, [deal.id]: e.target.value }))}
-                          className="text-xs border border-brand-mist rounded-lg px-2 py-1 w-full bg-transparent focus:outline-none focus:ring-1 focus:ring-brand-purple/50 text-brand-charcoal/70"
+                          className="text-xs border border-cream-2 rounded-lg px-2 py-1 w-full bg-transparent focus:outline-none focus:ring-1 focus:ring-sage/50 text-ink/70"
                         />
                       )}
                     </td>
@@ -402,8 +402,8 @@ export default function AdminQueuePage() {
                           className="w-9 h-9 object-cover rounded-lg shrink-0"
                         />
                       ) : (
-                        <div className="w-9 h-9 rounded-lg bg-brand-mist flex items-center justify-center shrink-0">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-brand-charcoal/20">
+                        <div className="w-9 h-9 rounded-lg bg-cream-2 flex items-center justify-center shrink-0">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-ink/20">
                             <rect x="3" y="3" width="18" height="18" rx="2" />
                             <path d="M3 9h18M9 21V9" />
                           </svg>
@@ -413,20 +413,20 @@ export default function AdminQueuePage() {
 
                     {/* Product info */}
                     <td className="px-3 py-3 min-w-0">
-                      <p className="font-medium text-brand-charcoal truncate">{deal.seoTitle ?? deal.sku}</p>
-                      <p className="text-xs text-brand-charcoal/50 truncate">{deal.brand} · {deal.sku}</p>
+                      <p className="font-medium text-ink truncate">{deal.seoTitle ?? deal.sku}</p>
+                      <p className="text-xs text-ink/50 truncate">{deal.brand} · {deal.sku}</p>
                     </td>
 
-                    <td className="px-3 py-3 text-right text-brand-charcoal/60 text-xs">
+                    <td className="px-3 py-3 text-right text-ink/60 text-xs">
                       {wholesale ? `$${wholesale.toFixed(2)}` : '—'}
                     </td>
-                    <td className="px-3 py-3 text-right text-brand-charcoal/60 text-xs">
+                    <td className="px-3 py-3 text-right text-ink/60 text-xs">
                       {msrp ? `$${msrp.toFixed(2)}` : '—'}
                     </td>
-                    <td className="px-3 py-3 text-right text-brand-charcoal/60 text-xs">
-                      {map != null && map > 0 ? `$${map.toFixed(2)}` : <span className="text-brand-charcoal/30">none</span>}
+                    <td className="px-3 py-3 text-right text-ink/60 text-xs">
+                      {map != null && map > 0 ? `$${map.toFixed(2)}` : <span className="text-ink/30">none</span>}
                     </td>
-                    <td className="px-3 py-3 text-right font-semibold text-brand-charcoal text-xs">
+                    <td className="px-3 py-3 text-right font-semibold text-ink text-xs">
                       {dealPrice != null ? `$${dealPrice.toFixed(2)}` : '—'}
                     </td>
                     <td className="px-3 py-3 text-right font-semibold text-xs">
@@ -436,7 +436,7 @@ export default function AdminQueuePage() {
                           </span>
                         : '—'}
                     </td>
-                    <td className="px-3 py-3 text-right text-brand-charcoal/70 text-xs">
+                    <td className="px-3 py-3 text-right text-ink/70 text-xs">
                       {deal.unitsAvailable ?? '—'}
                     </td>
 
@@ -466,7 +466,7 @@ export default function AdminQueuePage() {
                           { intent: 'save-date', id: String(deal.id), dealDate: editedDates[deal.id] ?? deal.dealDate },
                           { method: 'post' },
                         )}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-full bg-brand-gradient text-white hover:opacity-90 transition-opacity whitespace-nowrap"
+                        className="text-xs font-semibold px-3 py-1.5 rounded-full bg-coral text-white hover:opacity-90 transition-opacity whitespace-nowrap"
                       >
                         Save
                       </button>
@@ -475,9 +475,9 @@ export default function AdminQueuePage() {
 
                   {/* Expanded image gallery */}
                   {isExpanded && images.length > 0 && (
-                    <tr key={`${deal.id}-gallery`} className="bg-brand-mist/50 border-t border-brand-mist/60">
+                    <tr key={`${deal.id}-gallery`} className="bg-cream-2/50 border-t border-cream-2/60">
                       <td colSpan={12} className="px-5 py-4">
-                        <p className="text-xs font-semibold text-brand-charcoal/40 uppercase tracking-wide mb-3">
+                        <p className="text-xs font-semibold text-ink/40 uppercase tracking-wide mb-3">
                           Product Images ({images.length})
                         </p>
                         <div className="flex gap-3 flex-wrap">
@@ -495,8 +495,8 @@ export default function AdminQueuePage() {
                     </tr>
                   )}
                   {isExpanded && images.length === 0 && (
-                    <tr key={`${deal.id}-no-img`} className="bg-brand-mist/50 border-t border-brand-mist/60">
-                      <td colSpan={12} className="px-5 py-4 text-xs text-brand-charcoal/40 italic">
+                    <tr key={`${deal.id}-no-img`} className="bg-cream-2/50 border-t border-cream-2/60">
+                      <td colSpan={12} className="px-5 py-4 text-xs text-ink/40 italic">
                         No images available from Shopify for this product.
                       </td>
                     </tr>
@@ -507,7 +507,7 @@ export default function AdminQueuePage() {
           </tbody>
         </table>
         {visibleDeals.length > 0 && (
-          <div className="px-4 py-2 border-t border-brand-mist text-xs text-brand-charcoal/40 text-right">
+          <div className="px-4 py-2 border-t border-cream-2 text-xs text-ink/40 text-right">
             {visibleDeals.length} deal{visibleDeals.length !== 1 ? 's' : ''} — click a row to preview images
           </div>
         )}
@@ -518,13 +518,13 @@ export default function AdminQueuePage() {
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setPendingConfirm(null)} />
           <div className="relative bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full">
-            <p className="text-sm font-medium text-brand-charcoal mb-1">{pendingConfirm.label}</p>
-            <p className="text-sm text-brand-charcoal/60 mb-5">{pendingConfirm.message}</p>
+            <p className="text-sm font-medium text-ink mb-1">{pendingConfirm.label}</p>
+            <p className="text-sm text-ink/60 mb-5">{pendingConfirm.message}</p>
             <div className="flex gap-3 justify-end">
               <button
                 type="button"
                 onClick={() => setPendingConfirm(null)}
-                className="px-4 py-2 text-sm font-semibold text-brand-charcoal/60 hover:text-brand-charcoal rounded-xl transition-colors"
+                className="px-4 py-2 text-sm font-semibold text-ink/60 hover:text-ink rounded-xl transition-colors"
               >
                 Cancel
               </button>
@@ -545,7 +545,7 @@ export default function AdminQueuePage() {
                   className={`px-4 py-2 text-sm font-semibold rounded-xl transition-colors ${
                     pendingConfirm.intent === 'delete'
                       ? 'bg-red-500 text-white hover:bg-red-600'
-                      : 'bg-brand-gradient text-white hover:opacity-90'
+                      : 'bg-coral text-white hover:opacity-90'
                   }`}
                 >
                   {pendingConfirm.label}
@@ -592,7 +592,7 @@ function ActionsDropdown({ deal, isOpen, onToggle, fetcher, onConfirm, onClose }
     >
       <button
         onClick={onToggle}
-        className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-full bg-brand-mist text-brand-charcoal hover:bg-brand-charcoal/10 transition-colors whitespace-nowrap"
+        className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-full bg-cream-2 text-ink hover:bg-ink/10 transition-colors whitespace-nowrap"
       >
         Actions
         <svg
@@ -604,13 +604,13 @@ function ActionsDropdown({ deal, isOpen, onToggle, fetcher, onConfirm, onClose }
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 z-30 bg-white rounded-xl shadow-lg border border-brand-mist py-1 min-w-[148px]">
+        <div className="absolute right-0 top-full mt-1 z-30 bg-white rounded-xl shadow-lg border border-cream-2 py-1 min-w-[148px]">
           {canApprove && (
             <fetcher.Form method="post" onSubmit={onClose}>
               <input type="hidden" name="intent" value="approve" />
               <input type="hidden" name="id" value={deal.id} />
               <input type="hidden" name="shopifyProductId" value={deal.shopifyProductId ?? ''} />
-              <button type="submit" className="w-full text-left px-4 py-2 text-xs font-medium text-green-600 hover:bg-brand-mist transition-colors">
+              <button type="submit" className="w-full text-left px-4 py-2 text-xs font-medium text-green-600 hover:bg-cream-2 transition-colors">
                 ✓ Approve
               </button>
             </fetcher.Form>
@@ -619,7 +619,7 @@ function ActionsDropdown({ deal, isOpen, onToggle, fetcher, onConfirm, onClose }
             <fetcher.Form method="post" onSubmit={onClose}>
               <input type="hidden" name="intent" value="unapprove" />
               <input type="hidden" name="id" value={deal.id} />
-              <button type="submit" className="w-full text-left px-4 py-2 text-xs font-medium text-yellow-600 hover:bg-brand-mist transition-colors">
+              <button type="submit" className="w-full text-left px-4 py-2 text-xs font-medium text-yellow-600 hover:bg-cream-2 transition-colors">
                 ↩ Unapprove
               </button>
             </fetcher.Form>
@@ -629,7 +629,7 @@ function ActionsDropdown({ deal, isOpen, onToggle, fetcher, onConfirm, onClose }
               <input type="hidden" name="intent" value="unarchive" />
               <input type="hidden" name="id" value={deal.id} />
               <input type="hidden" name="shopifyProductId" value={deal.shopifyProductId ?? ''} />
-              <button type="submit" className="w-full text-left px-4 py-2 text-xs font-medium text-yellow-600 hover:bg-brand-mist transition-colors">
+              <button type="submit" className="w-full text-left px-4 py-2 text-xs font-medium text-yellow-600 hover:bg-cream-2 transition-colors">
                 ↩ Return to Queue
               </button>
             </fetcher.Form>
@@ -646,12 +646,12 @@ function ActionsDropdown({ deal, isOpen, onToggle, fetcher, onConfirm, onClose }
                   message: `Force "${deal.seoTitle ?? deal.sku}" live now? This archives the current live deal.`,
                 })
               }}
-              className="w-full text-left px-4 py-2 text-xs font-medium text-blue-600 hover:bg-brand-mist transition-colors"
+              className="w-full text-left px-4 py-2 text-xs font-medium text-blue-600 hover:bg-cream-2 transition-colors"
             >
               ⚡ Force Live
             </button>
           )}
-          <div className="my-1 border-t border-brand-mist/60" />
+          <div className="my-1 border-t border-cream-2/60" />
           <button
             onClick={() => {
               onClose()

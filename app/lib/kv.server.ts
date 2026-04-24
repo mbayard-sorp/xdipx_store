@@ -115,6 +115,20 @@ export const KV_KEYS = {
   liveDealHandle:         'live-deal:handle',
   fbt:                    (handle: string) => `fbt:${handle}`,
   collectionCursor:       (handle: string, page: number) => `vault:cursor:${handle}:p${page}`,
+  // v2 redesign — dial vote aggregates (5-min TTL)
+  dialAggregate:          (shopifyProductId: string) => `dial:agg:${shopifyProductId}`,
+  // PDP product-level aggregate vote (thumbs up/down on the whole dial)
+  productVoteAggregate:   (shopifyProductId: string) => `dial:product-agg:${shopifyProductId}`,
+  // PDP contextual Emma aside (24h TTL; guest/empty inputs collapse to one key per product)
+  emmaAside:              (productId: string, userBucket: string, cartHash: string, browseHash: string) =>
+                          `emmaAside:${productId}:${userBucket}:${cartHash}:${browseHash}`,
+  emmaAsideLock:          (productId: string) => `emmaAside:lock:${productId}`,
+  emmaAsideDailyCount:    (utcDate: string) => `emmaAside:dailyCount:${utcDate}`,
+  // Cart drawer Emma aside (24h TTL; cart+profile+subtotal-band collapse to one key)
+  emmaCartAside:          (variant: string, userBucket: string, cartHash: string, searchHash: string, subtotalBand: number) =>
+                          `emmaCartAside:${variant}:${userBucket}:${cartHash}:${searchHash}:${subtotalBand}`,
+  emmaCartAsideLock:      (cartHash: string) => `emmaCartAside:lock:${cartHash}`,
+  emmaCartAsideDailyCount:(utcDate: string) => `emmaCartAside:dailyCount:${utcDate}`,
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────
@@ -143,5 +157,7 @@ export async function getPinnedAccessoryIds(): Promise<string[]> {
 }
 
 export async function setPinnedAccessoryIds(ids: string[]): Promise<void> {
-  await kvSet(KV_KEYS.pinnedAccessoryIds, ids, 86400)
+  // Persistent admin config — no TTL. Previous 24h TTL silently dropped upsells
+  // from the cart drawer one day after being set.
+  await kvSet(KV_KEYS.pinnedAccessoryIds, ids)
 }

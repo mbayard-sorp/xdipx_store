@@ -32,12 +32,12 @@ export default function SubscriptionsList() {
       {/* Desktop heading (mobile sub-header already shows "Subscriptions") */}
       <section className="hidden lg:block">
         <h1
-          className="text-2xl font-bold text-brand-charcoal"
+          className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          Subscriptions <span className="text-brand-purple">♥</span>
+          Subscriptions <span className="text-sage">♥</span>
         </h1>
-        <p className="text-sm text-brand-charcoal/50 mt-0.5">
+        <p className="text-sm text-ink/50 mt-0.5">
           {customer.email}
         </p>
       </section>

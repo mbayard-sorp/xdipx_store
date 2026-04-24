@@ -57,16 +57,16 @@ export default function AdminLogin() {
   const data = useActionData<{ error?: string }>()
 
   return (
-    <div className="min-h-screen bg-brand-charcoal flex items-center justify-center px-4">
+    <div className="min-h-screen bg-ink flex items-center justify-center px-4">
       <div className="bg-white rounded-2xl p-8 w-full max-w-sm shadow-xl">
         <div className="text-center mb-8">
           <span
-            className="text-3xl font-black text-brand-gradient"
+            className="text-3xl font-black text-coral"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             xdipx
           </span>
-          <p className="text-brand-charcoal/50 text-sm mt-1">admin</p>
+          <p className="text-ink/50 text-sm mt-1">admin</p>
         </div>
 
         <Form method="post" className="space-y-4">
@@ -77,7 +77,7 @@ export default function AdminLogin() {
             autoFocus
             required
             autoComplete="email"
-            className="w-full px-4 py-3 rounded-xl border border-brand-mist bg-brand-cream text-brand-charcoal placeholder-brand-charcoal/40 focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+            className="w-full px-4 py-3 rounded-xl border border-cream-2 bg-cream text-ink placeholder-ink/40 focus:outline-none focus:ring-2 focus:ring-coral/30"
           />
 
           <input
@@ -86,7 +86,7 @@ export default function AdminLogin() {
             placeholder="Password"
             required
             autoComplete="current-password"
-            className="w-full px-4 py-3 rounded-xl border border-brand-mist bg-brand-cream text-brand-charcoal placeholder-brand-charcoal/40 focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+            className="w-full px-4 py-3 rounded-xl border border-cream-2 bg-cream text-ink placeholder-ink/40 focus:outline-none focus:ring-2 focus:ring-coral/30"
           />
 
           {data?.error && (
@@ -95,7 +95,7 @@ export default function AdminLogin() {
 
           <button
             type="submit"
-            className="w-full bg-brand-gradient text-white font-bold py-3 rounded-xl hover:opacity-90 transition-opacity"
+            className="w-full bg-coral text-white font-bold py-3 rounded-xl hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Sign in ♥

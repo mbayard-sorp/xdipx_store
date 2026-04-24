@@ -94,17 +94,17 @@ export default function AddressesPage() {
       <section className="hidden lg:flex items-center justify-between">
         <div>
           <h1
-            className="text-2xl font-bold text-brand-charcoal"
+            className="text-2xl font-bold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            Addresses <span className="text-brand-purple">♥</span>
+            Addresses <span className="text-sage">♥</span>
           </h1>
-          <p className="text-sm text-brand-charcoal/50 mt-0.5">{customer.email}</p>
+          <p className="text-sm text-ink/50 mt-0.5">{customer.email}</p>
         </div>
         {tokenType !== 'account' && (
           <Link
             to="/account/addresses/new"
-            className="text-sm font-semibold text-white bg-brand-gradient px-4 py-2 rounded-full hover:opacity-90 transition-opacity"
+            className="text-sm font-semibold text-white bg-coral px-4 py-2 rounded-full hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             + Add address
@@ -117,7 +117,7 @@ export default function AddressesPage() {
         <div className="flex justify-end lg:hidden">
           <Link
             to="/account/addresses/new"
-            className="text-sm font-semibold text-white bg-brand-gradient px-4 py-2 rounded-full hover:opacity-90 transition-opacity"
+            className="text-sm font-semibold text-white bg-coral px-4 py-2 rounded-full hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             + Add address
@@ -137,19 +137,19 @@ export default function AddressesPage() {
 
       {/* Shop OAuth notice — address management not available for account-API sessions */}
       {tokenType === 'account' ? (
-        <div className="bg-white border border-brand-mist rounded-2xl px-6 py-8 text-center space-y-3">
+        <div className="bg-white border border-cream-2 rounded-2xl px-6 py-8 text-center space-y-3">
           <p
-            className="text-base font-semibold text-brand-charcoal"
+            className="text-base font-semibold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            Address management isn't available for Shop-login sessions yet <span className="text-brand-purple">♥</span>
+            Address management isn't available for Shop-login sessions yet <span className="text-sage">♥</span>
           </p>
-          <p className="text-sm text-brand-charcoal/60">
+          <p className="text-sm text-ink/60">
             Sign in with email and password to manage your saved addresses.
           </p>
           <Link
             to="/account/logout"
-            className="inline-flex items-center justify-center mt-1 px-5 py-2.5 rounded-full text-sm font-semibold text-brand-charcoal bg-brand-mist hover:bg-brand-mist/70 transition-colors"
+            className="inline-flex items-center justify-center mt-1 px-5 py-2.5 rounded-full text-sm font-semibold text-ink bg-cream-2 hover:bg-cream-2/70 transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Sign out and use email login
@@ -178,7 +178,7 @@ export default function AddressesPage() {
 
       {/* Fetcher loading indicator */}
       {isDeleting && (
-        <p className="text-xs text-brand-charcoal/40 text-center animate-pulse">
+        <p className="text-xs text-ink/40 text-center animate-pulse">
           Updating…
         </p>
       )}

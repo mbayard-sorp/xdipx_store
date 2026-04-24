@@ -36,6 +36,72 @@ export interface ProductVariant {
   quantityAvailable: number
 }
 
+// v2 redesign — sensation dial + hero video
+export type ProductTypeDial = 'air-pulsation' | 'vibrator' | 'wand' | 'lube' | 'wear'
+
+export interface SensationDial {
+  intensity?:      number
+  quietness?:      number
+  softness?:       number
+  suction?:        number
+  buildup?:        number
+  learningCurve?:  number
+  patternVariety?: number
+  reach?:          number
+  slipperiness?:   number
+  longevity?:      number
+  fit?:            number
+  [key: string]:   number | undefined
+}
+
+export interface HeroVideo {
+  src:      string
+  poster?:  string
+  duration: number
+}
+
+export type EmmaHeroVariant = 'loving' | 'bundle' | 'quote'
+
+export interface EmmaHeroCopy {
+  variant:     EmmaHeroVariant
+  eyebrow:     string
+  headline:    string
+  body:        string
+  aside:       string
+  pullQuote?:  string
+  generatedAt: string
+  voiceHash:   string
+}
+
+/** Quiet-endorsement homepage template copy (Haiku-generated, stored per product). */
+export interface QuietEndorsementCopy {
+  eyebrow:        string
+  subhead:        string
+  body:           string
+  bannerHeadline: string
+}
+
+export interface PairBundleCopyWhyCard { head: string; body: string }
+export interface PairBundleCopyMoment  { lead: string; body: string }
+
+/** Pair-bundle homepage template copy (Haiku-generated per primary product). */
+export interface PairBundleCopy {
+  eyebrow:      string
+  subhead:      string
+  headline:     string
+  body:         string
+  bannerLine:   string
+  pairedHandle: string
+  generatedAt:  string
+  primaryTag:   string
+  partnerTag:   string
+  knotCaption:  string
+  whyCards:     PairBundleCopyWhyCard[]
+  emmaQuote:    string
+  momentTitle:  string
+  moments:      PairBundleCopyMoment[]
+}
+
 export interface Deal {
   id: string
   shopifyProductId: string
@@ -46,7 +112,6 @@ export interface Deal {
   fullStory: string
   worksForHim: string
   worksForHer: string
-  featureBullets: string[]
   boxContents: string[]
   specifications?: string
   images: ProductImage[]
@@ -72,6 +137,18 @@ export interface Deal {
   sellingPlanGroups?: SellingPlanGroup[]
   tags: string[]
   rating?: { value: number; count: number }
+  // v2 redesign metafields (all optional — legacy products skip gracefully)
+  mapRestricted?:          boolean
+  heroVideo?:              HeroVideo
+  moodTags?:               string[]
+  audienceTags?:           string[]
+  mattersTags?:            string[]
+  productTypeDial?:        ProductTypeDial
+  sensationDial?:          SensationDial
+  pairingWhy?:             Record<string, string>
+  emmaHero?:               EmmaHeroCopy
+  quietEndorsementCopy?:   QuietEndorsementCopy
+  pairBundleCopy?:         PairBundleCopy
 }
 
 export interface Product {
@@ -90,6 +167,12 @@ export interface Product {
   category?: string
   sellingPlanGroups?: SellingPlanGroup[]
   rating?: { value: number; count: number }
+  // v2 redesign — Ask Emma tag facets
+  moodTags?:     string[]
+  audienceTags?: string[]
+  mattersTags?:  string[]
+  // v2 redesign — 9:16 card hero video
+  heroVideo?:    HeroVideo
 }
 
 export interface VaultDeal {
@@ -104,6 +187,12 @@ export interface VaultDeal {
   category: string
   dealStatus: 'draft' | 'scheduled' | 'live' | 'archived'
   qty: number
+  // v2 redesign — tag facets for Ask Emma filtering
+  moodTags?:     string[]
+  audienceTags?: string[]
+  mattersTags?:  string[]
+  // v2 redesign — 9:16 card hero video
+  heroVideo?:    HeroVideo
 }
 
 // ─── Bundles ──────────────────────────────────────────────────────────────
@@ -172,6 +261,7 @@ export interface CartLine {
   }
   sellingPlanAllocation?: {
     sellingPlan: { id: string; name: string }
+    discountPct?: number
   }
 }
 
@@ -183,6 +273,29 @@ export interface Cart {
   cost: {
     subtotalAmount: { amount: string; currencyCode: string }
     totalAmount:    { amount: string; currencyCode: string }
+  }
+}
+
+// ─── Emma Cart Context (drawer personalization) ──────────────────────────
+
+export type EmmaCartVariant =
+  | 'first-timer'
+  | 'repeat'
+  | 'gift'
+  | 'free-ship-adjacent'
+  | 'back-after-abandon'
+
+export interface EmmaCartContext {
+  variant:      EmmaCartVariant
+  greeting:     string
+  body:         string
+  contextFacts: string[]
+  pairing:      Product | null
+  pairingWhy:   string
+  freeShip: {
+    threshold: number
+    remaining: number
+    progress:  number
   }
 }
 
@@ -278,7 +391,7 @@ export interface DailyProfitSummaryRow {
 // ─── Admin ─────────────────────────────────────────────────────────────────
 
 export interface GenerateCopyRequest {
-  type: 'tagline' | 'full_story' | 'both_ways' | 'bullets' | 'box_contents' | 'email_subjects' | 'seo_meta' | 'specifications'
+  type: 'tagline' | 'full_story' | 'both_ways' | 'box_contents' | 'email_subjects' | 'seo_meta' | 'specifications' | 'quiet_endorsement' | 'pair_bundle'
   product: {
     title: string
     brand: string
@@ -286,12 +399,20 @@ export interface GenerateCopyRequest {
     categories: string[]
     dealPrice?: number
     msrp?: number
+    mapRestricted?: boolean
+    partner?: {
+      title:       string
+      brand:       string
+      description: string
+      categories:  string[]
+      dealPrice?:  number
+    }
   }
 }
 
 export interface GenerateCopyResult {
   type: string
-  content: string | string[] | { forHim: string; forHer: string }
+  content: string | string[] | { forHim: string; forHer: string } | QuietEndorsementCopy | PairBundleCopy
 }
 
 // ─── Klaviyo ──────────────────────────────────────────────────────────────

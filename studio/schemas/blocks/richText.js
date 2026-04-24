@@ -1,10 +1,12 @@
+import { ImageGeneratorInput } from '../../components/ImageGeneratorInput'
+
 export default {
   name: 'richText',
   title: 'Rich Text',
   type: 'object',
   fields: [
     { name: 'active', title: 'Active', type: 'boolean', initialValue: true },
-    { name: 'order', title: 'Order', type: 'number', initialValue: 10 },
+    { name: 'order', title: 'Order', type: 'number', initialValue: 10, hidden: true },
     {
       name: 'body',
       title: 'Body',
@@ -52,6 +54,7 @@ export default {
         {
           type: 'image',
           options: { hotspot: true },
+          components: { input: ImageGeneratorInput },
           fields: [
             { name: 'alt', title: 'Alt text', type: 'string' },
             { name: 'caption', title: 'Caption', type: 'string' },
@@ -99,7 +102,7 @@ export default {
         .slice(0, 80)
       return {
         title: text || '(empty rich text)',
-        subtitle: `Order ${order ?? 0} · ${active ? 'Visible' : 'Hidden'}`,
+        subtitle: `${active ? 'Visible' : 'Hidden'}`,
       }
     },
   },

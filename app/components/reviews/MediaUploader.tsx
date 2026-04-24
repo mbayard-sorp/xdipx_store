@@ -68,8 +68,8 @@ export function MediaUploader({ onChange, maxFiles = 5, maxMb = 10 }: MediaUploa
         className={[
           'border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors',
           isDragging
-            ? 'border-brand-purple bg-brand-mist'
-            : 'border-brand-mist hover:border-brand-purple/50',
+            ? 'border-sage bg-cream-2'
+            : 'border-cream-2 hover:border-sage/50',
         ].join(' ')}
         role="button"
         tabIndex={0}
@@ -77,10 +77,10 @@ export function MediaUploader({ onChange, maxFiles = 5, maxMb = 10 }: MediaUploa
         onKeyDown={e => e.key === 'Enter' && inputRef.current?.click()}
       >
         <span className="text-2xl block mb-1" aria-hidden="true">📷</span>
-        <p className="text-sm text-brand-charcoal/60">
-          Drag photos/videos or <span className="text-brand-purple font-medium">tap to select</span>
+        <p className="text-sm text-ink/60">
+          Drag photos/videos or <span className="text-sage font-medium">tap to select</span>
         </p>
-        <p className="text-xs text-brand-charcoal/40 mt-1">
+        <p className="text-xs text-ink/40 mt-1">
           {files.length}/{maxFiles} • Max {maxMb}MB each
         </p>
       </div>
@@ -102,7 +102,7 @@ export function MediaUploader({ onChange, maxFiles = 5, maxMb = 10 }: MediaUploa
       {previews.length > 0 && (
         <div className="flex flex-wrap gap-2 mt-3">
           {previews.map((preview, i) => (
-            <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden bg-brand-mist">
+            <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden bg-cream-2">
               {preview ? (
                 <img src={preview} alt={`Upload ${i + 1}`} className="w-full h-full object-cover" />
               ) : (

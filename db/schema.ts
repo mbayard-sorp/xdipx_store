@@ -165,12 +165,17 @@ export const wishlists = pgTable('wishlists', {
   id:          serial('id').primaryKey(),
   customerGid: varchar('customer_gid', { length: 60 }).notNull(),
   name:        varchar('name', { length: 100 }).notNull(),
+  note:        text('note'),
+  privacy:     varchar('privacy', { length: 20 }).default('private').notNull(),
+  giftMode:    boolean('gift_mode').default(false).notNull(),
+  shareToken:  varchar('share_token', { length: 48 }),
   isDefault:   boolean('is_default').default(false).notNull(),
   publicSlug:  varchar('public_slug', { length: 20 }),
   createdAt:   timestamp('created_at').defaultNow().notNull(),
   updatedAt:   timestamp('updated_at').defaultNow().notNull(),
 }, t => ({
   slugUnique:      uniqueIndex('wishlists_slug_uniq').on(t.publicSlug),
+  shareTokenUq:    uniqueIndex('wishlists_share_token_uniq').on(t.shareToken),
   customerIdx:     index('wishlists_customer_idx').on(t.customerGid),
   customerNameUq:  uniqueIndex('wishlists_customer_name').on(t.customerGid, t.name),
 }))
@@ -180,10 +185,34 @@ export const wishlistItems = pgTable('wishlist_items', {
   wishlistId:       integer('wishlist_id').notNull().references(() => wishlists.id, { onDelete: 'cascade' }),
   shopifyProductId: varchar('shopify_product_id', { length: 64 }).notNull(),
   handle:           varchar('handle', { length: 255 }).notNull(),
+  variantSelection: json('variant_selection').$type<Record<string, string>>(),
   addedAt:          timestamp('added_at').defaultNow().notNull(),
 }, t => ({
   itemUnique: uniqueIndex('wishlist_items_unique').on(t.wishlistId, t.shopifyProductId),
   listIdx:    index('wishlist_items_list_idx').on(t.wishlistId),
+}))
+
+export const pdpDialVotes = pgTable('pdp_dial_votes', {
+  id:               serial('id').primaryKey(),
+  shopifyProductId: varchar('shopify_product_id', { length: 64 }).notNull(),
+  dimension:        varchar('dimension', { length: 40 }).notNull(),
+  customerGid:      varchar('customer_gid', { length: 60 }).notNull(),
+  vote:             integer('vote').notNull(),
+  createdAt:        timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  voteUnique:    uniqueIndex('pdp_dial_votes_uniq').on(t.shopifyProductId, t.dimension, t.customerGid),
+  productIdx:    index('pdp_dial_votes_product_idx').on(t.shopifyProductId),
+}))
+
+export const pdpProductVotes = pgTable('pdp_product_votes', {
+  id:               serial('id').primaryKey(),
+  shopifyProductId: varchar('shopify_product_id', { length: 64 }).notNull(),
+  customerGid:      varchar('customer_gid', { length: 60 }).notNull(),
+  vote:             integer('vote').notNull(),
+  createdAt:        timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  voteUnique: uniqueIndex('pdp_product_votes_uniq').on(t.shopifyProductId, t.customerGid),
+  productIdx: index('pdp_product_votes_product_idx').on(t.shopifyProductId),
 }))
 
 export const callLog = pgTable('call_log', {
@@ -315,6 +344,77 @@ export type ReturnStatus =
   | 'denied'
   | 'canceled'
 
+export const emmaChatSessions = pgTable('emma_chat_sessions', {
+  id:                  serial('id').primaryKey(),
+  cookieId:            varchar('cookie_id', { length: 40 }).notNull(),
+  customerGid:         varchar('customer_gid', { length: 60 }),
+  ipHash:              varchar('ip_hash', { length: 64 }),
+  userAgent:           varchar('user_agent', { length: 255 }),
+  turnCount:           integer('turn_count').default(0).notNull(),
+  firstProductHandle:  varchar('first_product_handle', { length: 255 }),
+  checkoutUrlShared:   text('checkout_url_shared'),
+  checkoutSharedAt:    timestamp('checkout_shared_at'),
+  createdAt:           timestamp('created_at').defaultNow().notNull(),
+  lastActivityAt:      timestamp('last_activity_at').defaultNow().notNull(),
+}, t => ({
+  cookieUq:    uniqueIndex('emma_sessions_cookie_uniq').on(t.cookieId),
+  customerIdx: index('emma_sessions_customer_idx').on(t.customerGid),
+  createdIdx:  index('emma_sessions_created_idx').on(t.createdAt),
+}))
+
+export interface EmmaQuickReplyLog {
+  question: string
+  options: string[]
+  mode: string
+}
+
+export const emmaChatTurns = pgTable('emma_chat_turns', {
+  id:         serial('id').primaryKey(),
+  sessionId:  integer('session_id').notNull().references(() => emmaChatSessions.id, { onDelete: 'cascade' }),
+  role:       varchar('role', { length: 10 }).notNull(),
+  text:       text('text').notNull(),
+  hidden:     boolean('hidden').default(false).notNull(),
+  products:   json('products').$type<string[]>(),
+  quickReply: json('quick_reply').$type<EmmaQuickReplyLog | null>(),
+  latencyMs:  integer('latency_ms'),
+  createdAt:  timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  sessionIdx: index('emma_turns_session_idx').on(t.sessionId, t.createdAt),
+}))
+
+export const emmaChatEvents = pgTable('emma_chat_events', {
+  id:         serial('id').primaryKey(),
+  sessionId:  integer('session_id').notNull().references(() => emmaChatSessions.id, { onDelete: 'cascade' }),
+  turnId:     integer('turn_id'),
+  kind:       varchar('kind', { length: 30 }).notNull(),
+  payload:    json('payload'),
+  createdAt:  timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  sessionIdx: index('emma_events_session_idx').on(t.sessionId, t.createdAt),
+  kindIdx:    index('emma_events_kind_idx').on(t.kind, t.createdAt),
+}))
+
+export const ivrVoices = pgTable('ivr_voices', {
+  id:        serial('id').primaryKey(),
+  name:      varchar('name', { length: 100 }).notNull(),
+  voiceId:   varchar('voice_id', { length: 100 }).notNull(),
+  notes:     text('notes').default('').notNull(),
+  active:    boolean('active').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, t => ({
+  voiceIdUq: uniqueIndex('ivr_voices_voice_id_uniq').on(t.voiceId),
+  activeIdx: index('ivr_voices_active_idx').on(t.active),
+}))
+
+export const colorSwatchCache = pgTable('color_swatch_cache', {
+  colorKey:  varchar('color_key', { length: 80 }).primaryKey(),
+  label:     varchar('label', { length: 120 }).notNull(),
+  hex:       varchar('hex', { length: 7 }),
+  source:    varchar('source', { length: 16 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
 export const productCopurchase = pgTable('product_copurchase', {
   id:         serial('id').primaryKey(),
   handleA:    varchar('handle_a', { length: 255 }).notNull(),
@@ -326,3 +426,4 @@ export const productCopurchase = pgTable('product_copurchase', {
   handleAIdx: index('copurchase_a_idx').on(t.handleA),
   handleBIdx: index('copurchase_b_idx').on(t.handleB),
 }))
+

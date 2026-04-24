@@ -14,6 +14,7 @@ import blogProductEmbed   from '../schemas/blocks/blogProductEmbed.js'
 import blogCta            from '../schemas/blocks/blogCta.js'
 import blogVideoEmbed     from '../schemas/blocks/blogVideoEmbed.js'
 import richText           from '../schemas/blocks/richText.js'
+import editorBio          from '../schemas/blocks/editorBio.js'
 import homepageSections   from '../schemas/homepageSections.js'
 import siteSettings       from '../schemas/siteSettings.js'
 import productPage        from '../schemas/productPage.js'
@@ -23,6 +24,12 @@ import blogPost           from '../schemas/blogPost.js'
 import blogCategory       from '../schemas/blogCategory.js'
 import blogAuthor         from '../schemas/blogAuthor.js'
 import blogHomepage       from '../schemas/blogHomepage.js'
+import emmaHeroSettings   from '../schemas/emmaHeroSettings.js'
+import emmaPreset         from '../schemas/emmaPreset.js'
+import emmaPick           from '../schemas/emmaPick.js'
+import emmaContextRail    from '../schemas/emmaContextRail.js'
+import emmaCuratedRail    from '../schemas/blocks/emmaCuratedRail.js'
+import editor             from '../schemas/editor.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -39,6 +46,19 @@ export const schemaTypes = [
   blogCategory,
   blogAuthor,
   blogHomepage,
+  // v2 redesign — Emma hero (additive; homepageSections untouched)
+  emmaHeroSettings,
+  // v2 redesign — Emma presets for Ask Emma rail
+  emmaPreset,
+  // v2 redesign — Emma-voice picks indexed per featured product (Claude-generated)
+  emmaPick,
+  // v2 redesign — Emma context rails (AI-curated product rails under the hero)
+  emmaContextRail,
+  // v2 redesign — Emma-curated rails (agent-generated, draft→approve→live)
+  emmaCuratedRail,
+  // Editor (Emma) singleton — avatar + name + bio. Powers cart drawer avatar,
+  // hero byline, /about E-E-A-T, and editor bio cards. Single source of truth.
+  editor,
   // Block object types
   announcementBar,
   promoBanner,
@@ -50,6 +70,7 @@ export const schemaTypes = [
   testimonials,
   bonusDeal,
   trustBar,
+  editorBio,
   // Blog block object types
   blogImage,
   blogPullQuote,

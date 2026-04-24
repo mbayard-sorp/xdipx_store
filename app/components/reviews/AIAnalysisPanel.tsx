@@ -13,7 +13,7 @@ const SENTIMENT_STYLES: Record<string, string> = {
 export function AIAnalysisPanel({ review }: AIAnalysisPanelProps) {
   if (!review.aiSentiment && review.aiSpamScore == null && !review.aiSummary) {
     return (
-      <div className="bg-brand-mist rounded-xl p-4 text-sm text-brand-charcoal/50 italic">
+      <div className="bg-cream-2 rounded-xl p-4 text-sm text-ink/50 italic">
         AI analysis not yet run for this review.
       </div>
     )
@@ -22,9 +22,9 @@ export function AIAnalysisPanel({ review }: AIAnalysisPanelProps) {
   const spamPct = review.aiSpamScore != null ? Math.round(review.aiSpamScore * 100) : null
 
   return (
-    <div className="bg-brand-mist rounded-xl p-4 space-y-3">
+    <div className="bg-cream-2 rounded-xl p-4 space-y-3">
       <p
-        className="text-xs font-semibold text-brand-charcoal/50 uppercase tracking-widest"
+        className="text-xs font-semibold text-ink/50 uppercase tracking-widest"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         AI Analysis
@@ -33,10 +33,10 @@ export function AIAnalysisPanel({ review }: AIAnalysisPanelProps) {
       {/* Sentiment badge */}
       {review.aiSentiment && (
         <div className="flex items-center gap-2">
-          <span className="text-xs text-brand-charcoal/50">Sentiment</span>
+          <span className="text-xs text-ink/50">Sentiment</span>
           <span className={[
             'text-xs font-semibold px-2.5 py-0.5 rounded-full capitalize',
-            SENTIMENT_STYLES[review.aiSentiment] ?? 'bg-brand-mist text-brand-charcoal',
+            SENTIMENT_STYLES[review.aiSentiment] ?? 'bg-cream-2 text-ink',
           ].join(' ')}>
             {review.aiSentiment}
           </span>
@@ -47,7 +47,7 @@ export function AIAnalysisPanel({ review }: AIAnalysisPanelProps) {
       {spamPct != null && (
         <div>
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-brand-charcoal/50">Spam score</span>
+            <span className="text-xs text-ink/50">Spam score</span>
             <span className={[
               'text-xs font-semibold',
               spamPct >= 75 ? 'text-red-600' : spamPct >= 40 ? 'text-amber-600' : 'text-green-600',
@@ -69,7 +69,7 @@ export function AIAnalysisPanel({ review }: AIAnalysisPanelProps) {
 
       {/* AI summary */}
       {review.aiSummary && (
-        <p className="text-xs text-brand-charcoal/70 italic leading-relaxed">
+        <p className="text-xs text-ink/70 italic leading-relaxed">
           "{review.aiSummary}"
         </p>
       )}

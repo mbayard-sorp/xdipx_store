@@ -1,3 +1,4 @@
+import { ImageGeneratorInput } from '../components/ImageGeneratorInput'
 import { withImageGenerator } from '../lib/withImageGenerator'
 
 export default {
@@ -7,11 +8,19 @@ export default {
   __experimental_actions: ['update', 'publish'],
   fields: [
     {
+      name: 'logoPrompt',
+      title: 'Logo prompt',
+      type: 'text',
+      rows: 3,
+      description: 'Describe the logo to generate (optional). Used by the ✦ Generate button on the Site Logo field.',
+    },
+    {
       name: 'logo',
       title: 'Site Logo',
       type: 'image',
       description: 'Navbar + footer logo. PNG or SVG with transparent background recommended. Ideal size: 200×60px.',
       options: { hotspot: false },
+      components: { input: ImageGeneratorInput },
       fields: [
         {
           name: 'alt',

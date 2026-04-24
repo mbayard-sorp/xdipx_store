@@ -48,7 +48,7 @@ function ClickThroughGate({ onConfirm }: { onConfirm: () => void }) {
       <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
         <button
           onClick={onConfirm}
-          className="flex-1 bg-white text-brand-coral font-bold py-3 px-6 rounded-full text-lg transition-all hover:scale-105 hover:shadow-lg"
+          className="flex-1 bg-white text-coral font-bold py-3 px-6 rounded-full text-lg transition-all hover:scale-105 hover:shadow-lg"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Yes, let me in ♥
@@ -125,7 +125,7 @@ function DobEntryGate({ onConfirm }: { onConfirm: () => void }) {
 
       <button
         type="submit"
-        className="bg-white text-brand-coral font-bold py-3 px-8 rounded-full text-lg transition-all hover:scale-105 hover:shadow-lg"
+        className="bg-white text-coral font-bold py-3 px-8 rounded-full text-lg transition-all hover:scale-105 hover:shadow-lg"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Enter ♥
@@ -156,36 +156,41 @@ export function AgeGate({ verificationLevel = 'click_through' }: AgeGateProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex flex-col items-center justify-center px-6"
-      style={{ background: 'linear-gradient(135deg, #F04E37 0%, #FF8C38 50%, #7B2FBE 100%)' }}
+      className="fixed inset-0 z-[9999] flex items-center justify-center px-4 bg-brand-charcoal/40 backdrop-blur-md"
       aria-modal="true"
+      role="dialog"
       aria-label="Age verification"
     >
-      {/* Logo */}
-      <div className="mb-10 fade-in">
-        <span
-          className="text-white text-4xl md:text-5xl font-black tracking-tight select-none"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          xdipx
-        </span>
-        <span className="text-white/70 text-sm block text-center -mt-1 tracking-widest uppercase">
-          daily wellness deals
-        </span>
+      <div
+        className="relative w-full max-w-md rounded-3xl shadow-2xl px-6 py-8 sm:px-8 sm:py-10 flex flex-col items-center"
+        style={{ background: 'linear-gradient(135deg, #F04E37 0%, #FF8C38 50%, #7B2FBE 100%)' }}
+      >
+        {/* Logo */}
+        <div className="mb-6 fade-in">
+          <span
+            className="text-white text-3xl md:text-4xl font-black tracking-tight select-none block text-center"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            xdipx
+          </span>
+          <span className="text-white/70 text-xs block text-center -mt-1 tracking-widest uppercase">
+            daily wellness deals
+          </span>
+        </div>
+
+        {verificationLevel === 'dob_entry' ? (
+          <DobEntryGate onConfirm={handleConfirm} />
+        ) : (
+          <ClickThroughGate onConfirm={handleConfirm} />
+        )}
+
+        {/* id_verify level: placeholder — integrate third-party SDK here when needed */}
+        {verificationLevel === 'id_verify' && (
+          <p className="mt-6 text-white/60 text-xs text-center max-w-xs">
+            ID verification required in your state. Integration pending.
+          </p>
+        )}
       </div>
-
-      {verificationLevel === 'dob_entry' ? (
-        <DobEntryGate onConfirm={handleConfirm} />
-      ) : (
-        <ClickThroughGate onConfirm={handleConfirm} />
-      )}
-
-      {/* id_verify level: placeholder — integrate third-party SDK here when needed */}
-      {verificationLevel === 'id_verify' && (
-        <p className="mt-6 text-white/60 text-xs text-center max-w-xs">
-          ID verification required in your state. Integration pending.
-        </p>
-      )}
     </div>
   )
 }

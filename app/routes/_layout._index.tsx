@@ -2,20 +2,25 @@ import { useEffect } from 'react'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useOutletContext } from 'react-router'
 import {
-  getDealByShopifyId, getProductsByTag, getBonusDeal,
+  getDealByShopifyId, getDealByHandle, getProductsByTag, getBonusDeal,
   getCollectionProducts, getProductsByHandles,
 } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
-import { dealHistory } from '../../db/schema'
-import { eq } from 'drizzle-orm'
+import { dealHistory, pipelineSettings } from '../../db/schema'
+import { eq, inArray } from 'drizzle-orm'
 import { kvGet, KV_KEYS } from '~/lib/kv.server'
-import { getHomepageSections }                  from '~/lib/sanity.server'
+import { getHomepageSections, getEmmaHeroSettings } from '~/lib/sanity.server'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
-import { CountdownTimer }        from '~/components/store/CountdownTimer'
-import { DailyDealHero }         from '~/components/store/DailyDealHero'
+import { getEmmaContextRows }    from '~/lib/emma-rails.server'
+import { getCartIdFromCookie }   from '~/lib/cart.server'
+import { EmmaHero }              from '~/components/store/EmmaHero'
 import { BundleHero }            from '~/components/store/BundleHero'
+import { QuietEndorsementHero }  from '~/components/store/QuietEndorsementHero'
+import { PairBundleHero }        from '~/components/store/PairBundleHero'
+import { PairBundleFullBleedHero } from '~/components/store/PairBundleFullBleedHero'
 import { ProductCarousel }       from '~/components/cms/ProductCarousel'
+import { EmmaContextRow }        from '~/components/home/EmmaContextRow'
 import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }  from '~/components/cms/ContentBlockRenderer'
 import { ProductStructuredData } from '~/components/seo/ProductStructuredData'
@@ -47,17 +52,41 @@ export function headers() {
   }
 }
 
-export async function loader(_args: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   // Read the live-deal row first (indexed, cheap); then fan out the Shopify
   // fetch alongside the other branches so it overlaps rather than chains.
   const dbDeal = await getLiveDealRow()
-  const [deal, forHim, forHer, bonusDeal, cmsData] = await Promise.all([
+  const [deal, forHim, forHer, bonusDeal, cmsData, emmaHero, templateRows] = await Promise.all([
     dbDeal?.shopifyProductId ? getDealByShopifyId(dbDeal.shopifyProductId) : Promise.resolve(null),
     getProductsByTag('for-him', 8),
     getProductsByTag('for-her', 8),
     getBonusDeal(),
     getHomepageSections(),
+    getEmmaHeroSettings(),
+    db.select().from(pipelineSettings).where(inArray(pipelineSettings.key, [
+      'homepage_template',
+      'homepage_show_free_shipping',
+      'homepage_pair_product_handle',
+      'homepage_pair_discount_pct',
+    ])),
   ])
+
+  const homepageSettings = {
+    template: (templateRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed',
+    showFreeShipping: (templateRows.find(r => r.key === 'homepage_show_free_shipping')?.value ?? 'true') === 'true',
+    pairProductHandle: (templateRows.find(r => r.key === 'homepage_pair_product_handle')?.value ?? '').trim(),
+    pairDiscountPct: parseInt(templateRows.find(r => r.key === 'homepage_pair_discount_pct')?.value ?? '10', 10) || 10,
+  }
+
+  // Resolve pair deal only when a pair_bundle template is active
+  const pairBundleDeal = (homepageSettings.template === 'pair_bundle' || homepageSettings.template === 'pair_bundle_fullbleed') && homepageSettings.pairProductHandle
+    ? await getDealByHandle(homepageSettings.pairProductHandle)
+    : null
+
+  // Resolve optional pair product for bundle variant (Shopify handle → Deal)
+  const pairDeal = emmaHero?.heroVariant === 'bundle' && emmaHero.pairProductHandle
+    ? await getDealByHandle(emmaHero.pairProductHandle)
+    : null
 
   // If the live deal's Sanity doc is flagged as a bundle, render the bundle hero
   // instead of the DailyDealHero. Falls back to the regular product hero when
@@ -87,17 +116,45 @@ export async function loader(_args: LoaderFunctionArgs) {
     carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
   }
 
+  // Resolve Shopify products for any Emma-curated rail blocks (manual handles only)
+  const emmaRailBlocks = (cmsData?.sections ?? []).filter(
+    (s): s is import('~/types/cms').EmmaCuratedRailBlock => s._type === 'emmaCuratedRail',
+  )
+  if (emmaRailBlocks.length > 0) {
+    const results = await Promise.all(
+      emmaRailBlocks.map(b =>
+        b.productHandles?.length
+          ? getProductsByHandles(b.productHandles.map(p => p.handle))
+          : Promise.resolve([] as Product[]),
+      ),
+    )
+    emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
+  }
+
   if (!deal) {
     return {
       deal: null, bundle: null, forHim, forHer, bonusDeal,
       viewers: 0, soldToday: 0, cmsData, carouselProductMap,
+      emmaHero: null, pairDeal: null, homepageSettings, pairBundleDeal: null,
+      emmaContextRows: [],
     }
   }
 
-  const [viewers, reviewData, aggregate] = await Promise.all([
+  // Session seed: prefer the cart cookie (stable per visitor once they engage);
+  // anon visitors fall back to a 60s rotating bucket so the edge-cached window
+  // naturally reshuffles on each revalidation. Cheap enough to compute inline.
+  const cartId  = getCartIdFromCookie(request)
+  const minuteBucket = Math.floor(Date.now() / 60_000)
+  const sessionSeed = cartId ?? `anon-${minuteBucket}`
+
+  const [viewers, reviewData, aggregate, emmaContextRows] = await Promise.all([
     kvGet<number>(KV_KEYS.viewerCount(deal.handle)).then(n => n ?? 0),
     getProductReviews(deal.shopifyProductId, { sort: 'newest', page: 1, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
+    getEmmaContextRows({ dealHandle: deal.handle, sessionSeed }).catch(err => {
+      console.error('[homepage] emma context rows failed:', err)
+      return []
+    }),
   ])
 
   return {
@@ -106,14 +163,16 @@ export async function loader(_args: LoaderFunctionArgs) {
     reviews: reviewData.reviews,
     reviewTotal: reviewData.total,
     aggregate: aggregate ?? null,
+    emmaHero, pairDeal, homepageSettings, pairBundleDeal,
+    emmaContextRows,
   }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const canonical = 'https://xdipx.com/'
   if (!data?.deal) {
-    const title = 'xdipx — Daily Wellness Deals'
-    const description = 'One deal. Every day. Ships discreet.'
+    const title = "xdipx — Emma's picks · sexual wellness, edited"
+    const description = "Emma's picks — sexual wellness we've actually tried. Ships discreet."
     return [
       { title },
       { name: 'description', content: description },
@@ -122,8 +181,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     ]
   }
   const { deal } = data
-  const title = `${deal.seoTitle} — Today Only | xdipx`
-  const description = deal.metaDescription || `${deal.seoTitle} — today's deal at xdipx. Ships discreet.`
+  const title = `${deal.seoTitle} — Emma's pick | xdipx`
+  const description = deal.metaDescription || `${deal.seoTitle} — Emma's pick at xdipx. Ships discreet.`
   return [
     { title },
     { name: 'description', content: description },
@@ -142,8 +201,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 export default function Homepage() {
   const {
     deal, bundle, forHim, forHer, bonusDeal,
-    viewers, soldToday, cmsData, carouselProductMap,
-    reviews, reviewTotal, aggregate,
+    cmsData, carouselProductMap,
+    emmaHero, pairDeal, homepageSettings, pairBundleDeal,
+    emmaContextRows,
   } = useLoaderData<typeof loader>()
   const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
 
@@ -179,43 +239,92 @@ export default function Homepage() {
   // announcementBar is handled in _layout.tsx — exclude it here
   const contentBlocks = cmsSections.filter(s => s._type !== 'announcementBar')
 
+  // MAP-restricted: prefer the Shopify metafield; fall back to MAP-vs-MSRP heuristic
+  // for legacy products without the `map_restricted` flag set.
+  const mapRestricted = !!(deal && (deal.mapRestricted ?? (deal.mapPrice > 0 && deal.mapPrice >= deal.msrp)))
+
+  // Priority: Shopify `xdipx.emma_hero` metafield (Claude-generated on promotion)
+  // → Sanity `emmaHero` doc (manual editorial override) → component defaults.
+  const shopifyEmma = deal?.emmaHero
+  const heroVariant = shopifyEmma?.variant ?? emmaHero?.heroVariant ?? 'loving'
+  const heroCopy = shopifyEmma
+    ? {
+        eyebrow:  shopifyEmma.eyebrow,
+        headline: shopifyEmma.headline,
+        body:     shopifyEmma.body,
+        aside:    shopifyEmma.aside,
+        ...(shopifyEmma.pullQuote ? { pullQuote: shopifyEmma.pullQuote } : {}),
+      }
+    : emmaHero
+      ? {
+          ...(emmaHero.eyebrow   ? { eyebrow:   emmaHero.eyebrow }   : {}),
+          ...(emmaHero.headline  ? { headline:  emmaHero.headline }  : {}),
+          ...(emmaHero.body      ? { body:      emmaHero.body }      : {}),
+          ...(emmaHero.aside     ? { aside:     emmaHero.aside }     : {}),
+          ...(emmaHero.pullQuote ? { pullQuote: emmaHero.pullQuote } : {}),
+        }
+      : undefined
+
   return (
     <>
-      <CountdownTimer />
-
       {bundle ? (
         <BundleHero bundle={bundle} buyButtonText={buyButtonText} />
+      ) : deal && homepageSettings.template === 'pair_bundle' && pairBundleDeal && deal.pairBundleCopy ? (
+        <>
+          <PairBundleHero
+            primary={deal}
+            partner={pairBundleDeal}
+            copy={deal.pairBundleCopy}
+            discountPct={homepageSettings.pairDiscountPct}
+          />
+          <ProductStructuredData deal={deal} />
+        </>
+      ) : deal && homepageSettings.template === 'pair_bundle_fullbleed' && pairBundleDeal && deal.pairBundleCopy ? (
+        <>
+          <PairBundleFullBleedHero
+            primary={deal}
+            partner={pairBundleDeal}
+            copy={deal.pairBundleCopy}
+            discountPct={homepageSettings.pairDiscountPct}
+          />
+          <ProductStructuredData deal={deal} />
+        </>
+      ) : deal && homepageSettings.template === 'quiet_endorsement' && deal.quietEndorsementCopy ? (
+        <>
+          <QuietEndorsementHero deal={deal} showFreeShipping={homepageSettings.showFreeShipping} />
+          <ProductStructuredData deal={deal} />
+        </>
       ) : deal ? (
         <>
-          <DailyDealHero
+          <EmmaHero
             deal={deal}
-            viewers={viewers}
-            soldToday={soldToday}
-            reviews={reviews ?? []}
-            reviewTotal={reviewTotal ?? 0}
-            aggregate={aggregate}
-            buyButtonText={buyButtonText}
-            shareUrl="https://xdipx.com/"
-            shareTitle={deal.seoTitle}
-            shareImage={deal.images[0]?.url ?? null}
+            variant={heroVariant}
+            mapRestricted={mapRestricted}
+            {...(heroCopy ? { copy: heroCopy } : {})}
+            pairDeal={pairDeal}
           />
 
           <ProductStructuredData deal={deal} />
         </>
       ) : (
         <div className="max-w-2xl mx-auto px-4 py-24 text-center">
-          <p className="text-brand-purple text-5xl mb-4">♥</p>
+          <p className="text-sage text-5xl mb-4">♥</p>
           <h1
-            className="text-3xl font-bold text-brand-charcoal mb-3"
+            className="text-3xl font-bold text-ink mb-3"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Something good is coming.
           </h1>
-          <p className="text-brand-charcoal/60">
-            Today's deal is being set up. Check back at midnight.
+          <p className="text-ink/60">
+            Emma's next pick is just around the corner.
           </p>
         </div>
       )}
+
+      {/* ── Emma context rows (AI-personalized rails under the hero) ──────── */}
+      {emmaContextRows && emmaContextRows.length > 0 && emmaContextRows.map(row => (
+        <EmmaContextRow key={row.rail.id} row={row} />
+      ))}
 
       {/* ── CMS content blocks (ordered by Sanity `order` field) ──────────── */}
       {contentBlocks.map(block => (

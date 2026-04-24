@@ -58,16 +58,16 @@ export default function ReviewPage() {
     useLoaderData<typeof loader>()
 
   return (
-    <div className="min-h-screen bg-brand-cream py-12 px-4">
+    <div className="min-h-screen bg-cream py-12 px-4">
       <div className="max-w-lg mx-auto">
         <div className="text-center mb-8">
           <span
-            className="text-3xl font-black text-brand-gradient select-none"
+            className="text-3xl font-black text-coral select-none"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             xdipx
           </span>
-          <p className="text-sm text-brand-charcoal/50 mt-1">
+          <p className="text-sm text-ink/50 mt-1">
             {isVerifiedPurchase ? 'Thanks for your purchase! ♥' : 'Share your experience'}
           </p>
         </div>

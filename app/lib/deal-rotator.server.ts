@@ -122,6 +122,18 @@ export async function transitionToVaultPricing(
       vaultPrice: vaultPrice > 0 ? vaultPrice.toFixed(2) : null,
     })
     .where(and(eq(dealHistory.id, deal.id), eq(dealHistory.status, 'live')))
+
+  // Archive Emma-curated homepage rails for this deal — they're tied to the
+  // editorial moment. PDP rails persist on the canonical product URL.
+  try {
+    const { archiveHomepageRailsForDeal } = await import('./sanity.server')
+    const { archived } = await archiveHomepageRailsForDeal(deal.shopifyProductId)
+    if (archived.length) {
+      console.log('[deal-rotator] Archived homepage rails:', archived.length)
+    }
+  } catch (err) {
+    console.error('[deal-rotator] Rail archive failed (non-blocking):', err)
+  }
 }
 
 /**
@@ -162,6 +174,84 @@ export async function activateDeal(
 
   // Set live status in Shopify
   await setDealStatus(deal.shopifyProductId, 'live')
+
+  // Recycled-deal path: if this product was a previous deal, restore any
+  // archived homepage rails instead of regenerating. Saves tokens, preserves
+  // editorial history for repeat picks.
+  try {
+    const { unarchiveHomepageRailsForDeal } = await import('./sanity.server')
+    const { unarchived } = await unarchiveHomepageRailsForDeal(deal.shopifyProductId)
+    if (unarchived.length) {
+      console.log('[deal-rotator] Un-archived homepage rails:', unarchived.length)
+    }
+  } catch (err) {
+    console.error('[deal-rotator] Rail un-archive failed (non-blocking):', err)
+  }
+
+  // Emma hero copy — generated from pipelineSettings.brandVoice (non-blocking).
+  // Fetched via getDailyDeal() since we just flipped this product to live status.
+  try {
+    const { getDailyDeal } = await import('./shopify.server')
+    const { generateEmmaHero } = await import('./claude.server')
+    const fullDeal = await getDailyDeal().catch(() => null)
+    const seedDeal = fullDeal ?? {
+      seoTitle: deal.seoTitle ?? '',
+      tagline: '',
+      fullStory: '',
+      brand: '',
+      category: 'both' as const,
+      dealPrice,
+      msrp,
+      mapRestricted: false,
+    }
+    const variant = seedDeal.mapRestricted ? 'quote' : 'loving'
+    const copy = await generateEmmaHero({ deal: seedDeal, variant })
+    await updateProductMetafield(
+      deal.shopifyProductId,
+      'emma_hero',
+      JSON.stringify(copy),
+      'json',
+    )
+    // Mirror the Emma signature into xdipx.tagline so any surface that still
+    // reads the tagline metafield picks up Emma's voice on activation.
+    if (copy.aside) {
+      await updateProductMetafield(
+        deal.shopifyProductId,
+        'tagline',
+        copy.aside,
+        'single_line_text_field',
+      )
+    }
+
+    // Index the pick into Sanity so Emma gets smarter as deals flow.
+    // Non-blocking inside the same try — we've already written the source of
+    // truth (Shopify metafield); Sanity is the searchable replica.
+    if (fullDeal?.handle) {
+      try {
+        const { upsertEmmaPick } = await import('./sanity.server')
+        await upsertEmmaPick({
+          productId:     deal.shopifyProductId,
+          productHandle: fullDeal.handle,
+          productTitle:  fullDeal.seoTitle ?? deal.seoTitle ?? undefined,
+          brand:         fullDeal.brand ?? undefined,
+          category:      fullDeal.category ?? undefined,
+          dealDate:      estDate(0),
+          variant:       copy.variant,
+          eyebrow:       copy.eyebrow,
+          headline:      copy.headline,
+          body:          copy.body,
+          aside:         copy.aside,
+          pullQuote:     copy.pullQuote,
+          voiceHash:     copy.voiceHash,
+          generatedAt:   copy.generatedAt,
+        })
+      } catch (sanityErr) {
+        console.error('[deal-rotator] Emma pick Sanity index failed (non-blocking):', sanityErr)
+      }
+    }
+  } catch (err) {
+    console.error('[deal-rotator] Emma hero generation failed (non-blocking):', err)
+  }
 
   // Update DB
   await db
@@ -253,6 +343,22 @@ export async function rotateDeal(): Promise<{
   // 4. Activate next deal
   if (nextDeal) {
     await activateDeal(nextDeal)
+
+    // 5. Precompute Emma context rails for all active rails against the
+    //    newly-live deal. Non-blocking — a failure here must not leave the
+    //    site without a live deal. Lazy-on-miss in the homepage loader is
+    //    the safety net if this call fails.
+    try {
+      const { getDailyDeal } = await import('./shopify.server')
+      const live = await getDailyDeal().catch(() => null)
+      if (live?.handle) {
+        const { regenerateActiveRails } = await import('./emma-rails.server')
+        const res = await regenerateActiveRails(live.handle, 'midnight')
+        console.log('[deal-rotator] emma rails precomputed:', res)
+      }
+    } catch (err) {
+      console.error('[deal-rotator] emma rails precompute failed (non-blocking):', err)
+    }
   }
 
   return {

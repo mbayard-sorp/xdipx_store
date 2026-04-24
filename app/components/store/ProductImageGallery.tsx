@@ -4,7 +4,14 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 
 export type GalleryItem =
   | { kind: 'image'; url: string; altText: string }
-  | { kind: 'video'; previewUrl: string; sources: { url: string; mimeType: string }[]; aspect?: 'portrait' | 'landscape' | 'square' }
+  | {
+      kind:       'video'
+      previewUrl: string
+      sources:    { url: string; mimeType: string }[]
+      aspect?:    'portrait' | 'landscape' | 'square'
+      /** Optional duration (seconds) — rendered as a thumbnail chip when present. */
+      duration?:  number
+    }
 
 interface ProductImageGalleryProps {
   items: GalleryItem[]
@@ -16,7 +23,14 @@ interface ProductImageGalleryProps {
   heartOverlay?: React.ReactNode
 }
 
-const ZOOM_IN_CURSOR = `url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><circle cx='12' cy='12' r='10' fill='white' stroke='%231E1A2E' stroke-width='2'/><line x1='19' y1='19' x2='28' y2='28' stroke='%231E1A2E' stroke-width='3' stroke-linecap='round'/><line x1='8' y1='12' x2='16' y2='12' stroke='%231E1A2E' stroke-width='2'/><line x1='12' y1='8' x2='12' y2='16' stroke='%231E1A2E' stroke-width='2'/></svg>") 12 12, zoom-in`
+function formatDuration(seconds: number): string {
+  const s = Math.round(seconds)
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return `▶ ${m}:${r.toString().padStart(2, '0')}`
+}
+
+const ZOOM_IN_CURSOR =`url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><circle cx='12' cy='12' r='10' fill='white' stroke='%231E1A2E' stroke-width='2'/><line x1='19' y1='19' x2='28' y2='28' stroke='%231E1A2E' stroke-width='3' stroke-linecap='round'/><line x1='8' y1='12' x2='16' y2='12' stroke='%231E1A2E' stroke-width='2'/><line x1='12' y1='8' x2='12' y2='16' stroke='%231E1A2E' stroke-width='2'/></svg>") 12 12, zoom-in`
 
 const ZOOM_OUT_CURSOR = `url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><circle cx='12' cy='12' r='10' fill='white' stroke='%231E1A2E' stroke-width='2'/><line x1='19' y1='19' x2='28' y2='28' stroke='%231E1A2E' stroke-width='3' stroke-linecap='round'/><line x1='8' y1='12' x2='16' y2='12' stroke='%231E1A2E' stroke-width='2'/></svg>") 12 12, zoom-out`
 
@@ -198,7 +212,7 @@ export function ProductImageGallery({
       {/* Main image / video */}
       <div
         ref={containerRef}
-        className="relative rounded-2xl overflow-hidden bg-brand-mist shadow-sm select-none aspect-square"
+        className={`relative rounded-[8px] overflow-hidden shadow-sm select-none aspect-square ${isPortrait && isVideoActive ? 'bg-ink' : 'bg-cream-2'}`}
       >
         {/* Video element — always mounted when a video is active so videoRef
             is available for imperative play() inside the click handler */}
@@ -252,7 +266,7 @@ export function ProductImageGallery({
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                       <div className="w-16 h-16 rounded-full bg-white/90 shadow-lg flex items-center justify-center">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                          <polygon points="8,5 20,12 8,19" fill="#1E1A2E" />
+                          <polygon points="8,5 20,12 8,19" fill="#151211" />
                         </svg>
                       </div>
                     </div>
@@ -270,7 +284,7 @@ export function ProductImageGallery({
                   decoding="async"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-brand-charcoal/20 text-6xl">
+                <div className="w-full h-full flex items-center justify-center text-ink/20 text-6xl">
                   &#9829;
                 </div>
               )}
@@ -301,7 +315,7 @@ export function ProductImageGallery({
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                       <div className="w-16 h-16 rounded-full bg-white/90 shadow-lg flex items-center justify-center">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                          <polygon points="8,5 20,12 8,19" fill="#1E1A2E" />
+                          <polygon points="8,5 20,12 8,19" fill="#151211" />
                         </svg>
                       </div>
                     </div>
@@ -349,7 +363,11 @@ export function ProductImageGallery({
         )}
 
         {/* Heart overlay slot (self-positioned via variant="overlay") */}
-        {heartOverlay && <div className="z-20">{heartOverlay}</div>}
+        {heartOverlay && (
+          <div className="absolute inset-0 z-30 pointer-events-none">
+            {heartOverlay}
+          </div>
+        )}
       </div>
 
       {/* Mobile dot indicators */}
@@ -363,8 +381,8 @@ export function ProductImageGallery({
               className={[
                 'rounded-full transition-all duration-200',
                 lockedIndex === i
-                  ? 'w-5 h-1.5 bg-brand-coral'
-                  : 'w-1.5 h-1.5 bg-brand-charcoal/25',
+                  ? 'w-5 h-1.5 bg-coral'
+                  : 'w-1.5 h-1.5 bg-ink/25',
               ].join(' ')}
             />
           ))}
@@ -433,10 +451,10 @@ function ThumbnailStrip({
         type="button"
         onClick={() => scrollThumbs('left')}
         className={[
-          'shrink-0 w-11 h-11 rounded-full border border-brand-mist bg-white/80 backdrop-blur flex items-center justify-center transition-all',
+          'shrink-0 w-11 h-11 rounded-full border border-cream-2 bg-white/80 backdrop-blur flex items-center justify-center transition-all',
           canScrollLeft
-            ? 'text-brand-charcoal/60 hover:text-brand-charcoal hover:border-brand-charcoal/30'
-            : 'text-brand-charcoal/15 cursor-default',
+            ? 'text-ink/60 hover:text-ink hover:border-ink/30'
+            : 'text-ink/15 cursor-default',
         ].join(' ')}
         aria-label="Scroll thumbnails left"
         tabIndex={canScrollLeft ? 0 : -1}
@@ -458,9 +476,9 @@ function ThumbnailStrip({
             onMouseLeave={() => onHover(null)}
             onClick={() => onSelect(i)}
             className={[
-              'relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 transition-all',
+              'relative shrink-0 w-16 h-16 rounded-[8px] overflow-hidden border-2 transition-all',
               displayIndex === i
-                ? 'border-brand-coral'
+                ? 'border-coral'
                 : 'border-transparent opacity-60 hover:opacity-100',
             ].join(' ')}
             aria-label={item.kind === 'video' ? `Play video ${i + 1}` : `View image ${i + 1}`}
@@ -475,11 +493,18 @@ function ThumbnailStrip({
               className="w-full h-full object-cover"
             />
             {item.kind === 'video' && (
-              <div className="absolute inset-0 flex items-center justify-center bg-brand-charcoal/30">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true">
-                  <polygon points="5,3 19,12 5,21" />
-                </svg>
-              </div>
+              <>
+                <div className="absolute inset-0 flex items-center justify-center bg-ink/30">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+                    <polygon points="5,3 19,12 5,21" />
+                  </svg>
+                </div>
+                {typeof item.duration === 'number' && item.duration > 0 && (
+                  <span className="absolute bottom-1 left-1 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded leading-none">
+                    {formatDuration(item.duration)}
+                  </span>
+                )}
+              </>
             )}
           </button>
         ))}
@@ -490,10 +515,10 @@ function ThumbnailStrip({
         type="button"
         onClick={() => scrollThumbs('right')}
         className={[
-          'shrink-0 w-11 h-11 rounded-full border border-brand-mist bg-white/80 backdrop-blur flex items-center justify-center transition-all',
+          'shrink-0 w-11 h-11 rounded-full border border-cream-2 bg-white/80 backdrop-blur flex items-center justify-center transition-all',
           canScrollRight
-            ? 'text-brand-charcoal/60 hover:text-brand-charcoal hover:border-brand-charcoal/30'
-            : 'text-brand-charcoal/15 cursor-default',
+            ? 'text-ink/60 hover:text-ink hover:border-ink/30'
+            : 'text-ink/15 cursor-default',
         ].join(' ')}
         aria-label="Scroll thumbnails right"
         tabIndex={canScrollRight ? 0 : -1}

@@ -1,10 +1,13 @@
+import { bgStyleField } from '../../lib/bgStyleField'
+
 export default {
   name: 'trustBar',
   title: 'Trust Bar',
   type: 'object',
   fields: [
     { name: 'active', title: 'Active', type: 'boolean', initialValue: true },
-    { name: 'order',  title: 'Order',  type: 'number',  initialValue: 50 },
+    { name: 'order',  title: 'Order',  type: 'number',  initialValue: 50, hidden: true },
+    bgStyleField({ initialValue: 'white' }),
     {
       name: 'items',
       title: 'Linked Trust Items',
@@ -20,7 +23,7 @@ export default {
       const n = Array.isArray(items) ? items.length : 0
       return {
         title: 'Trust Bar',
-        subtitle: `${n} item${n === 1 ? '' : 's'} · Order ${order ?? 0} · ${active === false ? 'Hidden' : 'Visible'}`,
+        subtitle: `${n} item${n === 1 ? '' : 's'} · ${active === false ? 'Hidden' : 'Visible'}`,
       }
     },
   },

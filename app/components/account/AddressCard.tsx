@@ -30,12 +30,12 @@ export function AddressCard({
   const encodedId = encodeURIComponent(address.id)
 
   return (
-    <div className="bg-white border border-brand-mist rounded-2xl p-5 space-y-3">
+    <div className="bg-white border border-cream-2 rounded-2xl p-5 space-y-3">
       {/* Header row: default pill or empty */}
       <div className="flex items-center justify-between gap-2">
         {isDefault ? (
           <span
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-brand-purple rounded-full px-3 py-1"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-sage rounded-full px-3 py-1"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             <span aria-hidden="true">●</span> Default
@@ -46,16 +46,16 @@ export function AddressCard({
       </div>
 
       {/* Address body */}
-      <div className="text-sm text-brand-charcoal space-y-0.5">
+      <div className="text-sm text-ink space-y-0.5">
         {name && <p className="font-semibold">{name}</p>}
-        {address.company && <p className="text-brand-charcoal/70">{address.company}</p>}
+        {address.company && <p className="text-ink/70">{address.company}</p>}
         {address.formatted.map((line, i) => (
-          <p key={i} className={i === 0 ? undefined : 'text-brand-charcoal/70'}>
+          <p key={i} className={i === 0 ? undefined : 'text-ink/70'}>
             {line}
           </p>
         ))}
         {address.phone && (
-          <p className="text-brand-charcoal/70 pt-1">{address.phone}</p>
+          <p className="text-ink/70 pt-1">{address.phone}</p>
         )}
       </div>
 
@@ -63,18 +63,18 @@ export function AddressCard({
       <div className="flex items-center gap-3 pt-1 text-sm">
         <Link
           to={`/account/addresses/${encodedId}/edit`}
-          className="text-brand-purple font-semibold hover:underline"
+          className="text-sage font-semibold hover:underline"
           aria-label={`Edit address: ${label}`}
         >
           Edit
         </Link>
 
-        <span className="text-brand-charcoal/20" aria-hidden="true">·</span>
+        <span className="text-ink/20" aria-hidden="true">·</span>
 
         <button
           type="button"
           onClick={() => onDelete(address.id)}
-          className="text-brand-charcoal/60 hover:text-red-600 font-semibold transition-colors"
+          className="text-ink/60 hover:text-red-600 font-semibold transition-colors"
           aria-label={`Delete address: ${label}`}
         >
           Delete
@@ -82,11 +82,11 @@ export function AddressCard({
 
         {!isDefault && (
           <>
-            <span className="text-brand-charcoal/20" aria-hidden="true">·</span>
+            <span className="text-ink/20" aria-hidden="true">·</span>
             <button
               type="button"
               onClick={() => onSetDefault(address.id)}
-              className="text-brand-charcoal/60 hover:text-brand-purple font-semibold transition-colors"
+              className="text-ink/60 hover:text-sage font-semibold transition-colors"
               aria-label={`Set as default address: ${label}`}
             >
               Set default

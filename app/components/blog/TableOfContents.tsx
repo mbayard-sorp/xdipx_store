@@ -56,7 +56,7 @@ export function TableOfContents({ body }: { body: unknown[] }) {
       <div className="lg:hidden mb-6">
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-2 text-sm font-semibold text-brand-charcoal w-full py-2"
+          className="flex items-center gap-2 text-sm font-semibold text-ink w-full py-2"
         >
           <span>Table of Contents</span>
           <svg
@@ -77,7 +77,7 @@ export function TableOfContents({ body }: { body: unknown[] }) {
         className="hidden lg:block sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto"
         aria-label="Table of contents"
       >
-        <p className="text-xs font-semibold text-brand-charcoal/50 uppercase tracking-wider mb-3">
+        <p className="text-xs font-semibold text-ink/50 uppercase tracking-wider mb-3">
           Contents
         </p>
         <TOCList headings={headings} activeId={activeId} />
@@ -99,8 +99,8 @@ function TOCList({ headings, activeId }: { headings: TOCItem[]; activeId: string
             }}
             className={`block py-1 transition-colors border-l-2 pl-3 ${
               activeId === h.id
-                ? 'border-brand-purple text-brand-purple font-medium'
-                : 'border-transparent text-brand-charcoal/60 hover:text-brand-charcoal hover:border-brand-mist'
+                ? 'border-sage text-sage font-medium'
+                : 'border-transparent text-ink/60 hover:text-ink hover:border-cream-2'
             }`}
           >
             {h.text}

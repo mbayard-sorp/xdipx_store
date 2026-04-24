@@ -102,11 +102,28 @@ function toIvrCard(
 
 // ─── Keyword search (replaces searchProducts backend) ────────────────────────
 
+// Queries that name a concrete product type — if we match on description
+// text alone we return garbage (a massager whose description says "pair with
+// lube" gets surfaced for a "lube" search). Restrict these to strict fields
+// so the result is actually that kind of product.
+const STRICT_CATEGORY_TERMS = new Set([
+  'lube', 'lubes', 'lubricant', 'lubricants',
+  'vibrator', 'vibrators', 'vibe', 'vibes',
+  'dildo', 'dildos',
+  'wand', 'wands',
+  'rabbit', 'rabbits',
+  'plug', 'plugs',
+  'ring', 'rings',
+  'cleaner', 'cleaners',
+])
+
 export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[]> {
   const { query, limit = 3, category, priceMax, tags } = opts
   const client = getSanityClient()
 
   if (!client) return shopifyFallback(query, limit)
+
+  const strictCategory = STRICT_CATEGORY_TERMS.has(query.trim().toLowerCase())
 
   try {
     const patterns = buildQueryPatterns(query)
@@ -128,7 +145,9 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
     const descMatch = fieldMatchAny('pt::text(description)', paramNames)
     const seoMatch = fieldMatchAny('seoDescription', paramNames)
     conditions.push(
-      `(${titleMatch} || ${taglineMatch} || ${vendorMatch} || ${categoryMatch} || ${descMatch} || ${seoMatch})`,
+      strictCategory
+        ? `(${titleMatch} || ${taglineMatch} || ${vendorMatch} || ${categoryMatch})`
+        : `(${titleMatch} || ${taglineMatch} || ${vendorMatch} || ${categoryMatch} || ${descMatch} || ${seoMatch})`,
     )
 
     if (category) {
@@ -167,7 +186,13 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
       { handle: string; title: string; category: string | null; tagline: string | null; ivrVoiceSummary: string | null }[]
     >(groq, groqParams)
 
-    if (!sanityResults || sanityResults.length === 0) return shopifyFallback(query, limit)
+    if (!sanityResults || sanityResults.length === 0) {
+      // Shopify's full-text search matches description bodies too, which is the
+      // same trap the strict path avoids. Return empty so Emma says "no match"
+      // instead of surfacing a massager for a "lube" query.
+      if (strictCategory) return []
+      return shopifyFallback(query, limit)
+    }
 
     const handles = sanityResults.map((r) => r.handle).filter(Boolean)
     const shopifyProducts = await getProductsByHandles(handles)

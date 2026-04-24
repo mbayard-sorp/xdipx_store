@@ -1,7 +1,17 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { GenerateCopyRequest, GenerateCopyResult, ProductScore } from '~/types'
+import { createHash } from 'node:crypto'
+import type { Deal, EmmaHeroCopy, EmmaHeroVariant, GenerateCopyRequest, GenerateCopyResult, ProductScore } from '~/types'
+import { getPipelineSetting } from './feed-processor.server'
+import {
+  RAIL_TOOLS,
+  buildCandidatePool,
+  createRailGenState,
+  executeRailTool,
+  type RailProposal,
+  type PairingWhyProposal,
+} from '~/lib/emma-rail-tools.server'
 
-const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] })
+const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
 // Tiered models: HAIKU for short/templated copy (~20× cheaper), SONNET for
 // long-form narrative and structured tasks (full_story, specs, schedule, blog).
@@ -32,6 +42,42 @@ async function generate(
   if (block?.type !== 'text') throw new Error('Unexpected Claude response type')
   return block.text
 }
+
+/**
+ * Reusable low-level call for short, one-shot generations (contextual asides,
+ * microcopy, etc.). Lets callers override the system prompt while sharing the
+ * same Anthropic client + error handling. Supports a wall-clock timeout so
+ * PDP renders don't hang on slow model responses.
+ */
+export async function generateWithSystem(opts: {
+  system:     string
+  user:       string
+  model?:     string
+  maxTokens?: number
+  timeoutMs?: number
+}): Promise<string> {
+  const { system, user, model = MODEL_FAST, maxTokens = 128, timeoutMs } = opts
+  const call = client.messages.create({
+    model,
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: 'user', content: user }],
+  })
+  const msg = timeoutMs
+    ? await Promise.race([
+        call,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Claude request timed out')), timeoutMs),
+        ),
+      ])
+    : await call
+  const block = msg.content[0]
+  if (block?.type !== 'text') throw new Error('Unexpected Claude response type')
+  return block.text
+}
+
+/** Exported brand-voice system prompt so callers composing their own user prompts can speak in brand voice. */
+export const BRAND_VOICE_SYSTEM_PROMPT = SYSTEM_PROMPT
 
 /** Strip markdown code fences that Claude sometimes wraps JSON in. */
 function stripFences(raw: string): string {
@@ -125,31 +171,6 @@ ${productContext}`
       }
     }
 
-    case 'bullets': {
-      const primaryPrompt = `Write 4–6 feature bullet points for this product. Short, specific, benefit-first. No fluff. Return as a JSON array of strings.\n\n${productContext}`
-      const retryPrompt   = `Return ONLY a JSON array of 4 to 5 short benefit strings. Example: ["Dual motors for blended stimulation", "Whisper-quiet for total privacy"]. Nothing else — no markdown, no prose.\n\n${productContext}`
-
-      const raw = await generate(primaryPrompt, 1024, MODEL_FAST)
-      try {
-        const parsed = JSON.parse(stripFences(raw)) as string[]
-        if (Array.isArray(parsed) && parsed.length >= 3) return { type, content: parsed }
-      } catch { /* fall through */ }
-
-      const retried = await generate(retryPrompt, 1024, MODEL_FAST)
-      try {
-        const parsed = JSON.parse(stripFences(retried)) as string[]
-        if (Array.isArray(parsed) && parsed.length >= 3) return { type, content: parsed }
-      } catch { /* fall through */ }
-
-      // Fallback: extract lines from description
-      const lines = product.description
-        .split(/[.!?\n]/)
-        .map(s => s.trim())
-        .filter(s => s.length > 20 && s.length < 120)
-        .slice(0, 4)
-      return { type, content: lines.length >= 3 ? lines : [`${product.title} by ${product.brand}`, 'Rechargeable and body-safe', 'Ships discreetly'] }
-    }
-
     case 'email_subjects': {
       const raw = await generate(
         `Write 5 email subject lines for today's daily deal email. Max 50 chars each. Playful, urgent, curiosity-driven. Return as a JSON array of strings.\n\n${productContext}`,
@@ -199,6 +220,185 @@ ${productContext}`
       } catch { /* fall through */ }
 
       return { type, content: [`1x ${product.title}`, '1x User manual'] }
+    }
+
+    case 'quiet_endorsement': {
+      const mapNote = product.mapRestricted
+        ? 'This product is MAP-restricted — do NOT reference a discount or a strike price. The hook must be Emma\'s endorsement, not the price.'
+        : 'You may reference a pleasant price or value if it flows naturally, but the hook should still be Emma\'s endorsement, not the discount.'
+      const primaryPrompt = `Write the four short strings for Emma's "quiet endorsement" homepage template. Emma voice: a trusted, funny friend who has actually tried this and quietly can't stop thinking about it. Never "Buy now" — never countdowns — never "sex" as an adjective. Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction".
+${mapNote}
+
+Return ONLY a raw JSON object (no markdown) with these exact keys:
+- eyebrow: a tag line ≤ 60 chars, two short phrases joined by " · " (middle dot, U+00B7). Example shape: "quiet endorsement · works for MAP-restricted".
+- subhead: one short line, lowercase, casual — something like "updated whenever I change my mind".
+- body: 1–2 sentences (≤ 200 chars total). First person, Emma voice. Wrap one 1–4 word phrase in underscores like _slow-burn energy_ so the UI can highlight it in coral. End with a soft curiosity nudge ("Come see.", "Worth a peek.", etc).
+- bannerHeadline: ≤ 30 chars, italic-editorial feel, product name in Emma's words. Use " · " as separator if you have two parts. Example: "Slowburn · the Hush".
+
+${productContext}`
+      const retryPrompt = `Return ONLY raw JSON. No markdown, no prose before or after. Shape: {"eyebrow": "...", "subhead": "...", "body": "...", "bannerHeadline": "..."}. Follow Emma voice rules. ${productContext}`
+
+      const isValid = (v: unknown): v is import('~/types').QuietEndorsementCopy => {
+        if (!v || typeof v !== 'object') return false
+        const obj = v as Record<string, unknown>
+        return typeof obj.eyebrow === 'string' && obj.eyebrow.trim().length > 0
+          && typeof obj.subhead === 'string' && obj.subhead.trim().length > 0
+          && typeof obj.body === 'string' && obj.body.trim().length > 0
+          && typeof obj.bannerHeadline === 'string' && obj.bannerHeadline.trim().length > 0
+      }
+
+      const raw = await generate(primaryPrompt, 512, MODEL_FAST)
+      try {
+        const parsed = JSON.parse(stripFences(raw))
+        if (isValid(parsed)) return { type, content: parsed }
+      } catch { /* fall through */ }
+
+      const retried = await generate(retryPrompt, 512, MODEL_FAST)
+      try {
+        const parsed = JSON.parse(stripFences(retried))
+        if (isValid(parsed)) return { type, content: parsed }
+      } catch { /* fall through */ }
+
+      return {
+        type,
+        content: {
+          eyebrow:        product.mapRestricted ? 'quiet endorsement · works for MAP-restricted' : 'quiet endorsement · editor\u2019s pick',
+          subhead:        'updated whenever I change my mind',
+          body:           `I\u2019ve been a little obsessed with this one \u2014 it\u2019s got a kind of _slow-burn energy_ I wasn\u2019t expecting. Come see.`,
+          bannerHeadline: `${product.brand || 'Emma\u2019s pick'} \u00B7 ${product.title}`.slice(0, 30),
+        },
+      }
+    }
+
+    case 'pair_bundle': {
+      const partner = product.partner
+      const nowISO  = () => new Date().toISOString()
+
+      const staticFallback = (): import('~/types').PairBundleCopy => ({
+        eyebrow:      'emma recommends · a pair',
+        subhead:      'better together · save when you grab both',
+        headline:     'These two were made for each other.',
+        body:         `One sets the mood, the other carries it. It\u2019s the kind of _slow-burn pairing_ that just clicks. Come see.`,
+        bannerLine:   '\u2014 Emma \u00B7 picked this pair because they click \u00B7 swaps it when something better lands',
+        pairedHandle: '',
+        generatedAt:  nowISO(),
+        primaryTag:   'this one',
+        partnerTag:   'and this',
+        knotCaption:  'tied together on purpose',
+        whyCards: [
+          { head: 'One handles the fun part.', body: 'The rumble, the tease, the main event. Dialed in and ready to go.' },
+          { head: 'The other handles the smart part.', body: 'Keeps everything gliding, safe on toys, easy on skin. No drama, no cleanup headache.' },
+          { head: 'Together they buy you time.', body: 'Less stop-and-start, more flow. You\u2019ll feel the difference in the first few minutes.' },
+        ],
+        emmaQuote:    `This is the pair I\u2019d hand a friend who asked \u201Cjust pick something for me.\u201D One does the work, one does the _finish_, and together they feel intentional. That\u2019s the whole point of a good pair.`,
+        momentTitle:  'how to make this pair click',
+        moments: [
+          { lead: 'Start with the lube.', body: 'A little goes a long way \u2014 warm it in your hands first so it lands smooth instead of startling.' },
+          { lead: 'Then bring in the other.', body: 'Let the rhythm build before you ramp up. The pair wants you unhurried.' },
+        ],
+      })
+
+      if (!partner) {
+        return {
+          type,
+          content: {
+            ...staticFallback(),
+            body:       `Set a pair in the toolbar first \u2014 I\u2019ll write this once I can see both.`,
+            bannerLine: '\u2014 Emma \u00B7 waiting on a pairing',
+          },
+        }
+      }
+
+      const pairContext = `Primary product:\n- Title: ${product.title}\n- Brand: ${product.brand}\n- Description: ${product.description}\n- Categories: ${product.categories.join(', ')}${product.dealPrice ? `\n- Deal price: $${product.dealPrice}` : ''}\n\nPartner product:\n- Title: ${partner.title}\n- Brand: ${partner.brand}\n- Description: ${partner.description}\n- Categories: ${partner.categories.join(', ')}${partner.dealPrice ? `\n- Deal price: $${partner.dealPrice}` : ''}`
+
+      const voiceRules = `VOICE RULES (strict):
+- Emma is a persona \u2014 she does NOT claim to have personally used or tested any product.
+- NEVER say: "I tried", "I tested", "I've been using", "been living with", "spent X weeks", "I reached for this", "since April", "a month of use", or any similar first-person use claim.
+- NEVER invent usage stats ("238 pairs grabbed", "top 5%", "my #1").
+- Emma curates, pairs, and recommends \u2014 she speaks about why things WOULD click, not what she felt.
+- OK to say: "picks this pair", "I\u2019d hand this to a friend", "why they click", "made for each other", "the slow one", "the fix-it one", "a pairing that works".
+- Do NOT name the brands. Do NOT restate the product titles. Do NOT surface countdowns or "until midnight".
+- Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction" \u2014 never "sex" as an adjective.`
+
+      const shapeSpec = `Return ONLY a raw JSON object (no markdown fences, no prose around it) with EXACTLY these keys:
+
+{
+  "eyebrow":     string  // \u2264 60 chars, two short phrases joined by " \u00B7 " (middle dot U+00B7). e.g. "emma recommends \u00B7 a powerful pair"
+  "subhead":     string  // \u2264 70 chars, lowercase, casual. e.g. "better together \u00B7 save when you grab both"
+  "headline":    string  // 6\u201310 words, editorial italic feel, the hook. e.g. "These two were made for each other."
+  "body":        string  // 25\u201345 words, 2 sentences. Wrap ONE 1\u20134 word phrase in underscores like _slow-burn energy_. Describe both products' ROLES (one does X, the other does Y). End with a soft curiosity nudge.
+  "bannerLine":  string  // one short italic Emma sign-off, no testimony. e.g. "\u2014 Emma \u00B7 picks this pair for slow-burn nights \u00B7 swaps it when something better lands"
+  "primaryTag":  string  // 2\u20133 lowercase words, curator voice, describes the primary's ROLE. e.g. "the buzz one" or "the slow one"
+  "partnerTag":  string  // 2\u20133 lowercase words, curator voice, describes the partner's ROLE. e.g. "the glide one" or "the fix-it one"
+  "knotCaption": string  // 3\u20136 words, short label for why they're tied together. e.g. "tied together on purpose" or "one better idea"
+  "whyCards": [          // EXACTLY 3 entries explaining why the pairing works
+    { "head": string,    // 5\u20139 words ending in a period. Short editorial hook. e.g. "One handles the fun part."
+      "body": string }   // 15\u201325 words, no testimony, factual + evocative
+  ],
+  "emmaQuote":   string  // 35\u201360 words, 2\u20133 sentences, first-person curator voice ("this is the pair I'd hand a friend"). Supports 1\u20132 _emphasis_ spans. NEVER "tried/tested/used".
+  "momentTitle": string  // 5\u20138 words, italic feel. e.g. "how to make this pair click"
+  "moments": [           // 2 or 3 entries \u2014 a quick how-to for the pair
+    { "lead": string,    // 4\u20137 words, will render bold. e.g. "Start with the lube."
+      "body": string }   // 15\u201322 words continuing the step in Emma voice
+  ]
+}
+
+The whyCards array MUST have length 3. The moments array MUST have length 2 or 3. No extra keys. No nulls.`
+
+      const primaryPrompt = `Write Emma's "pair bundle" editorial module copy \u2014 two curated products sold together at a better price.
+
+${voiceRules}
+
+${shapeSpec}
+
+${pairContext}`
+
+      const retryPrompt = `Return ONLY raw JSON matching this exact shape: {"eyebrow","subhead","headline","body","bannerLine","primaryTag","partnerTag","knotCaption","whyCards":[{"head","body"},{"head","body"},{"head","body"}],"emmaQuote","momentTitle","moments":[{"lead","body"},{"lead","body"}]}.\n\n${voiceRules}\n\n${pairContext}`
+
+      type Raw = Omit<import('~/types').PairBundleCopy, 'pairedHandle' | 'generatedAt'>
+
+      const isStr = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0
+      const isCard = (v: unknown): v is { head: string; body: string } =>
+        !!v && typeof v === 'object' && isStr((v as Record<string, unknown>).head) && isStr((v as Record<string, unknown>).body)
+      const isMoment = (v: unknown): v is { lead: string; body: string } =>
+        !!v && typeof v === 'object' && isStr((v as Record<string, unknown>).lead) && isStr((v as Record<string, unknown>).body)
+
+      const isValid = (v: unknown): v is Raw => {
+        if (!v || typeof v !== 'object') return false
+        const o = v as Record<string, unknown>
+        return isStr(o.eyebrow)
+          && isStr(o.subhead)
+          && isStr(o.headline)
+          && isStr(o.body)
+          && isStr(o.bannerLine)
+          && isStr(o.primaryTag)
+          && isStr(o.partnerTag)
+          && isStr(o.knotCaption)
+          && isStr(o.emmaQuote)
+          && isStr(o.momentTitle)
+          && Array.isArray(o.whyCards) && o.whyCards.length === 3 && o.whyCards.every(isCard)
+          && Array.isArray(o.moments) && (o.moments.length === 2 || o.moments.length === 3) && o.moments.every(isMoment)
+      }
+
+      const wrap = (copy: Raw): import('~/types').PairBundleCopy => ({
+        ...copy,
+        pairedHandle: '',
+        generatedAt:  nowISO(),
+      })
+
+      const raw = await generate(primaryPrompt, 1800, MODEL_FAST)
+      try {
+        const parsed = JSON.parse(stripFences(raw))
+        if (isValid(parsed)) return { type, content: wrap(parsed) }
+      } catch { /* fall through */ }
+
+      const retried = await generate(retryPrompt, 1800, MODEL_FAST)
+      try {
+        const parsed = JSON.parse(stripFences(retried))
+        if (isValid(parsed)) return { type, content: wrap(parsed) }
+      } catch { /* fall through */ }
+
+      return { type, content: staticFallback() }
     }
 
     case 'specifications': {
@@ -370,7 +570,6 @@ export async function generateVideoContent(product: {
   worksForHer?: string
   specifications?: string
   whatsInTheBox?: string
-  featureBullets?: string[]
   /** Optional freeform instruction appended to the Claude prompt — for admin overrides */
   customPrompt?: string
   /** Pin to a specific format instead of auto-selecting */
@@ -386,9 +585,6 @@ export async function generateVideoContent(product: {
   const worksForHer = product.worksForHer ? stripHtml(product.worksForHer).slice(0, 200) : ''
   const specs       = product.specifications ? stripHtml(product.specifications).slice(0, 200) : ''
   const inTheBox    = product.whatsInTheBox  ? stripHtml(product.whatsInTheBox).slice(0, 150)  : ''
-  const bullets     = product.featureBullets
-    ? product.featureBullets.map(b => stripHtml(b).slice(0, 80)).filter(Boolean).join(', ')
-    : ''
 
   const productContext = [
     `Product: ${product.title}`,
@@ -401,7 +597,6 @@ export async function generateVideoContent(product: {
     worksForHer       ? `Works for her: ${worksForHer}`                            : '',
     specs             ? `Specifications: ${specs}`                                 : '',
     inTheBox          ? `What's in the box: ${inTheBox}`                           : '',
-    bullets           ? `Features: ${bullets}`                                     : '',
   ].filter(Boolean).join('\n')
 
   const formatDescriptions: Partial<Record<VOFormat, string>> = {
@@ -428,7 +623,7 @@ Brand voice: playful, cheeky, warm. PG-13 strictly — suggest, never show. Innu
 Product:
 ${productContext}
 
-Use the product details above to make the narrator script and reaction text feel specific to THIS product — not generic wellness copy. Mine the full story, feature bullets, and specs for details that are funny, surprising, or unusually specific. A narrator referencing an actual feature ("7 settings" or "whisper quiet" or "USB rechargeable") is always funnier and more trustworthy than one speaking in generalities. Specificity = credibility = conversion.
+Use the product details above to make the narrator script and reaction text feel specific to THIS product — not generic wellness copy. Mine the full story and specs for details that are funny, surprising, or unusually specific. A narrator referencing an actual feature ("7 settings" or "whisper quiet" or "USB rechargeable") is always funnier and more trustworthy than one speaking in generalities. Specificity = credibility = conversion.
 
 If works-for-him and works-for-her are both present, the narrator should feel warm and inclusive toward both without assuming who is watching. If only one is present, subtly orient the tone toward that audience without being exclusionary.
 
@@ -723,6 +918,149 @@ export interface BlogSEOSuggestion {
   suggestedTags: string[]
 }
 
+// ─── Emma Hero (homepage) ─────────────────────────────────────────────────
+
+const DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful — suggestive is fine, explicit is not. Never use "sex" as an adjective — use "intimate", "pleasure", or "wellness". Never "Buy now" — use "Take a peek →" or "I'll take it ♥". Never surface a countdown or "until midnight." Always include a short first-person aside ("been living on my desk," "telling everyone about this combo"). Never assume the reader's experience level.`
+
+const EMMA_SYSTEM_PROMPT = `You are Emma — the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You test everything you recommend. You write in first person, warm and specific, like a note to a friend.`
+
+function emmaHeroFallback(deal: Pick<Deal, 'seoTitle' | 'tagline' | 'brand'>, variant: EmmaHeroVariant, voiceHash: string): EmmaHeroCopy {
+  const base: EmmaHeroCopy = {
+    variant,
+    eyebrow: 'Kinda obsessed',
+    headline: deal.tagline || `This ${deal.brand} one quietly made it into my rotation.`,
+    body: `Slow-burn build, surprisingly gentle finish. If you want something that feels considered — not gimmicky — this is the one.`,
+    aside: `— Emma · still on my desk`,
+    generatedAt: new Date().toISOString(),
+    voiceHash,
+  }
+  if (variant === 'quote') base.pullQuote = `"This one earned its spot."`
+  return base
+}
+
+export async function generateEmmaHero(opts: {
+  deal: Pick<Deal, 'seoTitle' | 'tagline' | 'fullStory' | 'brand' | 'category' | 'dealPrice' | 'msrp' | 'mapRestricted'>
+  variant?: EmmaHeroVariant
+  /** Optional override — otherwise pulled from pipelineSettings.brandVoice. */
+  brandVoice?: string
+}): Promise<EmmaHeroCopy> {
+  const variant = opts.variant ?? (opts.deal.mapRestricted ? 'quote' : 'loving')
+  const brandVoice = opts.brandVoice ?? (await getPipelineSetting('brandVoice')) ?? DEFAULT_BRAND_VOICE
+  const voiceHash = createHash('sha1').update(brandVoice).digest('hex').slice(0, 12)
+
+  const discountPct = opts.deal.msrp > 0 && opts.deal.dealPrice > 0
+    ? Math.round(((opts.deal.msrp - opts.deal.dealPrice) / opts.deal.msrp) * 100)
+    : 0
+  const mapLine = opts.deal.mapRestricted
+    ? 'MAP-restricted — no discount claims, no percent-off language, no struck prices.'
+    : discountPct > 0 ? `Currently ${discountPct}% off MSRP — you may allude to value, but never in "buy now" or countdown language.` : ''
+
+  const system = `${EMMA_SYSTEM_PROMPT}\n\n${brandVoice}`
+
+  const user = `Write the Emma hero block for the homepage of xdipx.com. Variant: "${variant}".
+
+Product context (do NOT echo — rewrite in Emma's voice):
+- Title: ${opts.deal.seoTitle}
+- Brand: ${opts.deal.brand}
+- Category: ${opts.deal.category}
+${opts.deal.tagline ? `- Existing tagline (for context only): ${opts.deal.tagline}` : ''}
+${opts.deal.fullStory ? `- Full story (context only, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
+${mapLine}
+
+Return ONLY this JSON (no markdown):
+{
+  "eyebrow":   "A DYNAMIC FEELING in Emma's own voice — 2–4 words, first-person, informal. Examples: 'Kinda obsessed', 'Low-key amazed', 'Still thinking about this', 'Quietly sold', 'Actually impressed'. No period. Do NOT use 'Currently loving' or generic editorial phrases like 'This week's pick'. Must feel like a quick reaction, not a label.",
+  "headline":  "ONE sentence (8–14 words) that explains WHY Emma is featuring this pick right now — the reason it earned the slot. First-person, specific, warm. Never starts with the product name. Never 'buy now'. Example shape: 'Something about how quiet this one is just broke my brain.'",
+  "body":      "1–2 short sentences (25–45 words total) — the highlights a shopper should know. What it feels like, what stands out, what surprised her. Tight and specific. No marketing bloat. No clinical language.",
+  "aside":     "'— Emma · <3–6 word aside>', e.g. '— Emma · still on my desk'"${variant === 'quote' ? `,
+  "pullQuote": "one short pull-quote (6–12 words) — in quotes — a friend-to-friend endorsement. No price or discount language."` : ''}
+}`
+
+  async function attempt(tries = 2): Promise<EmmaHeroCopy> {
+    for (let i = 0; i < tries; i++) {
+      try {
+        const msg = await client.messages.create({
+          model: MODEL,
+          max_tokens: 800,
+          system,
+          messages: [{ role: 'user', content: user }],
+        })
+        const block = msg.content[0]
+        if (block?.type !== 'text') throw new Error('non-text response')
+        const parsed = JSON.parse(stripFences(block.text)) as Partial<EmmaHeroCopy>
+        if (parsed.eyebrow && parsed.headline && parsed.body && parsed.aside) {
+          const out: EmmaHeroCopy = {
+            variant,
+            eyebrow:  parsed.eyebrow,
+            headline: parsed.headline,
+            body:     parsed.body,
+            aside:    parsed.aside,
+            generatedAt: new Date().toISOString(),
+            voiceHash,
+          }
+          if (variant === 'quote' && parsed.pullQuote) out.pullQuote = parsed.pullQuote
+          return out
+        }
+      } catch (err) {
+        if (i === tries - 1) throw err
+      }
+    }
+    throw new Error('unreachable')
+  }
+
+  try {
+    return await attempt(2)
+  } catch (err) {
+    console.error('[generateEmmaHero] falling back to hardcoded copy:', err)
+    return emmaHeroFallback(opts.deal, variant, voiceHash)
+  }
+}
+
+const EMMA_TAGLINE_FALLBACKS = [
+  'here to help you find what you’re into ♥',
+  'your no-judgment guide to pleasure ♥',
+  'quietly obsessed with the good stuff ♥',
+  'pick my brain — I’ve tested most of it ♥',
+  'tell me what you’re curious about ♥',
+]
+
+export async function generateEmmaTagline(): Promise<string> {
+  const system = `You are Emma — the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You write like a trusted, funny friend. Tasteful, warm, curious. Never clinical. Never sleazy. Never "sex" as an adjective.`
+  const user = `Write ONE short tagline for the Emma chat window's status line. It sits right under "Ask Emma · Online".
+
+Rules:
+- 5 to 9 words, lowercase (first word may be capitalized).
+- First-person Emma voice.
+- Ends with the ♥ glyph (exactly one).
+- No quotes, no period, no emoji other than ♥.
+- No "buy now", no countdown, no pricing, no "sex" as adjective.
+- Feel friendly and specific — the kind of thing a friend might say when you open the chat. Examples of the vibe (don't copy): "here to help you find what you're into ♥", "pick my brain, I've tried most of it ♥".
+
+Return ONLY the tagline text, nothing else.`
+
+  try {
+    const msg = await client.messages.create({
+      model: MODEL_FAST,
+      max_tokens: 80,
+      system,
+      messages: [{ role: 'user', content: user }],
+    })
+    const block = msg.content[0]
+    if (block?.type !== 'text') throw new Error('non-text response')
+    const line = block.text
+      .trim()
+      .replace(/^["'`]|["'`]$/g, '')
+      .replace(/\s+/g, ' ')
+      .split('\n')[0]
+      ?.trim()
+    if (line && line.length > 4 && line.length <= 80 && line.includes('♥')) return line
+    if (line && line.length > 4 && line.length <= 80) return `${line} ♥`
+  } catch (err) {
+    console.error('[generateEmmaTagline] falling back:', err)
+  }
+  return EMMA_TAGLINE_FALLBACKS[Math.floor(Math.random() * EMMA_TAGLINE_FALLBACKS.length)]!
+}
+
 export async function generateBlogSEO(
   title: string,
   excerpt: string,
@@ -749,5 +1087,281 @@ Return only the JSON object, no markdown.`,
       seoDescription: excerpt.slice(0, 160),
       suggestedTags: [],
     }
+  }
+}
+
+// ─── Emma context-group picker ──────────────────────────────────────────────
+// Used by the homepage "Emma picks" rails. Called at midnight deal rotation
+// (plus admin/brief-change/lazy fallbacks) — never per page view. Uses prompt
+// caching: SYSTEM_PROMPT + hero context block are cache_control-tagged so the
+// first group per deal pays full cost and subsequent groups read from cache.
+
+export interface ContextPickCandidate {
+  id:          string          // Shopify product GID
+  handle:      string
+  title:       string
+  brand?:      string
+  tags?:       string[]
+  productType?: string
+  price?:      number
+  blurb?:      string          // 1-line description
+}
+
+export interface ContextPickInput {
+  hero: {
+    handle:      string
+    title:       string
+    brand?:      string
+    tagline?:    string
+    category?:   string
+    tags?:       string[]
+    dealPrice?:  number
+    moodTags?:   string[]
+    audienceTags?: string[]
+    mattersTags?: string[]
+  }
+  group: {
+    name:        string
+    kind:        'pairing' | 'alternative' | 'adjacent'
+    emmaContext: string
+  }
+  candidates:    ContextPickCandidate[]
+  maxPicks:      number
+}
+
+export interface ContextPickResult {
+  picks: Array<{ id: string; pairingWhy: string }>
+  tokens: {
+    input:  number
+    output: number
+    cacheCreation: number
+    cacheRead:     number
+  }
+}
+
+function kindBrief(kind: ContextPickInput['group']['kind']): string {
+  switch (kind) {
+    case 'pairing':     return 'Pick products that go WELL WITH the hero deal — complements, add-ons, or things that make the hero better.'
+    case 'alternative': return 'Pick products that someone who skipped the hero deal might love instead — same vibe or satisfaction, different form factor.'
+    case 'adjacent':    return 'Pick products that share the hero\u2019s mood or moment — adjacent in category, not direct pairs or alternatives.'
+  }
+}
+
+export async function pickForContextGroup(input: ContextPickInput): Promise<ContextPickResult> {
+  const hero = input.hero
+  const heroBlock = [
+    `HERO DEAL (what\u2019s in the sale box right now)`,
+    `Title: ${hero.title}`,
+    hero.brand    ? `Brand: ${hero.brand}` : '',
+    hero.tagline  ? `Tagline: ${hero.tagline}` : '',
+    hero.category ? `Category: ${hero.category}` : '',
+    hero.dealPrice != null ? `Deal price: $${hero.dealPrice.toFixed(2)}` : '',
+    hero.tags?.length         ? `Tags: ${hero.tags.join(', ')}` : '',
+    hero.moodTags?.length     ? `Mood: ${hero.moodTags.join(', ')}` : '',
+    hero.audienceTags?.length ? `Audience: ${hero.audienceTags.join(', ')}` : '',
+    hero.mattersTags?.length  ? `Matters: ${hero.mattersTags.join(', ')}` : '',
+  ].filter(Boolean).join('\n')
+
+  const candidateLines = input.candidates.map((c, i) => {
+    const bits = [
+      `${i + 1}. id=${c.id}`,
+      `handle=${c.handle}`,
+      `title="${c.title}"`,
+      c.brand       ? `brand=${c.brand}` : '',
+      c.productType ? `type=${c.productType}` : '',
+      c.price != null ? `price=$${c.price.toFixed(2)}` : '',
+      c.tags?.length ? `tags=[${c.tags.slice(0, 6).join(',')}]` : '',
+      c.blurb       ? `blurb=${c.blurb.slice(0, 120)}` : '',
+    ].filter(Boolean)
+    return bits.join(' | ')
+  }).join('\n')
+
+  const userPrompt = `GROUP BRIEF
+Name: ${input.group.name}
+Kind: ${input.group.kind} \u2014 ${kindBrief(input.group.kind)}
+Context from editor: ${input.group.emmaContext}
+
+CANDIDATES (pick from these only; exclude the hero deal):
+${candidateLines}
+
+TASK
+Pick the best ${input.maxPicks} products from the candidates above. For each pick, write Emma\u2019s 12\u201320 word first-person aside explaining why it fits with the hero deal in *this* group\u2019s context.
+
+Voice rules (must follow):
+- First person ("been testing these side by side", "I keep coming back to this one").
+- Never "Buy now", "limited time", "until midnight", or any countdown language.
+- Never use "sex" as an adjective \u2014 use intimate, pleasure, wellness, slow-burn.
+- Never assume the reader\u2019s experience level.
+- Tasteful and warm. Suggestive OK, explicit not OK.
+- Use \u2665 sparingly (at most one per group).
+
+Return STRICT JSON only, no markdown fences:
+{ "picks": [{ "id": "<product GID>", "pairingWhy": "<12\u201320 word aside>" }, ...] }
+
+Return exactly ${input.maxPicks} picks, ordered best\u2192worst. Use only ids from the candidates list.`
+
+  const msg = await client.messages.create({
+    model: MODEL_FAST,
+    max_tokens: 1500,
+    // Cache the brand voice + hero context across groups within the same deal
+    // rotation. Ephemeral cache TTL ~5m; a midnight pass finishes in seconds.
+    system: [
+      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: heroBlock,     cache_control: { type: 'ephemeral' } },
+    ],
+    messages: [{ role: 'user', content: userPrompt }],
+  })
+
+  const block = msg.content[0]
+  if (block?.type !== 'text') throw new Error('pickForContextGroup: unexpected response type')
+
+  let parsed: { picks: Array<{ id: string; pairingWhy: string }> }
+  try {
+    parsed = JSON.parse(stripFences(block.text)) as typeof parsed
+  } catch {
+    const match = block.text.match(/\{[\s\S]*"picks"[\s\S]*\}/)
+    if (!match) throw new Error('pickForContextGroup: could not parse JSON response')
+    parsed = JSON.parse(match[0]) as typeof parsed
+  }
+
+  const validIds = new Set(input.candidates.map(c => c.id))
+  const picks = (parsed.picks ?? [])
+    .filter(p => p && typeof p.id === 'string' && typeof p.pairingWhy === 'string' && validIds.has(p.id))
+    .slice(0, input.maxPicks)
+
+  const usage = msg.usage as (typeof msg.usage) & {
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?:     number
+  }
+
+  return {
+    picks,
+    tokens: {
+      input:         usage?.input_tokens ?? 0,
+      output:        usage?.output_tokens ?? 0,
+      cacheCreation: usage?.cache_creation_input_tokens ?? 0,
+      cacheRead:     usage?.cache_read_input_tokens ?? 0,
+    },
+  }
+}
+
+// ─── Emma Curated Rails (agentic, tool-use loop) ─────────────────────────────
+
+export interface GenerateRailsResult {
+  rails: RailProposal[]
+  pairingWhy: PairingWhyProposal[]
+  candidatePoolSize: number
+  turns: number
+}
+
+/**
+ * Multi-turn agent loop where Emma reasons over the catalog and proposes rails.
+ * Stops when the model emits stop_reason "end_turn" or hits MAX_TURNS.
+ */
+export async function generateRails(opts: {
+  deal: Deal
+  partner?: Deal
+  accessories?: { id: string; title: string; brand?: string }[]
+  brandVoice?: string
+}): Promise<GenerateRailsResult> {
+  const { deal, partner, accessories = [] } = opts
+  const brandVoice = opts.brandVoice ?? (await getPipelineSetting('brandVoice')) ?? DEFAULT_BRAND_VOICE
+
+  const pool = await buildCandidatePool(deal, partner)
+  const state = createRailGenState([deal.handle, partner?.handle].filter(Boolean) as string[])
+
+  const dealContext = [
+    `Title: ${deal.seoTitle}`,
+    `Brand: ${deal.brand}`,
+    `Category: ${deal.category}`,
+    deal.tagline ? `Tagline: ${deal.tagline}` : '',
+    deal.audienceTags?.length ? `Audience tags: ${deal.audienceTags.join(', ')}` : '',
+    deal.moodTags?.length     ? `Mood tags: ${deal.moodTags.join(', ')}` : '',
+    deal.mattersTags?.length  ? `Matters tags: ${deal.mattersTags.join(', ')}` : '',
+  ].filter(Boolean).join('\n')
+
+  const partnerContext = partner ? `\n\nPaired with:\n- Title: ${partner.seoTitle}\n- Brand: ${partner.brand}\n- Category: ${partner.category}` : ''
+
+  const accessoryContext = accessories.length
+    ? `\n\nAccessories that need pairing_why blurbs (call propose_pairing_why once each):\n${accessories.map(a => `- ${a.id} — ${a.title}${a.brand ? ` (${a.brand})` : ''}`).join('\n')}`
+    : ''
+
+  const system = `${EMMA_SYSTEM_PROMPT}\n\n${brandVoice}
+
+You are curating cross-sell rails for an editorial storefront. Your goal: propose 2 rails for the product detail page (target: "pdp") and 1 rail for the homepage (target: "homepage"). Each rail must include 4–8 products, a short Emma-voice aside, and a one-sentence rationale.
+
+Rules:
+- Use list_candidate_pool first to see what's available. Only fall back to query_products_by_tag/collection if the pool is thin.
+- Never include the primary deal product or its pair partner in any rail.
+- Each rail should have a clear theme (a mood, an audience, a use case) — not a random grab bag.
+- The "emmaAside" is first-person and short ("been pairing these all month", "the trio I keep recommending").
+- The rail "heading" is a confident editorial label, 3–7 words. Never "buy now" / "shop now".
+- After all rails and pairing_why blurbs are proposed, simply stop responding (end_turn). Do not summarize.`
+
+  const userPrompt = `Deal context:\n${dealContext}${partnerContext}${accessoryContext}\n\nStart by inspecting list_candidate_pool, then propose 2 PDP rails + 1 homepage rail using propose_rail.${accessories.length ? ' Then propose one pairing_why blurb per accessory.' : ''}`
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messages: any[] = [{ role: 'user', content: userPrompt }]
+  const MAX_TURNS = 8
+  let turn = 0
+
+  console.log(`[generateRails] starting. pool=${pool.length} deal=${deal.handle}${partner ? ` partner=${partner.handle}` : ''}`)
+
+  while (turn < MAX_TURNS) {
+    turn++
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 4096,
+      system,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tools: RAIL_TOOLS as any,
+      messages,
+    })
+
+    messages.push({ role: 'assistant', content: response.content })
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const textParts = response.content.filter((b: any) => b.type === 'text') as { text: string }[]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolUses = response.content.filter((b: any) => b.type === 'tool_use') as { name: string; input: unknown }[]
+    console.log(
+      `[generateRails] turn ${turn}: stop=${response.stop_reason} tools=[${toolUses.map(t => t.name).join(', ') || 'none'}]${textParts[0]?.text ? ` text="${textParts[0].text.slice(0, 120).replace(/\s+/g, ' ')}"` : ''}`,
+    )
+
+    if (response.stop_reason === 'end_turn' || response.stop_reason === 'max_tokens') break
+
+    if (toolUses.length === 0) break
+
+    const toolResults = await Promise.all(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (toolUses as any[]).map(async tu => {
+        try {
+          const result = await executeRailTool(tu.name, tu.input, state, pool)
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: tu.id,
+            content: JSON.stringify(result),
+          }
+        } catch (err) {
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: tu.id,
+            is_error: true,
+            content: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
+          }
+        }
+      }),
+    )
+
+    messages.push({ role: 'user', content: toolResults })
+  }
+
+  console.log(`[generateRails] completed in ${turn} turns. ${state.rails.length} rails, ${state.pairingWhy.length} blurbs.`)
+
+  return {
+    rails: state.rails,
+    pairingWhy: state.pairingWhy,
+    candidatePoolSize: pool.length,
+    turns: turn,
   }
 }

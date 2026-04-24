@@ -5,12 +5,14 @@ import { PromoBanner }        from './PromoBanner'
 import { EditorialTiles }     from './EditorialTiles'
 import { CategoryGrid }       from './CategoryGrid'
 import { ProductCarousel }    from './ProductCarousel'
+import { EmmaCuratedRail }    from './EmmaCuratedRail'
 import { PlayTogetherBanner } from './PlayTogetherBanner'
 import { BrandLogoWall }      from './BrandLogoWall'
 import { Testimonials }       from './Testimonials'
 import { BonusDealSection }   from './BonusDealSection'
 import { RichTextBlock }      from './RichTextBlock'
 import { TrustBarBlock }      from './TrustBarBlock'
+import { EditorBioBlock }     from './EditorBioBlock'
 
 interface ContentBlockRendererProps {
   block: ContentBlock
@@ -35,6 +37,13 @@ export function ContentBlockRenderer({ block, carouselProductMap, bonusDealProdu
           products={carouselProductMap[block._key] ?? []}
         />
       )
+    case 'emmaCuratedRail':
+      return (
+        <EmmaCuratedRail
+          block={block}
+          products={carouselProductMap[block._key] ?? []}
+        />
+      )
     case 'playTogetherBanner':
       return <PlayTogetherBanner block={block} />
     case 'brandLogoWall':
@@ -47,6 +56,8 @@ export function ContentBlockRenderer({ block, carouselProductMap, bonusDealProdu
       return <TrustBarBlock block={block} />
     case 'richText':
       return <RichTextBlock block={block} />
+    case 'editorBio':
+      return <EditorBioBlock block={block} />
     default:
       return null
   }

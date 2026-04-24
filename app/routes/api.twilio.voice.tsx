@@ -12,6 +12,7 @@ import { twiml, verifyTwilioRequest, withTimeout, xmlEscape } from '~/lib/twilio
 import { db } from '~/lib/db.server'
 import { normalizeForTTS } from '~/lib/tts-normalize'
 import { callLog, pipelineSettings } from '../../db/schema'
+import { getActiveIvrVoiceId } from '~/lib/ivr-voice.server'
 
 const MAX_CALLS_PER_HOUR = Number(process.env['IVR_MAX_CALLS_PER_HOUR'] ?? 5)
 
@@ -133,12 +134,11 @@ const STT_HINTS = [
  * should route to voicemail instead of emitting broken TwiML that Twilio
  * would render as an "application error" to the caller.
  */
-function buildTwiml(greeting: string): string | null {
+function buildTwiml(greeting: string, voiceId: string): string | null {
   const base = process.env['IVR_WS_URL'] ?? ''
   const secret = process.env['IVR_WS_SECRET'] ?? ''
-  const voiceId = process.env['ELEVENLABS_VOICE_ID_IVR'] ?? ''
   if (!base || !voiceId) {
-    console.error('[ivr] missing required env — IVR_WS_URL or ELEVENLABS_VOICE_ID_IVR not set; falling back to voicemail')
+    console.error('[ivr] missing required config — IVR_WS_URL or active IVR voice not set; falling back to voicemail')
     return null
   }
   // Append shared secret so the Fly WS rejects connections that didn't come
@@ -225,7 +225,8 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const greeting = await getGreeting()
-    const xml = buildTwiml(greeting)
+    const voiceId = await getActiveIvrVoiceId()
+    const xml = buildTwiml(greeting, voiceId)
     // Missing env → no valid ConversationRelay TwiML; send caller to voicemail
     // rather than letting Twilio play a generic "application error" message.
     if (!xml) return twiml(afterHoursTwiml())
@@ -308,6 +309,7 @@ export async function loader({ request: _request }: LoaderFunctionArgs) {
   if (process.env['NODE_ENV'] === 'production') {
     return new Response('Method Not Allowed', { status: 405 })
   }
-  const xml = buildTwiml('Hi, thanks for calling xdipx. How can I help you today?')
+  const voiceId = await getActiveIvrVoiceId()
+  const xml = buildTwiml('Hi, thanks for calling xdipx. How can I help you today?', voiceId)
   return twiml(xml ?? afterHoursTwiml())
 }

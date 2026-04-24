@@ -42,10 +42,10 @@ export default function CheckoutUpsellsPage() {
   return (
     <div className="max-w-2xl">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
+        <h1 className="text-2xl font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Checkout Upsells
         </h1>
-        <p className="text-sm text-brand-charcoal/60 mt-1">
+        <p className="text-sm text-ink/60 mt-1">
           Products shown as upsells in the cart drawer. Up to 4 displayed.
         </p>
       </div>

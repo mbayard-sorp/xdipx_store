@@ -1,26 +1,12 @@
 import { useState, useEffect } from 'react'
-import type { SellingPlanGroup, SellingPlan } from '~/types'
+import type { SellingPlanGroup } from '~/types'
+import { getSubscriptionPrice } from '~/lib/selling-plan'
 
 interface SubscriptionSelectorProps {
   sellingPlanGroups: SellingPlanGroup[]
   basePrice: number
   selectedPlanId: string | null
   onPlanChange: (planId: string | null) => void
-}
-
-export function getSubscriptionPrice(basePrice: number, plan: SellingPlan): number {
-  const adj = plan.priceAdjustments[0]?.adjustmentValue
-  if (!adj) return basePrice
-  switch (adj.__typename) {
-    case 'SellingPlanPercentagePriceAdjustment':
-      return basePrice * (1 - adj.adjustmentPercentage / 100)
-    case 'SellingPlanFixedAmountPriceAdjustment':
-      return Math.max(0, basePrice - parseFloat(adj.adjustmentAmount.amount))
-    case 'SellingPlanFixedPriceAdjustment':
-      return parseFloat(adj.price.amount)
-    default:
-      return basePrice
-  }
 }
 
 function getMaxDiscount(groups: SellingPlanGroup[]): number {
@@ -63,25 +49,22 @@ export function SubscriptionSelector({
   const savings = basePrice - subscriptionPrice
 
   return (
-    <div className="space-y-3">
-      {/* Purchase type toggle */}
-      <div className="grid grid-cols-2 gap-2" role="group" aria-label="Purchase type">
+    <div className="contents">
+      {/* Purchase type toggle — compact pills, shares row with variant pills */}
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Purchase type">
         <button
           type="button"
           onClick={() => setIsSubscription(false)}
           aria-pressed={!isSubscription}
           className={[
-            'rounded-xl border-2 px-3 py-2.5 text-sm font-semibold transition-all text-left',
+            'px-4 py-2 rounded-full text-sm border transition-colors',
             !isSubscription
-              ? 'border-brand-coral bg-brand-coral/10 text-brand-charcoal'
-              : 'border-brand-mist text-brand-charcoal/50 hover:border-brand-charcoal/20',
+              ? 'border-coral bg-coral text-white font-bold'
+              : 'border-line bg-white/80 text-ink hover:bg-white hover:border-coral hover:text-coral',
           ].join(' ')}
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          One-time purchase
-          <span className="block text-xs font-normal mt-0.5 opacity-70">
-            ${basePrice.toFixed(2)}
-          </span>
+          Buy one-time
         </button>
 
         <button
@@ -89,24 +72,21 @@ export function SubscriptionSelector({
           onClick={() => setIsSubscription(true)}
           aria-pressed={isSubscription}
           className={[
-            'rounded-xl border-2 px-3 py-2.5 text-sm font-semibold transition-all text-left',
+            'px-4 py-2 rounded-full text-sm border transition-colors',
             isSubscription
-              ? 'border-brand-purple bg-brand-purple/10 text-brand-charcoal'
-              : 'border-brand-mist text-brand-charcoal/50 hover:border-brand-charcoal/20',
+              ? 'border-coral bg-coral text-white font-bold'
+              : 'border-line bg-white/80 text-ink hover:bg-white hover:border-coral hover:text-coral',
           ].join(' ')}
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          Subscribe & Save{maxDiscount > 0 ? ` ${maxDiscount}%` : ''}
-          <span className="block text-xs font-normal mt-0.5 opacity-70">
-            ${subscriptionPrice.toFixed(2)}/delivery
-          </span>
+          Subscribe{maxDiscount > 0 ? ` · save ${maxDiscount}%` : ''}
         </button>
       </div>
 
-      {/* Frequency selector */}
+      {/* Frequency selector — below, full-width when active */}
       {isSubscription && allPlans.length > 1 && (
-        <div className="space-y-1.5">
-          <p className="text-xs font-medium text-brand-charcoal/60 uppercase tracking-wide">
+        <div className="w-full space-y-1.5">
+          <p className="text-xs font-medium text-ink/60 uppercase tracking-wide">
             Delivery frequency
           </p>
           <div className="flex flex-wrap gap-2">
@@ -119,10 +99,10 @@ export function SubscriptionSelector({
                   onClick={() => onPlanChange(plan.id)}
                   aria-pressed={isActive}
                   className={[
-                    'px-3 py-1.5 text-sm rounded-full border-2 font-medium transition-all',
+                    'px-3 py-1.5 text-sm rounded-full border font-medium transition-colors',
                     isActive
-                      ? 'border-brand-purple text-brand-purple bg-brand-purple/5'
-                      : 'border-brand-mist text-brand-charcoal/60 hover:border-brand-charcoal/20',
+                      ? 'border-coral bg-coral text-white'
+                      : 'border-line bg-white/80 text-ink hover:bg-white hover:border-coral hover:text-coral',
                   ].join(' ')}
                 >
                   {plan.name}
@@ -135,7 +115,7 @@ export function SubscriptionSelector({
 
       {/* Savings callout */}
       {isSubscription && savings > 0 && (
-        <p className="text-xs font-semibold text-brand-purple flex items-center gap-1.5">
+        <p className="w-full text-xs font-semibold text-sage flex items-center gap-1.5">
           <HeartIcon />
           You save ${savings.toFixed(2)} per delivery
         </p>
