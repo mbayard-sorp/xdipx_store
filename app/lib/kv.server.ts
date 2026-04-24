@@ -124,6 +124,11 @@ export const KV_KEYS = {
                           `emmaAside:${productId}:${userBucket}:${cartHash}:${browseHash}`,
   emmaAsideLock:          (productId: string) => `emmaAside:lock:${productId}`,
   emmaAsideDailyCount:    (utcDate: string) => `emmaAside:dailyCount:${utcDate}`,
+  // Cart drawer Emma aside (24h TTL; cart+profile+subtotal-band collapse to one key)
+  emmaCartAside:          (variant: string, userBucket: string, cartHash: string, searchHash: string, subtotalBand: number) =>
+                          `emmaCartAside:${variant}:${userBucket}:${cartHash}:${searchHash}:${subtotalBand}`,
+  emmaCartAsideLock:      (cartHash: string) => `emmaCartAside:lock:${cartHash}`,
+  emmaCartAsideDailyCount:(utcDate: string) => `emmaCartAside:dailyCount:${utcDate}`,
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────

@@ -1,8 +1,9 @@
 import type { RefObject } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useFetcher } from 'react-router'
-import { motion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import type { Cart, CartLine, EmmaCartContext, Product } from '~/types'
+import type { EmmaPersona } from '~/types/cms'
 import { trackViewCart, trackRemoveFromCart, trackBeginCheckout, type GA4Item } from '~/lib/analytics.client'
 
 const FREE_SHIPPING_THRESHOLD = 99
@@ -11,6 +12,7 @@ interface CartDrawerProps {
   cart: Cart | null
   emma?: EmmaCartContext | null
   upsells?: Product[]
+  emmaPersona?: EmmaPersona | null
   panelRef?: RefObject<HTMLDivElement | null>
   onClose: () => void
   onMouseEnter?: () => void
@@ -31,10 +33,23 @@ function cartLinesToGA4(lines: CartLine[]): GA4Item[] {
   })
 }
 
-export function CartDrawer({ cart, emma = null, upsells = [], panelRef, onClose, onMouseEnter, onMouseLeave }: CartDrawerProps) {
+export function CartDrawer({ cart, emma = null, upsells = [], emmaPersona = null, panelRef, onClose, onMouseEnter, onMouseLeave }: CartDrawerProps) {
   const subtotal  = cart ? parseFloat(cart.cost.subtotalAmount.amount) : 0
   const remaining = emma?.freeShip.remaining ?? Math.max(FREE_SHIPPING_THRESHOLD - subtotal, 0)
   const progress  = emma?.freeShip.progress  ?? Math.min((subtotal / FREE_SHIPPING_THRESHOLD) * 100, 100)
+
+  // AI-generated Emma aside — fetched after the drawer renders the deterministic
+  // body, then fades in. Never blocks the drawer.
+  const asideFetcher = useFetcher<{ body: string | null; source: string }>()
+  const cartSignature = cart
+    ? `${cart.totalQuantity}|${cart.cost.subtotalAmount.amount}`
+    : 'empty'
+  useEffect(() => {
+    if (!cart || cart.lines.length === 0) return
+    asideFetcher.load('/api/emma-cart')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartSignature])
+  const aiBody = asideFetcher.data?.body ?? null
 
   useEffect(() => {
     if (cart && cart.lines.length > 0) {
@@ -81,34 +96,40 @@ export function CartDrawer({ cart, emma = null, upsells = [], panelRef, onClose,
 
       {/* Emma avatar block — only when we have cart content */}
       {cart && cart.lines.length > 0 && emma && (
-        <EmmaBlock emma={emma} />
+        <EmmaBlock emma={emma} aiBody={aiBody} persona={emmaPersona} />
       )}
 
       {/* Free-ship bar */}
       <div className="px-5 py-3 border-b border-line bg-paper shrink-0">
-        {remaining > 0 ? (
-          <p className="text-xs text-ink/75 mb-2">
-            <span className="text-coral font-semibold">${remaining.toFixed(2)}</span>
-            {' '}to free ship —{' '}
-            <span className="text-sage font-semibold">close ✿</span>
-          </p>
-        ) : (
-          <p className="text-xs font-semibold text-sage mb-2 flex items-center gap-1">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-            Free ship's yours ♥
-          </p>
-        )}
-        <div className="relative h-1.5 rounded-full bg-cream-2 overflow-hidden">
+        <div
+          className="relative h-1.5 rounded-full bg-cream-2 overflow-hidden"
+          role="progressbar"
+          aria-valuenow={Math.round(progress)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`Progress toward free shipping at $${FREE_SHIPPING_THRESHOLD}`}
+        >
           <div
             className="absolute inset-y-0 left-0 rounded-full bg-coral transition-all duration-500"
             style={{ width: `${progress}%` }}
           />
         </div>
+        {remaining > 0 ? (
+          <p className="text-xs text-ink/75 mt-2 text-center">
+            <span className="text-coral font-semibold">${remaining.toFixed(2)}</span>
+            {' '}to ${FREE_SHIPPING_THRESHOLD} for free shipping
+          </p>
+        ) : (
+          <p className="text-xs font-semibold text-sage mt-2 flex items-center justify-center gap-1">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+            Free shipping unlocked ♥
+          </p>
+        )}
       </div>
 
-      {/* Line items + one Emma pairing */}
+      {/* Line items + Emma recommends rail */}
       <div className="flex-1 overflow-y-auto">
         {!cart || cart.lines.length === 0 ? (
           <EmptyCart onClose={onClose} upsells={upsells} />
@@ -119,7 +140,9 @@ export function CartDrawer({ cart, emma = null, upsells = [], panelRef, onClose,
                 <CartLineItem key={line.id} line={line} />
               ))}
             </ul>
-            {emma?.pairing && <EmmaPairing pairing={emma.pairing} why={emma.pairingWhy} />}
+            {upsells.length > 0 && emma && (
+              <EmmaRecommends products={upsells} emma={emma} />
+            )}
           </>
         )}
       </div>
@@ -154,38 +177,106 @@ export function CartDrawer({ cart, emma = null, upsells = [], panelRef, onClose,
 
 // ─── Emma avatar block ──────────────────────────────────────────────────────
 
-function EmmaBlock({ emma }: { emma: EmmaCartContext }) {
+function EmmaBlock({
+  emma,
+  aiBody,
+  persona,
+}: {
+  emma:     EmmaCartContext
+  aiBody:   string | null
+  persona:  EmmaPersona | null
+}) {
+  const body    = aiBody ?? emma.body
+  const bodyKey = aiBody ? 'ai' : 'fallback'
   return (
     <div className="px-5 py-4 border-b border-line bg-cream-2/70">
       <div className="flex gap-3">
-        <div
-          className="w-10 h-10 shrink-0 rounded-full bg-coral text-white flex items-center justify-center font-bold text-sm"
-          style={{ fontFamily: 'var(--font-display)' }}
-          aria-hidden="true"
-        >
-          E
-        </div>
+        {persona?.avatarUrl ? (
+          <img
+            src={persona.avatarUrl}
+            alt={persona.avatarAlt || persona.displayName || 'Emma'}
+            width={40}
+            height={40}
+            className="w-10 h-10 shrink-0 rounded-full object-cover ring-1 ring-line"
+            loading="lazy"
+          />
+        ) : (
+          <div
+            className="w-10 h-10 shrink-0 rounded-full bg-coral text-white flex items-center justify-center font-bold text-sm"
+            style={{ fontFamily: 'var(--font-display)' }}
+            aria-hidden="true"
+          >
+            E
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <p className="text-[13px] leading-relaxed text-ink">
             <span className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
               {emma.greeting}
             </span>{' '}
-            {emma.body}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span
+                key={bodyKey}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.25 }}
+              >
+                {body}
+              </motion.span>
+            </AnimatePresence>
           </p>
-          {emma.contextFacts.length > 0 && (
-            <p className="text-[10px] text-muted mt-1.5 font-mono">
-              context: {emma.contextFacts.join(' · ')}
-            </p>
-          )}
         </div>
       </div>
     </div>
   )
 }
 
-// ─── ONE THING EMMA'D ADD ───────────────────────────────────────────────────
+// ─── EMMA RECOMMENDS (rail of pinned upsells) ───────────────────────────────
 
-function EmmaPairing({ pairing, why }: { pairing: Product; why: string }) {
+function upsellsIntroCopy(emma: EmmaCartContext): string {
+  const { variant, freeShip } = emma
+  if (freeShip.remaining > 0 && freeShip.remaining <= 25) {
+    return `You're $${freeShip.remaining.toFixed(2)} from free ship — any of these tip you over ✿`
+  }
+  switch (variant) {
+    case 'gift':               return "A few quiet add-ons that travel well in a bundle."
+    case 'repeat':             return "Little things I'd slide in alongside what you've got."
+    case 'first-timer':        return "A few picks I'd casually add — low commitment."
+    case 'back-after-abandon': return "These pair nicely with what you've been eyeing."
+    case 'free-ship-adjacent': return "Any of these round the order out nicely."
+    default:                   return "A few of my quiet favorites — low-key add-ons."
+  }
+}
+
+function EmmaRecommends({ products, emma }: { products: Product[]; emma: EmmaCartContext }) {
+  const available = products.filter(p => p.variants[0]?.availableForSale).slice(0, 4)
+  if (available.length === 0) return null
+  const intro = upsellsIntroCopy(emma)
+
+  return (
+    <div className="border-t border-line px-5 pt-4 pb-5 bg-paper">
+      <p
+        className="text-[10px] font-bold text-coral uppercase tracking-[0.14em] mb-1"
+        style={{ fontFamily: 'var(--font-display)' }}
+      >
+        Emma recommends →
+      </p>
+      <p className="text-[12px] text-muted leading-snug mb-3 italic">
+        {intro}
+      </p>
+      <ul className="divide-y divide-line/70">
+        {available.map(p => (
+          <li key={p.id} className="py-3 first:pt-0 last:pb-0">
+            <EmmaRecommendRow product={p} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function EmmaRecommendRow({ product }: { product: Product }) {
   const fetcher       = useFetcher()
   const wasSubmitting = useRef(false)
   const [added, setAdded] = useState(false)
@@ -208,64 +299,54 @@ function EmmaPairing({ pairing, why }: { pairing: Product; why: string }) {
     }
   }, [fetcher.state, fetcher.data])
 
-  const variant = pairing.variants[0]
-  const image   = pairing.images[0]
-
-  if (!variant?.availableForSale) return null
+  const variant = product.variants[0]
+  const image   = product.images[0]
+  if (!variant) return null
 
   return (
-    <div className="border-t border-line px-5 pt-4 pb-5 bg-paper">
-      <p
-        className="text-[10px] font-bold text-coral uppercase tracking-[0.14em] mb-3"
-        style={{ fontFamily: 'var(--font-display)' }}
-      >
-        One thing Emma'd add →
-      </p>
-      <div className="flex items-center gap-3">
-        <Link to={`/products/${pairing.handle}`} className="flex items-center gap-3 flex-1 min-w-0 group">
-          <div className="w-14 h-14 rounded-lg overflow-hidden bg-cream-2 shrink-0 ring-1 ring-line">
-            {image ? (
-              <img
-                src={image.url}
-                alt={image.altText || pairing.title}
-                width={56}
-                height={56}
-                className="w-full h-full object-cover"
-                loading="lazy"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-ink/20">♥</div>
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-ink leading-tight group-hover:text-coral transition-colors line-clamp-1">
-              {pairing.title}
-            </p>
-            {why && <p className="text-[11px] text-muted leading-snug mt-0.5 line-clamp-2">{why}</p>}
-            <p className="text-sm font-bold text-coral mt-1">${pairing.price.toFixed(2)}</p>
-          </div>
-        </Link>
-        <fetcher.Form method="post" action="/api/cart">
-          <input type="hidden" name="intent"    value="add-item" />
-          <input type="hidden" name="variantId" value={variant.id} />
-          <button
-            type="submit"
-            disabled={isPending || added}
-            onClick={() => setFailed(false)}
-            className={[
-              'shrink-0 text-xs font-bold px-3.5 py-2.5 rounded-full transition-all',
-              added
-                ? 'bg-sage/20 text-sage'
-                : failed
-                  ? 'bg-red-100 text-red-500'
-                  : 'bg-coral text-white hover:bg-coral-deep disabled:opacity-50',
-            ].join(' ')}
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            {added ? 'Added ♥' : isPending ? '…' : failed ? 'Retry' : '+ add'}
-          </button>
-        </fetcher.Form>
-      </div>
+    <div className="flex items-center gap-3">
+      <Link to={`/products/${product.handle}`} className="flex items-center gap-3 flex-1 min-w-0 group">
+        <div className="w-14 h-14 rounded-lg overflow-hidden bg-cream-2 shrink-0 ring-1 ring-line">
+          {image ? (
+            <img
+              src={image.url}
+              alt={image.altText || product.title}
+              width={56}
+              height={56}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-ink/20">♥</div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-ink leading-tight group-hover:text-coral transition-colors break-words">
+            {product.title}
+          </p>
+          <p className="text-sm font-bold text-coral mt-0.5">${product.price.toFixed(2)}</p>
+        </div>
+      </Link>
+      <fetcher.Form method="post" action="/api/cart">
+        <input type="hidden" name="intent"    value="add-item" />
+        <input type="hidden" name="variantId" value={variant.id} />
+        <button
+          type="submit"
+          disabled={isPending || added}
+          onClick={() => setFailed(false)}
+          className={[
+            'shrink-0 text-xs font-bold px-3.5 py-2.5 rounded-full transition-all',
+            added
+              ? 'bg-sage/20 text-sage'
+              : failed
+                ? 'bg-red-100 text-red-500'
+                : 'bg-coral text-white hover:bg-coral-deep disabled:opacity-50',
+          ].join(' ')}
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          {added ? 'Added ♥' : isPending ? '…' : failed ? 'Retry' : '+ add'}
+        </button>
+      </fetcher.Form>
     </div>
   )
 }

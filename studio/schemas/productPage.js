@@ -406,6 +406,7 @@ export default {
         { type: 'brandLogoWall'      },
         { type: 'testimonials'       },
         { type: 'trustBar'           },
+        { type: 'editorBio'          },
       ],
     },
   ],

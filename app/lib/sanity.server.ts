@@ -1,5 +1,5 @@
 import { createClient } from '@sanity/client'
-import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPreset } from '~/types/cms'
+import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor } from '~/types/cms'
 import { cached, invalidateCache } from '~/lib/kv.server'
 
 // Shared field projection reused by homepage + product page queries.
@@ -44,6 +44,19 @@ const CONTENT_BLOCKS_PROJECTION = `
     body
   ),
   bgColor, maxWidth,
+  // editorBio — dereference the editor singleton at query time so the block
+  // always renders live data without a second round-trip.
+  variant, headingOverride, hideLongBio, hideSocials, showCta,
+  "editor": select(
+    _type == "editorBio" => *[_id == "singleton.editor"][0]{
+      name, role,
+      "photoUrl": photo.asset->url,
+      "photoAlt": photo.alt,
+      shortBio, longBio,
+      "picksSince": picksSince,
+      instagram, email
+    }
+  ),
 `
 
 const projectId = process.env['SANITY_PROJECT_ID']
@@ -119,6 +132,51 @@ export async function getEmmaHeroSettings(preview = false): Promise<EmmaHeroSett
 
   if (preview) return fetcher()
   return cached('sanity:emma-hero', 60, fetcher)
+}
+
+// Editor persona singleton — powers hero byline + /about E-E-A-T
+const EDITOR_GROQ = `
+  *[_id == "singleton.editor"][0]{
+    name,
+    role,
+    "photoUrl": photo.asset->url,
+    "photoAlt": photo.alt,
+    shortBio,
+    longBio,
+    "picksSince": picksSince,
+    instagram,
+    email
+  }
+`
+
+export async function getEditor(preview = false): Promise<Editor | null> {
+  if (!projectId) return null
+
+  const fetcher = async (): Promise<Editor | null> => {
+    try {
+      const client = getClient(false, preview)
+      if (!client) return null
+      const raw = await client.fetch<Partial<Editor> | null>(EDITOR_GROQ)
+      if (!raw?.name) return null
+      return {
+        name:       raw.name,
+        role:       raw.role ?? 'Editor',
+        photoUrl:   raw.photoUrl ?? null,
+        photoAlt:   raw.photoAlt ?? null,
+        shortBio:   raw.shortBio ?? null,
+        longBio:    raw.longBio ?? null,
+        picksSince: raw.picksSince ?? null,
+        instagram:  raw.instagram ?? null,
+        email:      raw.email ?? null,
+      }
+    } catch (err) {
+      console.error('[sanity] getEditor error:', err)
+      return null
+    }
+  }
+
+  if (preview) return fetcher()
+  return cached('sanity:editor', 300, fetcher)
 }
 
 // v2 redesign — Emma presets for Ask Emma rail
@@ -395,6 +453,32 @@ export async function getSiteSettings(): Promise<SiteSettings | null> {
       return data ?? null
     } catch (err) {
       console.error('[sanity] getSiteSettings error:', err)
+      return null
+    }
+  })
+}
+
+// ─── Emma Persona ─────────────────────────────────────────────────────────────
+// Thin projection of the Editor singleton for consumers that only need the
+// avatar + display name (cart drawer, etc.). Single source of truth is
+// `singleton.editor`.
+
+export async function getEmmaPersona(): Promise<EmmaPersona | null> {
+  if (!projectId) return null
+  return cached('sanity:emma-persona', 300, async () => {
+    try {
+      const client = getClient()
+      if (!client) return null
+      const data = await client.fetch<{ avatarUrl: string | null; avatarAlt: string | null; displayName: string | null } | null>(
+        `*[_id == "singleton.editor"][0]{
+          "avatarUrl":   photo.asset->url,
+          "avatarAlt":   coalesce(photo.alt, name, "Emma"),
+          "displayName": coalesce(name, "Emma")
+        }`
+      )
+      return data ?? null
+    } catch (err) {
+      console.error('[sanity] getEmmaPersona error:', err)
       return null
     }
   })
