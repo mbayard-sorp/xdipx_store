@@ -91,7 +91,13 @@ export function EmmaDiscoveryRail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestKey])
 
-  const data = fetcher.data
+  // Error responses (e.g. 429) don't have the DiscoveryResult shape — treat
+  // them as "no data" so the rail degrades to its fallback copy instead of
+  // crashing on `.length` reads.
+  const raw = fetcher.data as DiscoveryResult | { error?: string } | undefined
+  const data = raw && Array.isArray((raw as DiscoveryResult).starredHandles)
+    ? (raw as DiscoveryResult)
+    : undefined
   const loading = fetcher.state !== 'idle' && !data
 
   useEffect(() => {

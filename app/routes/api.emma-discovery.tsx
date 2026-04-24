@@ -26,7 +26,7 @@ export async function action({ request }: ActionFunctionArgs) {
     })
   }
 
-  const rl = await checkRateLimit(request, 'emma-discovery', 30, 60)
+  const rl = await checkRateLimit(request, 'emma-discovery', 90, 60)
   if (!rl.ok) return rateLimited()
 
   let body: DiscoveryArgs

@@ -18,7 +18,7 @@ export async function action({ request }: ActionFunctionArgs) {
     })
   }
 
-  const rl = await checkRateLimit(request, 'emma-encouragement', 30, 60)
+  const rl = await checkRateLimit(request, 'emma-encouragement', 90, 60)
   if (!rl.ok) return rateLimited()
 
   let body: EncouragementArgs

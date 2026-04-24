@@ -61,17 +61,17 @@ export function EmmaEncouragementStrip({
   }, [key, debounceMs])
 
   useEffect(() => {
-    if (fetcher.data?.message) {
-      setMessage(fetcher.data.message)
-      setPending(false)
-    }
-  }, [fetcher.data])
-
-  useEffect(() => {
     if (fetcher.state === 'loading' || fetcher.state === 'submitting') {
       setPending(true)
+      return
     }
-  }, [fetcher.state])
+    // Idle: either got a message or an error payload (e.g. 429). Either way
+    // stop spinning; a valid message replaces the previous one.
+    if (fetcher.data && typeof fetcher.data.message === 'string') {
+      setMessage(fetcher.data.message)
+    }
+    setPending(false)
+  }, [fetcher.state, fetcher.data])
 
   return (
     <div
