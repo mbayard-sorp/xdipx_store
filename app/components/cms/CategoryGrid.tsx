@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import type { CategoryGridBlock } from '~/types/cms'
+import { bgClass, isDarkBg } from './bgStyle'
 
 interface CategoryGridProps {
   block: CategoryGridBlock
@@ -15,11 +16,14 @@ export function CategoryGrid({ block }: CategoryGridProps) {
     columns === 6 ? 'grid-cols-3 sm:grid-cols-6' :
     'grid-cols-2 sm:grid-cols-4'
 
+  const style = block.bgStyle ?? 'white'
+  const dark  = isDarkBg(style)
+
   return (
-    <section className="py-12 px-4 bg-white">
+    <section className={`py-12 px-4 ${bgClass(style)}`}>
       <div className="max-w-6xl mx-auto">
         <h2
-          className="text-2xl font-bold text-ink mb-6 text-center"
+          className={`text-2xl font-bold mb-6 text-center ${dark ? 'text-white' : 'text-ink'}`}
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {heading}

@@ -29,10 +29,16 @@ const API_SECRET = process.env.SANITY_STUDIO_API_SECRET ?? ''
 export function ImageGeneratorInput(props) {
   const client = useClient({ apiVersion: '2024-01-01' })
 
-  // Read the sibling imagePrompt field from the same form path (works for both
-  // document-level and nested block usage)
-  const parentPath   = props.path.slice(0, -1)
-  const savedPrompt  = useFormValue([...parentPath, 'imagePrompt']) ?? ''
+  // Read the sibling prompt field from the same form path. Schemas can override
+  // the field name via `options.promptField` — otherwise falls back to 'imagePrompt'
+  // and then a same-name '<fieldName>Prompt' convention (e.g. logo → logoPrompt).
+  const parentPath      = props.path.slice(0, -1)
+  const fieldName       = props.schemaType?.name
+  const optPromptField  = props.schemaType?.options?.promptField
+  const promptFieldName = optPromptField || (fieldName ? `${fieldName}Prompt` : 'imagePrompt')
+  const primaryPrompt   = useFormValue([...parentPath, promptFieldName])
+  const fallbackPrompt  = useFormValue([...parentPath, 'imagePrompt'])
+  const savedPrompt     = (primaryPrompt ?? fallbackPrompt ?? '')
 
   const [panelOpen,    setPanelOpen]    = useState(false)
   const [prompt,       setPrompt]       = useState('')

@@ -1,3 +1,6 @@
+import { bgStyleField } from '../../lib/bgStyleField'
+import { withImageGenerator } from '../../lib/withImageGenerator'
+
 export default {
   name: 'playTogetherBanner',
   title: 'Play Together Banner',
@@ -9,11 +12,13 @@ export default {
     { name: 'body',          title: 'Body',          type: 'text' },
     { name: 'ctaLabel',      title: 'CTA Label',     type: 'string' },
     { name: 'ctaLink',       title: 'CTA Link',      type: 'string' },
+    bgStyleField({ initialValue: 'cream' }),
     {
       name: 'imagePosition', title: 'Image Position', type: 'string',
       options: { list: ['left', 'right'] }, initialValue: 'right',
     },
-    { name: 'image', title: 'Image', type: 'image', options: { hotspot: true } },
+    // AI image generation — replaces the plain image field
+    ...withImageGenerator('image'),
   ],
   preview: {
     select: { title: 'heading', media: 'image', active: 'active', order: 'order' },

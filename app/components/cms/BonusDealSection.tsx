@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import type { BonusDealBlock } from '~/types/cms'
 import type { Product } from '~/types'
+import { bgClass, isDarkBg } from './bgStyle'
 
 interface BonusDealSectionProps {
   block: BonusDealBlock
@@ -15,24 +16,26 @@ export function BonusDealSection({ block, product }: BonusDealSectionProps) {
   const compare = product.compareAtPrice
   const eyebrow = block.eyebrow || 'Bonus Deal'
   const heading = block.heading || 'Because one deal is never enough.'
+  const style   = block.bgStyle ?? 'charcoal'
+  const dark    = isDarkBg(style)
 
   return (
-    <section className="py-10 px-4 bg-ink">
+    <section className={`py-10 px-4 ${bgClass(style)}`}>
       <div className="max-w-4xl mx-auto">
         <p
-          className="text-sm uppercase tracking-widest text-center mb-2 text-white/50"
+          className={`text-sm uppercase tracking-widest text-center mb-2 ${dark ? 'text-white/50' : 'text-muted'}`}
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {eyebrow}
         </p>
         <h2
-          className="text-xl font-bold text-white text-center mb-6"
+          className={`text-xl font-bold text-center mb-6 ${dark ? 'text-white' : 'text-ink'}`}
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {heading}
         </h2>
 
-        <div className="flex flex-col sm:flex-row items-center gap-6 bg-white/5 rounded-2xl p-6">
+        <div className={`flex flex-col sm:flex-row items-center gap-6 rounded-2xl p-6 ${dark ? 'bg-white/5' : 'bg-ink/5'}`}>
           {product.images[0] && (
             <img
               src={product.images[0].url}
@@ -43,19 +46,19 @@ export function BonusDealSection({ block, product }: BonusDealSectionProps) {
           )}
 
           <div className="flex-1 text-center sm:text-left">
-            <p className="text-white/50 text-xs uppercase tracking-wide">{product.brand}</p>
+            <p className={`text-xs uppercase tracking-wide ${dark ? 'text-white/50' : 'text-muted'}`}>{product.brand}</p>
             <h3
-              className="text-white font-bold text-lg mt-0.5"
+              className={`font-bold text-lg mt-0.5 ${dark ? 'text-white' : 'text-ink'}`}
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {product.title}
             </h3>
             <div className="flex items-center gap-2 justify-center sm:justify-start mt-2">
-              <span className="text-coral-2 font-black text-2xl" style={{ fontFamily: 'var(--font-display)' }}>
+              <span className={`font-black text-2xl ${dark ? 'text-coral-2' : 'text-coral'}`} style={{ fontFamily: 'var(--font-display)' }}>
                 ${price.toFixed(2)}
               </span>
               {compare && compare > price && (
-                <span className="text-white/40 line-through text-sm">${compare.toFixed(2)}</span>
+                <span className={`line-through text-sm ${dark ? 'text-white/40' : 'text-muted/60'}`}>${compare.toFixed(2)}</span>
               )}
             </div>
           </div>

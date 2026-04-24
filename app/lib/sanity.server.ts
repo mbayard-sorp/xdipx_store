@@ -77,7 +77,9 @@ const SECTIONS_WITH_REFS_PROJECTION = `
   sections[]{
     _key,
     ...select(
-      _type == "reference" => @->{
+      // Named reference array items (e.g. emmaCuratedRailRef) store _type as the
+      // custom name, not "reference" — so match by the presence of _ref instead.
+      defined(_ref) => @->{
         _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
         "productHandles": productHandles[]{ handle },
         layout, bgStyle, ctaLink, ctaLabel

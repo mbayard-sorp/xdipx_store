@@ -1,3 +1,6 @@
+import { bgStyleField } from '../../lib/bgStyleField'
+import { withImageGenerator } from '../../lib/withImageGenerator'
+
 export default {
   name: 'editorialTiles',
   title: 'Editorial Tiles',
@@ -7,6 +10,7 @@ export default {
     { name: 'order',   title: 'Order',   type: 'number',  initialValue: 20, hidden: true },
     { name: 'eyebrow', title: 'Eyebrow', type: 'string' },
     { name: 'heading', title: 'Heading', type: 'string' },
+    bgStyleField({ initialValue: 'white' }),
     {
       name: 'tiles', title: 'Tiles', type: 'array',
       of: [{
@@ -17,7 +21,8 @@ export default {
           { name: 'link',      title: 'Link URL',  type: 'string' },
           { name: 'linkLabel', title: 'Link Label', type: 'string' },
           { name: 'emoji',     title: 'Emoji (fallback)', type: 'string' },
-          { name: 'image',     title: 'Image', type: 'image', options: { hotspot: true } },
+          // AI image generation — adds imagePrompt sibling + wraps 'image' input
+          ...withImageGenerator('image'),
         ],
         preview: { select: { title: 'label', media: 'image' } },
       }],

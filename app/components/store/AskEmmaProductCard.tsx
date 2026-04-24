@@ -4,8 +4,8 @@ import type { ChatProductCard, ChatVariantOption } from '~/lib/ai-agent/chat-typ
 interface Props {
   card: ChatProductCard
   /** @deprecated add-to-cart removed from chat cards; prop kept for caller compatibility */
-  onVariantPick?: (card: ChatProductCard, variant: ChatVariantOption) => void
-  onTellMore?: (card: ChatProductCard) => void
+  onVariantPick?: ((card: ChatProductCard, variant: ChatVariantOption) => void) | undefined
+  onTellMore?: ((card: ChatProductCard) => void) | undefined
 }
 
 export function AskEmmaProductCard({ card, onTellMore }: Props) {

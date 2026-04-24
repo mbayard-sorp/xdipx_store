@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import type { EditorialTilesBlock } from '~/types/cms'
+import { bgClass, isDarkBg } from './bgStyle'
 
 interface EditorialTilesProps {
   block: EditorialTilesBlock
@@ -10,18 +11,21 @@ export function EditorialTiles({ block }: EditorialTilesProps) {
 
   if (!tiles.length) return null
 
+  const style = block.bgStyle ?? 'cream'
+  const dark  = isDarkBg(style)
+
   return (
-    <section className="py-12 px-4 bg-cream">
+    <section className={`py-12 px-4 ${bgClass(style)}`}>
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
           {eyebrow && (
-            <p className="text-sage text-xs font-semibold uppercase tracking-widest mb-2">
+            <p className={`text-xs font-semibold uppercase tracking-widest mb-2 ${dark ? 'text-sage/80' : 'text-sage'}`}>
               {eyebrow}
             </p>
           )}
           <h2
-            className="text-2xl md:text-3xl font-bold text-ink"
+            className={`text-2xl md:text-3xl font-bold ${dark ? 'text-white' : 'text-ink'}`}
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {heading}

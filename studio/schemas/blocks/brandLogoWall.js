@@ -1,3 +1,6 @@
+import { bgStyleField } from '../../lib/bgStyleField'
+import { withImageGenerator } from '../../lib/withImageGenerator'
+
 export default {
   name: 'brandLogoWall',
   title: 'Brand Logo Wall',
@@ -6,6 +9,7 @@ export default {
     { name: 'active',  title: 'Active',  type: 'boolean', initialValue: true },
     { name: 'order',   title: 'Order',   type: 'number',  initialValue: 60, hidden: true },
     { name: 'heading', title: 'Heading', type: 'string',  initialValue: 'Top brands we carry' },
+    bgStyleField({ initialValue: 'white' }),
     {
       name: 'logos', title: 'Brand Logos', type: 'array',
       of: [{
@@ -14,7 +18,8 @@ export default {
           { name: 'brand', title: 'Brand Name', type: 'string' },
           { name: 'emoji', title: 'Emoji (fallback)', type: 'string' },
           { name: 'link',  title: 'Link URL', type: 'string' },
-          { name: 'logo',  title: 'Logo Image', type: 'image' },
+          // AI image generation — adds imagePrompt sibling + wraps 'logo' image input
+          ...withImageGenerator('logo'),
         ],
         preview: { select: { title: 'brand', media: 'logo' } },
       }],
