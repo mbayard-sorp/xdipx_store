@@ -1,4 +1,5 @@
 import type { Deal } from '~/types'
+import type { Editor } from '~/types/cms'
 
 function getTodayMidnightISO(): string {
   const d = new Date()
@@ -6,8 +7,42 @@ function getTodayMidnightISO(): string {
   return d.toISOString()
 }
 
-export function ProductStructuredData({ deal }: { deal: Deal }) {
+function stripHtml(s: string | null | undefined): string {
+  if (!s) return ''
+  return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+export function ProductStructuredData({
+  deal,
+  editor = null,
+}: {
+  deal: Deal
+  editor?: Editor | null
+}) {
   const url = `https://xdipx.com/products/${deal.handle}`
+  const emmaId = 'https://xdipx.com/about#emma'
+  const emmaPerson = editor
+    ? {
+        '@type':  'Person',
+        '@id':    emmaId,
+        name:     editor.name,
+        ...(editor.photoUrl ? { image: editor.photoUrl } : {}),
+        url:      'https://xdipx.com/about',
+        jobTitle: editor.role,
+        worksFor: { '@type': 'Organization', '@id': 'https://xdipx.com/#organization' },
+      }
+    : null
+  const reviewBody = stripHtml(deal.fullStory) || deal.tagline || ''
+  const emmaReview = emmaPerson && reviewBody
+    ? {
+        '@type':      'Review',
+        author:       { '@type': 'Person', '@id': emmaId },
+        datePublished: deal.dealDate,
+        reviewBody,
+        reviewRating: { '@type': 'Rating', ratingValue: 5, bestRating: 5 },
+        name:         `Why I picked ${deal.seoTitle}`,
+      }
+    : null
 
   const offer = {
     '@type':         'Offer',
@@ -67,6 +102,8 @@ export function ProductStructuredData({ deal }: { deal: Deal }) {
         worstRating:  1,
       },
     } : {}),
+    ...(emmaPerson ? { author: emmaPerson, reviewedBy: { '@type': 'Person', '@id': emmaId } } : {}),
+    ...(emmaReview ? { review: emmaReview } : {}),
   }
 
   return (
