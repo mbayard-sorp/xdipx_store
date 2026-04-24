@@ -7,7 +7,7 @@ import type { ChatTurn, ChatProductCard, ChatReply, QuickReplyPayload } from './
 
 export type { ChatTurn, ChatProductCard, ChatReply, QuickReplyPayload }
 
-const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] ?? '' })
+const client = new Anthropic({ apiKey: (process.env['ANTHROPIC_API_KEY'] ?? '').trim() })
 
 const MODEL = 'claude-haiku-4-5-20251001'
 const MAX_TOOL_HOPS = 5

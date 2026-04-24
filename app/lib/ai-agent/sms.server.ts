@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { SMS_SYSTEM_PROMPT } from './prompt'
 import { QA_TOOL_DEFINITIONS, runQaTool, type AgentContext } from './tools.server'
 
-const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] ?? '' })
+const client = new Anthropic({ apiKey: (process.env['ANTHROPIC_API_KEY'] ?? '').trim() })
 
 const MODEL = 'claude-haiku-4-5-20251001'
 const MAX_TOOL_HOPS = 3

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import type { Deal, EmmaHeroCopy, EmmaHeroVariant, GenerateCopyRequest, GenerateCopyResult, ProductScore } from '~/types'
 import { getPipelineSetting } from './feed-processor.server'
 
-const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] })
+const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
 // Tiered models: HAIKU for short/templated copy (~20× cheaper), SONNET for
 // long-form narrative and structured tasks (full_story, specs, schedule, blog).

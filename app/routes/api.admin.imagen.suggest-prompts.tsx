@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import Anthropic from '@anthropic-ai/sdk'
 
-const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] })
+const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
 export async function action({ request }: ActionFunctionArgs) {
   await requireAdmin(request)
