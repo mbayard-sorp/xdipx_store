@@ -135,7 +135,7 @@ export function HeartButton({
 
   const baseClasses =
     variant === 'overlay'
-      ? `absolute top-2 right-2 z-10 flex items-center justify-center ${sizeClasses} rounded-full bg-white/90 backdrop-blur-sm shadow-md hover:bg-white transition-colors`
+      ? `absolute top-2 right-2 z-10 pointer-events-auto flex items-center justify-center ${sizeClasses} rounded-full bg-white/90 backdrop-blur-sm shadow-md hover:bg-white transition-colors`
       : `inline-flex items-center justify-center ${sizeClasses} rounded-full bg-cream-2 hover:bg-sage hover:text-white transition-colors`
 
   return (
