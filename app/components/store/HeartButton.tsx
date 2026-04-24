@@ -99,6 +99,12 @@ export function HeartButton({
     e.preventDefault()
     e.stopPropagation()
 
+    // Session hasn't resolved yet — ignore the click rather than fall through
+    // to the localStorage path. Otherwise a logged-in user clicking before
+    // /api/session lands writes to localStorage (no DB persist) and then the
+    // effect that mirrors heartedFromLoader reverts the optimistic toggle.
+    if (!isSessionLoaded) return
+
     const next = !hearted
     setHearted(next) // optimistic
     if (!next) setToast(null) // dismiss on un-heart
@@ -158,7 +164,7 @@ export function HeartButton({
           strokeWidth={hearted ? 0 : 2}
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={hearted ? 'text-sage' : 'text-ink/70'}
+          className={hearted ? 'text-coral' : 'text-ink/70'}
           aria-hidden="true"
         >
           <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />

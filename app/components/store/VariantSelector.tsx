@@ -4,14 +4,11 @@ import type { ProductVariant } from '~/types'
 interface VariantSelectorProps {
   variants:          ProductVariant[]
   options:           { name: string; values: string[] }[]
-  selectedVariantId: string
-  onVariantSelect:   (variantId: string) => void
+  selectedOptions:   Record<string, string>
+  onSelectionChange: (next: Record<string, string>) => void
+  swatches?:         Record<string, string>
 }
 
-/**
- * Color-name → hex map for common Shopify swatch values.
- * Anything unmatched falls back to neutral cream-2 with initial letter.
- */
 const COLOR_MAP: Record<string, string> = {
   black:   '#151211',
   white:   '#FFFFFF',
@@ -42,96 +39,131 @@ function isColorOption(name: string): boolean {
   return n === 'color' || n === 'colour'
 }
 
-function isSwatchy(name: string): boolean {
-  // Use circles for color; pills for everything else.
-  return isColorOption(name)
+function resolveSwatchColor(value: string, swatches?: Record<string, string>): string {
+  const full = value.toLowerCase().trim()
+  const first = full.split(/\s+/)[0] ?? ''
+  return swatches?.[full] ?? COLOR_MAP[first] ?? '#F2EADD'
 }
 
-function swatchColor(value: string): string {
-  const key = value.toLowerCase().trim().split(/\s+/)[0] ?? ''
-  return COLOR_MAP[key] ?? '#F2EADD'
+function matches(variant: ProductVariant, selection: Record<string, string>): boolean {
+  return Object.entries(selection).every(([name, value]) =>
+    variant.selectedOptions.some(o => o.name === name && o.value === value),
+  )
+}
+
+/**
+ * Find the single variant whose selectedOptions exactly match every key in
+ * `selection`. Returns undefined for partial selections on multi-axis products.
+ */
+export function resolveVariant(
+  variants: ProductVariant[],
+  selection: Record<string, string>,
+  optionNames?: string[],
+): ProductVariant | undefined {
+  const names = optionNames ?? Object.keys(selection)
+  if (names.some(n => !selection[n])) return undefined
+  return variants.find(v => matches(v, selection))
+}
+
+/**
+ * Would flipping `optionName` to `value` point at a variant that exists AND is
+ * in stock? Holds the rest of `selection` fixed.
+ */
+export function isValueAvailable(
+  variants: ProductVariant[],
+  optionName: string,
+  value: string,
+  selection: Record<string, string>,
+): boolean {
+  const next = { ...selection, [optionName]: value }
+  return variants.some(
+    v => matches(v, next) && v.availableForSale && v.quantityAvailable !== 0,
+  )
+}
+
+/**
+ * Does a variant with this axis value exist at all (regardless of stock)?
+ * Used to distinguish "never made" (Sage/XL) from "sold out" (Sage/L).
+ */
+export function valueExists(
+  variants: ProductVariant[],
+  optionName: string,
+  value: string,
+  selection: Record<string, string>,
+): boolean {
+  const next = { ...selection, [optionName]: value }
+  return variants.some(v => matches(v, next))
 }
 
 export function VariantSelector({
   variants,
   options,
-  selectedVariantId,
-  onVariantSelect,
+  selectedOptions,
+  onSelectionChange,
+  swatches,
 }: VariantSelectorProps) {
-  const selectedVariant = variants.find(v => v.id === selectedVariantId) ?? variants[0]
+  const resolved = useMemo(() => resolveVariant(variants, selectedOptions, options.map(o => o.name)), [variants, selectedOptions, options])
 
-  // Build helper: for a given (optionName, value), find the variant that would
-  // result if user flipped this one axis while keeping the other axes the same.
-  const findVariantForChange = useMemo(() => {
-    return (optionName: string, value: string): ProductVariant | undefined => {
-      if (!selectedVariant) return undefined
-      const targetOptions = selectedVariant.selectedOptions.map(o =>
-        o.name === optionName ? { name: o.name, value } : o,
-      )
-      // Prefer exact match
-      const exact = variants.find(v =>
-        targetOptions.every(t =>
-          v.selectedOptions.some(o => o.name === t.name && o.value === t.value),
-        ),
-      )
-      if (exact) return exact
-      // Fallback: any variant matching just this axis = value
-      return variants.find(v =>
-        v.selectedOptions.some(o => o.name === optionName && o.value === value),
-      )
-    }
-  }, [variants, selectedVariant])
-
-  // For OOS hint: find any in-stock color when the current selection is OOS.
+  // OOS hint — only when the selection fully resolves to an OOS variant AND a
+  // color axis exists with an in-stock alternative.
   const oosFallback = useMemo(() => {
-    if (!selectedVariant || selectedVariant.availableForSale) return null
+    if (!resolved || resolved.availableForSale) return null
     const colorOpt = options.find(o => isColorOption(o.name))
     if (!colorOpt) return null
-    const alt = variants.find(v =>
-      v.availableForSale &&
-      v.selectedOptions.some(o => o.name === colorOpt.name),
+    const altColor = colorOpt.values.find(v =>
+      v !== selectedOptions[colorOpt.name] &&
+      isValueAvailable(variants, colorOpt.name, v, selectedOptions),
     )
-    if (!alt) return null
-    const altColor = alt.selectedOptions.find(o => o.name === colorOpt.name)?.value
     if (!altColor) return null
-    return { optionName: colorOpt.name, value: altColor, variant: alt }
-  }, [selectedVariant, options, variants])
+    return { optionName: colorOpt.name, value: altColor }
+  }, [resolved, options, variants, selectedOptions])
 
   if (variants.length <= 1 || options.length === 0) return null
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 w-full">
       {options.map(opt => {
-        const current = selectedVariant?.selectedOptions.find(o => o.name === opt.name)?.value
-        const useSwatch = isSwatchy(opt.name)
+        const current  = selectedOptions[opt.name]
+        const useSwatch = isColorOption(opt.name)
 
         return (
           <div key={opt.name}>
+            {options.length > 1 && (
+              <div
+                className="text-[11px] uppercase tracking-wider text-muted mb-2"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                {opt.name}{current ? ': ' : ''}
+                {current && <span className="text-ink font-semibold normal-case tracking-normal">{current}</span>}
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               {opt.values.map(val => {
-                const match       = findVariantForChange(opt.name, val)
-                const isSelected  = match?.id === selectedVariant?.id && current === val
-                const isAvailable = match?.availableForSale ?? false
+                const exists    = valueExists(variants, opt.name, val, selectedOptions)
+                const available = exists && isValueAvailable(variants, opt.name, val, selectedOptions)
+                const isSelected = current === val
 
                 if (useSwatch) {
                   return (
                     <button
                       key={val}
                       type="button"
-                      onClick={() => match && onVariantSelect(match.id)}
-                      disabled={!match}
-                      aria-label={`${opt.name}: ${val}${isAvailable ? '' : ' (out of stock)'}`}
+                      onClick={() => exists && onSelectionChange({ ...selectedOptions, [opt.name]: val })}
+                      disabled={!exists}
+                      aria-pressed={isSelected}
+                      aria-label={`${opt.name}: ${val}${available ? '' : exists ? ' (out of stock)' : ' (unavailable)'}`}
                       title={val}
                       className={[
                         'relative w-10 h-10 rounded-full border-2 transition-all',
                         isSelected
                           ? 'border-coral ring-2 ring-coral/30 ring-offset-2 ring-offset-paper'
                           : 'border-line hover:border-coral/60',
-                        !isAvailable && 'opacity-40',
+                        !exists && 'opacity-30 cursor-not-allowed',
+                        exists && !available && 'opacity-50',
                       ].filter(Boolean).join(' ')}
-                      style={{ backgroundColor: swatchColor(val) }}
+                      style={{ backgroundColor: resolveSwatchColor(val, swatches) }}
                     >
-                      {!isAvailable && (
+                      {exists && !available && (
                         <span
                           aria-hidden="true"
                           className="absolute inset-0 flex items-center justify-center text-ink/60 text-lg"
@@ -147,15 +179,18 @@ export function VariantSelector({
                   <button
                     key={val}
                     type="button"
-                    onClick={() => match && onVariantSelect(match.id)}
-                    disabled={!match}
+                    onClick={() => exists && onSelectionChange({ ...selectedOptions, [opt.name]: val })}
+                    disabled={!exists}
+                    aria-pressed={isSelected}
                     className={[
                       'px-4 py-2 rounded-full text-sm border transition-colors',
                       isSelected
                         ? 'border-coral bg-coral text-white font-bold'
-                        : isAvailable
+                        : available
                           ? 'border-line bg-white/80 text-ink hover:bg-white hover:border-coral hover:text-coral'
-                          : 'border-line bg-white/80 text-ink/70 line-through cursor-not-allowed',
+                          : exists
+                            ? 'border-line bg-white/80 text-ink/70 line-through cursor-not-allowed'
+                            : 'border-line/60 bg-white/40 text-ink/40 cursor-not-allowed',
                     ].join(' ')}
                     style={{ fontFamily: 'var(--font-display)' }}
                   >
@@ -173,7 +208,7 @@ export function VariantSelector({
           This one's out of stock —{' '}
           <button
             type="button"
-            onClick={() => onVariantSelect(oosFallback.variant.id)}
+            onClick={() => onSelectionChange({ ...selectedOptions, [oosFallback.optionName]: oosFallback.value })}
             className="text-coral hover:text-coral-deep font-medium underline underline-offset-2"
           >
             try {oosFallback.value} instead →

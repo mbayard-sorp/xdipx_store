@@ -407,6 +407,14 @@ export const ivrVoices = pgTable('ivr_voices', {
   activeIdx: index('ivr_voices_active_idx').on(t.active),
 }))
 
+export const colorSwatchCache = pgTable('color_swatch_cache', {
+  colorKey:  varchar('color_key', { length: 80 }).primaryKey(),
+  label:     varchar('label', { length: 120 }).notNull(),
+  hex:       varchar('hex', { length: 7 }),
+  source:    varchar('source', { length: 16 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
 export const productCopurchase = pgTable('product_copurchase', {
   id:         serial('id').primaryKey(),
   handleA:    varchar('handle_a', { length: 255 }).notNull(),
