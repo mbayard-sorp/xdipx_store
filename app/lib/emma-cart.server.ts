@@ -76,6 +76,114 @@ export function deriveEmmaCartContext({
   }
 }
 
+/**
+ * Signals struct used by emma-cart-aside.server.ts to prompt Haiku.
+ * Keeps the variant-selection logic co-located with deriveEmmaCartContext
+ * so AI + deterministic copy always pick the same angle.
+ */
+export interface EmmaCartSignals {
+  variant:          EmmaCartVariant
+  firstName:        string | null
+  orderCount:       number
+  subtotal:         number
+  freeShipGap:      number
+  cartLines:        Array<{
+    variantId:   string
+    title:       string
+    productType: string | null
+    quantity:    number
+    price:       number
+  }>
+  recentCategories: string[]
+  isGift:           boolean
+  hasSubscription:  boolean
+  userGid:          string | null
+}
+
+export function deriveEmmaCartSignals({
+  cart,
+  profile = null,
+  lastSearchQuery: _unused = null,
+}: Pick<DeriveArgs, 'cart' | 'profile' | 'lastSearchQuery'>): EmmaCartSignals | null {
+  if (!cart || cart.lines.length === 0) return null
+
+  const subtotal    = parseFloat(cart.cost.subtotalAmount.amount)
+  const freeShipGap = Math.max(FREE_SHIPPING_THRESHOLD - subtotal, 0)
+
+  const firstName  = profile?.firstName?.trim() || null
+  const orderCount = profile?.orders?.length ?? 0
+  const isGift     = cartLooksLikeGift(cart)
+
+  // Mirror the variant selection from deriveEmmaCartContext exactly.
+  let variant: EmmaCartVariant
+  if (isGift)                                                                    variant = 'gift'
+  else if (freeShipGap > 0 && freeShipGap <= FREE_SHIP_ADJACENT_GAP)             variant = 'free-ship-adjacent'
+  else if (orderCount >= 1)                                                      variant = 'repeat'
+  else                                                                           variant = 'first-timer'
+
+  const cartLines = cart.lines.map(l => ({
+    variantId:   l.merchandise.id,
+    title:       l.merchandise.product.title,
+    productType: inferProductType(l.merchandise.product.title),
+    quantity:    l.quantity,
+    price:       parseFloat(l.merchandise.price.amount),
+  }))
+
+  const hasSubscription = cart.lines.some(l => !!l.sellingPlanAllocation)
+
+  // Top categories from profile order history — gives Emma a past-purchase angle.
+  const recentCategories: string[] = profile?.orders
+    ? topCategories(profile.orders.flatMap(o => o.lineItems.map(li => li.title)))
+    : []
+
+  return {
+    variant,
+    firstName,
+    orderCount,
+    subtotal,
+    freeShipGap,
+    cartLines,
+    recentCategories,
+    isGift,
+    hasSubscription,
+    userGid: profile?.id ?? null,
+  }
+}
+
+function inferProductType(title: string): string | null {
+  const t = title.toLowerCase()
+  if (/\b(lube|glide|silicone|water[- ]based)\b/.test(t)) return 'lube'
+  if (/\bwand\b/.test(t)) return 'wand'
+  if (/\b(pulse|suction|clitoral)\b/.test(t)) return 'air-pulsation'
+  if (/\b(wearable|panty|cock[- ]?ring)\b/.test(t)) return 'wearable'
+  if (/\b(vibr|vibe)\b/.test(t)) return 'vibrator'
+  if (/\bmassage\b/.test(t)) return 'massager'
+  return null
+}
+
+function topCategories(titles: string[]): string[] {
+  // Cheap keyword buckets — we don't have proper taxonomy on past orders,
+  // so we grep titles for known product-type words. Good enough to signal "loves lubes".
+  const buckets: Record<string, RegExp> = {
+    lube:           /\b(lube|glide|silicone|water[- ]based)\b/i,
+    vibrator:       /\b(vibr|vibe)\b/i,
+    wand:           /\bwand\b/i,
+    'air-pulsation':/\b(pulse|air|suction|clitoral)\b/i,
+    wearable:       /\b(wearable|panty|ring|cock[- ]?ring)\b/i,
+    massager:       /\bmassage\b/i,
+  }
+  const counts: Record<string, number> = {}
+  for (const t of titles) {
+    for (const [bucket, re] of Object.entries(buckets)) {
+      if (re.test(t)) counts[bucket] = (counts[bucket] ?? 0) + 1
+    }
+  }
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([bucket]) => bucket)
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function cartLooksLikeGift(cart: Cart | null): boolean {
@@ -86,7 +194,7 @@ function cartLooksLikeGift(cart: Cart | null): boolean {
   })
 }
 
-function bodyForVariant(
+export function bodyForVariant(
   v: EmmaCartVariant,
   { firstName, remaining }: { firstName: string | null; remaining: number },
 ): string {

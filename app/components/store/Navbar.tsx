@@ -6,7 +6,7 @@ import { DesktopMegaMenu, MobileMegaMenu } from '~/components/store/MegaMenu'
 import { SearchBar } from '~/components/store/SearchBar'
 import { useSession } from '~/lib/session-context'
 import type { Cart, EmmaCartContext, Product } from '~/types'
-import type { MegaMenuBanner } from '~/types/cms'
+import type { EmmaPersona, MegaMenuBanner } from '~/types/cms'
 import type { ShopifyMenuItem } from '~/lib/shopify.server'
 
 interface NavbarProps {
@@ -15,10 +15,11 @@ interface NavbarProps {
   menuItems?: ShopifyMenuItem[]
   megaMenuBanners?: MegaMenuBanner[]
   upsells?: Product[]
+  emmaPersona?: EmmaPersona | null
 }
 
 
-export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBanners = [], upsells = [] }: NavbarProps) {
+export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBanners = [], upsells = [], emmaPersona = null }: NavbarProps) {
   const { isCustomerLoggedIn, customerFirstName, wishlistCount, isLoaded: isSessionLoaded } = useSession()
   // Cart is loaded per-user via fetcher (keeps parent HTML/data edge-cacheable).
   const cartFetcher = useFetcher<{ cart: Cart | null; emma?: EmmaCartContext }>()
@@ -300,6 +301,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
               cart={cart}
               emma={emma}
               upsells={upsells}
+              emmaPersona={emmaPersona}
               panelRef={cartDrawerRef}
               onClose={() => setCartOpen(false)}
               onMouseEnter={() => { cancelAutoClose(); openCart() }}

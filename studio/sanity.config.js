@@ -32,6 +32,11 @@ export default defineConfig({
             S.documentTypeListItem('emmaPreset').title("Emma's presets").icon(() => '🎯'),
             S.documentTypeListItem('emmaCuratedRail').title('Emma curated rails').icon(() => '♥'),
             S.listItem()
+              .title('Editor (Emma)')
+              .id('editor')
+              .icon(() => '👩')
+              .child(S.document().schemaType('editor').documentId('singleton.editor')),
+            S.listItem()
               .title('Site Settings')
               .id('siteSettings')
               .icon(() => '⚙️')

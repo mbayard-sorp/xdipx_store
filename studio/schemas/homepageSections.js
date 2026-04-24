@@ -23,6 +23,7 @@ export default {
         { type: 'bonusDeal'          },
         { type: 'trustBar'           },
         { type: 'richText'           },
+        { type: 'editorBio'          },
       ],
     },
   ],

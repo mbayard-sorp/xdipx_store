@@ -14,6 +14,7 @@ import blogProductEmbed   from '../schemas/blocks/blogProductEmbed.js'
 import blogCta            from '../schemas/blocks/blogCta.js'
 import blogVideoEmbed     from '../schemas/blocks/blogVideoEmbed.js'
 import richText           from '../schemas/blocks/richText.js'
+import editorBio          from '../schemas/blocks/editorBio.js'
 import homepageSections   from '../schemas/homepageSections.js'
 import siteSettings       from '../schemas/siteSettings.js'
 import productPage        from '../schemas/productPage.js'
@@ -27,6 +28,7 @@ import emmaHeroSettings   from '../schemas/emmaHeroSettings.js'
 import emmaPreset         from '../schemas/emmaPreset.js'
 import emmaPick           from '../schemas/emmaPick.js'
 import emmaCuratedRail    from '../schemas/blocks/emmaCuratedRail.js'
+import editor             from '../schemas/editor.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -51,6 +53,9 @@ export const schemaTypes = [
   emmaPick,
   // v2 redesign — Emma-curated rails (agent-generated, draft→approve→live)
   emmaCuratedRail,
+  // Editor (Emma) singleton — avatar + name + bio. Powers cart drawer avatar,
+  // hero byline, /about E-E-A-T, and editor bio cards. Single source of truth.
+  editor,
   // Block object types
   announcementBar,
   promoBanner,
@@ -62,6 +67,7 @@ export const schemaTypes = [
   testimonials,
   bonusDeal,
   trustBar,
+  editorBio,
   // Blog block object types
   blogImage,
   blogPullQuote,

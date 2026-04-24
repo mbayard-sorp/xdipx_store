@@ -15,7 +15,7 @@ import { Analytics }       from '~/components/store/Analytics'
 import { MobileTabBar }    from '~/components/store/MobileTabBar'
 import { AskEmmaWidget }   from '~/components/store/AskEmmaWidget'
 import { AnnouncementBar } from '~/components/cms/AnnouncementBar'
-import { getHomepageSections, getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
+import { getEmmaPersona, getHomepageSections, getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
 import { getAccessoryProducts, getMainMenu } from '~/lib/shopify.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { SessionProvider } from '~/lib/session-context'
@@ -27,11 +27,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // pinnedIds live in KV and resolve in ~1–5ms — fetch them outside the main
   // Promise.all so we can fan accessories in parallel with everything else.
   const pinnedIds = (await getPinnedAccessoryIds()) ?? []
-  const [cms, settings, menuItems, upsells] = await Promise.all([
+  const [cms, settings, menuItems, upsells, emmaPersona] = await Promise.all([
     getHomepageSections(preview),
     getSiteSettings(),
     getMainMenu(),
     pinnedIds.length ? getAccessoryProducts(pinnedIds.slice(0, 4)) : Promise.resolve<Product[]>([]),
+    getEmmaPersona(),
   ])
 
   const announcementBar = cms?.sections.find(
@@ -49,11 +50,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const footerDisclaimer = settings?.footerDisclaimer ?? null
   const buyButtonText = settings?.buyButtonText || "I'll take it ♥"
   const siteBanner: SiteBannerData | null = settings?.siteBanner ?? null
-  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells }
+  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona }
 }
 
 export default function StoreLayout() {
-  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells } = useLoaderData<typeof loader>()
+  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona } = useLoaderData<typeof loader>()
   const { pathname } = useLocation()
   const rootData = useRouteLoaderData<{ ENV?: { GA4_ID?: string } }>('root')
   const ga4Id = rootData?.ENV?.GA4_ID ?? ''
@@ -82,7 +83,7 @@ export default function StoreLayout() {
           )}
 
           {announcementBar && <AnnouncementBar block={announcementBar} />}
-          <Navbar logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} />
+          <Navbar logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} emmaPersona={emmaPersona} />
           <SiteBanner banner={siteBanner} />
           <main className={`flex-1 ${showMobileShell ? 'pb-20 md:pb-0' : ''}`}>
             <Outlet context={{ buyButtonText }} />

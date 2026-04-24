@@ -205,6 +205,35 @@ export interface TrustBarBlock {
   trustItems?: TrustItem[]
 }
 
+// ─── Editor Bio Card ─────────────────────────────────────────────────────
+
+export type EditorBioVariant = 'hero' | 'card' | 'quote'
+
+export interface EditorBioBlock {
+  _type: 'editorBio'
+  _key: string
+  active: boolean
+  order: number
+  variant: EditorBioVariant
+  eyebrow?: string
+  headingOverride?: string
+  hideLongBio?: boolean
+  hideSocials?: boolean
+  bgStyle?: 'cream' | 'paper' | 'cream-2'
+  showCta?: boolean
+  editor?: {
+    name: string
+    role: string
+    photoUrl: string | null
+    photoAlt: string | null
+    shortBio: string | null
+    longBio: unknown[] | null
+    picksSince: string | null
+    instagram: string | null
+    email: string | null
+  } | null
+}
+
 // ─── Rich Text ───────────────────────────────────────────────────────────
 
 export interface RichTextBlock {
@@ -232,6 +261,7 @@ export type ContentBlock =
   | BonusDealBlock
   | TrustBarBlock
   | RichTextBlock
+  | EditorBioBlock
 
 export interface HomepageSections {
   _id: string
@@ -307,6 +337,7 @@ export type PageSection =
   | TestimonialsBlock
   | TrustBarBlock
   | RichTextBlock
+  | EditorBioBlock
 
 export interface SanityPage {
   _id: string
@@ -346,6 +377,26 @@ export interface EmmaHeroSettings {
   aside?: string
   pullQuote?: string
   pairProductHandle?: string
+}
+
+// v2 redesign — Emma persona singleton (avatar + display name)
+export interface EmmaPersona {
+  avatarUrl:   string | null
+  avatarAlt:   string | null
+  displayName: string | null
+}
+
+// Editor persona singleton — powers hero byline + /about E-E-A-T
+export interface Editor {
+  name: string
+  role: string
+  photoUrl: string | null
+  photoAlt: string | null
+  shortBio: string | null
+  longBio: unknown[] | null
+  picksSince: string | null
+  instagram: string | null
+  email: string | null
 }
 
 // v2 redesign — Emma presets (Ask Emma rail)
