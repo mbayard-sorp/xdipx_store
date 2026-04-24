@@ -50,7 +50,7 @@ function normalizeState(raw: string): string {
 
 export interface AgentContext {
   phone?: string
-  channel: 'voice' | 'sms'
+  channel: 'voice' | 'sms' | 'chat'
 }
 
 export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [

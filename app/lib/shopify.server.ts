@@ -3942,7 +3942,7 @@ export async function createDraftOrder(input: {
   customer: DraftOrderCustomer
   shipping: DraftOrderShipping
   note?: string
-  channel: 'voice' | 'sms'
+  channel: 'voice' | 'sms' | 'chat'
 }): Promise<DraftOrderResult> {
   const [firstName, ...rest] = input.customer.name.trim().split(/\s+/)
   const lastName = rest.join(' ') || firstName || ''

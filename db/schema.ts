@@ -254,7 +254,7 @@ export const draftOrders = pgTable('draft_orders', {
   id:                serial('id').primaryKey(),
   shopifyDraftId:    varchar('shopify_draft_id', { length: 64 }).notNull().unique(),
   shopifyInvoiceUrl: text('shopify_invoice_url'),
-  channel:           varchar('channel', { length: 10 }).notNull(), // voice | sms
+  channel:           varchar('channel', { length: 10 }).notNull(), // voice | sms | chat
   phone:             varchar('phone', { length: 20 }).notNull(),
   email:             varchar('email', { length: 255 }),
   customerName:      varchar('customer_name', { length: 255 }),
@@ -314,6 +314,39 @@ export type ReturnStatus =
   | 'closed'
   | 'denied'
   | 'canceled'
+
+export const chatSessions = pgTable('chat_sessions', {
+  id:             varchar('id', { length: 64 }).primaryKey(),
+  email:          varchar('email', { length: 255 }),
+  phone:          varchar('phone', { length: 20 }),
+  utm:            json('utm').$type<Record<string, string>>(),
+  ref:            varchar('ref', { length: 50 }),
+  ipHash:         varchar('ip_hash', { length: 64 }),
+  userAgent:      text('user_agent'),
+  status:         varchar('status', { length: 20 }).default('active').notNull(),
+  tokensUsed:     integer('tokens_used').default(0).notNull(),
+  toolCallCount:  json('tool_call_count').$type<Record<string, number>>(),
+  summary:        text('summary'),
+  createdAt:      timestamp('created_at').defaultNow().notNull(),
+  lastActivityAt: timestamp('last_activity_at').defaultNow().notNull(),
+  closedAt:       timestamp('closed_at'),
+}, t => ({
+  emailIdx:   index('chat_sessions_email_idx').on(t.email, t.createdAt),
+  phoneIdx:   index('chat_sessions_phone_idx').on(t.phone, t.createdAt),
+  createdIdx: index('chat_sessions_created_idx').on(t.createdAt),
+}))
+
+export const chatMessages = pgTable('chat_messages', {
+  id:        serial('id').primaryKey(),
+  sessionId: varchar('session_id', { length: 64 }).notNull().references(() => chatSessions.id, { onDelete: 'cascade' }),
+  role:      varchar('role', { length: 10 }).notNull(), // user | assistant | tool
+  content:   json('content').notNull(),
+  toolName:  varchar('tool_name', { length: 40 }),
+  tokens:    integer('tokens').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  sessionIdx: index('chat_messages_session_idx').on(t.sessionId, t.createdAt),
+}))
 
 export const productCopurchase = pgTable('product_copurchase', {
   id:         serial('id').primaryKey(),

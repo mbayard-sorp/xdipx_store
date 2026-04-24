@@ -304,7 +304,7 @@ export interface KlaviyoProfile {
 
 // ─── Consent ──────────────────────────────────────────────────────────────
 
-export type ConsentType = 'all' | 'essential_only'
+export type ConsentType = 'all' | 'essential_only' | 'chat'
 export type VerificationLevel = 'click_through' | 'dob_entry' | 'id_verify'
 
 // ─── Bulk Import ──────────────────────────────────────────────────────────

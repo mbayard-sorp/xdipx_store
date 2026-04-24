@@ -11,6 +11,7 @@ import { Navbar }          from '~/components/store/Navbar'
 import { SiteBanner }      from '~/components/store/SiteBanner'
 import { Footer }          from '~/components/store/Footer'
 import { CookieConsent }   from '~/components/store/CookieConsent'
+import { ChatWidget }      from '~/components/chat/ChatWidget'
 import { Analytics }       from '~/components/store/Analytics'
 import { AnnouncementBar } from '~/components/cms/AnnouncementBar'
 import { getHomepageSections, getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
@@ -100,6 +101,7 @@ export default function StoreLayout() {
       </main>
       <Footer socialLinks={socialLinks} footerColumns={footerColumns} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} />
       <CookieConsent />
+      <ChatWidget />
       <Analytics
         ga4Id={typeof window !== 'undefined' ? (window as unknown as { ENV?: { GA4_ID?: string } }).ENV?.GA4_ID ?? '' : ''}
         isLoggedIn={isCustomerLoggedIn}
