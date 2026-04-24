@@ -54,9 +54,6 @@ export async function action({ request }: ActionFunctionArgs) {
   const worksForHer     = (form.get('worksForHer')     as string) || undefined
   const specifications  = (form.get('specifications')  as string) || undefined
   const whatsInTheBox   = (form.get('whatsInTheBox')   as string) || undefined
-  const featureBullets  = form.get('featureBullets')
-    ? JSON.parse(form.get('featureBullets') as string) as string[]
-    : undefined
 
   // Admin-pinned format + voice
   const rawFormat  = form.get('format') as string | null
@@ -93,7 +90,6 @@ export async function action({ request }: ActionFunctionArgs) {
     ...(worksForHer    ? { worksForHer }    : {}),
     ...(specifications ? { specifications } : {}),
     ...(whatsInTheBox  ? { whatsInTheBox }  : {}),
-    ...(featureBullets ? { featureBullets } : {}),
     ...(customPrompt   ? { customPrompt }   : {}),
     ...(forceFormat    ? { forceFormat }    : {}),
     ...(customFormatText ? { customFormatDescription: customFormatText } : {}),

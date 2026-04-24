@@ -107,17 +107,6 @@ export function VariantSelector({
 
         return (
           <div key={opt.name}>
-            <p
-              className="text-[13px] font-bold text-ink mb-2 uppercase tracking-wide"
-              style={{ fontFamily: 'var(--font-display)' }}
-            >
-              {opt.name}
-              {current && (
-                <span className="ml-2 font-medium normal-case tracking-normal text-muted">
-                  {current}
-                </span>
-              )}
-            </p>
             <div className="flex flex-wrap gap-2">
               {opt.values.map(val => {
                 const match       = findVariantForChange(opt.name, val)
@@ -165,8 +154,8 @@ export function VariantSelector({
                       isSelected
                         ? 'border-coral bg-coral text-white font-bold'
                         : isAvailable
-                          ? 'border-line text-ink hover:border-coral hover:text-coral'
-                          : 'border-line text-ink/30 line-through cursor-not-allowed',
+                          ? 'border-line bg-white/80 text-ink hover:bg-white hover:border-coral hover:text-coral'
+                          : 'border-line bg-white/80 text-ink/70 line-through cursor-not-allowed',
                     ].join(' ')}
                     style={{ fontFamily: 'var(--font-display)' }}
                   >

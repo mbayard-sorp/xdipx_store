@@ -6,6 +6,7 @@ import {
   getCustomerToken,
   setOAuthPending,
   setSocialOAuthPending,
+  safeRedirectTo,
 } from '~/lib/customer-session.server'
 import {
   SHOP_OAUTH_ENABLED,
@@ -27,10 +28,29 @@ import { getCartIdFromCookie, linkCartToCustomer } from '~/lib/cart.server'
 
 export const meta: MetaFunction = () => [{ title: 'Sign in — xdipx' }]
 
-// Already logged in → go to account
+/**
+ * Combines a validated `redirectTo` with an optional `pendingVote` param,
+ * producing a single safe path we can stash in the OAuth session or use
+ * after email/password login. Returns null if `redirectTo` is unsafe.
+ */
+function buildPostLoginTarget(redirectTo: string | null, pendingVote: string | null): string | null {
+  const safe = safeRedirectTo(redirectTo)
+  if (!safe) return null
+  if (pendingVote !== '1' && pendingVote !== '-1') return safe
+  const sep = safe.includes('?') ? '&' : '?'
+  return `${safe}${sep}pendingVote=${pendingVote}`
+}
+
+// Already logged in → follow redirectTo if present, else /account
 export async function loader({ request }: LoaderFunctionArgs) {
-  const existing = await getCustomerToken(request)
-  if (existing) throw redirect('/account')
+  const url         = new URL(request.url)
+  const redirectTo  = url.searchParams.get('redirectTo')
+  const pendingVote = url.searchParams.get('pendingVote')
+  const existing    = await getCustomerToken(request)
+  if (existing) {
+    const target = buildPostLoginTarget(redirectTo, pendingVote) ?? '/account'
+    throw redirect(target)
+  }
   return {
     shopOAuthEnabled:     SHOP_OAUTH_ENABLED,
     googleOAuthEnabled:   GOOGLE_OAUTH_ENABLED,
@@ -42,6 +62,10 @@ export async function action({ request }: ActionFunctionArgs) {
   const form   = await request.formData()
   const intent = form.get('intent') as string
 
+  const redirectTo  = (form.get('redirectTo')  as string | null) ?? null
+  const pendingVote = (form.get('pendingVote') as string | null) ?? null
+  const postLogin   = buildPostLoginTarget(redirectTo, pendingVote)
+
   // ── Shop OAuth ───────────────────────────────────────────────────────────
   if (intent === 'shop-login') {
     if (!SHOP_OAUTH_ENABLED) return { error: 'Shop login is not configured.' }
@@ -51,7 +75,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const redirectUri  = new URL('/api/customer-callback', new URL(request.url).origin).toString()
     const loginUrl     = await getShopLoginUrl(redirectUri, state, codeVerifier)
 
-    const headers = await setOAuthPending(request, state, codeVerifier)
+    const headers = await setOAuthPending(request, state, codeVerifier, postLogin)
     headers.set('Location', loginUrl)
     return new Response(null, { status: 302, headers })
   }
@@ -65,7 +89,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const redirectUri  = new URL('/api/google-callback', new URL(request.url).origin).toString()
     const loginUrl     = await getGoogleLoginUrl(redirectUri, state, codeVerifier)
 
-    const headers = await setSocialOAuthPending(request, state, codeVerifier)
+    const headers = await setSocialOAuthPending(request, state, codeVerifier, postLogin)
     headers.set('Location', loginUrl)
     return new Response(null, { status: 302, headers })
   }
@@ -78,7 +102,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const redirectUri = new URL('/api/facebook-callback', new URL(request.url).origin).toString()
     const loginUrl    = getFacebookLoginUrl(redirectUri, state)
 
-    const headers = await setSocialOAuthPending(request, state)
+    const headers = await setSocialOAuthPending(request, state, undefined, postLogin)
     headers.set('Location', loginUrl)
     return new Response(null, { status: 302, headers })
   }
@@ -105,7 +129,7 @@ export async function action({ request }: ActionFunctionArgs) {
     console.error('[login] cart link failed:', err)
   }
 
-  throw redirect('/account?from=login', { headers })
+  throw redirect(postLogin ?? '/account?from=login', { headers })
 }
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
@@ -126,6 +150,9 @@ export default function AccountLoginPage() {
     fetcherError ??
     (oauthError ? OAUTH_ERROR_MESSAGES[oauthError] ?? 'Sign-in failed. Please try again.' : null)
 
+  const redirectToParam  = searchParams.get('redirectTo')  ?? ''
+  const pendingVoteParam = searchParams.get('pendingVote') ?? ''
+
   const hasSocialButtons = shopOAuthEnabled || googleOAuthEnabled || facebookOAuthEnabled
 
   return (
@@ -145,6 +172,8 @@ export default function AccountLoginPage() {
         {shopOAuthEnabled && (
           <fetcher.Form method="post" className="mb-3">
             <input type="hidden" name="intent" value="shop-login" />
+            <input type="hidden" name="redirectTo" value={redirectToParam} />
+            <input type="hidden" name="pendingVote" value={pendingVoteParam} />
             <button
               type="submit"
               disabled={isLoading}
@@ -161,6 +190,8 @@ export default function AccountLoginPage() {
         {googleOAuthEnabled && (
           <fetcher.Form method="post" className="mb-3">
             <input type="hidden" name="intent" value="google-login" />
+            <input type="hidden" name="redirectTo" value={redirectToParam} />
+            <input type="hidden" name="pendingVote" value={pendingVoteParam} />
             <button
               type="submit"
               disabled={isLoading}
@@ -177,6 +208,8 @@ export default function AccountLoginPage() {
         {facebookOAuthEnabled && (
           <fetcher.Form method="post" className="mb-3">
             <input type="hidden" name="intent" value="facebook-login" />
+            <input type="hidden" name="redirectTo" value={redirectToParam} />
+            <input type="hidden" name="pendingVote" value={pendingVoteParam} />
             <button
               type="submit"
               disabled={isLoading}
@@ -211,6 +244,8 @@ export default function AccountLoginPage() {
 
         {/* Email / password form */}
         <fetcher.Form method="post" className="space-y-4">
+          <input type="hidden" name="redirectTo" value={redirectToParam} />
+          <input type="hidden" name="pendingVote" value={pendingVoteParam} />
           <div>
             <label className="block text-sm font-semibold text-ink mb-1" htmlFor="email">
               Email

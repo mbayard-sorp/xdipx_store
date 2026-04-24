@@ -23,27 +23,27 @@ export function StockIndicator({ qty, isDigital = false, className = '' }: Stock
     )
   }
 
-  if (qty <= 20) {
+  if (qty <= 5) {
     return (
-      <span className={`inline-flex items-center gap-1.5 text-sm font-medium text-coral ${className}`}>
-        <span className="w-2 h-2 rounded-full bg-coral animate-pulse" aria-hidden="true" />
-        Only {qty} left — going fast
+      <span className={`inline-flex items-center gap-1.5 text-sm font-medium text-red-500 ${className}`}>
+        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" aria-hidden="true" />
+        Almost gone
       </span>
     )
   }
 
-  if (qty <= 50) {
+  if (qty <= 10) {
     return (
-      <span className={`inline-flex items-center gap-1.5 text-sm font-medium text-coral-2 ${className}`}>
-        <span className="w-2 h-2 rounded-full bg-coral-2" aria-hidden="true" />
-        {qty} remaining
+      <span className={`inline-flex items-center gap-1.5 text-sm font-medium text-amber-500 ${className}`}>
+        <span className="w-2 h-2 rounded-full bg-amber-500" aria-hidden="true" />
+        Low stock
       </span>
     )
   }
 
   return (
     <span className={`inline-flex items-center gap-1.5 text-sm text-ink/60 ${className}`}>
-      <span className="w-2 h-2 rounded-full bg-green-400" aria-hidden="true" />
+      <span className="w-2 h-2 rounded-full bg-green-500" aria-hidden="true" />
       In stock
     </span>
   )

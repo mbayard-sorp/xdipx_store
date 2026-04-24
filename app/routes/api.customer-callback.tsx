@@ -34,7 +34,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let headers = await loginCustomerSession(request, accessToken, 'account')
   headers = await clearOAuthPending(request, headers)
 
-  throw redirect('/account', { headers })
+  throw redirect(pending.redirectTo ?? '/account', { headers })
 }
 
 export default function CustomerCallback() {

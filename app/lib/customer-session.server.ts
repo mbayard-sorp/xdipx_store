@@ -76,16 +76,38 @@ export async function logoutCustomerSession(request: Request): Promise<Headers> 
   return headers
 }
 
+// ── Redirect-target safety ────────────────────────────────────────────────────
+
+/**
+ * Returns `candidate` if it's a safe same-origin path, else null.
+ * Rejects protocol-relative URLs (`//evil.com`), absolute URLs
+ * (`http://...`), and backslash tricks (`/\evil.com`) to prevent open
+ * redirects after login.
+ */
+export function safeRedirectTo(candidate: string | null | undefined): string | null {
+  if (!candidate) return null
+  if (typeof candidate !== 'string') return null
+  if (!candidate.startsWith('/')) return null
+  if (candidate.startsWith('//') || candidate.startsWith('/\\')) return null
+  // Extra guard: reject any control character or embedded scheme
+  if (/[\x00-\x1f]/.test(candidate)) return null
+  return candidate
+}
+
 // ── OAuth PKCE helpers (used during Shop login flow) ──────────────────────────
 
 export async function setOAuthPending(
   request: Request,
   state: string,
   codeVerifier: string,
+  redirectTo?: string | null,
 ): Promise<Headers> {
   const session = await getSession(request.headers.get('Cookie'))
   session.set('oauthState', state)
   session.set('oauthCodeVerifier', codeVerifier)
+  const safe = safeRedirectTo(redirectTo)
+  if (safe) session.set('oauthRedirectTo', safe)
+  else      session.unset('oauthRedirectTo')
   const headers = new Headers()
   headers.set('Set-Cookie', await commitSession(session))
   return headers
@@ -94,18 +116,21 @@ export async function setOAuthPending(
 export async function getOAuthPending(request: Request): Promise<{
   state: string
   codeVerifier: string
+  redirectTo: string | null
 } | null> {
   const session = await getSession(request.headers.get('Cookie'))
   const state = session.get('oauthState') as string | undefined
   const codeVerifier = session.get('oauthCodeVerifier') as string | undefined
   if (!state || !codeVerifier) return null
-  return { state, codeVerifier }
+  const redirectTo = safeRedirectTo(session.get('oauthRedirectTo') as string | undefined)
+  return { state, codeVerifier, redirectTo }
 }
 
 export async function clearOAuthPending(request: Request, baseHeaders?: Headers): Promise<Headers> {
   const session = await getSession(request.headers.get('Cookie'))
   session.unset('oauthState')
   session.unset('oauthCodeVerifier')
+  session.unset('oauthRedirectTo')
   const headers = baseHeaders ?? new Headers()
   headers.set('Set-Cookie', await commitSession(session))
   return headers
@@ -123,11 +148,15 @@ export async function setSocialOAuthPending(
   request: Request,
   state: string,
   codeVerifier?: string,
+  redirectTo?: string | null,
 ): Promise<Headers> {
   const session = await getSession(request.headers.get('Cookie'))
   session.set('socialOAuthState', state)
   if (codeVerifier) session.set('socialOAuthCodeVerifier', codeVerifier)
   else session.unset('socialOAuthCodeVerifier')
+  const safe = safeRedirectTo(redirectTo)
+  if (safe) session.set('socialOAuthRedirectTo', safe)
+  else      session.unset('socialOAuthRedirectTo')
   const headers = new Headers()
   headers.set('Set-Cookie', await commitSession(session))
   return headers
@@ -136,18 +165,21 @@ export async function setSocialOAuthPending(
 export async function getSocialOAuthPending(request: Request): Promise<{
   state: string
   codeVerifier: string | null
+  redirectTo: string | null
 } | null> {
   const session = await getSession(request.headers.get('Cookie'))
   const state = session.get('socialOAuthState') as string | undefined
   if (!state) return null
   const codeVerifier = (session.get('socialOAuthCodeVerifier') as string | undefined) ?? null
-  return { state, codeVerifier }
+  const redirectTo   = safeRedirectTo(session.get('socialOAuthRedirectTo') as string | undefined)
+  return { state, codeVerifier, redirectTo }
 }
 
 export async function clearSocialOAuthPending(request: Request, baseHeaders?: Headers): Promise<Headers> {
   const session = await getSession(request.headers.get('Cookie'))
   session.unset('socialOAuthState')
   session.unset('socialOAuthCodeVerifier')
+  session.unset('socialOAuthRedirectTo')
   const headers = baseHeaders ?? new Headers()
   headers.set('Set-Cookie', await commitSession(session))
   return headers
