@@ -114,7 +114,7 @@ export const KV_KEYS = {
   ltxOperation:           (token: string) => `ltx:op:${token}`,
   liveDealHandle:         'live-deal:handle',
   fbt:                    (handle: string) => `fbt:${handle}`,
-  collectionCursor:       (handle: string, page: number) => `vault:cursor:${handle}:p${page}`,
+  collectionCursor:       (handle: string, page: number, sort = 'manual') => `vault:cursor:${handle}:${sort}:p${page}`,
   // v2 redesign — dial vote aggregates (5-min TTL)
   dialAggregate:          (shopifyProductId: string) => `dial:agg:${shopifyProductId}`,
   // PDP product-level aggregate vote (thumbs up/down on the whole dial)
@@ -129,6 +129,12 @@ export const KV_KEYS = {
                           `emmaCartAside:${variant}:${userBucket}:${cartHash}:${searchHash}:${subtotalBand}`,
   emmaCartAsideLock:      (cartHash: string) => `emmaCartAside:lock:${cartHash}`,
   emmaCartAsideDailyCount:(utcDate: string) => `emmaCartAside:dailyCount:${utcDate}`,
+  // Discovery rail on /search + /collections (10-min TTL per query+filter+recentView hash)
+  emmaDiscovery:          (hash: string) => `emmaDiscovery:v1:${hash}`,
+  emmaDiscoveryDailyCount:(utcDate: string) => `emmaDiscovery:dailyCount:${utcDate}`,
+  // Encouragement strip above discovery grid (30-min TTL per filter combination)
+  emmaEncouragement:           (hash: string) => `emmaEncouragement:v2:${hash}`,
+  emmaEncouragementDailyCount: (utcDate: string) => `emmaEncouragement:dailyCount:${utcDate}`,
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────
