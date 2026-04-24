@@ -49,6 +49,10 @@ export interface Deal {
   featureBullets: string[]
   boxContents: string[]
   specifications?: string
+  template?: 'default' | 'editorial'
+  emmaQuote?: string
+  editorialCaption?: string
+  priceCommentary?: string
   images: ProductImage[]
   videos: ProductVideo[]
   moodImageUrl?: string
@@ -278,7 +282,7 @@ export interface DailyProfitSummaryRow {
 // ─── Admin ─────────────────────────────────────────────────────────────────
 
 export interface GenerateCopyRequest {
-  type: 'tagline' | 'full_story' | 'both_ways' | 'bullets' | 'box_contents' | 'email_subjects' | 'seo_meta' | 'specifications'
+  type: 'tagline' | 'full_story' | 'both_ways' | 'bullets' | 'box_contents' | 'email_subjects' | 'seo_meta' | 'specifications' | 'emma_quote' | 'editorial_caption' | 'price_commentary'
   product: {
     title: string
     brand: string

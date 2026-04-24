@@ -18,6 +18,7 @@
   /* Typography */
   --font-display: 'Poppins', sans-serif;
   --font-body:    'Inter', sans-serif;
+  --font-hand:    'Caveat', 'Kalam', cursive;
 
   /* Brand Gradient */
   --background-image-brand-gradient: linear-gradient(to right, #F04E37, #FF8C38);

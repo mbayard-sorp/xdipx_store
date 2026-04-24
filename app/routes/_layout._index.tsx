@@ -14,6 +14,7 @@ import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { CountdownTimer }        from '~/components/store/CountdownTimer'
 import { DailyDealHero }         from '~/components/store/DailyDealHero'
+import { EditorialDealHero }     from '~/components/store/EditorialDealHero'
 import { BundleHero }            from '~/components/store/BundleHero'
 import { ProductCarousel }       from '~/components/cms/ProductCarousel'
 import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
@@ -185,6 +186,11 @@ export default function Homepage() {
 
       {bundle ? (
         <BundleHero bundle={bundle} buyButtonText={buyButtonText} />
+      ) : deal && deal.template === 'editorial' ? (
+        <>
+          <EditorialDealHero deal={deal} buyButtonText={buyButtonText} />
+          <ProductStructuredData deal={deal} />
+        </>
       ) : deal ? (
         <>
           <DailyDealHero

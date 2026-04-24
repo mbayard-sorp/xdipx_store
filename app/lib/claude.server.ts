@@ -214,6 +214,63 @@ ${productContext}`
       return { type, content: `<ul><li>${product.description.slice(0, 500)}</li></ul>` }
     }
 
+    case 'emma_quote': {
+      const primaryPrompt = `Write a 2–3 sentence quote in Emma's voice about this product — she's the editorial curator for xdipx. First person, warm, slightly obsessed, curious. Don't mention price, discounts, or shipping. Mention how the product feels, a mood, or an unexpected detail. Wrap ONE short evocative phrase (2–4 words) in *asterisks* — the UI renders it as a coral highlight. 30–55 words total. Return only the quote, no quotation marks, no preamble.
+
+Example tone: I've been a little obsessed with this one — it's got a kind of *slow-burn energy* I wasn't expecting. Come see.
+
+${productContext}`
+      const retryPrompt = `Return ONE short first-person quote in a warm, cheeky voice about this product. 2–3 sentences, 30–55 words. Wrap one short phrase in *asterisks*. No preamble, no quote marks.\n\n${productContext}`
+
+      const text = await generate(primaryPrompt, 512)
+      const cleaned = text.replace(/^["']|["']$/g, '').trim()
+      if (cleaned.length >= 30 && cleaned.includes('*')) return { type, content: cleaned }
+
+      const retried = await generate(retryPrompt, 512)
+      const cleanedRetry = retried.replace(/^["']|["']$/g, '').trim()
+      if (cleanedRetry.length >= 30) return { type, content: cleanedRetry }
+
+      return { type, content: `I've been a little obsessed with this one — it's got a kind of *quiet magic* I wasn't expecting. Come see.` }
+    }
+
+    case 'editorial_caption': {
+      const primaryPrompt = `Write a 2–4 word poetic nickname for this product using the format "Mood · the Thing". Short, evocative, a little mysterious. Never use the literal brand or product name.
+
+Examples: "Slowburn · the Hush" | "Quiet Storm · the Velvet" | "Featherlight · the Whisper"
+
+Return only the caption, no quotes, no preamble.\n\n${productContext}`
+      const retryPrompt = `Return ONLY a short caption formatted as "Mood · the Thing". 2–4 words. No preamble, no quotes.\n\n${productContext}`
+
+      const text = await generate(primaryPrompt, 128, MODEL_FAST)
+      const cleaned = text.replace(/^["']|["']$/g, '').trim().split('\n')[0]?.trim() ?? ''
+      if (cleaned.length >= 4 && cleaned.length <= 40) return { type, content: cleaned }
+
+      const retried = await generate(retryPrompt, 128, MODEL_FAST)
+      const cleanedRetry = retried.replace(/^["']|["']$/g, '').trim().split('\n')[0]?.trim() ?? ''
+      if (cleanedRetry.length >= 4 && cleanedRetry.length <= 40) return { type, content: cleanedRetry }
+
+      return { type, content: `Quiet Magic · the Pick` }
+    }
+
+    case 'price_commentary': {
+      const primaryPrompt = `Write a short, confident phrase about this product's price tag — 4–8 words. Assume the price is MAP-restricted (we can't advertise a discount or say "free shipping"). Tone: unbothered, tasteful, a little dry. Never use: %, "sale", "off", "free shipping", "deal", numbers.
+
+Examples: "the price is the price" | "priced exactly where it should be" | "no games — just the good stuff" | "worth every quiet penny"
+
+Return only the phrase, no quotes, no preamble.\n\n${productContext}`
+      const retryPrompt = `Return ONE short phrase (4–8 words) about a MAP-restricted price. No numbers, no %, no "sale", no "free shipping". No quotes, no preamble.\n\n${productContext}`
+
+      const text = await generate(primaryPrompt, 128, MODEL_FAST)
+      const cleaned = text.replace(/^["']|["']$/g, '').trim().split('\n')[0]?.trim() ?? ''
+      if (cleaned.length >= 6 && cleaned.length <= 60) return { type, content: cleaned }
+
+      const retried = await generate(retryPrompt, 128, MODEL_FAST)
+      const cleanedRetry = retried.replace(/^["']|["']$/g, '').trim().split('\n')[0]?.trim() ?? ''
+      if (cleanedRetry.length >= 6 && cleanedRetry.length <= 60) return { type, content: cleanedRetry }
+
+      return { type, content: `the price is the price — worth it` }
+    }
+
     default:
       throw new Error(`Unknown copy type: ${type as string}`)
   }

@@ -413,6 +413,8 @@ export async function action({ request }: ActionFunctionArgs) {
       const dealPrice  = parseFloat((form.get('dealPrice') as string) || '0')
       const msrp       = parseFloat((form.get('msrp') as string) || '0')
       const editId     = form.get('editId') as string | null
+      const templateRaw = (form.get('template') as string) || 'default'
+      const template: 'default' | 'editorial' = templateRaw === 'editorial' ? 'editorial' : 'default'
 
       if (!rawDesc?.trim()) return { ok: false, error: 'No original description — paste the raw product description and Save it first.' }
 
@@ -420,15 +422,27 @@ export async function action({ request }: ActionFunctionArgs) {
       const productContext = { title: seoTitle, brand, description: rawDesc, categories, dealPrice, msrp }
 
       const specsResult = await generateCopy({ type: 'specifications', product: productContext })
-      const [taglineResult, storyResult, bothWaysResult, bulletsResult, seoMetaResult, boxContentsResult] =
-        await Promise.all([
-          generateCopy({ type: 'tagline',      product: productContext }),
-          generateCopy({ type: 'full_story',   product: productContext }),
-          generateCopy({ type: 'both_ways',    product: productContext }),
-          generateCopy({ type: 'bullets',      product: productContext }),
-          generateCopy({ type: 'seo_meta',     product: productContext }),
-          generateCopy({ type: 'box_contents', product: productContext }),
-        ])
+      const corePromises = Promise.all([
+        generateCopy({ type: 'tagline',      product: productContext }),
+        generateCopy({ type: 'full_story',   product: productContext }),
+        generateCopy({ type: 'both_ways',    product: productContext }),
+        generateCopy({ type: 'bullets',      product: productContext }),
+        generateCopy({ type: 'seo_meta',     product: productContext }),
+        generateCopy({ type: 'box_contents', product: productContext }),
+      ])
+
+      const editorialPromises = template === 'editorial'
+        ? Promise.all([
+            generateCopy({ type: 'emma_quote',         product: productContext }),
+            generateCopy({ type: 'editorial_caption', product: productContext }),
+            generateCopy({ type: 'price_commentary',  product: productContext }),
+          ])
+        : Promise.resolve(null)
+
+      const [
+        [taglineResult, storyResult, bothWaysResult, bulletsResult, seoMetaResult, boxContentsResult],
+        editorialResults,
+      ] = await Promise.all([corePromises, editorialPromises])
 
       const tagline     = Array.isArray(taglineResult.content) ? (taglineResult.content[0] ?? '') : taglineResult.content as string
       const fullStory   = storyResult.content as string
@@ -445,6 +459,12 @@ export async function action({ request }: ActionFunctionArgs) {
         worksForHim: bothWays.forHim, worksForHer: bothWays.forHer,
         featureBullets: bullets, seoMetaDescription: seoMeta,
         specifications: specs, boxContents,
+        template,
+        ...(editorialResults ? {
+          emmaQuote:         editorialResults[0].content as string,
+          editorialCaption:  editorialResults[1].content as string,
+          priceCommentary:   editorialResults[2].content as string,
+        } : {}),
       })
 
       return redirect(editId ? `/admin/deals?edit=${editId}` : '/admin/deals')
@@ -524,15 +544,50 @@ function RawDescriptionPanel({ deal, categories, editId }: {
 }) {
   const saveFetcher     = useFetcher<{ ok: boolean }>()
   const generateFetcher = useFetcher<{ ok: boolean; error?: string }>()
+  const templateFetcher = useFetcher<{ ok: boolean }>()
   const textareaRef     = useRef<HTMLTextAreaElement>(null)
+  const [template, setTemplate] = useState<'default' | 'editorial'>(deal.template ?? 'default')
   const hasSaved        = saveFetcher.state === 'idle' && saveFetcher.data?.ok === true
   const genError        = generateFetcher.data && 'error' in generateFetcher.data ? (generateFetcher.data as { error: string }).error : null
+  const templateSaving  = templateFetcher.state === 'submitting'
+  const templateSaved   = templateFetcher.state === 'idle' && templateFetcher.data?.ok === true
+
+  const handleTemplateChange = (next: 'default' | 'editorial') => {
+    setTemplate(next)
+    const fd = new FormData()
+    fd.set('intent', 'save-field')
+    fd.set('productId', deal.shopifyProductId)
+    fd.set('key', 'template')
+    fd.set('type', 'single_line_text_field')
+    fd.set('value', next)
+    templateFetcher.submit(fd, { method: 'post' })
+  }
 
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
       <h3 className="font-semibold text-brand-charcoal" style={{ fontFamily: 'var(--font-display)' }}>
         Raw Description
       </h3>
+
+      {/* Template selector — controls which homepage hero renders */}
+      <div className="bg-brand-cream rounded-xl border border-amber-200 px-4 py-3 flex items-center gap-3">
+        <label className="text-xs font-bold text-brand-charcoal/70 uppercase tracking-wider shrink-0" htmlFor="template-select">
+          Homepage template
+        </label>
+        <select
+          id="template-select"
+          value={template}
+          onChange={e => handleTemplateChange(e.target.value as 'default' | 'editorial')}
+          className="flex-1 border border-brand-mist rounded-lg px-3 py-1.5 text-sm text-brand-charcoal bg-white focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+        >
+          <option value="default">Default — price-led hero</option>
+          <option value="editorial">Editorial — Emma quote hero (best for MAP-restricted)</option>
+        </select>
+        <span className="text-xs text-brand-charcoal/50 shrink-0 min-w-[60px] text-right">
+          {templateSaving ? 'Saving…' : templateSaved ? '✓ Saved' : ''}
+        </span>
+      </div>
+
       <saveFetcher.Form method="post" className="flex flex-col gap-2">
         <input type="hidden" name="intent"    value="save-raw-description" />
         <input type="hidden" name="productId" value={deal.shopifyProductId} />
@@ -561,6 +616,7 @@ function RawDescriptionPanel({ deal, categories, editId }: {
         <input type="hidden" name="dealPrice"       value={deal.dealPrice} />
         <input type="hidden" name="msrp"            value={deal.msrp} />
         <input type="hidden" name="editId"          value={editId} />
+        <input type="hidden" name="template"        value={template} />
         <button
           type="submit"
           disabled={generateFetcher.state !== 'idle' || !deal.rawDescription}
@@ -1479,6 +1535,19 @@ export default function AdminDealsPage() {
                         <SaveableField label="What's In The Box" intent="save-box-contents" defaultValue={(editorData.deal.boxContents ?? []).join('\n')} productId={editorData.deal.shopifyProductId} rows={4} hint="One item per line" />
                         <SaveableField label="Feature Bullets" intent="save-bullets" defaultValue={(editorData.deal.featureBullets ?? []).join('\n')} productId={editorData.deal.shopifyProductId} rows={4} hint="One bullet per line" />
                         <SaveableField label="SEO Meta Description" fieldKey="seo_meta_description" fieldType="multi_line_text_field" defaultValue={editorData.deal.metaDescription} productId={editorData.deal.shopifyProductId} rows={2} />
+
+                        {editorData.deal.template === 'editorial' && (
+                          <>
+                            <div className="pt-3 mt-3 border-t border-brand-mist">
+                              <p className="text-xs font-bold text-brand-purple uppercase tracking-wider mb-3">
+                                Editorial template fields
+                              </p>
+                            </div>
+                            <SaveableField label="Emma Quote" fieldKey="emma_quote" fieldType="multi_line_text_field" defaultValue={editorData.deal.emmaQuote ?? ''} productId={editorData.deal.shopifyProductId} rows={4} hint="Wrap one phrase in *asterisks* to render it in coral." />
+                            <SaveableField label="Editorial Caption" fieldKey="editorial_caption" defaultValue={editorData.deal.editorialCaption ?? ''} productId={editorData.deal.shopifyProductId} rows={2} hint='2–4 word poetic nickname, e.g. "Slowburn · the Hush".' />
+                            <SaveableField label="Price Commentary" fieldKey="price_commentary" defaultValue={editorData.deal.priceCommentary ?? ''} productId={editorData.deal.shopifyProductId} rows={2} hint='Replaces "free shipping" line. No %, no "sale".' />
+                          </>
+                        )}
                       </div>
                     )}
                   </div>

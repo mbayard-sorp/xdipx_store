@@ -185,6 +185,8 @@ export async function action({ request }: ActionFunctionArgs) {
       const categories = (form.get('categories') as string).split(',').filter(Boolean)
       const dealPrice  = parseFloat((form.get('dealPrice') as string) || '0')
       const msrp       = parseFloat((form.get('msrp') as string) || '0')
+      const templateRaw = (form.get('template') as string) || 'default'
+      const template: 'default' | 'editorial' = templateRaw === 'editorial' ? 'editorial' : 'default'
 
       if (!rawDesc?.trim()) return { ok: false, error: 'No original description — paste the raw product description and Save it first.' }
 
@@ -195,25 +197,33 @@ export async function action({ request }: ActionFunctionArgs) {
       // Extract specs first (sequential) so full_story can omit them
       const specsResult = await generateCopy({ type: 'specifications', product: productContext })
 
-      const [taglineResult, storyResult, bothWaysResult, bulletsResult, seoMetaResult, boxContentsResult] =
-        await Promise.all([
-          generateCopy({ type: 'tagline',      product: productContext }),
-          generateCopy({ type: 'full_story',   product: productContext }),
-          generateCopy({ type: 'both_ways',    product: productContext }),
-          generateCopy({ type: 'bullets',      product: productContext }),
-          generateCopy({ type: 'seo_meta',     product: productContext }),
-          generateCopy({ type: 'box_contents', product: productContext }),
-        ])
+      const corePromises = [
+        generateCopy({ type: 'tagline',      product: productContext }),
+        generateCopy({ type: 'full_story',   product: productContext }),
+        generateCopy({ type: 'both_ways',    product: productContext }),
+        generateCopy({ type: 'bullets',      product: productContext }),
+        generateCopy({ type: 'seo_meta',     product: productContext }),
+        generateCopy({ type: 'box_contents', product: productContext }),
+      ]
 
-      const tagline     = Array.isArray(taglineResult.content)
-        ? (taglineResult.content[0] ?? '')
-        : taglineResult.content as string
-      const fullStory   = storyResult.content as string
-      const bothWays    = bothWaysResult.content as { forHim: string; forHer: string }
-      const bullets     = bulletsResult.content as string[]
-      const seoMeta     = seoMetaResult.content as string
+      const editorialPromises = template === 'editorial' ? [
+        generateCopy({ type: 'emma_quote',        product: productContext }),
+        generateCopy({ type: 'editorial_caption', product: productContext }),
+        generateCopy({ type: 'price_commentary',  product: productContext }),
+      ] : []
+
+      const allResults = await Promise.all([...corePromises, ...editorialPromises])
+      const [taglineResult, storyResult, bothWaysResult, bulletsResult, seoMetaResult, boxContentsResult, emmaResult, captionResult, priceResult] = allResults
+
+      const tagline     = Array.isArray(taglineResult!.content)
+        ? (taglineResult!.content[0] ?? '')
+        : taglineResult!.content as string
+      const fullStory   = storyResult!.content as string
+      const bothWays    = bothWaysResult!.content as { forHim: string; forHer: string }
+      const bullets     = bulletsResult!.content as string[]
+      const seoMeta     = seoMetaResult!.content as string
       const specs       = specsResult.content as string
-      const boxContents = boxContentsResult.content as string[]
+      const boxContents = boxContentsResult!.content as string[]
 
       const numericId = productId.replace('gid://shopify/Product/', '')
       await pushProductToShopify({
@@ -227,6 +237,12 @@ export async function action({ request }: ActionFunctionArgs) {
         seoMetaDescription: seoMeta,
         specifications: specs,
         boxContents,
+        template,
+        ...(template === 'editorial' ? {
+          emmaQuote:         emmaResult?.content    as string,
+          editorialCaption:  captionResult?.content as string,
+          priceCommentary:   priceResult?.content   as string,
+        } : {}),
       })
 
       const currentDate = form.get('currentDate') as string | null
@@ -320,11 +336,26 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
 }) {
   const saveFetcher     = useFetcher<{ ok: boolean }>()
   const generateFetcher = useFetcher<{ ok: boolean; error?: string }>()
+  const templateFetcher = useFetcher<{ ok: boolean }>()
   const textareaRef     = useRef<HTMLTextAreaElement>(null)
+  const [template, setTemplate] = useState<'default' | 'editorial'>(deal.template ?? 'default')
 
   const isSaving     = saveFetcher.state === 'submitting'
   const saved        = saveFetcher.state === 'idle' && saveFetcher.data?.ok === true
   const isGenerating = generateFetcher.state === 'submitting'
+  const templateSaving = templateFetcher.state === 'submitting'
+  const templateSaved  = templateFetcher.state === 'idle' && templateFetcher.data?.ok === true
+
+  const handleTemplateChange = (next: 'default' | 'editorial') => {
+    setTemplate(next)
+    const fd = new FormData()
+    fd.set('intent', 'save-field')
+    fd.set('productId', deal.shopifyProductId)
+    fd.set('key', 'template')
+    fd.set('value', next)
+    fd.set('type', 'single_line_text_field')
+    templateFetcher.submit(fd, { method: 'post' })
+  }
 
   const placeholder = '(No original description stored — re-run the pipeline to import it, or paste the raw product description here and click Save)'
 
@@ -338,6 +369,25 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
         <p className="text-xs text-brand-charcoal/50 mt-1">
           Raw text from Nalpac feed. Edit if needed, then click "Generate All Fields" to regenerate all copy from this source.
         </p>
+      </div>
+
+      {/* Template selector — controls which homepage hero renders */}
+      <div className="bg-white rounded-xl border border-amber-200 px-4 py-3 flex items-center gap-3">
+        <label className="text-xs font-bold text-brand-charcoal/70 uppercase tracking-wider shrink-0" htmlFor="template-select">
+          Homepage template
+        </label>
+        <select
+          id="template-select"
+          value={template}
+          onChange={e => handleTemplateChange(e.target.value as 'default' | 'editorial')}
+          className="flex-1 border border-brand-mist rounded-lg px-3 py-1.5 text-sm text-brand-charcoal bg-white focus:outline-none focus:ring-2 focus:ring-brand-coral/30"
+        >
+          <option value="default">Default — price-led hero</option>
+          <option value="editorial">Editorial — Emma quote hero (best for MAP-restricted)</option>
+        </select>
+        <span className="text-xs text-brand-charcoal/50 shrink-0 min-w-[60px] text-right">
+          {templateSaving ? 'Saving…' : templateSaved ? '✓ Saved' : ''}
+        </span>
       </div>
 
       {/* Editable description */}
@@ -385,6 +435,7 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
         <input type="hidden" name="categories"     value={categories.join(',')} />
         <input type="hidden" name="dealPrice"      value={deal.dealPrice} />
         <input type="hidden" name="msrp"           value={deal.msrp} />
+        <input type="hidden" name="template"       value={template} />
         <button
           type="submit"
           disabled={isGenerating}
@@ -1502,6 +1553,41 @@ function DealManager() {
                   productId={deal.shopifyProductId}
                   rows={2}
                 />
+
+                {deal.template === 'editorial' && (
+                  <>
+                    <div className="bg-brand-mist/50 border border-brand-purple/20 rounded-xl px-4 py-2 text-xs font-bold text-brand-purple uppercase tracking-wider">
+                      Editorial Template Fields
+                    </div>
+                    <SaveableField
+                      label="Emma's Quote"
+                      hint="Handwritten-style quote on the editorial hero. Wrap ONE phrase in *asterisks* to highlight it in coral."
+                      fieldKey="emma_quote"
+                      fieldType="multi_line_text_field"
+                      defaultValue={deal.emmaQuote ?? ''}
+                      productId={deal.shopifyProductId}
+                      rows={4}
+                    />
+                    <SaveableField
+                      label="Editorial Caption"
+                      hint={`Short poetic caption shown above the price. Format: "Mood · the Thing".`}
+                      fieldKey="editorial_caption"
+                      fieldType="single_line_text_field"
+                      defaultValue={deal.editorialCaption ?? ''}
+                      productId={deal.shopifyProductId}
+                      rows={1}
+                    />
+                    <SaveableField
+                      label="Price Commentary"
+                      hint="Replaces 'free shipping' on the editorial hero — tasteful phrase about price (MAP-restricted safe)."
+                      fieldKey="price_commentary"
+                      fieldType="single_line_text_field"
+                      defaultValue={deal.priceCommentary ?? ''}
+                      productId={deal.shopifyProductId}
+                      rows={1}
+                    />
+                  </>
+                )}
               </CollapsibleSection>
             </DraggableSection>
           ),

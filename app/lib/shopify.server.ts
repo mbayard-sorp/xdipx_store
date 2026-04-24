@@ -89,6 +89,10 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "mood_image_url" }
     { namespace: "xdipx", key: "accessory_product_ids" }
     { namespace: "xdipx", key: "specifications" }
+    { namespace: "xdipx", key: "template" }
+    { namespace: "xdipx", key: "emma_quote" }
+    { namespace: "xdipx", key: "editorial_caption" }
+    { namespace: "xdipx", key: "price_commentary" }
     { namespace: "custom", key: "original_description" }
   ]) {
     namespace key value
@@ -338,6 +342,13 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     tags: node.tags ?? [],
     accessoryProductIds: parseMetafieldJSON<string[]>(mf, 'accessory_product_ids', []),
     ...(parseMetafield(mf, 'specifications') ? { specifications: parseMetafield(mf, 'specifications') } : {}),
+    ...((): { template?: 'default' | 'editorial' } => {
+      const t = parseMetafield(mf, 'template')
+      return t === 'editorial' || t === 'default' ? { template: t } : {}
+    })(),
+    ...(parseMetafield(mf, 'emma_quote') ? { emmaQuote: parseMetafield(mf, 'emma_quote') } : {}),
+    ...(parseMetafield(mf, 'editorial_caption') ? { editorialCaption: parseMetafield(mf, 'editorial_caption') } : {}),
+    ...(parseMetafield(mf, 'price_commentary') ? { priceCommentary: parseMetafield(mf, 'price_commentary') } : {}),
     metaDescription: parseMetafield(mf, 'seo_meta_description'),
     ...(parseMetafield(mf, 'original_description') ? { rawDescription: parseMetafield(mf, 'original_description') } : {}),
     ...(parseMetafield(mf, 'deal_score') ? { dealScore: parseFloat(parseMetafield(mf, 'deal_score')) } : {}),
@@ -1232,6 +1243,10 @@ export interface ProductPageDoc {
   seoMetaDescription?: string | undefined
   specifications?: string | undefined
   rawDescription?: string | undefined
+  template?: 'default' | 'editorial' | undefined
+  emmaQuote?: string | undefined
+  editorialCaption?: string | undefined
+  priceCommentary?: string | undefined
 }
 
 export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
@@ -1319,6 +1334,10 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   add('deal_score',           doc.dealScore?.toString(),        'number_decimal')
   add('seo_meta_description', doc.seoMetaDescription,           'multi_line_text_field',  true)
   add('specifications',       doc.specifications,               'multi_line_text_field',  true)
+  add('template',             doc.template,                     'single_line_text_field')
+  add('emma_quote',           doc.emmaQuote,                    'multi_line_text_field')
+  add('editorial_caption',    doc.editorialCaption,             'single_line_text_field')
+  add('price_commentary',     doc.priceCommentary,              'single_line_text_field')
 
   // Store original Nalpac description in the custom namespace metafield
   if (doc.rawDescription) {
