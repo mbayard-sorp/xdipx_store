@@ -212,7 +212,7 @@ export function ProductImageGallery({
       {/* Main image / video */}
       <div
         ref={containerRef}
-        className={`relative rounded-2xl overflow-hidden shadow-sm select-none aspect-square ${isPortrait && isVideoActive ? 'bg-ink' : 'bg-cream-2'}`}
+        className={`relative rounded-[8px] overflow-hidden shadow-sm select-none aspect-square ${isPortrait && isVideoActive ? 'bg-ink' : 'bg-cream-2'}`}
       >
         {/* Video element — always mounted when a video is active so videoRef
             is available for imperative play() inside the click handler */}
@@ -472,7 +472,7 @@ function ThumbnailStrip({
             onMouseLeave={() => onHover(null)}
             onClick={() => onSelect(i)}
             className={[
-              'relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 transition-all',
+              'relative shrink-0 w-16 h-16 rounded-[8px] overflow-hidden border-2 transition-all',
               displayIndex === i
                 ? 'border-coral'
                 : 'border-transparent opacity-60 hover:opacity-100',

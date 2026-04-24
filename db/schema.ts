@@ -204,6 +204,17 @@ export const pdpDialVotes = pgTable('pdp_dial_votes', {
   productIdx:    index('pdp_dial_votes_product_idx').on(t.shopifyProductId),
 }))
 
+export const pdpProductVotes = pgTable('pdp_product_votes', {
+  id:               serial('id').primaryKey(),
+  shopifyProductId: varchar('shopify_product_id', { length: 64 }).notNull(),
+  customerGid:      varchar('customer_gid', { length: 60 }).notNull(),
+  vote:             integer('vote').notNull(),
+  createdAt:        timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  voteUnique: uniqueIndex('pdp_product_votes_uniq').on(t.shopifyProductId, t.customerGid),
+  productIdx: index('pdp_product_votes_product_idx').on(t.shopifyProductId),
+}))
+
 export const callLog = pgTable('call_log', {
   id:              serial('id').primaryKey(),
   callSid:         varchar('call_sid', { length: 64 }).notNull().unique(),

@@ -258,7 +258,6 @@ export async function upsertProductPage(params: {
   tagline?: string | undefined
   description?: string | undefined
   seoDescription?: string | undefined
-  featureBullets?: string[] | undefined
   category?: string | undefined
   price?: number | undefined
   compareAtPrice?: number | undefined
@@ -298,7 +297,6 @@ export async function upsertProductPage(params: {
   if (params.tagline !== undefined) searchFields.tagline = params.tagline
   if (params.description !== undefined) searchFields.description = params.description
   if (params.seoDescription !== undefined) searchFields.seoDescription = params.seoDescription
-  if (params.featureBullets !== undefined) searchFields.featureBullets = params.featureBullets
   if (params.category !== undefined) searchFields.category = params.category
   if (params.price !== undefined) searchFields.price = params.price
   if (params.compareAtPrice !== undefined) searchFields.compareAtPrice = params.compareAtPrice

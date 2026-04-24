@@ -83,10 +83,10 @@ export function WaitlistButton({ productHandle, className = '' }: WaitlistButton
           onClick={handleNotifyClick}
           disabled={isPending}
           className={[
-            'text-sm font-semibold px-4 py-2 rounded-full transition-all disabled:opacity-60',
+            'py-4 rounded-full font-bold text-lg transition-all disabled:opacity-60 shadow-md shadow-muted/20',
             showInput
-              ? 'shrink-0 bg-sage text-white hover:bg-sun'
-              : 'border-2 border-sage text-sage hover:bg-sage hover:text-white',
+              ? 'shrink-0 px-6 bg-muted text-white hover:opacity-90'
+              : 'flex-1 bg-muted text-white hover:opacity-90 hover:scale-[1.01]',
           ].join(' ')}
           style={{ fontFamily: 'var(--font-display)' }}
         >

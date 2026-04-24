@@ -7,7 +7,7 @@
  *   3. Find the next open scheduling slot (today + daysAhead)
  *   4. Find or create the Shopify product for the selected candidate
  *   5. Select 2-3 accessories via Claude
- *   6. Generate all AI copy (tagline, full story, both ways, bullets, email subjects, SEO)
+ *   6. Generate all AI copy (tagline, full story, both ways, email subjects, SEO)
  *   7. Push all fields to Shopify as metafields
  *   8. Insert a dealHistory row with status: draft
  *
@@ -87,7 +87,7 @@ function inferCategory(categories: string[]): string {
 
 function validateCopyFields(fields: {
   tagline: string; fullStory: string; forHim: string; forHer: string
-  specs: string; boxContents: string[]; seoMeta: string; bullets: string[]
+  specs: string; boxContents: string[]; seoMeta: string
 }) {
   if (!fields.tagline?.trim())               throw new Error('Copy generation failed: tagline is empty')
   if (!fields.fullStory?.includes('<p'))      throw new Error('Copy generation failed: fullStory missing HTML')
@@ -96,7 +96,6 @@ function validateCopyFields(fields: {
   if (!fields.specs?.trim())                 throw new Error('Copy generation failed: specifications is empty')
   if (!fields.boxContents.length)            throw new Error('Copy generation failed: boxContents is empty')
   if (!fields.seoMeta || fields.seoMeta.length < 50) throw new Error('Copy generation failed: seoMeta too short')
-  if (fields.bullets.length < 3)             throw new Error('Copy generation failed: fewer than 3 bullets')
 }
 
 // ─── Main orchestrator ─────────────────────────────────────────────────────
@@ -184,12 +183,11 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
     const specsResult = await generateCopy({ type: 'specifications', product: productContext })
 
     //    Step B: remaining copy in parallel (full_story knows specs are in a separate tab)
-    const [taglineResult, storyResult, bothWaysResult, bulletsResult, seoMetaResult, boxContentsResult] =
+    const [taglineResult, storyResult, bothWaysResult, seoMetaResult, boxContentsResult] =
       await Promise.all([
         generateCopy({ type: 'tagline',      product: productContext }),
         generateCopy({ type: 'full_story',   product: productContext }),
         generateCopy({ type: 'both_ways',    product: productContext }),
-        generateCopy({ type: 'bullets',      product: productContext }),
         generateCopy({ type: 'seo_meta',     product: productContext }),
         generateCopy({ type: 'box_contents', product: productContext }),
       ])
@@ -201,13 +199,12 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
     const bothWays   = bothWaysResult.content as { forHim: string; forHer: string }
     const forHim     = bothWays.forHim
     const forHer     = bothWays.forHer
-    const bullets    = bulletsResult.content as string[]
     const seoMeta    = seoMetaResult.content as string
     const specs      = specsResult.content as string
     const boxContents = boxContentsResult.content as string[]
 
-    // Validate all 8 required fields before touching Shopify
-    validateCopyFields({ tagline, fullStory, forHim, forHer, specs, boxContents, seoMeta, bullets })
+    // Validate required fields before touching Shopify
+    validateCopyFields({ tagline, fullStory, forHim, forHer, specs, boxContents, seoMeta })
 
     // 8. Push all fields to Shopify
     await pushProductToShopify({
@@ -219,7 +216,6 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
       fullStory,
       worksForHim:      forHim,
       worksForHer:      forHer,
-      featureBullets:   bullets,
       category:         inferCategory(chosen.categories),
       dealStatus:       'draft',
       dealDate,

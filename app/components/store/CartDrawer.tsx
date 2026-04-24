@@ -348,6 +348,9 @@ function CartLineItem({ line }: { line: CartLine }) {
         {line.sellingPlanAllocation && (
           <p className="text-xs text-sage font-medium flex items-center gap-1">
             <RepeatIcon /> {line.sellingPlanAllocation.sellingPlan.name}
+            {line.sellingPlanAllocation.discountPct
+              ? ` · save ${line.sellingPlanAllocation.discountPct}%`
+              : ''}
           </p>
         )}
         <p className="text-sm font-semibold text-coral">

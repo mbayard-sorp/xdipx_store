@@ -58,7 +58,6 @@ export async function action({ request }: ActionFunctionArgs) {
     fullStory:        body['fullStory']        as string | undefined,
     worksForHim:      body['worksForHim']      as string | undefined,
     worksForHer:      body['worksForHer']      as string | undefined,
-    featureBullets:   body['featureBullets']   as string[] | undefined,
     moodImageUrl:     body['moodImageUrl']     as string | undefined,
     category:         body['category']         as string | undefined,
     dealStatus:       body['dealStatus']       as string | undefined,

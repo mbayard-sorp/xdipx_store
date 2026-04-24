@@ -117,6 +117,13 @@ export const KV_KEYS = {
   collectionCursor:       (handle: string, page: number) => `vault:cursor:${handle}:p${page}`,
   // v2 redesign — dial vote aggregates (5-min TTL)
   dialAggregate:          (shopifyProductId: string) => `dial:agg:${shopifyProductId}`,
+  // PDP product-level aggregate vote (thumbs up/down on the whole dial)
+  productVoteAggregate:   (shopifyProductId: string) => `dial:product-agg:${shopifyProductId}`,
+  // PDP contextual Emma aside (24h TTL; guest/empty inputs collapse to one key per product)
+  emmaAside:              (productId: string, userBucket: string, cartHash: string, browseHash: string) =>
+                          `emmaAside:${productId}:${userBucket}:${cartHash}:${browseHash}`,
+  emmaAsideLock:          (productId: string) => `emmaAside:lock:${productId}`,
+  emmaAsideDailyCount:    (utcDate: string) => `emmaAside:dailyCount:${utcDate}`,
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────

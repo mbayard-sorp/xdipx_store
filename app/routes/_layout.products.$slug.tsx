@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { Suspense, useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { useLoaderData, useOutletContext, useFetcher, useSearchParams } from 'react-router'
+import { Await, data, useLoaderData, useOutletContext, useFetcher, useSearchParams } from 'react-router'
 import { ProductImageGallery, type GalleryItem } from '~/components/store/ProductImageGallery'
+import { StarRating } from '~/components/reviews/StarRating'
 import {
   getDealByHandle, getProductsByTag,
   getCollectionProducts, getProductsByHandles,
@@ -11,7 +12,20 @@ import { getProductPageBlocks } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
-import { getDialAggregates, type DialAggregate } from '~/lib/dial-votes.server'
+import {
+  getProductVoteAggregate,
+  getCustomerProductVote,
+  type ProductVoteAggregate,
+} from '~/lib/dial-votes.server'
+import { getCustomerToken } from '~/lib/customer-session.server'
+import { customerAPI } from '~/lib/customer-api.server'
+import { getCartIdFromCookie } from '~/lib/cart.server'
+import { getCart } from '~/lib/shopify.server'
+import { getEmmaAside, type EmmaAsideResult } from '~/lib/emma-aside.server'
+import { parseBrowseCookie, buildBrowseCookie } from '~/lib/browse-history.server'
+import { EmmaContextualAside } from '~/components/store/EmmaContextualAside'
+import { EmmaContextualAsideSkeleton } from '~/components/store/EmmaContextualAsideSkeleton'
+import { getFallbackAside } from '~/lib/emma-aside-templates'
 import BundleHero from '~/components/store/BundleHero'
 import BundleSaveCard from '~/components/store/BundleSaveCard'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
@@ -25,7 +39,8 @@ import { VariantSelector }        from '~/components/store/VariantSelector'
 import { SocialProofBar }         from '~/components/store/SocialProofBar'
 import { StockIndicator }         from '~/components/store/StockIndicator'
 import { WaitlistButton }         from '~/components/store/WaitlistButton'
-import { SubscriptionSelector, getSubscriptionPrice } from '~/components/store/SubscriptionSelector'
+import { SubscriptionSelector } from '~/components/store/SubscriptionSelector'
+import { getSubscriptionPrice, getBestSubscriptionOffer } from '~/lib/selling-plan'
 import { EmailSubscribe }         from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }   from '~/components/cms/ContentBlockRenderer'
 import type { Product } from '~/types'
@@ -33,6 +48,7 @@ import type { ProductCarouselBlock } from '~/types/cms'
 import { trackViewItem, trackAddToCart } from '~/lib/analytics.client'
 import { ShareButtons } from '~/components/common/ShareButtons'
 import { HeartButton } from '~/components/store/HeartButton'
+import { Toast } from '~/components/account/Toast'
 import { buildSocialMeta } from '~/lib/social-meta'
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
@@ -60,7 +76,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       carouselProductMap: {},
       fbtProducts: [],
       pairsWithItems: [] as PairsWithItem[],
-      dialAggregates: {} as Record<string, DialAggregate>,
+      productVoteAggregate: { agrees: 0, disagrees: 0, agreePct: 0 } as ProductVoteAggregate,
+      customerProductVote: null as (1 | -1 | null),
+      isLoggedIn: false,
       companionBundle: null,
       reviews: [],
       reviewTotal: 0,
@@ -68,6 +86,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       reviewSort: 'newest',
       reviewFilter: 'all',
       aggregate: null,
+      emmaAsidePromise: Promise.resolve<EmmaAsideResult>({ text: '', source: 'fallback' }),
     }
   }
 
@@ -82,13 +101,30 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const hasDial = !!(deal.sensationDial && deal.productTypeDial)
   const hasPairing = !!(deal.pairingWhy && Object.keys(deal.pairingWhy).length > 0 && deal.accessoryProductIds.length > 0)
 
-  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, dialAggregates, pairProducts] = await Promise.all([
+  // Resolve current customer (for sticky vote state + gating). Failures here
+  // are non-fatal — PDP still renders for anonymous users.
+  const customerToken = await getCustomerToken(request)
+  let customerGid: string | null = null
+  if (customerToken) {
+    try {
+      const profile = await customerAPI(customerToken).getProfile()
+      customerGid = profile?.id ?? null
+    } catch { /* treat as anonymous */ }
+  }
+  const isLoggedIn = !!customerGid
+
+  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts] = await Promise.all([
     getProductPageBlocks(slug),
     getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
     getFrequentlyBoughtWith(slug, 4),
     getBundleCompanionFor(slug),
-    hasDial ? getDialAggregates(deal.shopifyProductId) : Promise.resolve({} as Record<string, DialAggregate>),
+    hasDial
+      ? getProductVoteAggregate(deal.shopifyProductId)
+      : Promise.resolve({ agrees: 0, disagrees: 0, agreePct: 0 } as ProductVoteAggregate),
+    hasDial && customerGid
+      ? getCustomerProductVote(deal.shopifyProductId, customerGid)
+      : Promise.resolve(null as (1 | -1 | null)),
     hasPairing ? getProductsByIds(deal.accessoryProductIds) : Promise.resolve([]),
   ])
 
@@ -122,6 +158,45 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .filter((x): x is PairsWithItem => x !== null)
         .slice(0, 3)
     : []
+
+  // ── Emma contextual aside (deferred: returned un-awaited for streaming) ───
+  // Gather extra context: cart lines + recently-browsed titles.
+  const cartId = getCartIdFromCookie(request)
+  const cartLinesPromise = cartId
+    ? getCart(cartId).then(c => (c?.lines ?? []).map(l => ({
+        title:    l.merchandise.title,
+        quantity: l.quantity,
+      })))
+    : Promise.resolve([] as Array<{ title: string; quantity: number }>)
+
+  const previousBrowseIds = parseBrowseCookie(request)
+  // Strip the current product from the browse context (we're looking at it now).
+  const otherBrowseIds = previousBrowseIds.filter(id => id !== deal.shopifyProductId).slice(0, 4)
+  const browseProductsPromise = otherBrowseIds.length > 0
+    ? getProductsByIds(otherBrowseIds).then(list => list.map(p => ({ title: p.title })))
+    : Promise.resolve([] as Array<{ title: string }>)
+
+  const emmaAsidePromise: Promise<EmmaAsideResult> = Promise.all([cartLinesPromise, browseProductsPromise])
+    .then(([cartLines, browseProducts]) =>
+      getEmmaAside({
+        product: {
+          id:               deal.id,
+          shopifyProductId: deal.shopifyProductId,
+          seoTitle:         deal.seoTitle,
+          brand:            deal.brand,
+          tagline:          deal.tagline,
+          ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
+        },
+        cartLines,
+        browseProducts,
+        pairsWithProducts: pairsWithItems.map(p => ({ title: p.title })),
+        userGid:           customerGid,
+      }),
+    )
+    .catch((): EmmaAsideResult => ({
+      text:   getFallbackAside({ id: deal.id, ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}) }),
+      source: 'fallback',
+    }))
 
   // Resolve Shopify products for any productCarousel blocks
   const carouselBlocks = pdpBlocks.filter(
@@ -160,23 +235,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
   }
 
-  return {
-    type: 'product' as const,
-    deal,
-    pdpBlocks,
-    carouselProductMap,
-    fbtProducts,
-    pairsWithItems,
-    dialAggregates,
-    companionBundle,
-    reviews:       reviewData.reviews,
-    reviewTotal:   reviewData.total,
-    reviewPage,
-    reviewSort,
-    reviewFilter,
-    aggregate:     aggregate ?? null,
-    bundle: null,
-  }
+  const browseCookieHeader = buildBrowseCookie(deal.shopifyProductId, previousBrowseIds)
+
+  return data(
+    {
+      type: 'product' as const,
+      deal,
+      pdpBlocks,
+      carouselProductMap,
+      fbtProducts,
+      pairsWithItems,
+      productVoteAggregate,
+      customerProductVote,
+      isLoggedIn,
+      companionBundle,
+      reviews:       reviewData.reviews,
+      reviewTotal:   reviewData.total,
+      reviewPage,
+      reviewSort,
+      reviewFilter,
+      aggregate:     aggregate ?? null,
+      bundle: null,
+      emmaAsidePromise,
+    },
+    { headers: { 'Set-Cookie': browseCookieHeader } },
+  )
 }
 
 // ─── Meta ─────────────────────────────────────────────────────────────────────
@@ -259,7 +342,9 @@ function ProductPage() {
   const carouselProductMap = loaderData.carouselProductMap
   const fbtProducts = loaderData.fbtProducts
   const pairsWithItems = loaderData.pairsWithItems
-  const dialAggregatesLoaded = loaderData.dialAggregates
+  const productVoteAggregateLoaded = loaderData.productVoteAggregate
+  const customerProductVoteLoaded  = loaderData.customerProductVote
+  const isLoggedIn                 = loaderData.isLoggedIn
   const companionBundle = loaderData.companionBundle
   const reviews = loaderData.reviews
   const reviewTotal = loaderData.reviewTotal
@@ -267,27 +352,67 @@ function ProductPage() {
   const reviewSort = loaderData.reviewSort
   const reviewFilter = loaderData.reviewFilter
   const aggregate = loaderData.aggregate
+  const emmaAsidePromise = loaderData.emmaAsidePromise
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
-  const voteFetcher = useFetcher<{ ok: boolean; aggregates?: Record<string, DialAggregate>; error?: string }>()
-  const [dialAggregates, setDialAggregates] = useState<Record<string, DialAggregate>>(dialAggregatesLoaded)
-  const isLoggedIn = typeof document !== 'undefined' && document.cookie.includes('customer_access_token')
+  const voteFetcher = useFetcher<{
+    ok: boolean
+    aggregate?: ProductVoteAggregate
+    loginUrl?: string
+    error?: string
+  }>()
+  const [productVoteAggregate, setProductVoteAggregate] = useState<ProductVoteAggregate>(productVoteAggregateLoaded)
+  const [customerVote, setCustomerVote] = useState<1 | -1 | null>(customerProductVoteLoaded)
+  const [voteToast, setVoteToast] = useState<{ vote: 1 | -1; key: number } | null>(null)
 
   useEffect(() => {
-    if (voteFetcher.state === 'idle' && voteFetcher.data?.ok && voteFetcher.data.aggregates) {
-      setDialAggregates(voteFetcher.data.aggregates)
+    if (voteFetcher.state !== 'idle' || !voteFetcher.data) return
+    if (voteFetcher.data.ok && voteFetcher.data.aggregate) {
+      setProductVoteAggregate(voteFetcher.data.aggregate)
+      setVoteToast({ vote: customerVote ?? 1, key: Date.now() })
+      return
     }
-  }, [voteFetcher.state, voteFetcher.data])
+    // Guest tried to vote — bounce through login with pendingVote so we can
+    // replay after sign-in.
+    if (!voteFetcher.data.ok && voteFetcher.data.loginUrl) {
+      window.location.assign(voteFetcher.data.loginUrl)
+    }
+  }, [voteFetcher.state, voteFetcher.data, customerVote])
 
-  const handleDialVote = useCallback((dimension: string, vote: 1 | -1) => {
+  const submitProductVote = useCallback((vote: 1 | -1) => {
     const fd = new FormData()
+    fd.set('intent',           'product-vote')
     fd.set('shopifyProductId', deal.shopifyProductId)
-    fd.set('dimension',        dimension)
+    fd.set('handle',           deal.handle)
     fd.set('vote',             String(vote))
     voteFetcher.submit(fd, { method: 'post', action: '/api/pdp-vote' })
-  }, [deal.shopifyProductId, voteFetcher])
+  }, [deal.shopifyProductId, deal.handle, voteFetcher])
+
+  const handleAggregateVote = useCallback((vote: 1 | -1) => {
+    setCustomerVote(vote) // optimistic sticky state; reverts if 401 redirects away
+    submitProductVote(vote)
+  }, [submitProductVote])
 
   const [searchParams, setSearchParams] = useSearchParams()
+
+  // Replay a pending vote after guest sign-in: ?pendingVote=1|-1 is set by
+  // api.pdp-vote's 401 loginUrl and preserved through the login redirect.
+  const replayedRef = useRef(false)
+  useEffect(() => {
+    if (replayedRef.current || !isLoggedIn) return
+    const pending = searchParams.get('pendingVote')
+    if (pending !== '1' && pending !== '-1') return
+    const vote = pending === '1' ? 1 : -1
+    replayedRef.current = true
+    setCustomerVote(vote)
+    submitProductVote(vote)
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.delete('pendingVote')
+      return next
+    }, { replace: true })
+  }, [isLoggedIn, searchParams, setSearchParams, submitProductVote])
+
   const variants     = deal.variants ?? []
   const options      = deal.options  ?? []
   const multiVariant = variants.length > 1
@@ -360,6 +485,9 @@ function ProductPage() {
   const discount = deal.msrp > 0 && deal.msrp > price
     ? Math.round(((deal.msrp - price) / deal.msrp) * 100)
     : 0
+  const subscriptionOffer = !selectedPlanId
+    ? getBestSubscriptionOffer(deal.sellingPlanGroups, basePrice)
+    : null
 
   const worksFor: [boolean, boolean, boolean] = [
     deal.category === 'for-him'  || deal.category === 'both' || deal.category === 'couples',
@@ -416,92 +544,96 @@ function ProductPage() {
     <section className="max-w-6xl mx-auto px-4 py-8 relative">
       <div className="grid md:grid-cols-2 gap-8 lg:gap-12 items-start">
 
-        {/* ── Left: Media gallery ─────────────────────────────────────── */}
-        <ProductImageGallery
-          items={allMedia}
-          alt={deal.seoTitle}
-          activeIndex={activeImg}
-          onSelectIndex={setActiveImg}
-          shareOverlay={
-            <ShareButtons
-              url={`https://xdipx.com/products/${deal.handle}`}
-              title={deal.seoTitle}
-              image={deal.images[0]?.url ?? null}
-              variant="overlay"
-            />
-          }
-          heartOverlay={
-            <HeartButton
-              shopifyProductId={deal.shopifyProductId}
-              handle={deal.handle}
-              productTitle={deal.seoTitle}
-              price={deal.dealPrice}
-              variant="overlay"
-              size="md"
-            />
-          }
-        />
+        {/* ── Left: Media gallery + Emma aside ─────────────────────────── */}
+        <div className="space-y-4">
+          <ProductImageGallery
+            items={allMedia}
+            alt={deal.seoTitle}
+            activeIndex={activeImg}
+            onSelectIndex={setActiveImg}
+            shareOverlay={
+              <ShareButtons
+                url={`https://xdipx.com/products/${deal.handle}`}
+                title={deal.seoTitle}
+                image={deal.images[0]?.url ?? null}
+                variant="overlay"
+              />
+            }
+            heartOverlay={
+              <HeartButton
+                shopifyProductId={deal.shopifyProductId}
+                handle={deal.handle}
+                productTitle={deal.seoTitle}
+                price={deal.dealPrice}
+                variant="overlay"
+                size="md"
+              />
+            }
+          />
+
+          {/* Contextual Emma aside — centered below the gallery. Streamed via deferred loader data. */}
+          <div className="flex justify-center">
+            <div className="w-full max-w-[520px]">
+              <Suspense fallback={<EmmaContextualAsideSkeleton />}>
+                <Await
+                  resolve={emmaAsidePromise}
+                  errorElement={
+                    <EmmaContextualAside
+                      text={getFallbackAside({
+                        id: deal.id,
+                        ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
+                      })}
+                    />
+                  }
+                >
+                  {(result: EmmaAsideResult) =>
+                    result.text ? <EmmaContextualAside text={result.text} /> : null
+                  }
+                </Await>
+              </Suspense>
+            </div>
+          </div>
+        </div>
 
         {/* ── Right: Product info ─────────────────────────────────────── */}
         <div className="space-y-4">
           {/* Brand + title */}
           <div>
-            <p className="text-ink/50 text-sm font-medium uppercase tracking-widest">
-              {deal.brand}
-            </p>
+            <div className="text-ink/50 text-sm font-medium uppercase tracking-widest flex items-center gap-1.5 flex-wrap">
+              <span>{deal.brand}</span>
+              {deal.productTypeDial && (
+                <>
+                  <span aria-hidden="true">•</span>
+                  <span>{deal.productTypeDial}</span>
+                </>
+              )}
+              {aggregate && aggregate.approvedCount > 0 && (
+                <>
+                  <span aria-hidden="true">•</span>
+                  <span className="inline-flex items-center gap-1 normal-case tracking-normal">
+                    <StarRating value={Math.round(aggregate.averageRating)} size="sm" readonly />
+                    <span className="text-ink/60">({aggregate.approvedCount})</span>
+                  </span>
+                </>
+              )}
+            </div>
             <h1
               className="text-2xl md:text-3xl font-bold text-ink mt-1 leading-snug"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {deal.seoTitle}
             </h1>
-            {deal.tagline && !deal.emmaHero && (
-              <p className="text-ink/70 mt-2 italic">{deal.tagline}</p>
-            )}
-          </div>
-
-          {/* Emma voice block — reuses hero copy generated at deal activation */}
-          {deal.emmaHero && (
-            <div className="bg-cream-2 border border-line rounded-2xl p-5 space-y-2">
-              <p
-                className="text-xs tracking-widest uppercase text-coral font-semibold"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                <span aria-hidden="true">♥</span> {deal.emmaHero.eyebrow}
-              </p>
+            {deal.emmaHero?.headline ? (
               <h2
-                className="text-lg md:text-xl font-bold text-ink leading-snug"
+                className="text-lg md:text-xl text-ink mt-2 leading-snug"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
                 {deal.emmaHero.headline}
               </h2>
-              <p className="text-ink/80 text-sm leading-relaxed">
-                {deal.emmaHero.body}
-              </p>
-              {deal.emmaHero.aside && (
-                <p className="text-muted text-xs italic pt-1">
-                  {deal.emmaHero.aside}
-                </p>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  if (typeof window === 'undefined') return
-                  window.dispatchEvent(new CustomEvent('emma:open', {
-                    detail: {
-                      reason: 'why-this-pick',
-                      productHandle: deal.handle,
-                      productTitle:  deal.seoTitle,
-                    },
-                  }))
-                }}
-                className="text-sm text-ink underline underline-offset-4 decoration-ink/30 hover:decoration-ink transition-colors"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                Ask Emma why →
-              </button>
-            </div>
-          )}
+            ) : deal.tagline ? (
+              <p className="text-ink/70 mt-2 italic">{deal.tagline}</p>
+            ) : null}
+          </div>
 
           {/* Price */}
           <div className="flex items-center gap-3 flex-wrap">
@@ -524,105 +656,90 @@ function ProductPage() {
             <StockIndicator qty={qty} isDigital={isDigital} />
           </div>
 
+          {/* Subscription teaser */}
+          {subscriptionOffer && (
+            <p className="text-sm text-ink/70">
+              or <span className="font-semibold text-ink">${subscriptionOffer.price.toFixed(2)}</span>{' '}
+              with subscription ·{' '}
+              <span className="text-coral font-semibold">save {subscriptionOffer.discountPct}%</span>{' '}
+              <span className="text-sage" aria-hidden="true">♥</span>
+            </p>
+          )}
+
+          {/* How it feels — sensation dial + aggregate vote */}
+          {deal.productTypeDial && deal.sensationDial && (
+            <SensationDial
+              type={deal.productTypeDial}
+              values={deal.sensationDial}
+              aggregate={productVoteAggregate}
+              customerVote={customerVote}
+              onAggregateVote={handleAggregateVote}
+              voting={voteFetcher.state !== 'idle'}
+            />
+          )}
+
           {/* Social proof */}
           <SocialProofBar />
 
-          {/* Feature bullets */}
-          {deal.featureBullets.length > 0 && (
-            <ul className="space-y-1.5">
-              {deal.featureBullets.map((bullet, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-ink/80">
-                  <span className="text-sage mt-0.5 shrink-0" aria-hidden="true">♥</span>
-                  {bullet}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {/* Works for */}
-          {(worksFor[0] || worksFor[1] || worksFor[2]) && (
-            <div className="flex items-center gap-2 text-sm text-ink/60 flex-wrap">
-              <span>Works for:</span>
-              {worksFor[0] && <WorksForBadge label="Him"     emoji="♂" />}
-              {worksFor[1] && <WorksForBadge label="Her"     emoji="♀" />}
-              {worksFor[2] && <WorksForBadge label="Couples" emoji="🫶" />}
+          {/* Variant + subscription pills — shared row */}
+          {(multiVariant || (deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0)) && (
+            <div className="flex flex-wrap items-start gap-2">
+              {multiVariant && (
+                <VariantSelector
+                  variants={variants}
+                  options={options}
+                  selectedVariantId={selectedId}
+                  onVariantSelect={handleVariantSelect}
+                />
+              )}
+              {deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0 && (
+                <SubscriptionSelector
+                  sellingPlanGroups={deal.sellingPlanGroups}
+                  basePrice={basePrice}
+                  selectedPlanId={selectedPlanId}
+                  onPlanChange={setSelectedPlanId}
+                />
+              )}
             </div>
-          )}
-
-          {/* Variant selector */}
-          {multiVariant && (
-            <VariantSelector
-              variants={variants}
-              options={options}
-              selectedVariantId={selectedId}
-              onVariantSelect={handleVariantSelect}
-            />
-          )}
-
-          {/* Subscription selector */}
-          {deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0 && (
-            <SubscriptionSelector
-              sellingPlanGroups={deal.sellingPlanGroups}
-              basePrice={basePrice}
-              selectedPlanId={selectedPlanId}
-              onPlanChange={setSelectedPlanId}
-            />
           )}
 
           {/* Qty + Add to cart */}
           {inStock ? (
-            <fetcher.Form method="post" action="/api/cart" className="space-y-3">
+            <fetcher.Form method="post" action="/api/cart" className="flex items-stretch gap-3">
               <input type="hidden" name="intent"    value="add-item" />
               <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
               {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
-
-              <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-ink/70" htmlFor="qty">Qty</label>
-                <div className="flex items-center border border-cream-2 rounded-full overflow-hidden bg-white">
-                  <button
-                    type="button"
-                    onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                    className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
-                    aria-label="Decrease quantity"
-                  >−</button>
-                  <input id="qty" type="hidden" name="quantity" value={quantity} />
-                  <span className="px-4 text-sm font-semibold text-ink tabular-nums">{quantity}</span>
-                  <button
-                    type="button"
-                    onClick={() => setQuantity(q => Math.min(3, q + 1))}
-                    className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
-                    aria-label="Increase quantity"
-                  >+</button>
-                </div>
-                <span className="text-xs text-ink/40">Max 3</span>
-              </div>
 
               <button
                 ref={ctaRef}
                 type="submit"
                 disabled={isPending}
-                className="w-full py-4 rounded-full font-bold text-lg bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20 transition-all"
+                className="flex-1 py-4 rounded-full font-bold text-lg bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20 transition-all"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
                 {isPending ? 'Adding...' : buyButtonText}
               </button>
-              <p className="text-[11px] text-muted text-center uppercase tracking-wide">
-                plain box · billed as DIPCOM · free ship $99+
-              </p>
+
+              <div className="flex items-center border border-cream-2 rounded-full overflow-hidden bg-white shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
+                  aria-label="Decrease quantity"
+                >−</button>
+                <label htmlFor="qty" className="sr-only">Quantity</label>
+                <input id="qty" type="hidden" name="quantity" value={quantity} />
+                <span className="px-3 text-sm font-semibold text-ink tabular-nums" aria-live="polite">{quantity}</span>
+                <button
+                  type="button"
+                  onClick={() => setQuantity(q => Math.min(3, q + 1))}
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
+                  aria-label="Increase quantity"
+                >+</button>
+              </div>
             </fetcher.Form>
           ) : (
             <WaitlistButton productHandle={deal.handle} />
-          )}
-
-          {/* Sensation dial + voting */}
-          {deal.productTypeDial && deal.sensationDial && (
-            <SensationDial
-              type={deal.productTypeDial}
-              values={deal.sensationDial}
-              agreeByDimension={dialAggregates}
-              onVote={handleDialVote}
-              votingLocked={!isLoggedIn}
-            />
           )}
 
         </div>
@@ -663,11 +780,11 @@ function ProductPage() {
       ) : heroContent}
 
       <div className="max-w-6xl mx-auto px-4">
-        <RecentlyBrowsed currentHandle={deal.handle} />
         {pairsWithItems.length > 0
           ? <PairsWith items={pairsWithItems} />
           : <FrequentlyBoughtWith products={fbtProducts} />
         }
+        <RecentlyBrowsed currentHandle={deal.handle} />
         {companionBundle && (
           <BundleSaveCard bundle={companionBundle} buyButtonText={buyButtonText} />
         )}
@@ -733,6 +850,14 @@ function ProductPage() {
         ...(deal.category === 'for-her' ? [{ name: 'For Her', url: 'https://xdipx.com/for-her' }] : []),
         { name: deal.seoTitle,   url: `https://xdipx.com/products/${deal.handle}` },
       ]} />
+
+      {voteToast && (
+        <Toast
+          key={voteToast.key}
+          message={voteToast.vote === 1 ? 'Thanks — vote recorded ♥' : 'Got it — noted.'}
+          onDismiss={() => setVoteToast(null)}
+        />
+      )}
     </>
   )
 }

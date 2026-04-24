@@ -156,7 +156,6 @@ async function classifyProduct(product: {
   tagline?: string
   originalDescription?: string
   sanityDescription?: string
-  featureBullets?: string[]
   category?: string
   vendor?: string
   descriptors?: string[]
@@ -173,7 +172,6 @@ async function classifyProduct(product: {
     product.descriptors?.length && `Product Tags: ${product.descriptors.join(', ')}`,
     product.originalDescription && `Manufacturer Description: ${product.originalDescription}`,
     !product.originalDescription && product.sanityDescription && `Description: ${product.sanityDescription}`,
-    product.featureBullets?.length && `Feature Bullets: ${product.featureBullets.join(', ')}`,
   ].filter(Boolean).join('\n')
 
   const presetHints = [
@@ -240,12 +238,11 @@ async function main() {
     tagline?: string
     vendor?: string
     category?: string
-    featureBullets?: string[]
     sanityDescription?: string
     shopifyHandle: string
   }[]>(
     `*[_type == "productPage" && defined(shopifyHandle) && (${needsEnrichment})] {
-      _id, title, tagline, vendor, category, featureBullets, shopifyHandle,
+      _id, title, tagline, vendor, category, shopifyHandle,
       "sanityDescription": pt::text(description)
     }`,
   )
@@ -272,7 +269,6 @@ async function main() {
         tagline: product.tagline,
         originalDescription: originalDescription ?? undefined,
         sanityDescription: product.sanityDescription,
-        featureBullets: product.featureBullets,
         category: product.category,
         vendor: product.vendor,
         descriptors,
