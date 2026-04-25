@@ -7,8 +7,9 @@ import { ProductImageGallery, type GalleryItem } from '~/components/store/Produc
 import {
   getDealByHandle, getProductsByTag,
   getCollectionProducts, getProductsByHandles,
-  getProductsByIds,
+  getProductsByIds, getMainMenu,
 } from '~/lib/shopify.server'
+import { resolveBreadcrumbs, type BreadcrumbCrumb } from '~/lib/breadcrumbs.server'
 import { getProductPageBlocks, getProductFaqs } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
@@ -33,6 +34,7 @@ import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 import { FAQStructuredData }      from '~/components/seo/FAQStructuredData'
 import { ProductFaqList }         from '~/components/store/ProductFaqList'
+import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
 // ProductTabs removed — content now lives in the SEO summary grid above.
 import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
 import FrequentlyBoughtWith       from '~/components/store/FrequentlyBoughtWith'
@@ -95,6 +97,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       aggregate: null,
       faqs: [] as ProductFaq[],
       emmaAsidePromise: Promise.resolve<EmmaAsideResult>({ text: '', source: 'fallback' }),
+      breadcrumbs: [
+        { label: 'Home', url: 'https://xdipx.com/', href: '/' },
+        { label: bundle.title, url: `https://xdipx.com/products/${bundle.handle}`, href: `/products/${bundle.handle}` },
+      ] as BreadcrumbCrumb[],
     }
   }
 
@@ -125,7 +131,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     .filter(o => o.name.toLowerCase() === 'color' || o.name.toLowerCase() === 'colour')
     .flatMap(o => o.values)
 
-  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts, swatches, faqs] = await Promise.all([
+  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts, swatches, faqs, mainMenu] = await Promise.all([
     getProductPageBlocks(slug),
     getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
@@ -140,7 +146,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     hasPairing ? getProductsByIds(deal.accessoryProductIds) : Promise.resolve([]),
     colorLabels.length > 0 ? getSwatchMap(colorLabels) : Promise.resolve({} as Record<string, string>),
     getProductFaqs(slug),
+    getMainMenu(),
   ])
+
+  const breadcrumbs: BreadcrumbCrumb[] = resolveBreadcrumbs({
+    menu: mainMenu,
+    productCollectionHandles: (deal.collections ?? []).map(c => c.handle),
+    productTitle: deal.seoTitle,
+    productHandle: deal.handle,
+  })
 
   const fbtProducts = fbtHandles.length > 0
     ? (await getProductsByHandles(fbtHandles)).map(p => ({
@@ -273,6 +287,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       faqs,
       bundle: null,
       emmaAsidePromise,
+      breadcrumbs,
     },
     { headers: { 'Set-Cookie': browseCookieHeader } },
   )
@@ -594,8 +609,14 @@ function ProductPage() {
   }, [fetcher.state, fetcher.data])
 
   const heroContent = (
-    <section className="max-w-6xl mx-auto px-4 py-8 relative">
-      <div className="grid md:grid-cols-2 gap-8 lg:gap-12 items-start">
+    <section className="max-w-6xl mx-auto px-4 pt-4 pb-8 relative">
+      <BreadcrumbNav
+        items={loaderData.breadcrumbs.map(c => ({
+          label: c.label,
+          ...(c.href ? { href: c.href } : {}),
+        }))}
+      />
+      <div className="grid md:grid-cols-2 gap-8 lg:gap-12 items-start mt-4">
 
         {/* ── Left: Media gallery + Emma aside ─────────────────────────── */}
         <div className="space-y-4">
@@ -835,6 +856,7 @@ function ProductPage() {
         {...(deal.brand ? { brand: deal.brand } : {})}
         descriptionHtml={deal.descriptionHtml ?? ''}
         boxContents={deal.boxContents ?? []}
+        {...(deal.careInstructions?.length ? { careInstructions: deal.careInstructions } : {})}
         {...(deal.specifications ? { specifications: deal.specifications } : {})}
         faqCount={faqs.length}
         {...(faqs.length > 0 ? { faqSlot: <ProductFaqList faqs={faqs} /> } : {})}
@@ -950,12 +972,11 @@ function ProductPage() {
       )}
 
       <ProductStructuredData deal={deal} />
-      <BreadcrumbStructuredData items={[
-        { name: 'Home',          url: 'https://xdipx.com/' },
-        ...(deal.category === 'for-him' ? [{ name: 'For Him', url: 'https://xdipx.com/for-him' }] : []),
-        ...(deal.category === 'for-her' ? [{ name: 'For Her', url: 'https://xdipx.com/for-her' }] : []),
-        { name: deal.seoTitle,   url: `https://xdipx.com/products/${deal.handle}` },
-      ]} />
+      <BreadcrumbStructuredData
+        items={loaderData.breadcrumbs
+          .filter((c): c is typeof c & { url: string } => !!c.url)
+          .map(c => ({ name: c.label, url: c.url }))}
+      />
       {faqs.length > 0 && (
         <FAQStructuredData faqs={faqs.map(f => ({ question: f.question, answer: f.answer }))} />
       )}

@@ -109,6 +109,9 @@ const METAFIELDS_FRAGMENT = `
 
 const PRODUCT_CORE_FRAGMENT = `
   id handle title vendor tags description descriptionHtml
+  collections(first: 10) {
+    edges { node { handle title } }
+  }
   images(first: 10) {
     edges { node { url altText } }
   }
@@ -415,6 +418,7 @@ interface ShopifyProductNode {
   tags: string[]
   description: string
   descriptionHtml?: string
+  collections?: { edges: { node: { handle: string; title: string } }[] }
   images: { edges: { node: { url: string; altText: string | null } }[] }
   media?: { edges: { node: ShopifyMediaNode }[] }
   options: { name: string; values: string[] }[]
@@ -583,6 +587,9 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
       ? { pairBundleCopy: pairBundleCopy as import('~/types').PairBundleCopy }
       : {}),
     ...(sellingPlanGroups && sellingPlanGroups.length > 0 ? { sellingPlanGroups } : {}),
+    ...(node.collections?.edges?.length
+      ? { collections: node.collections.edges.map(e => ({ handle: e.node.handle, title: e.node.title })) }
+      : {}),
   }
 }
 

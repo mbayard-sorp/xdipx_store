@@ -1,15 +1,16 @@
 import { ExpandableHtml } from '~/components/store/ExpandableHtml'
 
 interface ProductSummaryGridProps {
-  productTitle:    string
-  productType?:    string
-  brand?:          string
-  descriptionHtml: string
-  boxContents:     string[]
-  specifications?: string | undefined
-  faqCount?:       number
-  faqSlot?:        React.ReactNode
-  emmaSlot?:       React.ReactNode
+  productTitle:       string
+  productType?:       string
+  brand?:             string
+  descriptionHtml:    string
+  boxContents:        string[]
+  careInstructions?:  string[]
+  specifications?:    string | undefined
+  faqCount?:          number
+  faqSlot?:           React.ReactNode
+  emmaSlot?:          React.ReactNode
 }
 
 function stripHtml(html: string): string {
@@ -119,6 +120,7 @@ export function ProductSummaryGrid({
   brand,
   descriptionHtml,
   boxContents,
+  careInstructions,
   specifications,
   faqCount = 0,
   faqSlot,
@@ -134,6 +136,12 @@ export function ProductSummaryGrid({
     : ''
   const boxFallback = 'See exactly what arrives in your discreet package.'
 
+  const careItems = careInstructions ?? []
+  const careBodyHtml = careItems.length > 0
+    ? `<ul>${careItems.slice(0, 4).map(i => `<li>${i}</li>`).join('')}${careItems.length > 4 ? `<li>…and ${careItems.length - 4} more</li>` : ''}</ul>`
+    : ''
+  const careFallback = 'Quick care + storage notes so it stays good for the long haul.'
+
   const specBodyHtml = specifications ? specsExcerptHtml(specifications) : ''
   const specFallback = `Materials, dimensions, charging, waterproof rating${productType ? ` for the ${productType}` : ''}.`
 
@@ -146,7 +154,7 @@ export function ProductSummaryGrid({
       aria-label="Product details overview"
       className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3"
     >
-      {/* Row 1 — What it does (1/3) + FAQs (2/3) */}
+      {/* Row 1 — What it does (2/6) + FAQs (4/6) */}
       <SummaryCard
         eyebrow="What it does"
         className="lg:col-span-2"
@@ -158,7 +166,12 @@ export function ProductSummaryGrid({
         {...(faqSlot ? { bodySlot: faqSlot } : { body: faqSummary })}
       />
 
-      {/* Row 2 — three equal-width cards */}
+      {/* Row 2 — Care Instructions + In the box + Specs (three equal cards) */}
+      <SummaryCard
+        eyebrow="Care Instructions"
+        className="lg:col-span-2"
+        {...(careBodyHtml ? { bodyHtml: careBodyHtml } : { body: careFallback })}
+      />
       <SummaryCard
         eyebrow="In the box"
         className="lg:col-span-2"
@@ -169,9 +182,11 @@ export function ProductSummaryGrid({
         className="lg:col-span-2"
         {...(specBodyHtml ? { bodyHtml: specBodyHtml } : { body: specFallback })}
       />
+
+      {/* Row 3 — Emma's take, full grid width */}
       <SummaryCard
         eyebrow="Emma's take"
-        className="lg:col-span-2"
+        className="lg:col-span-6"
         bodySlot={emmaSlot ?? <p className="text-sm text-ink/60 italic">Emma's note loads in a moment…</p>}
       />
     </section>

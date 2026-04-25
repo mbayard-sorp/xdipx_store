@@ -169,6 +169,8 @@ export interface Deal {
   emmaHero?:               EmmaHeroCopy
   quietEndorsementCopy?:   QuietEndorsementCopy
   pairBundleCopy?:         PairBundleCopy
+  /** Shopify collection memberships — used for breadcrumb resolution against the main menu. */
+  collections?:            { handle: string; title: string }[]
 }
 
 export interface Product {
