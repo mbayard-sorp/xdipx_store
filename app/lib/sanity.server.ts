@@ -1,5 +1,5 @@
 import { createClient } from '@sanity/client'
-import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor } from '~/types/cms'
+import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq } from '~/types/cms'
 import { cached, invalidateCache } from '~/lib/kv.server'
 
 // Shared field projection reused by homepage + product page queries.
@@ -576,6 +576,30 @@ export async function getProductPageBlocks(handle: string): Promise<ContentBlock
     return data?.sections ?? []
   } catch (err) {
     console.error('[sanity] getProductPageBlocks error:', err)
+    return []
+  }
+}
+
+/**
+ * Fetch the per-product FAQ list from Sanity. Returns [] when the product
+ * has no `productFaqs` configured. Filters out entries missing question or
+ * answer so the PDP never renders half-empty Q&A pairs (also keeps the
+ * FAQPage JSON-LD valid).
+ */
+export async function getProductFaqs(handle: string): Promise<ProductFaq[]> {
+  if (!projectId) return []
+  try {
+    const client = getClient()
+    if (!client) return []
+    const data = await client.fetch<{ faqs: ProductFaq[] | null } | null>(
+      `*[_type == "productPage" && shopifyHandle == $handle][0]{
+        "faqs": productFaqs[]{ question, answer }
+      }`,
+      { handle },
+    )
+    return (data?.faqs ?? []).filter(f => f && f.question && f.answer)
+  } catch (err) {
+    console.error('[sanity] getProductFaqs error:', err)
     return []
   }
 }

@@ -9,7 +9,7 @@ import {
   getCollectionProducts, getProductsByHandles,
   getProductsByIds,
 } from '~/lib/shopify.server'
-import { getProductPageBlocks } from '~/lib/sanity.server'
+import { getProductPageBlocks, getProductFaqs } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
@@ -31,6 +31,8 @@ import BundleHero from '~/components/store/BundleHero'
 import BundleSaveCard from '~/components/store/BundleSaveCard'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
+import { FAQStructuredData }      from '~/components/seo/FAQStructuredData'
+import { ProductFaqList }         from '~/components/store/ProductFaqList'
 // ProductTabs removed — content now lives in the SEO summary grid above.
 import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
 import FrequentlyBoughtWith       from '~/components/store/FrequentlyBoughtWith'
@@ -48,7 +50,7 @@ import { getSubscriptionPrice, getBestSubscriptionOffer } from '~/lib/selling-pl
 import { EmailSubscribe }         from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }   from '~/components/cms/ContentBlockRenderer'
 import type { Product } from '~/types'
-import type { ProductCarouselBlock } from '~/types/cms'
+import type { ProductCarouselBlock, ProductFaq } from '~/types/cms'
 import { trackViewItem, trackAddToCart } from '~/lib/analytics.client'
 import { ShareButtons } from '~/components/common/ShareButtons'
 import { HeartButton } from '~/components/store/HeartButton'
@@ -91,6 +93,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       reviewSort: 'newest',
       reviewFilter: 'all',
       aggregate: null,
+      faqs: [] as ProductFaq[],
       emmaAsidePromise: Promise.resolve<EmmaAsideResult>({ text: '', source: 'fallback' }),
     }
   }
@@ -122,7 +125,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     .filter(o => o.name.toLowerCase() === 'color' || o.name.toLowerCase() === 'colour')
     .flatMap(o => o.values)
 
-  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts, swatches] = await Promise.all([
+  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts, swatches, faqs] = await Promise.all([
     getProductPageBlocks(slug),
     getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     getProductAggregate(deal.shopifyProductId),
@@ -136,6 +139,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       : Promise.resolve(null as (1 | -1 | null)),
     hasPairing ? getProductsByIds(deal.accessoryProductIds) : Promise.resolve([]),
     colorLabels.length > 0 ? getSwatchMap(colorLabels) : Promise.resolve({} as Record<string, string>),
+    getProductFaqs(slug),
   ])
 
   const fbtProducts = fbtHandles.length > 0
@@ -266,6 +270,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       reviewSort,
       reviewFilter,
       aggregate:     aggregate ?? null,
+      faqs,
       bundle: null,
       emmaAsidePromise,
     },
@@ -365,6 +370,7 @@ function ProductPage() {
   void loaderData.reviewFilter
   void loaderData.aggregate
   const swatches  = loaderData.swatches ?? {}
+  const faqs      = loaderData.faqs ?? []
   const emmaAsidePromise = loaderData.emmaAsidePromise
   const layoutData = useRouteLoaderData<typeof layoutLoader>('routes/_layout')
   const emmaPersona = layoutData?.emmaPersona ?? null
@@ -830,6 +836,8 @@ function ProductPage() {
         descriptionHtml={deal.descriptionHtml ?? ''}
         boxContents={deal.boxContents ?? []}
         {...(deal.specifications ? { specifications: deal.specifications } : {})}
+        faqCount={faqs.length}
+        {...(faqs.length > 0 ? { faqSlot: <ProductFaqList faqs={faqs} /> } : {})}
         emmaSlot={
           <Suspense fallback={<EmmaTakeBody text="Emma's note loads in a moment…" {...(emmaPersona ? { persona: emmaPersona } : {})} />}>
             <Await
@@ -948,6 +956,9 @@ function ProductPage() {
         ...(deal.category === 'for-her' ? [{ name: 'For Her', url: 'https://xdipx.com/for-her' }] : []),
         { name: deal.seoTitle,   url: `https://xdipx.com/products/${deal.handle}` },
       ]} />
+      {faqs.length > 0 && (
+        <FAQStructuredData faqs={faqs.map(f => ({ question: f.question, answer: f.answer }))} />
+      )}
 
       {voteToast && (
         <Toast

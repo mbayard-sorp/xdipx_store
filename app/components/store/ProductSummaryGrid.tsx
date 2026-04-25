@@ -8,6 +8,7 @@ interface ProductSummaryGridProps {
   boxContents:     string[]
   specifications?: string | undefined
   faqCount?:       number
+  faqSlot?:        React.ReactNode
   emmaSlot?:       React.ReactNode
 }
 
@@ -120,6 +121,7 @@ export function ProductSummaryGrid({
   boxContents,
   specifications,
   faqCount = 0,
+  faqSlot,
   emmaSlot,
 }: ProductSummaryGridProps) {
   const descBodyHtml = descriptionHtml
@@ -153,7 +155,7 @@ export function ProductSummaryGrid({
       <SummaryCard
         eyebrow="FAQs / Q&A"
         className="lg:col-span-4"
-        body={faqSummary}
+        {...(faqSlot ? { bodySlot: faqSlot } : { body: faqSummary })}
       />
 
       {/* Row 2 — three equal-width cards */}
