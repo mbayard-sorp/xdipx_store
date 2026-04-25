@@ -1,5 +1,22 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 
+// Shopify CDN supports `?width=` query params for on-the-fly resizing. Build
+// a srcset spanning common viewport widths so mobile doesn't pay desktop
+// bandwidth. The main gallery viewport is ~100vw on mobile and ~50vw on
+// desktop; widths cover 1× and 2× for both.
+const GALLERY_SRCSET_WIDTHS = [480, 768, 1024, 1600]
+const GALLERY_SIZES = '(max-width: 768px) 100vw, 50vw'
+
+function shopifyImageSrcset(url: string, widths: readonly number[] = GALLERY_SRCSET_WIDTHS): string {
+  const sep = url.includes('?') ? '&' : '?'
+  return widths.map(w => `${url}${sep}width=${w} ${w}w`).join(', ')
+}
+
+function shopifyImageAt(url: string, width: number): string {
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}width=${width}`
+}
+
 // ─── Gallery media types ──────────────────────────────────────────────────────
 
 export type GalleryItem =
@@ -255,10 +272,13 @@ export function ProductImageGallery({
               {items[lockedIndex]?.kind === 'video' ? (
                 <>
                   <img
-                    src={items[lockedIndex].previewUrl}
+                    src={shopifyImageAt(items[lockedIndex].previewUrl, 1024)}
+                    srcSet={shopifyImageSrcset(items[lockedIndex].previewUrl)}
+                    sizes={GALLERY_SIZES}
                     alt={alt}
                     className={`w-full h-full ${items[lockedIndex].aspect === 'portrait' ? 'object-contain' : 'object-cover'}`}
                     draggable={false}
+                    loading="eager"
                     fetchPriority="high"
                     decoding="async"
                   />
@@ -274,12 +294,15 @@ export function ProductImageGallery({
                 </>
               ) : items[lockedIndex]?.kind === 'image' ? (
                 <img
-                  src={items[lockedIndex].url}
+                  src={shopifyImageAt(items[lockedIndex].url, 1024)}
+                  srcSet={shopifyImageSrcset(items[lockedIndex].url)}
+                  sizes={GALLERY_SIZES}
                   alt={items[lockedIndex].altText || alt}
                   width={1200}
                   height={1200}
                   className="w-full h-full object-cover"
                   draggable={false}
+                  loading="eager"
                   fetchPriority="high"
                   decoding="async"
                 />
@@ -303,7 +326,9 @@ export function ProductImageGallery({
                 {items[previewIndex].kind === 'video' ? (
                   <>
                     <img
-                      src={items[previewIndex].previewUrl}
+                      src={shopifyImageAt(items[previewIndex].previewUrl, 1024)}
+                      srcSet={shopifyImageSrcset(items[previewIndex].previewUrl)}
+                      sizes={GALLERY_SIZES}
                       alt={alt}
                       width={1200}
                       height={1200}
@@ -322,7 +347,9 @@ export function ProductImageGallery({
                   </>
                 ) : (
                   <img
-                    src={items[previewIndex].url}
+                    src={shopifyImageAt(items[previewIndex].url, 1024)}
+                    srcSet={shopifyImageSrcset(items[previewIndex].url)}
+                    sizes={GALLERY_SIZES}
                     alt={items[previewIndex].altText || alt}
                     width={1200}
                     height={1200}
@@ -484,7 +511,8 @@ function ThumbnailStrip({
             aria-label={item.kind === 'video' ? `Play video ${i + 1}` : `View image ${i + 1}`}
           >
             <img
-              src={item.kind === 'video' ? item.previewUrl : item.url}
+              src={shopifyImageAt(item.kind === 'video' ? item.previewUrl : item.url, 128)}
+              srcSet={`${shopifyImageAt(item.kind === 'video' ? item.previewUrl : item.url, 128)} 1x, ${shopifyImageAt(item.kind === 'video' ? item.previewUrl : item.url, 192)} 2x`}
               alt=""
               width={64}
               height={64}

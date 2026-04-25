@@ -22,6 +22,23 @@ export default {
       description: 'At least one full sentence (40+ chars). Plain text only, no HTML. Emma voice. No em-dashes.',
       validation: Rule => Rule.required().min(40).max(800),
     },
+    {
+      name: 'category',
+      title: 'Category',
+      type: 'string',
+      description: 'Groups FAQs on the PDP. "Care" entries also surface in the Care Instructions summary card.',
+      options: {
+        list: [
+          { title: 'General',       value: 'general'       },
+          { title: 'Care',          value: 'care'          },
+          { title: 'Usage',         value: 'usage'         },
+          { title: 'Compatibility', value: 'compatibility' },
+          { title: 'Shipping',      value: 'shipping'      },
+        ],
+        layout: 'dropdown',
+      },
+      initialValue: 'general',
+    },
   ],
   preview: {
     select: { title: 'question', subtitle: 'answer' },
