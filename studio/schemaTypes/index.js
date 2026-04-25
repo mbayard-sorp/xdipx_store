@@ -15,6 +15,7 @@ import blogCta            from '../schemas/blocks/blogCta.js'
 import blogVideoEmbed     from '../schemas/blocks/blogVideoEmbed.js'
 import richText           from '../schemas/blocks/richText.js'
 import editorBio          from '../schemas/blocks/editorBio.js'
+import productFaq         from '../schemas/blocks/productFaq.js'
 import homepageSections   from '../schemas/homepageSections.js'
 import siteSettings       from '../schemas/siteSettings.js'
 import productPage        from '../schemas/productPage.js'
@@ -77,6 +78,8 @@ export const schemaTypes = [
   bonusDeal,
   trustBar,
   editorBio,
+  // PDP — per-product FAQ entries (Q&A pairs, additive).
+  productFaq,
   // Blog block object types
   blogImage,
   blogPullQuote,

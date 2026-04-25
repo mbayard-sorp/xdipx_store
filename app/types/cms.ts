@@ -241,6 +241,13 @@ export interface EditorBioBlock {
   } | null
 }
 
+// ─── Product FAQ ─────────────────────────────────────────────────────────
+
+export interface ProductFaq {
+  question: string
+  answer:   string
+}
+
 // ─── Rich Text ───────────────────────────────────────────────────────────
 
 export interface RichTextBlock {

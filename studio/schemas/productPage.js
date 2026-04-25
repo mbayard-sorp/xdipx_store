@@ -38,6 +38,7 @@ export default {
     { name: 'emma',     title: 'Emma Discovery'                },
     { name: 'ivr',      title: 'IVR / Voice'                   },
     { name: 'bundle',   title: 'Bundle'                        },
+    { name: 'faqs',     title: 'FAQs / Q&A'                    },
     { name: 'content',  title: 'Content Blocks'                },
   ],
 
@@ -437,6 +438,20 @@ export default {
       description: 'Products whose PDP should show a "Bundle & Save" card pointing at this bundle. Leave empty to only surface the bundle on its own URL / homepage.',
       hidden: ({ parent }) => !parent?.isBundle,
       of: [{ type: 'reference', to: [{ type: 'productPage' }] }],
+    },
+
+    // ── FAQs / Q&A (additive — emits FAQPage JSON-LD on the PDP) ──────────────
+    // Visible Q&A list rendered in the PDP "FAQs / Q&A" card. Visible answer
+    // text MUST match JSON-LD; never hide content here. Sweet spot is 4–8
+    // questions per product. Emma generates drafts; humans approve in Studio.
+    {
+      name: 'productFaqs',
+      title: 'Product FAQs',
+      type: 'array',
+      group: 'faqs',
+      description: '4 to 8 questions/answers shown on the PDP and emitted as FAQPage JSON-LD. One-line answers get ignored by LLMs. Aim for 1 to 3 sentences.',
+      of: [{ type: 'productFaq' }],
+      validation: Rule => Rule.max(12),
     },
 
     // ── Content Blocks ────────────────────────────────────────────────────────
