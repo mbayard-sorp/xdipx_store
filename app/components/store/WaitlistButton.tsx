@@ -66,16 +66,30 @@ export function WaitlistButton({ productHandle, className = '' }: WaitlistButton
         {showInput && (
           <>
             <label htmlFor="waitlist-email" className="sr-only">Email address</label>
-            <input
-              id="waitlist-email"
-              ref={inputRef}
-              type="email"
-              placeholder="your@email.com"
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? 'waitlist-error' : undefined}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleNotifyClick() } }}
-              className="flex-1 min-w-0 px-3 py-2 text-sm rounded-full border border-cream-2 bg-white text-ink placeholder:text-ink/50 focus:outline-none focus:border-sage transition-colors"
-            />
+            <div className="relative flex-1 min-w-0 self-center">
+              <input
+                id="waitlist-email"
+                ref={inputRef}
+                type="email"
+                placeholder="your@email.com"
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? 'waitlist-error' : undefined}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleNotifyClick() } }}
+                className="block w-full h-11 pl-4 pr-10 text-sm rounded-full border border-cream-2 bg-white text-ink placeholder:text-ink/50 focus:outline-none focus:border-sage transition-colors"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInput(false)
+                  setError('')
+                  if (inputRef.current) inputRef.current.value = ''
+                }}
+                aria-label="Close notify-me form"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full text-ink/50 hover:text-ink hover:bg-cream-2 flex items-center justify-center transition-colors"
+              >
+                <CloseIcon />
+              </button>
+            </div>
           </>
         )}
         <button
@@ -105,6 +119,15 @@ function CheckIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   )
 }
