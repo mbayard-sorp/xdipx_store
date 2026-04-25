@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useFetcher, useLoaderData, useNavigate } from 'react-router'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { searchAll, getSearchVendors } from '~/lib/search.server'
+import { searchAll } from '~/lib/search.server'
 import type { ContentResult, SearchProductResult } from '~/lib/search.server'
 import { getLiveDealHandle } from '~/lib/shopify.server'
 import { getPage, getEmmaPresets } from '~/lib/sanity.server'
@@ -60,7 +60,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const budgetMaxS = url.searchParams.get('budgetMax')
   const budgetMax  = budgetMaxS ? parseFloat(budgetMaxS) : null
 
-  const [searchResult, taxonomyRow, vendorList, liveDealHandle, bannerPage, presets] = await Promise.all([
+  const [searchResult, taxonomyRow, liveDealHandle, bannerPage, presets] = await Promise.all([
     searchAll({
       query: q,
       tags,
@@ -77,7 +77,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       page,
     }),
     db.select().from(pipelineSettings).where(eq(pipelineSettings.key, 'searchFilterTaxonomy')),
-    getSearchVendors(),
     getLiveDealHandle(),
     getPage('search-banner'),
     getEmmaPresets(),
@@ -98,7 +97,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     page,
     searchResult,
     taxonomy,
-    vendorList,
     liveDealHandle,
     bannerBlocks,
     presets,
@@ -109,7 +107,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export default function SearchPage() {
   const {
-    q, sort, page, searchResult, taxonomy, vendorList, liveDealHandle, bannerBlocks, activeFilters,
+    q, sort, page, searchResult, taxonomy, liveDealHandle, bannerBlocks, activeFilters,
     presets, recentViews,
   } = useLoaderData<typeof loader>()
   const navigate = useNavigate()
@@ -243,13 +241,10 @@ export default function SearchPage() {
     return m
   }, [facets, taxonomy])
 
-  const priceBuckets = facets?.priceBuckets ?? { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }
-
-  const featureCounts = facets?.featureCounts ?? {}
-  const experienceCounts = facets?.experienceCounts ?? {}
-  const hasAnyFeatures = Object.keys(featureCounts).length > 0
-  const hasAnyExperience = Object.keys(experienceCounts).length > 0
-
+  // Active-filter chips above the grid still surface vendor/feature/
+  // experience/price selections that arrive via direct URL params, even
+  // though we no longer render UI to add them — admin/search-filters is
+  // the single source of truth for the sidebar.
   const hasActiveFilters =
     activeFilters.vendors.length > 0 ||
     activeFilters.tags.length > 0 ||
@@ -259,20 +254,6 @@ export default function SearchPage() {
     activeFilters.priceMax != null
 
   const hasContentResults = pages.length > 0 || blogPosts.length > 0
-
-  // Admin-defined group labels (lowercased) — used to suppress legacy
-  // IVR/vendor/price auto-sections that the admin has already replaced
-  // with a curated group of the same name. Prevents duplicate "Features",
-  // "Brand", etc. headers and lets admin's defaultExpanded flag be the
-  // single source of truth for those sections.
-  const adminLabels = useMemo(
-    () => new Set(taxonomy.map(g => g.label.trim().toLowerCase())),
-    [taxonomy],
-  )
-  const adminHasFeatures   = adminLabels.has('features')
-  const adminHasExperience = adminLabels.has('experience') || adminLabels.has('experience level')
-  const adminHasBrand      = adminLabels.has('brand') || adminLabels.has('brands') || adminLabels.has('all brands')
-  const adminHasPrice      = adminLabels.has('price')
 
   const filterSidebar = (
     <div className="space-y-6">
@@ -311,129 +292,12 @@ export default function SearchPage() {
         </FilterSection>
       ))}
 
-      {/* Features (from IVR descriptors) — suppressed if admin defines a
-         Features group, so admin's curated list + flag wins. */}
-      {hasAnyFeatures && !adminHasFeatures && (
-        <FilterSection title="Features" collapsible defaultExpanded>
-          <ul className="space-y-2">
-            {Object.entries(featureCounts)
-              .sort(([, a], [, b]) => b - a)
-              .slice(0, 10)
-              .map(([feature, count]) => {
-                const checked = activeFilters.features.includes(feature)
-                return (
-                  <li key={feature}>
-                    <label className="flex items-center gap-2 cursor-pointer group">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleArrayFilter('feature', feature)}
-                        className="accent-sage w-3.5 h-3.5 rounded"
-                      />
-                      <span className={`text-sm capitalize transition-colors ${checked ? 'text-sage font-medium' : 'text-ink/70 group-hover:text-sage'}`}>
-                        {feature.replace(/-/g, ' ')}
-                      </span>
-                      <span className="text-xs text-ink/30 ml-auto">({count})</span>
-                    </label>
-                  </li>
-                )
-              })}
-          </ul>
-        </FilterSection>
-      )}
-
-      {/* Experience Level (from IVR descriptors) — suppressed if admin
-         defines an Experience / Experience Level group. */}
-      {hasAnyExperience && !adminHasExperience && (
-        <FilterSection title="Experience Level" collapsible defaultExpanded>
-          <ul className="space-y-2">
-            {Object.entries(experienceCounts)
-              .sort(([, a], [, b]) => b - a)
-              .map(([level, count]) => {
-                const checked = activeFilters.experience.includes(level)
-                return (
-                  <li key={level}>
-                    <label className="flex items-center gap-2 cursor-pointer group">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleArrayFilter('experience', level)}
-                        className="accent-sage w-3.5 h-3.5 rounded"
-                      />
-                      <span className={`text-sm capitalize transition-colors ${checked ? 'text-sage font-medium' : 'text-ink/70 group-hover:text-sage'}`}>
-                        {level}
-                      </span>
-                      <span className="text-xs text-ink/30 ml-auto">({count})</span>
-                    </label>
-                  </li>
-                )
-              })}
-          </ul>
-        </FilterSection>
-      )}
-
-      {/* Brand / Vendor — suppressed if admin defines a Brand / Brands /
-         All Brands group. */}
-      {vendorList.length > 0 && !adminHasBrand && (
-        <FilterSection title="Brand">
-          <ul className="space-y-2">
-            {vendorList.slice(0, 12).map(v => {
-              const checked = activeFilters.vendors.includes(v.vendor)
-              const count = facets?.vendorCounts?.[v.vendor] ?? v.count
-              return (
-                <li key={v.vendor}>
-                  <label className="flex items-center gap-2 cursor-pointer group">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleArrayFilter('vendor', v.vendor)}
-                      className="accent-sage w-3.5 h-3.5 rounded"
-                    />
-                    <span className={`text-sm transition-colors ${checked ? 'text-sage font-medium' : 'text-ink/70 group-hover:text-sage'}`}>
-                      {v.vendor}
-                    </span>
-                    <span className="text-xs text-ink/30 ml-auto">({count})</span>
-                  </label>
-                </li>
-              )
-            })}
-          </ul>
-        </FilterSection>
-      )}
-
-      {/* Price buckets — suppressed if admin defines a Price group. */}
-      {!adminHasPrice && (
-      <FilterSection title="Price">
-        <ul className="space-y-1.5">
-          {[
-            { label: 'Under $25',  min: null,   max: '25',  count: priceBuckets.under25 },
-            { label: '$25 – $50',  min: '25',   max: '50',  count: priceBuckets.p25_50 },
-            { label: '$50 – $100', min: '50',   max: '100', count: priceBuckets.p50_100 },
-            { label: '$100+',      min: '100',  max: null,  count: priceBuckets.over100 },
-          ].map(bucket => {
-            const active = activeFilters.priceMin === bucket.min && activeFilters.priceMax === bucket.max
-            return (
-              <li key={bucket.label} className="flex items-center gap-2">
-                <button
-                  onClick={() => active ? setPriceRange(null, null) : setPriceRange(bucket.min, bucket.max)}
-                  className={`text-sm transition-colors ${active ? 'text-sage font-semibold' : 'text-ink/70 hover:text-sage'}`}
-                >
-                  {bucket.label}
-                </button>
-                <span className="text-xs text-ink/30 ml-auto">({bucket.count})</span>
-              </li>
-            )
-          })}
-          {(activeFilters.priceMin || activeFilters.priceMax) && (
-            <li>
-              <button onClick={() => setPriceRange(null, null)} className="text-xs text-ink/40 hover:text-coral transition-colors">
-                Clear price filter
-              </button>
-            </li>
-          )}
-        </ul>
-      </FilterSection>
-      )}
+      {/* Legacy auto-sections (Features / Experience Level / Brand / Price)
+         have been removed: /admin/search-filters is the single source of
+         truth for the sidebar. Anything not curated by admin shouldn't
+         appear here. The taxonomy filter chips above are the only
+         tag-driven controls; the AskEmmaRail above the sidebar handles
+         mood / audience / matters / budget. */}
     </div>
   )
 
