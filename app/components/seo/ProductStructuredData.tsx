@@ -93,6 +93,9 @@ export function ProductStructuredData({
       seller:                  SELLER,
       hasMerchantReturnPolicy: MERCHANT_RETURN_POLICY,
       shippingDetails:         SHIPPING_DETAILS,
+      ...(v.quantityAvailable > 0
+        ? { inventoryLevel: { '@type': 'QuantitativeValue', value: v.quantityAvailable } }
+        : {}),
       ...(v.title && v.title !== 'Default Title' ? { name: v.title } : {}),
       ...(v.barcode ? { gtin: v.barcode } : {}),
     }
@@ -146,6 +149,8 @@ export function ProductStructuredData({
     category:      deal.category,
     image:         deal.images.map(img => img.url),
     url,
+    ...(deal.createdAt ? { datePublished: deal.createdAt } : (deal.dealDate ? { datePublished: deal.dealDate } : {})),
+    ...(deal.updatedAt ? { dateModified: deal.updatedAt } : {}),
     offers,
     ...(deal.rating && deal.rating.count > 0 ? {
       aggregateRating: {

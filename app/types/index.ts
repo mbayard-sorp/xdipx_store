@@ -172,6 +172,10 @@ export interface Deal {
   pairBundleCopy?:         PairBundleCopy
   /** Shopify collection memberships — used for breadcrumb resolution against the main menu. */
   collections?:            { handle: string; title: string }[]
+  /** Shopify Product.createdAt — fed to JSON-LD `datePublished`. */
+  createdAt?:              string
+  /** Shopify Product.updatedAt — fed to JSON-LD `dateModified`. */
+  updatedAt?:              string
 }
 
 export interface Product {
