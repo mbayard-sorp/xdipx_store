@@ -139,7 +139,7 @@ export interface Deal {
   mapPrice: number
   brand: string
   category: 'for-him' | 'for-her' | 'both' | 'couples'
-  dealStatus: 'draft' | 'scheduled' | 'live'
+  dealStatus: 'draft' | 'scheduled' | 'live' | 'archived'
   dealDate: string
   qty: number
   accessoryProductIds: string[]

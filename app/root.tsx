@@ -54,6 +54,10 @@ export const links: LinksFunction = () => [
   { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
   // Preconnect for Google Analytics
   { rel: 'preconnect', href: 'https://www.googletagmanager.com' },
+  // Preconnect for Shopify CDN — the LCP hero image and gallery come from
+  // cdn.shopify.com on every product/homepage view. crossOrigin saves a
+  // round-trip on the cross-origin TCP+TLS handshake.
+  { rel: 'preconnect', href: 'https://cdn.shopify.com', crossOrigin: 'anonymous' },
   // Archivo (display) + Inter (body) — preload the stylesheet request so it
   // starts alongside HTML parsing instead of waiting for the parser to reach it.
   {
