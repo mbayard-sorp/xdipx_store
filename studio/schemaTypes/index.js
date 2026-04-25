@@ -18,6 +18,7 @@ import editorBio          from '../schemas/blocks/editorBio.js'
 import productFaq         from '../schemas/blocks/productFaq.js'
 import homepageSections   from '../schemas/homepageSections.js'
 import siteSettings       from '../schemas/siteSettings.js'
+import pdpDefaults        from '../schemas/pdpDefaults.js'
 import productPage        from '../schemas/productPage.js'
 import page               from '../schemas/page.js'
 import trustItem          from '../schemas/trustItem.js'
@@ -38,6 +39,7 @@ export const schemaTypes = [
   // Documents (singletons)
   homepageSections,
   siteSettings,
+  pdpDefaults,
   // Documents (per-product content)
   productPage,
   // Documents (generic pages)

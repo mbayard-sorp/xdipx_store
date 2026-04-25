@@ -1,5 +1,5 @@
 import { createClient } from '@sanity/client'
-import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq } from '~/types/cms'
+import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock } from '~/types/cms'
 import { cached, invalidateCache } from '~/lib/kv.server'
 
 // Shared field projection reused by homepage + product page queries.
@@ -493,6 +493,46 @@ export async function upsertEmmaPick(params: {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await writeClient.createOrReplace(doc as any)
+}
+
+// ─── PDP Defaults ─────────────────────────────────────────────────────────────
+// Sitewide trust bar shown below the buy button on every product page.
+// Trust items live as their own `trustItem` documents and are referenced from
+// the singleton — same pattern (and same documents, if editors choose) as the
+// homepage trust bar.
+//
+// GROQ quirk: combining `select()` with a trailing reference deref silently
+// null-refs the items — see CONTENT_BLOCKS_PROJECTION above. Project
+// `trustItems` directly here so TrustBarBlock can read it.
+
+export async function getPdpTrustBar(): Promise<TrustBarBlock | null> {
+  if (!projectId) return null
+  return cached('sanity:pdp-trust-bar', 300, async () => {
+    try {
+      const client = getClient()
+      if (!client) return null
+      // Singleton lookup — Studio uses _id == "singleton.pdpDefaults" via the
+      // structure config, but query by type so the bar still resolves if the
+      // doc happens to live under a different id (e.g. seeded via the API
+      // before Studio schema deploy).
+      const data = await client.fetch<TrustBarBlock | null>(
+        `*[_type == "pdpDefaults"] | order(_updatedAt desc)[0].trustBar{
+          _type, _key, active, order, bgStyle,
+          "trustItems": items[]->{ icon, headline, subheadline, active }
+        }`
+      )
+      if (!data) return null
+      // Drop items the editor has flipped to inactive so the rendered bar
+      // doesn't have to filter; TrustBar's own filter remains as a guard.
+      const trustItems = (data.trustItems ?? []).filter(
+        (i): i is NonNullable<typeof i> => !!i && i.active !== false,
+      )
+      return { ...data, trustItems }
+    } catch (err) {
+      console.error('[sanity] getPdpTrustBar error:', err)
+      return null
+    }
+  })
 }
 
 // ─── Site Settings ────────────────────────────────────────────────────────────
