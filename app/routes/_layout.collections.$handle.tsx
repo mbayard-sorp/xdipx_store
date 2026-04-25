@@ -1,10 +1,14 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useSearchParams, Link } from 'react-router'
-import { getCollectionDeals } from '~/lib/shopify.server'
+import { getCollectionDeals, type CollectionSort } from '~/lib/shopify.server'
 import { getEmmaPresets } from '~/lib/sanity.server'
 import { VaultCard } from '~/components/store/VaultCard'
 import { AskEmmaRail, matchesAskEmmaFilters } from '~/components/store/AskEmmaRail'
+import { EmmaDiscoveryRail } from '~/components/store/EmmaDiscoveryRail'
+import { EmmaEncouragementStrip } from '~/components/store/EmmaEncouragementStrip'
+import { LetMeLookAgainCTA } from '~/components/store/LetMeLookAgainCTA'
+import { readRecentHandles } from '~/lib/recent-views.server'
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const title = data?.title ?? 'Collection'
@@ -21,13 +25,21 @@ export function headers() {
   }
 }
 
+const SORT_VALUES = ['manual', 'newest', 'price-asc', 'price-desc'] as const
+function parseSort(raw: string | null): CollectionSort {
+  return (SORT_VALUES as readonly string[]).includes(raw ?? '')
+    ? (raw as CollectionSort)
+    : 'manual'
+}
+
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const handle = params.handle!
   const url = new URL(request.url)
   const page = parseInt(url.searchParams.get('page') ?? '1')
+  const sort = parseSort(url.searchParams.get('sort'))
 
   const [{ deals, hasNextPage }, presets] = await Promise.all([
-    getCollectionDeals(handle, page, 24),
+    getCollectionDeals(handle, page, 24, sort),
     getEmmaPresets(),
   ])
 
@@ -36,12 +48,15 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ')
 
-  return { deals, hasNextPage, page, handle, title, presets }
+  const recentViews = readRecentHandles(request)
+
+  return { deals, hasNextPage, page, handle, title, presets, recentViews, sort }
 }
 
 export default function CollectionPage() {
-  const { deals, hasNextPage, page, handle, title, presets } = useLoaderData<typeof loader>()
-  const [params] = useSearchParams()
+  const { deals, hasNextPage, page, handle, title, presets, recentViews, sort } = useLoaderData<typeof loader>()
+  const [params, setParams] = useSearchParams()
+  const [starred, setStarred] = useState<Record<string, string>>({})
 
   const filtered = useMemo(
     () => deals.filter(d => matchesAskEmmaFilters(
@@ -56,14 +71,39 @@ export default function CollectionPage() {
     [deals, params],
   )
 
-  const { moods, audiences, matters, priceMin, priceMax } = useMemo(
-    () => deriveFacets(deals.map(d => ({
+  const candidates = useMemo(
+    () => filtered.slice(0, 20).map(d => ({
+      handle:      d.handle,
+      title:       d.seoTitle,
+      vendor:      d.brand ?? null,
+      price:       d.dealPrice,
+      tags:        [],
+      moodTags:    d.moodTags ?? [],
+      mattersTags: d.mattersTags ?? [],
+    })),
+    [filtered],
+  )
+
+  const activeFilters = useMemo(() => ({
+    moods:     params.getAll('mood'),
+    audiences: params.getAll('audience'),
+    matters:   params.getAll('matters'),
+    budgetMax: params.get('budgetMax') ? Number(params.get('budgetMax')) : null,
+  }), [params])
+
+  const facetProducts = useMemo(
+    () => deals.map(d => ({
       ...(d.moodTags     ? { moodTags:     d.moodTags     } : {}),
       ...(d.audienceTags ? { audienceTags: d.audienceTags } : {}),
       ...(d.mattersTags  ? { mattersTags:  d.mattersTags  } : {}),
       price: d.dealPrice,
-    }))),
+    })),
     [deals],
+  )
+
+  const { moods, audiences, matters, priceMin, priceMax } = useMemo(
+    () => deriveFacets(facetProducts),
+    [facetProducts],
   )
 
   function pageHref(p: number) {
@@ -86,20 +126,65 @@ export default function CollectionPage() {
       </div>
 
       <div className="flex flex-col md:flex-row gap-8">
-        <AskEmmaRail
-          availableMoods={moods}
-          availableAudiences={audiences}
-          availableMatters={matters}
-          priceMin={priceMin}
-          priceMax={priceMax}
-          presets={presets}
-        />
+        <div className="flex flex-col gap-4 md:w-[260px] md:shrink-0">
+          <EmmaDiscoveryRail
+            surface="collection"
+            collection={handle}
+            candidates={candidates}
+            recentViews={recentViews}
+            onStarredChange={setStarred}
+          />
+          <AskEmmaRail
+            availableMoods={moods}
+            availableAudiences={audiences}
+            availableMatters={matters}
+            priceMin={priceMin}
+            priceMax={priceMax}
+            products={facetProducts}
+            presets={presets}
+          />
+        </div>
 
         <div className="flex-1 min-w-0">
+          {deals.length > 0 && (
+            <div className="flex items-center gap-3 mb-3">
+              <EmmaEncouragementStrip
+                surface="collection"
+                collection={handle}
+              />
+              <div className="flex items-center gap-2 shrink-0">
+                <label htmlFor="collection-sort" className="text-xs text-muted">
+                  Sort:
+                </label>
+                <select
+                  id="collection-sort"
+                  value={sort}
+                  onChange={e => {
+                    const next = new URLSearchParams(params)
+                    const v = e.target.value
+                    if (v === 'manual') next.delete('sort')
+                    else next.set('sort', v)
+                    next.delete('page')
+                    setParams(next, { preventScrollReset: true })
+                  }}
+                  className="text-xs bg-paper border border-line rounded-full px-3 py-1.5 text-ink focus:outline-none focus:border-coral"
+                >
+                  <option value="manual">Relevance</option>
+                  <option value="newest">Newest</option>
+                  <option value="price-asc">Price: Low to High</option>
+                  <option value="price-desc">Price: High to Low</option>
+                </select>
+              </div>
+            </div>
+          )}
           {filtered.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {filtered.map(deal => (
-                <VaultCard key={deal.id} deal={deal} />
+                <VaultCard
+                  key={deal.id}
+                  deal={deal}
+                  {...(starred[deal.handle] ? { starred: { reason: starred[deal.handle]! } } : {})}
+                />
               ))}
             </div>
           ) : deals.length > 0 ? (
@@ -139,6 +224,14 @@ export default function CollectionPage() {
               </Link>
             )}
           </div>
+
+          {deals.length > 0 && (
+            <LetMeLookAgainCTA
+              collection={title}
+              filters={activeFilters}
+              className="mt-8"
+            />
+          )}
         </div>
       </div>
     </div>

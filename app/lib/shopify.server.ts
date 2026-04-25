@@ -192,9 +192,10 @@ const PRODUCT_CARD_FRAGMENT = `
   images(first: 1) {
     edges { node { url altText } }
   }
-  variants(first: 1) {
+  variants(first: 2) {
     edges {
       node {
+        id
         price { amount }
         compareAtPrice { amount }
         quantityAvailable
@@ -215,6 +216,7 @@ interface ShopifyProductCardNode {
   variants: {
     edges: {
       node: {
+        id: string
         price: { amount: string }
         compareAtPrice: { amount: string } | null
         quantityAvailable: number
@@ -227,7 +229,8 @@ interface ShopifyProductCardNode {
 
 function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
   const mf = node.metafields
-  const variant = node.variants.edges[0]?.node
+  const variantEdges = node.variants.edges
+  const variant = variantEdges[0]?.node
   const dealPrice = parseFloat(variant?.price.amount ?? '0')
   const moodTags     = parseMetafieldJSON<string[]>(mf, 'mood_tags',     [])
   const audienceTags = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
@@ -245,6 +248,8 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
     category: (parseMetafield(mf, 'category') || 'both') as Deal['category'],
     dealStatus: 'archived' as const,
     qty: variant?.quantityAvailable ?? 0,
+    defaultVariantId:    variant?.id ?? null,
+    hasMultipleVariants: variantEdges.length > 1,
     ...(moodTags.length     > 0 ? { moodTags }     : {}),
     ...(audienceTags.length > 0 ? { audienceTags } : {}),
     ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
@@ -958,17 +963,28 @@ export async function getVaultDeals(page = 1, limit = 20): Promise<{ deals: Vaul
   }
 }
 
+export type CollectionSort = 'manual' | 'newest' | 'price-asc' | 'price-desc'
+
+function sortToStorefront(sort: CollectionSort): { sortKey: string; reverse: boolean } {
+  switch (sort) {
+    case 'newest':     return { sortKey: 'CREATED',  reverse: true  }
+    case 'price-asc':  return { sortKey: 'PRICE',    reverse: false }
+    case 'price-desc': return { sortKey: 'PRICE',    reverse: true  }
+    case 'manual':
+    default:           return { sortKey: 'MANUAL',   reverse: false }
+  }
+}
+
 export async function getCollectionDeals(
   handle: string,
   page = 1,
   limit = 20,
+  sort: CollectionSort = 'manual',
 ): Promise<{ deals: VaultDeal[]; hasNextPage: boolean }> {
-  // Shopify uses opaque cursors — cache the cursor for the start of each
-  // requested page in KV so we don't re-walk on every request. On cache miss
-  // we walk forward once and populate every page's cursor along the way.
+  const { sortKey, reverse } = sortToStorefront(sort)
   let after: string | null = null
   if (page > 1) {
-    const cached = await kvGet<string>(KV_KEYS.collectionCursor(handle, page))
+    const cached = await kvGet<string>(KV_KEYS.collectionCursor(handle, page, sort))
     if (cached) {
       after = cached
     } else {
@@ -978,18 +994,18 @@ export async function getCollectionDeals(
             products: { edges: { cursor: string }[] }
           } | null
         }>(`
-          query SkipPage($handle: String!, $first: Int!, $after: String) {
+          query SkipPage($handle: String!, $first: Int!, $after: String, $sortKey: ProductCollectionSortKeys!, $reverse: Boolean!) {
             collection(handle: $handle) {
-              products(first: $first, after: $after, sortKey: MANUAL) {
+              products(first: $first, after: $after, sortKey: $sortKey, reverse: $reverse) {
                 edges { cursor }
               }
             }
           }
-        `, { handle, first: limit, after })
+        `, { handle, first: limit, after, sortKey, reverse })
         const edges = skip.collection?.products.edges
         if (!edges?.length) return { deals: [], hasNextPage: false }
         after = edges[edges.length - 1]!.cursor
-        await kvSet(KV_KEYS.collectionCursor(handle, p + 1), after, COLLECTION_CURSOR_TTL)
+        await kvSet(KV_KEYS.collectionCursor(handle, p + 1, sort), after, COLLECTION_CURSOR_TTL)
       }
     }
   }
@@ -1002,15 +1018,15 @@ export async function getCollectionDeals(
       }
     } | null
   }>(`
-    query GetCollectionDeals($handle: String!, $first: Int!, $after: String) {
+    query GetCollectionDeals($handle: String!, $first: Int!, $after: String, $sortKey: ProductCollectionSortKeys!, $reverse: Boolean!) {
       collection(handle: $handle) {
-        products(first: $first, after: $after, sortKey: MANUAL) {
+        products(first: $first, after: $after, sortKey: $sortKey, reverse: $reverse) {
           pageInfo { hasNextPage }
           edges { cursor node { ${PRODUCT_CARD_FRAGMENT} } }
         }
       }
     }
-  `, { handle, first: limit, after })
+  `, { handle, first: limit, after, sortKey, reverse })
 
   if (!data.collection) return { deals: [], hasNextPage: false }
   return {

@@ -241,6 +241,38 @@ export function AskEmmaWidget() {
     }
   }, [open])
 
+  // Refs for the `xdipx:emma:openWith` bridge — must sit above early returns
+  // so hook order stays stable across renders. sendMessageRef is populated
+  // after sendMessage is defined below.
+  const sendMessageRef = useRef<((msg: string, opts?: { hidden?: boolean }) => void) | null>(null)
+  const pendingSeededPromptRef = useRef<string | null>(null)
+
+  // Open Emma with a seeded prompt when another component dispatches
+  // `xdipx:emma:openWith`. Stores the prompt until the widget is open + idle,
+  // then sends it via the ref so we always call the latest sendMessage.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ prompt?: string }>).detail
+      const prompt = typeof detail?.prompt === 'string' ? detail.prompt.trim() : ''
+      if (!prompt) return
+      pendingSeededPromptRef.current = prompt
+      setOpen(true)
+      setHasUnread(false)
+    }
+    window.addEventListener('xdipx:emma:openWith', handler as EventListener)
+    return () => window.removeEventListener('xdipx:emma:openWith', handler as EventListener)
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    if (isSending || isRevealing) return
+    const pending = pendingSeededPromptRef.current
+    if (!pending) return
+    pendingSeededPromptRef.current = null
+    sendMessageRef.current?.(pending)
+  }, [open, isSending, isRevealing])
+
   if (onAdmin) return null
   if (!mounted) return null
 
@@ -271,6 +303,11 @@ export function AskEmmaWidget() {
   }
 
   const send = () => sendMessage(draft)
+
+  // Keep the ref pointing at the latest sendMessage so the openWith listener
+  // always dispatches through the current closure. Safe to mutate in render:
+  // refs don't drive re-renders.
+  sendMessageRef.current = sendMessage
 
   const onVariantPick = (card: ChatProductCard, variant: ChatVariantOption) => {
     if (!variant.inStock) return

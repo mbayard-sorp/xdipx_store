@@ -45,6 +45,10 @@ export interface SearchProductResult {
     src: string
     aspect: 'portrait' | 'landscape' | 'square' | null
   } | null
+  // Ask-Emma taxonomy — projected from Shopify metafields during hydration.
+  moodTags?: string[]
+  audienceTags?: string[]
+  mattersTags?: string[]
 }
 
 export interface SearchFacets {
@@ -221,6 +225,11 @@ export async function searchAll(params: {
   experience?: string[]
   priceMin?: number | null
   priceMax?: number | null
+  // Ask-Emma taxonomy — applied post-hydration against Shopify metafields.
+  moods?: string[]
+  audiences?: string[]
+  matters?: string[]
+  budgetMax?: number | null
   sort?: SortOption
   page?: number
   perPage?: number
@@ -461,14 +470,22 @@ export async function searchAll(params: {
         firstVideo: firstVid && mp4
           ? { previewUrl: firstVid.previewImageUrl, src: mp4.url, aspect: firstVid.aspect ?? null }
           : null,
+        ...(shopify?.moodTags?.length     ? { moodTags: shopify.moodTags }         : {}),
+        ...(shopify?.audienceTags?.length ? { audienceTags: shopify.audienceTags } : {}),
+        ...(shopify?.mattersTags?.length  ? { mattersTags: shopify.mattersTags }   : {}),
       }
     })
+
+    // Ask-Emma taxonomy filter — applied post-hydration since the tags live on
+    // Shopify metafields, not Sanity. Kept optional so current callers that
+    // don't pass these args are unaffected.
+    const emmaFiltered = applyAskEmmaFilter(products, params)
 
     // Compute facets over the full filtered result set (all pages)
     const facets = await computeFacets(client, productFilter, groqParams)
 
     return {
-      products,
+      products: emmaFiltered,
       pages: data.pages ?? [],
       blogPosts: data.blogPosts ?? [],
       totalProducts: data.totalProducts,
@@ -479,6 +496,38 @@ export async function searchAll(params: {
     console.error('[search] Sanity search failed, falling back to Shopify:', err)
     return shopifyFallback(params)
   }
+}
+
+// ─── Ask-Emma taxonomy post-filter ──────────────────────────────────────────
+// Mood/audience/matters/budget filters live on Shopify metafields, so we apply
+// them after hydration. Mirrors the predicate from AskEmmaRail so the UI chips
+// filter consistently across client-side and server-side callers.
+function applyAskEmmaFilter(
+  products: SearchProductResult[],
+  params: { moods?: string[]; audiences?: string[]; matters?: string[]; budgetMax?: number | null },
+): SearchProductResult[] {
+  const moods     = params.moods ?? []
+  const audiences = params.audiences ?? []
+  const matters   = params.matters ?? []
+  const budgetMax = params.budgetMax ?? null
+  if (moods.length === 0 && audiences.length === 0 && matters.length === 0 && budgetMax == null) {
+    return products
+  }
+  return products.filter(p => {
+    if (moods.length > 0) {
+      if (!p.moodTags?.some(t => moods.includes(t))) return false
+    }
+    if (audiences.length > 0) {
+      if (!p.audienceTags?.some(t => audiences.includes(t))) return false
+    }
+    if (matters.length > 0) {
+      if (!p.mattersTags?.some(t => matters.includes(t))) return false
+    }
+    if (budgetMax != null && p.price != null) {
+      if (parseFloat(p.price) > budgetMax) return false
+    }
+    return true
+  })
 }
 
 // ─── Facet computation ──────────────────────────────────────────────────────
@@ -721,6 +770,10 @@ async function shopifyFallback(params: {
   vendors?: string[]
   priceMin?: number | null
   priceMax?: number | null
+  moods?: string[]
+  audiences?: string[]
+  matters?: string[]
+  budgetMax?: number | null
   sort?: string
   page?: number
   perPage?: number
@@ -758,23 +811,28 @@ async function shopifyFallback(params: {
     productFilters,
   })
 
+  const rawProducts: SearchProductResult[] = result.products.map(p => ({
+    handle: p.handle,
+    title: p.title,
+    vendor: p.vendor,
+    tags: p.tags,
+    category: null,
+    previewImageUrl: p.featuredImage?.url ?? null,
+    price: p.priceRange.minVariantPrice.amount,
+    compareAtPrice: p.compareAtPriceRange.maxVariantPrice?.amount ?? null,
+    featuredImage: p.featuredImage,
+    shopifyId: p.id,
+    defaultVariantId: null,
+    hasMultipleVariants: false,
+    availableForSale: true,
+    firstVideo: null,
+  }))
+  // Note: fallback path has no metafields hydrated, so mood/audience/matters
+  // filters here will exclude every product with those tags unset. This is the
+  // correct conservative behavior — we cannot verify the tag without the
+  // Shopify hydration that the Sanity path performs.
   return {
-    products: result.products.map(p => ({
-      handle: p.handle,
-      title: p.title,
-      vendor: p.vendor,
-      tags: p.tags,
-      category: null,
-      previewImageUrl: p.featuredImage?.url ?? null,
-      price: p.priceRange.minVariantPrice.amount,
-      compareAtPrice: p.compareAtPriceRange.maxVariantPrice?.amount ?? null,
-      featuredImage: p.featuredImage,
-      shopifyId: p.id,
-      defaultVariantId: null,
-      hasMultipleVariants: false,
-      availableForSale: true,
-      firstVideo: null,
-    })),
+    products: applyAskEmmaFilter(rawProducts, params),
     pages: [],
     blogPosts: [],
     totalProducts: result.totalCount,
