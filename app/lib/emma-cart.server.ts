@@ -200,7 +200,7 @@ export function bodyForVariant(
 ): string {
   switch (v) {
     case 'first-timer':
-      return `Good picks — I'd have grabbed the same. Ships in a plain box, billed as DIPCOM. Checkout's quick ♥`
+      return `Good picks. I'd have grabbed the same. Ships in a plain box, billed as XDIPX. Checkout's quick ♥`
     case 'repeat':
       return firstName
         ? `Welcome back. I lined the pairing up with what you've bought before — take a peek if it fits.`

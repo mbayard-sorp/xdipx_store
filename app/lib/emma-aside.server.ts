@@ -20,20 +20,21 @@ import { BRAND_VOICE_SYSTEM_PROMPT, generateWithSystem } from './claude.server'
 import { getFallbackAside } from './emma-aside-templates.server'
 import type { Deal } from '~/types'
 
-const HAIKU_TIMEOUT_MS  = 2500
+const HAIKU_TIMEOUT_MS  = 3500
 const CACHE_TTL_SECONDS = 60 * 60 * 24        // 24h
 const LOCK_TTL_SECONDS  = 3
-const MAX_OUTPUT_TOKENS = 120
+const MAX_OUTPUT_TOKENS = 240
 const DAILY_BUDGET_CEIL = 5000                 // fallback-only after this many gens/day
 
 const ASIDE_SYSTEM = `${BRAND_VOICE_SYSTEM_PROMPT}
 
 You're writing ONE contextual aside for the product detail page. Strict rules:
-- 1-2 sentences, max 28 words total.
+- 2-4 sentences, max 56 words total.
+- Do not start the aside with your own name or "Emma —"; the UI already shows your avatar and name.
 - Sound like you're reacting to this exact person on this exact page — not reading a press release.
 - Never say "Buy now". Never mention timers or urgency.
 - Never quote the context back verbatim ("I see you have X in your cart" = banned).
-- You can riff on what's in their cart / what they've been browsing / how this pairs — but ONE angle max. Don't stack.
+- You can riff on what's in their cart / what they've been browsing / how this pairs — pick the most interesting angle and develop it; don't stack three at once.
 - Plain text. No markdown. No quotation marks wrapping the whole aside. Optional ♥ at the end.`
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -92,13 +93,16 @@ function buildUserPrompt(args: EmmaAsideArgs): string {
 }
 
 function cleanOutput(raw: string): string {
-  // Strip surrounding quotes, leading bullet markers, stray code fences.
+  // Strip surrounding quotes, leading bullet markers, stray code fences,
+  // and any leading "Emma —" / "Emma -" / "Emma:" the model may add despite
+  // instructions (the UI already attributes via avatar + name).
   let out = raw.trim()
   out = out.replace(/^```[\w]*\n?/i, '').replace(/\n?```$/i, '').trim()
   if ((out.startsWith('"') && out.endsWith('"')) || (out.startsWith('“') && out.endsWith('”'))) {
     out = out.slice(1, -1).trim()
   }
   out = out.replace(/^[-–—•\s]+/, '').trim()
+  out = out.replace(/^emma\s*[—–\-:]\s*/i, '').trim()
   return out
 }
 

@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Review, ReviewAggregate } from '~/types/reviews'
-import { ReviewList } from '~/components/reviews/ReviewList'
-import { ReviewForm } from '~/components/reviews/ReviewForm'
+// Imports kept for restore of Reviews tab below.
+// import { ReviewList } from '~/components/reviews/ReviewList'
+// import { ReviewForm } from '~/components/reviews/ReviewForm'
 
 interface ProductTabsProps {
-  fullStory:       string
+  descriptionHtml: string
   boxContents:     string[]
   forHim:          string
   forHer:          string
@@ -16,34 +17,51 @@ interface ProductTabsProps {
   reviewPage?:     number
   reviewSort?:     string
   reviewFilter?:   string
+  emmaAsideSlot?:  React.ReactNode
 }
 
-type Tab = "Emma's take" | 'In the box' | 'Both ways ♥' | 'Specs' | 'Reviews'
+type Tab = "Emma's take" | 'What it does' | 'In the box' | 'Both ways ♥' | 'Specs' | 'Reviews'
 
 const proseBody =
   'prose prose-sm max-w-none text-ink/80 leading-relaxed'
 
 export function ProductTabs({
-  fullStory, boxContents, forHim, forHer, specifications,
-  productId, reviews = [], aggregate, reviewTotal = 0,
-  reviewPage = 1, reviewSort = 'newest', reviewFilter = 'all',
+  descriptionHtml, boxContents, forHim, forHer, specifications,
+  productId: _productId, reviews: _reviews = [], aggregate, reviewTotal: _reviewTotal = 0,
+  reviewPage: _reviewPage = 1, reviewSort: _reviewSort = 'newest', reviewFilter: _reviewFilter = 'all',
+  emmaAsideSlot,
 }: ProductTabsProps) {
-  const reviewCount = aggregate?.approvedCount ?? 0
+  void aggregate // referenced by hidden Reviews panel
   const hasForEither = Boolean(forHim || forHer)
 
   const visibleTabs: Tab[] = [
-    ...(fullStory ? ["Emma's take" as Tab] : []),
+    ...(emmaAsideSlot ? ["Emma's take" as Tab] : []),
+    ...(descriptionHtml ? ['What it does' as Tab] : []),
     'In the box',
     ...(hasForEither ? ['Both ways ♥' as Tab] : []),
     ...(specifications ? ['Specs' as Tab] : []),
-    ...(productId ? ['Reviews' as Tab] : []),
+    // ...(productId ? ['Reviews' as Tab] : []),  // Reviews tab hidden
   ]
 
   const [active, setActive] = useState<Tab>(visibleTabs[0] ?? 'In the box')
 
-  const panelClass = (tab: Tab) => (active === tab ? '' : 'hidden')
-  const panelId = (tab: Tab) => `tabpanel-${tab.replace(/\W+/g, '-').toLowerCase()}`
   const tabId = (tab: Tab) => `tab-${tab.replace(/\W+/g, '-').toLowerCase()}`
+  const panelId = (tab: Tab) => `tabpanel-${tab.replace(/\W+/g, '-').toLowerCase()}`
+  const panelClass = (tab: Tab) => (active === tab ? '' : 'hidden')
+
+  // Activate the tab matching the current URL hash (e.g. #tab-what-it-does)
+  // so the SEO summary cards above can deep-link straight into a tab.
+  useEffect(() => {
+    const sync = () => {
+      const id = window.location.hash.replace(/^#/, '')
+      if (!id) return
+      const match = visibleTabs.find(t => tabId(t) === id)
+      if (match) setActive(match)
+    }
+    sync()
+    window.addEventListener('hashchange', sync)
+    return () => window.removeEventListener('hashchange', sync)
+  }, [visibleTabs])
 
   return (
     <div className="mt-10">
@@ -71,21 +89,34 @@ export function ProductTabs({
               ].join(' ')}
               style={{ fontFamily: 'var(--font-display)' }}
             >
-              {tab === 'Reviews' && reviewCount > 0 ? `Reviews (${reviewCount})` : tab}
+              {tab === 'Reviews' && (aggregate?.approvedCount ?? 0) > 0
+                ? `Reviews (${aggregate?.approvedCount})`
+                : tab}
             </button>
           )
         })}
       </div>
 
       <div className="py-6">
-        {fullStory && (
+        {emmaAsideSlot && (
           <section
             id={panelId("Emma's take")}
             role="tabpanel"
             aria-labelledby={tabId("Emma's take")}
             className={panelClass("Emma's take")}
           >
-            <div className={proseBody} dangerouslySetInnerHTML={{ __html: fullStory }} />
+            {emmaAsideSlot}
+          </section>
+        )}
+
+        {descriptionHtml && (
+          <section
+            id={panelId('What it does')}
+            role="tabpanel"
+            aria-labelledby={tabId('What it does')}
+            className={panelClass('What it does')}
+          >
+            <div className={proseBody} dangerouslySetInnerHTML={{ __html: descriptionHtml }} />
           </section>
         )}
 
@@ -159,6 +190,7 @@ export function ProductTabs({
           </section>
         )}
 
+        {/* Reviews tab hidden — uncomment to restore.
         {productId && (
           <section
             id={panelId('Reviews')}
@@ -196,6 +228,7 @@ export function ProductTabs({
             </div>
           </section>
         )}
+        */}
       </div>
     </div>
   )

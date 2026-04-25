@@ -63,16 +63,12 @@ interface SensationDialProps {
 export function SensationDial({
   type,
   values,
-  aggregate,
-  customerVote,
-  onAggregateVote,
-  voting,
+  aggregate: _aggregate,
+  customerVote: _customerVote,
+  onAggregateVote: _onAggregateVote,
+  voting: _voting,
 }: SensationDialProps) {
   const dims = DIMENSIONS_BY_TYPE[type]
-  const agrees    = aggregate?.agrees    ?? 0
-  const disagrees = aggregate?.disagrees ?? 0
-  const total     = agrees + disagrees
-  const agreePct  = aggregate?.agreePct  ?? 0
 
   return (
     <section className="bg-paper/90 rounded-[var(--radius-lg)] border border-line p-5 md:p-6">
@@ -118,6 +114,7 @@ export function SensationDial({
         })}
       </ul>
 
+      {/* Aggregate vote footer hidden — uncomment to restore.
       {onAggregateVote && (
         <footer className="mt-5 pt-4 border-t border-line">
           <p
@@ -156,10 +153,13 @@ export function SensationDial({
           </div>
         </footer>
       )}
+      */}
     </section>
   )
 }
 
+// @ts-expect-error — kept for future restore of vote footer
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function AggregateVoteChip({
   direction,
   label,

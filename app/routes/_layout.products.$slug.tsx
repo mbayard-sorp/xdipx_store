@@ -1,8 +1,9 @@
 import { Suspense, useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { Await, data, useLoaderData, useOutletContext, useFetcher, useSearchParams } from 'react-router'
+import { Await, data, useLoaderData, useOutletContext, useFetcher, useSearchParams, useRouteLoaderData } from 'react-router'
+import type { loader as layoutLoader } from '~/routes/_layout'
 import { ProductImageGallery, type GalleryItem } from '~/components/store/ProductImageGallery'
-import { StarRating } from '~/components/reviews/StarRating'
+// import { StarRating } from '~/components/reviews/StarRating'  // hidden — restore with star rating block
 import {
   getDealByHandle, getProductsByTag,
   getCollectionProducts, getProductsByHandles,
@@ -23,22 +24,24 @@ import { getCartIdFromCookie } from '~/lib/cart.server'
 import { getCart } from '~/lib/shopify.server'
 import { getEmmaAside, type EmmaAsideResult } from '~/lib/emma-aside.server'
 import { parseBrowseCookie, buildBrowseCookie } from '~/lib/browse-history.server'
-import { EmmaContextualAside } from '~/components/store/EmmaContextualAside'
-import { EmmaContextualAsideSkeleton } from '~/components/store/EmmaContextualAsideSkeleton'
+// EmmaContextualAside / Skeleton no longer used — Emma's take now lives inside
+// the SEO summary grid via EmmaTakeBody (defined below).
 import { getFallbackAside } from '~/lib/emma-aside-templates'
 import BundleHero from '~/components/store/BundleHero'
 import BundleSaveCard from '~/components/store/BundleSaveCard'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
-import { ProductTabs }            from '~/components/store/ProductTabs'
+// ProductTabs removed — content now lives in the SEO summary grid above.
 import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
 import FrequentlyBoughtWith       from '~/components/store/FrequentlyBoughtWith'
 import { SensationDial }          from '~/components/store/SensationDial'
 import { PairsWith, type PairsWithItem } from '~/components/store/PairsWith'
 import { VariantSelector, resolveVariant } from '~/components/store/VariantSelector'
+import { CircleOptionSelector } from '~/components/store/CircleOptionSelector'
+import { ProductSummaryGrid } from '~/components/store/ProductSummaryGrid'
 import { getSwatchMap } from '~/lib/swatches.server'
 import { SocialProofBar }         from '~/components/store/SocialProofBar'
-import { StockIndicator }         from '~/components/store/StockIndicator'
+// import { StockIndicator } from '~/components/store/StockIndicator'  // hidden — restore with stock indicator block
 import { WaitlistButton }         from '~/components/store/WaitlistButton'
 import { SubscriptionSelector } from '~/components/store/SubscriptionSelector'
 import { getSubscriptionPrice, getBestSubscriptionOffer } from '~/lib/selling-plan'
@@ -354,14 +357,17 @@ function ProductPage() {
   const customerProductVoteLoaded  = loaderData.customerProductVote
   const isLoggedIn                 = loaderData.isLoggedIn
   const companionBundle = loaderData.companionBundle
-  const reviews = loaderData.reviews
-  const reviewTotal = loaderData.reviewTotal
-  const reviewPage = loaderData.reviewPage
-  const reviewSort = loaderData.reviewSort
-  const reviewFilter = loaderData.reviewFilter
-  const aggregate = loaderData.aggregate
+  // Review fields kept on loader for SEO JSON-LD / future restore of Reviews UI.
+  void loaderData.reviews
+  void loaderData.reviewTotal
+  void loaderData.reviewPage
+  void loaderData.reviewSort
+  void loaderData.reviewFilter
+  void loaderData.aggregate
   const swatches  = loaderData.swatches ?? {}
   const emmaAsidePromise = loaderData.emmaAsidePromise
+  const layoutData = useRouteLoaderData<typeof layoutLoader>('routes/_layout')
+  const emmaPersona = layoutData?.emmaPersona ?? null
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
   const voteFetcher = useFetcher<{
@@ -492,14 +498,14 @@ function ProductPage() {
       if (idx >= 0) setActiveImg(idx)
     }
 
-    // Only stamp ?variant= when we've resolved a concrete variant.
-    if (exact) {
-      setSearchParams(prev => {
-        const nextParams = new URLSearchParams(prev)
-        nextParams.set('variant', exact.id)
-        return nextParams
-      }, { replace: true })
-    }
+    // Stamp ?variant= when we've resolved a concrete variant; clear it when the
+    // user has deselected an axis and no longer points at a single variant.
+    setSearchParams(prev => {
+      const nextParams = new URLSearchParams(prev)
+      if (exact) nextParams.set('variant', exact.id)
+      else nextParams.delete('variant')
+      return nextParams
+    }, { replace: true, preventScrollReset: true })
   }, [variants, optionNames, allMedia, setSearchParams])
 
   const selectedVariant = resolveVariant(variants, selectedOptions, optionNames) ?? (multiVariant ? undefined : variants[0])
@@ -510,8 +516,19 @@ function ProductPage() {
   const price    = activePlan ? getSubscriptionPrice(basePrice, activePlan) : basePrice
   const isDigital = deal.handle === 'egift-card'
   const needsSelection = multiVariant && !selectedVariant
+  // Build "Pick a size and color" / "Pick a color" / "Pick a size" depending
+  // on which axes still need a choice. Size always reads first.
+  const pickLabel: string = (() => {
+    const order = (n: string) => (n === 'size' ? 0 : (n === 'color' || n === 'colour') ? 1 : 2)
+    const missing = options
+      .filter(o => !selectedOptions[o.name])
+      .map(o => o.name.toLowerCase())
+      .sort((a, b) => order(a) - order(b))
+    if (missing.length === 0) return 'Pick an option'
+    return `Pick a ${missing.join(' and ')}`
+  })()
   const inStock  = isDigital ? true : (selectedVariant?.availableForSale ?? (multiVariant ? false : deal.qty > 0))
-  const qty      = selectedVariant?.quantityAvailable ?? deal.qty
+  void (selectedVariant?.quantityAvailable ?? deal.qty)  // qty kept for hidden StockIndicator restore
   const discount = deal.msrp > 0 && deal.msrp > price
     ? Math.round(((deal.msrp - price) / deal.msrp) * 100)
     : 0
@@ -600,29 +617,6 @@ function ProductPage() {
               />
             }
           />
-
-          {/* Contextual Emma aside — centered below the gallery. Streamed via deferred loader data. */}
-          <div className="flex justify-center">
-            <div className="w-full max-w-[520px]">
-              <Suspense fallback={<EmmaContextualAsideSkeleton />}>
-                <Await
-                  resolve={emmaAsidePromise}
-                  errorElement={
-                    <EmmaContextualAside
-                      text={getFallbackAside({
-                        id: deal.id,
-                        ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
-                      })}
-                    />
-                  }
-                >
-                  {(result: EmmaAsideResult) =>
-                    result.text ? <EmmaContextualAside text={result.text} /> : null
-                  }
-                </Await>
-              </Suspense>
-            </div>
-          </div>
         </div>
 
         {/* ── Right: Product info ─────────────────────────────────────── */}
@@ -637,6 +631,7 @@ function ProductPage() {
                   <span>{deal.productTypeDial}</span>
                 </>
               )}
+              {/* Star rating hidden — uncomment to restore.
               {aggregate && aggregate.approvedCount > 0 && (
                 <>
                   <span aria-hidden="true">•</span>
@@ -646,6 +641,7 @@ function ProductPage() {
                   </span>
                 </>
               )}
+              */}
             </div>
             <h1
               className="text-2xl md:text-3xl font-bold text-ink mt-1 leading-snug"
@@ -683,9 +679,12 @@ function ProductPage() {
                 </span>
               </>
             )}
-            {needsSelection
-              ? <span className="text-[13px] text-muted italic">Pick a size to see availability</span>
-              : <StockIndicator qty={qty} isDigital={isDigital} />}
+            {needsSelection && (
+              <span className="text-[13px] text-muted italic">Pick a size to see availability</span>
+            )}
+            {/* Stock indicator hidden — uncomment to restore.
+            {!needsSelection && <StockIndicator qty={qty} isDigital={isDigital} />}
+            */}
           </div>
 
           {/* Subscription teaser */}
@@ -713,93 +712,152 @@ function ProductPage() {
           {/* Social proof */}
           <SocialProofBar />
 
-          {/* Variant + subscription pills — shared row */}
-          {(multiVariant || (deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0)) && (
+          {/* Subscription pill */}
+          {deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0 && (
             <div className="flex flex-wrap items-start gap-2">
-              {multiVariant && (
-                <VariantSelector
-                  variants={variants}
-                  options={options}
-                  selectedOptions={selectedOptions}
-                  onSelectionChange={handleSelectionChange}
-                  swatches={swatches}
-                />
-              )}
-              {deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0 && (
-                <SubscriptionSelector
-                  sellingPlanGroups={deal.sellingPlanGroups}
-                  basePrice={basePrice}
-                  selectedPlanId={selectedPlanId}
-                  onPlanChange={setSelectedPlanId}
-                />
-              )}
+              <SubscriptionSelector
+                sellingPlanGroups={deal.sellingPlanGroups}
+                basePrice={basePrice}
+                selectedPlanId={selectedPlanId}
+                onPlanChange={setSelectedPlanId}
+              />
             </div>
           )}
 
-          {/* Qty + Add to cart */}
-          {inStock || needsSelection ? (
-            <fetcher.Form method="post" action="/api/cart" className="flex items-stretch gap-3">
-              <input type="hidden" name="intent"    value="add-item" />
-              <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
-              {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
+          {/* Qty + Add to cart (with inline color/size circles) — circles
+              always render so users can still switch variants when the current
+              one is out of stock and the waitlist UI is showing instead. */}
+          <div className="flex items-stretch gap-2">
+            {multiVariant && options.map(opt => {
+              const lower = opt.name.toLowerCase()
+              const isColor = lower === 'color' || lower === 'colour'
+              const isSize  = lower === 'size'
+              if (!isColor && !isSize) return null
+              return (
+                <CircleOptionSelector
+                  key={opt.name}
+                  optionName={opt.name}
+                  values={opt.values}
+                  {...(selectedOptions[opt.name] ? { selected: selectedOptions[opt.name] } : {})}
+                  onSelect={(v) => handleSelectionChange({ ...selectedOptions, [opt.name]: v })}
+                  onClear={() => {
+                    const { [opt.name]: _drop, ...rest } = selectedOptions
+                    void _drop
+                    handleSelectionChange(rest)
+                  }}
+                  kind={isColor ? 'color' : 'size'}
+                  swatches={swatches}
+                  variants={variants}
+                  selectedOptions={selectedOptions}
+                />
+              )
+            })}
 
-              <button
-                ref={ctaRef}
-                type="submit"
-                disabled={isPending || needsSelection}
-                className={[
-                  'flex-1 py-4 rounded-full font-bold text-lg transition-all',
-                  needsSelection
-                    ? 'bg-ink/10 text-ink/50 cursor-not-allowed'
-                    : 'bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20',
-                ].join(' ')}
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                {needsSelection
-                  ? `Pick a ${options.find(o => !selectedOptions[o.name])?.name.toLowerCase() ?? 'size'}`
-                  : isPending ? 'Adding...' : buyButtonText}
-              </button>
+            {inStock || needsSelection ? (
+              <fetcher.Form method="post" action="/api/cart" className="flex items-stretch gap-2 flex-1 min-w-0">
+                <input type="hidden" name="intent"    value="add-item" />
+                <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
+                {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
 
-              <div className="flex items-center border border-cream-2 rounded-full overflow-hidden bg-white shrink-0">
                 <button
-                  type="button"
-                  onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                  className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
-                  aria-label="Decrease quantity"
-                >−</button>
-                <label htmlFor="qty" className="sr-only">Quantity</label>
-                <input id="qty" type="hidden" name="quantity" value={quantity} />
-                <span className="px-3 text-sm font-semibold text-ink tabular-nums" aria-live="polite">{quantity}</span>
-                <button
-                  type="button"
-                  onClick={() => setQuantity(q => Math.min(3, q + 1))}
-                  className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink hover:bg-cream-2 transition-colors text-lg"
-                  aria-label="Increase quantity"
-                >+</button>
+                  ref={ctaRef}
+                  type="submit"
+                  disabled={isPending || needsSelection}
+                  className={[
+                    'flex-1 py-4 rounded-full font-bold text-lg transition-all',
+                    needsSelection
+                      ? 'bg-ink/10 text-ink/50 cursor-not-allowed'
+                      : 'bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20',
+                  ].join(' ')}
+                  style={{ fontFamily: 'var(--font-display)' }}
+                >
+                  {needsSelection
+                    ? pickLabel
+                    : isPending ? 'Adding...' : buyButtonText}
+                </button>
+
+                <div className="flex items-stretch border border-cream-2 rounded-full overflow-hidden bg-white shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                    className="min-w-[44px] flex items-center justify-center text-ink/70 hover:bg-coral hover:text-white transition-colors text-lg"
+                    aria-label="Decrease quantity"
+                  >−</button>
+                  <label htmlFor="qty" className="sr-only">Quantity</label>
+                  <input id="qty" type="hidden" name="quantity" value={quantity} />
+                  <span className="px-3 flex items-center text-sm font-semibold text-ink tabular-nums" aria-live="polite">{quantity}</span>
+                  <button
+                    type="button"
+                    onClick={() => setQuantity(q => Math.min(3, q + 1))}
+                    className="min-w-[44px] flex items-center justify-center text-ink/70 hover:bg-coral hover:text-white transition-colors text-lg"
+                    aria-label="Increase quantity"
+                  >+</button>
+                </div>
+              </fetcher.Form>
+            ) : (
+              <div className="flex-1 min-w-0">
+                <WaitlistButton productHandle={deal.handle} />
               </div>
-            </fetcher.Form>
-          ) : (
-            <WaitlistButton productHandle={deal.handle} />
+            )}
+          </div>
+
+          {/* Non-color/size axis fallback (rare): render legacy selector */}
+          {multiVariant && options.some(o => {
+            const l = o.name.toLowerCase()
+            return l !== 'color' && l !== 'colour' && l !== 'size'
+          }) && (
+            <VariantSelector
+              variants={variants}
+              options={options.filter(o => {
+                const l = o.name.toLowerCase()
+                return l !== 'color' && l !== 'colour' && l !== 'size'
+              })}
+              selectedOptions={selectedOptions}
+              onSelectionChange={handleSelectionChange}
+              swatches={swatches}
+            />
           )}
 
         </div>
       </div>
 
-      {/* Tabbed content */}
-      <ProductTabs
-        fullStory={deal.fullStory}
+      {/* Keyword-rich summary grid — visible by default for SEO; cards anchor
+          to the matching tab below for deeper detail. */}
+      <ProductSummaryGrid
+        productTitle={deal.seoTitle}
+        {...(deal.productTypeDial ? { productType: deal.productTypeDial } : {})}
+        {...(deal.brand ? { brand: deal.brand } : {})}
+        descriptionHtml={deal.descriptionHtml ?? ''}
         boxContents={deal.boxContents ?? []}
-        forHim={deal.worksForHim}
-        forHer={deal.worksForHer}
         {...(deal.specifications ? { specifications: deal.specifications } : {})}
-        productId={deal.shopifyProductId}
-        reviews={reviews}
-        reviewTotal={reviewTotal}
-        aggregate={aggregate}
-        reviewPage={reviewPage}
-        reviewSort={reviewSort}
-        reviewFilter={reviewFilter}
+        emmaSlot={
+          <Suspense fallback={<EmmaTakeBody text="Emma's note loads in a moment…" {...(emmaPersona ? { persona: emmaPersona } : {})} />}>
+            <Await
+              resolve={emmaAsidePromise}
+              errorElement={
+                <EmmaTakeBody
+                  text={getFallbackAside({
+                    id: deal.id,
+                    ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
+                  })}
+                  {...(emmaPersona ? { persona: emmaPersona } : {})}
+                />
+              }
+            >
+              {(result: EmmaAsideResult) => (
+                <EmmaTakeBody
+                  text={result.text || getFallbackAside({
+                    id: deal.id,
+                    ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
+                  })}
+                  {...(emmaPersona ? { persona: emmaPersona } : {})}
+                />
+              )}
+            </Await>
+          </Suspense>
+        }
       />
+
     </section>
   )
 
@@ -908,6 +966,38 @@ function WorksForBadge({ label, emoji }: { label: string; emoji: string }) {
       <span aria-hidden="true">{emoji}</span>
       {label}
     </span>
+  )
+}
+
+function EmmaTakeBody({
+  text,
+  persona,
+}: {
+  text:     string
+  persona?: { avatarUrl: string | null; avatarAlt: string | null; displayName: string | null } | null
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      {persona?.avatarUrl ? (
+        <img
+          src={persona.avatarUrl}
+          alt={persona.avatarAlt || persona.displayName || 'Emma'}
+          width={40}
+          height={40}
+          loading="lazy"
+          className="shrink-0 w-10 h-10 rounded-full object-cover ring-1 ring-line"
+        />
+      ) : (
+        <span
+          aria-hidden="true"
+          className="shrink-0 w-10 h-10 rounded-full bg-coral/10 text-coral flex items-center justify-center text-lg"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          ♥
+        </span>
+      )}
+      <p className="text-sm text-ink/80 leading-relaxed pt-1">{text}</p>
+    </div>
   )
 }
 
