@@ -260,11 +260,32 @@ export default function SearchPage() {
 
   const hasContentResults = pages.length > 0 || blogPosts.length > 0
 
+  // Admin-defined group labels (lowercased) — used to suppress legacy
+  // IVR/vendor/price auto-sections that the admin has already replaced
+  // with a curated group of the same name. Prevents duplicate "Features",
+  // "Brand", etc. headers and lets admin's defaultExpanded flag be the
+  // single source of truth for those sections.
+  const adminLabels = useMemo(
+    () => new Set(taxonomy.map(g => g.label.trim().toLowerCase())),
+    [taxonomy],
+  )
+  const adminHasFeatures   = adminLabels.has('features')
+  const adminHasExperience = adminLabels.has('experience') || adminLabels.has('experience level')
+  const adminHasBrand      = adminLabels.has('brand') || adminLabels.has('brands') || adminLabels.has('all brands')
+  const adminHasPrice      = adminLabels.has('price')
+
   const filterSidebar = (
     <div className="space-y-6">
-      {/* Curated tag filter groups from admin taxonomy */}
+      {/* Curated tag filter groups from admin taxonomy. Keying on
+         defaultExpanded forces a re-mount when admin toggles the flag, so
+         FilterSection's useState picks up the new initial value. */}
       {taxonomy.map(group => (
-        <FilterSection key={group.id} title={group.label} collapsible defaultExpanded={group.defaultExpanded !== false}>
+        <FilterSection
+          key={`${group.id}:${group.defaultExpanded === false ? 'c' : 'e'}`}
+          title={group.label}
+          collapsible
+          defaultExpanded={group.defaultExpanded !== false}
+        >
           <ul className="space-y-2">
             {group.tags.map(t => {
               const checked = activeFilters.tags.includes(t.tag)
@@ -290,8 +311,9 @@ export default function SearchPage() {
         </FilterSection>
       ))}
 
-      {/* Features (from IVR descriptors) */}
-      {hasAnyFeatures && (
+      {/* Features (from IVR descriptors) — suppressed if admin defines a
+         Features group, so admin's curated list + flag wins. */}
+      {hasAnyFeatures && !adminHasFeatures && (
         <FilterSection title="Features" collapsible defaultExpanded>
           <ul className="space-y-2">
             {Object.entries(featureCounts)
@@ -320,8 +342,9 @@ export default function SearchPage() {
         </FilterSection>
       )}
 
-      {/* Experience Level (from IVR descriptors) */}
-      {hasAnyExperience && (
+      {/* Experience Level (from IVR descriptors) — suppressed if admin
+         defines an Experience / Experience Level group. */}
+      {hasAnyExperience && !adminHasExperience && (
         <FilterSection title="Experience Level" collapsible defaultExpanded>
           <ul className="space-y-2">
             {Object.entries(experienceCounts)
@@ -349,8 +372,9 @@ export default function SearchPage() {
         </FilterSection>
       )}
 
-      {/* Brand / Vendor */}
-      {vendorList.length > 0 && (
+      {/* Brand / Vendor — suppressed if admin defines a Brand / Brands /
+         All Brands group. */}
+      {vendorList.length > 0 && !adminHasBrand && (
         <FilterSection title="Brand">
           <ul className="space-y-2">
             {vendorList.slice(0, 12).map(v => {
@@ -377,7 +401,8 @@ export default function SearchPage() {
         </FilterSection>
       )}
 
-      {/* Price buckets */}
+      {/* Price buckets — suppressed if admin defines a Price group. */}
+      {!adminHasPrice && (
       <FilterSection title="Price">
         <ul className="space-y-1.5">
           {[
@@ -408,6 +433,7 @@ export default function SearchPage() {
           )}
         </ul>
       </FilterSection>
+      )}
     </div>
   )
 
