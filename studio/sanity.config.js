@@ -51,6 +51,11 @@ export default defineConfig({
               .id('siteSettings')
               .icon(() => '⚙️')
               .child(S.document().schemaType('siteSettings').documentId('singleton.siteSettings')),
+            S.listItem()
+              .title('PDP Defaults')
+              .id('pdpDefaults')
+              .icon(() => '🛒')
+              .child(S.document().schemaType('pdpDefaults').documentId('singleton.pdpDefaults')),
             S.divider(),
             S.documentTypeListItem('productPage').title('Products').icon(() => '🛍️'),
             S.documentTypeListItem('page').title('Pages').icon(() => '📄'),

@@ -212,6 +212,13 @@ export interface TrustBarBlock {
   bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
+// PDP-wide defaults singleton — currently just the sitewide trust bar shown
+// below the buy button on every product page. See app/lib/sanity.server.ts
+// `getPdpTrustBar()`.
+export interface PdpDefaults {
+  trustBar: TrustBarBlock | null
+}
+
 // ─── Editor Bio Card ─────────────────────────────────────────────────────
 
 export type EditorBioVariant = 'hero' | 'card' | 'quote'

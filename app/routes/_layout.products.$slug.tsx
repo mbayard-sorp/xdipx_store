@@ -10,7 +10,7 @@ import {
   getProductsByIds, getMainMenu,
 } from '~/lib/shopify.server'
 import { resolveBreadcrumbs, type BreadcrumbCrumb } from '~/lib/breadcrumbs.server'
-import { getProductPageBlocks, getProductFaqs } from '~/lib/sanity.server'
+import { getProductPageBlocks, getProductFaqs, getPdpTrustBar } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
@@ -52,8 +52,9 @@ import { SubscriptionSelector } from '~/components/store/SubscriptionSelector'
 import { getSubscriptionPrice, getBestSubscriptionOffer } from '~/lib/selling-plan'
 import { EmailSubscribe }         from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }   from '~/components/cms/ContentBlockRenderer'
+import { TrustBarBlock }          from '~/components/cms/TrustBarBlock'
 import type { Product } from '~/types'
-import type { ProductCarouselBlock, ProductFaq } from '~/types/cms'
+import type { ProductCarouselBlock, ProductFaq, TrustBarBlock as TrustBarBlockType } from '~/types/cms'
 import { trackViewItem, trackAddToCart } from '~/lib/analytics.client'
 import { ShareButtons } from '~/components/common/ShareButtons'
 import { HeartButton } from '~/components/store/HeartButton'
@@ -103,6 +104,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         { label: 'Home', url: 'https://xdipx.com/', href: '/' },
         { label: bundle.title, url: `https://xdipx.com/products/${bundle.handle}`, href: `/products/${bundle.handle}` },
       ] as BreadcrumbCrumb[],
+      pdpTrustBar: null as TrustBarBlockType | null,
     }
   }
 
@@ -147,7 +149,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // HIDDEN — Reviews UI: paused until we have orders. Restore the two
   // commented-out fetches and the JSX block at line ~707 when bringing the
   // user-review system back online.
-  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts, swatches, faqs, mainMenu] = await Promise.all([
+  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts, swatches, faqs, mainMenu, pdpTrustBar] = await Promise.all([
     getProductPageBlocks(slug),
     // getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     // getProductAggregate(deal.shopifyProductId),
@@ -165,6 +167,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     colorLabels.length > 0 ? getSwatchMap(colorLabels) : Promise.resolve({} as Record<string, string>),
     getProductFaqs(slug),
     getMainMenu(),
+    getPdpTrustBar(),
   ])
 
   const breadcrumbs: BreadcrumbCrumb[] = resolveBreadcrumbs({
@@ -321,6 +324,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       emmaAsideStatic,
       emmaAsidePromise,
       breadcrumbs,
+      pdpTrustBar,
     },
     { headers: { 'Set-Cookie': browseCookieHeader } },
   )
@@ -453,6 +457,7 @@ function ProductPage() {
   const nonCareFaqs = faqs.filter(f => f.category !== 'care')
   const emmaAsidePromise = loaderData.emmaAsidePromise
   const emmaAsideStatic  = loaderData.emmaAsideStatic ?? ''
+  const pdpTrustBar      = loaderData.pdpTrustBar
   const layoutData = useRouteLoaderData<typeof layoutLoader>('routes/_layout')
   const emmaPersona = layoutData?.emmaPersona ?? null
   const fetcher = useFetcher()
@@ -893,6 +898,13 @@ function ProductPage() {
               </div>
             )}
           </div>
+
+          {/* Sitewide PDP trust bar — managed in Sanity at PDP Defaults. */}
+          {pdpTrustBar && pdpTrustBar.trustItems && pdpTrustBar.trustItems.length > 0 && (
+            <div className="mt-4">
+              <TrustBarBlock block={pdpTrustBar} />
+            </div>
+          )}
 
           {/* Non-color/size axis fallback (rare): render legacy selector */}
           {multiVariant && options.some(o => {
