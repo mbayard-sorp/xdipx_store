@@ -15,6 +15,8 @@ import { Analytics }       from '~/components/store/Analytics'
 import { MobileTabBar }    from '~/components/store/MobileTabBar'
 import { AskEmmaWidget }   from '~/components/store/AskEmmaWidget'
 import { AnnouncementBar } from '~/components/cms/AnnouncementBar'
+import { OrganizationStructuredData } from '~/components/seo/OrganizationStructuredData'
+import { WebsiteStructuredData }      from '~/components/seo/WebsiteStructuredData'
 import { getEmmaPersona, getHomepageSections, getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
 import { getAccessoryProducts, getMainMenu } from '~/lib/shopify.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
@@ -93,6 +95,10 @@ export default function StoreLayout() {
           <AskEmmaWidget />
           <CookieConsent />
           <Analytics ga4Id={ga4Id} />
+
+          {/* Sitewide brand entity + sitelinks search box. */}
+          <OrganizationStructuredData />
+          <WebsiteStructuredData />
 
           {/* Visual editing overlays — only active when Sanity studio is open */}
           {preview && <LivePreview />}

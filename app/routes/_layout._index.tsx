@@ -24,8 +24,6 @@ import { EmmaContextRow }        from '~/components/home/EmmaContextRow'
 import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }  from '~/components/cms/ContentBlockRenderer'
 import { ProductStructuredData } from '~/components/seo/ProductStructuredData'
-import { OrganizationStructuredData } from '~/components/seo/OrganizationStructuredData'
-import { WebsiteStructuredData } from '~/components/seo/WebsiteStructuredData'
 import type { Product } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
 import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~/lib/analytics.client'
@@ -359,8 +357,6 @@ export default function Homepage() {
       )}
 
       <EmailSubscribe />
-      <OrganizationStructuredData />
-      <WebsiteStructuredData />
     </>
   )
 }
