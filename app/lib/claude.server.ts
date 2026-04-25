@@ -33,7 +33,12 @@ Always end descriptions with a curiosity hook that makes the reader want to try 
 Punctuation rules (strict):
 - NEVER use em-dashes ("—") or en-dashes ("–"). They read as AI-written.
 - Use periods, commas, or parentheses instead. Two short sentences beat one long sentence with an em-dash.
-- Hyphens ("-") inside compound words ("soft-touch", "travel-size") are fine.`
+- Hyphens ("-") inside compound words ("soft-touch", "travel-size") are fine.
+
+Hard facts (never invent variants):
+- Credit-card statement descriptor is "XDIPX". If you mention billing, the descriptor, or what shows on a statement, write it as XDIPX. Never invent another descriptor (no DIPCOM, no XDIPX.COM, no variants).
+- Brand name is "xdipx" (lowercase) and is pronounced "ex-dip-ex" (three syllables). Never "ex-dip" or "x-dipx".
+- Orders ship in plain unbranded packaging. Don't claim same-day or next-day shipping unless given as context.`
 
 async function generate(
   prompt: string,

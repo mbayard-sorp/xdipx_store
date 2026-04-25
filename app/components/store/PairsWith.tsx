@@ -90,7 +90,7 @@ function PairCard({ item }: { item: PairsWithItem }) {
   const addOne = (e: React.MouseEvent) => {
     e.preventDefault()
     const formData = new FormData()
-    formData.set('intent',    'add')
+    formData.set('intent',    'add-item')
     formData.set('variantId', item.variantId)
     formData.set('quantity',  '1')
     fetcher.submit(formData, { method: 'post', action: '/api/cart' })
