@@ -34,6 +34,7 @@ export interface ProductVariant {
   compareAtPrice: string | null
   availableForSale: boolean
   quantityAvailable: number
+  barcode?: string
 }
 
 // v2 redesign — sensation dial + hero video

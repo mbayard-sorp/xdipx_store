@@ -593,11 +593,13 @@ export async function getProductFaqs(handle: string): Promise<ProductFaq[]> {
     if (!client) return []
     const data = await client.fetch<{ faqs: ProductFaq[] | null } | null>(
       `*[_type == "productPage" && shopifyHandle == $handle][0]{
-        "faqs": productFaqs[]{ question, answer }
+        "faqs": productFaqs[]{ question, answer, category }
       }`,
       { handle },
     )
-    return (data?.faqs ?? []).filter(f => f && f.question && f.answer)
+    return (data?.faqs ?? [])
+      .filter(f => f && f.question && f.answer)
+      .map(f => ({ ...f, category: f.category ?? 'general' }))
   } catch (err) {
     console.error('[sanity] getProductFaqs error:', err)
     return []

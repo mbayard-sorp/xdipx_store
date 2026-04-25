@@ -138,6 +138,7 @@ const PRODUCT_CORE_FRAGMENT = `
         compareAtPrice { amount currencyCode }
         availableForSale
         quantityAvailable
+        barcode
       }
     }
   }
@@ -379,6 +380,7 @@ interface ShopifyVariantNode {
   compareAtPrice: { amount: string } | null
   availableForSale: boolean
   quantityAvailable: number
+  barcode: string | null
 }
 
 interface ShopifyMediaNode {
@@ -485,6 +487,7 @@ function nodeToProduct(node: ShopifyProductNode): Product {
       compareAtPrice: e.node.compareAtPrice?.amount ?? null,
       availableForSale: e.node.availableForSale,
       quantityAvailable: e.node.quantityAvailable,
+      ...(e.node.barcode ? { barcode: e.node.barcode } : {}),
     })),
     price: parseFloat(variant?.price.amount ?? '0'),
     ...(variant?.compareAtPrice ? { compareAtPrice: parseFloat(variant.compareAtPrice.amount) } : {}),
@@ -560,6 +563,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
       compareAtPrice: e.node.compareAtPrice?.amount ?? null,
       availableForSale: e.node.availableForSale,
       quantityAvailable: e.node.quantityAvailable,
+      ...(e.node.barcode ? { barcode: e.node.barcode } : {}),
     })),
     options: node.options,
     // rating populated by Judge.me integration — omitted until available
@@ -694,6 +698,7 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     id: number; title: string; price: string; compare_at_price: string | null
     inventory_quantity: number; option1: string | null; option2: string | null; option3: string | null
     image_id: number | null
+    barcode: string | null
   }
   interface RestImage { id: number; src: string; alt: string | null }
   interface RestOption { name: string; values: string[] }
@@ -844,6 +849,7 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
         compareAtPrice: v.compare_at_price,
         availableForSale: (v.inventory_quantity ?? 0) > 0,
         quantityAvailable: v.inventory_quantity ?? 0,
+        ...(v.barcode ? { barcode: v.barcode } : {}),
       }
     }),
     options: product.options,

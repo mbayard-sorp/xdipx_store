@@ -243,9 +243,17 @@ export interface EditorBioBlock {
 
 // ─── Product FAQ ─────────────────────────────────────────────────────────
 
+export type ProductFaqCategory =
+  | 'general'
+  | 'care'
+  | 'usage'
+  | 'compatibility'
+  | 'shipping'
+
 export interface ProductFaq {
-  question: string
-  answer:   string
+  question:  string
+  answer:    string
+  category?: ProductFaqCategory
 }
 
 // ─── Rich Text ───────────────────────────────────────────────────────────

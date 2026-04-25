@@ -33,6 +33,7 @@ import BundleSaveCard from '~/components/store/BundleSaveCard'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 import { FAQStructuredData }      from '~/components/seo/FAQStructuredData'
+import { VideoStructuredData }    from '~/components/seo/VideoStructuredData'
 import { ProductFaqList }         from '~/components/store/ProductFaqList'
 import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
 // ProductTabs removed — content now lives in the SEO summary grid above.
@@ -295,6 +296,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
 // ─── Meta ─────────────────────────────────────────────────────────────────────
 
+function preloadHeroImageTag(imageUrl: string | undefined | null) {
+  if (!imageUrl) return null
+  // Responsive preload — the gallery renders the first image at ~100vw on
+  // mobile and ~50vw on desktop, so let the browser pick the right size from
+  // a small srcset. `imagesrcset`/`imagesizes` are the lowercase HTML attrs
+  // that the preload scanner reads during initial parse, before React boots.
+  const sep = imageUrl.includes('?') ? '&' : '?'
+  return {
+    tagName: 'link',
+    rel: 'preload',
+    as: 'image',
+    href: `${imageUrl}${sep}width=1024`,
+    imagesrcset: [
+      `${imageUrl}${sep}width=480 480w`,
+      `${imageUrl}${sep}width=768 768w`,
+      `${imageUrl}${sep}width=1024 1024w`,
+      `${imageUrl}${sep}width=1600 1600w`,
+    ].join(', '),
+    imagesizes: '(max-width: 768px) 100vw, 50vw',
+    fetchpriority: 'high',
+  } as const
+}
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data) return [{ title: 'Product not found | xdipx' }]
   if (data.type === 'bundle' && data.bundle) {
@@ -302,10 +326,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     const title = `${bundle.title} — Bundle Deal | xdipx`
     const description = bundle.tagline || `${bundle.title} — save ${bundle.discountPct}% when you buy the bundle.`
     const url = `https://xdipx.com/products/${bundle.handle}`
+    const heroPreload = preloadHeroImageTag(bundle.images[0]?.url)
     return [
       { title },
       { name: 'description', content: description },
       { tagName: 'link', rel: 'canonical', href: url },
+      ...(heroPreload ? [heroPreload] : []),
       ...buildSocialMeta({
         title,
         description,
@@ -321,10 +347,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const title = `${deal.seoTitle} | xdipx`
   const description = deal.metaDescription || `${deal.seoTitle} — ships discreet from xdipx.`
   const url = `https://xdipx.com/products/${deal.handle}`
+  const heroPreload = preloadHeroImageTag(deal.images[0]?.url)
   return [
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: url },
+    ...(heroPreload ? [heroPreload] : []),
     ...buildSocialMeta({
       title,
       description,
@@ -386,6 +414,7 @@ function ProductPage() {
   void loaderData.aggregate
   const swatches  = loaderData.swatches ?? {}
   const faqs      = loaderData.faqs ?? []
+  const careFaqs  = faqs.filter(f => f.category === 'care')
   const emmaAsidePromise = loaderData.emmaAsidePromise
   const layoutData = useRouteLoaderData<typeof layoutLoader>('routes/_layout')
   const emmaPersona = layoutData?.emmaPersona ?? null
@@ -486,7 +515,7 @@ function ProductPage() {
       sources:    v.sources,
       ...(v.aspect ? { aspect: v.aspect } : {}),
     }))
-    const images = deal.images.map<GalleryItem>(img => ({ kind: 'image', url: img.url, altText: img.altText }))
+    const images = deal.images.map<GalleryItem>(img => ({ kind: 'image', url: img.url, altText: img.altText || deal.seoTitle }))
     const [first, ...rest] = images
     const base = first ? [first, ...videos, ...rest] : [...videos]
     return heroVideoItem ? [heroVideoItem, ...base] : base
@@ -857,6 +886,7 @@ function ProductPage() {
         descriptionHtml={deal.descriptionHtml ?? ''}
         boxContents={deal.boxContents ?? []}
         {...(deal.careInstructions?.length ? { careInstructions: deal.careInstructions } : {})}
+        {...(careFaqs.length > 0 ? { careFaqs } : {})}
         {...(deal.specifications ? { specifications: deal.specifications } : {})}
         faqCount={faqs.length}
         {...(faqs.length > 0 ? { faqSlot: <ProductFaqList faqs={faqs} /> } : {})}
@@ -972,6 +1002,7 @@ function ProductPage() {
       )}
 
       <ProductStructuredData deal={deal} />
+      <VideoStructuredData deal={deal} />
       <BreadcrumbStructuredData
         items={loaderData.breadcrumbs
           .filter((c): c is typeof c & { url: string } => !!c.url)

@@ -6,7 +6,14 @@ interface ProductSummaryGridProps {
   brand?:             string
   descriptionHtml:    string
   boxContents:        string[]
+  /** Legacy free-text care steps from the xdipx.care_instructions metafield.
+   *  Used as the fallback bullet list when no Sanity care-tagged FAQs exist. */
   careInstructions?:  string[]
+  /** Care-categorized FAQ questions (Sanity productFaq with category="care").
+   *  When present, the Care card renders these question titles instead of the
+   *  metafield string list — same content surfaces as full Q&A in the FAQ
+   *  accordion below, so nothing is hidden from Google. */
+  careFaqs?:          { question: string }[]
   specifications?:    string | undefined
   faqCount?:          number
   faqSlot?:           React.ReactNode
@@ -121,6 +128,7 @@ export function ProductSummaryGrid({
   descriptionHtml,
   boxContents,
   careInstructions,
+  careFaqs,
   specifications,
   faqCount = 0,
   faqSlot,
@@ -136,7 +144,11 @@ export function ProductSummaryGrid({
     : ''
   const boxFallback = 'See exactly what arrives in your discreet package.'
 
-  const careItems = careInstructions ?? []
+  // Prefer Sanity care-tagged FAQ questions over the legacy metafield list.
+  // The full Q&A renders in the FAQ accordion below, so the card showing
+  // questions is a teaser/index, not hidden content.
+  const careFaqQuestions = (careFaqs ?? []).map(f => f.question).filter(Boolean)
+  const careItems = careFaqQuestions.length > 0 ? careFaqQuestions : (careInstructions ?? [])
   const careBodyHtml = careItems.length > 0
     ? `<ul>${careItems.slice(0, 4).map(i => `<li>${i}</li>`).join('')}${careItems.length > 4 ? `<li>…and ${careItems.length - 4} more</li>` : ''}</ul>`
     : ''
