@@ -7,11 +7,6 @@ function getTodayMidnightISO(): string {
   return d.toISOString()
 }
 
-function stripHtml(s: string | null | undefined): string {
-  if (!s) return ''
-  return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
 const SELLER = {
   '@type': 'Organization',
   name:    'xdipx',
@@ -67,7 +62,7 @@ export function ProductStructuredData({
         worksFor: { '@type': 'Organization', '@id': 'https://xdipx.com/#organization' },
       }
     : null
-  const reviewBody = stripHtml(deal.fullStory) || deal.tagline || ''
+  const reviewBody = deal.tagline ?? ''
   const emmaReview = emmaPerson && reviewBody
     ? {
         '@type':      'Review',

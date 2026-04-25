@@ -1,4 +1,6 @@
 import { ExpandableHtml } from '~/components/store/ExpandableHtml'
+import { ProductFaqList } from '~/components/store/ProductFaqList'
+import type { ProductFaq } from '~/types/cms'
 
 interface ProductSummaryGridProps {
   productTitle:       string
@@ -9,11 +11,11 @@ interface ProductSummaryGridProps {
   /** Legacy free-text care steps from the xdipx.care_instructions metafield.
    *  Used as the fallback bullet list when no Sanity care-tagged FAQs exist. */
   careInstructions?:  string[]
-  /** Care-categorized FAQ questions (Sanity productFaq with category="care").
-   *  When present, the Care card renders these question titles instead of the
-   *  metafield string list — same content surfaces as full Q&A in the FAQ
-   *  accordion below, so nothing is hidden from Google. */
-  careFaqs?:          { question: string }[]
+  /** Care-categorized FAQs (Sanity productFaq with category="care"). When
+   *  present, the Care card renders them as a twirl-down accordion (same
+   *  component as the main FAQ card) so the structured Q&A is fully visible
+   *  and indexable. Falls back to careInstructions bullets when absent. */
+  careFaqs?:          ProductFaq[]
   specifications?:    string | undefined
   faqCount?:          number
   faqSlot?:           React.ReactNode
@@ -90,12 +92,16 @@ function SummaryCard({ href, eyebrow, body, bodyHtml, bodySlot, className = '', 
 
   const inner = (
     <>
-      <div
-        className="text-[11px] uppercase tracking-wider text-coral mb-2"
+      {/* H2 sits under the PDP H1 (product title). Each summary card is a
+          peer-level topic ("Care Instructions", "FAQs / Q&A", "Emma's take",
+          etc.) — the H2 hierarchy gives Google explicit topic clusters
+          instead of inferring structure from styled divs. */}
+      <h2
+        className="text-[11px] uppercase tracking-wider text-coral mb-2 font-medium"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         {eyebrow}
-      </div>
+      </h2>
       {bodySlot
         ? <div className="flex-1 min-h-0">{bodySlot}</div>
         : bodyHtml
@@ -144,13 +150,14 @@ export function ProductSummaryGrid({
     : ''
   const boxFallback = 'See exactly what arrives in your discreet package.'
 
-  // Prefer Sanity care-tagged FAQ questions over the legacy metafield list.
-  // The full Q&A renders in the FAQ accordion below, so the card showing
-  // questions is a teaser/index, not hidden content.
-  const careFaqQuestions = (careFaqs ?? []).map(f => f.question).filter(Boolean)
-  const careItems = careFaqQuestions.length > 0 ? careFaqQuestions : (careInstructions ?? [])
-  const careBodyHtml = careItems.length > 0
-    ? `<ul>${careItems.slice(0, 4).map(i => `<li>${i}</li>`).join('')}${careItems.length > 4 ? `<li>…and ${careItems.length - 4} more</li>` : ''}</ul>`
+  // Prefer Sanity care-tagged FAQs (full Q&A) and render them as an
+  // accordion identical to the main FAQ card. Falls back to the legacy
+  // careInstructions string list as bullets when no structured care Q&A
+  // is configured.
+  const hasCareFaqs = (careFaqs ?? []).length > 0
+  const careLegacyItems = careInstructions ?? []
+  const careBodyHtml = !hasCareFaqs && careLegacyItems.length > 0
+    ? `<ul>${careLegacyItems.slice(0, 4).map(i => `<li>${i}</li>`).join('')}${careLegacyItems.length > 4 ? `<li>…and ${careLegacyItems.length - 4} more</li>` : ''}</ul>`
     : ''
   const careFallback = 'Quick care + storage notes so it stays good for the long haul.'
 
@@ -182,7 +189,11 @@ export function ProductSummaryGrid({
       <SummaryCard
         eyebrow="Care Instructions"
         className="lg:col-span-2"
-        {...(careBodyHtml ? { bodyHtml: careBodyHtml } : { body: careFallback })}
+        {...(hasCareFaqs
+          ? { bodySlot: <ProductFaqList faqs={careFaqs!} /> }
+          : careBodyHtml
+            ? { bodyHtml: careBodyHtml }
+            : { body: careFallback })}
       />
       <SummaryCard
         eyebrow="In the box"

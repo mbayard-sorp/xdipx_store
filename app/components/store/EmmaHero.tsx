@@ -49,10 +49,15 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
     ? Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)
     : 0
   const image = deal.images[0]
+  const productHref = `/products/${deal.handle}`
   return (
     <section className="bg-cream">
       <div className="max-w-6xl mx-auto px-4 py-8 md:py-14 grid gap-6 md:grid-cols-[1.25fr_1fr]">
-        <div className="relative rounded-[var(--radius-lg)] overflow-hidden bg-cream-2 aspect-[4/5] md:aspect-auto md:min-h-[480px]">
+        <Link
+          to={productHref}
+          aria-label={deal.seoTitle}
+          className="relative rounded-[var(--radius-lg)] overflow-hidden bg-cream-2 aspect-[4/5] md:aspect-auto md:min-h-[480px] block"
+        >
           {image ? (
             <img
               src={image.url}
@@ -70,7 +75,7 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
               {discountPct}% off this week
             </span>
           )}
-        </div>
+        </Link>
 
         <div className="flex flex-col justify-center gap-4 md:py-6">
           <div className="flex items-center gap-2">
@@ -87,7 +92,9 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
             className="font-black text-ink leading-[1.05] text-3xl md:text-5xl"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            {copy?.headline ?? deal.seoTitle}
+            <Link to={productHref} className="hover:text-coral transition-colors">
+              {copy?.headline ?? deal.seoTitle}
+            </Link>
           </h1>
 
           <p className="text-ink/75 text-base md:text-lg leading-relaxed max-w-prose">
@@ -165,7 +172,11 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
         </h1>
 
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 md:gap-6">
-          <div className="relative rounded-[var(--radius)] overflow-hidden bg-paper aspect-square">
+          <Link
+            to={`/products/${deal.handle}`}
+            aria-label={deal.seoTitle}
+            className="relative rounded-[var(--radius)] overflow-hidden bg-paper aspect-square block"
+          >
             {image1 && (
               <img
                 src={image1.url}
@@ -174,7 +185,7 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
                 loading="eager"
               />
             )}
-          </div>
+          </Link>
           <span
             className="text-coral text-3xl md:text-4xl font-black bg-paper border border-ink/15 px-3 py-1 rounded-full rotate-[-4deg]"
             style={{ fontFamily: 'var(--font-display)' }}
@@ -182,7 +193,11 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
           >
             +
           </span>
-          <div className="relative rounded-[var(--radius)] overflow-hidden bg-paper aspect-square">
+          <Link
+            to={`/products/${pair.handle}`}
+            aria-label={pair.seoTitle}
+            className="relative rounded-[var(--radius)] overflow-hidden bg-paper aspect-square block"
+          >
             {image2 && (
               <img
                 src={image2.url}
@@ -191,7 +206,7 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
                 loading="eager"
               />
             )}
-          </div>
+          </Link>
         </div>
 
         <p className="text-ink/75 text-base md:text-lg leading-relaxed max-w-prose">
@@ -279,7 +294,11 @@ function HeroQuote({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: b
           </div>
         </div>
 
-        <div className="relative rounded-[var(--radius-lg)] overflow-hidden bg-cream-2 aspect-[4/5] md:aspect-auto md:min-h-[420px]">
+        <Link
+          to={`/products/${deal.handle}`}
+          aria-label={deal.seoTitle}
+          className="relative rounded-[var(--radius-lg)] overflow-hidden bg-cream-2 aspect-[4/5] md:aspect-auto md:min-h-[420px] block"
+        >
           {image && (
             <img
               src={image.url}
@@ -309,7 +328,7 @@ function HeroQuote({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: b
               <span className="text-muted text-xs">· free shipping</span>
             </div>
           </div>
-        </div>
+        </Link>
       </div>
     </section>
   )

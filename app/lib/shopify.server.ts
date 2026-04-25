@@ -919,6 +919,109 @@ export async function getProductsByHandles(handles: string[]): Promise<Product[]
   return results.filter((p): p is Product => p !== null)
 }
 
+export interface SitemapProductImages {
+  title:  string
+  images: Array<{ url: string; altText: string | null }>
+}
+
+/**
+ * Bulk lightweight fetch for the XML sitemap. Returns a handle → images map
+ * for every published product. Skips metafields, variants, and media to keep
+ * the payload small — the sitemap only needs handle, title, and image URLs.
+ * Capped at 3 images per product (primary + 2 alts) to keep the sitemap lean.
+ *
+ * Cached for 1 hour, matching the sitemap response cache.
+ */
+export async function getProductImagesForSitemap(): Promise<Map<string, SitemapProductImages>> {
+  return cached('shopify:sitemap:product-images', 3600, async () => {
+    const map = new Map<string, SitemapProductImages>()
+    let cursor: string | null = null
+    // Storefront API hard-caps `first` at 250 per page. Two pages = up to 500
+    // products, plenty of headroom for the current catalog.
+    for (let page = 0; page < 4; page++) {
+      const data: {
+        products: {
+          pageInfo: { hasNextPage: boolean; endCursor: string | null }
+          edges: Array<{
+            node: {
+              handle: string
+              title:  string
+              images: { edges: Array<{ node: { url: string; altText: string | null } }> }
+            }
+          }>
+        }
+      } = await storefront(`
+        query SitemapProductImages($first: Int!, $after: String) {
+          products(first: $first, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            edges {
+              node {
+                handle
+                title
+                images(first: 3) { edges { node { url altText } } }
+              }
+            }
+          }
+        }
+      `, { first: 250, after: cursor })
+
+      for (const edge of data.products.edges) {
+        const images = edge.node.images.edges.map(e => ({
+          url:     e.node.url,
+          altText: e.node.altText ?? null,
+        }))
+        map.set(edge.node.handle, { title: edge.node.title, images })
+      }
+
+      if (!data.products.pageInfo.hasNextPage) break
+      cursor = data.products.pageInfo.endCursor
+      if (!cursor) break
+    }
+    return map
+  })
+}
+
+export interface SitemapCollection {
+  handle:    string
+  updatedAt: string
+}
+
+/**
+ * Bulk lightweight fetch for the XML sitemap. Returns every published
+ * collection's handle + updatedAt so /collections/$handle URLs can be
+ * advertised to Google. Cached for 1 hour, matching the sitemap response.
+ */
+export async function getCollectionsForSitemap(): Promise<SitemapCollection[]> {
+  return cached('shopify:sitemap:collections', 3600, async () => {
+    const out: SitemapCollection[] = []
+    let cursor: string | null = null
+    for (let page = 0; page < 4; page++) {
+      const data: {
+        collections: {
+          pageInfo: { hasNextPage: boolean; endCursor: string | null }
+          edges: Array<{ node: { handle: string; updatedAt: string } }>
+        }
+      } = await storefront(`
+        query SitemapCollections($first: Int!, $after: String) {
+          collections(first: $first, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            edges { node { handle updatedAt } }
+          }
+        }
+      `, { first: 250, after: cursor })
+
+      for (const edge of data.collections.edges) {
+        out.push({ handle: edge.node.handle, updatedAt: edge.node.updatedAt })
+      }
+
+      if (!data.collections.pageInfo.hasNextPage) break
+      cursor = data.collections.pageInfo.endCursor
+      if (!cursor) break
+    }
+    return out
+  })
+}
+
 export async function getBonusDeal(): Promise<Product | null> {
   return cached('shopify:bonus-deal', READ_TTL, async () => {
     const data = await storefront<{

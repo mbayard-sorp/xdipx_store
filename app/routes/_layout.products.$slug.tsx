@@ -97,7 +97,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       reviewFilter: 'all',
       aggregate: null,
       faqs: [] as ProductFaq[],
-      emmaAsidePromise: Promise.resolve<EmmaAsideResult>({ text: '', source: 'fallback' }),
+      emmaAsideStatic: '',
+      emmaAsidePromise: null as Promise<EmmaAsideResult> | null,
       breadcrumbs: [
         { label: 'Home', url: 'https://xdipx.com/', href: '/' },
         { label: bundle.title, url: `https://xdipx.com/products/${bundle.handle}`, href: `/products/${bundle.handle}` },
@@ -107,6 +108,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const deal = await getDealByHandle(slug)
   if (!deal) throw new Response('Product not found', { status: 404 })
+
+  // Archived products return 410 Gone — a stronger crawl signal than 404
+  // that this URL was deliberately removed (vs. accidentally missing) so
+  // Google drops it from the index faster.
+  if (deal.dealStatus === 'archived') {
+    throw new Response(null, {
+      status: 410,
+      statusText: 'Gone',
+      headers: { 'Cache-Control': 'public, max-age=300' },
+    })
+  }
 
   const url          = new URL(request.url)
   const reviewPage   = parseInt(url.searchParams.get('reviewPage')   ?? '1', 10)
@@ -132,10 +144,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     .filter(o => o.name.toLowerCase() === 'color' || o.name.toLowerCase() === 'colour')
     .flatMap(o => o.values)
 
+  // HIDDEN — Reviews UI: paused until we have orders. Restore the two
+  // commented-out fetches and the JSX block at line ~707 when bringing the
+  // user-review system back online.
   const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts, swatches, faqs, mainMenu] = await Promise.all([
     getProductPageBlocks(slug),
-    getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
-    getProductAggregate(deal.shopifyProductId),
+    // getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
+    // getProductAggregate(deal.shopifyProductId),
+    Promise.resolve({ reviews: [], total: 0 } as Awaited<ReturnType<typeof getProductReviews>>),
+    Promise.resolve(null as Awaited<ReturnType<typeof getProductAggregate>>),
     getFrequentlyBoughtWith(slug, 4),
     getBundleCompanionFor(slug),
     hasDial
@@ -188,44 +205,58 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .slice(0, 3)
     : []
 
-  // ── Emma contextual aside (deferred: returned un-awaited for streaming) ───
-  // Gather extra context: cart lines + recently-browsed titles.
+  // ── Emma contextual aside ─────────────────────────────────────────────────
+  // SEO-visible static aside: deterministic, no Claude call. Either the admin-
+  // generated emmaHero.aside (preferred — already brand-voiced and approved)
+  // or the per-product hash-stable template fallback. Always present in the
+  // initial server-rendered HTML so Googlebot, social crawlers, and JS-off
+  // users see real Emma copy instead of a "loading…" placeholder.
+  const emmaAsideStatic =
+    deal.emmaHero?.aside?.trim() ||
+    getFallbackAside({
+      id: deal.id,
+      ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
+    })
+
+  // Personalization (cart/browse-aware) only fires when there's something to
+  // personalize on — otherwise the static aside is already the right answer
+  // and we save a KV round-trip + potential Claude budget.
   const cartId = getCartIdFromCookie(request)
-  const cartLinesPromise = cartId
-    ? getCart(cartId).then(c => (c?.lines ?? []).map(l => ({
-        title:    l.merchandise.title,
-        quantity: l.quantity,
-      })))
-    : Promise.resolve([] as Array<{ title: string; quantity: number }>)
-
   const previousBrowseIds = parseBrowseCookie(request)
-  // Strip the current product from the browse context (we're looking at it now).
   const otherBrowseIds = previousBrowseIds.filter(id => id !== deal.shopifyProductId).slice(0, 4)
-  const browseProductsPromise = otherBrowseIds.length > 0
-    ? getProductsByIds(otherBrowseIds).then(list => list.map(p => ({ title: p.title })))
-    : Promise.resolve([] as Array<{ title: string }>)
+  const hasPersonalization = !!cartId || otherBrowseIds.length > 0 || customerGid !== null
 
-  const emmaAsidePromise: Promise<EmmaAsideResult> = Promise.all([cartLinesPromise, browseProductsPromise])
-    .then(([cartLines, browseProducts]) =>
-      getEmmaAside({
-        product: {
-          id:               deal.id,
-          shopifyProductId: deal.shopifyProductId,
-          seoTitle:         deal.seoTitle,
-          brand:            deal.brand,
-          tagline:          deal.tagline,
-          ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
-        },
-        cartLines,
-        browseProducts,
-        pairsWithProducts: pairsWithItems.map(p => ({ title: p.title })),
-        userGid:           customerGid,
-      }),
-    )
-    .catch((): EmmaAsideResult => ({
-      text:   getFallbackAside({ id: deal.id, ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}) }),
-      source: 'fallback',
-    }))
+  const emmaAsidePromise: Promise<EmmaAsideResult> | null = hasPersonalization
+    ? (async (): Promise<EmmaAsideResult> => {
+        try {
+          const cartLines = cartId
+            ? (await getCart(cartId).catch(() => null))?.lines?.map(l => ({
+                title:    l.merchandise.title,
+                quantity: l.quantity,
+              })) ?? []
+            : []
+          const browseProducts = otherBrowseIds.length > 0
+            ? (await getProductsByIds(otherBrowseIds)).map(p => ({ title: p.title }))
+            : []
+          return await getEmmaAside({
+            product: {
+              id:               deal.id,
+              shopifyProductId: deal.shopifyProductId,
+              seoTitle:         deal.seoTitle,
+              brand:            deal.brand,
+              tagline:          deal.tagline,
+              ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
+            },
+            cartLines,
+            browseProducts,
+            pairsWithProducts: pairsWithItems.map(p => ({ title: p.title })),
+            userGid:           customerGid,
+          })
+        } catch {
+          return { text: emmaAsideStatic, source: 'fallback' }
+        }
+      })()
+    : null
 
   // Resolve Shopify products for any productCarousel blocks
   const carouselBlocks = pdpBlocks.filter(
@@ -287,6 +318,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       aggregate:     aggregate ?? null,
       faqs,
       bundle: null,
+      emmaAsideStatic,
       emmaAsidePromise,
       breadcrumbs,
     },
@@ -413,9 +445,14 @@ function ProductPage() {
   void loaderData.reviewFilter
   void loaderData.aggregate
   const swatches  = loaderData.swatches ?? {}
-  const faqs      = loaderData.faqs ?? []
-  const careFaqs  = faqs.filter(f => f.category === 'care')
+  const faqs        = loaderData.faqs ?? []
+  const careFaqs    = faqs.filter(f => f.category === 'care')
+  // Care-tagged FAQs render in the Care Instructions card only — keep them
+  // out of the main FAQ accordion to avoid duplicate visible content. JSON-LD
+  // still receives the full list (FAQStructuredData below) for SEO.
+  const nonCareFaqs = faqs.filter(f => f.category !== 'care')
   const emmaAsidePromise = loaderData.emmaAsidePromise
+  const emmaAsideStatic  = loaderData.emmaAsideStatic ?? ''
   const layoutData = useRouteLoaderData<typeof layoutLoader>('routes/_layout')
   const emmaPersona = layoutData?.emmaPersona ?? null
   const fetcher = useFetcher()
@@ -888,33 +925,41 @@ function ProductPage() {
         {...(deal.careInstructions?.length ? { careInstructions: deal.careInstructions } : {})}
         {...(careFaqs.length > 0 ? { careFaqs } : {})}
         {...(deal.specifications ? { specifications: deal.specifications } : {})}
-        faqCount={faqs.length}
-        {...(faqs.length > 0 ? { faqSlot: <ProductFaqList faqs={faqs} /> } : {})}
+        faqCount={nonCareFaqs.length}
+        {...(nonCareFaqs.length > 0 ? { faqSlot: <ProductFaqList faqs={nonCareFaqs} /> } : {})}
         emmaSlot={
-          <Suspense fallback={<EmmaTakeBody text="Emma's note loads in a moment…" {...(emmaPersona ? { persona: emmaPersona } : {})} />}>
-            <Await
-              resolve={emmaAsidePromise}
-              errorElement={
+          emmaAsidePromise ? (
+            <Suspense
+              fallback={
                 <EmmaTakeBody
-                  text={getFallbackAside({
-                    id: deal.id,
-                    ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
-                  })}
+                  text={emmaAsideStatic}
                   {...(emmaPersona ? { persona: emmaPersona } : {})}
                 />
               }
             >
-              {(result: EmmaAsideResult) => (
-                <EmmaTakeBody
-                  text={result.text || getFallbackAside({
-                    id: deal.id,
-                    ...(deal.productTypeDial ? { productTypeDial: deal.productTypeDial } : {}),
-                  })}
-                  {...(emmaPersona ? { persona: emmaPersona } : {})}
-                />
-              )}
-            </Await>
-          </Suspense>
+              <Await
+                resolve={emmaAsidePromise}
+                errorElement={
+                  <EmmaTakeBody
+                    text={emmaAsideStatic}
+                    {...(emmaPersona ? { persona: emmaPersona } : {})}
+                  />
+                }
+              >
+                {(result: EmmaAsideResult) => (
+                  <EmmaTakeBody
+                    text={result.text || emmaAsideStatic}
+                    {...(emmaPersona ? { persona: emmaPersona } : {})}
+                  />
+                )}
+              </Await>
+            </Suspense>
+          ) : (
+            <EmmaTakeBody
+              text={emmaAsideStatic}
+              {...(emmaPersona ? { persona: emmaPersona } : {})}
+            />
+          )
         }
       />
 

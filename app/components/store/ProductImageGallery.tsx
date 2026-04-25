@@ -17,6 +17,23 @@ function shopifyImageAt(url: string, width: number): string {
   return `${url}${sep}width=${width}`
 }
 
+// Same as shopifyImageSrcset but with `&format=avif|webp` appended so the
+// browser can pull the modern format directly from the CDN. Used inside
+// <picture><source type="image/..."> entries; the JPG/PNG <img> fallback
+// is emitted alongside via shopifyImageSrcset.
+function shopifyImageSrcsetFmt(
+  url: string,
+  format: 'avif' | 'webp',
+  widths: readonly number[] = GALLERY_SRCSET_WIDTHS,
+): string {
+  const sep = url.includes('?') ? '&' : '?'
+  return widths.map(w => `${url}${sep}width=${w}&format=${format} ${w}w`).join(', ')
+}
+
+function isShopifyCdn(url: string): boolean {
+  return /cdn\.shopify\.com/.test(url)
+}
+
 // ─── Gallery media types ──────────────────────────────────────────────────────
 
 export type GalleryItem =
@@ -271,17 +288,25 @@ export function ProductImageGallery({
             >
               {items[lockedIndex]?.kind === 'video' ? (
                 <>
-                  <img
-                    src={shopifyImageAt(items[lockedIndex].previewUrl, 1024)}
-                    srcSet={shopifyImageSrcset(items[lockedIndex].previewUrl)}
-                    sizes={GALLERY_SIZES}
-                    alt={alt}
-                    className={`w-full h-full ${items[lockedIndex].aspect === 'portrait' ? 'object-contain' : 'object-cover'}`}
-                    draggable={false}
-                    loading="eager"
-                    fetchPriority="high"
-                    decoding="async"
-                  />
+                  <picture>
+                    {isShopifyCdn(items[lockedIndex].previewUrl) && (
+                      <>
+                        <source type="image/avif" srcSet={shopifyImageSrcsetFmt(items[lockedIndex].previewUrl, 'avif')} sizes={GALLERY_SIZES} />
+                        <source type="image/webp" srcSet={shopifyImageSrcsetFmt(items[lockedIndex].previewUrl, 'webp')} sizes={GALLERY_SIZES} />
+                      </>
+                    )}
+                    <img
+                      src={shopifyImageAt(items[lockedIndex].previewUrl, 1024)}
+                      srcSet={shopifyImageSrcset(items[lockedIndex].previewUrl)}
+                      sizes={GALLERY_SIZES}
+                      alt={alt}
+                      className={`w-full h-full ${items[lockedIndex].aspect === 'portrait' ? 'object-contain' : 'object-cover'}`}
+                      draggable={false}
+                      loading="eager"
+                      fetchPriority="high"
+                      decoding="async"
+                    />
+                  </picture>
                   {previewIndex === null && videoState === 'idle' && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                       <div className="w-16 h-16 rounded-full bg-white/90 shadow-lg flex items-center justify-center">
@@ -293,19 +318,27 @@ export function ProductImageGallery({
                   )}
                 </>
               ) : items[lockedIndex]?.kind === 'image' ? (
-                <img
-                  src={shopifyImageAt(items[lockedIndex].url, 1024)}
-                  srcSet={shopifyImageSrcset(items[lockedIndex].url)}
-                  sizes={GALLERY_SIZES}
-                  alt={items[lockedIndex].altText || alt}
-                  width={1200}
-                  height={1200}
-                  className="w-full h-full object-cover"
-                  draggable={false}
-                  loading="eager"
-                  fetchPriority="high"
-                  decoding="async"
-                />
+                <picture>
+                  {isShopifyCdn(items[lockedIndex].url) && (
+                    <>
+                      <source type="image/avif" srcSet={shopifyImageSrcsetFmt(items[lockedIndex].url, 'avif')} sizes={GALLERY_SIZES} />
+                      <source type="image/webp" srcSet={shopifyImageSrcsetFmt(items[lockedIndex].url, 'webp')} sizes={GALLERY_SIZES} />
+                    </>
+                  )}
+                  <img
+                    src={shopifyImageAt(items[lockedIndex].url, 1024)}
+                    srcSet={shopifyImageSrcset(items[lockedIndex].url)}
+                    sizes={GALLERY_SIZES}
+                    alt={items[lockedIndex].altText || alt}
+                    width={1200}
+                    height={1200}
+                    className="w-full h-full object-cover"
+                    draggable={false}
+                    loading="eager"
+                    fetchPriority="high"
+                    decoding="async"
+                  />
+                </picture>
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-ink/20 text-6xl">
                   &#9829;
@@ -325,18 +358,26 @@ export function ProductImageGallery({
               >
                 {items[previewIndex].kind === 'video' ? (
                   <>
-                    <img
-                      src={shopifyImageAt(items[previewIndex].previewUrl, 1024)}
-                      srcSet={shopifyImageSrcset(items[previewIndex].previewUrl)}
-                      sizes={GALLERY_SIZES}
-                      alt={alt}
-                      width={1200}
-                      height={1200}
-                      className="w-full h-full object-cover"
-                      draggable={false}
-                      loading="lazy"
-                      decoding="async"
-                    />
+                    <picture>
+                      {isShopifyCdn(items[previewIndex].previewUrl) && (
+                        <>
+                          <source type="image/avif" srcSet={shopifyImageSrcsetFmt(items[previewIndex].previewUrl, 'avif')} sizes={GALLERY_SIZES} />
+                          <source type="image/webp" srcSet={shopifyImageSrcsetFmt(items[previewIndex].previewUrl, 'webp')} sizes={GALLERY_SIZES} />
+                        </>
+                      )}
+                      <img
+                        src={shopifyImageAt(items[previewIndex].previewUrl, 1024)}
+                        srcSet={shopifyImageSrcset(items[previewIndex].previewUrl)}
+                        sizes={GALLERY_SIZES}
+                        alt={alt}
+                        width={1200}
+                        height={1200}
+                        className="w-full h-full object-cover"
+                        draggable={false}
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    </picture>
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                       <div className="w-16 h-16 rounded-full bg-white/90 shadow-lg flex items-center justify-center">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -346,18 +387,26 @@ export function ProductImageGallery({
                     </div>
                   </>
                 ) : (
-                  <img
-                    src={shopifyImageAt(items[previewIndex].url, 1024)}
-                    srcSet={shopifyImageSrcset(items[previewIndex].url)}
-                    sizes={GALLERY_SIZES}
-                    alt={items[previewIndex].altText || alt}
-                    width={1200}
-                    height={1200}
-                    className="w-full h-full object-cover"
-                    draggable={false}
-                    loading="lazy"
-                    decoding="async"
-                  />
+                  <picture>
+                    {isShopifyCdn(items[previewIndex].url) && (
+                      <>
+                        <source type="image/avif" srcSet={shopifyImageSrcsetFmt(items[previewIndex].url, 'avif')} sizes={GALLERY_SIZES} />
+                        <source type="image/webp" srcSet={shopifyImageSrcsetFmt(items[previewIndex].url, 'webp')} sizes={GALLERY_SIZES} />
+                      </>
+                    )}
+                    <img
+                      src={shopifyImageAt(items[previewIndex].url, 1024)}
+                      srcSet={shopifyImageSrcset(items[previewIndex].url)}
+                      sizes={GALLERY_SIZES}
+                      alt={items[previewIndex].altText || alt}
+                      width={1200}
+                      height={1200}
+                      className="w-full h-full object-cover"
+                      draggable={false}
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  </picture>
                 )}
               </div>
             )}
