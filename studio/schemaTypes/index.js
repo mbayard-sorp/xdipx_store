@@ -40,6 +40,7 @@ import seoKeyword         from '../schemas/seo/seoKeyword.js'
 import seoCluster         from '../schemas/seo/seoCluster.js'
 // Multi-author voice profiles for AI-generated content (Emma + future agents).
 import editorialAuthor    from '../schemas/authors/editorialAuthor.js'
+import collectionPage     from '../schemas/collectionPage.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -81,6 +82,10 @@ export const schemaTypes = [
   seoKeyword,
   // Editorial authors — voice profiles for Emma + future AI authors.
   editorialAuthor,
+  // PLP SEO — editorial overrides per Shopify collection (intro copy, FAQs,
+  // related collections). Additive — Shopify is still source of truth for
+  // products; Sanity wins for SEO meta when present.
+  collectionPage,
   // Block object types
   announcementBar,
   promoBanner,

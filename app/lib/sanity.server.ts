@@ -1,6 +1,9 @@
 import { createClient } from '@sanity/client'
+import { toHTML } from '@portabletext/to-html'
 import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock } from '~/types/cms'
 import { cached, invalidateCache } from '~/lib/kv.server'
+
+type PortableTextBlocks = Parameters<typeof toHTML>[0]
 
 // Shared field projection reused by homepage + product page queries.
 // Inline blocks project all their own fields; reference entries (emmaCuratedRail)
@@ -643,6 +646,70 @@ export async function getProductFaqs(handle: string): Promise<ProductFaq[]> {
   } catch (err) {
     console.error('[sanity] getProductFaqs error:', err)
     return []
+  }
+}
+
+// ─── Collection Page (PLP SEO overrides) ─────────────────────────────────────
+
+export interface CollectionPageSanity {
+  shopifyHandle:  string
+  seoTitle:       string | null
+  seoDescription: string | null
+  h1:             string | null
+  introHtml:      string | null
+  heroImageUrl:   string | null
+  heroImageAlt:   string | null
+  faqs: Array<{ question: string; answer: string }>
+  related: Array<{ handle: string; label: string }>
+}
+
+export async function getCollectionPage(handle: string, preview = false): Promise<CollectionPageSanity | null> {
+  if (!projectId) return null
+  try {
+    const client = getClient(false, preview)
+    if (!client) return null
+    const data = await client.fetch<{
+      shopifyHandle:  string
+      seoTitle:       string | null
+      seoDescription: string | null
+      h1:             string | null
+      introCopy:      unknown[] | null
+      heroImage:      { url: string | null; alt: string | null } | null
+      faqs:  Array<{ question: string; answer: string }> | null
+      related: Array<{ handle: string; label: string }> | null
+    } | null>(
+      `*[_type == "collectionPage" && shopifyHandle == $handle][0]{
+        shopifyHandle,
+        seoTitle,
+        seoDescription,
+        h1,
+        introCopy,
+        "heroImage": heroImageOverride{ "url": asset->url, alt },
+        "faqs": faqs[]{ question, answer },
+        "related": relatedCollections[]{ handle, label }
+      }`,
+      { handle },
+    )
+    if (!data) return null
+
+    const introHtml = data.introCopy && data.introCopy.length > 0
+      ? toHTML(data.introCopy as PortableTextBlocks)
+      : null
+
+    return {
+      shopifyHandle:  data.shopifyHandle,
+      seoTitle:       data.seoTitle ?? null,
+      seoDescription: data.seoDescription ?? null,
+      h1:             data.h1 ?? null,
+      introHtml,
+      heroImageUrl:   data.heroImage?.url ?? null,
+      heroImageAlt:   data.heroImage?.alt ?? null,
+      faqs:           (data.faqs ?? []).filter(f => f?.question && f?.answer),
+      related:        (data.related ?? []).filter(r => r?.handle && r?.label),
+    }
+  } catch (err) {
+    console.error('[sanity] getCollectionPage error:', err)
+    return null
   }
 }
 

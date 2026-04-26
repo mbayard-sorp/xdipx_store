@@ -1,21 +1,87 @@
 import { useMemo, useState } from 'react'
-import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
+import type { LoaderFunctionArgs, MetaDescriptor, MetaFunction } from 'react-router'
 import { useLoaderData, useSearchParams, Link } from 'react-router'
-import { getCollectionDeals, type CollectionSort } from '~/lib/shopify.server'
-import { getEmmaPresets } from '~/lib/sanity.server'
+import { getCollection, getCollectionDeals, getMainMenu, type CollectionSort } from '~/lib/shopify.server'
+import { getCollectionPage, getEmmaPresets } from '~/lib/sanity.server'
+import { canonicalUrl, pageTitle, robotsContent, truncateForMeta } from '~/lib/seo'
+import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
 import { VaultCard } from '~/components/store/VaultCard'
 import { AskEmmaRail, matchesAskEmmaFilters } from '~/components/store/AskEmmaRail'
 import { EmmaDiscoveryRail } from '~/components/store/EmmaDiscoveryRail'
 import { EmmaEncouragementStrip } from '~/components/store/EmmaEncouragementStrip'
 import { LetMeLookAgainCTA } from '~/components/store/LetMeLookAgainCTA'
+import { Breadcrumbs } from '~/components/seo/Breadcrumbs'
+import { CollectionStructuredData } from '~/components/seo/CollectionStructuredData'
+import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
+import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { readRecentHandles } from '~/lib/recent-views.server'
 
+const FACET_PARAMS = ['mood', 'audience', 'matters', 'budgetMax'] as const
+const PAGE_SIZE = 24
+
+function preloadHeroImageTag(imageUrl: string | undefined | null) {
+  if (!imageUrl) return null
+  const sep = imageUrl.includes('?') ? '&' : '?'
+  return {
+    tagName: 'link',
+    rel: 'preload',
+    as: 'image',
+    href: `${imageUrl}${sep}width=1600`,
+    imagesrcset: [
+      `${imageUrl}${sep}width=768 768w`,
+      `${imageUrl}${sep}width=1200 1200w`,
+      `${imageUrl}${sep}width=1600 1600w`,
+      `${imageUrl}${sep}width=2000 2000w`,
+    ].join(', '),
+    imagesizes: '100vw',
+    fetchpriority: 'high',
+  } as const
+}
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  const title = data?.title ?? 'Collection'
-  return [
-    { title: `${title} | xdipx` },
-    { name: 'description', content: `Shop ${title.toLowerCase()} at xdipx — curated picks on intimate wellness products.` },
+  if (!data) return [{ title: pageTitle(['Collection not found']) }]
+  const {
+    seoTitle,
+    seoDescription,
+    canonical,
+    ogImageUrl: image,
+    ogImageAlt,
+    filtersApplied,
+    page,
+    h1,
+  } = data
+
+  const titleSuffix = page > 1 ? ` — Page ${page}` : ''
+  const finalTitle = pageTitle([`${seoTitle}${titleSuffix}`])
+  const finalDescription = truncateForMeta(seoDescription)
+  const heroPreload = preloadHeroImageTag(image)
+
+  const tags: MetaDescriptor[] = [
+    { title: finalTitle },
+    { name: 'description', content: finalDescription },
+    { tagName: 'link', rel: 'canonical', href: canonical },
   ]
+
+  // Faceted variants are explicitly noindex,follow — Google retains link
+  // equity flowing to PDPs but doesn't index near-duplicate filter combos.
+  if (filtersApplied) {
+    tags.push({ name: 'robots', content: robotsContent({ index: false, follow: true }) })
+  }
+
+  if (heroPreload) tags.push(heroPreload)
+
+  tags.push(
+    ...buildSocialMeta({
+      title: finalTitle,
+      description: finalDescription,
+      url: canonical,
+      image: image ?? null,
+      type: 'website',
+      imageAlt: ogImageAlt ?? h1,
+    }),
+  )
+
+  return tags
 }
 
 export function headers() {
@@ -32,29 +98,127 @@ function parseSort(raw: string | null): CollectionSort {
     : 'manual'
 }
 
-export async function loader({ params, request }: LoaderFunctionArgs) {
-  const handle = params.handle!
-  const url = new URL(request.url)
-  const page = parseInt(url.searchParams.get('page') ?? '1')
-  const sort = parseSort(url.searchParams.get('sort'))
-
-  const [{ deals, hasNextPage }, presets] = await Promise.all([
-    getCollectionDeals(handle, page, 24, sort),
-    getEmmaPresets(),
-  ])
-
-  const title = handle
+function titleCase(handle: string): string {
+  return handle
     .split('-')
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ')
+}
+
+export async function loader({ params, request }: LoaderFunctionArgs) {
+  const handle = params.handle!
+  const url = new URL(request.url)
+  const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10))
+  const sort = parseSort(url.searchParams.get('sort'))
+
+  const filtersApplied = FACET_PARAMS.some(p => {
+    const vals = url.searchParams.getAll(p)
+    return vals.some(v => v && v.length > 0)
+  })
+
+  const [collection, sanity, { deals, hasNextPage }, presets, menu] = await Promise.all([
+    getCollection(handle),
+    getCollectionPage(handle),
+    getCollectionDeals(handle, page, PAGE_SIZE, sort),
+    getEmmaPresets(),
+    getMainMenu(),
+  ])
+
+  // 404 — no Shopify collection at this handle.
+  if (!collection) {
+    throw new Response('Collection not found', { status: 404 })
+  }
+
+  // Resolve display + SEO with Sanity > Shopify SEO > Shopify title fallback.
+  const fallbackTitle = collection.title || titleCase(handle)
+  const h1 = sanity?.h1 || fallbackTitle
+  const seoTitle =
+    sanity?.seoTitle
+    || collection.seoTitle
+    || `${fallbackTitle} — Editorially curated picks`
+  const seoDescription =
+    sanity?.seoDescription
+    || collection.seoDescription
+    || collection.description
+    || `Shop ${fallbackTitle.toLowerCase()} at xdipx — curated picks on intimate-wellness products, hand-picked by Emma.`
+
+  const introHtml = sanity?.introHtml || (collection.descriptionHtml || null)
+
+  const heroImageUrl = sanity?.heroImageUrl || collection.image?.url || null
+  const heroImageAlt = sanity?.heroImageAlt || collection.image?.altText || h1
+
+  // Canonical strategy:
+  //  - Page > 1: self-canonical at ?page=N (each page is its own document).
+  //  - Page 1, with sort: canonical to the bare /collections/$handle (sort is
+  //    a faceting param, not a new document).
+  //  - Filters applied: canonical still points to the bare URL — combined
+  //    with `noindex,follow` above this consolidates faceted variants.
+  const canonical =
+    page > 1
+      ? canonicalUrl({
+          path: `/collections/${handle}`,
+          searchParams: new URLSearchParams({ page: String(page) }),
+          allowedParams: ['page'],
+        })
+      : canonicalUrl({ path: `/collections/${handle}` })
 
   const recentViews = readRecentHandles(request)
 
-  return { deals, hasNextPage, page, handle, title, presets, recentViews, sort }
+  // Top-level menu collections for "Browse other categories" rail.
+  const sibling = menu
+    .flatMap(m => [m, ...m.items])
+    .filter(m => /\/collections\//.test(m.url))
+    .map(m => {
+      const slug = m.url.split('/collections/')[1]?.split('?')[0]?.split('/')[0]
+      return slug ? { handle: slug, label: m.title } : null
+    })
+    .filter((m): m is { handle: string; label: string } => !!m && m.handle !== handle)
+
+  // Sanity-curated related collections take priority; fall back to siblings.
+  const relatedCollections = (sanity?.related?.length ? sanity.related : sibling).slice(0, 8)
+
+  return {
+    deals,
+    hasNextPage,
+    page,
+    handle,
+    h1,
+    seoTitle,
+    seoDescription,
+    canonical,
+    introHtml,
+    heroImageUrl,
+    heroImageAlt,
+    ogImageUrl: heroImageUrl,
+    ogImageAlt: heroImageAlt,
+    filtersApplied,
+    sort,
+    presets,
+    recentViews,
+    faqs: sanity?.faqs ?? [],
+    relatedCollections,
+    productsCount: collection.productsCount,
+  }
 }
 
 export default function CollectionPage() {
-  const { deals, hasNextPage, page, handle, title, presets, recentViews, sort } = useLoaderData<typeof loader>()
+  const {
+    deals,
+    hasNextPage,
+    page,
+    handle,
+    h1,
+    canonical,
+    introHtml,
+    heroImageUrl,
+    heroImageAlt,
+    seoDescription,
+    sort,
+    presets,
+    recentViews,
+    faqs,
+    relatedCollections,
+  } = useLoaderData<typeof loader>()
   const [params, setParams] = useSearchParams()
   const [starred, setStarred] = useState<Record<string, string>>({})
 
@@ -114,16 +278,83 @@ export default function CollectionPage() {
     return suffix ? `/collections/${handle}?${suffix}` : `/collections/${handle}`
   }
 
+  const breadcrumbItems = [
+    { name: 'Home', href: '/' },
+    { name: 'Collections', href: '/collections' },
+    { name: h1 },
+  ]
+  const breadcrumbSchema = breadcrumbItems.map((c, i) => ({
+    name: c.name,
+    url:
+      i === breadcrumbItems.length - 1
+        ? canonical
+        : `${SITE_ORIGIN}${c.href}`,
+  }))
+
   return (
-    <div className="max-w-6xl mx-auto px-4 py-10">
-      <div className="mb-8">
+    <div className="max-w-6xl mx-auto px-4 py-6">
+      {/* Structured data — emit before paint. */}
+      <BreadcrumbStructuredData items={breadcrumbSchema} />
+      <CollectionStructuredData
+        name={h1}
+        description={seoDescription}
+        url={canonical}
+        items={deals.map(d => ({ handle: d.handle, title: d.seoTitle }))}
+      />
+      {faqs.length > 0 && <FAQStructuredData faqs={faqs} />}
+
+      <Breadcrumbs items={breadcrumbItems} className="mb-4" />
+
+      {heroImageUrl && (
+        <div className="mb-6 overflow-hidden rounded-2xl border border-line bg-cream-2">
+          <picture>
+            <source
+              type="image/avif"
+              srcSet={[
+                `${heroImageUrl}${heroImageUrl.includes('?') ? '&' : '?'}width=768&format=avif 768w`,
+                `${heroImageUrl}${heroImageUrl.includes('?') ? '&' : '?'}width=1200&format=avif 1200w`,
+                `${heroImageUrl}${heroImageUrl.includes('?') ? '&' : '?'}width=1600&format=avif 1600w`,
+                `${heroImageUrl}${heroImageUrl.includes('?') ? '&' : '?'}width=2000&format=avif 2000w`,
+              ].join(', ')}
+              sizes="100vw"
+            />
+            <source
+              type="image/webp"
+              srcSet={[
+                `${heroImageUrl}${heroImageUrl.includes('?') ? '&' : '?'}width=768&format=webp 768w`,
+                `${heroImageUrl}${heroImageUrl.includes('?') ? '&' : '?'}width=1200&format=webp 1200w`,
+                `${heroImageUrl}${heroImageUrl.includes('?') ? '&' : '?'}width=1600&format=webp 1600w`,
+              ].join(', ')}
+              sizes="100vw"
+            />
+            <img
+              src={`${heroImageUrl}${heroImageUrl.includes('?') ? '&' : '?'}width=1600`}
+              alt={heroImageAlt ?? h1}
+              width={1600}
+              height={600}
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
+              className="w-full h-auto object-cover aspect-[16/6]"
+            />
+          </picture>
+        </div>
+      )}
+
+      <header className="mb-8">
         <h1
-          className="text-3xl font-bold text-ink"
+          className="text-3xl md:text-4xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          {title}
+          {h1}
         </h1>
-      </div>
+        {introHtml && (
+          <div
+            className="prose prose-sm md:prose-base max-w-3xl mt-3 text-ink/80"
+            dangerouslySetInnerHTML={{ __html: introHtml }}
+          />
+        )}
+      </header>
 
       <div className="flex flex-col md:flex-row gap-8">
         <div className="flex flex-col gap-4 md:w-[260px] md:shrink-0">
@@ -189,7 +420,7 @@ export default function CollectionPage() {
             </div>
           ) : deals.length > 0 ? (
             <div className="text-center py-20">
-              <p className="text-ink/60 text-sm mb-3">Nothing matches those filters in {title}.</p>
+              <p className="text-ink/60 text-sm mb-3">Nothing matches those filters in {h1}.</p>
               <p className="text-muted text-xs">Try loosening a chip above — or ask Emma for a different preset.</p>
             </div>
           ) : (
@@ -205,10 +436,11 @@ export default function CollectionPage() {
             </div>
           )}
 
-          <div className="flex justify-center gap-4 mt-10">
+          <nav aria-label="Pagination" className="flex justify-center gap-4 mt-10">
             {page > 1 && (
               <Link
                 to={pageHref(page - 1)}
+                rel="prev"
                 className="px-5 py-2 rounded-full border border-line text-ink/70 hover:bg-cream-2 transition-colors text-sm"
               >
                 &larr; Previous
@@ -217,23 +449,70 @@ export default function CollectionPage() {
             {hasNextPage && (
               <Link
                 to={pageHref(page + 1)}
+                rel="next"
                 className="px-5 py-2 rounded-full bg-coral text-white text-sm font-semibold hover:opacity-90 transition-opacity"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
                 Next page &rarr;
               </Link>
             )}
-          </div>
+          </nav>
 
           {deals.length > 0 && (
             <LetMeLookAgainCTA
-              collection={title}
+              collection={h1}
               filters={activeFilters}
               className="mt-8"
             />
           )}
         </div>
       </div>
+
+      {faqs.length > 0 && (
+        <section className="mt-16 max-w-3xl mx-auto" aria-labelledby="collection-faq-heading">
+          <h2
+            id="collection-faq-heading"
+            className="text-2xl font-bold text-ink mb-6"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            FAQs about {h1.toLowerCase()}
+          </h2>
+          <ul className="divide-y divide-line">
+            {faqs.map((faq, i) => (
+              <li key={i} className="py-4">
+                <h3 className="font-semibold text-ink">{faq.question}</h3>
+                <p className="mt-1 text-ink/80 text-sm leading-relaxed whitespace-pre-line">
+                  {faq.answer}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {relatedCollections.length > 0 && (
+        <section className="mt-16" aria-labelledby="related-collections-heading">
+          <h2
+            id="related-collections-heading"
+            className="text-xl font-bold text-ink mb-4"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Browse other categories
+          </h2>
+          <ul className="flex flex-wrap gap-2">
+            {relatedCollections.map(rc => (
+              <li key={rc.handle}>
+                <Link
+                  to={`/collections/${rc.handle}`}
+                  className="inline-block px-4 py-2 rounded-full border border-line bg-paper text-sm text-ink hover:bg-cream-2 transition-colors"
+                >
+                  {rc.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   )
 }

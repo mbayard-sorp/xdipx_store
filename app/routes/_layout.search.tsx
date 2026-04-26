@@ -32,9 +32,21 @@ type SortValue = typeof SORT_OPTIONS[number]['value']
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const q = data?.q ?? ''
+  // /search is intentionally noindex per Google's site-search guidelines —
+  // search-results pages are typically thin/duplicate. `follow` keeps link
+  // equity flowing through to PDPs. Canonical strips ALL query params so
+  // every variant (?q=, ?utm_*, ?gclid, sort/filter combos) consolidates to
+  // one URL — Google never holds onto a search-result URL anyway.
   return [
     { title: q ? `Search: "${q}" — xdipx` : 'Search — xdipx' },
-    { name: 'robots', content: 'noindex' },
+    {
+      name: 'description',
+      content: q
+        ? `Searching xdipx for "${q}". Browse curated picks, the vault, and Emma's notebook.`
+        : "Search xdipx — curated intimate-wellness picks, the vault, and Emma's notebook.",
+    },
+    { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/search' },
+    { name: 'robots', content: 'noindex, follow' },
   ]
 }
 
