@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useFetcher, useLocation } from 'react-router'
 import { AnimatePresence, motion } from 'motion/react'
 import { CartDrawer } from '~/components/store/CartDrawer'
+import type { VerificationLevel } from '~/components/store/AgeGate'
 import { DesktopMegaMenu, MobileMegaMenu } from '~/components/store/MegaMenu'
 import { SearchBar } from '~/components/store/SearchBar'
 import { useSession } from '~/lib/session-context'
@@ -16,10 +17,11 @@ interface NavbarProps {
   megaMenuBanners?: MegaMenuBanner[]
   upsells?: Product[]
   emmaPersona?: EmmaPersona | null
+  ageGateLevel?: VerificationLevel
 }
 
 
-export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBanners = [], upsells = [], emmaPersona = null }: NavbarProps) {
+export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBanners = [], upsells = [], emmaPersona = null, ageGateLevel = 'click_through' }: NavbarProps) {
   const { isCustomerLoggedIn, customerFirstName, wishlistCount, isLoaded: isSessionLoaded } = useSession()
   // Cart is loaded per-user via fetcher (keeps parent HTML/data edge-cacheable).
   const cartFetcher = useFetcher<{ cart: Cart | null; emma?: EmmaCartContext }>()
@@ -308,6 +310,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
               emma={emma}
               upsells={upsells}
               emmaPersona={emmaPersona}
+              ageGateLevel={ageGateLevel}
               panelRef={cartDrawerRef}
               onClose={() => setCartOpen(false)}
               onMouseEnter={() => { cancelAutoClose(); openCart() }}

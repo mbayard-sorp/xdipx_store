@@ -1,35 +1,10 @@
-'use client'
-
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useAgeVerified } from '~/lib/use-age-verified'
 
 export type VerificationLevel = 'click_through' | 'dob_entry' | 'id_verify'
 
-interface AgeGateProps {
+interface AgeGatePanelProps {
   verificationLevel?: VerificationLevel
-}
-
-const STORAGE_KEY   = 'xdipx_age_verified'
-const EXPIRY_DAYS   = 30
-const POLICY_VERSION = '1.0'
-
-function isVerified(): boolean {
-  if (typeof window === 'undefined') return false
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return false
-    const data = JSON.parse(raw) as { verified: boolean; timestamp: number; version: string }
-    const age  = Date.now() - data.timestamp
-    return data.verified && age < EXPIRY_DAYS * 24 * 60 * 60 * 1000
-  } catch {
-    return false
-  }
-}
-
-function setVerified(): void {
-  window.localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({ verified: true, timestamp: Date.now(), version: POLICY_VERSION }),
-  )
 }
 
 // ── Click-through (default) ──────────────────────────────────────────────────
@@ -61,10 +36,6 @@ function ClickThroughGate({ onConfirm }: { onConfirm: () => void }) {
           Not yet
         </a>
       </div>
-
-      <p className="text-white/50 text-xs max-w-xs">
-        We don't track this. Just keeping things responsible.
-      </p>
     </div>
   )
 }
@@ -138,59 +109,42 @@ function DobEntryGate({ onConfirm }: { onConfirm: () => void }) {
   )
 }
 
-// ── Main AgeGate ─────────────────────────────────────────────────────────────
-export function AgeGate({ verificationLevel = 'click_through' }: AgeGateProps) {
-  const [visible, setVisible] = useState(false)
-
-  // Only check localStorage on the client; never show gate during SSR
-  useEffect(() => {
-    if (!isVerified()) setVisible(true)
-  }, [])
-
-  function handleConfirm() {
-    setVerified()
-    setVisible(false)
-  }
-
-  if (!visible) return null
+// ── AgeGatePanel ─────────────────────────────────────────────────────────────
+// Embeddable gradient panel with no fixed-overlay shell. Used inside the cart
+// drawer to gate cart contents until the visitor confirms 18+.
+export function AgeGatePanel({ verificationLevel = 'click_through' }: AgeGatePanelProps) {
+  const { confirm } = useAgeVerified()
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center px-4 bg-brand-charcoal/40 backdrop-blur-md"
-      aria-modal="true"
-      role="dialog"
+      className="relative w-full max-w-md mx-auto rounded-3xl shadow-xl px-6 py-8 sm:px-8 sm:py-10 flex flex-col items-center"
+      style={{ background: 'linear-gradient(135deg, #F04E37 0%, #FF8C38 50%, #7B2FBE 100%)' }}
+      role="region"
       aria-label="Age verification"
     >
-      <div
-        className="relative w-full max-w-md rounded-3xl shadow-2xl px-6 py-8 sm:px-8 sm:py-10 flex flex-col items-center"
-        style={{ background: 'linear-gradient(135deg, #F04E37 0%, #FF8C38 50%, #7B2FBE 100%)' }}
-      >
-        {/* Logo */}
-        <div className="mb-6 fade-in">
-          <span
-            className="text-white text-3xl md:text-4xl font-black tracking-tight select-none block text-center"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            xdipx
-          </span>
-          <span className="text-white/70 text-xs block text-center -mt-1 tracking-widest uppercase">
-            daily wellness deals
-          </span>
-        </div>
-
-        {verificationLevel === 'dob_entry' ? (
-          <DobEntryGate onConfirm={handleConfirm} />
-        ) : (
-          <ClickThroughGate onConfirm={handleConfirm} />
-        )}
-
-        {/* id_verify level: placeholder — integrate third-party SDK here when needed */}
-        {verificationLevel === 'id_verify' && (
-          <p className="mt-6 text-white/60 text-xs text-center max-w-xs">
-            ID verification required in your state. Integration pending.
-          </p>
-        )}
+      <div className="mb-6 fade-in">
+        <span
+          className="text-white text-3xl md:text-4xl font-black tracking-tight select-none block text-center"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          xdipx
+        </span>
+        <span className="text-white/70 text-xs block text-center -mt-1 tracking-widest uppercase">
+          daily wellness deals
+        </span>
       </div>
+
+      {verificationLevel === 'dob_entry' ? (
+        <DobEntryGate onConfirm={confirm} />
+      ) : (
+        <ClickThroughGate onConfirm={confirm} />
+      )}
+
+      {verificationLevel === 'id_verify' && (
+        <p className="mt-6 text-white/60 text-xs text-center max-w-xs">
+          ID verification required in your state. Integration pending.
+        </p>
+      )}
     </div>
   )
 }
