@@ -5,6 +5,8 @@ import type {
   SensationDialV2, SensationDialItem, DialValue, ProductTypeDial, CareInstructions,
 } from '~/types'
 import { getPipelineSetting } from './feed-processor.server'
+import { buildKeywordBlock, type SeoContentType } from './seo-keywords.server'
+import { getEditorialAuthor } from './editorial-author.server'
 import {
   RAIL_TOOLS,
   buildCandidatePool,
@@ -38,7 +40,13 @@ Punctuation rules (strict):
 Hard facts (never invent variants):
 - Credit-card statement descriptor is "XDIPX". If you mention billing, the descriptor, or what shows on a statement, write it as XDIPX. Never invent another descriptor (no DIPCOM, no XDIPX.COM, no variants).
 - Brand name is "xdipx" (lowercase) and is pronounced "ex-dip-ex" (three syllables). Never "ex-dip" or "x-dipx".
-- Orders ship in plain unbranded packaging. Don't claim same-day or next-day shipping unless given as context.`
+- Orders ship in plain unbranded packaging. Don't claim same-day or next-day shipping unless given as context.
+
+SEO targeting:
+- When a <keyword_targets> block appears in the input, weave the primary term into the headline and first 100 words exactly once. Integrate secondary terms naturally across headings and body. Long-tail and question terms surface best in FAQs, asides, and supporting paragraphs.
+- Never stuff. Do not repeat the primary term more than three times in body copy.
+- If a term feels forced, drop it. Voice always wins over keyword density.
+- Avoid any term listed inside <avoid>.`
 
 async function generate(
   prompt: string,
@@ -97,9 +105,40 @@ function stripFences(raw: string): string {
   return raw.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim()
 }
 
+/** Map copy type → keyword bank content-type so the right keywords surface. */
+function resolveSeoContentType(type: GenerateCopyRequest['type']): SeoContentType {
+  if (type === 'blog_article') return 'blog'
+  return 'pdp'
+}
+
 export async function generateCopy(req: GenerateCopyRequest): Promise<GenerateCopyResult> {
   const { type, product } = req
-  const productContext = `Product: ${product.title}\nBrand: ${product.brand}\nDescription: ${product.description}\nCategories: ${product.categories.join(', ')}${product.dealPrice ? `\nDeal price: $${product.dealPrice} (was $${product.msrp})` : ''}`
+
+  // Resolve optional editorial author. Emma is implied by the default brand voice;
+  // when an explicit author is set, voiceRules layer on top in the blog_article case.
+  const author = req.authorSlug ? await getEditorialAuthor(req.authorSlug).catch(() => null) : null
+  const seoMode = req.seoMode ?? author?.seoMode ?? 'natural'
+
+  // Pull the keyword targeting block in parallel with prompt assembly.
+  // No-op (returns '') when seoMode === 'off' or the bank has nothing matching —
+  // copy generation falls back to the pre-keyword behaviour.
+  const keywordBlock = await buildKeywordBlock({
+    productType: product.productTypeDial,
+    moods:       product.moodTags,
+    audiences:   product.audienceTags,
+    matters:     product.mattersTags,
+    contentType: resolveSeoContentType(type),
+    topic:       req.topic,
+    seoMode,
+  }).catch((err) => {
+    console.error('[claude] buildKeywordBlock failed (continuing without):', err)
+    return ''
+  })
+
+  const productContextBase = `Product: ${product.title}\nBrand: ${product.brand}\nDescription: ${product.description}\nCategories: ${product.categories.join(', ')}${product.dealPrice ? `\nDeal price: $${product.dealPrice} (was $${product.msrp})` : ''}`
+  const productContext = keywordBlock
+    ? `${productContextBase}\n\n${keywordBlock}`
+    : productContextBase
 
   switch (type) {
     case 'tagline': {
@@ -451,8 +490,181 @@ ${pairContext}`
       return { type, content: `<ul><li>${product.description.slice(0, 500)}</li></ul>` }
     }
 
+    case 'blog_article': {
+      // Blog articles route through generateBlogArticle which has its own
+      // input shape (topic-driven, not product-driven). The product object
+      // here is treated as topical context — title may carry the article topic
+      // when the caller has no separate `topic` field.
+      const article = await generateBlogArticle({
+        topic:    req.topic ?? product.title,
+        context:  product.description ?? '',
+        tags:     product.categories ?? [],
+        keywordBlock,
+        author,
+      })
+      return { type, content: article }
+    }
+
     default:
       throw new Error(`Unknown copy type: ${type as string}`)
+  }
+}
+
+// ─── Blog article generation ────────────────────────────────────────────────
+// Topic-driven (not product-driven). Composes the base brand voice with optional
+// editorial author rules and the keyword bank's <keyword_targets> block. Output
+// is Sanity-Portable-Text-compatible so the result can be saved straight into
+// blogPost.body[] as a draft for admin review.
+
+import type { BlogArticleCopy } from '~/types'
+import type { EditorialAuthor } from './editorial-author.server'
+
+interface GenerateBlogArticleInput {
+  topic:        string
+  context?:     string
+  tags?:        string[]
+  /** Pre-rendered <keyword_targets> XML — saves a Sanity round-trip when the
+   *  caller already built it. Pass '' to skip targeting. */
+  keywordBlock: string
+  author?:      EditorialAuthor | null
+}
+
+function rid(prefix: string): string {
+  return `${prefix}${Math.random().toString(36).slice(2, 10)}`
+}
+
+/** Convert markdown-ish text into a minimal Portable Text array.
+ *  Accepts:
+ *    - "## Heading"  → block with style:"h2"
+ *    - "### Heading" → block with style:"h3"
+ *    - blank line    → paragraph break
+ *    - everything else → block with style:"normal"
+ *  Bold/italic/links are emitted as plain text — keeps the helper trivial and
+ *  predictable. Editors can add formatting in Studio.
+ */
+function markdownToPortableText(md: string): unknown[] {
+  const blocks: unknown[] = []
+  const paragraphs = md.split(/\n{2,}/).map(p => p.trim()).filter(Boolean)
+  for (const p of paragraphs) {
+    let style: 'h2' | 'h3' | 'normal' = 'normal'
+    let text = p
+    if (text.startsWith('### ')) { style = 'h3'; text = text.slice(4).trim() }
+    else if (text.startsWith('## ')) { style = 'h2'; text = text.slice(3).trim() }
+    else if (text.startsWith('# ')) { style = 'h2'; text = text.slice(2).trim() }
+    blocks.push({
+      _type: 'block',
+      _key:  rid('b'),
+      style,
+      markDefs: [],
+      children: [{
+        _type: 'span',
+        _key:  rid('s'),
+        text,
+        marks: [],
+      }],
+    })
+  }
+  return blocks
+}
+
+function slugifyForBlog(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .slice(0, 80)
+}
+
+/**
+ * Generate a blog article. Topic-driven; composes voice + keyword targeting
+ * + author rules into one Claude call. Returns Portable Text + metadata.
+ *
+ * Side-effect-free — caller decides where to write (typically a Sanity
+ * blogPost draft via the admin UI or a separate persistence helper).
+ */
+export async function generateBlogArticle(input: GenerateBlogArticleInput): Promise<BlogArticleCopy> {
+  const { topic, context = '', tags = [], keywordBlock, author } = input
+
+  const composedSystem = author?.voiceRules?.length
+    ? `${SYSTEM_PROMPT}\n\nAuthor voice (${author.name}):\n${author.voiceRules.map(r => `- ${r}`).join('\n')}${author.personaSummary ? `\n\nPersona: ${author.personaSummary}` : ''}`
+    : SYSTEM_PROMPT
+
+  const ctxBlock = [
+    `Topic: ${topic}`,
+    context ? `Background context:\n${context}` : '',
+    tags.length ? `Related tags: ${tags.join(', ')}` : '',
+    keywordBlock,
+  ].filter(Boolean).join('\n\n')
+
+  // Single structured-output call. Asks for JSON with title, slug, excerpt,
+  // SEO meta, and a markdown body — body is parsed into Portable Text below.
+  const userPrompt = `Write a blog article for xdipx.com targeting the topic and keyword set above. Length: ~700–1100 words. Structure: a hook intro (no heading), then 3–5 H2 sections with at least one H3 subsection in the longest section. Conversational, useful, never preachy. Cite specific scenarios over generalities.
+
+Return a single JSON object with this exact shape (JSON only, no markdown fences):
+{
+  "title":          "string — 50–70 chars, weave the primary keyword",
+  "slug":           "string — kebab-case, ≤ 60 chars, derived from title",
+  "excerpt":        "string — 110–160 chars, hook the reader",
+  "seoTitle":       "string — 50–60 chars, optimized for SERP",
+  "seoDescription": "string — 140–155 chars, includes primary keyword",
+  "body":           "string — markdown body (## for H2, ### for H3, blank lines between paragraphs). Do NOT include the H1 title (that's the title field)."
+}
+
+${ctxBlock}`
+
+  const fallback = (): BlogArticleCopy => ({
+    title:          topic,
+    slug:           slugifyForBlog(topic),
+    excerpt:        `A look at ${topic} from xdipx.`,
+    seoTitle:       topic.slice(0, 60),
+    seoDescription: `Practical, tasteful guidance on ${topic} — written for curious adults.`.slice(0, 155),
+    body:           markdownToPortableText(`A short note on ${topic}. We'll come back with more soon.`),
+  })
+
+  let raw: string
+  try {
+    raw = await generateWithSystem({
+      system:    composedSystem,
+      user:      userPrompt,
+      model:     MODEL,
+      maxTokens: 4096,
+    })
+  } catch (err) {
+    console.error('[claude] generateBlogArticle Claude call failed:', err)
+    return fallback()
+  }
+
+  try {
+    const parsed = JSON.parse(stripFences(raw)) as Partial<{
+      title:          unknown
+      slug:           unknown
+      excerpt:        unknown
+      seoTitle:       unknown
+      seoDescription: unknown
+      body:           unknown
+    }>
+    const title = typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : topic
+    const slug  = typeof parsed.slug  === 'string' && parsed.slug.trim()  ? slugifyForBlog(parsed.slug)  : slugifyForBlog(title)
+    const excerpt = typeof parsed.excerpt === 'string' ? parsed.excerpt.trim() : ''
+    const seoTitle = typeof parsed.seoTitle === 'string' && parsed.seoTitle.trim()
+      ? parsed.seoTitle.trim()
+      : title.slice(0, 60)
+    const seoDescription = typeof parsed.seoDescription === 'string' && parsed.seoDescription.trim()
+      ? parsed.seoDescription.trim()
+      : (excerpt || `A practical guide to ${topic}.`).slice(0, 155)
+    const bodyMd = typeof parsed.body === 'string' ? parsed.body : ''
+    return {
+      title,
+      slug,
+      excerpt: excerpt || `A look at ${topic}.`,
+      seoTitle,
+      seoDescription,
+      body: bodyMd ? markdownToPortableText(bodyMd) : markdownToPortableText(`A short note on ${topic}.`),
+    }
+  } catch (err) {
+    console.error('[claude] generateBlogArticle JSON parse failed:', err)
+    return fallback()
   }
 }
 

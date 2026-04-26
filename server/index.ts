@@ -9,6 +9,7 @@ import { createRequestHandler } from '@react-router/express'
 import type { ServerBuild } from 'react-router'
 import { createCronRoutes } from './cron.js'
 import { createWebhookRoutes } from './webhooks.js'
+import { createMcpRoutes } from './mcp-route.js'
 import { validateStartupEnv } from '../app/lib/env.server.js'
 
 const isProduction = process.env['NODE_ENV'] === 'production'
@@ -47,6 +48,11 @@ if (viteDevServer) {
 
 // ─── Cron routes — protected by x-cron-secret header ─────────────────────
 app.use('/cron', express.json({ limit: '64kb' }), createCronRoutes())
+
+// ─── MCP server — protected by Authorization: Bearer header ──────────────
+// Streamable HTTP transport at POST /mcp/seo-bank. Powers the SEO keyword
+// bank agent (Claude Desktop, Cursor, web Claude, etc.).
+app.use('/mcp', express.json({ limit: '1mb' }), createMcpRoutes())
 
 // ─── Shopify webhooks — raw body for HMAC verification ────────────────────
 app.use(

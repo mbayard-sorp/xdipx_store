@@ -137,6 +137,7 @@ const NAV_ITEMS = [
   { to: '/admin/emails',         label: 'Emails',       Icon: MailIcon      },
   { to: '/admin/socials',        label: 'Socials',      Icon: SocialsIcon   },
   { to: '/admin/search-filters', label: 'Search Filters', Icon: SearchFilterIcon },
+  { to: '/admin/seo-regen',      label: 'SEO Regen',     Icon: LabsIcon      },
   { to: '/admin/labs',           label: 'Labs',          Icon: LabsIcon      },
   { to: '/admin/settings',       label: 'Settings',     Icon: SettingsIcon  },
 ]
