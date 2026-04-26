@@ -46,6 +46,7 @@ export async function loader() {
     { loc: `${base}/vault`, lastmod: undefined, changefreq: 'daily', priority: '0.6' },
     { loc: `${base}/for-him`, lastmod: undefined, changefreq: 'daily', priority: '0.5' },
     { loc: `${base}/for-her`, lastmod: undefined, changefreq: 'daily', priority: '0.5' },
+    { loc: `${base}/collections`, lastmod: undefined, changefreq: 'weekly', priority: '0.8' },
 
     // Products
     ...products.map(p => {
@@ -94,12 +95,18 @@ export async function loader() {
 
     // Collection pages — /collections/$handle. Helps Google rank xdipx for
     // category queries (e.g. "wand vibrators", "couples toys").
-    ...collections.map(c => ({
-      loc: `${base}/collections/${c.handle}`,
-      lastmod: c.updatedAt?.split('T')[0],
-      changefreq: 'weekly',
-      priority: '0.6',
-    })),
+    ...collections.map(c => {
+      const images: SitemapImage[] = c.image?.url
+        ? [{ loc: c.image.url, title: c.image.altText?.trim() || c.handle.replace(/-/g, ' ') }]
+        : []
+      return {
+        loc: `${base}/collections/${c.handle}`,
+        lastmod: c.updatedAt?.split('T')[0],
+        changefreq: 'weekly',
+        priority: '0.7',
+        ...(images.length > 0 ? { images } : {}),
+      }
+    }),
   ]
 
   const xml = [

@@ -4,6 +4,10 @@ const GENERIC_BLOCKS = [
   'Disallow: /admin',
   'Disallow: /account',
   'Disallow: /api/',
+  // /search is also marked noindex,follow in <meta>; disallowing crawl is
+  // belt-and-suspenders for Bing/AI crawlers that respect robots.txt more
+  // strictly than the meta directive.
+  'Disallow: /search',
   '',
 ]
 
@@ -35,6 +39,7 @@ export async function loader() {
     'Disallow: /admin',
     'Disallow: /account',
     'Disallow: /api/',
+    'Disallow: /search',
     '',
   ])
 
