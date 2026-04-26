@@ -58,8 +58,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function StoreLayout() {
   const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona } = useLoaderData<typeof loader>()
   const { pathname } = useLocation()
-  const rootData = useRouteLoaderData<{ ENV?: { GA4_ID?: string } }>('root')
+  const rootData = useRouteLoaderData<{ ENV?: { GA4_ID?: string; AGE_GATE_LEVEL?: string } }>('root')
   const ga4Id = rootData?.ENV?.GA4_ID ?? ''
+  const ageGateLevel = (rootData?.ENV?.AGE_GATE_LEVEL ?? 'click_through') as 'click_through' | 'dob_entry' | 'id_verify'
 
   // Hide the mobile tab bar on PDP (pinned "Dip In" CTA owns the bottom) and on
   // the checkout flow. The AskEmmaWidget renders on every page.
@@ -85,7 +86,7 @@ export default function StoreLayout() {
           )}
 
           {announcementBar && <AnnouncementBar block={announcementBar} />}
-          <Navbar logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} emmaPersona={emmaPersona} />
+          <Navbar logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} emmaPersona={emmaPersona} ageGateLevel={ageGateLevel} />
           <SiteBanner banner={siteBanner} />
           <main className={`flex-1 ${showMobileShell ? 'pb-20 md:pb-0' : ''}`}>
             <Outlet context={{ buyButtonText }} />

@@ -14,7 +14,6 @@ import type { LoaderFunctionArgs, LinksFunction } from 'react-router'
 import * as Sentry from '@sentry/react'
 import { BotIdClient } from 'botid/client'
 import stylesheet from './app.css?url'
-import { AgeGate } from './components/store/AgeGate'
 
 const BOTID_PROTECTED_ROUTES = [
   { path: '/api/waitlist',  method: 'POST' },
@@ -167,8 +166,6 @@ export default function App() {
 
   return (
     <>
-      {/* Age gate renders above everything; self-dismisses on confirmation */}
-      <AgeGate verificationLevel={ENV.AGE_GATE_LEVEL as 'click_through' | 'dob_entry' | 'id_verify'} />
       <Outlet />
       {/* Inject public ENV for client-side access */}
       <script

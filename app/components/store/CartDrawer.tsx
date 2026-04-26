@@ -5,6 +5,8 @@ import { AnimatePresence, motion } from 'motion/react'
 import type { Cart, CartLine, EmmaCartContext, Product } from '~/types'
 import type { EmmaPersona } from '~/types/cms'
 import { trackViewCart, trackRemoveFromCart, trackBeginCheckout, type GA4Item } from '~/lib/analytics.client'
+import { AgeGatePanel, type VerificationLevel } from '~/components/store/AgeGate'
+import { useAgeVerified } from '~/lib/use-age-verified'
 
 const FREE_SHIPPING_THRESHOLD = 99
 
@@ -13,6 +15,7 @@ interface CartDrawerProps {
   emma?: EmmaCartContext | null
   upsells?: Product[]
   emmaPersona?: EmmaPersona | null
+  ageGateLevel?: VerificationLevel
   panelRef?: RefObject<HTMLDivElement | null>
   onClose: () => void
   onMouseEnter?: () => void
@@ -33,7 +36,8 @@ function cartLinesToGA4(lines: CartLine[]): GA4Item[] {
   })
 }
 
-export function CartDrawer({ cart, emma = null, upsells = [], emmaPersona = null, panelRef, onClose, onMouseEnter, onMouseLeave }: CartDrawerProps) {
+export function CartDrawer({ cart, emma = null, upsells = [], emmaPersona = null, ageGateLevel = 'click_through', panelRef, onClose, onMouseEnter, onMouseLeave }: CartDrawerProps) {
+  const { verified } = useAgeVerified()
   const subtotal  = cart ? parseFloat(cart.cost.subtotalAmount.amount) : 0
   const remaining = emma?.freeShip.remaining ?? Math.max(FREE_SHIPPING_THRESHOLD - subtotal, 0)
   const progress  = emma?.freeShip.progress  ?? Math.min((subtotal / FREE_SHIPPING_THRESHOLD) * 100, 100)
@@ -45,17 +49,18 @@ export function CartDrawer({ cart, emma = null, upsells = [], emmaPersona = null
     ? `${cart.totalQuantity}|${cart.cost.subtotalAmount.amount}`
     : 'empty'
   useEffect(() => {
-    if (!cart || cart.lines.length === 0) return
+    if (!verified || !cart || cart.lines.length === 0) return
     asideFetcher.load('/api/emma-cart')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cartSignature])
+  }, [cartSignature, verified])
   const aiBody = asideFetcher.data?.body ?? null
 
   useEffect(() => {
-    if (cart && cart.lines.length > 0) {
+    if (verified && cart && cart.lines.length > 0) {
       trackViewCart(cartLinesToGA4(cart.lines), subtotal)
     }
-  }, []) // fire once on mount (drawer open)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verified]) // fire on mount + when gate clears
 
   return (
     <motion.div
@@ -94,6 +99,15 @@ export function CartDrawer({ cart, emma = null, upsells = [], emmaPersona = null
         </button>
       </div>
 
+      {!verified ? (
+        <div className="flex-1 overflow-y-auto px-4 py-6 flex flex-col items-center justify-center gap-4">
+          <p className="text-sm text-ink/70 text-center max-w-xs">
+            Quick check before you peek in the bag.
+          </p>
+          <AgeGatePanel verificationLevel={ageGateLevel} />
+        </div>
+      ) : (
+        <>
       {/* Emma avatar block — only when we have cart content */}
       {cart && cart.lines.length > 0 && emma && (
         <EmmaBlock emma={emma} aiBody={aiBody} persona={emmaPersona} />
@@ -170,6 +184,8 @@ export function CartDrawer({ cart, emma = null, upsells = [], emmaPersona = null
             straight to checkout · no detours
           </p>
         </div>
+      )}
+        </>
       )}
     </motion.div>
   )
