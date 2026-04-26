@@ -17,3 +17,6 @@ ivr_descriptors.csv
 scripts/.bg-removal-checkpoint.json
 # v2 redesign handoff — reference assets, too large to commit
 /redesign/
+
+# Content-generation cache (local artifacts only)
+.cache/

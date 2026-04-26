@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LoaderFunctionArgs, MetaDescriptor, MetaFunction } from 'react-router'
 import { useLoaderData, useSearchParams, Link } from 'react-router'
 import { getCollection, getCollectionDeals, getMainMenu, type CollectionSort } from '~/lib/shopify.server'
-import { getCollectionPage, getEmmaPresets } from '~/lib/sanity.server'
+import { getCollectionPage, getEmmaPresets, getBlogPosts } from '~/lib/sanity.server'
 import { canonicalUrl, pageTitle, robotsContent, truncateForMeta } from '~/lib/seo'
 import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
 import { VaultCard } from '~/components/store/VaultCard'
@@ -62,13 +62,17 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { tagName: 'link', rel: 'canonical', href: canonical },
   ]
 
-  // Faceted variants are explicitly noindex,follow — Google retains link
-  // equity flowing to PDPs but doesn't index near-duplicate filter combos.
-  if (filtersApplied) {
+  // Non-canonical variants get `noindex, follow`. Filters AND non-default
+  // sort orders both qualify — canonical points at the bare URL either way,
+  // but the meta tag stops Google wasting crawl budget on N×4 sort variants
+  // and consolidates link equity. `follow` keeps PDP discovery intact.
+  if ((data as { nonCanonicalVariant?: boolean }).nonCanonicalVariant ?? filtersApplied) {
     tags.push({ name: 'robots', content: robotsContent({ index: false, follow: true }) })
   }
 
-  if (heroPreload) tags.push(heroPreload)
+  // Suppress the hero preload on page > 1 — the deeper page no longer
+  // renders the hero image (P1 #7), so preloading it just wastes bytes.
+  if (heroPreload && page === 1) tags.push(heroPreload)
 
   tags.push(
     ...buildSocialMeta({
@@ -85,9 +89,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 }
 
 export function headers() {
+  // PLPs are content-stable — products only change when Shopify webhooks fire
+  // (handled by route revalidation) or when an editor updates the Sanity
+  // collectionPage doc. 10-min CDN with 1-hour SWR keeps LCP fast on cold
+  // hits without staling content meaningfully.
   return {
-    'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
-    'Vercel-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=600',
+    'Cache-Control': 'public, max-age=0, s-maxage=600, stale-while-revalidate=3600',
+    'Vercel-CDN-Cache-Control': 'public, s-maxage=600, stale-while-revalidate=3600',
   }
 }
 
@@ -115,13 +123,21 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     const vals = url.searchParams.getAll(p)
     return vals.some(v => v && v.length > 0)
   })
+  // Sort variants are also non-canonical (canonical points at the bare URL).
+  // Treat them like filters for indexing purposes — see meta() above.
+  const nonCanonicalVariant = filtersApplied || sort !== 'manual'
 
-  const [collection, sanity, { deals, hasNextPage }, presets, menu] = await Promise.all([
+  const [collection, sanity, { deals, hasNextPage }, presets, menu, notebook] = await Promise.all([
     getCollection(handle),
     getCollectionPage(handle),
     getCollectionDeals(handle, page, PAGE_SIZE, sort),
     getEmmaPresets(),
     getMainMenu(),
+    // Notebook rail — only loaded for page 1 (it's hidden on deeper pages
+    // per the duplicate-content suppression rules).
+    page === 1
+      ? getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [], total: 0 }))
+      : Promise.resolve({ posts: [], total: 0 }),
   ])
 
   // 404 — no Shopify collection at this handle.
@@ -130,17 +146,30 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   }
 
   // Resolve display + SEO with Sanity > Shopify SEO > Shopify title fallback.
+  // Title fallbacks use the live productsCount when available so each
+  // collection has a unique, keyword-led title — Google's title rewriter
+  // is far less likely to overwrite "Wand Vibrators — Shop 24 Picks" than
+  // it is the previous "{X} — Editorially curated picks" boilerplate.
   const fallbackTitle = collection.title || titleCase(handle)
+  const lcTitle = fallbackTitle.toLowerCase()
+  const productsCount = collection.productsCount ?? 0
+  const titleFallback = productsCount > 0
+    ? `${fallbackTitle} — Shop ${productsCount} Curated Picks`
+    : `${fallbackTitle} — Curated Picks`
+  const descriptionFallback = productsCount > 0
+    ? `Shop ${productsCount} hand-picked ${lcTitle} at xdipx. Emma's editorial picks on intimate-wellness products. Discreet shipping, US ships free over $59.`
+    : `Shop ${lcTitle} at xdipx. Emma's editorial picks on intimate-wellness products. Discreet shipping, US ships free over $59.`
+
   const h1 = sanity?.h1 || fallbackTitle
   const seoTitle =
     sanity?.seoTitle
     || collection.seoTitle
-    || `${fallbackTitle} — Editorially curated picks`
+    || titleFallback
   const seoDescription =
     sanity?.seoDescription
     || collection.seoDescription
     || collection.description
-    || `Shop ${fallbackTitle.toLowerCase()} at xdipx — curated picks on intimate-wellness products, hand-picked by Emma.`
+    || descriptionFallback
 
   const introHtml = sanity?.introHtml || (collection.descriptionHtml || null)
 
@@ -192,12 +221,14 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     ogImageUrl: heroImageUrl,
     ogImageAlt: heroImageAlt,
     filtersApplied,
+    nonCanonicalVariant,
     sort,
     presets,
     recentViews,
     faqs: sanity?.faqs ?? [],
     relatedCollections,
     productsCount: collection.productsCount,
+    notebookPosts: notebook.posts,
   }
 }
 
@@ -218,7 +249,14 @@ export default function CollectionPage() {
     recentViews,
     faqs,
     relatedCollections,
+    filtersApplied,
+    productsCount,
+    notebookPosts,
   } = useLoaderData<typeof loader>()
+  // Page 1 is the canonical document — render the full editorial frame
+  // (hero, intro, FAQs, notebook rail). Pages > 1 are pagination-only and
+  // strip those sections to avoid near-duplicate-content signals.
+  const isCanonicalPage = page === 1
   const [params, setParams] = useSearchParams()
   const [starred, setStarred] = useState<Record<string, string>>({})
 
@@ -293,19 +331,33 @@ export default function CollectionPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
-      {/* Structured data — emit before paint. */}
+      {/* Structured data — emit before paint. Skip ItemList entirely on
+          filtered/non-canonical variants and on empty collections; an empty
+          ItemList is invalid per Google's rich-results validator and a
+          filter-narrowed list misrepresents the collection. */}
       <BreadcrumbStructuredData items={breadcrumbSchema} />
-      <CollectionStructuredData
-        name={h1}
-        description={seoDescription}
-        url={canonical}
-        items={deals.map(d => ({ handle: d.handle, title: d.seoTitle }))}
-      />
-      {faqs.length > 0 && <FAQStructuredData faqs={faqs} />}
+      {isCanonicalPage && !filtersApplied && deals.length > 0 && (
+        <CollectionStructuredData
+          name={h1}
+          description={seoDescription}
+          url={canonical}
+          numberOfItems={productsCount ?? deals.length}
+          items={deals.map(d => ({
+            handle: d.handle,
+            title:  d.seoTitle,
+            image:  d.images[0]?.url ?? null,
+            price:  d.dealPrice,
+            currency: 'USD',
+            availability: d.qty > 0 ? 'InStock' : 'OutOfStock',
+            brand:  d.brand ?? null,
+          }))}
+        />
+      )}
+      {isCanonicalPage && faqs.length > 0 && <FAQStructuredData faqs={faqs} />}
 
       <Breadcrumbs items={breadcrumbItems} className="mb-4" />
 
-      {heroImageUrl && (
+      {isCanonicalPage && heroImageUrl && (
         <div className="mb-6 overflow-hidden rounded-2xl border border-line bg-cream-2">
           <picture>
             <source
@@ -341,20 +393,22 @@ export default function CollectionPage() {
         </div>
       )}
 
-      <header className="mb-8">
+      <header className="mb-6">
         <h1
           className="text-3xl md:text-4xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          {h1}
+          {h1}{page > 1 ? ` — Page ${page}` : ''}
         </h1>
-        {introHtml && (
-          <div
-            className="prose prose-sm md:prose-base max-w-3xl mt-3 text-ink/80"
-            dangerouslySetInnerHTML={{ __html: introHtml }}
-          />
-        )}
       </header>
+
+      {/* Side-by-side info boxes (description + FAQ accordion) — page 1 only.
+          Both blocks live in the SSR'd DOM so Google reads everything; the
+          "more" toggle is a CSS class swap, and the FAQ uses native <details>
+          which keeps every answer in DOM regardless of open state. */}
+      {isCanonicalPage && (introHtml || faqs.length > 0) && (
+        <CollectionInfoBoxes introHtml={introHtml} faqs={faqs} />
+      )}
 
       <div className="flex flex-col md:flex-row gap-8">
         <div className="flex flex-col gap-4 md:w-[260px] md:shrink-0">
@@ -468,22 +522,45 @@ export default function CollectionPage() {
         </div>
       </div>
 
-      {faqs.length > 0 && (
-        <section className="mt-16 max-w-3xl mx-auto" aria-labelledby="collection-faq-heading">
+      {/* Notebook section renders only on page 1 to keep deeper paginated
+          pages clearly secondary documents. The FAQ block formerly here has
+          moved to the top-of-page CollectionInfoBoxes side-by-side layout. */}
+      {isCanonicalPage && notebookPosts.length > 0 && (
+        <section className="mt-16" aria-labelledby="notebook-rail-heading">
           <h2
-            id="collection-faq-heading"
-            className="text-2xl font-bold text-ink mb-6"
+            id="notebook-rail-heading"
+            className="text-xl font-bold text-ink mb-4"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            FAQs about {h1.toLowerCase()}
+            From Emma's notebook
           </h2>
-          <ul className="divide-y divide-line">
-            {faqs.map((faq, i) => (
-              <li key={i} className="py-4">
-                <h3 className="font-semibold text-ink">{faq.question}</h3>
-                <p className="mt-1 text-ink/80 text-sm leading-relaxed whitespace-pre-line">
-                  {faq.answer}
-                </p>
+          <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            {notebookPosts.map(post => (
+              <li key={post._id}>
+                <Link
+                  to={`/notebook/${post.slug}`}
+                  className="group block rounded-2xl overflow-hidden border border-line bg-paper hover:shadow-md transition-shadow"
+                >
+                  {post.heroImageUrl && (
+                    <div className="aspect-[4/3] bg-cream-2 overflow-hidden">
+                      <img
+                        src={`${post.heroImageUrl}${post.heroImageUrl.includes('?') ? '&' : '?'}w=600`}
+                        alt={post.heroImageAlt ?? post.title}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      />
+                    </div>
+                  )}
+                  <div className="p-4">
+                    <h3 className="text-sm font-semibold text-ink line-clamp-2 group-hover:text-coral transition-colors">
+                      {post.title}
+                    </h3>
+                    {post.excerpt && (
+                      <p className="mt-1 text-xs text-ink/60 line-clamp-2">{post.excerpt}</p>
+                    )}
+                  </div>
+                </Link>
               </li>
             ))}
           </ul>
@@ -508,6 +585,100 @@ export default function CollectionPage() {
                 >
                   {rc.label}
                 </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  )
+}
+
+// PDP-style two-box editorial header: description on the left (with a
+// CSS-clamp + "more" toggle so all copy stays in the SSR DOM for Google),
+// FAQ accordion on the right (native <details>, every answer in DOM).
+function CollectionInfoBoxes({
+  introHtml,
+  faqs,
+}: {
+  introHtml: string | null
+  faqs: Array<{ question: string; answer: string }>
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [needsExpand, setNeedsExpand] = useState(false)
+  const introRef = useRef<HTMLDivElement>(null)
+
+  // Measure once after first paint to decide whether the "more" toggle is
+  // worth showing. Re-runs if the intro HTML changes.
+  useEffect(() => {
+    const el = introRef.current
+    if (!el) return
+    setNeedsExpand(el.scrollHeight > el.clientHeight + 1)
+  }, [introHtml])
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
+      {introHtml && (
+        <section
+          aria-labelledby="collection-info-heading"
+          className="rounded-2xl border border-line bg-paper p-5"
+        >
+          <h2
+            id="collection-info-heading"
+            className="text-xs font-bold text-coral uppercase tracking-wider mb-3"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            On this shelf
+          </h2>
+          <div
+            ref={introRef}
+            className={`prose prose-sm max-w-none text-ink/80 transition-[max-height] ${expanded ? '' : 'line-clamp-[6]'}`}
+            dangerouslySetInnerHTML={{ __html: introHtml }}
+          />
+          {needsExpand && (
+            <button
+              type="button"
+              onClick={() => setExpanded(e => !e)}
+              className="mt-3 text-sm font-semibold text-coral hover:opacity-80 transition-opacity"
+              aria-expanded={expanded}
+            >
+              {expanded ? 'close' : 'more...'}
+            </button>
+          )}
+        </section>
+      )}
+
+      {faqs.length > 0 && (
+        <section
+          aria-labelledby="collection-faq-heading"
+          className="rounded-2xl border border-line bg-paper p-5"
+        >
+          <h2
+            id="collection-faq-heading"
+            className="text-xs font-bold text-coral uppercase tracking-wider mb-2"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            FAQs / Q&amp;A
+          </h2>
+          <ul className="divide-y divide-line">
+            {faqs.map((faq, i) => (
+              <li key={i}>
+                <details className="group">
+                  <summary className="flex items-start gap-2 py-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                    <span
+                      aria-hidden="true"
+                      className="text-coral text-xs mt-1 transition-transform group-open:rotate-90 shrink-0"
+                    >
+                      ▶
+                    </span>
+                    <h3 className="font-semibold text-ink text-sm flex-1 m-0">
+                      {faq.question}
+                    </h3>
+                  </summary>
+                  <p className="pb-3 pl-5 text-ink/80 text-sm leading-relaxed whitespace-pre-line">
+                    {faq.answer}
+                  </p>
+                </details>
               </li>
             ))}
           </ul>

@@ -41,6 +41,7 @@ import seoCluster         from '../schemas/seo/seoCluster.js'
 // Multi-author voice profiles for AI-generated content (Emma + future agents).
 import editorialAuthor    from '../schemas/authors/editorialAuthor.js'
 import collectionPage     from '../schemas/collectionPage.js'
+import collectionsHub     from '../schemas/collectionsHub.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -86,6 +87,9 @@ export const schemaTypes = [
   // related collections). Additive — Shopify is still source of truth for
   // products; Sanity wins for SEO meta when present.
   collectionPage,
+  // Hub SEO — editorial copy + FAQs for the /collections hub PLP. Singleton.
+  // Additive — falls back to hardcoded defaults when the doc doesn't exist.
+  collectionsHub,
   // Block object types
   announcementBar,
   promoBanner,
