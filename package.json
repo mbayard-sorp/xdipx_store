@@ -20,6 +20,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/genai": "^1.48.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@neondatabase/serverless": "^0.10.4",
     "@portabletext/react": "^6.0.3",
     "@portabletext/to-html": "^5.0.2",
@@ -54,7 +55,8 @@
     "react-dom": "^19.1.0",
     "react-router": "^7.5.0",
     "remotion": "^4.0.294",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@react-router/dev": "^7.5.0",

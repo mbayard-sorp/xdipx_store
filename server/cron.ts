@@ -162,6 +162,29 @@ export function createCronRoutes() {
   })
 
   /**
+   * POST /cron/keyword-research
+   * Schedule: weekly Sunday 02:00 UTC — discover new SEO keywords via
+   * DataForSEO + LLM clusterer, write to Sanity as pending or approved.
+   * Also callable on-demand by admin (with the cron secret).
+   * Body (optional): { manualSeeds?: string[], maxSeeds?: number }
+   */
+  router.post('/keyword-research', guard, async (req, res) => {
+    try {
+      const { runKeywordResearch } = await import('../app/lib/seo-research.server.js')
+      const opts: { maxSeeds?: number; manualSeeds?: string[] } = {}
+      if (typeof req.body?.maxSeeds === 'number') opts.maxSeeds = req.body.maxSeeds
+      if (Array.isArray(req.body?.manualSeeds)) {
+        opts.manualSeeds = (req.body.manualSeeds as unknown[]).filter((s): s is string => typeof s === 'string')
+      }
+      const result = await runKeywordResearch(opts)
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:keyword-research]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/inventory-check
    * Schedule: every 5 min — check if live deal is sold out, rotate if so
    */

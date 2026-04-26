@@ -52,6 +52,20 @@ export default defineConfig({
               .icon(() => '⚙️')
               .child(S.document().schemaType('siteSettings').documentId('singleton.siteSettings')),
             S.divider(),
+            S.listItem()
+              .title('SEO')
+              .id('seo')
+              .icon(() => '🔎')
+              .child(
+                S.list()
+                  .title('SEO')
+                  .items([
+                    S.documentTypeListItem('seoKeyword').title('Keywords').icon(() => '🔑'),
+                    S.documentTypeListItem('seoCluster').title('Clusters').icon(() => '🧭'),
+                  ]),
+              ),
+            S.documentTypeListItem('editorialAuthor').title('Editorial authors').icon(() => '✒️'),
+            S.divider(),
             S.documentTypeListItem('productPage').title('Products').icon(() => '🛍️'),
             S.documentTypeListItem('page').title('Pages').icon(() => '📄'),
             S.documentTypeListItem('trustItem').title('Trust Items').icon(() => '✅'),

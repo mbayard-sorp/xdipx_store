@@ -33,6 +33,12 @@ import emmaCuratedRail    from '../schemas/blocks/emmaCuratedRail.js'
 import editor             from '../schemas/editor.js'
 import dialRegistry       from '../schemas/dialRegistry.js'
 import askEmmaVocabulary  from '../schemas/askEmmaVocabulary.js'
+// SEO keyword bank — auto-discovered terms + topic clusters powering all
+// AI-written copy. Additive; does not touch existing schemas.
+import seoKeyword         from '../schemas/seo/seoKeyword.js'
+import seoCluster         from '../schemas/seo/seoCluster.js'
+// Multi-author voice profiles for AI-generated content (Emma + future agents).
+import editorialAuthor    from '../schemas/authors/editorialAuthor.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -66,6 +72,13 @@ export const schemaTypes = [
   dialRegistry,
   // Bulk-import — Ask Emma vocabulary singleton (mood/audience/matters tag pools)
   askEmmaVocabulary,
+  // SEO keyword bank — single source of truth for keyword targeting across all
+  // AI-written copy. Auto-populated by the weekly research cron; admin approves
+  // pending entries in Studio.
+  seoCluster,
+  seoKeyword,
+  // Editorial authors — voice profiles for Emma + future AI authors.
+  editorialAuthor,
   // Block object types
   announcementBar,
   promoBanner,

@@ -420,7 +420,7 @@ export interface DailyProfitSummaryRow {
 // ─── Admin ─────────────────────────────────────────────────────────────────
 
 export interface GenerateCopyRequest {
-  type: 'tagline' | 'full_story' | 'both_ways' | 'box_contents' | 'bullets' | 'email_subjects' | 'seo_meta' | 'specifications' | 'quiet_endorsement' | 'pair_bundle'
+  type: 'tagline' | 'full_story' | 'both_ways' | 'box_contents' | 'bullets' | 'email_subjects' | 'seo_meta' | 'specifications' | 'quiet_endorsement' | 'pair_bundle' | 'blog_article'
   product: {
     title: string
     brand: string
@@ -429,6 +429,12 @@ export interface GenerateCopyRequest {
     dealPrice?: number
     msrp?: number
     mapRestricted?: boolean
+    /** Product type dial — used by SEO keyword filter to scope candidate terms. */
+    productTypeDial?: ProductTypeDial
+    /** Editorial tag overlap inputs for SEO keyword selection. */
+    moodTags?: string[]
+    audienceTags?: string[]
+    mattersTags?: string[]
     partner?: {
       title:       string
       brand:       string
@@ -437,11 +443,40 @@ export interface GenerateCopyRequest {
       dealPrice?:  number
     }
   }
+  /**
+   * Optional editorial author slug. When set, the author's voiceRules are
+   * appended to the brand-voice system prompt and seoMode is honored for
+   * keyword targeting. Defaults to the base brand voice with seoMode=natural.
+   */
+  authorSlug?: string
+  /**
+   * Optional topic — required for blog_article generation. Drives keyword
+   * selection and outline.
+   */
+  topic?: string
+  /**
+   * Toggle keyword targeting. Defaults to 'natural'. Set 'off' to skip the
+   * keyword bank entirely (e.g. internal admin previews).
+   */
+  seoMode?: 'aggressive' | 'natural' | 'off'
+}
+
+/** Blog article generation output — Sanity Portable Text body + metadata. */
+export interface BlogArticleCopy {
+  title:           string
+  slug:            string
+  excerpt:         string
+  seoTitle:        string
+  seoDescription:  string
+  /** Sanity Portable Text array — compatible with blogPost.body. */
+  body:            unknown[]
+  /** Keyword cluster slug this article targets (from the keyword bank). */
+  clusterSlug?:    string
 }
 
 export interface GenerateCopyResult {
   type: string
-  content: string | string[] | { forHim: string; forHer: string } | QuietEndorsementCopy | PairBundleCopy
+  content: string | string[] | { forHim: string; forHer: string } | QuietEndorsementCopy | PairBundleCopy | BlogArticleCopy
 }
 
 // ─── Klaviyo ──────────────────────────────────────────────────────────────
