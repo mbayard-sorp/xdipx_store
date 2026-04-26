@@ -185,6 +185,24 @@ export function createCronRoutes() {
   })
 
   /**
+   * POST /cron/log-monitor
+   * Schedule: every 15 min — pull recent Vercel runtime logs, classify
+   * signal vs noise via Claude haiku, open GitHub issues for P0 groups.
+   * Body (optional): { windowMinutes?: number }
+   */
+  router.post('/log-monitor', guard, async (req, res) => {
+    try {
+      const { runLogMonitor } = await import('../app/lib/log-monitor.server.js')
+      const windowMinutes = typeof req.body?.windowMinutes === 'number' ? req.body.windowMinutes : 15
+      const result = await runLogMonitor({ windowMinutes })
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:log-monitor]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/inventory-check
    * Schedule: every 5 min — check if live deal is sold out, rotate if so
    */
