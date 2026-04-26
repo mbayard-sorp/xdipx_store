@@ -34,6 +34,7 @@ import emmaCuratedRail    from '../schemas/blocks/emmaCuratedRail.js'
 import editor             from '../schemas/editor.js'
 import dialRegistry       from '../schemas/dialRegistry.js'
 import askEmmaVocabulary  from '../schemas/askEmmaVocabulary.js'
+import collectionPage     from '../schemas/collectionPage.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -68,6 +69,10 @@ export const schemaTypes = [
   dialRegistry,
   // Bulk-import — Ask Emma vocabulary singleton (mood/audience/matters tag pools)
   askEmmaVocabulary,
+  // PLP SEO — editorial overrides per Shopify collection (intro copy, FAQs,
+  // related collections). Additive — Shopify is still source of truth for
+  // products; Sanity wins for SEO meta when present.
+  collectionPage,
   // Block object types
   announcementBar,
   promoBanner,

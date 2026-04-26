@@ -989,6 +989,79 @@ export async function getProductImagesForSitemap(): Promise<Map<string, SitemapP
 export interface SitemapCollection {
   handle:    string
   updatedAt: string
+  image?:    { url: string; altText: string | null } | null
+}
+
+export interface CollectionMeta {
+  id:              string
+  handle:          string
+  title:           string
+  description:     string
+  descriptionHtml: string
+  seoTitle:        string | null
+  seoDescription:  string | null
+  image:           { url: string; altText: string | null; width: number | null; height: number | null } | null
+  updatedAt:       string
+  productsCount:   number | null
+}
+
+/**
+ * Fetch full collection metadata for SEO + PLP rendering. Returns null if the
+ * collection is unpublished or does not exist (loader translates that to a
+ * 404). Cached for the same READ_TTL as products so admin edits surface
+ * within ~60s.
+ */
+export async function getCollection(handle: string): Promise<CollectionMeta | null> {
+  return cached(`shopify:col-meta:${handle}`, READ_TTL, async () => {
+    const data = await storefront<{
+      collection: {
+        id:              string
+        handle:          string
+        title:           string
+        description:     string
+        descriptionHtml: string
+        updatedAt:       string
+        seo:             { title: string | null; description: string | null }
+        image:           { url: string; altText: string | null; width: number | null; height: number | null } | null
+        products:        { edges: { node: { id: string } }[]; pageInfo: { hasNextPage: boolean } }
+      } | null
+    }>(`
+      query GetCollectionMeta($handle: String!) {
+        collection(handle: $handle) {
+          id
+          handle
+          title
+          description
+          descriptionHtml
+          updatedAt
+          seo { title description }
+          image { url altText width height }
+          products(first: 50) {
+            pageInfo { hasNextPage }
+            edges { node { id } }
+          }
+        }
+      }
+    `, { handle })
+
+    const c = data.collection
+    if (!c) return null
+
+    const productsCount = c.products.pageInfo.hasNextPage ? null : c.products.edges.length
+
+    return {
+      id:              c.id,
+      handle:          c.handle,
+      title:           c.title,
+      description:     c.description ?? '',
+      descriptionHtml: c.descriptionHtml ?? '',
+      seoTitle:        c.seo?.title ?? null,
+      seoDescription:  c.seo?.description ?? null,
+      image:           c.image,
+      updatedAt:       c.updatedAt,
+      productsCount,
+    }
+  })
 }
 
 /**
@@ -1004,19 +1077,27 @@ export async function getCollectionsForSitemap(): Promise<SitemapCollection[]> {
       const data: {
         collections: {
           pageInfo: { hasNextPage: boolean; endCursor: string | null }
-          edges: Array<{ node: { handle: string; updatedAt: string } }>
+          edges: Array<{ node: {
+            handle: string
+            updatedAt: string
+            image: { url: string; altText: string | null } | null
+          } }>
         }
       } = await storefront(`
         query SitemapCollections($first: Int!, $after: String) {
           collections(first: $first, after: $after) {
             pageInfo { hasNextPage endCursor }
-            edges { node { handle updatedAt } }
+            edges { node { handle updatedAt image { url altText } } }
           }
         }
       `, { first: 250, after: cursor })
 
       for (const edge of data.collections.edges) {
-        out.push({ handle: edge.node.handle, updatedAt: edge.node.updatedAt })
+        out.push({
+          handle: edge.node.handle,
+          updatedAt: edge.node.updatedAt,
+          image: edge.node.image,
+        })
       }
 
       if (!data.collections.pageInfo.hasNextPage) break
@@ -1188,6 +1269,76 @@ export async function getMainMenu(): Promise<ShopifyMenuItem[]> {
       }
     `)
     return data.menu?.items ?? []
+  })
+}
+
+export interface CollectionListItem {
+  handle:        string
+  title:         string
+  description:   string
+  image:         { url: string; altText: string | null } | null
+  productsCount: number | null
+}
+
+/**
+ * Public Storefront-API list of every published collection — drives the
+ * /collections hub PLP. Cached for 5 minutes (admin edits propagate then).
+ */
+export async function getCollectionList(): Promise<CollectionListItem[]> {
+  return cached('shopify:collection-list:public', 300, async () => {
+    const out: CollectionListItem[] = []
+    let cursor: string | null = null
+    for (let page = 0; page < 4; page++) {
+      const data: {
+        collections: {
+          pageInfo: { hasNextPage: boolean; endCursor: string | null }
+          edges: Array<{ node: {
+            handle:      string
+            title:       string
+            description: string
+            image:       { url: string; altText: string | null } | null
+            products:    { edges: { node: { id: string } }[]; pageInfo: { hasNextPage: boolean } }
+          } }>
+        }
+      } = await storefront(`
+        query CollectionList($first: Int!, $after: String) {
+          collections(first: $first, after: $after, sortKey: TITLE) {
+            pageInfo { hasNextPage endCursor }
+            edges {
+              node {
+                handle
+                title
+                description
+                image { url altText }
+                products(first: 1) {
+                  pageInfo { hasNextPage }
+                  edges { node { id } }
+                }
+              }
+            }
+          }
+        }
+      `, { first: 100, after: cursor })
+
+      for (const edge of data.collections.edges) {
+        const n = edge.node
+        // Filter out empty collections — they pollute the hub and rank poorly.
+        const hasProducts = n.products.edges.length > 0 || n.products.pageInfo.hasNextPage
+        if (!hasProducts) continue
+        out.push({
+          handle:        n.handle,
+          title:         n.title,
+          description:   n.description ?? '',
+          image:         n.image,
+          productsCount: n.products.pageInfo.hasNextPage ? null : n.products.edges.length,
+        })
+      }
+
+      if (!data.collections.pageInfo.hasNextPage) break
+      cursor = data.collections.pageInfo.endCursor
+      if (!cursor) break
+    }
+    return out
   })
 }
 
