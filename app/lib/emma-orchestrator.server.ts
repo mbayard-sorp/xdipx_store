@@ -11,7 +11,6 @@
  * Modeled on `generateRails` at app/lib/claude.server.ts:1281 (8-turn cap,
  * tool-use threading via tool_use / tool_result message pairs).
  */
-import Anthropic from '@anthropic-ai/sdk'
 import {
   generateCopy,
   generateEmmaTake,
@@ -24,18 +23,20 @@ import {
   generateIvrUseCase,
   generateIvrFeatures,
   generateIvrVoiceSummary,
+  generateProductTitle,
+  generatePairingWhy,
   type AskEmmaAxis,
   type IvrExperience,
 } from '~/lib/claude.server'
-import { getDialRegistry, appendDialLabel, type DialRegistry } from '~/lib/dial-registry.server'
+import { getDialRegistry, getDialTaxonomy, appendDialLabel, type DialRegistry, type DialTaxonomy } from '~/lib/dial-registry.server'
 import { getAskEmmaVocabulary, type AskEmmaVocabulary } from '~/lib/ask-emma-vocab.server'
 import { generateMoodImage } from '~/lib/imagen.server'
-import { uploadMoodImageToShopifyFiles } from '~/lib/shopify.server'
+import { uploadMoodImageToShopifyFiles, type PairingCandidate } from '~/lib/shopify.server'
+import { getDefaultClient, type LLMClient } from '~/lib/llm-client.server'
 import type {
   Deal, EmmaHeroCopy, ProductTypeDial, SensationDialV2,
 } from '~/types'
 
-const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] })
 const MODEL = 'claude-sonnet-4-20250514'
 const MAX_TURNS = 24
 
@@ -58,10 +59,25 @@ export interface OrchestratorInput {
   seoTitle: string
   /** Inferred deal category — narrow Deal-shaped union. */
   category: DealCategory
+  /** Pairing candidate accessories (from getPairingCandidates) — lets the
+   *  proposePairingWhy tool pick 1–3 to recommend with Emma-voice copy.
+   *  Optional: when omitted, the tool short-circuits and the orchestrator
+   *  produces no pairings. */
+  pairingCandidates?: PairingCandidate[]
+  /** LLM transport. Defaults to AnthropicSdkClient (production importer).
+   *  The backfill script can swap this for ClaudeAgentSdkClient to route
+   *  through the user's Max subscription instead of API tokens. */
+  llmClient?: LLMClient
 }
 
 export interface ProductWrites {
   productTypeDial:    ProductTypeDial
+  /** SEO-augmented title when augmented=true. Equal to input seoTitle when raw was already descriptive. */
+  productTitle?:      string
+  /** True when the orchestrator augmented the manufacturer's raw title. */
+  productTitleAugmented?: boolean
+  /** Manufacturer's original title verbatim — written to xdipx.original_title. */
+  originalTitle?:     string
   tagline:            string
   featureBullets:     string[]
   worksForHim?:       string
@@ -77,6 +93,9 @@ export interface ProductWrites {
   mattersTags:        string[]
   emmaHero?:          EmmaHeroCopy
   moodImageUrl?:      string         // Shopify CDN URL after Files-API upload
+  // Pairing — written to xdipx.pairing_why + xdipx.accessory_product_ids on PDP
+  accessoryProductIds?: string[]
+  pairingWhy?:        Record<string, string>
   // IVR / voice surfaces — purpose-built for chat / IVR / SMS where descriptionHtml can't render.
   ivrExperience?:     IvrExperience
   ivrUseCase?:        string[]
@@ -112,6 +131,7 @@ export interface OrchestratorResult {
 interface OrchestratorState {
   input:        OrchestratorInput
   dialRegistry: DialRegistry
+  dialTaxonomy: DialTaxonomy
   vocab:        AskEmmaVocabulary
   writes:       Partial<ProductWrites>
   telemetry:    OrchestratorTelemetry
@@ -124,7 +144,10 @@ function makeDealContext(state: OrchestratorState): Pick<
 > & { productTypeDial?: ProductTypeDial; mapRestricted: boolean } {
   // Deal-shaped object for downstream generators; populated as tools run.
   return {
-    seoTitle:        state.input.seoTitle,
+    // Use the augmented title once generateProductTitle has run; fall back
+    // to the caller-supplied seoTitle until then. This way Emma's Take and
+    // friends speak in terms of the final shopper-facing title.
+    seoTitle:        state.writes.productTitle ?? state.input.seoTitle,
     tagline:         state.writes.tagline ?? '',
     fullStory:       state.writes.descriptionHtml ?? '',
     brand:           state.input.product.brand,
@@ -137,12 +160,70 @@ function makeDealContext(state: OrchestratorState): Pick<
   }
 }
 
+/**
+ * Compose a `GenerateCopyRequest['product']` shape from the orchestrator state,
+ * threading the dial classification + tags accumulated by earlier tools so the
+ * SEO keyword bank's `buildKeywordBlock` can filter approved terms by them.
+ *
+ * Without this, copy generators receive only the raw input fields and the
+ * keyword filter sees empty arrays — falling back to no targeting context.
+ */
+function enrichProduct(
+  state: OrchestratorState,
+  product: OrchestratorProductInput,
+): {
+  title: string
+  brand: string
+  description: string
+  categories: string[]
+  dealPrice?: number
+  msrp?: number
+  productTypeDial?: ProductTypeDial
+  moodTags?: string[]
+  audienceTags?: string[]
+  mattersTags?: string[]
+} {
+  const enriched: ReturnType<typeof enrichProduct> = {
+    title:       state.writes.productTitle ?? product.title,
+    brand:       product.brand,
+    description: product.description,
+    categories:  product.categories,
+    dealPrice:   product.dealPrice,
+    msrp:        product.msrp,
+  }
+  if (state.writes.productTypeDial) enriched.productTypeDial = state.writes.productTypeDial
+  if (state.writes.moodTags?.length)     enriched.moodTags     = state.writes.moodTags
+  if (state.writes.audienceTags?.length) enriched.audienceTags = state.writes.audienceTags
+  if (state.writes.mattersTags?.length)  enriched.mattersTags  = state.writes.mattersTags
+  return enriched
+}
+
 // ─── Tool definitions (sent to the model) ────────────────────────────────────
 
 const TOOLS = [
   {
     name: 'classifyProductTypeDial',
     description: 'Classify the product into one of: air-pulsation, vibrator, wand, lube, wear. Always call this FIRST so other tools have the right type.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'generateMoodTags',
+    description: 'Generate slugified mood tags from the controlled vocabulary. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'generateAudienceTags',
+    description: 'Generate slugified audience tags (me / us / gift) from the controlled vocabulary. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'generateMattersTags',
+    description: 'Generate slugified "what matters" tags (quiet, soft-touch, travel-size, etc.) from the controlled vocabulary. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'generateProductTitle',
+    description: 'Decide whether to augment the manufacturer title with one SEO descriptor (e.g. "Eclipse 7" → "Eclipse 7 Wand Vibrator"), or leave it alone if it already names the category. Run AFTER classifyProductTypeDial + tag tools so the descriptor matches keyword bank targets. Always call this.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -186,21 +267,6 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'generateMoodTags',
-    description: 'Generate slugified mood tags from the controlled vocabulary. Always call this.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateAudienceTags',
-    description: 'Generate slugified audience tags (me / us / gift) from the controlled vocabulary. Always call this.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateMattersTags',
-    description: 'Generate slugified "what matters" tags (quiet, soft-touch, travel-size, etc.) from the controlled vocabulary. Always call this.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
     name: 'generateEmmaHero',
     description: 'Generate the Emma hero block (eyebrow / headline / body / aside). Always call this.',
     input_schema: { type: 'object', properties: {}, required: [] },
@@ -208,6 +274,11 @@ const TOOLS = [
   {
     name: 'generateMoodImage',
     description: 'Generate ONE PDP hero mood image and upload to Shopify Files. Always call this. Returns a CDN URL stored on the writes payload.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'proposePairingWhy',
+    description: 'Pick 1–3 sibling products that pair with this primary and write a short Emma-voice "why this pairs" blurb for each. SKIP this tool when no pairing candidates are available (the orchestrator surfaces them via input.pairingCandidates).',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -258,8 +329,64 @@ async function executeTool(
       return { ok: true, summary: `productTypeDial=${t}` }
     }
 
+    case 'generateProductTitle': {
+      const dial = state.writes.productTypeDial ?? 'vibrator'
+      const titleResult = await generateProductTitle({
+        rawTitle:        product.title,
+        brand:           product.brand,
+        rawDescription:  product.description,
+        productTypeDial: dial,
+      })
+      state.writes.productTitle          = titleResult.title
+      state.writes.productTitleAugmented = titleResult.augmented
+      state.writes.originalTitle         = titleResult.originalTitle
+      return {
+        ok: true,
+        summary: titleResult.augmented
+          ? `title augmented: "${titleResult.originalTitle}" → "${titleResult.title}" (${titleResult.reason})`
+          : `title preserved: "${titleResult.title}" (${titleResult.reason})`,
+      }
+    }
+
+    case 'proposePairingWhy': {
+      const candidates = state.input.pairingCandidates ?? []
+      if (candidates.length === 0) {
+        return { ok: true, summary: 'no pairing candidates — skipped' }
+      }
+      try {
+        const dial = state.writes.productTypeDial ?? 'vibrator'
+        const result = await generatePairingWhy({
+          primary: {
+            title:           product.title,
+            brand:           product.brand,
+            productTypeDial: dial,
+            ...(state.writes.tagline ? { tagline: state.writes.tagline } : {}),
+            description:     product.description,
+          },
+          candidates: candidates.map(c => {
+            const ci: { productId: string; title: string; brand?: string; productTypeDial?: string; price?: number } = {
+              productId: c.productId,
+              title:     c.title,
+              price:     c.price,
+            }
+            if (c.brand)           ci.brand           = c.brand
+            if (c.productTypeDial) ci.productTypeDial = c.productTypeDial
+            return ci
+          }),
+        })
+        if (result.accessoryProductIds.length > 0) {
+          state.writes.accessoryProductIds = result.accessoryProductIds
+          state.writes.pairingWhy          = result.pairingWhy
+          return { ok: true, summary: `pairings=${result.accessoryProductIds.length}` }
+        }
+        return { ok: true, summary: 'no pairings strong enough — skipped' }
+      } catch (err) {
+        return { ok: false, summary: `pairings skipped: ${err instanceof Error ? err.message : 'error'}` }
+      }
+    }
+
     case 'generateTagline': {
-      const r = await generateCopy({ type: 'tagline', product })
+      const r = await generateCopy({ type: 'tagline', product: enrichProduct(state, product) })
       const arr = r.content as string[]
       const first = Array.isArray(arr) ? arr[0] : (arr as unknown as string)
       state.writes.tagline = (first ?? '').trim()
@@ -267,20 +394,20 @@ async function executeTool(
     }
 
     case 'generateFeatureBullets': {
-      const r = await generateCopy({ type: 'bullets', product })
+      const r = await generateCopy({ type: 'bullets', product: enrichProduct(state, product) })
       const bullets = (r.content as string[]) ?? []
       state.writes.featureBullets = bullets
       return { ok: bullets.length > 0, summary: `bullets=${bullets.length}` }
     }
 
     case 'generateSpecifications': {
-      const r = await generateCopy({ type: 'specifications', product })
+      const r = await generateCopy({ type: 'specifications', product: enrichProduct(state, product) })
       state.writes.specifications = (r.content as string) ?? ''
       return { ok: !!state.writes.specifications, summary: `specs len=${state.writes.specifications.length}` }
     }
 
     case 'generateSeoMeta': {
-      const r = await generateCopy({ type: 'seo_meta', product })
+      const r = await generateCopy({ type: 'seo_meta', product: enrichProduct(state, product) })
       state.writes.seoMetaDescription = (r.content as string) ?? ''
       return { ok: !!state.writes.seoMetaDescription, summary: `seoMeta len=${state.writes.seoMetaDescription.length}` }
     }
@@ -305,9 +432,11 @@ async function executeTool(
     case 'generateSensationDialV2': {
       const type: ProductTypeDial = state.writes.productTypeDial ?? 'vibrator'
       const preferredLabels = state.dialRegistry[type] ?? []
+      const taxonomy = state.dialTaxonomy[type] ?? []
       const dial = await generateSensationDialV2({
         deal: { ...dealCtx, productTypeDial: type },
         preferredLabels,
+        ...(taxonomy.length > 0 ? { taxonomy } : {}),
       })
       state.writes.sensationDialV2 = dial
       // Emma can propose a new dial label when none of the preferred ones fit.
@@ -332,7 +461,7 @@ async function executeTool(
     }
 
     case 'generateBoxContents': {
-      const r = await generateCopy({ type: 'box_contents', product })
+      const r = await generateCopy({ type: 'box_contents', product: enrichProduct(state, product) })
       const bc = (r.content as string[]) ?? []
       if (bc.length > 0) state.writes.boxContents = bc
       return { ok: true, summary: `boxContents=${bc.length}` }
@@ -432,17 +561,43 @@ async function executeTool(
 
 const SYSTEM = `You are Emma's content brain for xdipx.com — an editorially-curated sexual-wellness storefront. Given one product, you decide which content generators to run to fully populate its PDP and Emma's voice surfaces (chat / IVR / SMS), then call them via tools.
 
-Required for every product: classifyProductTypeDial (FIRST), generateTagline, generateFeatureBullets, generateSpecifications, generateSeoMeta, generateEmmaTake, generateSensationDialV2, generateMoodTags, generateAudienceTags, generateMattersTags, generateEmmaHero, generateMoodImage, generateIvrExperience, generateIvrUseCase, generateIvrFeatures, generateIvrVoiceSummary.
+Required for every product (run in this exact phase order):
+
+Phase 1 — classify (must complete BEFORE anything else):
+  1. classifyProductTypeDial
+
+Phase 2 — tag the product (must complete BEFORE copy generators so the SEO keyword bank can filter approved terms by these tags — without this, copy is generic):
+  2. generateMoodTags
+  3. generateAudienceTags
+  4. generateMattersTags
+
+Phase 3 — title decision (uses dial + tags to pick a descriptor when needed):
+  5. generateProductTitle
+
+Phase 4 — copy generators (these benefit from keyword targeting via the tags above):
+  6. generateTagline
+  7. generateSeoMeta
+  8. generateFeatureBullets
+  9. generateSpecifications
+  10. generateEmmaTake
+
+Phase 5 — dial + hero + image (independent, run after copy is set):
+  11. generateSensationDialV2 (must be AFTER classifyProductTypeDial)
+  12. generateEmmaHero
+  13. generateMoodImage
+
+Phase 6 — pairings (run AFTER tagline + emmaTake exist so the pairing-why blurbs have richer context):
+  14. proposePairingWhy (SKIP if no pairing candidates were provided)
+
+Phase 7 — IVR / voice surfaces (run AFTER generateEmmaTake — they need rich context):
+  15. generateIvrExperience
+  16. generateIvrUseCase
+  17. generateIvrFeatures
+  18. generateIvrVoiceSummary  (LAST among IVR tools — benefits from the others)
 
 Conditional:
 - generateCareInstructions: skip for lube unless the lube has a real care/storage note.
 - generateBoxContents: skip for lube; usually skip for wear.
-
-Order rules:
-- classifyProductTypeDial FIRST (other tools depend on its result).
-- generateSensationDialV2 must run AFTER classifyProductTypeDial.
-- generateIvrExperience / UseCase / Features / VoiceSummary should run AFTER generateEmmaTake so they have richer context.
-- Call generateIvrVoiceSummary LAST among the IVR tools.
 
 When every applicable tool above has been called, call \`finish\` with no arguments. Do NOT re-emit content — the orchestrator already has it.
 
@@ -450,14 +605,16 @@ Be efficient. Each tool is a single call. Do NOT call the same tool twice.`
 
 export async function generateProductContent(input: OrchestratorInput): Promise<OrchestratorResult> {
   const t0 = Date.now()
-  const [dialRegistry, vocab] = await Promise.all([
+  const [dialRegistry, dialTaxonomy, vocab] = await Promise.all([
     getDialRegistry(),
+    getDialTaxonomy(),
     getAskEmmaVocabulary(),
   ])
 
   const state: OrchestratorState = {
     input,
     dialRegistry,
+    dialTaxonomy,
     vocab,
     writes: {},
     telemetry: {
@@ -488,10 +645,12 @@ Start with classifyProductTypeDial, then run every other applicable tool exactly
 
   const calledTools = new Set<string>()
 
+  const llm: LLMClient = input.llmClient ?? getDefaultClient()
+
   while (state.telemetry.turns < MAX_TURNS && !state.finished) {
     state.telemetry.turns++
 
-    const response = await client.messages.create({
+    const response = await llm.create({
       model:      MODEL,
       max_tokens: 4096,
       system:     SYSTEM,
@@ -568,19 +727,24 @@ Start with classifyProductTypeDial, then run every other applicable tool exactly
   // doesn't completely fail.
   const writes: ProductWrites = {
     productTypeDial:    state.writes.productTypeDial    ?? 'vibrator',
-    tagline:            state.writes.tagline            ?? `${input.product.brand} ${input.product.title} — at xdipx.`,
+    tagline:            state.writes.tagline            ?? `${input.product.brand} ${input.product.title} at xdipx.`,
     featureBullets:     state.writes.featureBullets     ?? [],
     seoMetaDescription: state.writes.seoMetaDescription ?? '',
     descriptionHtml:    state.writes.descriptionHtml    ?? '',
     moodTags:           state.writes.moodTags           ?? [],
     audienceTags:       state.writes.audienceTags       ?? [],
     mattersTags:        state.writes.mattersTags        ?? [],
+    ...(state.writes.productTitle    !== undefined ? { productTitle:        state.writes.productTitle    } : {}),
+    ...(state.writes.productTitleAugmented !== undefined ? { productTitleAugmented: state.writes.productTitleAugmented } : {}),
+    ...(state.writes.originalTitle   !== undefined ? { originalTitle:       state.writes.originalTitle   } : {}),
     ...(state.writes.boxContents     !== undefined ? { boxContents:      state.writes.boxContents }     : {}),
     ...(state.writes.specifications  !== undefined ? { specifications:   state.writes.specifications }  : {}),
     ...(state.writes.careInstructions!== undefined ? { careInstructions: state.writes.careInstructions } : {}),
     ...(state.writes.sensationDialV2 !== undefined ? { sensationDialV2:  state.writes.sensationDialV2 } : {}),
     ...(state.writes.emmaHero        !== undefined ? { emmaHero:         state.writes.emmaHero }        : {}),
     ...(state.writes.moodImageUrl    !== undefined ? { moodImageUrl:     state.writes.moodImageUrl }    : {}),
+    ...(state.writes.accessoryProductIds !== undefined ? { accessoryProductIds: state.writes.accessoryProductIds } : {}),
+    ...(state.writes.pairingWhy      !== undefined ? { pairingWhy:       state.writes.pairingWhy      } : {}),
     ...(state.writes.ivrExperience   !== undefined ? { ivrExperience:    state.writes.ivrExperience   } : {}),
     ...(state.writes.ivrUseCase      !== undefined ? { ivrUseCase:       state.writes.ivrUseCase      } : {}),
     ...(state.writes.ivrFeatures     !== undefined ? { ivrFeatures:      state.writes.ivrFeatures     } : {}),

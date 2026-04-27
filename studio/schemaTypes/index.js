@@ -33,6 +33,8 @@ import emmaContextRail    from '../schemas/emmaContextRail.js'
 import emmaCuratedRail    from '../schemas/blocks/emmaCuratedRail.js'
 import editor             from '../schemas/editor.js'
 import dialRegistry       from '../schemas/dialRegistry.js'
+import dialTaxonomy       from '../schemas/dialTaxonomy.js'
+import dialDimension      from '../schemas/dialDimension.js'
 import askEmmaVocabulary  from '../schemas/askEmmaVocabulary.js'
 // SEO keyword bank — auto-discovered terms + topic clusters powering all
 // AI-written copy. Additive; does not touch existing schemas.
@@ -74,6 +76,9 @@ export const schemaTypes = [
   editor,
   // PDP redesign — sensation dial label registry (singleton)
   dialRegistry,
+  // PDP redesign — rich dial taxonomy (singleton, additive — companion to
+  // dialRegistry that adds per-dimension definitions and 1/3/5 scale docs).
+  dialTaxonomy,
   // Bulk-import — Ask Emma vocabulary singleton (mood/audience/matters tag pools)
   askEmmaVocabulary,
   // SEO keyword bank — single source of truth for keyword targeting across all
@@ -104,6 +109,9 @@ export const schemaTypes = [
   editorBio,
   // PDP — per-product FAQ entries (Q&A pairs, additive).
   productFaq,
+  // PDP — rich sensation dial dimension (label + 1/3/5 scale docs).
+  // Used inside dialTaxonomy arrays.
+  dialDimension,
   // Blog block object types
   blogImage,
   blogPullQuote,

@@ -924,6 +924,100 @@ export async function getProductsByHandles(handles: string[]): Promise<Product[]
   return results.filter((p): p is Product => p !== null)
 }
 
+export interface PairingCandidate {
+  productId:       string  // GID
+  handle:          string
+  title:           string
+  brand?:          string
+  productTypeDial?: string
+  category?:       string
+  price:           number
+  image?:          string
+}
+
+/**
+ * Resolve up to 3 pairing-candidate sibling products for a freshly-imported
+ * product. Used by the orchestrator's `proposePairingWhy` tool so Emma can
+ * write per-accessory copy without needing the product to be in a curated
+ * collection yet.
+ *
+ * Strategy (in order — first non-empty wins):
+ *   1. Same primary collection (manual sort, first 6 minus self)
+ *   2. Same `category` tag (e.g. for-her, couples) — Shopify tag query
+ *   3. Same `cat:` sub-category tag (legacy seed)
+ *
+ * Excludes the product itself. Returns up to `limit` candidates (default 3).
+ */
+export async function getPairingCandidates(opts: {
+  shopifyProductId: string
+  category?:        string
+  primaryCollectionHandle?: string
+  subCategories?:   string[]
+  limit?:           number
+}): Promise<PairingCandidate[]> {
+  const limit = Math.max(1, Math.min(opts.limit ?? 3, 8))
+  const selfId = opts.shopifyProductId.replace('gid://shopify/Product/', '')
+  const seen = new Set<string>([selfId])
+
+  const toCandidate = (p: Product): PairingCandidate | null => {
+    const numericId = p.id.replace('gid://shopify/Product/', '')
+    if (seen.has(numericId)) return null
+    seen.add(numericId)
+    const candidate: PairingCandidate = {
+      productId: p.id,
+      handle:    p.handle,
+      title:     p.title,
+      price:     p.price,
+    }
+    if (p.brand)              candidate.brand           = p.brand
+    if (p.category)           candidate.category        = p.category
+    if (p.images?.[0]?.url)   candidate.image           = p.images[0].url
+    return candidate
+  }
+
+  // 1. Primary collection
+  const out: PairingCandidate[] = []
+  if (opts.primaryCollectionHandle) {
+    try {
+      const inCollection = await getCollectionProducts(opts.primaryCollectionHandle, 6)
+      for (const p of inCollection) {
+        const c = toCandidate(p)
+        if (c) out.push(c)
+        if (out.length >= limit) return out
+      }
+    } catch { /* fall through */ }
+  }
+
+  // 2. Category tag — broad, evergreen pool
+  if (out.length < limit && opts.category) {
+    try {
+      const byCategory = await getProductsByTag(opts.category, 8)
+      for (const p of byCategory) {
+        const c = toCandidate(p)
+        if (c) out.push(c)
+        if (out.length >= limit) return out
+      }
+    } catch { /* fall through */ }
+  }
+
+  // 3. Sub-category tags — narrow but more specific
+  if (out.length < limit) {
+    for (const sub of (opts.subCategories ?? []).slice(0, 3)) {
+      try {
+        const slug = sub.toLowerCase().replace(/\s+/g, '-')
+        const bySub = await getProductsByTag(`cat:${slug}`, 6)
+        for (const p of bySub) {
+          const c = toCandidate(p)
+          if (c) out.push(c)
+          if (out.length >= limit) return out
+        }
+      } catch { /* fall through */ }
+    }
+  }
+
+  return out
+}
+
 export interface SitemapProductImages {
   title:  string
   images: Array<{ url: string; altText: string | null }>
@@ -1837,6 +1931,51 @@ export async function setDealStatus(productId: string, status: string): Promise<
   })
 }
 
+/**
+ * Archive a Shopify product so it stops appearing in storefront/search.
+ *
+ *   - Sets the Shopify product `status` to ARCHIVED via Admin GraphQL.
+ *   - Sets `xdipx.deal_status='archived'` metafield + mirrors `deal-status-archived` tag.
+ *   - Returns the resolved handle so callers can mirror to Sanity.
+ *
+ * Idempotent — calling on an already-archived product is a no-op (the GraphQL
+ * call still goes through but Shopify accepts re-setting the same status).
+ */
+export async function archiveShopifyProduct(
+  productId: string,
+  reason?: string,
+): Promise<{ handle: string | null }> {
+  const numericId = productId.replace('gid://shopify/Product/', '')
+  const gid = `gid://shopify/Product/${numericId}`
+
+  // 1. Set product.status = ARCHIVED via Admin GraphQL.
+  const updateResult = await adminGraphQL<{
+    productUpdate: { product: { handle: string } | null; userErrors: { field: string[]; message: string }[] }
+  }>(`
+    mutation ArchiveProduct($input: ProductInput!) {
+      productUpdate(input: $input) {
+        product { handle }
+        userErrors { field message }
+      }
+    }
+  `, { input: { id: gid, status: 'ARCHIVED' } })
+
+  if (updateResult.productUpdate.userErrors.length > 0) {
+    const errs = updateResult.productUpdate.userErrors.map(e => `${e.field.join('.')}: ${e.message}`).join('; ')
+    throw new Error(`archiveShopifyProduct: ${errs}`)
+  }
+
+  const handle = updateResult.productUpdate.product?.handle ?? await getProductHandleById(numericId)
+
+  // 2. Mirror archive state in our metafield + tag — keeps Storefront queries consistent.
+  await setDealStatus(productId, 'archived')
+
+  if (reason) {
+    console.info(`[archiveShopifyProduct] ${numericId} archived: ${reason}`)
+  }
+  return { handle }
+}
+
 export async function createDraftProduct(data: {
   title: string
   handle: string
@@ -1934,6 +2073,10 @@ export interface ProductPageDoc {
   audienceTags?: string[] | undefined             // xdipx.audience_tags (list.text)
   mattersTags?: string[] | undefined              // xdipx.matters_tags (list.text)
   emmaHero?: EmmaHeroCopy | undefined             // xdipx.emma_hero (json)
+  // Brand-aware title augmentation
+  originalTitle?: string | undefined              // xdipx.original_title (single_line_text_field) — manufacturer's pre-augmented title
+  // Pairing copy — keyed by accessory GID
+  pairingWhy?: Record<string, string> | undefined // xdipx.pairing_why (json)
 }
 
 export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
@@ -1987,14 +2130,15 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   }
 
   add('tagline',          doc.tagline,               'single_line_text_field', true)
-  // Optional: legacy field, no longer generated by the bulk-import orchestrator. Editors may hand-fill.
+  // @deprecated — legacy field, no longer generated by the bulk-import orchestrator. Editors may hand-fill on legacy products.
   add('full_story',       ptToHtml(doc.fullStory),   'multi_line_text_field')
-  // Deprecated by v2 PDP redesign — Emma's take in body_html replaced these.
+  // @deprecated — v2 PDP redesign removed the "Both Ways" tab; Emma's take in body_html replaced these.
   // Kept optional so editor hand-fills on legacy products still write through.
   add('works_for_him',    ptToHtml(doc.worksForHim), 'multi_line_text_field')
   add('works_for_her',    ptToHtml(doc.worksForHer), 'multi_line_text_field')
   add('mood_image_url',   doc.moodImageUrl,                    'single_line_text_field')
   add('product_type_dial', doc.productTypeDial,                'single_line_text_field')
+  add('original_title',   doc.originalTitle,                   'single_line_text_field')
   add('category',         doc.category,                        'single_line_text_field')
   add('deal_status',      doc.dealStatus,                      'single_line_text_field')
   add('deal_date',        doc.dealDate,                        'date')
@@ -2070,6 +2214,13 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
     metafields.push({
       namespace: 'xdipx', key: 'emma_hero', ownerId: gid,
       value: JSON.stringify(doc.emmaHero),
+      type: 'json',
+    })
+  }
+  if (doc.pairingWhy && Object.keys(doc.pairingWhy).length > 0) {
+    metafields.push({
+      namespace: 'xdipx', key: 'pairing_why', ownerId: gid,
+      value: JSON.stringify(doc.pairingWhy),
       type: 'json',
     })
   }

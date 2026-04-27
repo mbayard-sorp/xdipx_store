@@ -56,6 +56,38 @@ export async function fetchNalpacFeed(): Promise<NalpacProduct[]> {
   return records
 }
 
+// ─── Discontinued detection ────────────────────────────────────────────────
+
+/**
+ * Nalpac flags products as "discontinued" in the feed when the manufacturer
+ * has stopped shipping. We skip these on import and archive any matching
+ * already-imported products in the daily cron sweep.
+ *
+ * Match rules (in order — Sub-Category and Product Type FIRST to reduce
+ * false positives from descriptive copy):
+ *   - Sub-Category contains case-insensitive `\bdiscontinued\b`
+ *   - Product Title contains the marker
+ *   - "DISC" or "DC" present as a standalone token (not as part of "disc"
+ *     describing a CD-shaped object — require word boundaries)
+ *   - Description as a tiebreaker, only when no other field had signal
+ */
+export function isDiscontinued(product: NalpacProduct | { 'Sub-Category'?: string; 'Product Title'?: string; 'Product Description'?: string }): boolean {
+  const fields = [
+    product['Sub-Category'] ?? '',
+    product['Product Title'] ?? '',
+  ]
+  for (const f of fields) {
+    if (/\bdiscontinued\b/i.test(f)) return true
+    if (/\b(DISC|DC)\b/.test(f)) return true
+  }
+  // Description tiebreaker — only if explicitly says discontinued
+  // (avoid false positives like "won't be discontinued any time soon").
+  const desc = product['Product Description'] ?? ''
+  if (/\bdiscontinued by manufacturer\b/i.test(desc)) return true
+  if (/\bproduct (?:has been |is )?discontinued\b/i.test(desc)) return true
+  return false
+}
+
 // ─── Category helpers ──────────────────────────────────────────────────────
 
 export function parseCategories(raw: string): string[] {
@@ -167,9 +199,19 @@ export function scoreProduct(
 
 // ─── Main pipeline ─────────────────────────────────────────────────────────
 
+export interface DiscontinuedSweepResult {
+  flagged:       number
+  archived:      number
+  alreadyArchived: number
+  notImported:   number
+  errors:        Array<{ sku: string; message: string }>
+}
+
 export async function dailyFeedProcessor(): Promise<{
   topCandidates: ProductScore[]
   needsImagen: string[]
+  discontinuedSkus: string[]
+  discontinuedSweep: DiscontinuedSweepResult
 }> {
   const [products, history, blockedBrandsSetting] = await Promise.all([
     fetchNalpacFeed(),
@@ -192,7 +234,20 @@ export async function dailyFeedProcessor(): Promise<{
       .filter(Boolean),
   )
 
-  const scores = products
+  // Surface discontinued SKUs separately — they're filtered out of scoring
+  // (eligible products only) but we still want the cron to archive matching
+  // already-imported products downstream.
+  const discontinuedSkus: string[] = []
+  const eligibleProducts: NalpacProduct[] = []
+  for (const p of products) {
+    if (isDiscontinued(p)) {
+      discontinuedSkus.push(p.SKU)
+    } else {
+      eligibleProducts.push(p)
+    }
+  }
+
+  const scores = eligibleProducts
     .map(p => scoreProduct(p, recentSkus, recentCategories, blockedBrands))
     .filter((s): s is ProductScore => s !== null)
     .sort((a, b) => b.score - a.score)
@@ -201,10 +256,96 @@ export async function dailyFeedProcessor(): Promise<{
   const topCandidates = scores.slice(0, 30)
   await kvSet('feed:top-candidates', topCandidates, FEED_TTL)
 
+  // Sweep discontinued products: archive matching already-imported items.
+  const discontinuedSweep = await archiveDiscontinuedProducts(discontinuedSkus)
+  console.info(
+    `[feed-processor] discontinued sweep: ${discontinuedSweep.flagged} flagged, ` +
+    `${discontinuedSweep.archived} archived, ${discontinuedSweep.alreadyArchived} already-archived, ` +
+    `${discontinuedSweep.notImported} not-imported, ${discontinuedSweep.errors.length} errors`,
+  )
+
   return {
     topCandidates,
     needsImagen: getSKUsNeedingImagen(),
+    discontinuedSkus,
+    discontinuedSweep,
   }
+}
+
+/**
+ * For each SKU flagged as discontinued by the latest Nalpac feed, look up the
+ * product in dealHistory + Shopify and archive it. Idempotent — products that
+ * are already archived are reported as alreadyArchived and not re-written.
+ *
+ * Best-effort per-product: errors are collected, not thrown, so one bad SKU
+ * doesn't kill the cron.
+ */
+export async function archiveDiscontinuedProducts(skus: string[]): Promise<DiscontinuedSweepResult> {
+  const result: DiscontinuedSweepResult = {
+    flagged:         skus.length,
+    archived:        0,
+    alreadyArchived: 0,
+    notImported:     0,
+    errors:          [],
+  }
+  if (skus.length === 0) return result
+
+  // Lazy-import to keep this module dependency-free for callers that only
+  // want isDiscontinued (e.g. the bulk-import skip path).
+  const { archiveShopifyProduct } = await import('./shopify.server')
+  const { upsertProductPage } = await import('./sanity.server').catch(() => ({ upsertProductPage: null }))
+
+  for (const sku of skus) {
+    try {
+      const rows = await db
+        .select({
+          shopifyProductId: dealHistory.shopifyProductId,
+          status:           dealHistory.status,
+        })
+        .from(dealHistory)
+        .where(eq(dealHistory.sku, sku))
+        .limit(1)
+
+      const row = rows[0]
+      if (!row) {
+        result.notImported++
+        continue
+      }
+      if (row.status === 'archived') {
+        result.alreadyArchived++
+        continue
+      }
+      if (!row.shopifyProductId) {
+        result.errors.push({ sku, message: 'dealHistory row has no shopifyProductId — cannot archive' })
+        continue
+      }
+
+      // Best-effort: archive Shopify product status + metafield + DB row + Sanity.
+      const archived = await archiveShopifyProduct(row.shopifyProductId, 'discontinued by manufacturer')
+      await db
+        .update(dealHistory)
+        .set({ status: 'archived' })
+        .where(eq(dealHistory.sku, sku))
+
+      // Mirror to Sanity productPage. Best-effort — Sanity hiccup shouldn't
+      // unwind the Shopify archive.
+      if (upsertProductPage && archived?.handle) {
+        try {
+          await upsertProductPage({
+            handle:           archived.handle,
+            shopifyProductId: `gid://shopify/Product/${row.shopifyProductId}`,
+            archived:         true,
+          })
+        } catch (err) {
+          console.warn(`[feed-processor] archive-discontinued: sanity sync ${sku} failed:`, err instanceof Error ? err.message : err)
+        }
+      }
+      result.archived++
+    } catch (err) {
+      result.errors.push({ sku, message: err instanceof Error ? err.message : String(err) })
+    }
+  }
+  return result
 }
 
 export function buildTags(product: NalpacProduct): string[] {

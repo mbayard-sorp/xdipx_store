@@ -12,8 +12,8 @@ var __export = (target, all) => {
 async function getKV() {
   if (_kv) return _kv;
   if (!process.env["KV_REST_API_URL"] || !process.env["KV_REST_API_TOKEN"]) return null;
-  const { createClient: createClient5 } = await import("@vercel/kv");
-  _kv = createClient5({
+  const { createClient: createClient6 } = await import("@vercel/kv");
+  _kv = createClient6({
     url: process.env["KV_REST_API_URL"],
     token: process.env["KV_REST_API_TOKEN"]
   });
@@ -536,147 +536,6 @@ var init_db_server = __esm({
   }
 });
 
-// app/lib/feed-processor.server.ts
-import { parse } from "csv-parse/sync";
-import { sql as sql2, eq } from "drizzle-orm";
-async function getPipelineSetting(key) {
-  try {
-    const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq(pipelineSettings.key, key)).limit(1);
-    return rows[0]?.value ?? null;
-  } catch {
-    return null;
-  }
-}
-function cleanDescription(raw) {
-  let clean = raw.replace(/(\w)ft\./g, "$1'");
-  clean = clean.replace(/(?<!\d)in\./g, '"');
-  return clean.replace(/\s+/g, " ").trim();
-}
-async function fetchNalpacFeed() {
-  const cached2 = await kvGet(KV_KEYS.feedCache);
-  if (cached2) return cached2;
-  const feedUrl = await getPipelineSetting("feedUrl") || process.env["NALPAC_FEED_URL"] || "";
-  if (!feedUrl) throw new Error("No feed URL configured. Set NALPAC_FEED_URL env var or configure in Admin \u2192 Settings.");
-  const res = await fetch(feedUrl);
-  if (!res.ok) throw new Error(`Feed fetch failed: ${res.status}`);
-  const csv = await res.text();
-  const records = parse(csv, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true
-  });
-  await kvSet(KV_KEYS.feedCache, records, FEED_TTL);
-  await kvSet(KV_KEYS.feedCacheTimestamp, (/* @__PURE__ */ new Date()).toISOString());
-  return records;
-}
-function parseCategories(raw) {
-  return raw.split(",").map((c) => c.trim()).filter(Boolean);
-}
-function getImages(product) {
-  return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => product[`Image ${i}`]).filter(Boolean);
-}
-function flagForImagenGeneration(sku) {
-  SKU_NEEDS_IMAGEN.add(sku);
-}
-function getSKUsNeedingImagen() {
-  return [...SKU_NEEDS_IMAGEN];
-}
-function isEligible(product, recentSkus, blockedBrands) {
-  const qty = parseInt(product["Total qty available"] ?? "0");
-  const wholesale = parseFloat(product["Wholesale"] ?? "0");
-  const msrp = parseFloat(product["MSRP"] ?? "0");
-  const brandBlocked = blockedBrands.has(product.Brand.toLowerCase().trim());
-  return qty >= 20 && wholesale > 0 && msrp > 0 && !recentSkus.has(product.SKU) && !brandBlocked;
-}
-function scoreProduct(product, recentSkus, recentCategories, blockedBrands = /* @__PURE__ */ new Set()) {
-  if (!isEligible(product, recentSkus, blockedBrands)) return null;
-  const wholesale = parseFloat(product["Wholesale"]);
-  const msrp = parseFloat(product["MSRP"]);
-  const map = parseFloat(product["MAP"] ?? "0") || 0;
-  const qty = parseInt(product["Total qty available"]);
-  const images = getImages(product);
-  const categories = parseCategories(product["Sub-Category"]);
-  const profScore = (msrp - wholesale) / msrp;
-  let dealScore;
-  let dealPrice;
-  let discountPct;
-  let mapType;
-  if (map === 0) {
-    dealPrice = Math.max(wholesale * 1.4, msrp * 0.55);
-    discountPct = (msrp - dealPrice) / msrp * 100;
-    dealScore = 1;
-    mapType = "no-map";
-  } else if (map < msrp) {
-    dealPrice = map;
-    discountPct = (msrp - map) / msrp * 100;
-    dealScore = Math.min(discountPct / 30, 1);
-    mapType = "below-msrp";
-  } else {
-    dealPrice = msrp;
-    discountPct = 0;
-    dealScore = 0.05;
-    mapType = "equals-msrp";
-  }
-  const invScore = qty < 50 ? 0.4 : qty <= 250 ? 1 : qty <= 600 ? 0.8 : 0.65;
-  if (images.length < 3) flagForImagenGeneration(product.SKU);
-  const imgScore = Math.min(images.length / 8, 1);
-  const overlap = categories.filter(
-    (c) => recentCategories.flat().includes(c)
-  ).length;
-  const catScore = Math.pow(0.7, overlap);
-  const score2 = profScore * 0.35 + dealScore * 0.3 + invScore * 0.2 + imgScore * 0.1 + catScore * 0.05;
-  return {
-    sku: product.SKU,
-    title: cleanDescription(product["Product Title"]),
-    brand: product.Brand,
-    description: cleanDescription(product["Product Description"] ?? ""),
-    score: score2,
-    msrp: Math.round(msrp * 100) / 100,
-    wholesaleCost: Math.round(wholesale * 100) / 100,
-    mapPrice: Math.round(map * 100) / 100,
-    dealPrice: Math.round(dealPrice * 100) / 100,
-    discountPct: Math.round(discountPct * 10) / 10,
-    profitPerUnit: Math.round((dealPrice - wholesale) * 100) / 100,
-    qty,
-    mapType,
-    images,
-    categories
-  };
-}
-async function dailyFeedProcessor() {
-  const [products, history, blockedBrandsSetting] = await Promise.all([
-    fetchNalpacFeed(),
-    db.select({
-      sku: dealHistory.sku,
-      categories: dealHistory.categories
-    }).from(dealHistory).orderBy(sql2`${dealHistory.dealDate} DESC`).limit(90),
-    getPipelineSetting("blockedBrands")
-  ]);
-  const recentSkus = new Set(history.map((h) => h.sku));
-  const recentCategories = history.map((h) => h.categories ?? []);
-  const blockedBrands = new Set(
-    (blockedBrandsSetting ?? "").split(",").map((b) => b.toLowerCase().trim()).filter(Boolean)
-  );
-  const scores = products.map((p) => scoreProduct(p, recentSkus, recentCategories, blockedBrands)).filter((s) => s !== null).sort((a, b) => b.score - a.score);
-  const topCandidates = scores.slice(0, 30);
-  await kvSet("feed:top-candidates", topCandidates, FEED_TTL);
-  return {
-    topCandidates,
-    needsImagen: getSKUsNeedingImagen()
-  };
-}
-var FEED_TTL, SKU_NEEDS_IMAGEN;
-var init_feed_processor_server = __esm({
-  "app/lib/feed-processor.server.ts"() {
-    "use strict";
-    init_kv_server();
-    init_db_server();
-    init_schema();
-    FEED_TTL = 23 * 60 * 60;
-    SKU_NEEDS_IMAGEN = /* @__PURE__ */ new Set();
-  }
-});
-
 // app/lib/shopify.server.ts
 var shopify_server_exports = {};
 __export(shopify_server_exports, {
@@ -687,6 +546,7 @@ __export(shopify_server_exports, {
   adminGetCustomerSubscriptions: () => adminGetCustomerSubscriptions,
   adminGetSubscriptionContract: () => adminGetSubscriptionContract,
   appendProductTag: () => appendProductTag,
+  archiveShopifyProduct: () => archiveShopifyProduct,
   associateImageWithVariant: () => associateImageWithVariant,
   attachVideoToProduct: () => attachVideoToProduct,
   cartBuyerIdentityUpdate: () => cartBuyerIdentityUpdate,
@@ -725,7 +585,9 @@ __export(shopify_server_exports, {
   getApprovedDeal: () => getApprovedDeal,
   getBonusDeal: () => getBonusDeal,
   getCart: () => getCart,
+  getCollection: () => getCollection,
   getCollectionDeals: () => getCollectionDeals,
+  getCollectionList: () => getCollectionList,
   getCollectionProducts: () => getCollectionProducts,
   getCollectionsForSitemap: () => getCollectionsForSitemap,
   getCountries: () => getCountries,
@@ -739,6 +601,7 @@ __export(shopify_server_exports, {
   getHandleByProductId: () => getHandleByProductId,
   getLiveDealHandle: () => getLiveDealHandle,
   getMainMenu: () => getMainMenu,
+  getPairingCandidates: () => getPairingCandidates,
   getProductAdminImages: () => getProductAdminImages,
   getProductByHandle: () => getProductByHandle,
   getProductHandleById: () => getProductHandleById,
@@ -1322,6 +1185,64 @@ async function getProductsByHandles(handles) {
   const results = await Promise.all(handles.map((h) => getProductByHandle(h)));
   return results.filter((p) => p !== null);
 }
+async function getPairingCandidates(opts) {
+  const limit = Math.max(1, Math.min(opts.limit ?? 3, 8));
+  const selfId = opts.shopifyProductId.replace("gid://shopify/Product/", "");
+  const seen = /* @__PURE__ */ new Set([selfId]);
+  const toCandidate2 = (p) => {
+    const numericId = p.id.replace("gid://shopify/Product/", "");
+    if (seen.has(numericId)) return null;
+    seen.add(numericId);
+    const candidate = {
+      productId: p.id,
+      handle: p.handle,
+      title: p.title,
+      price: p.price
+    };
+    if (p.brand) candidate.brand = p.brand;
+    if (p.category) candidate.category = p.category;
+    if (p.images?.[0]?.url) candidate.image = p.images[0].url;
+    return candidate;
+  };
+  const out = [];
+  if (opts.primaryCollectionHandle) {
+    try {
+      const inCollection = await getCollectionProducts(opts.primaryCollectionHandle, 6);
+      for (const p of inCollection) {
+        const c = toCandidate2(p);
+        if (c) out.push(c);
+        if (out.length >= limit) return out;
+      }
+    } catch {
+    }
+  }
+  if (out.length < limit && opts.category) {
+    try {
+      const byCategory = await getProductsByTag(opts.category, 8);
+      for (const p of byCategory) {
+        const c = toCandidate2(p);
+        if (c) out.push(c);
+        if (out.length >= limit) return out;
+      }
+    } catch {
+    }
+  }
+  if (out.length < limit) {
+    for (const sub of (opts.subCategories ?? []).slice(0, 3)) {
+      try {
+        const slug = sub.toLowerCase().replace(/\s+/g, "-");
+        const bySub = await getProductsByTag(`cat:${slug}`, 6);
+        for (const p of bySub) {
+          const c = toCandidate2(p);
+          if (c) out.push(c);
+          if (out.length >= limit) return out;
+        }
+      } catch {
+      }
+    }
+  }
+  return out;
+}
 async function getProductImagesForSitemap() {
   return cached("shopify:sitemap:product-images", 3600, async () => {
     const map = /* @__PURE__ */ new Map();
@@ -1355,6 +1276,43 @@ async function getProductImagesForSitemap() {
     return map;
   });
 }
+async function getCollection(handle) {
+  return cached(`shopify:col-meta:${handle}`, READ_TTL, async () => {
+    const data = await storefront(`
+      query GetCollectionMeta($handle: String!) {
+        collection(handle: $handle) {
+          id
+          handle
+          title
+          description
+          descriptionHtml
+          updatedAt
+          seo { title description }
+          image { url altText width height }
+          products(first: 50) {
+            pageInfo { hasNextPage }
+            edges { node { id } }
+          }
+        }
+      }
+    `, { handle });
+    const c = data.collection;
+    if (!c) return null;
+    const productsCount = c.products.pageInfo.hasNextPage ? null : c.products.edges.length;
+    return {
+      id: c.id,
+      handle: c.handle,
+      title: c.title,
+      description: c.description ?? "",
+      descriptionHtml: c.descriptionHtml ?? "",
+      seoTitle: c.seo?.title ?? null,
+      seoDescription: c.seo?.description ?? null,
+      image: c.image,
+      updatedAt: c.updatedAt,
+      productsCount
+    };
+  });
+}
 async function getCollectionsForSitemap() {
   return cached("shopify:sitemap:collections", 3600, async () => {
     const out = [];
@@ -1364,12 +1322,16 @@ async function getCollectionsForSitemap() {
         query SitemapCollections($first: Int!, $after: String) {
           collections(first: $first, after: $after) {
             pageInfo { hasNextPage endCursor }
-            edges { node { handle updatedAt } }
+            edges { node { handle updatedAt image { url altText } } }
           }
         }
       `, { first: 250, after: cursor });
       for (const edge of data.collections.edges) {
-        out.push({ handle: edge.node.handle, updatedAt: edge.node.updatedAt });
+        out.push({
+          handle: edge.node.handle,
+          updatedAt: edge.node.updatedAt,
+          image: edge.node.image
+        });
       }
       if (!data.collections.pageInfo.hasNextPage) break;
       cursor = data.collections.pageInfo.endCursor;
@@ -1496,6 +1458,49 @@ async function getMainMenu() {
       }
     `);
     return data.menu?.items ?? [];
+  });
+}
+async function getCollectionList() {
+  return cached("shopify:collection-list:public", 300, async () => {
+    const out = [];
+    let cursor = null;
+    for (let page = 0; page < 4; page++) {
+      const data = await storefront(`
+        query CollectionList($first: Int!, $after: String) {
+          collections(first: $first, after: $after, sortKey: TITLE) {
+            pageInfo { hasNextPage endCursor }
+            edges {
+              node {
+                handle
+                title
+                description
+                image { url altText }
+                products(first: 1) {
+                  pageInfo { hasNextPage }
+                  edges { node { id } }
+                }
+              }
+            }
+          }
+        }
+      `, { first: 100, after: cursor });
+      for (const edge of data.collections.edges) {
+        const n = edge.node;
+        const hasProducts = n.products.edges.length > 0 || n.products.pageInfo.hasNextPage;
+        if (!hasProducts) continue;
+        out.push({
+          handle: n.handle,
+          title: n.title,
+          description: n.description ?? "",
+          image: n.image,
+          productsCount: n.products.pageInfo.hasNextPage ? null : n.products.edges.length
+        });
+      }
+      if (!data.collections.pageInfo.hasNextPage) break;
+      cursor = data.collections.pageInfo.endCursor;
+      if (!cursor) break;
+    }
+    return out;
   });
 }
 async function getShopifyCollections() {
@@ -1814,6 +1819,28 @@ async function setDealStatus(productId, status) {
     product: { id: numericId, tags: currentTags.join(", ") }
   });
 }
+async function archiveShopifyProduct(productId, reason) {
+  const numericId = productId.replace("gid://shopify/Product/", "");
+  const gid = `gid://shopify/Product/${numericId}`;
+  const updateResult = await adminGraphQL(`
+    mutation ArchiveProduct($input: ProductInput!) {
+      productUpdate(input: $input) {
+        product { handle }
+        userErrors { field message }
+      }
+    }
+  `, { input: { id: gid, status: "ARCHIVED" } });
+  if (updateResult.productUpdate.userErrors.length > 0) {
+    const errs = updateResult.productUpdate.userErrors.map((e) => `${e.field.join(".")}: ${e.message}`).join("; ");
+    throw new Error(`archiveShopifyProduct: ${errs}`);
+  }
+  const handle = updateResult.productUpdate.product?.handle ?? await getProductHandleById(numericId);
+  await setDealStatus(productId, "archived");
+  if (reason) {
+    console.info(`[archiveShopifyProduct] ${numericId} archived: ${reason}`);
+  }
+  return { handle };
+}
 async function createDraftProduct(data) {
   const res = await shopifyAdmin("/products.json", "POST", {
     product: {
@@ -1902,6 +1929,7 @@ async function pushProductToShopify(doc) {
   add("works_for_her", ptToHtml(doc.worksForHer), "multi_line_text_field");
   add("mood_image_url", doc.moodImageUrl, "single_line_text_field");
   add("product_type_dial", doc.productTypeDial, "single_line_text_field");
+  add("original_title", doc.originalTitle, "single_line_text_field");
   add("category", doc.category, "single_line_text_field");
   add("deal_status", doc.dealStatus, "single_line_text_field");
   add("deal_date", doc.dealDate, "date");
@@ -1989,6 +2017,15 @@ async function pushProductToShopify(doc) {
       key: "emma_hero",
       ownerId: gid,
       value: JSON.stringify(doc.emmaHero),
+      type: "json"
+    });
+  }
+  if (doc.pairingWhy && Object.keys(doc.pairingWhy).length > 0) {
+    metafields.push({
+      namespace: "xdipx",
+      key: "pairing_why",
+      ownerId: gid,
+      value: JSON.stringify(doc.pairingWhy),
       type: "json"
     });
   }
@@ -3767,315 +3804,6 @@ var init_shopify_server = __esm({
   }
 });
 
-// app/lib/klaviyo.server.ts
-var klaviyo_server_exports = {};
-__export(klaviyo_server_exports, {
-  getProfileByEmail: () => getProfileByEmail,
-  getProfileSubscriptions: () => getProfileSubscriptions,
-  subscribeToDailyDeal: () => subscribeToDailyDeal,
-  subscribeToList: () => subscribeToList,
-  subscribeToWaitlist: () => subscribeToWaitlist,
-  syncWishlistProfileProperty: () => syncWishlistProfileProperty,
-  trackEvent: () => trackEvent,
-  trackReviewApproved: () => trackReviewApproved,
-  trackReviewInviteSent: () => trackReviewInviteSent,
-  trackReviewReminderSent: () => trackReviewReminderSent,
-  trackReviewSubmitted: () => trackReviewSubmitted,
-  trackWishlistAdded: () => trackWishlistAdded,
-  trackWishlistRemoved: () => trackWishlistRemoved,
-  triggerDailyDealEmail: () => triggerDailyDealEmail,
-  unsubscribeAll: () => unsubscribeAll,
-  unsubscribeFromList: () => unsubscribeFromList,
-  updatePreferences: () => updatePreferences,
-  updateProfileProperties: () => updateProfileProperties
-});
-async function klaviyoFetch(path, method = "GET", body) {
-  const init2 = {
-    method,
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json",
-      revision: "2024-10-15",
-      Authorization: `Klaviyo-API-Key ${process.env["KLAVIYO_API_KEY"]}`
-    }
-  };
-  if (body) init2.body = JSON.stringify(body);
-  const res = await fetch(`${BASE}${path}`, init2);
-  if (!res.ok) {
-    const text3 = await res.text();
-    throw new Error(`Klaviyo API error ${res.status}: ${text3}`);
-  }
-  if (res.status === 204 || res.status === 202) return {};
-  const text2 = await res.text();
-  if (!text2) return {};
-  return JSON.parse(text2);
-}
-async function subscribeToList(listId, email, firstName) {
-  const profileAttrs = {
-    email,
-    subscriptions: {
-      email: { marketing: { consent: "SUBSCRIBED" } }
-    }
-  };
-  if (firstName) profileAttrs.first_name = firstName;
-  await klaviyoFetch("/profile-subscription-bulk-create-jobs/", "POST", {
-    data: {
-      type: "profile-subscription-bulk-create-job",
-      attributes: {
-        profiles: {
-          data: [{ type: "profile", attributes: profileAttrs }]
-        }
-      },
-      relationships: {
-        list: { data: { type: "list", id: listId } }
-      }
-    }
-  });
-}
-async function subscribeToDailyDeal(email, firstName) {
-  const listId = process.env["KLAVIYO_LIST_ID_DAILY_DEAL"];
-  await subscribeToList(listId, email, firstName);
-}
-async function subscribeToWaitlist(email, productHandle) {
-  const listId = process.env["KLAVIYO_LIST_ID_WAITLIST"];
-  await klaviyoFetch("/profile-subscription-bulk-create-jobs/", "POST", {
-    data: {
-      type: "profile-subscription-bulk-create-job",
-      attributes: {
-        profiles: {
-          data: [{
-            type: "profile",
-            attributes: {
-              email,
-              subscriptions: {
-                email: { marketing: { consent: "SUBSCRIBED" } }
-              }
-            }
-          }]
-        }
-      },
-      relationships: {
-        list: { data: { type: "list", id: listId } }
-      }
-    }
-  });
-  await trackEvent(email, "Waitlist Signup", { product_handle: productHandle });
-}
-async function trackEvent(email, eventName, properties) {
-  await klaviyoFetch("/events/", "POST", {
-    data: {
-      type: "event",
-      attributes: {
-        metric: { data: { type: "metric", attributes: { name: eventName } } },
-        profile: { data: { type: "profile", attributes: { email } } },
-        properties
-      }
-    }
-  });
-}
-async function trackReviewSubmitted(params) {
-  await trackEvent(params.email, "Review Submitted", {
-    reviewer_name: params.reviewerName,
-    shopify_product_id: params.shopifyProductId,
-    rating: params.rating,
-    review_id: params.reviewId,
-    is_verified_purchase: params.isVerifiedPurchase,
-    submitted_at: (/* @__PURE__ */ new Date()).toISOString()
-  });
-}
-async function trackReviewApproved(params) {
-  await trackEvent(params.email, "Review Approved", {
-    reviewer_name: params.reviewerName,
-    shopify_product_id: params.shopifyProductId,
-    review_id: params.reviewId,
-    approved_at: (/* @__PURE__ */ new Date()).toISOString()
-  });
-}
-async function trackReviewInviteSent(params) {
-  await trackEvent(params.email, "Review Invite Sent", {
-    reviewer_name: params.reviewerName,
-    shopify_product_id: params.shopifyProductId,
-    shopify_order_id: params.shopifyOrderId,
-    invite_token: params.inviteToken,
-    invite_url: `https://xdipx.com/api/reviews/invite/${params.inviteToken}`,
-    sent_at: (/* @__PURE__ */ new Date()).toISOString()
-  });
-}
-async function trackReviewReminderSent(params) {
-  await trackEvent(params.email, "Review Reminder Sent", {
-    reviewer_name: params.reviewerName,
-    shopify_product_id: params.shopifyProductId,
-    invite_token: params.inviteToken,
-    invite_url: `https://xdipx.com/api/reviews/invite/${params.inviteToken}`,
-    reminder_at: (/* @__PURE__ */ new Date()).toISOString()
-  });
-}
-async function triggerDailyDealEmail(deal) {
-  await klaviyoFetch("/events/", "POST", {
-    data: {
-      type: "event",
-      attributes: {
-        metric: { data: { type: "metric", attributes: { name: "Daily Deal Activated" } } },
-        profile: { data: { type: "profile", attributes: { email: "broadcast@xdipx.com" } } },
-        properties: { ...deal }
-      }
-    }
-  });
-}
-function knownListIds() {
-  const ids = [
-    process.env["KLAVIYO_LIST_ID_DAILY_DEAL"],
-    process.env["KLAVIYO_LIST_ID_WAITLIST"]
-  ];
-  return ids.filter((id) => !!id);
-}
-async function getProfileByEmail(email) {
-  try {
-    const filter = `equals(email,"${email}")`;
-    const path = `/profiles/?filter=${encodeURIComponent(filter)}`;
-    const res = await klaviyoFetch(path, "GET");
-    const first = res.data?.[0];
-    return first ? { id: first.id } : null;
-  } catch (err) {
-    console.error("[klaviyo.getProfileByEmail] failed:", err);
-    return null;
-  }
-}
-async function getProfileSubscriptions(email) {
-  const known = knownListIds();
-  if (known.length === 0) return [];
-  const profile = await getProfileByEmail(email);
-  if (!profile) {
-    return known.map((listId) => ({ listId, subscribed: false }));
-  }
-  try {
-    const res = await klaviyoFetch(`/profiles/${profile.id}/relationships/lists/`, "GET");
-    const memberships = new Set((res.data ?? []).map((d) => d.id));
-    return known.map((listId) => ({
-      listId,
-      subscribed: memberships.has(listId)
-    }));
-  } catch (err) {
-    console.error("[klaviyo.getProfileSubscriptions] failed:", err);
-    return known.map((listId) => ({ listId, subscribed: false }));
-  }
-}
-async function unsubscribeFromList(listId, email) {
-  await klaviyoFetch("/profile-subscription-bulk-delete-jobs/", "POST", {
-    data: {
-      type: "profile-subscription-bulk-delete-job",
-      attributes: {
-        profiles: {
-          data: [{ type: "profile", attributes: { email } }]
-        }
-      },
-      relationships: {
-        list: { data: { type: "list", id: listId } }
-      }
-    }
-  });
-}
-async function updatePreferences(email, updates) {
-  for (const { listId, subscribed } of updates) {
-    try {
-      if (subscribed) {
-        await subscribeToList(listId, email);
-      } else {
-        await unsubscribeFromList(listId, email);
-      }
-    } catch (err) {
-      console.error(
-        `[klaviyo.updatePreferences] failed for list=${listId} subscribed=${subscribed}:`,
-        err
-      );
-    }
-  }
-}
-async function unsubscribeAll(email) {
-  for (const listId of knownListIds()) {
-    try {
-      await unsubscribeFromList(listId, email);
-    } catch (err) {
-      console.error(
-        `[klaviyo.unsubscribeAll] failed for list=${listId}:`,
-        err
-      );
-    }
-  }
-}
-async function updateProfileProperties(email, properties) {
-  try {
-    const profile = await getProfileByEmail(email);
-    if (!profile) {
-      console.warn("[klaviyo.updateProfileProperties] no profile found for", email);
-      return;
-    }
-    await klaviyoFetch(`/profiles/${profile.id}/`, "PATCH", {
-      data: {
-        type: "profile",
-        id: profile.id,
-        attributes: { properties }
-      }
-    });
-  } catch (err) {
-    console.error("[klaviyo.updateProfileProperties] failed:", err);
-  }
-}
-async function trackWishlistAdded(email, item) {
-  try {
-    await trackEvent(email, "Added to Wishlist", {
-      product_handle: item.productHandle,
-      product_title: item.productTitle ?? null,
-      price: item.price ?? null,
-      list_name: item.listName ?? null,
-      added_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-  } catch (err) {
-    console.error("[klaviyo.trackWishlistAdded] failed:", err);
-  }
-}
-async function trackWishlistRemoved(email, item) {
-  try {
-    await trackEvent(email, "Removed from Wishlist", {
-      product_handle: item.productHandle,
-      list_name: item.listName ?? null,
-      removed_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-  } catch (err) {
-    console.error("[klaviyo.trackWishlistRemoved] failed:", err);
-  }
-}
-async function syncWishlistProfileProperty(email, handles) {
-  try {
-    const profile = await getProfileByEmail(email);
-    if (!profile) {
-      console.warn("[klaviyo.syncWishlistProfileProperty] no profile found for", email);
-      return;
-    }
-    await klaviyoFetch(`/profiles/${profile.id}/`, "PATCH", {
-      data: {
-        type: "profile",
-        id: profile.id,
-        attributes: {
-          properties: {
-            wishlist_handles: handles,
-            wishlist_count: handles.length
-          }
-        }
-      }
-    });
-  } catch (err) {
-    console.error("[klaviyo.syncWishlistProfileProperty] failed:", err);
-  }
-}
-var BASE;
-var init_klaviyo_server = __esm({
-  "app/lib/klaviyo.server.ts"() {
-    "use strict";
-    BASE = "https://a.klaviyo.com/api";
-  }
-});
-
 // app/lib/sanity.server.ts
 var sanity_server_exports = {};
 __export(sanity_server_exports, {
@@ -4091,6 +3819,9 @@ __export(sanity_server_exports, {
   getBlogPost: () => getBlogPost,
   getBlogPosts: () => getBlogPosts,
   getBlogPostsForSitemap: () => getBlogPostsForSitemap,
+  getCollectionPage: () => getCollectionPage,
+  getCollectionTypeMap: () => getCollectionTypeMap,
+  getCollectionsHub: () => getCollectionsHub,
   getEditor: () => getEditor,
   getEmmaHeroSettings: () => getEmmaHeroSettings,
   getEmmaPersona: () => getEmmaPersona,
@@ -4098,6 +3829,7 @@ __export(sanity_server_exports, {
   getHomepageSections: () => getHomepageSections,
   getPage: () => getPage,
   getPageList: () => getPageList,
+  getPdpTrustBar: () => getPdpTrustBar,
   getProductFaqs: () => getProductFaqs,
   getProductHandlesForSitemap: () => getProductHandlesForSitemap,
   getProductPageBlocks: () => getProductPageBlocks,
@@ -4118,6 +3850,7 @@ __export(sanity_server_exports, {
   upsertProductPage: () => upsertProductPage
 });
 import { createClient } from "@sanity/client";
+import { toHTML as toHTML2 } from "@portabletext/to-html";
 function getClient(withToken = false, preview = false, perspective) {
   if (!projectId) return null;
   const resolvedPerspective = perspective ?? (preview ? "previewDrafts" : "published");
@@ -4274,6 +4007,10 @@ async function upsertProductPage(params) {
     docId = existing._id;
     created = false;
   } else {
+    if (!params.title) {
+      console.warn(`[upsertProductPage] no productPage doc for handle "${params.handle}" \u2014 skipping (archive/upsert without title)`);
+      return { created: false };
+    }
     docId = `productPage-${params.handle}`;
     await writeClient.createIfNotExists({
       _id: docId,
@@ -4304,6 +4041,8 @@ async function upsertProductPage(params) {
   if (params.ivrUseCase !== void 0) searchFields.ivrUseCase = params.ivrUseCase;
   if (params.ivrFeatures !== void 0) searchFields.ivrFeatures = params.ivrFeatures;
   if (params.ivrVoiceSummary !== void 0) searchFields.ivrVoiceSummary = params.ivrVoiceSummary;
+  if (params.moodTags !== void 0 && params.moodTags.length > 0) searchFields.ivrMood = params.moodTags;
+  if (params.archived !== void 0) searchFields.archived = params.archived;
   if (Object.keys(searchFields).length > 0) {
     await writeClient.patch(docId).set(searchFields).commit();
   }
@@ -4355,6 +4094,29 @@ async function upsertEmmaPick(params) {
   if (params.category !== void 0) doc.category = params.category;
   if (params.pullQuote !== void 0) doc.pullQuote = params.pullQuote;
   await writeClient.createOrReplace(doc);
+}
+async function getPdpTrustBar() {
+  if (!projectId) return null;
+  return cached("sanity:pdp-trust-bar", 300, async () => {
+    try {
+      const client2 = getClient();
+      if (!client2) return null;
+      const data = await client2.fetch(
+        `*[_type == "pdpDefaults"] | order(_updatedAt desc)[0].trustBar{
+          _type, _key, active, order, bgStyle,
+          "trustItems": items[]->{ icon, headline, subheadline, active }
+        }`
+      );
+      if (!data) return null;
+      const trustItems = (data.trustItems ?? []).filter(
+        (i) => !!i && i.active !== false
+      );
+      return { ...data, trustItems };
+    } catch (err) {
+      console.error("[sanity] getPdpTrustBar error:", err);
+      return null;
+    }
+  });
 }
 async function getSiteSettings() {
   if (!projectId) return null;
@@ -4444,6 +4206,94 @@ async function getProductFaqs(handle) {
   } catch (err) {
     console.error("[sanity] getProductFaqs error:", err);
     return [];
+  }
+}
+async function getCollectionPage(handle, preview = false) {
+  if (!projectId) return null;
+  try {
+    const client2 = getClient(false, preview);
+    if (!client2) return null;
+    const data = await client2.fetch(
+      `*[_type == "collectionPage" && shopifyHandle == $handle][0]{
+        shopifyHandle,
+        collectionType,
+        seoTitle,
+        seoDescription,
+        h1,
+        introCopy,
+        "heroImage": heroImageOverride{ "url": asset->url, alt },
+        "faqs": faqs[]{ question, answer },
+        "related": relatedCollections[]{ handle, label }
+      }`,
+      { handle }
+    );
+    if (!data) return null;
+    const introHtml = data.introCopy && data.introCopy.length > 0 ? toHTML2(data.introCopy) : null;
+    return {
+      shopifyHandle: data.shopifyHandle,
+      collectionType: data.collectionType ?? "category",
+      seoTitle: data.seoTitle ?? null,
+      seoDescription: data.seoDescription ?? null,
+      h1: data.h1 ?? null,
+      introHtml,
+      heroImageUrl: data.heroImage?.url ?? null,
+      heroImageAlt: data.heroImage?.alt ?? null,
+      faqs: (data.faqs ?? []).filter((f) => f?.question && f?.answer),
+      related: (data.related ?? []).filter((r) => r?.handle && r?.label)
+    };
+  } catch (err) {
+    console.error("[sanity] getCollectionPage error:", err);
+    return null;
+  }
+}
+async function getCollectionTypeMap() {
+  const out = /* @__PURE__ */ new Map();
+  if (!projectId) return out;
+  try {
+    const client2 = getClient();
+    if (!client2) return out;
+    const data = await client2.fetch(
+      `*[_type == "collectionPage"]{ shopifyHandle, collectionType }`
+    );
+    for (const row of data ?? []) {
+      if (row.shopifyHandle) {
+        out.set(row.shopifyHandle, row.collectionType ?? "category");
+      }
+    }
+    return out;
+  } catch (err) {
+    console.error("[sanity] getCollectionTypeMap error:", err);
+    return out;
+  }
+}
+async function getCollectionsHub(preview = false) {
+  if (!projectId) return null;
+  try {
+    const client2 = getClient(false, preview);
+    if (!client2) return null;
+    const data = await client2.fetch(
+      `*[_type == "collectionsHub"][0]{
+        seoTitle,
+        seoDescription,
+        h1,
+        introCopy,
+        "featured": featuredCollectionHandles[]{ handle, blurb },
+        "faqs": faqs[]{ question, answer }
+      }`
+    );
+    if (!data) return null;
+    const introHtml = data.introCopy && data.introCopy.length > 0 ? toHTML2(data.introCopy) : null;
+    return {
+      seoTitle: data.seoTitle ?? null,
+      seoDescription: data.seoDescription ?? null,
+      h1: data.h1 ?? null,
+      introHtml,
+      featured: (data.featured ?? []).filter((f) => f?.handle).map((f) => ({ handle: f.handle, blurb: f.blurb ?? null })),
+      faqs: (data.faqs ?? []).filter((f) => f?.question && f?.answer)
+    };
+  } catch (err) {
+    console.error("[sanity] getCollectionsHub error:", err);
+    return null;
   }
 }
 async function getPage(slug, preview = false) {
@@ -4957,6 +4807,535 @@ var init_sanity_server = __esm({
   }
 });
 
+// app/lib/feed-processor.server.ts
+import { parse } from "csv-parse/sync";
+import { sql as sql2, eq } from "drizzle-orm";
+async function getPipelineSetting(key) {
+  try {
+    const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq(pipelineSettings.key, key)).limit(1);
+    return rows[0]?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+function cleanDescription(raw) {
+  let clean = raw.replace(/(\w)ft\./g, "$1'");
+  clean = clean.replace(/(?<!\d)in\./g, '"');
+  return clean.replace(/\s+/g, " ").trim();
+}
+async function fetchNalpacFeed() {
+  const cached2 = await kvGet(KV_KEYS.feedCache);
+  if (cached2) return cached2;
+  const feedUrl = await getPipelineSetting("feedUrl") || process.env["NALPAC_FEED_URL"] || "";
+  if (!feedUrl) throw new Error("No feed URL configured. Set NALPAC_FEED_URL env var or configure in Admin \u2192 Settings.");
+  const res = await fetch(feedUrl);
+  if (!res.ok) throw new Error(`Feed fetch failed: ${res.status}`);
+  const csv = await res.text();
+  const records = parse(csv, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true
+  });
+  await kvSet(KV_KEYS.feedCache, records, FEED_TTL);
+  await kvSet(KV_KEYS.feedCacheTimestamp, (/* @__PURE__ */ new Date()).toISOString());
+  return records;
+}
+function isDiscontinued(product) {
+  const fields = [
+    product["Sub-Category"] ?? "",
+    product["Product Title"] ?? ""
+  ];
+  for (const f of fields) {
+    if (/\bdiscontinued\b/i.test(f)) return true;
+    if (/\b(DISC|DC)\b/.test(f)) return true;
+  }
+  const desc = product["Product Description"] ?? "";
+  if (/\bdiscontinued by manufacturer\b/i.test(desc)) return true;
+  if (/\bproduct (?:has been |is )?discontinued\b/i.test(desc)) return true;
+  return false;
+}
+function parseCategories(raw) {
+  return raw.split(",").map((c) => c.trim()).filter(Boolean);
+}
+function getImages(product) {
+  return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => product[`Image ${i}`]).filter(Boolean);
+}
+function flagForImagenGeneration(sku) {
+  SKU_NEEDS_IMAGEN.add(sku);
+}
+function getSKUsNeedingImagen() {
+  return [...SKU_NEEDS_IMAGEN];
+}
+function isEligible(product, recentSkus, blockedBrands) {
+  const qty = parseInt(product["Total qty available"] ?? "0");
+  const wholesale = parseFloat(product["Wholesale"] ?? "0");
+  const msrp = parseFloat(product["MSRP"] ?? "0");
+  const brandBlocked = blockedBrands.has(product.Brand.toLowerCase().trim());
+  return qty >= 20 && wholesale > 0 && msrp > 0 && !recentSkus.has(product.SKU) && !brandBlocked;
+}
+function scoreProduct(product, recentSkus, recentCategories, blockedBrands = /* @__PURE__ */ new Set()) {
+  if (!isEligible(product, recentSkus, blockedBrands)) return null;
+  const wholesale = parseFloat(product["Wholesale"]);
+  const msrp = parseFloat(product["MSRP"]);
+  const map = parseFloat(product["MAP"] ?? "0") || 0;
+  const qty = parseInt(product["Total qty available"]);
+  const images = getImages(product);
+  const categories = parseCategories(product["Sub-Category"]);
+  const profScore = (msrp - wholesale) / msrp;
+  let dealScore;
+  let dealPrice;
+  let discountPct;
+  let mapType;
+  if (map === 0) {
+    dealPrice = Math.max(wholesale * 1.4, msrp * 0.55);
+    discountPct = (msrp - dealPrice) / msrp * 100;
+    dealScore = 1;
+    mapType = "no-map";
+  } else if (map < msrp) {
+    dealPrice = map;
+    discountPct = (msrp - map) / msrp * 100;
+    dealScore = Math.min(discountPct / 30, 1);
+    mapType = "below-msrp";
+  } else {
+    dealPrice = msrp;
+    discountPct = 0;
+    dealScore = 0.05;
+    mapType = "equals-msrp";
+  }
+  const invScore = qty < 50 ? 0.4 : qty <= 250 ? 1 : qty <= 600 ? 0.8 : 0.65;
+  if (images.length < 3) flagForImagenGeneration(product.SKU);
+  const imgScore = Math.min(images.length / 8, 1);
+  const overlap = categories.filter(
+    (c) => recentCategories.flat().includes(c)
+  ).length;
+  const catScore = Math.pow(0.7, overlap);
+  const score2 = profScore * 0.35 + dealScore * 0.3 + invScore * 0.2 + imgScore * 0.1 + catScore * 0.05;
+  return {
+    sku: product.SKU,
+    title: cleanDescription(product["Product Title"]),
+    brand: product.Brand,
+    description: cleanDescription(product["Product Description"] ?? ""),
+    score: score2,
+    msrp: Math.round(msrp * 100) / 100,
+    wholesaleCost: Math.round(wholesale * 100) / 100,
+    mapPrice: Math.round(map * 100) / 100,
+    dealPrice: Math.round(dealPrice * 100) / 100,
+    discountPct: Math.round(discountPct * 10) / 10,
+    profitPerUnit: Math.round((dealPrice - wholesale) * 100) / 100,
+    qty,
+    mapType,
+    images,
+    categories
+  };
+}
+async function dailyFeedProcessor() {
+  const [products, history, blockedBrandsSetting] = await Promise.all([
+    fetchNalpacFeed(),
+    db.select({
+      sku: dealHistory.sku,
+      categories: dealHistory.categories
+    }).from(dealHistory).orderBy(sql2`${dealHistory.dealDate} DESC`).limit(90),
+    getPipelineSetting("blockedBrands")
+  ]);
+  const recentSkus = new Set(history.map((h) => h.sku));
+  const recentCategories = history.map((h) => h.categories ?? []);
+  const blockedBrands = new Set(
+    (blockedBrandsSetting ?? "").split(",").map((b) => b.toLowerCase().trim()).filter(Boolean)
+  );
+  const discontinuedSkus = [];
+  const eligibleProducts = [];
+  for (const p of products) {
+    if (isDiscontinued(p)) {
+      discontinuedSkus.push(p.SKU);
+    } else {
+      eligibleProducts.push(p);
+    }
+  }
+  const scores = eligibleProducts.map((p) => scoreProduct(p, recentSkus, recentCategories, blockedBrands)).filter((s) => s !== null).sort((a, b) => b.score - a.score);
+  const topCandidates = scores.slice(0, 30);
+  await kvSet("feed:top-candidates", topCandidates, FEED_TTL);
+  const discontinuedSweep = await archiveDiscontinuedProducts(discontinuedSkus);
+  console.info(
+    `[feed-processor] discontinued sweep: ${discontinuedSweep.flagged} flagged, ${discontinuedSweep.archived} archived, ${discontinuedSweep.alreadyArchived} already-archived, ${discontinuedSweep.notImported} not-imported, ${discontinuedSweep.errors.length} errors`
+  );
+  return {
+    topCandidates,
+    needsImagen: getSKUsNeedingImagen(),
+    discontinuedSkus,
+    discontinuedSweep
+  };
+}
+async function archiveDiscontinuedProducts(skus) {
+  const result = {
+    flagged: skus.length,
+    archived: 0,
+    alreadyArchived: 0,
+    notImported: 0,
+    errors: []
+  };
+  if (skus.length === 0) return result;
+  const { archiveShopifyProduct: archiveShopifyProduct2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+  const { upsertProductPage: upsertProductPage2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports)).catch(() => ({ upsertProductPage: null }));
+  for (const sku of skus) {
+    try {
+      const rows = await db.select({
+        shopifyProductId: dealHistory.shopifyProductId,
+        status: dealHistory.status
+      }).from(dealHistory).where(eq(dealHistory.sku, sku)).limit(1);
+      const row = rows[0];
+      if (!row) {
+        result.notImported++;
+        continue;
+      }
+      if (row.status === "archived") {
+        result.alreadyArchived++;
+        continue;
+      }
+      if (!row.shopifyProductId) {
+        result.errors.push({ sku, message: "dealHistory row has no shopifyProductId \u2014 cannot archive" });
+        continue;
+      }
+      const archived = await archiveShopifyProduct2(row.shopifyProductId, "discontinued by manufacturer");
+      await db.update(dealHistory).set({ status: "archived" }).where(eq(dealHistory.sku, sku));
+      if (upsertProductPage2 && archived?.handle) {
+        try {
+          await upsertProductPage2({
+            handle: archived.handle,
+            shopifyProductId: `gid://shopify/Product/${row.shopifyProductId}`,
+            archived: true
+          });
+        } catch (err) {
+          console.warn(`[feed-processor] archive-discontinued: sanity sync ${sku} failed:`, err instanceof Error ? err.message : err);
+        }
+      }
+      result.archived++;
+    } catch (err) {
+      result.errors.push({ sku, message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return result;
+}
+var FEED_TTL, SKU_NEEDS_IMAGEN;
+var init_feed_processor_server = __esm({
+  "app/lib/feed-processor.server.ts"() {
+    "use strict";
+    init_kv_server();
+    init_db_server();
+    init_schema();
+    FEED_TTL = 23 * 60 * 60;
+    SKU_NEEDS_IMAGEN = /* @__PURE__ */ new Set();
+  }
+});
+
+// app/lib/klaviyo.server.ts
+var klaviyo_server_exports = {};
+__export(klaviyo_server_exports, {
+  getProfileByEmail: () => getProfileByEmail,
+  getProfileSubscriptions: () => getProfileSubscriptions,
+  subscribeToDailyDeal: () => subscribeToDailyDeal,
+  subscribeToList: () => subscribeToList,
+  subscribeToWaitlist: () => subscribeToWaitlist,
+  syncWishlistProfileProperty: () => syncWishlistProfileProperty,
+  trackEvent: () => trackEvent,
+  trackReviewApproved: () => trackReviewApproved,
+  trackReviewInviteSent: () => trackReviewInviteSent,
+  trackReviewReminderSent: () => trackReviewReminderSent,
+  trackReviewSubmitted: () => trackReviewSubmitted,
+  trackWishlistAdded: () => trackWishlistAdded,
+  trackWishlistRemoved: () => trackWishlistRemoved,
+  triggerDailyDealEmail: () => triggerDailyDealEmail,
+  unsubscribeAll: () => unsubscribeAll,
+  unsubscribeFromList: () => unsubscribeFromList,
+  updatePreferences: () => updatePreferences,
+  updateProfileProperties: () => updateProfileProperties
+});
+async function klaviyoFetch(path, method = "GET", body) {
+  const init2 = {
+    method,
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      revision: "2024-10-15",
+      Authorization: `Klaviyo-API-Key ${process.env["KLAVIYO_API_KEY"]}`
+    }
+  };
+  if (body) init2.body = JSON.stringify(body);
+  const res = await fetch(`${BASE}${path}`, init2);
+  if (!res.ok) {
+    const text3 = await res.text();
+    throw new Error(`Klaviyo API error ${res.status}: ${text3}`);
+  }
+  if (res.status === 204 || res.status === 202) return {};
+  const text2 = await res.text();
+  if (!text2) return {};
+  return JSON.parse(text2);
+}
+async function subscribeToList(listId, email, firstName) {
+  const profileAttrs = {
+    email,
+    subscriptions: {
+      email: { marketing: { consent: "SUBSCRIBED" } }
+    }
+  };
+  if (firstName) profileAttrs.first_name = firstName;
+  await klaviyoFetch("/profile-subscription-bulk-create-jobs/", "POST", {
+    data: {
+      type: "profile-subscription-bulk-create-job",
+      attributes: {
+        profiles: {
+          data: [{ type: "profile", attributes: profileAttrs }]
+        }
+      },
+      relationships: {
+        list: { data: { type: "list", id: listId } }
+      }
+    }
+  });
+}
+async function subscribeToDailyDeal(email, firstName) {
+  const listId = process.env["KLAVIYO_LIST_ID_DAILY_DEAL"];
+  await subscribeToList(listId, email, firstName);
+}
+async function subscribeToWaitlist(email, productHandle) {
+  const listId = process.env["KLAVIYO_LIST_ID_WAITLIST"];
+  await klaviyoFetch("/profile-subscription-bulk-create-jobs/", "POST", {
+    data: {
+      type: "profile-subscription-bulk-create-job",
+      attributes: {
+        profiles: {
+          data: [{
+            type: "profile",
+            attributes: {
+              email,
+              subscriptions: {
+                email: { marketing: { consent: "SUBSCRIBED" } }
+              }
+            }
+          }]
+        }
+      },
+      relationships: {
+        list: { data: { type: "list", id: listId } }
+      }
+    }
+  });
+  await trackEvent(email, "Waitlist Signup", { product_handle: productHandle });
+}
+async function trackEvent(email, eventName, properties) {
+  await klaviyoFetch("/events/", "POST", {
+    data: {
+      type: "event",
+      attributes: {
+        metric: { data: { type: "metric", attributes: { name: eventName } } },
+        profile: { data: { type: "profile", attributes: { email } } },
+        properties
+      }
+    }
+  });
+}
+async function trackReviewSubmitted(params) {
+  await trackEvent(params.email, "Review Submitted", {
+    reviewer_name: params.reviewerName,
+    shopify_product_id: params.shopifyProductId,
+    rating: params.rating,
+    review_id: params.reviewId,
+    is_verified_purchase: params.isVerifiedPurchase,
+    submitted_at: (/* @__PURE__ */ new Date()).toISOString()
+  });
+}
+async function trackReviewApproved(params) {
+  await trackEvent(params.email, "Review Approved", {
+    reviewer_name: params.reviewerName,
+    shopify_product_id: params.shopifyProductId,
+    review_id: params.reviewId,
+    approved_at: (/* @__PURE__ */ new Date()).toISOString()
+  });
+}
+async function trackReviewInviteSent(params) {
+  await trackEvent(params.email, "Review Invite Sent", {
+    reviewer_name: params.reviewerName,
+    shopify_product_id: params.shopifyProductId,
+    shopify_order_id: params.shopifyOrderId,
+    invite_token: params.inviteToken,
+    invite_url: `https://xdipx.com/api/reviews/invite/${params.inviteToken}`,
+    sent_at: (/* @__PURE__ */ new Date()).toISOString()
+  });
+}
+async function trackReviewReminderSent(params) {
+  await trackEvent(params.email, "Review Reminder Sent", {
+    reviewer_name: params.reviewerName,
+    shopify_product_id: params.shopifyProductId,
+    invite_token: params.inviteToken,
+    invite_url: `https://xdipx.com/api/reviews/invite/${params.inviteToken}`,
+    reminder_at: (/* @__PURE__ */ new Date()).toISOString()
+  });
+}
+async function triggerDailyDealEmail(deal) {
+  await klaviyoFetch("/events/", "POST", {
+    data: {
+      type: "event",
+      attributes: {
+        metric: { data: { type: "metric", attributes: { name: "Daily Deal Activated" } } },
+        profile: { data: { type: "profile", attributes: { email: "broadcast@xdipx.com" } } },
+        properties: { ...deal }
+      }
+    }
+  });
+}
+function knownListIds() {
+  const ids = [
+    process.env["KLAVIYO_LIST_ID_DAILY_DEAL"],
+    process.env["KLAVIYO_LIST_ID_WAITLIST"]
+  ];
+  return ids.filter((id) => !!id);
+}
+async function getProfileByEmail(email) {
+  try {
+    const filter = `equals(email,"${email}")`;
+    const path = `/profiles/?filter=${encodeURIComponent(filter)}`;
+    const res = await klaviyoFetch(path, "GET");
+    const first = res.data?.[0];
+    return first ? { id: first.id } : null;
+  } catch (err) {
+    console.error("[klaviyo.getProfileByEmail] failed:", err);
+    return null;
+  }
+}
+async function getProfileSubscriptions(email) {
+  const known = knownListIds();
+  if (known.length === 0) return [];
+  const profile = await getProfileByEmail(email);
+  if (!profile) {
+    return known.map((listId) => ({ listId, subscribed: false }));
+  }
+  try {
+    const res = await klaviyoFetch(`/profiles/${profile.id}/relationships/lists/`, "GET");
+    const memberships = new Set((res.data ?? []).map((d) => d.id));
+    return known.map((listId) => ({
+      listId,
+      subscribed: memberships.has(listId)
+    }));
+  } catch (err) {
+    console.error("[klaviyo.getProfileSubscriptions] failed:", err);
+    return known.map((listId) => ({ listId, subscribed: false }));
+  }
+}
+async function unsubscribeFromList(listId, email) {
+  await klaviyoFetch("/profile-subscription-bulk-delete-jobs/", "POST", {
+    data: {
+      type: "profile-subscription-bulk-delete-job",
+      attributes: {
+        profiles: {
+          data: [{ type: "profile", attributes: { email } }]
+        }
+      },
+      relationships: {
+        list: { data: { type: "list", id: listId } }
+      }
+    }
+  });
+}
+async function updatePreferences(email, updates) {
+  for (const { listId, subscribed } of updates) {
+    try {
+      if (subscribed) {
+        await subscribeToList(listId, email);
+      } else {
+        await unsubscribeFromList(listId, email);
+      }
+    } catch (err) {
+      console.error(
+        `[klaviyo.updatePreferences] failed for list=${listId} subscribed=${subscribed}:`,
+        err
+      );
+    }
+  }
+}
+async function unsubscribeAll(email) {
+  for (const listId of knownListIds()) {
+    try {
+      await unsubscribeFromList(listId, email);
+    } catch (err) {
+      console.error(
+        `[klaviyo.unsubscribeAll] failed for list=${listId}:`,
+        err
+      );
+    }
+  }
+}
+async function updateProfileProperties(email, properties) {
+  try {
+    const profile = await getProfileByEmail(email);
+    if (!profile) {
+      console.warn("[klaviyo.updateProfileProperties] no profile found for", email);
+      return;
+    }
+    await klaviyoFetch(`/profiles/${profile.id}/`, "PATCH", {
+      data: {
+        type: "profile",
+        id: profile.id,
+        attributes: { properties }
+      }
+    });
+  } catch (err) {
+    console.error("[klaviyo.updateProfileProperties] failed:", err);
+  }
+}
+async function trackWishlistAdded(email, item) {
+  try {
+    await trackEvent(email, "Added to Wishlist", {
+      product_handle: item.productHandle,
+      product_title: item.productTitle ?? null,
+      price: item.price ?? null,
+      list_name: item.listName ?? null,
+      added_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  } catch (err) {
+    console.error("[klaviyo.trackWishlistAdded] failed:", err);
+  }
+}
+async function trackWishlistRemoved(email, item) {
+  try {
+    await trackEvent(email, "Removed from Wishlist", {
+      product_handle: item.productHandle,
+      list_name: item.listName ?? null,
+      removed_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  } catch (err) {
+    console.error("[klaviyo.trackWishlistRemoved] failed:", err);
+  }
+}
+async function syncWishlistProfileProperty(email, handles) {
+  try {
+    const profile = await getProfileByEmail(email);
+    if (!profile) {
+      console.warn("[klaviyo.syncWishlistProfileProperty] no profile found for", email);
+      return;
+    }
+    await klaviyoFetch(`/profiles/${profile.id}/`, "PATCH", {
+      data: {
+        type: "profile",
+        id: profile.id,
+        attributes: {
+          properties: {
+            wishlist_handles: handles,
+            wishlist_count: handles.length
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.error("[klaviyo.syncWishlistProfileProperty] failed:", err);
+  }
+}
+var BASE;
+var init_klaviyo_server = __esm({
+  "app/lib/klaviyo.server.ts"() {
+    "use strict";
+    BASE = "https://a.klaviyo.com/api";
+  }
+});
+
 // app/lib/seo-keywords.server.ts
 import { createClient as createClient2 } from "@sanity/client";
 function getReadClient() {
@@ -4990,17 +5369,19 @@ async function fetchCandidates(input) {
       !defined(contentTypes) || count(contentTypes) == 0 ||
       "any" in contentTypes || $contentType in contentTypes
     ) && (
-      // No taxonomy tags at all = general-purpose, always eligible
-      (!defined(productTypeDials) || count(productTypeDials) == 0) &&
-      (!defined(moodTags)         || count(moodTags) == 0) &&
-      (!defined(audienceTags)     || count(audienceTags) == 0) &&
-      (!defined(mattersTags)      || count(mattersTags) == 0)
-    ) || (
-      // Or shares at least one tag with the input
-      ($productType != null && $productType in productTypeDials) ||
-      count((moodTags     ?? [])[@ in $moods])     > 0 ||
-      count((audienceTags ?? [])[@ in $audiences]) > 0 ||
-      count((mattersTags  ?? [])[@ in $matters])   > 0
+      (
+        // No taxonomy tags at all = general-purpose, always eligible
+        (!defined(productTypeDials) || count(productTypeDials) == 0) &&
+        (!defined(moodTags)         || count(moodTags) == 0) &&
+        (!defined(audienceTags)     || count(audienceTags) == 0) &&
+        (!defined(mattersTags)      || count(mattersTags) == 0)
+      ) || (
+        // Or shares at least one tag with the input
+        ($productType != null && $productType in productTypeDials) ||
+        count((moodTags     ?? [])[@ in $moods])     > 0 ||
+        count((audienceTags ?? [])[@ in $audiences]) > 0 ||
+        count((mattersTags  ?? [])[@ in $matters])   > 0
+      )
     )]{ ${KEYWORD_PROJECTION} }
   `;
   try {
@@ -5408,6 +5789,8 @@ __export(claude_server_exports, {
   generateIvrFeatures: () => generateIvrFeatures,
   generateIvrUseCase: () => generateIvrUseCase,
   generateIvrVoiceSummary: () => generateIvrVoiceSummary,
+  generatePairingWhy: () => generatePairingWhy,
+  generateProductTitle: () => generateProductTitle,
   generateRails: () => generateRails,
   generateSEOTitle: () => generateSEOTitle,
   generateSchedule: () => generateSchedule,
@@ -5981,6 +6364,135 @@ Return only the rewritten title, no quotes.`,
   );
   return text2.trim().slice(0, 60);
 }
+async function generateProductTitle(input) {
+  const original = input.rawTitle.trim();
+  const fallbackDescriptor = PRODUCT_TYPE_DESCRIPTOR_FALLBACK[input.productTypeDial] ?? "Vibrator";
+  const PRODUCT_TYPE_WORDS = /\b(vibrator|wand|massager|stimulator|stroker|lube|lubricant|gel|harness|plug|ring|sleeve|kit|set|bullet|toy|cleaner|warming|cooling|edible|wearable|panty|dildo)\b/i;
+  if (PRODUCT_TYPE_WORDS.test(original) && original.length >= 12) {
+    return {
+      title: original.slice(0, 70),
+      augmented: false,
+      originalTitle: original,
+      reason: "title already descriptive"
+    };
+  }
+  const keywordBlock = input.keywordBlock ?? "";
+  const userPrompt = `Decide whether this manufacturer product title needs an SEO descriptor appended.
+
+Raw manufacturer title: "${input.rawTitle}"
+Brand / vendor: ${input.brand || input.vendor || "(unknown)"}
+Product type (dial): ${input.productTypeDial}
+${input.rawDescription ? `Description (first 400 chars): ${input.rawDescription.slice(0, 400)}` : ""}
+${keywordBlock || ""}
+
+Rules (in priority order):
+1. PRESERVE branded names verbatim \u2014 never rewrite "Sona 2 Cruise", "Magic Wand Original", numbered model names. Treat the manufacturer's chosen name as a proper noun.
+2. LEAVE FULLY-DESCRIPTIVE titles alone \u2014 if the title already contains a product-type word ("wand", "vibrator", "lube", "harness", "plug", "ring", "stimulator", "massager", "kit", "set", etc.) OR a clear functional descriptor, return augmented=false with the original title.
+3. AUGMENT abstract titles \u2014 when no descriptor is present, APPEND ONE concise descriptor after the branded name with a single space (no em-dash, no colon). Example: "Eclipse 7" \u2192 "Eclipse 7 Wand Vibrator".
+4. Pull the descriptor from the dial classification + (if a <keyword_targets> block is provided) primary keyword terms that match this dial. If nothing matches, fall back to: ${fallbackDescriptor}.
+5. NEVER invent claims \u2014 descriptors describe form factor / category only, not benefits ("quiet", "rechargeable", etc.).
+6. Cap final title at 70 chars total.
+7. NEVER use em-dashes ("\u2014") or en-dashes ("\u2013"). Hyphens in compound words ("soft-touch") are fine.
+
+Return ONLY raw JSON (no markdown):
+{"title":"<final title>","augmented":<true|false>,"reason":"<one short sentence>"}`;
+  let raw;
+  try {
+    raw = await generate(userPrompt, 256, MODEL);
+  } catch (err) {
+    console.warn("[generateProductTitle] Claude call failed, falling back to raw title:", err instanceof Error ? err.message : err);
+    return {
+      title: original.slice(0, 70),
+      augmented: false,
+      originalTitle: original,
+      reason: "claude error; preserved original"
+    };
+  }
+  let parsed = {};
+  try {
+    parsed = JSON.parse(stripFences(raw));
+  } catch {
+    const m = raw.match(/\{[\s\S]*?"title"[\s\S]*?\}/);
+    if (m) {
+      try {
+        parsed = JSON.parse(m[0]);
+      } catch {
+      }
+    }
+  }
+  const finalTitle = (parsed.title ?? original).trim().slice(0, 70);
+  const augmented = Boolean(parsed.augmented) && finalTitle !== original;
+  const reason = (parsed.reason ?? "").trim() || (augmented ? "augmented with descriptor" : "preserved as-is");
+  return {
+    title: finalTitle,
+    augmented,
+    originalTitle: original,
+    reason
+  };
+}
+async function generatePairingWhy(input) {
+  if (input.candidates.length === 0) {
+    return { accessoryProductIds: [], pairingWhy: {} };
+  }
+  const candidatesBlock = input.candidates.map((c, i) => `${i + 1}. id=${c.productId}
+   title="${c.title}"${c.brand ? `, brand="${c.brand}"` : ""}${c.productTypeDial ? `, type=${c.productTypeDial}` : ""}${c.price !== void 0 ? `, price=$${c.price}` : ""}`).join("\n");
+  const userPrompt = `You're picking 1\u20133 accessory products that genuinely pair with the primary product, then writing one short Emma-voice "why this pairs" blurb per pick.
+
+Primary product:
+Title: ${input.primary.title}
+Brand: ${input.primary.brand}
+Type: ${input.primary.productTypeDial}
+${input.primary.tagline ? `Tagline: ${input.primary.tagline}` : ""}
+${input.primary.description ? `Description (200 chars): ${input.primary.description.slice(0, 200)}` : ""}
+
+Accessory candidates:
+${candidatesBlock}
+
+Rules:
+- Pick 1, 2, or 3 \u2014 only the ones that genuinely complement the primary. Quality over quota.
+- Skip any candidate that doesn't fit. Better to return 1 strong pick than 3 weak ones.
+- Each blurb: ONE short sentence (\u2264120 chars), Emma voice, first-person friend who's tested it. Explains WHY they pair (not what each product does on its own).
+- Voice: warm, curious, witty. Not clinical, not sleazy.
+- NEVER use em-dashes ("\u2014"). Hyphens in compound words are fine.
+- Don't restate the product titles. Don't name brands.
+- If NO candidates are strong fits, return picks: [].
+
+Return ONLY raw JSON (no markdown):
+{"picks":[{"id":"<accessoryProductId>","blurb":"<\u2264120 chars Emma voice>"}]}`;
+  let raw;
+  try {
+    raw = await generate(userPrompt, 800, MODEL);
+  } catch (err) {
+    console.warn("[generatePairingWhy] Claude call failed:", err instanceof Error ? err.message : err);
+    return { accessoryProductIds: [], pairingWhy: {} };
+  }
+  let parsed = {};
+  try {
+    parsed = JSON.parse(stripFences(raw));
+  } catch {
+    const m = raw.match(/\{[\s\S]*?"picks"[\s\S]*?\}/);
+    if (m) {
+      try {
+        parsed = JSON.parse(m[0]);
+      } catch {
+      }
+    }
+  }
+  const validIds = new Set(input.candidates.map((c) => c.productId));
+  const accessoryProductIds = [];
+  const pairingWhy = {};
+  for (const pick of parsed.picks ?? []) {
+    if (!pick?.id || !pick?.blurb) continue;
+    if (!validIds.has(pick.id)) continue;
+    if (accessoryProductIds.includes(pick.id)) continue;
+    const blurb = pick.blurb.trim().slice(0, 140);
+    if (!blurb) continue;
+    accessoryProductIds.push(pick.id);
+    pairingWhy[pick.id] = blurb;
+    if (accessoryProductIds.length >= 3) break;
+  }
+  return { accessoryProductIds, pairingWhy };
+}
 async function generateTweetCopy(deal) {
   const discountPct = deal.msrp > 0 ? Math.round(100 - deal.dealPrice / deal.msrp * 100) : 0;
   const productUrl = `https://xdipx.com/products/${deal.handle}`;
@@ -6494,6 +7006,22 @@ No markdown, no fences, no commentary.`;
 }
 async function generateSensationDialV2(opts) {
   const type = opts.deal.productTypeDial ?? "vibrator";
+  const taxonomyBlock = (() => {
+    if (!opts.taxonomy?.length) return "";
+    const lines = opts.taxonomy.map((d) => {
+      const head = `- ${d.label}${d.definition ? `: ${d.definition}` : ""}`;
+      const scale = [];
+      if (d.scaleLow) scale.push(`1 = ${d.scaleLow}`);
+      if (d.scaleMid) scale.push(`3 = ${d.scaleMid}`);
+      if (d.scaleHigh) scale.push(`5 = ${d.scaleHigh}`);
+      return scale.length > 0 ? `${head}
+  scale: ${scale.join(" | ")}` : head;
+    });
+    return `
+
+Dimension definitions and value scales (use these to anchor your scoring \u2014 same dimension should mean the same thing across products):
+${lines.join("\n")}`;
+  })();
   const labelList = opts.preferredLabels.length > 0 ? opts.preferredLabels.map((l) => `- ${l}`).join("\n") : "(none \u2014 invent appropriate labels)";
   const user = `Build the "How it feels" sensation dial for this product. 5 to 6 dimensions, each scored 1 to 5 (5 = most).
 
@@ -6507,7 +7035,7 @@ ${opts.deal.fullStory ? `- Story (context, strip HTML): ${opts.deal.fullStory.re
 ${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, " ").slice(0, 400)}` : ""}
 
 Preferred labels for this product type (use these when they fit):
-${labelList}
+${labelList}${taxonomyBlock}
 
 If a different label clearly fits this product better than any of the preferred ones, propose the new label and set "proposed": true. Otherwise reuse a preferred label exactly as written and omit "proposed". Do not propose a synonym of a preferred label \u2014 propose only when the dimension is genuinely different.
 
@@ -6524,7 +7052,7 @@ Rules:
 - 5 or 6 items, no duplicates.
 - Each "value" is an integer 1\u20135.
 - Keep labels under 24 chars, sentence case, no trailing punctuation.
-- Honest scoring \u2014 don't max everything.`;
+- Honest scoring \u2014 don't max everything. Use the dimension scale docs above (when present) to anchor "what 3 vs 5 means" \u2014 consistency across products matters.`;
   const msg = await client.messages.create({
     model: MODEL_FAST,
     max_tokens: 600,
@@ -6967,7 +7495,7 @@ Start by inspecting list_candidate_pool, then propose 2 PDP rails + 1 homepage r
     turns: turn
   };
 }
-var client, MODEL, MODEL_FAST, SYSTEM_PROMPT, BRAND_VOICE_SYSTEM_PROMPT, CTA_WORDS, VEO_SYSTEM_PROMPT, LTX_SYSTEM_PROMPT, DEFAULT_BRAND_VOICE, EMMA_SYSTEM_PROMPT, EMMA_TAGLINE_FALLBACKS, PRODUCT_TYPE_DIALS, ASK_EMMA_AXIS_GUIDANCE, IVR_EXPERIENCE_LEVELS, IVR_USE_CASES, IVR_FEATURES;
+var client, MODEL, MODEL_FAST, SYSTEM_PROMPT, BRAND_VOICE_SYSTEM_PROMPT, PRODUCT_TYPE_DESCRIPTOR_FALLBACK, CTA_WORDS, VEO_SYSTEM_PROMPT, LTX_SYSTEM_PROMPT, DEFAULT_BRAND_VOICE, EMMA_SYSTEM_PROMPT, EMMA_TAGLINE_FALLBACKS, PRODUCT_TYPE_DIALS, ASK_EMMA_AXIS_GUIDANCE, IVR_EXPERIENCE_LEVELS, IVR_USE_CASES, IVR_FEATURES;
 var init_claude_server = __esm({
   "app/lib/claude.server.ts"() {
     "use strict";
@@ -7003,6 +7531,13 @@ SEO targeting:
 - If a term feels forced, drop it. Voice always wins over keyword density.
 - Avoid any term listed inside <avoid>.`;
     BRAND_VOICE_SYSTEM_PROMPT = SYSTEM_PROMPT;
+    PRODUCT_TYPE_DESCRIPTOR_FALLBACK = {
+      "air-pulsation": "Air-Pulse Stimulator",
+      "vibrator": "Vibrator",
+      "wand": "Wand Vibrator",
+      "lube": "Lubricant",
+      "wear": "Wearable"
+    };
     CTA_WORDS = ["Today.", "Yours.", "Obviously.", "Go on.", "Finally."];
     VEO_SYSTEM_PROMPT = `You are a video prompt engineer for Google Veo. You enhance simple video ideas into detailed, production-ready Veo prompts. Your job is to FAITHFULLY EXPAND the user's idea \u2014 not replace it. The user's concept is the creative foundation. You add cinematic detail (camera, lighting, composition, audio) while keeping their vision intact.
 
@@ -8888,6 +9423,343 @@ function createWebhookRoutes() {
   return router;
 }
 
+// server/mcp-route.ts
+import { Router as Router3 } from "express";
+import { timingSafeEqual } from "node:crypto";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+
+// app/lib/mcp-seo-bank.server.ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import { createClient as createClient5 } from "@sanity/client";
+var projectId5 = process.env["SANITY_PROJECT_ID"];
+var dataset5 = process.env["SANITY_DATASET"] ?? "production";
+var apiVersion5 = "2024-10-01";
+function getWriteClient2() {
+  if (!projectId5) return null;
+  return createClient5({
+    projectId: projectId5,
+    dataset: dataset5,
+    apiVersion: apiVersion5,
+    useCdn: false,
+    token: process.env["SANITY_API_TOKEN"],
+    perspective: "raw"
+  });
+}
+function textResult(text2) {
+  return { content: [{ type: "text", text: text2 }] };
+}
+function jsonResult(value) {
+  return textResult(JSON.stringify(value, null, 2));
+}
+async function resolveKeywordId(idOrTerm) {
+  const client2 = getWriteClient2();
+  if (!client2) return null;
+  if (idOrTerm.startsWith("seoKeyword.")) return idOrTerm;
+  const row = await client2.fetch(
+    `*[_type == "seoKeyword" && lower(term) == lower($term)][0]{ _id }`,
+    { term: idOrTerm }
+  );
+  return row?._id ?? null;
+}
+function buildMcpServer() {
+  const server = new McpServer({ name: "xdipx-seo-bank", version: "0.1.0" });
+  server.registerTool(
+    "list_keywords",
+    {
+      title: "List keywords",
+      description: "Browse the SEO keyword bank with filters. Defaults to pending status so the agent triages the gray zone first. Returns the term, status, kind, intent, volume, difficulty, relevanceScore, cluster slug, and tag arrays. Useful for: triage, finding gaps, locating duplicates.",
+      inputSchema: {
+        status: z.enum(["pending", "approved", "rejected", "archived"]).optional().describe('Defaults to "pending".'),
+        kind: z.enum(["head", "long-tail", "question", "branded"]).optional(),
+        intent: z.enum(["informational", "transactional", "navigational", "commercial"]).optional(),
+        clusterSlug: z.string().optional().describe("Filter to one cluster by slug."),
+        minVolume: z.number().optional(),
+        maxDifficulty: z.number().optional(),
+        flagged: z.boolean().optional(),
+        search: z.string().optional().describe("Substring match on the term."),
+        limit: z.number().min(1).max(200).optional().describe("Defaults to 50."),
+        offset: z.number().min(0).optional()
+      }
+    },
+    async (args) => {
+      const client2 = getWriteClient2();
+      if (!client2) return textResult("Sanity not configured.");
+      const status = args.status ?? "pending";
+      const limit = args.limit ?? 50;
+      const offset = args.offset ?? 0;
+      const filters = [`_type == "seoKeyword"`, `status == $status`];
+      const params = { status, limit, offset };
+      if (args.kind) {
+        filters.push(`kind == $kind`);
+        params.kind = args.kind;
+      }
+      if (args.intent) {
+        filters.push(`intent == $intent`);
+        params.intent = args.intent;
+      }
+      if (args.clusterSlug) {
+        filters.push(`cluster->slug.current == $clusterSlug`);
+        params.clusterSlug = args.clusterSlug;
+      }
+      if (args.minVolume != null) {
+        filters.push(`volume >= $minVolume`);
+        params.minVolume = args.minVolume;
+      }
+      if (args.maxDifficulty != null) {
+        filters.push(`difficulty <= $maxDifficulty`);
+        params.maxDifficulty = args.maxDifficulty;
+      }
+      if (args.flagged != null) {
+        filters.push(`flagged == $flagged`);
+        params.flagged = args.flagged;
+      }
+      if (args.search) {
+        filters.push(`term match $search`);
+        params.search = `*${args.search}*`;
+      }
+      const groq = `*[${filters.join(" && ")}] | order(coalesce(relevanceScore, 0) desc, coalesce(volume, 0) desc) [$offset...$offset + $limit] {
+        _id, term, kind, intent, volume, difficulty, cpc, relevanceScore,
+        productTypeDials, moodTags, audienceTags, mattersTags, contentTypes,
+        status, flagged, flagReason,
+        "cluster": cluster->{ "slug": slug.current, title, pillarTerm }
+      }`;
+      const rows = await client2.fetch(groq, params);
+      const total = await client2.fetch(`count(*[${filters.join(" && ")}])`, params);
+      return jsonResult({ total, returned: Array.isArray(rows) ? rows.length : 0, offset, limit, keywords: rows });
+    }
+  );
+  server.registerTool(
+    "approve_keyword",
+    {
+      title: "Approve keyword",
+      description: 'Flip a keyword to status="approved" AND clear flagged=false (approval implicitly unflags \u2014 the gen-time filter requires both `status="approved"` AND `flagged != true`, so an approved-but-still-flagged keyword would be silently excluded). Pass either the Sanity _id (preferred) or the term string. The optional reason is stored on the doc\'s notes field for audit.',
+      inputSchema: {
+        idOrTerm: z.string().describe("Sanity _id or the exact term."),
+        reason: z.string().optional()
+      }
+    },
+    async (args) => {
+      const client2 = getWriteClient2();
+      if (!client2) return textResult("Sanity not configured.");
+      const id = await resolveKeywordId(args.idOrTerm);
+      if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
+      const patch = { status: "approved", flagged: false };
+      if (args.reason) patch.notes = args.reason;
+      await client2.patch(id).set(patch).commit();
+      return textResult(`\u2713 approved (unflagged) \xB7 ${id}`);
+    }
+  );
+  server.registerTool(
+    "reject_keyword",
+    {
+      title: "Reject keyword",
+      description: 'Flip a keyword to status="rejected". Rejected terms are excluded from generation and added to the <avoid> list passed to Claude during copy generation. Use for: off-brand, competitor brand names, genuinely irrelevant terms, "not in catalog" mismatches. Does NOT change the flagged field \u2014 if a term is rejected AND flagged, it just stays both. Optional reason \u2192 notes for audit.',
+      inputSchema: {
+        idOrTerm: z.string(),
+        reason: z.string().optional()
+      }
+    },
+    async (args) => {
+      const client2 = getWriteClient2();
+      if (!client2) return textResult("Sanity not configured.");
+      const id = await resolveKeywordId(args.idOrTerm);
+      if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
+      const patch = { status: "rejected" };
+      if (args.reason) patch.notes = args.reason;
+      await client2.patch(id).set(patch).commit();
+      return textResult(`\u2717 rejected \xB7 ${id}`);
+    }
+  );
+  server.registerTool(
+    "flag_keyword",
+    {
+      title: "Flag keyword",
+      description: 'Set flagged=true on a keyword. Flagged terms are excluded from generation regardless of status. ONLY use for the three valid policy categories: (1) off-brand competitor name (KY, Womanizer, We-Vibe, etc.), (2) regulated medical/efficacy claim ("treats X", "doctor recommended"), (3) explicit-only term outside the tasteful catalog. NOT for "not in catalog" mismatches (use reject_keyword for those) or "borders on competitor comparison" softness (those are usually category descriptors that should be approved). Use unflag_keyword to undo.',
+      inputSchema: {
+        idOrTerm: z.string(),
+        reason: z.string().describe("One-line reason. Must fit one of the three policy categories above.")
+      }
+    },
+    async (args) => {
+      const client2 = getWriteClient2();
+      if (!client2) return textResult("Sanity not configured.");
+      const id = await resolveKeywordId(args.idOrTerm);
+      if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
+      await client2.patch(id).set({ flagged: true, flagReason: args.reason }).commit();
+      return textResult(`\u2691 flagged \xB7 ${id} \xB7 ${args.reason}`);
+    }
+  );
+  server.registerTool(
+    "unflag_keyword",
+    {
+      title: "Unflag keyword",
+      description: "Clear flagged=false on a keyword without changing its status (use approve_keyword if you also want to approve in one shot \u2014 that does both). Use this when the keyword was over-flagged but you want to leave it in pending for further review, OR to clear a flag on an already-approved keyword that approve_keyword may have missed (older code paths). Optional reason replaces flagReason for audit.",
+      inputSchema: {
+        idOrTerm: z.string(),
+        reason: z.string().optional().describe('Replaces flagReason on the doc, e.g. "false-positive: category descriptor".')
+      }
+    },
+    async (args) => {
+      const client2 = getWriteClient2();
+      if (!client2) return textResult("Sanity not configured.");
+      const id = await resolveKeywordId(args.idOrTerm);
+      if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
+      const patch = { flagged: false };
+      patch.flagReason = args.reason ?? null;
+      await client2.patch(id).set(patch).commit();
+      return textResult(`\u2713 unflagged \xB7 ${id}`);
+    }
+  );
+  server.registerTool(
+    "bulk_update_status",
+    {
+      title: "Bulk update status (mixed verdicts)",
+      description: 'Apply MIXED status updates to up to 50 keywords in one tool call. Each update is an independent { idOrTerm, status, reason? } object \u2014 so a single call can approve some, reject others, and pending the rest. Much faster than per-keyword calls. When an update sets status="approved", flagged is also cleared on that doc (matches approve_keyword behavior). Other statuses leave flagged untouched. Returns per-update success/failure. Use this for triage batches; use unflag_keyword separately if you want to clear flags without any status change.',
+      inputSchema: {
+        updates: z.array(z.object({
+          idOrTerm: z.string().describe("Sanity _id or exact term."),
+          status: z.enum(["approved", "rejected", "pending", "archived"]),
+          reason: z.string().optional().describe("Stored on the doc's notes field.")
+        })).min(1).max(50)
+      }
+    },
+    async (args) => {
+      const client2 = getWriteClient2();
+      if (!client2) return textResult("Sanity not configured.");
+      const results = [];
+      for (const u of args.updates) {
+        try {
+          const id = await resolveKeywordId(u.idOrTerm);
+          if (!id) {
+            results.push({ idOrTerm: u.idOrTerm, status: u.status, resolvedId: null, ok: false, error: "not found" });
+            continue;
+          }
+          const patch = { status: u.status };
+          if (u.status === "approved") patch.flagged = false;
+          if (u.reason) patch.notes = u.reason;
+          await client2.patch(id).set(patch).commit();
+          results.push({ idOrTerm: u.idOrTerm, status: u.status, resolvedId: id, ok: true });
+        } catch (err) {
+          results.push({
+            idOrTerm: u.idOrTerm,
+            status: u.status,
+            resolvedId: null,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err)
+          });
+        }
+      }
+      const byStatus = {};
+      for (const r of results) {
+        if (r.ok) byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
+      }
+      const summary = {
+        total: results.length,
+        ok: results.filter((r) => r.ok).length,
+        failed: results.filter((r) => !r.ok).length,
+        byStatus
+      };
+      return jsonResult({ summary, results });
+    }
+  );
+  server.registerTool(
+    "bank_stats",
+    {
+      title: "Bank statistics",
+      description: "Summary of the keyword bank: total keywords, counts by status, count of clusters, count of flagged terms, and the most-recent research run timestamp. Cheap call \u2014 useful as a sanity check before / after triage sessions.",
+      inputSchema: {}
+    },
+    async () => {
+      const client2 = getWriteClient2();
+      if (!client2) return textResult("Sanity not configured.");
+      const stats = await client2.fetch(`{
+        "total":    count(*[_type == "seoKeyword"]),
+        "approved": count(*[_type == "seoKeyword" && status == "approved"]),
+        "pending":  count(*[_type == "seoKeyword" && status == "pending"]),
+        "rejected": count(*[_type == "seoKeyword" && status == "rejected"]),
+        "archived": count(*[_type == "seoKeyword" && status == "archived"]),
+        "flagged":  count(*[_type == "seoKeyword" && flagged == true]),
+        "clusters": count(*[_type == "seoCluster" && status != "archived"]),
+        "lastResearched": *[_type == "seoKeyword"] | order(lastResearchedAt desc)[0].lastResearchedAt
+      }`);
+      return jsonResult(stats);
+    }
+  );
+  server.registerTool(
+    "trigger_research",
+    {
+      title: "Trigger keyword research",
+      description: "Run the SEO research pipeline on demand (DataForSEO + LLM clusterer + Sanity write). Defaults to pulling seeds from existing clusters + approved heads + product titles. Pass manualSeeds to research specific terms. Costs ~$0.05 per seed when DataForSEO is configured. Returns a summary including how many candidates were written.",
+      inputSchema: {
+        manualSeeds: z.array(z.string()).optional().describe("Specific terms to seed the run with. Each gets its own related-keywords expansion."),
+        maxSeeds: z.number().min(1).max(80).optional().describe("Cap the seed count. Defaults to 80.")
+      }
+    },
+    async (args) => {
+      const cronSecret = process.env["CRON_SECRET"];
+      const baseUrl = process.env["MCP_CRON_BASE_URL"] ?? `http://localhost:${process.env["PORT"] ?? 3e3}`;
+      if (!cronSecret) return textResult("CRON_SECRET not set \u2014 cannot trigger research.");
+      const body = {};
+      if (args.manualSeeds?.length) body.manualSeeds = args.manualSeeds;
+      if (typeof args.maxSeeds === "number") body.maxSeeds = args.maxSeeds;
+      try {
+        const res = await fetch(`${baseUrl}/cron/keyword-research`, {
+          method: "POST",
+          headers: { "x-cron-secret": cronSecret, "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({ raw: "unparseable response" }));
+        if (!res.ok) return jsonResult({ ok: false, status: res.status, ...data });
+        return jsonResult(data);
+      } catch (err) {
+        return textResult(`Research call failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  );
+  return server;
+}
+
+// server/mcp-route.ts
+function safeBearerCheck(req) {
+  const expected = process.env["MCP_BEARER_TOKEN"];
+  if (!expected || expected.length === 0) return false;
+  const auth = req.headers["authorization"];
+  if (typeof auth !== "string" || !auth.startsWith("Bearer ")) return false;
+  const provided = auth.slice("Bearer ".length).trim();
+  if (provided.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+}
+function createMcpRoutes() {
+  const router = Router3();
+  router.get("/health", (_req, res) => {
+    const enabled = !!process.env["MCP_BEARER_TOKEN"];
+    res.json({ ok: true, enabled, server: "xdipx-seo-bank", version: "0.1.0" });
+  });
+  router.all("/seo-bank", async (req, res) => {
+    if (!process.env["MCP_BEARER_TOKEN"]) {
+      res.status(503).json({ error: "MCP not configured (MCP_BEARER_TOKEN unset)" });
+      return;
+    }
+    if (!safeBearerCheck(req)) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: void 0 });
+      const server = buildMcpServer();
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } catch (err) {
+      console.error("[mcp:seo-bank]", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: String(err) });
+      }
+    }
+  });
+  return router;
+}
+
 // app/lib/env.server.ts
 var isProd = process.env["NODE_ENV"] === "production";
 var REQUIRED_IN_PRODUCTION = [
@@ -8938,6 +9810,7 @@ if (viteDevServer) {
   app.use(viteDevServer.middlewares);
 }
 app.use("/cron", express.json({ limit: "64kb" }), createCronRoutes());
+app.use("/mcp", express.json({ limit: "1mb" }), createMcpRoutes());
 app.use(
   "/webhooks",
   express.raw({ type: "application/json", limit: "1mb" }),
