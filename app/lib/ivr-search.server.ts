@@ -32,7 +32,6 @@ export interface IvrProductCard {
   handle: string
   category: string
   tagline: string
-  voiceSummary: string
   inStock: boolean
   price: number
   pctOff: number
@@ -63,7 +62,7 @@ export interface IvrDiscoverOpts {
 
 function toIvrCard(
   p: Product,
-  sanityFields?: { tagline?: string | undefined; category?: string | undefined; voiceSummary?: string | undefined },
+  sanityFields?: { tagline?: string | undefined; category?: string | undefined },
 ): IvrProductCard {
   const variantPrice = p.variants[0]?.price
   const price = variantPrice ? Number(variantPrice) : (p.price ?? 0)
@@ -90,7 +89,6 @@ function toIvrCard(
     handle: p.handle,
     category: sanityFields?.category ?? p.category ?? '',
     tagline: normalizeForTTS(sanityFields?.tagline ?? p.metaDescription ?? ''),
-    voiceSummary: normalizeForTTS(sanityFields?.voiceSummary ?? ''),
     inStock: inStockVariants.length > 0,
     price: disp.price,
     pctOff: disp.pctOffMsrp,
@@ -178,12 +176,11 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
       "handle": shopifyHandle,
       title,
       category,
-      tagline,
-      ivrVoiceSummary
+      tagline
     }`
 
     const sanityResults = await client.fetch<
-      { handle: string; title: string; category: string | null; tagline: string | null; ivrVoiceSummary: string | null }[]
+      { handle: string; title: string; category: string | null; tagline: string | null }[]
     >(groq, groqParams)
 
     if (!sanityResults || sanityResults.length === 0) {
@@ -202,7 +199,7 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
     for (const sr of sanityResults) {
       const product = shopifyMap.get(sr.handle)
       if (!product) continue
-      cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined, voiceSummary: sr.ivrVoiceSummary ?? undefined }))
+      cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
     }
 
     return cards
@@ -280,12 +277,11 @@ export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductC
       "handle": shopifyHandle,
       title,
       category,
-      tagline,
-      ivrVoiceSummary
+      tagline
     }`
 
     const sanityResults = await client.fetch<
-      { handle: string; title: string; category: string | null; tagline: string | null; ivrVoiceSummary: string | null }[]
+      { handle: string; title: string; category: string | null; tagline: string | null }[]
     >(groq, groqParams)
 
     if (!sanityResults || sanityResults.length === 0) return []
@@ -298,7 +294,7 @@ export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductC
     for (const sr of sanityResults) {
       const product = shopifyMap.get(sr.handle)
       if (!product) continue
-      cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined, voiceSummary: sr.ivrVoiceSummary ?? undefined }))
+      cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
     }
 
     return cards

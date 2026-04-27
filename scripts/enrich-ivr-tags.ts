@@ -4,7 +4,7 @@
  * Uses a curated descriptor CSV (ivr_descriptors.csv) as ground truth for
  * feature extraction and context, supplemented by Shopify's original
  * manufacturer description. Haiku classifies mood, experience, useCase,
- * and generates a TTS-safe voiceSummary.
+ * and features.
  *
  * Run:   npx tsx scripts/enrich-ivr-tags.ts
  * Force: npx tsx scripts/enrich-ivr-tags.ts --force   (re-classify all)
@@ -16,7 +16,6 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@sanity/client'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { normalizeForTTS } from '../app/lib/tts-normalize.ts'
 
 const SHOPIFY_STORE = process.env['SHOPIFY_STORE_DOMAIN'] ?? process.env['PUBLIC_STORE_DOMAIN']
 const SHOPIFY_TOKEN = process.env['SHOPIFY_STOREFRONT_ACCESS_TOKEN'] ?? process.env['SHOPIFY_STOREFRONT_API_TOKEN'] ?? process.env['PUBLIC_STOREFRONT_API_TOKEN']
@@ -117,7 +116,6 @@ interface ClassificationResult {
   experience: string
   useCase: string[]
   features: string[]
-  voiceSummary: string
 }
 
 // ─── Shopify Storefront API — fetch original_description ────────────────────
@@ -196,8 +194,7 @@ Return JSON with these fields:
 - "mood": array from [${VALID_MOODS.join(', ')}] — pick 1–3 that genuinely fit the product's vibe
 - "experience": one of [${VALID_EXPERIENCE.join(', ')}] — who would love this most?
 - "useCase": array from [${VALID_USE_CASE.join(', ')}] — pick 1–3 scenarios this product shines in
-- "features": array from [${VALID_FEATURES.join(', ')}] — include any pre-confirmed features above, plus others explicitly stated in the description or tags
-- "voiceSummary": one sentence under 120 chars in our brand voice (playful, warm, never clinical). No markdown, no URLs, no special symbols. This will be read aloud by a TTS voice on a phone call.`,
+- "features": array from [${VALID_FEATURES.join(', ')}] — include any pre-confirmed features above, plus others explicitly stated in the description or tags`,
     }],
   })
 
@@ -220,10 +217,6 @@ Return JSON with these fields:
       : (csvExperience ?? 'beginner'),
     useCase: mergedUseCases,
     features: mergedFeatures,
-    // Normalize at the source so new Sanity docs can never carry stray
-    // punctuation / markdown / URLs into the TTS path. 120-char cap is applied
-    // after normalization so trimmed length is the final spoken length.
-    voiceSummary: normalizeForTTS(parsed.voiceSummary).slice(0, 120),
   }
 }
 
@@ -283,7 +276,6 @@ async function main() {
         ivrExperience: result.experience,
         ivrUseCase: result.useCase,
         ivrFeatures: result.features,
-        ivrVoiceSummary: result.voiceSummary,
       }).commit()
 
       enriched++
@@ -292,7 +284,6 @@ async function main() {
         originalDescription ? 'shopify' : 'sanity',
       ].filter(Boolean).join('+')
       console.log(`  ✓ ${product.shopifyHandle} (${src}): mood=[${result.mood}] exp=${result.experience} use=[${result.useCase}] feat=[${result.features}]`)
-      console.log(`    voice: "${result.voiceSummary}"`)
     } catch (err) {
       errors++
       console.error(`  ✗ ${product.shopifyHandle}:`, err instanceof Error ? err.message : err)

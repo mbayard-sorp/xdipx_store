@@ -377,7 +377,6 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
           ...(writes.ivrExperience    !== undefined ? { ivrExperience:    writes.ivrExperience    } : {}),
           ...(writes.ivrUseCase       !== undefined ? { ivrUseCase:       writes.ivrUseCase       } : {}),
           ...(writes.ivrFeatures      !== undefined ? { ivrFeatures:      writes.ivrFeatures      } : {}),
-          ...(writes.ivrVoiceSummary  !== undefined ? { ivrVoiceSummary:  writes.ivrVoiceSummary  } : {}),
         }
         if (images[0])              upsertParams.imageUrl     = images[0]
         if (writes.moodImageUrl)    upsertParams.moodImageUrl = writes.moodImageUrl

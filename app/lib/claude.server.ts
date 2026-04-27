@@ -2028,37 +2028,6 @@ Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`
   }
 }
 
-/** ≤ 120-char Emma-voice summary, designed to be read aloud. Plain text only. */
-export async function generateIvrVoiceSummary(opts: { deal: IvrDealCtx }): Promise<string> {
-  const user = `Write ONE short Emma-voice sentence summarising this product, designed to be read aloud over the phone or in a chat reply. Hard cap: 120 characters total (count spaces). Aim for 90–110. Plain text only — no HTML, no markdown, no bullet lists, no emojis. Conversational, specific, first-person.
-
-Good (109 chars): "Pocket wand with real punch — seven settings, whisper-quiet low end, and a battery that lasts a weekend."
-Bad: "Premium wireless rechargeable wand vibrator with multiple speeds and waterproof design." (catalog-y)
-Bad: "This silicone-based lube stays put through longer sessions and I reach for it constantly because it's clean." (too long, runs past 120)
-
-${ivrProductBlock(opts.deal)}
-
-Return ONLY this JSON (no markdown): { "summary": "..." }`
-
-  try {
-    const msg = await client.messages.create({
-      model: MODEL_FAST,
-      max_tokens: 200,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: user }],
-    })
-    const block = msg.content[0]
-    if (block?.type !== 'text') throw new Error('non-text response')
-    const parsed = JSON.parse(stripFences(block.text)) as { summary?: unknown }
-    if (typeof parsed.summary === 'string') {
-      return parsed.summary.trim().replace(/\s+/g, ' ').slice(0, 120)
-    }
-  } catch (err) {
-    console.error('[generateIvrVoiceSummary] failed:', err)
-  }
-  return ''
-}
-
 // ─── Emma Curated Rails (agentic, tool-use loop) ─────────────────────────────
 // ─── Emma context-group picker ──────────────────────────────────────────────
 // Used by the homepage "Emma picks" rails. Called at midnight deal rotation

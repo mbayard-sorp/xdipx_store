@@ -442,7 +442,6 @@ async function enrichOne(
     if (writes.ivrExperience)        upsertParams.ivrExperience    = writes.ivrExperience
     if (writes.ivrUseCase?.length)   upsertParams.ivrUseCase       = writes.ivrUseCase
     if (writes.ivrFeatures?.length)  upsertParams.ivrFeatures      = writes.ivrFeatures
-    if (writes.ivrVoiceSummary)      upsertParams.ivrVoiceSummary  = writes.ivrVoiceSummary
     if (writes.moodImageUrl)         upsertParams.moodImageUrl     = writes.moodImageUrl
 
     // Pricing context — pulled from the Shopify snapshot's metafields, not

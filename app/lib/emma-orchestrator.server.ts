@@ -22,7 +22,6 @@ import {
   generateIvrExperience,
   generateIvrUseCase,
   generateIvrFeatures,
-  generateIvrVoiceSummary,
   generateProductTitle,
   generatePairingWhy,
   type AskEmmaAxis,
@@ -99,7 +98,6 @@ export interface ProductWrites {
   ivrExperience?:     IvrExperience
   ivrUseCase?:        string[]
   ivrFeatures?:       string[]
-  ivrVoiceSummary?:   string
 }
 
 export interface ToolCallTrace {
@@ -288,11 +286,6 @@ const TOOLS = [
   {
     name: 'generateIvrFeatures',
     description: 'Pick 2–4 voice-mentionable feature slugs (app-controlled / waterproof / quiet / etc.) that Emma can speak aloud when filtering. Always call this.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateIvrVoiceSummary',
-    description: 'Write a 1–2 sentence Emma-voice summary designed to be read aloud over phone/chat/SMS. Plain text, no markup. Always call this LAST among IVR tools (it benefits from richer context).',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -528,12 +521,6 @@ async function executeTool(
       return { ok: true, summary: `ivrFeatures=${tags.length}` }
     }
 
-    case 'generateIvrVoiceSummary': {
-      const summary = await generateIvrVoiceSummary({ deal: dealCtx })
-      state.writes.ivrVoiceSummary = summary
-      return { ok: !!summary, summary: `ivrVoiceSummary len=${summary.length}` }
-    }
-
     case 'finish': {
       state.finished = true
       return { ok: true, summary: 'orchestrator complete' }
@@ -683,7 +670,6 @@ Phase 7 — IVR / voice surfaces (run AFTER generateEmmaTake — they need rich 
   14. generateIvrExperience
   15. generateIvrUseCase
   16. generateIvrFeatures
-  17. generateIvrVoiceSummary  (LAST among IVR tools — benefits from the others)
 
 Conditional:
 - generateCareInstructions: skip for lube unless the lube has a real care/storage note.
@@ -851,7 +837,6 @@ Start with classifyProductTypeDial, then run every other applicable tool exactly
     ...(state.writes.ivrExperience   !== undefined ? { ivrExperience:    state.writes.ivrExperience   } : {}),
     ...(state.writes.ivrUseCase      !== undefined ? { ivrUseCase:       state.writes.ivrUseCase      } : {}),
     ...(state.writes.ivrFeatures     !== undefined ? { ivrFeatures:      state.writes.ivrFeatures     } : {}),
-    ...(state.writes.ivrVoiceSummary !== undefined ? { ivrVoiceSummary:  state.writes.ivrVoiceSummary } : {}),
   }
 
   return { writes, telemetry: state.telemetry }
