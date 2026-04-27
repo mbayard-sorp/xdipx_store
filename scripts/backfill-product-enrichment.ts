@@ -370,7 +370,6 @@ async function enrichOne(
     if (writes.tagline           && await maybeShouldRefresh(snap, 'xdipx.tagline',              args)) { doc.tagline            = writes.tagline;             fieldsChanged.push('tagline') }
     if (writes.seoMetaDescription&& await maybeShouldRefresh(snap, 'xdipx.seo_meta_description', args)) { doc.seoMetaDescription = writes.seoMetaDescription;  fieldsChanged.push('seo_meta_description') }
     if (writes.descriptionHtml   && (args.mode === 'full' || !snap.body_html))                           { doc.descriptionHtml    = writes.descriptionHtml;     fieldsChanged.push('descriptionHtml') }
-    if (writes.featureBullets?.length) { doc.featureBullets = writes.featureBullets; fieldsChanged.push('feature_bullets') }
   }
 
   if (want.pairings && writes.accessoryProductIds?.length) {
@@ -394,15 +393,6 @@ async function enrichOne(
   }
 
   try {
-    // pushProductToShopify requires featureBullets when modifying — narrow
-    // mode runs may not include it. Pull from the existing metafield as a
-    // fallback so we don't fail validation.
-    if (!doc.featureBullets) {
-      const existing = snap.metafields['xdipx.feature_bullets']
-      if (existing) {
-        try { doc.featureBullets = JSON.parse(existing) as string[] } catch { /* ignore */ }
-      }
-    }
     if (!doc.tagline)            doc.tagline            = snap.metafields['xdipx.tagline']
     if (!doc.seoMetaDescription) doc.seoMetaDescription = snap.metafields['xdipx.seo_meta_description']
     if (!doc.specifications)     doc.specifications     = snap.metafields['xdipx.specifications']
@@ -445,7 +435,6 @@ async function enrichOne(
     if (doc.seoTitle)            upsertParams.seoTitle       = doc.seoTitle
     if (doc.seoMetaDescription)  upsertParams.seoDescription = doc.seoMetaDescription
     if (writes.descriptionHtml)  upsertParams.description    = writes.descriptionHtml
-    if (writes.featureBullets?.length) upsertParams.featureBullets = writes.featureBullets
     if (writes.productTypeDial)  upsertParams.productTypeDial = writes.productTypeDial
     if (writes.moodTags?.length)     upsertParams.moodTags     = writes.moodTags
     if (writes.audienceTags?.length) upsertParams.audienceTags = writes.audienceTags

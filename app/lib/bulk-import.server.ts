@@ -290,7 +290,6 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       ...(writes.productTitleAugmented ? { title: finalTitle } : {}),
       seoTitle:           finalTitle,
       tagline:            writes.tagline,
-      featureBullets:     writes.featureBullets,
       ...(writes.worksForHim      !== undefined ? { worksForHim:      writes.worksForHim }      : {}),
       ...(writes.worksForHer      !== undefined ? { worksForHer:      writes.worksForHer }      : {}),
       ...(writes.boxContents      !== undefined ? { boxContents:      writes.boxContents }      : {}),
@@ -364,7 +363,6 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
           vendor:           masterRow.Brand,
           tags:             categories,                  // Mirror sub-categories so Studio editors can filter
           tagline:          writes.tagline,
-          featureBullets:   writes.featureBullets,
           description,
           seoTitle,
           seoDescription:   writes.seoMetaDescription,

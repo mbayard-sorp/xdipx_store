@@ -341,7 +341,6 @@ export async function upsertProductPage(params: {
   vendor?: string | undefined
   tags?: string[] | undefined
   tagline?: string | undefined
-  featureBullets?: string[] | undefined
   description?: string | undefined
   seoTitle?: string | undefined
   seoDescription?: string | undefined
@@ -407,7 +406,6 @@ export async function upsertProductPage(params: {
   if (params.vendor !== undefined) searchFields.vendor = params.vendor
   if (params.tags !== undefined) searchFields.tags = params.tags
   if (params.tagline !== undefined) searchFields.tagline = params.tagline
-  if (params.featureBullets !== undefined) searchFields.featureBullets = params.featureBullets
   // description is a portable-text array in the schema (searchable via pt::text).
   // Wrap the raw string in a single block so it round-trips cleanly and search still hits.
   if (params.description !== undefined) searchFields.description = stringToPortableText(params.description)
