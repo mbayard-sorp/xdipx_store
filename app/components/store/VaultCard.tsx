@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useFetcher } from 'react-router'
 import type { VaultDeal } from '~/types'
-import { WaitlistButton } from './WaitlistButton'
 import { HeartButton } from './HeartButton'
 import { CardVideo } from './CardVideo'
 import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
@@ -145,12 +144,6 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
           </div>
         </div>
       </Link>
-
-      {deal.qty === 0 && (
-        <div className="px-4 pb-4">
-          <WaitlistButton productHandle={deal.handle} />
-        </div>
-      )}
     </article>
   )
 }
