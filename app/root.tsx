@@ -143,6 +143,36 @@ export function Layout({ children }: { children: React.ReactNode }) {
         className="font-body text-ink antialiased"
         style={{ fontFamily: 'var(--font-body)' }}
       >
+        {/* Sitewide WebSite + Organization JSON-LD. WebSite enables the
+            sitelinks search box (in-SERP search input under the brand
+            result); Organization gives Google a canonical brand entity to
+            attach knowledge-panel data to. Both are static so we can render
+            them inside <body> as a single inert script tag. */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify([
+              {
+                '@context': 'https://schema.org',
+                '@type':    'WebSite',
+                url:        'https://xdipx.com',
+                name:       'xdipx',
+                potentialAction: {
+                  '@type':       'SearchAction',
+                  target:        'https://xdipx.com/search?q={search_term_string}',
+                  'query-input': 'required name=search_term_string',
+                },
+              },
+              {
+                '@context': 'https://schema.org',
+                '@type':    'Organization',
+                url:        'https://xdipx.com',
+                name:       'xdipx',
+                logo:       'https://xdipx.com/apple-touch-icon.png',
+              },
+            ]),
+          }}
+        />
         {gtmId && (
           <noscript>
             <iframe

@@ -74,6 +74,23 @@ export default defineConfig({
             S.documentTypeListItem('productPage').title('Products').icon(() => '🛍️'),
             S.documentTypeListItem('page').title('Pages').icon(() => '📄'),
             S.documentTypeListItem('trustItem').title('Trust Items').icon(() => '✅'),
+            S.listItem()
+              .title('Collections (SEO)')
+              .id('collectionsSeo')
+              .icon(() => '🗂️')
+              .child(
+                S.list()
+                  .title('Collections (SEO)')
+                  .items([
+                    S.listItem()
+                      .title('Collections Hub')
+                      .id('collectionsHub')
+                      .icon(() => '🏷️')
+                      .child(S.document().schemaType('collectionsHub').documentId('singleton.collectionsHub')),
+                    S.divider(),
+                    S.documentTypeListItem('collectionPage').title('Collection Pages').icon(() => '🗃️'),
+                  ]),
+              ),
             S.divider(),
             S.listItem()
               .title('Blog')

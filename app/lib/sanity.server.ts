@@ -651,8 +651,11 @@ export async function getProductFaqs(handle: string): Promise<ProductFaq[]> {
 
 // ─── Collection Page (PLP SEO overrides) ─────────────────────────────────────
 
+export type CollectionType = 'category' | 'brand' | 'theme'
+
 export interface CollectionPageSanity {
   shopifyHandle:  string
+  collectionType: CollectionType
   seoTitle:       string | null
   seoDescription: string | null
   h1:             string | null
@@ -670,6 +673,7 @@ export async function getCollectionPage(handle: string, preview = false): Promis
     if (!client) return null
     const data = await client.fetch<{
       shopifyHandle:  string
+      collectionType: CollectionType | null
       seoTitle:       string | null
       seoDescription: string | null
       h1:             string | null
@@ -680,6 +684,7 @@ export async function getCollectionPage(handle: string, preview = false): Promis
     } | null>(
       `*[_type == "collectionPage" && shopifyHandle == $handle][0]{
         shopifyHandle,
+        collectionType,
         seoTitle,
         seoDescription,
         h1,
@@ -698,6 +703,7 @@ export async function getCollectionPage(handle: string, preview = false): Promis
 
     return {
       shopifyHandle:  data.shopifyHandle,
+      collectionType: data.collectionType ?? 'category',
       seoTitle:       data.seoTitle ?? null,
       seoDescription: data.seoDescription ?? null,
       h1:             data.h1 ?? null,
@@ -709,6 +715,84 @@ export async function getCollectionPage(handle: string, preview = false): Promis
     }
   } catch (err) {
     console.error('[sanity] getCollectionPage error:', err)
+    return null
+  }
+}
+
+/**
+ * Bulk lookup of every collectionPage's collectionType, indexed by Shopify
+ * handle. Used by the /collections hub to split the grid into "Shop by
+ * category", "Shop by brand", and "Shop by theme" sections. Anything without
+ * a collectionPage doc defaults to 'category' at the call site.
+ */
+export async function getCollectionTypeMap(): Promise<Map<string, CollectionType>> {
+  const out = new Map<string, CollectionType>()
+  if (!projectId) return out
+  try {
+    const client = getClient()
+    if (!client) return out
+    const data = await client.fetch<Array<{ shopifyHandle: string; collectionType: CollectionType | null }>>(
+      `*[_type == "collectionPage"]{ shopifyHandle, collectionType }`,
+    )
+    for (const row of data ?? []) {
+      if (row.shopifyHandle) {
+        out.set(row.shopifyHandle, row.collectionType ?? 'category')
+      }
+    }
+    return out
+  } catch (err) {
+    console.error('[sanity] getCollectionTypeMap error:', err)
+    return out
+  }
+}
+
+// ─── Collections Hub (editorial overrides) ─────────────────────────────────
+
+export interface CollectionsHubSanity {
+  seoTitle:       string | null
+  seoDescription: string | null
+  h1:             string | null
+  introHtml:      string | null
+  featured:       Array<{ handle: string; blurb: string | null }>
+  faqs:           Array<{ question: string; answer: string }>
+}
+
+export async function getCollectionsHub(preview = false): Promise<CollectionsHubSanity | null> {
+  if (!projectId) return null
+  try {
+    const client = getClient(false, preview)
+    if (!client) return null
+    const data = await client.fetch<{
+      seoTitle:       string | null
+      seoDescription: string | null
+      h1:             string | null
+      introCopy:      unknown[] | null
+      featured:       Array<{ handle: string; blurb: string | null }> | null
+      faqs:           Array<{ question: string; answer: string }> | null
+    } | null>(
+      `*[_type == "collectionsHub"][0]{
+        seoTitle,
+        seoDescription,
+        h1,
+        introCopy,
+        "featured": featuredCollectionHandles[]{ handle, blurb },
+        "faqs": faqs[]{ question, answer }
+      }`,
+    )
+    if (!data) return null
+    const introHtml = data.introCopy && data.introCopy.length > 0
+      ? toHTML(data.introCopy as PortableTextBlocks)
+      : null
+    return {
+      seoTitle:       data.seoTitle ?? null,
+      seoDescription: data.seoDescription ?? null,
+      h1:             data.h1 ?? null,
+      introHtml,
+      featured:       (data.featured ?? []).filter(f => f?.handle).map(f => ({ handle: f.handle, blurb: f.blurb ?? null })),
+      faqs:           (data.faqs ?? []).filter(f => f?.question && f?.answer),
+    }
+  } catch (err) {
+    console.error('[sanity] getCollectionsHub error:', err)
     return null
   }
 }

@@ -36,6 +36,7 @@ export default {
 
   groups: [
     { name: 'targeting', title: 'Targeting',     default: true },
+    { name: 'taxonomy',  title: 'Taxonomy'                     },
     { name: 'seo',       title: 'SEO Overrides'                },
     { name: 'editorial', title: 'Editorial Copy'               },
     { name: 'faqs',      title: 'FAQs'                         },
@@ -60,12 +61,31 @@ export default {
     },
 
     {
+      name: 'collectionType',
+      title: 'Collection Type',
+      type: 'string',
+      group: 'taxonomy',
+      description: 'Drives where this collection appears on the /collections hub. Categories group under "Shop by category", brands under "Shop by brand", and themes under "Shop by theme". Anything without a doc here defaults to "category".',
+      options: {
+        list: [
+          { title: 'Category (e.g. wands, vibrators, lubes)', value: 'category' },
+          { title: 'Brand (e.g. Lelo, We-Vibe, Fun Factory)',  value: 'brand'    },
+          { title: 'Theme (e.g. couples-night, first-timer)',  value: 'theme'    },
+        ],
+        layout: 'radio',
+      },
+      initialValue: 'category',
+      validation: Rule => Rule.required(),
+    },
+
+    {
       name: 'seoTitle',
       title: 'SEO Title',
       type: 'string',
       group: 'seo',
-      description: 'Overrides the page <title> in Google. Leave blank to fall back to Shopify collection title. Aim for 50–60 chars.',
-      validation: Rule => Rule.max(70),
+      description: 'Overrides the page <title> in Google. Leave blank to fall back to the auto-generated Shopify-derived title. Google truncates ~60 chars in SERPs.',
+      // Warn if it's likely to truncate; hard error past 70.
+      validation: Rule => Rule.max(70).warning('Aim for ≤60 chars — Google truncates the rest in SERPs.'),
     },
     {
       name: 'seoDescription',
@@ -73,8 +93,14 @@ export default {
       type: 'text',
       group: 'seo',
       rows: 3,
-      description: 'Overrides the meta description in Google. Aim for 140–155 chars.',
-      validation: Rule => Rule.max(160),
+      description: 'Overrides the meta description in Google. Aim for 120–155 chars.',
+      validation: Rule => Rule
+        .max(160)
+        .custom(v => {
+          if (!v) return true
+          if (v.length < 120) return 'Aim for at least 120 chars — short descriptions get rewritten by Google.'
+          return true
+        }),
     },
     {
       name: 'h1',
@@ -91,7 +117,20 @@ export default {
       description: 'Optional — overrides the Shopify collection image. Drives og:image and the LCP hero on the PLP.',
       options: { hotspot: true },
       fields: [
-        { name: 'alt', title: 'Alt text', type: 'string' },
+        {
+          name: 'alt',
+          title: 'Alt text',
+          type: 'string',
+          description: 'Required when an image is set — needed for accessibility and image-search ranking.',
+          // Required only when an image is present.
+          validation: Rule => Rule.custom((alt, ctx) => {
+            const parent = ctx.parent
+            if (parent?.asset && (!alt || !alt.trim())) {
+              return 'Alt text is required when a hero image is set.'
+            }
+            return true
+          }),
+        },
       ],
     },
 
@@ -102,6 +141,14 @@ export default {
       group: 'editorial',
       description: 'Rendered below the H1 — 1 to 3 short paragraphs of editorial framing for the category. This is the single biggest organic-ranking lever; write distinctive copy per category in Emma voice.',
       of: [RICH_TEXT_BLOCK],
+      // Warn (not error) when intro copy is missing — collections with no
+      // editorial copy fall back to thin Shopify descriptions and rank poorly.
+      validation: Rule => Rule.custom(v => {
+        if (!v || v.length === 0) {
+          return 'Add at least one paragraph of intro copy — this is the single biggest organic-ranking lever for the page.'
+        }
+        return true
+      }).warning(),
     },
 
     {
@@ -123,7 +170,23 @@ export default {
           },
         },
       ],
-      validation: Rule => Rule.max(12),
+      validation: Rule => Rule
+        .max(12)
+        .custom(v => {
+          if (!v || v.length < 3) {
+            return 'Add at least 3 FAQs — they fuel FAQ rich snippets and People-Also-Ask coverage.'
+          }
+          return true
+        }).warning(),
+    },
+
+    {
+      name: 'needsKeywordPass',
+      title: 'Needs keyword pass',
+      type: 'boolean',
+      description: 'TRUE means Emma copy was written without approved keyword targeting. A later script will weave keywords in via patch_document_from_json once the SEO bank covers this cluster. Do not edit by hand.',
+      initialValue: false,
+      readOnly: true,
     },
 
     {

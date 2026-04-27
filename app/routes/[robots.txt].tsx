@@ -1,13 +1,15 @@
+// Note: /search is intentionally crawl-allowed — the page emits
+// `<meta name="robots" content="noindex, follow">`. Disallowing it in
+// robots.txt would prevent Google from fetching the page and seeing the
+// noindex directive, leaving any historically-indexed /search?q=… URLs
+// stuck in SERPs as "URL blocked" stubs. Crawl + noindex is the
+// recommended pattern for site-search results.
 const GENERIC_BLOCKS = [
   'User-agent: *',
   'Allow: /',
   'Disallow: /admin',
   'Disallow: /account',
   'Disallow: /api/',
-  // /search is also marked noindex,follow in <meta>; disallowing crawl is
-  // belt-and-suspenders for Bing/AI crawlers that respect robots.txt more
-  // strictly than the meta directive.
-  'Disallow: /search',
   '',
 ]
 
@@ -39,7 +41,6 @@ export async function loader() {
     'Disallow: /admin',
     'Disallow: /account',
     'Disallow: /api/',
-    'Disallow: /search',
     '',
   ])
 

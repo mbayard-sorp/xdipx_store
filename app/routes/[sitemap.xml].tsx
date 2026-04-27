@@ -28,6 +28,17 @@ export async function loader() {
     ? new Date(liveDealRows[0]!.dealDate).toISOString().split('T')[0]
     : undefined
 
+  // /collections hub lastmod — pick the most recent collection updatedAt so
+  // Google sees the hub as fresh whenever any underlying collection changes.
+  const collectionsHubLastmod = collections.length > 0
+    ? collections
+        .map(c => c.updatedAt)
+        .filter((d): d is string => !!d)
+        .sort()
+        .pop()
+        ?.split('T')[0]
+    : undefined
+
   type SitemapImage = { loc: string; title: string }
   type SitemapUrl = {
     loc:        string
@@ -46,7 +57,7 @@ export async function loader() {
     { loc: `${base}/vault`, lastmod: undefined, changefreq: 'daily', priority: '0.6' },
     { loc: `${base}/for-him`, lastmod: undefined, changefreq: 'daily', priority: '0.5' },
     { loc: `${base}/for-her`, lastmod: undefined, changefreq: 'daily', priority: '0.5' },
-    { loc: `${base}/collections`, lastmod: undefined, changefreq: 'weekly', priority: '0.8' },
+    { loc: `${base}/collections`, lastmod: collectionsHubLastmod, changefreq: 'weekly', priority: '0.8' },
 
     // Products
     ...products.map(p => {
