@@ -42,6 +42,7 @@ import {
   pushProductToShopify,
   archiveShopifyProduct,
   getPairingCandidates,
+  getProductHandleById,
   shopifyAdmin,
   type ProductPageDoc,
 } from '../app/lib/shopify.server'
@@ -51,6 +52,7 @@ import {
   isDiscontinued,
 } from '../app/lib/feed-processor.server'
 import { makeLLMClient } from '../app/lib/llm-client.server'
+import { upsertProductPage } from '../app/lib/sanity.server'
 
 interface Args {
   apply:               boolean
@@ -410,6 +412,89 @@ async function enrichOne(
     console.log(JSON.stringify({ handle: snap.handle, sku: row.sku, mode: args.scope, applied: true, fieldsChanged, cost }))
   } catch (err) {
     summary.errors.push({ sku: row.sku, message: `pushProductToShopify: ${err instanceof Error ? err.message : err}` })
+    return
+  }
+
+  // Mirror the same writes to the Sanity productPage doc so search index,
+  // voice/IVR surfaces, and the keyword-bank productPage projection don't lag.
+  // Mirrors the pattern at app/lib/bulk-import.server.ts:309-371.
+  // Best-effort: failures here are logged + recorded but don't unwind the
+  // already-successful Shopify write.
+  try {
+    const handle = await getProductHandleById(row.shopifyProductId)
+    if (!handle) {
+      summary.errors.push({ sku: row.sku, message: 'sanity: could not resolve Shopify handle — skipping productPage sync' })
+      return
+    }
+    const gid = `gid://shopify/Product/${row.shopifyProductId}`
+
+    // Build the upsert payload narrowed to what actually got written above.
+    // Mirrors --mode=fill-gaps semantics: we only forward fields whose Shopify
+    // counterpart was just updated (i.e. they're keys in `doc`).
+    const upsertParams: Parameters<typeof upsertProductPage>[0] = {
+      handle,
+      shopifyProductId: gid,
+      title:    snap.title,                  // safe default; orchestrator title overrides below
+      vendor:   snap.vendor || row.brand,
+      tags:     categories,
+      category: snap.metafields['xdipx.category'] || undefined,
+    }
+    // Title — only overwrite when augmented (matches Shopify-side condition).
+    if (doc.title !== undefined) upsertParams.title = doc.title
+    if (doc.tagline)             upsertParams.tagline        = doc.tagline
+    if (doc.seoTitle)            upsertParams.seoTitle       = doc.seoTitle
+    if (doc.seoMetaDescription)  upsertParams.seoDescription = doc.seoMetaDescription
+    if (writes.descriptionHtml)  upsertParams.description    = writes.descriptionHtml
+    if (writes.featureBullets?.length) upsertParams.featureBullets = writes.featureBullets
+    if (writes.productTypeDial)  upsertParams.productTypeDial = writes.productTypeDial
+    if (writes.moodTags?.length)     upsertParams.moodTags     = writes.moodTags
+    if (writes.audienceTags?.length) upsertParams.audienceTags = writes.audienceTags
+    if (writes.mattersTags?.length)  upsertParams.mattersTags  = writes.mattersTags
+    if (writes.ivrExperience)        upsertParams.ivrExperience    = writes.ivrExperience
+    if (writes.ivrUseCase?.length)   upsertParams.ivrUseCase       = writes.ivrUseCase
+    if (writes.ivrFeatures?.length)  upsertParams.ivrFeatures      = writes.ivrFeatures
+    if (writes.ivrVoiceSummary)      upsertParams.ivrVoiceSummary  = writes.ivrVoiceSummary
+    if (writes.moodImageUrl)         upsertParams.moodImageUrl     = writes.moodImageUrl
+
+    // Pricing context — pulled from the Shopify snapshot's metafields, not
+    // the orchestrator (orchestrator doesn't touch these).
+    const originalPrice = Number(snap.metafields['xdipx.original_price'])
+    const mapPrice      = Number(snap.metafields['xdipx.map_price'])
+    if (Number.isFinite(originalPrice) && originalPrice > 0) upsertParams.originalPrice = originalPrice
+    if (Number.isFinite(mapPrice)      && mapPrice      > 0) upsertParams.mapPrice      = mapPrice
+
+    // Hero image for first-time productPage creates (idempotent on re-runs;
+    // upsertProductPage skips when previewImageUrl is already on Sanity CDN).
+    const firstImage = snap.images[0]?.src
+    if (firstImage) upsertParams.imageUrl = firstImage
+
+    // One retry on transient failure (network / short auth blip), matching
+    // the live import flow.
+    let lastErr: unknown
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await upsertProductPage(upsertParams)
+        lastErr = null
+        break
+      } catch (err) {
+        lastErr = err
+        if (attempt === 1) {
+          await new Promise(r => setTimeout(r, 500))
+        }
+      }
+    }
+    if (lastErr) {
+      summary.errors.push({
+        sku: row.sku,
+        message: `sanity: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
+      })
+    }
+  } catch (err) {
+    // Defensive — anything thrown outside the retry block.
+    summary.errors.push({
+      sku: row.sku,
+      message: `sanity: unexpected: ${err instanceof Error ? err.message : String(err)}`,
+    })
   }
 }
 
