@@ -30,6 +30,13 @@ const DEFS: MetafieldDef[] = [
     description: 'When true, UI must not advertise a discount or struck price.',
     type:        'boolean',
   },
+  // Phase 7 — brand-aware title augmentation
+  {
+    key:         'original_title',
+    name:        'Original title (manufacturer)',
+    description: 'The manufacturer\'s original product title before Emma\'s SEO augmentation. Audit trail + rollback path. Empty when augmented=false.',
+    type:        'single_line_text_field',
+  },
   // Phase 6 — video thumbnails
   {
     key:         'hero_video',

@@ -35,6 +35,11 @@ export default defineConfig({
               .icon(() => '🎚️')
               .child(S.document().schemaType('dialRegistry').documentId('singleton.dialRegistry')),
             S.listItem()
+              .title('Sensation dial taxonomy')
+              .id('dialTaxonomy')
+              .icon(() => '📐')
+              .child(S.document().schemaType('dialTaxonomy').documentId('singleton.dialTaxonomy')),
+            S.listItem()
               .title('Ask Emma vocabulary')
               .id('askEmmaVocabulary')
               .icon(() => '💬')

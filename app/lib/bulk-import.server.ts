@@ -11,12 +11,13 @@ import { db } from '~/lib/db.server'
 import { dealHistory } from '../../db/schema'
 import { generateSEOTitle } from '~/lib/claude.server'
 import { generateProductContent } from '~/lib/emma-orchestrator.server'
-import { cleanDescription } from '~/lib/feed-processor.server'
+import { cleanDescription, isDiscontinued } from '~/lib/feed-processor.server'
 import {
   findProductBySKU,
   createShopifyProductFromFeed,
   createShopifyProductWithVariants,
   getProductHandleById,
+  getPairingCandidates,
   pushProductToShopify,
 } from '~/lib/shopify.server'
 import { upsertProductPage } from '~/lib/sanity.server'
@@ -158,7 +159,20 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
   const masterSku = masterRow.SKU
 
   try {
-    // 1. Duplicate check
+    // 1. Discontinued check — Nalpac flags abandoned products in Sub-Category /
+    //    Product Title / Description. Don't waste AI spend on a product we'll
+    //    have to take down. The daily-feed-processor cron archives any
+    //    already-imported SKUs that flip discontinued in a later feed.
+    if (isDiscontinued({
+      'Sub-Category':       masterRow['Sub-Category'] ?? '',
+      'Product Title':      masterRow['Product Title'] ?? '',
+      'Product Description': masterRow['Product Description'] ?? '',
+    })) {
+      console.info(`[bulk-import] ${masterSku} skipped: discontinued`)
+      return { success: false, sku: masterSku, skipped: true, error: 'discontinued by manufacturer' }
+    }
+
+    // 2. Duplicate check
     if (await isSkuAlreadyImported(masterSku)) {
       return { success: false, sku: masterSku, skipped: true }
     }
@@ -220,13 +234,29 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       )
     }
 
-    // 4. Generate SEO title (caller-side; orchestrator wires it through to generators)
+    // 4. Generate SEO title (initial seed for Emma's orchestrator — the
+    //    orchestrator's `generateProductTitle` tool may augment it further
+    //    based on dial classification + tags).
     const seoTitle = await generateSEOTitle(masterRow['Product Title'], masterRow.Brand)
 
-    // 5. Run the Emma orchestrator — Sonnet tool-use loop that decides which
+    // 5. Resolve pairing candidates so the orchestrator's `proposePairingWhy`
+    //    tool can pick 1–3 sibling products to recommend with Emma-voice copy.
+    //    Best-effort — if Shopify is empty for this category, we just pass an
+    //    empty list and the tool short-circuits.
+    const pairingCandidates = await getPairingCandidates({
+      shopifyProductId: numericId,
+      category,
+      subCategories:    categories,
+    }).catch(err => {
+      console.warn(`[bulk-import] ${masterSku} pairing-candidates lookup failed:`, err instanceof Error ? err.message : err)
+      return []
+    })
+
+    // 6. Run the Emma orchestrator — Sonnet tool-use loop that decides which
     //    content generators to call (Emma's take, dial v2, care, mood/audience/
-    //    matters tags, mood image, etc.) and returns a consolidated payload.
-    //    Note: full_story is no longer generated — the PDP reads descriptionHtml.
+    //    matters tags, pairing-why, mood image, etc.) and returns a consolidated
+    //    payload. Note: full_story is no longer generated — the PDP reads
+    //    descriptionHtml.
     const { writes, telemetry } = await generateProductContent({
       product: {
         title:       masterRow['Product Title'],
@@ -238,18 +268,27 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       },
       seoTitle,
       category,
+      pairingCandidates,
     })
+
+    // Final shopper-facing title (augmented when Emma decided the raw title
+    // needed an SEO descriptor; otherwise unchanged).
+    const finalTitle = writes.productTitle ?? seoTitle
 
     console.info(
       `[bulk-import] ${masterSku} orchestrator: tokens=${telemetry.totalTokens} ` +
       `duration=${telemetry.durationMs}ms turns=${telemetry.turns} ` +
+      `pairings=${writes.accessoryProductIds?.length ?? 0} ` +
+      `titleAugmented=${writes.productTitleAugmented ? 'yes' : 'no'} ` +
       `tools=[${telemetry.toolCalls.map(c => `${c.name}${c.ok ? '' : '!'}`).join(',')}]`,
     )
 
-    // 6. Push all metafields to Shopify (full_story deliberately omitted)
+    // 7. Push all metafields to Shopify (full_story deliberately omitted)
     await pushProductToShopify({
       shopifyProductId:   numericId,
-      seoTitle,
+      // Update product.title when augmented; leave alone otherwise.
+      ...(writes.productTitleAugmented ? { title: finalTitle } : {}),
+      seoTitle:           finalTitle,
       tagline:            writes.tagline,
       featureBullets:     writes.featureBullets,
       ...(writes.worksForHim      !== undefined ? { worksForHim:      writes.worksForHim }      : {}),
@@ -266,6 +305,9 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       mattersTags:        writes.mattersTags,
       ...(writes.emmaHero         !== undefined ? { emmaHero:         writes.emmaHero }         : {}),
       ...(writes.moodImageUrl     !== undefined ? { moodImageUrl:     writes.moodImageUrl }     : {}),
+      ...(writes.originalTitle    !== undefined ? { originalTitle:    writes.originalTitle }    : {}),
+      ...(writes.accessoryProductIds !== undefined ? { accessoryProductIds: writes.accessoryProductIds } : {}),
+      ...(writes.pairingWhy       !== undefined ? { pairingWhy:       writes.pairingWhy }       : {}),
       category,
       dealStatus:         'pending_approval',
       dealDate:           '2099-12-31',

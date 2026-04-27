@@ -690,6 +690,11 @@ export async function generateSchedule(
   }
 }
 
+/**
+ * @deprecated Use `generateProductTitle` — it preserves manufacturer-branded
+ * names verbatim, only augmenting abstract titles with a category descriptor.
+ * Kept for back-compat with admin tooling that still calls it directly.
+ */
 export async function generateSEOTitle(rawTitle: string, brand: string): Promise<string> {
   const text = await generate(
     `Rewrite this product title for SEO. Max 60 chars. Format: {Brand} {Product Type} {Key Feature}. Remove filler words and explicit language. Replace explicit terms with tasteful equivalents.\n\nRaw title: "${rawTitle}"\nBrand: "${brand}"\n\nReturn only the rewritten title, no quotes.`,
@@ -697,6 +702,219 @@ export async function generateSEOTitle(rawTitle: string, brand: string): Promise
     MODEL_FAST,
   )
   return text.trim().slice(0, 60)
+}
+
+// ─── Brand-aware, SEO-aware product title generation ─────────────────────────
+
+export interface GenerateProductTitleInput {
+  rawTitle:        string
+  brand:           string
+  vendor?:         string
+  rawDescription?: string
+  productTypeDial: ProductTypeDial
+  /** Pre-rendered <keyword_targets> XML block from buildKeywordBlock — saves
+   *  a Sanity round-trip when the caller already built it. Pass '' to skip. */
+  keywordBlock?:   string
+}
+
+export interface GenerateProductTitleResult {
+  title:         string   // Final title (raw OR augmented)
+  augmented:     boolean  // True when a descriptor was appended
+  originalTitle: string   // The raw manufacturer title verbatim
+  reason:        string   // One-line explanation: why augmented or why not
+}
+
+const PRODUCT_TYPE_DESCRIPTOR_FALLBACK: Record<ProductTypeDial, string> = {
+  'air-pulsation': 'Air-Pulse Stimulator',
+  'vibrator':      'Vibrator',
+  'wand':          'Wand Vibrator',
+  'lube':          'Lubricant',
+  'wear':          'Wearable',
+}
+
+/**
+ * Decide whether to augment a manufacturer's product title with an SEO
+ * descriptor. Preserves branded names verbatim ("Sona 2 Cruise") and only
+ * appends ONE category descriptor to abstract titles ("Eclipse 7" → "Eclipse 7
+ * Wand Vibrator"). Never invents claims.
+ *
+ * Runs Sonnet (the decision is nuanced — Haiku gets fooled by "Couples Kit").
+ * Hard-cap final title at 70 chars.
+ */
+export async function generateProductTitle(
+  input: GenerateProductTitleInput,
+): Promise<GenerateProductTitleResult> {
+  const original = input.rawTitle.trim()
+  const fallbackDescriptor = PRODUCT_TYPE_DESCRIPTOR_FALLBACK[input.productTypeDial] ?? 'Vibrator'
+
+  // Cheap heuristic short-circuit: titles that already contain a category word
+  // get returned as-is without burning a Claude call. Saves ~half the catalog
+  // from the API hit while still letting Sonnet make the close calls.
+  const PRODUCT_TYPE_WORDS = /\b(vibrator|wand|massager|stimulator|stroker|lube|lubricant|gel|harness|plug|ring|sleeve|kit|set|bullet|toy|cleaner|warming|cooling|edible|wearable|panty|dildo)\b/i
+  if (PRODUCT_TYPE_WORDS.test(original) && original.length >= 12) {
+    return {
+      title:         original.slice(0, 70),
+      augmented:     false,
+      originalTitle: original,
+      reason:        'title already descriptive',
+    }
+  }
+
+  const keywordBlock = input.keywordBlock ?? ''
+  const userPrompt = `Decide whether this manufacturer product title needs an SEO descriptor appended.
+
+Raw manufacturer title: "${input.rawTitle}"
+Brand / vendor: ${input.brand || input.vendor || '(unknown)'}
+Product type (dial): ${input.productTypeDial}
+${input.rawDescription ? `Description (first 400 chars): ${input.rawDescription.slice(0, 400)}` : ''}
+${keywordBlock || ''}
+
+Rules (in priority order):
+1. PRESERVE branded names verbatim — never rewrite "Sona 2 Cruise", "Magic Wand Original", numbered model names. Treat the manufacturer's chosen name as a proper noun.
+2. LEAVE FULLY-DESCRIPTIVE titles alone — if the title already contains a product-type word ("wand", "vibrator", "lube", "harness", "plug", "ring", "stimulator", "massager", "kit", "set", etc.) OR a clear functional descriptor, return augmented=false with the original title.
+3. AUGMENT abstract titles — when no descriptor is present, APPEND ONE concise descriptor after the branded name with a single space (no em-dash, no colon). Example: "Eclipse 7" → "Eclipse 7 Wand Vibrator".
+4. Pull the descriptor from the dial classification + (if a <keyword_targets> block is provided) primary keyword terms that match this dial. If nothing matches, fall back to: ${fallbackDescriptor}.
+5. NEVER invent claims — descriptors describe form factor / category only, not benefits ("quiet", "rechargeable", etc.).
+6. Cap final title at 70 chars total.
+7. NEVER use em-dashes ("—") or en-dashes ("–"). Hyphens in compound words ("soft-touch") are fine.
+
+Return ONLY raw JSON (no markdown):
+{"title":"<final title>","augmented":<true|false>,"reason":"<one short sentence>"}`
+
+  let raw: string
+  try {
+    raw = await generate(userPrompt, 256, MODEL)
+  } catch (err) {
+    console.warn('[generateProductTitle] Claude call failed, falling back to raw title:', err instanceof Error ? err.message : err)
+    return {
+      title:         original.slice(0, 70),
+      augmented:     false,
+      originalTitle: original,
+      reason:        'claude error; preserved original',
+    }
+  }
+
+  let parsed: { title?: string; augmented?: boolean; reason?: string } = {}
+  try {
+    parsed = JSON.parse(stripFences(raw)) as typeof parsed
+  } catch {
+    // Sonnet sometimes wraps in prose; try to extract a JSON object
+    const m = raw.match(/\{[\s\S]*?"title"[\s\S]*?\}/)
+    if (m) {
+      try { parsed = JSON.parse(m[0]) as typeof parsed } catch { /* keep empty */ }
+    }
+  }
+
+  const finalTitle = (parsed.title ?? original).trim().slice(0, 70)
+  const augmented  = Boolean(parsed.augmented) && finalTitle !== original
+  const reason     = (parsed.reason ?? '').trim() || (augmented ? 'augmented with descriptor' : 'preserved as-is')
+
+  return {
+    title:         finalTitle,
+    augmented,
+    originalTitle: original,
+    reason,
+  }
+}
+
+// ─── Pairing-why generation ──────────────────────────────────────────────────
+
+export interface PairingCandidateInput {
+  productId:       string  // GID — keys the result object
+  title:           string
+  brand?:          string
+  productTypeDial?: string
+  price?:          number
+}
+
+export interface GeneratePairingWhyInput {
+  primary: {
+    title:           string
+    brand:           string
+    productTypeDial: ProductTypeDial
+    tagline?:        string
+    description?:    string
+  }
+  candidates: PairingCandidateInput[]
+}
+
+/**
+ * Pick the best 1–3 pairing accessories from the candidate list and write a
+ * short Emma-voice "why this pairs" blurb for each. Returns an object keyed
+ * by accessoryProductId for direct write to `xdipx.pairing_why`.
+ *
+ * Returns empty arrays when no candidates are good enough to recommend
+ * (the orchestrator should treat that as "skip" rather than fail).
+ */
+export async function generatePairingWhy(
+  input: GeneratePairingWhyInput,
+): Promise<{ accessoryProductIds: string[]; pairingWhy: Record<string, string> }> {
+  if (input.candidates.length === 0) {
+    return { accessoryProductIds: [], pairingWhy: {} }
+  }
+
+  const candidatesBlock = input.candidates
+    .map((c, i) => `${i + 1}. id=${c.productId}\n   title="${c.title}"${c.brand ? `, brand="${c.brand}"` : ''}${c.productTypeDial ? `, type=${c.productTypeDial}` : ''}${c.price !== undefined ? `, price=$${c.price}` : ''}`)
+    .join('\n')
+
+  const userPrompt = `You're picking 1–3 accessory products that genuinely pair with the primary product, then writing one short Emma-voice "why this pairs" blurb per pick.
+
+Primary product:
+Title: ${input.primary.title}
+Brand: ${input.primary.brand}
+Type: ${input.primary.productTypeDial}
+${input.primary.tagline ? `Tagline: ${input.primary.tagline}` : ''}
+${input.primary.description ? `Description (200 chars): ${input.primary.description.slice(0, 200)}` : ''}
+
+Accessory candidates:
+${candidatesBlock}
+
+Rules:
+- Pick 1, 2, or 3 — only the ones that genuinely complement the primary. Quality over quota.
+- Skip any candidate that doesn't fit. Better to return 1 strong pick than 3 weak ones.
+- Each blurb: ONE short sentence (≤120 chars), Emma voice, first-person friend who's tested it. Explains WHY they pair (not what each product does on its own).
+- Voice: warm, curious, witty. Not clinical, not sleazy.
+- NEVER use em-dashes ("—"). Hyphens in compound words are fine.
+- Don't restate the product titles. Don't name brands.
+- If NO candidates are strong fits, return picks: [].
+
+Return ONLY raw JSON (no markdown):
+{"picks":[{"id":"<accessoryProductId>","blurb":"<≤120 chars Emma voice>"}]}`
+
+  let raw: string
+  try {
+    raw = await generate(userPrompt, 800, MODEL)
+  } catch (err) {
+    console.warn('[generatePairingWhy] Claude call failed:', err instanceof Error ? err.message : err)
+    return { accessoryProductIds: [], pairingWhy: {} }
+  }
+
+  let parsed: { picks?: Array<{ id?: string; blurb?: string }> } = {}
+  try {
+    parsed = JSON.parse(stripFences(raw)) as typeof parsed
+  } catch {
+    const m = raw.match(/\{[\s\S]*?"picks"[\s\S]*?\}/)
+    if (m) {
+      try { parsed = JSON.parse(m[0]) as typeof parsed } catch { /* keep empty */ }
+    }
+  }
+
+  const validIds = new Set(input.candidates.map(c => c.productId))
+  const accessoryProductIds: string[] = []
+  const pairingWhy: Record<string, string> = {}
+
+  for (const pick of parsed.picks ?? []) {
+    if (!pick?.id || !pick?.blurb) continue
+    if (!validIds.has(pick.id)) continue
+    if (accessoryProductIds.includes(pick.id)) continue
+    const blurb = pick.blurb.trim().slice(0, 140)
+    if (!blurb) continue
+    accessoryProductIds.push(pick.id)
+    pairingWhy[pick.id] = blurb
+    if (accessoryProductIds.length >= 3) break
+  }
+
+  return { accessoryProductIds, pairingWhy }
 }
 
 // ─── Tweet Copy Generation ───────────────────────────────────────────────────
@@ -1446,8 +1664,34 @@ export async function generateSensationDialV2(opts: {
   deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'fullStory' | 'specifications' | 'tagline'>
   /** Current preferred labels for this product type (from Sanity dialRegistry). */
   preferredLabels: string[]
+  /** Optional rich taxonomy entries with definitions + 1/3/5 scale docs from
+   *  the dialTaxonomy singleton. When present, makes generated values much
+   *  more consistent across products of the same type. */
+  taxonomy?: Array<{
+    label:      string
+    definition?: string
+    scaleLow?:  string
+    scaleMid?:  string
+    scaleHigh?: string
+  }>
 }): Promise<SensationDialV2> {
   const type: ProductTypeDial = opts.deal.productTypeDial ?? 'vibrator'
+
+  // Prefer the rich taxonomy when populated — it includes scale documentation
+  // that anchors values consistently. Fall back to the flat label list when
+  // the taxonomy hasn't been seeded yet.
+  const taxonomyBlock = (() => {
+    if (!opts.taxonomy?.length) return ''
+    const lines = opts.taxonomy.map(d => {
+      const head = `- ${d.label}${d.definition ? `: ${d.definition}` : ''}`
+      const scale: string[] = []
+      if (d.scaleLow)  scale.push(`1 = ${d.scaleLow}`)
+      if (d.scaleMid)  scale.push(`3 = ${d.scaleMid}`)
+      if (d.scaleHigh) scale.push(`5 = ${d.scaleHigh}`)
+      return scale.length > 0 ? `${head}\n  scale: ${scale.join(' | ')}` : head
+    })
+    return `\n\nDimension definitions and value scales (use these to anchor your scoring — same dimension should mean the same thing across products):\n${lines.join('\n')}`
+  })()
 
   const labelList = opts.preferredLabels.length > 0
     ? opts.preferredLabels.map(l => `- ${l}`).join('\n')
@@ -1465,7 +1709,7 @@ ${opts.deal.fullStory ? `- Story (context, strip HTML): ${opts.deal.fullStory.re
 ${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
 
 Preferred labels for this product type (use these when they fit):
-${labelList}
+${labelList}${taxonomyBlock}
 
 If a different label clearly fits this product better than any of the preferred ones, propose the new label and set "proposed": true. Otherwise reuse a preferred label exactly as written and omit "proposed". Do not propose a synonym of a preferred label — propose only when the dimension is genuinely different.
 
@@ -1482,7 +1726,7 @@ Rules:
 - 5 or 6 items, no duplicates.
 - Each "value" is an integer 1–5.
 - Keep labels under 24 chars, sentence case, no trailing punctuation.
-- Honest scoring — don't max everything.`
+- Honest scoring — don't max everything. Use the dimension scale docs above (when present) to anchor "what 3 vs 5 means" — consistency across products matters.`
 
   const msg = await client.messages.create({
     model: MODEL_FAST,

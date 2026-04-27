@@ -113,23 +113,30 @@ async function fetchCandidates(input: BuildKeywordContextInput): Promise<SeoKeyw
   const matters     = input.matters   ?? []
   const contentType = input.contentType
 
+  // Note on parens: GROQ's `&&` binds tighter than `||`, so the
+  // "no-tags OR shares-tags" clause MUST be wrapped together — otherwise the
+  // query is parsed as `(everything-up-to-no-tags) || (shares-tags)` which
+  // matches anything tagged at all and surfaces a parse error. The outer
+  // shape is: filter && contentType-clause && (no-tags || shares-tags).
   const groq = `
     *[_type == "seoKeyword" && status == "approved" && flagged != true && (
       // Content type matches or is "any" / unspecified
       !defined(contentTypes) || count(contentTypes) == 0 ||
       "any" in contentTypes || $contentType in contentTypes
     ) && (
-      // No taxonomy tags at all = general-purpose, always eligible
-      (!defined(productTypeDials) || count(productTypeDials) == 0) &&
-      (!defined(moodTags)         || count(moodTags) == 0) &&
-      (!defined(audienceTags)     || count(audienceTags) == 0) &&
-      (!defined(mattersTags)      || count(mattersTags) == 0)
-    ) || (
-      // Or shares at least one tag with the input
-      ($productType != null && $productType in productTypeDials) ||
-      count((moodTags     ?? [])[@ in $moods])     > 0 ||
-      count((audienceTags ?? [])[@ in $audiences]) > 0 ||
-      count((mattersTags  ?? [])[@ in $matters])   > 0
+      (
+        // No taxonomy tags at all = general-purpose, always eligible
+        (!defined(productTypeDials) || count(productTypeDials) == 0) &&
+        (!defined(moodTags)         || count(moodTags) == 0) &&
+        (!defined(audienceTags)     || count(audienceTags) == 0) &&
+        (!defined(mattersTags)      || count(mattersTags) == 0)
+      ) || (
+        // Or shares at least one tag with the input
+        ($productType != null && $productType in productTypeDials) ||
+        count((moodTags     ?? [])[@ in $moods])     > 0 ||
+        count((audienceTags ?? [])[@ in $audiences]) > 0 ||
+        count((mattersTags  ?? [])[@ in $matters])   > 0
+      )
     )]{ ${KEYWORD_PROJECTION} }
   `
   try {

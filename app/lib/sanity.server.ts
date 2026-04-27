@@ -332,7 +332,8 @@ async function uploadImageToSanity(
 export async function upsertProductPage(params: {
   handle: string
   shopifyProductId: string
-  title: string
+  /** Optional on archive-only updates — required on first create. */
+  title?: string
   imageUrl?: string | undefined
   /** PDP hero background image (Shopify CDN URL). Stored on the productPage as `moodImageUrl`. */
   moodImageUrl?: string | undefined
@@ -359,6 +360,9 @@ export async function upsertProductPage(params: {
   ivrUseCase?: string[] | undefined
   ivrFeatures?: string[] | undefined
   ivrVoiceSummary?: string | undefined
+  /** Soft-delete flag — search filters drop archived productPages. Set true when
+   *  Nalpac flags the product as discontinued, false to un-archive. */
+  archived?: boolean | undefined
 }): Promise<{ created: boolean }> {
   // Use 'raw' perspective so drafts.* docs come back too — without it, the image block
   // can't see a draft that's masking the published version in Studio.
@@ -380,6 +384,13 @@ export async function upsertProductPage(params: {
     docId = existing._id
     created = false
   } else {
+    if (!params.title) {
+      // First-create requires a title — without it the doc would fail Studio
+      // validation and search projection. Archive-only callers should always
+      // hit an existing doc; if they don't, log and bail.
+      console.warn(`[upsertProductPage] no productPage doc for handle "${params.handle}" — skipping (archive/upsert without title)`)
+      return { created: false }
+    }
     docId = `productPage-${params.handle}`
     await writeClient.createIfNotExists({
       _id: docId,
@@ -414,6 +425,13 @@ export async function upsertProductPage(params: {
   if (params.ivrUseCase !== undefined) searchFields.ivrUseCase = params.ivrUseCase
   if (params.ivrFeatures !== undefined) searchFields.ivrFeatures = params.ivrFeatures
   if (params.ivrVoiceSummary !== undefined) searchFields.ivrVoiceSummary = params.ivrVoiceSummary
+  // Mirror moodTags into the productPage `ivrMood` field so voice/chat search
+  // (app/lib/ivr-search.server.ts) and the keyword map in search.server.ts
+  // resolve the same source of truth as the Shopify metafield. The dedicated
+  // enrich-ivr-tags.ts script remains as a one-shot for legacy products that
+  // have no productPage.moodTags yet.
+  if (params.moodTags !== undefined && params.moodTags.length > 0) searchFields.ivrMood = params.moodTags
+  if (params.archived !== undefined) searchFields.archived = params.archived
 
   if (Object.keys(searchFields).length > 0) {
     await writeClient.patch(docId).set(searchFields).commit()
