@@ -417,7 +417,12 @@ async function enrichOne(
   if (want.keywords) {
     if (writes.tagline           && await maybeShouldRefresh(snap, 'xdipx.tagline',              args)) { doc.tagline            = writes.tagline;             fieldsChanged.push('tagline') }
     if (writes.seoMetaDescription&& await maybeShouldRefresh(snap, 'xdipx.seo_meta_description', args)) { doc.seoMetaDescription = writes.seoMetaDescription;  fieldsChanged.push('seo_meta_description') }
-    if (writes.descriptionHtml   && (args.mode === 'full' || !snap.body_html))                           { doc.descriptionHtml    = writes.descriptionHtml;     fieldsChanged.push('descriptionHtml') }
+    // descriptionHtml — always overwrite Shopify body_html with the freshly-generated
+    // Emma's take. Editorial direction: every product's main description gets
+    // rewritten by the orchestrator, regardless of what was there before. Sanity
+    // mirrors the same value (in upsertProductPage below), so both surfaces stay
+    // in sync. Hand-edits in Shopify Admin will be clobbered on the next backfill.
+    if (writes.descriptionHtml) { doc.descriptionHtml    = writes.descriptionHtml;     fieldsChanged.push('descriptionHtml') }
   }
 
   if (want.pairings && writes.accessoryProductIds?.length) {

@@ -317,12 +317,14 @@ export default {
       title: 'Experience Level',
       type: 'string',
       group: 'ivr',
-      description: 'Used when callers say "beginner-friendly" or "something advanced".',
+      description: 'Used when callers say "beginner-friendly" or "something advanced". Vocabulary matches `IVR_EXPERIENCE_LEVELS` in app/lib/claude.server.ts — the orchestrator generates these exact slugs.',
       options: {
         list: [
-          { title: 'Beginner',      value: 'beginner'     },
-          { title: 'Intermediate',  value: 'intermediate' },
-          { title: 'Advanced',      value: 'advanced'     },
+          { title: 'First-time',   value: 'first-time'  },
+          { title: 'Curious',      value: 'curious'     },
+          { title: 'Experienced',  value: 'experienced' },
+          { title: 'Advanced',     value: 'advanced'    },
+          { title: 'Any',          value: 'any'         },
         ],
         layout: 'radio',
       },
