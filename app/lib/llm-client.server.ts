@@ -128,6 +128,71 @@ export async function loadAgentSdk(): Promise<{ query: any; tool: any; createSdk
   return { query: sdk.query, tool: sdk.tool, createSdkMcpServer: sdk.createSdkMcpServer }
 }
 
+/**
+ * Single-turn Claude call routed through the Agent SDK / Max subscription.
+ *
+ * The SDK's `query()` is built for tool-using agents; for non-tool generators
+ * (the per-tool content generators in `claude.server.ts`) we just want the
+ * model's text output to one prompt. This wraps that pattern: no MCP server,
+ * no tools, `maxTurns: 1`, walk the stream, return the assistant's text + any
+ * usage that comes back on the assistant message.
+ *
+ * Returns:
+ *   - `text`: concatenated text blocks from the assistant message(s)
+ *   - `inputTokens` / `outputTokens`: from `assistant.message.usage` if surfaced
+ *
+ * The SDK ignores the `model` option (Claude Code uses the subscription's
+ * default Sonnet). `maxTokens` is forwarded as a budget hint where supported.
+ */
+export async function runSingleClaudeCallViaSdk(opts: {
+  system:    string
+  prompt:    string
+  maxTokens: number
+  model?:    string
+}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  const { query } = await loadAgentSdk()
+
+  let text = ''
+  let inputTokens  = 0
+  let outputTokens = 0
+
+  const stream = query({
+    prompt: opts.prompt,
+    options: {
+      systemPrompt: opts.system,
+      tools:        [],   // disable all built-in tools (Bash/Read/etc.)
+      maxTurns:     1,    // single round-trip, like client.messages.create
+    },
+  })
+
+  for await (const event of stream) {
+    if (!event || typeof event !== 'object') continue
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ev = event as any
+    if (ev.type === 'assistant') {
+      // Pull text blocks out of the assistant's BetaMessage.content[]
+      const blocks = ev.message?.content
+      if (Array.isArray(blocks)) {
+        for (const block of blocks) {
+          if (block?.type === 'text' && typeof block.text === 'string') {
+            text += block.text
+          }
+        }
+      }
+      const usage = ev.message?.usage
+      if (usage) {
+        inputTokens  += Number(usage.input_tokens  ?? 0)
+        outputTokens += Number(usage.output_tokens ?? 0)
+      }
+    } else if (ev.type === 'result') {
+      // SDK terminates here.
+      break
+    }
+  }
+
+  return { text, inputTokens, outputTokens }
+}
+
 // ─── Default + factory ──────────────────────────────────────────────────────
 
 let _default: LLMClient | null = null

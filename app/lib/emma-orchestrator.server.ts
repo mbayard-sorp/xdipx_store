@@ -22,8 +22,11 @@ import {
   generateIvrExperience,
   generateIvrUseCase,
   generateIvrFeatures,
+  generateProductFaqs,
   generateProductTitle,
   generatePairingWhy,
+  drainToolTokens,
+  type ProductFaq,
   type AskEmmaAxis,
   type IvrExperience,
 } from '~/lib/claude.server'
@@ -98,6 +101,8 @@ export interface ProductWrites {
   ivrExperience?:     IvrExperience
   ivrUseCase?:        string[]
   ivrFeatures?:       string[]
+  // PDP FAQs — Sanity-only (productPage.productFaqs[]). Renders visibly + emits FAQPage JSON-LD.
+  productFaqs?:       ProductFaq[]
 }
 
 export interface ToolCallTrace {
@@ -289,6 +294,11 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
+    name: 'generateProductFaqs',
+    description: 'Generate 4–6 FAQ pairs (general / care / usage / compatibility) for the PDP and FAQPage JSON-LD. Always call this AFTER generateEmmaTake — answers benefit from the product story being set. Sanity-only field; no Shopify metafield.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
     name: 'finish',
     description: 'Call this last — when every applicable tool above has been called. Takes no arguments; orchestrator returns the consolidated writes.',
     input_schema: { type: 'object', properties: {}, required: [] },
@@ -311,6 +321,7 @@ async function executeTool(
         brand:       product.brand,
         description: product.description,
         categories:  product.categories,
+        ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
       state.writes.productTypeDial = t
       return { ok: true, summary: `productTypeDial=${t}` }
@@ -323,6 +334,7 @@ async function executeTool(
         brand:           product.brand,
         rawDescription:  product.description,
         productTypeDial: dial,
+        ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
       state.writes.productTitle          = titleResult.title
       state.writes.productTitleAugmented = titleResult.augmented
@@ -360,6 +372,7 @@ async function executeTool(
             if (c.productTypeDial) ci.productTypeDial = c.productTypeDial
             return ci
           }),
+          ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
         })
         if (result.accessoryProductIds.length > 0) {
           state.writes.accessoryProductIds = result.accessoryProductIds
@@ -373,7 +386,7 @@ async function executeTool(
     }
 
     case 'generateTagline': {
-      const r = await generateCopy({ type: 'tagline', product: enrichProduct(state, product) })
+      const r = await generateCopy({ type: 'tagline', product: enrichProduct(state, product) }, state.input.llmClient)
       const arr = r.content as string[]
       const first = Array.isArray(arr) ? arr[0] : (arr as unknown as string)
       state.writes.tagline = (first ?? '').trim()
@@ -381,26 +394,26 @@ async function executeTool(
     }
 
     case 'generateSpecifications': {
-      const r = await generateCopy({ type: 'specifications', product: enrichProduct(state, product) })
+      const r = await generateCopy({ type: 'specifications', product: enrichProduct(state, product) }, state.input.llmClient)
       state.writes.specifications = (r.content as string) ?? ''
       return { ok: !!state.writes.specifications, summary: `specs len=${state.writes.specifications.length}` }
     }
 
     case 'generateSeoMeta': {
-      const r = await generateCopy({ type: 'seo_meta', product: enrichProduct(state, product) })
+      const r = await generateCopy({ type: 'seo_meta', product: enrichProduct(state, product) }, state.input.llmClient)
       state.writes.seoMetaDescription = (r.content as string) ?? ''
       return { ok: !!state.writes.seoMetaDescription, summary: `seoMeta len=${state.writes.seoMetaDescription.length}` }
     }
 
     case 'generateEmmaTake': {
-      const html = await generateEmmaTake({ deal: dealCtx })
+      const html = await generateEmmaTake({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
       state.writes.descriptionHtml = html
       return { ok: !!html, summary: `emmaTake len=${html.length}` }
     }
 
     case 'generateCareInstructions': {
       try {
-        const bullets = await generateCareInstructions({ deal: dealCtx })
+        const bullets = await generateCareInstructions({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
         state.writes.careInstructions = bullets
         return { ok: true, summary: `care=${bullets.length}` }
       } catch (err) {
@@ -417,6 +430,7 @@ async function executeTool(
         deal: { ...dealCtx, productTypeDial: type },
         preferredLabels,
         ...(taxonomy.length > 0 ? { taxonomy } : {}),
+        ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
       state.writes.sensationDialV2 = dial
       // Emma can propose a new dial label when none of the preferred ones fit.
@@ -441,7 +455,7 @@ async function executeTool(
     }
 
     case 'generateBoxContents': {
-      const r = await generateCopy({ type: 'box_contents', product: enrichProduct(state, product) })
+      const r = await generateCopy({ type: 'box_contents', product: enrichProduct(state, product) }, state.input.llmClient)
       const bc = (r.content as string[]) ?? []
       if (bc.length > 0) state.writes.boxContents = bc
       return { ok: true, summary: `boxContents=${bc.length}` }
@@ -458,6 +472,7 @@ async function executeTool(
         deal: dealCtx,
         axis,
         preferredLabels: state.vocab[axis],
+        ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
       if (axis === 'mood')          state.writes.moodTags     = tags
       else if (axis === 'audience') state.writes.audienceTags = tags
@@ -477,6 +492,7 @@ async function executeTool(
           msrp:          dealCtx.msrp,
           mapRestricted: dealCtx.mapRestricted,
         },
+        ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
       state.writes.emmaHero = hero
       return { ok: true, summary: `emmaHero variant=${hero.variant}` }
@@ -504,21 +520,27 @@ async function executeTool(
     }
 
     case 'generateIvrExperience': {
-      const lvl = await generateIvrExperience({ deal: dealCtx })
+      const lvl = await generateIvrExperience({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
       state.writes.ivrExperience = lvl
       return { ok: true, summary: `ivrExperience=${lvl}` }
     }
 
     case 'generateIvrUseCase': {
-      const tags = await generateIvrUseCase({ deal: dealCtx })
+      const tags = await generateIvrUseCase({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
       state.writes.ivrUseCase = tags
       return { ok: true, summary: `ivrUseCase=${tags.length}` }
     }
 
     case 'generateIvrFeatures': {
-      const tags = await generateIvrFeatures({ deal: dealCtx })
+      const tags = await generateIvrFeatures({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
       state.writes.ivrFeatures = tags
       return { ok: true, summary: `ivrFeatures=${tags.length}` }
+    }
+
+    case 'generateProductFaqs': {
+      const faqs = await generateProductFaqs({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
+      state.writes.productFaqs = faqs
+      return { ok: faqs.length > 0, summary: `productFaqs=${faqs.length}` }
     }
 
     case 'finish': {
@@ -572,6 +594,9 @@ async function runOrchestrationViaSdk(
         let ok = false
         let summary = ''
         let errorMsg: string | undefined
+        // Drain any stale accumulator state before invoking the tool so we only
+        // attribute tokens spent inside this tool's executeTool call.
+        drainToolTokens()
         try {
           const r = await executeTool(t.name, state)
           ok = r.ok
@@ -580,11 +605,14 @@ async function runOrchestrationViaSdk(
           errorMsg = err instanceof Error ? err.message : String(err)
           summary = `tool error: ${errorMsg}`
         }
+        const toolTokens = drainToolTokens()
+        state.telemetry.totalInputTokens  += toolTokens.input
+        state.telemetry.totalOutputTokens += toolTokens.output
         state.telemetry.toolCalls.push({
           name:         t.name,
           durationMs:   Date.now() - start,
-          inputTokens:  0,
-          outputTokens: 0,
+          inputTokens:  toolTokens.input,
+          outputTokens: toolTokens.output,
           ok,
           ...(errorMsg ? { error: errorMsg } : {}),
         })
@@ -671,8 +699,11 @@ Phase 7 — IVR / voice surfaces (run AFTER generateEmmaTake — they need rich 
   15. generateIvrUseCase
   16. generateIvrFeatures
 
+Phase 8 — PDP FAQs (run AFTER generateEmmaTake + generateSpecifications + tag tools — answers benefit from full product context):
+  17. generateProductFaqs
+
 Conditional:
-- generateCareInstructions: skip for lube unless the lube has a real care/storage note.
+- generateCareInstructions: call for every product type. The underlying generator branches on productTypeDial — hardware gets 3–5 maintenance bullets, consumables (lube, edible wear) get 2–3 playful storage/usage bullets.
 - generateBoxContents: skip for lube; usually skip for wear.
 
 When every applicable tool above has been called, call \`finish\` with no arguments. Do NOT re-emit content — the orchestrator already has it.
@@ -769,6 +800,7 @@ Start with classifyProductTypeDial, then run every other applicable tool exactly
           let ok = false
           let summary = ''
           let errorMsg: string | undefined
+          drainToolTokens()
           try {
             const r = await executeTool(tu.name, state)
             ok = r.ok
@@ -777,11 +809,14 @@ Start with classifyProductTypeDial, then run every other applicable tool exactly
             errorMsg = err instanceof Error ? err.message : String(err)
             summary = `tool error: ${errorMsg}`
           }
+          const toolTokens = drainToolTokens()
+          state.telemetry.totalInputTokens  += toolTokens.input
+          state.telemetry.totalOutputTokens += toolTokens.output
           state.telemetry.toolCalls.push({
             name:         tu.name,
             durationMs:   Date.now() - start,
-            inputTokens:  0,
-            outputTokens: 0,
+            inputTokens:  toolTokens.input,
+            outputTokens: toolTokens.output,
             ok,
             ...(errorMsg ? { error: errorMsg } : {}),
           })
@@ -837,6 +872,7 @@ Start with classifyProductTypeDial, then run every other applicable tool exactly
     ...(state.writes.ivrExperience   !== undefined ? { ivrExperience:    state.writes.ivrExperience   } : {}),
     ...(state.writes.ivrUseCase      !== undefined ? { ivrUseCase:       state.writes.ivrUseCase      } : {}),
     ...(state.writes.ivrFeatures     !== undefined ? { ivrFeatures:      state.writes.ivrFeatures     } : {}),
+    ...(state.writes.productFaqs     !== undefined ? { productFaqs:      state.writes.productFaqs     } : {}),
   }
 
   return { writes, telemetry: state.telemetry }

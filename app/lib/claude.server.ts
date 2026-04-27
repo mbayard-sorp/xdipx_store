@@ -15,8 +15,87 @@ import {
   type RailProposal,
   type PairingWhyProposal,
 } from '~/lib/emma-rail-tools.server'
+// `runSingleClaudeCallViaSdk` is still exported from llm-client.server.ts and ready
+// to be re-imported here when the SDK's single-turn surface starts working for
+// our JSON-only prompts. See header comment on `callClaude` below.
+import { type LLMClient } from '~/lib/llm-client.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
+
+/**
+ * Single point of routing for per-tool generators. Currently HYBRID by design:
+ *
+ *   - Outer orchestrator turn loop routes through the Agent SDK / Max
+ *     subscription via `runOrchestrationViaSdk` in emma-orchestrator.server.ts.
+ *   - Per-tool generators (this function's callers) route through the
+ *     Anthropic SDK / API key. We keep the `llmClient` parameter threaded
+ *     through every generator (and surface it here) so that when the SDK's
+ *     single-turn surface starts working for our use case, we can flip the
+ *     branch back on without re-touching every generator.
+ *
+ * Why per-tool can't currently route through Max: the Agent SDK is
+ * tool-using-agent shaped. `runSingleClaudeCallViaSdk` (with `tools: []`,
+ * `maxTurns: 1`) returns literal text "Failed to ..." for our JSON-only
+ * prompts — Claude Code refuses the bare-prompt shape. Investigation deferred;
+ * see `runSingleClaudeCallViaSdk` in llm-client.server.ts and the comment block
+ * around the disabled SDK branch below.
+ *
+ * Returns text + per-call token counts so generators can surface telemetry up
+ * to the orchestrator's `state.telemetry.toolCalls` entries via the
+ * `drainToolTokens()` helper.
+ */
+async function callClaude(opts: {
+  llmClient?: LLMClient | undefined
+  model:      string
+  maxTokens:  number
+  system:     string
+  userPrompt: string
+}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  let result: { text: string; inputTokens: number; outputTokens: number }
+  // SDK branch DISABLED — see header comment. To re-enable for testing:
+  //
+  //   if (opts.llmClient?.via === 'claude-code') {
+  //     result = await runSingleClaudeCallViaSdk({
+  //       system:    opts.system,
+  //       prompt:    opts.userPrompt,
+  //       maxTokens: opts.maxTokens,
+  //     })
+  //   } else { ... API path }
+  //
+  // For now, all per-tool generation goes through the API key. Outer
+  // orchestrator decisions still route through Max via runOrchestrationViaSdk.
+  void opts.llmClient  // retain the threading without using it
+  const msg = await client.messages.create({
+    model:      opts.model,
+    max_tokens: opts.maxTokens,
+    system:     opts.system,
+    messages:   [{ role: 'user', content: opts.userPrompt }],
+  })
+  const block = msg.content[0]
+  if (block?.type !== 'text') throw new Error('Unexpected Claude response type')
+  result = {
+    text:         block.text,
+    inputTokens:  msg.usage.input_tokens,
+    outputTokens: msg.usage.output_tokens,
+  }
+  _toolTokenAccumulator.input  += result.inputTokens
+  _toolTokenAccumulator.output += result.outputTokens
+  return result
+}
+
+/**
+ * Module-level accumulator for per-tool token counts. callClaude adds to it;
+ * the orchestrator's executeTool dispatch drains it after each tool call so
+ * the totals can be attributed to the right ToolCallTrace entry.
+ */
+let _toolTokenAccumulator = { input: 0, output: 0 }
+
+/** Drain the accumulator and return the delta. Resets on read. */
+export function drainToolTokens(): { input: number; output: number } {
+  const out = _toolTokenAccumulator
+  _toolTokenAccumulator = { input: 0, output: 0 }
+  return out
+}
 
 // Tiered models: HAIKU for short/templated copy (~20× cheaper), SONNET for
 // long-form narrative and structured tasks (full_story, specs, schedule, blog).
@@ -28,7 +107,7 @@ Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy.
 Write as a trusted, funny friend who isn't embarrassed about the topic. Your goal is to welcome first-time buyers and delight experienced ones.
 Keep all copy tasteful. Suggestive is fine, explicit is not.
 Always signal discretion, value, and trust.
-Never use "sex" as an adjective. Use "intimate", "pleasure", or "wellness".
+Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait.
 Never assume the reader's experience level.
 Always end descriptions with a curiosity hook that makes the reader want to try it.
 
@@ -52,16 +131,16 @@ async function generate(
   prompt: string,
   maxTokens = 1024,
   model: string = MODEL,
+  llmClient?: LLMClient,
 ): Promise<string> {
-  const msg = await client.messages.create({
+  const { text } = await callClaude({
+    llmClient,
     model,
-    max_tokens: maxTokens,
+    maxTokens,
     system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: prompt }],
+    userPrompt: prompt,
   })
-  const block = msg.content[0]
-  if (block?.type !== 'text') throw new Error('Unexpected Claude response type')
-  return block.text
+  return text
 }
 
 /**
@@ -111,7 +190,7 @@ function resolveSeoContentType(type: GenerateCopyRequest['type']): SeoContentTyp
   return 'pdp'
 }
 
-export async function generateCopy(req: GenerateCopyRequest): Promise<GenerateCopyResult> {
+export async function generateCopy(req: GenerateCopyRequest, llmClient?: LLMClient): Promise<GenerateCopyResult> {
   const { type, product } = req
 
   // Resolve optional editorial author. Emma is implied by the default brand voice;
@@ -145,14 +224,14 @@ export async function generateCopy(req: GenerateCopyRequest): Promise<GenerateCo
       const primaryPrompt = `Write 3 one-sentence taglines for the following product. Be genuinely funny — irreverent, witty, puns welcome. Think: a comedian friend who loves these products and has zero shame. Tasteful but not boring. Max 12 words each. Return as a JSON array of strings (no markdown).\n\n${productContext}`
       const retryPrompt   = `Return exactly one short funny sentence as a product tagline. No JSON, no newlines, no lists, no quotes. Just the sentence.\n\n${productContext}`
 
-      const raw = await generate(primaryPrompt, 1024, MODEL_FAST)
+      const raw = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient)
       try {
         const parsed = JSON.parse(stripFences(raw)) as string[]
         const first = Array.isArray(parsed) ? parsed.find(s => typeof s === 'string' && s.trim()) : null
         if (first) return { type, content: parsed }
       } catch { /* fall through to retry */ }
 
-      const retried = await generate(retryPrompt, 1024, MODEL_FAST)
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST, llmClient)
       const line = retried.trim().split('\n')[0]?.trim()
       if (line) return { type, content: [line] }
 
@@ -227,13 +306,13 @@ ${productContext}`
       const primaryPrompt = `Write 4–6 feature bullet points for this product. Short, specific, benefit-first. No fluff. Return as a JSON array of strings.\n\n${productContext}`
       const retryPrompt   = `Return ONLY a JSON array of 4 to 5 short benefit strings. Example: ["Dual motors for blended stimulation", "Whisper-quiet for total privacy"]. Nothing else — no markdown, no prose.\n\n${productContext}`
 
-      const raw = await generate(primaryPrompt, 1024, MODEL_FAST)
+      const raw = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient)
       try {
         const parsed = JSON.parse(stripFences(raw)) as string[]
         if (Array.isArray(parsed) && parsed.length >= 3) return { type, content: parsed }
       } catch { /* fall through */ }
 
-      const retried = await generate(retryPrompt, 1024, MODEL_FAST)
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST, llmClient)
       try {
         const parsed = JSON.parse(stripFences(retried)) as string[]
         if (Array.isArray(parsed) && parsed.length >= 3) return { type, content: parsed }
@@ -267,11 +346,11 @@ ${productContext}`
       const primaryPrompt = `Write a 140–155 character SEO meta description for this product. Format: "[Discount or 'Best price']. [1-sentence benefit]. Ships discreet. $[price] at xdipx." Return only the meta description, no quotes.\n\n${productContext}`
       const retryPrompt   = `Write a single SEO meta description between 140 and 155 characters. Return only the description — no quotes, no labels, no explanation.\n\n${productContext}`
 
-      const text = await generate(primaryPrompt, 1024, MODEL_FAST)
+      const text = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient)
       const cleaned = text.replace(/^["']|["']$/g, '').trim()
       if (cleaned.length >= 50) return { type, content: cleaned.slice(0, 155) }
 
-      const retried = await generate(retryPrompt, 1024, MODEL_FAST)
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST, llmClient)
       const cleanedRetry = retried.replace(/^["']|["']$/g, '').trim()
       if (cleanedRetry.length >= 50) return { type, content: cleanedRetry.slice(0, 155) }
 
@@ -283,13 +362,13 @@ ${productContext}`
       const primaryPrompt = `Extract what is physically included in the box for this product from the description below. Return a JSON array of short strings (one item per element), e.g. ["1x vibrator", "1x USB charging cable", "1x storage pouch"]. If the description doesn't mention box contents, infer the most likely inclusions based on the product type. Return only the JSON array, no markdown.\n\n${productContext}`
       const retryPrompt   = `Return ONLY a JSON array of what's in the box. Example: ["1x vibrator", "1x USB cable"]. Nothing else — no markdown, no prose, no explanation.\n\n${productContext}`
 
-      const raw = await generate(primaryPrompt, 1024, MODEL_FAST)
+      const raw = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient)
       try {
         const parsed = JSON.parse(stripFences(raw)) as string[]
         if (Array.isArray(parsed) && parsed.length >= 1) return { type, content: parsed }
       } catch { /* fall through */ }
 
-      const retried = await generate(retryPrompt, 1024, MODEL_FAST)
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST, llmClient)
       try {
         const parsed = JSON.parse(stripFences(retried)) as string[]
         if (Array.isArray(parsed) && parsed.length >= 1) return { type, content: parsed }
@@ -323,13 +402,13 @@ ${productContext}`
           && typeof obj.bannerHeadline === 'string' && obj.bannerHeadline.trim().length > 0
       }
 
-      const raw = await generate(primaryPrompt, 512, MODEL_FAST)
+      const raw = await generate(primaryPrompt, 512, MODEL_FAST, llmClient)
       try {
         const parsed = JSON.parse(stripFences(raw))
         if (isValid(parsed)) return { type, content: parsed }
       } catch { /* fall through */ }
 
-      const retried = await generate(retryPrompt, 512, MODEL_FAST)
+      const retried = await generate(retryPrompt, 512, MODEL_FAST, llmClient)
       try {
         const parsed = JSON.parse(stripFences(retried))
         if (isValid(parsed)) return { type, content: parsed }
@@ -462,13 +541,13 @@ ${pairContext}`
         generatedAt:  nowISO(),
       })
 
-      const raw = await generate(primaryPrompt, 1800, MODEL_FAST)
+      const raw = await generate(primaryPrompt, 1800, MODEL_FAST, llmClient)
       try {
         const parsed = JSON.parse(stripFences(raw))
         if (isValid(parsed)) return { type, content: wrap(parsed) }
       } catch { /* fall through */ }
 
-      const retried = await generate(retryPrompt, 1800, MODEL_FAST)
+      const retried = await generate(retryPrompt, 1800, MODEL_FAST, llmClient)
       try {
         const parsed = JSON.parse(stripFences(retried))
         if (isValid(parsed)) return { type, content: wrap(parsed) }
@@ -715,6 +794,7 @@ export interface GenerateProductTitleInput {
   /** Pre-rendered <keyword_targets> XML block from buildKeywordBlock — saves
    *  a Sanity round-trip when the caller already built it. Pass '' to skip. */
   keywordBlock?:   string
+  llmClient?:      LLMClient
 }
 
 export interface GenerateProductTitleResult {
@@ -733,13 +813,22 @@ const PRODUCT_TYPE_DESCRIPTOR_FALLBACK: Record<ProductTypeDial, string> = {
 }
 
 /**
- * Decide whether to augment a manufacturer's product title with an SEO
- * descriptor. Preserves branded names verbatim ("Sona 2 Cruise") and only
- * appends ONE category descriptor to abstract titles ("Eclipse 7" → "Eclipse 7
- * Wand Vibrator"). Never invents claims.
+ * Compose a factual, SEO-friendly product title from the manufacturer's raw
+ * title + description. Pulls descriptors (material, format, category, size /
+ * variant) from the source description and assembles them in a standardized
+ * order so titles read consistently across the catalog.
  *
- * Runs Sonnet (the decision is nuanced — Haiku gets fooled by "Couples Kit").
- * Hard-cap final title at 70 chars.
+ * Examples:
+ *   "Edible G-String"        → "Edible Candy G-String Underwear One-Size"
+ *   "JO H2O Original 16oz"   → "H2O Original Water-Based Personal Lubricant 16oz"
+ *   "Sona 2 Cruise" (branded model — preserve) → "Sona 2 Cruise Sonic Clitoral Massager"
+ *   "Eclipse 7"   (numbered abstract — augment)→ "Eclipse 7 Rechargeable Wand Vibrator"
+ *
+ * Brand is NOT prepended (the PDP shows the brand above the title).
+ * Plain factual tone — not Emma voice. Hard cap 70 chars.
+ *
+ * Runs Sonnet — the descriptor extraction + branded-model-preservation balance
+ * is nuanced enough to fool Haiku on "Couples Kit"-shaped inputs.
  */
 export async function generateProductTitle(
   input: GenerateProductTitleInput,
@@ -747,43 +836,33 @@ export async function generateProductTitle(
   const original = input.rawTitle.trim()
   const fallbackDescriptor = PRODUCT_TYPE_DESCRIPTOR_FALLBACK[input.productTypeDial] ?? 'Vibrator'
 
-  // Cheap heuristic short-circuit: titles that already contain a category word
-  // get returned as-is without burning a Claude call. Saves ~half the catalog
-  // from the API hit while still letting Sonnet make the close calls.
-  const PRODUCT_TYPE_WORDS = /\b(vibrator|wand|massager|stimulator|stroker|lube|lubricant|gel|harness|plug|ring|sleeve|kit|set|bullet|toy|cleaner|warming|cooling|edible|wearable|panty|dildo)\b/i
-  if (PRODUCT_TYPE_WORDS.test(original) && original.length >= 12) {
-    return {
-      title:         original.slice(0, 70),
-      augmented:     false,
-      originalTitle: original,
-      reason:        'title already descriptive',
-    }
-  }
-
   const keywordBlock = input.keywordBlock ?? ''
-  const userPrompt = `Decide whether this manufacturer product title needs an SEO descriptor appended.
+  const userPrompt = `Compose an SEO-friendly product title for this product. Pull descriptors (material, format, category, size / variant) from the manufacturer's description and assemble them in this standardized order:
+
+  [Material / Feature] [Original Manufacturer Name] [Category Noun] [Size / Variant]
 
 Raw manufacturer title: "${input.rawTitle}"
-Brand / vendor: ${input.brand || input.vendor || '(unknown)'}
 Product type (dial): ${input.productTypeDial}
-${input.rawDescription ? `Description (first 400 chars): ${input.rawDescription.slice(0, 400)}` : ''}
+${input.rawDescription ? `Manufacturer description (first 600 chars):\n${input.rawDescription.slice(0, 600)}` : '(no description provided)'}
 ${keywordBlock || ''}
 
 Rules (in priority order):
-1. PRESERVE branded names verbatim — never rewrite "Sona 2 Cruise", "Magic Wand Original", numbered model names. Treat the manufacturer's chosen name as a proper noun.
-2. LEAVE FULLY-DESCRIPTIVE titles alone — if the title already contains a product-type word ("wand", "vibrator", "lube", "harness", "plug", "ring", "stimulator", "massager", "kit", "set", etc.) OR a clear functional descriptor, return augmented=false with the original title.
-3. AUGMENT abstract titles — when no descriptor is present, APPEND ONE concise descriptor after the branded name with a single space (no em-dash, no colon). Example: "Eclipse 7" → "Eclipse 7 Wand Vibrator".
-4. Pull the descriptor from the dial classification + (if a <keyword_targets> block is provided) primary keyword terms that match this dial. If nothing matches, fall back to: ${fallbackDescriptor}.
-5. NEVER invent claims — descriptors describe form factor / category only, not benefits ("quiet", "rechargeable", etc.).
-6. Cap final title at 70 chars total.
-7. NEVER use em-dashes ("—") or en-dashes ("–"). Hyphens in compound words ("soft-touch") are fine.
+1. PRESERVE branded model names verbatim — "Sona 2 Cruise", "Magic Wand Original", numbered model names. Treat the manufacturer's chosen name as a proper noun. You may APPEND descriptors after the branded name; never rewrite the name itself.
+2. NO BRAND PREFIX — the PDP shows the brand above the title, so don't include "Hott Products" / "System JO" / "Lelo" etc. Start with the material / feature descriptor or the product name.
+3. PULL descriptors from the description, not from imagination. If the description doesn't say "silicone" or "rechargeable", don't add those words.
+4. CATEGORY NOUN — every title ends with (or contains) a clear category word: "Underwear", "Vibrator", "Wand", "Lube", "Lubricant", "Plug", "Massager", "Sleeve", "Kit", etc. If you can't determine one from the description, fall back to: ${fallbackDescriptor}.
+5. SIZE / VARIANT — append size or volume when stated ("16oz", "One-Size", "Medium", "12-Pack"). Skip if not in the source.
+6. PLAIN FACTUAL TONE — no Emma personality, no marketing puffery, no benefit claims ("luxurious", "intense"). Just descriptors.
+7. NEVER use em-dashes ("—") or en-dashes ("–"). Hyphens in compound words ("water-based", "soft-touch") are fine.
+8. Cap final title at 70 characters total. Trim least-informative descriptor first if over.
+9. \`augmented\` should be \`true\` when the new title differs from the raw manufacturer title (which is almost always); \`false\` only when no useful descriptors could be extracted and you preserved the original as-is.
 
 Return ONLY raw JSON (no markdown):
 {"title":"<final title>","augmented":<true|false>,"reason":"<one short sentence>"}`
 
   let raw: string
   try {
-    raw = await generate(userPrompt, 256, MODEL)
+    raw = await generate(userPrompt, 256, MODEL, input.llmClient)
   } catch (err) {
     console.warn('[generateProductTitle] Claude call failed, falling back to raw title:', err instanceof Error ? err.message : err)
     return {
@@ -836,6 +915,7 @@ export interface GeneratePairingWhyInput {
     description?:    string
   }
   candidates: PairingCandidateInput[]
+  llmClient?:        LLMClient
 }
 
 /**
@@ -883,7 +963,7 @@ Return ONLY raw JSON (no markdown):
 
   let raw: string
   try {
-    raw = await generate(userPrompt, 800, MODEL)
+    raw = await generate(userPrompt, 800, MODEL, input.llmClient)
   } catch (err) {
     console.warn('[generatePairingWhy] Claude call failed:', err instanceof Error ? err.message : err)
     return { accessoryProductIds: [], pairingWhy: {} }
@@ -927,7 +1007,7 @@ export async function generateTweetCopy(deal: {
   msrp: number
   category: string
   handle: string
-}): Promise<{ mainTweet: string; threadReply?: string }> {
+}, llmClient?: LLMClient): Promise<{ mainTweet: string; threadReply?: string }> {
   const discountPct = deal.msrp > 0
     ? Math.round(100 - (deal.dealPrice / deal.msrp) * 100)
     : 0
@@ -972,11 +1052,11 @@ Product: ${deal.brand} ${deal.title} — $${deal.dealPrice} (was $${deal.msrp})`
     return null
   }
 
-  const first = await generate(primaryPrompt, 512, MODEL_FAST)
+  const first = await generate(primaryPrompt, 512, MODEL_FAST, llmClient)
   const firstParsed = tryParse(first)
   if (firstParsed) return firstParsed
 
-  const retried = await generate(retryPrompt, 512, MODEL_FAST)
+  const retried = await generate(retryPrompt, 512, MODEL_FAST, llmClient)
   const secondParsed = tryParse(retried)
   if (secondParsed) return secondParsed
 
@@ -1387,7 +1467,7 @@ export interface BlogSEOSuggestion {
 
 // ─── Emma Hero (homepage) ─────────────────────────────────────────────────
 
-const DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful — suggestive is fine, explicit is not. Never use "sex" as an adjective — use "intimate", "pleasure", or "wellness". Never "Buy now" — use "Take a peek →" or "I'll take it ♥". Never surface a countdown or "until midnight." Always include a short first-person aside ("been living on my desk," "telling everyone about this combo"). Never assume the reader's experience level.`
+const DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful — suggestive is fine, explicit is not. Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait. Never "Buy now" — use "Take a peek →" or "I'll take it ♥". Never surface a countdown or "until midnight." Always include a short first-person aside ("been living on my desk," "telling everyone about this combo"). Never assume the reader's experience level.`
 
 const EMMA_SYSTEM_PROMPT = `You are Emma — the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You test everything you recommend. You write in first person, warm and specific, like a note to a friend.`
 
@@ -1410,6 +1490,7 @@ export async function generateEmmaHero(opts: {
   variant?: EmmaHeroVariant
   /** Optional override — otherwise pulled from pipelineSettings.brandVoice. */
   brandVoice?: string
+  llmClient?:  LLMClient
 }): Promise<EmmaHeroCopy> {
   const variant = opts.variant ?? (opts.deal.mapRestricted ? 'quote' : 'loving')
   const brandVoice = opts.brandVoice ?? (await getPipelineSetting('brandVoice')) ?? DEFAULT_BRAND_VOICE
@@ -1446,15 +1527,14 @@ Return ONLY this JSON (no markdown):
   async function attempt(tries = 2): Promise<EmmaHeroCopy> {
     for (let i = 0; i < tries; i++) {
       try {
-        const msg = await client.messages.create({
-          model: MODEL,
-          max_tokens: 800,
+        const { text } = await callClaude({
+          llmClient: opts.llmClient,
+          model:     MODEL,
+          maxTokens: 800,
           system,
-          messages: [{ role: 'user', content: user }],
+          userPrompt: user,
         })
-        const block = msg.content[0]
-        if (block?.type !== 'text') throw new Error('non-text response')
-        const parsed = JSON.parse(stripFences(block.text)) as Partial<EmmaHeroCopy>
+        const parsed = JSON.parse(stripFences(text)) as Partial<EmmaHeroCopy>
         if (parsed.eyebrow && parsed.headline && parsed.body && parsed.aside) {
           const out: EmmaHeroCopy = {
             variant,
@@ -1567,6 +1647,7 @@ Return only the JSON object, no markdown.`,
 export async function generateEmmaTake(opts: {
   deal: Pick<Deal, 'seoTitle' | 'tagline' | 'fullStory' | 'brand' | 'category' | 'productTypeDial'>
   brandVoice?: string
+  llmClient?:  LLMClient
 }): Promise<string> {
   const brandVoice = opts.brandVoice ?? (await getPipelineSetting('brandVoice')) ?? DEFAULT_BRAND_VOICE
   const system = `${EMMA_SYSTEM_PROMPT}\n\n${brandVoice}`
@@ -1587,7 +1668,7 @@ Cover, in this order, in your own voice (no headings, just flowing paragraphs):
 3. How to get the most out of it — a tip Emma would whisper to a friend.
 
 Constraints:
-- 120–200 words total. Two short paragraphs maximum.
+- Under 100 words total. One paragraph (or two very short ones, max). The PDP shows this above a "...more" expand fold; staying tight means readers see all three beats without clicking.
 - Return clean HTML — only <p>, <em>, <strong> tags. No headings, no <ul>, no inline styles, no class attrs.
 - First-person Emma voice throughout. No "Buy now". No countdowns. No clinical language.
 - Do NOT mention price, MAP, or discounts.
@@ -1596,15 +1677,14 @@ Constraints:
 Return ONLY the HTML — no markdown, no fences, no preamble.`
 
   try {
-    const msg = await client.messages.create({
-      model: MODEL,
-      max_tokens: 800,
+    const { text } = await callClaude({
+      llmClient: opts.llmClient,
+      model:     MODEL,
+      maxTokens: 800,
       system,
-      messages: [{ role: 'user', content: user }],
+      userPrompt: user,
     })
-    const block = msg.content[0]
-    if (block?.type !== 'text') throw new Error('non-text response')
-    return stripFences(block.text).trim()
+    return stripFences(text).trim()
   } catch (err) {
     console.error('[generateEmmaTake] failed:', err)
     throw err
@@ -1612,12 +1692,44 @@ Return ONLY the HTML — no markdown, no fences, no preamble.`
 }
 
 /**
- * Generate 3–5 short imperative care bullets for a product. Haiku-fast.
+ * Generate care instructions for a product. Branches on `productTypeDial`:
+ *
+ *   - Hardware (vibrator / wand / air-pulsation / wear non-edible): 3–5 short
+ *     imperative bullets covering cleaning, charging, storage, lube
+ *     compatibility, what to avoid. Practical, technical.
+ *
+ *   - Consumables (lube, edible wear): 2–3 fun + SEO-friendly bullets that
+ *     read more like "how to enjoy / where to keep it" than maintenance
+ *     instructions. The product takes care of you, not the other way around.
+ *
+ * Lube and edible wear used to be skipped entirely; with the consumable
+ * branch they get something tasteful in the empty Care card.
  */
 export async function generateCareInstructions(opts: {
-  deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'specifications'>
+  deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'specifications' | 'fullStory'>
+  llmClient?: LLMClient
 }): Promise<CareInstructions> {
-  const user = `Write 3 to 5 short care instructions for this product. Each is one short imperative sentence — under 14 words.
+  const isConsumable = opts.deal.productTypeDial === 'lube'
+    // future-proof: edible wear (when classified) lands here too once the dial gets a finer split.
+
+  const user = isConsumable
+    ? `Write 2 or 3 short care/storage bullets for this consumable product. Each is one playful, SEO-friendly sentence — under 16 words. Goal: fill the PDP "Care" card with something genuinely useful and a little fun, NOT a maintenance manual.
+
+Product:
+- Title: ${opts.deal.seoTitle}
+- Type: ${opts.deal.productTypeDial}
+${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
+
+Tone:
+- This stuff takes care of you more than you take care of it.
+- Cover what actually matters: where to keep it, when to use it, how it plays with toys / condoms / skin (if relevant), shelf life.
+- Specific, brand-voice, not clinical. Think "store wherever you intend to use it most" not "store in a cool, dry place."
+- The word "sex" or "sexy" is allowed where it fits naturally and helps SEO.
+- No em-dashes ("—" or "–"). Use periods, commas, or parentheses.
+
+Return ONLY a JSON array of strings (2–3 items). Example: ["Stays slick from morning shower to midnight nightstand.", "Plays well with silicone toys, latex condoms, and sensitive skin."]
+No markdown, no fences, no commentary.`
+    : `Write 3 to 5 short care instructions for this product. Each is one short imperative sentence — under 14 words.
 
 Product:
 - Title: ${opts.deal.seoTitle}
@@ -1627,30 +1739,129 @@ ${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ''}
 ${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 500)}` : ''}
 
 Cover what actually matters for this object — cleaning, charging/storage, lube compatibility (where relevant), what to avoid. Practical, not clinical.
+No em-dashes ("—" or "–"). Use periods, commas, or parentheses.
 
 Return ONLY a JSON array of strings. Example: ["Wipe with mild soap and warm water after each use.", "Air-dry before storing in the included pouch."]
 No markdown, no fences, no commentary.`
 
   try {
-    const msg = await client.messages.create({
-      model: MODEL_FAST,
-      max_tokens: 400,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: user }],
+    const { text } = await callClaude({
+      llmClient: opts.llmClient,
+      model:     MODEL_FAST,
+      maxTokens: 400,
+      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user,
     })
-    const block = msg.content[0]
-    if (block?.type !== 'text') throw new Error('non-text response')
-    const parsed = JSON.parse(stripFences(block.text)) as unknown
+    const parsed = JSON.parse(stripFences(text)) as unknown
     if (!Array.isArray(parsed)) throw new Error('expected array')
     const bullets = parsed
       .filter((x): x is string => typeof x === 'string')
       .map(s => s.trim())
-      .filter(s => s.length > 0 && s.length <= 140)
+      .filter(s => s.length > 0 && s.length <= 160)
       .slice(0, 5)
-    if (bullets.length < 3) throw new Error(`only ${bullets.length} valid bullets returned`)
+    const minRequired = isConsumable ? 2 : 3
+    if (bullets.length < minRequired) throw new Error(`only ${bullets.length} valid bullets returned (needed ${minRequired})`)
     return bullets
   } catch (err) {
     console.error('[generateCareInstructions] failed:', err)
+    throw err
+  }
+}
+
+/**
+ * Product FAQ — shape matches `studio/schemas/blocks/productFaq.js`. Stored on
+ * `productPage.productFaqs[]`, rendered visibly on the PDP and emitted as
+ * FAQPage JSON-LD. Visible answer text MUST equal the structured-data answer
+ * text (Google flags hidden-content schemas).
+ */
+export type ProductFaq = {
+  question: string
+  answer:   string
+  category: 'general' | 'care' | 'usage' | 'compatibility' | 'shipping'
+}
+
+const PRODUCT_FAQ_CATEGORIES = ['general', 'care', 'usage', 'compatibility', 'shipping'] as const
+
+/**
+ * Generate 4–6 product FAQs covering general / usage / care (mandatory) plus
+ * compatibility and shipping where they apply. Powers the PDP "FAQs / Q&A"
+ * card AND the FAQPage JSON-LD that Google + LLM citers consume.
+ *
+ * Sonnet — answers benefit from rich product context.
+ */
+export async function generateProductFaqs(opts: {
+  deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'specifications' | 'fullStory' | 'tagline' | 'moodTags' | 'audienceTags' | 'mattersTags'>
+  llmClient?: LLMClient
+}): Promise<ProductFaq[]> {
+  const tagsLine = [
+    opts.deal.moodTags?.length    ? `mood: ${opts.deal.moodTags.join(', ')}`         : '',
+    opts.deal.audienceTags?.length ? `audience: ${opts.deal.audienceTags.join(', ')}` : '',
+    opts.deal.mattersTags?.length  ? `matters: ${opts.deal.mattersTags.join(', ')}`   : '',
+  ].filter(Boolean).join(' / ')
+
+  const user = `Generate 4 to 6 FAQs for this product's PDP. They render visibly AND get emitted as FAQPage JSON-LD — visible text must match structured text (no hidden content).
+
+Product:
+- Title: ${opts.deal.seoTitle}
+- Brand: ${opts.deal.brand}
+- Category: ${opts.deal.category}
+${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ''}
+${opts.deal.tagline ? `- Tagline (context): ${opts.deal.tagline}` : ''}
+${tagsLine ? `- Tags: ${tagsLine}` : ''}
+${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 500)}` : ''}
+${opts.deal.fullStory ? `- Existing story (context, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 600)}` : ''}
+
+Coverage requirements:
+- AT LEAST ONE \`general\` FAQ (what is it, who it's for).
+- AT LEAST ONE \`usage\` FAQ (how to use it, when, with whom).
+- AT LEAST ONE \`care\` FAQ (cleaning / storage / battery / shelf life — whichever fits).
+- OPTIONAL \`compatibility\` FAQ — only when relevant: lube↔toy materials, sleeve sizing, app/Bluetooth requirements, condom safety.
+- OPTIONAL \`shipping\` FAQ — only for products with non-standard shipping (oversize, restricted regions). Otherwise SKIP this category entirely.
+
+Question rules:
+- Full natural-language sentences ("How long does it take to charge?") — never keyword fragments.
+- Each question 10–160 chars. Each unique — no duplicate Q across products.
+- Phrase the way a real customer would type into search or ask out loud.
+
+Answer rules:
+- 1–3 sentences, 40–800 chars. Emma voice — friendly, factual, specific.
+- Plain text only. No markdown, no HTML, no URLs, no emoji.
+- NO em-dashes ("—" or "–"). Use periods, commas, or parentheses instead.
+- The word "sex" or "sexy" is allowed where it fits naturally and helps SEO discovery.
+- Don't invent specs not in the source (no fabricated battery life, dimensions, materials).
+
+Return ONLY raw JSON (no markdown). An array of objects: [{ "question": "...", "answer": "...", "category": "general|care|usage|compatibility|shipping" }, ...]`
+
+  try {
+    const { text } = await callClaude({
+      llmClient: opts.llmClient,
+      model:     MODEL,
+      maxTokens: 2000,
+      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user,
+    })
+    const parsed = JSON.parse(stripFences(text)) as unknown
+    if (!Array.isArray(parsed)) throw new Error('expected array')
+
+    const faqs: ProductFaq[] = []
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== 'object') continue
+      const e = entry as { question?: unknown; answer?: unknown; category?: unknown }
+      const question = typeof e.question === 'string' ? e.question.trim() : ''
+      const answer   = typeof e.answer   === 'string' ? e.answer.trim()   : ''
+      const category = typeof e.category === 'string' ? e.category.trim() : ''
+      if (question.length < 10 || question.length > 160) continue
+      if (answer.length   < 40 || answer.length   > 800) continue
+      if (!(PRODUCT_FAQ_CATEGORIES as readonly string[]).includes(category)) continue
+      faqs.push({ question, answer, category: category as ProductFaq['category'] })
+    }
+
+    // Cap to top 6 in case model overproduced; require min 3 to consider it useful.
+    const trimmed = faqs.slice(0, 6)
+    if (trimmed.length < 3) throw new Error(`only ${trimmed.length} valid FAQs returned`)
+    return trimmed
+  } catch (err) {
+    console.error('[generateProductFaqs] failed:', err)
     throw err
   }
 }
@@ -1674,6 +1885,7 @@ export async function generateSensationDialV2(opts: {
     scaleMid?:  string
     scaleHigh?: string
   }>
+  llmClient?: LLMClient
 }): Promise<SensationDialV2> {
   const type: ProductTypeDial = opts.deal.productTypeDial ?? 'vibrator'
 
@@ -1728,16 +1940,15 @@ Rules:
 - Keep labels under 24 chars, sentence case, no trailing punctuation.
 - Honest scoring — don't max everything. Use the dimension scale docs above (when present) to anchor "what 3 vs 5 means" — consistency across products matters.`
 
-  const msg = await client.messages.create({
-    model: MODEL_FAST,
-    max_tokens: 600,
-    system: EMMA_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: user }],
+  const { text } = await callClaude({
+    llmClient: opts.llmClient,
+    model:     MODEL_FAST,
+    maxTokens: 600,
+    system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+    userPrompt: user,
   })
-  const block = msg.content[0]
-  if (block?.type !== 'text') throw new Error('non-text response')
 
-  const parsed = JSON.parse(stripFences(block.text)) as { items?: Array<{ label?: unknown; value?: unknown; proposed?: unknown }> }
+  const parsed = JSON.parse(stripFences(text)) as { items?: Array<{ label?: unknown; value?: unknown; proposed?: unknown }> }
   if (!parsed.items || !Array.isArray(parsed.items)) throw new Error('missing items array')
 
   const seen = new Set<string>()
@@ -1774,6 +1985,7 @@ export async function inferProductTypeDial(input: {
   brand: string
   description: string
   categories: string[]
+  llmClient?: LLMClient
 }): Promise<ProductTypeDial> {
   const user = `Classify the product into ONE of these buckets (return exactly one):
 - air-pulsation  (clitoral suction / air-pulse / pressure-wave devices)
@@ -1792,15 +2004,14 @@ Return ONLY this JSON: { "type": "vibrator" }
 No markdown. No commentary.`
 
   try {
-    const msg = await client.messages.create({
-      model: MODEL_FAST,
-      max_tokens: 60,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: user }],
+    const { text } = await callClaude({
+      llmClient: input.llmClient,
+      model:     MODEL_FAST,
+      maxTokens: 60,
+      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user,
     })
-    const block = msg.content[0]
-    if (block?.type !== 'text') throw new Error('non-text response')
-    const parsed = JSON.parse(stripFences(block.text)) as { type?: unknown }
+    const parsed = JSON.parse(stripFences(text)) as { type?: unknown }
     const t = typeof parsed.type === 'string' ? parsed.type.trim().toLowerCase() : ''
     if (PRODUCT_TYPE_DIALS.includes(t as ProductTypeDial)) return t as ProductTypeDial
   } catch (err) {
@@ -1828,6 +2039,7 @@ export async function generateAskEmmaTags(opts: {
   axis: AskEmmaAxis
   /** Current vocabulary for this axis (from Sanity askEmmaVocabulary). */
   preferredLabels: string[]
+  llmClient?: LLMClient
 }): Promise<string[]> {
   const { deal, axis, preferredLabels } = opts
 
@@ -1859,15 +2071,14 @@ Rules:
 Return ONLY this JSON (no markdown): { "tags": ["slug-one", "slug-two"] }`
 
   try {
-    const msg = await client.messages.create({
-      model: MODEL_FAST,
-      max_tokens: 200,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: user }],
+    const { text } = await callClaude({
+      llmClient: opts.llmClient,
+      model:     MODEL_FAST,
+      maxTokens: 200,
+      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user,
     })
-    const block = msg.content[0]
-    if (block?.type !== 'text') throw new Error('non-text response')
-    const parsed = JSON.parse(stripFences(block.text)) as { tags?: unknown }
+    const parsed = JSON.parse(stripFences(text)) as { tags?: unknown }
     if (!Array.isArray(parsed.tags)) return []
 
     const seen = new Set<string>()
@@ -1917,7 +2128,7 @@ function ivrProductBlock(deal: IvrDealCtx): string {
 }
 
 /** Single experience-level enum: who this product fits best. */
-export async function generateIvrExperience(opts: { deal: IvrDealCtx }): Promise<IvrExperience> {
+export async function generateIvrExperience(opts: { deal: IvrDealCtx; llmClient?: LLMClient }): Promise<IvrExperience> {
   const user = `Pick the experience level this product fits best. One of: ${IVR_EXPERIENCE_LEVELS.join(' | ')}.
 
 Use "first-time" for beginner-friendly products (gentle, simple controls, low intensity).
@@ -1931,15 +2142,14 @@ ${ivrProductBlock(opts.deal)}
 Return ONLY this JSON (no markdown): { "level": "first-time" }`
 
   try {
-    const msg = await client.messages.create({
-      model: MODEL_FAST,
-      max_tokens: 60,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: user }],
+    const { text } = await callClaude({
+      llmClient: opts.llmClient,
+      model:     MODEL_FAST,
+      maxTokens: 60,
+      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user,
     })
-    const block = msg.content[0]
-    if (block?.type !== 'text') throw new Error('non-text response')
-    const parsed = JSON.parse(stripFences(block.text)) as { level?: unknown }
+    const parsed = JSON.parse(stripFences(text)) as { level?: unknown }
     const lvl = typeof parsed.level === 'string' ? parsed.level.trim().toLowerCase() : ''
     if ((IVR_EXPERIENCE_LEVELS as readonly string[]).includes(lvl)) return lvl as IvrExperience
   } catch (err) {
@@ -1949,7 +2159,7 @@ Return ONLY this JSON (no markdown): { "level": "first-time" }`
 }
 
 /** 1–3 use-case slugs from a fixed vocabulary, voice-friendly. */
-export async function generateIvrUseCase(opts: { deal: IvrDealCtx }): Promise<string[]> {
+export async function generateIvrUseCase(opts: { deal: IvrDealCtx; llmClient?: LLMClient }): Promise<string[]> {
   const user = `Pick 1–3 use cases this product fits, from this exact vocabulary:
 ${IVR_USE_CASES.map(s => `- ${s}`).join('\n')}
 
@@ -1960,15 +2170,14 @@ ${ivrProductBlock(opts.deal)}
 Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`
 
   try {
-    const msg = await client.messages.create({
-      model: MODEL_FAST,
-      max_tokens: 100,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: user }],
+    const { text } = await callClaude({
+      llmClient: opts.llmClient,
+      model:     MODEL_FAST,
+      maxTokens: 100,
+      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user,
     })
-    const block = msg.content[0]
-    if (block?.type !== 'text') throw new Error('non-text response')
-    const parsed = JSON.parse(stripFences(block.text)) as { useCases?: unknown }
+    const parsed = JSON.parse(stripFences(text)) as { useCases?: unknown }
     if (!Array.isArray(parsed.useCases)) return []
     const allowed = new Set<string>(IVR_USE_CASES as readonly string[])
     const seen = new Set<string>()
@@ -1989,7 +2198,7 @@ Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`
 }
 
 /** 2–4 feature slugs from a fixed voice-surface vocabulary. */
-export async function generateIvrFeatures(opts: { deal: IvrDealCtx }): Promise<string[]> {
+export async function generateIvrFeatures(opts: { deal: IvrDealCtx; llmClient?: LLMClient }): Promise<string[]> {
   const user = `Pick 2–4 features that are TRUE for this product, from this exact vocabulary:
 ${IVR_FEATURES.map(s => `- ${s}`).join('\n')}
 
@@ -2000,15 +2209,14 @@ ${ivrProductBlock(opts.deal)}
 Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`
 
   try {
-    const msg = await client.messages.create({
-      model: MODEL_FAST,
-      max_tokens: 120,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: user }],
+    const { text } = await callClaude({
+      llmClient: opts.llmClient,
+      model:     MODEL_FAST,
+      maxTokens: 120,
+      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user,
     })
-    const block = msg.content[0]
-    if (block?.type !== 'text') throw new Error('non-text response')
-    const parsed = JSON.parse(stripFences(block.text)) as { features?: unknown }
+    const parsed = JSON.parse(stripFences(text)) as { features?: unknown }
     if (!Array.isArray(parsed.features)) return []
     const allowed = new Set<string>(IVR_FEATURES as readonly string[])
     const seen = new Set<string>()
