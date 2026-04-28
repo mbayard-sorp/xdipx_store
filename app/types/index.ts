@@ -199,7 +199,11 @@ export interface Deal {
   worksForHim: string
   worksForHer: string
   boxContents: string[]
-  specifications?: string
+  /** Phase 2 — string[] of "Label: Value" spec bullet pairs (e.g.
+   *  ["Color: Black", "Material: Nylon straps"]). Mirrors care/box bullet shape;
+   *  renders as a `<ul>` in the Specs grid card. Stored on Shopify as
+   *  xdipx.specifications (JSON-stringified). */
+  specifications?: string[]
   images: ProductImage[]
   videos: ProductVideo[]
   moodImageUrl?: string
@@ -208,7 +212,9 @@ export interface Deal {
   wholesaleCost: number
   mapPrice: number
   brand: string
-  category: 'for-him' | 'for-her' | 'both' | 'couples'
+  /** Phase 2 — multi-select. Empty array = unspecified. The legacy single-value
+   *  `'both'` is now expressed as `['for-him', 'for-her']`. */
+  category: Array<'for-him' | 'for-her' | 'couples'>
   dealStatus: 'draft' | 'scheduled' | 'live' | 'archived'
   dealDate: string
   qty: number
@@ -272,6 +278,24 @@ export interface Product {
   heroVideo?:    HeroVideo
 }
 
+/**
+ * Legacy single-value category. The canonical `Deal.category` is now an array
+ * (Phase 2 multi-select), but several legacy sinks — analytics events
+ * (`item_category`), social posts, video gen prompts, Sanity emmaCuratedRail —
+ * still want a single string. This collapses the array to the closest legacy
+ * value: 'both' when empty or split for-him+for-her, 'couples' when present,
+ * otherwise the first entry.
+ */
+export function categoryToLegacyString(
+  c: ReadonlyArray<'for-him' | 'for-her' | 'couples'> | string | undefined,
+): string {
+  if (typeof c === 'string') return c
+  if (!c || c.length === 0) return 'both'
+  if (c.includes('couples')) return 'couples'
+  if (c.length >= 2 && c.includes('for-him') && c.includes('for-her')) return 'both'
+  return c[0] ?? 'both'
+}
+
 export interface VaultDeal {
   id: string
   handle: string
@@ -281,7 +305,8 @@ export interface VaultDeal {
   msrp: number
   images: ProductImage[]
   brand: string
-  category: string
+  /** Phase 2 — multi-select audience tags. Empty array = unspecified. */
+  category: Array<'for-him' | 'for-her' | 'couples'>
   dealStatus: 'draft' | 'scheduled' | 'live' | 'archived'
   qty: number
   defaultVariantId?:    string | null

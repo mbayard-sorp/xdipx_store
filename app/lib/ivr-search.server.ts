@@ -149,7 +149,7 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
     )
 
     if (category) {
-      conditions.push('category == $cat')
+      conditions.push('$cat in category')
       groqParams.cat = category
     }
     if (priceMax != null) {
@@ -226,18 +226,20 @@ export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductC
     const boostClauses: string[] = []
 
     if (mood && mood.length > 0) {
-      const moodOr = mood.map((_, i) => `$mood${i} in ivrMood`).join(' || ')
+      const moodOr = mood.map((_, i) => `$mood${i} in moodTags`).join(' || ')
       conditions.push(`(${moodOr})`)
       mood.forEach((m, i) => {
         groqParams[`mood${i}`] = m
-        boostClauses.push(`boost($mood${i} in ivrMood, 3)`)
+        boostClauses.push(`boost($mood${i} in moodTags, 3)`)
       })
     }
 
     if (experience) {
-      conditions.push('ivrExperience == $exp')
+      // Phase 2 — ivrExperience is now string[]. Empty array means "no
+      // level constraint" so it matches every filter automatically.
+      conditions.push('(count(ivrExperience) == 0 || $exp in ivrExperience)')
       groqParams.exp = experience
-      boostClauses.push('boost(ivrExperience == $exp, 4)')
+      boostClauses.push('boost($exp in ivrExperience, 4)')
     }
 
     if (useCase && useCase.length > 0) {
@@ -259,7 +261,7 @@ export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductC
     }
 
     if (category) {
-      conditions.push('category == $cat')
+      conditions.push('$cat in category')
       groqParams.cat = category
     }
 

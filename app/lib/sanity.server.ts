@@ -1,8 +1,27 @@
 import { createClient } from '@sanity/client'
+import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
 import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock } from '~/types/cms'
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
+
+/**
+ * Sanity arrays of objects require a unique `_key` per item. Generated from
+ * a stable content hash (sha1 prefix) so re-writes are idempotent and editor
+ * hand-edits aren't replaced as "new items" on the next backfill.
+ *
+ * Falls back to an index-suffixed hash on collisions.
+ */
+function withSanityKey<T extends object>(items: T[], hashOf: (item: T) => string): (T & { _key: string })[] {
+  const seen = new Set<string>()
+  return items.map((item, i) => {
+    const base = createHash('sha1').update(hashOf(item)).digest('hex').slice(0, 12)
+    let key = base
+    if (seen.has(key)) key = `${base}${i.toString(36)}`
+    seen.add(key)
+    return { ...item, _key: key }
+  })
+}
 
 type PortableTextBlocks = Parameters<typeof toHTML>[0]
 
@@ -345,11 +364,8 @@ export async function upsertProductPage(params: {
   description?: string | undefined
   seoTitle?: string | undefined
   seoDescription?: string | undefined
-  category?: string | undefined
-  /** Today's price / MAP. Maps to productPage.mapPrice in the schema. */
-  mapPrice?: number | undefined
-  /** MSRP / compare-at. Maps to productPage.originalPrice in the schema. */
-  originalPrice?: number | undefined
+  /** Phase 2 — multi-select audience tags. */
+  category?: Array<'for-him' | 'for-her' | 'couples'> | undefined
   // Emma discovery — auto-filled by bulk-import orchestrator. Drives chat / IVR / SMS filters.
   // Phase 1 rebuild — accepts the expanded ProductTypeDial enum (19 values) plus
   // the legacy values during the transitional Sanity-migration window. Stored
@@ -363,11 +379,24 @@ export async function upsertProductPage(params: {
   audienceTags?: string[] | undefined
   mattersTags?: string[] | undefined
   // IVR / voice surfaces — purpose-built for IVR / chat / SMS where descriptionHtml can't render.
-  ivrExperience?: string | undefined
+  ivrExperience?: string[] | undefined
   ivrUseCase?: string[] | undefined
   ivrFeatures?: string[] | undefined
   // PDP FAQs — productPage.productFaqs[]. Renders visibly + emits FAQPage JSON-LD. Sanity-only.
   productFaqs?: Array<{ question: string; answer: string; category: string }> | undefined
+  // Care & Specs — mirrors of Shopify metafields (xdipx.care_instructions /
+  // .specifications / .box_contents). Source-of-truth lives on Shopify; the
+  // backfill writes both surfaces from the same orchestrator output so Sanity
+  // search projections + Studio editorial UX have the full picture.
+  careInstructions?: string[] | undefined
+  specifications?: string[] | undefined
+  boxContents?: string[] | undefined
+  // Sensation dial v2 — self-describing { items: [{label, value, proposed?}] }.
+  // Mirror of xdipx.sensation_dial_v2.
+  sensationDialV2?: { items: Array<{ label: string; value: number; proposed?: boolean }> } | undefined
+  /** Manufacturer's verbatim title — mirror of xdipx.original_title. Stable
+   *  source-of-truth for legal / sourcing / re-augmentation. */
+  originalTitle?: string | undefined
   /** Soft-delete flag — search filters drop archived productPages. Set true when
    *  Nalpac flags the product as discontinued, false to un-archive. */
   archived?: boolean | undefined
@@ -412,6 +441,9 @@ export async function upsertProductPage(params: {
 
   // Patch enriched search fields if provided
   const searchFields: Record<string, unknown> = {}
+  // Title — keep Sanity in sync with Shopify product.title across re-runs.
+  // Was previously only set on create, leaving stale titles on existing docs.
+  if (params.title !== undefined) searchFields.title = params.title
   if (params.vendor !== undefined) searchFields.vendor = params.vendor
   if (params.tags !== undefined) searchFields.tags = params.tags
   if (params.tagline !== undefined) searchFields.tagline = params.tagline
@@ -420,8 +452,6 @@ export async function upsertProductPage(params: {
   if (params.description !== undefined) searchFields.description = stringToPortableText(params.description)
   if (params.seoDescription !== undefined) searchFields.seoDescription = params.seoDescription
   if (params.category !== undefined) searchFields.category = params.category
-  if (params.mapPrice !== undefined) searchFields.mapPrice = params.mapPrice
-  if (params.originalPrice !== undefined) searchFields.originalPrice = params.originalPrice
   if (params.seoTitle !== undefined) searchFields.seoTitle = params.seoTitle
   if (params.moodImageUrl !== undefined) searchFields.moodImageUrl = params.moodImageUrl
   if (params.productTypeDial !== undefined) searchFields.productTypeDial = params.productTypeDial
@@ -431,13 +461,26 @@ export async function upsertProductPage(params: {
   if (params.ivrExperience !== undefined) searchFields.ivrExperience = params.ivrExperience
   if (params.ivrUseCase !== undefined) searchFields.ivrUseCase = params.ivrUseCase
   if (params.ivrFeatures !== undefined) searchFields.ivrFeatures = params.ivrFeatures
-  if (params.productFaqs !== undefined) searchFields.productFaqs = params.productFaqs
-  // Mirror moodTags into the productPage `ivrMood` field so voice/chat search
-  // (app/lib/ivr-search.server.ts) and the keyword map in search.server.ts
-  // resolve the same source of truth as the Shopify metafield. The dedicated
-  // enrich-ivr-tags.ts script remains as a one-shot for legacy products that
-  // have no productPage.moodTags yet.
-  if (params.moodTags !== undefined && params.moodTags.length > 0) searchFields.ivrMood = params.moodTags
+  if (params.productFaqs !== undefined) {
+    searchFields.productFaqs = withSanityKey(params.productFaqs, f => `${f.question}|${f.category}`)
+  }
+  // Phase 2 sync — mirror Shopify metafield content into productPage so search
+  // projections + Studio editorial UX see everything the PDP renders. Source
+  // of truth remains the Shopify metafield (xdipx.*); these are derived.
+  if (params.careInstructions !== undefined)   searchFields.careInstructions   = params.careInstructions
+  if (params.specifications !== undefined)     searchFields.specifications     = params.specifications
+  if (params.boxContents !== undefined)        searchFields.boxContents        = params.boxContents
+  if (params.sensationDialV2 !== undefined) {
+    const items = params.sensationDialV2.items ?? []
+    searchFields.sensationDialV2 = {
+      ...params.sensationDialV2,
+      items: withSanityKey(items, it => it.label),
+    }
+  }
+  if (params.productSubtypeDial !== undefined) searchFields.productSubtypeDial = params.productSubtypeDial
+  if (params.originalTitle !== undefined)      searchFields.originalTitle      = params.originalTitle
+  // ivrMood mirror removed — IVR search now reads moodTags directly so there's
+  // a single source of truth for mood tags on the productPage doc.
   if (params.archived !== undefined) searchFields.archived = params.archived
 
   if (Object.keys(searchFields).length > 0) {

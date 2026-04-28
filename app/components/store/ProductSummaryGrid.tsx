@@ -16,7 +16,9 @@ interface ProductSummaryGridProps {
    *  component as the main FAQ card) so the structured Q&A is fully visible
    *  and indexable. Falls back to careInstructions bullets when absent. */
   careFaqs?:          ProductFaq[]
-  specifications?:    string | undefined
+  /** Phase 2 — string[] of "Label: Value" bullets. Mirrors the care/box
+   *  bullet shape; renders as a `<ul>` in the Specs grid card. */
+  specifications?:    string[] | undefined
   faqCount?:          number
   faqSlot?:           React.ReactNode
   emmaSlot?:          React.ReactNode
@@ -40,28 +42,6 @@ function firstParagraphHtml(html: string): string {
   const period = text.indexOf('. ')
   if (period > 40 && period < 240) return text.slice(0, period + 1)
   return text.slice(0, 200) + (text.length > 200 ? '…' : '')
-}
-
-/**
- * Build a short HTML excerpt of a spec block. Prefers the first table row
- * rendered as `<strong>label</strong> value` pairs, then falls back to the
- * first paragraph or a stripped excerpt.
- */
-function specsExcerptHtml(html: string, max = 3): string {
-  if (!html) return ''
-  const rows = Array.from(html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi))
-  if (rows.length > 0) {
-    const items = rows.slice(0, max).map(row => {
-      const cells = Array.from((row[1] ?? '').matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi))
-        .map(c => stripHtml(c[1] ?? ''))
-        .filter(Boolean)
-      if (cells.length === 0) return ''
-      if (cells.length === 1) return `<li>${cells[0]}</li>`
-      return `<li><strong>${cells[0]}:</strong> ${cells.slice(1).join(' ')}</li>`
-    }).filter(Boolean)
-    if (items.length > 0) return `<ul>${items.join('')}</ul>`
-  }
-  return firstParagraphHtml(html)
 }
 
 interface CardProps {
@@ -161,7 +141,10 @@ export function ProductSummaryGrid({
     : ''
   const careFallback = 'Quick care + storage notes so it stays good for the long haul.'
 
-  const specBodyHtml = specifications ? specsExcerptHtml(specifications) : ''
+  const specItems = specifications ?? []
+  const specBodyHtml = specItems.length > 0
+    ? `<ul>${specItems.slice(0, 4).map(i => `<li>${i}</li>`).join('')}${specItems.length > 4 ? `<li>…and ${specItems.length - 4} more</li>` : ''}</ul>`
+    : ''
   const specFallback = `Materials, dimensions, charging, waterproof rating${productType ? ` for the ${productType}` : ''}.`
 
   const faqSummary = faqCount > 0

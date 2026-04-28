@@ -106,6 +106,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const key       = form.get('key') as string
     const value     = form.get('value') as string
     const type      = (form.get('type') as string) || 'single_line_text_field'
+    if (key === 'specifications') {
+      // Phase 2 — specifications stored as JSON string[] of "Label: Value"
+      // bullets (mirrors care_instructions / box_contents). Editor types one
+      // bullet per line; we serialize before writing.
+      const items = value.split('\n').map(l => l.trim()).filter(Boolean)
+      await updateProductMetafield(productId, key, JSON.stringify(items), type)
+      return { ok: true }
+    }
     await updateProductMetafield(productId, key, value, type)
     return { ok: true }
   }
@@ -202,7 +210,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const fullStory   = storyResult.content as string
       const bothWays    = bothWaysResult.content as { forHim: string; forHer: string }
       const seoMeta     = seoMetaResult.content as string
-      const specs       = specsResult.content as string
+      const specs       = (Array.isArray(specsResult.content) ? specsResult.content : []) as string[]
       const boxContents = boxContentsResult.content as string[]
 
       const numericId = productId.replace('gid://shopify/Product/', '')
@@ -810,7 +818,7 @@ function VideoGeneratorSection({ deal, category, promptSettings }: {
       if (deal.fullStory)      fd.set('fullStory',      deal.fullStory)
       if (deal.worksForHim)    fd.set('worksForHim',    deal.worksForHim)
       if (deal.worksForHer)    fd.set('worksForHer',    deal.worksForHer)
-      if (deal.specifications) fd.set('specifications', deal.specifications)
+      if (deal.specifications?.length) fd.set('specifications', deal.specifications.join('\n'))
       if (deal.boxContents?.length) fd.set('whatsInTheBox', deal.boxContents.join(', '))
 
       const res = await fetch('/api/generate-video', { method: 'POST', body: fd })
@@ -1464,7 +1472,7 @@ function DealManager() {
                 <SaveableField label="Full Story"     fieldKey="full_story"     fieldType="multi_line_text_field"  defaultValue={deal.fullStory}             productId={deal.shopifyProductId} rows={10} />
                 <SaveableField label="Works For Him"  fieldKey="works_for_him"  fieldType="multi_line_text_field"  defaultValue={deal.worksForHim}           productId={deal.shopifyProductId} />
                 <SaveableField label="Works For Her"  fieldKey="works_for_her"  fieldType="multi_line_text_field"  defaultValue={deal.worksForHer}           productId={deal.shopifyProductId} />
-                <SaveableField label="Specifications" fieldKey="specifications"  fieldType="multi_line_text_field"  defaultValue={deal.specifications ?? ''}  productId={deal.shopifyProductId} rows={6} />
+                <SaveableField label="Specifications" fieldKey="specifications"  fieldType="multi_line_text_field"  defaultValue={(deal.specifications ?? []).join('\n')}  productId={deal.shopifyProductId} rows={6} hint="One bullet per line: 'Label: Value' (e.g. 'Color: Black')" />
                 <SaveableField
                   label="What's In The Box"
                   hint="One item per line. Shown in the 'What's In The Box' tab."

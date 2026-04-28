@@ -86,7 +86,12 @@ export function createRailGenState(excludeHandles: string[] = []): RailGenState 
 export async function buildCandidatePool(deal: Deal, partner?: Deal): Promise<CatalogCandidate[]> {
   const audiences = [...new Set([...(deal.audienceTags ?? []), ...(partner?.audienceTags ?? [])])]
   const moods     = [...new Set([...(deal.moodTags ?? []),     ...(partner?.moodTags ?? [])])]
-  const categories = [...new Set([deal.category, partner?.category].filter(Boolean) as string[])]
+  // Phase 2 — category is now string[]; flatten the deal + partner arrays
+  // into a unique set of audience tags for shopify-tag bucket queries.
+  const categories = [...new Set([
+    ...(deal.category ?? []),
+    ...(partner?.category ?? []),
+  ])]
 
   const buckets = await Promise.all([
     ...audiences.slice(0, 3).map(t => getProductsByTag(`audience-${t}`, 10).catch(() => [])),

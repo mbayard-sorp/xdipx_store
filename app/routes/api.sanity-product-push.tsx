@@ -59,7 +59,15 @@ export async function action({ request }: ActionFunctionArgs) {
     worksForHim:      body['worksForHim']      as string | undefined,
     worksForHer:      body['worksForHer']      as string | undefined,
     moodImageUrl:     body['moodImageUrl']     as string | undefined,
-    category:         body['category']         as string | undefined,
+    category:         (() => {
+      const v = body['category']
+      if (Array.isArray(v)) return v.filter((s): s is 'for-him' | 'for-her' | 'couples' => s === 'for-him' || s === 'for-her' || s === 'couples')
+      if (typeof v === 'string') {
+        if (v === 'both') return ['for-him', 'for-her'] as const
+        if (v === 'for-him' || v === 'for-her' || v === 'couples') return [v]
+      }
+      return undefined
+    })(),
     dealStatus:       body['dealStatus']       as string | undefined,
     dealDate:         body['dealDate']         as string | undefined,
     originalPrice:    body['originalPrice']    as number | undefined,

@@ -39,6 +39,7 @@
  *   --sku=s         — single product by Nalpac SKU
  *   --from-handle=h — resume from this handle (alphabetical)
  *   --via=api|claude-code — pick the LLM transport (default: api)
+ *   --skip-sanity   — skip the productPage upsert (Shopify-only test mode)
  *
  * Exit code: 0 on clean run, 1 if any product errored.
  */
@@ -80,6 +81,7 @@ interface Args {
   fromHandle?:         string
   fromFile?:           string
   maxAgeDays:          number
+  skipSanity:          boolean
 }
 
 function parseArgs(argv: string[]): Args {
@@ -105,6 +107,7 @@ function parseArgs(argv: string[]): Args {
       has('--archive-discontinued') ? 'archive-discontinued' :
                                       'all',
     maxAgeDays: Number(valOf('--max-age') ?? '90'),
+    skipSanity: has('--skip-sanity'),
   }
   if (limit) out.limit = Number(limit)
   if (!apply && out.limit === undefined) out.limit = 5
@@ -415,6 +418,22 @@ async function enrichOne(
   const doc: ProductPageDoc = { shopifyProductId: row.shopifyProductId }
   const fieldsChanged: string[] = []
 
+  // Phase 2 — write the inferred multi-select category back to Shopify so it
+  // matches the array shape Sanity now uses. inferCategoryFallback handles
+  // legacy single-string inputs (`couples`, `both`, `him`, etc.) and returns
+  // the canonical Array<'for-him' | 'for-her' | 'couples'>. Only write when
+  // mode=full (don't churn existing values on incremental runs).
+  if (args.mode === 'full') {
+    const inferred = inferCategoryFallback(snap.metafields['xdipx.category'])
+    const existing = snap.metafields['xdipx.category'] ?? ''
+    const existingNormalized = existing.trim().startsWith('[') ? existing : ''
+    const desiredJson = JSON.stringify(inferred)
+    if (existingNormalized !== desiredJson) {
+      doc.category = inferred
+      fieldsChanged.push('category')
+    }
+  }
+
   // Augmented display title — only override product.title when the orchestrator
   // decided the manufacturer's title needed an SEO descriptor appended.
   if (want.title && writes.productTitleAugmented && await maybeShouldRefresh(snap, 'xdipx.original_title', args)) {
@@ -529,7 +548,18 @@ async function enrichOne(
     try {
       if (!doc.tagline)            doc.tagline            = snap.metafields['xdipx.tagline']
       if (!doc.seoMetaDescription) doc.seoMetaDescription = snap.metafields['xdipx.seo_meta_description']
-      if (!doc.specifications)     doc.specifications     = snap.metafields['xdipx.specifications']
+      // specifications backfill — preserve existing JSON-stringified array OR
+      // attempt to parse legacy HTML/plain content into bullets. When neither
+      // works the field is left empty and the PDP shows the fallback message.
+      if (!doc.specifications) {
+        const raw = snap.metafields['xdipx.specifications']
+        if (raw?.trim().startsWith('[')) {
+          try {
+            const parsed = JSON.parse(raw)
+            if (Array.isArray(parsed)) doc.specifications = parsed.filter((s): s is string => typeof s === 'string')
+          } catch { /* ignore — leave empty */ }
+        }
+      }
 
       await pushProductToShopify(doc)
       shopifyApplied = true
@@ -537,6 +567,30 @@ async function enrichOne(
       summary.errors.push({ sku: row.sku, message: `pushProductToShopify: ${err instanceof Error ? err.message : err}` })
       return
     }
+  }
+
+  // --skip-sanity short-circuit: phase-1 testing path where the Sanity admin
+  // migrations (dial registry, askEmmaVocabulary Title Case, etc.) haven't
+  // been done yet. Skip the productPage upsert entirely so Shopify-only state
+  // can be inspected without touching Sanity.
+  if (args.skipSanity) {
+    if (shopifyApplied) {
+      summary.changed++
+      console.log(JSON.stringify({
+        handle: snap.handle,
+        sku:    row.sku,
+        mode:   args.scope,
+        applied: true,
+        shopifyApplied,
+        sanitySkipped: true,
+        fieldsChanged,
+        sanityOnlyChanged,
+        cost,
+      }))
+    } else {
+      summary.skipped++
+    }
+    return
   }
 
   // Mirror the same writes to the Sanity productPage doc so search index,
@@ -564,7 +618,7 @@ async function enrichOne(
       title:    snap.title,                  // safe default; orchestrator title overrides below
       vendor:   snap.vendor || row.brand,
       tags:     categories,
-      category: snap.metafields['xdipx.category'] || undefined,
+      category: inferCategoryFallback(snap.metafields['xdipx.category']),
     }
     // Title — only overwrite when augmented (matches Shopify-side condition).
     if (doc.title !== undefined) upsertParams.title = doc.title
@@ -574,21 +628,23 @@ async function enrichOne(
     if (want.keywords && writes.descriptionHtml)  upsertParams.description    = writes.descriptionHtml
     if (want.tags     && writes.productTypeDial)  upsertParams.productTypeDial = writes.productTypeDial
     if (want.tags     && writes.productSubtypeDial != null) upsertParams.productSubtypeDial = writes.productSubtypeDial
+    if (want.tags     && writes.sensationDialV2)      upsertParams.sensationDialV2 = writes.sensationDialV2
     if (want.tags     && writes.moodTags?.length)     upsertParams.moodTags     = writes.moodTags
     if (want.tags     && writes.audienceTags?.length) upsertParams.audienceTags = writes.audienceTags
     if (want.tags     && writes.mattersTags?.length)  upsertParams.mattersTags  = writes.mattersTags
+    if (want.specs    && writes.specifications)       upsertParams.specifications   = writes.specifications
+    if (want.specs    && writes.careInstructions?.length) upsertParams.careInstructions = writes.careInstructions
+    if (want.specs    && writes.boxContents?.length)  upsertParams.boxContents  = writes.boxContents
     if (want.ivr      && writes.ivrExperience)        upsertParams.ivrExperience = writes.ivrExperience
     if (want.ivr      && writes.ivrUseCase?.length)   upsertParams.ivrUseCase    = writes.ivrUseCase
     if (want.ivr      && writes.ivrFeatures?.length)  upsertParams.ivrFeatures   = writes.ivrFeatures
     if (want.keywords && writes.productFaqs?.length)  upsertParams.productFaqs   = writes.productFaqs
+    if (writes.originalTitle)        upsertParams.originalTitle = writes.originalTitle
     if (writes.moodImageUrl)         upsertParams.moodImageUrl  = writes.moodImageUrl
 
-    // Pricing context — pulled from the Shopify snapshot's metafields, not
-    // the orchestrator (orchestrator doesn't touch these).
-    const originalPrice = Number(snap.metafields['xdipx.original_price'])
-    const mapPrice      = Number(snap.metafields['xdipx.map_price'])
-    if (Number.isFinite(originalPrice) && originalPrice > 0) upsertParams.originalPrice = originalPrice
-    if (Number.isFinite(mapPrice)      && mapPrice      > 0) upsertParams.mapPrice      = mapPrice
+    // Pricing fields (originalPrice / mapPrice) removed from Sanity productPage
+    // schema — they live solely on Shopify metafields where the deal pipeline
+    // and PDP loader read them. No Sanity sync needed.
 
     // Hero image for first-time productPage creates (idempotent on re-runs;
     // upsertProductPage skips when previewImageUrl is already on Sanity CDN).
@@ -638,9 +694,22 @@ async function enrichOne(
   }
 }
 
-function inferCategoryFallback(stored: string | undefined): 'for-him' | 'for-her' | 'both' | 'couples' {
-  if (stored === 'for-him' || stored === 'for-her' || stored === 'both' || stored === 'couples') return stored
-  return 'both'
+function inferCategoryFallback(stored: string | undefined): Array<'for-him' | 'for-her' | 'couples'> {
+  if (!stored) return ['for-him', 'for-her']
+  // Phase 2 — Shopify metafield is now JSON-stringified array. Legacy values
+  // are single strings (handle for-him/for-her/couples + 'both' → split).
+  if (stored.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed)) {
+        const valid = new Set(['for-him', 'for-her', 'couples'])
+        return parsed.filter((s): s is 'for-him' | 'for-her' | 'couples' => typeof s === 'string' && valid.has(s))
+      }
+    } catch { /* fall through */ }
+  }
+  if (stored === 'both')    return ['for-him', 'for-her']
+  if (stored === 'for-him' || stored === 'for-her' || stored === 'couples') return [stored]
+  return ['for-him', 'for-her']
 }
 
 // ─── --from-file mode ────────────────────────────────────────────────────────

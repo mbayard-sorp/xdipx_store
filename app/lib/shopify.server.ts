@@ -250,7 +250,7 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
     msrp: parseFloat(parseMetafield(mf, 'original_price') || (variant?.compareAtPrice?.amount ?? '0')),
     images: parseImages(node.images.edges),
     brand: node.vendor,
-    category: (parseMetafield(mf, 'category') || 'both') as Deal['category'],
+    category: parseCategory(parseMetafield(mf, 'category')),
     dealStatus: 'archived' as const,
     qty: variant?.quantityAvailable ?? 0,
     defaultVariantId:    variant?.id ?? null,
@@ -274,6 +274,61 @@ function parseMetafieldJSON<T>(metafields: ({ namespace: string; key: string; va
   const raw = parseMetafield(metafields, key)
   if (!raw) return fallback
   try { return JSON.parse(raw) as T } catch { return fallback }
+}
+
+/**
+ * Category parser. Phase 2 stores `xdipx.category` as a JSON-stringified
+ * `string[]` of audience tags (`for-him` / `for-her` / `couples`). Legacy
+ * products have a single-value string (`for-him` / `for-her` / `both` /
+ * `couples`). The legacy `both` expands to `['for-him', 'for-her']`. Empty
+ * raw → empty array. Returns the canonical multi-select array.
+ */
+function parseCategory(raw: string): Array<'for-him' | 'for-her' | 'couples'> {
+  if (!raw) return []
+  const valid = new Set(['for-him', 'for-her', 'couples'])
+  // New format: JSON array
+  if (raw.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((s): s is string => typeof s === 'string' && valid.has(s))
+          .map(s => s as 'for-him' | 'for-her' | 'couples')
+      }
+    } catch { /* fall through */ }
+  }
+  // Legacy: single-value string
+  const v = raw.trim().toLowerCase()
+  if (v === 'both')  return ['for-him', 'for-her']
+  if (v === 'him')   return ['for-him']  // legacy stale
+  if (v === 'her')   return ['for-her']
+  if (valid.has(v))  return [v as 'for-him' | 'for-her' | 'couples']
+  return []
+}
+
+/**
+ * Specifications-bullet parser. Phase 2 stores `xdipx.specifications` as a
+ * JSON-stringified `string[]` of "Label: Value" bullets. Legacy products still
+ * have HTML strings (a `<ul>` of `<li><strong>Label:</strong> Value</li>`).
+ * Returns the bullets as a plain string array regardless of source format.
+ */
+function parseSpecificationsBullets(raw: string): string[] {
+  if (!raw) return []
+  // New format: JSON array
+  if (raw.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) return parsed.filter(s => typeof s === 'string' && s.trim()).map(s => (s as string).trim())
+    } catch { /* fall through */ }
+  }
+  // Legacy format: HTML <ul>/<li> — extract bullet text. Strip inner tags but
+  // keep label/value semantics by collapsing "<strong>Label:</strong> Value"
+  // to "Label: Value".
+  const items = Array.from(raw.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi))
+  if (items.length === 0) return []
+  return items
+    .map(m => (m[1] ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim())
+    .filter(s => s.length > 0)
 }
 
 function parseImages(edges: { node: { url: string; altText: string | null } }[]): ProductImage[] {
@@ -545,13 +600,16 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     wholesaleCost: parseFloat(parseMetafield(mf, 'wholesale_cost') || '0'),
     mapPrice: parseFloat(parseMetafield(mf, 'map_price') || '0'),
     brand: node.vendor,
-    category: (parseMetafield(mf, 'category') || 'both') as Deal['category'],
+    category: parseCategory(parseMetafield(mf, 'category')),
     dealStatus: (parseMetafield(mf, 'deal_status') || 'live') as Deal['dealStatus'],
     dealDate: parseMetafield(mf, 'deal_date'),
     qty: variant?.quantityAvailable ?? 0,
     tags: node.tags ?? [],
     accessoryProductIds: parseMetafieldJSON<string[]>(mf, 'accessory_product_ids', []),
-    ...(parseMetafield(mf, 'specifications') ? { specifications: parseMetafield(mf, 'specifications') } : {}),
+    ...(((): { specifications?: string[] } => {
+      const bullets = parseSpecificationsBullets(parseMetafield(mf, 'specifications'))
+      return bullets.length > 0 ? { specifications: bullets } : {}
+    })()),
     metaDescription: parseMetafield(mf, 'seo_meta_description'),
     ...(parseMetafield(mf, 'original_description') ? { rawDescription: parseMetafield(mf, 'original_description') } : {}),
     ...(parseMetafield(mf, 'deal_score') ? { dealScore: parseFloat(parseMetafield(mf, 'deal_score')) } : {}),
@@ -811,13 +869,16 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     wholesaleCost: parseFloat(mfVal('wholesale_cost') || '0'),
     mapPrice: parseFloat(mfVal('map_price') || '0'),
     brand: product.vendor,
-    category: (mfVal('category') || 'both') as Deal['category'],
+    category: parseCategory(mfVal('category')),
     dealStatus: (mfVal('deal_status') || 'pending') as Deal['dealStatus'],
     dealDate: mfVal('deal_date'),
     qty: variant?.inventory_quantity ?? 0,
     tags: product.tags ? product.tags.split(', ').filter(Boolean) : [],
     accessoryProductIds: mfJSON<string[]>('accessory_product_ids', []),
-    ...(mfVal('specifications') ? { specifications: mfVal('specifications') } : {}),
+    ...(((): { specifications?: string[] } => {
+      const bullets = parseSpecificationsBullets(mfVal('specifications'))
+      return bullets.length > 0 ? { specifications: bullets } : {}
+    })()),
     metaDescription: mfVal('seo_meta_description'),
     ...(mfVal('original_description') ? { rawDescription: mfVal('original_description') } : {}),
     ...(mfVal('deal_score') ? { dealScore: parseFloat(mfVal('deal_score')) } : {}),
@@ -950,7 +1011,9 @@ export interface PairingCandidate {
  */
 export async function getPairingCandidates(opts: {
   shopifyProductId: string
-  category?:        string
+  /** Phase 2 — accepts the multi-select array. The function picks a primary
+   *  category for shopify-tag filtering. */
+  category?:        ReadonlyArray<'for-him' | 'for-her' | 'couples'> | string
   primaryCollectionHandle?: string
   subCategories?:   string[]
   limit?:           number
@@ -988,10 +1051,12 @@ export async function getPairingCandidates(opts: {
     } catch { /* fall through */ }
   }
 
-  // 2. Category tag — broad, evergreen pool
-  if (out.length < limit && opts.category) {
+  // 2. Category tag — broad, evergreen pool. Phase 2 — accepts an array;
+  // pick the first entry as the primary tag for Shopify-tag filtering.
+  const primaryCategoryTag = Array.isArray(opts.category) ? opts.category[0] : opts.category
+  if (out.length < limit && primaryCategoryTag) {
     try {
-      const byCategory = await getProductsByTag(opts.category, 8)
+      const byCategory = await getProductsByTag(primaryCategoryTag, 8)
       for (const p of byCategory) {
         const c = toCandidate(p)
         if (c) out.push(c)
@@ -2051,7 +2116,8 @@ export interface ProductPageDoc {
   worksForHer?: unknown        // string (legacy) or portable text blocks
   boxContents?: string[] | undefined
   moodImageUrl?: string | undefined
-  category?: string | undefined
+  /** Phase 2 — multi-select audience tags. Stored as JSON string[] on Shopify. */
+  category?: Array<'for-him' | 'for-her' | 'couples'> | undefined
   dealStatus?: string | undefined
   dealDate?: string | undefined
   originalPrice?: number | undefined
@@ -2061,7 +2127,7 @@ export interface ProductPageDoc {
   dealScore?: number | undefined
   accessoryProductIds?: string[] | undefined
   seoMetaDescription?: string | undefined
-  specifications?: string | undefined
+  specifications?: string[] | undefined
   rawDescription?: string | undefined
   // v2 redesign — Emma agentic content
   descriptionHtml?: string | undefined            // Shopify body_html (Emma's take)
@@ -2154,7 +2220,15 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   // Lives in custom namespace per metafield-defs registry.
   addCustom('product_subtype_dial', doc.productSubtypeDial ?? undefined, 'single_line_text_field')
   add('original_title',   doc.originalTitle,                   'single_line_text_field')
-  add('category',         doc.category,                        'single_line_text_field')
+  // Phase 2 — category stored as JSON string[] (mirrors care/box/specs).
+  // Legacy single-value strings still parse via parseCategory on read.
+  if (doc.category && doc.category.length > 0) {
+    metafields.push({
+      namespace: 'xdipx', key: 'category', ownerId: gid,
+      value: JSON.stringify(doc.category),
+      type: 'single_line_text_field',
+    })
+  }
   add('deal_status',      doc.dealStatus,                      'single_line_text_field')
   add('deal_date',        doc.dealDate,                        'date')
   add('nalpac_sku',       doc.nalpacSku,                       'single_line_text_field')
@@ -2181,8 +2255,19 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   add('deal_score',           doc.dealScore?.toString(),        'number_decimal')
   // Optional — Shopify-native product.seo.description (set above) is the canonical SEO field; this metafield is supplementary.
   add('seo_meta_description', doc.seoMetaDescription,           'multi_line_text_field')
-  // Optional — varies by product type (lubes have minimal specs; toys have full dimension/material lists).
-  add('specifications',       doc.specifications,               'multi_line_text_field')
+  // Phase 2 — specifications stored as JSON string[] of "Label: Value" bullets,
+  // matching care_instructions / box_contents shape. Optional; varies by type
+  // (lubes have minimal specs; toys have full dimension/material lists). The
+  // Shopify metafield definition currently advertises type=multi_line_text_field
+  // (legacy), but the value is JSON-stringified — readers use
+  // parseSpecificationsBullets which handles both formats during the migration.
+  if (doc.specifications?.length) {
+    metafields.push({
+      namespace: 'xdipx', key: 'specifications', ownerId: gid,
+      value: JSON.stringify(doc.specifications),
+      type: 'multi_line_text_field',
+    })
+  }
 
   // v2 redesign — Emma agentic content metafields
   if (doc.careInstructions?.length) {

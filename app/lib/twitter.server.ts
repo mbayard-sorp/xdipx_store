@@ -4,6 +4,7 @@ import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { generateTweetCopy } from './claude.server'
 import { getDealByShopifyId } from './shopify.server'
+import { categoryToLegacyString } from '~/types'
 import { eq } from 'drizzle-orm'
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -210,7 +211,7 @@ export async function postDealTweet(
         imageUrl = imageUrl || fullDeal.images[0]?.url || ''
         brand = brand || fullDeal.brand
         tagline = tagline || fullDeal.tagline
-        category = category || fullDeal.category
+        category = category || categoryToLegacyString(fullDeal.category)
       }
     }
 

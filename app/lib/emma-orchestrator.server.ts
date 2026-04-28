@@ -43,7 +43,10 @@ const MAX_TURNS = 24
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
-export type DealCategory = 'for-him' | 'for-her' | 'both' | 'couples'
+/** Phase 2 — multi-select audience tagging. The legacy single-value 'both' is
+ *  expressed as ['for-him', 'for-her']. */
+export type DealCategoryValue = 'for-him' | 'for-her' | 'couples'
+export type DealCategory      = DealCategoryValue[]
 
 export interface OrchestratorProductInput {
   title:        string
@@ -87,7 +90,7 @@ export interface ProductWrites {
   worksForHim?:       string
   worksForHer?:       string
   boxContents?:       string[]
-  specifications?:    string
+  specifications?:    string[]
   seoMetaDescription: string
   descriptionHtml:    string         // Emma's take, written to product.body_html
   careInstructions?:  string[]
@@ -166,7 +169,7 @@ function makeDealContext(state: OrchestratorState): Pick<
     brand:           state.input.product.brand,
     category:        state.input.category,
     ...(state.writes.productTypeDial ? { productTypeDial: state.writes.productTypeDial } : {}),
-    specifications:  state.writes.specifications ?? '',
+    specifications:  state.writes.specifications ?? [],
     dealPrice:       state.input.product.dealPrice,
     msrp:            state.input.product.msrp,
     mapRestricted:   false,
@@ -216,7 +219,7 @@ function enrichProduct(
 const TOOLS = [
   {
     name: 'classifyProductTypeDial',
-    description: 'Classify the product into one of: air-pulsation, vibrator, wand, lube, wear. Always call this FIRST so other tools have the right type.',
+    description: 'Classify the product into a hierarchical taxonomy — top-level type AND per-parent subtype in one call. Top-level types: vibrator, dildo, anal, bondage, cock-ring, stroker, couples, harness, extender, pump, lube, massage, enhancer, wear, condom, wellness, novelty, book-media, sex-machine. Always call this FIRST so other tools have the right type.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -236,7 +239,7 @@ const TOOLS = [
   },
   {
     name: 'generateSpecifications',
-    description: 'Generate the specifications HTML for the Specs tab. Always call this.',
+    description: 'Generate a string[] of "Label: Value" specification bullets for the Specs grid card (mirrors care/box format). Always call this.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -277,7 +280,7 @@ const TOOLS = [
   // never schedules them.
   {
     name: 'generateIvrExperience',
-    description: 'Pick ONE experience level the product fits best (first-time / curious / experienced / advanced / any). Used by Emma chat/IVR/SMS to match buyer intent. Always call this AFTER classifyProductTypeDial and generateEmmaTake (so context is rich).',
+    description: 'Pick EVERY experience level the product fits (multi-select). Choose 1–4 from: first-time, curious, experienced, advanced. A versatile product can hit multiple levels. Used by Emma chat/IVR/SMS to match buyer intent. Always call this AFTER classifyProductTypeDial and generateEmmaTake (so context is rich).',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -400,8 +403,9 @@ async function executeTool(
 
     case 'generateSpecifications': {
       const r = await generateCopy({ type: 'specifications', product: enrichProduct(state, product) }, state.input.llmClient)
-      state.writes.specifications = (r.content as string) ?? ''
-      return { ok: !!state.writes.specifications, summary: `specs len=${state.writes.specifications.length}` }
+      const specs = Array.isArray(r.content) ? (r.content as string[]) : []
+      state.writes.specifications = specs
+      return { ok: specs.length > 0, summary: `specs items=${specs.length}` }
     }
 
     case 'generateSeoMeta': {
@@ -528,9 +532,9 @@ async function executeTool(
     }
 
     case 'generateIvrExperience': {
-      const lvl = await generateIvrExperience({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
-      state.writes.ivrExperience = lvl
-      return { ok: true, summary: `ivrExperience=${lvl}` }
+      const lvls = await generateIvrExperience({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
+      state.writes.ivrExperience = lvls
+      return { ok: true, summary: `ivrExperience=[${lvls.join(',')}]` }
     }
 
     case 'generateIvrUseCase': {
@@ -864,6 +868,7 @@ Start with classifyProductTypeDial, then run every other applicable tool exactly
     moodTags:           state.writes.moodTags           ?? [],
     audienceTags:       state.writes.audienceTags       ?? [],
     mattersTags:        state.writes.mattersTags        ?? [],
+    ...(state.writes.productSubtypeDial !== undefined ? { productSubtypeDial: state.writes.productSubtypeDial } : {}),
     ...(state.writes.productTitle    !== undefined ? { productTitle:        state.writes.productTitle    } : {}),
     ...(state.writes.productTitleAugmented !== undefined ? { productTitleAugmented: state.writes.productTitleAugmented } : {}),
     ...(state.writes.originalTitle   !== undefined ? { originalTitle:       state.writes.originalTitle   } : {}),

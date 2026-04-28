@@ -123,12 +123,14 @@ const DEFS: MetafieldDef[] = [
     description: 'JSON string[] — what ships in the box ("1x toy", "1x charging cable", "1x pouch"). Renders in PDP "In the Box" tab.',
     type:        'json',
   },
-  // PDP — "Specifications" tab content (orchestrator-generated, HTML table)
+  // PDP — Specifications bullets (orchestrator-generated, JSON string[])
+  // Mirrors care_instructions / box_contents shape — each item is a
+  // "Label: Value" pair (e.g. "Color: Black", "Material: Nylon").
   {
     key:         'specifications',
     name:        'Specifications',
-    description: 'HTML table of product specs (material, dimensions, runtime, etc.). Renders in PDP Specifications tab.',
-    type:        'multi_line_text_field',
+    description: 'JSON string[] — "Label: Value" spec bullets (e.g. ["Color: Black", "Material: Nylon"]). Renders in PDP Specs grid card.',
+    type:        'json',
   },
   // PDP redesign — Care instructions (Emma-generated)
   {
