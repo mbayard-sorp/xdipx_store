@@ -41,6 +41,7 @@ import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
 import FrequentlyBoughtWith       from '~/components/store/FrequentlyBoughtWith'
 import { SensationDial }          from '~/components/store/SensationDial'
 import { PairsWith, type PairsWithItem } from '~/components/store/PairsWith'
+import { AlsoBuyMini }                from '~/components/store/AlsoBuyMini'
 import { VariantSelector, resolveVariant } from '~/components/store/VariantSelector'
 import { CircleOptionSelector } from '~/components/store/CircleOptionSelector'
 import { ProductSummaryGrid } from '~/components/store/ProductSummaryGrid'
@@ -178,14 +179,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     productHandle: deal.handle,
   })
 
+  // Add variantId so fbtProducts can be added to cart from the in-line
+  // "Customers also buy" mini-module above the Add-to-cart form. Drop items
+  // without a usable first variant — they can't be checked out anyway.
+  // Also defensively exclude self in case a recommendation source ever lets
+  // the current product through.
   const fbtProducts = fbtHandles.length > 0
-    ? (await getProductsByHandles(fbtHandles)).map(p => ({
-        handle: p.handle,
-        title:  p.title,
-        image:  p.images[0]?.url ?? null,
-        price:  p.price,
-        compareAtPrice: p.compareAtPrice ?? null,
-      }))
+    ? (await getProductsByHandles(fbtHandles))
+        .map(p => {
+          const variantId = p.variants[0]?.id
+          if (!variantId) return null
+          if (variantId === deal.variantId) return null
+          return {
+            handle:         p.handle,
+            title:          p.title,
+            image:          p.images[0]?.url ?? null,
+            price:          p.price,
+            compareAtPrice: p.compareAtPrice ?? null,
+            variantId,
+          }
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null)
     : []
 
   const pairsWithItems: PairsWithItem[] = hasPairing
@@ -452,10 +466,14 @@ function ProductPage() {
   const swatches  = loaderData.swatches ?? {}
   const faqs        = loaderData.faqs ?? []
   const careFaqs    = faqs.filter(f => f.category === 'care')
-  // Care-tagged FAQs render in the Care Instructions card only — keep them
-  // out of the main FAQ accordion to avoid duplicate visible content. JSON-LD
-  // still receives the full list (FAQStructuredData below) for SEO.
   const nonCareFaqs = faqs.filter(f => f.category !== 'care')
+  // Care card priority (mirrors ProductSummaryGrid): legacy careInstructions
+  // bullets win when present, care productFaqs are the accordion fallback.
+  // We only need to strip care from the main FAQ card when the accordion
+  // path is active — otherwise the full FAQ list is visible there with no
+  // duplicate-content risk.
+  const careAccordionInCareCard = !(deal.careInstructions?.length) && careFaqs.length > 0
+  const visibleFaqs = careAccordionInCareCard ? nonCareFaqs : faqs
   const emmaAsidePromise = loaderData.emmaAsidePromise
   const emmaAsideStatic  = loaderData.emmaAsideStatic ?? ''
   const pdpTrustBar      = loaderData.pdpTrustBar
@@ -472,6 +490,19 @@ function ProductPage() {
   const [productVoteAggregate, setProductVoteAggregate] = useState<ProductVoteAggregate>(productVoteAggregateLoaded)
   const [customerVote, setCustomerVote] = useState<1 | -1 | null>(customerProductVoteLoaded)
   const [voteToast, setVoteToast] = useState<{ vote: 1 | -1; key: number } | null>(null)
+  // Variant ids of "Customers also buy" thumbs the shopper has ticked. The
+  // Add-to-cart form below reads this set and switches its payload to
+  // intent=addMany when non-empty so the main + extras land in cart in one
+  // round trip via /api/cart's existing handler.
+  const [extraVariantIds, setExtraVariantIds] = useState<Set<string>>(new Set())
+  const toggleExtra = useCallback((variantId: string) => {
+    setExtraVariantIds(prev => {
+      const next = new Set(prev)
+      if (next.has(variantId)) next.delete(variantId)
+      else next.add(variantId)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     if (voteFetcher.state !== 'idle' || !voteFetcher.data) return
@@ -795,19 +826,44 @@ function ProductPage() {
             </p>
           )}
 
-          {/* How it feels — sensation dial + aggregate vote.
-              Renders when EITHER the legacy dial or v2 has data. */}
-          {deal.productTypeDial && (deal.sensationDialV2?.items?.length || (deal.sensationDial && Object.keys(deal.sensationDial).length > 0)) && (
-            <SensationDial
-              type={deal.productTypeDial}
-              {...(deal.sensationDial ? { values: deal.sensationDial } : {})}
-              {...(deal.sensationDialV2 ? { valuesV2: deal.sensationDialV2 } : {})}
-              aggregate={productVoteAggregate}
-              customerVote={customerVote}
-              onAggregateVote={handleAggregateVote}
-              voting={voteFetcher.state !== 'idle'}
-            />
-          )}
+          {/* Sensation dial (left) + Customers also buy (right).
+              Side-by-side at lg+ so the dial bars run shorter and the
+              impulse cross-sell sits at eye level next to it. Stacks
+              vertically below lg where the buy column is too narrow to
+              split. Either side may render alone if its data is empty. */}
+          {(() => {
+            const hasDial = !!deal.productTypeDial && !!(deal.sensationDialV2?.items?.length || (deal.sensationDial && Object.keys(deal.sensationDial).length > 0))
+            const alsoBuyItems = (loaderData.fbtProducts ?? []).slice(0, 2)
+            const hasAlsoBuy = alsoBuyItems.length > 0
+            if (!hasDial && !hasAlsoBuy) return null
+            const dialNode = hasDial && deal.productTypeDial ? (
+              <SensationDial
+                type={deal.productTypeDial}
+                {...(deal.sensationDial ? { values: deal.sensationDial } : {})}
+                {...(deal.sensationDialV2 ? { valuesV2: deal.sensationDialV2 } : {})}
+                aggregate={productVoteAggregate}
+                customerVote={customerVote}
+                onAggregateVote={handleAggregateVote}
+                voting={voteFetcher.state !== 'idle'}
+              />
+            ) : null
+            const alsoBuyNode = hasAlsoBuy ? (
+              <AlsoBuyMini
+                items={alsoBuyItems}
+                checked={extraVariantIds}
+                onToggle={toggleExtra}
+              />
+            ) : null
+            if (hasDial && hasAlsoBuy) {
+              return (
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3 items-start">
+                  {dialNode}
+                  {alsoBuyNode}
+                </div>
+              )
+            }
+            return dialNode ?? alsoBuyNode
+          })()}
 
           {/* Social proof */}
           <SocialProofBar />
@@ -855,9 +911,29 @@ function ProductPage() {
 
             {inStock || needsSelection ? (
               <fetcher.Form method="post" action="/api/cart" className="flex items-stretch gap-2 flex-1 min-w-0">
-                <input type="hidden" name="intent"    value="add-item" />
-                <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
-                {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
+                {extraVariantIds.size === 0 ? (
+                  // Default single-add path — unchanged from pre-AlsoBuyMini.
+                  <>
+                    <input type="hidden" name="intent"    value="add-item" />
+                    <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
+                    {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
+                  </>
+                ) : (
+                  // Cross-sell extras checked → switch to /api/cart's
+                  // addMany handler so main + extras land in cart in one
+                  // round trip. Per-line subscription (sellingPlanId) is
+                  // not honored by addMany today; if a plan is selected it
+                  // is dropped here and the main goes in at one-time price.
+                  <>
+                    <input type="hidden" name="intent"      value="addMany" />
+                    <input type="hidden" name="variantId_0" value={selectedVariant?.id ?? deal.variantId} />
+                    <input type="hidden" name="quantity_0"  value={quantity} />
+                    {Array.from(extraVariantIds).flatMap((vid, i) => [
+                      <input key={`v-${vid}`} type="hidden" name={`variantId_${i + 1}`} value={vid} />,
+                      <input key={`q-${vid}`} type="hidden" name={`quantity_${i + 1}`}  value="1" />,
+                    ])}
+                  </>
+                )}
 
                 <button
                   ref={ctaRef}
@@ -932,8 +1008,8 @@ function ProductPage() {
         {...(deal.careInstructions?.length ? { careInstructions: deal.careInstructions } : {})}
         {...(careFaqs.length > 0 ? { careFaqs } : {})}
         {...(deal.specifications ? { specifications: deal.specifications } : {})}
-        faqCount={nonCareFaqs.length}
-        {...(nonCareFaqs.length > 0 ? { faqSlot: <ProductFaqList faqs={nonCareFaqs} /> } : {})}
+        faqCount={visibleFaqs.length}
+        {...(visibleFaqs.length > 0 ? { faqSlot: <ProductFaqList faqs={visibleFaqs} /> } : {})}
         emmaSlot={
           emmaAsidePromise ? (
             <Suspense
