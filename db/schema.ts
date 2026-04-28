@@ -427,3 +427,24 @@ export const productCopurchase = pgTable('product_copurchase', {
   handleBIdx: index('copurchase_b_idx').on(t.handleB),
 }))
 
+// Per-product per-field enrichment cache (Phase 1 rebuild — cost discipline).
+// Keyed by (productId, fieldName, voiceHash, promptVersion). On cache hit,
+// the import orchestrator skips the generator call entirely. `--mode=full`
+// bypasses cache and writes a new row (latest wins on lookup).
+export const productEnrichmentCache = pgTable('product_enrichment_cache', {
+  id:            serial('id').primaryKey(),
+  productId:     varchar('product_id',     { length: 64 }).notNull(),  // Shopify GID
+  fieldName:     varchar('field_name',     { length: 64 }).notNull(),  // e.g. tagline, descriptionHtml
+  voiceHash:     varchar('voice_hash',     { length: 32 }).notNull(),  // sha1 slice of system+brand voice
+  promptVersion: varchar('prompt_version', { length: 16 }).notNull(),  // bumped on prompt-structure changes
+  content:       json('content').notNull(),                            // generated payload (shape varies by field)
+  model:         varchar('model',          { length: 32 }).notNull(),  // "claude-haiku-4-5-..." / "claude-sonnet-4-..."
+  inputTokens:   integer('input_tokens').default(0).notNull(),
+  outputTokens:  integer('output_tokens').default(0).notNull(),
+  generatedAt:   timestamp('generated_at').defaultNow().notNull(),
+}, t => ({
+  cacheKeyUniq:    uniqueIndex('enrich_cache_key_uniq').on(t.productId, t.fieldName, t.voiceHash, t.promptVersion),
+  productIdx:      index('enrich_cache_product_idx').on(t.productId),
+  generatedAtIdx:  index('enrich_cache_generated_idx').on(t.generatedAt),
+}))
+

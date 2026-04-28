@@ -3,30 +3,20 @@ import type { ProductTypeDial, SensationDial as SensationDialValues } from '~/ty
 /**
  * Dial dimensions per product type. Order here = render order.
  * Keys match the keys Emma enters in the `sensation_dial` JSON metafield.
+ *
+ * Phase 1 rebuild — only the legacy `vibrator`, `lube`, and `wear` keys have
+ * curated dimensions (the legacy `air-pulsation` and `wand` are now subtypes
+ * of `vibrator` and merged into that entry). For new top-level types
+ * (dildo, anal, bondage, etc.), the dial falls back to the v2 free-form
+ * `sensation_dial_v2` metafield rendered elsewhere on the PDP.
  */
-const DIMENSIONS_BY_TYPE: Record<ProductTypeDial, ReadonlyArray<{ key: keyof SensationDialValues; label: string }>> = {
-  'air-pulsation': [
-    { key: 'intensity',      label: 'Intensity'       },
-    { key: 'quietness',      label: 'Quietness'       },
-    { key: 'softness',       label: 'Softness'        },
-    { key: 'suction',        label: 'Suction'         },
-    { key: 'buildup',        label: 'Build-up'        },
-    { key: 'learningCurve',  label: 'Learning curve'  },
-  ],
+const DIMENSIONS_BY_TYPE: Partial<Record<ProductTypeDial, ReadonlyArray<{ key: keyof SensationDialValues; label: string }>>> = {
   vibrator: [
     { key: 'intensity',      label: 'Intensity'       },
     { key: 'quietness',      label: 'Quietness'       },
     { key: 'softness',       label: 'Softness'        },
     { key: 'patternVariety', label: 'Pattern variety' },
     { key: 'buildup',        label: 'Build-up'        },
-    { key: 'learningCurve',  label: 'Learning curve'  },
-  ],
-  wand: [
-    { key: 'intensity',      label: 'Intensity'       },
-    { key: 'quietness',      label: 'Quietness'       },
-    { key: 'reach',          label: 'Reach'           },
-    { key: 'softness',       label: 'Softness'        },
-    { key: 'patternVariety', label: 'Pattern variety' },
     { key: 'learningCurve',  label: 'Learning curve'  },
   ],
   lube: [
@@ -68,7 +58,11 @@ export function SensationDial({
   onAggregateVote: _onAggregateVote,
   voting: _voting,
 }: SensationDialProps) {
+  // Render-fallback for top-level types without curated dimensions (Phase 1
+  // expansion adds many types; only vibrator/lube/wear have legacy dial maps).
+  // The free-form sensation_dial_v2 covers the rest elsewhere on the PDP.
   const dims = DIMENSIONS_BY_TYPE[type]
+  if (!dims) return null
 
   return (
     <section className="bg-paper/90 rounded-[var(--radius-lg)] border border-line p-5 md:p-6">

@@ -23,6 +23,7 @@ import { selectAccessories, generateCopy, generateSEOTitle } from './claude.serv
 import {
   findProductBySKU,
   createShopifyProductFromFeed,
+  slugifyHandle,
   pushProductToShopify,
   setDealStatus,
 } from './shopify.server'
@@ -151,8 +152,11 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
     if (shopifyGid) {
       numericId = shopifyGid.replace('gid://shopify/Product/', '')
     } else {
-      // Product not yet in Shopify — create it as a draft
-      numericId = await createShopifyProductFromFeed(chosen)
+      // Product not yet in Shopify — create it as a draft.
+      // Phase 1 rebuild — explicit handle (slugify-from-title preserves
+      // legacy behavior for this code path).
+      const handle = slugifyHandle(chosen.title)
+      numericId = await createShopifyProductFromFeed(chosen, handle)
       shopifyGid = `gid://shopify/Product/${numericId}`
     }
 

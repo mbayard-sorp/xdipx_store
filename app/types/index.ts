@@ -38,7 +38,77 @@ export interface ProductVariant {
 }
 
 // v2 redesign — sensation dial + hero video
-export type ProductTypeDial = 'air-pulsation' | 'vibrator' | 'wand' | 'lube' | 'wear'
+// Phase 1 rebuild — hierarchical taxonomy. Top-level is the closed enum below;
+// the per-parent subtype lives in custom.product_subtype_dial. See
+// PRODUCT_SUBTYPES_BY_TYPE in app/lib/claude.server.ts for the per-parent enum.
+// Migration note: old values `air-pulsation` and `wand` are now subtypes under
+// `vibrator` parent. Existing products are reclassified during the Phase 1
+// backfill pass; downstream readers (dial-registry, SensationDial, emma-aside)
+// degrade gracefully for unknown top-level types until Sanity content catches up.
+export type ProductTypeDial =
+  | 'vibrator' | 'dildo' | 'anal' | 'bondage' | 'cock-ring' | 'stroker'
+  | 'couples' | 'harness' | 'extender' | 'pump' | 'lube' | 'massage'
+  | 'enhancer' | 'wear' | 'condom' | 'wellness' | 'novelty' | 'book-media'
+  | 'sex-machine'
+
+/** Closed list of top-level ProductTypeDial values — runtime equivalent of the
+ *  TypeScript union. Useful for validation and iteration. */
+export const PRODUCT_TYPE_DIALS = [
+  'vibrator', 'dildo', 'anal', 'bondage', 'cock-ring', 'stroker',
+  'couples', 'harness', 'extender', 'pump', 'lube', 'massage',
+  'enhancer', 'wear', 'condom', 'wellness', 'novelty', 'book-media',
+  'sex-machine',
+] as const satisfies readonly ProductTypeDial[]
+
+/** Per-parent subtype enum. Closed list per top-level type; `null` when
+ *  classification is `sex-machine` (no subtype) or too ambiguous to commit.
+ *  Validated at runtime against PRODUCT_SUBTYPES_BY_TYPE. */
+export type ProductSubtypeDial =
+  // vibrator subtypes
+  | 'bullet-egg' | 'rabbit' | 'g-spot' | 'finger-clit' | 'wand'
+  | 'air-pulsation' | 'rotating-thrusting' | 'remote' | 'wearable'
+  // dildo subtypes
+  | 'realistic' | 'glass-metal' | 'silicone' | 'dual-density' | 'non-phallic'
+  | 'vibrating' | 'packer' | 'large'
+  // anal subtypes
+  | 'plug' | 'prostate' | 'beads' | 'dilator' | 'douche-enema'
+  // bondage subtypes
+  | 'paddle-whip' | 'restraint' | 'blindfold' | 'gag' | 'collar-leash'
+  | 'nipple' | 'body-harness' | 'sensory' | 'electrostim'
+  // cock-ring subtypes
+  | 'classic' | 'cock-ball-sling' | 'ball-stretcher' | 'set'
+  // stroker subtypes
+  | 'vagina' | 'mouth' | 'pocket' | 'non-realistic' | 'doll' | 'disposable'
+  // couples subtypes
+  | 'game-romance' | 'bedroom-accessory' | 'positioning-aid' | 'swing-sling'
+  // harness subtypes
+  | 'fabric' | 'leather' | 'vegan-leather' | 'o-ring' | 'set-kit'
+  // extender subtypes
+  | 'sling' | 'sleeve' | 'strap-on'
+  // pump subtypes
+  | 'penis'
+  // lube subtypes (note: 'anal' here is a lube-base subtype, not the top-level
+  // anal category — both share the same literal string; TS unions tolerate it)
+  | 'water-based' | 'silicone-based' | 'hybrid' | 'flavored' | 'natural'
+  | 'anal' | 'warming-cooling' | 'toy-cleaner'
+  // massage subtypes
+  | 'body-care' | 'candle' | 'perfume-pheromone' | 'hygiene' | 'cbd'
+  // enhancer subtypes
+  | 'desensitizer-relaxer' | 'oral' | 'arousal-gel' | 'male-arousal'
+  | 'female-arousal' | 'gummy-edible' | 'pill'
+  // wear subtypes
+  | 'mens-underwear' | 'panty' | 'bra-panty-set' | 'bodysuit-teddy'
+  | 'bodystocking' | 'hosiery' | 'pasty' | 'apparel' | 'sock' | 'accessory'
+  | 'plus-queen'
+  // condom subtypes
+  | 'glyde' | 'trojan' | 'lifestyles' | 'durex'
+  // wellness subtypes
+  | 'kegel' | 'aftercare'
+  // novelty subtypes
+  | 'candy-edible' | 'pin-keychain' | 'game' | 'plushie-pillow'
+  | 'novelty-gift' | 'party-supply'
+  // book-media subtypes
+  | 'book' | 'coloring-book'
 
 /** @deprecated Use SensationDialV2 — kept for read-fallback only. */
 export interface SensationDial {

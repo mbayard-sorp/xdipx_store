@@ -6,17 +6,25 @@
  *   npx tsx scripts/backfill-product-enrichment.ts                     # dry-run, 5 products, --via=api
  *   npx tsx scripts/backfill-product-enrichment.ts --apply             # write
  *   npx tsx scripts/backfill-product-enrichment.ts --via=claude-code   # bill against Max subscription
- *   npx tsx scripts/backfill-product-enrichment.ts --pairings-only --apply
  *   npx tsx scripts/backfill-product-enrichment.ts --titles-only --limit=20
+ *   npx tsx scripts/backfill-product-enrichment.ts --specs-only --apply
+ *   npx tsx scripts/backfill-product-enrichment.ts --ivr-only --apply
  *   npx tsx scripts/backfill-product-enrichment.ts --archive-discontinued --apply
  *
- * Modes (combine to scope work):
+ * Scopes (combine to narrow work):
  *   --titles-only           — generateProductTitle only (cheap, fast)
- *   --pairings-only         — proposePairingWhy only (fills the new metafield)
- *   --keywords-only         — re-runs copy generators with the keyword bank
- *   --tags-only             — refreshes mood/audience/matters tags
+ *   --keywords-only         — re-runs copy generators with keyword targeting
+ *                              (tagline + seoMetaDescription + descriptionHtml + FAQs)
+ *   --tags-only             — refreshes D1 type/subtype + D3 Title Case mood/audience/matters tags
+ *   --specs-only            — refreshes C1 boxContents + C2 specifications + C3 careInstructions
+ *   --ivr-only              — refreshes G1 ivrExperience + G2 ivrUseCase + G3 ivrFeatures
  *   --archive-discontinued  — no AI; pulls Nalpac feed, archives matching SKUs
  *   (no flag)               — full orchestrator, behaves like a re-import
+ *
+ * REMOVED in Phase 1 rebuild:
+ *   --pairings-only — pairings (F1/F2) are now deal-cycle artifacts, regenerated when
+ *                     a product enters the homepage deal slot against the freshest
+ *                     catalog state. Migrated out of the import-time backfill scope.
  *
  * Diff modes:
  *   --mode=fill-gaps  — only writes empty fields (default; safe re-runs)
@@ -50,15 +58,22 @@ import { generateProductContent, type ProductWrites } from '../app/lib/emma-orch
 import {
   fetchNalpacFeed,
   isDiscontinued,
+  getPipelineSetting,
 } from '../app/lib/feed-processor.server'
 import { makeLLMClient } from '../app/lib/llm-client.server'
 import { upsertProductPage } from '../app/lib/sanity.server'
+import {
+  getCachedWrites,
+  setCachedWrites,
+  hashVoice,
+  PROMPT_VERSION,
+} from '../app/lib/enrichment-cache.server'
 
 interface Args {
   apply:               boolean
   via:                 'api' | 'claude-code'
   mode:                'fill-gaps' | 'refresh' | 'full'
-  scope:               'all' | 'titles-only' | 'pairings-only' | 'keywords-only' | 'tags-only' | 'archive-discontinued'
+  scope:               'all' | 'titles-only' | 'keywords-only' | 'tags-only' | 'specs-only' | 'ivr-only' | 'archive-discontinued'
   limit?:              number
   handle?:             string
   sku?:                string
@@ -82,10 +97,11 @@ function parseArgs(argv: string[]): Args {
     via:        (valOf('--via') as Args['via']) ?? 'api',
     mode:       (valOf('--mode') as Args['mode']) ?? 'fill-gaps',
     scope:
-      has('--titles-only')          ? 'titles-only'   :
-      has('--pairings-only')        ? 'pairings-only' :
-      has('--keywords-only')        ? 'keywords-only' :
-      has('--tags-only')            ? 'tags-only'     :
+      has('--titles-only')          ? 'titles-only'    :
+      has('--keywords-only')        ? 'keywords-only'  :
+      has('--tags-only')            ? 'tags-only'      :
+      has('--specs-only')           ? 'specs-only'     :
+      has('--ivr-only')             ? 'ivr-only'       :
       has('--archive-discontinued') ? 'archive-discontinued' :
                                       'all',
     maxAgeDays: Number(valOf('--max-age') ?? '90'),
@@ -302,25 +318,50 @@ async function enrichOne(
   const dealPriceRaw   = snap.metafields['xdipx.original_price']
   const msrp           = Number(dealPriceRaw) || 0
 
-  // Decide which fields to write per scope.
+  // Decide which fields to write per scope. Phase 1 rebuild — `pairings`
+  // dropped (deal-cycle now); `specs` and `ivr` added; `tags` now also
+  // covers the D1 type/subtype refresh (taxonomy lives with tags).
   const want = {
     title:    args.scope === 'all' || args.scope === 'titles-only',
-    pairings: args.scope === 'all' || args.scope === 'pairings-only',
     keywords: args.scope === 'all' || args.scope === 'keywords-only',
     tags:     args.scope === 'all' || args.scope === 'tags-only',
+    specs:    args.scope === 'all' || args.scope === 'specs-only',
+    ivr:      args.scope === 'all' || args.scope === 'ivr-only',
   }
 
-  // Run orchestrator unless caller pre-generated writes (e.g. via --from-file
-  // where a Claude Code subagent already did the work on the Max subscription).
-  // Note: the orchestrator runs *every* tool — this is a known cost. For
-  // scope-narrowed runs we still let it run but only push the relevant fields
-  // back to Shopify, so the budget hit is the same but the diff is narrower.
+  // Phase 1 rebuild — generated-content cache. Cache key: (productId, voiceHash,
+  // promptVersion). Hit + mode != 'full' skips the orchestrator entirely.
+  // --mode=full (and --from-file overrides) bypass the cache.
+  const brandVoice = (await getPipelineSetting('brandVoice').catch(() => null)) ?? null
+  const voiceHash  = hashVoice(brandVoice)
+  const productGid = `gid://shopify/Product/${row.shopifyProductId}`
+
   let writes: ProductWrites | null = null
   let cost = { inputTokens: 0, outputTokens: 0 }
+  let cacheStatus: 'hit' | 'miss' | 'bypass' | 'pre-generated' = 'miss'
+
   if (preGeneratedWrites) {
     writes = preGeneratedWrites
+    cacheStatus = 'pre-generated'
     // No cost — content was generated externally. Telemetry shows zero for these rows.
   } else {
+    if (args.mode !== 'full') {
+      // Try the cache first. Hit means same voice + same prompt version + same
+      // product GID — safe to reuse without re-running the orchestrator.
+      const cached = await getCachedWrites(productGid, voiceHash).catch(err => {
+        console.warn(`[backfill] ${row.sku} cache lookup failed (continuing without cache):`, err instanceof Error ? err.message : err)
+        return null
+      })
+      if (cached) {
+        writes = cached.writes
+        cacheStatus = 'hit'
+      }
+    } else {
+      cacheStatus = 'bypass'
+    }
+  }
+
+  if (!writes) {
     try {
       const llmClient = makeLLMClient(args.via)
       const pairingCandidates = await getPairingCandidates({
@@ -349,6 +390,17 @@ async function enrichOne(
       }
       summary.totalCost.inputTokens  += cost.inputTokens
       summary.totalCost.outputTokens += cost.outputTokens
+
+      // Write the cache row so subsequent backfill passes (same voiceHash +
+      // promptVersion) skip the orchestrator. Best-effort: a cache write
+      // failure should not unwind a successful generation.
+      await setCachedWrites(productGid, voiceHash, writes, {
+        model:        args.via === 'claude-code' ? 'claude-code-agent-sdk' : 'anthropic-sdk-mixed',
+        inputTokens:  cost.inputTokens,
+        outputTokens: cost.outputTokens,
+      }).catch(err => {
+        console.warn(`[backfill] ${row.sku} cache write failed (orchestrator output preserved in-memory):`, err instanceof Error ? err.message : err)
+      })
     } catch (err) {
       summary.errors.push({ sku: row.sku, message: `orchestrator: ${err instanceof Error ? err.message : err}` })
       return
@@ -379,39 +431,56 @@ async function enrichOne(
     fieldsChanged.push('original_title')
   }
 
-  // Core PDP attributes — populate when missing, regardless of --titles-only / etc.
-  // scope flags. The PDP's sensation-dial UI ([app/routes/_layout.products.$slug.tsx])
-  // and the IVR/chat search-tag flow both depend on these. Without them, backfilled
-  // products silently render without the dial visualization.
-  if (writes.productTypeDial && await maybeShouldRefresh(snap, 'xdipx.product_type_dial', args)) {
-    doc.productTypeDial = writes.productTypeDial
-    fieldsChanged.push('product_type_dial')
-  }
-  if (writes.sensationDialV2 && await maybeShouldRefresh(snap, 'xdipx.sensation_dial_v2', args)) {
-    doc.sensationDialV2 = writes.sensationDialV2
-    fieldsChanged.push('sensation_dial_v2')
-  }
-  if (writes.specifications && await maybeShouldRefresh(snap, 'xdipx.specifications', args)) {
-    doc.specifications = writes.specifications
-    fieldsChanged.push('specifications')
-  }
-  if (writes.careInstructions?.length && await maybeShouldRefresh(snap, 'xdipx.care_instructions', args)) {
-    doc.careInstructions = writes.careInstructions
-    fieldsChanged.push('care_instructions')
-  }
-  if (writes.boxContents?.length && await maybeShouldRefresh(snap, 'xdipx.box_contents', args)) {
-    doc.boxContents = writes.boxContents
-    fieldsChanged.push('box_contents')
-  }
-  if (writes.moodImageUrl && await maybeShouldRefresh(snap, 'xdipx.mood_image_url', args)) {
-    doc.moodImageUrl = writes.moodImageUrl
-    fieldsChanged.push('mood_image_url')
-  }
-
+  // Phase 1 rebuild — taxonomy fields (D1 type/subtype, D2 sensation dial)
+  // are gated by `want.tags` since the dial registry and ask-emma vocab live
+  // with the tag refresh. The `--tags-only` scope refreshes both classifiers
+  // and tags in one pass.
   if (want.tags) {
+    if (writes.productTypeDial && await maybeShouldRefresh(snap, 'xdipx.product_type_dial', args)) {
+      doc.productTypeDial = writes.productTypeDial
+      fieldsChanged.push('product_type_dial')
+    }
+    // D1 hierarchical subtype — lives in custom namespace, not xdipx.
+    // No fill-gaps source-of-truth metafield to compare; always write when
+    // the orchestrator returned a value (null indicates ambiguous and is
+    // intentionally skipped).
+    if (writes.productSubtypeDial != null) {
+      doc.productSubtypeDial = writes.productSubtypeDial
+      fieldsChanged.push('product_subtype_dial')
+    }
+    if (writes.sensationDialV2 && await maybeShouldRefresh(snap, 'xdipx.sensation_dial_v2', args)) {
+      doc.sensationDialV2 = writes.sensationDialV2
+      fieldsChanged.push('sensation_dial_v2')
+    }
     if (writes.moodTags?.length     && await maybeShouldRefresh(snap, 'xdipx.mood_tags',     args)) { doc.moodTags     = writes.moodTags;     fieldsChanged.push('mood_tags') }
     if (writes.audienceTags?.length && await maybeShouldRefresh(snap, 'xdipx.audience_tags', args)) { doc.audienceTags = writes.audienceTags; fieldsChanged.push('audience_tags') }
     if (writes.mattersTags?.length  && await maybeShouldRefresh(snap, 'xdipx.matters_tags',  args)) { doc.mattersTags  = writes.mattersTags;  fieldsChanged.push('matters_tags') }
+  }
+
+  // Phase 1 rebuild — structured PDP content (C1 box, C2 specs, C3 care)
+  // gated by `want.specs`. `--specs-only` runs all three together.
+  if (want.specs) {
+    if (writes.specifications && await maybeShouldRefresh(snap, 'xdipx.specifications', args)) {
+      doc.specifications = writes.specifications
+      fieldsChanged.push('specifications')
+    }
+    if (writes.careInstructions?.length && await maybeShouldRefresh(snap, 'xdipx.care_instructions', args)) {
+      doc.careInstructions = writes.careInstructions
+      fieldsChanged.push('care_instructions')
+    }
+    if (writes.boxContents?.length && await maybeShouldRefresh(snap, 'xdipx.box_contents', args)) {
+      doc.boxContents = writes.boxContents
+      fieldsChanged.push('box_contents')
+    }
+  }
+
+  // moodImageUrl is image-pipeline output (Phase 2+) — push when present
+  // regardless of scope, but the orchestrator's tool list excludes the
+  // image generator on import paths so writes.moodImageUrl will normally
+  // be undefined.
+  if (writes.moodImageUrl && await maybeShouldRefresh(snap, 'xdipx.mood_image_url', args)) {
+    doc.moodImageUrl = writes.moodImageUrl
+    fieldsChanged.push('mood_image_url')
   }
 
   if (want.keywords) {
@@ -424,35 +493,34 @@ async function enrichOne(
     // in sync. Hand-edits in Shopify Admin will be clobbered on the next backfill.
     if (writes.descriptionHtml) { doc.descriptionHtml    = writes.descriptionHtml;     fieldsChanged.push('descriptionHtml') }
   }
-
-  if (want.pairings && writes.accessoryProductIds?.length) {
-    if (await maybeShouldRefresh(snap, 'xdipx.pairing_why', args)) {
-      doc.accessoryProductIds = writes.accessoryProductIds
-      doc.pairingWhy          = writes.pairingWhy
-      fieldsChanged.push('pairing_why', 'accessory_product_ids')
-    }
-  }
+  // NOTE: pairings (F1/F2) removed from import-time backfill in Phase 1.
+  // Pairings are now deal-cycle artifacts and refresh against the freshest
+  // catalog when a product enters the homepage deal slot.
 
   // Sanity-only fields — no Shopify metafield equivalent. These need their
   // own change tracking because fieldsChanged only counts Shopify-targetable
   // updates. Without this, a product that has all Shopify metafields filled
   // but is missing Sanity FAQs / IVR fields would be `skipped: 1` and the
   // freshly-generated content would never reach the productPage doc.
+  //
+  // Phase 1 rebuild — gating:
+  //   FAQs (H1) flow with `want.keywords` since they share the keyword bank context.
+  //   IVR fields (G1/G2/G3) flow with `want.ivr` for the new --ivr-only scope.
   const sanityOnlyChanged: string[] = []
-  if (writes.productFaqs?.length)   sanityOnlyChanged.push('productFaqs')
-  if (writes.ivrExperience)         sanityOnlyChanged.push('ivrExperience')
-  if (writes.ivrUseCase?.length)    sanityOnlyChanged.push('ivrUseCase')
-  if (writes.ivrFeatures?.length)   sanityOnlyChanged.push('ivrFeatures')
+  if (want.keywords && writes.productFaqs?.length) sanityOnlyChanged.push('productFaqs')
+  if (want.ivr      && writes.ivrExperience)       sanityOnlyChanged.push('ivrExperience')
+  if (want.ivr      && writes.ivrUseCase?.length)  sanityOnlyChanged.push('ivrUseCase')
+  if (want.ivr      && writes.ivrFeatures?.length) sanityOnlyChanged.push('ivrFeatures')
 
   if (fieldsChanged.length === 0 && sanityOnlyChanged.length === 0) {
     summary.skipped++
-    console.log(JSON.stringify({ handle: snap.handle, sku: row.sku, mode: args.scope, fieldsChanged: [], cost, durationMs: 0 }))
+    console.log(JSON.stringify({ handle: snap.handle, sku: row.sku, mode: args.scope, fieldsChanged: [], cost, cache: cacheStatus, promptVersion: PROMPT_VERSION, durationMs: 0 }))
     return
   }
 
   if (!args.apply) {
     summary.changed++  // counted as "would change" in dry-run summary
-    console.log(JSON.stringify({ handle: snap.handle, sku: row.sku, mode: args.scope, dryRun: true, fieldsChanged, sanityOnlyChanged, cost }))
+    console.log(JSON.stringify({ handle: snap.handle, sku: row.sku, mode: args.scope, dryRun: true, fieldsChanged, sanityOnlyChanged, cost, cache: cacheStatus, promptVersion: PROMPT_VERSION }))
     return
   }
 
@@ -503,16 +571,17 @@ async function enrichOne(
     if (doc.tagline)             upsertParams.tagline        = doc.tagline
     if (doc.seoTitle)            upsertParams.seoTitle       = doc.seoTitle
     if (doc.seoMetaDescription)  upsertParams.seoDescription = doc.seoMetaDescription
-    if (writes.descriptionHtml)  upsertParams.description    = writes.descriptionHtml
-    if (writes.productTypeDial)  upsertParams.productTypeDial = writes.productTypeDial
-    if (writes.moodTags?.length)     upsertParams.moodTags     = writes.moodTags
-    if (writes.audienceTags?.length) upsertParams.audienceTags = writes.audienceTags
-    if (writes.mattersTags?.length)  upsertParams.mattersTags  = writes.mattersTags
-    if (writes.ivrExperience)        upsertParams.ivrExperience    = writes.ivrExperience
-    if (writes.ivrUseCase?.length)   upsertParams.ivrUseCase       = writes.ivrUseCase
-    if (writes.ivrFeatures?.length)  upsertParams.ivrFeatures      = writes.ivrFeatures
-    if (writes.productFaqs?.length)  upsertParams.productFaqs      = writes.productFaqs
-    if (writes.moodImageUrl)         upsertParams.moodImageUrl     = writes.moodImageUrl
+    if (want.keywords && writes.descriptionHtml)  upsertParams.description    = writes.descriptionHtml
+    if (want.tags     && writes.productTypeDial)  upsertParams.productTypeDial = writes.productTypeDial
+    if (want.tags     && writes.productSubtypeDial != null) upsertParams.productSubtypeDial = writes.productSubtypeDial
+    if (want.tags     && writes.moodTags?.length)     upsertParams.moodTags     = writes.moodTags
+    if (want.tags     && writes.audienceTags?.length) upsertParams.audienceTags = writes.audienceTags
+    if (want.tags     && writes.mattersTags?.length)  upsertParams.mattersTags  = writes.mattersTags
+    if (want.ivr      && writes.ivrExperience)        upsertParams.ivrExperience = writes.ivrExperience
+    if (want.ivr      && writes.ivrUseCase?.length)   upsertParams.ivrUseCase    = writes.ivrUseCase
+    if (want.ivr      && writes.ivrFeatures?.length)  upsertParams.ivrFeatures   = writes.ivrFeatures
+    if (want.keywords && writes.productFaqs?.length)  upsertParams.productFaqs   = writes.productFaqs
+    if (writes.moodImageUrl)         upsertParams.moodImageUrl  = writes.moodImageUrl
 
     // Pricing context — pulled from the Shopify snapshot's metafields, not
     // the orchestrator (orchestrator doesn't touch these).

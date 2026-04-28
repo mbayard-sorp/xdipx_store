@@ -69,12 +69,14 @@ const DEFAULT: Pool = [
   "Tested, approved, still in rotation ♥",
 ]
 
-const POOLS: Record<ProductTypeDial, Pool> = {
-  wand:            WAND,
-  vibrator:        VIBRATOR,
-  'air-pulsation': AIR_PULSATION,
-  lube:            LUBE,
-  wear:            WEAR,
+// Phase 1 rebuild — ProductTypeDial expanded to 19 values. Legacy `wand` and
+// `air-pulsation` are now subtypes of `vibrator`; their lines are merged into
+// the `vibrator` pool. Top-level types without a curated pool fall through to
+// DEFAULT — adequate fallback voice until we curate per-type lines.
+const POOLS: Partial<Record<ProductTypeDial, Pool>> = {
+  vibrator: [...VIBRATOR, ...WAND, ...AIR_PULSATION],
+  lube:     LUBE,
+  wear:     WEAR,
 }
 
 function hashString(s: string): number {
@@ -89,7 +91,7 @@ function hashString(s: string): number {
 /** Deterministic per-product fallback pick. Same product → same line every time. */
 export function getFallbackAside(product: Pick<Deal, 'id' | 'productTypeDial'>): string {
   const pool = product.productTypeDial ? POOLS[product.productTypeDial] : DEFAULT
-  const lines = pool.length > 0 ? pool : DEFAULT
+  const lines = pool && pool.length > 0 ? pool : DEFAULT
   const idx = hashString(product.id) % lines.length
   return lines[idx] ?? DEFAULT[0]!
 }

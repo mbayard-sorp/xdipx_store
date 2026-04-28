@@ -17,8 +17,8 @@ import {
   generateCareInstructions,
   generateSensationDialV2,
   generateEmmaHero,
-  inferProductTypeDial,
-  generateAskEmmaTags,
+  inferProductTaxonomy,
+  generateAskEmmaTagsAll,
   generateIvrExperience,
   generateIvrUseCase,
   generateIvrFeatures,
@@ -27,7 +27,6 @@ import {
   generatePairingWhy,
   drainToolTokens,
   type ProductFaq,
-  type AskEmmaAxis,
   type IvrExperience,
 } from '~/lib/claude.server'
 import { getDialRegistry, getDialTaxonomy, appendDialLabel, type DialRegistry, type DialTaxonomy } from '~/lib/dial-registry.server'
@@ -36,7 +35,7 @@ import { generateMoodImage } from '~/lib/imagen.server'
 import { uploadMoodImageToShopifyFiles, type PairingCandidate } from '~/lib/shopify.server'
 import { getDefaultClient, loadAgentSdk, type LLMClient } from '~/lib/llm-client.server'
 import type {
-  Deal, EmmaHeroCopy, ProductTypeDial, SensationDialV2,
+  Deal, EmmaHeroCopy, ProductTypeDial, ProductSubtypeDial, SensationDialV2,
 } from '~/types'
 
 const MODEL = 'claude-sonnet-4-20250514'
@@ -74,6 +73,10 @@ export interface OrchestratorInput {
 
 export interface ProductWrites {
   productTypeDial:    ProductTypeDial
+  /** Phase 1 D1 — per-parent subtype (closed list scoped to productTypeDial).
+   *  Null when type is `sex-machine` (no subtype) or classification is too
+   *  ambiguous to commit. Written to `custom.product_subtype_dial` metafield. */
+  productSubtypeDial?: ProductSubtypeDial | null
   /** SEO-augmented title when augmented=true. Equal to input seoTitle when raw was already descriptive. */
   productTitle?:      string
   /** True when the orchestrator augmented the manufacturer's raw title. */
@@ -142,9 +145,15 @@ interface OrchestratorState {
 
 function makeDealContext(state: OrchestratorState): Pick<
   Deal,
-  'seoTitle' | 'tagline' | 'fullStory' | 'brand' | 'category' | 'specifications' | 'dealPrice' | 'msrp'
+  'seoTitle' | 'tagline' | 'fullStory' | 'descriptionHtml' | 'careInstructions' | 'brand' | 'category' | 'specifications' | 'dealPrice' | 'msrp'
 > & { productTypeDial?: ProductTypeDial; mapRestricted: boolean } {
   // Deal-shaped object for downstream generators; populated as tools run.
+  // Phase 1 rebuild — also threads descriptionHtml (B1) and careInstructions
+  // (C3) through so generateProductFaqs (H1) can DIFFERENTIATE its Q&A from
+  // those surfaces. When B1/C3 haven't run yet, the H1 context is empty and
+  // the prompt degrades gracefully (FAQs produced without differentiation
+  // guidance). Tool ordering hint in the orchestrator's user message tries
+  // to schedule B1 + C3 before H1.
   return {
     // Use the augmented title once generateProductTitle has run; fall back
     // to the caller-supplied seoTitle until then. This way Emma's Take and
@@ -152,6 +161,8 @@ function makeDealContext(state: OrchestratorState): Pick<
     seoTitle:        state.writes.productTitle ?? state.input.seoTitle,
     tagline:         state.writes.tagline ?? '',
     fullStory:       state.writes.descriptionHtml ?? '',
+    ...(state.writes.descriptionHtml  ? { descriptionHtml:  state.writes.descriptionHtml }  : {}),
+    ...(state.writes.careInstructions ? { careInstructions: state.writes.careInstructions } : {}),
     brand:           state.input.product.brand,
     category:        state.input.category,
     ...(state.writes.productTypeDial ? { productTypeDial: state.writes.productTypeDial } : {}),
@@ -209,18 +220,8 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'generateMoodTags',
-    description: 'Generate slugified mood tags from the controlled vocabulary. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateAudienceTags',
-    description: 'Generate slugified audience tags (me / us / gift) from the controlled vocabulary. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateMattersTags',
-    description: 'Generate slugified "what matters" tags (quiet, soft-touch, travel-size, etc.) from the controlled vocabulary. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags.',
+    name: 'generateAskEmmaTagsAll',
+    description: 'Generate Title Case Ask Emma tags for ALL THREE axes (mood / audience / matters) in one combined Haiku call. Replaces the three single-axis tools. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags. Backfill will not invent new vocab; tags are restricted to the curated lists.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -263,21 +264,17 @@ const TOOLS = [
     description: 'Generate "what is in the box" bullets. Call this for hardware (vibrator, wand, air-pulsation). SKIP for lube. SKIP for wear unless the wear product has packaging contents worth listing.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
-  {
-    name: 'generateEmmaHero',
-    description: 'Generate the Emma hero block (eyebrow / headline / body / aside). Always call this.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateMoodImage',
-    description: 'Generate ONE PDP hero mood image and upload to Shopify Files. Always call this. Returns a CDN URL stored on the writes payload.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'proposePairingWhy',
-    description: 'Pick 1–3 sibling products that pair with this primary and write a short Emma-voice "why this pairs" blurb for each. SKIP this tool when no pairing candidates are available (the orchestrator surfaces them via input.pairingCandidates).',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
+  // Phase 1 rebuild — these tools were removed from the import orchestrator's
+  // tool list:
+  //   - generateEmmaHero (E1/E2): deal-cycle artifact, regenerated per
+  //     deal slot rotation. Out of import scope.
+  //   - generateMoodImage: image generation is Phase 2+ scope.
+  //   - proposePairingWhy (F1/F2): pairings are deal-cycle, curated when
+  //     a product enters the homepage deal slot against the freshest
+  //     catalog state.
+  // The corresponding case branches and underlying generator functions are
+  // preserved so the deal-cycle pipeline can call them directly. Import path
+  // never schedules them.
   {
     name: 'generateIvrExperience',
     description: 'Pick ONE experience level the product fits best (first-time / curious / experienced / advanced / any). Used by Emma chat/IVR/SMS to match buyer intent. Always call this AFTER classifyProductTypeDial and generateEmmaTake (so context is rich).',
@@ -316,15 +313,23 @@ async function executeTool(
 
   switch (name) {
     case 'classifyProductTypeDial': {
-      const t = await inferProductTypeDial({
+      // Phase 1 D1 — combined type+subtype Haiku classifier. Replaces the
+      // legacy 5-bucket inferProductTypeDial. Returns the new top-level
+      // ProductTypeDial (19 values) AND the per-parent ProductSubtypeDial
+      // in a single call.
+      const taxonomy = await inferProductTaxonomy({
         title:       product.title,
         brand:       product.brand,
         description: product.description,
         categories:  product.categories,
         ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
-      state.writes.productTypeDial = t
-      return { ok: true, summary: `productTypeDial=${t}` }
+      state.writes.productTypeDial    = taxonomy.type
+      state.writes.productSubtypeDial = taxonomy.subtype
+      const summary = taxonomy.subtype
+        ? `productTypeDial=${taxonomy.type}/${taxonomy.subtype}`
+        : `productTypeDial=${taxonomy.type}`
+      return { ok: true, summary }
     }
 
     case 'generateProductTitle': {
@@ -461,23 +466,26 @@ async function executeTool(
       return { ok: true, summary: `boxContents=${bc.length}` }
     }
 
-    case 'generateMoodTags':
-    case 'generateAudienceTags':
-    case 'generateMattersTags': {
-      const axis: AskEmmaAxis =
-        name === 'generateMoodTags'     ? 'mood'
-        : name === 'generateAudienceTags' ? 'audience'
-        : 'matters'
-      const tags = await generateAskEmmaTags({
+    case 'generateAskEmmaTagsAll': {
+      // Phase 1 D3 — combined-axes call. One Haiku round trip returns all
+      // three axes; cheaper than the legacy three single-axis calls. Title
+      // Case storage; backfill default disallows AI-proposed new labels.
+      const result = await generateAskEmmaTagsAll({
         deal: dealCtx,
-        axis,
-        preferredLabels: state.vocab[axis],
+        vocabularies: {
+          mood:     state.vocab.mood,
+          audience: state.vocab.audience,
+          matters:  state.vocab.matters,
+        },
         ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
-      if (axis === 'mood')          state.writes.moodTags     = tags
-      else if (axis === 'audience') state.writes.audienceTags = tags
-      else                          state.writes.mattersTags  = tags
-      return { ok: true, summary: `${axis}Tags=${tags.length}` }
+      state.writes.moodTags     = result.moodTags
+      state.writes.audienceTags = result.audienceTags
+      state.writes.mattersTags  = result.mattersTags
+      return {
+        ok: true,
+        summary: `mood=${result.moodTags.length} audience=${result.audienceTags.length} matters=${result.mattersTags.length}`,
+      }
     }
 
     case 'generateEmmaHero': {
@@ -673,34 +681,32 @@ Phase 1 — classify (must complete BEFORE anything else):
   1. classifyProductTypeDial
 
 Phase 2 — tag the product (must complete BEFORE copy generators so the SEO keyword bank can filter approved terms by these tags — without this, copy is generic):
-  2. generateMoodTags
-  3. generateAudienceTags
-  4. generateMattersTags
+  2. generateAskEmmaTagsAll  (single Haiku call, all three axes — mood / audience / matters)
 
 Phase 3 — title decision (uses dial + tags to pick a descriptor when needed):
-  5. generateProductTitle
+  3. generateProductTitle
 
 Phase 4 — copy generators (these benefit from keyword targeting via the tags above):
-  6. generateTagline
-  7. generateSeoMeta
-  8. generateSpecifications
-  9. generateEmmaTake
+  4. generateTagline
+  5. generateSeoMeta
+  6. generateSpecifications
+  7. generateEmmaTake
 
 Phase 5 — dial + hero + image (independent, run after copy is set):
-  10. generateSensationDialV2 (must be AFTER classifyProductTypeDial)
-  11. generateEmmaHero
-  12. generateMoodImage
+  8. generateSensationDialV2 (must be AFTER classifyProductTypeDial)
+  9. generateEmmaHero
+  10. generateMoodImage
 
 Phase 6 — pairings (run AFTER tagline + emmaTake exist so the pairing-why blurbs have richer context):
-  13. proposePairingWhy (SKIP if no pairing candidates were provided)
+  11. proposePairingWhy (SKIP if no pairing candidates were provided)
 
 Phase 7 — IVR / voice surfaces (run AFTER generateEmmaTake — they need rich context):
-  14. generateIvrExperience
-  15. generateIvrUseCase
-  16. generateIvrFeatures
+  12. generateIvrExperience
+  13. generateIvrUseCase
+  14. generateIvrFeatures
 
-Phase 8 — PDP FAQs (run AFTER generateEmmaTake + generateSpecifications + tag tools — answers benefit from full product context):
-  17. generateProductFaqs
+Phase 8 — PDP FAQs (run LAST — must be AFTER generateEmmaTake AND generateCareInstructions so the differentiation context is populated; H1 answers must NOT restate descriptionHtml or careInstructions):
+  15. generateProductFaqs
 
 Conditional:
 - generateCareInstructions: call for every product type. The underlying generator branches on productTypeDial — hardware gets 3–5 maintenance bullets, consumables (lube, edible wear) get 2–3 playful storage/usage bullets.
