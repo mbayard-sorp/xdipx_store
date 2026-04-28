@@ -341,7 +341,6 @@ export async function upsertProductPage(params: {
   vendor?: string | undefined
   tags?: string[] | undefined
   tagline?: string | undefined
-  featureBullets?: string[] | undefined
   description?: string | undefined
   seoTitle?: string | undefined
   seoDescription?: string | undefined
@@ -359,7 +358,8 @@ export async function upsertProductPage(params: {
   ivrExperience?: string | undefined
   ivrUseCase?: string[] | undefined
   ivrFeatures?: string[] | undefined
-  ivrVoiceSummary?: string | undefined
+  // PDP FAQs — productPage.productFaqs[]. Renders visibly + emits FAQPage JSON-LD. Sanity-only.
+  productFaqs?: Array<{ question: string; answer: string; category: string }> | undefined
   /** Soft-delete flag — search filters drop archived productPages. Set true when
    *  Nalpac flags the product as discontinued, false to un-archive. */
   archived?: boolean | undefined
@@ -407,7 +407,6 @@ export async function upsertProductPage(params: {
   if (params.vendor !== undefined) searchFields.vendor = params.vendor
   if (params.tags !== undefined) searchFields.tags = params.tags
   if (params.tagline !== undefined) searchFields.tagline = params.tagline
-  if (params.featureBullets !== undefined) searchFields.featureBullets = params.featureBullets
   // description is a portable-text array in the schema (searchable via pt::text).
   // Wrap the raw string in a single block so it round-trips cleanly and search still hits.
   if (params.description !== undefined) searchFields.description = stringToPortableText(params.description)
@@ -424,7 +423,7 @@ export async function upsertProductPage(params: {
   if (params.ivrExperience !== undefined) searchFields.ivrExperience = params.ivrExperience
   if (params.ivrUseCase !== undefined) searchFields.ivrUseCase = params.ivrUseCase
   if (params.ivrFeatures !== undefined) searchFields.ivrFeatures = params.ivrFeatures
-  if (params.ivrVoiceSummary !== undefined) searchFields.ivrVoiceSummary = params.ivrVoiceSummary
+  if (params.productFaqs !== undefined) searchFields.productFaqs = params.productFaqs
   // Mirror moodTags into the productPage `ivrMood` field so voice/chat search
   // (app/lib/ivr-search.server.ts) and the keyword map in search.server.ts
   // resolve the same source of truth as the Shopify metafield. The dedicated

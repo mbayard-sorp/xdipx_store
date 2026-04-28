@@ -290,7 +290,6 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       ...(writes.productTitleAugmented ? { title: finalTitle } : {}),
       seoTitle:           finalTitle,
       tagline:            writes.tagline,
-      featureBullets:     writes.featureBullets,
       ...(writes.worksForHim      !== undefined ? { worksForHim:      writes.worksForHim }      : {}),
       ...(writes.worksForHer      !== undefined ? { worksForHer:      writes.worksForHer }      : {}),
       ...(writes.boxContents      !== undefined ? { boxContents:      writes.boxContents }      : {}),
@@ -364,7 +363,6 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
           vendor:           masterRow.Brand,
           tags:             categories,                  // Mirror sub-categories so Studio editors can filter
           tagline:          writes.tagline,
-          featureBullets:   writes.featureBullets,
           description,
           seoTitle,
           seoDescription:   writes.seoMetaDescription,
@@ -379,7 +377,7 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
           ...(writes.ivrExperience    !== undefined ? { ivrExperience:    writes.ivrExperience    } : {}),
           ...(writes.ivrUseCase       !== undefined ? { ivrUseCase:       writes.ivrUseCase       } : {}),
           ...(writes.ivrFeatures      !== undefined ? { ivrFeatures:      writes.ivrFeatures      } : {}),
-          ...(writes.ivrVoiceSummary  !== undefined ? { ivrVoiceSummary:  writes.ivrVoiceSummary  } : {}),
+          ...(writes.productFaqs      !== undefined ? { productFaqs:      writes.productFaqs      } : {}),
         }
         if (images[0])              upsertParams.imageUrl     = images[0]
         if (writes.moodImageUrl)    upsertParams.moodImageUrl = writes.moodImageUrl

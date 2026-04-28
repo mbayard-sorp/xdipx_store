@@ -22,9 +22,11 @@ import {
   generateIvrExperience,
   generateIvrUseCase,
   generateIvrFeatures,
-  generateIvrVoiceSummary,
+  generateProductFaqs,
   generateProductTitle,
   generatePairingWhy,
+  drainToolTokens,
+  type ProductFaq,
   type AskEmmaAxis,
   type IvrExperience,
 } from '~/lib/claude.server'
@@ -32,7 +34,7 @@ import { getDialRegistry, getDialTaxonomy, appendDialLabel, type DialRegistry, t
 import { getAskEmmaVocabulary, type AskEmmaVocabulary } from '~/lib/ask-emma-vocab.server'
 import { generateMoodImage } from '~/lib/imagen.server'
 import { uploadMoodImageToShopifyFiles, type PairingCandidate } from '~/lib/shopify.server'
-import { getDefaultClient, type LLMClient } from '~/lib/llm-client.server'
+import { getDefaultClient, loadAgentSdk, type LLMClient } from '~/lib/llm-client.server'
 import type {
   Deal, EmmaHeroCopy, ProductTypeDial, SensationDialV2,
 } from '~/types'
@@ -79,7 +81,6 @@ export interface ProductWrites {
   /** Manufacturer's original title verbatim — written to xdipx.original_title. */
   originalTitle?:     string
   tagline:            string
-  featureBullets:     string[]
   worksForHim?:       string
   worksForHer?:       string
   boxContents?:       string[]
@@ -100,7 +101,8 @@ export interface ProductWrites {
   ivrExperience?:     IvrExperience
   ivrUseCase?:        string[]
   ivrFeatures?:       string[]
-  ivrVoiceSummary?:   string
+  // PDP FAQs — Sanity-only (productPage.productFaqs[]). Renders visibly + emits FAQPage JSON-LD.
+  productFaqs?:       ProductFaq[]
 }
 
 export interface ToolCallTrace {
@@ -232,11 +234,6 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'generateFeatureBullets',
-    description: 'Generate 6–10 short feature bullets. Always call this.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
     name: 'generateSpecifications',
     description: 'Generate the specifications HTML for the Specs tab. Always call this.',
     input_schema: { type: 'object', properties: {}, required: [] },
@@ -297,8 +294,8 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'generateIvrVoiceSummary',
-    description: 'Write a 1–2 sentence Emma-voice summary designed to be read aloud over phone/chat/SMS. Plain text, no markup. Always call this LAST among IVR tools (it benefits from richer context).',
+    name: 'generateProductFaqs',
+    description: 'Generate 4–6 FAQ pairs (general / care / usage / compatibility) for the PDP and FAQPage JSON-LD. Always call this AFTER generateEmmaTake — answers benefit from the product story being set. Sanity-only field; no Shopify metafield.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -324,6 +321,7 @@ async function executeTool(
         brand:       product.brand,
         description: product.description,
         categories:  product.categories,
+        ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
       state.writes.productTypeDial = t
       return { ok: true, summary: `productTypeDial=${t}` }
@@ -336,6 +334,7 @@ async function executeTool(
         brand:           product.brand,
         rawDescription:  product.description,
         productTypeDial: dial,
+        ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
       state.writes.productTitle          = titleResult.title
       state.writes.productTitleAugmented = titleResult.augmented
@@ -373,6 +372,7 @@ async function executeTool(
             if (c.productTypeDial) ci.productTypeDial = c.productTypeDial
             return ci
           }),
+          ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
         })
         if (result.accessoryProductIds.length > 0) {
           state.writes.accessoryProductIds = result.accessoryProductIds
@@ -386,41 +386,34 @@ async function executeTool(
     }
 
     case 'generateTagline': {
-      const r = await generateCopy({ type: 'tagline', product: enrichProduct(state, product) })
+      const r = await generateCopy({ type: 'tagline', product: enrichProduct(state, product) }, state.input.llmClient)
       const arr = r.content as string[]
       const first = Array.isArray(arr) ? arr[0] : (arr as unknown as string)
       state.writes.tagline = (first ?? '').trim()
       return { ok: true, summary: `tagline len=${state.writes.tagline.length}` }
     }
 
-    case 'generateFeatureBullets': {
-      const r = await generateCopy({ type: 'bullets', product: enrichProduct(state, product) })
-      const bullets = (r.content as string[]) ?? []
-      state.writes.featureBullets = bullets
-      return { ok: bullets.length > 0, summary: `bullets=${bullets.length}` }
-    }
-
     case 'generateSpecifications': {
-      const r = await generateCopy({ type: 'specifications', product: enrichProduct(state, product) })
+      const r = await generateCopy({ type: 'specifications', product: enrichProduct(state, product) }, state.input.llmClient)
       state.writes.specifications = (r.content as string) ?? ''
       return { ok: !!state.writes.specifications, summary: `specs len=${state.writes.specifications.length}` }
     }
 
     case 'generateSeoMeta': {
-      const r = await generateCopy({ type: 'seo_meta', product: enrichProduct(state, product) })
+      const r = await generateCopy({ type: 'seo_meta', product: enrichProduct(state, product) }, state.input.llmClient)
       state.writes.seoMetaDescription = (r.content as string) ?? ''
       return { ok: !!state.writes.seoMetaDescription, summary: `seoMeta len=${state.writes.seoMetaDescription.length}` }
     }
 
     case 'generateEmmaTake': {
-      const html = await generateEmmaTake({ deal: dealCtx })
+      const html = await generateEmmaTake({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
       state.writes.descriptionHtml = html
       return { ok: !!html, summary: `emmaTake len=${html.length}` }
     }
 
     case 'generateCareInstructions': {
       try {
-        const bullets = await generateCareInstructions({ deal: dealCtx })
+        const bullets = await generateCareInstructions({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
         state.writes.careInstructions = bullets
         return { ok: true, summary: `care=${bullets.length}` }
       } catch (err) {
@@ -437,6 +430,7 @@ async function executeTool(
         deal: { ...dealCtx, productTypeDial: type },
         preferredLabels,
         ...(taxonomy.length > 0 ? { taxonomy } : {}),
+        ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
       state.writes.sensationDialV2 = dial
       // Emma can propose a new dial label when none of the preferred ones fit.
@@ -461,7 +455,7 @@ async function executeTool(
     }
 
     case 'generateBoxContents': {
-      const r = await generateCopy({ type: 'box_contents', product: enrichProduct(state, product) })
+      const r = await generateCopy({ type: 'box_contents', product: enrichProduct(state, product) }, state.input.llmClient)
       const bc = (r.content as string[]) ?? []
       if (bc.length > 0) state.writes.boxContents = bc
       return { ok: true, summary: `boxContents=${bc.length}` }
@@ -478,6 +472,7 @@ async function executeTool(
         deal: dealCtx,
         axis,
         preferredLabels: state.vocab[axis],
+        ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
       if (axis === 'mood')          state.writes.moodTags     = tags
       else if (axis === 'audience') state.writes.audienceTags = tags
@@ -497,6 +492,7 @@ async function executeTool(
           msrp:          dealCtx.msrp,
           mapRestricted: dealCtx.mapRestricted,
         },
+        ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
       state.writes.emmaHero = hero
       return { ok: true, summary: `emmaHero variant=${hero.variant}` }
@@ -524,27 +520,27 @@ async function executeTool(
     }
 
     case 'generateIvrExperience': {
-      const lvl = await generateIvrExperience({ deal: dealCtx })
+      const lvl = await generateIvrExperience({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
       state.writes.ivrExperience = lvl
       return { ok: true, summary: `ivrExperience=${lvl}` }
     }
 
     case 'generateIvrUseCase': {
-      const tags = await generateIvrUseCase({ deal: dealCtx })
+      const tags = await generateIvrUseCase({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
       state.writes.ivrUseCase = tags
       return { ok: true, summary: `ivrUseCase=${tags.length}` }
     }
 
     case 'generateIvrFeatures': {
-      const tags = await generateIvrFeatures({ deal: dealCtx })
+      const tags = await generateIvrFeatures({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
       state.writes.ivrFeatures = tags
       return { ok: true, summary: `ivrFeatures=${tags.length}` }
     }
 
-    case 'generateIvrVoiceSummary': {
-      const summary = await generateIvrVoiceSummary({ deal: dealCtx })
-      state.writes.ivrVoiceSummary = summary
-      return { ok: !!summary, summary: `ivrVoiceSummary len=${summary.length}` }
+    case 'generateProductFaqs': {
+      const faqs = await generateProductFaqs({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
+      state.writes.productFaqs = faqs
+      return { ok: faqs.length > 0, summary: `productFaqs=${faqs.length}` }
     }
 
     case 'finish': {
@@ -554,6 +550,116 @@ async function executeTool(
 
     default:
       return { ok: false, summary: `unknown tool: ${name}` }
+  }
+}
+
+// ─── Agent SDK orchestration path (--via=claude-code) ────────────────────────
+
+/**
+ * Drives the orchestrator via the Agent SDK so the *outer* model decisions
+ * (which tool to call, when to finish) bill against the Max subscription
+ * instead of the API key. Per-tool content generators inside `executeTool`
+ * still hit the Anthropic API directly — routing those would require pushing
+ * `generateCopy` etc. through the SDK as well.
+ *
+ * The SDK manages turns + tool dispatch internally via in-process MCP, so
+ * this function exposes each orchestrator tool as an MCP tool whose handler
+ * delegates to `executeTool(name, state)`. We just walk the event stream for
+ * usage telemetry and stop when `state.finished` flips or the SDK emits a
+ * terminal `result` event.
+ */
+async function runOrchestrationViaSdk(
+  state: OrchestratorState,
+  userPrompt: string,
+): Promise<void> {
+  const { query, tool, createSdkMcpServer } = await loadAgentSdk()
+
+  const calledTools = new Set<string>()
+
+  const mcpTools = TOOLS.map(t =>
+    tool(
+      t.name,
+      t.description,
+      // Empty Zod raw shape — orchestrator tools take no model-supplied input;
+      // they read from `state.input` and write to `state.writes`.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      {} as any,
+      async (_args: unknown, _extra: unknown) => {
+        if (calledTools.has(t.name)) {
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, summary: `${t.name} already called — skipping duplicate` }) }] }
+        }
+        calledTools.add(t.name)
+
+        const start = Date.now()
+        let ok = false
+        let summary = ''
+        let errorMsg: string | undefined
+        // Drain any stale accumulator state before invoking the tool so we only
+        // attribute tokens spent inside this tool's executeTool call.
+        drainToolTokens()
+        try {
+          const r = await executeTool(t.name, state)
+          ok = r.ok
+          summary = r.summary
+        } catch (err) {
+          errorMsg = err instanceof Error ? err.message : String(err)
+          summary = `tool error: ${errorMsg}`
+        }
+        const toolTokens = drainToolTokens()
+        state.telemetry.totalInputTokens  += toolTokens.input
+        state.telemetry.totalOutputTokens += toolTokens.output
+        state.telemetry.toolCalls.push({
+          name:         t.name,
+          durationMs:   Date.now() - start,
+          inputTokens:  toolTokens.input,
+          outputTokens: toolTokens.output,
+          ok,
+          ...(errorMsg ? { error: errorMsg } : {}),
+        })
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ ok, summary }) }],
+          ...(errorMsg ? { isError: true } : {}),
+        }
+      },
+    ),
+  )
+
+  const mcpServer = createSdkMcpServer({
+    name:    'emma-orchestrator',
+    version: '1.0.0',
+    tools:   mcpTools,
+  })
+
+  // Pre-approve all our MCP tools so the SDK doesn't prompt for permission.
+  // SDK convention: `mcp__<servername>__<toolname>`.
+  const allowedTools = TOOLS.map(t => `mcp__emma-orchestrator__${t.name}`)
+
+  const stream = query({
+    prompt: userPrompt,
+    options: {
+      systemPrompt: SYSTEM,
+      mcpServers:   { 'emma-orchestrator': mcpServer },
+      // Disable all built-in Claude Code tools (Bash/Read/Edit/etc.). Only
+      // our MCP tools should be available to the model.
+      tools:        [],
+      allowedTools,
+      maxTurns:     MAX_TURNS,
+    },
+  })
+
+  for await (const event of stream) {
+    if (!event || typeof event !== 'object') continue
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ev = event as any
+    if (ev.type === 'assistant' && ev.message?.usage) {
+      state.telemetry.totalInputTokens  += Number(ev.message.usage.input_tokens  ?? 0)
+      state.telemetry.totalOutputTokens += Number(ev.message.usage.output_tokens ?? 0)
+      state.telemetry.turns++
+    } else if (ev.type === 'result') {
+      // SDK terminates here.
+      break
+    }
+    if (state.finished) break
   }
 }
 
@@ -577,26 +683,27 @@ Phase 3 — title decision (uses dial + tags to pick a descriptor when needed):
 Phase 4 — copy generators (these benefit from keyword targeting via the tags above):
   6. generateTagline
   7. generateSeoMeta
-  8. generateFeatureBullets
-  9. generateSpecifications
-  10. generateEmmaTake
+  8. generateSpecifications
+  9. generateEmmaTake
 
 Phase 5 — dial + hero + image (independent, run after copy is set):
-  11. generateSensationDialV2 (must be AFTER classifyProductTypeDial)
-  12. generateEmmaHero
-  13. generateMoodImage
+  10. generateSensationDialV2 (must be AFTER classifyProductTypeDial)
+  11. generateEmmaHero
+  12. generateMoodImage
 
 Phase 6 — pairings (run AFTER tagline + emmaTake exist so the pairing-why blurbs have richer context):
-  14. proposePairingWhy (SKIP if no pairing candidates were provided)
+  13. proposePairingWhy (SKIP if no pairing candidates were provided)
 
 Phase 7 — IVR / voice surfaces (run AFTER generateEmmaTake — they need rich context):
-  15. generateIvrExperience
-  16. generateIvrUseCase
-  17. generateIvrFeatures
-  18. generateIvrVoiceSummary  (LAST among IVR tools — benefits from the others)
+  14. generateIvrExperience
+  15. generateIvrUseCase
+  16. generateIvrFeatures
+
+Phase 8 — PDP FAQs (run AFTER generateEmmaTake + generateSpecifications + tag tools — answers benefit from full product context):
+  17. generateProductFaqs
 
 Conditional:
-- generateCareInstructions: skip for lube unless the lube has a real care/storage note.
+- generateCareInstructions: call for every product type. The underlying generator branches on productTypeDial — hardware gets 3–5 maintenance bullets, consumables (lube, edible wear) get 2–3 playful storage/usage bullets.
 - generateBoxContents: skip for lube; usually skip for wear.
 
 When every applicable tool above has been called, call \`finish\` with no arguments. Do NOT re-emit content — the orchestrator already has it.
@@ -640,95 +747,112 @@ Pricing context (do not echo): deal $${input.product.dealPrice} / msrp $${input.
 
 Start with classifyProductTypeDial, then run every other applicable tool exactly once, then call finish.`
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const messages: any[] = [{ role: 'user', content: userPrompt }]
-
-  const calledTools = new Set<string>()
-
   const llm: LLMClient = input.llmClient ?? getDefaultClient()
 
-  while (state.telemetry.turns < MAX_TURNS && !state.finished) {
-    state.telemetry.turns++
-
-    const response = await llm.create({
-      model:      MODEL,
-      max_tokens: 4096,
-      system:     SYSTEM,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tools:      TOOLS as any,
-      messages,
-    })
-
-    state.telemetry.totalInputTokens  += response.usage.input_tokens
-    state.telemetry.totalOutputTokens += response.usage.output_tokens
-
-    messages.push({ role: 'assistant', content: response.content })
-
+  if (llm.via === 'claude-code') {
+    // SDK manages turns + tool dispatch internally; we just expose tools as MCP
+    // and walk the stream for telemetry. See runOrchestrationViaSdk.
+    await runOrchestrationViaSdk(state, userPrompt)
+  } else {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const toolUses = response.content.filter((b: any) => b.type === 'tool_use') as
-      Array<{ id: string; name: string; input: unknown }>
+    const messages: any[] = [{ role: 'user', content: userPrompt }]
 
-    if (toolUses.length === 0) {
-      // Model stopped without calling finish; treat as done.
-      break
-    }
+    const calledTools = new Set<string>()
 
-    const toolResults = await Promise.all(
-      toolUses.map(async tu => {
-        if (calledTools.has(tu.name)) {
+    while (state.telemetry.turns < MAX_TURNS && !state.finished) {
+      state.telemetry.turns++
+
+      const response = await llm.create({
+        model:      MODEL,
+        max_tokens: 4096,
+        system:     SYSTEM,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tools:      TOOLS as any,
+        messages,
+      })
+
+      state.telemetry.totalInputTokens  += response.usage.input_tokens
+      state.telemetry.totalOutputTokens += response.usage.output_tokens
+
+      messages.push({ role: 'assistant', content: response.content })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const toolUses = response.content.filter((b: any) => b.type === 'tool_use') as
+        Array<{ id: string; name: string; input: unknown }>
+
+      if (toolUses.length === 0) {
+        // Model stopped without calling finish; treat as done.
+        break
+      }
+
+      const toolResults = await Promise.all(
+        toolUses.map(async tu => {
+          if (calledTools.has(tu.name)) {
+            return {
+              type:        'tool_result' as const,
+              tool_use_id: tu.id,
+              content:     JSON.stringify({ ok: false, summary: `${tu.name} already called — skipping duplicate` }),
+            }
+          }
+          calledTools.add(tu.name)
+
+          const start = Date.now()
+          let ok = false
+          let summary = ''
+          let errorMsg: string | undefined
+          drainToolTokens()
+          try {
+            const r = await executeTool(tu.name, state)
+            ok = r.ok
+            summary = r.summary
+          } catch (err) {
+            errorMsg = err instanceof Error ? err.message : String(err)
+            summary = `tool error: ${errorMsg}`
+          }
+          const toolTokens = drainToolTokens()
+          state.telemetry.totalInputTokens  += toolTokens.input
+          state.telemetry.totalOutputTokens += toolTokens.output
+          state.telemetry.toolCalls.push({
+            name:         tu.name,
+            durationMs:   Date.now() - start,
+            inputTokens:  toolTokens.input,
+            outputTokens: toolTokens.output,
+            ok,
+            ...(errorMsg ? { error: errorMsg } : {}),
+          })
           return {
             type:        'tool_result' as const,
             tool_use_id: tu.id,
-            content:     JSON.stringify({ ok: false, summary: `${tu.name} already called — skipping duplicate` }),
+            content:     JSON.stringify({ ok, summary }),
+            ...(errorMsg ? { is_error: true } : {}),
           }
-        }
-        calledTools.add(tu.name)
+        }),
+      )
 
-        const start = Date.now()
-        let ok = false
-        let summary = ''
-        let errorMsg: string | undefined
-        try {
-          const r = await executeTool(tu.name, state)
-          ok = r.ok
-          summary = r.summary
-        } catch (err) {
-          errorMsg = err instanceof Error ? err.message : String(err)
-          summary = `tool error: ${errorMsg}`
-        }
-        state.telemetry.toolCalls.push({
-          name:         tu.name,
-          durationMs:   Date.now() - start,
-          inputTokens:  0,
-          outputTokens: 0,
-          ok,
-          ...(errorMsg ? { error: errorMsg } : {}),
-        })
-        return {
-          type:        'tool_result' as const,
-          tool_use_id: tu.id,
-          content:     JSON.stringify({ ok, summary }),
-          ...(errorMsg ? { is_error: true } : {}),
-        }
-      }),
-    )
+      messages.push({ role: 'user', content: toolResults })
 
-    messages.push({ role: 'user', content: toolResults })
-
-    if (state.finished) break
-    if (response.stop_reason === 'end_turn') break
+      if (state.finished) break
+      if (response.stop_reason === 'end_turn') break
+    }
   }
 
   state.telemetry.totalTokens = state.telemetry.totalInputTokens + state.telemetry.totalOutputTokens
   state.telemetry.durationMs  = Date.now() - t0
 
-  // Validate the writes payload contains the always-required fields. If a
-  // required field is missing, fall back to an empty default so the import
-  // doesn't completely fail.
+  // Coverage check — if no tools fired, the LLM client returned empty content
+  // (e.g., broken adapter) and silently letting the writes payload assemble
+  // with `?? defaults` would ship template strings to Shopify. Fail loudly
+  // here instead so the upstream caller can decide what to do.
+  if (state.telemetry.toolCalls.length === 0) {
+    throw new Error('orchestrator: 0 tool calls — LLM client returned empty content (check llm-client adapter)')
+  }
+  if (!state.writes.tagline?.trim()) {
+    throw new Error('orchestrator: tagline tool did not run or returned empty — refusing to ship a fallback')
+  }
+
   const writes: ProductWrites = {
     productTypeDial:    state.writes.productTypeDial    ?? 'vibrator',
-    tagline:            state.writes.tagline            ?? `${input.product.brand} ${input.product.title} at xdipx.`,
-    featureBullets:     state.writes.featureBullets     ?? [],
+    tagline:            state.writes.tagline,
     seoMetaDescription: state.writes.seoMetaDescription ?? '',
     descriptionHtml:    state.writes.descriptionHtml    ?? '',
     moodTags:           state.writes.moodTags           ?? [],
@@ -748,7 +872,7 @@ Start with classifyProductTypeDial, then run every other applicable tool exactly
     ...(state.writes.ivrExperience   !== undefined ? { ivrExperience:    state.writes.ivrExperience   } : {}),
     ...(state.writes.ivrUseCase      !== undefined ? { ivrUseCase:       state.writes.ivrUseCase      } : {}),
     ...(state.writes.ivrFeatures     !== undefined ? { ivrFeatures:      state.writes.ivrFeatures     } : {}),
-    ...(state.writes.ivrVoiceSummary !== undefined ? { ivrVoiceSummary:  state.writes.ivrVoiceSummary } : {}),
+    ...(state.writes.productFaqs     !== undefined ? { productFaqs:      state.writes.productFaqs     } : {}),
   }
 
   return { writes, telemetry: state.telemetry }

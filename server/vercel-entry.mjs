@@ -5376,11 +5376,13 @@ async function fetchCandidates(input) {
         (!defined(audienceTags)     || count(audienceTags) == 0) &&
         (!defined(mattersTags)      || count(mattersTags) == 0)
       ) || (
-        // Or shares at least one tag with the input
-        ($productType != null && $productType in productTypeDials) ||
-        count((moodTags     ?? [])[@ in $moods])     > 0 ||
-        count((audienceTags ?? [])[@ in $audiences]) > 0 ||
-        count((mattersTags  ?? [])[@ in $matters])   > 0
+        // Or shares at least one tag with the input.
+        // Note: GROQ rejects "??" coalesce inside count() ("expected ')'
+        // following parenthesized expression"). Use defined() guards instead.
+        ($productType != null && defined(productTypeDials) && count(productTypeDials[@ == $productType]) > 0) ||
+        (defined(moodTags)     && count(moodTags[@ in $moods])         > 0) ||
+        (defined(audienceTags) && count(audienceTags[@ in $audiences]) > 0) ||
+        (defined(mattersTags)  && count(mattersTags[@ in $matters])    > 0)
       )
     )]{ ${KEYWORD_PROJECTION} }
   `;

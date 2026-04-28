@@ -277,7 +277,6 @@ export async function searchAll(params: {
     const seoMatch     = fieldMatchAny('seoDescription', queryParamNames)
     const categoryMatch = fieldMatchAny('category', queryParamNames)
     const descMatch    = fieldMatchAny('pt::text(description)', queryParamNames)
-    const voiceSummaryMatch = fieldMatchAny('ivrVoiceSummary', queryParamNames)
     const tagInAny     = `(${queryParamNames.map(n => `$${n} in tags`).join(' || ')})`
 
     // IVR field match conditions — products matching only via descriptors still appear
@@ -289,7 +288,7 @@ export async function searchAll(params: {
     const ivrMatchOr = ivrMatchClauses.length > 0 ? ` || ${ivrMatchClauses.join(' || ')}` : ''
 
     productConditions.push(
-      `(${titleMatch} || ${taglineMatch} || ${vendorMatch} || ${seoMatch} || ${categoryMatch} || ${tagInAny} || ${descMatch} || ${voiceSummaryMatch}${ivrMatchOr})`
+      `(${titleMatch} || ${taglineMatch} || ${vendorMatch} || ${seoMatch} || ${categoryMatch} || ${tagInAny} || ${descMatch}${ivrMatchOr})`
     )
   } else if (ivrTerms.length > 0) {
     // No text query but IVR terms detected (shouldn't normally happen, but be safe)
@@ -369,7 +368,6 @@ export async function searchAll(params: {
         ...ivrBoosts,
         ...queryParamNames.map(n => `boost(tagline match $${n}, 3)`),
         ...queryParamNames.map(n => `boost(vendor match $${n}, 2)`),
-        ...queryParamNames.map(n => `boost(ivrVoiceSummary match $${n}, 2)`),
         ...queryParamNames.map(n => `boost(pt::text(description) match $${n}, 1)`),
         ...queryParamNames.map(n => `boost(seoDescription match $${n}, 1)`),
       ].join(',\n        ')
@@ -606,7 +604,6 @@ export async function predictiveSearchUnified(query: string): Promise<Predictive
   const anyTagline = fieldMatchAny('tagline', paramNames)
   const anyVendor = fieldMatchAny('vendor', paramNames)
   const anyCategory = fieldMatchAny('category', paramNames)
-  const anyVoiceSummary = fieldMatchAny('ivrVoiceSummary', paramNames)
   const anySeoTitle = fieldMatchAny('seoTitle', paramNames)
   const anyExcerpt = fieldMatchAny('excerpt', paramNames)
   const anyTagIn = `(${paramNames.map(n => `$${n} in tags`).join(' || ')})`
@@ -619,8 +616,8 @@ export async function predictiveSearchUnified(query: string): Promise<Predictive
   )
   const ivrMatchOr = ivrMatchClauses.length > 0 ? ` || ${ivrMatchClauses.join(' || ')}` : ''
 
-  const productMatchAny = `(${anyTitle} || ${anyTagline} || ${anyVendor} || ${anyCategory} || ${anyVoiceSummary}${ivrMatchOr})`
-  const productFullMatchAny = `(${anyTitle} || ${anyTagline} || ${anyVendor} || ${anyCategory} || ${anyTagIn} || ${anyVoiceSummary}${ivrMatchOr})`
+  const productMatchAny = `(${anyTitle} || ${anyTagline} || ${anyVendor} || ${anyCategory}${ivrMatchOr})`
+  const productFullMatchAny = `(${anyTitle} || ${anyTagline} || ${anyVendor} || ${anyCategory} || ${anyTagIn}${ivrMatchOr})`
 
   const ivrBoosts = ivrTerms.map(t =>
     IVR_ARRAY_FIELDS.has(t.field)
@@ -632,7 +629,6 @@ export async function predictiveSearchUnified(query: string): Promise<Predictive
     ...ivrBoosts,
     ...paramNames.map(n => `boost(tagline match $${n}, 3)`),
     ...paramNames.map(n => `boost(vendor match $${n}, 2)`),
-    ...paramNames.map(n => `boost(ivrVoiceSummary match $${n}, 2)`),
     ...paramNames.map(n => `boost(category match $${n}, 1)`),
   ].join(', ')
 

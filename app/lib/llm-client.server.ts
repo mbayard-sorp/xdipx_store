@@ -85,110 +85,112 @@ export class AnthropicSdkClient implements LLMClient {
   }
 }
 
-// ─── ClaudeAgentSdkClient — backfill via Max subscription ────────────────────
+// ─── ClaudeAgentSdkClient — Max-subscription routing marker ──────────────────
 
 /**
- * Adapter for `@anthropic-ai/claude-agent-sdk` `query()`. The SDK runs Claude
- * Code as a subprocess against your authenticated Max session, so token usage
- * counts toward your subscription quota instead of an API key.
+ * Marker class signalling the orchestrator should route via the Agent SDK
+ * path (`runOrchestrationViaSdk` in emma-orchestrator.server.ts) instead of
+ * driving an API-style turn loop. The Agent SDK manages turns + tool dispatch
+ * itself via its in-process MCP server protocol, which doesn't fit the
+ * `LLMClient.create(req)→LLMResponse` shape.
  *
- * Trade-offs vs api path:
- *   - Higher per-call latency (subprocess + interactive session overhead)
- *   - Token counts come back as 0 (Agent SDK doesn't surface them)
- *   - Auth is the existing `claude /login` session — no env-var setup
- *
- * We dynamic-import the SDK so the production bundle doesn't pay the cost of
- * pulling it in unless the backfill script actually opts in.
- *
- * IMPORTANT: This adapter is best-effort and intentionally narrow. If the
- * Agent SDK shape diverges (it's pre-1.0), we surface the error rather than
- * silently fabricating tool calls — the user can fall back to `--via=api`.
+ * The orchestrator branches on `llm.via === 'claude-code'` BEFORE calling
+ * `create()`, so this method should never run. It throws if it does — that
+ * indicates a routing bug, not a normal code path.
  */
 export class ClaudeAgentSdkClient implements LLMClient {
   readonly via = 'claude-code' as const
 
-  async create(req: LLMRequest): Promise<LLMResponse> {
+  async create(_req: LLMRequest): Promise<LLMResponse> {
+    throw new Error(
+      'ClaudeAgentSdkClient.create() must not be called — orchestrator should branch on `via === "claude-code"` and use runOrchestrationViaSdk instead.',
+    )
+  }
+}
+
+/**
+ * Dynamic-imports the Agent SDK and returns the helpers used by the
+ * orchestrator's claude-code path. Kept dynamic so the production bundle
+ * doesn't pull `@anthropic-ai/claude-agent-sdk` in unless the backfill
+ * actually opts into `--via=claude-code`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function loadAgentSdk(): Promise<{ query: any; tool: any; createSdkMcpServer: any }> {
+  // Indirect dynamic import so TS doesn't require the package at build time.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-implied-eval
+  const dynImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sdk = await dynImport('@anthropic-ai/claude-agent-sdk').catch(() => null) as any
+  if (!sdk) throw new Error('install @anthropic-ai/claude-agent-sdk to use --via=claude-code')
+  if (typeof sdk.query !== 'function') throw new Error('@anthropic-ai/claude-agent-sdk has no `query` export — SDK shape changed')
+  if (typeof sdk.tool !== 'function') throw new Error('@anthropic-ai/claude-agent-sdk has no `tool` export — SDK shape changed')
+  if (typeof sdk.createSdkMcpServer !== 'function') throw new Error('@anthropic-ai/claude-agent-sdk has no `createSdkMcpServer` export — SDK shape changed')
+  return { query: sdk.query, tool: sdk.tool, createSdkMcpServer: sdk.createSdkMcpServer }
+}
+
+/**
+ * Single-turn Claude call routed through the Agent SDK / Max subscription.
+ *
+ * The SDK's `query()` is built for tool-using agents; for non-tool generators
+ * (the per-tool content generators in `claude.server.ts`) we just want the
+ * model's text output to one prompt. This wraps that pattern: no MCP server,
+ * no tools, `maxTurns: 1`, walk the stream, return the assistant's text + any
+ * usage that comes back on the assistant message.
+ *
+ * Returns:
+ *   - `text`: concatenated text blocks from the assistant message(s)
+ *   - `inputTokens` / `outputTokens`: from `assistant.message.usage` if surfaced
+ *
+ * The SDK ignores the `model` option (Claude Code uses the subscription's
+ * default Sonnet). `maxTokens` is forwarded as a budget hint where supported.
+ */
+export async function runSingleClaudeCallViaSdk(opts: {
+  system:    string
+  prompt:    string
+  maxTokens: number
+  model?:    string
+}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  const { query } = await loadAgentSdk()
+
+  let text = ''
+  let inputTokens  = 0
+  let outputTokens = 0
+
+  const stream = query({
+    prompt: opts.prompt,
+    options: {
+      systemPrompt: opts.system,
+      tools:        [],   // disable all built-in tools (Bash/Read/etc.)
+      maxTurns:     1,    // single round-trip, like client.messages.create
+    },
+  })
+
+  for await (const event of stream) {
+    if (!event || typeof event !== 'object') continue
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let queryFn: any
-    try {
-      // Dynamic + indirect import so TS doesn't require the package at build time.
-      // The Agent SDK is an optional dependency — install before using --via=claude-code.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-implied-eval
-      const dynImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>
-      const mod = await dynImport('@anthropic-ai/claude-agent-sdk').catch(() => null)
-      if (!mod) {
-        throw new Error(
-          'ClaudeAgentSdkClient: install @anthropic-ai/claude-agent-sdk to use --via=claude-code',
-        )
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      queryFn = (mod as any).query
-      if (typeof queryFn !== 'function') {
-        throw new Error('ClaudeAgentSdkClient: @anthropic-ai/claude-agent-sdk has no `query` export — SDK shape may have changed')
-      }
-    } catch (err) {
-      throw err instanceof Error ? err : new Error(String(err))
-    }
-
-    // The Agent SDK takes a single user prompt + a tool registry; we serialize
-    // the orchestrator's message array into one prompt string so the subprocess
-    // session sees the full context. This is lossy compared to native multi-
-    // turn, but the orchestrator already keeps state in its own `state.writes`
-    // — the model just needs to decide the next tool call.
-    const promptParts: string[] = []
-    promptParts.push(`<system>${req.system}</system>`)
-    for (const m of req.messages) {
-      if (typeof m.content === 'string') {
-        promptParts.push(`<${m.role}>${m.content}</${m.role}>`)
-      } else if (Array.isArray(m.content)) {
-        promptParts.push(`<${m.role}>${JSON.stringify(m.content)}</${m.role}>`)
-      }
-    }
-    const prompt = promptParts.join('\n\n')
-
-    // Call the SDK and collect the streaming events into a single content array.
-    const content: AnthropicContent[] = []
-    let inputTokens = 0
-    let outputTokens = 0
-
-    try {
-      const stream = queryFn({
-        prompt,
-        options: {
-          model: req.model,
-          // Limit subprocess "permission mode" so it can call our tools but
-          // not arbitrary built-ins. The Agent SDK takes a `tools` shape; we
-          // pass our orchestrator tools straight through.
-          tools: req.tools,
-        },
-      })
-      for await (const event of stream) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ev = event as any
-        if (ev?.type === 'tool_use' && ev.tool_use) {
-          content.push({
-            type:  'tool_use',
-            id:    ev.tool_use.id ?? `tu_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            name:  ev.tool_use.name,
-            input: ev.tool_use.input ?? {},
-          })
-        } else if (ev?.type === 'text' && typeof ev.text === 'string') {
-          content.push({ type: 'text', text: ev.text })
-        } else if (ev?.type === 'message' && ev.message?.usage) {
-          inputTokens  += Number(ev.message.usage.input_tokens  ?? 0)
-          outputTokens += Number(ev.message.usage.output_tokens ?? 0)
+    const ev = event as any
+    if (ev.type === 'assistant') {
+      // Pull text blocks out of the assistant's BetaMessage.content[]
+      const blocks = ev.message?.content
+      if (Array.isArray(blocks)) {
+        for (const block of blocks) {
+          if (block?.type === 'text' && typeof block.text === 'string') {
+            text += block.text
+          }
         }
       }
-    } catch (err) {
-      throw err instanceof Error ? err : new Error(String(err))
-    }
-
-    return {
-      content,
-      stop_reason: content.some(c => c?.type === 'tool_use') ? 'tool_use' : 'end_turn',
-      usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+      const usage = ev.message?.usage
+      if (usage) {
+        inputTokens  += Number(usage.input_tokens  ?? 0)
+        outputTokens += Number(usage.output_tokens ?? 0)
+      }
+    } else if (ev.type === 'result') {
+      // SDK terminates here.
+      break
     }
   }
+
+  return { text, inputTokens, outputTokens }
 }
 
 // ─── Default + factory ──────────────────────────────────────────────────────

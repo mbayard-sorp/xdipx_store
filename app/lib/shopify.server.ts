@@ -2050,7 +2050,6 @@ export interface ProductPageDoc {
   worksForHim?: unknown        // string (legacy) or portable text blocks
   worksForHer?: unknown        // string (legacy) or portable text blocks
   boxContents?: string[] | undefined
-  featureBullets?: string[] | undefined          // xdipx.feature_bullets (json)
   moodImageUrl?: string | undefined
   category?: string | undefined
   dealStatus?: string | undefined
@@ -2147,13 +2146,6 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   add('wholesale_cost',   doc.wholesaleCost?.toString(),       'number_decimal')
   add('map_price',        doc.mapPrice?.toString(),            'number_decimal')
 
-  if (!doc.featureBullets?.length) throw new Error('pushProductToShopify: featureBullets is empty')
-  metafields.push({
-    namespace: 'xdipx', key: 'feature_bullets', ownerId: gid,
-    value: JSON.stringify(doc.featureBullets),
-    type: 'json',
-  })
-
   // box_contents is optional — orchestrator legitimately omits it for some types (e.g. lube).
   if (doc.boxContents?.length) {
     metafields.push({
@@ -2171,8 +2163,10 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
     })
   }
   add('deal_score',           doc.dealScore?.toString(),        'number_decimal')
-  add('seo_meta_description', doc.seoMetaDescription,           'multi_line_text_field',  true)
-  add('specifications',       doc.specifications,               'multi_line_text_field',  true)
+  // Optional — Shopify-native product.seo.description (set above) is the canonical SEO field; this metafield is supplementary.
+  add('seo_meta_description', doc.seoMetaDescription,           'multi_line_text_field')
+  // Optional — varies by product type (lubes have minimal specs; toys have full dimension/material lists).
+  add('specifications',       doc.specifications,               'multi_line_text_field')
 
   // v2 redesign — Emma agentic content metafields
   if (doc.careInstructions?.length) {
