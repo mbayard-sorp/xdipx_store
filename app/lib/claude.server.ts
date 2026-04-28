@@ -2107,8 +2107,44 @@ Return ONLY this JSON (no markdown): { "tags": ["slug-one", "slug-two"] }`
 export const IVR_EXPERIENCE_LEVELS = ['first-time', 'curious', 'experienced', 'advanced', 'any'] as const
 export type IvrExperience = typeof IVR_EXPERIENCE_LEVELS[number]
 
-export const IVR_USE_CASES = ['date-night', 'travel', 'everyday', 'discovery', 'gift', 'celebration'] as const
-export const IVR_FEATURES  = ['app-controlled', 'waterproof', 'rechargeable', 'quiet', 'travel-size', 'hands-free', 'soft-touch', 'pinpoint', 'full-coverage'] as const
+// Phase 1 rebuild — expanded vocabularies. See plan: Group G locked.
+// Cap raised on G2 (1–3 → 2–5) and G3 (2–4 → 3–8) to accommodate richer vocab
+// without becoming a tag dump. Honest tagging is the load-bearing rule.
+export const IVR_USE_CASES = [
+  'date-night', 'travel', 'everyday', 'discovery', 'gift', 'celebration',
+  'anniversary', 'honeymoon', 'valentine', 'birthday', 'bachelorette', 'pride',
+  'holiday', 'me-time', 'self-care', 'stress-relief', 'bedtime', 'after-work',
+  'couples-play', 'long-distance', 'partner-surprise', 'spice-up',
+  'newly-dating', 'long-term', 'first-time', 'experimentation',
+  'couples-discovery', 'kink-curious', 'role-play', 'fantasy', 'bdsm',
+  'power-play', 'bondage-night', 'vacation', 'weekend-getaway', 'shower-bath',
+  'discreet-public', 'quickie', 'pelvic-floor', 'kegel-training', 'postpartum',
+  'menopause', 'libido-boost', 'prostate-health', 'erectile-support',
+  'menstrual-comfort', 'gift-set', 'party-favor', 'self-gift',
+  'queer-affirming', 'trans-affirming', 'women-focused', 'men-focused',
+  'inclusive',
+] as const
+
+export const IVR_FEATURES = [
+  'app-controlled', 'waterproof', 'rechargeable', 'quiet', 'travel-size',
+  'hands-free', 'soft-touch', 'pinpoint', 'full-coverage', 'battery-powered',
+  'disposable-battery', 'usb-c', 'wireless-remote', 'bluetooth', 'long-distance',
+  'magnetic-charging', 'rumbly', 'buzzy', 'gentle', 'beginner-friendly',
+  'intense', 'powerful', 'vibrating', 'rotating', 'thrusting', 'suction',
+  'squirting', 'pulsing', 'warming', 'cooling', 'tingling', 'silicone', 'glass',
+  'metal', 'wood', 'body-safe', 'phthalate-free', 'latex-free', 'hypoallergenic',
+  'vegan', 'vegan-leather', 'leather', 'faux-leather', 'mini', 'compact',
+  'large', 'xl', 'xxl', 'oversized', 'plus-size', 'queen-size', 'curvy',
+  'small', 'medium', 'slim', 'girthy', 'flared-base', 'suction-cup', 'strapless',
+  'harness-compatible', 'solo', 'partner', 'couples', 'gift', 'gift-set',
+  'beginner', 'advanced', 'pro', 'lgbtq', 'pride', 'rainbow', 'clitoral',
+  'g-spot', 'p-spot', 'prostate', 'nipple', 'anal', 'oral', 'external',
+  'internal', 'dual-stim', 'luxury', 'premium', 'discreet', 'glow-in-the-dark',
+  'realistic', 'non-phallic', 'fantasy', 'holiday', 'valentine', 'pride-edition',
+  'water-based', 'silicone-based', 'hybrid', 'oil-based', 'flavored',
+  'unscented', 'cbd', 'organic', 'natural', 'condom-safe', 'toy-safe',
+  'numbing', 'desensitizing',
+] as const
 
 type IvrDealCtx = Pick<
   Deal,

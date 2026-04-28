@@ -15,6 +15,10 @@
 import 'dotenv/config'
 
 type MetafieldDef = {
+  /** Metafield namespace. Defaults to 'xdipx' when omitted. Use 'custom' for
+   *  fields that should live in Shopify's reserved namespace (e.g. parent/child
+   *  taxonomy fields where Shopify's UI groups namespace=custom together). */
+  namespace?:  string
   key:         string
   name:        string
   description: string
@@ -63,11 +67,41 @@ const DEFS: MetafieldDef[] = [
     description: 'Surface-level concerns (quiet, soft-touch, travel-size, first-time, waterproof, rechargeable, hands-free, etc).',
     type:        'list.single_line_text_field',
   },
-  // Phase 2 — sensation dial + voting
+  // Phase 2 — sensation dial + voting (Phase 1 rebuild — expanded enum)
   {
     key:         'product_type_dial',
     name:        'Product type (for dial)',
-    description: 'One of: air-pulsation | vibrator | wand | lube | wear. Drives which sensation dial dimensions render.',
+    description: 'Top-level product taxonomy. One of: vibrator | dildo | anal | bondage | cock-ring | stroker | couples | harness | extender | pump | lube | massage | enhancer | wear | condom | wellness | novelty | book-media | sex-machine. Drives careInstructions branching, Ask Emma filters, sensation dial vocabulary, and IVR product-type self-restriction. Pair with custom.product_subtype_dial for finer-grained classification.',
+    type:        'single_line_text_field',
+  },
+  // Phase 1 rebuild — hierarchical taxonomy: subtype scoped to product_type_dial parent.
+  // Lives in 'custom' namespace per plan; keeps xdipx namespace focused on editorial fields.
+  {
+    namespace:   'custom',
+    key:         'product_subtype_dial',
+    name:        'Product subtype (for dial)',
+    description: [
+      'Subtype scoped to xdipx.product_type_dial parent. Closed enum per parent:',
+      '• vibrator → bullet-egg | rabbit | g-spot | finger-clit | wand | air-pulsation | rotating-thrusting | remote | wearable',
+      '• dildo → realistic | glass-metal | silicone | dual-density | non-phallic | vibrating | packer | large',
+      '• anal → plug | prostate | beads | vibrating | dilator | douche-enema',
+      '• bondage → paddle-whip | restraint | blindfold | gag | collar-leash | nipple | body-harness | sensory | electrostim',
+      '• cock-ring → classic | vibrating | cock-ball-sling | ball-stretcher | set',
+      '• stroker → vagina | mouth | pocket | non-realistic | vibrating | doll | disposable',
+      '• couples → game-romance | bedroom-accessory | positioning-aid | swing-sling | wearable',
+      '• harness → fabric | leather | vegan-leather | o-ring | set-kit',
+      '• extender → sling | sleeve | vibrating | strap-on',
+      '• pump → penis',
+      '• lube → water-based | silicone-based | hybrid | flavored | natural | anal | warming-cooling | toy-cleaner',
+      '• massage → body-care | candle | perfume-pheromone | hygiene | cbd',
+      '• enhancer → desensitizer-relaxer | oral | arousal-gel | male-arousal | female-arousal | gummy-edible | pill',
+      '• wear → mens-underwear | panty | bra-panty-set | bodysuit-teddy | bodystocking | hosiery | pasty | apparel | sock | accessory | plus-queen',
+      '• condom → glyde | trojan | lifestyles | durex',
+      '• wellness → kegel | dilator | douche-enema | hygiene | aftercare',
+      '• novelty → candy-edible | pin-keychain | game | plushie-pillow | novelty-gift | party-supply',
+      '• book-media → book | coloring-book',
+      '• sex-machine → (no subtype — leave empty)',
+    ].join('\n'),
     type:        'single_line_text_field',
   },
   {
@@ -199,11 +233,12 @@ const CREATE_MUTATION = `
 `
 
 async function ensureDef(def: MetafieldDef) {
+  const ns = def.namespace ?? 'xdipx'
   const existing = await gql<{
     metafieldDefinitions: {
       nodes: Array<{ id: string; name: string; access: { storefront: string | null } }>
     }
-  }>(CHECK_QUERY, { ns: 'xdipx', key: def.key })
+  }>(CHECK_QUERY, { ns, key: def.key })
   const node = existing.metafieldDefinitions.nodes[0]
   if (node) {
     if (node.access?.storefront !== 'PUBLIC_READ') {
@@ -216,7 +251,7 @@ async function ensureDef(def: MetafieldDef) {
         }
       }>(UPDATE_MUTATION, {
         def: {
-          namespace:  'xdipx',
+          namespace:  ns,
           key:        def.key,
           ownerType:  'PRODUCT',
           access:     { storefront: 'PUBLIC_READ' },
@@ -224,12 +259,12 @@ async function ensureDef(def: MetafieldDef) {
       })
       const errs = updated.metafieldDefinitionUpdate.userErrors
       if (errs.length > 0) {
-        console.error(`  ✗ xdipx.${def.key} — update failed: ${errs.map(e => e.message).join('; ')}`)
+        console.error(`  ✗ ${ns}.${def.key} — update failed: ${errs.map(e => e.message).join('; ')}`)
       } else {
-        console.log(`  ↻ xdipx.${def.key} — granted storefront access`)
+        console.log(`  ↻ ${ns}.${def.key} — granted storefront access`)
       }
     } else {
-      console.log(`  ✓ xdipx.${def.key} — already exists`)
+      console.log(`  ✓ ${ns}.${def.key} — already exists`)
     }
     return
   }
@@ -240,7 +275,7 @@ async function ensureDef(def: MetafieldDef) {
     }
   }>(CREATE_MUTATION, {
     def: {
-      namespace:   'xdipx',
+      namespace:   ns,
       key:         def.key,
       name:        def.name,
       description: def.description,
@@ -254,14 +289,14 @@ async function ensureDef(def: MetafieldDef) {
   })
   const errors = created.metafieldDefinitionCreate.userErrors
   if (errors.length > 0) {
-    console.error(`  ✗ xdipx.${def.key} — ${errors.map(e => e.message).join('; ')}`)
+    console.error(`  ✗ ${ns}.${def.key} — ${errors.map(e => e.message).join('; ')}`)
     return
   }
-  console.log(`  + xdipx.${def.key} — created`)
+  console.log(`  + ${ns}.${def.key} — created`)
 }
 
 async function main() {
-  console.log(`Creating ${DEFS.length} xdipx metafield definitions on ${STORE}...`)
+  console.log(`Ensuring ${DEFS.length} metafield definitions on ${STORE}...`)
   for (const def of DEFS) {
     await ensureDef(def)
   }
