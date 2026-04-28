@@ -17,7 +17,7 @@ import {
   generateCareInstructions,
   generateSensationDialV2,
   generateEmmaHero,
-  inferProductTypeDial,
+  inferProductTaxonomy,
   generateAskEmmaTags,
   generateIvrExperience,
   generateIvrUseCase,
@@ -36,7 +36,7 @@ import { generateMoodImage } from '~/lib/imagen.server'
 import { uploadMoodImageToShopifyFiles, type PairingCandidate } from '~/lib/shopify.server'
 import { getDefaultClient, loadAgentSdk, type LLMClient } from '~/lib/llm-client.server'
 import type {
-  Deal, EmmaHeroCopy, ProductTypeDial, SensationDialV2,
+  Deal, EmmaHeroCopy, ProductTypeDial, ProductSubtypeDial, SensationDialV2,
 } from '~/types'
 
 const MODEL = 'claude-sonnet-4-20250514'
@@ -74,6 +74,10 @@ export interface OrchestratorInput {
 
 export interface ProductWrites {
   productTypeDial:    ProductTypeDial
+  /** Phase 1 D1 — per-parent subtype (closed list scoped to productTypeDial).
+   *  Null when type is `sex-machine` (no subtype) or classification is too
+   *  ambiguous to commit. Written to `custom.product_subtype_dial` metafield. */
+  productSubtypeDial?: ProductSubtypeDial | null
   /** SEO-augmented title when augmented=true. Equal to input seoTitle when raw was already descriptive. */
   productTitle?:      string
   /** True when the orchestrator augmented the manufacturer's raw title. */
@@ -324,15 +328,23 @@ async function executeTool(
 
   switch (name) {
     case 'classifyProductTypeDial': {
-      const t = await inferProductTypeDial({
+      // Phase 1 D1 — combined type+subtype Haiku classifier. Replaces the
+      // legacy 5-bucket inferProductTypeDial. Returns the new top-level
+      // ProductTypeDial (19 values) AND the per-parent ProductSubtypeDial
+      // in a single call.
+      const taxonomy = await inferProductTaxonomy({
         title:       product.title,
         brand:       product.brand,
         description: product.description,
         categories:  product.categories,
         ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
-      state.writes.productTypeDial = t
-      return { ok: true, summary: `productTypeDial=${t}` }
+      state.writes.productTypeDial    = taxonomy.type
+      state.writes.productSubtypeDial = taxonomy.subtype
+      const summary = taxonomy.subtype
+        ? `productTypeDial=${taxonomy.type}/${taxonomy.subtype}`
+        : `productTypeDial=${taxonomy.type}`
+      return { ok: true, summary }
     }
 
     case 'generateProductTitle': {

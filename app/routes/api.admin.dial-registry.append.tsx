@@ -2,9 +2,14 @@ import type { ActionFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { appendDialLabel } from '~/lib/dial-registry.server'
 import { getDealByShopifyId, updateProductMetafield } from '~/lib/shopify.server'
-import type { ProductTypeDial, SensationDialV2 } from '~/types'
+import { PRODUCT_TYPE_DIALS, type ProductTypeDial, type SensationDialV2 } from '~/types'
 
-const VALID_TYPES: ProductTypeDial[] = ['air-pulsation', 'vibrator', 'wand', 'lube', 'wear']
+// Phase 1 rebuild — only the legacy {vibrator, lube, wear} subset of the
+// expanded ProductTypeDial currently has a Sanity dialRegistry field mapped
+// (see TYPE_TO_FIELD in dial-registry.server.ts). Until the Sanity schema
+// migration adds fields for the remaining 16 top-level types, this admin
+// endpoint refuses appends for unmapped types with a clear error message.
+const VALID_TYPES: readonly ProductTypeDial[] = PRODUCT_TYPE_DIALS
 
 /**
  * Accept a proposed dial label: append to the Sanity registry for its product

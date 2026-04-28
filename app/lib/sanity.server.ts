@@ -1,6 +1,7 @@
 import { createClient } from '@sanity/client'
 import { toHTML } from '@portabletext/to-html'
 import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock } from '~/types/cms'
+import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
 
 type PortableTextBlocks = Parameters<typeof toHTML>[0]
@@ -350,7 +351,14 @@ export async function upsertProductPage(params: {
   /** MSRP / compare-at. Maps to productPage.originalPrice in the schema. */
   originalPrice?: number | undefined
   // Emma discovery — auto-filled by bulk-import orchestrator. Drives chat / IVR / SMS filters.
-  productTypeDial?: 'air-pulsation' | 'vibrator' | 'wand' | 'lube' | 'wear' | undefined
+  // Phase 1 rebuild — accepts the expanded ProductTypeDial enum (19 values) plus
+  // the legacy values during the transitional Sanity-migration window. Stored
+  // as a free-form string in Sanity productPage.productTypeDial.
+  productTypeDial?: ProductTypeDial | string | undefined
+  /** Phase 1 rebuild — new D1 hierarchical-taxonomy subtype, scoped to the
+   *  parent productTypeDial. Stored as a string; validated at the orchestrator
+   *  boundary against PRODUCT_SUBTYPES_BY_TYPE. */
+  productSubtypeDial?: string | undefined
   moodTags?: string[] | undefined
   audienceTags?: string[] | undefined
   mattersTags?: string[] | undefined

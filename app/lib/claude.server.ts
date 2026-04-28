@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'node:crypto'
 import type {
   Deal, EmmaHeroCopy, EmmaHeroVariant, GenerateCopyRequest, GenerateCopyResult, ProductScore,
-  SensationDialV2, SensationDialItem, DialValue, ProductTypeDial, CareInstructions,
+  SensationDialV2, SensationDialItem, DialValue, ProductTypeDial, ProductSubtypeDial, CareInstructions,
 } from '~/types'
 import { getPipelineSetting } from './feed-processor.server'
 import { buildKeywordBlock, type SeoContentType } from './seo-keywords.server'
@@ -819,12 +819,29 @@ export interface GenerateProductTitleResult {
   reason:        string   // One-line explanation: why augmented or why not
 }
 
+// Phase 1 rebuild — descriptor fallbacks for the expanded D1 enum.
+// Used by generateProductTitle when no descriptor can be extracted from the
+// manufacturer's description. Keep these short, factual, and SEO-friendly.
 const PRODUCT_TYPE_DESCRIPTOR_FALLBACK: Record<ProductTypeDial, string> = {
-  'air-pulsation': 'Air-Pulse Stimulator',
-  'vibrator':      'Vibrator',
-  'wand':          'Wand Vibrator',
-  'lube':          'Lubricant',
-  'wear':          'Wearable',
+  'vibrator':    'Vibrator',
+  'dildo':       'Dildo',
+  'anal':        'Anal Toy',
+  'bondage':     'Bondage Gear',
+  'cock-ring':   'Cock Ring',
+  'stroker':     'Stroker',
+  'couples':     'Couples Toy',
+  'harness':     'Harness',
+  'extender':    'Extender',
+  'pump':        'Pump',
+  'lube':        'Lubricant',
+  'massage':     'Massage',
+  'enhancer':    'Enhancer',
+  'wear':        'Wearable',
+  'condom':      'Condoms',
+  'wellness':    'Wellness',
+  'novelty':     'Novelty',
+  'book-media':  'Book',
+  'sex-machine': 'Sex Machine',
 }
 
 /**
@@ -2034,12 +2051,26 @@ Rules:
 
 // ─── Bulk-import — product type classifier + Ask Emma tag generator ─────────
 
-const PRODUCT_TYPE_DIALS: ProductTypeDial[] = ['air-pulsation', 'vibrator', 'wand', 'lube', 'wear']
+// Phase 1 rebuild — `inferProductTypeDial` is the legacy 5-bucket classifier.
+// D1 step 7 will replace it with `inferProductTaxonomy` (combined type+subtype
+// call returning the full 19-value enum + per-parent subtype). Until then,
+// this maps the legacy buckets to the new top-level ProductTypeDial:
+//   air-pulsation, wand, vibrator → vibrator   (legacy values are now subtypes)
+//   lube → lube, wear → wear
+const LEGACY_DIAL_BUCKETS = ['air-pulsation', 'vibrator', 'wand', 'lube', 'wear'] as const
+
+function mapLegacyDialBucket(legacy: string): ProductTypeDial | null {
+  if (legacy === 'air-pulsation' || legacy === 'wand' || legacy === 'vibrator') return 'vibrator'
+  if (legacy === 'lube') return 'lube'
+  if (legacy === 'wear') return 'wear'
+  return null
+}
 
 /**
- * Classify a product into one of the five `product_type_dial` buckets so the
- * sensation-dial generator can pull the right preferred labels. Defaults to
- * 'vibrator' if Haiku is unsure — never returns null.
+ * @deprecated Phase 1 rebuild replaces this with `inferProductTaxonomy` (D1 step 7).
+ * Classify a product into one of the legacy five buckets and map to the new
+ * top-level ProductTypeDial. Defaults to 'vibrator' if Haiku is unsure — never
+ * returns null.
  */
 export async function inferProductTypeDial(input: {
   title: string
@@ -2074,11 +2105,150 @@ No markdown. No commentary.`
     })
     const parsed = JSON.parse(stripFences(text)) as { type?: unknown }
     const t = typeof parsed.type === 'string' ? parsed.type.trim().toLowerCase() : ''
-    if (PRODUCT_TYPE_DIALS.includes(t as ProductTypeDial)) return t as ProductTypeDial
+    if ((LEGACY_DIAL_BUCKETS as readonly string[]).includes(t)) {
+      const mapped = mapLegacyDialBucket(t)
+      if (mapped) return mapped
+    }
   } catch (err) {
     console.error('[inferProductTypeDial] failed, defaulting to vibrator:', err)
   }
   return 'vibrator'
+}
+
+// ─── Phase 1 D1 — combined type+subtype hierarchical classifier ──────────────
+
+/** Per-parent subtype enum. Closed list per top-level ProductTypeDial. Used by
+ *  `inferProductTaxonomy` for runtime validation and for prompt context (the
+ *  caller passes the parent's allowed subtypes so Haiku doesn't memorize the
+ *  full hierarchy). `sex-machine` has no subtypes — leave the value null. */
+export const PRODUCT_SUBTYPES_BY_TYPE: Record<ProductTypeDial, readonly ProductSubtypeDial[]> = {
+  vibrator:    ['bullet-egg', 'rabbit', 'g-spot', 'finger-clit', 'wand', 'air-pulsation', 'rotating-thrusting', 'remote', 'wearable'],
+  dildo:       ['realistic', 'glass-metal', 'silicone', 'dual-density', 'non-phallic', 'vibrating', 'packer', 'large'],
+  anal:        ['plug', 'prostate', 'beads', 'vibrating', 'dilator', 'douche-enema'],
+  bondage:     ['paddle-whip', 'restraint', 'blindfold', 'gag', 'collar-leash', 'nipple', 'body-harness', 'sensory', 'electrostim'],
+  'cock-ring': ['classic', 'vibrating', 'cock-ball-sling', 'ball-stretcher', 'set'],
+  stroker:     ['vagina', 'mouth', 'pocket', 'non-realistic', 'vibrating', 'doll', 'disposable'],
+  couples:     ['game-romance', 'bedroom-accessory', 'positioning-aid', 'swing-sling', 'wearable'],
+  harness:     ['fabric', 'leather', 'vegan-leather', 'o-ring', 'set-kit'],
+  extender:    ['sling', 'sleeve', 'vibrating', 'strap-on'],
+  pump:        ['penis'],
+  lube:        ['water-based', 'silicone-based', 'hybrid', 'flavored', 'natural', 'anal', 'warming-cooling', 'toy-cleaner'],
+  massage:     ['body-care', 'candle', 'perfume-pheromone', 'hygiene', 'cbd'],
+  enhancer:    ['desensitizer-relaxer', 'oral', 'arousal-gel', 'male-arousal', 'female-arousal', 'gummy-edible', 'pill'],
+  wear:        ['mens-underwear', 'panty', 'bra-panty-set', 'bodysuit-teddy', 'bodystocking', 'hosiery', 'pasty', 'apparel', 'sock', 'accessory', 'plus-queen'],
+  condom:      ['glyde', 'trojan', 'lifestyles', 'durex'],
+  wellness:    ['kegel', 'dilator', 'douche-enema', 'hygiene', 'aftercare'],
+  novelty:     ['candy-edible', 'pin-keychain', 'game', 'plushie-pillow', 'novelty-gift', 'party-supply'],
+  'book-media': ['book', 'coloring-book'],
+  'sex-machine': [],
+}
+
+const TOP_LEVEL_DIAL_GUIDE = `Top-level taxonomy (pick exactly one):
+- vibrator     (any vibrating toy: bullet, rabbit, g-spot, wand, air-pulse, rotating, remote, wearable)
+- dildo        (non-vibrating insertable, realistic or fantasy, packer, etc.)
+- anal         (plug, prostate massager, beads, dilator, douche)
+- bondage      (paddle, restraint, blindfold, gag, collar, sensory, electrostim)
+- cock-ring    (classic ring, sling, ball stretcher, ring set)
+- stroker      (masturbation sleeve, pocket, doll)
+- couples      (couples game, positioning aid, swing/sling, shared accessory)
+- harness      (strap-on harness body)
+- extender     (penis sleeve, extender, strap-on extender)
+- pump         (penis pump)
+- lube         (lubricant of any base — water/silicone/hybrid/oil — and toy cleaner)
+- massage      (body massage product, oil, candle, pheromone, CBD)
+- enhancer     (desensitizer, arousal gel, gummy, pill, oral spray)
+- wear         (lingerie, underwear, bodysuit, hosiery, pasty, apparel)
+- condom       (any condom brand)
+- wellness     (kegel, dilator, douche, hygiene, aftercare)
+- novelty      (candy, pin, game, plushie, party supply, novelty gift)
+- book-media   (book, coloring book)
+- sex-machine  (machines — no subtype available; leave subtype empty)`
+
+export interface InferProductTaxonomyResult {
+  type:    ProductTypeDial
+  /** Null when the top-level is sex-machine (no subtypes) or when classification
+   *  is too ambiguous to commit. Validated against PRODUCT_SUBTYPES_BY_TYPE. */
+  subtype: ProductSubtypeDial | null
+}
+
+/**
+ * Phase 1 D1 — combined type+subtype Haiku classifier. Returns the top-level
+ * ProductTypeDial AND the per-parent ProductSubtypeDial in one call.
+ *
+ * The prompt scopes the subtype options to the chosen top-level (caller passes
+ * the parent's child list as context) so Haiku doesn't have to memorize the
+ * full hierarchy. Defaults to {type: 'vibrator', subtype: null} on failure.
+ *
+ * Replaces `inferProductTypeDial`. Both write paths go through this for new
+ * imports and backfill reclassification.
+ */
+export async function inferProductTaxonomy(input: {
+  title: string
+  brand: string
+  description: string
+  categories: string[]
+  llmClient?: LLMClient
+}): Promise<InferProductTaxonomyResult> {
+  const subtypeBlock = (Object.entries(PRODUCT_SUBTYPES_BY_TYPE) as Array<[ProductTypeDial, readonly ProductSubtypeDial[]]>)
+    .map(([t, subs]) => subs.length === 0
+      ? `  ${t}: (no subtype — leave subtype null/empty)`
+      : `  ${t}: ${subs.join(' | ')}`)
+    .join('\n')
+
+  const user = `Classify this product into a hierarchical taxonomy. Two fields:
+1. \`type\` — one of the closed top-level values
+2. \`subtype\` — one of the closed values scoped to the chosen \`type\`, OR null when the type is \`sex-machine\` or no subtype clearly fits
+
+${TOP_LEVEL_DIAL_GUIDE}
+
+Subtypes by parent:
+${subtypeBlock}
+
+HONEST CLASSIFICATION:
+- Pick the dominant type when a product spans two (an anal vibrator → \`anal\` parent with subtype \`vibrating\`, NOT \`vibrator\` parent).
+- Skip the subtype (return null) rather than force a bad fit.
+- Don't invent new types or subtypes — both lists are closed.
+
+Product:
+- Title: ${input.title}
+- Brand: ${input.brand}
+- Categories: ${input.categories.join(', ') || '(none)'}
+- Description (truncated): ${input.description.slice(0, 600)}
+
+Return ONLY this JSON (no markdown):
+{ "type": "vibrator", "subtype": "rabbit" }
+or { "type": "sex-machine", "subtype": null }`
+
+  try {
+    const { text } = await callClaude({
+      llmClient: input.llmClient,
+      model:     MODEL_FAST,
+      maxTokens: 100,
+      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user,
+    })
+    const parsed = JSON.parse(stripFences(text)) as { type?: unknown; subtype?: unknown }
+    const rawType = typeof parsed.type === 'string' ? parsed.type.trim().toLowerCase() : ''
+    if (!(rawType in PRODUCT_SUBTYPES_BY_TYPE)) {
+      console.warn(`[inferProductTaxonomy] unrecognized type "${rawType}", defaulting to vibrator`)
+      return { type: 'vibrator', subtype: null }
+    }
+    const type = rawType as ProductTypeDial
+    const allowedSubs = PRODUCT_SUBTYPES_BY_TYPE[type]
+
+    let subtype: ProductSubtypeDial | null = null
+    if (allowedSubs.length > 0) {
+      const rawSubtype = typeof parsed.subtype === 'string' ? parsed.subtype.trim().toLowerCase() : ''
+      if (rawSubtype && (allowedSubs as readonly string[]).includes(rawSubtype)) {
+        subtype = rawSubtype as ProductSubtypeDial
+      }
+      // else leave null — admin can review and fill in manually
+    }
+    return { type, subtype }
+  } catch (err) {
+    console.error('[inferProductTaxonomy] failed, defaulting to vibrator:', err)
+    return { type: 'vibrator', subtype: null }
+  }
 }
 
 export type AskEmmaAxis = 'mood' | 'audience' | 'matters'
