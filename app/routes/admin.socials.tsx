@@ -8,6 +8,7 @@ import { generateTweetCopy } from '~/lib/claude.server'
 import { getDealByShopifyId } from '~/lib/shopify.server'
 import { postManualTweet, deleteAndLogTweet, retryFailedPost } from '~/lib/twitter.server'
 import { requireAdmin } from '~/lib/session.server'
+import { categoryToLegacyString } from '~/types'
 
 export const meta: MetaFunction = () => [{ title: 'Socials — xdipx Admin' }]
 
@@ -41,7 +42,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       liveDealImage = fullDeal.images[0]?.url ?? null
       liveDealBrand = fullDeal.brand
       liveDealTagline = fullDeal.tagline
-      liveDealCategory = fullDeal.category
+      liveDealCategory = categoryToLegacyString(fullDeal.category)
     }
   }
 

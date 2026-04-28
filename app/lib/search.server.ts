@@ -634,9 +634,9 @@ export async function predictiveSearchUnified(query: string): Promise<Predictive
 
   try {
     const data = await client.fetch<{
-      products: { handle: string; title: string; previewImageUrl: string | null; vendor: string | null; category: string | null }[]
+      products: { handle: string; title: string; previewImageUrl: string | null; vendor: string | null; category: string[] | null }[]
       totalProducts: number
-      categoryRows: { category: string | null }[]
+      categoryRows: { category: string[] | null }[]
       pages: { title: string; slug: string }[]
       blogPosts: { title: string; slug: string }[]
     }>(`{
@@ -644,7 +644,7 @@ export async function predictiveSearchUnified(query: string): Promise<Predictive
         "handle": shopifyHandle, title, previewImageUrl, vendor, category
       },
       "totalProducts": count(*[_type == "productPage" && ${productFullMatchAny}]),
-      "categoryRows": *[_type == "productPage" && ${productFullMatchAny} && defined(category)]{ category },
+      "categoryRows": *[_type == "productPage" && ${productFullMatchAny} && count(category) > 0]{ category },
       "pages": *[_type == "page" && (${anyTitle} || ${anySeoTitle})] [0...3] {
         title, "slug": slug.current
       },
@@ -660,6 +660,9 @@ export async function predictiveSearchUnified(query: string): Promise<Predictive
 
     const products: PredictiveProduct[] = data.products.map(sp => {
       const shopify = shopifyMap.get(sp.handle)
+      // Phase 2 — category is multi-select; collapse the array to a primary
+      // display label for the dropdown (first entry, or null when empty).
+      const cat = Array.isArray(sp.category) ? (sp.category[0] ?? null) : null
       return {
         handle: sp.handle,
         title: shopify?.title ?? sp.title,
@@ -667,14 +670,19 @@ export async function predictiveSearchUnified(query: string): Promise<Predictive
         vendor: sp.vendor,
         price: shopify ? String(shopify.price) : null,
         compareAtPrice: shopify?.compareAtPrice ? String(shopify.compareAtPrice) : null,
-        category: sp.category ?? null,
+        category: cat,
       }
     })
 
-    // Aggregate top categories from the matched result set
+    // Aggregate top categories — each entry in a doc's category array counts
+    // independently toward the facet (so a [for-him, couples] product
+    // contributes one to each).
     const categoryCounts = new Map<string, number>()
     for (const row of data.categoryRows ?? []) {
-      if (row.category) categoryCounts.set(row.category, (categoryCounts.get(row.category) ?? 0) + 1)
+      const arr = Array.isArray(row.category) ? row.category : []
+      for (const c of arr) {
+        if (c) categoryCounts.set(c, (categoryCounts.get(c) ?? 0) + 1)
+      }
     }
     const categories = Array.from(categoryCounts.entries())
       .map(([label, count]) => ({ label, count }))

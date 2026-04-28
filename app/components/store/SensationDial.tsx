@@ -1,14 +1,15 @@
-import type { ProductTypeDial, SensationDial as SensationDialValues } from '~/types'
+import type { ProductTypeDial, SensationDial as SensationDialValues, SensationDialV2 } from '~/types'
 
 /**
  * Dial dimensions per product type. Order here = render order.
- * Keys match the keys Emma enters in the `sensation_dial` JSON metafield.
+ * Keys match the keys Emma enters in the legacy `sensation_dial` JSON metafield.
  *
  * Phase 1 rebuild — only the legacy `vibrator`, `lube`, and `wear` keys have
  * curated dimensions (the legacy `air-pulsation` and `wand` are now subtypes
  * of `vibrator` and merged into that entry). For new top-level types
- * (dildo, anal, bondage, etc.), the dial falls back to the v2 free-form
- * `sensation_dial_v2` metafield rendered elsewhere on the PDP.
+ * (dildo, anal, bondage, etc.) the orchestrator writes `sensation_dial_v2`
+ * with self-describing { label, value } items — this component renders v2
+ * directly when present, so new types don't need a legacy dim map.
  */
 const DIMENSIONS_BY_TYPE: Partial<Record<ProductTypeDial, ReadonlyArray<{ key: keyof SensationDialValues; label: string }>>> = {
   vibrator: [
@@ -39,7 +40,10 @@ export interface SensationDialAggregate {
 
 interface SensationDialProps {
   type:   ProductTypeDial
-  values: SensationDialValues
+  /** Legacy `sensation_dial` shape (key-based). Optional when valuesV2 is provided. */
+  values?: SensationDialValues
+  /** New `sensation_dial_v2` shape (self-describing label+value items). Preferred when present. */
+  valuesV2?: SensationDialV2
   /** Product-level aggregate vote totals. */
   aggregate?: SensationDialAggregate
   /** Current customer's own vote, for sticky-pressed state. */
@@ -50,19 +54,40 @@ interface SensationDialProps {
   voting?: boolean
 }
 
+interface RenderItem { label: string; value: number }
+
 export function SensationDial({
   type,
   values,
+  valuesV2,
   aggregate: _aggregate,
   customerVote: _customerVote,
   onAggregateVote: _onAggregateVote,
   voting: _voting,
 }: SensationDialProps) {
-  // Render-fallback for top-level types without curated dimensions (Phase 1
-  // expansion adds many types; only vibrator/lube/wear have legacy dial maps).
-  // The free-form sensation_dial_v2 covers the rest elsewhere on the PDP.
-  const dims = DIMENSIONS_BY_TYPE[type]
-  if (!dims) return null
+  // Prefer v2 — it's self-describing and covers the full taxonomy. Fall back
+  // to the legacy key-based map for older `sensation_dial` data.
+  const items: RenderItem[] = (() => {
+    if (valuesV2?.items?.length) {
+      return valuesV2.items
+        .filter(it => it && typeof it.label === 'string' && it.label.trim())
+        .map(it => ({
+          label: it.label,
+          value: Math.max(0, Math.min(5, Math.round(it.value ?? 0))),
+        }))
+        .filter(it => it.value > 0)
+    }
+    const dims = DIMENSIONS_BY_TYPE[type]
+    if (!dims || !values) return []
+    return dims
+      .map(({ key, label }) => ({
+        label,
+        value: Math.max(0, Math.min(5, Math.round((values[key] ?? 0) as number))),
+      }))
+      .filter(it => it.value > 0)
+  })()
+
+  if (items.length === 0) return null
 
   return (
     <section className="bg-paper/90 rounded-[var(--radius-lg)] border border-line p-5 md:p-6">
@@ -76,36 +101,32 @@ export function SensationDial({
       </header>
 
       <ul className="space-y-3">
-        {dims.map(({ key, label }) => {
-          const value = Math.max(0, Math.min(5, Math.round(values[key] ?? 0)))
-          if (!value) return null
-          return (
-            <li key={key as string} className="grid grid-cols-[minmax(0,9rem)_1fr] items-center gap-3">
-              <span
-                className="text-sm font-medium text-ink"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                {label}
-              </span>
-              <div
-                className="flex gap-1.5"
-                aria-label={`${label}: ${value} of 5`}
-                role="img"
-              >
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <span
-                    key={i}
-                    className={[
-                      'h-2.5 flex-1 rounded-full transition-colors',
-                      i < value ? 'bg-coral' : 'bg-cream-2',
-                    ].join(' ')}
-                    aria-hidden="true"
-                  />
-                ))}
-              </div>
-            </li>
-          )
-        })}
+        {items.map(({ label, value }) => (
+          <li key={label} className="grid grid-cols-[minmax(0,9rem)_1fr] items-center gap-3">
+            <span
+              className="text-sm font-medium text-ink"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              {label}
+            </span>
+            <div
+              className="flex gap-1.5"
+              aria-label={`${label}: ${value} of 5`}
+              role="img"
+            >
+              {Array.from({ length: 5 }).map((_, i) => (
+                <span
+                  key={i}
+                  className={[
+                    'h-2.5 flex-1 rounded-full transition-colors',
+                    i < value ? 'bg-coral' : 'bg-cream-2',
+                  ].join(' ')}
+                  aria-hidden="true"
+                />
+              ))}
+            </div>
+          </li>
+        ))}
       </ul>
 
       {/* Aggregate vote footer hidden — uncomment to restore.

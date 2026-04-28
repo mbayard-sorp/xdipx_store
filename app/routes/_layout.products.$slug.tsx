@@ -54,6 +54,7 @@ import { EmailSubscribe }         from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }   from '~/components/cms/ContentBlockRenderer'
 import { TrustBarBlock }          from '~/components/cms/TrustBarBlock'
 import type { Product } from '~/types'
+import { categoryToLegacyString } from '~/types'
 import type { ProductCarouselBlock, ProductFaq, TrustBarBlock as TrustBarBlockType } from '~/types/cms'
 import { trackViewItem, trackAddToCart } from '~/lib/analytics.client'
 import { ShareButtons } from '~/components/common/ShareButtons'
@@ -127,7 +128,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const reviewSort   = url.searchParams.get('reviewSort')   ?? 'newest'
   const reviewFilter = url.searchParams.get('reviewFilter') ?? 'all'
 
-  const hasDial = !!(deal.sensationDial && deal.productTypeDial)
+  const hasDial = !!(deal.productTypeDial && (deal.sensationDialV2?.items?.length || (deal.sensationDial && Object.keys(deal.sensationDial).length > 0)))
   const hasPairing = !!(deal.pairingWhy && Object.keys(deal.pairingWhy).length > 0 && deal.accessoryProductIds.length > 0)
 
   // Resolve current customer (for sticky vote state + gating). Failures here
@@ -651,7 +652,7 @@ function ProductPage() {
       item_id: deal.shopifyProductId,
       item_name: deal.seoTitle,
       item_brand: deal.brand,
-      item_category: deal.category,
+      item_category: categoryToLegacyString(deal.category),
       price,
     }, price)
   }, [deal.handle])
@@ -669,7 +670,7 @@ function ProductPage() {
           item_id: deal.shopifyProductId,
           item_name: deal.seoTitle,
           item_brand: deal.brand,
-          item_category: deal.category,
+          item_category: categoryToLegacyString(deal.category),
           price,
           quantity,
           ...(selectedVariant?.title ? { item_variant: selectedVariant.title } : {}),
@@ -794,11 +795,13 @@ function ProductPage() {
             </p>
           )}
 
-          {/* How it feels — sensation dial + aggregate vote */}
-          {deal.productTypeDial && deal.sensationDial && (
+          {/* How it feels — sensation dial + aggregate vote.
+              Renders when EITHER the legacy dial or v2 has data. */}
+          {deal.productTypeDial && (deal.sensationDialV2?.items?.length || (deal.sensationDial && Object.keys(deal.sensationDial).length > 0)) && (
             <SensationDial
               type={deal.productTypeDial}
-              values={deal.sensationDial}
+              {...(deal.sensationDial ? { values: deal.sensationDial } : {})}
+              {...(deal.sensationDialV2 ? { valuesV2: deal.sensationDialV2 } : {})}
               aggregate={productVoteAggregate}
               customerVote={customerVote}
               onAggregateVote={handleAggregateVote}
@@ -898,13 +901,6 @@ function ProductPage() {
             )}
           </div>
 
-          {/* Sitewide PDP trust bar — managed in Sanity at PDP Defaults. */}
-          {pdpTrustBar && pdpTrustBar.trustItems && pdpTrustBar.trustItems.length > 0 && (
-            <div className="mt-4">
-              <TrustBarBlock block={pdpTrustBar} />
-            </div>
-          )}
-
           {/* Non-color/size axis fallback (rare): render legacy selector */}
           {multiVariant && options.some(o => {
             const l = o.name.toLowerCase()
@@ -973,6 +969,14 @@ function ProductPage() {
           )
         }
       />
+
+      {/* Sitewide PDP trust bar — managed in Sanity at PDP Defaults. Sits
+          below Emma's take, styled to match the summary-grid cards. */}
+      {pdpTrustBar && pdpTrustBar.trustItems && pdpTrustBar.trustItems.length > 0 && (
+        <div className="mt-3 bg-paper rounded-[var(--radius-lg)] border border-line py-3 px-4 overflow-hidden">
+          <TrustBarBlock block={pdpTrustBar} frameless />
+        </div>
+      )}
 
     </section>
   )

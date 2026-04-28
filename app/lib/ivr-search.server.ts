@@ -149,7 +149,7 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
     )
 
     if (category) {
-      conditions.push('category == $cat')
+      conditions.push('$cat in category')
       groqParams.cat = category
     }
     if (priceMax != null) {
@@ -226,11 +226,11 @@ export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductC
     const boostClauses: string[] = []
 
     if (mood && mood.length > 0) {
-      const moodOr = mood.map((_, i) => `$mood${i} in ivrMood`).join(' || ')
+      const moodOr = mood.map((_, i) => `$mood${i} in moodTags`).join(' || ')
       conditions.push(`(${moodOr})`)
       mood.forEach((m, i) => {
         groqParams[`mood${i}`] = m
-        boostClauses.push(`boost($mood${i} in ivrMood, 3)`)
+        boostClauses.push(`boost($mood${i} in moodTags, 3)`)
       })
     }
 
@@ -259,7 +259,7 @@ export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductC
     }
 
     if (category) {
-      conditions.push('category == $cat')
+      conditions.push('$cat in category')
       groqParams.cat = category
     }
 

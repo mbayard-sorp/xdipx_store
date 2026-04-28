@@ -73,13 +73,12 @@ const truncateWords = (s: string | undefined, n: number) => {
 }
 
 const categoryLabel = (c: Deal['category']) => {
-  switch (c) {
-    case 'for-him': return 'For him'
-    case 'for-her': return 'For her'
-    case 'both':    return 'Both'
-    case 'couples': return 'Couples'
-    default:        return ''
-  }
+  if (!c || c.length === 0) return ''
+  if (c.includes('couples')) return 'Couples'
+  if (c.length >= 2 && c.includes('for-him') && c.includes('for-her')) return 'Both'
+  if (c.includes('for-him')) return 'For him'
+  if (c.includes('for-her')) return 'For her'
+  return ''
 }
 
 function useVariantPicker(deal: Deal) {

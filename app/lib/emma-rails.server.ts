@@ -23,6 +23,7 @@ import {
 import { pickForContextGroup, type ContextPickCandidate } from './claude.server'
 import { kvGet, kvSet, kvDel } from './kv.server'
 import type { Product } from '~/types'
+import { categoryToLegacyString } from '~/types'
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -315,7 +316,7 @@ export async function regenerateRail(
         title:      hero.seoTitle,
         ...(hero.brand    ? { brand: hero.brand } : {}),
         ...(hero.tagline  ? { tagline: hero.tagline } : {}),
-        ...(hero.category ? { category: hero.category } : {}),
+        ...(hero.category?.length ? { category: categoryToLegacyString(hero.category) } : {}),
         ...(hero.tags?.length ? { tags: hero.tags } : {}),
         dealPrice:  hero.dealPrice,
       },

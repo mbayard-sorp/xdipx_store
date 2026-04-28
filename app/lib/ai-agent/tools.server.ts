@@ -77,7 +77,7 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
       properties: {
         query: { type: 'string', description: 'Free-text search query from the user.' },
         limit: { type: 'number', description: 'Max results to return. 1–5. Default 5.' },
-        category: { type: 'string', enum: ['for-him', 'for-her', 'couples', 'both'], description: 'Filter by audience category.' },
+        category: { type: 'string', enum: ['for-him', 'for-her', 'couples'], description: 'Filter by audience tag. Multi-select on the doc — this filter matches any product that has the given tag among its category array.' },
         priceMax: { type: 'number', description: 'Max price in dollars.' },
       },
       required: ['query'],
@@ -95,7 +95,7 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
         experience: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Experience level.' },
         useCase: { type: 'array', items: { type: 'string', enum: ['solo', 'couples', 'date-night', 'gift', 'travel'] }, description: 'Use-case tags.' },
         features: { type: 'array', items: { type: 'string', enum: ['waterproof', 'quiet', 'rechargeable', 'app-controlled', 'body-safe'] }, description: 'Feature tags.' },
-        category: { type: 'string', enum: ['for-him', 'for-her', 'couples', 'both'], description: 'Audience category.' },
+        category: { type: 'string', enum: ['for-him', 'for-her', 'couples'], description: 'Audience tag. Multi-select on the doc — this filter matches any product that has the given tag among its category array.' },
         priceMax: { type: 'number', description: 'Max price in dollars.' },
         limit: { type: 'number', description: '1–5, default 3.' },
       },

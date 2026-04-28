@@ -25,6 +25,7 @@ import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }  from '~/components/cms/ContentBlockRenderer'
 import { ProductStructuredData } from '~/components/seo/ProductStructuredData'
 import type { Product } from '~/types'
+import { categoryToLegacyString } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
 import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~/lib/analytics.client'
 import { buildSocialMeta } from '~/lib/social-meta'
@@ -212,7 +213,7 @@ export default function Homepage() {
       item_id: deal.shopifyProductId,
       item_name: deal.seoTitle,
       item_brand: deal.brand,
-      item_category: deal.category,
+      item_category: categoryToLegacyString(deal.category),
       price: deal.dealPrice,
     }
     trackViewItem(item, deal.dealPrice)

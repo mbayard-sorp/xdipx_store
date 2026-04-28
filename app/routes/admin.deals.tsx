@@ -398,6 +398,13 @@ export async function action({ request }: ActionFunctionArgs) {
     const key       = form.get('key') as string
     const value     = form.get('value') as string
     const type      = (form.get('type') as string) || 'single_line_text_field'
+    if (key === 'specifications') {
+      // Phase 2 — specifications stored as JSON string[] of "Label: Value"
+      // bullets. Editor types one bullet per line; serialize before writing.
+      const items = value.split('\n').map(l => l.trim()).filter(Boolean)
+      await updateProductMetafield(productId, key, JSON.stringify(items), type)
+      return { ok: true }
+    }
     await updateProductMetafield(productId, key, value, type)
     return { ok: true }
   }
@@ -514,7 +521,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const fullStory   = storyResult.content as string
       const bothWays    = bothWaysResult.content as { forHim: string; forHer: string }
       const seoMeta     = seoMetaResult.content as string
-      const specs       = specsResult.content as string
+      const specs       = (Array.isArray(specsResult.content) ? specsResult.content : []) as string[]
       const boxContents = boxContentsResult.content as string[]
 
       const numericId = productId.replace('gid://shopify/Product/', '')
@@ -2597,7 +2604,7 @@ export default function AdminDealsPage() {
                         <SaveableField label="Full Story" fieldKey="full_story" fieldType="multi_line_text_field" defaultValue={editorData.deal.fullStory} productId={editorData.deal.shopifyProductId} rows={8} />
                         <SaveableField label="Works For Him" fieldKey="works_for_him" fieldType="multi_line_text_field" defaultValue={editorData.deal.worksForHim} productId={editorData.deal.shopifyProductId} rows={3} />
                         <SaveableField label="Works For Her" fieldKey="works_for_her" fieldType="multi_line_text_field" defaultValue={editorData.deal.worksForHer} productId={editorData.deal.shopifyProductId} rows={3} />
-                        <SaveableField label="Specifications" fieldKey="specifications" fieldType="multi_line_text_field" defaultValue={editorData.deal.specifications ?? ''} productId={editorData.deal.shopifyProductId} rows={5} />
+                        <SaveableField label="Specifications" fieldKey="specifications" fieldType="multi_line_text_field" defaultValue={(editorData.deal.specifications ?? []).join('\n')} productId={editorData.deal.shopifyProductId} rows={5} hint="One bullet per line: 'Label: Value'" />
                         <SaveableField label="What's In The Box" intent="save-box-contents" defaultValue={(editorData.deal.boxContents ?? []).join('\n')} productId={editorData.deal.shopifyProductId} rows={4} hint="One item per line" />
                         <SaveableField label="SEO Meta Description" fieldKey="seo_meta_description" fieldType="multi_line_text_field" defaultValue={editorData.deal.metaDescription} productId={editorData.deal.shopifyProductId} rows={2} />
                       </div>

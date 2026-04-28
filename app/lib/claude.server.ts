@@ -184,6 +184,45 @@ function stripFences(raw: string): string {
   return raw.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim()
 }
 
+/**
+ * Detect when the model wrote meta-commentary about the prompt instead of the
+ * requested output. Triggered when keyword targets are off-topic (e.g. a
+ * product type with no keyword-bank coverage falls through the GROQ filter
+ * and surfaces unrelated terms — the model "helpfully" calls out the
+ * mismatch in plain text instead of generating copy). Caller falls through
+ * to retry / deterministic fallback.
+ *
+ * Patterns are intentionally conservative — false positives here truncate
+ * legit copy to the fallback, which is worse than the current behaviour for
+ * normal output. Only the obvious commentary openings are flagged.
+ */
+/**
+ * Detect price mentions in generated copy. Prices change frequently and storing
+ * them in body/SEO/tagline copy creates stale text — the PDP renders Shopify's
+ * live price separately. Caller falls through to retry / deterministic fallback
+ * when this returns true.
+ *
+ * Matches: "$73.99", "$74", "73.99 dollars", "73 dollars", "for $5".
+ * Does NOT match: dimension specs like "16 oz" or "5/5" dial values.
+ */
+function containsPrice(text: string): boolean {
+  return /\$\s?\d/.test(text) || /\b\d+(?:\.\d{1,2})?\s*(?:dollars|usd)\b/i.test(text)
+}
+
+function looksLikeMetaCommentary(text: string): boolean {
+  const head = text.slice(0, 80).toLowerCase()
+  return (
+    head.startsWith('i notice') ||
+    head.startsWith("i'm flagging") ||
+    head.startsWith('i am flagging') ||
+    head.startsWith("i'd flag") ||
+    head.startsWith('the keyword') ||
+    head.startsWith("these keywords don't") ||
+    head.startsWith('these keyword targets') ||
+    head.startsWith('the provided keyword')
+  )
+}
+
 /** Map copy type → keyword bank content-type so the right keywords surface. */
 function resolveSeoContentType(type: GenerateCopyRequest['type']): SeoContentType {
   if (type === 'blog_article') return 'blog'
@@ -214,26 +253,31 @@ export async function generateCopy(req: GenerateCopyRequest, llmClient?: LLMClie
     return ''
   })
 
-  const productContextBase = `Product: ${product.title}\nBrand: ${product.brand}\nDescription: ${product.description}\nCategories: ${product.categories.join(', ')}${product.dealPrice ? `\nDeal price: $${product.dealPrice} (was $${product.msrp})` : ''}`
+  // Editorial direction: price MUST NOT appear in any AI-generated copy. Prices
+  // change frequently and storing them in body/SEO/tagline copy creates stale
+  // text. The PDP renders Shopify's live price separately from this content.
+  const productContextBase = `Product: ${product.title}\nBrand: ${product.brand}\nDescription: ${product.description}\nCategories: ${product.categories.join(', ')}`
   const productContext = keywordBlock
     ? `${productContextBase}\n\n${keywordBlock}`
     : productContextBase
 
   switch (type) {
     case 'tagline': {
-      const primaryPrompt = `Write 3 one-sentence taglines for the following product. Emma voice — observational, casual, lightly witty. Think: a trusted friend who's recommending it, not a stand-up comedian. Avoid punchline-shaped puns and ad-copy zingers. Fragments are welcome ("the one I keep recommending", "earns its spot daily", "quietly indispensable"). First person OK. Max 12 words each. NO em-dashes. NO ♥ glyph (reserve it for CTAs and asides). Return as a JSON array of strings (no markdown).\n\n${productContext}`
-      const retryPrompt   = `Return exactly one short Emma-voice product tagline. Observational, casual, ≤ 12 words. No em-dashes, no ♥ glyph, no quotes. Just the sentence.\n\n${productContext}`
+      const primaryPrompt = `Write 3 one-sentence taglines for the following product. Emma voice — observational, casual, lightly witty. Think: a trusted friend who's recommending it, not a stand-up comedian. Avoid punchline-shaped puns and ad-copy zingers. Fragments are welcome ("the one I keep recommending", "earns its spot daily", "quietly indispensable"). First person OK. Max 12 words each. NO em-dashes. NO ♥ glyph (reserve it for CTAs and asides). If any keyword targets in the prompt do not fit this product, IGNORE them silently — write from product details only. Never narrate a mismatch, never preface, never explain. Return as a JSON array of strings (no markdown).\n\n${productContext}`
+      const retryPrompt   = `Return exactly one short Emma-voice product tagline. Observational, casual, ≤ 12 words. No em-dashes, no ♥ glyph, no quotes, no preamble, no commentary. Just the sentence.\n\n${productContext}`
 
       const raw = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient)
       try {
         const parsed = JSON.parse(stripFences(raw)) as string[]
-        const first = Array.isArray(parsed) ? parsed.find(s => typeof s === 'string' && s.trim()) : null
-        if (first) return { type, content: parsed }
+        if (Array.isArray(parsed)) {
+          const clean = parsed.filter(s => typeof s === 'string' && s.trim() && !looksLikeMetaCommentary(s))
+          if (clean.length > 0) return { type, content: clean }
+        }
       } catch { /* fall through to retry */ }
 
       const retried = await generate(retryPrompt, 1024, MODEL_FAST, llmClient)
       const line = retried.trim().split('\n')[0]?.trim()
-      if (line) return { type, content: [line] }
+      if (line && !looksLikeMetaCommentary(line)) return { type, content: [line] }
 
       return { type, content: [`${product.brand} ${product.title}, today on xdipx.`] }
     }
@@ -340,36 +384,29 @@ ${productContext}`
     }
 
     case 'seo_meta': {
-      const priceLine = product.mapRestricted
-        ? '(MAP-restricted — DO NOT mention price, discount, or struck-through pricing.)'
-        : product.dealPrice
-          ? `Today's price: $${product.dealPrice}. You may include the price if it flows naturally.`
-          : '(No deal price set — anchor on benefit + ships discreetly, no price.)'
-
       const primaryPrompt = `Write a 140–155 character SEO meta description for this product. This shows in Google SERP and link previews — drives click-through.
 
 Two anchors to include (Emma voice within these constraints):
-  (a) Trust/value beat: "Ships discreetly" + price (only when not MAP-restricted)
+  (a) Trust beat: "Ships discreetly" — keeps the discretion signal in SERP
   (b) Benefit beat in light Emma voice — fragment OK, first-person OK, no marketing fluff
 
-${priceLine}
+NEVER mention price, discount, or any dollar amount. Prices change; this copy is durable. Keep the focus on the product and how it feels to use.
+
+If any keyword targets in this prompt don't actually fit the product, IGNORE them silently and write the description from the product details only — never narrate the mismatch, never preface, never explain. Output exactly the description and nothing else.
 
 Voice: light Emma — observational, warm, specific. Not a generic SEO template, not a stand-up zinger. Brand mentions written as "XDIPX" (uppercase). NO em-dashes ("—" or "–"). Return ONLY the meta description text — no quotes, no labels.\n\n${productContext}`
-      const retryPrompt   = `Write a single SEO meta description, 140 to 155 characters. Light Emma voice. Include "Ships discreetly". ${product.mapRestricted ? 'NO price or discount mentions (MAP-restricted).' : product.dealPrice ? `Price $${product.dealPrice} optional.` : 'No price.'} No em-dashes. Return ONLY the description.\n\n${productContext}`
+      const retryPrompt   = `Write a single SEO meta description, 140 to 155 characters. Light Emma voice. Include "Ships discreetly". NEVER mention price or dollar amounts. No em-dashes. Output ONLY the description text — no preamble, no commentary, no quotes.\n\n${productContext}`
 
       const text = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient)
       const cleaned = text.replace(/^["']|["']$/g, '').trim()
-      if (cleaned.length >= 50) return { type, content: cleaned.slice(0, 155) }
+      if (cleaned.length >= 50 && !looksLikeMetaCommentary(cleaned) && !containsPrice(cleaned)) return { type, content: cleaned.slice(0, 155) }
 
       const retried = await generate(retryPrompt, 1024, MODEL_FAST, llmClient)
       const cleanedRetry = retried.replace(/^["']|["']$/g, '').trim()
-      if (cleanedRetry.length >= 50) return { type, content: cleanedRetry.slice(0, 155) }
+      if (cleanedRetry.length >= 50 && !looksLikeMetaCommentary(cleanedRetry) && !containsPrice(cleanedRetry)) return { type, content: cleanedRetry.slice(0, 155) }
 
-      // Fallback: deterministic, no em-dashes, respects MAP restriction.
-      const priceFragment = product.mapRestricted || !product.dealPrice
-        ? ''
-        : `$${product.dealPrice} today. `
-      const fallback = `${product.brand} ${product.title}. ${priceFragment}Ships discreetly from XDIPX.`
+      // Fallback: deterministic, no em-dashes, no price.
+      const fallback = `${product.brand} ${product.title}. Ships discreetly from XDIPX.`
       return { type, content: fallback.slice(0, 155) }
     }
 
@@ -572,16 +609,45 @@ ${pairContext}`
     }
 
     case 'specifications': {
-      const primaryPrompt = `Extract and format the technical specifications from this product description into clean, readable HTML. Use a <table> with two columns (spec name + value) if there are 4+ specs, otherwise use a <ul> list. Include: dimensions, materials, power source, charge time, run time, waterproofing, colors, and any other objective specs. If a spec is not mentioned, omit it. No fluff or marketing copy — just the facts. Return only the HTML, no markdown, no wrapper tags.\n\n${productContext}`
-      const retryPrompt   = `Return ONLY HTML starting with <table> or <ul> containing the technical specs from this product description. No markdown, no explanation, no preamble.\n\n${productContext}`
+      // Phase 2 — emit a JSON array of "Label: Value" bullet pairs (mirrors
+      // care_instructions / box_contents shape). Renders as <ul> on the PDP
+      // Specs grid card. NEVER include price.
+      const primaryPrompt = `Extract the technical specifications from this product description as a JSON array of "Label: Value" bullet pairs. Each entry is a single short string with the label, a colon, and the value (e.g. "Color: Black", "Material: Body-safe silicone", "Battery life: 90 minutes per charge").
 
-      const text = await generate(primaryPrompt, 2048)
-      if (text.includes('<')) return { type, content: text }
+Include only objective facts surfaced in the description: dimensions, materials, power source, charge time, run time, waterproofing, colors, weight, controls, country of origin. Skip categories the source doesn't mention — better fewer accurate specs than padded ones. NEVER include price, discount, or dollar amounts.
 
-      const retried = await generate(retryPrompt, 2048)
-      if (retried.includes('<')) return { type, content: retried }
+Voice: factual and concise. No fluff, no marketing copy, no Emma asides. Each value 4–80 chars.
 
-      return { type, content: `<ul><li>${product.description.slice(0, 500)}</li></ul>` }
+Return ONLY a JSON array of strings, max 12 entries. No markdown, no prose, no wrapper.
+
+Example: ["Color: Black", "Material: Nylon straps with padded cuffs", "Includes: 4 cuffs and restraint straps", "Fit: Universal mattress sizes"]
+
+${productContext}`
+      const retryPrompt   = `Return ONLY a JSON array of "Label: Value" spec strings extracted from this product. No markdown, no explanation, no preamble. Example: ["Color: Black", "Material: Silicone"]\n\n${productContext}`
+
+      const tryParse = (raw: string): string[] | null => {
+        try {
+          const parsed = JSON.parse(stripFences(raw))
+          if (!Array.isArray(parsed)) return null
+          const out = parsed
+            .filter((s): s is string => typeof s === 'string' && s.trim().length >= 4 && s.trim().length <= 100)
+            .map(s => s.trim())
+          return out.length > 0 ? out.slice(0, 12) : null
+        } catch { return null }
+      }
+
+      const text = await generate(primaryPrompt, 1500, MODEL_FAST, llmClient)
+      const parsed = tryParse(text)
+      if (parsed) return { type, content: parsed }
+
+      const retried = await generate(retryPrompt, 1500, MODEL_FAST, llmClient)
+      const parsedRetry = tryParse(retried)
+      if (parsedRetry) return { type, content: parsedRetry }
+
+      // Deterministic fallback — returns nothing. The PDP shows the
+      // specifications fallback message rather than mangled HTML when the
+      // model can't produce a clean array.
+      return { type, content: [] }
     }
 
     case 'blog_article': {
@@ -1499,7 +1565,7 @@ export interface BlogSEOSuggestion {
 
 // ─── Emma Hero (homepage) ─────────────────────────────────────────────────
 
-const DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful — suggestive is fine, explicit is not. Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait. Never "Buy now" — use "Take a peek →" or "I'll take it ♥". Never surface a countdown or "until midnight." Always include a short first-person aside ("been living on my desk," "telling everyone about this combo"). Never assume the reader's experience level.`
+const DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful — suggestive is fine, explicit is not. Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait. Never "Buy now" — use "Take a peek →" or "I'll take it ♥". Never surface a countdown or "until midnight." Always include a short first-person aside ("been living on my desk," "telling everyone about this combo"). Never assume the reader's experience level. If any keyword targets, vocabulary lists, or input fields in the prompt do not fit the actual product, silently ignore them — write from the product details only. Never narrate a mismatch, never preface output with explanation, never write meta-commentary about the prompt. Output only the requested copy.`
 
 const EMMA_SYSTEM_PROMPT = `You are Emma — the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You test everything you recommend. You write in first person, warm and specific, like a note to a friend.`
 
@@ -1542,7 +1608,7 @@ export async function generateEmmaHero(opts: {
 Product context (do NOT echo — rewrite in Emma's voice):
 - Title: ${opts.deal.seoTitle}
 - Brand: ${opts.deal.brand}
-- Category: ${opts.deal.category}
+- Category: ${opts.deal.category.join(', ')}
 ${opts.deal.tagline ? `- Existing tagline (for context only): ${opts.deal.tagline}` : ''}
 ${opts.deal.fullStory ? `- Full story (context only, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
 ${mapLine}
@@ -1689,7 +1755,7 @@ export async function generateEmmaTake(opts: {
 Product:
 - Title: ${opts.deal.seoTitle}
 - Brand: ${opts.deal.brand}
-- Category: ${opts.deal.category}
+- Category: ${opts.deal.category.join(', ')}
 ${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ''}
 ${opts.deal.tagline ? `- Tagline (context only — DO NOT echo in first sentence): ${opts.deal.tagline}` : ''}
 ${opts.deal.fullStory ? `- Existing story (context, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 600)}` : ''}
@@ -1759,7 +1825,7 @@ export async function generateCareInstructions(opts: {
 Product:
 - Title: ${opts.deal.seoTitle}
 - Type: ${opts.deal.productTypeDial}
-${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
+${opts.deal.specifications?.length ? `- Specs (context): ${opts.deal.specifications.join('; ').slice(0, 400)}` : ''}
 
 Tone:
 - This stuff takes care of you more than you take care of it.
@@ -1775,9 +1841,9 @@ No markdown, no fences, no commentary.`
 Product:
 - Title: ${opts.deal.seoTitle}
 - Brand: ${opts.deal.brand}
-- Category: ${opts.deal.category}
+- Category: ${opts.deal.category.join(', ')}
 ${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ''}
-${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 500)}` : ''}
+${opts.deal.specifications?.length ? `- Specs (context): ${opts.deal.specifications.join('; ').slice(0, 500)}` : ''}
 
 Cover what actually matters for this object — cleaning, charging/storage, lube compatibility (where relevant), what to avoid. Practical, not clinical.
 
@@ -1859,40 +1925,46 @@ export async function generateProductFaqs(opts: {
     ? opts.deal.careInstructions.join(' | ').slice(0, 500)
     : ''
 
-  const user = `Generate 4 to 6 FAQs for this product's PDP. They render visibly AND get emitted as FAQPage JSON-LD — visible text must match structured text (no hidden content).
+  const user = `Generate 6 to 8 FAQs for this product's PDP. They render visibly AND get emitted as FAQPage JSON-LD — visible text must match structured text (no hidden content).
 
 Product:
 - Title: ${opts.deal.seoTitle}
 - Brand: ${opts.deal.brand}
-- Category: ${opts.deal.category}
+- Category: ${opts.deal.category.join(', ')}
 ${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ''}
 ${opts.deal.tagline ? `- Tagline (context): ${opts.deal.tagline}` : ''}
 ${tagsLine ? `- Tags: ${tagsLine}` : ''}
-${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 500)}` : ''}
+${opts.deal.specifications?.length ? `- Specs (context): ${opts.deal.specifications.join('; ').slice(0, 500)}` : ''}
 ${opts.deal.fullStory ? `- Existing story (context, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 600)}` : ''}
 
 DIFFERENTIATION CONTEXT (what's already covered elsewhere on the PDP):
 ${descriptionHtmlText ? `- Emma's Take (descriptionHtml — narrative beat: who it clicks for / why explore / Emma's tip):\n  ${descriptionHtmlText}\n` : ''}${careInstructionsText ? `- Care card (careInstructions — structured imperatives covering cleaning / charging / storage / lube compat):\n  ${careInstructionsText}\n` : ''}
-**Each FAQ must be DISTINCT from the description and care instructions above. If the answer would just restate content from those surfaces, SKIP that FAQ — better 4 distinct entries than 6 with overlap.**
+**Each FAQ must be DISTINCT from the description and care instructions above. If the answer would just restate content from those surfaces, SKIP that FAQ — better fewer distinct entries than overlap.**
 
 Coverage requirements + DIFFERENTIATION RULES per category:
 
-- \`general\` — AT LEAST ONE.
+- \`general\` — 1 to 2 entries.
   Focus: practical "what is this" — product type, primary feature, basic spec.
   Good: "What kind of stimulation does this provide?", "Is this rechargeable?", "What's the runtime on a full charge?"
   AVOID: "Who is this for?" / "Who clicks for this?" — already covered in Emma's Take.
 
-- \`usage\` — AT LEAST ONE.
+- \`usage\` — 1 to 2 entries.
   Focus: practical operation — controls, modes, setup, partner/solo.
   Good: "How do I switch between intensity levels?", "Can I use this in the shower?", "Does it work with a partner or solo?"
   AVOID: "How do I get the most out of it?" — already covered in Emma's Take.
 
-- \`care\` — AT LEAST ONE.
-  Focus: customer-question framings that COMPLEMENT the structured care card.
-  Good: "Is it safe to share with a partner?", "How long does the battery last before needing replacement?", "What if it stops charging?"
-  AVOID: "How do I clean it?" / "How do I store it?" — already in care instructions.
+- \`care\` — **2 to 3 entries (REQUIRED for SEO).** Each must hit a DIFFERENT care angle from the list below.
+  Focus: customer-question framings that COMPLEMENT (do not restate) the structured care card.
+  Distinct angles to choose 2-3 from:
+    • Safety / sharing — "Is it safe to share with a partner?", "Do I need a condom or barrier when sharing?"
+    • Material safety — "Is the material body-safe?", "Is this phthalate-free?", "Is it hypoallergenic?"
+    • Battery / power longevity — "How long does the battery last on a full charge?", "What if it stops charging?", "How long until I need to replace the battery?"
+    • Lifespan / replacement — "How long should this last with regular use?", "When should I retire it?"
+    • Travel / on-the-go — "Can I take this on a plane?", "Will the charger work internationally?", "Is it discreet for travel?"
+    • Lube + material compatibility — "Which lubes are safe with this material?", "Will silicone lube damage the surface?"
+  AVOID: "How do I clean it?" / "How do I store it?" / "How do I charge it?" — already in the care card.
 
-- \`compatibility\` — OPTIONAL. Only when relevant: lube↔toy materials, sleeve sizing, app/Bluetooth requirements, condom safety.
+- \`compatibility\` — OPTIONAL. Only when relevant: lube↔toy materials (if not already covered in care), sleeve sizing, app/Bluetooth requirements, condom safety.
 
 - \`shipping\` — OPTIONAL. Only for non-standard shipping (oversize, restricted regions). Otherwise SKIP entirely.
 
@@ -1910,17 +1982,9 @@ Answer rules:
 
 Return ONLY raw JSON (no markdown). An array of objects: [{ "question": "...", "answer": "...", "category": "general|care|usage|compatibility|shipping" }, ...]`
 
-  try {
-    const { text } = await callClaude({
-      llmClient: opts.llmClient,
-      model:     MODEL,
-      maxTokens: 2000,
-      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
-      userPrompt: user,
-    })
-    const parsed = JSON.parse(stripFences(text)) as unknown
+  const parseFaqs = (raw: string): ProductFaq[] => {
+    const parsed = JSON.parse(stripFences(raw)) as unknown
     if (!Array.isArray(parsed)) throw new Error('expected array')
-
     const faqs: ProductFaq[] = []
     for (const entry of parsed) {
       if (!entry || typeof entry !== 'object') continue
@@ -1933,10 +1997,101 @@ Return ONLY raw JSON (no markdown). An array of objects: [{ "question": "...", "
       if (!(PRODUCT_FAQ_CATEGORIES as readonly string[]).includes(category)) continue
       faqs.push({ question, answer, category: category as ProductFaq['category'] })
     }
+    return faqs
+  }
 
-    // Cap to top 6 in case model overproduced; require min 3 to consider it useful.
-    const trimmed = faqs.slice(0, 6)
+  /**
+   * Smart trim that preserves category coverage. Walks the desired-distribution
+   * caps below in priority order, taking up to N entries from each bucket so a
+   * model that over-produced one category can't crowd out coverage of another.
+   * Total cap 8 (matches the prompt's upper bound).
+   */
+  const trimWithCoverage = (faqs: ProductFaq[]): ProductFaq[] => {
+    const caps: Record<ProductFaq['category'], number> = {
+      care:          3,
+      general:       2,
+      usage:         2,
+      compatibility: 1,
+      shipping:      1,
+    }
+    const taken: ProductFaq[] = []
+    const counts: Record<string, number> = {}
+    for (const f of faqs) {
+      if (taken.length >= 8) break
+      const cap = caps[f.category]
+      const cur = counts[f.category] ?? 0
+      if (cur >= cap) continue
+      taken.push(f)
+      counts[f.category] = cur + 1
+    }
+    return taken
+  }
+
+  try {
+    const { text } = await callClaude({
+      llmClient: opts.llmClient,
+      model:     MODEL,
+      maxTokens: 2500,
+      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user,
+    })
+    let faqs = parseFaqs(text)
+
+    // Coverage retry: if the primary call came back with fewer than 2 care
+    // FAQs, ask Sonnet for additional care-only entries that complement (don't
+    // restate) what's already there. We splice them into the existing batch
+    // instead of re-running the full generator (cheaper, preserves the
+    // diversity of the first pass for general/usage).
+    const careCount = (arr: ProductFaq[]) => arr.filter(f => f.category === 'care').length
+    if (careCount(faqs) < 2) {
+      const existingCareQs = faqs
+        .filter(f => f.category === 'care')
+        .map(f => `- ${f.question}`)
+        .join('\n') || '(none yet)'
+      const careTopUp = `The first FAQ pass for this product produced fewer than 2 \`care\` entries. Generate ${2 - careCount(faqs) + 1} additional \`care\` FAQs that COMPLEMENT (do not restate) the structured care card AND are DISTINCT from these existing care entries:
+
+${existingCareQs}
+
+Each new FAQ must hit a DIFFERENT care angle (safety/sharing, material safety, battery/power longevity, lifespan/replacement, travel/on-the-go, or lube↔material compatibility) from the others.
+
+Same product context, same answer rules (40–800 chars, plain text, no em-dashes, Emma voice).
+Return ONLY raw JSON array of objects: [{ "question": "...", "answer": "...", "category": "care" }, ...]
+
+Product:
+- Title: ${opts.deal.seoTitle}
+- Brand: ${opts.deal.brand}
+${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ''}
+${opts.deal.specifications?.length ? `- Specs (context): ${opts.deal.specifications.join('; ').slice(0, 400)}` : ''}
+${careInstructionsText ? `- Care card already covers (do NOT restate): ${careInstructionsText}` : ''}`
+
+      try {
+        const { text: retryText } = await callClaude({
+          llmClient: opts.llmClient,
+          model:     MODEL,
+          maxTokens: 1200,
+          system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+          userPrompt: careTopUp,
+        })
+        const extras = parseFaqs(retryText).filter(f => f.category === 'care')
+        // Dedupe by question (case-insensitive) before splicing in.
+        const seen = new Set(faqs.map(f => f.question.toLowerCase()))
+        for (const e of extras) {
+          if (seen.has(e.question.toLowerCase())) continue
+          faqs.push(e)
+          seen.add(e.question.toLowerCase())
+        }
+      } catch (err) {
+        console.warn('[generateProductFaqs] care top-up failed (continuing with primary batch):', err instanceof Error ? err.message : err)
+      }
+    }
+
+    const trimmed = trimWithCoverage(faqs)
     if (trimmed.length < 3) throw new Error(`only ${trimmed.length} valid FAQs returned`)
+    if (careCount(trimmed) < 1) {
+      console.warn(`[generateProductFaqs] no care FAQs after retry — Care card will fall back to careInstructions bullets`)
+    } else if (careCount(trimmed) < 2) {
+      console.warn(`[generateProductFaqs] only 1 care FAQ after retry — below the SEO target of 2-3`)
+    }
     return trimmed
   } catch (err) {
     console.error('[generateProductFaqs] failed:', err)
@@ -1992,11 +2147,11 @@ export async function generateSensationDialV2(opts: {
 Product:
 - Title: ${opts.deal.seoTitle}
 - Brand: ${opts.deal.brand}
-- Category: ${opts.deal.category}
+- Category: ${opts.deal.category.join(', ')}
 - Type: ${type}
 ${opts.deal.tagline ? `- Tagline: ${opts.deal.tagline}` : ''}
 ${opts.deal.fullStory ? `- Story (context, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 500)}` : ''}
-${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
+${opts.deal.specifications?.length ? `- Specs (context): ${opts.deal.specifications.join('; ').slice(0, 400)}` : ''}
 
 Preferred labels for this product type (use these when they fit):
 ${labelList}${taxonomyBlock}
@@ -2261,8 +2416,13 @@ const ASK_EMMA_AXIS_GUIDANCE: Record<AskEmmaAxis, string> = {
 
 /**
  * Validate raw model-output tags against curated vocabulary. Phase 1 rebuild —
- * Title Case storage. Returns canonical Title Case from `preferredLabels`
+ * Title Case storage. Returns Title Case canonicalized from `preferredLabels`
  * (case-insensitive match), capped at 5 unique entries.
+ *
+ * Storage form is always Title Case regardless of vocab case. The Sanity
+ * `askEmmaVocabulary` doc still serves kebab during the transition (Phase 2
+ * Sanity migration), so we Title Case at the boundary. Matches the one-time
+ * migration in scripts/migrate-existing-products-d1-d3.ts:84.
  *
  * When `allowProposed` is true and a tag doesn't match any preferred label,
  * the raw value is title-cased and accepted as a proposal. When false (the
@@ -2287,11 +2447,12 @@ function validateAskEmmaTagBatch(
     const trimmed = item.trim()
     if (!trimmed || trimmed.length > 32) continue
     const lower = trimmed.toLowerCase()
-    const canonical = canonicalByLower.get(lower) ?? (allowProposed ? toTitleCase(trimmed) : null)
+    const canonical = canonicalByLower.get(lower) ?? (allowProposed ? trimmed : null)
     if (!canonical) continue
-    if (seen.has(canonical)) continue
-    seen.add(canonical)
-    out.push(canonical)
+    const titleCased = toTitleCase(canonical)
+    if (seen.has(titleCased)) continue
+    seen.add(titleCased)
+    out.push(titleCased)
     if (out.length >= 5) break
   }
   return out
@@ -2342,11 +2503,11 @@ export async function generateAskEmmaTags(opts: {
 Product:
 - Title: ${deal.seoTitle}
 - Brand: ${deal.brand}
-- Category: ${deal.category}
+- Category: ${deal.category.join(', ')}
 ${deal.productTypeDial ? `- Type: ${deal.productTypeDial}` : ''}
 ${deal.tagline ? `- Tagline: ${deal.tagline}` : ''}
 ${deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
-${deal.specifications ? `- Specs (HTML, context): ${deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 300)}` : ''}
+${deal.specifications?.length ? `- Specs (context): ${deal.specifications.join('; ').slice(0, 300)}` : ''}
 
 Curated vocabulary for "${axis}" (Title Case — ${allowProposed ? 'PREFER these; only propose new when none fit' : 'STRICT: pick ONLY from this list'}):
 ${labelList}
@@ -2406,11 +2567,11 @@ export async function generateAskEmmaTagsAll(opts: {
 Product:
 - Title: ${deal.seoTitle}
 - Brand: ${deal.brand}
-- Category: ${deal.category}
+- Category: ${deal.category.join(', ')}
 ${deal.productTypeDial ? `- Type: ${deal.productTypeDial}` : ''}
 ${deal.tagline ? `- Tagline: ${deal.tagline}` : ''}
 ${deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
-${deal.specifications ? `- Specs (HTML, context): ${deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 300)}` : ''}
+${deal.specifications?.length ? `- Specs (context): ${deal.specifications.join('; ').slice(0, 300)}` : ''}
 
 AXIS GUIDE:
 - mood: ${ASK_EMMA_AXIS_GUIDANCE.mood}
@@ -2512,11 +2673,11 @@ function ivrProductBlock(deal: IvrDealCtx): string {
   return [
     `- Title: ${deal.seoTitle}`,
     `- Brand: ${deal.brand}`,
-    `- Category: ${deal.category}`,
+    `- Category: ${deal.category.join(', ')}`,
     deal.productTypeDial ? `- Type: ${deal.productTypeDial}` : '',
     deal.tagline ? `- Tagline: ${deal.tagline}` : '',
     deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : '',
-    deal.specifications ? `- Specs (context): ${deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 250)}` : '',
+    deal.specifications?.length ? `- Specs (context): ${deal.specifications.join('; ').slice(0, 250)}` : '',
   ].filter(Boolean).join('\n')
 }
 
@@ -2845,7 +3006,7 @@ export async function generateRails(opts: {
   const dealContext = [
     `Title: ${deal.seoTitle}`,
     `Brand: ${deal.brand}`,
-    `Category: ${deal.category}`,
+    `Category: ${deal.category.join(', ')}`,
     deal.tagline ? `Tagline: ${deal.tagline}` : '',
     deal.audienceTags?.length ? `Audience tags: ${deal.audienceTags.join(', ')}` : '',
     deal.moodTags?.length     ? `Mood tags: ${deal.moodTags.join(', ')}` : '',

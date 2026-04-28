@@ -345,11 +345,8 @@ export async function upsertProductPage(params: {
   description?: string | undefined
   seoTitle?: string | undefined
   seoDescription?: string | undefined
-  category?: string | undefined
-  /** Today's price / MAP. Maps to productPage.mapPrice in the schema. */
-  mapPrice?: number | undefined
-  /** MSRP / compare-at. Maps to productPage.originalPrice in the schema. */
-  originalPrice?: number | undefined
+  /** Phase 2 — multi-select audience tags. */
+  category?: Array<'for-him' | 'for-her' | 'couples'> | undefined
   // Emma discovery — auto-filled by bulk-import orchestrator. Drives chat / IVR / SMS filters.
   // Phase 1 rebuild — accepts the expanded ProductTypeDial enum (19 values) plus
   // the legacy values during the transitional Sanity-migration window. Stored
@@ -368,6 +365,19 @@ export async function upsertProductPage(params: {
   ivrFeatures?: string[] | undefined
   // PDP FAQs — productPage.productFaqs[]. Renders visibly + emits FAQPage JSON-LD. Sanity-only.
   productFaqs?: Array<{ question: string; answer: string; category: string }> | undefined
+  // Care & Specs — mirrors of Shopify metafields (xdipx.care_instructions /
+  // .specifications / .box_contents). Source-of-truth lives on Shopify; the
+  // backfill writes both surfaces from the same orchestrator output so Sanity
+  // search projections + Studio editorial UX have the full picture.
+  careInstructions?: string[] | undefined
+  specifications?: string[] | undefined
+  boxContents?: string[] | undefined
+  // Sensation dial v2 — self-describing { items: [{label, value, proposed?}] }.
+  // Mirror of xdipx.sensation_dial_v2.
+  sensationDialV2?: { items: Array<{ label: string; value: number; proposed?: boolean }> } | undefined
+  /** Manufacturer's verbatim title — mirror of xdipx.original_title. Stable
+   *  source-of-truth for legal / sourcing / re-augmentation. */
+  originalTitle?: string | undefined
   /** Soft-delete flag — search filters drop archived productPages. Set true when
    *  Nalpac flags the product as discontinued, false to un-archive. */
   archived?: boolean | undefined
@@ -420,8 +430,6 @@ export async function upsertProductPage(params: {
   if (params.description !== undefined) searchFields.description = stringToPortableText(params.description)
   if (params.seoDescription !== undefined) searchFields.seoDescription = params.seoDescription
   if (params.category !== undefined) searchFields.category = params.category
-  if (params.mapPrice !== undefined) searchFields.mapPrice = params.mapPrice
-  if (params.originalPrice !== undefined) searchFields.originalPrice = params.originalPrice
   if (params.seoTitle !== undefined) searchFields.seoTitle = params.seoTitle
   if (params.moodImageUrl !== undefined) searchFields.moodImageUrl = params.moodImageUrl
   if (params.productTypeDial !== undefined) searchFields.productTypeDial = params.productTypeDial
@@ -432,12 +440,17 @@ export async function upsertProductPage(params: {
   if (params.ivrUseCase !== undefined) searchFields.ivrUseCase = params.ivrUseCase
   if (params.ivrFeatures !== undefined) searchFields.ivrFeatures = params.ivrFeatures
   if (params.productFaqs !== undefined) searchFields.productFaqs = params.productFaqs
-  // Mirror moodTags into the productPage `ivrMood` field so voice/chat search
-  // (app/lib/ivr-search.server.ts) and the keyword map in search.server.ts
-  // resolve the same source of truth as the Shopify metafield. The dedicated
-  // enrich-ivr-tags.ts script remains as a one-shot for legacy products that
-  // have no productPage.moodTags yet.
-  if (params.moodTags !== undefined && params.moodTags.length > 0) searchFields.ivrMood = params.moodTags
+  // Phase 2 sync — mirror Shopify metafield content into productPage so search
+  // projections + Studio editorial UX see everything the PDP renders. Source
+  // of truth remains the Shopify metafield (xdipx.*); these are derived.
+  if (params.careInstructions !== undefined)   searchFields.careInstructions   = params.careInstructions
+  if (params.specifications !== undefined)     searchFields.specifications     = params.specifications
+  if (params.boxContents !== undefined)        searchFields.boxContents        = params.boxContents
+  if (params.sensationDialV2 !== undefined)    searchFields.sensationDialV2    = params.sensationDialV2
+  if (params.productSubtypeDial !== undefined) searchFields.productSubtypeDial = params.productSubtypeDial
+  if (params.originalTitle !== undefined)      searchFields.originalTitle      = params.originalTitle
+  // ivrMood mirror removed — IVR search now reads moodTags directly so there's
+  // a single source of truth for mood tags on the productPage doc.
   if (params.archived !== undefined) searchFields.archived = params.archived
 
   if (Object.keys(searchFields).length > 0) {

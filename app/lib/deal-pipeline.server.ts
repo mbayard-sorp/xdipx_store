@@ -69,32 +69,29 @@ function nextOpenSlot(scheduledDates: Set<string>, daysAhead: number): string {
   return fallback.toISOString().split('T')[0]!
 }
 
-// Determine Shopify category from ProductScore categories
-function inferCategory(categories: string[]): string {
+// Phase 2 — multi-select inference. Returns an array of audience tags.
+function inferCategory(categories: string[]): Array<'for-him' | 'for-her' | 'couples'> {
   const forHimCats  = ['Vagina Strokers', 'Body Molds', 'Prostate Toys', 'Masturbators', 'Hands-Free Masturbators']
   const forHerCats  = ['Dual Action and Rabbits', 'Finger and Clit', 'Air Pulse and Suction', 'Bullets and Eggs']
   const coupleCats  = ['Couples and Wearable', 'Remote', 'Top Couples Toys', 'Restraints']
-  const isHim = categories.some(c => forHimCats.includes(c))
-  const isHer = categories.some(c => forHerCats.includes(c))
-  const isCouples = categories.some(c => coupleCats.includes(c))
-  if (isCouples) return 'couples'
-  if (isHim && isHer) return 'both'
-  if (isHim) return 'for-him'
-  if (isHer) return 'for-her'
-  return 'both'
+  const out: Array<'for-him' | 'for-her' | 'couples'> = []
+  if (categories.some(c => forHimCats.includes(c)))  out.push('for-him')
+  if (categories.some(c => forHerCats.includes(c)))  out.push('for-her')
+  if (categories.some(c => coupleCats.includes(c))) out.push('couples')
+  return out.length > 0 ? out : ['for-him', 'for-her']
 }
 
 // ─── Copy validation ───────────────────────────────────────────────────────
 
 function validateCopyFields(fields: {
   tagline: string; fullStory: string; forHim: string; forHer: string
-  specs: string; boxContents: string[]; seoMeta: string
+  specs: string[]; boxContents: string[]; seoMeta: string
 }) {
   if (!fields.tagline?.trim())               throw new Error('Copy generation failed: tagline is empty')
   if (!fields.fullStory?.includes('<p'))      throw new Error('Copy generation failed: fullStory missing HTML')
   if (!fields.forHim?.trim())                throw new Error('Copy generation failed: forHim is empty')
   if (!fields.forHer?.trim())                throw new Error('Copy generation failed: forHer is empty')
-  if (!fields.specs?.trim())                 throw new Error('Copy generation failed: specifications is empty')
+  if (!fields.specs?.length)                 throw new Error('Copy generation failed: specifications is empty')
   if (!fields.boxContents.length)            throw new Error('Copy generation failed: boxContents is empty')
   if (!fields.seoMeta || fields.seoMeta.length < 50) throw new Error('Copy generation failed: seoMeta too short')
 }
@@ -204,7 +201,7 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
     const forHim     = bothWays.forHim
     const forHer     = bothWays.forHer
     const seoMeta    = seoMetaResult.content as string
-    const specs      = specsResult.content as string
+    const specs      = (Array.isArray(specsResult.content) ? specsResult.content : []) as string[]
     const boxContents = boxContentsResult.content as string[]
 
     // Validate required fields before touching Shopify

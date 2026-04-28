@@ -2,15 +2,24 @@ import type { TrustIcon, TrustItem } from '~/types/cms'
 
 interface TrustBarProps {
   items: TrustItem[]
+  /** When true, render without the default `bg-white border-y border-cream-2`
+   *  frame so the parent can supply its own framing (e.g. a card-style wrapper
+   *  matching the PDP summary grid). Padding is also dropped so the parent
+   *  controls spacing. */
+  frameless?: boolean
 }
 
-export function TrustBar({ items }: TrustBarProps) {
+export function TrustBar({ items, frameless = false }: TrustBarProps) {
   // Drop null entries — broken or unpublished Sanity refs dereference to null
   const visible = items.filter((i): i is TrustItem => i != null && i.active !== false)
   if (visible.length === 0) return null
 
+  const wrapperClass = frameless
+    ? 'overflow-hidden'
+    : 'bg-white border-y border-cream-2 py-3 px-4 overflow-hidden'
+
   return (
-    <div className="bg-white border-y border-cream-2 py-3 px-4 overflow-hidden">
+    <div className={wrapperClass}>
       {/* Desktop: static row */}
       <ul className="hidden md:flex max-w-6xl mx-auto items-center justify-between gap-2">
         {visible.map((item, i) => (

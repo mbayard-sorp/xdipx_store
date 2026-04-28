@@ -27,18 +27,18 @@ import type { ProductScore } from '~/types'
 
 // ─── Category inference (mirrors deal-pipeline.server.ts) ─────────────────────
 
-function inferCategory(categories: string[]): 'for-him' | 'for-her' | 'both' | 'couples' {
+/** Phase 2 — multi-select inference. Returns an array of audience tags. */
+function inferCategory(categories: string[]): Array<'for-him' | 'for-her' | 'couples'> {
   const forHimCats  = ['Vagina Strokers', 'Body Molds', 'Prostate Toys', 'Masturbators', 'Hands-Free Masturbators']
   const forHerCats  = ['Dual Action and Rabbits', 'Finger and Clit', 'Air Pulse and Suction', 'Bullets and Eggs']
   const coupleCats  = ['Couples and Wearable', 'Remote', 'Top Couples Toys', 'Restraints']
-  const isHim     = categories.some(c => forHimCats.includes(c))
-  const isHer     = categories.some(c => forHerCats.includes(c))
-  const isCouples = categories.some(c => coupleCats.includes(c))
-  if (isCouples) return 'couples'
-  if (isHim && isHer) return 'both'
-  if (isHim) return 'for-him'
-  if (isHer) return 'for-her'
-  return 'both'
+  const out: Array<'for-him' | 'for-her' | 'couples'> = []
+  if (categories.some(c => forHimCats.includes(c)))  out.push('for-him')
+  if (categories.some(c => forHerCats.includes(c)))  out.push('for-her')
+  if (categories.some(c => coupleCats.includes(c))) out.push('couples')
+  // Default to ['for-him', 'for-her'] — the legacy 'both' equivalent — when no
+  // category signals match.
+  return out.length > 0 ? out : ['for-him', 'for-her']
 }
 
 // ─── Deal price computation (mirrors feed-processor.server.ts) ────────────────
@@ -376,8 +376,8 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
           seoTitle,
           seoDescription:   writes.seoMetaDescription,
           category,
-          mapPrice:         dealPrice,
-          originalPrice:    msrp,
+          // Pricing fields removed from Sanity productPage schema — pricing
+          // lives solely on Shopify metafields where the deal pipeline reads.
           productTypeDial:  writes.productTypeDial,
           ...(writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {}),
           moodTags:         writes.moodTags,
@@ -642,8 +642,7 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
       seoTitle,
       seoDescription:   writes.seoMetaDescription,
       category,
-      mapPrice:         rawProduct.dealPrice,
-      originalPrice:    rawProduct.msrp,
+      // Pricing fields removed from Sanity productPage schema (Shopify-only).
       productTypeDial:  writes.productTypeDial,
       ...(writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {}),
       moodTags:         writes.moodTags,

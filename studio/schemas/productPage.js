@@ -34,7 +34,7 @@ export default {
   groups: [
     { name: 'product',  title: 'Product',        default: true },
     { name: 'copy',     title: 'Copy & Story'                  },
-    { name: 'deal',     title: 'Deal Settings'                 },
+    { name: 'care',     title: 'Care & Specs'                  },
     { name: 'emma',     title: 'Emma Discovery'                },
     { name: 'ivr',      title: 'IVR / Voice'                   },
     { name: 'bundle',   title: 'Bundle'                        },
@@ -75,6 +75,15 @@ export default {
       title: 'Product Title',
       type: 'string',
       group: 'product',
+      description: 'Customer-facing title (may be SEO-augmented from the manufacturer\'s original).',
+    },
+    {
+      name: 'originalTitle',
+      title: 'Original Manufacturer Title',
+      type: 'string',
+      group: 'product',
+      description: 'Manufacturer\'s verbatim title — kept as the legal/sourcing source-of-truth for legal/sourcing/re-augmentation. Mirrors xdipx.original_title on Shopify.',
+      readOnly: true,
     },
     {
       name: 'vendor',
@@ -124,38 +133,9 @@ export default {
       group: 'copy',
       description: 'Short punchy line shown under the product title on the PDP.',
     },
-    {
-      name: 'fullStory',
-      title: 'Full Story',
-      type: 'array',
-      group: 'copy',
-      description: 'Shown in the "The Full Story" tab on the PDP.',
-      of: [RICH_TEXT_BLOCK],
-    },
-    {
-      name: 'worksForHim',
-      title: 'Works For Him',
-      type: 'array',
-      group: 'copy',
-      description: 'Shown in the "Both Ways ♥" tab under "For Him".',
-      of: [RICH_TEXT_BLOCK],
-    },
-    {
-      name: 'worksForHer',
-      title: 'Works For Her',
-      type: 'array',
-      group: 'copy',
-      description: 'Shown in the "Both Ways ♥" tab under "For Her".',
-      of: [RICH_TEXT_BLOCK],
-    },
-    {
-      name: 'featureBullets',
-      title: 'Feature Bullets',
-      type: 'array',
-      group: 'copy',
-      description: 'Shown in "What\'s In The Box" tab and inline on the PDP hero.',
-      of: [{ type: 'string' }],
-    },
+    // Phase 1 deprecations (PR#50/#51) — fullStory (B2), worksForHim/Her (B3),
+    // and featureBullets are no longer generated. Removed from schema; existing
+    // values on legacy docs are ignored by the PDP.
     {
       name: 'moodImageUrl',
       title: 'Mood / Lifestyle Image URL',
@@ -164,78 +144,67 @@ export default {
       description: 'Full URL to a lifestyle image. Renders as PDP hero background.',
     },
 
-    // ── Deal Settings ────────────────────────────────────────────────────────
+    // ── Care & Specs (mirrored from Shopify metafields by the orchestrator) ─
+    // Source-of-truth lives on Shopify (xdipx.care_instructions, .specifications,
+    // .box_contents). These fields are populated by the import/backfill pipeline
+    // so the productPage doc reflects everything the PDP renders. Edits made
+    // here are reference-only — the next backfill run will overwrite them with
+    // the orchestrator output. Hand-edit on Shopify Admin if you need to
+    // override.
+    {
+      name: 'careInstructions',
+      title: 'Care Instructions (bullets)',
+      type: 'array',
+      group: 'care',
+      description: 'Imperative care steps (cleaning, charging, storage, lube compat). Mirror of xdipx.care_instructions. The PDP Care card prefers care-categorized FAQs; this list is the fallback.',
+      of: [{ type: 'string' }],
+      validation: Rule => Rule.max(8),
+    },
+    {
+      name: 'specifications',
+      title: 'Specifications',
+      type: 'array',
+      group: 'care',
+      description: 'Tech spec bullets — one "Label: Value" pair per item (e.g. "Color: Black", "Material: Nylon straps"). Mirror of xdipx.specifications. Renders in the Specs grid card.',
+      of: [{ type: 'string' }],
+      validation: Rule => Rule.max(15),
+    },
+    {
+      name: 'boxContents',
+      title: 'In the Box',
+      type: 'array',
+      group: 'care',
+      description: 'What ships in the package. Mirror of xdipx.box_contents. Renders in the "In the box" grid card.',
+      of: [{ type: 'string' }],
+      validation: Rule => Rule.max(12),
+    },
+
+    // category — multi-select audience tags. A product can be any combination
+    // of for-him / for-her / couples (e.g. ['for-him', 'couples'] = he can use
+    // it solo OR with a partner). Empty = unspecified. The legacy single-value
+    // 'both' was redundant — it's now expressed as ['for-him', 'for-her'].
+    // Used by IVR/chat search filters and the AI agent's product tools.
     {
       name: 'category',
       title: 'Category',
-      type: 'string',
-      group: 'deal',
+      type: 'array',
+      group: 'product',
+      description: 'Audience targeting — pick any that apply. Multi-select.',
+      of: [{ type: 'string' }],
       options: {
         list: [
-          { title: 'Both',     value: 'both'    },
           { title: 'For Him',  value: 'for-him' },
           { title: 'For Her',  value: 'for-her' },
           { title: 'Couples',  value: 'couples' },
         ],
-        layout: 'radio',
-      },
-      initialValue: 'both',
-    },
-    {
-      name: 'dealStatus',
-      title: 'Deal Status',
-      type: 'string',
-      group: 'deal',
-      options: {
-        list: [
-          { title: 'Pending Approval', value: 'pending_approval' },
-          { title: 'Approved',         value: 'approved'         },
-          { title: 'Live',             value: 'live'             },
-          { title: 'Archived',         value: 'archived'         },
-        ],
-        layout: 'radio',
+        layout: 'list',
       },
     },
-    {
-      name: 'dealDate',
-      title: 'Deal Date',
-      type: 'date',
-      group: 'deal',
-      options: { dateFormat: 'YYYY-MM-DD' },
-    },
-    {
-      name: 'originalPrice',
-      title: 'MSRP / Original Price ($)',
-      type: 'number',
-      group: 'deal',
-    },
-    {
-      name: 'wholesaleCost',
-      title: 'Wholesale Cost ($)',
-      type: 'number',
-      group: 'deal',
-    },
-    {
-      name: 'mapPrice',
-      title: 'MAP Price ($)',
-      type: 'number',
-      group: 'deal',
-      description: 'Minimum Advertised Price. 0 = no MAP.',
-    },
-    {
-      name: 'dealScore',
-      title: 'Deal Score',
-      type: 'number',
-      group: 'deal',
-      description: 'Algorithm score 0–100. Higher = better candidate for daily deal.',
-      readOnly: true,
-    },
-    {
-      name: 'nalpacSku',
-      title: 'Nalpac SKU',
-      type: 'string',
-      group: 'deal',
-    },
+    // Deal-pipeline fields (dealStatus, dealDate, originalPrice, wholesaleCost,
+    // mapPrice, dealScore, nalpacSku) live solely on Shopify metafields where
+    // the deal pipeline reads them. Removed from Sanity schema — no app query
+    // projects them. Cleanup script unsets the orphaned values on existing
+    // docs.
     {
       name: 'archived',
       title: 'Archived',
@@ -254,17 +223,69 @@ export default {
       title: 'Product Type (Dial)',
       type: 'string',
       group: 'emma',
-      description: 'Coarse type used by sensation dial + chat narrowing ("any wands?").',
+      description: 'Coarse type used by sensation dial + chat narrowing ("any wands?"). Phase 1 expanded vocabulary (PR#51) — option list above the dropdown is hint-only; the orchestrator may write any of the 19 valid values (vibrator, dildo, anal, bondage, cock-ring, stroker, couples, harness, extender, pump, lube, massage, enhancer, wear, condom, wellness, novelty, book-media, sex-machine).',
       options: {
         list: [
-          { title: 'Air pulsation', value: 'air-pulsation' },
           { title: 'Vibrator',      value: 'vibrator'      },
-          { title: 'Wand',          value: 'wand'          },
+          { title: 'Dildo',         value: 'dildo'         },
+          { title: 'Anal',          value: 'anal'          },
+          { title: 'Bondage',       value: 'bondage'       },
+          { title: 'Cock ring',     value: 'cock-ring'     },
+          { title: 'Stroker',       value: 'stroker'       },
+          { title: 'Couples',       value: 'couples'       },
+          { title: 'Harness',       value: 'harness'       },
+          { title: 'Extender',      value: 'extender'      },
+          { title: 'Pump',          value: 'pump'          },
           { title: 'Lube',          value: 'lube'          },
+          { title: 'Massage',       value: 'massage'       },
+          { title: 'Enhancer',      value: 'enhancer'      },
           { title: 'Wear',          value: 'wear'          },
+          { title: 'Condom',        value: 'condom'        },
+          { title: 'Wellness',      value: 'wellness'      },
+          { title: 'Novelty',       value: 'novelty'       },
+          { title: 'Book / Media',  value: 'book-media'    },
+          { title: 'Sex machine',   value: 'sex-machine'   },
         ],
-        layout: 'radio',
       },
+    },
+    {
+      name: 'productSubtypeDial',
+      title: 'Product Subtype (Dial)',
+      type: 'string',
+      group: 'emma',
+      description: 'Per-parent subtype scoped to productTypeDial (e.g. wand for vibrator, water-based for lube, restraint for bondage). Mirror of custom.product_subtype_dial. Populated by the orchestrator; null when type is sex-machine or classification was ambiguous.',
+    },
+    {
+      name: 'sensationDialV2',
+      title: 'Sensation Dial (v2)',
+      type: 'object',
+      group: 'emma',
+      description: 'Self-describing dial: 5–6 dimensions scored 1–5 with an optional `proposed` flag for AI-introduced labels. Mirror of xdipx.sensation_dial_v2.',
+      fields: [
+        {
+          name: 'items',
+          title: 'Items',
+          type: 'array',
+          of: [
+            {
+              type: 'object',
+              name: 'sensationDialItem',
+              fields: [
+                { name: 'label',    title: 'Label',    type: 'string', validation: Rule => Rule.required() },
+                { name: 'value',    title: 'Value (1–5)', type: 'number', validation: Rule => Rule.required().integer().min(0).max(5) },
+                { name: 'proposed', title: 'Proposed (new label, awaiting registry approval)', type: 'boolean', initialValue: false },
+              ],
+              preview: {
+                select: { title: 'label', value: 'value', proposed: 'proposed' },
+                prepare: ({ title, value, proposed }) => ({
+                  title:    title || 'Untitled dimension',
+                  subtitle: `${value ?? 0}/5${proposed ? ' · proposed' : ''}`,
+                }),
+              },
+            },
+          ],
+        },
+      ],
     },
     {
       name: 'moodTags',
@@ -295,23 +316,7 @@ export default {
     },
 
     // ── IVR / Voice Discovery ─────────────────────────────────────────────────
-    {
-      name: 'ivrMood',
-      title: 'Mood Tags',
-      type: 'array',
-      group: 'ivr',
-      description: 'Mood/vibe for voice discovery queries like "something romantic" or "playful".',
-      of: [{ type: 'string' }],
-      options: {
-        list: [
-          { title: 'Playful',      value: 'playful'     },
-          { title: 'Romantic',     value: 'romantic'     },
-          { title: 'Luxurious',    value: 'luxurious'    },
-          { title: 'Adventurous',  value: 'adventurous'  },
-          { title: 'Relaxing',     value: 'relaxing'     },
-        ],
-      },
-    },
+    // ivrMood removed — duplicated moodTags. IVR search now reads moodTags directly.
     {
       name: 'ivrExperience',
       title: 'Experience Level',
@@ -363,14 +368,9 @@ export default {
         ],
       },
     },
-    {
-      name: 'ivrVoiceSummary',
-      title: 'Voice Summary',
-      type: 'string',
-      group: 'ivr',
-      description: 'One TTS-safe sentence for the phone agent. No markdown, no URLs. Under 120 chars.',
-      validation: Rule => Rule.max(120),
-    },
+    // ivrVoiceSummary deprecated by `deprecate ivrVoiceSummary across the
+    // pipeline` — voice surfaces now compose from ivrExperience + ivrUseCase
+    // + ivrFeatures directly. Removed from schema.
 
     // ── Bundle ───────────────────────────────────────────────────────────────
     {
@@ -494,8 +494,7 @@ export default {
   },
 
   orderings: [
-    { title: 'Title A–Z',  name: 'titleAsc',  by: [{ field: 'title',         direction: 'asc'  }] },
-    { title: 'Deal Date ↓', name: 'dealDesc', by: [{ field: 'dealDate',      direction: 'desc' }] },
-    { title: 'Score ↓',     name: 'scoreDesc', by: [{ field: 'dealScore',    direction: 'desc' }] },
+    { title: 'Title A–Z',   name: 'titleAsc',  by: [{ field: 'title',  direction: 'asc'  }] },
+    { title: 'Vendor A–Z',  name: 'vendorAsc', by: [{ field: 'vendor', direction: 'asc'  }] },
   ],
 }
