@@ -1,8 +1,3 @@
--- Per-product per-field enrichment cache (Phase 1 rebuild — cost discipline).
--- Keyed by (product_id, field_name, voice_hash, prompt_version). On cache hit,
--- the import orchestrator skips the generator call entirely. --mode=full
--- bypasses cache and writes a new row (latest wins on lookup).
-
 CREATE TABLE IF NOT EXISTS product_enrichment_cache (
   id              SERIAL PRIMARY KEY,
   product_id      VARCHAR(64) NOT NULL,
