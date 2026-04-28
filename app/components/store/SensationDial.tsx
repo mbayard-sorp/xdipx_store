@@ -90,8 +90,8 @@ export function SensationDial({
   if (items.length === 0) return null
 
   return (
-    <section className="bg-paper/90 rounded-[var(--radius-lg)] border border-line p-5 md:p-6">
-      <header className="mb-4">
+    <section className="bg-paper/90 rounded-[var(--radius-lg)] border border-line p-4 md:p-5">
+      <header className="mb-3">
         <h3
           className="text-base md:text-lg font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
@@ -100,9 +100,9 @@ export function SensationDial({
         </h3>
       </header>
 
-      <ul className="space-y-3">
+      <ul className="space-y-2">
         {items.map(({ label, value }) => (
-          <li key={label} className="grid grid-cols-[minmax(0,9rem)_1fr] items-center gap-3">
+          <li key={label} className="grid grid-cols-[minmax(0,9rem)_1fr] items-center gap-1.5">
             <span
               className="text-sm font-medium text-ink"
               style={{ fontFamily: 'var(--font-display)' }}
@@ -118,7 +118,11 @@ export function SensationDial({
                 <span
                   key={i}
                   className={[
-                    'h-2.5 flex-1 rounded-full transition-colors',
+                    'h-2.5 rounded-full transition-colors',
+                    // Mobile: stretch to fill the row's extra space.
+                    // lg+: fixed w-5 so bars left-justify next to the
+                    // impulse cross-sell column (which sits beside the dial).
+                    'flex-1 lg:flex-none lg:w-5',
                     i < value ? 'bg-coral' : 'bg-cream-2',
                   ].join(' ')}
                   aria-hidden="true"

@@ -8,13 +8,16 @@ interface ProductSummaryGridProps {
   brand?:             string
   descriptionHtml:    string
   boxContents:        string[]
-  /** Legacy free-text care steps from the xdipx.care_instructions metafield.
-   *  Used as the fallback bullet list when no Sanity care-tagged FAQs exist. */
+  /** Free-text care steps from the xdipx.care_instructions metafield.
+   *  Rendered as a bullet list in the Care card. Takes priority over
+   *  careFaqs when both are configured — editors treat this field as the
+   *  canonical care-instructions source. */
   careInstructions?:  string[]
-  /** Care-categorized FAQs (Sanity productFaq with category="care"). When
-   *  present, the Care card renders them as a twirl-down accordion (same
-   *  component as the main FAQ card) so the structured Q&A is fully visible
-   *  and indexable. Falls back to careInstructions bullets when absent. */
+  /** Care-categorized FAQs (Sanity productFaq with category="care"). Used
+   *  as a fallback accordion in the Care card when no careInstructions
+   *  bullets exist. The route already excludes these from the main FAQ
+   *  card whenever this fallback path is active to avoid duplicate
+   *  visible content. */
   careFaqs?:          ProductFaq[]
   /** Phase 2 — string[] of "Label: Value" bullets. Mirrors the care/box
    *  bullet shape; renders as a `<ul>` in the Specs grid card. */
@@ -51,8 +54,13 @@ interface CardProps {
   bodyHtml?:  string
   bodySlot?:  React.ReactNode
   className?: string
-  /** Max line count before the body clamps and "more" appears. Default 12. */
+  /** Max line count before the body clamps and "more" appears. Default 12.
+   *  Used for paragraph copy (e.g. "What it does"). */
   clampLines?: number
+  /** Item-aware clamp for `<li>` bullet content. When set, takes precedence
+   *  over `clampLines`. Use this for the bullet cards so wrapping items
+   *  don't trip the toggle prematurely. */
+  clampItems?: number
 }
 
 const cardBodyClass =
@@ -65,7 +73,7 @@ const cardBodyClass =
   '[&_li]:flex [&_li]:gap-1.5 [&_li]:items-start [&_li]:before:content-["♥"] [&_li]:before:text-sage [&_li]:before:text-xs [&_li]:before:mt-0.5 ' +
   '[&_br]:block'
 
-function SummaryCard({ href, eyebrow, body, bodyHtml, bodySlot, className = '', clampLines = 12 }: CardProps) {
+function SummaryCard({ href, eyebrow, body, bodyHtml, bodySlot, className = '', clampLines = 12, clampItems }: CardProps) {
   const baseClass =
     'flex flex-col h-full p-5 bg-paper rounded-[var(--radius-lg)] border border-line transition-all'
   const interactiveClass = href ? 'hover:border-coral hover:shadow-md' : ''
@@ -90,6 +98,7 @@ function SummaryCard({ href, eyebrow, body, bodyHtml, bodySlot, className = '', 
               <ExpandableHtml
                 html={bodyHtml}
                 clampLines={clampLines}
+                {...(clampItems ? { clampItems } : {})}
                 bodyClass={cardBodyClass}
               />
             </div>
@@ -125,25 +134,30 @@ export function ProductSummaryGrid({
     : ''
   const descFallback = `Get the full story on the ${productTitle}${brand ? ` from ${brand}` : ''}.`
 
+  // Box / Care-bullets / Specs all render the FULL list and rely on the
+  // shared ExpandableHtml clamp + more/close affordance (mirrors the "What
+  // it does" card). No upstream slicing — overflow detection picks the
+  // expander up automatically when the rendered list exceeds clampLines.
   const boxBodyHtml = boxContents.length > 0
-    ? `<ul>${boxContents.slice(0, 4).map(i => `<li>${i}</li>`).join('')}${boxContents.length > 4 ? `<li>…and ${boxContents.length - 4} more</li>` : ''}</ul>`
+    ? `<ul>${boxContents.map(i => `<li>${i}</li>`).join('')}</ul>`
     : ''
   const boxFallback = 'See exactly what arrives in your discreet package.'
 
-  // Prefer Sanity care-tagged FAQs (full Q&A) and render them as an
-  // accordion identical to the main FAQ card. Falls back to the legacy
-  // careInstructions string list as bullets when no structured care Q&A
-  // is configured.
-  const hasCareFaqs = (careFaqs ?? []).length > 0
+  // Care card priority: legacy careInstructions bullets first (canonical
+  // editorial source), care-tagged productFaqs second (richer Q&A
+  // accordion). When the bullets exist, the route also folds care FAQs
+  // back into the main FAQ card so the full set stays visible.
   const careLegacyItems = careInstructions ?? []
-  const careBodyHtml = !hasCareFaqs && careLegacyItems.length > 0
-    ? `<ul>${careLegacyItems.slice(0, 4).map(i => `<li>${i}</li>`).join('')}${careLegacyItems.length > 4 ? `<li>…and ${careLegacyItems.length - 4} more</li>` : ''}</ul>`
+  const hasCareLegacy   = careLegacyItems.length > 0
+  const hasCareFaqs     = !hasCareLegacy && (careFaqs ?? []).length > 0
+  const careBodyHtml = hasCareLegacy
+    ? `<ul>${careLegacyItems.map(i => `<li>${i}</li>`).join('')}</ul>`
     : ''
   const careFallback = 'Quick care + storage notes so it stays good for the long haul.'
 
   const specItems = specifications ?? []
   const specBodyHtml = specItems.length > 0
-    ? `<ul>${specItems.slice(0, 4).map(i => `<li>${i}</li>`).join('')}${specItems.length > 4 ? `<li>…and ${specItems.length - 4} more</li>` : ''}</ul>`
+    ? `<ul>${specItems.map(i => `<li>${i}</li>`).join('')}</ul>`
     : ''
   const specFallback = `Materials, dimensions, charging, waterproof rating${productType ? ` for the ${productType}` : ''}.`
 
@@ -168,10 +182,15 @@ export function ProductSummaryGrid({
         {...(faqSlot ? { bodySlot: faqSlot } : { body: faqSummary })}
       />
 
-      {/* Row 2 — Care Instructions + In the box + Specs (three equal cards) */}
+      {/* Row 2 — Care Instructions + In the box + Specs (three equal cards).
+          Bullet cards use the same ExpandableHtml clamp + more/close
+          affordance as "What it does", but clamp by ITEM count (clampItems)
+          rather than lines so wrapping bullets don't surface the toggle
+          prematurely. Editorial bullet budgets: Care 5, Box 10, Specs 10. */}
       <SummaryCard
         eyebrow="Care Instructions"
         className="lg:col-span-2"
+        clampItems={5}
         {...(hasCareFaqs
           ? { bodySlot: <ProductFaqList faqs={careFaqs!} /> }
           : careBodyHtml
@@ -181,11 +200,13 @@ export function ProductSummaryGrid({
       <SummaryCard
         eyebrow="In the box"
         className="lg:col-span-2"
+        clampItems={10}
         {...(boxBodyHtml ? { bodyHtml: boxBodyHtml } : { body: boxFallback })}
       />
       <SummaryCard
         eyebrow="Specs"
         className="lg:col-span-2"
+        clampItems={10}
         {...(specBodyHtml ? { bodyHtml: specBodyHtml } : { body: specFallback })}
       />
 
