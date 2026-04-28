@@ -235,9 +235,11 @@ export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductC
     }
 
     if (experience) {
-      conditions.push('ivrExperience == $exp')
+      // Phase 2 — ivrExperience is now string[]. Empty array means "no
+      // level constraint" so it matches every filter automatically.
+      conditions.push('(count(ivrExperience) == 0 || $exp in ivrExperience)')
       groqParams.exp = experience
-      boostClauses.push('boost(ivrExperience == $exp, 4)')
+      boostClauses.push('boost($exp in ivrExperience, 4)')
     }
 
     if (useCase && useCase.length > 0) {

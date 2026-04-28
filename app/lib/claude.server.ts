@@ -2622,8 +2622,13 @@ Return ONLY this JSON (no markdown):
 // Vocabularies are intentionally tight so Emma can speak them naturally aloud
 // and downstream surfaces can match user intent without fuzzy NLP.
 
-export const IVR_EXPERIENCE_LEVELS = ['first-time', 'curious', 'experienced', 'advanced', 'any'] as const
-export type IvrExperience = typeof IVR_EXPERIENCE_LEVELS[number]
+// Phase 2 — multi-select. The legacy single-value 'any' was redundant and is
+// expressed as either an empty array (no constraint) or all four levels. Drop
+// 'any' from the canonical vocabulary; the IVR search filter `$exp in array`
+// returns no constraint when the field is empty.
+export const IVR_EXPERIENCE_LEVELS = ['first-time', 'curious', 'experienced', 'advanced'] as const
+export type IvrExperienceValue = typeof IVR_EXPERIENCE_LEVELS[number]
+export type IvrExperience      = IvrExperienceValue[]
 
 // Phase 1 rebuild — expanded vocabularies. See plan: Group G locked.
 // Cap raised on G2 (1–3 → 2–5) and G3 (2–4 → 3–8) to accommodate richer vocab
@@ -2681,35 +2686,52 @@ function ivrProductBlock(deal: IvrDealCtx): string {
   ].filter(Boolean).join('\n')
 }
 
-/** Single experience-level enum: who this product fits best. */
+/**
+ * Multi-select experience-level: every level this product fits.
+ * Phase 2 — was a single enum value (incl. legacy 'any'); now an array. Empty
+ * array = no level constraint (matches every level via `$exp in array`).
+ */
 export async function generateIvrExperience(opts: { deal: IvrDealCtx; llmClient?: LLMClient }): Promise<IvrExperience> {
-  const user = `Pick the experience level this product fits best. One of: ${IVR_EXPERIENCE_LEVELS.join(' | ')}.
+  const user = `Pick every experience level this product genuinely fits. Multi-select — return 1–4 levels. Choose from: ${IVR_EXPERIENCE_LEVELS.join(' | ')}.
 
 Use "first-time" for beginner-friendly products (gentle, simple controls, low intensity).
 Use "curious" for someone exploring beyond the basics — slightly more ambitious but still approachable.
 Use "experienced" for people comfortable with the category looking for variety or upgrades.
 Use "advanced" for high-intensity, niche, or technique-heavy products.
-Use "any" only when the product genuinely fits across all levels.
+
+A versatile product can hit multiple levels (e.g. a starter vibrator that also satisfies an experienced buyer). Be honest — only include a level the product genuinely serves.
 
 ${ivrProductBlock(opts.deal)}
 
-Return ONLY this JSON (no markdown): { "level": "first-time" }`
+Return ONLY this JSON (no markdown): { "levels": ["first-time", "curious"] }`
 
   try {
     const { text } = await callClaude({
       llmClient: opts.llmClient,
       model:     MODEL_FAST,
-      maxTokens: 60,
+      maxTokens: 100,
       system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
       userPrompt: user,
     })
-    const parsed = JSON.parse(stripFences(text)) as { level?: unknown }
-    const lvl = typeof parsed.level === 'string' ? parsed.level.trim().toLowerCase() : ''
-    if ((IVR_EXPERIENCE_LEVELS as readonly string[]).includes(lvl)) return lvl as IvrExperience
+    const parsed = JSON.parse(stripFences(text)) as { levels?: unknown }
+    if (Array.isArray(parsed.levels)) {
+      const valid = new Set<string>(IVR_EXPERIENCE_LEVELS as readonly string[])
+      const out: IvrExperienceValue[] = []
+      const seen = new Set<string>()
+      for (const item of parsed.levels) {
+        if (typeof item !== 'string') continue
+        const v = item.trim().toLowerCase()
+        if (!valid.has(v) || seen.has(v)) continue
+        seen.add(v)
+        out.push(v as IvrExperienceValue)
+        if (out.length >= 4) break
+      }
+      return out
+    }
   } catch (err) {
     console.error('[generateIvrExperience] failed:', err)
   }
-  return 'any'
+  return []
 }
 
 /** 2–5 use-case slugs from a fixed vocabulary (54 slugs post-Phase 1 expansion).

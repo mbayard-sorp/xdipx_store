@@ -1,8 +1,27 @@
 import { createClient } from '@sanity/client'
+import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
 import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock } from '~/types/cms'
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
+
+/**
+ * Sanity arrays of objects require a unique `_key` per item. Generated from
+ * a stable content hash (sha1 prefix) so re-writes are idempotent and editor
+ * hand-edits aren't replaced as "new items" on the next backfill.
+ *
+ * Falls back to an index-suffixed hash on collisions.
+ */
+function withSanityKey<T extends object>(items: T[], hashOf: (item: T) => string): (T & { _key: string })[] {
+  const seen = new Set<string>()
+  return items.map((item, i) => {
+    const base = createHash('sha1').update(hashOf(item)).digest('hex').slice(0, 12)
+    let key = base
+    if (seen.has(key)) key = `${base}${i.toString(36)}`
+    seen.add(key)
+    return { ...item, _key: key }
+  })
+}
 
 type PortableTextBlocks = Parameters<typeof toHTML>[0]
 
@@ -360,7 +379,7 @@ export async function upsertProductPage(params: {
   audienceTags?: string[] | undefined
   mattersTags?: string[] | undefined
   // IVR / voice surfaces — purpose-built for IVR / chat / SMS where descriptionHtml can't render.
-  ivrExperience?: string | undefined
+  ivrExperience?: string[] | undefined
   ivrUseCase?: string[] | undefined
   ivrFeatures?: string[] | undefined
   // PDP FAQs — productPage.productFaqs[]. Renders visibly + emits FAQPage JSON-LD. Sanity-only.
@@ -422,6 +441,9 @@ export async function upsertProductPage(params: {
 
   // Patch enriched search fields if provided
   const searchFields: Record<string, unknown> = {}
+  // Title — keep Sanity in sync with Shopify product.title across re-runs.
+  // Was previously only set on create, leaving stale titles on existing docs.
+  if (params.title !== undefined) searchFields.title = params.title
   if (params.vendor !== undefined) searchFields.vendor = params.vendor
   if (params.tags !== undefined) searchFields.tags = params.tags
   if (params.tagline !== undefined) searchFields.tagline = params.tagline
@@ -439,14 +461,22 @@ export async function upsertProductPage(params: {
   if (params.ivrExperience !== undefined) searchFields.ivrExperience = params.ivrExperience
   if (params.ivrUseCase !== undefined) searchFields.ivrUseCase = params.ivrUseCase
   if (params.ivrFeatures !== undefined) searchFields.ivrFeatures = params.ivrFeatures
-  if (params.productFaqs !== undefined) searchFields.productFaqs = params.productFaqs
+  if (params.productFaqs !== undefined) {
+    searchFields.productFaqs = withSanityKey(params.productFaqs, f => `${f.question}|${f.category}`)
+  }
   // Phase 2 sync — mirror Shopify metafield content into productPage so search
   // projections + Studio editorial UX see everything the PDP renders. Source
   // of truth remains the Shopify metafield (xdipx.*); these are derived.
   if (params.careInstructions !== undefined)   searchFields.careInstructions   = params.careInstructions
   if (params.specifications !== undefined)     searchFields.specifications     = params.specifications
   if (params.boxContents !== undefined)        searchFields.boxContents        = params.boxContents
-  if (params.sensationDialV2 !== undefined)    searchFields.sensationDialV2    = params.sensationDialV2
+  if (params.sensationDialV2 !== undefined) {
+    const items = params.sensationDialV2.items ?? []
+    searchFields.sensationDialV2 = {
+      ...params.sensationDialV2,
+      items: withSanityKey(items, it => it.label),
+    }
+  }
   if (params.productSubtypeDial !== undefined) searchFields.productSubtypeDial = params.productSubtypeDial
   if (params.originalTitle !== undefined)      searchFields.originalTitle      = params.originalTitle
   // ivrMood mirror removed — IVR search now reads moodTags directly so there's

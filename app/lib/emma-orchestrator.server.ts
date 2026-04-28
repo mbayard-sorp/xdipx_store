@@ -280,7 +280,7 @@ const TOOLS = [
   // never schedules them.
   {
     name: 'generateIvrExperience',
-    description: 'Pick ONE experience level the product fits best (first-time / curious / experienced / advanced / any). Used by Emma chat/IVR/SMS to match buyer intent. Always call this AFTER classifyProductTypeDial and generateEmmaTake (so context is rich).',
+    description: 'Pick EVERY experience level the product fits (multi-select). Choose 1–4 from: first-time, curious, experienced, advanced. A versatile product can hit multiple levels. Used by Emma chat/IVR/SMS to match buyer intent. Always call this AFTER classifyProductTypeDial and generateEmmaTake (so context is rich).',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -532,9 +532,9 @@ async function executeTool(
     }
 
     case 'generateIvrExperience': {
-      const lvl = await generateIvrExperience({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
-      state.writes.ivrExperience = lvl
-      return { ok: true, summary: `ivrExperience=${lvl}` }
+      const lvls = await generateIvrExperience({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
+      state.writes.ivrExperience = lvls
+      return { ok: true, summary: `ivrExperience=[${lvls.join(',')}]` }
     }
 
     case 'generateIvrUseCase': {
