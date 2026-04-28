@@ -16,6 +16,7 @@ import {
   findProductBySKU,
   createShopifyProductFromFeed,
   createShopifyProductWithVariants,
+  slugifyHandle,
   getProductHandleById,
   getPairingCandidates,
   pushProductToShopify,
@@ -216,10 +217,16 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
         images,
         categories,
       }
-      numericId = await createShopifyProductFromFeed(productScore)
+      // Phase 1 rebuild — handle is now an explicit caller input. Bulk-import
+      // preserves the legacy slugify-from-title behavior via slugifyHandle();
+      // new importNewProduct() entry point accepts an explicit handle from
+      // the product-management agent.
+      const handle = slugifyHandle(masterRow['Product Title'])
+      numericId = await createShopifyProductFromFeed(productScore, handle)
     } else {
       // Multi-variant
       const optionName = group.masterRow['Variant Option Name'] || 'Option'
+      const handle = slugifyHandle(masterRow['Product Title'])
       numericId = await createShopifyProductWithVariants(
         {
           title:      masterRow['Product Title'],
@@ -231,6 +238,7 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
         },
         variants,
         optionName,
+        handle,
       )
     }
 

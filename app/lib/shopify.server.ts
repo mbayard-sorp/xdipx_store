@@ -2318,16 +2318,34 @@ export async function findProductBySKU(sku: string): Promise<string | null> {
 }
 
 /**
- * Create a new Shopify product (DRAFT status) from a scored Nalpac feed product.
- * Returns the numeric product ID (not GID) as a string.
+ * Slugify a string into a Shopify product handle. Phase 1 rebuild — extracted
+ * here so legacy callers (`bulk-import`, `deal-pipeline`) keep auto-slugify
+ * behavior at the call site, while new callers (importNewProduct entry point)
+ * accept handle as a required input from the product-management agent.
+ *
+ * Per CLAUDE.md, the canonical product URL is `/products/{handle}` and the
+ * handle should never change once set. Use this helper only as a default for
+ * legacy paths; prefer accepting an explicit handle from the caller.
  */
-export async function createShopifyProductFromFeed(product: ProductScore): Promise<string> {
-  const handle = product.title
+export function slugifyHandle(s: string): string {
+  return s
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 200)
+}
 
+/**
+ * Create a new Shopify product (DRAFT status) from a scored Nalpac feed product.
+ * Returns the numeric product ID (not GID) as a string.
+ *
+ * Phase 1 rebuild — `handle` is now a REQUIRED input. The caller picks the
+ * handle (typically via `slugifyHandle(product.title)` for legacy parity, or
+ * an explicit value from the product-management agent for new imports).
+ * Auto-slugify-from-title was removed because the resulting handle is the
+ * canonical URL and CLAUDE.md forbids implicit URL generation.
+ */
+export async function createShopifyProductFromFeed(product: ProductScore, handle: string): Promise<string> {
   const tags = buildProductTags(product)
 
   const res = await shopifyAdmin<{ product: { id: string; variants: { id: string; inventory_item_id: string }[] } }>('/products.json', 'POST', {
@@ -2364,6 +2382,11 @@ export async function createShopifyProductFromFeed(product: ProductScore): Promi
  * Each variant maps to one BulkVariantRow. Returns the numeric product ID.
  * Includes 'deal-status-pending' in initial tags to avoid a separate setDealStatus call.
  */
+/**
+ * Phase 1 rebuild — `handle` is a REQUIRED input. See `slugifyHandle` and the
+ * notes on createShopifyProductFromFeed for why auto-slugify was removed from
+ * the create paths.
+ */
 export async function createShopifyProductWithVariants(
   master: {
     title: string
@@ -2375,12 +2398,8 @@ export async function createShopifyProductWithVariants(
   },
   variants: import('~/types').BulkVariantRow[],
   optionName: string,
+  handle: string,
 ): Promise<string> {
-  const handle = master.title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 200)
 
   const tags: string[] = [
     `brand:${master.brand.toLowerCase().replace(/\s+/g, '-')}`,
