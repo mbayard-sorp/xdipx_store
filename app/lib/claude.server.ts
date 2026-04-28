@@ -221,8 +221,8 @@ export async function generateCopy(req: GenerateCopyRequest, llmClient?: LLMClie
 
   switch (type) {
     case 'tagline': {
-      const primaryPrompt = `Write 3 one-sentence taglines for the following product. Be genuinely funny — irreverent, witty, puns welcome. Think: a comedian friend who loves these products and has zero shame. Tasteful but not boring. Max 12 words each. Return as a JSON array of strings (no markdown).\n\n${productContext}`
-      const retryPrompt   = `Return exactly one short funny sentence as a product tagline. No JSON, no newlines, no lists, no quotes. Just the sentence.\n\n${productContext}`
+      const primaryPrompt = `Write 3 one-sentence taglines for the following product. Emma voice — observational, casual, lightly witty. Think: a trusted friend who's recommending it, not a stand-up comedian. Avoid punchline-shaped puns and ad-copy zingers. Fragments are welcome ("the one I keep recommending", "earns its spot daily", "quietly indispensable"). First person OK. Max 12 words each. NO em-dashes. NO ♥ glyph (reserve it for CTAs and asides). Return as a JSON array of strings (no markdown).\n\n${productContext}`
+      const retryPrompt   = `Return exactly one short Emma-voice product tagline. Observational, casual, ≤ 12 words. No em-dashes, no ♥ glyph, no quotes. Just the sentence.\n\n${productContext}`
 
       const raw = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient)
       try {
@@ -235,7 +235,7 @@ export async function generateCopy(req: GenerateCopyRequest, llmClient?: LLMClie
       const line = retried.trim().split('\n')[0]?.trim()
       if (line) return { type, content: [line] }
 
-      return { type, content: [`${product.brand} ${product.title} — today only at xdipx.`] }
+      return { type, content: [`${product.brand} ${product.title}, today on xdipx.`] }
     }
 
     case 'full_story': {
@@ -340,11 +340,22 @@ ${productContext}`
     }
 
     case 'seo_meta': {
-      const discount = product.dealPrice && product.msrp && product.msrp > 0
-        ? `${Math.round(100 - (product.dealPrice / product.msrp) * 100)}% off`
-        : 'Best price'
-      const primaryPrompt = `Write a 140–155 character SEO meta description for this product. Format: "[Discount or 'Best price']. [1-sentence benefit]. Ships discreet. $[price] at xdipx." Return only the meta description, no quotes.\n\n${productContext}`
-      const retryPrompt   = `Write a single SEO meta description between 140 and 155 characters. Return only the description — no quotes, no labels, no explanation.\n\n${productContext}`
+      const priceLine = product.mapRestricted
+        ? '(MAP-restricted — DO NOT mention price, discount, or struck-through pricing.)'
+        : product.dealPrice
+          ? `Today's price: $${product.dealPrice}. You may include the price if it flows naturally.`
+          : '(No deal price set — anchor on benefit + ships discreetly, no price.)'
+
+      const primaryPrompt = `Write a 140–155 character SEO meta description for this product. This shows in Google SERP and link previews — drives click-through.
+
+Two anchors to include (Emma voice within these constraints):
+  (a) Trust/value beat: "Ships discreetly" + price (only when not MAP-restricted)
+  (b) Benefit beat in light Emma voice — fragment OK, first-person OK, no marketing fluff
+
+${priceLine}
+
+Voice: light Emma — observational, warm, specific. Not a generic SEO template, not a stand-up zinger. Brand mentions written as "XDIPX" (uppercase). NO em-dashes ("—" or "–"). Return ONLY the meta description text — no quotes, no labels.\n\n${productContext}`
+      const retryPrompt   = `Write a single SEO meta description, 140 to 155 characters. Light Emma voice. Include "Ships discreetly". ${product.mapRestricted ? 'NO price or discount mentions (MAP-restricted).' : product.dealPrice ? `Price $${product.dealPrice} optional.` : 'No price.'} No em-dashes. Return ONLY the description.\n\n${productContext}`
 
       const text = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient)
       const cleaned = text.replace(/^["']|["']$/g, '').trim()
@@ -354,7 +365,11 @@ ${productContext}`
       const cleanedRetry = retried.replace(/^["']|["']$/g, '').trim()
       if (cleanedRetry.length >= 50) return { type, content: cleanedRetry.slice(0, 155) }
 
-      const fallback = `${discount} on ${product.brand} ${product.title}. Ships discreetly. ${product.dealPrice ? `$${product.dealPrice} ` : ''}at xdipx.com.`
+      // Fallback: deterministic, no em-dashes, respects MAP restriction.
+      const priceFragment = product.mapRestricted || !product.dealPrice
+        ? ''
+        : `$${product.dealPrice} today. `
+      const fallback = `${product.brand} ${product.title}. ${priceFragment}Ships discreetly from XDIPX.`
       return { type, content: fallback.slice(0, 155) }
     }
 
@@ -1652,27 +1667,29 @@ export async function generateEmmaTake(opts: {
   const brandVoice = opts.brandVoice ?? (await getPipelineSetting('brandVoice')) ?? DEFAULT_BRAND_VOICE
   const system = `${EMMA_SYSTEM_PROMPT}\n\n${brandVoice}`
 
-  const user = `Write Emma's "take" on this product. It will appear in the Emma's take tab on the product page — a friend-to-friend honest read.
+  const user = `Write Emma's "take" on this product. It appears at the top of the PDP — a friend-to-friend honest read. This is THE customer-facing voice surface; treat it accordingly.
 
 Product:
 - Title: ${opts.deal.seoTitle}
 - Brand: ${opts.deal.brand}
 - Category: ${opts.deal.category}
 ${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ''}
-${opts.deal.tagline ? `- Tagline (context): ${opts.deal.tagline}` : ''}
+${opts.deal.tagline ? `- Tagline (context only — DO NOT echo in first sentence): ${opts.deal.tagline}` : ''}
 ${opts.deal.fullStory ? `- Existing story (context, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 600)}` : ''}
 
 Cover, in this order, in your own voice (no headings, just flowing paragraphs):
 1. Who this clicks for — what they're after, what they'll like.
-2. Who might want to skip — be specific. Honest. No marketing fudge.
+2. Why it's worth exploring — what makes it intriguing, approachable, or fun to try. POSITIVE INVITATION. NEVER tell anyone to skip this product. NEVER gatekeep.
 3. How to get the most out of it — a tip Emma would whisper to a friend.
 
 Constraints:
 - Under 100 words total. One paragraph (or two very short ones, max). The PDP shows this above a "...more" expand fold; staying tight means readers see all three beats without clicking.
 - Return clean HTML — only <p>, <em>, <strong> tags. No headings, no <ul>, no inline styles, no class attrs.
-- First-person Emma voice throughout. No "Buy now". No countdowns. No clinical language.
+- First-person Emma voice throughout. Present tense. No "Buy now". No countdowns. No clinical language.
 - Do NOT mention price, MAP, or discounts.
-- Do NOT echo the product title in the first sentence.
+- Do NOT echo the product title OR tagline in the first sentence.
+- "sex" and "sexy" are allowed where contextually relevant to the product and customer discovery (e.g. "sex toy", "safer sex", "sexy gift"). Default to "intimate"/"pleasure"/"wellness" for general voice — don't drop "sex" in for SEO bait.
+- NO em-dashes ("—" or "–"). Use periods, commas, or parentheses.
 
 Return ONLY the HTML — no markdown, no fences, no preamble.`
 
@@ -1709,8 +1726,15 @@ export async function generateCareInstructions(opts: {
   deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'specifications' | 'fullStory'>
   llmClient?: LLMClient
 }): Promise<CareInstructions> {
-  const isConsumable = opts.deal.productTypeDial === 'lube'
-    // future-proof: edible wear (when classified) lands here too once the dial gets a finer split.
+  // Phase 1 rebuild — consumable family. Today only `lube` is in ProductTypeDial,
+  // but the D1 refactor expands the enum to include `massage`, `enhancer`, and
+  // `condom`. Using a runtime string Set makes this branch correctly absorb the
+  // expanded values once D1 lands without a second edit here.
+  const CONSUMABLE_TYPES: ReadonlySet<string> = new Set([
+    'lube', 'massage', 'enhancer', 'condom',
+  ])
+  const isConsumable = opts.deal.productTypeDial !== undefined
+    && CONSUMABLE_TYPES.has(opts.deal.productTypeDial)
 
   const user = isConsumable
     ? `Write 2 or 3 short care/storage bullets for this consumable product. Each is one playful, SEO-friendly sentence — under 16 words. Goal: fill the PDP "Care" card with something genuinely useful and a little fun, NOT a maintenance manual.
@@ -1723,7 +1747,7 @@ ${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specification
 Tone:
 - This stuff takes care of you more than you take care of it.
 - Cover what actually matters: where to keep it, when to use it, how it plays with toys / condoms / skin (if relevant), shelf life.
-- Specific, brand-voice, not clinical. Think "store wherever you intend to use it most" not "store in a cool, dry place."
+- SPECIFIC OVER GENERIC. "Store wherever you intend to use it most" beats "store in a cool, dry place." "Stays slick from morning shower to midnight nightstand" beats "long-lasting formula."
 - The word "sex" or "sexy" is allowed where it fits naturally and helps SEO.
 - No em-dashes ("—" or "–"). Use periods, commas, or parentheses.
 
@@ -1739,6 +1763,9 @@ ${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ''}
 ${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 500)}` : ''}
 
 Cover what actually matters for this object — cleaning, charging/storage, lube compatibility (where relevant), what to avoid. Practical, not clinical.
+
+SPECIFIC OVER GENERIC. "Tucks back into the storage pouch; charges off any USB-C" beats "Store in a cool, dry place." "Wipe with mild soap and warm water after use" beats "Clean before storage."
+
 No em-dashes ("—" or "–"). Use periods, commas, or parentheses.
 
 Return ONLY a JSON array of strings. Example: ["Wipe with mild soap and warm water after each use.", "Air-dry before storing in the included pouch."]
@@ -1787,10 +1814,16 @@ const PRODUCT_FAQ_CATEGORIES = ['general', 'care', 'usage', 'compatibility', 'sh
  * compatibility and shipping where they apply. Powers the PDP "FAQs / Q&A"
  * card AND the FAQPage JSON-LD that Google + LLM citers consume.
  *
+ * Phase 1 rebuild — must DIFFERENTIATE from descriptionHtml (B1) and
+ * careInstructions (C3). The B1 narrative + C3 structured care + H1 Q&A all
+ * render on the same PDP; restating concepts across them dilutes the page
+ * for shoppers AND for SEO/LLM citers. Caller passes already-generated B1+C3
+ * into the prompt context so the model can see what it must NOT echo.
+ *
  * Sonnet — answers benefit from rich product context.
  */
 export async function generateProductFaqs(opts: {
-  deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'specifications' | 'fullStory' | 'tagline' | 'moodTags' | 'audienceTags' | 'mattersTags'>
+  deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'specifications' | 'fullStory' | 'tagline' | 'moodTags' | 'audienceTags' | 'mattersTags' | 'descriptionHtml' | 'careInstructions'>
   llmClient?: LLMClient
 }): Promise<ProductFaq[]> {
   const tagsLine = [
@@ -1798,6 +1831,16 @@ export async function generateProductFaqs(opts: {
     opts.deal.audienceTags?.length ? `audience: ${opts.deal.audienceTags.join(', ')}` : '',
     opts.deal.mattersTags?.length  ? `matters: ${opts.deal.mattersTags.join(', ')}`   : '',
   ].filter(Boolean).join(' / ')
+
+  // Already-generated B1 (Emma's Take) and C3 (care instructions) get passed
+  // as differentiation context. The model sees what's already covered and
+  // chooses Q&A that complements rather than restates.
+  const descriptionHtmlText = opts.deal.descriptionHtml
+    ? opts.deal.descriptionHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600)
+    : ''
+  const careInstructionsText = Array.isArray(opts.deal.careInstructions) && opts.deal.careInstructions.length > 0
+    ? opts.deal.careInstructions.join(' | ').slice(0, 500)
+    : ''
 
   const user = `Generate 4 to 6 FAQs for this product's PDP. They render visibly AND get emitted as FAQPage JSON-LD — visible text must match structured text (no hidden content).
 
@@ -1811,23 +1854,41 @@ ${tagsLine ? `- Tags: ${tagsLine}` : ''}
 ${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 500)}` : ''}
 ${opts.deal.fullStory ? `- Existing story (context, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 600)}` : ''}
 
-Coverage requirements:
-- AT LEAST ONE \`general\` FAQ (what is it, who it's for).
-- AT LEAST ONE \`usage\` FAQ (how to use it, when, with whom).
-- AT LEAST ONE \`care\` FAQ (cleaning / storage / battery / shelf life — whichever fits).
-- OPTIONAL \`compatibility\` FAQ — only when relevant: lube↔toy materials, sleeve sizing, app/Bluetooth requirements, condom safety.
-- OPTIONAL \`shipping\` FAQ — only for products with non-standard shipping (oversize, restricted regions). Otherwise SKIP this category entirely.
+DIFFERENTIATION CONTEXT (what's already covered elsewhere on the PDP):
+${descriptionHtmlText ? `- Emma's Take (descriptionHtml — narrative beat: who it clicks for / why explore / Emma's tip):\n  ${descriptionHtmlText}\n` : ''}${careInstructionsText ? `- Care card (careInstructions — structured imperatives covering cleaning / charging / storage / lube compat):\n  ${careInstructionsText}\n` : ''}
+**Each FAQ must be DISTINCT from the description and care instructions above. If the answer would just restate content from those surfaces, SKIP that FAQ — better 4 distinct entries than 6 with overlap.**
+
+Coverage requirements + DIFFERENTIATION RULES per category:
+
+- \`general\` — AT LEAST ONE.
+  Focus: practical "what is this" — product type, primary feature, basic spec.
+  Good: "What kind of stimulation does this provide?", "Is this rechargeable?", "What's the runtime on a full charge?"
+  AVOID: "Who is this for?" / "Who clicks for this?" — already covered in Emma's Take.
+
+- \`usage\` — AT LEAST ONE.
+  Focus: practical operation — controls, modes, setup, partner/solo.
+  Good: "How do I switch between intensity levels?", "Can I use this in the shower?", "Does it work with a partner or solo?"
+  AVOID: "How do I get the most out of it?" — already covered in Emma's Take.
+
+- \`care\` — AT LEAST ONE.
+  Focus: customer-question framings that COMPLEMENT the structured care card.
+  Good: "Is it safe to share with a partner?", "How long does the battery last before needing replacement?", "What if it stops charging?"
+  AVOID: "How do I clean it?" / "How do I store it?" — already in care instructions.
+
+- \`compatibility\` — OPTIONAL. Only when relevant: lube↔toy materials, sleeve sizing, app/Bluetooth requirements, condom safety.
+
+- \`shipping\` — OPTIONAL. Only for non-standard shipping (oversize, restricted regions). Otherwise SKIP entirely.
 
 Question rules:
 - Full natural-language sentences ("How long does it take to charge?") — never keyword fragments.
-- Each question 10–160 chars. Each unique — no duplicate Q across products.
+- Each question 10–160 chars. Each unique.
 - Phrase the way a real customer would type into search or ask out loud.
 
 Answer rules:
 - 1–3 sentences, 40–800 chars. Emma voice — friendly, factual, specific.
 - Plain text only. No markdown, no HTML, no URLs, no emoji.
 - NO em-dashes ("—" or "–"). Use periods, commas, or parentheses instead.
-- The word "sex" or "sexy" is allowed where it fits naturally and helps SEO discovery.
+- The words "sex" and "sexy" are allowed where contextually relevant to the product and customer discovery — FAQs benefit from these terms for SEO + LLM-citer indexing.
 - Don't invent specs not in the source (no fabricated battery life, dimensions, materials).
 
 Return ONLY raw JSON (no markdown). An array of objects: [{ "question": "...", "answer": "...", "category": "general|care|usage|compatibility|shipping" }, ...]`
@@ -2194,12 +2255,29 @@ Return ONLY this JSON (no markdown): { "level": "first-time" }`
   return 'any'
 }
 
-/** 1–3 use-case slugs from a fixed vocabulary, voice-friendly. */
+/** 2–5 use-case slugs from a fixed vocabulary (54 slugs post-Phase 1 expansion).
+ *  Voice-friendly — Emma reads these aloud when filtering ("good for date-night,
+ *  long-distance"). Honest tagging is the load-bearing rule. */
 export async function generateIvrUseCase(opts: { deal: IvrDealCtx; llmClient?: LLMClient }): Promise<string[]> {
-  const user = `Pick 1–3 use cases this product fits, from this exact vocabulary:
+  const user = `Pick 2–5 use cases this product fits, from this exact vocabulary:
 ${IVR_USE_CASES.map(s => `- ${s}`).join('\n')}
 
-Honest tagging — only pick what genuinely fits. Skip rather than stretch.
+HONEST TAGGING — STRICT.
+- For OBJECTIVE/inferable slugs (travel = product is portable; long-distance = product has remote/app control): tag based on product spec support.
+- For SUBJECTIVE slugs (spice-up, partner-surprise, kink-curious, role-play, newly-dating, long-term, experimentation, queer-affirming, trans-affirming, etc.): tag ONLY when the description strongly supports it. Default to OMISSION when ambiguous. Skip rather than stretch.
+
+MUTUAL-EXCLUSIVITY HINTS (soft guidance — usually pick at most one within each facet):
+- Occasion: anniversary, honeymoon, valentine, birthday, bachelorette, pride, holiday — usually one or none. \`holiday\` is the umbrella for non-specific holidays; pick a specific occasion when it fits.
+- Wellness/health: pelvic-floor, kegel-training, postpartum, menopause, libido-boost, prostate-health, erectile-support, menstrual-comfort — usually one, ONLY on wellness-category products.
+- Affirming/inclusive: queer-affirming, trans-affirming, women-focused, men-focused, inclusive — usually one or two.
+- Gift sub-category: gift, gift-set, party-favor, self-gift — pick the most specific that applies.
+
+PRODUCT-TYPE SELF-RESTRICTION:
+- Wellness slugs (kegel-training, postpartum, prostate-health, erectile-support, menstrual-comfort) only apply to wellness/specific product types. Don't tag a vibrator as \`kegel-training\` unless it's actually a kegel device.
+- Affirming slugs (queer-affirming, trans-affirming, women-focused, men-focused) based on actual product positioning, not assumption from category.
+${opts.deal.productTypeDial ? `- This product's type is "${opts.deal.productTypeDial}" — keep tags consistent with what fits this category.` : ''}
+
+CROSS-FIELD NOTE: Some slugs (valentine, pride, holiday, gift, gift-set, long-distance, first-time) also appear in the IVR features vocabulary. There, they describe what the product IS (Pride-edition design, has rainbow colors). Here, they describe WHEN/WHY to use it (good for Pride parties, good for Valentine's gift). A product may legitimately tag the same slug in both fields — that's intentional.
 
 ${ivrProductBlock(opts.deal)}
 
@@ -2209,7 +2287,7 @@ Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`
     const { text } = await callClaude({
       llmClient: opts.llmClient,
       model:     MODEL_FAST,
-      maxTokens: 100,
+      maxTokens: 200,
       system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
       userPrompt: user,
     })
@@ -2224,7 +2302,7 @@ Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`
       if (!allowed.has(slug) || seen.has(slug)) continue
       seen.add(slug)
       out.push(slug)
-      if (out.length >= 3) break
+      if (out.length >= 5) break
     }
     return out
   } catch (err) {
@@ -2233,12 +2311,27 @@ Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`
   }
 }
 
-/** 2–4 feature slugs from a fixed voice-surface vocabulary. */
+/** 3–8 feature slugs from a fixed voice-surface vocabulary (104 slugs post-Phase 1 expansion).
+ *  Spoken aloud by Emma when filtering. Honest tagging is critical — false claims break trust
+ *  immediately. */
 export async function generateIvrFeatures(opts: { deal: IvrDealCtx; llmClient?: LLMClient }): Promise<string[]> {
-  const user = `Pick 2–4 features that are TRUE for this product, from this exact vocabulary:
+  const user = `Pick 3–8 features that are TRUE for this product, from this exact vocabulary:
 ${IVR_FEATURES.map(s => `- ${s}`).join('\n')}
 
-Honest tagging — these will be spoken aloud by Emma when filtering ("looking for something quiet and waterproof"). Don't tag something the product doesn't actually have.
+HONEST TAGGING — STRICT.
+- For OBJECTIVE slugs (waterproof, rechargeable, usb-c, silicone, body-safe, phthalate-free, latex-free, hypoallergenic, vegan, app-controlled, bluetooth, magnetic-charging, etc.): tag ONLY when the product description supports it. Don't infer from category.
+- For SUBJECTIVE slugs (rumbly, buzzy, gentle, intense, powerful, luxury, premium, discreet, beginner-friendly): tag ONLY when the description strongly supports it. Default to OMISSION when ambiguous.
+- These get spoken aloud by Emma when filtering ("looking for something quiet and waterproof"). False claims break shopper trust immediately.
+
+MUTUAL-EXCLUSIVITY HINTS (soft guidance — usually pick at most one within each facet):
+- Size: mini, compact, small, medium, large, xl, xxl, oversized, plus-size, queen-size, curvy, slim, girthy
+- Material primary: silicone, glass, metal, wood, leather, vegan-leather, faux-leather
+- Lube base: water-based, silicone-based, hybrid, oil-based (none for non-lubes)
+- Identity/edition: pride, rainbow, pride-edition, holiday, valentine
+
+PRODUCT-TYPE SELF-RESTRICTION:
+- Only tag features that apply to the product type. Don't tag \`harness-compatible\` on a lube, \`condom-safe\` on a vibrator, \`flared-base\` on a non-anal toy, \`water-based\`/\`silicone-based\`/\`hybrid\`/\`oil-based\` on anything that isn't a lubricant, etc.
+${opts.deal.productTypeDial ? `- This product's type is "${opts.deal.productTypeDial}" — only pick features that genuinely fit this category.` : ''}
 
 ${ivrProductBlock(opts.deal)}
 
@@ -2248,7 +2341,7 @@ Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`
     const { text } = await callClaude({
       llmClient: opts.llmClient,
       model:     MODEL_FAST,
-      maxTokens: 120,
+      maxTokens: 300,
       system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
       userPrompt: user,
     })
@@ -2263,7 +2356,7 @@ Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`
       if (!allowed.has(slug) || seen.has(slug)) continue
       seen.add(slug)
       out.push(slug)
-      if (out.length >= 4) break
+      if (out.length >= 8) break
     }
     return out
   } catch (err) {

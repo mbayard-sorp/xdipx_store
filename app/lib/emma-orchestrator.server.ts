@@ -142,9 +142,15 @@ interface OrchestratorState {
 
 function makeDealContext(state: OrchestratorState): Pick<
   Deal,
-  'seoTitle' | 'tagline' | 'fullStory' | 'brand' | 'category' | 'specifications' | 'dealPrice' | 'msrp'
+  'seoTitle' | 'tagline' | 'fullStory' | 'descriptionHtml' | 'careInstructions' | 'brand' | 'category' | 'specifications' | 'dealPrice' | 'msrp'
 > & { productTypeDial?: ProductTypeDial; mapRestricted: boolean } {
   // Deal-shaped object for downstream generators; populated as tools run.
+  // Phase 1 rebuild — also threads descriptionHtml (B1) and careInstructions
+  // (C3) through so generateProductFaqs (H1) can DIFFERENTIATE its Q&A from
+  // those surfaces. When B1/C3 haven't run yet, the H1 context is empty and
+  // the prompt degrades gracefully (FAQs produced without differentiation
+  // guidance). Tool ordering hint in the orchestrator's user message tries
+  // to schedule B1 + C3 before H1.
   return {
     // Use the augmented title once generateProductTitle has run; fall back
     // to the caller-supplied seoTitle until then. This way Emma's Take and
@@ -152,6 +158,8 @@ function makeDealContext(state: OrchestratorState): Pick<
     seoTitle:        state.writes.productTitle ?? state.input.seoTitle,
     tagline:         state.writes.tagline ?? '',
     fullStory:       state.writes.descriptionHtml ?? '',
+    ...(state.writes.descriptionHtml  ? { descriptionHtml:  state.writes.descriptionHtml }  : {}),
+    ...(state.writes.careInstructions ? { careInstructions: state.writes.careInstructions } : {}),
     brand:           state.input.product.brand,
     category:        state.input.category,
     ...(state.writes.productTypeDial ? { productTypeDial: state.writes.productTypeDial } : {}),

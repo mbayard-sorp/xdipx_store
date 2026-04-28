@@ -38,6 +38,11 @@ export interface ProductVariant {
 }
 
 // v2 redesign — sensation dial + hero video
+// Phase 1 rebuild note: the D1 task expands this to a 19-value top-level enum
+// + new `ProductSubtypeDial` for hierarchical taxonomy. That migration cascades
+// across dialRegistry, dial-registry.server, SensationDial component, and a
+// handful of admin routes — done together in the D1 task to keep the change
+// atomic. For now this stays as the legacy enum.
 export type ProductTypeDial = 'air-pulsation' | 'vibrator' | 'wand' | 'lube' | 'wear'
 
 /** @deprecated Use SensationDialV2 — kept for read-fallback only. */
