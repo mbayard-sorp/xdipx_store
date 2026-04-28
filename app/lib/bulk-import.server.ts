@@ -432,3 +432,247 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
     return { success: false, sku: masterSku, error: message }
   }
 }
+
+// ─── Phase 1 forward pipeline — agent-friendly entry point ───────────────────
+// `importProductGroup` above stays the entry for the Nalpac CSV bulk path.
+// `importNewProduct` below is the entry the product-management agent uses
+// (via /api/import-product). It accepts a clean, source-neutral input shape
+// and shares the same downstream calls. Future cleanup: merge the glue code
+// once both callers stabilize.
+
+export interface ImportNewProductInput {
+  /** Where this product came from. Drives source-tag wiring. */
+  source: 'manual' | 'agent' | 'nalpac'
+  /** Required: SEO-stable product handle. Per CLAUDE.md, the canonical URL
+   *  is `/products/{handle}` and never changes once set. The agent picks it. */
+  handle: string
+  /** Raw product fields. The agent normalizes before calling — no CSV-row
+   *  shapes leak in here. */
+  rawProduct: {
+    sku:           string
+    title:         string
+    brand:         string
+    description:   string
+    /** Optional pre-cleaned variant. When omitted, `description` is used. */
+    rawDescription?: string
+    categories:    string[]
+    dealPrice:     number
+    msrp:          number
+    wholesaleCost: number
+    mapPrice?:     number
+    qty?:          number
+    images?:       string[]
+  }
+  /** Optional voice-profile override. When omitted, generators use the
+   *  default brand voice from pipelineSettings. The hash is stored alongside
+   *  cached generations so cache invalidates when voice changes. */
+  voiceProfile?: { hash?: string; brandVoice?: string }
+}
+
+export interface ImportNewProductResult {
+  shopifyProductId: string  // numeric, e.g. "1234567890"
+  gid:              string  // gid://shopify/Product/<id>
+  handle:           string
+  warnings:         { stage: string; message: string }[]
+}
+
+/**
+ * Import a single product through the Phase 1 enrichment pipeline. Used by
+ * the product-management agent (via /api/import-product) and any other
+ * non-CSV caller.
+ *
+ * Flow:
+ *   1. Discontinued check — refuse if Nalpac flags it.
+ *   2. SKU duplicate check — return existing GID if already imported.
+ *   3. Create draft Shopify product with the EXPLICIT handle (no slugify).
+ *   4. Run the import orchestrator (A/B/C/D/G/H tools). E/F deal-cycle
+ *      tools and B2/B3/Phase-2 tools are excluded by the orchestrator's
+ *      tool list.
+ *   5. Push enrichment to Shopify metafields.
+ *   6. Insert dealHistory queue row.
+ *   7. Upsert Sanity productPage.
+ *
+ * Caller is responsible for activation (changing draft -> active publication).
+ * That stays an admin step — Phase 1 leaves products in draft + 'pending_approval'.
+ */
+export async function importNewProduct(input: ImportNewProductInput): Promise<ImportNewProductResult> {
+  const { source, handle, rawProduct, voiceProfile } = input
+  const sku = rawProduct.sku
+  const warnings: { stage: string; message: string }[] = []
+
+  // 1. Discontinued check
+  if (isDiscontinued({
+    'Sub-Category':        rawProduct.categories.join(', '),
+    'Product Title':       rawProduct.title,
+    'Product Description': rawProduct.rawDescription ?? rawProduct.description,
+  })) {
+    throw new Error(`importNewProduct: ${sku} is flagged discontinued by manufacturer`)
+  }
+
+  // 2. Duplicate check — if SKU already exists, surface the existing GID
+  //    rather than creating a duplicate Shopify product.
+  const existingGid = await findProductBySKU(sku)
+  if (existingGid) {
+    const existingId = existingGid.replace('gid://shopify/Product/', '')
+    return {
+      shopifyProductId: existingId,
+      gid:              existingGid,
+      handle,  // caller's input handle — may differ from the actual Shopify handle, intentional
+      warnings: [{ stage: 'duplicate', message: `SKU ${sku} already imported as ${existingGid}; not re-creating` }],
+    }
+  }
+
+  // 3. Create draft Shopify product with EXPLICIT handle.
+  const productScore: ProductScore = {
+    sku,
+    title:         rawProduct.title,
+    brand:         rawProduct.brand,
+    description:   rawProduct.description,
+    score:         0,
+    msrp:          rawProduct.msrp,
+    wholesaleCost: rawProduct.wholesaleCost,
+    mapPrice:      rawProduct.mapPrice ?? 0,
+    dealPrice:     rawProduct.dealPrice,
+    discountPct:   rawProduct.msrp > 0 ? ((rawProduct.msrp - rawProduct.dealPrice) / rawProduct.msrp) * 100 : 0,
+    profitPerUnit: rawProduct.dealPrice - rawProduct.wholesaleCost,
+    qty:           rawProduct.qty ?? 0,
+    mapType:       (rawProduct.mapPrice ?? 0) === 0 ? 'no-map' : (rawProduct.mapPrice ?? 0) < rawProduct.msrp ? 'below-msrp' : 'equals-msrp',
+    images:        rawProduct.images ?? [],
+    categories:    rawProduct.categories,
+  }
+  const numericId = await createShopifyProductFromFeed(productScore, handle)
+  const gid       = `gid://shopify/Product/${numericId}`
+
+  // 4. Run the import orchestrator. Source-neutral input — uses rawProduct
+  //    fields directly. Voice profile flows through to the per-tool
+  //    generators (default when omitted).
+  const seoTitle = await generateSEOTitle(rawProduct.title, rawProduct.brand)
+  const category = inferCategory(rawProduct.categories)
+  const pairingCandidates = await getPairingCandidates({
+    shopifyProductId: numericId,
+    category,
+    subCategories:    rawProduct.categories,
+  }).catch(err => {
+    console.warn(`[importNewProduct] ${sku} pairing-candidates lookup failed:`, err instanceof Error ? err.message : err)
+    return []
+  })
+  const { writes, telemetry } = await generateProductContent({
+    product: {
+      title:       rawProduct.title,
+      brand:       rawProduct.brand,
+      description: rawProduct.description,
+      categories:  rawProduct.categories,
+      dealPrice:   rawProduct.dealPrice,
+      msrp:        rawProduct.msrp,
+    },
+    seoTitle,
+    category,
+    pairingCandidates,
+  })
+  const finalTitle = writes.productTitle ?? seoTitle
+  console.info(
+    `[importNewProduct] ${sku} (source=${source}) orchestrator: tokens=${telemetry.totalTokens} ` +
+    `duration=${telemetry.durationMs}ms turns=${telemetry.turns} ` +
+    `voiceHash=${voiceProfile?.hash ?? 'default'} ` +
+    `tools=[${telemetry.toolCalls.map(c => `${c.name}${c.ok ? '' : '!'}`).join(',')}]`,
+  )
+
+  // 5. Push enrichment to Shopify (parallel structure to importProductGroup
+  //    step 7 above — drift between the two should be reconciled in a
+  //    future refactor).
+  await pushProductToShopify({
+    shopifyProductId:   numericId,
+    ...(writes.productTitleAugmented ? { title: finalTitle } : {}),
+    seoTitle:           finalTitle,
+    tagline:            writes.tagline,
+    ...(writes.boxContents      !== undefined ? { boxContents:      writes.boxContents }      : {}),
+    ...(writes.specifications   !== undefined ? { specifications:   writes.specifications }   : {}),
+    seoMetaDescription: writes.seoMetaDescription,
+    descriptionHtml:    writes.descriptionHtml,
+    ...(writes.careInstructions !== undefined ? { careInstructions: writes.careInstructions } : {}),
+    ...(writes.sensationDialV2  !== undefined ? { sensationDialV2:  writes.sensationDialV2 }  : {}),
+    productTypeDial:    writes.productTypeDial,
+    ...(writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {}),
+    moodTags:           writes.moodTags,
+    audienceTags:       writes.audienceTags,
+    mattersTags:        writes.mattersTags,
+    ...(writes.originalTitle    !== undefined ? { originalTitle:    writes.originalTitle }    : {}),
+    category,
+    dealStatus:         'pending_approval',
+    dealDate:           '2099-12-31',
+    originalPrice:      rawProduct.msrp,
+    wholesaleCost:      rawProduct.wholesaleCost,
+    mapPrice:           rawProduct.mapPrice ?? 0,
+    nalpacSku:          sku,
+    rawDescription:     rawProduct.rawDescription ?? rawProduct.description,
+  })
+
+  // 6. Insert dealHistory queue row — lands at bottom of queue.
+  const [{ maxSort = 0 } = {}] = await db
+    .select({ maxSort: max(dealHistory.sortOrder) })
+    .from(dealHistory)
+  const nextSortOrder = (maxSort ?? 0) + 1
+  await db.insert(dealHistory).values({
+    sku,
+    seoTitle,
+    brand:            rawProduct.brand,
+    categories:       rawProduct.categories,
+    dealDate:         '2099-12-31',
+    wholesaleCost:    rawProduct.wholesaleCost.toFixed(2),
+    dealPrice:        rawProduct.dealPrice.toFixed(2),
+    msrp:             rawProduct.msrp.toFixed(2),
+    mapPrice:         (rawProduct.mapPrice ?? 0).toFixed(2),
+    unitsAvailable:   rawProduct.qty ?? 0,
+    dealScore:        null,
+    status:           'queued',
+    sortOrder:        nextSortOrder,
+    shopifyProductId: numericId,
+  }).onConflictDoNothing()
+
+  // 7. Upsert Sanity productPage — best-effort with one retry.
+  try {
+    const upsertParams: Parameters<typeof upsertProductPage>[0] = {
+      handle,
+      shopifyProductId: gid,
+      title:            rawProduct.title,
+      vendor:           rawProduct.brand,
+      tags:             rawProduct.categories,
+      tagline:          writes.tagline,
+      description:      rawProduct.description,
+      seoTitle,
+      seoDescription:   writes.seoMetaDescription,
+      category,
+      mapPrice:         rawProduct.dealPrice,
+      originalPrice:    rawProduct.msrp,
+      productTypeDial:  writes.productTypeDial,
+      ...(writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {}),
+      moodTags:         writes.moodTags,
+      audienceTags:     writes.audienceTags,
+      mattersTags:      writes.mattersTags,
+      ...(writes.ivrExperience !== undefined ? { ivrExperience: writes.ivrExperience } : {}),
+      ...(writes.ivrUseCase    !== undefined ? { ivrUseCase:    writes.ivrUseCase    } : {}),
+      ...(writes.ivrFeatures   !== undefined ? { ivrFeatures:   writes.ivrFeatures   } : {}),
+      ...(writes.productFaqs   !== undefined ? { productFaqs:   writes.productFaqs   } : {}),
+    }
+    if (rawProduct.images?.[0]) upsertParams.imageUrl = rawProduct.images[0]
+    let lastErr: unknown
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await upsertProductPage(upsertParams)
+        lastErr = null
+        break
+      } catch (err) {
+        lastErr = err
+        if (attempt === 1) await new Promise(r => setTimeout(r, 500))
+      }
+    }
+    if (lastErr) {
+      const msg = `sanity sync failed after retry: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`
+      warnings.push({ stage: 'sanity', message: msg })
+    }
+  } catch (err) {
+    warnings.push({ stage: 'sanity', message: err instanceof Error ? err.message : String(err) })
+  }
+
+  return { shopifyProductId: numericId, gid, handle, warnings }
+}
