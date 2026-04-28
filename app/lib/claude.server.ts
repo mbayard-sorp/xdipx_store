@@ -2260,23 +2260,82 @@ const ASK_EMMA_AXIS_GUIDANCE: Record<AskEmmaAxis, string> = {
 }
 
 /**
- * Generate slugified Ask Emma tags for a single axis. Strongly prefers the
- * supplied vocabulary so URL params like `?matters=soft-touch` round-trip
- * cleanly through the Collection filter rail. Model may propose new slugs
- * when none of the preferred labels fit; appended in admin triage (separate UI).
+ * Validate raw model-output tags against curated vocabulary. Phase 1 rebuild —
+ * Title Case storage. Returns canonical Title Case from `preferredLabels`
+ * (case-insensitive match), capped at 5 unique entries.
+ *
+ * When `allowProposed` is true and a tag doesn't match any preferred label,
+ * the raw value is title-cased and accepted as a proposal. When false (the
+ * default for backfill), unmatched tags are dropped.
+ */
+function validateAskEmmaTagBatch(
+  raw: unknown[],
+  preferredLabels: string[],
+  allowProposed: boolean,
+): string[] {
+  const canonicalByLower = new Map<string, string>()
+  for (const label of preferredLabels) {
+    const trimmed = label.trim()
+    if (!trimmed) continue
+    canonicalByLower.set(trimmed.toLowerCase(), trimmed)
+  }
+
+  const seen = new Set<string>()
+  const out:  string[] = []
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const trimmed = item.trim()
+    if (!trimmed || trimmed.length > 32) continue
+    const lower = trimmed.toLowerCase()
+    const canonical = canonicalByLower.get(lower) ?? (allowProposed ? toTitleCase(trimmed) : null)
+    if (!canonical) continue
+    if (seen.has(canonical)) continue
+    seen.add(canonical)
+    out.push(canonical)
+    if (out.length >= 5) break
+  }
+  return out
+}
+
+/** Title-case a label, preserving hyphenated compounds ("First-Time Friendly"). */
+function toTitleCase(s: string): string {
+  return s
+    .toLowerCase()
+    .split(/\s+/)
+    .map(word => word
+      .split('-')
+      .map(part => part.length > 0 ? part[0]!.toUpperCase() + part.slice(1) : part)
+      .join('-'))
+    .join(' ')
+    .trim()
+}
+
+/**
+ * Generate Ask Emma tags for a single axis. Phase 1 rebuild — Title Case
+ * storage (e.g. "Soft Touch" not "soft-touch").
+ *
+ * **Backfill default: AI does NOT invent new labels.** Output is restricted
+ * to `preferredLabels` (case-insensitive match, canonical form from vocab).
+ * Forward pipeline can opt in via `allowProposed: true` — those land Title
+ * Case for admin review.
+ *
+ * For the cost-optimized combined-axes call see `generateAskEmmaTagsAll`.
  */
 export async function generateAskEmmaTags(opts: {
   deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'tagline' | 'fullStory' | 'specifications'>
   axis: AskEmmaAxis
   /** Current vocabulary for this axis (from Sanity askEmmaVocabulary). */
   preferredLabels: string[]
+  /** Phase 1 default false — backfill must NOT invent new vocab. Forward
+   *  pipeline may flip to true. */
+  allowProposed?: boolean
   llmClient?: LLMClient
 }): Promise<string[]> {
-  const { deal, axis, preferredLabels } = opts
+  const { deal, axis, preferredLabels, allowProposed = false } = opts
 
   const labelList = preferredLabels.length > 0
     ? preferredLabels.map(l => `- ${l}`).join('\n')
-    : '(none — invent appropriate slugs)'
+    : '(no curated vocabulary yet)'
 
   const user = `Pick the Ask Emma tags for the "${axis}" axis on this product. ${ASK_EMMA_AXIS_GUIDANCE[axis]}
 
@@ -2289,17 +2348,17 @@ ${deal.tagline ? `- Tagline: ${deal.tagline}` : ''}
 ${deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
 ${deal.specifications ? `- Specs (HTML, context): ${deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 300)}` : ''}
 
-Preferred slugs for "${axis}" (use these whenever they fit):
+Curated vocabulary for "${axis}" (Title Case — ${allowProposed ? 'PREFER these; only propose new when none fit' : 'STRICT: pick ONLY from this list'}):
 ${labelList}
 
 Rules:
-- Return slugs in lowercase kebab-case (e.g. "soft-touch", not "Soft touch").
-- Reuse a preferred slug exactly when it fits.
-- Only invent a new slug if none of the preferred ones fit. Keep new slugs short (≤ 24 chars), generic enough to apply to other products.
-- Do NOT invent synonyms of preferred slugs.
+- Return labels in **Title Case** (e.g. "Soft Touch", "First-Time Friendly", "Slow Burn") — never lowercase, never kebab-case.
+${allowProposed
+  ? '- Only invent a new label if NONE of the curated ones fit. Keep new labels <=24 chars, Title Case, generic enough to apply to other products. Do NOT invent synonyms of existing labels.'
+  : '- DO NOT invent new labels. If no curated label fits, leave that aspect untagged.'}
 - Honest tagging — don't tag every option. If unsure, leave it out.
 
-Return ONLY this JSON (no markdown): { "tags": ["slug-one", "slug-two"] }`
+Return ONLY this JSON (no markdown): { "tags": ["Soft Touch", "First-Time Friendly"] }`
 
   try {
     const { text } = await callClaude({
@@ -2311,22 +2370,89 @@ Return ONLY this JSON (no markdown): { "tags": ["slug-one", "slug-two"] }`
     })
     const parsed = JSON.parse(stripFences(text)) as { tags?: unknown }
     if (!Array.isArray(parsed.tags)) return []
-
-    const seen = new Set<string>()
-    const out: string[] = []
-    for (const raw of parsed.tags) {
-      if (typeof raw !== 'string') continue
-      const slug = raw.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-      if (!slug || slug.length > 32 || seen.has(slug)) continue
-      seen.add(slug)
-      out.push(slug)
-      if (out.length >= 5) break
-    }
-    return out
+    return validateAskEmmaTagBatch(parsed.tags, preferredLabels, allowProposed)
   } catch (err) {
     console.error(`[generateAskEmmaTags:${axis}] failed:`, err)
     return []
+  }
+}
+
+/**
+ * Phase 1 D3 \u2014 combined-axes Ask Emma tag generator. Single Haiku call returns
+ * all three axes (mood / audience / matters) in one round trip. Cost saver \u2014
+ * 3 calls become 1, sharing the product context block.
+ *
+ * Title Case storage. Backfill default disallows AI-proposed new labels.
+ */
+export async function generateAskEmmaTagsAll(opts: {
+  deal: Pick<Deal, 'seoTitle' | 'brand' | 'category' | 'productTypeDial' | 'tagline' | 'fullStory' | 'specifications'>
+  /** Curated vocabulary per axis (from Sanity askEmmaVocabulary). */
+  vocabularies: Record<AskEmmaAxis, string[]>
+  /** Phase 1 default false \u2014 backfill must NOT invent new vocab. */
+  allowProposed?: boolean
+  llmClient?: LLMClient
+}): Promise<{ moodTags: string[]; audienceTags: string[]; mattersTags: string[] }> {
+  const { deal, vocabularies, allowProposed = false } = opts
+
+  const renderVocab = (axis: AskEmmaAxis): string => {
+    const items = vocabularies[axis]
+    return items.length > 0
+      ? items.map(l => `  - ${l}`).join('\n')
+      : '  (no curated vocabulary yet)'
+  }
+
+  const user = `Pick the Ask Emma tags for ALL THREE axes on this product. Title Case storage.
+
+Product:
+- Title: ${deal.seoTitle}
+- Brand: ${deal.brand}
+- Category: ${deal.category}
+${deal.productTypeDial ? `- Type: ${deal.productTypeDial}` : ''}
+${deal.tagline ? `- Tagline: ${deal.tagline}` : ''}
+${deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, ' ').slice(0, 400)}` : ''}
+${deal.specifications ? `- Specs (HTML, context): ${deal.specifications.replace(/<[^>]+>/g, ' ').slice(0, 300)}` : ''}
+
+AXIS GUIDE:
+- mood: ${ASK_EMMA_AXIS_GUIDANCE.mood}
+- audience: ${ASK_EMMA_AXIS_GUIDANCE.audience}
+- matters: ${ASK_EMMA_AXIS_GUIDANCE.matters}
+
+CURATED VOCABULARIES (Title Case \u2014 ${allowProposed ? 'PREFER these; only propose new when none fit' : 'STRICT: pick ONLY from these lists'}):
+mood:
+${renderVocab('mood')}
+audience:
+${renderVocab('audience')}
+matters:
+${renderVocab('matters')}
+
+Rules:
+- Each tag in **Title Case** (e.g. "Soft Touch", "First-Time Friendly"). Never lowercase, never kebab-case.
+${allowProposed
+  ? '- Only invent a new label per axis when NONE of that axis\'s curated entries fit. <=24 chars, Title Case, no synonyms of existing labels.'
+  : '- DO NOT invent new labels. If no curated entry fits an aspect, leave that aspect untagged in that axis.'}
+- Honest tagging \u2014 leave it out if unsure.
+- Stay within each axis. Don't put a "mood" label in the "matters" array.
+
+Return ONLY this JSON (no markdown):
+{ "mood": ["..."], "audience": ["..."], "matters": ["..."] }`
+
+  try {
+    const { text } = await callClaude({
+      llmClient: opts.llmClient,
+      model:     MODEL_FAST,
+      maxTokens: 600,
+      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user,
+    })
+    const parsed = JSON.parse(stripFences(text)) as { mood?: unknown; audience?: unknown; matters?: unknown }
+    return {
+      moodTags:     Array.isArray(parsed.mood)     ? validateAskEmmaTagBatch(parsed.mood,     vocabularies.mood,     allowProposed) : [],
+      audienceTags: Array.isArray(parsed.audience) ? validateAskEmmaTagBatch(parsed.audience, vocabularies.audience, allowProposed) : [],
+      mattersTags:  Array.isArray(parsed.matters)  ? validateAskEmmaTagBatch(parsed.matters,  vocabularies.matters,  allowProposed) : [],
+    }
+  } catch (err) {
+    console.error('[generateAskEmmaTagsAll] failed:', err)
+    return { moodTags: [], audienceTags: [], mattersTags: [] }
   }
 }
 

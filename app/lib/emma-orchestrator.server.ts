@@ -18,7 +18,7 @@ import {
   generateSensationDialV2,
   generateEmmaHero,
   inferProductTaxonomy,
-  generateAskEmmaTags,
+  generateAskEmmaTagsAll,
   generateIvrExperience,
   generateIvrUseCase,
   generateIvrFeatures,
@@ -27,7 +27,6 @@ import {
   generatePairingWhy,
   drainToolTokens,
   type ProductFaq,
-  type AskEmmaAxis,
   type IvrExperience,
 } from '~/lib/claude.server'
 import { getDialRegistry, getDialTaxonomy, appendDialLabel, type DialRegistry, type DialTaxonomy } from '~/lib/dial-registry.server'
@@ -221,18 +220,8 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'generateMoodTags',
-    description: 'Generate slugified mood tags from the controlled vocabulary. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateAudienceTags',
-    description: 'Generate slugified audience tags (me / us / gift) from the controlled vocabulary. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateMattersTags',
-    description: 'Generate slugified "what matters" tags (quiet, soft-touch, travel-size, etc.) from the controlled vocabulary. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags.',
+    name: 'generateAskEmmaTagsAll',
+    description: 'Generate Title Case Ask Emma tags for ALL THREE axes (mood / audience / matters) in one combined Haiku call. Replaces the three single-axis tools. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags. Backfill will not invent new vocab; tags are restricted to the curated lists.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -481,23 +470,26 @@ async function executeTool(
       return { ok: true, summary: `boxContents=${bc.length}` }
     }
 
-    case 'generateMoodTags':
-    case 'generateAudienceTags':
-    case 'generateMattersTags': {
-      const axis: AskEmmaAxis =
-        name === 'generateMoodTags'     ? 'mood'
-        : name === 'generateAudienceTags' ? 'audience'
-        : 'matters'
-      const tags = await generateAskEmmaTags({
+    case 'generateAskEmmaTagsAll': {
+      // Phase 1 D3 — combined-axes call. One Haiku round trip returns all
+      // three axes; cheaper than the legacy three single-axis calls. Title
+      // Case storage; backfill default disallows AI-proposed new labels.
+      const result = await generateAskEmmaTagsAll({
         deal: dealCtx,
-        axis,
-        preferredLabels: state.vocab[axis],
+        vocabularies: {
+          mood:     state.vocab.mood,
+          audience: state.vocab.audience,
+          matters:  state.vocab.matters,
+        },
         ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
       })
-      if (axis === 'mood')          state.writes.moodTags     = tags
-      else if (axis === 'audience') state.writes.audienceTags = tags
-      else                          state.writes.mattersTags  = tags
-      return { ok: true, summary: `${axis}Tags=${tags.length}` }
+      state.writes.moodTags     = result.moodTags
+      state.writes.audienceTags = result.audienceTags
+      state.writes.mattersTags  = result.mattersTags
+      return {
+        ok: true,
+        summary: `mood=${result.moodTags.length} audience=${result.audienceTags.length} matters=${result.mattersTags.length}`,
+      }
     }
 
     case 'generateEmmaHero': {
@@ -693,34 +685,32 @@ Phase 1 — classify (must complete BEFORE anything else):
   1. classifyProductTypeDial
 
 Phase 2 — tag the product (must complete BEFORE copy generators so the SEO keyword bank can filter approved terms by these tags — without this, copy is generic):
-  2. generateMoodTags
-  3. generateAudienceTags
-  4. generateMattersTags
+  2. generateAskEmmaTagsAll  (single Haiku call, all three axes — mood / audience / matters)
 
 Phase 3 — title decision (uses dial + tags to pick a descriptor when needed):
-  5. generateProductTitle
+  3. generateProductTitle
 
 Phase 4 — copy generators (these benefit from keyword targeting via the tags above):
-  6. generateTagline
-  7. generateSeoMeta
-  8. generateSpecifications
-  9. generateEmmaTake
+  4. generateTagline
+  5. generateSeoMeta
+  6. generateSpecifications
+  7. generateEmmaTake
 
 Phase 5 — dial + hero + image (independent, run after copy is set):
-  10. generateSensationDialV2 (must be AFTER classifyProductTypeDial)
-  11. generateEmmaHero
-  12. generateMoodImage
+  8. generateSensationDialV2 (must be AFTER classifyProductTypeDial)
+  9. generateEmmaHero
+  10. generateMoodImage
 
 Phase 6 — pairings (run AFTER tagline + emmaTake exist so the pairing-why blurbs have richer context):
-  13. proposePairingWhy (SKIP if no pairing candidates were provided)
+  11. proposePairingWhy (SKIP if no pairing candidates were provided)
 
 Phase 7 — IVR / voice surfaces (run AFTER generateEmmaTake — they need rich context):
-  14. generateIvrExperience
-  15. generateIvrUseCase
-  16. generateIvrFeatures
+  12. generateIvrExperience
+  13. generateIvrUseCase
+  14. generateIvrFeatures
 
-Phase 8 — PDP FAQs (run AFTER generateEmmaTake + generateSpecifications + tag tools — answers benefit from full product context):
-  17. generateProductFaqs
+Phase 8 — PDP FAQs (run LAST — must be AFTER generateEmmaTake AND generateCareInstructions so the differentiation context is populated; H1 answers must NOT restate descriptionHtml or careInstructions):
+  15. generateProductFaqs
 
 Conditional:
 - generateCareInstructions: call for every product type. The underlying generator branches on productTypeDial — hardware gets 3–5 maintenance bullets, consumables (lube, edible wear) get 2–3 playful storage/usage bullets.
