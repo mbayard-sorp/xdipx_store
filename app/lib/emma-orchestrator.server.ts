@@ -264,21 +264,17 @@ const TOOLS = [
     description: 'Generate "what is in the box" bullets. Call this for hardware (vibrator, wand, air-pulsation). SKIP for lube. SKIP for wear unless the wear product has packaging contents worth listing.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
-  {
-    name: 'generateEmmaHero',
-    description: 'Generate the Emma hero block (eyebrow / headline / body / aside). Always call this.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateMoodImage',
-    description: 'Generate ONE PDP hero mood image and upload to Shopify Files. Always call this. Returns a CDN URL stored on the writes payload.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'proposePairingWhy',
-    description: 'Pick 1–3 sibling products that pair with this primary and write a short Emma-voice "why this pairs" blurb for each. SKIP this tool when no pairing candidates are available (the orchestrator surfaces them via input.pairingCandidates).',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
+  // Phase 1 rebuild — these tools were removed from the import orchestrator's
+  // tool list:
+  //   - generateEmmaHero (E1/E2): deal-cycle artifact, regenerated per
+  //     deal slot rotation. Out of import scope.
+  //   - generateMoodImage: image generation is Phase 2+ scope.
+  //   - proposePairingWhy (F1/F2): pairings are deal-cycle, curated when
+  //     a product enters the homepage deal slot against the freshest
+  //     catalog state.
+  // The corresponding case branches and underlying generator functions are
+  // preserved so the deal-cycle pipeline can call them directly. Import path
+  // never schedules them.
   {
     name: 'generateIvrExperience',
     description: 'Pick ONE experience level the product fits best (first-time / curious / experienced / advanced / any). Used by Emma chat/IVR/SMS to match buyer intent. Always call this AFTER classifyProductTypeDial and generateEmmaTake (so context is rich).',

@@ -628,11 +628,10 @@ function ProductPage() {
     ? getBestSubscriptionOffer(deal.sellingPlanGroups, basePrice)
     : null
 
-  const worksFor: [boolean, boolean, boolean] = [
-    deal.category === 'for-him'  || deal.category === 'both' || deal.category === 'couples',
-    deal.category === 'for-her'  || deal.category === 'both' || deal.category === 'couples',
-    deal.category === 'couples',
-  ]
+  // Phase 1 rebuild — `worksFor` and `WorksForBadge` were used by the legacy
+  // "Works For" badges attached to the deprecated `worksForHim`/`worksForHer`
+  // PDP tabs (see line 39 comment, ProductTabs removed). Both deleted with
+  // the B3 drop in Phase 1.
 
   // Sticky mobile CTA — appears when main button scrolls out of view
   useEffect(() => {
@@ -1077,15 +1076,6 @@ function ProductPage() {
         />
       )}
     </>
-  )
-}
-
-function WorksForBadge({ label, emoji }: { label: string; emoji: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 bg-cream-2 px-2.5 py-0.5 rounded-full text-xs font-medium text-ink/70">
-      <span aria-hidden="true">{emoji}</span>
-      {label}
-    </span>
   )
 }
 
