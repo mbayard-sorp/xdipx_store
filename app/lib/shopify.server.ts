@@ -52,7 +52,7 @@ export async function shopifyAdmin<T>(path: string, method = 'GET', body?: unkno
   return res.json() as Promise<T>
 }
 
-async function adminGraphQL<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+export async function adminGraphQL<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
   const res = await fetch(ADMIN_GQL_ENDPOINT, {
     method: 'POST',
     headers: {
