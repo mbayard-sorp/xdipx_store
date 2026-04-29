@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFetcher, useNavigate, useRouteLoaderData, useSearchParams } from 'react-router'
 import { useSession } from '~/lib/session-context'
 import type { DiscoveryCandidate, DiscoveryResult } from '~/lib/emma-discovery.server'
@@ -43,7 +43,6 @@ export function EmmaDiscoveryRail({
   const fetcher = useFetcher<DiscoveryResult>()
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const [collapsed, setCollapsed] = useState(true)
   const lastKeyRef = useRef<string>('')
 
   // Stable key representing the current request so we only POST when it changes.
@@ -149,57 +148,88 @@ export function EmmaDiscoveryRail({
       ].join(' ')}
       aria-label="Emma's discovery rail"
     >
-      <button
-        type="button"
-        className="w-full flex items-center justify-between md:hidden mb-3"
-        aria-expanded={!collapsed}
-        onClick={() => setCollapsed(v => !v)}
-      >
-        <span
-          className="text-xs uppercase tracking-wider text-muted font-semibold"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          Emma's notes
-        </span>
-        <span aria-hidden className="text-muted">{collapsed ? '▸' : '▾'}</span>
-      </button>
-
-      <div className={`${collapsed ? 'hidden md:block' : 'block'}`}>
-        <div className="flex flex-col items-center mb-3">
-          {emmaPersona?.avatarUrl ? (
-            <img
-              src={emmaPersona.avatarUrl}
-              alt={emmaPersona.avatarAlt || emmaPersona.displayName || 'Emma'}
-              width={56}
-              height={56}
-              className="w-14 h-14 rounded-full object-cover ring-2 ring-coral/30 mb-2"
-              loading="lazy"
-            />
-          ) : (
-            <div
-              className="w-14 h-14 rounded-full bg-coral text-paper flex items-center justify-center font-bold text-lg ring-2 ring-coral/30 mb-2"
-              style={{ fontFamily: 'var(--font-display)' }}
-              aria-hidden="true"
-            >
-              E
-            </div>
-          )}
+      <div>
+        {/* Avatar + greeting + narrator
+            - Mobile: salutation as title; avatar (left) — text (right)
+            - Desktop: existing centered column with avatar above greeting */}
+        {/* MOBILE LAYOUT */}
+        <div className="md:hidden mb-3">
           <p
-            className="text-xs uppercase tracking-wider text-coral font-semibold text-center"
+            className="text-xs uppercase tracking-wider text-coral font-semibold mb-2"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {greeting}
           </p>
-        </div>
-        <div className="mb-3">
-          {loading && !data ? (
-            <div className="space-y-2">
-              <div className="h-3 rounded bg-cream-2 animate-pulse" />
-              <div className="h-3 w-3/4 rounded bg-cream-2 animate-pulse" />
+          <div className="flex items-start gap-3">
+            {emmaPersona?.avatarUrl ? (
+              <img
+                src={emmaPersona.avatarUrl}
+                alt={emmaPersona.avatarAlt || emmaPersona.displayName || 'Emma'}
+                width={48}
+                height={48}
+                className="w-12 h-12 rounded-full object-cover ring-2 ring-coral/30 shrink-0"
+                loading="lazy"
+              />
+            ) : (
+              <div
+                className="w-12 h-12 rounded-full bg-coral text-paper flex items-center justify-center font-bold text-base ring-2 ring-coral/30 shrink-0"
+                style={{ fontFamily: 'var(--font-display)' }}
+                aria-hidden="true"
+              >
+                E
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              {loading && !data ? (
+                <div className="space-y-2">
+                  <div className="h-3 rounded bg-cream-2 animate-pulse" />
+                  <div className="h-3 w-3/4 rounded bg-cream-2 animate-pulse" />
+                </div>
+              ) : (
+                <p className="text-ink text-sm leading-snug">{narrator}</p>
+              )}
             </div>
-          ) : (
-            <p className="text-ink text-sm leading-snug">{narrator}</p>
-          )}
+          </div>
+        </div>
+
+        {/* DESKTOP LAYOUT */}
+        <div className="hidden md:block">
+          <div className="flex flex-col items-center mb-3">
+            {emmaPersona?.avatarUrl ? (
+              <img
+                src={emmaPersona.avatarUrl}
+                alt={emmaPersona.avatarAlt || emmaPersona.displayName || 'Emma'}
+                width={56}
+                height={56}
+                className="w-14 h-14 rounded-full object-cover ring-2 ring-coral/30 mb-2"
+                loading="lazy"
+              />
+            ) : (
+              <div
+                className="w-14 h-14 rounded-full bg-coral text-paper flex items-center justify-center font-bold text-lg ring-2 ring-coral/30 mb-2"
+                style={{ fontFamily: 'var(--font-display)' }}
+                aria-hidden="true"
+              >
+                E
+              </div>
+            )}
+            <p
+              className="text-xs uppercase tracking-wider text-coral font-semibold text-center"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              {greeting}
+            </p>
+          </div>
+          <div className="mb-3">
+            {loading && !data ? (
+              <div className="space-y-2">
+                <div className="h-3 rounded bg-cream-2 animate-pulse" />
+                <div className="h-3 w-3/4 rounded bg-cream-2 animate-pulse" />
+              </div>
+            ) : (
+              <p className="text-ink text-sm leading-snug">{narrator}</p>
+            )}
+          </div>
         </div>
 
         {data && data.didYouMean.length > 0 && (

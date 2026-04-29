@@ -149,3 +149,54 @@
 .pulse-ring {
   animation: pulse-ring 2s ease-in-out infinite;
 }
+
+/* "Please select a color" attention pulse for circular option selectors.
+   - Persistent thick white + ink ring keeps the swatch outlined even
+     between pulse beats so the eye locks onto it on cream/paper.
+   - Radiating coral ring expands outward each cycle for the "ping" effect.
+   - Subtle scale-up adds physical motion without breaking the layout. */
+@keyframes pulse-outline {
+  0% {
+    box-shadow:
+      0 0 0 3px rgba(255, 255, 255, 1),
+      0 0 0 5px rgba(21, 18, 17, 1),
+      0 0 0 5px rgba(255, 75, 31, 0.9);
+    transform: scale(1);
+  }
+  60% {
+    box-shadow:
+      0 0 0 3px rgba(255, 255, 255, 1),
+      0 0 0 5px rgba(21, 18, 17, 1),
+      0 0 0 22px rgba(255, 75, 31, 0);
+    transform: scale(1.08);
+  }
+  100% {
+    box-shadow:
+      0 0 0 3px rgba(255, 255, 255, 1),
+      0 0 0 5px rgba(21, 18, 17, 1),
+      0 0 0 0 rgba(255, 75, 31, 0);
+    transform: scale(1);
+  }
+}
+
+.pulse-outline {
+  border-radius: 9999px;
+  animation: pulse-outline 1.1s ease-out infinite;
+  /* No margin: keep the wrapper at its natural size so toggling the class
+     doesn't push surrounding flex/grid items. The radiating ring is a
+     box-shadow (out-of-flow) and the scale is a transform (out-of-flow),
+     so neither affects layout. */
+}
+
+/* Floats up and fades away — used for transient "Please select a color"
+   prompts above the buy bundle button. Self-completing one-shot animation. */
+@keyframes float-up-fade {
+  0%   { opacity: 0; transform: translate(-50%, 14px); }
+  15%  { opacity: 1; transform: translate(-50%, 0); }
+  80%  { opacity: 1; transform: translate(-50%, -10px); }
+  100% { opacity: 0; transform: translate(-50%, -34px); }
+}
+
+.float-up-fade {
+  animation: float-up-fade 2.4s ease-out forwards;
+}

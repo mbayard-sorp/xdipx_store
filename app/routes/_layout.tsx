@@ -12,7 +12,7 @@ import { SiteBanner }      from '~/components/store/SiteBanner'
 import { Footer }          from '~/components/store/Footer'
 import { CookieConsent }   from '~/components/store/CookieConsent'
 import { Analytics }       from '~/components/store/Analytics'
-import { MobileTabBar }    from '~/components/store/MobileTabBar'
+import { MobileExploreMenu } from '~/components/store/MobileExploreMenu'
 import { AskEmmaWidget }   from '~/components/store/AskEmmaWidget'
 import { AnnouncementBar } from '~/components/cms/AnnouncementBar'
 import { OrganizationStructuredData } from '~/components/seo/OrganizationStructuredData'
@@ -62,8 +62,10 @@ export default function StoreLayout() {
   const ga4Id = rootData?.ENV?.GA4_ID ?? ''
   const ageGateLevel = (rootData?.ENV?.AGE_GATE_LEVEL ?? 'click_through') as 'click_through' | 'dob_entry' | 'id_verify'
 
-  // Hide the mobile tab bar on PDP (pinned "Dip In" CTA owns the bottom) and on
-  // the checkout flow. The AskEmmaWidget renders on every page.
+  // Hide the mobile explore menu on PDP (pinned "Dip In" CTA owns the
+  // bottom) and the checkout flow. Everywhere else, the explore menu
+  // pops UP from the bottom on tap so shoppers can browse categories
+  // without using the top nav. The AskEmmaWidget renders on every page.
   const isPdp        = pathname.startsWith('/products/')
   const isCheckout   = pathname.startsWith('/checkout-extras')
   const showMobileShell = !isPdp && !isCheckout
@@ -92,7 +94,7 @@ export default function StoreLayout() {
             <Outlet context={{ buyButtonText }} />
           </main>
           <Footer socialLinks={socialLinks} footerColumns={footerColumns} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} />
-          {showMobileShell && <MobileTabBar />}
+          {showMobileShell && <MobileExploreMenu menuItems={menuItems} />}
           <AskEmmaWidget />
           <CookieConsent />
           <Analytics ga4Id={ga4Id} />

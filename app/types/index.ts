@@ -186,6 +186,8 @@ export interface PairBundleCopy {
   emmaQuote:    string
   momentTitle:  string
   moments:      PairBundleCopyMoment[]
+  /** Short Emma-voice greeting shown next to her avatar (e.g. "great to meet you"). */
+  conciergeSalutation?: string
 }
 
 export interface Deal {
