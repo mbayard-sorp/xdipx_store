@@ -33,10 +33,9 @@ export default {
     },
   ],
   preview: {
-    select: { mood: 'mood', audience: 'audience', matters: 'matters' },
-    prepare: ({ mood = [], audience = [], matters = [] }) => ({
+    prepare: () => ({
       title: 'Ask Emma vocabulary',
-      subtitle: `mood ${mood.length} · audience ${audience.length} · matters ${matters.length}`,
+      subtitle: 'mood · audience · matters',
     }),
   },
 }
