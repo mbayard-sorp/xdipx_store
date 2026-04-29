@@ -51,6 +51,9 @@ export function ProductStructuredData({
 }) {
   const url = `https://xdipx.com/products/${deal.handle}`
   const emmaId = 'https://xdipx.com/about#emma'
+  // Editorial authorship only — no Review schema. Emma is the seller's editor,
+  // and Google treats Review nodes as user-submitted; emitting a 5/5 self-review
+  // risks a structured-data manual action across the whole catalog.
   const emmaPerson = editor
     ? {
         '@type':  'Person',
@@ -60,17 +63,6 @@ export function ProductStructuredData({
         url:      'https://xdipx.com/about',
         jobTitle: editor.role,
         worksFor: { '@type': 'Organization', '@id': 'https://xdipx.com/#organization' },
-      }
-    : null
-  const reviewBody = deal.tagline ?? ''
-  const emmaReview = emmaPerson && reviewBody
-    ? {
-        '@type':      'Review',
-        author:       { '@type': 'Person', '@id': emmaId },
-        datePublished: deal.dealDate,
-        reviewBody,
-        reviewRating: { '@type': 'Rating', ratingValue: 5, bestRating: 5 },
-        name:         `Why I picked ${deal.seoTitle}`,
       }
     : null
 
@@ -162,7 +154,6 @@ export function ProductStructuredData({
       },
     } : {}),
     ...(emmaPerson ? { author: emmaPerson, reviewedBy: { '@type': 'Person', '@id': emmaId } } : {}),
-    ...(emmaReview ? { review: emmaReview } : {}),
   }
 
   return (
