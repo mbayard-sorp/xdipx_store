@@ -167,6 +167,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 }
 
+// LCP preload — mirrors the helper in _layout.products.$slug.tsx so the
+// daily-deal hero image starts fetching during initial parse, before React
+// boots. Same imagesrcset/imagesizes contract as the PDP gallery.
+function preloadHeroImageTag(imageUrl: string | undefined | null) {
+  if (!imageUrl) return null
+  const sep = imageUrl.includes('?') ? '&' : '?'
+  return {
+    tagName: 'link',
+    rel: 'preload',
+    as: 'image',
+    href: `${imageUrl}${sep}width=1024`,
+    imagesrcset: [
+      `${imageUrl}${sep}width=480 480w`,
+      `${imageUrl}${sep}width=768 768w`,
+      `${imageUrl}${sep}width=1024 1024w`,
+      `${imageUrl}${sep}width=1600 1600w`,
+    ].join(', '),
+    imagesizes: '(max-width: 768px) 100vw, 50vw',
+    fetchpriority: 'high',
+  } as const
+}
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const canonical = 'https://xdipx.com/'
   if (!data?.deal) {
@@ -182,10 +204,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const { deal } = data
   const title = `${deal.seoTitle} — Emma's pick | xdipx`
   const description = deal.metaDescription || `${deal.seoTitle} — Emma's pick at xdipx. Ships discreet.`
+  const heroPreload = preloadHeroImageTag(deal.images[0]?.url)
   return [
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: canonical },
+    ...(heroPreload ? [heroPreload] : []),
     ...buildSocialMeta({
       title,
       description,
