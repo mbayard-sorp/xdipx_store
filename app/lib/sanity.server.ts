@@ -1126,8 +1126,11 @@ export async function getBlogPostsForSitemap(): Promise<{ slug: string; publishe
   try {
     const client = getClient()
     if (!client) return []
+    // Excluding noIndex:true posts here matches the per-post meta robots
+    // directive and prevents Search Console "Submitted URL marked noindex"
+    // warnings from a sitemap-listed but noindex'd page.
     return await client.fetch(
-      `*[_type == "blogPost" && status == "published"] | order(publishedAt desc) {
+      `*[_type == "blogPost" && status == "published" && noIndex != true] | order(publishedAt desc) {
         "slug": slug.current, publishedAt, _updatedAt
       }`,
     )
