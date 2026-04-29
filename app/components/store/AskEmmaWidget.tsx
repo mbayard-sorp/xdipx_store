@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useFetcher, useLocation, useRevalidator } from 'react-router'
+import { Link, useFetcher, useLocation, useRevalidator, useRouteLoaderData } from 'react-router'
 import { AnimatePresence, motion } from 'motion/react'
+import type { loader as layoutLoader } from '~/routes/_layout'
 import type { ChatProductCard, ChatTurn, ChatVariantOption, QuickReplyPayload } from '~/lib/ai-agent/chat-types'
 import { AskEmmaProductCard } from './AskEmmaProductCard'
 
@@ -40,6 +41,9 @@ const REVEAL_MIN_MS = 700
 export function AskEmmaWidget() {
   const location = useLocation()
   const onAdmin = location.pathname.startsWith('/admin')
+
+  const layoutData = useRouteLoaderData<typeof layoutLoader>('routes/_layout')
+  const emmaPersona = layoutData?.emmaPersona ?? null
 
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
@@ -456,7 +460,7 @@ export function AskEmmaWidget() {
         onClick={toggleOpen}
         aria-label={open ? 'Close chat with Emma' : 'Open chat with Emma'}
         aria-expanded={open}
-        className={`fixed bottom-[calc(120px+env(safe-area-inset-bottom))] md:bottom-4 z-[55] flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition-[right,transform] duration-300 ease-out hover:scale-105 active:scale-95 ${
+        className={`fixed bottom-[calc(120px+env(safe-area-inset-bottom))] md:bottom-4 z-[55] flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition-[right,transform] duration-300 ease-out hover:scale-105 active:scale-95 overflow-visible ${
           cartOpen ? 'right-4 md:right-[25rem]' : 'right-4'
         }`}
         style={{ background: 'linear-gradient(to right, #F04E37, #FF8C38)' }}
@@ -466,9 +470,21 @@ export function AskEmmaWidget() {
             <path d="M1 1l12 12M13 1L1 13" />
           </svg>
         ) : (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
+          <>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            {emmaPersona?.avatarUrl && (
+              <img
+                src={emmaPersona.avatarUrl}
+                alt={emmaPersona.avatarAlt || emmaPersona.displayName || 'Emma'}
+                width={28}
+                height={28}
+                className="absolute -top-2 -left-2 h-7 w-7 rounded-full object-cover ring-2 ring-white shadow-md pointer-events-none"
+                loading="lazy"
+              />
+            )}
+          </>
         )}
         {hasUnread && !open && (
           <span className="absolute right-1 top-1 flex h-3 w-3">

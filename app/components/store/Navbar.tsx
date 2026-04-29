@@ -278,10 +278,10 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
               </button>
             </div>
 
-            {/* Hamburger — mobile only */}
+            {/* Hamburger — desktop-only fallback (mobile uses the bottom explore menu) */}
             <button
               onClick={() => setDrawerOpen(true)}
-              className="md:hidden flex flex-col items-center justify-center w-11 h-11 rounded-full hover:bg-cream-2 transition-colors gap-[5px]"
+              className="hidden flex flex-col items-center justify-center w-11 h-11 rounded-full hover:bg-cream-2 transition-colors gap-[5px]"
               aria-label="Open menu"
             >
               <span className="block w-[18px] h-[2px] bg-ink rounded-full" />

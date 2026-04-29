@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useFetcher } from 'react-router'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Link, useFetcher, useRouteLoaderData } from 'react-router'
+import type { loader as layoutLoader } from '~/routes/_layout'
 import type { Deal, PairBundleCopy, ProductVariant } from '~/types'
 import { PairBundleHeroCarousel } from './PairBundleHeroCarousel'
+import { CircleOptionSelector } from './CircleOptionSelector'
 import { splitUnderscores, renderWithHighlight } from './pairBundleText'
 
 interface PairBundleFullBleedHeroProps {
@@ -9,29 +11,14 @@ interface PairBundleFullBleedHeroProps {
   partner:     Deal
   copy:        PairBundleCopy
   discountPct: number
+  /** Optional trust bar rendered between the price/buy strip and the carousel. */
+  trustBar?:   ReactNode
+  /** Sanity-defined color label → CSS color overrides (PDP-style). */
+  swatches?:   Record<string, string>
 }
 
 const fmtPrice = (n: number) =>
   `$${Number.isInteger(n) ? n.toFixed(0) : n.toFixed(2)}`
-
-function renderDekWithPill(body: string) {
-  return splitUnderscores(body).map((p, i) => {
-    if (!p.emph) return <span key={i}>{p.text}</span>
-    return (
-      <span
-        key={i}
-        style={{
-          background:   'linear-gradient(180deg, transparent 60%, var(--color-coral-soft) 60%)',
-          color:        'var(--color-coral-deep)',
-          fontWeight:   700,
-          padding:      '0 2px',
-        }}
-      >
-        {p.text}
-      </span>
-    )
-  })
-}
 
 function renderHeadlineItalic(headline: string) {
   const parts = splitUnderscores(headline)
@@ -66,21 +53,6 @@ function renderHeadlineItalic(headline: string) {
   return <>{headline}</>
 }
 
-const truncateWords = (s: string | undefined, n: number) => {
-  if (!s) return ''
-  const words = s.trim().split(/\s+/)
-  return words.length <= n ? s.trim() : `${words.slice(0, n).join(' ')}…`
-}
-
-const categoryLabel = (c: Deal['category']) => {
-  if (!c || c.length === 0) return ''
-  if (c.includes('couples')) return 'Couples'
-  if (c.length >= 2 && c.includes('for-him') && c.includes('for-her')) return 'Both'
-  if (c.includes('for-him')) return 'For him'
-  if (c.includes('for-her')) return 'For her'
-  return ''
-}
-
 function useVariantPicker(deal: Deal) {
   const optionGroups = useMemo(() => {
     const groups: Record<string, string[]> = {}
@@ -94,155 +66,45 @@ function useVariantPicker(deal: Deal) {
     return entries
   }, [deal.variants])
 
-  const firstVariant = deal.variants?.[0]
-  const initial = useMemo<Record<string, string>>(() => {
-    const seed: Record<string, string> = {}
-    for (const [name, vals] of optionGroups) {
-      const preferred = firstVariant?.selectedOptions.find(o => o.name === name)?.value
-      seed[name] = preferred ?? vals[0]!
-    }
-    return seed
-  }, [optionGroups, firstVariant])
+  // Start with NO option selected — user must explicitly pick before adding.
+  const [selected, setSelected] = useState<Record<string, string>>({})
 
-  const [selected, setSelected] = useState<Record<string, string>>(initial)
+  const isReady = optionGroups.every(([name]) => !!selected[name])
 
   const selectedVariant: ProductVariant | undefined = useMemo(() => {
     if (!deal.variants?.length) return undefined
+    if (!isReady) return undefined
     return deal.variants.find(v =>
       v.selectedOptions.every(o => selected[o.name] === o.value),
     )
-  }, [deal.variants, selected])
+  }, [deal.variants, selected, isReady])
 
-  const variantId = selectedVariant?.id || deal.variantId
+  const variantId = isReady ? (selectedVariant?.id || deal.variantId) : undefined
 
-  return { optionGroups, selected, setSelected, variantId }
+  const missingOption = optionGroups.find(([name]) => !selected[name])?.[0] ?? null
+
+  return { optionGroups, selected, setSelected, variantId, isReady, missingOption }
 }
 
-/* =============================================================
-   Variant + qty disclosure row (shared by mobile + desktop tiles)
-   ============================================================= */
-function Disclosure({
-  open,
-  optionGroups,
-  selected,
-  setSelected,
-  qty,
-  setQty,
-}: {
-  open:         boolean
-  optionGroups: [string, string[]][]
-  selected:     Record<string, string>
-  setSelected:  (next: Record<string, string>) => void
-  qty:          number
-  setQty:       (n: number) => void
-}) {
-  return (
-    <div
-      className="overflow-hidden transition-[max-height,margin-top] duration-300 ease-out"
-      style={{ maxHeight: open ? '320px' : '0px', marginTop: open ? '12px' : '0px' }}
-    >
-      {optionGroups.map(([name, values]) => {
-        const isColor = /colou?r/i.test(name)
-        return (
-          <div
-            key={name}
-            className="flex items-center gap-2.5 flex-wrap p-3 bg-cream-2 border border-dashed border-line-2 rounded-[10px] mb-2"
-          >
-            <span className="text-[10.5px] tracking-[0.1em] uppercase font-bold text-muted mr-0.5" style={{ fontFamily: 'var(--font-body)' }}>
-              {name}
-            </span>
-            {values.map(val => {
-              const active = selected[name] === val
-              if (isColor) {
-                return (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => setSelected({ ...selected, [name]: val })}
-                    className="w-[22px] h-[22px] rounded-full border-[1.2px] border-ink"
-                    style={{
-                      background: val,
-                      outline: active ? '2px solid var(--color-ink)' : 'none',
-                      outlineOffset: active ? '2px' : '0',
-                    }}
-                    aria-label={val}
-                    title={val}
-                  />
-                )
-              }
-              return (
-                <button
-                  key={val}
-                  type="button"
-                  onClick={() => setSelected({ ...selected, [name]: val })}
-                  className={`px-[11px] py-[5px] rounded-full border-[1.2px] border-ink text-[12px] font-semibold ${active ? 'bg-ink text-cream' : 'bg-paper text-ink'}`}
-                  style={{ fontFamily: 'var(--font-body)' }}
-                >
-                  {val}
-                </button>
-              )
-            })}
-          </div>
-        )
-      })}
-
-      <div className="flex items-center gap-2.5 flex-wrap p-3 bg-cream-2 border border-dashed border-line-2 rounded-[10px]">
-        <span className="text-[10.5px] tracking-[0.1em] uppercase font-bold text-muted mr-0.5" style={{ fontFamily: 'var(--font-body)' }}>
-          Qty
-        </span>
-        <div className="inline-flex items-center border-[1.2px] border-ink rounded-full overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setQty(Math.max(1, qty - 1))}
-            className="px-2.5 py-1 text-[14px] font-bold bg-paper hover:bg-cream-2 disabled:opacity-40"
-            disabled={qty <= 1}
-            aria-label="Decrease quantity"
-          >−</button>
-          <span className="px-2.5 py-1 text-[14px] font-bold" style={{ fontFamily: 'var(--font-display)' }}>{qty}</span>
-          <button
-            type="button"
-            onClick={() => setQty(Math.min(9, qty + 1))}
-            className="px-2.5 py-1 text-[14px] font-bold bg-paper hover:bg-cream-2 disabled:opacity-40"
-            disabled={qty >= 9}
-            aria-label="Increase quantity"
-          >+</button>
-        </div>
-      </div>
-    </div>
-  )
-}
+const isColorOption = (name: string) => /colou?r/i.test(name)
 
 /* =============================================================
    Mobile pair tile (bordered cream card, centered image)
    ============================================================= */
 function MobilePairItem({
-  deal, tag, tagSide, qty, setQty, optionGroups, selected, setSelected, open, onToggle,
+  deal, selected, setSelected, swatches, highlightColor,
 }: {
-  deal:         Deal
-  tag:          string
-  tagSide:      'left' | 'right'
-  qty:          number
-  setQty:       (n: number) => void
-  optionGroups: [string, string[]][]
-  selected:     Record<string, string>
-  setSelected:  (next: Record<string, string>) => void
-  open:         boolean
-  onToggle:     () => void
+  deal:           Deal
+  selected:       Record<string, string>
+  setSelected:    (next: Record<string, string>) => void
+  swatches:       Record<string, string>
+  highlightColor: boolean
 }) {
-  const img     = deal.images[0]
-  const blurb   = truncateWords(deal.tagline, 20)
-  const cat     = categoryLabel(deal.category)
-  const brandEb = [deal.brand, cat].filter(Boolean).join(' · ')
+  const img = deal.images[0]
+  const colorOpt = (deal.options ?? []).find(o => isColorOption(o.name))
 
   return (
-    <div className="relative flex flex-col bg-cream rounded-[16px] border-[1.2px] border-line-2 overflow-hidden">
-      <span
-        className={`absolute z-10 text-[22px] leading-none top-3 ${tagSide === 'left' ? 'left-4 -rotate-[4deg] text-coral' : 'right-4 rotate-[3deg] text-sage'}`}
-        style={{ fontFamily: 'var(--font-script)' }}
-      >
-        {tag}
-      </span>
-
+    <div className="relative flex flex-col bg-cream rounded-[16px] border-[1.2px] border-line-2">
       <Link
         to={`/products/${deal.handle}`}
         className="flex items-center justify-center pt-7 pb-3 px-5"
@@ -260,53 +122,33 @@ function MobilePairItem({
       </Link>
 
       <div className="px-5 pb-5">
-        {brandEb && (
-          <div className="text-[10.5px] tracking-[0.14em] uppercase font-bold text-muted mb-1" style={{ fontFamily: 'var(--font-body)' }}>
-            {brandEb}
-          </div>
-        )}
-        <div className="text-[19px] font-bold leading-tight mb-1.5" style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}>
-          {deal.seoTitle}
-        </div>
-        {blurb && (
-          <p className="text-[12.5px] leading-[1.45] text-ink-2 mb-2.5" style={{ fontFamily: 'var(--font-body)' }}>
-            {blurb}
-          </p>
-        )}
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-baseline gap-2">
-            <span className="text-[17px] font-bold" style={{ fontFamily: 'var(--font-display)' }}>
-              {fmtPrice(deal.dealPrice)}
-            </span>
-            {!deal.mapRestricted && deal.msrp > 0 && deal.dealPrice < deal.msrp && (
-              <span
-                className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10.5px] font-extrabold uppercase tracking-[0.08em]"
-                style={{
-                  background: 'var(--color-coral-soft)',
-                  color:      'var(--color-coral-deep)',
-                  fontFamily: 'var(--font-body)',
-                }}
-              >
-                {Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)}% off MSRP
-              </span>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={onToggle}
-            className="inline-flex items-center gap-1 text-[12px] font-bold text-ink hover:text-coral underline decoration-[1.5px] underline-offset-[3px] whitespace-nowrap"
-            style={{ fontFamily: 'var(--font-body)' }}
-            aria-expanded={open}
+          <div
+            className="flex-1 min-w-0 text-left text-[19px] font-bold leading-tight"
+            style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
           >
-            {optionGroups.length > 0 ? `Pick ${optionGroups[0]![0].toLowerCase()}` : 'Adjust qty'}
-            <span
-              className="inline-block text-[10px] transition-transform duration-200"
-              style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
-            >▾</span>
-          </button>
+            {deal.seoTitle}
+          </div>
+          {colorOpt && colorOpt.values.length > 1 && (
+            <div className={highlightColor ? 'pulse-outline' : undefined}>
+              <CircleOptionSelector
+                optionName={colorOpt.name}
+                values={colorOpt.values}
+                {...(selected[colorOpt.name] ? { selected: selected[colorOpt.name] } : {})}
+                onSelect={(v) => setSelected({ ...selected, [colorOpt.name]: v })}
+                onClear={() => {
+                  const next = { ...selected }
+                  delete next[colorOpt.name]
+                  setSelected(next)
+                }}
+                kind="color"
+                swatches={swatches}
+                variants={deal.variants ?? []}
+                selectedOptions={selected}
+              />
+            </div>
+          )}
         </div>
-
-        <Disclosure open={open} optionGroups={optionGroups} selected={selected} setSelected={setSelected} qty={qty} setQty={setQty} />
       </div>
     </div>
   )
@@ -316,64 +158,19 @@ function MobilePairItem({
    Desktop pair tile (tape + script anno + big image + script emma-say)
    ============================================================= */
 function DesktopPairItem({
-  deal, side, tape, anno, qty, setQty, optionGroups, selected, setSelected, open, onToggle,
+  deal, selected, setSelected, swatches, highlightColor,
 }: {
-  deal:         Deal
-  side:         'left' | 'right'
-  tape:         string
-  anno:         string
-  qty:          number
-  setQty:       (n: number) => void
-  optionGroups: [string, string[]][]
-  selected:     Record<string, string>
-  setSelected:  (next: Record<string, string>) => void
-  open:         boolean
-  onToggle:     () => void
+  deal:           Deal
+  selected:       Record<string, string>
+  setSelected:    (next: Record<string, string>) => void
+  swatches:       Record<string, string>
+  highlightColor: boolean
 }) {
-  const img     = deal.images[0]
-  const say     = truncateWords(deal.tagline, 10)
-  const cat     = categoryLabel(deal.category)
-  const brandEb = [deal.brand, cat].filter(Boolean).join(' · ')
-
-  const tapeStyle = side === 'left'
-    ? { left: '22px', transform: 'rotate(-2deg)', background: 'var(--color-butter)', color: 'var(--color-ink)' }
-    : { right: '22px', transform: 'rotate(2deg)', background: 'var(--color-sage)', color: 'var(--color-cream)' }
-  const annoStyle = side === 'left'
-    ? { left: '120px', transform: 'rotate(-3deg)', color: 'var(--color-coral)' }
-    : { right: '120px', transform: 'rotate(2deg)', color: 'var(--color-sage)' }
+  const img      = deal.images[0]
+  const colorOpt = (deal.options ?? []).find(o => isColorOption(o.name))
 
   return (
-    <div className="relative flex flex-col px-10 pt-10 pb-7 min-h-[560px]">
-      <span
-        className="absolute top-[22px] z-[3] whitespace-nowrap"
-        style={{
-          ...tapeStyle,
-          padding:       '4px 11px',
-          fontFamily:    'var(--font-body)',
-          fontWeight:    800,
-          fontSize:      '10.5px',
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          border:        '1.2px solid var(--color-ink)',
-          boxShadow:     '2px 2px 0 var(--color-ink)',
-          borderRadius:  '2px',
-        }}
-      >
-        {tape}
-      </span>
-      <span
-        className="absolute top-[26px] z-[3] whitespace-nowrap"
-        style={{
-          ...annoStyle,
-          fontFamily: 'var(--font-script)',
-          fontSize:   '22px',
-          fontWeight: 600,
-          lineHeight: 1,
-        }}
-      >
-        {anno}
-      </span>
-
+    <div className="relative flex flex-col px-10 pt-10 pb-7">
       <Link
         to={`/products/${deal.handle}`}
         className="relative flex items-start justify-center -mx-10 pt-6 pb-4 overflow-hidden"
@@ -404,70 +201,33 @@ function DesktopPairItem({
       </Link>
 
       <div className="pt-[18px] flex-1 flex flex-col" style={{ borderTop: '1px dashed var(--color-line-2)' }}>
-        {brandEb && (
-          <div className="mb-1.5 text-muted" style={{ fontFamily: 'var(--font-body)', fontWeight: 800, fontSize: '10.5px', letterSpacing: '0.16em', textTransform: 'uppercase' }}>
-            {brandEb}
-          </div>
-        )}
-        <div
-          className="mb-2 leading-[1.15]"
-          style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '22px', letterSpacing: '-0.01em' }}
-        >
-          {deal.seoTitle}
-        </div>
-        {say && (
+        <div className="flex items-center justify-between gap-3">
           <div
-            className="flex items-baseline gap-1.5 mb-3.5"
-            style={{ fontFamily: 'var(--font-script)', fontSize: '19px', color: 'var(--color-ink-2)', lineHeight: 1.25 }}
+            className="flex-1 min-w-0 text-left leading-[1.15]"
+            style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '22px', letterSpacing: '-0.01em' }}
           >
-            <span className="text-coral font-bold" style={{ fontFamily: 'var(--font-body)', fontSize: '14px' }}>—</span>
-            <span>{say}</span>
+            {deal.seoTitle}
           </div>
-        )}
-
-        <div
-          className="flex items-baseline justify-between gap-[18px] pt-2.5 mt-auto"
-          style={{ borderTop: '1px solid var(--color-line)' }}
-        >
-          <div className="flex items-baseline gap-2.5">
-            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '22px', letterSpacing: '-0.01em' }}>
-              {fmtPrice(deal.dealPrice)}
-            </span>
-            {!deal.mapRestricted && deal.msrp > 0 && deal.dealPrice < deal.msrp && (
-              <span
-                className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[11px] font-extrabold uppercase tracking-[0.08em]"
-                style={{
-                  background: 'var(--color-coral-soft)',
-                  color:      'var(--color-coral-deep)',
-                  fontFamily: 'var(--font-body)',
+          {colorOpt && colorOpt.values.length > 1 && (
+            <div className={highlightColor ? 'pulse-outline' : undefined}>
+              <CircleOptionSelector
+                optionName={colorOpt.name}
+                values={colorOpt.values}
+                {...(selected[colorOpt.name] ? { selected: selected[colorOpt.name] } : {})}
+                onSelect={(v) => setSelected({ ...selected, [colorOpt.name]: v })}
+                onClear={() => {
+                  const next = { ...selected }
+                  delete next[colorOpt.name]
+                  setSelected(next)
                 }}
-              >
-                {Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)}% off MSRP
-              </span>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={onToggle}
-            className="inline-flex items-center gap-1 text-ink hover:text-coral underline whitespace-nowrap"
-            style={{
-              fontFamily:           'var(--font-body)',
-              fontWeight:           700,
-              fontSize:             '12px',
-              textDecorationThickness: '1.5px',
-              textUnderlineOffset:  '3px',
-            }}
-            aria-expanded={open}
-          >
-            {optionGroups.length > 0 ? `Pick ${optionGroups[0]![0].toLowerCase()}` : 'Adjust qty'}
-            <span
-              className="inline-block text-[10px] transition-transform duration-200"
-              style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
-            >▾</span>
-          </button>
+                kind="color"
+                swatches={swatches}
+                variants={deal.variants ?? []}
+                selectedOptions={selected}
+              />
+            </div>
+          )}
         </div>
-
-        <Disclosure open={open} optionGroups={optionGroups} selected={selected} setSelected={setSelected} qty={qty} setQty={setQty} />
       </div>
     </div>
   )
@@ -476,49 +236,59 @@ function DesktopPairItem({
 /* =============================================================
    The hero
    ============================================================= */
-export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }: PairBundleFullBleedHeroProps) {
+export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, trustBar, swatches = {} }: PairBundleFullBleedHeroProps) {
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
 
+  const layoutData  = useRouteLoaderData<typeof layoutLoader>('routes/_layout')
+  const emmaPersona = layoutData?.emmaPersona ?? null
+
   const primaryPicker = useVariantPicker(primary)
   const partnerPicker = useVariantPicker(partner)
-  const [qtyA, setQtyA] = useState(1)
-  const [qtyB, setQtyB] = useState(1)
-  const [openA, setOpenA] = useState(false)
-  const [openB, setOpenB] = useState(false)
 
-  const landingRef = useRef<HTMLButtonElement>(null)
-  const [landingInView, setLandingInView] = useState(false)
+  // `nonce` lets us re-trigger the float-up-fade animation when the user
+  // clicks Buy multiple times — keying off it forces React to remount.
+  const [toastState, setToastState] = useState<{ message: string; nonce: number } | null>(null)
+  const [highlightSide, setHighlightSide] = useState<'primary' | 'partner' | null>(null)
+
+  // Self-clear so the highlight pulse stops when the float-up-fade finishes.
   useEffect(() => {
-    if (!landingRef.current) return
-    const obs = new IntersectionObserver(
-      entries => setLandingInView(entries[0]?.isIntersecting ?? false),
-      { threshold: 0, rootMargin: '0px 0px 120px 0px' },
-    )
-    obs.observe(landingRef.current)
-    return () => obs.disconnect()
-  }, [])
+    if (!toastState) return
+    const t = setTimeout(() => {
+      setToastState(null)
+      setHighlightSide(null)
+    }, 2500)
+    return () => clearTimeout(t)
+  }, [toastState])
 
-  const mobileLandingRef = useRef<HTMLButtonElement>(null)
-  const [mobileLandingInView, setMobileLandingInView] = useState(false)
-  useEffect(() => {
-    if (!mobileLandingRef.current) return
-    const obs = new IntersectionObserver(
-      entries => setMobileLandingInView(entries[0]?.isIntersecting ?? false),
-      { threshold: 0, rootMargin: '0px 0px 40px 0px' },
-    )
-    obs.observe(mobileLandingRef.current)
-    return () => obs.disconnect()
-  }, [])
+  // Guard the cart submission: if either picker is missing a required option,
+  // block the submit, surface a callout, and pulse the relevant selector.
+  const handleBuyBundleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    if (!primaryPicker.isReady) {
+      e.preventDefault()
+      const opt = (primaryPicker.missingOption ?? 'option').toLowerCase()
+      setToastState({ message: `Please select a ${opt}`, nonce: Date.now() })
+      setHighlightSide('primary')
+      return
+    }
+    if (!partnerPicker.isReady) {
+      e.preventDefault()
+      const opt = (partnerPicker.missingOption ?? 'option').toLowerCase()
+      setToastState({ message: `Please select a ${opt}`, nonce: Date.now() })
+      setHighlightSide('partner')
+      return
+    }
+  }
 
-  const combinedDeal = primary.dealPrice * qtyA + partner.dealPrice * qtyB
+  const combinedDeal = primary.dealPrice + partner.dealPrice
+  const combinedMsrp = primary.msrp + partner.msrp
   const pct          = Math.max(0, Math.min(50, Math.round(discountPct)))
   const bundlePrice  = Math.round(combinedDeal * (1 - pct / 100) * 100) / 100
-  const savings      = Math.round((combinedDeal - bundlePrice) * 100) / 100
+  const savings      = Math.round((combinedMsrp - bundlePrice) * 100) / 100
 
   const primaryMapped = primary.mapRestricted ?? (primary.mapPrice > 0 && primary.mapPrice >= primary.msrp)
   const partnerMapped = partner.mapRestricted ?? (partner.mapPrice > 0 && partner.mapPrice >= partner.msrp)
-  const showStrike    = !primaryMapped && !partnerMapped && combinedDeal > bundlePrice
+  const showStrike    = !primaryMapped && !partnerMapped && combinedMsrp > bundlePrice
 
   const whyCards = (copy.whyCards ?? []).slice(0, 3)
 
@@ -526,14 +296,21 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
     <section className="bg-cream">
 
       {/* Shared cart form — targeted by all CTAs via form="pair-bundle-form" */}
-      <fetcher.Form id="pair-bundle-form" method="post" action="/api/cart" className="hidden">
+      <fetcher.Form
+        id="pair-bundle-form"
+        method="post"
+        action="/api/cart"
+        className="hidden"
+        onSubmit={handleBuyBundleSubmit}
+      >
         <input type="hidden" name="intent" value="addMany" />
-        <input type="hidden" name="variantId_0" value={primaryPicker.variantId} />
-        <input type="hidden" name="quantity_0"  value={qtyA} />
-        <input type="hidden" name="variantId_1" value={partnerPicker.variantId} />
-        <input type="hidden" name="quantity_1"  value={qtyB} />
+        <input type="hidden" name="variantId_0" value={primaryPicker.variantId ?? ''} />
+        <input type="hidden" name="quantity_0"  value="1" />
+        <input type="hidden" name="variantId_1" value={partnerPicker.variantId ?? ''} />
+        <input type="hidden" name="quantity_1"  value="1" />
         <input type="hidden" name="cartTag"     value="pair_bundle" />
       </fetcher.Form>
+
 
       {/* ===== TOP HALF (eyebrow → tied stage) ===== */}
       <div className="px-4">
@@ -541,55 +318,108 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
         {/* ================= MOBILE (top) ================= */}
         <div className="md:hidden">
           <div className="relative bg-paper border border-line border-b-0 p-6">
-            <div className="flex flex-wrap items-start justify-between gap-4 mb-2.5">
-              <span
-                className="inline-flex items-center gap-1.5 px-[13px] py-1.5 rounded-full text-[11.5px] font-extrabold uppercase tracking-[0.12em]"
-                style={{
-                  background:  'var(--color-coral-soft)',
-                  color:       'var(--color-coral-deep)',
-                  border:      '1.2px solid var(--color-coral)',
-                  fontFamily:  'var(--font-body)',
-                }}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M12 21s-7.5-4.6-9.5-9.1C1 8 3 4 7 4c2 0 3.7 1.2 5 3 1.3-1.8 3-3 5-3 4 0 6 4 4.5 7.9C19.5 16.4 12 21 12 21z" />
-                </svg>
-                {copy.eyebrow}
-              </span>
-              <span
-                className="text-[14px] italic text-muted text-right leading-snug max-w-[320px]"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                {copy.subhead}
-              </span>
+            {/* Emma's intro — mobile (avatar + message + tel/message links) */}
+            <div
+              className="flex items-start gap-3 mb-5 pb-5"
+              style={{ borderBottom: '1px dashed var(--color-line-2)' }}
+            >
+              {emmaPersona?.avatarUrl ? (
+                <img
+                  src={emmaPersona.avatarUrl}
+                  alt={emmaPersona.avatarAlt || emmaPersona.displayName || 'Emma'}
+                  width={64}
+                  height={64}
+                  className="w-16 h-16 rounded-full object-cover shrink-0"
+                  style={{
+                    border:    '1.5px solid var(--color-ink)',
+                    boxShadow: '2px 2px 0 var(--color-ink)',
+                  }}
+                  loading="eager"
+                />
+              ) : (
+                <span
+                  className="w-16 h-16 rounded-full bg-coral text-cream inline-flex items-center justify-center shrink-0"
+                  style={{
+                    border:     '1.5px solid var(--color-ink)',
+                    boxShadow:  '2px 2px 0 var(--color-ink)',
+                    fontFamily: 'var(--font-display)',
+                    fontWeight: 800,
+                    fontSize:   '26px',
+                  }}
+                  aria-hidden="true"
+                >
+                  E
+                </span>
+              )}
+              <div className="min-w-0">
+                <p
+                  style={{
+                    fontFamily: 'var(--font-body)',
+                    fontWeight: 500,
+                    fontSize:   '13px',
+                    color:      'var(--color-ink)',
+                    lineHeight: 1.45,
+                  }}
+                >
+                  Hi, I&rsquo;m Emma! Think of me as your shopping sidekick. Message or call anytime while you browse, and I&rsquo;ll help you find what you need or answer anything you&rsquo;re wondering about.
+                </p>
+                <div
+                  className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2"
+                  style={{
+                    fontFamily: 'var(--font-body)',
+                    fontWeight: 700,
+                    fontSize:   '13px',
+                  }}
+                >
+                  <a
+                    href="tel:+16239001188"
+                    className="inline-flex items-center gap-1.5 underline decoration-[1.5px] underline-offset-[3px] hover:opacity-80"
+                    style={{ color: 'var(--color-coral)' }}
+                  >
+                    <svg aria-hidden="true" width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M2.5 4.25C2.5 3.28 3.28 2.5 4.25 2.5h1.69c.78 0 1.46.55 1.62 1.32l.45 2.16c.14.66-.13 1.34-.69 1.71l-1.16.77a11.5 11.5 0 005.38 5.38l.77-1.16a1.6 1.6 0 011.71-.69l2.16.45c.77.16 1.32.84 1.32 1.62v1.69c0 .97-.78 1.75-1.75 1.75H14.5C7.6 17.5 2.5 12.4 2.5 5.5v-1.25z" />
+                    </svg>
+                    (623) 900-1188
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window === 'undefined') return
+                      window.dispatchEvent(
+                        new CustomEvent('xdipx:emma:openWith', {
+                          detail: {
+                            prompt: "Hi Emma! I could use a hand finding what I'm looking for.",
+                          },
+                        }),
+                      )
+                    }}
+                    className="inline-flex items-center gap-1.5 underline decoration-[1.5px] underline-offset-[3px] hover:opacity-80"
+                    style={{ color: 'var(--color-coral)', fontFamily: 'var(--font-body)', fontWeight: 700, fontSize: '13px' }}
+                  >
+                    <svg aria-hidden="true" width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M2.5 4.5A1.5 1.5 0 014 3h12a1.5 1.5 0 011.5 1.5v9A1.5 1.5 0 0116 15H7.41l-3.7 3.05A.6.6 0 012.5 17.6V4.5z" />
+                    </svg>
+                    Message Emma
+                  </button>
+                </div>
+              </div>
             </div>
 
             <h1
-              className="text-ink text-[32px] italic mb-1.5 max-w-[880px]"
+              className="text-ink text-[32px] italic mb-7 max-w-[880px]"
               style={{ fontFamily: 'var(--font-display)', fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.08 }}
             >
               {copy.headline}
             </h1>
-            <p
-              className="text-[15px] text-muted max-w-[640px] leading-[1.5] mb-7"
-              style={{ fontFamily: 'var(--font-body)' }}
-            >
-              {renderWithHighlight(copy.body)}
-            </p>
 
             <div className="relative mb-6 overflow-visible bg-transparent">
               <div className="grid grid-cols-1 relative">
                 <MobilePairItem
                   deal={primary}
-                  tag={copy.primaryTag || 'this one'}
-                  tagSide="left"
-                  qty={qtyA}
-                  setQty={setQtyA}
-                  optionGroups={primaryPicker.optionGroups}
                   selected={primaryPicker.selected}
                   setSelected={primaryPicker.setSelected}
-                  open={openA}
-                  onToggle={() => setOpenA(v => !v)}
+                  swatches={swatches}
+                  highlightColor={highlightSide === 'primary'}
                 />
 
                 <div className="relative flex items-center justify-center py-3.5">
@@ -640,15 +470,10 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
 
                 <MobilePairItem
                   deal={partner}
-                  tag={copy.partnerTag || 'and this'}
-                  tagSide="right"
-                  qty={qtyB}
-                  setQty={setQtyB}
-                  optionGroups={partnerPicker.optionGroups}
                   selected={partnerPicker.selected}
                   setSelected={partnerPicker.setSelected}
-                  open={openB}
-                  onToggle={() => setOpenB(v => !v)}
+                  swatches={swatches}
+                  highlightColor={highlightSide === 'partner'}
                 />
               </div>
             </div>
@@ -661,89 +486,113 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
             boxShadow:    '0 30px 60px -30px rgba(21,18,17,0.2)',
           }}
         >
-          {/* ---------- HEAD ---------- */}
+          {/* ---------- HEAD (two-column: Emma left, headline right) ---------- */}
           <header
-            className="relative grid grid-cols-[1fr_auto] gap-8 px-10 pt-9 pb-7"
+            className="relative px-10 pt-9 pb-7 flex items-stretch gap-8"
             style={{ borderBottom: '1px dashed var(--color-line-2)' }}
           >
             <div aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-1.5 bg-coral" />
 
-            <div>
-              <div className="flex items-center gap-3.5 mb-4">
+            {/* LEFT — Emma's section: avatar + greeting (natural width) */}
+            <div className="flex items-start gap-4 shrink-0 max-w-[420px]">
+              {emmaPersona?.avatarUrl ? (
+                <img
+                  src={emmaPersona.avatarUrl}
+                  alt={emmaPersona.avatarAlt || emmaPersona.displayName || 'Emma'}
+                  width={84}
+                  height={84}
+                  className="w-[84px] h-[84px] rounded-full object-cover shrink-0"
+                  style={{
+                    border:    '1.5px solid var(--color-ink)',
+                    boxShadow: '2px 2px 0 var(--color-ink)',
+                  }}
+                  loading="eager"
+                />
+              ) : (
                 <span
-                  className="w-[42px] h-[42px] rounded-full bg-coral text-cream inline-flex items-center justify-center shrink-0"
+                  className="w-[84px] h-[84px] rounded-full bg-coral text-cream inline-flex items-center justify-center shrink-0"
                   style={{
                     border:     '1.5px solid var(--color-ink)',
                     boxShadow:  '2px 2px 0 var(--color-ink)',
                     fontFamily: 'var(--font-display)',
                     fontWeight: 800,
-                    fontSize:   '17px',
+                    fontSize:   '34px',
                   }}
+                  aria-hidden="true"
                 >
                   E
                 </span>
-                <div>
-                  <div
-                    className="mb-0.5"
-                    style={{
-                      fontFamily:     'var(--font-body)',
-                      fontWeight:     800,
-                      fontSize:       '11px',
-                      letterSpacing:  '0.14em',
-                      textTransform:  'uppercase',
-                      color:          'var(--color-coral-deep)',
+              )}
+              <div className="min-w-0">
+                <p
+                  style={{
+                    fontFamily: 'var(--font-body)',
+                    fontWeight: 500,
+                    fontSize:   '13.5px',
+                    color:      'var(--color-ink)',
+                    lineHeight: 1.45,
+                  }}
+                >
+                  Hi, I&rsquo;m Emma! Think of me as your shopping sidekick. Message or call anytime while you browse, and I&rsquo;ll help you find what you need or answer anything you&rsquo;re wondering about.
+                </p>
+                <div
+                  className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2"
+                  style={{
+                    fontFamily: 'var(--font-body)',
+                    fontWeight: 700,
+                    fontSize:   '13.5px',
+                  }}
+                >
+                  <a
+                    href="tel:+16239001188"
+                    className="inline-flex items-center gap-1.5 underline decoration-[1.5px] underline-offset-[3px] hover:opacity-80"
+                    style={{ color: 'var(--color-coral)' }}
+                  >
+                    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M2.5 4.25C2.5 3.28 3.28 2.5 4.25 2.5h1.69c.78 0 1.46.55 1.62 1.32l.45 2.16c.14.66-.13 1.34-.69 1.71l-1.16.77a11.5 11.5 0 005.38 5.38l.77-1.16a1.6 1.6 0 011.71-.69l2.16.45c.77.16 1.32.84 1.32 1.62v1.69c0 .97-.78 1.75-1.75 1.75H14.5C7.6 17.5 2.5 12.4 2.5 5.5v-1.25z" />
+                    </svg>
+                    (623) 900-1188
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window === 'undefined') return
+                      window.dispatchEvent(
+                        new CustomEvent('xdipx:emma:openWith', {
+                          detail: {
+                            prompt: "Hi Emma! I could use a hand finding what I'm looking for.",
+                          },
+                        }),
+                      )
                     }}
+                    className="inline-flex items-center gap-1.5 underline decoration-[1.5px] underline-offset-[3px] hover:opacity-80"
+                    style={{ color: 'var(--color-coral)', fontFamily: 'var(--font-body)', fontWeight: 700, fontSize: '13.5px' }}
                   >
-                    ♥ {copy.eyebrow}
-                  </div>
-                  <div
-                    className="italic text-muted"
-                    style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 400 }}
-                  >
-                    {copy.subhead}
-                  </div>
+                    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M2.5 4.5A1.5 1.5 0 014 3h12a1.5 1.5 0 011.5 1.5v9A1.5 1.5 0 0116 15H7.41l-3.7 3.05A.6.6 0 012.5 17.6V4.5z" />
+                    </svg>
+                    Message Emma
+                  </button>
                 </div>
               </div>
+            </div>
 
+            {/* RIGHT — headline (flexes to fill remaining space, text vertically centered) */}
+            <div className="flex-1 min-w-0 flex items-center">
               <h2
-                className="italic mb-3.5 max-w-[720px]"
+                className="italic m-0 w-full"
                 style={{
                   fontFamily:    'var(--font-display)',
                   fontStyle:     'italic',
                   fontWeight:    500,
-                  fontSize:      '52px',
+                  fontSize:      'clamp(22px, 3.4vw, 56px)',
                   lineHeight:    1.03,
                   letterSpacing: '-0.022em',
+                  textWrap:      'balance',
                 }}
               >
                 {renderHeadlineItalic(copy.headline)}
               </h2>
-
-              <p
-                className="text-ink-2 max-w-[680px]"
-                style={{ fontFamily: 'var(--font-body)', fontSize: '14.5px', lineHeight: 1.6 }}
-              >
-                {renderDekWithPill(copy.body)}
-              </p>
-            </div>
-
-            <div
-              className="text-right italic text-muted self-start max-w-[260px]"
-              style={{ fontFamily: 'var(--font-display)', fontSize: '13.5px', lineHeight: 1.5 }}
-            >
-              <div
-                className="mb-1.5 text-ink not-italic"
-                style={{
-                  fontFamily:     'var(--font-body)',
-                  fontWeight:     800,
-                  fontSize:       '11px',
-                  letterSpacing:  '0.16em',
-                  textTransform:  'uppercase',
-                }}
-              >
-                Emma&#39;s curated pair
-              </div>
-              {copy.subhead}
             </div>
           </header>
 
@@ -777,29 +626,17 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
 
             <DesktopPairItem
               deal={primary}
-              side="left"
-              tape="This one"
-              anno={copy.primaryTag || '♥ start here'}
-              qty={qtyA}
-              setQty={setQtyA}
-              optionGroups={primaryPicker.optionGroups}
               selected={primaryPicker.selected}
               setSelected={primaryPicker.setSelected}
-              open={openA}
-              onToggle={() => setOpenA(v => !v)}
+              swatches={swatches}
+              highlightColor={highlightSide === 'primary'}
             />
             <DesktopPairItem
               deal={partner}
-              side="right"
-              tape="And this"
-              anno={copy.partnerTag || '★ the glide'}
-              qty={qtyB}
-              setQty={setQtyB}
-              optionGroups={partnerPicker.optionGroups}
               selected={partnerPicker.selected}
               setSelected={partnerPicker.setSelected}
-              open={openB}
-              onToggle={() => setOpenB(v => !v)}
+              swatches={swatches}
+              highlightColor={highlightSide === 'partner'}
             />
 
             {/* knot overlay */}
@@ -868,19 +705,12 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
         </article>
       </div>
 
-      <PairBundleHeroCarousel
-        whyCards={whyCards}
-        emmaQuote=""
-        momentTitle={copy.momentTitle ?? 'how to make this pair click'}
-        moments={copy.moments ?? []}
-      />
+      {/* ===== PRICE & BUY STRIP (above carousel) ===== */}
+      <div className="px-4">
 
-      {/* ===== BOTTOM HALF (buy bar → signature) ===== */}
-      <div className="px-4 pb-8 md:pb-14">
-
-        {/* ================= MOBILE (bottom) ================= */}
+        {/* ================= MOBILE (price + buy) ================= */}
         <div className="md:hidden">
-          <div className="relative bg-paper border border-line border-t-0 p-6">
+          <div className="relative bg-paper border border-line border-t-0 border-b-0 px-6 pb-6">
             <div
               className="grid grid-cols-1 gap-5 p-6 rounded-[16px] bg-cream-2"
               style={{ border: '1.2px solid var(--color-ink)' }}
@@ -891,7 +721,7 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
                 </span>
                 {showStrike && (
                   <span className="text-muted line-through text-[18px]" style={{ fontFamily: 'var(--font-display)' }}>
-                    {fmtPrice(combinedDeal)}
+                    {fmtPrice(combinedMsrp)}
                   </span>
                 )}
                 {savings > 0 && (
@@ -908,89 +738,51 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
                 )}
               </div>
 
-              <button
-                ref={mobileLandingRef}
-                type="submit"
-                form="pair-bundle-form"
-                disabled={isPending}
-                className="w-full inline-flex items-center justify-between gap-2.5 px-5 py-3.5 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
-                style={{
-                  border:     '1.5px solid var(--color-ink)',
-                  boxShadow:  '3px 3px 0 var(--color-ink)',
-                  fontFamily: 'var(--font-body)',
-                  fontWeight: 800,
-                  fontSize:   '14.5px',
-                }}
-              >
-                <span>{isPending ? 'Adding…' : 'I\u2019ll take both \u2665'}</span>
-                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '15px' }}>
-                  {fmtPrice(bundlePrice)}
-                </span>
-              </button>
+              <div className="relative">
+                {toastState && (
+                  <div
+                    key={toastState.nonce}
+                    role="status"
+                    aria-live="polite"
+                    className="float-up-fade absolute bottom-full left-1/2 mb-2 z-10 pointer-events-none whitespace-nowrap"
+                  >
+                    <div
+                      className="inline-flex items-center gap-2 bg-white border border-cream-2 rounded-full shadow-lg px-4 py-2 text-[13px] font-semibold text-ink"
+                      style={{ fontFamily: 'var(--font-display)' }}
+                    >
+                      <span aria-hidden="true" className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
+                      {toastState.message}
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="submit"
+                  form="pair-bundle-form"
+                  disabled={isPending}
+                  className="w-full inline-flex items-center justify-between gap-2.5 px-5 py-3.5 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
+                  style={{
+                    border:     '1.5px solid var(--color-ink)',
+                    boxShadow:  '3px 3px 0 var(--color-ink)',
+                    fontFamily: 'var(--font-body)',
+                    fontWeight: 800,
+                    fontSize:   '14.5px',
+                  }}
+                >
+                  <span>{isPending ? 'Adding…' : 'Buy the bundle ♥'}</span>
+                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '15px' }}>
+                    {fmtPrice(bundlePrice)}
+                  </span>
+                </button>
+              </div>
 
               <p className="text-[11.5px] text-muted text-center" style={{ fontFamily: 'var(--font-body)' }}>
                 Shipping free on this pair · plain packaging · 30-day returns
               </p>
             </div>
-
-            {copy.emmaQuote && (
-              <div className="mt-6 text-center">
-                <span
-                  aria-hidden="true"
-                  className="block text-coral leading-none mb-1 select-none"
-                  style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 800, fontSize: '44px' }}
-                >
-                  &ldquo;
-                </span>
-                <p
-                  className="text-ink italic leading-[1.4]"
-                  style={{ fontFamily: 'var(--font-display)', fontWeight: 400, fontSize: '19px', letterSpacing: '-0.005em' }}
-                >
-                  {renderWithHighlight(copy.emmaQuote)}
-                </p>
-                <p className="mt-2.5 text-coral-deep" style={{ fontFamily: 'var(--font-script)', fontSize: '18px' }}>
-                  — Emma
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Mobile sticky CTA — fixed above MobileTabBar; fades once the inline CTA scrolls in */}
-          <div
-            aria-hidden={mobileLandingInView}
-            className="fixed left-0 right-0 px-4 pt-6 pb-3.5 z-[54]"
-            style={{
-              bottom:         'calc(52px + env(safe-area-inset-bottom))',
-              background:     'linear-gradient(180deg, rgba(250,244,234,0) 0%, var(--color-cream) 30%)',
-              opacity:        mobileLandingInView ? 0 : 1,
-              transform:      mobileLandingInView ? 'translateY(8px)' : 'translateY(0)',
-              pointerEvents:  mobileLandingInView ? 'none' : 'auto',
-              transition:     'opacity 200ms ease-out, transform 250ms ease-out',
-            }}
-          >
-            <button
-              type="submit"
-              form="pair-bundle-form"
-              disabled={isPending}
-              tabIndex={mobileLandingInView ? -1 : 0}
-              className="w-full inline-flex items-center justify-between gap-2.5 px-5 py-4 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
-              style={{
-                border:     '1.5px solid var(--color-ink)',
-                boxShadow:  '3px 3px 0 var(--color-ink)',
-                fontFamily: 'var(--font-body)',
-                fontWeight: 800,
-                fontSize:   '14.5px',
-              }}
-            >
-              <span>{isPending ? 'Adding…' : 'I\u2019ll take both \u2665'}</span>
-              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '16px' }}>
-                {fmtPrice(bundlePrice)}
-              </span>
-            </button>
           </div>
         </div>
 
-        {/* ================= DESKTOP (bottom: buy bar + signature) ================= */}
+        {/* ================= DESKTOP (buy bar) ================= */}
         <article
           className="hidden md:block relative bg-paper"
           style={{
@@ -1033,7 +825,7 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
                     className="text-muted line-through"
                     style={{ fontFamily: 'var(--font-display)', fontWeight: 500, fontSize: '22px' }}
                   >
-                    {fmtPrice(combinedDeal)}
+                    {fmtPrice(combinedMsrp)}
                   </span>
                 )}
                 {savings > 0 && (
@@ -1059,46 +851,97 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
                 )}
               </div>
 
-              <div
-                className="flex gap-2.5 flex-wrap text-ink-2"
-                style={{ fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: '12.5px' }}
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="w-[5px] h-[5px] rounded-full bg-coral" />Ships free
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="w-[5px] h-[5px] rounded-full bg-coral" />Plain envelope
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="w-[5px] h-[5px] rounded-full bg-coral" />30-day returns
-                </span>
-              </div>
             </div>
 
             <div className="flex flex-col gap-2 items-end">
-              <button
-                ref={landingRef}
-                type="submit"
-                form="pair-bundle-form"
-                disabled={isPending}
-                className="inline-flex items-center gap-2.5 rounded-full bg-coral text-cream transition-[transform,box-shadow] duration-100 hover:-translate-x-px hover:-translate-y-px disabled:opacity-60 disabled:cursor-not-allowed"
-                style={{
-                  padding:    '16px 32px',
-                  border:     '2px solid var(--color-ink)',
-                  boxShadow:  '4px 4px 0 var(--color-ink)',
-                  fontFamily: 'var(--font-body)',
-                  fontWeight: 800,
-                  fontSize:   '16px',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.boxShadow = '5px 5px 0 var(--color-ink)' }}
-                onMouseLeave={e => { e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-ink)' }}
-              >
-                <span>{isPending ? 'Adding…' : "I\u2019ll take both"}</span>
-                <span style={{ color: 'var(--color-butter)', fontSize: '17px' }}>♥</span>
-              </button>
+              <div className="relative">
+                {toastState && (
+                  <div
+                    key={toastState.nonce}
+                    role="status"
+                    aria-live="polite"
+                    className="float-up-fade absolute bottom-full left-1/2 mb-3 z-10 pointer-events-none whitespace-nowrap"
+                  >
+                    <div
+                      className="inline-flex items-center gap-2 bg-white border border-cream-2 rounded-full shadow-lg px-4 py-2 text-[13px] font-semibold text-ink"
+                      style={{ fontFamily: 'var(--font-display)' }}
+                    >
+                      <span aria-hidden="true" className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
+                      {toastState.message}
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="submit"
+                  form="pair-bundle-form"
+                  disabled={isPending}
+                  className="inline-flex items-center gap-2.5 rounded-full bg-coral text-cream transition-[transform,box-shadow] duration-100 hover:-translate-x-px hover:-translate-y-px disabled:opacity-60 disabled:cursor-not-allowed"
+                  style={{
+                    padding:    '16px 32px',
+                    border:     '2px solid var(--color-ink)',
+                    boxShadow:  '4px 4px 0 var(--color-ink)',
+                    fontFamily: 'var(--font-body)',
+                    fontWeight: 800,
+                    fontSize:   '16px',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.boxShadow = '5px 5px 0 var(--color-ink)' }}
+                  onMouseLeave={e => { e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-ink)' }}
+                >
+                  <span>{isPending ? 'Adding…' : "Buy the bundle"}</span>
+                  <span style={{ color: 'var(--color-butter)', fontSize: '17px' }}>♥</span>
+                </button>
+              </div>
             </div>
           </section>
+        </article>
+      </div>
 
+      {trustBar ? <div className="px-4">{trustBar}</div> : null}
+
+      <PairBundleHeroCarousel
+        whyCards={whyCards}
+        emmaQuote=""
+        momentTitle={copy.momentTitle ?? 'how to make this pair click'}
+        moments={copy.moments ?? []}
+      />
+
+      {/* ===== BOTTOM HALF (buy bar → signature) ===== */}
+      <div className="px-4 pb-8 md:pb-14">
+
+        {/* ================= MOBILE (bottom: emma quote) ================= */}
+        <div className="md:hidden">
+          <div className="relative bg-paper border border-line border-t-0 p-6">
+            {copy.emmaQuote && (
+              <div className="text-center">
+                <span
+                  aria-hidden="true"
+                  className="block text-coral leading-none mb-1 select-none"
+                  style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 800, fontSize: '44px' }}
+                >
+                  &ldquo;
+                </span>
+                <p
+                  className="text-ink italic leading-[1.4]"
+                  style={{ fontFamily: 'var(--font-display)', fontWeight: 400, fontSize: '19px', letterSpacing: '-0.005em' }}
+                >
+                  {renderWithHighlight(copy.emmaQuote)}
+                </p>
+                <p className="mt-2.5 text-coral-deep" style={{ fontFamily: 'var(--font-script)', fontSize: '18px' }}>
+                  — Emma
+                </p>
+              </div>
+            )}
+          </div>
+
+        </div>
+
+        {/* ================= DESKTOP (bottom: emma quote) ================= */}
+        <article
+          className="hidden md:block relative bg-paper"
+          style={{
+            boxShadow:    '0 30px 60px -30px rgba(21,18,17,0.2)',
+          }}
+        >
           {/* ---------- EMMA PULL QUOTE ---------- */}
           {copy.emmaQuote && (
             <section
@@ -1161,42 +1004,6 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct }:
         </article>
       </div>
 
-      {/* Desktop floating CTA — lands when the buy bar scrolls into view */}
-      <div
-        aria-hidden={landingInView}
-        className="hidden md:block fixed bottom-4 right-[84px] z-[54]"
-        style={{
-          opacity:        landingInView ? 0 : 1,
-          transform:      landingInView ? 'translateY(12px) scale(0.96)' : 'translateY(0) scale(1)',
-          pointerEvents:  landingInView ? 'none' : 'auto',
-          transition:     'opacity 250ms ease-out, transform 300ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-      >
-        <button
-          type="submit"
-          form="pair-bundle-form"
-          disabled={isPending}
-          tabIndex={landingInView ? -1 : 0}
-          className="inline-flex items-center gap-2.5 rounded-full bg-coral text-cream hover:-translate-x-px hover:-translate-y-px disabled:opacity-60 disabled:cursor-not-allowed"
-          style={{
-            padding:    '14px 22px',
-            border:     '2px solid var(--color-ink)',
-            boxShadow:  '4px 4px 0 var(--color-ink)',
-            fontFamily: 'var(--font-body)',
-            fontWeight: 800,
-            fontSize:   '14.5px',
-            transition: 'transform 100ms ease-out, box-shadow 100ms ease-out',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.boxShadow = '5px 5px 0 var(--color-ink)' }}
-          onMouseLeave={e => { e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-ink)' }}
-        >
-          <span>{isPending ? 'Adding…' : "I\u2019ll take both"}</span>
-          <span style={{ color: 'var(--color-butter)', fontSize: '15px' }}>♥</span>
-          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '15px' }}>
-            {fmtPrice(bundlePrice)}
-          </span>
-        </button>
-      </div>
     </section>
   )
 }

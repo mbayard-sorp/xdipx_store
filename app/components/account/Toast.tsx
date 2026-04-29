@@ -11,6 +11,12 @@ interface ToastProps {
   variant?: 'success' | 'error'
   /** Show an X close button */
   showClose?: boolean
+  /**
+   * Position on screen.
+   * - `default` (existing behaviour): bottom-center on mobile, top-right on desktop, z-50.
+   * - `center`: viewport-centered with a soft scrim and z-[60] so it sits above sticky/floating CTAs.
+   */
+  position?: 'default' | 'center'
 }
 
 /**
@@ -21,7 +27,7 @@ interface ToastProps {
  * - Fades + slides in, auto-dismisses after 3000ms
  * - Brand styling: rounded-2xl, white bg, subtle shadow
  */
-export function Toast({ message, children, onDismiss, variant = 'success', showClose = false }: ToastProps) {
+export function Toast({ message, children, onDismiss, variant = 'success', showClose = false, position = 'default' }: ToastProps) {
   const [visible, setVisible] = useState(false)
 
   // Route onDismiss through a ref so the dismiss-timer effect only runs ONCE
@@ -49,6 +55,66 @@ export function Toast({ message, children, onDismiss, variant = 'success', showC
     // Intentionally empty deps — see onDismissRef comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  if (position === 'center') {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className={`
+          fixed inset-0 z-[60] flex items-center justify-center px-4 pointer-events-none
+          transition-opacity duration-200 ease-out
+          ${visible ? 'opacity-100' : 'opacity-0'}
+        `}
+      >
+        <div
+          className={`
+            pointer-events-auto flex items-center gap-3 bg-white rounded-2xl
+            shadow-2xl border border-cream-2 px-5 py-4 text-base text-ink
+            transition-transform duration-200 ease-out
+            ${visible ? 'scale-100' : 'scale-95'}
+          `}
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          {variant === 'success' ? (
+            <svg
+              aria-hidden="true"
+              className="w-5 h-5 text-sage shrink-0"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fillRule="evenodd"
+                d="M16.704 5.29a1 1 0 010 1.42l-7.5 7.5a1 1 0 01-1.415 0l-3.5-3.5a1 1 0 111.415-1.42l2.793 2.79 6.793-6.79a1 1 0 011.414 0z"
+                clipRule="evenodd"
+              />
+            </svg>
+          ) : (
+            <span
+              aria-hidden="true"
+              className="w-3 h-3 rounded-full bg-red-500 shrink-0"
+            />
+          )}
+          {children ?? <span className="font-semibold">{message}</span>}
+          {showClose && (
+            <button
+              type="button"
+              onClick={() => {
+                setVisible(false)
+                setTimeout(() => onDismissRef.current(), 200)
+              }}
+              aria-label="Close"
+              className="ml-2 text-ink/40 hover:text-ink transition-colors shrink-0"
+            >
+              <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div

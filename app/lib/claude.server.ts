@@ -492,6 +492,7 @@ ${productContext}`
         primaryTag:   'this one',
         partnerTag:   'and this',
         knotCaption:  'tied together on purpose',
+        conciergeSalutation: 'great to have you',
         whyCards: [
           { head: 'One handles the fun part.', body: 'The rumble, the tease, the main event. Dialed in and ready to go.' },
           { head: 'The other handles the smart part.', body: 'Keeps everything gliding, safe on toys, easy on skin. No drama, no cleanup headache.' },
@@ -538,6 +539,7 @@ ${productContext}`
   "primaryTag":  string  // 2\u20133 lowercase words, curator voice, describes the primary's ROLE. e.g. "the buzz one" or "the slow one"
   "partnerTag":  string  // 2\u20133 lowercase words, curator voice, describes the partner's ROLE. e.g. "the glide one" or "the fix-it one"
   "knotCaption": string  // 3\u20136 words, short label for why they're tied together. e.g. "tied together on purpose" or "one better idea"
+  "conciergeSalutation": string  // 2\u20135 lowercase words, warm Emma-voice greeting shown next to her avatar after "Hello, I'm Emma your shop concierge." e.g. "great to meet you" or "happy you stopped by". No exclamation marks, no first-person product claims.
   "whyCards": [          // EXACTLY 3 entries explaining why the pairing works
     { "head": string,    // 5\u20139 words ending in a period. Short editorial hook. e.g. "One handles the fun part."
       "body": string }   // 15\u201325 words, no testimony, factual + evocative
@@ -560,7 +562,7 @@ ${shapeSpec}
 
 ${pairContext}`
 
-      const retryPrompt = `Return ONLY raw JSON matching this exact shape: {"eyebrow","subhead","headline","body","bannerLine","primaryTag","partnerTag","knotCaption","whyCards":[{"head","body"},{"head","body"},{"head","body"}],"emmaQuote","momentTitle","moments":[{"lead","body"},{"lead","body"}]}.\n\n${voiceRules}\n\n${pairContext}`
+      const retryPrompt = `Return ONLY raw JSON matching this exact shape: {"eyebrow","subhead","headline","body","bannerLine","primaryTag","partnerTag","knotCaption","conciergeSalutation","whyCards":[{"head","body"},{"head","body"},{"head","body"}],"emmaQuote","momentTitle","moments":[{"lead","body"},{"lead","body"}]}.\n\n${voiceRules}\n\n${pairContext}`
 
       type Raw = Omit<import('~/types').PairBundleCopy, 'pairedHandle' | 'generatedAt'>
 

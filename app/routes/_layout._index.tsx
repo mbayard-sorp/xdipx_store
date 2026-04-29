@@ -14,6 +14,7 @@ import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getEmmaContextRows }    from '~/lib/emma-rails.server'
 import { getCartIdFromCookie }   from '~/lib/cart.server'
+import { getSwatchMap }          from '~/lib/swatches.server'
 import { EmmaHero }              from '~/components/store/EmmaHero'
 import { BundleHero }            from '~/components/store/BundleHero'
 import { QuietEndorsementHero }  from '~/components/store/QuietEndorsementHero'
@@ -23,10 +24,11 @@ import { ProductCarousel }       from '~/components/cms/ProductCarousel'
 import { EmmaContextRow }        from '~/components/home/EmmaContextRow'
 import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
 import { ContentBlockRenderer }  from '~/components/cms/ContentBlockRenderer'
+import { TrustBarBlock }         from '~/components/cms/TrustBarBlock'
 import { ProductStructuredData } from '~/components/seo/ProductStructuredData'
 import type { Product } from '~/types'
 import { categoryToLegacyString } from '~/types'
-import type { ProductCarouselBlock } from '~/types/cms'
+import type { ProductCarouselBlock, TrustBarBlock as TrustBarBlockType } from '~/types/cms'
 import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~/lib/analytics.client'
 import { buildSocialMeta } from '~/lib/social-meta'
 
@@ -74,13 +76,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     template: (templateRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed',
     showFreeShipping: (templateRows.find(r => r.key === 'homepage_show_free_shipping')?.value ?? 'true') === 'true',
     pairProductHandle: (templateRows.find(r => r.key === 'homepage_pair_product_handle')?.value ?? '').trim(),
-    pairDiscountPct: parseInt(templateRows.find(r => r.key === 'homepage_pair_discount_pct')?.value ?? '10', 10) || 10,
+    pairDiscountPct: parseInt(templateRows.find(r => r.key === 'homepage_pair_discount_pct')?.value ?? '0', 10) || 0,
   }
 
   // Resolve pair deal only when a pair_bundle template is active
   const pairBundleDeal = (homepageSettings.template === 'pair_bundle' || homepageSettings.template === 'pair_bundle_fullbleed') && homepageSettings.pairProductHandle
     ? await getDealByHandle(homepageSettings.pairProductHandle)
     : null
+
+  // For the FullBleed pair template, fetch swatch hexes for both products'
+  // color options so the inline CircleOptionSelector matches the PDP look.
+  const pairColorLabels = homepageSettings.template === 'pair_bundle_fullbleed' && deal && pairBundleDeal
+    ? [
+        ...((deal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
+        ...((pairBundleDeal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
+      ]
+    : []
+  const pairSwatches: Record<string, string> = pairColorLabels.length > 0
+    ? await getSwatchMap(pairColorLabels)
+    : {}
 
   // Resolve optional pair product for bundle variant (Shopify handle → Deal)
   const pairDeal = emmaHero?.heroVariant === 'bundle' && emmaHero.pairProductHandle
@@ -135,7 +149,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       deal: null, bundle: null, forHim, forHer, bonusDeal,
       viewers: 0, soldToday: 0, cmsData, carouselProductMap,
       emmaHero: null, pairDeal: null, homepageSettings, pairBundleDeal: null,
-      emmaContextRows: [],
+      emmaContextRows: [], pairSwatches: {} as Record<string, string>,
     }
   }
 
@@ -163,7 +177,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     reviewTotal: reviewData.total,
     aggregate: aggregate ?? null,
     emmaHero, pairDeal, homepageSettings, pairBundleDeal,
-    emmaContextRows,
+    emmaContextRows, pairSwatches,
   }
 }
 
@@ -226,7 +240,7 @@ export default function Homepage() {
     deal, bundle, forHim, forHer, bonusDeal,
     cmsData, carouselProductMap,
     emmaHero, pairDeal, homepageSettings, pairBundleDeal,
-    emmaContextRows,
+    emmaContextRows, pairSwatches,
   } = useLoaderData<typeof loader>()
   const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
 
@@ -260,7 +274,16 @@ export default function Homepage() {
   // Split CMS sections: those that sit above BonusDeal/Vault vs below
   const cmsSections = cmsData?.sections ?? []
   // announcementBar is handled in _layout.tsx — exclude it here
-  const contentBlocks = cmsSections.filter(s => s._type !== 'announcementBar')
+  const allContentBlocks = cmsSections.filter(s => s._type !== 'announcementBar')
+  // For the pair_bundle_fullbleed template, lift the first trust bar out of
+  // the regular content stream so it can render directly below the price strip.
+  const isFullBleedPair = !!(deal && homepageSettings.template === 'pair_bundle_fullbleed' && pairBundleDeal && deal.pairBundleCopy)
+  const liftedTrustBar  = isFullBleedPair
+    ? (allContentBlocks.find((b): b is TrustBarBlockType => b._type === 'trustBar') ?? null)
+    : null
+  const contentBlocks = liftedTrustBar
+    ? allContentBlocks.filter(b => b._key !== liftedTrustBar._key)
+    : allContentBlocks
 
   // MAP-restricted: prefer the Shopify metafield; fall back to MAP-vs-MSRP heuristic
   // for legacy products without the `map_restricted` flag set.
@@ -309,6 +332,8 @@ export default function Homepage() {
             partner={pairBundleDeal}
             copy={deal.pairBundleCopy}
             discountPct={homepageSettings.pairDiscountPct}
+            trustBar={liftedTrustBar ? <TrustBarBlock block={liftedTrustBar} frameless /> : null}
+            swatches={pairSwatches ?? {}}
           />
           <ProductStructuredData deal={deal} />
         </>

@@ -111,14 +111,25 @@ export function AskEmmaRail({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="md:hidden w-full mb-4 rounded-full border border-line bg-paper py-2.5 text-sm font-medium text-ink"
-        aria-expanded={open}
-      >
-        Ask Emma {anyActive ? '· filters on' : ''}
-      </button>
+      <div className="md:hidden flex items-center gap-2 mb-4">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex-1 rounded-full border border-line bg-paper py-2.5 text-sm font-medium text-ink"
+          aria-expanded={open}
+        >
+          Filter Results {anyActive ? '· filters on' : ''}
+        </button>
+        {anyActive && (
+          <button
+            type="button"
+            onClick={clearAll}
+            className="shrink-0 rounded-full border border-coral bg-paper px-4 py-2.5 text-sm font-semibold text-coral hover:bg-coral hover:text-paper transition-colors"
+          >
+            Clear all
+          </button>
+        )}
+      </div>
 
       <aside
         className={[
@@ -128,7 +139,7 @@ export function AskEmmaRail({
         aria-label="Ask Emma"
       >
         <div className="md:hidden flex items-center justify-between mb-4">
-          <h2 className="font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>Ask Emma</h2>
+          <h2 className="font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>Filter Results</h2>
           <button type="button" onClick={() => setOpen(false)} className="text-muted text-sm" aria-label="Close">
             Done
           </button>
