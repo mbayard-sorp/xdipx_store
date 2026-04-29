@@ -48,52 +48,92 @@ async function callClaude(opts: {
   llmClient?: LLMClient | undefined
   model:      string
   maxTokens:  number
-  system:     string
+  /** Plain string system prompt (uncached). Mutually exclusive with `systemBlocks`. */
+  system?:    string
+  /**
+   * Structured system prompt with optional `cache_control` per block. Used to
+   * cache the stable persona + brand voice prefix across the ~14 per-tool calls
+   * within a product enrichment run (and across products processed within the
+   * 5-minute ephemeral cache TTL). Mutually exclusive with `system`.
+   */
+  systemBlocks?: ReadonlyArray<{ text: string; cache?: boolean }>
   userPrompt: string
 }): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
-  let result: { text: string; inputTokens: number; outputTokens: number }
-  // SDK branch DISABLED — see header comment. To re-enable for testing:
-  //
-  //   if (opts.llmClient?.via === 'claude-code') {
-  //     result = await runSingleClaudeCallViaSdk({
-  //       system:    opts.system,
-  //       prompt:    opts.userPrompt,
-  //       maxTokens: opts.maxTokens,
-  //     })
-  //   } else { ... API path }
-  //
-  // For now, all per-tool generation goes through the API key. Outer
-  // orchestrator decisions still route through Max via runOrchestrationViaSdk.
-  void opts.llmClient  // retain the threading without using it
+  // SDK branch DISABLED — see header comment.
+  void opts.llmClient
+
+  const systemParam: string | Anthropic.TextBlockParam[] | undefined = opts.systemBlocks
+    ? opts.systemBlocks.map(b => ({
+        type: 'text' as const,
+        text: b.text,
+        ...(b.cache ? { cache_control: { type: 'ephemeral' as const } } : {}),
+      }))
+    : opts.system
+
+  if (systemParam === undefined) {
+    throw new Error('callClaude: system or systemBlocks required')
+  }
+
   const msg = await client.messages.create({
     model:      opts.model,
     max_tokens: opts.maxTokens,
-    system:     opts.system,
+    system:     systemParam,
     messages:   [{ role: 'user', content: opts.userPrompt }],
   })
   const block = msg.content[0]
   if (block?.type !== 'text') throw new Error('Unexpected Claude response type')
-  result = {
-    text:         block.text,
-    inputTokens:  msg.usage.input_tokens,
-    outputTokens: msg.usage.output_tokens,
+  const usage = msg.usage as (typeof msg.usage) & {
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?:     number
   }
-  _toolTokenAccumulator.input  += result.inputTokens
-  _toolTokenAccumulator.output += result.outputTokens
+  const result = {
+    text:         block.text,
+    inputTokens:  usage.input_tokens,
+    outputTokens: usage.output_tokens,
+  }
+  _toolTokenAccumulator.input         += result.inputTokens
+  _toolTokenAccumulator.output        += result.outputTokens
+  _toolTokenAccumulator.cacheCreation += usage.cache_creation_input_tokens ?? 0
+  _toolTokenAccumulator.cacheRead     += usage.cache_read_input_tokens     ?? 0
   return result
+}
+
+/**
+ * Build a cacheable system block array for Emma's voice surfaces. Pull the
+ * brand voice from pipelineSettings once (or use the explicit override) and
+ * tag both blocks with `cache_control: ephemeral` so subsequent generators
+ * within the 5-minute TTL hit the cache at ~10% input price.
+ *
+ * Used by every per-tool generator that previously concatenated
+ * `${EMMA_SYSTEM_PROMPT}\n\n${brandVoice}` into a string. Switch from
+ * `system` to `systemBlocks: await buildEmmaSystemBlocks(brandVoiceOverride)`.
+ */
+export async function buildEmmaSystemBlocks(brandVoiceOverride?: string): Promise<ReadonlyArray<{ text: string; cache?: boolean }>> {
+  const brandVoice = brandVoiceOverride ?? (await getPipelineSetting('brandVoice')) ?? DEFAULT_BRAND_VOICE
+  return [
+    { text: EMMA_SYSTEM_PROMPT, cache: true },
+    { text: brandVoice,         cache: true },
+  ]
+}
+
+/** Cacheable variant of the legacy SYSTEM_PROMPT used by `generateCopy`. */
+function buildLegacySystemBlocks(): ReadonlyArray<{ text: string; cache?: boolean }> {
+  return [{ text: SYSTEM_PROMPT, cache: true }]
 }
 
 /**
  * Module-level accumulator for per-tool token counts. callClaude adds to it;
  * the orchestrator's executeTool dispatch drains it after each tool call so
- * the totals can be attributed to the right ToolCallTrace entry.
+ * the totals can be attributed to the right ToolCallTrace entry. Cache fields
+ * are tracked separately so the cost summary can show how much of each call's
+ * input was cache-read (90% off) vs. fresh-write (1.25× input).
  */
-let _toolTokenAccumulator = { input: 0, output: 0 }
+let _toolTokenAccumulator = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 }
 
 /** Drain the accumulator and return the delta. Resets on read. */
-export function drainToolTokens(): { input: number; output: number } {
+export function drainToolTokens(): { input: number; output: number; cacheCreation: number; cacheRead: number } {
   const out = _toolTokenAccumulator
-  _toolTokenAccumulator = { input: 0, output: 0 }
+  _toolTokenAccumulator = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 }
   return out
 }
 
@@ -137,7 +177,7 @@ async function generate(
     llmClient,
     model,
     maxTokens,
-    system: SYSTEM_PROMPT,
+    systemBlocks: buildLegacySystemBlocks(),
     userPrompt: prompt,
   })
   return text
@@ -668,6 +708,119 @@ ${productContext}`
     default:
       throw new Error(`Unknown copy type: ${type as string}`)
   }
+}
+
+/**
+ * Consolidated copy generator — produces tagline, SEO meta, and specifications
+ * in a SINGLE Haiku round trip. Replaces three legacy `generateCopy` calls
+ * (`tagline` + `seo_meta` + `specifications`) which all fed the same product
+ * context and same keyword block. Cuts per-call system-prompt overhead and
+ * the productContext/keywordBlock prefix by 3× before caching savings layer.
+ *
+ * Per-field validators run on the parsed JSON; if any field is invalid we
+ * fall back to the single-field generator from `generateCopy` for just that
+ * field, which is still 2× cheaper than the legacy 3-call path on the happy
+ * path and never worse than legacy on the unhappy path.
+ */
+export async function generateProductCopyBundle(req: {
+  product:    GenerateCopyRequest['product']
+  authorSlug?: string
+  seoMode?:    GenerateCopyRequest['seoMode']
+  llmClient?:  LLMClient
+}): Promise<{ tagline: string; seoMeta: string; specifications: string[] }> {
+  const { product } = req
+
+  const author = req.authorSlug ? await getEditorialAuthor(req.authorSlug).catch(() => null) : null
+  const seoMode = req.seoMode ?? author?.seoMode ?? 'natural'
+
+  const keywordBlock = await buildKeywordBlock({
+    productType: product.productTypeDial,
+    moods:       product.moodTags,
+    audiences:   product.audienceTags,
+    matters:     product.mattersTags,
+    contentType: 'pdp',
+    seoMode,
+  }).catch((err) => {
+    console.error('[generateProductCopyBundle] buildKeywordBlock failed (continuing without):', err)
+    return ''
+  })
+
+  const productContextBase = `Product: ${product.title}\nBrand: ${product.brand}\nDescription: ${product.description}\nCategories: ${product.categories.join(', ')}`
+  const productContext = keywordBlock ? `${productContextBase}\n\n${keywordBlock}` : productContextBase
+
+  const prompt = `Produce three independent copy fields for this product in a SINGLE JSON response. Each field has its own constraints — apply them strictly. NEVER mention price, discount, or dollar amounts in any field; the PDP renders Shopify's live price separately. NO em-dashes ("—" or "–") anywhere.
+
+If any keyword targets in the prompt do not fit this product, IGNORE them silently and write from the product details only. Never narrate a mismatch, never preface, never explain.
+
+FIELD 1 — "tagline" (string):
+- One short Emma-voice tagline. Observational, casual, lightly witty. Not a stand-up zinger.
+- Fragments are welcome ("the one I keep recommending", "earns its spot daily", "quietly indispensable").
+- Max 12 words. First person OK. NO em-dashes. NO ♥ glyph (reserve it for CTAs and asides).
+
+FIELD 2 — "seoMeta" (string):
+- 140–155 characters. Shows in Google SERP and link previews.
+- Include both: (a) the trust beat "Ships discreetly", (b) one short Emma-voice benefit beat (fragment OK, first-person OK).
+- Brand mentions written as "XDIPX" (uppercase). NO em-dashes. NO price/discount language.
+
+FIELD 3 — "specifications" (string[]):
+- JSON array of "Label: Value" bullet pairs (e.g. "Color: Black", "Material: Body-safe silicone").
+- Include only objective facts surfaced in the description: dimensions, materials, power source, charge time, run time, waterproofing, colors, weight, controls, country of origin.
+- Skip categories the source doesn't mention. Better fewer accurate specs than padded ones.
+- Factual and concise — no fluff, no Emma asides. Each value 4–80 chars. Max 12 entries. NEVER include price.
+
+Return ONLY this JSON shape (no markdown, no preamble):
+{ "tagline": "string", "seoMeta": "string", "specifications": ["Label: Value", ...] }
+
+${productContext}`
+
+  type Parsed = { tagline?: unknown; seoMeta?: unknown; specifications?: unknown }
+  let parsed: Parsed | null = null
+  try {
+    const { text } = await callClaude({
+      llmClient: req.llmClient,
+      model:     MODEL_FAST,
+      maxTokens: 1500,
+      systemBlocks: buildLegacySystemBlocks(),
+      userPrompt: prompt,
+    })
+    parsed = JSON.parse(stripFences(text)) as Parsed
+  } catch (err) {
+    console.error('[generateProductCopyBundle] consolidated call failed, falling back to per-field:', err)
+  }
+
+  // Per-field validation. Anything that fails validation falls back to the
+  // legacy per-field generator so a single bad field doesn't blank the others.
+  const taglineOk = (s: unknown): s is string => typeof s === 'string' && s.trim().length > 0 && s.trim().split(/\s+/).length <= 12 && !looksLikeMetaCommentary(s) && !s.includes('—') && !s.includes('–')
+  const seoMetaOk = (s: unknown): s is string => typeof s === 'string' && s.trim().length >= 50 && !looksLikeMetaCommentary(s) && !containsPrice(s)
+  const specsOk   = (a: unknown): a is string[] => Array.isArray(a) && a.length > 0 && a.every(v => typeof v === 'string' && v.trim().length >= 4 && v.trim().length <= 100)
+
+  let tagline = ''
+  let seoMeta = ''
+  let specifications: string[] = []
+
+  if (parsed && taglineOk(parsed.tagline)) {
+    tagline = parsed.tagline.trim()
+  } else {
+    const r = await generateCopy({ type: 'tagline', product, ...(req.authorSlug ? { authorSlug: req.authorSlug } : {}), ...(req.seoMode ? { seoMode: req.seoMode } : {}) }, req.llmClient)
+    const arr = r.content as string[]
+    tagline = (Array.isArray(arr) ? arr[0] : (arr as unknown as string))?.trim() ?? ''
+  }
+
+  if (parsed && seoMetaOk(parsed.seoMeta)) {
+    seoMeta = parsed.seoMeta.trim().slice(0, 155)
+  } else {
+    const r = await generateCopy({ type: 'seo_meta', product, ...(req.authorSlug ? { authorSlug: req.authorSlug } : {}), ...(req.seoMode ? { seoMode: req.seoMode } : {}) }, req.llmClient)
+    seoMeta = (r.content as string) ?? ''
+  }
+
+  if (parsed && specsOk(parsed.specifications)) {
+    specifications = parsed.specifications.map(s => s.trim()).slice(0, 12)
+  } else {
+    const r = await generateCopy({ type: 'specifications', product, ...(req.authorSlug ? { authorSlug: req.authorSlug } : {}), ...(req.seoMode ? { seoMode: req.seoMode } : {}) }, req.llmClient)
+    specifications = Array.isArray(r.content) ? (r.content as string[]) : []
+  }
+
+  return { tagline, seoMeta, specifications }
 }
 
 // ─── Blog article generation ────────────────────────────────────────────────
@@ -1601,7 +1754,7 @@ export async function generateEmmaHero(opts: {
     ? 'MAP-restricted — no discount claims, no percent-off language, no struck prices.'
     : discountPct > 0 ? `Currently ${discountPct}% off MSRP — you may allude to value, but never in "buy now" or countdown language.` : ''
 
-  const system = `${EMMA_SYSTEM_PROMPT}\n\n${brandVoice}`
+  const systemBlocksForHero = await buildEmmaSystemBlocks(opts.brandVoice)
 
   const user = `Write the Emma hero block for the homepage of xdipx.com. Variant: "${variant}".
 
@@ -1629,7 +1782,7 @@ Return ONLY this JSON (no markdown):
           llmClient: opts.llmClient,
           model:     MODEL,
           maxTokens: 800,
-          system,
+          systemBlocks: systemBlocksForHero,
           userPrompt: user,
         })
         const parsed = JSON.parse(stripFences(text)) as Partial<EmmaHeroCopy>
@@ -1747,8 +1900,7 @@ export async function generateEmmaTake(opts: {
   brandVoice?: string
   llmClient?:  LLMClient
 }): Promise<string> {
-  const brandVoice = opts.brandVoice ?? (await getPipelineSetting('brandVoice')) ?? DEFAULT_BRAND_VOICE
-  const system = `${EMMA_SYSTEM_PROMPT}\n\n${brandVoice}`
+  const systemBlocksForTake = await buildEmmaSystemBlocks(opts.brandVoice)
 
   const user = `Write Emma's "take" on this product. It appears at the top of the PDP — a friend-to-friend honest read. This is THE customer-facing voice surface; treat it accordingly.
 
@@ -1781,7 +1933,7 @@ Return ONLY the HTML — no markdown, no fences, no preamble.`
       llmClient: opts.llmClient,
       model:     MODEL,
       maxTokens: 800,
-      system,
+      systemBlocks: systemBlocksForTake,
       userPrompt: user,
     })
     return stripFences(text).trim()
@@ -1859,7 +2011,7 @@ No markdown, no fences, no commentary.`
       llmClient: opts.llmClient,
       model:     MODEL_FAST,
       maxTokens: 400,
-      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user,
     })
     const parsed = JSON.parse(stripFences(text)) as unknown
@@ -2032,7 +2184,7 @@ Return ONLY raw JSON (no markdown). An array of objects: [{ "question": "...", "
       llmClient: opts.llmClient,
       model:     MODEL,
       maxTokens: 2500,
-      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user,
     })
     let faqs = parseFaqs(text)
@@ -2069,7 +2221,7 @@ ${careInstructionsText ? `- Care card already covers (do NOT restate): ${careIns
           llmClient: opts.llmClient,
           model:     MODEL,
           maxTokens: 1200,
-          system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+          systemBlocks: await buildEmmaSystemBlocks(),
           userPrompt: careTopUp,
         })
         const extras = parseFaqs(retryText).filter(f => f.category === 'care')
@@ -2177,7 +2329,7 @@ Rules:
     llmClient: opts.llmClient,
     model:     MODEL_FAST,
     maxTokens: 600,
-    system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+    systemBlocks: await buildEmmaSystemBlocks(),
     userPrompt: user,
   })
 
@@ -2255,7 +2407,7 @@ No markdown. No commentary.`
       llmClient: input.llmClient,
       model:     MODEL_FAST,
       maxTokens: 60,
-      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user,
     })
     const parsed = JSON.parse(stripFences(text)) as { type?: unknown }
@@ -2379,7 +2531,7 @@ or { "type": "sex-machine", "subtype": null }`
       llmClient: input.llmClient,
       model:     MODEL_FAST,
       maxTokens: 100,
-      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user,
     })
     const parsed = JSON.parse(stripFences(text)) as { type?: unknown; subtype?: unknown }
@@ -2526,7 +2678,7 @@ Return ONLY this JSON (no markdown): { "tags": ["Soft Touch", "First-Time Friend
       llmClient: opts.llmClient,
       model:     MODEL_FAST,
       maxTokens: 200,
-      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user,
     })
     const parsed = JSON.parse(stripFences(text)) as { tags?: unknown }
@@ -2602,7 +2754,7 @@ Return ONLY this JSON (no markdown):
       llmClient: opts.llmClient,
       model:     MODEL_FAST,
       maxTokens: 600,
-      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user,
     })
     const parsed = JSON.parse(stripFences(text)) as { mood?: unknown; audience?: unknown; matters?: unknown }
@@ -2710,7 +2862,7 @@ Return ONLY this JSON (no markdown): { "levels": ["first-time", "curious"] }`
       llmClient: opts.llmClient,
       model:     MODEL_FAST,
       maxTokens: 100,
-      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user,
     })
     const parsed = JSON.parse(stripFences(text)) as { levels?: unknown }
@@ -2767,7 +2919,7 @@ Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`
       llmClient: opts.llmClient,
       model:     MODEL_FAST,
       maxTokens: 200,
-      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user,
     })
     const parsed = JSON.parse(stripFences(text)) as { useCases?: unknown }
@@ -2821,7 +2973,7 @@ Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`
       llmClient: opts.llmClient,
       model:     MODEL_FAST,
       maxTokens: 300,
-      system:    `${EMMA_SYSTEM_PROMPT}\n\n${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user,
     })
     const parsed = JSON.parse(stripFences(text)) as { features?: unknown }
@@ -2842,6 +2994,149 @@ Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`
     console.error('[generateIvrFeatures] failed:', err)
     return []
   }
+}
+
+/**
+ * Consolidated IVR generator — picks experience levels, use-case slugs, and
+ * feature slugs in a SINGLE Haiku round trip. Replaces three legacy calls
+ * (generateIvrExperience + generateIvrUseCase + generateIvrFeatures) with
+ * one, cutting per-call system-prompt overhead by 3× and the deal-context
+ * block by 3× before caching savings layer on top. Vocabularies and
+ * honest-tagging rules are preserved from the legacy prompts. Returns each
+ * field independently so a partial parse failure on one axis does not blank
+ * the others.
+ */
+export async function generateIvrAll(opts: {
+  deal:       IvrDealCtx
+  llmClient?: LLMClient
+}): Promise<{ experience: IvrExperience; useCases: string[]; features: string[] }> {
+  const user = `Pick three independent things for this product in a single response: experience levels, use cases, and features. Each axis has its own rules — apply them honestly.
+
+EXPERIENCE LEVELS (multi-select, 1–4 from this list):
+${IVR_EXPERIENCE_LEVELS.join(' | ')}
+
+- "first-time": gentle, simple controls, low intensity.
+- "curious": exploring beyond the basics, slightly ambitious but approachable.
+- "experienced": comfortable with the category, looking for variety or upgrades.
+- "advanced": high-intensity, niche, or technique-heavy.
+- A versatile product can hit multiple levels. Be honest — only include a level the product genuinely serves.
+
+USE CASES (2–5 slugs from this exact vocabulary):
+${IVR_USE_CASES.map(s => `- ${s}`).join('\n')}
+
+- Objective slugs (travel = portable; long-distance = remote/app control): tag based on spec support.
+- Subjective slugs (spice-up, partner-surprise, kink-curious, role-play, etc.): tag ONLY when the description strongly supports it. Default to OMISSION when ambiguous.
+- Mutual-exclusivity hints — usually pick at most one within each facet:
+  · Occasion: anniversary, honeymoon, valentine, birthday, bachelorette, pride, holiday.
+  · Wellness/health: pelvic-floor, kegel-training, postpartum, menopause, libido-boost, prostate-health, erectile-support, menstrual-comfort — usually one, ONLY on wellness-category products.
+  · Affirming/inclusive: queer-affirming, trans-affirming, women-focused, men-focused, inclusive — usually one or two.
+  · Gift sub-category: gift, gift-set, party-favor, self-gift — pick the most specific.
+- Wellness slugs apply only to wellness/specific product types. Affirming slugs based on actual product positioning.
+${opts.deal.productTypeDial ? `- This product's type is "${opts.deal.productTypeDial}" — keep tags consistent with what fits this category.` : ''}
+
+FEATURES (3–8 slugs from this exact vocabulary):
+${IVR_FEATURES.map(s => `- ${s}`).join('\n')}
+
+- Objective slugs (waterproof, rechargeable, usb-c, silicone, body-safe, app-controlled, bluetooth, etc.): tag ONLY when the description supports it. Don't infer from category.
+- Subjective slugs (rumbly, buzzy, gentle, intense, powerful, luxury, premium, discreet, beginner-friendly): tag ONLY when the description strongly supports it.
+- These get spoken aloud by Emma when filtering. False claims break shopper trust immediately.
+- Mutual-exclusivity hints:
+  · Size: mini, compact, small, medium, large, xl, xxl, oversized, plus-size, queen-size, curvy, slim, girthy.
+  · Material primary: silicone, glass, metal, wood, leather, vegan-leather, faux-leather.
+  · Lube base: water-based, silicone-based, hybrid, oil-based (none for non-lubes).
+  · Identity/edition: pride, rainbow, pride-edition, holiday, valentine.
+- Don't tag harness-compatible on a lube, condom-safe on a vibrator, flared-base on a non-anal toy, or any lube-base slug on anything that isn't a lubricant.
+${opts.deal.productTypeDial ? `- This product's type is "${opts.deal.productTypeDial}" — only pick features that genuinely fit this category.` : ''}
+
+CROSS-FIELD: a slug like 'pride' can appear in both useCases (good for Pride parties) AND features (Pride-edition design) — that's intentional when both apply.
+
+${ivrProductBlock(opts.deal)}
+
+Return ONLY this JSON shape (no markdown, no preamble):
+{ "experience": ["first-time"], "useCases": ["slug-one","slug-two"], "features": ["slug-one","slug-two","slug-three"] }`
+
+  type ParsedIvr = { experience?: unknown; useCases?: unknown; features?: unknown }
+  let parsed: ParsedIvr | null = null
+  try {
+    const { text } = await callClaude({
+      llmClient: opts.llmClient,
+      model:     MODEL_FAST,
+      maxTokens: 500,
+      systemBlocks: await buildEmmaSystemBlocks(),
+      userPrompt: user,
+    })
+    const cleaned = stripFences(text)
+    try {
+      parsed = JSON.parse(cleaned) as ParsedIvr
+    } catch {
+      // Extract the first top-level `{ ... }` block — handles cases where the
+      // model adds prose around the JSON or trails a stray character. Cheaper
+      // than running three legacy generators on a single parse hiccup.
+      const match = cleaned.match(/\{[\s\S]*?\}\s*$/m) ?? cleaned.match(/\{[\s\S]*\}/)
+      if (match) {
+        try { parsed = JSON.parse(match[0]) as ParsedIvr } catch { /* fall through */ }
+      }
+      if (!parsed) {
+        console.error('[generateIvrAll] could not extract JSON from response:', cleaned.slice(0, 300))
+      }
+    }
+  } catch (err) {
+    console.error('[generateIvrAll] failed:', err)
+  }
+  if (!parsed) parsed = {}
+
+  const experience: IvrExperience = Array.isArray(parsed.experience)
+    ? (() => {
+        const valid = new Set<string>(IVR_EXPERIENCE_LEVELS as readonly string[])
+        const out: IvrExperienceValue[] = []
+        const seen = new Set<string>()
+        for (const item of parsed.experience as unknown[]) {
+          if (typeof item !== 'string') continue
+          const v = item.trim().toLowerCase()
+          if (!valid.has(v) || seen.has(v)) continue
+          seen.add(v)
+          out.push(v as IvrExperienceValue)
+          if (out.length >= 4) break
+        }
+        return out
+      })()
+    : []
+
+  const useCases: string[] = Array.isArray(parsed.useCases)
+    ? (() => {
+        const allowed = new Set<string>(IVR_USE_CASES as readonly string[])
+        const out: string[] = []
+        const seen = new Set<string>()
+        for (const raw of parsed.useCases as unknown[]) {
+          if (typeof raw !== 'string') continue
+          const slug = raw.trim().toLowerCase()
+          if (!allowed.has(slug) || seen.has(slug)) continue
+          seen.add(slug)
+          out.push(slug)
+          if (out.length >= 5) break
+        }
+        return out
+      })()
+    : []
+
+  const features: string[] = Array.isArray(parsed.features)
+    ? (() => {
+        const allowed = new Set<string>(IVR_FEATURES as readonly string[])
+        const out: string[] = []
+        const seen = new Set<string>()
+        for (const raw of parsed.features as unknown[]) {
+          if (typeof raw !== 'string') continue
+          const slug = raw.trim().toLowerCase()
+          if (!allowed.has(slug) || seen.has(slug)) continue
+          seen.add(slug)
+          out.push(slug)
+          if (out.length >= 8) break
+        }
+        return out
+      })()
+    : []
+
+  return { experience, useCases, features }
 }
 
 // ─── Emma Curated Rails (agentic, tool-use loop) ─────────────────────────────
