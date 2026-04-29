@@ -7,7 +7,7 @@ import { ReturnStatusPill } from '~/components/account/ReturnStatusPill'
 import { EmptyState } from '~/components/account/EmptyState'
 import type { AccountOutletContext } from './_layout.account'
 
-export const meta: MetaFunction = () => [{ title: 'Returns — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Returns — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { token, tokenType } = await requireCustomer(request)

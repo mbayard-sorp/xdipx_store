@@ -4,6 +4,9 @@ import { data } from 'react-router'
 import { getPage, isPreviewRequest } from '~/lib/sanity.server'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
+import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
+import { canonicalUrl } from '~/lib/seo'
+import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
 import type { Product } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
 
@@ -42,19 +45,28 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data) return [{ title: 'Page not found — xdipx' }]
   const { page } = data
+  const title = (page.seoTitle ?? page.title) + ' — xdipx'
+  const description = page.seoDescription ?? `${page.title} at xdipx. Sexual wellness, editorially curated.`
+  const canonical = canonicalUrl({ path: `/pages/${page.slug}` })
   return [
-    { title: (page.seoTitle ?? page.title) + ' — xdipx' },
-    ...(page.seoDescription
-      ? [{ name: 'description', content: page.seoDescription }]
-      : []),
+    { title },
+    { name: 'description', content: description },
+    { tagName: 'link', rel: 'canonical', href: canonical },
+    ...buildSocialMeta({ title, description, url: canonical, image: null, type: 'website' }),
   ]
 }
 
 export default function SanityPage() {
   const { page, carouselProductMap } = useLoaderData<typeof loader>()
 
+  const breadcrumbItems = [
+    { name: 'Home', url: `${SITE_ORIGIN}/` },
+    { name: page.title, url: `${SITE_ORIGIN}/pages/${page.slug}` },
+  ]
+
   return (
     <div>
+      <BreadcrumbStructuredData items={breadcrumbItems} />
       {(page.sections ?? []).map(block => (
         <ContentBlockRenderer
           key={block._key}

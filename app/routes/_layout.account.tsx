@@ -1,9 +1,18 @@
-import type { LoaderFunctionArgs } from 'react-router'
+import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { Outlet, redirect, useLoaderData } from 'react-router'
 import { requireCustomer } from '~/lib/customer-session.server'
 import { customerAPI } from '~/lib/customer-api.server'
 import type { CustomerProfile } from '~/lib/shopify.server'
 import { AccountShell } from '~/components/account/AccountShell'
+
+// Cascade noindex,nofollow to every /account/* page. robots.txt blocks
+// crawling, but URLs linked from the wider web (e.g., bookmarks shared
+// publicly) can still be indexed as URL-only entries — and account pages
+// have no SEO value. Children may override their own title etc., but none
+// currently emit a `robots` directive, so this stays authoritative.
+export const meta: MetaFunction = () => [
+  { name: 'robots', content: 'noindex, nofollow' },
+]
 
 /**
  * Outlet context shape exposed to every authenticated `/account/*` child

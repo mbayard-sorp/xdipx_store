@@ -18,7 +18,7 @@ import { Toggle } from '~/components/account/Toggle'
 import { Toast } from '~/components/account/Toast'
 import { ConfirmDialog } from '~/components/account/ConfirmDialog'
 
-export const meta: MetaFunction = () => [{ title: 'Preferences — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Preferences — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 // ── Types + copy constants ───────────────────────────────────────────────────
 

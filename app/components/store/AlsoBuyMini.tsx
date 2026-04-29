@@ -1,3 +1,5 @@
+import { Link } from 'react-router'
+
 export interface AlsoBuyItem {
   handle:         string
   title:          string
@@ -74,12 +76,22 @@ export function AlsoBuyMini({ items, checked, onToggle }: AlsoBuyMiniProps) {
                     )}
                     {/* Title caption — gradient backdrop for legibility over
                         any product photo. Visible at all times so the row
-                        is readable on touch devices that have no hover. */}
-                    <div className="absolute inset-x-0 bottom-0 px-2 pt-4 pb-1.5 bg-gradient-to-t from-coral-deep/95 via-coral/65 to-transparent pointer-events-none lg:px-1.5 lg:pt-3 lg:pb-1">
-                      <p className="text-white text-xs font-semibold leading-tight line-clamp-2 lg:text-[10px]">
+                        is readable on touch devices that have no hover.
+                        The title is a Link so crawlers see real anchor text
+                        pointing at the cross-sell PDP, and so this row
+                        contributes to internal-linking equity. stopPropagation
+                        keeps the rest of the row as a tap-to-toggle target
+                        for the cart checkbox. */}
+                    <Link
+                      to={`/products/${item.handle}`}
+                      prefetch="intent"
+                      onClick={e => e.stopPropagation()}
+                      className="absolute inset-x-0 bottom-0 px-2 pt-4 pb-1.5 bg-gradient-to-t from-coral-deep/95 via-coral/65 to-transparent lg:px-1.5 lg:pt-3 lg:pb-1 hover:from-coral-deep hover:via-coral/80"
+                    >
+                      <span className="block text-white text-xs font-semibold leading-tight line-clamp-2 lg:text-[10px]">
                         {item.title}
-                      </p>
-                    </div>
+                      </span>
+                    </Link>
                   </div>
                   {/* "Click to add" badge — desktop-only, fades in on hover.
                       Sits OUTSIDE the inner clipper so the negative offset

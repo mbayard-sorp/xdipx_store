@@ -10,7 +10,7 @@ import {
 } from '~/lib/returns.server'
 import { verifyAddress } from '~/lib/easypost.server'
 
-export const meta: MetaFunction = () => [{ title: 'Start a return — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Start a return — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 const REASONS: { code: ReturnReasonCode; label: string }[] = [
   { code: 'DEFECTIVE',        label: 'Defective / damaged' },

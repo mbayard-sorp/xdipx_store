@@ -26,7 +26,7 @@ import {
 } from '~/lib/facebook-oauth.server'
 import { getCartIdFromCookie, linkCartToCustomer } from '~/lib/cart.server'
 
-export const meta: MetaFunction = () => [{ title: 'Sign in — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Sign in — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 /**
  * Combines a validated `redirectTo` with an optional `pendingVote` param,

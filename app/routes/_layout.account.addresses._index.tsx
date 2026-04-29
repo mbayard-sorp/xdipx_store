@@ -8,7 +8,7 @@ import { ConfirmDialog } from '~/components/account/ConfirmDialog'
 import { EmptyState } from '~/components/account/EmptyState'
 import type { AccountOutletContext } from './_layout.account'
 
-export const meta: MetaFunction = () => [{ title: 'Addresses — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Addresses — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 // ── Loader ───────────────────────────────────────────────────────────────────
 //

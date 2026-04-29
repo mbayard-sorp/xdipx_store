@@ -1,24 +1,28 @@
 import { useEffect, useMemo } from 'react'
-import type { MetaFunction, LoaderFunctionArgs } from 'react-router'
+import type { MetaFunction, MetaDescriptor, LoaderFunctionArgs } from 'react-router'
 import { useLoaderData, useSearchParams } from 'react-router'
 import { getProductsByTag } from '~/lib/shopify.server'
-import { getEmmaPresets } from '~/lib/sanity.server'
+import { getEmmaPresets, getCollectionPage } from '~/lib/sanity.server'
 import type { Product } from '~/types'
 import { trackViewItemList } from '~/lib/analytics.client'
 import { ProductCard } from '~/components/store/ProductCard'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 import { CollectionStructuredData } from '~/components/seo/CollectionStructuredData'
+import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { AskEmmaRail, matchesAskEmmaFilters } from '~/components/store/AskEmmaRail'
+import { canonicalUrl, robotsContent, pageTitle } from '~/lib/seo'
+import { buildSocialMeta } from '~/lib/social-meta'
 
-const PAGE_TITLE       = 'For Him — Pleasure Products'
-const PAGE_DESCRIPTION = "Hand-picked wellness and pleasure products chosen with him in mind — from sleeves and strokers to performance accessories and couples-friendly gear. Every product is curated for quality and value, shipped discreetly, and priced against Emma's standards."
-const PAGE_URL         = 'https://xdipx.com/for-him'
+const FALLBACK_SEO_TITLE   = 'For Him — Pleasure Products'
+const FALLBACK_DESCRIPTION = "Hand-picked wellness and pleasure products chosen with him in mind — from sleeves and strokers to performance accessories and couples-friendly gear. Every product is curated for quality and value, shipped discreetly, and priced against Emma's standards."
+const FALLBACK_H1          = 'For Him ♥'
+const PAGE_URL             = 'https://xdipx.com/for-him'
 
-export const meta: MetaFunction = () => [
-  { title: `${PAGE_TITLE} | xdipx` },
-  { name: 'description', content: "Hand-picked pleasure products for him. Ships discreet." },
-  { tagName: 'link', rel: 'canonical', href: PAGE_URL },
-]
+// Treat /for-him as a virtual collection. Editors can create a Sanity
+// `collectionPage` doc with shopifyHandle: "for-him" to override SEO copy,
+// add intro paragraphs, and ship FAQ schema. When no doc exists we fall
+// back to the hardcoded constants above.
+const FACET_PARAMS = ['mood', 'audience', 'matters', 'budgetMax'] as const
 
 export function headers() {
   return {
@@ -27,16 +31,64 @@ export function headers() {
   }
 }
 
-export async function loader(_: LoaderFunctionArgs) {
-  const [products, presets] = await Promise.all([
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url)
+  const filtersApplied = FACET_PARAMS.some(p => {
+    const vals = url.searchParams.getAll(p)
+    return vals.some(v => v && v.length > 0)
+  })
+
+  const [products, presets, sanity] = await Promise.all([
     getProductsByTag('for-him', 24),
     getEmmaPresets(),
+    getCollectionPage('for-him'),
   ])
-  return { products, presets }
+
+  const seoTitle       = sanity?.seoTitle       ?? FALLBACK_SEO_TITLE
+  const seoDescription = sanity?.seoDescription ?? FALLBACK_DESCRIPTION
+  const h1             = sanity?.h1             ?? FALLBACK_H1
+  const introHtml      = sanity?.introHtml      ?? null
+  const heroImageUrl   = sanity?.heroImageUrl   ?? null
+  const heroImageAlt   = sanity?.heroImageAlt   ?? h1
+  const faqs           = sanity?.faqs ?? []
+
+  const canonical = canonicalUrl({ path: '/for-him' })
+
+  return {
+    products, presets,
+    seoTitle, seoDescription, h1, introHtml, heroImageUrl, heroImageAlt, faqs,
+    canonical, filtersApplied,
+  }
+}
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  if (!data) return [{ title: pageTitle([FALLBACK_SEO_TITLE]) }]
+  const title = pageTitle([data.seoTitle])
+  const description = data.seoDescription
+
+  const tags: MetaDescriptor[] = [
+    { title },
+    { name: 'description', content: description },
+    { tagName: 'link', rel: 'canonical', href: data.canonical },
+    ...buildSocialMeta({
+      title,
+      description,
+      url: data.canonical,
+      image: data.heroImageUrl,
+      type: 'website',
+      imageAlt: data.heroImageAlt,
+    }),
+  ]
+
+  if (data.filtersApplied) {
+    tags.push({ name: 'robots', content: robotsContent({ index: false, follow: true }) })
+  }
+
+  return tags
 }
 
 export default function ForHimPage() {
-  const { products, presets } = useLoaderData<typeof loader>()
+  const { products, presets, seoTitle, seoDescription, h1, introHtml, faqs } = useLoaderData<typeof loader>()
   const [params] = useSearchParams()
 
   useEffect(() => {
@@ -72,15 +124,17 @@ export default function ForHimPage() {
         { name: 'For Him', url: PAGE_URL },
       ]} />
       <CollectionStructuredData
-        name={PAGE_TITLE}
-        description={PAGE_DESCRIPTION}
+        name={seoTitle}
+        description={seoDescription}
         url={PAGE_URL}
         items={products.map(p => ({ handle: p.handle, title: p.title }))}
       />
+      {faqs.length > 0 ? <FAQStructuredData faqs={faqs} /> : null}
       <ProductGrid
-        title="For Him ♥"
+        title={h1}
         subtitle="Dialed in. Just for him."
-        intro={PAGE_DESCRIPTION}
+        intro={seoDescription}
+        introHtml={introHtml}
         bullets={[
           'Strokers, sleeves, and solo-play essentials',
           'Performance and stamina accessories',
@@ -88,6 +142,7 @@ export default function ForHimPage() {
           'Men-forward wellness and care',
           'Discreet packaging and billing on every order',
         ]}
+        faqs={faqs}
         products={filtered}
         ask={{ moods, audiences, matters, priceMin, priceMax, presets }}
       />
@@ -118,13 +173,15 @@ function deriveFacets(items: Product[]) {
 }
 
 function ProductGrid({
-  title, subtitle, intro, bullets, products, ask,
+  title, subtitle, intro, introHtml, bullets, faqs, products, ask,
 }: {
-  title:    string
-  subtitle: string
-  intro:    string
-  bullets:  string[]
-  products: Product[]
+  title:     string
+  subtitle:  string
+  intro:     string
+  introHtml: string | null
+  bullets:   string[]
+  faqs:      Array<{ question: string; answer: string }>
+  products:  Product[]
   ask: {
     moods:     string[]
     audiences: string[]
@@ -142,7 +199,14 @@ function ProductGrid({
       <p className="text-ink/60 mb-6">{subtitle}</p>
 
       <div className="mb-8 max-w-3xl">
-        <p className="text-ink/80 leading-relaxed mb-4">{intro}</p>
+        {introHtml ? (
+          <div
+            className="prose prose-sm text-ink/80 leading-relaxed mb-4 max-w-none"
+            dangerouslySetInnerHTML={{ __html: introHtml }}
+          />
+        ) : (
+          <p className="text-ink/80 leading-relaxed mb-4">{intro}</p>
+        )}
         <ul className="space-y-1.5">
           {bullets.map((b, i) => (
             <li key={i} className="flex items-start gap-2 text-sm text-ink/75">
@@ -185,6 +249,25 @@ function ProductGrid({
           )}
         </div>
       </div>
+
+      {faqs.length > 0 && (
+        <section className="mt-12 max-w-3xl">
+          <h2 className="text-xl font-bold text-ink mb-4" style={{ fontFamily: 'var(--font-display)' }}>
+            Questions ♥
+          </h2>
+          <div className="divide-y divide-line border-y border-line">
+            {faqs.map((faq, i) => (
+              <details key={i} className="group py-4">
+                <summary className="cursor-pointer text-sm font-medium text-ink list-none flex items-start gap-3">
+                  <span className="text-coral shrink-0 group-open:rotate-45 transition-transform" aria-hidden="true">+</span>
+                  <span>{faq.question}</span>
+                </summary>
+                <div className="text-sm text-ink/75 leading-relaxed mt-3 ml-6">{faq.answer}</div>
+              </details>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

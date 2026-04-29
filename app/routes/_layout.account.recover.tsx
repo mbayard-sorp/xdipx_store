@@ -3,7 +3,7 @@ import { Link, useActionData, useFetcher, redirect } from 'react-router'
 import { customerRecover } from '~/lib/shopify.server'
 import { getCustomerToken } from '~/lib/customer-session.server'
 
-export const meta: MetaFunction = () => [{ title: 'Reset password — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Reset password — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 // Already logged in → go to account
 export async function loader({ request }: LoaderFunctionArgs) {

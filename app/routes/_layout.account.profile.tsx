@@ -22,7 +22,7 @@ import { Toast } from '~/components/account/Toast'
 import { DangerZone } from '~/components/account/DangerZone'
 import type { AccountOutletContext } from './_layout.account'
 
-export const meta: MetaFunction = () => [{ title: 'Profile — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Profile — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 // ── Action strategy ─────────────────────────────────────────────────────────
 // We return `data({ ok: true, intent }, { headers })` from the action so the

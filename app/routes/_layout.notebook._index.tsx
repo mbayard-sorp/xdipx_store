@@ -1,7 +1,10 @@
-import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
+import type { LoaderFunctionArgs, MetaFunction, MetaDescriptor } from 'react-router'
 import { useLoaderData, Link } from 'react-router'
 import { getBlogPosts, getBlogCategories, getBlogHomepage, isPreviewRequest } from '~/lib/sanity.server'
 import { BlogPostCard } from '~/components/blog/BlogPostCard'
+import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
+import { canonicalUrl, robotsContent } from '~/lib/seo'
+import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
 import type { BlogPostCard as BlogPostCardType, BlogCategory } from '~/types/cms'
 
 export function headers() {
@@ -38,6 +41,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
+  // Canonical strategy:
+  //  - `?category=X` is a faceted view of the dedicated /notebook/category/X
+  //    route; it gets `noindex,follow` (set in meta()) and a bare canonical.
+  //  - `?page=N` (no category) is its own document — self-canonical.
+  //  - Page 1, no category — canonical to bare /notebook.
+  const filtersApplied = !!category
+  const canonical =
+    !filtersApplied && page > 1
+      ? canonicalUrl({
+          path: '/notebook',
+          searchParams: new URLSearchParams({ page: String(page) }),
+          allowedParams: ['page'],
+        })
+      : canonicalUrl({ path: '/notebook' })
+
   return {
     posts: gridPosts,
     featuredPost,
@@ -48,30 +66,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
     categories,
     selectedCategory: category,
     blogHomepage,
+    canonical,
+    filtersApplied,
   }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  const base = data?.selectedCategory
+  if (!data) return [{ title: 'The Notebook | xdipx' }]
+  const base = data.selectedCategory
     ? `${data.selectedCategory.charAt(0).toUpperCase() + data.selectedCategory.slice(1)} — The Notebook`
     : 'The Notebook'
-  const description = data?.blogHomepage?.subtext ?? "Things worth knowing. Things worth trying. Things Emma couldn't stop thinking about."
-  return [
-    { title: `${base} | xdipx` },
+  const pageSuffix = data.page > 1 ? ` — Page ${data.page}` : ''
+  const title = `${base}${pageSuffix} | xdipx`
+  const description = data.blogHomepage?.subtext ?? "Things worth knowing. Things worth trying. Things Emma couldn't stop thinking about."
+
+  const tags: MetaDescriptor[] = [
+    { title },
     { name: 'description', content: description },
-    { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/notebook' },
-    { property: 'og:title', content: `${base} | xdipx` },
-    { property: 'og:type', content: 'website' },
-    { property: 'og:url', content: 'https://xdipx.com/notebook' },
+    { tagName: 'link', rel: 'canonical', href: data.canonical },
+    ...buildSocialMeta({ title, description, url: data.canonical, image: null, type: 'website' }),
   ]
+
+  // Faceted-view of the dedicated category route — let crawlers follow but
+  // don't compete with /notebook/category/{slug} for indexation.
+  if (data.filtersApplied) {
+    tags.push({ name: 'robots', content: robotsContent({ index: false, follow: true }) })
+  }
+
+  return tags
 }
 
 export default function NotebookIndex() {
   const { posts, featuredPost, secondaryPosts, total, page, perPage, categories, selectedCategory } = useLoaderData<typeof loader>()
   const totalPages = Math.ceil(total / perPage)
 
+  const breadcrumbSchema = [
+    { name: 'Home', url: `${SITE_ORIGIN}/` },
+    { name: 'Notebook', url: `${SITE_ORIGIN}/notebook` },
+  ]
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:py-10">
+      <BreadcrumbStructuredData items={breadcrumbSchema} />
       {/* Masthead */}
       <div className="text-center py-6 border-b-2 border-ink">
         <h1
