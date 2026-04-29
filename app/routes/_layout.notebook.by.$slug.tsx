@@ -5,6 +5,8 @@ import { getBlogAuthor, getBlogPosts } from '~/lib/sanity.server'
 import { BlogPostCard } from '~/components/blog/BlogPostCard'
 import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
+import { canonicalUrl } from '~/lib/seo'
+import { buildSocialMeta } from '~/lib/social-meta'
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const slug = params['slug'] ?? ''
@@ -16,25 +18,46 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   if (!author) throw data('Author not found', { status: 404 })
 
   const { posts, total } = await getBlogPosts({ page, perPage, authorSlug: slug })
+  const totalPages = Math.max(1, Math.ceil(total / perPage))
 
-  return { author, posts, total, page, perPage }
+  const basePath = `/notebook/by/${slug}`
+  const canonical =
+    page > 1
+      ? canonicalUrl({
+          path: basePath,
+          searchParams: new URLSearchParams({ page: String(page) }),
+          allowedParams: ['page'],
+        })
+      : canonicalUrl({ path: basePath })
+
+  return { author, posts, total, page, perPage, totalPages, canonical }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
   if (!loaderData) return [{ title: 'Writer not found — xdipx' }]
-  const { author } = loaderData
-  const title = `${author.name} — The Notebook | xdipx`
+  const { author, page, totalPages, canonical } = loaderData
+  const pageSuffix = page > 1 ? ` — Page ${page}` : ''
+  const title = `${author.name}${pageSuffix} — The Notebook | xdipx`
   const description = author.bio ?? `Posts by ${author.name} in the xdipx Notebook.`
-  const canonical = `https://xdipx.com/notebook/by/${author.slug}`
+  const image = author.avatarUrl ?? null
 
-  return [
+  const tags: ReturnType<MetaFunction> = [
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: canonical },
-    { property: 'og:title', content: title },
-    { property: 'og:type', content: 'profile' },
-    { property: 'og:url', content: canonical },
+    ...buildSocialMeta({ title, description, url: canonical, image, type: 'profile' }),
   ]
+
+  const basePath = `https://xdipx.com/notebook/by/${author.slug}`
+  if (page > 1) {
+    const prevHref = page - 1 === 1 ? basePath : `${basePath}?page=${page - 1}`
+    tags.push({ tagName: 'link', rel: 'prev', href: prevHref })
+  }
+  if (page < totalPages) {
+    tags.push({ tagName: 'link', rel: 'next', href: `${basePath}?page=${page + 1}` })
+  }
+
+  return tags
 }
 
 function formatJoinedDate(iso?: string) {
@@ -60,9 +83,36 @@ export default function NotebookAuthorPage() {
     { name: author.name, url: `https://xdipx.com/notebook/by/${author.slug}` },
   ]
 
+  // Person JSON-LD — distinct @id from /about#emma so Emma's editor identity
+  // and notebook author identities don't collide. The notebook author page is
+  // the canonical "@id" anchor for Person references in BlogPosting schema.
+  const personSchema = {
+    '@context': 'https://schema.org',
+    '@type':    'Person',
+    '@id':      `https://xdipx.com/notebook/by/${author.slug}#person`,
+    name:       author.name,
+    url:        `https://xdipx.com/notebook/by/${author.slug}`,
+    ...(author.avatarUrl ? { image: author.avatarUrl } : {}),
+    ...(author.bio ? { description: author.bio } : {}),
+    ...(author.role ? { jobTitle: author.role } : {}),
+    worksFor: {
+      '@type': 'Organization',
+      '@id':   'https://xdipx.com/#organization',
+      name:    'xdipx',
+      url:     'https://xdipx.com',
+    },
+    ...(author.socialLinks && author.socialLinks.length > 0
+      ? { sameAs: author.socialLinks.map(s => s.url).filter(Boolean) }
+      : {}),
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:py-10">
       <BreadcrumbStructuredData items={breadcrumbSchema} />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(personSchema) }}
+      />
       <BreadcrumbNav items={breadcrumbs} />
 
       {/* Hero */}

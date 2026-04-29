@@ -5,6 +5,8 @@ import { getBlogPosts, getBlogCategories } from '~/lib/sanity.server'
 import { BlogPostCard } from '~/components/blog/BlogPostCard'
 import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
+import { canonicalUrl } from '~/lib/seo'
+import { buildSocialMeta } from '~/lib/social-meta'
 import type { BlogCategory } from '~/types/cms'
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
@@ -18,25 +20,50 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   if (!category) throw data('Category not found', { status: 404 })
 
   const { posts, total } = await getBlogPosts({ page, perPage, category: slug })
+  const totalPages = Math.max(1, Math.ceil(total / perPage))
 
-  return { category, posts, total, page, perPage }
+  // Page > 1 is its own document — self-canonical at ?page=N. Page 1 canonicals
+  // to the bare slug URL.
+  const basePath = `/notebook/category/${slug}`
+  const canonical =
+    page > 1
+      ? canonicalUrl({
+          path: basePath,
+          searchParams: new URLSearchParams({ page: String(page) }),
+          allowedParams: ['page'],
+        })
+      : canonicalUrl({ path: basePath })
+
+  return { category, posts, total, page, perPage, totalPages, canonical }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
   if (!loaderData) return [{ title: 'Category not found — xdipx' }]
-  const { category } = loaderData
-  const title = (category.seoTitle ?? `${category.name} — The Notebook`) + ' | xdipx'
+  const { category, page, totalPages, canonical } = loaderData
+  const baseTitle = category.seoTitle ?? `${category.name} — The Notebook`
+  const pageSuffix = page > 1 ? ` — Page ${page}` : ''
+  const title = `${baseTitle}${pageSuffix} | xdipx`
   const description = category.seoDescription ?? category.description ?? `Read ${category.name.toLowerCase()} posts in the xdipx Notebook.`
-  const canonical = `https://xdipx.com/notebook/category/${category.slug}`
 
-  return [
+  const tags: ReturnType<MetaFunction> = [
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: canonical },
-    { property: 'og:title', content: title },
-    { property: 'og:type', content: 'website' },
-    { property: 'og:url', content: canonical },
+    ...buildSocialMeta({ title, description, url: canonical, image: null, type: 'website' }),
   ]
+
+  // rel=prev/next for paginated category archives — helps Google understand
+  // the sequence even with self-canonical paginated docs.
+  const basePath = `https://xdipx.com/notebook/category/${category.slug}`
+  if (page > 1) {
+    const prevHref = page - 1 === 1 ? basePath : `${basePath}?page=${page - 1}`
+    tags.push({ tagName: 'link', rel: 'prev', href: prevHref })
+  }
+  if (page < totalPages) {
+    tags.push({ tagName: 'link', rel: 'next', href: `${basePath}?page=${page + 1}` })
+  }
+
+  return tags
 }
 
 export default function NotebookCategoryPage() {

@@ -19,7 +19,7 @@ interface BuildSocialMetaInput {
   description: string
   url: string
   image: string | null
-  type?: 'website' | 'product' | 'article'
+  type?: 'website' | 'product' | 'article' | 'profile'
   siteName?: string
   twitterHandle?: string
   imageAlt?: string
