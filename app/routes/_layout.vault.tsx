@@ -1,17 +1,13 @@
 import { useEffect } from 'react'
-import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
+import type { LoaderFunctionArgs, MetaFunction, MetaDescriptor } from 'react-router'
 import { useLoaderData, Link } from 'react-router'
 import { getVaultDeals, getCollectionDeals } from '~/lib/shopify.server'
 import { getVaultFilterTabs } from '~/lib/kv.server'
 import { VaultCard } from '~/components/store/VaultCard'
 import { trackVaultBrowse, trackViewItemList } from '~/lib/analytics.client'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
-
-export const meta: MetaFunction = () => [
-  { title: 'The Shelf — Previous Picks | xdipx' },
-  { name: 'description', content: "The shelf — every pick Emma's featured. Some still available." },
-  { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/vault' },
-]
+import { canonicalUrl, robotsContent } from '~/lib/seo'
+import { buildSocialMeta } from '~/lib/social-meta'
 
 export function headers() {
   return {
@@ -22,7 +18,7 @@ export function headers() {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url     = new URL(request.url)
-  const page    = parseInt(url.searchParams.get('page') ?? '1')
+  const page    = Math.max(1, parseInt(url.searchParams.get('page') ?? '1'))
   const tabSlug = url.searchParams.get('tab') ?? 'all'
 
   const tabs      = await getVaultFilterTabs()
@@ -45,7 +41,69 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  return { deals, hasNextPage, page, tabs, activeTabId: activeTab.id, activeTabSlug: activeTab.slug }
+  // Canonical / index strategy:
+  //  - `?tab=` (anything other than the default 'all' tab) is a faceted view
+  //    of /vault → bare canonical + `noindex,follow` so we don't compete with
+  //    the parent vault page for indexation.
+  //  - `?page=N` on the default tab is its own document → self-canonical.
+  //  - `?tab=X&page=N` is already non-canonical via the tab rule.
+  const tabApplied = activeTab.slug !== 'all'
+  const canonical = !tabApplied && page > 1
+    ? canonicalUrl({
+        path: '/vault',
+        searchParams: new URLSearchParams({ page: String(page) }),
+        allowedParams: ['page'],
+      })
+    : canonicalUrl({ path: '/vault' })
+
+  return {
+    deals, hasNextPage, page, tabs,
+    activeTabId: activeTab.id,
+    activeTabSlug: activeTab.slug,
+    activeTabLabel: activeTab.label,
+    canonical, tabApplied,
+  }
+}
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  if (!data) {
+    return [
+      { title: 'The Shelf — Previous Picks | xdipx' },
+      { name: 'description', content: "The shelf — every pick Emma's featured. Some still available." },
+      { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/vault' },
+    ]
+  }
+
+  const tabSuffix  = data.tabApplied ? ` — ${data.activeTabLabel}` : ''
+  const pageSuffix = data.page > 1 ? ` — Page ${data.page}` : ''
+  const title       = `The Shelf${tabSuffix}${pageSuffix} | xdipx`
+  const description = "The shelf — every pick Emma's featured. Some still available."
+
+  const tags: MetaDescriptor[] = [
+    { title },
+    { name: 'description', content: description },
+    { tagName: 'link', rel: 'canonical', href: data.canonical },
+    ...buildSocialMeta({ title, description, url: data.canonical, image: null, type: 'website' }),
+  ]
+
+  if (data.tabApplied) {
+    tags.push({ name: 'robots', content: robotsContent({ index: false, follow: true }) })
+  }
+
+  // rel=prev/next for the indexable, default-tab pagination chain. Tab-filtered
+  // variants are noindex, so their pagination doesn't need the hint.
+  if (!data.tabApplied) {
+    const base = 'https://xdipx.com/vault'
+    if (data.page > 1) {
+      const prevHref = data.page - 1 === 1 ? base : `${base}?page=${data.page - 1}`
+      tags.push({ tagName: 'link', rel: 'prev', href: prevHref })
+    }
+    if (data.hasNextPage) {
+      tags.push({ tagName: 'link', rel: 'next', href: `${base}?page=${data.page + 1}` })
+    }
+  }
+
+  return tags
 }
 
 export default function VaultPage() {
