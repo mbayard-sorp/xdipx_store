@@ -175,13 +175,13 @@ export default function CollectionsHub() {
                   className="group block rounded-2xl overflow-hidden border border-line bg-paper hover:shadow-md transition-shadow"
                 >
                   {c.image?.url && (
-                    <div className="aspect-[4/3] bg-cream-2 overflow-hidden">
+                    <div className="h-[200px] bg-cream-2 overflow-hidden">
                       <img
                         src={`${c.image.url}${c.image.url.includes('?') ? '&' : '?'}width=600`}
                         alt={c.image.altText ?? c.title}
                         loading="lazy"
                         decoding="async"
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
                       />
                     </div>
                   )}
@@ -225,7 +225,7 @@ export default function CollectionsHub() {
                       to={`/collections/${c.handle}`}
                       className="group block rounded-2xl overflow-hidden border border-line bg-paper hover:shadow-md transition-shadow"
                     >
-                      <div className="aspect-[4/3] bg-cream-2 overflow-hidden">
+                      <div className="h-[200px] bg-cream-2 overflow-hidden">
                         {c.image?.url ? (
                           <picture>
                             <source
@@ -251,7 +251,7 @@ export default function CollectionsHub() {
                               alt={c.image.altText ?? c.title}
                               loading="lazy"
                               decoding="async"
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                              className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
                             />
                           </picture>
                         ) : (
