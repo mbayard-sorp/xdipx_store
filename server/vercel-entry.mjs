@@ -133,6 +133,7 @@ __export(schema_exports, {
   pdpProductVotes: () => pdpProductVotes,
   pipelineSettings: () => pipelineSettings,
   productCopurchase: () => productCopurchase,
+  productEnrichmentCache: () => productEnrichmentCache,
   referrals: () => referrals,
   returns: () => returns,
   smsAgeConsent: () => smsAgeConsent,
@@ -159,7 +160,7 @@ import {
   uniqueIndex,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -520,6 +521,28 @@ var init_schema = __esm({
       handleAIdx: index("copurchase_a_idx").on(t.handleA),
       handleBIdx: index("copurchase_b_idx").on(t.handleB)
     }));
+    productEnrichmentCache = pgTable("product_enrichment_cache", {
+      id: serial("id").primaryKey(),
+      productId: varchar("product_id", { length: 64 }).notNull(),
+      // Shopify GID
+      fieldName: varchar("field_name", { length: 64 }).notNull(),
+      // e.g. tagline, descriptionHtml
+      voiceHash: varchar("voice_hash", { length: 32 }).notNull(),
+      // sha1 slice of system+brand voice
+      promptVersion: varchar("prompt_version", { length: 16 }).notNull(),
+      // bumped on prompt-structure changes
+      content: json("content").notNull(),
+      // generated payload (shape varies by field)
+      model: varchar("model", { length: 32 }).notNull(),
+      // "claude-haiku-4-5-..." / "claude-sonnet-4-..."
+      inputTokens: integer("input_tokens").default(0).notNull(),
+      outputTokens: integer("output_tokens").default(0).notNull(),
+      generatedAt: timestamp("generated_at").defaultNow().notNull()
+    }, (t) => ({
+      cacheKeyUniq: uniqueIndex("enrich_cache_key_uniq").on(t.productId, t.fieldName, t.voiceHash, t.promptVersion),
+      productIdx: index("enrich_cache_product_idx").on(t.productId),
+      generatedAtIdx: index("enrich_cache_generated_idx").on(t.generatedAt)
+    }));
   }
 });
 
@@ -545,6 +568,7 @@ __export(shopify_server_exports, {
   adminCustomerDelete: () => adminCustomerDelete,
   adminGetCustomerSubscriptions: () => adminGetCustomerSubscriptions,
   adminGetSubscriptionContract: () => adminGetSubscriptionContract,
+  adminGraphQL: () => adminGraphQL,
   appendProductTag: () => appendProductTag,
   archiveShopifyProduct: () => archiveShopifyProduct,
   associateImageWithVariant: () => associateImageWithVariant,
@@ -634,6 +658,7 @@ __export(shopify_server_exports, {
   setMediaAsPrimary: () => setMediaAsPrimary,
   setPairingWhy: () => setPairingWhy,
   shopifyAdmin: () => shopifyAdmin,
+  slugifyHandle: () => slugifyHandle,
   updateCartLine: () => updateCartLine,
   updateCollectionDescription: () => updateCollectionDescription,
   updateCollectionImage: () => updateCollectionImage,
@@ -710,7 +735,7 @@ function nodeToVaultDeal(node) {
     msrp: parseFloat(parseMetafield(mf, "original_price") || (variant?.compareAtPrice?.amount ?? "0")),
     images: parseImages(node.images.edges),
     brand: node.vendor,
-    category: parseMetafield(mf, "category") || "both",
+    category: parseCategory(parseMetafield(mf, "category")),
     dealStatus: "archived",
     qty: variant?.quantityAvailable ?? 0,
     defaultVariantId: variant?.id ?? null,
@@ -732,6 +757,38 @@ function parseMetafieldJSON(metafields, key, fallback) {
   } catch {
     return fallback;
   }
+}
+function parseCategory(raw) {
+  if (!raw) return [];
+  const valid = /* @__PURE__ */ new Set(["for-him", "for-her", "couples"]);
+  if (raw.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((s) => typeof s === "string" && valid.has(s)).map((s) => s);
+      }
+    } catch {
+    }
+  }
+  const v = raw.trim().toLowerCase();
+  if (v === "both") return ["for-him", "for-her"];
+  if (v === "him") return ["for-him"];
+  if (v === "her") return ["for-her"];
+  if (valid.has(v)) return [v];
+  return [];
+}
+function parseSpecificationsBullets(raw) {
+  if (!raw) return [];
+  if (raw.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim());
+    } catch {
+    }
+  }
+  const items = Array.from(raw.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi));
+  if (items.length === 0) return [];
+  return items.map((m) => (m[1] ?? "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim()).filter((s) => s.length > 0);
 }
 function parseImages(edges) {
   return edges.map((e) => ({ url: e.node.url, altText: e.node.altText ?? "" }));
@@ -901,13 +958,16 @@ function nodeToDeal(node) {
     wholesaleCost: parseFloat(parseMetafield(mf, "wholesale_cost") || "0"),
     mapPrice: parseFloat(parseMetafield(mf, "map_price") || "0"),
     brand: node.vendor,
-    category: parseMetafield(mf, "category") || "both",
+    category: parseCategory(parseMetafield(mf, "category")),
     dealStatus: parseMetafield(mf, "deal_status") || "live",
     dealDate: parseMetafield(mf, "deal_date"),
     qty: variant?.quantityAvailable ?? 0,
     tags: node.tags ?? [],
     accessoryProductIds: parseMetafieldJSON(mf, "accessory_product_ids", []),
-    ...parseMetafield(mf, "specifications") ? { specifications: parseMetafield(mf, "specifications") } : {},
+    ...(() => {
+      const bullets = parseSpecificationsBullets(parseMetafield(mf, "specifications"));
+      return bullets.length > 0 ? { specifications: bullets } : {};
+    })(),
     metaDescription: parseMetafield(mf, "seo_meta_description"),
     ...parseMetafield(mf, "original_description") ? { rawDescription: parseMetafield(mf, "original_description") } : {},
     ...parseMetafield(mf, "deal_score") ? { dealScore: parseFloat(parseMetafield(mf, "deal_score")) } : {},
@@ -1088,13 +1148,16 @@ async function getDealByShopifyId(numericId) {
     wholesaleCost: parseFloat(mfVal("wholesale_cost") || "0"),
     mapPrice: parseFloat(mfVal("map_price") || "0"),
     brand: product.vendor,
-    category: mfVal("category") || "both",
+    category: parseCategory(mfVal("category")),
     dealStatus: mfVal("deal_status") || "pending",
     dealDate: mfVal("deal_date"),
     qty: variant?.inventory_quantity ?? 0,
     tags: product.tags ? product.tags.split(", ").filter(Boolean) : [],
     accessoryProductIds: mfJSON("accessory_product_ids", []),
-    ...mfVal("specifications") ? { specifications: mfVal("specifications") } : {},
+    ...(() => {
+      const bullets = parseSpecificationsBullets(mfVal("specifications"));
+      return bullets.length > 0 ? { specifications: bullets } : {};
+    })(),
     metaDescription: mfVal("seo_meta_description"),
     ...mfVal("original_description") ? { rawDescription: mfVal("original_description") } : {},
     ...mfVal("deal_score") ? { dealScore: parseFloat(mfVal("deal_score")) } : {},
@@ -1216,9 +1279,10 @@ async function getPairingCandidates(opts) {
     } catch {
     }
   }
-  if (out.length < limit && opts.category) {
+  const primaryCategoryTag = Array.isArray(opts.category) ? opts.category[0] : opts.category;
+  if (out.length < limit && primaryCategoryTag) {
     try {
-      const byCategory = await getProductsByTag(opts.category, 8);
+      const byCategory = await getProductsByTag(primaryCategoryTag, 8);
       for (const p of byCategory) {
         const c = toCandidate2(p);
         if (c) out.push(c);
@@ -1923,28 +1987,35 @@ async function pushProductToShopify(doc) {
     }
     metafields.push({ namespace: "xdipx", key, value: v, type, ownerId: gid });
   };
+  const addCustom = (key, value, type) => {
+    let v = value;
+    if (v && type === "single_line_text_field") v = v.replace(/[\r\n]+/g, " ").trim();
+    if (!v || v === "") return;
+    metafields.push({ namespace: "custom", key, value: v, type, ownerId: gid });
+  };
   add("tagline", doc.tagline, "single_line_text_field", true);
   add("full_story", ptToHtml(doc.fullStory), "multi_line_text_field");
   add("works_for_him", ptToHtml(doc.worksForHim), "multi_line_text_field");
   add("works_for_her", ptToHtml(doc.worksForHer), "multi_line_text_field");
   add("mood_image_url", doc.moodImageUrl, "single_line_text_field");
   add("product_type_dial", doc.productTypeDial, "single_line_text_field");
+  addCustom("product_subtype_dial", doc.productSubtypeDial ?? void 0, "single_line_text_field");
   add("original_title", doc.originalTitle, "single_line_text_field");
-  add("category", doc.category, "single_line_text_field");
+  if (doc.category && doc.category.length > 0) {
+    metafields.push({
+      namespace: "xdipx",
+      key: "category",
+      ownerId: gid,
+      value: JSON.stringify(doc.category),
+      type: "single_line_text_field"
+    });
+  }
   add("deal_status", doc.dealStatus, "single_line_text_field");
   add("deal_date", doc.dealDate, "date");
   add("nalpac_sku", doc.nalpacSku, "single_line_text_field");
   add("original_price", doc.originalPrice?.toString(), "number_decimal");
   add("wholesale_cost", doc.wholesaleCost?.toString(), "number_decimal");
   add("map_price", doc.mapPrice?.toString(), "number_decimal");
-  if (!doc.featureBullets?.length) throw new Error("pushProductToShopify: featureBullets is empty");
-  metafields.push({
-    namespace: "xdipx",
-    key: "feature_bullets",
-    ownerId: gid,
-    value: JSON.stringify(doc.featureBullets),
-    type: "json"
-  });
   if (doc.boxContents?.length) {
     metafields.push({
       namespace: "xdipx",
@@ -1964,8 +2035,16 @@ async function pushProductToShopify(doc) {
     });
   }
   add("deal_score", doc.dealScore?.toString(), "number_decimal");
-  add("seo_meta_description", doc.seoMetaDescription, "multi_line_text_field", true);
-  add("specifications", doc.specifications, "multi_line_text_field", true);
+  add("seo_meta_description", doc.seoMetaDescription, "multi_line_text_field");
+  if (doc.specifications?.length) {
+    metafields.push({
+      namespace: "xdipx",
+      key: "specifications",
+      ownerId: gid,
+      value: JSON.stringify(doc.specifications),
+      type: "multi_line_text_field"
+    });
+  }
   if (doc.careInstructions?.length) {
     metafields.push({
       namespace: "xdipx",
@@ -2083,8 +2162,10 @@ async function findProductBySKU(sku) {
   `, { query: `sku:${sku}` });
   return data.products.edges[0]?.node.id ?? null;
 }
-async function createShopifyProductFromFeed(product) {
-  const handle = product.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 200);
+function slugifyHandle(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 200);
+}
+async function createShopifyProductFromFeed(product, handle) {
   const tags = buildProductTags(product);
   const res = await shopifyAdmin("/products.json", "POST", {
     product: {
@@ -2111,8 +2192,7 @@ async function createShopifyProductFromFeed(product) {
   }
   return String(res.product.id);
 }
-async function createShopifyProductWithVariants(master, variants, optionName) {
-  const handle = master.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 200);
+async function createShopifyProductWithVariants(master, variants, optionName, handle) {
   const tags = [
     `brand:${master.brand.toLowerCase().replace(/\s+/g, "-")}`,
     `nalpac-sku-${master.sku}`,
@@ -3850,7 +3930,18 @@ __export(sanity_server_exports, {
   upsertProductPage: () => upsertProductPage
 });
 import { createClient } from "@sanity/client";
+import { createHash } from "node:crypto";
 import { toHTML as toHTML2 } from "@portabletext/to-html";
+function withSanityKey(items, hashOf) {
+  const seen = /* @__PURE__ */ new Set();
+  return items.map((item, i) => {
+    const base = createHash("sha1").update(hashOf(item)).digest("hex").slice(0, 12);
+    let key = base;
+    if (seen.has(key)) key = `${base}${i.toString(36)}`;
+    seen.add(key);
+    return { ...item, _key: key };
+  });
+}
 function getClient(withToken = false, preview = false, perspective) {
   if (!projectId) return null;
   const resolvedPerspective = perspective ?? (preview ? "previewDrafts" : "published");
@@ -4022,15 +4113,13 @@ async function upsertProductPage(params) {
     created = true;
   }
   const searchFields = {};
+  if (params.title !== void 0) searchFields.title = params.title;
   if (params.vendor !== void 0) searchFields.vendor = params.vendor;
   if (params.tags !== void 0) searchFields.tags = params.tags;
   if (params.tagline !== void 0) searchFields.tagline = params.tagline;
-  if (params.featureBullets !== void 0) searchFields.featureBullets = params.featureBullets;
   if (params.description !== void 0) searchFields.description = stringToPortableText(params.description);
   if (params.seoDescription !== void 0) searchFields.seoDescription = params.seoDescription;
   if (params.category !== void 0) searchFields.category = params.category;
-  if (params.mapPrice !== void 0) searchFields.mapPrice = params.mapPrice;
-  if (params.originalPrice !== void 0) searchFields.originalPrice = params.originalPrice;
   if (params.seoTitle !== void 0) searchFields.seoTitle = params.seoTitle;
   if (params.moodImageUrl !== void 0) searchFields.moodImageUrl = params.moodImageUrl;
   if (params.productTypeDial !== void 0) searchFields.productTypeDial = params.productTypeDial;
@@ -4040,8 +4129,21 @@ async function upsertProductPage(params) {
   if (params.ivrExperience !== void 0) searchFields.ivrExperience = params.ivrExperience;
   if (params.ivrUseCase !== void 0) searchFields.ivrUseCase = params.ivrUseCase;
   if (params.ivrFeatures !== void 0) searchFields.ivrFeatures = params.ivrFeatures;
-  if (params.ivrVoiceSummary !== void 0) searchFields.ivrVoiceSummary = params.ivrVoiceSummary;
-  if (params.moodTags !== void 0 && params.moodTags.length > 0) searchFields.ivrMood = params.moodTags;
+  if (params.productFaqs !== void 0) {
+    searchFields.productFaqs = withSanityKey(params.productFaqs, (f) => `${f.question}|${f.category}`);
+  }
+  if (params.careInstructions !== void 0) searchFields.careInstructions = params.careInstructions;
+  if (params.specifications !== void 0) searchFields.specifications = params.specifications;
+  if (params.boxContents !== void 0) searchFields.boxContents = params.boxContents;
+  if (params.sensationDialV2 !== void 0) {
+    const items = params.sensationDialV2.items ?? [];
+    searchFields.sensationDialV2 = {
+      ...params.sensationDialV2,
+      items: withSanityKey(items, (it) => it.label)
+    };
+  }
+  if (params.productSubtypeDial !== void 0) searchFields.productSubtypeDial = params.productSubtypeDial;
+  if (params.originalTitle !== void 0) searchFields.originalTitle = params.originalTitle;
   if (params.archived !== void 0) searchFields.archived = params.archived;
   if (Object.keys(searchFields).length > 0) {
     await writeClient.patch(docId).set(searchFields).commit();
@@ -4509,7 +4611,7 @@ async function getBlogPostsForSitemap() {
     const client2 = getClient();
     if (!client2) return [];
     return await client2.fetch(
-      `*[_type == "blogPost" && status == "published"] | order(publishedAt desc) {
+      `*[_type == "blogPost" && status == "published" && noIndex != true] | order(publishedAt desc) {
         "slug": slug.current, publishedAt, _updatedAt
       }`
     );
@@ -5602,7 +5704,10 @@ function createRailGenState(excludeHandles = []) {
 async function buildCandidatePool(deal, partner) {
   const audiences = [.../* @__PURE__ */ new Set([...deal.audienceTags ?? [], ...partner?.audienceTags ?? []])];
   const moods = [.../* @__PURE__ */ new Set([...deal.moodTags ?? [], ...partner?.moodTags ?? []])];
-  const categories = [...new Set([deal.category, partner?.category].filter(Boolean))];
+  const categories = [.../* @__PURE__ */ new Set([
+    ...deal.category ?? [],
+    ...partner?.category ?? []
+  ])];
   const buckets = await Promise.all([
     ...audiences.slice(0, 3).map((t) => getProductsByTag(`audience-${t}`, 10).catch(() => [])),
     ...moods.slice(0, 3).map((t) => getProductsByTag(`mood-${t}`, 10).catch(() => [])),
@@ -5775,9 +5880,12 @@ __export(claude_server_exports, {
   IVR_EXPERIENCE_LEVELS: () => IVR_EXPERIENCE_LEVELS,
   IVR_FEATURES: () => IVR_FEATURES,
   IVR_USE_CASES: () => IVR_USE_CASES,
+  PRODUCT_SUBTYPES_BY_TYPE: () => PRODUCT_SUBTYPES_BY_TYPE,
+  drainToolTokens: () => drainToolTokens,
   enhanceLtxPrompt: () => enhanceLtxPrompt,
   enhanceVeoPrompt: () => enhanceVeoPrompt,
   generateAskEmmaTags: () => generateAskEmmaTags,
+  generateAskEmmaTagsAll: () => generateAskEmmaTagsAll,
   generateBlogArticle: () => generateBlogArticle,
   generateBlogDraft: () => generateBlogDraft,
   generateBlogOutline: () => generateBlogOutline,
@@ -5790,8 +5898,8 @@ __export(claude_server_exports, {
   generateIvrExperience: () => generateIvrExperience,
   generateIvrFeatures: () => generateIvrFeatures,
   generateIvrUseCase: () => generateIvrUseCase,
-  generateIvrVoiceSummary: () => generateIvrVoiceSummary,
   generatePairingWhy: () => generatePairingWhy,
+  generateProductFaqs: () => generateProductFaqs,
   generateProductTitle: () => generateProductTitle,
   generateRails: () => generateRails,
   generateSEOTitle: () => generateSEOTitle,
@@ -5800,22 +5908,47 @@ __export(claude_server_exports, {
   generateTweetCopy: () => generateTweetCopy,
   generateVideoContent: () => generateVideoContent,
   generateWithSystem: () => generateWithSystem,
+  inferProductTaxonomy: () => inferProductTaxonomy,
   inferProductTypeDial: () => inferProductTypeDial,
   pickForContextGroup: () => pickForContextGroup,
   selectAccessories: () => selectAccessories
 });
 import Anthropic from "@anthropic-ai/sdk";
-import { createHash } from "node:crypto";
-async function generate(prompt, maxTokens = 1024, model = MODEL) {
+import { createHash as createHash2 } from "node:crypto";
+async function callClaude(opts) {
+  let result;
+  void opts.llmClient;
   const msg = await client.messages.create({
-    model,
-    max_tokens: maxTokens,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: prompt }]
+    model: opts.model,
+    max_tokens: opts.maxTokens,
+    system: opts.system,
+    messages: [{ role: "user", content: opts.userPrompt }]
   });
   const block = msg.content[0];
   if (block?.type !== "text") throw new Error("Unexpected Claude response type");
-  return block.text;
+  result = {
+    text: block.text,
+    inputTokens: msg.usage.input_tokens,
+    outputTokens: msg.usage.output_tokens
+  };
+  _toolTokenAccumulator.input += result.inputTokens;
+  _toolTokenAccumulator.output += result.outputTokens;
+  return result;
+}
+function drainToolTokens() {
+  const out = _toolTokenAccumulator;
+  _toolTokenAccumulator = { input: 0, output: 0 };
+  return out;
+}
+async function generate(prompt, maxTokens = 1024, model = MODEL, llmClient) {
+  const { text: text2 } = await callClaude({
+    llmClient,
+    model,
+    maxTokens,
+    system: SYSTEM_PROMPT,
+    userPrompt: prompt
+  });
+  return text2;
 }
 async function generateWithSystem(opts) {
   const { system, user, model = MODEL_FAST, maxTokens = 128, timeoutMs } = opts;
@@ -5838,11 +5971,18 @@ async function generateWithSystem(opts) {
 function stripFences(raw) {
   return raw.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
 }
+function containsPrice(text2) {
+  return /\$\s?\d/.test(text2) || /\b\d+(?:\.\d{1,2})?\s*(?:dollars|usd)\b/i.test(text2);
+}
+function looksLikeMetaCommentary(text2) {
+  const head = text2.slice(0, 80).toLowerCase();
+  return head.startsWith("i notice") || head.startsWith("i'm flagging") || head.startsWith("i am flagging") || head.startsWith("i'd flag") || head.startsWith("the keyword") || head.startsWith("these keywords don't") || head.startsWith("these keyword targets") || head.startsWith("the provided keyword");
+}
 function resolveSeoContentType(type) {
   if (type === "blog_article") return "blog";
   return "pdp";
 }
-async function generateCopy(req) {
+async function generateCopy(req, llmClient) {
   const { type, product } = req;
   const author = req.authorSlug ? await getEditorialAuthor(req.authorSlug).catch(() => null) : null;
   const seoMode = req.seoMode ?? author?.seoMode ?? "natural";
@@ -5861,30 +6001,31 @@ async function generateCopy(req) {
   const productContextBase = `Product: ${product.title}
 Brand: ${product.brand}
 Description: ${product.description}
-Categories: ${product.categories.join(", ")}${product.dealPrice ? `
-Deal price: $${product.dealPrice} (was $${product.msrp})` : ""}`;
+Categories: ${product.categories.join(", ")}`;
   const productContext = keywordBlock ? `${productContextBase}
 
 ${keywordBlock}` : productContextBase;
   switch (type) {
     case "tagline": {
-      const primaryPrompt = `Write 3 one-sentence taglines for the following product. Be genuinely funny \u2014 irreverent, witty, puns welcome. Think: a comedian friend who loves these products and has zero shame. Tasteful but not boring. Max 12 words each. Return as a JSON array of strings (no markdown).
+      const primaryPrompt = `Write 3 one-sentence taglines for the following product. Emma voice \u2014 observational, casual, lightly witty. Think: a trusted friend who's recommending it, not a stand-up comedian. Avoid punchline-shaped puns and ad-copy zingers. Fragments are welcome ("the one I keep recommending", "earns its spot daily", "quietly indispensable"). First person OK. Max 12 words each. NO em-dashes. NO \u2665 glyph (reserve it for CTAs and asides). If any keyword targets in the prompt do not fit this product, IGNORE them silently \u2014 write from product details only. Never narrate a mismatch, never preface, never explain. Return as a JSON array of strings (no markdown).
 
 ${productContext}`;
-      const retryPrompt = `Return exactly one short funny sentence as a product tagline. No JSON, no newlines, no lists, no quotes. Just the sentence.
+      const retryPrompt = `Return exactly one short Emma-voice product tagline. Observational, casual, \u2264 12 words. No em-dashes, no \u2665 glyph, no quotes, no preamble, no commentary. Just the sentence.
 
 ${productContext}`;
-      const raw = await generate(primaryPrompt, 1024, MODEL_FAST);
+      const raw = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient);
       try {
         const parsed = JSON.parse(stripFences(raw));
-        const first = Array.isArray(parsed) ? parsed.find((s) => typeof s === "string" && s.trim()) : null;
-        if (first) return { type, content: parsed };
+        if (Array.isArray(parsed)) {
+          const clean = parsed.filter((s) => typeof s === "string" && s.trim() && !looksLikeMetaCommentary(s));
+          if (clean.length > 0) return { type, content: clean };
+        }
       } catch {
       }
-      const retried = await generate(retryPrompt, 1024, MODEL_FAST);
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST, llmClient);
       const line = retried.trim().split("\n")[0]?.trim();
-      if (line) return { type, content: [line] };
-      return { type, content: [`${product.brand} ${product.title} \u2014 today only at xdipx.`] };
+      if (line && !looksLikeMetaCommentary(line)) return { type, content: [line] };
+      return { type, content: [`${product.brand} ${product.title}, today on xdipx.`] };
     }
     case "full_story": {
       const primaryPrompt = `Write a short, punchy product description in xdipx brand voice. Return valid HTML only \u2014 use <p> tags for paragraphs, <strong> for emphasis, <em> for playful asides, <ul>/<li> for bullets. No <html>, <head>, <body> tags. No headings.
@@ -5965,13 +6106,13 @@ ${productContext}`;
       const retryPrompt = `Return ONLY a JSON array of 4 to 5 short benefit strings. Example: ["Dual motors for blended stimulation", "Whisper-quiet for total privacy"]. Nothing else \u2014 no markdown, no prose.
 
 ${productContext}`;
-      const raw = await generate(primaryPrompt, 1024, MODEL_FAST);
+      const raw = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient);
       try {
         const parsed = JSON.parse(stripFences(raw));
         if (Array.isArray(parsed) && parsed.length >= 3) return { type, content: parsed };
       } catch {
       }
-      const retried = await generate(retryPrompt, 1024, MODEL_FAST);
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST, llmClient);
       try {
         const parsed = JSON.parse(stripFences(retried));
         if (Array.isArray(parsed) && parsed.length >= 3) return { type, content: parsed };
@@ -5995,20 +6136,29 @@ ${productContext}`,
       }
     }
     case "seo_meta": {
-      const discount = product.dealPrice && product.msrp && product.msrp > 0 ? `${Math.round(100 - product.dealPrice / product.msrp * 100)}% off` : "Best price";
-      const primaryPrompt = `Write a 140\u2013155 character SEO meta description for this product. Format: "[Discount or 'Best price']. [1-sentence benefit]. Ships discreet. $[price] at xdipx." Return only the meta description, no quotes.
+      const primaryPrompt = `Write a 140\u2013155 character SEO meta description for this product. This shows in Google SERP and link previews \u2014 drives click-through.
+
+Two anchors to include (Emma voice within these constraints):
+  (a) Trust beat: "Ships discreetly" \u2014 keeps the discretion signal in SERP
+  (b) Benefit beat in light Emma voice \u2014 fragment OK, first-person OK, no marketing fluff
+
+NEVER mention price, discount, or any dollar amount. Prices change; this copy is durable. Keep the focus on the product and how it feels to use.
+
+If any keyword targets in this prompt don't actually fit the product, IGNORE them silently and write the description from the product details only \u2014 never narrate the mismatch, never preface, never explain. Output exactly the description and nothing else.
+
+Voice: light Emma \u2014 observational, warm, specific. Not a generic SEO template, not a stand-up zinger. Brand mentions written as "XDIPX" (uppercase). NO em-dashes ("\u2014" or "\u2013"). Return ONLY the meta description text \u2014 no quotes, no labels.
 
 ${productContext}`;
-      const retryPrompt = `Write a single SEO meta description between 140 and 155 characters. Return only the description \u2014 no quotes, no labels, no explanation.
+      const retryPrompt = `Write a single SEO meta description, 140 to 155 characters. Light Emma voice. Include "Ships discreetly". NEVER mention price or dollar amounts. No em-dashes. Output ONLY the description text \u2014 no preamble, no commentary, no quotes.
 
 ${productContext}`;
-      const text2 = await generate(primaryPrompt, 1024, MODEL_FAST);
+      const text2 = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient);
       const cleaned = text2.replace(/^["']|["']$/g, "").trim();
-      if (cleaned.length >= 50) return { type, content: cleaned.slice(0, 155) };
-      const retried = await generate(retryPrompt, 1024, MODEL_FAST);
+      if (cleaned.length >= 50 && !looksLikeMetaCommentary(cleaned) && !containsPrice(cleaned)) return { type, content: cleaned.slice(0, 155) };
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST, llmClient);
       const cleanedRetry = retried.replace(/^["']|["']$/g, "").trim();
-      if (cleanedRetry.length >= 50) return { type, content: cleanedRetry.slice(0, 155) };
-      const fallback = `${discount} on ${product.brand} ${product.title}. Ships discreetly. ${product.dealPrice ? `$${product.dealPrice} ` : ""}at xdipx.com.`;
+      if (cleanedRetry.length >= 50 && !looksLikeMetaCommentary(cleanedRetry) && !containsPrice(cleanedRetry)) return { type, content: cleanedRetry.slice(0, 155) };
+      const fallback = `${product.brand} ${product.title}. Ships discreetly from XDIPX.`;
       return { type, content: fallback.slice(0, 155) };
     }
     case "box_contents": {
@@ -6018,13 +6168,13 @@ ${productContext}`;
       const retryPrompt = `Return ONLY a JSON array of what's in the box. Example: ["1x vibrator", "1x USB cable"]. Nothing else \u2014 no markdown, no prose, no explanation.
 
 ${productContext}`;
-      const raw = await generate(primaryPrompt, 1024, MODEL_FAST);
+      const raw = await generate(primaryPrompt, 1024, MODEL_FAST, llmClient);
       try {
         const parsed = JSON.parse(stripFences(raw));
         if (Array.isArray(parsed) && parsed.length >= 1) return { type, content: parsed };
       } catch {
       }
-      const retried = await generate(retryPrompt, 1024, MODEL_FAST);
+      const retried = await generate(retryPrompt, 1024, MODEL_FAST, llmClient);
       try {
         const parsed = JSON.parse(stripFences(retried));
         if (Array.isArray(parsed) && parsed.length >= 1) return { type, content: parsed };
@@ -6050,13 +6200,13 @@ ${productContext}`;
         const obj = v;
         return typeof obj.eyebrow === "string" && obj.eyebrow.trim().length > 0 && typeof obj.subhead === "string" && obj.subhead.trim().length > 0 && typeof obj.body === "string" && obj.body.trim().length > 0 && typeof obj.bannerHeadline === "string" && obj.bannerHeadline.trim().length > 0;
       };
-      const raw = await generate(primaryPrompt, 512, MODEL_FAST);
+      const raw = await generate(primaryPrompt, 512, MODEL_FAST, llmClient);
       try {
         const parsed = JSON.parse(stripFences(raw));
         if (isValid(parsed)) return { type, content: parsed };
       } catch {
       }
-      const retried = await generate(retryPrompt, 512, MODEL_FAST);
+      const retried = await generate(retryPrompt, 512, MODEL_FAST, llmClient);
       try {
         const parsed = JSON.parse(stripFences(retried));
         if (isValid(parsed)) return { type, content: parsed };
@@ -6178,13 +6328,13 @@ ${pairContext}`;
         pairedHandle: "",
         generatedAt: nowISO()
       });
-      const raw = await generate(primaryPrompt, 1800, MODEL_FAST);
+      const raw = await generate(primaryPrompt, 1800, MODEL_FAST, llmClient);
       try {
         const parsed = JSON.parse(stripFences(raw));
         if (isValid(parsed)) return { type, content: wrap(parsed) };
       } catch {
       }
-      const retried = await generate(retryPrompt, 1800, MODEL_FAST);
+      const retried = await generate(retryPrompt, 1800, MODEL_FAST, llmClient);
       try {
         const parsed = JSON.parse(stripFences(retried));
         if (isValid(parsed)) return { type, content: wrap(parsed) };
@@ -6193,17 +6343,37 @@ ${pairContext}`;
       return { type, content: staticFallback() };
     }
     case "specifications": {
-      const primaryPrompt = `Extract and format the technical specifications from this product description into clean, readable HTML. Use a <table> with two columns (spec name + value) if there are 4+ specs, otherwise use a <ul> list. Include: dimensions, materials, power source, charge time, run time, waterproofing, colors, and any other objective specs. If a spec is not mentioned, omit it. No fluff or marketing copy \u2014 just the facts. Return only the HTML, no markdown, no wrapper tags.
+      const primaryPrompt = `Extract the technical specifications from this product description as a JSON array of "Label: Value" bullet pairs. Each entry is a single short string with the label, a colon, and the value (e.g. "Color: Black", "Material: Body-safe silicone", "Battery life: 90 minutes per charge").
+
+Include only objective facts surfaced in the description: dimensions, materials, power source, charge time, run time, waterproofing, colors, weight, controls, country of origin. Skip categories the source doesn't mention \u2014 better fewer accurate specs than padded ones. NEVER include price, discount, or dollar amounts.
+
+Voice: factual and concise. No fluff, no marketing copy, no Emma asides. Each value 4\u201380 chars.
+
+Return ONLY a JSON array of strings, max 12 entries. No markdown, no prose, no wrapper.
+
+Example: ["Color: Black", "Material: Nylon straps with padded cuffs", "Includes: 4 cuffs and restraint straps", "Fit: Universal mattress sizes"]
 
 ${productContext}`;
-      const retryPrompt = `Return ONLY HTML starting with <table> or <ul> containing the technical specs from this product description. No markdown, no explanation, no preamble.
+      const retryPrompt = `Return ONLY a JSON array of "Label: Value" spec strings extracted from this product. No markdown, no explanation, no preamble. Example: ["Color: Black", "Material: Silicone"]
 
 ${productContext}`;
-      const text2 = await generate(primaryPrompt, 2048);
-      if (text2.includes("<")) return { type, content: text2 };
-      const retried = await generate(retryPrompt, 2048);
-      if (retried.includes("<")) return { type, content: retried };
-      return { type, content: `<ul><li>${product.description.slice(0, 500)}</li></ul>` };
+      const tryParse = (raw) => {
+        try {
+          const parsed2 = JSON.parse(stripFences(raw));
+          if (!Array.isArray(parsed2)) return null;
+          const out = parsed2.filter((s) => typeof s === "string" && s.trim().length >= 4 && s.trim().length <= 100).map((s) => s.trim());
+          return out.length > 0 ? out.slice(0, 12) : null;
+        } catch {
+          return null;
+        }
+      };
+      const text2 = await generate(primaryPrompt, 1500, MODEL_FAST, llmClient);
+      const parsed = tryParse(text2);
+      if (parsed) return { type, content: parsed };
+      const retried = await generate(retryPrompt, 1500, MODEL_FAST, llmClient);
+      const parsedRetry = tryParse(retried);
+      if (parsedRetry) return { type, content: parsedRetry };
+      return { type, content: [] };
     }
     case "blog_article": {
       const article = await generateBlogArticle({
@@ -6369,38 +6539,33 @@ Return only the rewritten title, no quotes.`,
 async function generateProductTitle(input) {
   const original = input.rawTitle.trim();
   const fallbackDescriptor = PRODUCT_TYPE_DESCRIPTOR_FALLBACK[input.productTypeDial] ?? "Vibrator";
-  const PRODUCT_TYPE_WORDS = /\b(vibrator|wand|massager|stimulator|stroker|lube|lubricant|gel|harness|plug|ring|sleeve|kit|set|bullet|toy|cleaner|warming|cooling|edible|wearable|panty|dildo)\b/i;
-  if (PRODUCT_TYPE_WORDS.test(original) && original.length >= 12) {
-    return {
-      title: original.slice(0, 70),
-      augmented: false,
-      originalTitle: original,
-      reason: "title already descriptive"
-    };
-  }
   const keywordBlock = input.keywordBlock ?? "";
-  const userPrompt = `Decide whether this manufacturer product title needs an SEO descriptor appended.
+  const userPrompt = `Compose an SEO-friendly product title for this product. Pull descriptors (material, format, category, size / variant) from the manufacturer's description and assemble them in this standardized order:
+
+  [Material / Feature] [Original Manufacturer Name] [Category Noun] [Size / Variant]
 
 Raw manufacturer title: "${input.rawTitle}"
-Brand / vendor: ${input.brand || input.vendor || "(unknown)"}
 Product type (dial): ${input.productTypeDial}
-${input.rawDescription ? `Description (first 400 chars): ${input.rawDescription.slice(0, 400)}` : ""}
+${input.rawDescription ? `Manufacturer description (first 600 chars):
+${input.rawDescription.slice(0, 600)}` : "(no description provided)"}
 ${keywordBlock || ""}
 
 Rules (in priority order):
-1. PRESERVE branded names verbatim \u2014 never rewrite "Sona 2 Cruise", "Magic Wand Original", numbered model names. Treat the manufacturer's chosen name as a proper noun.
-2. LEAVE FULLY-DESCRIPTIVE titles alone \u2014 if the title already contains a product-type word ("wand", "vibrator", "lube", "harness", "plug", "ring", "stimulator", "massager", "kit", "set", etc.) OR a clear functional descriptor, return augmented=false with the original title.
-3. AUGMENT abstract titles \u2014 when no descriptor is present, APPEND ONE concise descriptor after the branded name with a single space (no em-dash, no colon). Example: "Eclipse 7" \u2192 "Eclipse 7 Wand Vibrator".
-4. Pull the descriptor from the dial classification + (if a <keyword_targets> block is provided) primary keyword terms that match this dial. If nothing matches, fall back to: ${fallbackDescriptor}.
-5. NEVER invent claims \u2014 descriptors describe form factor / category only, not benefits ("quiet", "rechargeable", etc.).
-6. Cap final title at 70 chars total.
-7. NEVER use em-dashes ("\u2014") or en-dashes ("\u2013"). Hyphens in compound words ("soft-touch") are fine.
+1. PRESERVE branded model names verbatim \u2014 "Sona 2 Cruise", "Magic Wand Original", numbered model names. Treat the manufacturer's chosen name as a proper noun. You may APPEND descriptors after the branded name; never rewrite the name itself.
+2. NO BRAND PREFIX \u2014 the PDP shows the brand above the title, so don't include "Hott Products" / "System JO" / "Lelo" etc. Start with the material / feature descriptor or the product name.
+3. PULL descriptors from the description, not from imagination. If the description doesn't say "silicone" or "rechargeable", don't add those words.
+4. CATEGORY NOUN \u2014 every title ends with (or contains) a clear category word: "Underwear", "Vibrator", "Wand", "Lube", "Lubricant", "Plug", "Massager", "Sleeve", "Kit", etc. If you can't determine one from the description, fall back to: ${fallbackDescriptor}.
+5. SIZE / VARIANT \u2014 append size or volume when stated ("16oz", "One-Size", "Medium", "12-Pack"). Skip if not in the source.
+6. PLAIN FACTUAL TONE \u2014 no Emma personality, no marketing puffery, no benefit claims ("luxurious", "intense"). Just descriptors.
+7. NEVER use em-dashes ("\u2014") or en-dashes ("\u2013"). Hyphens in compound words ("water-based", "soft-touch") are fine.
+8. Cap final title at 70 characters total. Trim least-informative descriptor first if over.
+9. \`augmented\` should be \`true\` when the new title differs from the raw manufacturer title (which is almost always); \`false\` only when no useful descriptors could be extracted and you preserved the original as-is.
 
 Return ONLY raw JSON (no markdown):
 {"title":"<final title>","augmented":<true|false>,"reason":"<one short sentence>"}`;
   let raw;
   try {
-    raw = await generate(userPrompt, 256, MODEL);
+    raw = await generate(userPrompt, 256, MODEL, input.llmClient);
   } catch (err) {
     console.warn("[generateProductTitle] Claude call failed, falling back to raw title:", err instanceof Error ? err.message : err);
     return {
@@ -6463,7 +6628,7 @@ Return ONLY raw JSON (no markdown):
 {"picks":[{"id":"<accessoryProductId>","blurb":"<\u2264120 chars Emma voice>"}]}`;
   let raw;
   try {
-    raw = await generate(userPrompt, 800, MODEL);
+    raw = await generate(userPrompt, 800, MODEL, input.llmClient);
   } catch (err) {
     console.warn("[generatePairingWhy] Claude call failed:", err instanceof Error ? err.message : err);
     return { accessoryProductIds: [], pairingWhy: {} };
@@ -6495,7 +6660,7 @@ Return ONLY raw JSON (no markdown):
   }
   return { accessoryProductIds, pairingWhy };
 }
-async function generateTweetCopy(deal) {
+async function generateTweetCopy(deal, llmClient) {
   const discountPct = deal.msrp > 0 ? Math.round(100 - deal.dealPrice / deal.msrp * 100) : 0;
   const productUrl = `https://xdipx.com/products/${deal.handle}`;
   const primaryPrompt = `Write a tweet for today's daily deal on xdipx.com.
@@ -6536,10 +6701,10 @@ Product: ${deal.brand} ${deal.title} \u2014 $${deal.dealPrice} (was $${deal.msrp
     }
     return null;
   };
-  const first = await generate(primaryPrompt, 512, MODEL_FAST);
+  const first = await generate(primaryPrompt, 512, MODEL_FAST, llmClient);
   const firstParsed = tryParse(first);
   if (firstParsed) return firstParsed;
-  const retried = await generate(retryPrompt, 512, MODEL_FAST);
+  const retried = await generate(retryPrompt, 512, MODEL_FAST, llmClient);
   const secondParsed = tryParse(retried);
   if (secondParsed) return secondParsed;
   return {
@@ -6814,7 +6979,7 @@ function emmaHeroFallback(deal, variant, voiceHash) {
 async function generateEmmaHero(opts) {
   const variant = opts.variant ?? (opts.deal.mapRestricted ? "quote" : "loving");
   const brandVoice = opts.brandVoice ?? await getPipelineSetting("brandVoice") ?? DEFAULT_BRAND_VOICE;
-  const voiceHash = createHash("sha1").update(brandVoice).digest("hex").slice(0, 12);
+  const voiceHash = createHash2("sha1").update(brandVoice).digest("hex").slice(0, 12);
   const discountPct = opts.deal.msrp > 0 && opts.deal.dealPrice > 0 ? Math.round((opts.deal.msrp - opts.deal.dealPrice) / opts.deal.msrp * 100) : 0;
   const mapLine = opts.deal.mapRestricted ? "MAP-restricted \u2014 no discount claims, no percent-off language, no struck prices." : discountPct > 0 ? `Currently ${discountPct}% off MSRP \u2014 you may allude to value, but never in "buy now" or countdown language.` : "";
   const system = `${EMMA_SYSTEM_PROMPT}
@@ -6825,7 +6990,7 @@ ${brandVoice}`;
 Product context (do NOT echo \u2014 rewrite in Emma's voice):
 - Title: ${opts.deal.seoTitle}
 - Brand: ${opts.deal.brand}
-- Category: ${opts.deal.category}
+- Category: ${opts.deal.category.join(", ")}
 ${opts.deal.tagline ? `- Existing tagline (for context only): ${opts.deal.tagline}` : ""}
 ${opts.deal.fullStory ? `- Full story (context only, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, " ").slice(0, 400)}` : ""}
 ${mapLine}
@@ -6841,15 +7006,14 @@ Return ONLY this JSON (no markdown):
   async function attempt(tries = 2) {
     for (let i = 0; i < tries; i++) {
       try {
-        const msg = await client.messages.create({
+        const { text: text2 } = await callClaude({
+          llmClient: opts.llmClient,
           model: MODEL,
-          max_tokens: 800,
+          maxTokens: 800,
           system,
-          messages: [{ role: "user", content: user }]
+          userPrompt: user
         });
-        const block = msg.content[0];
-        if (block?.type !== "text") throw new Error("non-text response");
-        const parsed = JSON.parse(stripFences(block.text));
+        const parsed = JSON.parse(stripFences(text2));
         if (parsed.eyebrow && parsed.headline && parsed.body && parsed.aside) {
           const out = {
             variant,
@@ -6935,74 +7099,271 @@ async function generateEmmaTake(opts) {
   const system = `${EMMA_SYSTEM_PROMPT}
 
 ${brandVoice}`;
-  const user = `Write Emma's "take" on this product. It will appear in the Emma's take tab on the product page \u2014 a friend-to-friend honest read.
+  const user = `Write Emma's "take" on this product. It appears at the top of the PDP \u2014 a friend-to-friend honest read. This is THE customer-facing voice surface; treat it accordingly.
 
 Product:
 - Title: ${opts.deal.seoTitle}
 - Brand: ${opts.deal.brand}
-- Category: ${opts.deal.category}
+- Category: ${opts.deal.category.join(", ")}
 ${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ""}
-${opts.deal.tagline ? `- Tagline (context): ${opts.deal.tagline}` : ""}
+${opts.deal.tagline ? `- Tagline (context only \u2014 DO NOT echo in first sentence): ${opts.deal.tagline}` : ""}
 ${opts.deal.fullStory ? `- Existing story (context, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, " ").slice(0, 600)}` : ""}
 
 Cover, in this order, in your own voice (no headings, just flowing paragraphs):
 1. Who this clicks for \u2014 what they're after, what they'll like.
-2. Who might want to skip \u2014 be specific. Honest. No marketing fudge.
+2. Why it's worth exploring \u2014 what makes it intriguing, approachable, or fun to try. POSITIVE INVITATION. NEVER tell anyone to skip this product. NEVER gatekeep.
 3. How to get the most out of it \u2014 a tip Emma would whisper to a friend.
 
 Constraints:
-- 120\u2013200 words total. Two short paragraphs maximum.
+- Under 100 words total. One paragraph (or two very short ones, max). The PDP shows this above a "...more" expand fold; staying tight means readers see all three beats without clicking.
 - Return clean HTML \u2014 only <p>, <em>, <strong> tags. No headings, no <ul>, no inline styles, no class attrs.
-- First-person Emma voice throughout. No "Buy now". No countdowns. No clinical language.
+- First-person Emma voice throughout. Present tense. No "Buy now". No countdowns. No clinical language.
 - Do NOT mention price, MAP, or discounts.
-- Do NOT echo the product title in the first sentence.
+- Do NOT echo the product title OR tagline in the first sentence.
+- "sex" and "sexy" are allowed where contextually relevant to the product and customer discovery (e.g. "sex toy", "safer sex", "sexy gift"). Default to "intimate"/"pleasure"/"wellness" for general voice \u2014 don't drop "sex" in for SEO bait.
+- NO em-dashes ("\u2014" or "\u2013"). Use periods, commas, or parentheses.
 
 Return ONLY the HTML \u2014 no markdown, no fences, no preamble.`;
   try {
-    const msg = await client.messages.create({
+    const { text: text2 } = await callClaude({
+      llmClient: opts.llmClient,
       model: MODEL,
-      max_tokens: 800,
+      maxTokens: 800,
       system,
-      messages: [{ role: "user", content: user }]
+      userPrompt: user
     });
-    const block = msg.content[0];
-    if (block?.type !== "text") throw new Error("non-text response");
-    return stripFences(block.text).trim();
+    return stripFences(text2).trim();
   } catch (err) {
     console.error("[generateEmmaTake] failed:", err);
     throw err;
   }
 }
 async function generateCareInstructions(opts) {
-  const user = `Write 3 to 5 short care instructions for this product. Each is one short imperative sentence \u2014 under 14 words.
+  const CONSUMABLE_TYPES = /* @__PURE__ */ new Set([
+    "lube",
+    "massage",
+    "enhancer",
+    "condom"
+  ]);
+  const isConsumable = opts.deal.productTypeDial !== void 0 && CONSUMABLE_TYPES.has(opts.deal.productTypeDial);
+  const user = isConsumable ? `Write 2 or 3 short care/storage bullets for this consumable product. Each is one playful, SEO-friendly sentence \u2014 under 16 words. Goal: fill the PDP "Care" card with something genuinely useful and a little fun, NOT a maintenance manual.
+
+Product:
+- Title: ${opts.deal.seoTitle}
+- Type: ${opts.deal.productTypeDial}
+${opts.deal.specifications?.length ? `- Specs (context): ${opts.deal.specifications.join("; ").slice(0, 400)}` : ""}
+
+Tone:
+- This stuff takes care of you more than you take care of it.
+- Cover what actually matters: where to keep it, when to use it, how it plays with toys / condoms / skin (if relevant), shelf life.
+- SPECIFIC OVER GENERIC. "Store wherever you intend to use it most" beats "store in a cool, dry place." "Stays slick from morning shower to midnight nightstand" beats "long-lasting formula."
+- The word "sex" or "sexy" is allowed where it fits naturally and helps SEO.
+- No em-dashes ("\u2014" or "\u2013"). Use periods, commas, or parentheses.
+
+Return ONLY a JSON array of strings (2\u20133 items). Example: ["Stays slick from morning shower to midnight nightstand.", "Plays well with silicone toys, latex condoms, and sensitive skin."]
+No markdown, no fences, no commentary.` : `Write 3 to 5 short care instructions for this product. Each is one short imperative sentence \u2014 under 14 words.
 
 Product:
 - Title: ${opts.deal.seoTitle}
 - Brand: ${opts.deal.brand}
-- Category: ${opts.deal.category}
+- Category: ${opts.deal.category.join(", ")}
 ${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ""}
-${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, " ").slice(0, 500)}` : ""}
+${opts.deal.specifications?.length ? `- Specs (context): ${opts.deal.specifications.join("; ").slice(0, 500)}` : ""}
 
 Cover what actually matters for this object \u2014 cleaning, charging/storage, lube compatibility (where relevant), what to avoid. Practical, not clinical.
+
+SPECIFIC OVER GENERIC. "Tucks back into the storage pouch; charges off any USB-C" beats "Store in a cool, dry place." "Wipe with mild soap and warm water after use" beats "Clean before storage."
+
+No em-dashes ("\u2014" or "\u2013"). Use periods, commas, or parentheses.
 
 Return ONLY a JSON array of strings. Example: ["Wipe with mild soap and warm water after each use.", "Air-dry before storing in the included pouch."]
 No markdown, no fences, no commentary.`;
   try {
-    const msg = await client.messages.create({
+    const { text: text2 } = await callClaude({
+      llmClient: opts.llmClient,
       model: MODEL_FAST,
-      max_tokens: 400,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: user }]
+      maxTokens: 400,
+      system: `${EMMA_SYSTEM_PROMPT}
+
+${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user
     });
-    const block = msg.content[0];
-    if (block?.type !== "text") throw new Error("non-text response");
-    const parsed = JSON.parse(stripFences(block.text));
+    const parsed = JSON.parse(stripFences(text2));
     if (!Array.isArray(parsed)) throw new Error("expected array");
-    const bullets = parsed.filter((x) => typeof x === "string").map((s) => s.trim()).filter((s) => s.length > 0 && s.length <= 140).slice(0, 5);
-    if (bullets.length < 3) throw new Error(`only ${bullets.length} valid bullets returned`);
+    const bullets = parsed.filter((x) => typeof x === "string").map((s) => s.trim()).filter((s) => s.length > 0 && s.length <= 160).slice(0, 5);
+    const minRequired = isConsumable ? 2 : 3;
+    if (bullets.length < minRequired) throw new Error(`only ${bullets.length} valid bullets returned (needed ${minRequired})`);
     return bullets;
   } catch (err) {
     console.error("[generateCareInstructions] failed:", err);
+    throw err;
+  }
+}
+async function generateProductFaqs(opts) {
+  const tagsLine = [
+    opts.deal.moodTags?.length ? `mood: ${opts.deal.moodTags.join(", ")}` : "",
+    opts.deal.audienceTags?.length ? `audience: ${opts.deal.audienceTags.join(", ")}` : "",
+    opts.deal.mattersTags?.length ? `matters: ${opts.deal.mattersTags.join(", ")}` : ""
+  ].filter(Boolean).join(" / ");
+  const descriptionHtmlText = opts.deal.descriptionHtml ? opts.deal.descriptionHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 600) : "";
+  const careInstructionsText = Array.isArray(opts.deal.careInstructions) && opts.deal.careInstructions.length > 0 ? opts.deal.careInstructions.join(" | ").slice(0, 500) : "";
+  const user = `Generate 6 to 8 FAQs for this product's PDP. They render visibly AND get emitted as FAQPage JSON-LD \u2014 visible text must match structured text (no hidden content).
+
+Product:
+- Title: ${opts.deal.seoTitle}
+- Brand: ${opts.deal.brand}
+- Category: ${opts.deal.category.join(", ")}
+${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ""}
+${opts.deal.tagline ? `- Tagline (context): ${opts.deal.tagline}` : ""}
+${tagsLine ? `- Tags: ${tagsLine}` : ""}
+${opts.deal.specifications?.length ? `- Specs (context): ${opts.deal.specifications.join("; ").slice(0, 500)}` : ""}
+${opts.deal.fullStory ? `- Existing story (context, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, " ").slice(0, 600)}` : ""}
+
+DIFFERENTIATION CONTEXT (what's already covered elsewhere on the PDP):
+${descriptionHtmlText ? `- Emma's Take (descriptionHtml \u2014 narrative beat: who it clicks for / why explore / Emma's tip):
+  ${descriptionHtmlText}
+` : ""}${careInstructionsText ? `- Care card (careInstructions \u2014 structured imperatives covering cleaning / charging / storage / lube compat):
+  ${careInstructionsText}
+` : ""}
+**Each FAQ must be DISTINCT from the description and care instructions above. If the answer would just restate content from those surfaces, SKIP that FAQ \u2014 better fewer distinct entries than overlap.**
+
+Coverage requirements + DIFFERENTIATION RULES per category:
+
+- \`general\` \u2014 1 to 2 entries.
+  Focus: practical "what is this" \u2014 product type, primary feature, basic spec.
+  Good: "What kind of stimulation does this provide?", "Is this rechargeable?", "What's the runtime on a full charge?"
+  AVOID: "Who is this for?" / "Who clicks for this?" \u2014 already covered in Emma's Take.
+
+- \`usage\` \u2014 1 to 2 entries.
+  Focus: practical operation \u2014 controls, modes, setup, partner/solo.
+  Good: "How do I switch between intensity levels?", "Can I use this in the shower?", "Does it work with a partner or solo?"
+  AVOID: "How do I get the most out of it?" \u2014 already covered in Emma's Take.
+
+- \`care\` \u2014 **2 to 3 entries (REQUIRED for SEO).** Each must hit a DIFFERENT care angle from the list below.
+  Focus: customer-question framings that COMPLEMENT (do not restate) the structured care card.
+  Distinct angles to choose 2-3 from:
+    \u2022 Safety / sharing \u2014 "Is it safe to share with a partner?", "Do I need a condom or barrier when sharing?"
+    \u2022 Material safety \u2014 "Is the material body-safe?", "Is this phthalate-free?", "Is it hypoallergenic?"
+    \u2022 Battery / power longevity \u2014 "How long does the battery last on a full charge?", "What if it stops charging?", "How long until I need to replace the battery?"
+    \u2022 Lifespan / replacement \u2014 "How long should this last with regular use?", "When should I retire it?"
+    \u2022 Travel / on-the-go \u2014 "Can I take this on a plane?", "Will the charger work internationally?", "Is it discreet for travel?"
+    \u2022 Lube + material compatibility \u2014 "Which lubes are safe with this material?", "Will silicone lube damage the surface?"
+  AVOID: "How do I clean it?" / "How do I store it?" / "How do I charge it?" \u2014 already in the care card.
+
+- \`compatibility\` \u2014 OPTIONAL. Only when relevant: lube\u2194toy materials (if not already covered in care), sleeve sizing, app/Bluetooth requirements, condom safety.
+
+- \`shipping\` \u2014 OPTIONAL. Only for non-standard shipping (oversize, restricted regions). Otherwise SKIP entirely.
+
+Question rules:
+- Full natural-language sentences ("How long does it take to charge?") \u2014 never keyword fragments.
+- Each question 10\u2013160 chars. Each unique.
+- Phrase the way a real customer would type into search or ask out loud.
+
+Answer rules:
+- 1\u20133 sentences, 40\u2013800 chars. Emma voice \u2014 friendly, factual, specific.
+- Plain text only. No markdown, no HTML, no URLs, no emoji.
+- NO em-dashes ("\u2014" or "\u2013"). Use periods, commas, or parentheses instead.
+- The words "sex" and "sexy" are allowed where contextually relevant to the product and customer discovery \u2014 FAQs benefit from these terms for SEO + LLM-citer indexing.
+- Don't invent specs not in the source (no fabricated battery life, dimensions, materials).
+
+Return ONLY raw JSON (no markdown). An array of objects: [{ "question": "...", "answer": "...", "category": "general|care|usage|compatibility|shipping" }, ...]`;
+  const parseFaqs = (raw) => {
+    const parsed = JSON.parse(stripFences(raw));
+    if (!Array.isArray(parsed)) throw new Error("expected array");
+    const faqs = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== "object") continue;
+      const e = entry;
+      const question = typeof e.question === "string" ? e.question.trim() : "";
+      const answer = typeof e.answer === "string" ? e.answer.trim() : "";
+      const category = typeof e.category === "string" ? e.category.trim() : "";
+      if (question.length < 10 || question.length > 160) continue;
+      if (answer.length < 40 || answer.length > 800) continue;
+      if (!PRODUCT_FAQ_CATEGORIES.includes(category)) continue;
+      faqs.push({ question, answer, category });
+    }
+    return faqs;
+  };
+  const trimWithCoverage = (faqs) => {
+    const caps = {
+      care: 3,
+      general: 2,
+      usage: 2,
+      compatibility: 1,
+      shipping: 1
+    };
+    const taken = [];
+    const counts = {};
+    for (const f of faqs) {
+      if (taken.length >= 8) break;
+      const cap = caps[f.category];
+      const cur = counts[f.category] ?? 0;
+      if (cur >= cap) continue;
+      taken.push(f);
+      counts[f.category] = cur + 1;
+    }
+    return taken;
+  };
+  try {
+    const { text: text2 } = await callClaude({
+      llmClient: opts.llmClient,
+      model: MODEL,
+      maxTokens: 2500,
+      system: `${EMMA_SYSTEM_PROMPT}
+
+${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user
+    });
+    let faqs = parseFaqs(text2);
+    const careCount = (arr) => arr.filter((f) => f.category === "care").length;
+    if (careCount(faqs) < 2) {
+      const existingCareQs = faqs.filter((f) => f.category === "care").map((f) => `- ${f.question}`).join("\n") || "(none yet)";
+      const careTopUp = `The first FAQ pass for this product produced fewer than 2 \`care\` entries. Generate ${2 - careCount(faqs) + 1} additional \`care\` FAQs that COMPLEMENT (do not restate) the structured care card AND are DISTINCT from these existing care entries:
+
+${existingCareQs}
+
+Each new FAQ must hit a DIFFERENT care angle (safety/sharing, material safety, battery/power longevity, lifespan/replacement, travel/on-the-go, or lube\u2194material compatibility) from the others.
+
+Same product context, same answer rules (40\u2013800 chars, plain text, no em-dashes, Emma voice).
+Return ONLY raw JSON array of objects: [{ "question": "...", "answer": "...", "category": "care" }, ...]
+
+Product:
+- Title: ${opts.deal.seoTitle}
+- Brand: ${opts.deal.brand}
+${opts.deal.productTypeDial ? `- Type: ${opts.deal.productTypeDial}` : ""}
+${opts.deal.specifications?.length ? `- Specs (context): ${opts.deal.specifications.join("; ").slice(0, 400)}` : ""}
+${careInstructionsText ? `- Care card already covers (do NOT restate): ${careInstructionsText}` : ""}`;
+      try {
+        const { text: retryText } = await callClaude({
+          llmClient: opts.llmClient,
+          model: MODEL,
+          maxTokens: 1200,
+          system: `${EMMA_SYSTEM_PROMPT}
+
+${DEFAULT_BRAND_VOICE}`,
+          userPrompt: careTopUp
+        });
+        const extras = parseFaqs(retryText).filter((f) => f.category === "care");
+        const seen = new Set(faqs.map((f) => f.question.toLowerCase()));
+        for (const e of extras) {
+          if (seen.has(e.question.toLowerCase())) continue;
+          faqs.push(e);
+          seen.add(e.question.toLowerCase());
+        }
+      } catch (err) {
+        console.warn("[generateProductFaqs] care top-up failed (continuing with primary batch):", err instanceof Error ? err.message : err);
+      }
+    }
+    const trimmed = trimWithCoverage(faqs);
+    if (trimmed.length < 3) throw new Error(`only ${trimmed.length} valid FAQs returned`);
+    if (careCount(trimmed) < 1) {
+      console.warn(`[generateProductFaqs] no care FAQs after retry \u2014 Care card will fall back to careInstructions bullets`);
+    } else if (careCount(trimmed) < 2) {
+      console.warn(`[generateProductFaqs] only 1 care FAQ after retry \u2014 below the SEO target of 2-3`);
+    }
+    return trimmed;
+  } catch (err) {
+    console.error("[generateProductFaqs] failed:", err);
     throw err;
   }
 }
@@ -7030,11 +7391,11 @@ ${lines.join("\n")}`;
 Product:
 - Title: ${opts.deal.seoTitle}
 - Brand: ${opts.deal.brand}
-- Category: ${opts.deal.category}
+- Category: ${opts.deal.category.join(", ")}
 - Type: ${type}
 ${opts.deal.tagline ? `- Tagline: ${opts.deal.tagline}` : ""}
 ${opts.deal.fullStory ? `- Story (context, strip HTML): ${opts.deal.fullStory.replace(/<[^>]+>/g, " ").slice(0, 500)}` : ""}
-${opts.deal.specifications ? `- Specs (HTML, context): ${opts.deal.specifications.replace(/<[^>]+>/g, " ").slice(0, 400)}` : ""}
+${opts.deal.specifications?.length ? `- Specs (context): ${opts.deal.specifications.join("; ").slice(0, 400)}` : ""}
 
 Preferred labels for this product type (use these when they fit):
 ${labelList}${taxonomyBlock}
@@ -7055,15 +7416,16 @@ Rules:
 - Each "value" is an integer 1\u20135.
 - Keep labels under 24 chars, sentence case, no trailing punctuation.
 - Honest scoring \u2014 don't max everything. Use the dimension scale docs above (when present) to anchor "what 3 vs 5 means" \u2014 consistency across products matters.`;
-  const msg = await client.messages.create({
+  const { text: text2 } = await callClaude({
+    llmClient: opts.llmClient,
     model: MODEL_FAST,
-    max_tokens: 600,
-    system: EMMA_SYSTEM_PROMPT,
-    messages: [{ role: "user", content: user }]
+    maxTokens: 600,
+    system: `${EMMA_SYSTEM_PROMPT}
+
+${DEFAULT_BRAND_VOICE}`,
+    userPrompt: user
   });
-  const block = msg.content[0];
-  if (block?.type !== "text") throw new Error("non-text response");
-  const parsed = JSON.parse(stripFences(block.text));
+  const parsed = JSON.parse(stripFences(text2));
   if (!parsed.items || !Array.isArray(parsed.items)) throw new Error("missing items array");
   const seen = /* @__PURE__ */ new Set();
   const items = [];
@@ -7083,6 +7445,12 @@ Rules:
   if (items.length < 5) throw new Error(`only ${items.length} valid dial items returned`);
   return { items };
 }
+function mapLegacyDialBucket(legacy) {
+  if (legacy === "air-pulsation" || legacy === "wand" || legacy === "vibrator") return "vibrator";
+  if (legacy === "lube") return "lube";
+  if (legacy === "wear") return "wear";
+  return null;
+}
 async function inferProductTypeDial(input) {
   const user = `Classify the product into ONE of these buckets (return exactly one):
 - air-pulsation  (clitoral suction / air-pulse / pressure-wave devices)
@@ -7100,133 +7468,298 @@ Product:
 Return ONLY this JSON: { "type": "vibrator" }
 No markdown. No commentary.`;
   try {
-    const msg = await client.messages.create({
+    const { text: text2 } = await callClaude({
+      llmClient: input.llmClient,
       model: MODEL_FAST,
-      max_tokens: 60,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: user }]
+      maxTokens: 60,
+      system: `${EMMA_SYSTEM_PROMPT}
+
+${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user
     });
-    const block = msg.content[0];
-    if (block?.type !== "text") throw new Error("non-text response");
-    const parsed = JSON.parse(stripFences(block.text));
+    const parsed = JSON.parse(stripFences(text2));
     const t = typeof parsed.type === "string" ? parsed.type.trim().toLowerCase() : "";
-    if (PRODUCT_TYPE_DIALS.includes(t)) return t;
+    if (LEGACY_DIAL_BUCKETS.includes(t)) {
+      const mapped = mapLegacyDialBucket(t);
+      if (mapped) return mapped;
+    }
   } catch (err) {
     console.error("[inferProductTypeDial] failed, defaulting to vibrator:", err);
   }
   return "vibrator";
 }
+async function inferProductTaxonomy(input) {
+  const subtypeBlock = Object.entries(PRODUCT_SUBTYPES_BY_TYPE).map(([t, subs]) => subs.length === 0 ? `  ${t}: (no subtype \u2014 leave subtype null/empty)` : `  ${t}: ${subs.join(" | ")}`).join("\n");
+  const user = `Classify this product into a hierarchical taxonomy. Two fields:
+1. \`type\` \u2014 one of the closed top-level values
+2. \`subtype\` \u2014 one of the closed values scoped to the chosen \`type\`, OR null when the type is \`sex-machine\` or no subtype clearly fits
+
+${TOP_LEVEL_DIAL_GUIDE}
+
+Subtypes by parent:
+${subtypeBlock}
+
+HONEST CLASSIFICATION:
+- Pick the dominant type when a product spans two (an anal vibrator \u2192 \`anal\` parent with subtype \`vibrating\`, NOT \`vibrator\` parent).
+- Skip the subtype (return null) rather than force a bad fit.
+- Don't invent new types or subtypes \u2014 both lists are closed.
+
+Product:
+- Title: ${input.title}
+- Brand: ${input.brand}
+- Categories: ${input.categories.join(", ") || "(none)"}
+- Description (truncated): ${input.description.slice(0, 600)}
+
+Return ONLY this JSON (no markdown):
+{ "type": "vibrator", "subtype": "rabbit" }
+or { "type": "sex-machine", "subtype": null }`;
+  try {
+    const { text: text2 } = await callClaude({
+      llmClient: input.llmClient,
+      model: MODEL_FAST,
+      maxTokens: 100,
+      system: `${EMMA_SYSTEM_PROMPT}
+
+${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user
+    });
+    const parsed = JSON.parse(stripFences(text2));
+    const rawType = typeof parsed.type === "string" ? parsed.type.trim().toLowerCase() : "";
+    if (!(rawType in PRODUCT_SUBTYPES_BY_TYPE)) {
+      console.warn(`[inferProductTaxonomy] unrecognized type "${rawType}", defaulting to vibrator`);
+      return { type: "vibrator", subtype: null };
+    }
+    const type = rawType;
+    const allowedSubs = PRODUCT_SUBTYPES_BY_TYPE[type];
+    let subtype = null;
+    if (allowedSubs.length > 0) {
+      const rawSubtype = typeof parsed.subtype === "string" ? parsed.subtype.trim().toLowerCase() : "";
+      if (rawSubtype && allowedSubs.includes(rawSubtype)) {
+        subtype = rawSubtype;
+      }
+    }
+    return { type, subtype };
+  } catch (err) {
+    console.error("[inferProductTaxonomy] failed, defaulting to vibrator:", err);
+    return { type: "vibrator", subtype: null };
+  }
+}
+function validateAskEmmaTagBatch(raw, preferredLabels, allowProposed) {
+  const canonicalByLower = /* @__PURE__ */ new Map();
+  for (const label of preferredLabels) {
+    const trimmed = label.trim();
+    if (!trimmed) continue;
+    canonicalByLower.set(trimmed.toLowerCase(), trimmed);
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (!trimmed || trimmed.length > 32) continue;
+    const lower = trimmed.toLowerCase();
+    const canonical = canonicalByLower.get(lower) ?? (allowProposed ? trimmed : null);
+    if (!canonical) continue;
+    const titleCased = toTitleCase(canonical);
+    if (seen.has(titleCased)) continue;
+    seen.add(titleCased);
+    out.push(titleCased);
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+function toTitleCase(s) {
+  return s.toLowerCase().split(/\s+/).map((word) => word.split("-").map((part) => part.length > 0 ? part[0].toUpperCase() + part.slice(1) : part).join("-")).join(" ").trim();
+}
 async function generateAskEmmaTags(opts) {
-  const { deal, axis, preferredLabels } = opts;
-  const labelList = preferredLabels.length > 0 ? preferredLabels.map((l) => `- ${l}`).join("\n") : "(none \u2014 invent appropriate slugs)";
+  const { deal, axis, preferredLabels, allowProposed = false } = opts;
+  const labelList = preferredLabels.length > 0 ? preferredLabels.map((l) => `- ${l}`).join("\n") : "(no curated vocabulary yet)";
   const user = `Pick the Ask Emma tags for the "${axis}" axis on this product. ${ASK_EMMA_AXIS_GUIDANCE[axis]}
 
 Product:
 - Title: ${deal.seoTitle}
 - Brand: ${deal.brand}
-- Category: ${deal.category}
+- Category: ${deal.category.join(", ")}
 ${deal.productTypeDial ? `- Type: ${deal.productTypeDial}` : ""}
 ${deal.tagline ? `- Tagline: ${deal.tagline}` : ""}
 ${deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, " ").slice(0, 400)}` : ""}
-${deal.specifications ? `- Specs (HTML, context): ${deal.specifications.replace(/<[^>]+>/g, " ").slice(0, 300)}` : ""}
+${deal.specifications?.length ? `- Specs (context): ${deal.specifications.join("; ").slice(0, 300)}` : ""}
 
-Preferred slugs for "${axis}" (use these whenever they fit):
+Curated vocabulary for "${axis}" (Title Case \u2014 ${allowProposed ? "PREFER these; only propose new when none fit" : "STRICT: pick ONLY from this list"}):
 ${labelList}
 
 Rules:
-- Return slugs in lowercase kebab-case (e.g. "soft-touch", not "Soft touch").
-- Reuse a preferred slug exactly when it fits.
-- Only invent a new slug if none of the preferred ones fit. Keep new slugs short (\u2264 24 chars), generic enough to apply to other products.
-- Do NOT invent synonyms of preferred slugs.
+- Return labels in **Title Case** (e.g. "Soft Touch", "First-Time Friendly", "Slow Burn") \u2014 never lowercase, never kebab-case.
+${allowProposed ? "- Only invent a new label if NONE of the curated ones fit. Keep new labels <=24 chars, Title Case, generic enough to apply to other products. Do NOT invent synonyms of existing labels." : "- DO NOT invent new labels. If no curated label fits, leave that aspect untagged."}
 - Honest tagging \u2014 don't tag every option. If unsure, leave it out.
 
-Return ONLY this JSON (no markdown): { "tags": ["slug-one", "slug-two"] }`;
+Return ONLY this JSON (no markdown): { "tags": ["Soft Touch", "First-Time Friendly"] }`;
   try {
-    const msg = await client.messages.create({
+    const { text: text2 } = await callClaude({
+      llmClient: opts.llmClient,
       model: MODEL_FAST,
-      max_tokens: 200,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: user }]
+      maxTokens: 200,
+      system: `${EMMA_SYSTEM_PROMPT}
+
+${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user
     });
-    const block = msg.content[0];
-    if (block?.type !== "text") throw new Error("non-text response");
-    const parsed = JSON.parse(stripFences(block.text));
+    const parsed = JSON.parse(stripFences(text2));
     if (!Array.isArray(parsed.tags)) return [];
-    const seen = /* @__PURE__ */ new Set();
-    const out = [];
-    for (const raw of parsed.tags) {
-      if (typeof raw !== "string") continue;
-      const slug = raw.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-      if (!slug || slug.length > 32 || seen.has(slug)) continue;
-      seen.add(slug);
-      out.push(slug);
-      if (out.length >= 5) break;
-    }
-    return out;
+    return validateAskEmmaTagBatch(parsed.tags, preferredLabels, allowProposed);
   } catch (err) {
     console.error(`[generateAskEmmaTags:${axis}] failed:`, err);
     return [];
+  }
+}
+async function generateAskEmmaTagsAll(opts) {
+  const { deal, vocabularies, allowProposed = false } = opts;
+  const renderVocab = (axis) => {
+    const items = vocabularies[axis];
+    return items.length > 0 ? items.map((l) => `  - ${l}`).join("\n") : "  (no curated vocabulary yet)";
+  };
+  const user = `Pick the Ask Emma tags for ALL THREE axes on this product. Title Case storage.
+
+Product:
+- Title: ${deal.seoTitle}
+- Brand: ${deal.brand}
+- Category: ${deal.category.join(", ")}
+${deal.productTypeDial ? `- Type: ${deal.productTypeDial}` : ""}
+${deal.tagline ? `- Tagline: ${deal.tagline}` : ""}
+${deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, " ").slice(0, 400)}` : ""}
+${deal.specifications?.length ? `- Specs (context): ${deal.specifications.join("; ").slice(0, 300)}` : ""}
+
+AXIS GUIDE:
+- mood: ${ASK_EMMA_AXIS_GUIDANCE.mood}
+- audience: ${ASK_EMMA_AXIS_GUIDANCE.audience}
+- matters: ${ASK_EMMA_AXIS_GUIDANCE.matters}
+
+CURATED VOCABULARIES (Title Case \u2014 ${allowProposed ? "PREFER these; only propose new when none fit" : "STRICT: pick ONLY from these lists"}):
+mood:
+${renderVocab("mood")}
+audience:
+${renderVocab("audience")}
+matters:
+${renderVocab("matters")}
+
+Rules:
+- Each tag in **Title Case** (e.g. "Soft Touch", "First-Time Friendly"). Never lowercase, never kebab-case.
+${allowProposed ? "- Only invent a new label per axis when NONE of that axis's curated entries fit. <=24 chars, Title Case, no synonyms of existing labels." : "- DO NOT invent new labels. If no curated entry fits an aspect, leave that aspect untagged in that axis."}
+- Honest tagging \u2014 leave it out if unsure.
+- Stay within each axis. Don't put a "mood" label in the "matters" array.
+
+Return ONLY this JSON (no markdown):
+{ "mood": ["..."], "audience": ["..."], "matters": ["..."] }`;
+  try {
+    const { text: text2 } = await callClaude({
+      llmClient: opts.llmClient,
+      model: MODEL_FAST,
+      maxTokens: 600,
+      system: `${EMMA_SYSTEM_PROMPT}
+
+${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user
+    });
+    const parsed = JSON.parse(stripFences(text2));
+    return {
+      moodTags: Array.isArray(parsed.mood) ? validateAskEmmaTagBatch(parsed.mood, vocabularies.mood, allowProposed) : [],
+      audienceTags: Array.isArray(parsed.audience) ? validateAskEmmaTagBatch(parsed.audience, vocabularies.audience, allowProposed) : [],
+      mattersTags: Array.isArray(parsed.matters) ? validateAskEmmaTagBatch(parsed.matters, vocabularies.matters, allowProposed) : []
+    };
+  } catch (err) {
+    console.error("[generateAskEmmaTagsAll] failed:", err);
+    return { moodTags: [], audienceTags: [], mattersTags: [] };
   }
 }
 function ivrProductBlock(deal) {
   return [
     `- Title: ${deal.seoTitle}`,
     `- Brand: ${deal.brand}`,
-    `- Category: ${deal.category}`,
+    `- Category: ${deal.category.join(", ")}`,
     deal.productTypeDial ? `- Type: ${deal.productTypeDial}` : "",
     deal.tagline ? `- Tagline: ${deal.tagline}` : "",
     deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, " ").slice(0, 400)}` : "",
-    deal.specifications ? `- Specs (context): ${deal.specifications.replace(/<[^>]+>/g, " ").slice(0, 250)}` : ""
+    deal.specifications?.length ? `- Specs (context): ${deal.specifications.join("; ").slice(0, 250)}` : ""
   ].filter(Boolean).join("\n");
 }
 async function generateIvrExperience(opts) {
-  const user = `Pick the experience level this product fits best. One of: ${IVR_EXPERIENCE_LEVELS.join(" | ")}.
+  const user = `Pick every experience level this product genuinely fits. Multi-select \u2014 return 1\u20134 levels. Choose from: ${IVR_EXPERIENCE_LEVELS.join(" | ")}.
 
 Use "first-time" for beginner-friendly products (gentle, simple controls, low intensity).
 Use "curious" for someone exploring beyond the basics \u2014 slightly more ambitious but still approachable.
 Use "experienced" for people comfortable with the category looking for variety or upgrades.
 Use "advanced" for high-intensity, niche, or technique-heavy products.
-Use "any" only when the product genuinely fits across all levels.
+
+A versatile product can hit multiple levels (e.g. a starter vibrator that also satisfies an experienced buyer). Be honest \u2014 only include a level the product genuinely serves.
 
 ${ivrProductBlock(opts.deal)}
 
-Return ONLY this JSON (no markdown): { "level": "first-time" }`;
+Return ONLY this JSON (no markdown): { "levels": ["first-time", "curious"] }`;
   try {
-    const msg = await client.messages.create({
+    const { text: text2 } = await callClaude({
+      llmClient: opts.llmClient,
       model: MODEL_FAST,
-      max_tokens: 60,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: user }]
+      maxTokens: 100,
+      system: `${EMMA_SYSTEM_PROMPT}
+
+${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user
     });
-    const block = msg.content[0];
-    if (block?.type !== "text") throw new Error("non-text response");
-    const parsed = JSON.parse(stripFences(block.text));
-    const lvl = typeof parsed.level === "string" ? parsed.level.trim().toLowerCase() : "";
-    if (IVR_EXPERIENCE_LEVELS.includes(lvl)) return lvl;
+    const parsed = JSON.parse(stripFences(text2));
+    if (Array.isArray(parsed.levels)) {
+      const valid = new Set(IVR_EXPERIENCE_LEVELS);
+      const out = [];
+      const seen = /* @__PURE__ */ new Set();
+      for (const item of parsed.levels) {
+        if (typeof item !== "string") continue;
+        const v = item.trim().toLowerCase();
+        if (!valid.has(v) || seen.has(v)) continue;
+        seen.add(v);
+        out.push(v);
+        if (out.length >= 4) break;
+      }
+      return out;
+    }
   } catch (err) {
     console.error("[generateIvrExperience] failed:", err);
   }
-  return "any";
+  return [];
 }
 async function generateIvrUseCase(opts) {
-  const user = `Pick 1\u20133 use cases this product fits, from this exact vocabulary:
+  const user = `Pick 2\u20135 use cases this product fits, from this exact vocabulary:
 ${IVR_USE_CASES.map((s) => `- ${s}`).join("\n")}
 
-Honest tagging \u2014 only pick what genuinely fits. Skip rather than stretch.
+HONEST TAGGING \u2014 STRICT.
+- For OBJECTIVE/inferable slugs (travel = product is portable; long-distance = product has remote/app control): tag based on product spec support.
+- For SUBJECTIVE slugs (spice-up, partner-surprise, kink-curious, role-play, newly-dating, long-term, experimentation, queer-affirming, trans-affirming, etc.): tag ONLY when the description strongly supports it. Default to OMISSION when ambiguous. Skip rather than stretch.
+
+MUTUAL-EXCLUSIVITY HINTS (soft guidance \u2014 usually pick at most one within each facet):
+- Occasion: anniversary, honeymoon, valentine, birthday, bachelorette, pride, holiday \u2014 usually one or none. \`holiday\` is the umbrella for non-specific holidays; pick a specific occasion when it fits.
+- Wellness/health: pelvic-floor, kegel-training, postpartum, menopause, libido-boost, prostate-health, erectile-support, menstrual-comfort \u2014 usually one, ONLY on wellness-category products.
+- Affirming/inclusive: queer-affirming, trans-affirming, women-focused, men-focused, inclusive \u2014 usually one or two.
+- Gift sub-category: gift, gift-set, party-favor, self-gift \u2014 pick the most specific that applies.
+
+PRODUCT-TYPE SELF-RESTRICTION:
+- Wellness slugs (kegel-training, postpartum, prostate-health, erectile-support, menstrual-comfort) only apply to wellness/specific product types. Don't tag a vibrator as \`kegel-training\` unless it's actually a kegel device.
+- Affirming slugs (queer-affirming, trans-affirming, women-focused, men-focused) based on actual product positioning, not assumption from category.
+${opts.deal.productTypeDial ? `- This product's type is "${opts.deal.productTypeDial}" \u2014 keep tags consistent with what fits this category.` : ""}
+
+CROSS-FIELD NOTE: Some slugs (valentine, pride, holiday, gift, gift-set, long-distance, first-time) also appear in the IVR features vocabulary. There, they describe what the product IS (Pride-edition design, has rainbow colors). Here, they describe WHEN/WHY to use it (good for Pride parties, good for Valentine's gift). A product may legitimately tag the same slug in both fields \u2014 that's intentional.
 
 ${ivrProductBlock(opts.deal)}
 
 Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`;
   try {
-    const msg = await client.messages.create({
+    const { text: text2 } = await callClaude({
+      llmClient: opts.llmClient,
       model: MODEL_FAST,
-      max_tokens: 100,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: user }]
+      maxTokens: 200,
+      system: `${EMMA_SYSTEM_PROMPT}
+
+${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user
     });
-    const block = msg.content[0];
-    if (block?.type !== "text") throw new Error("non-text response");
-    const parsed = JSON.parse(stripFences(block.text));
+    const parsed = JSON.parse(stripFences(text2));
     if (!Array.isArray(parsed.useCases)) return [];
     const allowed = new Set(IVR_USE_CASES);
     const seen = /* @__PURE__ */ new Set();
@@ -7237,7 +7770,7 @@ Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`;
       if (!allowed.has(slug) || seen.has(slug)) continue;
       seen.add(slug);
       out.push(slug);
-      if (out.length >= 3) break;
+      if (out.length >= 5) break;
     }
     return out;
   } catch (err) {
@@ -7246,24 +7779,38 @@ Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`;
   }
 }
 async function generateIvrFeatures(opts) {
-  const user = `Pick 2\u20134 features that are TRUE for this product, from this exact vocabulary:
+  const user = `Pick 3\u20138 features that are TRUE for this product, from this exact vocabulary:
 ${IVR_FEATURES.map((s) => `- ${s}`).join("\n")}
 
-Honest tagging \u2014 these will be spoken aloud by Emma when filtering ("looking for something quiet and waterproof"). Don't tag something the product doesn't actually have.
+HONEST TAGGING \u2014 STRICT.
+- For OBJECTIVE slugs (waterproof, rechargeable, usb-c, silicone, body-safe, phthalate-free, latex-free, hypoallergenic, vegan, app-controlled, bluetooth, magnetic-charging, etc.): tag ONLY when the product description supports it. Don't infer from category.
+- For SUBJECTIVE slugs (rumbly, buzzy, gentle, intense, powerful, luxury, premium, discreet, beginner-friendly): tag ONLY when the description strongly supports it. Default to OMISSION when ambiguous.
+- These get spoken aloud by Emma when filtering ("looking for something quiet and waterproof"). False claims break shopper trust immediately.
+
+MUTUAL-EXCLUSIVITY HINTS (soft guidance \u2014 usually pick at most one within each facet):
+- Size: mini, compact, small, medium, large, xl, xxl, oversized, plus-size, queen-size, curvy, slim, girthy
+- Material primary: silicone, glass, metal, wood, leather, vegan-leather, faux-leather
+- Lube base: water-based, silicone-based, hybrid, oil-based (none for non-lubes)
+- Identity/edition: pride, rainbow, pride-edition, holiday, valentine
+
+PRODUCT-TYPE SELF-RESTRICTION:
+- Only tag features that apply to the product type. Don't tag \`harness-compatible\` on a lube, \`condom-safe\` on a vibrator, \`flared-base\` on a non-anal toy, \`water-based\`/\`silicone-based\`/\`hybrid\`/\`oil-based\` on anything that isn't a lubricant, etc.
+${opts.deal.productTypeDial ? `- This product's type is "${opts.deal.productTypeDial}" \u2014 only pick features that genuinely fit this category.` : ""}
 
 ${ivrProductBlock(opts.deal)}
 
 Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`;
   try {
-    const msg = await client.messages.create({
+    const { text: text2 } = await callClaude({
+      llmClient: opts.llmClient,
       model: MODEL_FAST,
-      max_tokens: 120,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: user }]
+      maxTokens: 300,
+      system: `${EMMA_SYSTEM_PROMPT}
+
+${DEFAULT_BRAND_VOICE}`,
+      userPrompt: user
     });
-    const block = msg.content[0];
-    if (block?.type !== "text") throw new Error("non-text response");
-    const parsed = JSON.parse(stripFences(block.text));
+    const parsed = JSON.parse(stripFences(text2));
     if (!Array.isArray(parsed.features)) return [];
     const allowed = new Set(IVR_FEATURES);
     const seen = /* @__PURE__ */ new Set();
@@ -7274,41 +7821,13 @@ Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`;
       if (!allowed.has(slug) || seen.has(slug)) continue;
       seen.add(slug);
       out.push(slug);
-      if (out.length >= 4) break;
+      if (out.length >= 8) break;
     }
     return out;
   } catch (err) {
     console.error("[generateIvrFeatures] failed:", err);
     return [];
   }
-}
-async function generateIvrVoiceSummary(opts) {
-  const user = `Write ONE short Emma-voice sentence summarising this product, designed to be read aloud over the phone or in a chat reply. Hard cap: 120 characters total (count spaces). Aim for 90\u2013110. Plain text only \u2014 no HTML, no markdown, no bullet lists, no emojis. Conversational, specific, first-person.
-
-Good (109 chars): "Pocket wand with real punch \u2014 seven settings, whisper-quiet low end, and a battery that lasts a weekend."
-Bad: "Premium wireless rechargeable wand vibrator with multiple speeds and waterproof design." (catalog-y)
-Bad: "This silicone-based lube stays put through longer sessions and I reach for it constantly because it's clean." (too long, runs past 120)
-
-${ivrProductBlock(opts.deal)}
-
-Return ONLY this JSON (no markdown): { "summary": "..." }`;
-  try {
-    const msg = await client.messages.create({
-      model: MODEL_FAST,
-      max_tokens: 200,
-      system: EMMA_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: user }]
-    });
-    const block = msg.content[0];
-    if (block?.type !== "text") throw new Error("non-text response");
-    const parsed = JSON.parse(stripFences(block.text));
-    if (typeof parsed.summary === "string") {
-      return parsed.summary.trim().replace(/\s+/g, " ").slice(0, 120);
-    }
-  } catch (err) {
-    console.error("[generateIvrVoiceSummary] failed:", err);
-  }
-  return "";
 }
 function kindBrief(kind) {
   switch (kind) {
@@ -7412,7 +7931,7 @@ async function generateRails(opts) {
   const dealContext = [
     `Title: ${deal.seoTitle}`,
     `Brand: ${deal.brand}`,
-    `Category: ${deal.category}`,
+    `Category: ${deal.category.join(", ")}`,
     deal.tagline ? `Tagline: ${deal.tagline}` : "",
     deal.audienceTags?.length ? `Audience tags: ${deal.audienceTags.join(", ")}` : "",
     deal.moodTags?.length ? `Mood tags: ${deal.moodTags.join(", ")}` : "",
@@ -7497,7 +8016,7 @@ Start by inspecting list_candidate_pool, then propose 2 PDP rails + 1 homepage r
     turns: turn
   };
 }
-var client, MODEL, MODEL_FAST, SYSTEM_PROMPT, BRAND_VOICE_SYSTEM_PROMPT, PRODUCT_TYPE_DESCRIPTOR_FALLBACK, CTA_WORDS, VEO_SYSTEM_PROMPT, LTX_SYSTEM_PROMPT, DEFAULT_BRAND_VOICE, EMMA_SYSTEM_PROMPT, EMMA_TAGLINE_FALLBACKS, PRODUCT_TYPE_DIALS, ASK_EMMA_AXIS_GUIDANCE, IVR_EXPERIENCE_LEVELS, IVR_USE_CASES, IVR_FEATURES;
+var client, _toolTokenAccumulator, MODEL, MODEL_FAST, SYSTEM_PROMPT, BRAND_VOICE_SYSTEM_PROMPT, PRODUCT_TYPE_DESCRIPTOR_FALLBACK, CTA_WORDS, VEO_SYSTEM_PROMPT, LTX_SYSTEM_PROMPT, DEFAULT_BRAND_VOICE, EMMA_SYSTEM_PROMPT, EMMA_TAGLINE_FALLBACKS, PRODUCT_FAQ_CATEGORIES, LEGACY_DIAL_BUCKETS, PRODUCT_SUBTYPES_BY_TYPE, TOP_LEVEL_DIAL_GUIDE, ASK_EMMA_AXIS_GUIDANCE, IVR_EXPERIENCE_LEVELS, IVR_USE_CASES, IVR_FEATURES;
 var init_claude_server = __esm({
   "app/lib/claude.server.ts"() {
     "use strict";
@@ -7506,6 +8025,7 @@ var init_claude_server = __esm({
     init_editorial_author_server();
     init_emma_rail_tools_server();
     client = new Anthropic({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
+    _toolTokenAccumulator = { input: 0, output: 0 };
     MODEL = "claude-sonnet-4-20250514";
     MODEL_FAST = "claude-haiku-4-5-20251001";
     SYSTEM_PROMPT = `You are the voice of xdipx.com, a daily flash-sale site for sexual wellness products.
@@ -7513,7 +8033,7 @@ Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy.
 Write as a trusted, funny friend who isn't embarrassed about the topic. Your goal is to welcome first-time buyers and delight experienced ones.
 Keep all copy tasteful. Suggestive is fine, explicit is not.
 Always signal discretion, value, and trust.
-Never use "sex" as an adjective. Use "intimate", "pleasure", or "wellness".
+Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait.
 Never assume the reader's experience level.
 Always end descriptions with a curiosity hook that makes the reader want to try it.
 
@@ -7534,11 +8054,25 @@ SEO targeting:
 - Avoid any term listed inside <avoid>.`;
     BRAND_VOICE_SYSTEM_PROMPT = SYSTEM_PROMPT;
     PRODUCT_TYPE_DESCRIPTOR_FALLBACK = {
-      "air-pulsation": "Air-Pulse Stimulator",
       "vibrator": "Vibrator",
-      "wand": "Wand Vibrator",
+      "dildo": "Dildo",
+      "anal": "Anal Toy",
+      "bondage": "Bondage Gear",
+      "cock-ring": "Cock Ring",
+      "stroker": "Stroker",
+      "couples": "Couples Toy",
+      "harness": "Harness",
+      "extender": "Extender",
+      "pump": "Pump",
       "lube": "Lubricant",
-      "wear": "Wearable"
+      "massage": "Massage",
+      "enhancer": "Enhancer",
+      "wear": "Wearable",
+      "condom": "Condoms",
+      "wellness": "Wellness",
+      "novelty": "Novelty",
+      "book-media": "Book",
+      "sex-machine": "Sex Machine"
     };
     CTA_WORDS = ["Today.", "Yours.", "Obviously.", "Go on.", "Finally."];
     VEO_SYSTEM_PROMPT = `You are a video prompt engineer for Google Veo. You enhance simple video ideas into detailed, production-ready Veo prompts. Your job is to FAITHFULLY EXPAND the user's idea \u2014 not replace it. The user's concept is the creative foundation. You add cinematic detail (camera, lighting, composition, audio) while keeping their vision intact.
@@ -7572,7 +8106,7 @@ Template skeleton: [product action] + [camera instruction] + [lighting/atmospher
 
 Brand context: xdipx.com \u2014 daily flash-sale site for sexual wellness products.
 Visual style: premium, warm, a little edgy \u2014 push boundaries while staying tasteful. Suggestive and playful, never outright explicit. Think high-end fragrance ad that makes you look twice.`;
-    DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful \u2014 suggestive is fine, explicit is not. Never use "sex" as an adjective \u2014 use "intimate", "pleasure", or "wellness". Never "Buy now" \u2014 use "Take a peek \u2192" or "I'll take it \u2665". Never surface a countdown or "until midnight." Always include a short first-person aside ("been living on my desk," "telling everyone about this combo"). Never assume the reader's experience level.`;
+    DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful \u2014 suggestive is fine, explicit is not. Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait. Never "Buy now" \u2014 use "Take a peek \u2192" or "I'll take it \u2665". Never surface a countdown or "until midnight." Always include a short first-person aside ("been living on my desk," "telling everyone about this combo"). Never assume the reader's experience level. If any keyword targets, vocabulary lists, or input fields in the prompt do not fit the actual product, silently ignore them \u2014 write from the product details only. Never narrate a mismatch, never preface output with explanation, never write meta-commentary about the prompt. Output only the requested copy.`;
     EMMA_SYSTEM_PROMPT = `You are Emma \u2014 the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You test everything you recommend. You write in first person, warm and specific, like a note to a friend.`;
     EMMA_TAGLINE_FALLBACKS = [
       "here to help you find what you\u2019re into \u2665",
@@ -7581,15 +8115,231 @@ Visual style: premium, warm, a little edgy \u2014 push boundaries while staying 
       "pick my brain \u2014 I\u2019ve tested most of it \u2665",
       "tell me what you\u2019re curious about \u2665"
     ];
-    PRODUCT_TYPE_DIALS = ["air-pulsation", "vibrator", "wand", "lube", "wear"];
+    PRODUCT_FAQ_CATEGORIES = ["general", "care", "usage", "compatibility", "shipping"];
+    LEGACY_DIAL_BUCKETS = ["air-pulsation", "vibrator", "wand", "lube", "wear"];
+    PRODUCT_SUBTYPES_BY_TYPE = {
+      vibrator: ["bullet-egg", "rabbit", "g-spot", "finger-clit", "wand", "air-pulsation", "rotating-thrusting", "remote", "wearable"],
+      dildo: ["realistic", "glass-metal", "silicone", "dual-density", "non-phallic", "vibrating", "packer", "large"],
+      anal: ["plug", "prostate", "beads", "vibrating", "dilator", "douche-enema"],
+      bondage: ["paddle-whip", "restraint", "blindfold", "gag", "collar-leash", "nipple", "body-harness", "sensory", "electrostim"],
+      "cock-ring": ["classic", "vibrating", "cock-ball-sling", "ball-stretcher", "set"],
+      stroker: ["vagina", "mouth", "pocket", "non-realistic", "vibrating", "doll", "disposable"],
+      couples: ["game-romance", "bedroom-accessory", "positioning-aid", "swing-sling", "wearable"],
+      harness: ["fabric", "leather", "vegan-leather", "o-ring", "set-kit"],
+      extender: ["sling", "sleeve", "vibrating", "strap-on"],
+      pump: ["penis"],
+      lube: ["water-based", "silicone-based", "hybrid", "flavored", "natural", "anal", "warming-cooling", "toy-cleaner"],
+      massage: ["body-care", "candle", "perfume-pheromone", "hygiene", "cbd"],
+      enhancer: ["desensitizer-relaxer", "oral", "arousal-gel", "male-arousal", "female-arousal", "gummy-edible", "pill"],
+      wear: ["mens-underwear", "panty", "bra-panty-set", "bodysuit-teddy", "bodystocking", "hosiery", "pasty", "apparel", "sock", "accessory", "plus-queen"],
+      condom: ["glyde", "trojan", "lifestyles", "durex"],
+      wellness: ["kegel", "dilator", "douche-enema", "hygiene", "aftercare"],
+      novelty: ["candy-edible", "pin-keychain", "game", "plushie-pillow", "novelty-gift", "party-supply"],
+      "book-media": ["book", "coloring-book"],
+      "sex-machine": []
+    };
+    TOP_LEVEL_DIAL_GUIDE = `Top-level taxonomy (pick exactly one):
+- vibrator     (any vibrating toy: bullet, rabbit, g-spot, wand, air-pulse, rotating, remote, wearable)
+- dildo        (non-vibrating insertable, realistic or fantasy, packer, etc.)
+- anal         (plug, prostate massager, beads, dilator, douche)
+- bondage      (paddle, restraint, blindfold, gag, collar, sensory, electrostim)
+- cock-ring    (classic ring, sling, ball stretcher, ring set)
+- stroker      (masturbation sleeve, pocket, doll)
+- couples      (couples game, positioning aid, swing/sling, shared accessory)
+- harness      (strap-on harness body)
+- extender     (penis sleeve, extender, strap-on extender)
+- pump         (penis pump)
+- lube         (lubricant of any base \u2014 water/silicone/hybrid/oil \u2014 and toy cleaner)
+- massage      (body massage product, oil, candle, pheromone, CBD)
+- enhancer     (desensitizer, arousal gel, gummy, pill, oral spray)
+- wear         (lingerie, underwear, bodysuit, hosiery, pasty, apparel)
+- condom       (any condom brand)
+- wellness     (kegel, dilator, douche, hygiene, aftercare)
+- novelty      (candy, pin, game, plushie, party supply, novelty gift)
+- book-media   (book, coloring book)
+- sex-machine  (machines \u2014 no subtype available; leave subtype empty)`;
     ASK_EMMA_AXIS_GUIDANCE = {
       mood: "How using this feels \u2014 the energy a shopper would gravitate to. Pick 1\u20133 that genuinely fit.",
       audience: "Who this is for \u2014 solo, couples, or gifting. Pick 1\u20132.",
       matters: "Practical features a shopper might filter on \u2014 quietness, travel-friendliness, beginner-friendliness, waterproof, rechargeable, hands-free, soft-touch material. Pick 2\u20134 that are TRUE for this product."
     };
-    IVR_EXPERIENCE_LEVELS = ["first-time", "curious", "experienced", "advanced", "any"];
-    IVR_USE_CASES = ["date-night", "travel", "everyday", "discovery", "gift", "celebration"];
-    IVR_FEATURES = ["app-controlled", "waterproof", "rechargeable", "quiet", "travel-size", "hands-free", "soft-touch", "pinpoint", "full-coverage"];
+    IVR_EXPERIENCE_LEVELS = ["first-time", "curious", "experienced", "advanced"];
+    IVR_USE_CASES = [
+      "date-night",
+      "travel",
+      "everyday",
+      "discovery",
+      "gift",
+      "celebration",
+      "anniversary",
+      "honeymoon",
+      "valentine",
+      "birthday",
+      "bachelorette",
+      "pride",
+      "holiday",
+      "me-time",
+      "self-care",
+      "stress-relief",
+      "bedtime",
+      "after-work",
+      "couples-play",
+      "long-distance",
+      "partner-surprise",
+      "spice-up",
+      "newly-dating",
+      "long-term",
+      "first-time",
+      "experimentation",
+      "couples-discovery",
+      "kink-curious",
+      "role-play",
+      "fantasy",
+      "bdsm",
+      "power-play",
+      "bondage-night",
+      "vacation",
+      "weekend-getaway",
+      "shower-bath",
+      "discreet-public",
+      "quickie",
+      "pelvic-floor",
+      "kegel-training",
+      "postpartum",
+      "menopause",
+      "libido-boost",
+      "prostate-health",
+      "erectile-support",
+      "menstrual-comfort",
+      "gift-set",
+      "party-favor",
+      "self-gift",
+      "queer-affirming",
+      "trans-affirming",
+      "women-focused",
+      "men-focused",
+      "inclusive"
+    ];
+    IVR_FEATURES = [
+      "app-controlled",
+      "waterproof",
+      "rechargeable",
+      "quiet",
+      "travel-size",
+      "hands-free",
+      "soft-touch",
+      "pinpoint",
+      "full-coverage",
+      "battery-powered",
+      "disposable-battery",
+      "usb-c",
+      "wireless-remote",
+      "bluetooth",
+      "long-distance",
+      "magnetic-charging",
+      "rumbly",
+      "buzzy",
+      "gentle",
+      "beginner-friendly",
+      "intense",
+      "powerful",
+      "vibrating",
+      "rotating",
+      "thrusting",
+      "suction",
+      "squirting",
+      "pulsing",
+      "warming",
+      "cooling",
+      "tingling",
+      "silicone",
+      "glass",
+      "metal",
+      "wood",
+      "body-safe",
+      "phthalate-free",
+      "latex-free",
+      "hypoallergenic",
+      "vegan",
+      "vegan-leather",
+      "leather",
+      "faux-leather",
+      "mini",
+      "compact",
+      "large",
+      "xl",
+      "xxl",
+      "oversized",
+      "plus-size",
+      "queen-size",
+      "curvy",
+      "small",
+      "medium",
+      "slim",
+      "girthy",
+      "flared-base",
+      "suction-cup",
+      "strapless",
+      "harness-compatible",
+      "solo",
+      "partner",
+      "couples",
+      "gift",
+      "gift-set",
+      "beginner",
+      "advanced",
+      "pro",
+      "lgbtq",
+      "pride",
+      "rainbow",
+      "clitoral",
+      "g-spot",
+      "p-spot",
+      "prostate",
+      "nipple",
+      "anal",
+      "oral",
+      "external",
+      "internal",
+      "dual-stim",
+      "luxury",
+      "premium",
+      "discreet",
+      "glow-in-the-dark",
+      "realistic",
+      "non-phallic",
+      "fantasy",
+      "holiday",
+      "valentine",
+      "pride-edition",
+      "water-based",
+      "silicone-based",
+      "hybrid",
+      "oil-based",
+      "flavored",
+      "unscented",
+      "cbd",
+      "organic",
+      "natural",
+      "condom-safe",
+      "toy-safe",
+      "numbing",
+      "desensitizing"
+    ];
+  }
+});
+
+// app/types/index.ts
+function categoryToLegacyString(c) {
+  if (typeof c === "string") return c;
+  if (!c || c.length === 0) return "both";
+  if (c.includes("couples")) return "couples";
+  if (c.length >= 2 && c.includes("for-him") && c.includes("for-her")) return "both";
+  return c[0] ?? "both";
+}
+var init_types = __esm({
+  "app/types/index.ts"() {
+    "use strict";
   }
 });
 
@@ -7745,7 +8495,7 @@ async function postDealTweet(deal) {
         imageUrl = imageUrl || fullDeal.images[0]?.url || "";
         brand = brand || fullDeal.brand;
         tagline = tagline || fullDeal.tagline;
-        category = category || fullDeal.category;
+        category = category || categoryToLegacyString(fullDeal.category);
       }
     }
     const copy = await generateTweetCopy({
@@ -7885,6 +8635,7 @@ var init_twitter_server = __esm({
     init_schema();
     init_claude_server();
     init_shopify_server();
+    init_types();
   }
 });
 
@@ -7898,7 +8649,7 @@ __export(emma_rails_server_exports, {
   regenerateRail: () => regenerateRail,
   regenerateRailById: () => regenerateRailById
 });
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 import { createClient as createClient4 } from "@sanity/client";
 function getReadClient3() {
   if (!projectId4) return null;
@@ -7917,7 +8668,7 @@ function computeBriefHash(rail) {
     sv: sv.trim(),
     m: rail.maxPicks
   });
-  return createHash2("sha256").update(payload).digest("hex").slice(0, 32);
+  return createHash3("sha256").update(payload).digest("hex").slice(0, 32);
 }
 function mulberry32(seed) {
   let t = seed >>> 0;
@@ -7930,7 +8681,7 @@ function mulberry32(seed) {
   };
 }
 function seedFromString(s) {
-  const hex = createHash2("sha256").update(s).digest("hex").slice(0, 8);
+  const hex = createHash3("sha256").update(s).digest("hex").slice(0, 8);
   return parseInt(hex, 16) >>> 0;
 }
 function seededShuffle(items, seed) {
@@ -8051,7 +8802,7 @@ async function regenerateRail(rail, dealHandle, trigger) {
         title: hero.seoTitle,
         ...hero.brand ? { brand: hero.brand } : {},
         ...hero.tagline ? { tagline: hero.tagline } : {},
-        ...hero.category ? { category: hero.category } : {},
+        ...hero.category?.length ? { category: categoryToLegacyString(hero.category) } : {},
         ...hero.tags?.length ? { tags: hero.tags } : {},
         dealPrice: hero.dealPrice
       },
@@ -8194,6 +8945,7 @@ var init_emma_rails_server = __esm({
     init_shopify_server();
     init_claude_server();
     init_kv_server();
+    init_types();
     projectId4 = process.env["SANITY_PROJECT_ID"];
     dataset4 = process.env["SANITY_DATASET"] ?? "production";
     apiVersion4 = "2024-10-01";
@@ -8317,7 +9069,7 @@ async function activateDeal(deal) {
       tagline: "",
       fullStory: "",
       brand: "",
-      category: "both",
+      category: ["for-him", "for-her"],
       dealPrice,
       msrp,
       mapRestricted: false
@@ -8346,7 +9098,7 @@ async function activateDeal(deal) {
           productHandle: fullDeal.handle,
           productTitle: fullDeal.seoTitle ?? deal.seoTitle ?? void 0,
           brand: fullDeal.brand ?? void 0,
-          category: fullDeal.category ?? void 0,
+          category: fullDeal.category && fullDeal.category.length > 0 ? fullDeal.category[0] : void 0,
           dealDate: estDate(0),
           variant: copy.variant,
           eyebrow: copy.eyebrow,
