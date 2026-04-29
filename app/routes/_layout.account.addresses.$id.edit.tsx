@@ -6,7 +6,7 @@ import { getCountries } from '~/lib/shopify.server'
 import type { CustomerAddressInput } from '~/lib/shopify.server'
 import { AddressForm } from '~/components/account/AddressForm'
 
-export const meta: MetaFunction = () => [{ title: 'Edit address — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Edit address — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 // ── Loader ───────────────────────────────────────────────────────────────────
 export async function loader({ request, params }: LoaderFunctionArgs) {

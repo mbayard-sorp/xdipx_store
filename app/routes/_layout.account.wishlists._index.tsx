@@ -9,7 +9,7 @@ import { ConfirmDialog } from '~/components/account/ConfirmDialog'
 import { EmptyState } from '~/components/account/EmptyState'
 import type { AccountOutletContext } from './_layout.account'
 
-export const meta: MetaFunction = () => [{ title: 'Wishlists — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Wishlists — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { token, tokenType } = await requireCustomer(request)

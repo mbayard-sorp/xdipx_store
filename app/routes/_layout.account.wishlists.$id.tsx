@@ -11,7 +11,7 @@ import {
 } from '~/lib/wishlist.server'
 import { ConfirmDialog } from '~/components/account/ConfirmDialog'
 
-export const meta: MetaFunction = () => [{ title: 'Wishlist — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Wishlist — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { token, tokenType } = await requireCustomer(request)

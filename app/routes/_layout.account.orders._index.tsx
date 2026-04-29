@@ -6,7 +6,7 @@ import { OrderCard } from '~/components/account/OrderCard'
 import { EmptyState } from '~/components/account/EmptyState'
 import type { AccountOutletContext } from './_layout.account'
 
-export const meta: MetaFunction = () => [{ title: 'Orders — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Orders — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 type StatusFilter = 'all' | 'processing' | 'shipped' | 'delivered' | 'returned'
 

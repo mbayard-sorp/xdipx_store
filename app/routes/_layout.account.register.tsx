@@ -25,7 +25,7 @@ import {
 } from '~/lib/facebook-oauth.server'
 import { getCartIdFromCookie, linkCartToCustomer } from '~/lib/cart.server'
 
-export const meta: MetaFunction = () => [{ title: 'Create account — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Create account — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 // Already logged in → go to account
 export async function loader({ request }: LoaderFunctionArgs) {

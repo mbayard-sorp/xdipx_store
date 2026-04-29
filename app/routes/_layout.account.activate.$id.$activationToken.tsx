@@ -4,7 +4,7 @@ import { customerActivate } from '~/lib/shopify.server'
 import { getCustomerToken, loginCustomerSession } from '~/lib/customer-session.server'
 import { getCartIdFromCookie, linkCartToCustomer } from '~/lib/cart.server'
 
-export const meta: MetaFunction = () => [{ title: 'Activate account — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Activate account — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const existing = await getCustomerToken(request)

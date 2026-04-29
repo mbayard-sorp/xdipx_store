@@ -8,8 +8,9 @@ import { ReturnTimeline } from '~/components/account/ReturnTimeline'
 import type { AccountOutletContext } from './_layout.account'
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  if (!data) return [{ title: 'Return — xdipx' }]
-  return [{ title: `${data.rma} — xdipx` }]
+  const robots = { name: 'robots', content: 'noindex, nofollow' }
+  if (!data) return [{ title: 'Return — xdipx' }, robots]
+  return [{ title: `${data.rma} — xdipx` }, robots]
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {

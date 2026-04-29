@@ -8,10 +8,11 @@ import { formatCadence } from '~/components/account/SubscriptionContractCard'
 import type { AccountOutletContext } from './_layout.account'
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  if (!data) return [{ title: 'Subscription — xdipx' }]
+  const robots = { name: 'robots', content: 'noindex, nofollow' }
+  if (!data) return [{ title: 'Subscription — xdipx' }, robots]
   const line = data.contract.lines[0]
   const title = line ? line.title : 'Subscription'
-  return [{ title: `${title} — xdipx` }]
+  return [{ title: `${title} — xdipx` }, robots]
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {

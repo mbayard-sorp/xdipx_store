@@ -11,8 +11,9 @@ import { isOrderWithinReturnWindow } from '~/lib/returns.server'
 import type { AccountOutletContext } from './_layout.account'
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  if (!data) return [{ title: 'Order — xdipx' }]
-  return [{ title: `Order #${data.order.orderNumber} — xdipx` }]
+  const robots = { name: 'robots', content: 'noindex, nofollow' }
+  if (!data) return [{ title: 'Order — xdipx' }, robots]
+  return [{ title: `Order #${data.order.orderNumber} — xdipx` }, robots]
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {

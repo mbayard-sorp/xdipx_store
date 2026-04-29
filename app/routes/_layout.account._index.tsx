@@ -11,7 +11,7 @@ import { EmptyState } from '~/components/account/EmptyState'
 import { MergeLocalHearts } from '~/components/store/MergeLocalHearts'
 import { useSession } from '~/lib/session-context'
 
-export const meta: MetaFunction = () => [{ title: 'Account — xdipx' }]
+export const meta: MetaFunction = () => [{ title: 'Account — xdipx' }, { name: 'robots', content: 'noindex, nofollow' }]
 
 export default function AccountDashboard() {
   const { customer } = useOutletContext<AccountOutletContext>()
