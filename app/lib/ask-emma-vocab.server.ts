@@ -11,9 +11,9 @@ export type AskEmmaAxis = 'mood' | 'audience' | 'matters'
 export type AskEmmaVocabulary = Record<AskEmmaAxis, string[]>
 
 const FALLBACK: AskEmmaVocabulary = {
-  mood:     ['slow-and-intimate', 'playful', 'adventurous', 'unhurried-solo'],
-  audience: ['me', 'us', 'gift'],
-  matters:  ['quiet', 'soft-touch', 'travel-size', 'first-time', 'waterproof', 'rechargeable', 'hands-free'],
+  mood:     ['slow-and-intimate', 'playful', 'adventurous', 'romantic', 'indulgent', 'curious', 'comforting', 'energetic', 'bold', 'sensual', 'spontaneous', 'tender'],
+  audience: ['solo', 'couples', 'long-distance', 'first-time', 'date-night', 'self-gift', 'gift-idea', 'anniversary', 'bachelorette', 'just-curious'],
+  matters:  ['whisper-quiet', 'waterproof', 'travel-size', 'rechargeable', 'app-controlled', 'hands-free', 'beginner-friendly', 'body-safe-silicone', 'discreet-design', 'long-battery', 'plus-size-friendly', 'latex-free'],
 }
 
 function client(write = false) {
