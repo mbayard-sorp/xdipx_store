@@ -13,15 +13,14 @@
  */
 import {
   generateCopy,
+  generateProductCopyBundle,
   generateEmmaTake,
   generateCareInstructions,
   generateSensationDialV2,
   generateEmmaHero,
   inferProductTaxonomy,
   generateAskEmmaTagsAll,
-  generateIvrExperience,
-  generateIvrUseCase,
-  generateIvrFeatures,
+  generateIvrAll,
   generateProductFaqs,
   generateProductTitle,
   generatePairingWhy,
@@ -124,6 +123,10 @@ export interface OrchestratorTelemetry {
   totalInputTokens:  number
   totalOutputTokens: number
   totalTokens:       number
+  /** Cache writes — paid at 1.25× input price. Counted at first call per cached prefix. */
+  totalCacheCreationTokens: number
+  /** Cache reads — paid at ~10% of input price (90% off). Counted on every subsequent call within TTL. */
+  totalCacheReadTokens:     number
   durationMs:        number
   turns:             number
   toolCalls:         ToolCallTrace[]
@@ -233,18 +236,8 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'generateTagline',
-    description: 'Generate the product tagline (one short, witty line). Always call this.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateSpecifications',
-    description: 'Generate a string[] of "Label: Value" specification bullets for the Specs grid card (mirrors care/box format). Always call this.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateSeoMeta',
-    description: 'Generate the SEO meta description. Always call this.',
+    name: 'generateProductCopyBundle',
+    description: 'Generate the product tagline, SEO meta description, AND "Label: Value" specifications bullets in a SINGLE Haiku call. Replaces the three legacy tools (generateTagline + generateSeoMeta + generateSpecifications) — they shared the same product context and keyword block. Always call this.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -279,18 +272,8 @@ const TOOLS = [
   // preserved so the deal-cycle pipeline can call them directly. Import path
   // never schedules them.
   {
-    name: 'generateIvrExperience',
-    description: 'Pick EVERY experience level the product fits (multi-select). Choose 1–4 from: first-time, curious, experienced, advanced. A versatile product can hit multiple levels. Used by Emma chat/IVR/SMS to match buyer intent. Always call this AFTER classifyProductTypeDial and generateEmmaTake (so context is rich).',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateIvrUseCase',
-    description: 'Pick 1–3 voice-friendly use-case slugs (date-night / travel / everyday / discovery / gift / celebration). Always call this.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'generateIvrFeatures',
-    description: 'Pick 2–4 voice-mentionable feature slugs (app-controlled / waterproof / quiet / etc.) that Emma can speak aloud when filtering. Always call this.',
+    name: 'generateIvrAll',
+    description: 'Pick experience levels, use-case slugs, AND feature slugs in a SINGLE Haiku call — replaces the three legacy IVR tools (generateIvrExperience + generateIvrUseCase + generateIvrFeatures). Used by Emma chat/IVR/SMS to match buyer intent and speak features aloud. Always call this AFTER classifyProductTypeDial and generateEmmaTake so context is rich.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -393,25 +376,18 @@ async function executeTool(
       }
     }
 
-    case 'generateTagline': {
-      const r = await generateCopy({ type: 'tagline', product: enrichProduct(state, product) }, state.input.llmClient)
-      const arr = r.content as string[]
-      const first = Array.isArray(arr) ? arr[0] : (arr as unknown as string)
-      state.writes.tagline = (first ?? '').trim()
-      return { ok: true, summary: `tagline len=${state.writes.tagline.length}` }
-    }
-
-    case 'generateSpecifications': {
-      const r = await generateCopy({ type: 'specifications', product: enrichProduct(state, product) }, state.input.llmClient)
-      const specs = Array.isArray(r.content) ? (r.content as string[]) : []
-      state.writes.specifications = specs
-      return { ok: specs.length > 0, summary: `specs items=${specs.length}` }
-    }
-
-    case 'generateSeoMeta': {
-      const r = await generateCopy({ type: 'seo_meta', product: enrichProduct(state, product) }, state.input.llmClient)
-      state.writes.seoMetaDescription = (r.content as string) ?? ''
-      return { ok: !!state.writes.seoMetaDescription, summary: `seoMeta len=${state.writes.seoMetaDescription.length}` }
+    case 'generateProductCopyBundle': {
+      const bundle = await generateProductCopyBundle({
+        product: enrichProduct(state, product),
+        ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}),
+      })
+      state.writes.tagline             = bundle.tagline
+      state.writes.seoMetaDescription  = bundle.seoMeta
+      state.writes.specifications      = bundle.specifications
+      return {
+        ok: !!bundle.tagline && !!bundle.seoMeta,
+        summary: `bundle tagline=${bundle.tagline.length} seoMeta=${bundle.seoMeta.length} specs=${bundle.specifications.length}`,
+      }
     }
 
     case 'generateEmmaTake': {
@@ -531,22 +507,15 @@ async function executeTool(
       }
     }
 
-    case 'generateIvrExperience': {
-      const lvls = await generateIvrExperience({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
-      state.writes.ivrExperience = lvls
-      return { ok: true, summary: `ivrExperience=[${lvls.join(',')}]` }
-    }
-
-    case 'generateIvrUseCase': {
-      const tags = await generateIvrUseCase({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
-      state.writes.ivrUseCase = tags
-      return { ok: true, summary: `ivrUseCase=${tags.length}` }
-    }
-
-    case 'generateIvrFeatures': {
-      const tags = await generateIvrFeatures({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
-      state.writes.ivrFeatures = tags
-      return { ok: true, summary: `ivrFeatures=${tags.length}` }
+    case 'generateIvrAll': {
+      const ivr = await generateIvrAll({ deal: dealCtx, ...(state.input.llmClient ? { llmClient: state.input.llmClient } : {}) })
+      state.writes.ivrExperience = ivr.experience
+      state.writes.ivrUseCase    = ivr.useCases
+      state.writes.ivrFeatures   = ivr.features
+      return {
+        ok: true,
+        summary: `ivr exp=[${ivr.experience.join(',')}] uc=${ivr.useCases.length} feat=${ivr.features.length}`,
+      }
     }
 
     case 'generateProductFaqs': {
@@ -618,8 +587,10 @@ async function runOrchestrationViaSdk(
           summary = `tool error: ${errorMsg}`
         }
         const toolTokens = drainToolTokens()
-        state.telemetry.totalInputTokens  += toolTokens.input
-        state.telemetry.totalOutputTokens += toolTokens.output
+        state.telemetry.totalInputTokens         += toolTokens.input
+        state.telemetry.totalOutputTokens        += toolTokens.output
+        state.telemetry.totalCacheCreationTokens += toolTokens.cacheCreation
+        state.telemetry.totalCacheReadTokens     += toolTokens.cacheRead
         state.telemetry.toolCalls.push({
           name:         t.name,
           durationMs:   Date.now() - start,
@@ -691,26 +662,22 @@ Phase 3 — title decision (uses dial + tags to pick a descriptor when needed):
   3. generateProductTitle
 
 Phase 4 — copy generators (these benefit from keyword targeting via the tags above):
-  4. generateTagline
-  5. generateSeoMeta
-  6. generateSpecifications
-  7. generateEmmaTake
+  4. generateProductCopyBundle  (single Haiku call: tagline + seoMeta + specifications together)
+  5. generateEmmaTake
 
 Phase 5 — dial + hero + image (independent, run after copy is set):
-  8. generateSensationDialV2 (must be AFTER classifyProductTypeDial)
-  9. generateEmmaHero
-  10. generateMoodImage
+  6. generateSensationDialV2 (must be AFTER classifyProductTypeDial)
+  7. generateEmmaHero
+  8. generateMoodImage
 
-Phase 6 — pairings (run AFTER tagline + emmaTake exist so the pairing-why blurbs have richer context):
-  11. proposePairingWhy (SKIP if no pairing candidates were provided)
+Phase 6 — pairings (run AFTER copy bundle + emmaTake exist so the pairing-why blurbs have richer context):
+  9. proposePairingWhy (SKIP if no pairing candidates were provided)
 
 Phase 7 — IVR / voice surfaces (run AFTER generateEmmaTake — they need rich context):
-  12. generateIvrExperience
-  13. generateIvrUseCase
-  14. generateIvrFeatures
+  10. generateIvrAll  (single Haiku call: experience + useCases + features together)
 
 Phase 8 — PDP FAQs (run LAST — must be AFTER generateEmmaTake AND generateCareInstructions so the differentiation context is populated; H1 answers must NOT restate descriptionHtml or careInstructions):
-  15. generateProductFaqs
+  11. generateProductFaqs
 
 Conditional:
 - generateCareInstructions: call for every product type. The underlying generator branches on productTypeDial — hardware gets 3–5 maintenance bullets, consumables (lube, edible wear) get 2–3 playful storage/usage bullets.
@@ -738,6 +705,8 @@ export async function generateProductContent(input: OrchestratorInput): Promise<
       totalInputTokens:  0,
       totalOutputTokens: 0,
       totalTokens:       0,
+      totalCacheCreationTokens: 0,
+      totalCacheReadTokens:     0,
       durationMs:        0,
       turns:             0,
       toolCalls:         [],
@@ -820,8 +789,10 @@ Start with classifyProductTypeDial, then run every other applicable tool exactly
             summary = `tool error: ${errorMsg}`
           }
           const toolTokens = drainToolTokens()
-          state.telemetry.totalInputTokens  += toolTokens.input
-          state.telemetry.totalOutputTokens += toolTokens.output
+          state.telemetry.totalInputTokens         += toolTokens.input
+          state.telemetry.totalOutputTokens        += toolTokens.output
+          state.telemetry.totalCacheCreationTokens += toolTokens.cacheCreation
+          state.telemetry.totalCacheReadTokens     += toolTokens.cacheRead
           state.telemetry.toolCalls.push({
             name:         tu.name,
             durationMs:   Date.now() - start,

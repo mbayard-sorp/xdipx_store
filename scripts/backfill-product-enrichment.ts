@@ -43,7 +43,10 @@
  *
  * Exit code: 0 on clean run, 1 if any product errored.
  */
-import 'dotenv/config'
+// MUST be the first import — populates process.env (with override) before any
+// downstream module reads it at evaluation time (e.g. db.server.ts builds a
+// Neon client at module scope).
+import './_load-env'
 import { eq, and, gte, sql } from 'drizzle-orm'
 import { db } from '../app/lib/db.server'
 import { dealHistory } from '../db/schema'
@@ -63,6 +66,7 @@ import {
 } from '../app/lib/feed-processor.server'
 import { makeLLMClient } from '../app/lib/llm-client.server'
 import { upsertProductPage } from '../app/lib/sanity.server'
+import { runBatchEmmaTake, type BatchEmmaTakeInput } from '../app/lib/batch-enrichment.server'
 import {
   getCachedWrites,
   setCachedWrites,
@@ -72,7 +76,7 @@ import {
 
 interface Args {
   apply:               boolean
-  via:                 'api' | 'claude-code'
+  via:                 'api' | 'claude-code' | 'batch'
   mode:                'fill-gaps' | 'refresh' | 'full'
   scope:               'all' | 'titles-only' | 'keywords-only' | 'tags-only' | 'specs-only' | 'ivr-only' | 'archive-discontinued'
   limit?:              number
@@ -119,8 +123,8 @@ function parseArgs(argv: string[]): Args {
   if (sku)        out.sku        = sku
   if (fromHandle) out.fromHandle = fromHandle
   if (fromFile)   out.fromFile   = fromFile
-  if (out.via !== 'api' && out.via !== 'claude-code') {
-    console.error(`Invalid --via=${out.via}. Use api or claude-code.`)
+  if (out.via !== 'api' && out.via !== 'claude-code' && out.via !== 'batch') {
+    console.error(`Invalid --via=${out.via}. Use api, claude-code, or batch.`)
     process.exit(1)
   }
   return out
@@ -228,7 +232,12 @@ interface BackfillSummary {
   changed:    number
   skipped:    number
   errors:     Array<{ sku: string; message: string }>
-  totalCost:  { inputTokens: number; outputTokens: number }
+  totalCost:  {
+    inputTokens:         number
+    outputTokens:        number
+    cacheCreationTokens: number
+    cacheReadTokens:     number
+  }
 }
 
 async function maybeShouldRefresh(
@@ -310,7 +319,7 @@ async function enrichOne(
   // Skip if Nalpac flagged it discontinued — archive instead.
   // (We don't refetch the feed here; rely on caller to use --archive-discontinued.)
 
-  const rawDescription = snap.rawDescription ?? snap.body_html.replace(/<[^>]+>/g, ' ').slice(0, 2000)
+  const rawDescription = snap.rawDescription ?? (snap.body_html ?? '').replace(/<[^>]+>/g, ' ').slice(0, 2000)
   const categoriesRaw  = await db
     .select({ categories: dealHistory.categories })
     .from(dealHistory)
@@ -391,8 +400,10 @@ async function enrichOne(
         inputTokens:  result.telemetry.totalInputTokens,
         outputTokens: result.telemetry.totalOutputTokens,
       }
-      summary.totalCost.inputTokens  += cost.inputTokens
-      summary.totalCost.outputTokens += cost.outputTokens
+      summary.totalCost.inputTokens         += cost.inputTokens
+      summary.totalCost.outputTokens        += cost.outputTokens
+      summary.totalCost.cacheCreationTokens += result.telemetry.totalCacheCreationTokens
+      summary.totalCost.cacheReadTokens     += result.telemetry.totalCacheReadTokens
 
       // Write the cache row so subsequent backfill passes (same voiceHash +
       // promptVersion) skip the orchestrator. Best-effort: a cache write
@@ -732,6 +743,107 @@ interface FromFileEntry {
   writes: ProductWrites
 }
 
+// ─── Batch API path (--via=batch) ────────────────────────────────────────────
+//
+// Refreshes Emma's Take across the matched products via Anthropic's Batch API
+// (50% off both input and output tokens, async — typically completes within
+// minutes for batches under ~50 requests, up to 24h for larger jobs). This is
+// the cheapest way to do a catalog-wide voice refresh after a brand-voice
+// change in /admin/settings.
+//
+// Scope: this MVP wires the heaviest single generator (Emma's Take, Sonnet,
+// 600–800 output tokens) through batch. The other per-tool generators stay on
+// the sync path. As the Nalpac automation matures, additional generators
+// (FAQs, copy bundle, dial) can extend `runBatchEmmaTake` in
+// app/lib/batch-enrichment.server.ts.
+async function runBatchVoiceRefresh(args: Args, summary: BackfillSummary) {
+  const rows = await listProducts(args)
+  console.log(`[batch] ${rows.length} product(s) matched for batch Emma's Take refresh`)
+  if (rows.length === 0) return
+
+  const estimatedSavings = rows.length * 0.05  // ~$0.05/product savings on the Sonnet generator at 50% off
+  console.log(`[cost-est] route: Anthropic Batch API (50% discount, async, results within 24h — usually minutes)`)
+  console.log(`[cost-est] estimated savings vs. sync: ~${formatUsd(estimatedSavings)} for ${rows.length} products on Emma's Take alone`)
+  console.log(`[cost-est] other generators (tagline / SEO meta / specs / dial / IVR / FAQs / care / box) still run on the sync API path when needed.`)
+  if (!args.apply) {
+    console.log(`[cost-est] dry-run: building batch payloads but skipping submission. Re-run with --apply to submit.`)
+  }
+
+  // Build batch inputs from each product's current Shopify metafields. The
+  // batch generator only needs voice-relevant fields, so we pull a thin
+  // snapshot rather than the full product context.
+  const inputs: BatchEmmaTakeInput[] = []
+  const skuByProductId = new Map<string, string>()
+  for (const row of rows) {
+    const numericId = row.shopifyProductId.split('/').pop()
+    if (!numericId) {
+      summary.errors.push({ sku: row.sku, message: 'invalid Shopify product ID' })
+      continue
+    }
+    const snap = await fetchProductSnapshot(numericId)
+    if (!snap) {
+      summary.errors.push({ sku: row.sku, message: 'snapshot fetch failed' })
+      continue
+    }
+    inputs.push({
+      productId: row.shopifyProductId,
+      deal: {
+        seoTitle:        snap.title,
+        brand:           snap.vendor,
+        category:        snap.product_type ? [snap.product_type] : [],
+        ...(snap.metafields['xdipx.tagline']           ? { tagline:    snap.metafields['xdipx.tagline'] }       : {}),
+        ...(snap.metafields['custom.original_description'] ? { fullStory: snap.metafields['custom.original_description'] } : { fullStory: snap.body_html }),
+        ...(snap.metafields['xdipx.product_type_dial'] ? { productTypeDial: snap.metafields['xdipx.product_type_dial'] as never } : {}),
+      },
+    })
+    skuByProductId.set(row.shopifyProductId, row.sku)
+  }
+
+  if (inputs.length === 0) {
+    console.log('[batch] no valid products to submit')
+    return
+  }
+
+  if (!args.apply) {
+    console.log(`[batch] dry-run: would submit ${inputs.length} requests`)
+    summary.processed = inputs.length
+    summary.skipped   = inputs.length
+    return
+  }
+
+  const brandVoice = await getPipelineSetting('brandVoice')
+  const result = await runBatchEmmaTake(inputs, {
+    ...(brandVoice ? { brandVoice } : {}),
+  })
+  console.log(`[batch] batch ${result.meta.batchId} done: succeeded=${result.meta.succeededCount} errored=${result.meta.erroredCount} duration=${(result.meta.durationMs / 1000).toFixed(1)}s`)
+
+  for (const failure of result.failures) {
+    const sku = skuByProductId.get(failure.productId) ?? failure.productId
+    summary.errors.push({ sku, message: failure.error })
+  }
+
+  // Push each successful result back to Shopify body_html. Sanity sync stays
+  // out of scope for this MVP — admins typically re-sync via the existing
+  // sync-sanity admin button after a voice refresh, since several Sanity
+  // fields beyond descriptionHtml may also need refresh.
+  for (const [productId, descriptionHtml] of result.results) {
+    summary.processed++
+    const sku = skuByProductId.get(productId) ?? productId
+    try {
+      const numericId = productId.split('/').pop()
+      if (!numericId) throw new Error('invalid product ID')
+      await shopifyAdmin(`/products/${numericId}.json`, 'PUT', {
+        product: { id: Number(numericId), body_html: descriptionHtml },
+      })
+      summary.changed++
+      summary.totalCost.outputTokens += descriptionHtml.length / 4  // rough char→token approximation
+      console.log(`  ✓ ${sku}: descriptionHtml len=${descriptionHtml.length}`)
+    } catch (err) {
+      summary.errors.push({ sku, message: err instanceof Error ? err.message : String(err) })
+    }
+  }
+}
+
 async function runFromFile(args: Args, summary: BackfillSummary) {
   const { readFile } = await import('node:fs/promises')
   const path = args.fromFile!
@@ -815,7 +927,7 @@ async function main() {
   const args = parseArgs(process.argv)
   const summary: BackfillSummary = {
     processed: 0, changed: 0, skipped: 0, errors: [],
-    totalCost: { inputTokens: 0, outputTokens: 0 },
+    totalCost: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
   }
 
   console.log(`Backfill: scope=${args.scope} mode=${args.mode} via=${args.via} dryRun=${!args.apply}${args.fromFile ? ` fromFile=${args.fromFile}` : ''}`)
@@ -824,6 +936,8 @@ async function main() {
     await runArchiveDiscontinued(args, summary)
   } else if (args.fromFile) {
     await runFromFile(args, summary)
+  } else if (args.via === 'batch') {
+    await runBatchVoiceRefresh(args, summary)
   } else {
     const rows = await listProducts(args)
     console.log(`[backfill] ${rows.length} product(s) to process`)
@@ -859,13 +973,26 @@ async function main() {
   console.log(`  errors:    ${summary.errors.length}`)
   if (summary.totalCost.inputTokens > 0 || summary.totalCost.outputTokens > 0) {
     console.log(`  tokens:    input=${summary.totalCost.inputTokens} output=${summary.totalCost.outputTokens}`)
+    if (summary.totalCost.cacheCreationTokens > 0 || summary.totalCost.cacheReadTokens > 0) {
+      const totalCacheable = summary.totalCost.cacheCreationTokens + summary.totalCost.cacheReadTokens
+      const hitRate = totalCacheable > 0
+        ? ((summary.totalCost.cacheReadTokens / totalCacheable) * 100).toFixed(1)
+        : '0.0'
+      console.log(`  cache:     creation=${summary.totalCost.cacheCreationTokens} read=${summary.totalCost.cacheReadTokens} hit-rate=${hitRate}%`)
+    }
     // Actual $ figure assuming Sonnet pricing ($3/M input + $15/M output) for
     // the per-tool side. Underestimates slightly — Haiku-tier tools are
     // included in the input/output totals but priced cheaper. Treat as upper
-    // bound on the API-key spend.
-    const inUsd  = (summary.totalCost.inputTokens  / 1_000_000) * 3
+    // bound on the API-key spend. Cache reads are billed at 10% of input price,
+    // cache writes at 1.25× — so we adjust the input figure for both.
+    const fullPriceInputTokens = summary.totalCost.inputTokens - summary.totalCost.cacheReadTokens
+    const inUsd  = ((fullPriceInputTokens + summary.totalCost.cacheCreationTokens * 1.25) / 1_000_000) * 3
+    const cacheReadUsd = (summary.totalCost.cacheReadTokens / 1_000_000) * 3 * 0.1
     const outUsd = (summary.totalCost.outputTokens / 1_000_000) * 15
-    console.log(`  cost:      ~${formatUsd(inUsd + outUsd)} (Sonnet upper-bound; Haiku tools are billed less)`)
+    console.log(`  cost:      ~${formatUsd(inUsd + cacheReadUsd + outUsd)} (Sonnet upper-bound, accounts for cache pricing; Haiku tools are billed less)`)
+    if (summary.processed > 0) {
+      console.log(`  per-prod:  ~${formatUsd((inUsd + cacheReadUsd + outUsd) / summary.processed)} / product`)
+    }
   }
   for (const err of summary.errors) {
     console.log(`    ✗ ${err.sku}: ${err.message}`)

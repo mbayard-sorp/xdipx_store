@@ -23,6 +23,7 @@ const DEFAULTS: Record<string, string> = {
   minProfit:                '0',
   vaultDiscountPct:         '25',
   brandVoice:               DEFAULT_BRAND_VOICE,
+  enrichmentMode:           'api',
   ivrFarewellMaxPrompts:    DEFAULT_FAREWELL_MAX_PROMPTS,
   ivrFarewellMaxDuration:   DEFAULT_FAREWELL_MAX_DURATION,
   ivrFarewellSilent:        DEFAULT_FAREWELL_SILENT,
@@ -274,6 +275,39 @@ export default function AdminSettingsPage() {
           Manually run the full pipeline: fetch feed → select deal → create Shopify product →
           generate AI copy → push metafields → stage for review.
         </p>
+
+        {/* Enrichment Mode toggle — controls how the cron-driven Nalpac
+            automation generates AI copy. `api` is the default sync path
+            (real-time, full price). `batch` uses Anthropic's Batch API
+            (50% off, async — results within 24h, usually minutes). */}
+        <fetcher.Form method="post" className="space-y-1">
+          <input type="hidden" name="intent" value="save-setting" />
+          <input type="hidden" name="key"    value="enrichmentMode" />
+          <label className="block text-sm font-semibold text-ink">
+            Enrichment Mode
+          </label>
+          <p className="text-xs text-ink/50">
+            <strong>API</strong> — sync, real-time, full price. Use for admin "regenerate now" actions.<br />
+            <strong>Batch</strong> — Anthropic Batch API, 50% off, async (results within 24h, usually minutes).
+            Use this when the Nalpac automation runs nightly and you don't need instant results.
+          </p>
+          <div className="flex gap-3 items-center pt-1">
+            <select
+              name="value"
+              defaultValue={settings['enrichmentMode'] ?? 'api'}
+              className="flex-1 border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
+            >
+              <option value="api">API — sync, full price</option>
+              <option value="batch">Batch — async, 50% off</option>
+            </select>
+            <button
+              type="submit"
+              className="text-sm font-semibold px-4 py-2 bg-cream-2 text-sage rounded-full hover:bg-sage/10 transition-colors whitespace-nowrap"
+            >
+              Save
+            </button>
+          </div>
+        </fetcher.Form>
 
         <SaveForm
           label="Minimum Profit per Unit"

@@ -8,22 +8,45 @@ const apiVersion = '2024-10-01'
 const SINGLETON_ID          = 'singleton.dialRegistry'
 const TAXONOMY_SINGLETON_ID = 'singleton.dialTaxonomy'
 
-// Phase 1 rebuild — ProductTypeDial expanded from 5 to 19 values. The Sanity
-// schema for dialRegistry / dialTaxonomy still has the legacy fields
-// (airPulsation, vibrator, wand, lube, wear). The runtime here reads those
-// legacy fields and routes them under the new top-level taxonomy:
-//   airPulsation / wand → vibrator (legacy values are now subtypes)
-//   vibrator / lube / wear → unchanged (legacy keys = new top-level keys)
-// Once the Sanity admin migration adds entries for the other 16 top-level
-// types (dildo, anal, bondage, etc.), expand TYPE_TO_FIELD accordingly.
-// Until then, unknown types return empty arrays — the sensation-dial generator
-// falls back to "(none — invent appropriate labels)" per its prompt.
-const TYPE_TO_FIELD: Partial<Record<ProductTypeDial, string>> = {
-  vibrator: 'vibrator',
-  lube:     'lube',
-  wear:     'wear',
+// ProductTypeDial → Sanity field name. Field names use camelCase (Sanity
+// disallows hyphens), so hyphenated types collapse: cock-ring → cockRing,
+// book-media → bookMedia, sex-machine → sexMachine. Legacy fields
+// `airPulsation` and `wand` are NOT in this map — they live in Sanity for
+// back-compat, and the read paths below dedupe their labels into `vibrator`
+// (since Phase 1 collapsed them into vibrator subtypes).
+const TYPE_TO_FIELD: Record<ProductTypeDial, string> = {
+  vibrator:      'vibrator',
+  dildo:         'dildo',
+  anal:          'anal',
+  bondage:       'bondage',
+  'cock-ring':   'cockRing',
+  stroker:       'stroker',
+  couples:       'couples',
+  harness:       'harness',
+  extender:      'extender',
+  pump:          'pump',
+  lube:          'lube',
+  massage:       'massage',
+  enhancer:      'enhancer',
+  wear:          'wear',
+  condom:        'condom',
+  wellness:      'wellness',
+  novelty:       'novelty',
+  'book-media':  'bookMedia',
+  'sex-machine': 'sexMachine',
 }
 
+// Field names to project in the GROQ fetches. Includes the legacy
+// `airPulsation` / `wand` fields so the read path can collapse them into
+// `vibrator` for back-compat with any seeded data.
+const REGISTRY_FIELD_NAMES = [
+  ...Object.values(TYPE_TO_FIELD),
+  'airPulsation', 'wand',
+] as const
+
+// Fallback labels for the most common types — used when Sanity is empty or
+// unreachable. Other types fall back to an empty array; the sensation-dial
+// generator's prompt handles "(none — invent appropriate labels)".
 const FALLBACK: Partial<Record<ProductTypeDial, string[]>> = {
   vibrator: ['Intensity', 'Quietness', 'Pattern variety', 'Buildup speed', 'Battery life', 'Learning curve'],
   lube:     ['Slipperiness', 'Longevity', 'Taste-safe', 'Body-safe', 'Tidy-up', 'Skin feel'],
@@ -61,25 +84,35 @@ export async function getDialRegistry(): Promise<DialRegistry> {
   const c = client(false)
   if (!c) return { ...FALLBACK }
   try {
-    const doc = await c.fetch<Record<string, string[] | undefined>>(`*[_id == $id][0]{
-      airPulsation, vibrator, wand, lube, wear
-    }`, { id: SINGLETON_ID })
-    // Legacy `airPulsation` and `wand` fields collapse into `vibrator` under
-    // the expanded ProductTypeDial. De-dupe labels when merging.
-    const vibratorLabels = [
-      ...(doc?.['vibrator']     ?? []),
-      ...(doc?.['airPulsation'] ?? []),
-      ...(doc?.['wand']         ?? []),
-    ]
-    const dedupedVibrator = vibratorLabels.length > 0
-      ? Array.from(new Set(vibratorLabels))
-      : FALLBACK.vibrator
+    const projection = REGISTRY_FIELD_NAMES.join(', ')
+    const doc = await c.fetch<Record<string, string[] | undefined>>(
+      `*[_id == $id][0]{ ${projection} }`,
+      { id: SINGLETON_ID },
+    )
+
     const out: DialRegistry = {}
-    if (dedupedVibrator?.length) out.vibrator = dedupedVibrator
-    if (doc?.['lube']?.length)   out.lube     = doc['lube']
-    else if (FALLBACK.lube)      out.lube     = FALLBACK.lube
-    if (doc?.['wear']?.length)   out.wear     = doc['wear']
-    else if (FALLBACK.wear)      out.wear     = FALLBACK.wear
+    for (const type of Object.keys(TYPE_TO_FIELD) as ProductTypeDial[]) {
+      const field = TYPE_TO_FIELD[type]
+      let labels = doc?.[field] ?? []
+
+      // Legacy collapse: `vibrator` absorbs labels seeded under `airPulsation`
+      // and `wand` (Phase 1 made those subtypes of vibrator). Dedupe.
+      if (type === 'vibrator') {
+        labels = [
+          ...labels,
+          ...(doc?.['airPulsation'] ?? []),
+          ...(doc?.['wand']         ?? []),
+        ]
+        labels = Array.from(new Set(labels))
+      }
+
+      if (labels.length > 0) {
+        out[type] = labels
+      } else if (FALLBACK[type]) {
+        out[type] = FALLBACK[type]
+      }
+      // Otherwise omit — the dial generator's prompt handles missing entries.
+    }
     return out
   } catch (err) {
     console.error('[dial-registry] fetch failed, using fallback:', err)
@@ -102,29 +135,38 @@ export async function getDialTaxonomy(): Promise<DialTaxonomy> {
   const c = client(false)
   if (!c) return empty
   try {
-    const doc = await c.fetch<Record<string, DialDimensionEntry[] | undefined>>(`*[_id == $id][0]{
-      airPulsation, vibrator, wand, lube, wear
-    }`, { id: TAXONOMY_SINGLETON_ID })
+    const projection = REGISTRY_FIELD_NAMES.join(', ')
+    const doc = await c.fetch<Record<string, DialDimensionEntry[] | undefined>>(
+      `*[_id == $id][0]{ ${projection} }`,
+      { id: TAXONOMY_SINGLETON_ID },
+    )
     if (!doc) return empty
-    // Same legacy collapsing as getDialRegistry — airPulsation/wand fold into
-    // vibrator under the expanded ProductTypeDial. Dedupe by label.
-    const vibratorEntries = [
-      ...(Array.isArray(doc['vibrator'])     ? doc['vibrator']     : []),
-      ...(Array.isArray(doc['airPulsation']) ? doc['airPulsation'] : []),
-      ...(Array.isArray(doc['wand'])         ? doc['wand']         : []),
-    ]
-    const seenLabels = new Set<string>()
-    const dedupedVibrator: DialDimensionEntry[] = []
-    for (const entry of vibratorEntries) {
-      if (!entry?.label || seenLabels.has(entry.label)) continue
-      seenLabels.add(entry.label)
-      dedupedVibrator.push(entry)
+
+    const out: DialTaxonomy = {}
+    for (const type of Object.keys(TYPE_TO_FIELD) as ProductTypeDial[]) {
+      const field = TYPE_TO_FIELD[type]
+      let entries: DialDimensionEntry[] = Array.isArray(doc[field]) ? doc[field]! : []
+
+      // Legacy collapse: `vibrator` absorbs entries seeded under `airPulsation`
+      // and `wand`. Dedupe by label (case-sensitive — Sanity preserves casing).
+      if (type === 'vibrator') {
+        const merged = [
+          ...entries,
+          ...(Array.isArray(doc['airPulsation']) ? doc['airPulsation']! : []),
+          ...(Array.isArray(doc['wand'])         ? doc['wand']!         : []),
+        ]
+        const seen = new Set<string>()
+        entries = []
+        for (const entry of merged) {
+          if (!entry?.label || seen.has(entry.label)) continue
+          seen.add(entry.label)
+          entries.push(entry)
+        }
+      }
+
+      if (entries.length > 0) out[type] = entries
     }
-    return {
-      vibrator: dedupedVibrator,
-      lube:     Array.isArray(doc['lube']) ? doc['lube'] : [],
-      wear:     Array.isArray(doc['wear']) ? doc['wear'] : [],
-    }
+    return out
   } catch (err) {
     console.error('[dial-registry] taxonomy fetch failed, returning empty:', err)
     return empty
