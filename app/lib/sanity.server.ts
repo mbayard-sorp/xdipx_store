@@ -4,6 +4,7 @@ import { toHTML } from '@portabletext/to-html'
 import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock } from '~/types/cms'
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
+import { normalizeTagList } from '~/lib/tag-normalize'
 
 /**
  * Sanity arrays of objects require a unique `_key` per item. Generated from
@@ -445,7 +446,13 @@ export async function upsertProductPage(params: {
   // Was previously only set on create, leaving stale titles on existing docs.
   if (params.title !== undefined) searchFields.title = params.title
   if (params.vendor !== undefined) searchFields.vendor = params.vendor
-  if (params.tags !== undefined) searchFields.tags = params.tags
+  if (params.tags !== undefined) {
+    searchFields.tags = params.tags
+    // Keep normalizedTags in lockstep — derived from tags via the canonical
+    // slugifier so /search and /view-all faceted filtering can match
+    // admin-curated taxonomy values against real product tags.
+    searchFields.normalizedTags = normalizeTagList(params.tags)
+  }
   if (params.tagline !== undefined) searchFields.tagline = params.tagline
   // description is a portable-text array in the schema (searchable via pt::text).
   // Wrap the raw string in a single block so it round-trips cleanly and search still hits.

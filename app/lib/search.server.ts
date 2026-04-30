@@ -8,6 +8,7 @@
 import { createClient } from '@sanity/client'
 import { getProductsByHandles, searchProducts, predictiveSearch as shopifyPredictiveSearch } from './shopify.server'
 import type { Product } from '~/types'
+import { normalizeTag } from './tag-normalize'
 
 // ─── Sanity client (read-only, CDN) ────────────────────────────────────────
 
@@ -53,6 +54,10 @@ export interface SearchProductResult {
 
 export interface SearchFacets {
   tagCounts: Record<string, number>
+  // Counts for admin-curated compound tags (CSV of parts, OR-matched). Counted
+  // once per product across all parts, so a product tagged with multiple parts
+  // doesn't double-count.
+  compoundTagCounts: Record<string, number>
   vendorCounts: Record<string, number>
   priceBuckets: { under25: number; p25_50: number; p50_100: number; over100: number }
   featureCounts: Record<string, number>
@@ -230,6 +235,9 @@ export async function searchAll(params: {
   audiences?: string[]
   matters?: string[]
   budgetMax?: number | null
+  // Compound tags (CSV strings) from the admin taxonomy — passed in so the
+  // server can count them with proper OR logic (each product counted once).
+  compoundTags?: string[]
   sort?: SortOption
   page?: number
   perPage?: number
@@ -247,6 +255,7 @@ export async function searchAll(params: {
     experience = [],
     priceMin = null,
     priceMax = null,
+    compoundTags = [],
     sort = 'relevance',
     page = 1,
     perPage = 24,
@@ -255,8 +264,17 @@ export async function searchAll(params: {
   const start = (page - 1) * perPage
   const end = start + perPage + 1 // fetch one extra to detect next page
 
-  // Build filter conditions for products
-  const productConditions: string[] = ['_type == "productPage"', 'archived != true']
+  // Build filter conditions for products, bucketed by dimension so the facet
+  // pipeline can rebuild the filter excluding any single dimension. This is
+  // what makes "if I added this filter, what would I get?" counts honest.
+  type FacetDim = 'tag' | 'vendor' | 'feature' | 'experience' | 'price'
+  const baseClauses: string[] = ['_type == "productPage"', 'archived != true']
+  const textClauses: string[] = []
+  const tagClauses: string[] = []
+  const vendorClauses: string[] = []
+  const featureClauses: string[] = []
+  const experienceClauses: string[] = []
+  const priceClauses: string[] = []
   const groqParams: Record<string, unknown> = {}
 
   const queryPatterns = query ? buildQueryPatterns(query) : []
@@ -287,7 +305,7 @@ export async function searchAll(params: {
     )
     const ivrMatchOr = ivrMatchClauses.length > 0 ? ` || ${ivrMatchClauses.join(' || ')}` : ''
 
-    productConditions.push(
+    textClauses.push(
       `(${titleMatch} || ${taglineMatch} || ${vendorMatch} || ${seoMatch} || ${categoryMatch} || ${tagInAny} || ${descMatch}${ivrMatchOr})`
     )
   } else if (ivrTerms.length > 0) {
@@ -297,32 +315,37 @@ export async function searchAll(params: {
         ? `$${t.paramName} in ${t.field}`
         : `${t.field} == $${t.paramName}`
     )
-    productConditions.push(`(${ivrMatchClauses.join(' || ')})`)
+    textClauses.push(`(${ivrMatchClauses.join(' || ')})`)
   }
 
   if (tags.length > 0) {
     // All selected tag filters must match (AND between filters)
-    // Each filter may be comma-delimited — any part matches (OR within filter)
+    // Each filter may be comma-delimited — any part matches (OR within filter).
+    // Filter against `normalizedTags` (canonical slug array on each product) so
+    // admin-curated taxonomy values like `cat:plugs-and-probes` match real
+    // product tags like "Plugs and Probes". User-supplied values run through
+    // `normalizeTag` here so both sides of the comparison share the same
+    // slugifier — see app/lib/tag-normalize.ts.
     for (let i = 0; i < tags.length; i++) {
-      const parts = tags[i]!.split(',').map(s => s.trim()).filter(Boolean)
+      const parts = tags[i]!.split(',').map(s => normalizeTag(s)).filter(Boolean)
       if (parts.length === 1) {
         const paramName = `tag${i}`
-        productConditions.push(`$${paramName} in tags`)
+        tagClauses.push(`$${paramName} in normalizedTags`)
         groqParams[paramName] = parts[0]
-      } else {
+      } else if (parts.length > 1) {
         const orConditions = parts.map((part, j) => {
           const paramName = `tag${i}_${j}`
           groqParams[paramName] = part
-          return `$${paramName} in tags`
+          return `$${paramName} in normalizedTags`
         })
-        productConditions.push(`(${orConditions.join(' || ')})`)
+        tagClauses.push(`(${orConditions.join(' || ')})`)
       }
     }
   }
 
   if (vendors.length > 0) {
     const vendorConditions = vendors.map((_, i) => `vendor == $vendor${i}`).join(' || ')
-    productConditions.push(`(${vendorConditions})`)
+    vendorClauses.push(`(${vendorConditions})`)
     vendors.forEach((v, i) => { groqParams[`vendor${i}`] = v })
   }
 
@@ -330,7 +353,7 @@ export async function searchAll(params: {
     // All selected features must be present (AND)
     for (let i = 0; i < features.length; i++) {
       const paramName = `feat${i}`
-      productConditions.push(`$${paramName} in ivrFeatures`)
+      featureClauses.push(`$${paramName} in ivrFeatures`)
       groqParams[paramName] = features[i]
     }
   }
@@ -338,20 +361,30 @@ export async function searchAll(params: {
   if (experience.length > 0) {
     // Any selected experience level matches (OR)
     const expConditions = experience.map((_, i) => `ivrExperience == $exp${i}`).join(' || ')
-    productConditions.push(`(${expConditions})`)
+    experienceClauses.push(`(${expConditions})`)
     experience.forEach((e, i) => { groqParams[`exp${i}`] = e })
   }
 
   if (priceMin != null) {
-    productConditions.push('price >= $priceMin')
+    priceClauses.push('price >= $priceMin')
     groqParams.priceMin = priceMin
   }
   if (priceMax != null) {
-    productConditions.push('price <= $priceMax')
+    priceClauses.push('price <= $priceMax')
     groqParams.priceMax = priceMax
   }
 
-  const productFilter = productConditions.join(' && ')
+  function buildFilter(exclude?: FacetDim): string {
+    const parts: string[] = [...baseClauses, ...textClauses]
+    if (exclude !== 'tag')        parts.push(...tagClauses)
+    if (exclude !== 'vendor')     parts.push(...vendorClauses)
+    if (exclude !== 'feature')    parts.push(...featureClauses)
+    if (exclude !== 'experience') parts.push(...experienceClauses)
+    if (exclude !== 'price')      parts.push(...priceClauses)
+    return parts.join(' && ')
+  }
+
+  const productFilter = buildFilter()
   const sortClause = sanitySort(sort)
 
   // Build the GROQ query with score() for relevance ranking.
@@ -479,8 +512,18 @@ export async function searchAll(params: {
     // don't pass these args are unaffected.
     const emmaFiltered = applyAskEmmaFilter(products, params)
 
-    // Compute facets over the full filtered result set (all pages)
-    const facets = await computeFacets(client, productFilter, groqParams)
+    // Compute facets per-dimension. Each facet excludes its own dimension from
+    // the filter so the displayed counts answer "how many results would I get
+    // if I picked this?" rather than collapsing to whatever the user already
+    // chose. Emma filters are deliberately not included — the curated drawer
+    // is its own self-consistent system.
+    const facets = await computeFacets(client, {
+      filterNoTag:        buildFilter('tag'),
+      filterNoVendor:     buildFilter('vendor'),
+      filterNoFeature:    buildFilter('feature'),
+      filterNoExperience: buildFilter('experience'),
+      filterNoPrice:      buildFilter('price'),
+    }, groqParams, compoundTags)
 
     return {
       products: emmaFiltered,
@@ -529,31 +572,84 @@ function applyAskEmmaFilter(
 }
 
 // ─── Facet computation ──────────────────────────────────────────────────────
+// Each facet runs its own query against a filter that *excludes* that facet's
+// dimension. The result: counts always answer "if I pick this option, what
+// would I get?" Each row contributes at most once to each facet (Set dedupe)
+// so a product tagged the same value twice can't inflate the count.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function computeFacets(client: any, productFilter: string, groqParams: Record<string, unknown>): Promise<SearchFacets> {
-  const emptyFacets: SearchFacets = { tagCounts: {}, vendorCounts: {}, priceBuckets: { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }, featureCounts: {}, experienceCounts: {} }
+async function computeFacets(
+  client: any,
+  filters: {
+    filterNoTag: string
+    filterNoVendor: string
+    filterNoFeature: string
+    filterNoExperience: string
+    filterNoPrice: string
+  },
+  groqParams: Record<string, unknown>,
+  compoundTags: string[] = [],
+): Promise<SearchFacets> {
+  const emptyFacets: SearchFacets = { tagCounts: {}, compoundTagCounts: {}, vendorCounts: {}, priceBuckets: { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }, featureCounts: {}, experienceCounts: {} }
   try {
-    const rows = (await client.fetch(
-      `*[${productFilter}]{ vendor, tags, price, ivrFeatures, ivrExperience }`,
+    const combined = await client.fetch(
+      `{
+        "tagRows":   *[${filters.filterNoTag}]{ "tags": normalizedTags },
+        "vendorRows": *[${filters.filterNoVendor}]{ vendor },
+        "featureRows": *[${filters.filterNoFeature}]{ ivrFeatures },
+        "experienceRows": *[${filters.filterNoExperience}]{ ivrExperience },
+        "priceRows": *[${filters.filterNoPrice}]{ price }
+      }`,
       groqParams,
-    )) as { vendor: string | null; tags: string[] | null; price: number | null; ivrFeatures: string[] | null; ivrExperience: string | null }[]
+    ) as {
+      tagRows: { tags: string[] | null }[]
+      vendorRows: { vendor: string | null }[]
+      featureRows: { ivrFeatures: string[] | null }[]
+      experienceRows: { ivrExperience: string | null }[]
+      priceRows: { price: number | null }[]
+    }
     const tagCounts: Record<string, number> = {}
     const vendorCounts: Record<string, number> = {}
     const featureCounts: Record<string, number> = {}
     const experienceCounts: Record<string, number> = {}
     const priceBuckets = { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }
-    for (const r of rows) {
+    // Pre-split compound tags into part lists so we can scan each row once.
+    // Normalize each part so the comparison sees the same slug shape stored in
+    // the product's normalizedTags array.
+    const compoundParts: { key: string; parts: string[] }[] = compoundTags
+      .map(key => ({ key, parts: key.split(',').map(s => normalizeTag(s)).filter(Boolean) }))
+      .filter(c => c.parts.length > 1)
+    const compoundTagCounts: Record<string, number> = {}
+    for (const r of combined.tagRows) {
+      if (!r.tags) continue
+      // Dedupe per product so a duplicate tag entry can't double-count.
+      const seen = new Set(r.tags)
+      for (const t of seen) tagCounts[t] = (tagCounts[t] ?? 0) + 1
+      // Count each compound once per product if any part matches.
+      for (const c of compoundParts) {
+        if (c.parts.some(p => seen.has(p))) {
+          compoundTagCounts[c.key] = (compoundTagCounts[c.key] ?? 0) + 1
+        }
+      }
+    }
+    for (const r of combined.vendorRows) {
       if (r.vendor) vendorCounts[r.vendor] = (vendorCounts[r.vendor] ?? 0) + 1
-      if (r.tags) for (const t of r.tags) tagCounts[t] = (tagCounts[t] ?? 0) + 1
-      if (r.ivrFeatures) for (const f of r.ivrFeatures) featureCounts[f] = (featureCounts[f] ?? 0) + 1
+    }
+    for (const r of combined.featureRows) {
+      if (!r.ivrFeatures) continue
+      const seen = new Set(r.ivrFeatures)
+      for (const f of seen) featureCounts[f] = (featureCounts[f] ?? 0) + 1
+    }
+    for (const r of combined.experienceRows) {
       if (r.ivrExperience) experienceCounts[r.ivrExperience] = (experienceCounts[r.ivrExperience] ?? 0) + 1
+    }
+    for (const r of combined.priceRows) {
       const p = r.price ?? 0
       if (p < 25) priceBuckets.under25++
       else if (p < 50) priceBuckets.p25_50++
       else if (p < 100) priceBuckets.p50_100++
       else priceBuckets.over100++
     }
-    return { tagCounts, vendorCounts, priceBuckets, featureCounts, experienceCounts }
+    return { tagCounts, compoundTagCounts, vendorCounts, priceBuckets, featureCounts, experienceCounts }
   } catch {
     return emptyFacets
   }
@@ -841,6 +937,6 @@ async function shopifyFallback(params: {
     blogPosts: [],
     totalProducts: result.totalCount,
     hasNextPage: result.pageInfo.hasNextPage,
-    facets: { tagCounts: {}, vendorCounts: {}, priceBuckets: { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }, featureCounts: {}, experienceCounts: {} },
+    facets: { tagCounts: {}, compoundTagCounts: {}, vendorCounts: {}, priceBuckets: { under25: 0, p25_50: 0, p50_100: 0, over100: 0 }, featureCounts: {}, experienceCounts: {} },
   }
 }

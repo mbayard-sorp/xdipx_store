@@ -144,6 +144,17 @@ export default {
       readOnly: true,
     },
     {
+      name: 'normalizedTags',
+      title: '🤖 Normalized Tags (filter index)',
+      type: 'array',
+      group: 'product',
+      description: 'Canonical slug form of every entry in `tags`, computed via `app/lib/tag-normalize.ts`. Used by /search and /view-all faceted filtering so admin-curated taxonomy values (e.g. `cat:plugs-and-probes`) match real Shopify tags (e.g. "Plugs and Probes"). Derived field — DO NOT edit directly. Populated by sync-products-to-sanity.ts and the backfill-normalized-tags.ts script.',
+      of: [{ type: 'string' }],
+      options: { layout: 'tags' },
+      readOnly: true,
+      hidden: true,
+    },
+    {
       name: 'description',
       title: '🛒 Product Description',
       type: 'array',

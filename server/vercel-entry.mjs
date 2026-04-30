@@ -3884,6 +3884,38 @@ var init_shopify_server = __esm({
   }
 });
 
+// app/lib/tag-normalize.ts
+function normalizeTag(input) {
+  let s = input.trim().toLowerCase();
+  for (const p of PREFIXES) {
+    if (s.startsWith(p)) {
+      s = s.slice(p.length);
+      break;
+    }
+  }
+  s = s.replace(/'+/g, "");
+  s = s.replace(/&/g, " and ");
+  s = s.replace(/[^a-z0-9]+/g, "-");
+  s = s.replace(/^-+|-+$/g, "");
+  return s;
+}
+function normalizeTagList(input) {
+  if (!input) return [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of input) {
+    const n = normalizeTag(raw);
+    if (n) seen.add(n);
+  }
+  return Array.from(seen);
+}
+var PREFIXES;
+var init_tag_normalize = __esm({
+  "app/lib/tag-normalize.ts"() {
+    "use strict";
+    PREFIXES = ["cat:", "brand:"];
+  }
+});
+
 // app/lib/sanity.server.ts
 var sanity_server_exports = {};
 __export(sanity_server_exports, {
@@ -4115,7 +4147,10 @@ async function upsertProductPage(params) {
   const searchFields = {};
   if (params.title !== void 0) searchFields.title = params.title;
   if (params.vendor !== void 0) searchFields.vendor = params.vendor;
-  if (params.tags !== void 0) searchFields.tags = params.tags;
+  if (params.tags !== void 0) {
+    searchFields.tags = params.tags;
+    searchFields.normalizedTags = normalizeTagList(params.tags);
+  }
   if (params.tagline !== void 0) searchFields.tagline = params.tagline;
   if (params.description !== void 0) searchFields.description = stringToPortableText(params.description);
   if (params.seoDescription !== void 0) searchFields.seoDescription = params.seoDescription;
@@ -4798,6 +4833,7 @@ var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
     init_kv_server();
+    init_tag_normalize();
     CONTENT_BLOCKS_PROJECTION = `
   _type, _key, active, order,
   // announcementBar

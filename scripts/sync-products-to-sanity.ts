@@ -11,6 +11,7 @@
 import 'dotenv/config'
 import { createClient } from '@sanity/client'
 import { JSDOM } from 'jsdom'
+import { normalizeTagList } from '../app/lib/tag-normalize'
 
 // ─── HTML → Portable Text converter ──────────────────────────────────────────
 
@@ -251,6 +252,7 @@ async function main() {
       title:            p.title,
       vendor:           p.vendor,
       tags:             p.tags,
+      normalizedTags:   normalizeTagList(p.tags),
       description:      htmlToPT(p.bodyHtml),
       seoTitle:         p.seo.title        || undefined,
       seoDescription:   p.seo.description  || undefined,
