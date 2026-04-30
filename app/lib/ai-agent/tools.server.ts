@@ -712,3 +712,36 @@ export async function runQaTool(
     return { ok: false, error: 'tool_failed' }
   }
 }
+
+// ─── Phase 6c — Knowledge-base lookup tool (additive) ─────────────────────
+// kbLookup is referenced as a forward ref in tools-by-stage.server.ts for
+// DISCOVERY, RESEARCH, PRESENTATION, OBJECTION, and POST_PURCHASE stages.
+// This definition is additive — existing QA_TOOL_DEFINITIONS untouched.
+
+export const KB_LOOKUP_TOOL_DEFINITION: Anthropic.Tool = {
+  name: 'kbLookup',
+  description:
+    'Look up xdipx knowledge-base content: shipping policy, returns policy, product-type compatibility rules, troubleshooting guides, or brand FAQ entries. Use when the shopper asks about policies, compatibility ("can I use silicone lube with a silicone toy?"), device issues, or discreet shipping / billing descriptor questions. Returns a short plain-text answer (≤280 chars) suitable for SMS or IVR, plus an optional longer excerpt for web chat.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      topic: {
+        type: 'string',
+        enum: ['shipping', 'returns', 'compatibility', 'troubleshooting', 'brand'],
+        description: "Which knowledge-base topic to look up. 'shipping' = shipping policy. 'returns' = returns policy. 'compatibility' = product-type compatibility matrix. 'troubleshooting' = device troubleshooting guides. 'brand' = brand FAQ (billing descriptor, discreet packaging, etc.).",
+      },
+      query: {
+        type: 'string',
+        description: "Free-text from the shopper's message used to find the best match. Required for 'troubleshooting' and 'brand'. Optional for other topics.",
+      },
+      productCategory: {
+        type: 'string',
+        description: "Product type to narrow compatibility or troubleshooting results. e.g. 'silicone-toy', 'air-pulsation', 'vibrator'. Leave empty for general lookups.",
+      },
+    },
+    required: ['topic'],
+    additionalProperties: false,
+  },
+}
+
+export { kbLookup } from '~/lib/sms-v2/tools/kb-lookup.server'

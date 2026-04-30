@@ -45,6 +45,14 @@ import editorialAuthor    from '../schemas/authors/editorialAuthor.js'
 import collectionPage     from '../schemas/collectionPage.js'
 import collectionsHub     from '../schemas/collectionsHub.js'
 
+// Phase 6c — Knowledge-base doc types for SMS / IVR / chat kbLookup tool.
+// Additive — existing schemas untouched.
+import kbShippingPolicy    from '../schemas/kbShippingPolicy.js'
+import kbReturnsPolicy     from '../schemas/kbReturnsPolicy.js'
+import kbCompatibilityRule from '../schemas/kbCompatibilityRule.js'
+import kbTroubleshooting   from '../schemas/kbTroubleshooting.js'
+import kbBrandFaq          from '../schemas/kbBrandFaq.js'
+
 export const schemaTypes = [
   // Documents (singletons)
   homepageSections,
@@ -119,4 +127,10 @@ export const schemaTypes = [
   blogCta,
   blogVideoEmbed,
   richText,
+  // Phase 6c — Knowledge-base doc types (additive; existing schemas untouched)
+  kbShippingPolicy,
+  kbReturnsPolicy,
+  kbCompatibilityRule,
+  kbTroubleshooting,
+  kbBrandFaq,
 ]
