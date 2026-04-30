@@ -44,6 +44,8 @@ import seoCluster         from '../schemas/seo/seoCluster.js'
 import editorialAuthor    from '../schemas/authors/editorialAuthor.js'
 import collectionPage     from '../schemas/collectionPage.js'
 import collectionsHub     from '../schemas/collectionsHub.js'
+// Phase 6d — Manufacturer specs data layer (additive; does not touch existing schemas).
+import mfgProductSpecs    from '../schemas/mfgProductSpecs.js'
 
 // Phase 6c — Knowledge-base doc types for SMS / IVR / chat kbLookup tool.
 // Additive — existing schemas untouched.
@@ -103,6 +105,8 @@ export const schemaTypes = [
   // Hub SEO — editorial copy + FAQs for the /collections hub PLP. Singleton.
   // Additive — falls back to hardcoded defaults when the doc doesn't exist.
   collectionsHub,
+  // Phase 6d — Manufacturer specs per product (additive; does not touch existing schemas).
+  mfgProductSpecs,
   // Block object types
   announcementBar,
   promoBanner,
