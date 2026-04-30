@@ -20,3 +20,4 @@ scripts/.bg-removal-checkpoint.json
 
 # Content-generation cache (local artifacts only)
 .cache/
+.worktrees
