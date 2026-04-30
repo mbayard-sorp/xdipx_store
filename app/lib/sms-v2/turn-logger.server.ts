@@ -19,7 +19,9 @@ import { eq } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { smsTurns } from '../../../db/schema'
 import type { ProcessSmsInput, ProcessSmsResult } from '~/lib/sms-processor.server'
+import type { StageResponse } from './types.server'
 import { getOrCreateConversation as _getOrCreateConversation } from './conversation.server'
+import { stageResponseToProcessResult } from './stage-dispatch.server'
 
 // ---------------------------------------------------------------------------
 // Conversation management
@@ -85,12 +87,19 @@ export async function insertSentinelInbound(
  * Optional Phase 1 observability fields that can be written to sms_turns rows
  * after the processor call resolves. All fields are optional — Phase 0 callers
  * pass nothing and the columns stay null.
+ *
+ * Phase 5.5 adds token/tool fields for v2 stage handlers.
  */
 export interface TurnObservabilityUpdate {
   intent?: string
   intentConfidence?: number
   stageIn?: string
   stageOut?: string
+  // Phase 5.5: populated by v2 stage handlers
+  inputTokens?: number | undefined
+  outputTokens?: number | undefined
+  toolCalls?: Array<{ name: string; input: unknown; ok: boolean; error?: string | undefined }> | undefined
+  fabricationCaught?: string | undefined
 }
 
 /**
@@ -110,15 +119,20 @@ export async function finaliseTurnRows(opts: {
 }): Promise<void> {
   const { sentinelId, phone, conversationId, emmaMsg, latencyMs, pipelineVersion, simulated, observability } = opts
 
-  // Update the sentinel inbound row with latency + optional Phase 1 fields.
+  // Update the sentinel inbound row with latency + optional Phase 1/5.5 fields.
   await db
     .update(smsTurns)
     .set({
       latencyMs,
-      ...(observability?.intent !== undefined     && { intent: observability.intent }),
-      ...(observability?.intentConfidence !== undefined && { intentConfidence: observability.intentConfidence }),
-      ...(observability?.stageIn !== undefined    && { stageIn: observability.stageIn }),
-      ...(observability?.stageOut !== undefined   && { stageOut: observability.stageOut }),
+      ...(observability?.intent !== undefined            && { intent: observability.intent }),
+      ...(observability?.intentConfidence !== undefined  && { intentConfidence: observability.intentConfidence }),
+      ...(observability?.stageIn !== undefined           && { stageIn: observability.stageIn }),
+      ...(observability?.stageOut !== undefined          && { stageOut: observability.stageOut }),
+      // Phase 5.5: token counts + tool calls from v2 stage handlers
+      ...(observability?.inputTokens !== undefined       && { inputTokens: observability.inputTokens }),
+      ...(observability?.outputTokens !== undefined      && { outputTokens: observability.outputTokens }),
+      ...(observability?.toolCalls !== undefined         && { toolCalls: observability.toolCalls }),
+      ...(observability?.fabricationCaught !== undefined && { fabricationCaught: observability.fabricationCaught }),
     })
     .where(eq(smsTurns.id, sentinelId))
 
@@ -132,6 +146,10 @@ export async function finaliseTurnRows(opts: {
       stageOut: observability?.stageOut ?? 'V1',
       intent: observability?.intent,
       intentConfidence: observability?.intentConfidence,
+      inputTokens: observability?.inputTokens,
+      outputTokens: observability?.outputTokens,
+      toolCalls: observability?.toolCalls,
+      fabricationCaught: observability?.fabricationCaught,
       emmaMsg,
       latencyMs,
       pipelineVersion,
@@ -271,6 +289,142 @@ export async function withTurnLogging(
       })
     } catch (err) {
       console.error('[turn-logger] finaliseTurnRows failed — reply already sent', err)
+    }
+  }
+
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// withTurnLoggingForStageResponse — Phase 5.5
+// ---------------------------------------------------------------------------
+
+/**
+ * Extended telemetry fields written by v2 stage handlers. Superset of
+ * TurnObservabilityUpdate with required stageIn/stageOut for stage handlers.
+ */
+export interface StageTelemetryOverride {
+  intent: string
+  intentConfidence: number
+  stageIn: string
+  stageOut: string
+  inputTokens?: number | undefined
+  outputTokens?: number | undefined
+  toolCalls?: Array<{ name: string; input: unknown; ok: boolean; error?: string | undefined }> | undefined
+  fabricationCaught?: string | undefined
+}
+
+/**
+ * Wraps an already-computed StageResponse with the same idempotency + logging
+ * dance as withTurnLogging(), but without calling a processFn again.
+ *
+ * Steps:
+ *   1. getOrCreateConversation() → stable conversationId UUID.
+ *   2. insertSentinelInbound() for real Twilio messages (dedup).
+ *   3. finaliseTurnRows() with the stage handler's telemetry.
+ *   4. Return the adapted ProcessSmsResult.
+ *
+ * The existing withTurnLogging() API is unchanged — this is a sibling export.
+ */
+export async function withTurnLoggingForStageResponse(
+  input: ProcessSmsInput,
+  stageResp: StageResponse,
+  pipelineVersion: string,
+  telemetry: StageTelemetryOverride,
+): Promise<ProcessSmsResult> {
+  const phone = input.from.trim()
+  const twilioSid = (input.twilioSid ?? '').trim()
+  const simulated = input.simulated ?? false
+
+  // Adapt to ProcessSmsResult now so we have it regardless of logging outcome.
+  const result = stageResponseToProcessResult(stageResp, simulated)
+
+  // Lazy-create conversation row and get the stable UUID.
+  let conversationId: string
+  try {
+    conversationId = await getOrCreateConversation(phone)
+  } catch (err) {
+    console.error('[turn-logger] withTurnLoggingForStageResponse: getOrCreateConversation failed', err)
+    return result
+  }
+
+  // Idempotency: only for real Twilio messages carrying a SID.
+  let sentinelId: number | null = null
+  if (twilioSid) {
+    let insertResult: { inserted: boolean; sentinelId: number | null }
+    try {
+      insertResult = await insertSentinelInbound(
+        phone,
+        conversationId,
+        twilioSid,
+        pipelineVersion,
+        input.body,
+      )
+    } catch (err) {
+      console.error('[turn-logger] withTurnLoggingForStageResponse: sentinel insert failed', err)
+      insertResult = { inserted: true, sentinelId: null }
+    }
+
+    if (!insertResult.inserted) {
+      // Duplicate SID — already processed.
+      console.warn(`[turn-logger] withTurnLoggingForStageResponse: duplicate SID ${twilioSid} — returning empty`)
+      return { replies: [], reply: null, outcome: 'empty' }
+    }
+    sentinelId = insertResult.sentinelId
+  }
+
+  const start = Date.now()
+
+  // For simulator calls without a sentinel row, write a fresh inbound row.
+  if (!sentinelId) {
+    try {
+      const inserted = await db
+        .insert(smsTurns)
+        .values({
+          phone,
+          conversationId,
+          direction: 'inbound',
+          stageIn: telemetry.stageIn,
+          stageOut: telemetry.stageOut,
+          customerMsg: input.body,
+          pipelineVersion,
+        })
+        .returning({ id: smsTurns.id })
+      sentinelId = inserted[0]?.id ?? null
+    } catch (err) {
+      console.error('[turn-logger] withTurnLoggingForStageResponse: simulator inbound row insert failed', err)
+    }
+  }
+
+  const latencyMs = Date.now() - start
+  const emmaMsg = result.reply
+
+  const observability: TurnObservabilityUpdate = {
+    intent: telemetry.intent,
+    intentConfidence: telemetry.intentConfidence,
+    stageIn: telemetry.stageIn,
+    stageOut: telemetry.stageOut,
+    ...(telemetry.inputTokens !== undefined      && { inputTokens: telemetry.inputTokens }),
+    ...(telemetry.outputTokens !== undefined     && { outputTokens: telemetry.outputTokens }),
+    ...(telemetry.toolCalls !== undefined        && { toolCalls: telemetry.toolCalls }),
+    ...(telemetry.fabricationCaught !== undefined && { fabricationCaught: telemetry.fabricationCaught }),
+  }
+
+  if (sentinelId !== null) {
+    try {
+      await finaliseTurnRows({
+        sentinelId,
+        phone,
+        conversationId,
+        customerMsg: input.body,
+        emmaMsg,
+        latencyMs,
+        pipelineVersion,
+        simulated,
+        observability,
+      })
+    } catch (err) {
+      console.error('[turn-logger] withTurnLoggingForStageResponse: finaliseTurnRows failed', err)
     }
   }
 
