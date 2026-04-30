@@ -60,13 +60,16 @@ async function handleSmsAction(request: Request): Promise<Response> {
   const twilioSid = params['MessageSid'] ?? params['SmsMessageSid'] ?? ''
 
   const version = pickPipelineVersion(from)
-  const processFn = version === 'v2' ? processSmsMessageV2 : processSmsMessage
+  const input = { from, body, twilioSid, simulated: false }
 
-  const result = await withTurnLogging(
-    { from, body, twilioSid, simulated: false },
-    processFn,
-    version,
-  )
+  // v2 owns its own turn-logging (per-stage observability is built into
+  // processSmsMessageV2 in Phase 5.5). v1 is unchanged — the route wraps it
+  // with withTurnLogging so v1 turns are logged with pipeline_version='v1'.
+  const result =
+    version === 'v2'
+      ? await processSmsMessageV2(input)
+      : await withTurnLogging(input, processSmsMessage, 'v1')
+
   if (result.replies.length === 0) return twiml(EMPTY_TWIML)
   return twiml(repliesTwiml(result.replies))
 }

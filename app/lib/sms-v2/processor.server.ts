@@ -20,10 +20,12 @@
  * (ProcessSmsResult). v2's dark-launch path is byte-identical to v1.
  */
 import { processSmsMessage } from '~/lib/sms-processor.server'
-import { getOrCreateConversation } from './conversation.server'
+import { getOrCreateConversation, applyStateWrites } from './conversation.server'
 import { classifyIntent } from './intent-classifier.server'
-import { withTurnLogging } from './turn-logger.server'
+import { withTurnLogging, withTurnLoggingForStageResponse } from './turn-logger.server'
 import { subscribeToSms } from './klaviyo.server'
+import { pickEffectiveStage, dispatchStage } from './stage-dispatch.server'
+import { buildEmmaContext } from './context-builder.server'
 import type { Stage } from './types.server'
 
 // Re-export types so callers can switch by import only — no re-definition needed.
@@ -67,23 +69,64 @@ export async function processSmsMessageV2(
     // Non-fatal — we already have a conversation object from the first call
   }
 
-  // --- Step 3: Call v1 processor via withTurnLogging, passing observability ---
-  // v1 directly writes the correct consent method tag based on input.simulated:
-  //   - real Twilio path → 'sms_yes_v2'
-  //   - simulator path   → 'sms_yes_v2_sim'
-  // No post-insert upgrade needed.
+  // --- Step 3: v2 stage dispatch (Phase 5.5) ---
+  // Resolve the effective stage (may differ from conversation.stage due to
+  // intent-driven pre-transitions), then try to dispatch to a v2 handler.
+  // Stages without a handler (GREETING, CONSENT_GATE, RECONNECT, SUPPORT, etc.)
+  // return null here and fall through to v1.
+  const effectiveStage = pickEffectiveStage(conversation.stage as Stage, intentResult)
   const stageLabel = conversation.stage as string
-  const result = await withTurnLogging(
-    input,
-    processSmsMessage,
-    'v2',
-    {
+
+  let result: Awaited<ReturnType<typeof processSmsMessage>>
+
+  const ctx = await buildEmmaContext(conversation)
+  const stageRespPromise = dispatchStage(effectiveStage, ctx, intentResult, input.body)
+
+  if (stageRespPromise !== null) {
+    // v2 stage handler ran — persist state writes, log telemetry, return adapted result.
+    const stageResp = await stageRespPromise
+
+    // Persist state (stage transition + any handles/URLs the handler wrote).
+    // Build the writes object explicitly to satisfy exactOptionalPropertyTypes.
+    const writes = stageResp.stateWrites
+    await applyStateWrites(phone, {
+      // Always persist the resolved stageOut even if stateWrites.stage is absent.
+      stage: writes.stage ?? stageResp.stageOut,
+      ...(writes.currentPitchHandle  !== undefined && { currentPitchHandle:  writes.currentPitchHandle }),
+      ...(writes.currentUpsellHandle !== undefined && { currentUpsellHandle: writes.currentUpsellHandle }),
+      ...(writes.lastQuoteUrl        !== undefined && { lastQuoteUrl:        writes.lastQuoteUrl }),
+      ...(writes.lastQuoteItems      !== undefined && { lastQuoteItems:      writes.lastQuoteItems }),
+      ...(writes.lastQuoteCreatedAt  !== undefined && { lastQuoteCreatedAt:  writes.lastQuoteCreatedAt }),
+      ...(writes.customerGid         !== undefined && { customerGid:         writes.customerGid }),
+    })
+
+    result = await withTurnLoggingForStageResponse(input, stageResp, 'v2', {
       intent: intentResult.intent,
       intentConfidence: intentResult.confidence,
-      stageIn: stageLabel,
-      stageOut: stageLabel,  // Phase 1: no stage transitions yet; stageOut = stageIn
-    },
-  )
+      stageIn: effectiveStage,
+      stageOut: stageResp.stageOut,
+      inputTokens: stageResp.telemetry.inputTokens,
+      outputTokens: stageResp.telemetry.outputTokens,
+      toolCalls: stageResp.telemetry.toolCalls,
+      fabricationCaught: stageResp.telemetry.fabricationCaught,
+    })
+  } else {
+    // No v2 handler for this stage — fall through to v1 (existing Phase 1 behavior).
+    // v1 directly writes the correct consent method tag based on input.simulated:
+    //   - real Twilio path → 'sms_yes_v2'
+    //   - simulator path   → 'sms_yes_v2_sim'
+    result = await withTurnLogging(
+      input,
+      processSmsMessage,
+      'v2',
+      {
+        intent: intentResult.intent,
+        intentConfidence: intentResult.confidence,
+        stageIn: stageLabel,
+        stageOut: stageLabel,  // v1 fallback: no stage transition
+      },
+    )
+  }
 
   // --- Step 4: AGE_CONFIRM post-processing — Klaviyo subscribe ---
   // Fire-and-forget; non-fatal. Klaviyo is for real consents only — simulator
