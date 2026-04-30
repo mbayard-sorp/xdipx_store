@@ -206,20 +206,20 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'buildCheckoutLink',
     description:
-      "SMS-only fallback for building a direct checkout link when no cart drawer is available. DO NOT USE ON WEB CHAT — on web, always call addItemsToCart instead so the shopper's real cart is updated and the drawer opens. Only viable on SMS where there's no cart UI to open.",
+      "SMS-only. Build a Shopify checkout URL the shopper can tap to pay. Pass the product HANDLE (e.g. 'lovense-osci-3') from your latest searchProducts/getProductDetails/findCollection result — the server resolves the live in-stock variant from the handle. Do NOT pass variantIds; do NOT invent or guess product handles; if you don't have a handle yet, call searchProducts first. Returns data.url — paste that exact URL verbatim into your reply.",
     input_schema: {
       type: 'object',
       properties: {
         items: {
           type: 'array',
-          description: 'Line items keyed by Shopify variant GID. Max 5 items.',
+          description: 'Line items, keyed by product handle. Max 5 items.',
           items: {
             type: 'object',
             properties: {
-              variantId: { type: 'string', description: "Shopify variant GID, e.g. 'gid://shopify/ProductVariant/1234'." },
-              quantity:  { type: 'number', description: 'Integer quantity, 1–5. Defaults to 1.' },
+              handle:   { type: 'string', description: "Product handle from searchProducts/getProductDetails (e.g. 'lovense-osci-3'). Required." },
+              quantity: { type: 'number', description: 'Integer quantity, 1–5. Defaults to 1.' },
             },
-            required: ['variantId'],
+            required: ['handle'],
             additionalProperties: false,
           },
         },
@@ -542,17 +542,28 @@ export async function runQaTool(
       if (rawItems.length > MAX_ITEMS_PER_ORDER) {
         return { ok: false, error: 'too_many_items', message: `Max ${MAX_ITEMS_PER_ORDER} line items.` }
       }
+      // Resolve each line's variant server-side from the handle. Same defense
+      // as addItemsToCart: Haiku has been observed hallucinating variant GIDs,
+      // so we only trust handles. Fetch live product data and pick the first
+      // in-stock variant (or the first variant if nothing is in stock).
       const lines: { variantId: string; quantity: number }[] = []
       for (const it of rawItems) {
-        const gid = String(it['variantId'] ?? '')
-        // Accept either a full GID or the bare numeric id.
-        const normalized = gid.startsWith('gid://') ? gid : `gid://shopify/ProductVariant/${gid.match(/(\d+)$/)?.[1] ?? ''}`
-        if (!/gid:\/\/shopify\/ProductVariant\/\d+/.test(normalized)) {
-          return { ok: false, error: 'bad_variant_id', message: `Invalid variantId: ${gid}` }
+        const handle = String(it['handle'] ?? '').trim()
+        if (!handle) {
+          return { ok: false, error: 'missing_handle', message: 'Each item needs a product handle. Re-run searchProducts to get one.' }
         }
         const qtyRaw = Number(it['quantity'] ?? 1)
         const qty = Number.isFinite(qtyRaw) ? Math.max(1, Math.min(5, Math.floor(qtyRaw))) : 1
-        lines.push({ variantId: normalized, quantity: qty })
+
+        const product = await getProductByHandle(handle)
+        if (!product || product.variants.length === 0) {
+          return { ok: false, error: 'product_not_found', message: `No variants found for handle "${handle}". Re-run searchProducts with a different query.` }
+        }
+        const chosen = product.variants.find((v) => v.availableForSale) ?? product.variants[0]
+        if (!chosen?.id || !/gid:\/\/shopify\/ProductVariant\/\d+/.test(chosen.id)) {
+          return { ok: false, error: 'variant_unavailable', message: `Couldn't resolve a variant for "${handle}".` }
+        }
+        lines.push({ variantId: chosen.id, quantity: qty })
       }
       try {
         const cart = await createCartWithLines(lines)
@@ -564,8 +575,12 @@ export async function runQaTool(
     }
 
     if (name === 'createDraftOrder') {
-      if (ctx.channel === 'chat') {
-        return { ok: false, error: 'unsupported_channel', message: 'Draft orders are only available on phone/SMS. Send the user to checkout instead.' }
+      // Voice (IVR) only — that's where the agent collects the address verbally
+      // because the caller can't tap a link mid-call. On SMS, use buildCheckoutLink
+      // (Shopify hosted checkout collects address at payment time). On web chat,
+      // use addItemsToCart.
+      if (ctx.channel !== 'voice') {
+        return { ok: false, error: 'unsupported_channel', message: 'createDraftOrder is voice-channel-only. On SMS, call buildCheckoutLink with the variantId — Shopify checkout collects email/address at payment time. On web chat, call addItemsToCart.' }
       }
       if (!ctx.phone) return { ok: false, error: 'no_caller_phone' }
       const items = Array.isArray(input['items']) ? (input['items'] as Array<Record<string, unknown>>) : []

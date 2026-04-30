@@ -38,6 +38,9 @@ export interface IvrProductCard {
   phrasing: DisplayPrice['phrasing']
   variantId: string
   variantOptions?: { variantId: string; label: string; price: number; inStock: boolean }[]
+  // Per-unit dollar margin (price minus wholesale cost). Used internally for
+  // ranking; not surfaced to the model.
+  margin?: number
 }
 
 export interface IvrSearchOpts {
@@ -82,6 +85,11 @@ function toIvrCard(
         }))
       : undefined
 
+  // Per-unit dollar margin. Falls back to 0 when wholesale cost isn't set on
+  // the product — those will rank below products with known margin.
+  const wholesale = (p as Product & { wholesaleCost?: number }).wholesaleCost ?? 0
+  const margin = wholesale > 0 ? Math.max(0, disp.price - wholesale) : 0
+
   // Belt-and-suspenders: normalize on read as well so Sanity docs authored
   // before the write-side fix still sound clean when Claude speaks them.
   return {
@@ -94,6 +102,7 @@ function toIvrCard(
     pctOff: disp.pctOffMsrp,
     phrasing: disp.phrasing,
     variantId: defaultVariant?.id ?? '',
+    margin,
     ...(variantOptions ? { variantOptions } : {}),
   }
 }
@@ -119,7 +128,13 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
   const { query, limit = 3, category, priceMax, tags } = opts
   const client = getSanityClient()
 
-  if (!client) return shopifyFallback(query, limit)
+  if (!client) return shuffle(await shopifyFallback(query, Math.max(limit * 2, 8))).slice(0, limit)
+  // Fetch a wider candidate pool so we can shuffle within similar relevance
+  // and avoid pitching the same product on every call. Top-N matches usually
+  // have similar scores; shuffling them gives variety without sacrificing
+  // quality. The first few results (relevance > everything else) stay near
+  // the top thanks to the score ordering before we fetch.
+  const candidatePool = Math.max(limit * 3, 12)
 
   const strictCategory = STRICT_CATEGORY_TERMS.has(query.trim().toLowerCase())
 
@@ -172,7 +187,7 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
       ...paramNames.map((n) => `boost(pt::text(description) match $${n}, 1)`),
     ].join(', ')
 
-    const groq = `*[${filter}] | score(${boosts}) [0...${limit}] {
+    const groq = `*[${filter}] | score(${boosts}) [0...${candidatePool}] {
       "handle": shopifyHandle,
       title,
       category,
@@ -188,7 +203,7 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
       // same trap the strict path avoids. Return empty so Emma says "no match"
       // instead of surfacing a massager for a "lube" query.
       if (strictCategory) return []
-      return shopifyFallback(query, limit)
+      return marginWeightedSelect(await shopifyFallback(query, Math.max(limit * 2, 8)), limit)
     }
 
     const handles = sanityResults.map((r) => r.handle).filter(Boolean)
@@ -202,11 +217,78 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
       cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
     }
 
-    return cards
+    // Rank by margin × inventory, with enough randomness to keep variety.
+    // Sanity has already filtered for context relevance (the candidate pool
+    // is "products that match this query"); within that pool, prefer items
+    // that make us money AND are sellable.
+    return marginWeightedSelect(cards, limit)
   } catch (err) {
     console.error('[ivr-search] Sanity search failed, falling back to Shopify:', err)
-    return shopifyFallback(query, limit)
+    return marginWeightedSelect(await shopifyFallback(query, Math.max(limit * 2, 8)), limit)
   }
+}
+
+/**
+ * In-place Fisher-Yates shuffle. Not cryptographically random — Math.random
+ * is plenty for picking which lube/vibrator to surface first.
+ */
+function shuffle<T>(items: T[]): T[] {
+  const out = items.slice()
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[out[i], out[j]] = [out[j]!, out[i]!]
+  }
+  return out
+}
+
+/**
+ * Pick `limit` cards from a relevance-filtered pool, biased toward in-stock
+ * and high-margin items, with enough randomness for variety.
+ *
+ *   1. Split into in-stock and out-of-stock (in-stock always preferred).
+ *   2. Within each pool, weight selection by margin: a $40-margin product is
+ *      twice as likely as a $20-margin product to land at position 0. This
+ *      gives high-margin items a real edge without making the lineup boring.
+ *   3. Products with no margin data (wholesale cost not set) get a small
+ *      baseline weight so they aren't completely starved out — but they
+ *      surface less often than known-margin products.
+ *
+ * The weighted-random draw means consecutive calls with the same query
+ * surface different products, so the model doesn't pitch the same vibrator
+ * every conversation.
+ */
+function marginWeightedSelect(cards: IvrProductCard[], limit: number): IvrProductCard[] {
+  if (cards.length <= limit) return shuffle(cards)
+  const inStock = cards.filter((c) => c.inStock)
+  const outOfStock = cards.filter((c) => !c.inStock)
+  // If we have enough in-stock candidates, only use those. Otherwise top off
+  // with out-of-stock so we don't return fewer than `limit` cards.
+  const primaryPool = inStock.length >= limit ? inStock : [...inStock, ...outOfStock]
+  const picked: IvrProductCard[] = []
+  const remaining = primaryPool.slice()
+  while (picked.length < limit && remaining.length > 0) {
+    const i = pickWeightedIndex(remaining)
+    picked.push(remaining[i]!)
+    remaining.splice(i, 1)
+  }
+  return picked
+}
+
+/**
+ * Weighted-random index pick. Weight = max(margin, $1). The floor ensures
+ * zero-margin products (wholesale not set, or priced below cost) still have
+ * a small chance to appear instead of being permanently invisible.
+ */
+function pickWeightedIndex(cards: IvrProductCard[]): number {
+  if (cards.length === 1) return 0
+  const weights = cards.map((c) => Math.max(c.margin ?? 0, 1))
+  const total = weights.reduce((a, b) => a + b, 0)
+  let roll = Math.random() * total
+  for (let i = 0; i < weights.length; i++) {
+    roll -= weights[i]!
+    if (roll <= 0) return i
+  }
+  return weights.length - 1
 }
 
 // ─── Discovery search (structured filters, no free-text) ─────────────────────
