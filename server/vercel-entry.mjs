@@ -5881,6 +5881,7 @@ __export(claude_server_exports, {
   IVR_FEATURES: () => IVR_FEATURES,
   IVR_USE_CASES: () => IVR_USE_CASES,
   PRODUCT_SUBTYPES_BY_TYPE: () => PRODUCT_SUBTYPES_BY_TYPE,
+  buildEmmaSystemBlocks: () => buildEmmaSystemBlocks,
   drainToolTokens: () => drainToolTokens,
   enhanceLtxPrompt: () => enhanceLtxPrompt,
   enhanceVeoPrompt: () => enhanceVeoPrompt,
@@ -5895,10 +5896,12 @@ __export(claude_server_exports, {
   generateEmmaHero: () => generateEmmaHero,
   generateEmmaTagline: () => generateEmmaTagline,
   generateEmmaTake: () => generateEmmaTake,
+  generateIvrAll: () => generateIvrAll,
   generateIvrExperience: () => generateIvrExperience,
   generateIvrFeatures: () => generateIvrFeatures,
   generateIvrUseCase: () => generateIvrUseCase,
   generatePairingWhy: () => generatePairingWhy,
+  generateProductCopyBundle: () => generateProductCopyBundle,
   generateProductFaqs: () => generateProductFaqs,
   generateProductTitle: () => generateProductTitle,
   generateRails: () => generateRails,
@@ -5916,28 +5919,48 @@ __export(claude_server_exports, {
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash as createHash2 } from "node:crypto";
 async function callClaude(opts) {
-  let result;
   void opts.llmClient;
+  const systemParam = opts.systemBlocks ? opts.systemBlocks.map((b) => ({
+    type: "text",
+    text: b.text,
+    ...b.cache ? { cache_control: { type: "ephemeral" } } : {}
+  })) : opts.system;
+  if (systemParam === void 0) {
+    throw new Error("callClaude: system or systemBlocks required");
+  }
   const msg = await client.messages.create({
     model: opts.model,
     max_tokens: opts.maxTokens,
-    system: opts.system,
+    system: systemParam,
     messages: [{ role: "user", content: opts.userPrompt }]
   });
   const block = msg.content[0];
   if (block?.type !== "text") throw new Error("Unexpected Claude response type");
-  result = {
+  const usage = msg.usage;
+  const result = {
     text: block.text,
-    inputTokens: msg.usage.input_tokens,
-    outputTokens: msg.usage.output_tokens
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens
   };
   _toolTokenAccumulator.input += result.inputTokens;
   _toolTokenAccumulator.output += result.outputTokens;
+  _toolTokenAccumulator.cacheCreation += usage.cache_creation_input_tokens ?? 0;
+  _toolTokenAccumulator.cacheRead += usage.cache_read_input_tokens ?? 0;
   return result;
+}
+async function buildEmmaSystemBlocks(brandVoiceOverride) {
+  const brandVoice = brandVoiceOverride ?? await getPipelineSetting("brandVoice") ?? DEFAULT_BRAND_VOICE;
+  return [
+    { text: EMMA_SYSTEM_PROMPT, cache: true },
+    { text: brandVoice, cache: true }
+  ];
+}
+function buildLegacySystemBlocks() {
+  return [{ text: SYSTEM_PROMPT, cache: true }];
 }
 function drainToolTokens() {
   const out = _toolTokenAccumulator;
-  _toolTokenAccumulator = { input: 0, output: 0 };
+  _toolTokenAccumulator = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
   return out;
 }
 async function generate(prompt, maxTokens = 1024, model = MODEL, llmClient) {
@@ -5945,7 +5968,7 @@ async function generate(prompt, maxTokens = 1024, model = MODEL, llmClient) {
     llmClient,
     model,
     maxTokens,
-    system: SYSTEM_PROMPT,
+    systemBlocks: buildLegacySystemBlocks(),
     userPrompt: prompt
   });
   return text2;
@@ -6236,6 +6259,7 @@ ${productContext}`;
         primaryTag: "this one",
         partnerTag: "and this",
         knotCaption: "tied together on purpose",
+        conciergeSalutation: "great to have you",
         whyCards: [
           { head: "One handles the fun part.", body: "The rumble, the tease, the main event. Dialed in and ready to go." },
           { head: "The other handles the smart part.", body: "Keeps everything gliding, safe on toys, easy on skin. No drama, no cleanup headache." },
@@ -6290,6 +6314,7 @@ Partner product:
   "primaryTag":  string  // 2\u20133 lowercase words, curator voice, describes the primary's ROLE. e.g. "the buzz one" or "the slow one"
   "partnerTag":  string  // 2\u20133 lowercase words, curator voice, describes the partner's ROLE. e.g. "the glide one" or "the fix-it one"
   "knotCaption": string  // 3\u20136 words, short label for why they're tied together. e.g. "tied together on purpose" or "one better idea"
+  "conciergeSalutation": string  // 2\u20135 lowercase words, warm Emma-voice greeting shown next to her avatar after "Hello, I'm Emma your shop concierge." e.g. "great to meet you" or "happy you stopped by". No exclamation marks, no first-person product claims.
   "whyCards": [          // EXACTLY 3 entries explaining why the pairing works
     { "head": string,    // 5\u20139 words ending in a period. Short editorial hook. e.g. "One handles the fun part."
       "body": string }   // 15\u201325 words, no testimony, factual + evocative
@@ -6310,7 +6335,7 @@ ${voiceRules}
 ${shapeSpec}
 
 ${pairContext}`;
-      const retryPrompt = `Return ONLY raw JSON matching this exact shape: {"eyebrow","subhead","headline","body","bannerLine","primaryTag","partnerTag","knotCaption","whyCards":[{"head","body"},{"head","body"},{"head","body"}],"emmaQuote","momentTitle","moments":[{"lead","body"},{"lead","body"}]}.
+      const retryPrompt = `Return ONLY raw JSON matching this exact shape: {"eyebrow","subhead","headline","body","bannerLine","primaryTag","partnerTag","knotCaption","conciergeSalutation","whyCards":[{"head","body"},{"head","body"},{"head","body"}],"emmaQuote","momentTitle","moments":[{"lead","body"},{"lead","body"}]}.
 
 ${voiceRules}
 
@@ -6388,6 +6413,92 @@ ${productContext}`;
     default:
       throw new Error(`Unknown copy type: ${type}`);
   }
+}
+async function generateProductCopyBundle(req) {
+  const { product } = req;
+  const author = req.authorSlug ? await getEditorialAuthor(req.authorSlug).catch(() => null) : null;
+  const seoMode = req.seoMode ?? author?.seoMode ?? "natural";
+  const keywordBlock = await buildKeywordBlock({
+    productType: product.productTypeDial,
+    moods: product.moodTags,
+    audiences: product.audienceTags,
+    matters: product.mattersTags,
+    contentType: "pdp",
+    seoMode
+  }).catch((err) => {
+    console.error("[generateProductCopyBundle] buildKeywordBlock failed (continuing without):", err);
+    return "";
+  });
+  const productContextBase = `Product: ${product.title}
+Brand: ${product.brand}
+Description: ${product.description}
+Categories: ${product.categories.join(", ")}`;
+  const productContext = keywordBlock ? `${productContextBase}
+
+${keywordBlock}` : productContextBase;
+  const prompt = `Produce three independent copy fields for this product in a SINGLE JSON response. Each field has its own constraints \u2014 apply them strictly. NEVER mention price, discount, or dollar amounts in any field; the PDP renders Shopify's live price separately. NO em-dashes ("\u2014" or "\u2013") anywhere.
+
+If any keyword targets in the prompt do not fit this product, IGNORE them silently and write from the product details only. Never narrate a mismatch, never preface, never explain.
+
+FIELD 1 \u2014 "tagline" (string):
+- One short Emma-voice tagline. Observational, casual, lightly witty. Not a stand-up zinger.
+- Fragments are welcome ("the one I keep recommending", "earns its spot daily", "quietly indispensable").
+- Max 12 words. First person OK. NO em-dashes. NO \u2665 glyph (reserve it for CTAs and asides).
+
+FIELD 2 \u2014 "seoMeta" (string):
+- 140\u2013155 characters. Shows in Google SERP and link previews.
+- Include both: (a) the trust beat "Ships discreetly", (b) one short Emma-voice benefit beat (fragment OK, first-person OK).
+- Brand mentions written as "XDIPX" (uppercase). NO em-dashes. NO price/discount language.
+
+FIELD 3 \u2014 "specifications" (string[]):
+- JSON array of "Label: Value" bullet pairs (e.g. "Color: Black", "Material: Body-safe silicone").
+- Include only objective facts surfaced in the description: dimensions, materials, power source, charge time, run time, waterproofing, colors, weight, controls, country of origin.
+- Skip categories the source doesn't mention. Better fewer accurate specs than padded ones.
+- Factual and concise \u2014 no fluff, no Emma asides. Each value 4\u201380 chars. Max 12 entries. NEVER include price.
+
+Return ONLY this JSON shape (no markdown, no preamble):
+{ "tagline": "string", "seoMeta": "string", "specifications": ["Label: Value", ...] }
+
+${productContext}`;
+  let parsed = null;
+  try {
+    const { text: text2 } = await callClaude({
+      llmClient: req.llmClient,
+      model: MODEL_FAST,
+      maxTokens: 1500,
+      systemBlocks: buildLegacySystemBlocks(),
+      userPrompt: prompt
+    });
+    parsed = JSON.parse(stripFences(text2));
+  } catch (err) {
+    console.error("[generateProductCopyBundle] consolidated call failed, falling back to per-field:", err);
+  }
+  const taglineOk = (s) => typeof s === "string" && s.trim().length > 0 && s.trim().split(/\s+/).length <= 12 && !looksLikeMetaCommentary(s) && !s.includes("\u2014") && !s.includes("\u2013");
+  const seoMetaOk = (s) => typeof s === "string" && s.trim().length >= 50 && !looksLikeMetaCommentary(s) && !containsPrice(s);
+  const specsOk = (a) => Array.isArray(a) && a.length > 0 && a.every((v) => typeof v === "string" && v.trim().length >= 4 && v.trim().length <= 100);
+  let tagline = "";
+  let seoMeta = "";
+  let specifications = [];
+  if (parsed && taglineOk(parsed.tagline)) {
+    tagline = parsed.tagline.trim();
+  } else {
+    const r = await generateCopy({ type: "tagline", product, ...req.authorSlug ? { authorSlug: req.authorSlug } : {}, ...req.seoMode ? { seoMode: req.seoMode } : {} }, req.llmClient);
+    const arr = r.content;
+    tagline = (Array.isArray(arr) ? arr[0] : arr)?.trim() ?? "";
+  }
+  if (parsed && seoMetaOk(parsed.seoMeta)) {
+    seoMeta = parsed.seoMeta.trim().slice(0, 155);
+  } else {
+    const r = await generateCopy({ type: "seo_meta", product, ...req.authorSlug ? { authorSlug: req.authorSlug } : {}, ...req.seoMode ? { seoMode: req.seoMode } : {} }, req.llmClient);
+    seoMeta = r.content ?? "";
+  }
+  if (parsed && specsOk(parsed.specifications)) {
+    specifications = parsed.specifications.map((s) => s.trim()).slice(0, 12);
+  } else {
+    const r = await generateCopy({ type: "specifications", product, ...req.authorSlug ? { authorSlug: req.authorSlug } : {}, ...req.seoMode ? { seoMode: req.seoMode } : {} }, req.llmClient);
+    specifications = Array.isArray(r.content) ? r.content : [];
+  }
+  return { tagline, seoMeta, specifications };
 }
 function rid(prefix) {
   return `${prefix}${Math.random().toString(36).slice(2, 10)}`;
@@ -6982,9 +7093,7 @@ async function generateEmmaHero(opts) {
   const voiceHash = createHash2("sha1").update(brandVoice).digest("hex").slice(0, 12);
   const discountPct = opts.deal.msrp > 0 && opts.deal.dealPrice > 0 ? Math.round((opts.deal.msrp - opts.deal.dealPrice) / opts.deal.msrp * 100) : 0;
   const mapLine = opts.deal.mapRestricted ? "MAP-restricted \u2014 no discount claims, no percent-off language, no struck prices." : discountPct > 0 ? `Currently ${discountPct}% off MSRP \u2014 you may allude to value, but never in "buy now" or countdown language.` : "";
-  const system = `${EMMA_SYSTEM_PROMPT}
-
-${brandVoice}`;
+  const systemBlocksForHero = await buildEmmaSystemBlocks(opts.brandVoice);
   const user = `Write the Emma hero block for the homepage of xdipx.com. Variant: "${variant}".
 
 Product context (do NOT echo \u2014 rewrite in Emma's voice):
@@ -7010,7 +7119,7 @@ Return ONLY this JSON (no markdown):
           llmClient: opts.llmClient,
           model: MODEL,
           maxTokens: 800,
-          system,
+          systemBlocks: systemBlocksForHero,
           userPrompt: user
         });
         const parsed = JSON.parse(stripFences(text2));
@@ -7095,10 +7204,7 @@ Return only the JSON object, no markdown.`
   }
 }
 async function generateEmmaTake(opts) {
-  const brandVoice = opts.brandVoice ?? await getPipelineSetting("brandVoice") ?? DEFAULT_BRAND_VOICE;
-  const system = `${EMMA_SYSTEM_PROMPT}
-
-${brandVoice}`;
+  const systemBlocksForTake = await buildEmmaSystemBlocks(opts.brandVoice);
   const user = `Write Emma's "take" on this product. It appears at the top of the PDP \u2014 a friend-to-friend honest read. This is THE customer-facing voice surface; treat it accordingly.
 
 Product:
@@ -7129,7 +7235,7 @@ Return ONLY the HTML \u2014 no markdown, no fences, no preamble.`;
       llmClient: opts.llmClient,
       model: MODEL,
       maxTokens: 800,
-      system,
+      systemBlocks: systemBlocksForTake,
       userPrompt: user
     });
     return stripFences(text2).trim();
@@ -7183,9 +7289,7 @@ No markdown, no fences, no commentary.`;
       llmClient: opts.llmClient,
       model: MODEL_FAST,
       maxTokens: 400,
-      system: `${EMMA_SYSTEM_PROMPT}
-
-${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user
     });
     const parsed = JSON.parse(stripFences(text2));
@@ -7309,9 +7413,7 @@ Return ONLY raw JSON (no markdown). An array of objects: [{ "question": "...", "
       llmClient: opts.llmClient,
       model: MODEL,
       maxTokens: 2500,
-      system: `${EMMA_SYSTEM_PROMPT}
-
-${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user
     });
     let faqs = parseFaqs(text2);
@@ -7338,9 +7440,7 @@ ${careInstructionsText ? `- Care card already covers (do NOT restate): ${careIns
           llmClient: opts.llmClient,
           model: MODEL,
           maxTokens: 1200,
-          system: `${EMMA_SYSTEM_PROMPT}
-
-${DEFAULT_BRAND_VOICE}`,
+          systemBlocks: await buildEmmaSystemBlocks(),
           userPrompt: careTopUp
         });
         const extras = parseFaqs(retryText).filter((f) => f.category === "care");
@@ -7420,9 +7520,7 @@ Rules:
     llmClient: opts.llmClient,
     model: MODEL_FAST,
     maxTokens: 600,
-    system: `${EMMA_SYSTEM_PROMPT}
-
-${DEFAULT_BRAND_VOICE}`,
+    systemBlocks: await buildEmmaSystemBlocks(),
     userPrompt: user
   });
   const parsed = JSON.parse(stripFences(text2));
@@ -7472,9 +7570,7 @@ No markdown. No commentary.`;
       llmClient: input.llmClient,
       model: MODEL_FAST,
       maxTokens: 60,
-      system: `${EMMA_SYSTEM_PROMPT}
-
-${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user
     });
     const parsed = JSON.parse(stripFences(text2));
@@ -7518,9 +7614,7 @@ or { "type": "sex-machine", "subtype": null }`;
       llmClient: input.llmClient,
       model: MODEL_FAST,
       maxTokens: 100,
-      system: `${EMMA_SYSTEM_PROMPT}
-
-${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user
     });
     const parsed = JSON.parse(stripFences(text2));
@@ -7599,9 +7693,7 @@ Return ONLY this JSON (no markdown): { "tags": ["Soft Touch", "First-Time Friend
       llmClient: opts.llmClient,
       model: MODEL_FAST,
       maxTokens: 200,
-      system: `${EMMA_SYSTEM_PROMPT}
-
-${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user
     });
     const parsed = JSON.parse(stripFences(text2));
@@ -7655,9 +7747,7 @@ Return ONLY this JSON (no markdown):
       llmClient: opts.llmClient,
       model: MODEL_FAST,
       maxTokens: 600,
-      system: `${EMMA_SYSTEM_PROMPT}
-
-${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user
     });
     const parsed = JSON.parse(stripFences(text2));
@@ -7700,9 +7790,7 @@ Return ONLY this JSON (no markdown): { "levels": ["first-time", "curious"] }`;
       llmClient: opts.llmClient,
       model: MODEL_FAST,
       maxTokens: 100,
-      system: `${EMMA_SYSTEM_PROMPT}
-
-${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user
     });
     const parsed = JSON.parse(stripFences(text2));
@@ -7754,9 +7842,7 @@ Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`;
       llmClient: opts.llmClient,
       model: MODEL_FAST,
       maxTokens: 200,
-      system: `${EMMA_SYSTEM_PROMPT}
-
-${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user
     });
     const parsed = JSON.parse(stripFences(text2));
@@ -7805,9 +7891,7 @@ Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`;
       llmClient: opts.llmClient,
       model: MODEL_FAST,
       maxTokens: 300,
-      system: `${EMMA_SYSTEM_PROMPT}
-
-${DEFAULT_BRAND_VOICE}`,
+      systemBlocks: await buildEmmaSystemBlocks(),
       userPrompt: user
     });
     const parsed = JSON.parse(stripFences(text2));
@@ -7828,6 +7912,123 @@ ${DEFAULT_BRAND_VOICE}`,
     console.error("[generateIvrFeatures] failed:", err);
     return [];
   }
+}
+async function generateIvrAll(opts) {
+  const user = `Pick three independent things for this product in a single response: experience levels, use cases, and features. Each axis has its own rules \u2014 apply them honestly.
+
+EXPERIENCE LEVELS (multi-select, 1\u20134 from this list):
+${IVR_EXPERIENCE_LEVELS.join(" | ")}
+
+- "first-time": gentle, simple controls, low intensity.
+- "curious": exploring beyond the basics, slightly ambitious but approachable.
+- "experienced": comfortable with the category, looking for variety or upgrades.
+- "advanced": high-intensity, niche, or technique-heavy.
+- A versatile product can hit multiple levels. Be honest \u2014 only include a level the product genuinely serves.
+
+USE CASES (2\u20135 slugs from this exact vocabulary):
+${IVR_USE_CASES.map((s) => `- ${s}`).join("\n")}
+
+- Objective slugs (travel = portable; long-distance = remote/app control): tag based on spec support.
+- Subjective slugs (spice-up, partner-surprise, kink-curious, role-play, etc.): tag ONLY when the description strongly supports it. Default to OMISSION when ambiguous.
+- Mutual-exclusivity hints \u2014 usually pick at most one within each facet:
+  \xB7 Occasion: anniversary, honeymoon, valentine, birthday, bachelorette, pride, holiday.
+  \xB7 Wellness/health: pelvic-floor, kegel-training, postpartum, menopause, libido-boost, prostate-health, erectile-support, menstrual-comfort \u2014 usually one, ONLY on wellness-category products.
+  \xB7 Affirming/inclusive: queer-affirming, trans-affirming, women-focused, men-focused, inclusive \u2014 usually one or two.
+  \xB7 Gift sub-category: gift, gift-set, party-favor, self-gift \u2014 pick the most specific.
+- Wellness slugs apply only to wellness/specific product types. Affirming slugs based on actual product positioning.
+${opts.deal.productTypeDial ? `- This product's type is "${opts.deal.productTypeDial}" \u2014 keep tags consistent with what fits this category.` : ""}
+
+FEATURES (3\u20138 slugs from this exact vocabulary):
+${IVR_FEATURES.map((s) => `- ${s}`).join("\n")}
+
+- Objective slugs (waterproof, rechargeable, usb-c, silicone, body-safe, app-controlled, bluetooth, etc.): tag ONLY when the description supports it. Don't infer from category.
+- Subjective slugs (rumbly, buzzy, gentle, intense, powerful, luxury, premium, discreet, beginner-friendly): tag ONLY when the description strongly supports it.
+- These get spoken aloud by Emma when filtering. False claims break shopper trust immediately.
+- Mutual-exclusivity hints:
+  \xB7 Size: mini, compact, small, medium, large, xl, xxl, oversized, plus-size, queen-size, curvy, slim, girthy.
+  \xB7 Material primary: silicone, glass, metal, wood, leather, vegan-leather, faux-leather.
+  \xB7 Lube base: water-based, silicone-based, hybrid, oil-based (none for non-lubes).
+  \xB7 Identity/edition: pride, rainbow, pride-edition, holiday, valentine.
+- Don't tag harness-compatible on a lube, condom-safe on a vibrator, flared-base on a non-anal toy, or any lube-base slug on anything that isn't a lubricant.
+${opts.deal.productTypeDial ? `- This product's type is "${opts.deal.productTypeDial}" \u2014 only pick features that genuinely fit this category.` : ""}
+
+CROSS-FIELD: a slug like 'pride' can appear in both useCases (good for Pride parties) AND features (Pride-edition design) \u2014 that's intentional when both apply.
+
+${ivrProductBlock(opts.deal)}
+
+Return ONLY this JSON shape (no markdown, no preamble):
+{ "experience": ["first-time"], "useCases": ["slug-one","slug-two"], "features": ["slug-one","slug-two","slug-three"] }`;
+  let parsed = null;
+  try {
+    const { text: text2 } = await callClaude({
+      llmClient: opts.llmClient,
+      model: MODEL_FAST,
+      maxTokens: 500,
+      systemBlocks: await buildEmmaSystemBlocks(),
+      userPrompt: user
+    });
+    const cleaned = stripFences(text2);
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      const match = cleaned.match(/\{[\s\S]*?\}\s*$/m) ?? cleaned.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0]);
+        } catch {
+        }
+      }
+      if (!parsed) {
+        console.error("[generateIvrAll] could not extract JSON from response:", cleaned.slice(0, 300));
+      }
+    }
+  } catch (err) {
+    console.error("[generateIvrAll] failed:", err);
+  }
+  if (!parsed) parsed = {};
+  const experience = Array.isArray(parsed.experience) ? (() => {
+    const valid = new Set(IVR_EXPERIENCE_LEVELS);
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const item of parsed.experience) {
+      if (typeof item !== "string") continue;
+      const v = item.trim().toLowerCase();
+      if (!valid.has(v) || seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+      if (out.length >= 4) break;
+    }
+    return out;
+  })() : [];
+  const useCases = Array.isArray(parsed.useCases) ? (() => {
+    const allowed = new Set(IVR_USE_CASES);
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const raw of parsed.useCases) {
+      if (typeof raw !== "string") continue;
+      const slug = raw.trim().toLowerCase();
+      if (!allowed.has(slug) || seen.has(slug)) continue;
+      seen.add(slug);
+      out.push(slug);
+      if (out.length >= 5) break;
+    }
+    return out;
+  })() : [];
+  const features = Array.isArray(parsed.features) ? (() => {
+    const allowed = new Set(IVR_FEATURES);
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const raw of parsed.features) {
+      if (typeof raw !== "string") continue;
+      const slug = raw.trim().toLowerCase();
+      if (!allowed.has(slug) || seen.has(slug)) continue;
+      seen.add(slug);
+      out.push(slug);
+      if (out.length >= 8) break;
+    }
+    return out;
+  })() : [];
+  return { experience, useCases, features };
 }
 function kindBrief(kind) {
   switch (kind) {
@@ -8025,7 +8226,7 @@ var init_claude_server = __esm({
     init_editorial_author_server();
     init_emma_rail_tools_server();
     client = new Anthropic({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
-    _toolTokenAccumulator = { input: 0, output: 0 };
+    _toolTokenAccumulator = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
     MODEL = "claude-sonnet-4-20250514";
     MODEL_FAST = "claude-haiku-4-5-20251001";
     SYSTEM_PROMPT = `You are the voice of xdipx.com, a daily flash-sale site for sexual wellness products.

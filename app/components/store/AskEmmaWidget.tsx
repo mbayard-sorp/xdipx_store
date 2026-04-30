@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useFetcher, useLocation, useRevalidator, useRouteLoaderData } from 'react-router'
 import { AnimatePresence, motion } from 'motion/react'
+import { BotIdClient } from 'botid/client'
 import type { loader as layoutLoader } from '~/routes/_layout'
 import type { ChatProductCard, ChatTurn, ChatVariantOption, QuickReplyPayload } from '~/lib/ai-agent/chat-types'
 import { AskEmmaProductCard } from './AskEmmaProductCard'
@@ -353,6 +354,8 @@ export function AskEmmaWidget() {
 
   return (
     <>
+      {/* Vercel BotID — invisible bot challenge for the chat endpoint. */}
+      <BotIdClient protect={[{ path: '/api/ask-emma', method: 'POST' }]} />
       <AnimatePresence>
         {open && (
           <motion.div
