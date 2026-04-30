@@ -17,8 +17,9 @@
  */
 import { eq } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { smsConversations, smsTurns } from '../../../db/schema'
+import { smsTurns } from '../../../db/schema'
 import type { ProcessSmsInput, ProcessSmsResult } from '~/lib/sms-processor.server'
+import { getOrCreateConversation as _getOrCreateConversation } from './conversation.server'
 
 // ---------------------------------------------------------------------------
 // Conversation management
@@ -27,31 +28,15 @@ import type { ProcessSmsInput, ProcessSmsResult } from '~/lib/sms-processor.serv
 /**
  * Look up the sms_conversations row for `phone`, inserting it if it doesn't
  * exist. Returns the stable conversation_id UUID.
+ *
+ * Phase 1: delegates to conversation.server.ts which handles 24h rotation,
+ * 6h stage TTL, and customer enrichment on first contact. Signature unchanged
+ * from Phase 0 so existing callers (smoke tests, pipeline-flag smoke) continue
+ * to work without modification.
  */
 export async function getOrCreateConversation(phone: string): Promise<string> {
-  // Upsert: on conflict (primary key = phone) do nothing, then read back.
-  await db
-    .insert(smsConversations)
-    .values({
-      phone,
-      stage: 'GREETING',
-      stageSetAt: new Date(),
-      lastActiveAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: smsConversations.phone,
-      set: { lastActiveAt: new Date() },
-    })
-
-  const rows = await db
-    .select({ conversationId: smsConversations.conversationId })
-    .from(smsConversations)
-    .where(eq(smsConversations.phone, phone))
-    .limit(1)
-
-  const id = rows[0]?.conversationId
-  if (!id) throw new Error(`[turn-logger] conversation row missing after upsert for phone=${phone}`)
-  return id
+  const row = await _getOrCreateConversation(phone)
+  return row.conversationId
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +82,18 @@ export async function insertSentinelInbound(
 }
 
 /**
+ * Optional Phase 1 observability fields that can be written to sms_turns rows
+ * after the processor call resolves. All fields are optional — Phase 0 callers
+ * pass nothing and the columns stay null.
+ */
+export interface TurnObservabilityUpdate {
+  intent?: string
+  intentConfidence?: number
+  stageIn?: string
+  stageOut?: string
+}
+
+/**
  * Update the sentinel inbound row with real fields after processSmsMessage
  * completes. Also writes a paired outbound row.
  */
@@ -109,13 +106,20 @@ export async function finaliseTurnRows(opts: {
   latencyMs: number
   pipelineVersion: string
   simulated: boolean
+  observability?: TurnObservabilityUpdate | undefined
 }): Promise<void> {
-  const { sentinelId, phone, conversationId, emmaMsg, latencyMs, pipelineVersion, simulated } = opts
+  const { sentinelId, phone, conversationId, emmaMsg, latencyMs, pipelineVersion, simulated, observability } = opts
 
-  // Update the sentinel inbound row with latency (other v1 fields stay null).
+  // Update the sentinel inbound row with latency + optional Phase 1 fields.
   await db
     .update(smsTurns)
-    .set({ latencyMs })
+    .set({
+      latencyMs,
+      ...(observability?.intent !== undefined     && { intent: observability.intent }),
+      ...(observability?.intentConfidence !== undefined && { intentConfidence: observability.intentConfidence }),
+      ...(observability?.stageIn !== undefined    && { stageIn: observability.stageIn }),
+      ...(observability?.stageOut !== undefined   && { stageOut: observability.stageOut }),
+    })
     .where(eq(smsTurns.id, sentinelId))
 
   // Write the paired outbound row if there was a reply.
@@ -124,14 +128,13 @@ export async function finaliseTurnRows(opts: {
       phone,
       conversationId,
       direction: 'outbound',
-      stageIn: 'V1',
-      stageOut: 'V1',
+      stageIn: observability?.stageIn ?? 'V1',
+      stageOut: observability?.stageOut ?? 'V1',
+      intent: observability?.intent,
+      intentConfidence: observability?.intentConfidence,
       emmaMsg,
       latencyMs,
       pipelineVersion,
-      // TODO (Phase 1): populate input_tokens, output_tokens, tool_calls from
-      // the v2 pipeline's response object once sms-processor.server.ts bubbles
-      // them up. v1's generateChatReply() doesn't return token counts.
     })
   }
 
@@ -164,6 +167,7 @@ export async function withTurnLogging(
   input: ProcessSmsInput,
   processFn: (input: ProcessSmsInput) => Promise<ProcessSmsResult>,
   pipelineVersion: string,
+  observability?: TurnObservabilityUpdate,
 ): Promise<ProcessSmsResult> {
   const phone = input.from.trim()
   const twilioSid = (input.twilioSid ?? '').trim()
@@ -263,6 +267,7 @@ export async function withTurnLogging(
         latencyMs,
         pipelineVersion,
         simulated,
+        ...(observability !== undefined && { observability }),
       })
     } catch (err) {
       console.error('[turn-logger] finaliseTurnRows failed — reply already sent', err)

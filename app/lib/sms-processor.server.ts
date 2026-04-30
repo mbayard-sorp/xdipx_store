@@ -26,7 +26,7 @@ export const HELP_REPLY =
 export const STOP_REPLY = "You're opted out of xdipx messages. Reply START anytime to resume."
 export const START_REPLY = "You're back in. Reply STOP to opt out anytime. Msg&data rates may apply."
 export const AGE_GATE_REPLY =
-  "xdipx is 18+ only. Reply YES to confirm you're 18 or older and we'll help you find what you're looking for. STOP to opt out."
+  "xdipx is 18+ only. Reply YES to confirm you're 18 or older AND agree to receive recurring marketing texts from xdipx (auto-dialed, ~4 msgs/month, msg & data rates may apply). Reply STOP to opt out anytime, HELP for help."
 export const AGE_WELCOME_REPLY =
   "You're in. I'm Emma — ask me anything about our daily deals, products, or your orders. What's on your mind?"
 
@@ -109,7 +109,7 @@ export async function processSmsMessage(input: ProcessSmsInput): Promise<Process
     if (AGE_CONFIRM_RE.test(body)) {
       await db
         .insert(smsAgeConsent)
-        .values({ phone: from, method: simulated ? 'sim_yes' : 'sms_yes' })
+        .values({ phone: from, method: simulated ? 'sim_yes' : 'sms_yes_v2' })
         .onConflictDoNothing({ target: smsAgeConsent.phone })
       await recordOutbound(from, AGE_WELCOME_REPLY, null, simulated)
       return single(AGE_WELCOME_REPLY, 'age_gate_confirmed')

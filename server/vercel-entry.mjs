@@ -563,6 +563,8 @@ var init_schema = __esm({
       lastQuoteItems: json("last_quote_items").$type(),
       lastQuoteCreatedAt: timestamp("last_quote_created_at"),
       customerGid: text("customer_gid"),
+      customerFirstName: text("customer_first_name"),
+      customerDefaultZip: text("customer_default_zip"),
       stageSetAt: timestamp("stage_set_at").notNull().defaultNow(),
       lastActiveAt: timestamp("last_active_at").notNull().defaultNow(),
       conversationId: uuid("conversation_id").notNull().defaultRandom()
