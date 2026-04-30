@@ -508,9 +508,39 @@ export const smsTurns = pgTable('sms_turns', {
   errors:           json('errors').$type<unknown[]>(),
   fabricationCaught: varchar('fabrication_caught', { length: 32 }),
   pipelineVersion:  varchar('pipeline_version', { length: 8 }).notNull(),
+  // Migration 028: channel='sms' (default) or 'web'. Existing rows backfilled to 'sms'.
+  channel:          varchar('channel', { length: 8 }).notNull().default('sms'),
   createdAt:        timestamp('created_at').notNull().defaultNow(),
 }, t => ({
   twilioSidUniq:    uniqueIndex('sms_turns_twilio_sid_uniq').on(t.twilioMessageSid),
   phoneCreatedIdx:  index('sms_turns_phone_created_idx').on(t.phone, t.createdAt),
+  channelCreatedIdx: index('sms_turns_channel_idx').on(t.channel, t.createdAt),
 }))
+
+// ---------------------------------------------------------------------------
+// Phase 8: Web chat v2 engine
+// ---------------------------------------------------------------------------
+
+/**
+ * One row per web chat session (cookie-based). Mirrors sms_conversations but
+ * keyed by session_id (UUID cookie) instead of phone number.
+ * Migration 027.
+ */
+export const webConversations = pgTable('web_conversations', {
+  sessionId:           varchar('session_id', { length: 64 }).primaryKey(),
+  stage:               varchar('stage', { length: 32 }).notNull().default('GREETING'),
+  currentPitchHandle:  text('current_pitch_handle'),
+  currentUpsellHandle: text('current_upsell_handle'),
+  lastQuoteUrl:        text('last_quote_url'),
+  lastQuoteItems:      json('last_quote_items').$type<unknown>(),
+  lastQuoteCreatedAt:  timestamp('last_quote_created_at'),
+  customerGid:         text('customer_gid'),
+  customerFirstName:   text('customer_first_name'),
+  customerDefaultZip:  text('customer_default_zip'),
+  pageHandle:          text('page_handle'),
+  pageRoute:           text('page_route'),
+  stageSetAt:          timestamp('stage_set_at').notNull().defaultNow(),
+  lastActiveAt:        timestamp('last_active_at').notNull().defaultNow(),
+  conversationId:      uuid('conversation_id').notNull().defaultRandom(),
+})
 

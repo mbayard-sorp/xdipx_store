@@ -145,6 +145,7 @@ __export(schema_exports, {
   tosAcceptance: () => tosAcceptance,
   tosVersions: () => tosVersions,
   voicemails: () => voicemails,
+  webConversations: () => webConversations,
   wishlistItems: () => wishlistItems,
   wishlists: () => wishlists
 });
@@ -164,7 +165,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -588,11 +589,31 @@ var init_schema = __esm({
       errors: json("errors").$type(),
       fabricationCaught: varchar("fabrication_caught", { length: 32 }),
       pipelineVersion: varchar("pipeline_version", { length: 8 }).notNull(),
+      // Migration 028: channel='sms' (default) or 'web'. Existing rows backfilled to 'sms'.
+      channel: varchar("channel", { length: 8 }).notNull().default("sms"),
       createdAt: timestamp("created_at").notNull().defaultNow()
     }, (t) => ({
       twilioSidUniq: uniqueIndex("sms_turns_twilio_sid_uniq").on(t.twilioMessageSid),
-      phoneCreatedIdx: index("sms_turns_phone_created_idx").on(t.phone, t.createdAt)
+      phoneCreatedIdx: index("sms_turns_phone_created_idx").on(t.phone, t.createdAt),
+      channelCreatedIdx: index("sms_turns_channel_idx").on(t.channel, t.createdAt)
     }));
+    webConversations = pgTable("web_conversations", {
+      sessionId: varchar("session_id", { length: 64 }).primaryKey(),
+      stage: varchar("stage", { length: 32 }).notNull().default("GREETING"),
+      currentPitchHandle: text("current_pitch_handle"),
+      currentUpsellHandle: text("current_upsell_handle"),
+      lastQuoteUrl: text("last_quote_url"),
+      lastQuoteItems: json("last_quote_items").$type(),
+      lastQuoteCreatedAt: timestamp("last_quote_created_at"),
+      customerGid: text("customer_gid"),
+      customerFirstName: text("customer_first_name"),
+      customerDefaultZip: text("customer_default_zip"),
+      pageHandle: text("page_handle"),
+      pageRoute: text("page_route"),
+      stageSetAt: timestamp("stage_set_at").notNull().defaultNow(),
+      lastActiveAt: timestamp("last_active_at").notNull().defaultNow(),
+      conversationId: uuid("conversation_id").notNull().defaultRandom()
+    });
   }
 });
 

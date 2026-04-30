@@ -10,6 +10,8 @@ import {
   recordSessionUsage,
   reserveSessionBudget,
 } from '~/lib/emma-budget.server'
+import { pickWebPipelineVersion } from '~/lib/sms-v2/web-pipeline-flag.server'
+import { processWebMessageV2 } from '~/lib/sms-v2/adapters/web.server'
 
 const ALLOWED_ORIGINS = new Set([
   'https://xdipx.com',
@@ -111,6 +113,46 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const existingCartId = getCartIdFromCookie(request)
   let newCartId: string | null = null
 
+  // 6. Version pick — uses the stable cookie UUID (cookieId) as the session key
+  // for the web pipeline flag allowlist. All pre-flights above run regardless
+  // of which version is picked.
+  const emmaSessionCookieId = sessionHandle?.cookieId ?? `anon-${Date.now()}`
+  const webPipelineVersion = pickWebPipelineVersion(emmaSessionCookieId)
+
+  // --- v2 path ---
+  if (webPipelineVersion === 'v2') {
+    try {
+      // Parse pageContext for v2: extract handle + route from pathname.
+      const webPageContext = pageContext
+        ? parseWebPageContext(pageContext.pathname)
+        : undefined
+
+      const v2History = history.map((t) => ({ role: t.role, text: t.text }))
+      const v2Input: import('~/lib/sms-v2/adapters/web.server').ProcessWebInput = {
+        sessionId: emmaSessionCookieId,
+        customerText: message,
+      }
+      if (webPageContext !== undefined) v2Input.pageContext = webPageContext
+      if (existingCartId !== null) v2Input.cartId = existingCartId
+      const result = await processWebMessageV2(v2Input, v2History)
+
+      const headers = new Headers()
+      if (sessionHandle?.setCookieHeader) headers.append('Set-Cookie', sessionHandle.setCookieHeader)
+
+      // v2 engine handles its own cart creation via checkout stage handler.
+      // No newCartId from v2 — cart is created inside the stage handler and the
+      // checkout URL is embedded in the reply prose. cartUpdated flag signals
+      // the client to revalidate the cart loader.
+
+      const { usage: _usage, ...clientPayload } = result
+      return Response.json(clientPayload, { headers })
+    } catch (err) {
+      console.error('[api.ask-emma] v2 generate failed — falling through to v1', err)
+      // Fall through to v1 on error.
+    }
+  }
+
+  // --- v1 path (default) ---
   try {
     const result = await generateChatReply(nextHistory, {
       channel: 'chat',
@@ -122,7 +164,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     })
     const latencyMs = Date.now() - startedAt
 
-    // 6. Record actual token usage against session + global counters. Strip
+    // Record actual token usage against session + global counters. Strip
     // `usage` from the client payload — it's a server-side accounting field.
     if (result.usage) {
       const { inputTokens, outputTokens } = result.usage
@@ -175,6 +217,40 @@ function sanitizePageContext(raw: unknown): { pathname: string } | undefined {
   const clean = p.split('?')[0]?.split('#')[0]?.trim() ?? ''
   if (!clean.startsWith('/') || clean.length > 200) return undefined
   return { pathname: clean }
+}
+
+/**
+ * Parse a sanitized pathname into v2 web page context fields.
+ * Examples:
+ *   /products/lush-mini       → { handle: 'lush-mini', route: '/products/lush-mini' }
+ *   /vault/lush-mini          → { handle: 'lush-mini', route: '/vault/lush-mini' }
+ *   /for-her                  → { collection: 'for-her', route: '/for-her' }
+ *   /                         → { route: '/' }
+ */
+function parseWebPageContext(
+  pathname: string,
+): { handle?: string; collection?: string; route?: string } {
+  const ctx: { handle?: string; collection?: string; route?: string } = { route: pathname }
+
+  const productMatch = pathname.match(/^\/products\/([^/]+)$/)
+  if (productMatch?.[1]) {
+    ctx.handle = productMatch[1]
+    return ctx
+  }
+
+  const vaultMatch = pathname.match(/^\/vault\/([^/]+)$/)
+  if (vaultMatch?.[1]) {
+    ctx.handle = vaultMatch[1]
+    return ctx
+  }
+
+  const collectionMatch = pathname.match(/^\/(for-him|for-her|vault)(?:\/)?$/)
+  if (collectionMatch?.[1]) {
+    ctx.collection = collectionMatch[1]
+    return ctx
+  }
+
+  return ctx
 }
 
 function sanitizeHistory(raw: unknown): ChatTurn[] {
