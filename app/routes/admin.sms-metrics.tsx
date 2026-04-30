@@ -94,11 +94,44 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalOutbound: Number(totRow?.total_outbound ?? 0),
   }
 
-  return { rows, totals }
+  // Phase 7 — per-stage breakdown (last 14d, inbound only so we count one row per turn).
+  const stageRes = await db.execute<{ stage_out: string; n: string }>(sql`
+    SELECT COALESCE(stage_out, '(null)') AS stage_out, count(*) AS n
+    FROM sms_turns
+    WHERE created_at > now() - interval '14 days' AND direction = 'inbound'
+    GROUP BY 1
+    ORDER BY n DESC
+  `)
+  const stageBreakdown: Array<{ stage: string; count: number }> = (stageRes.rows ?? []).map((r) => ({
+    stage: r.stage_out,
+    count: Number(r.n),
+  }))
+
+  // Phase 7 — fabrication validator fire-rate (last 14d).
+  const fabRes = await db.execute<{ fabrication_caught: string; n: string }>(sql`
+    SELECT fabrication_caught, count(*) AS n
+    FROM sms_turns
+    WHERE created_at > now() - interval '14 days' AND fabrication_caught IS NOT NULL
+    GROUP BY 1
+    ORDER BY n DESC
+  `)
+  const fabBreakdown: Array<{ kind: string; count: number }> = (fabRes.rows ?? []).map((r) => ({
+    kind: r.fabrication_caught,
+    count: Number(r.n),
+  }))
+
+  // Phase 7 — cutover banner state.
+  const envFlag = (process.env['SMS_PIPELINE_VERSION'] ?? '').trim()
+  const flagState =
+    envFlag === ''
+      ? "Pipeline default: v2 (kill-switch unset; set SMS_PIPELINE_VERSION=v1 to roll back)"
+      : `Pipeline default: explicit SMS_PIPELINE_VERSION='${envFlag}'`
+
+  return { rows, totals, stageBreakdown, fabBreakdown, flagState }
 }
 
 export default function AdminSmsMetricsPage() {
-  const { rows, totals } = useLoaderData<typeof loader>()
+  const { rows, totals, stageBreakdown, fabBreakdown, flagState } = useLoaderData<typeof loader>()
 
   return (
     <div className="p-8 max-w-5xl">
@@ -106,6 +139,11 @@ export default function AdminSmsMetricsPage() {
         SMS Metrics
       </h1>
       <p className="text-sm text-muted mb-6">Last 14 days · Phase 0 observability · live query, no cache.</p>
+
+      {/* Phase 7 cutover banner */}
+      <div className="mb-6 px-4 py-3 rounded-xl bg-coral/10 border border-coral/30 text-sm font-mono">
+        {flagState}
+      </div>
 
       <div className="grid grid-cols-3 gap-3 mb-8">
         <Stat label="Conversations (14d)" value={totals.totalConversations} />
@@ -158,6 +196,65 @@ export default function AdminSmsMetricsPage() {
         <code className="bg-cream-2 px-1 rounded">[turn-logger] duplicate SID</code>). They are not
         counted in this table because the rejected turn never writes a row.
       </p>
+
+      {/* Phase 7 — per-stage breakdown */}
+      <section className="mt-8">
+        <h2 className="text-lg font-semibold mb-3">Per-stage inbound (14d)</h2>
+        <div className="overflow-x-auto bg-white rounded-xl border border-black/10">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs uppercase tracking-wide text-black/50 border-b border-black/10">
+              <tr>
+                <th className="px-3 py-2">Stage out</th>
+                <th className="px-3 py-2">Inbound count</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stageBreakdown.map((r) => (
+                <tr key={r.stage} className="border-b border-black/5 last:border-b-0">
+                  <td className="px-3 py-2 font-mono">{r.stage}</td>
+                  <td className="px-3 py-2">{r.count}</td>
+                </tr>
+              ))}
+              {stageBreakdown.length === 0 && (
+                <tr>
+                  <td className="px-3 py-6 text-black/50" colSpan={2}>No stage data yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Phase 7 — fabrication validator fire-rate */}
+      <section className="mt-8">
+        <h2 className="text-lg font-semibold mb-3">Fabrication validator fire-rate (14d)</h2>
+        <div className="overflow-x-auto bg-white rounded-xl border border-black/10">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs uppercase tracking-wide text-black/50 border-b border-black/10">
+              <tr>
+                <th className="px-3 py-2">Validator</th>
+                <th className="px-3 py-2">Fired</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fabBreakdown.map((r) => (
+                <tr key={r.kind} className="border-b border-black/5 last:border-b-0">
+                  <td className="px-3 py-2 font-mono">{r.kind}</td>
+                  <td className="px-3 py-2">{r.count}</td>
+                </tr>
+              ))}
+              {fabBreakdown.length === 0 && (
+                <tr>
+                  <td className="px-3 py-6 text-black/50" colSpan={2}>
+                    No fabrication catches in last 14d. Either the structure is doing the work or there's not enough traffic — see{' '}
+                    <code className="bg-cream-2 px-1 rounded">.claude/orchestrator/audits/2026-04-30-validator-fire-rate.md</code>.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   )
 }

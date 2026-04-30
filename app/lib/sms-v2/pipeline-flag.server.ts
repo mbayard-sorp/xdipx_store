@@ -6,8 +6,11 @@
  * Two controls:
  *   SMS_V2_PHONES  — comma-separated E.164 allowlist (e.g. "+15555550100,+15555550101").
  *                    A phone in this list is ALWAYS routed to v2 regardless of the
- *                    global flag. This is the dark-launch / per-phone override.
- *   SMS_PIPELINE_VERSION — global default ('v1' | 'v2'). Defaults to 'v1'.
+ *                    global flag. Phase 0.5 used this for dark-launch; post-Phase 7
+ *                    it's the override layer for special test phones.
+ *   SMS_PIPELINE_VERSION — global default ('v1' | 'v2'). **Default is 'v2'** as of
+ *                    Phase 7 cutover (2026-04-30). Setting `SMS_PIPELINE_VERSION=v1`
+ *                    is the kill-switch for emergency rollback to the legacy path.
  *
  * Precedence: per-phone allowlist > SMS_PIPELINE_VERSION global flag.
  *
@@ -45,20 +48,22 @@ let _allowlist: Set<string> = parseAllowlist(process.env['SMS_V2_PHONES'])
 let _warnedInvalidVersion = false
 
 function readGlobalVersion(): 'v1' | 'v2' {
-  const raw = (process.env['SMS_PIPELINE_VERSION'] ?? 'v1').trim()
+  // Default flipped to 'v2' in Phase 7 cutover (2026-04-30). Set
+  // SMS_PIPELINE_VERSION=v1 as the kill-switch for emergency rollback.
+  const raw = (process.env['SMS_PIPELINE_VERSION'] ?? 'v2').trim()
   if (raw === 'v1' || raw === 'v2') return raw
   if (!_warnedInvalidVersion) {
     console.warn(
-      `[pipeline-flag] SMS_PIPELINE_VERSION='${raw}' is not 'v1' or 'v2' — coercing to 'v1'`,
+      `[pipeline-flag] SMS_PIPELINE_VERSION='${raw}' is not 'v1' or 'v2' — coercing to 'v2'`,
     )
     _warnedInvalidVersion = true
   }
-  return 'v1'
+  return 'v2'
 }
 
 /**
  * Return 'v2' if phone is in the allowlist, otherwise fall back to the global
- * SMS_PIPELINE_VERSION env (default 'v1').
+ * SMS_PIPELINE_VERSION env (default 'v2' as of Phase 7 cutover).
  */
 export function pickPipelineVersion(phone: string): 'v1' | 'v2' {
   if (_allowlist.has(phone)) return 'v2'
