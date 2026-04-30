@@ -20,11 +20,11 @@ import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export function executeReconnectStage(
+export async function executeReconnectStage(
   ctx: EmmaContext,
   intent: IntentResult,
   _customerText: string,
-): StageResponse {
+): Promise<StageResponse> {
   const lastItem = ctx.customer?.lastOrderItems?.[0]
 
   const prose = lastItem

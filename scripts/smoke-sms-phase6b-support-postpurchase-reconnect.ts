@@ -266,8 +266,8 @@ async function scenario5(): Promise<void> {
     ],
   })
 
-  // executeReconnectStage is synchronous — no mocking needed
-  const resp = executeReconnectStage(ctx, makeIntent('OFF_TOPIC'), 'hey')
+  // executeReconnectStage is async (Phase 6 unified the StageHandler contract)
+  const resp = await executeReconnectStage(ctx, makeIntent('OFF_TOPIC'), 'hey')
   const prose = resp.segments.map((s) => s.prose).join(' ')
   console.log('  Reply:', prose.slice(0, 200))
 
@@ -286,7 +286,7 @@ async function scenario6(): Promise<void> {
 
   const ctx = buildCtx({ stage: 'RECONNECT' }) // no lastOrderItems
 
-  const resp = executeReconnectStage(ctx, makeIntent('OFF_TOPIC'), 'hey')
+  const resp = await executeReconnectStage(ctx, makeIntent('OFF_TOPIC'), 'hey')
   const prose = resp.segments.map((s) => s.prose).join(' ')
   console.log('  Reply:', prose.slice(0, 200))
 

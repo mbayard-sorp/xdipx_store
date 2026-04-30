@@ -15,6 +15,12 @@ import { executeCheckoutStage } from './stages/checkout.server'
 import { executeUpsellStage } from './stages/upsell.server'
 import { executePresentationStage } from './stages/presentation.server'
 import { executeDiscoveryStage } from './stages/discovery.server'
+// Phase 6 stage handlers
+import { executeObjectionStage } from './stages/objection.server'
+import { executeResearchStage } from './stages/research.server'
+import { executeSupportStage } from './stages/support.server'
+import { executePostPurchaseStage } from './stages/post-purchase.server'
+import { executeReconnectStage } from './stages/reconnect.server'
 
 // ---------------------------------------------------------------------------
 // 1. Intent-driven stage shim
@@ -69,10 +75,16 @@ export type StageHandler = (
 ) => Promise<StageResponse>
 
 export const STAGE_HANDLERS: Partial<Record<Stage, StageHandler>> = {
-  CHECKOUT:     executeCheckoutStage,
-  UPSELL:       executeUpsellStage,
-  PRESENTATION: executePresentationStage,
-  DISCOVERY:    executeDiscoveryStage,
+  CHECKOUT:      executeCheckoutStage,
+  UPSELL:        executeUpsellStage,
+  PRESENTATION:  executePresentationStage,
+  DISCOVERY:     executeDiscoveryStage,
+  // Phase 6 — late-bound stages
+  OBJECTION:     executeObjectionStage,
+  RESEARCH:      executeResearchStage,
+  SUPPORT:       executeSupportStage,
+  POST_PURCHASE: executePostPurchaseStage,
+  RECONNECT:     executeReconnectStage,
 }
 
 // ---------------------------------------------------------------------------
