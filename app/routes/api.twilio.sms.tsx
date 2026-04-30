@@ -5,10 +5,18 @@
  * shared processSmsMessage() pipeline (STOP/HELP/age-gate/opt-out/rate-limit/
  * Claude). The same pipeline backs the /admin/sms-tester simulator with
  * `simulated: true` so the two paths can never drift.
+ *
+ * Phase 0: every turn is wrapped in withTurnLogging() which writes to
+ * sms_turns and deduplicates Twilio retries via the twilio_message_sid unique
+ * index. SMS_PIPELINE_VERSION env var defaults to 'v1'; 'v2' is a no-op in
+ * Phase 0 (logs a warning and falls through to v1).
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { twiml, verifyTwilioRequest, xmlEscape } from '~/lib/twilio.server'
 import { processSmsMessage, type SmsSegment } from '~/lib/sms-processor.server'
+import { withTurnLogging } from '~/lib/sms-v2/turn-logger.server'
+
+const PIPELINE_VERSION = (process.env['SMS_PIPELINE_VERSION'] ?? 'v1').trim()
 
 /**
  * Build a TwiML response with one <Message> per segment. Segments with a
@@ -51,7 +59,15 @@ async function handleSmsAction(request: Request): Promise<Response> {
   const body = (params['Body'] ?? '').trim()
   const twilioSid = params['MessageSid'] ?? params['SmsMessageSid'] ?? ''
 
-  const result = await processSmsMessage({ from, body, twilioSid, simulated: false })
+  if (PIPELINE_VERSION !== 'v1') {
+    console.warn(`[sms] SMS_PIPELINE_VERSION=${PIPELINE_VERSION} is not yet wired — falling through to v1`)
+  }
+
+  const result = await withTurnLogging(
+    { from, body, twilioSid, simulated: false },
+    processSmsMessage,
+    'v1',
+  )
   if (result.replies.length === 0) return twiml(EMPTY_TWIML)
   return twiml(repliesTwiml(result.replies))
 }

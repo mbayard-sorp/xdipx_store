@@ -15,6 +15,7 @@ import { requireAdmin } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { smsAgeConsent, smsMessages, smsOptouts } from '../../db/schema'
 import { processSmsMessage, type ProcessSmsResult } from '~/lib/sms-processor.server'
+import { withTurnLogging } from '~/lib/sms-v2/turn-logger.server'
 
 export const meta: MetaFunction = () => [{ title: 'SMS Tester — xdipx Admin' }]
 
@@ -105,7 +106,11 @@ export async function action({ request }: ActionFunctionArgs) {
   const body = String(form.get('body') ?? '').trim()
   if (!body) return { ok: false, error: 'body is required', phone } satisfies ActionData
 
-  const result = await processSmsMessage({ from: phone, body, simulated: true })
+  const result = await withTurnLogging(
+    { from: phone, body, simulated: true },
+    processSmsMessage,
+    'v1',
+  )
   return {
     ok: true,
     outcome: result.outcome,
