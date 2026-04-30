@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { eq, inArray, ne } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { ivrVoices, pipelineSettings } from '../../db/schema'
+import { IVR_CONFIG_DEFAULTS, getIvrConfigDiagnostic, type IvrConfigDiagnosticRow } from '~/lib/ivr-config.server'
 
 type VoiceRow = {
   id: number | null
@@ -26,6 +27,9 @@ const DEFAULTS: Record<string, string> = {
   ivrFarewellSilent: '',
   ivrFeelings: 'so happy,thrilled,super excited,really glad,pumped,stoked,delighted',
   ivrActivities: 'browsing the shelf,curating Emma\'s next pick,testing out some new arrivals,organizing the stockroom',
+  // Limits & rate-limiting (Phase 1 — backend wiring; UI lands in Phase 2).
+  // Stored in pipelineSettings; resolved at runtime by app/lib/ivr-config.server.ts.
+  ...IVR_CONFIG_DEFAULTS,
 }
 
 export async function loader(_: LoaderFunctionArgs) {
@@ -56,7 +60,9 @@ export async function loader(_: LoaderFunctionArgs) {
     }
   }
 
-  return { settings, voices }
+  const diagnostic = await getIvrConfigDiagnostic()
+
+  return { settings, voices, diagnostic }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -149,6 +155,10 @@ type SaveFormProps = {
   description?: string
   multiline?: boolean
   rows?: number
+  min?: number
+  step?: number | string
+  placeholder?: string
+  suffix?: string
 }
 
 function SaveForm({
@@ -160,6 +170,10 @@ function SaveForm({
   description,
   multiline,
   rows,
+  min,
+  step,
+  placeholder,
+  suffix,
 }: SaveFormProps) {
   return (
     <fetcher.Form method="post" className="space-y-1">
@@ -176,12 +190,18 @@ function SaveForm({
             className="w-full border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30 font-body leading-relaxed"
           />
         ) : (
-          <input
-            type={type}
-            name="value"
-            defaultValue={settings[settingKey] ?? ''}
-            className="flex-1 border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
-          />
+          <>
+            <input
+              type={type}
+              name="value"
+              defaultValue={settings[settingKey] ?? ''}
+              min={min}
+              step={step}
+              placeholder={placeholder}
+              className="flex-1 border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
+            />
+            {suffix && <span className="text-xs text-ink/50 whitespace-nowrap">{suffix}</span>}
+          </>
         )}
         <button
           type="submit"
@@ -194,8 +214,84 @@ function SaveForm({
   )
 }
 
+function DiagnosticPanel({ diagnostic }: { diagnostic: IvrConfigDiagnosticRow[] }) {
+  const [open, setOpen] = useState(false)
+  const dbCount = diagnostic.filter((r) => r.source === 'db').length
+  const envCount = diagnostic.filter((r) => r.source === 'env').length
+  const defaultCount = diagnostic.filter((r) => r.source === 'default').length
+
+  return (
+    <section className="bg-cream-2/40 border border-cream-2 rounded-2xl p-4 text-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between text-left"
+      >
+        <span className="font-semibold text-ink">
+          Effective config
+          <span className="ml-2 text-xs font-normal text-ink/50">
+            {dbCount} from DB · {envCount} from env · {defaultCount} default
+          </span>
+        </span>
+        <span className="text-xs text-ink/40">{open ? '▲ hide' : '▼ show'}</span>
+      </button>
+
+      {open && (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-ink/50 border-b border-cream-2">
+                <th className="py-1.5 pr-3">Key</th>
+                <th className="py-1.5 pr-3">Value</th>
+                <th className="py-1.5 pr-3">Source</th>
+                <th className="py-1.5">Env override</th>
+              </tr>
+            </thead>
+            <tbody className="font-mono">
+              {diagnostic.map((row) => (
+                <tr key={row.key} className="border-b border-cream-2/60 last:border-0">
+                  <td className="py-1.5 pr-3 text-ink/80">{row.key}</td>
+                  <td className="py-1.5 pr-3 text-ink break-all">{row.value || <span className="text-ink/30">(empty)</span>}</td>
+                  <td className="py-1.5 pr-3">
+                    <span
+                      className={
+                        row.source === 'db'
+                          ? 'text-sage'
+                          : row.source === 'env'
+                            ? 'text-sun'
+                            : 'text-ink/40'
+                      }
+                    >
+                      {row.source}
+                    </span>
+                  </td>
+                  <td className="py-1.5 text-ink/40">{row.envName ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-3 text-xs text-ink/40 font-body">
+            Resolution order: <span className="text-sage">db</span> → <span className="text-sun">env</span> → <span>default</span>. Saving a value above stores it in the DB and overrides the env on the next call.
+          </p>
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** Minutes → "Xs" or "Xm Ys" helper for inline preview text. */
+function fmtMinutes(raw: string | undefined): string {
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return 'disabled'
+  const totalSec = Math.round(n * 60)
+  if (totalSec < 60) return `${totalSec}s`
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return s ? `${m}m ${s}s` : `${m}m`
+}
+
 export default function AdminIvrPage() {
-  const { settings, voices } = useLoaderData<typeof loader>()
+  const { settings, voices, diagnostic } = useLoaderData<typeof loader>()
   const fetcher = useFetcher<typeof action>()
   const voicesFetcher = useFetcher<typeof action>()
 
@@ -251,6 +347,8 @@ export default function AdminIvrPage() {
       >
         IVR
       </h1>
+
+      <DiagnosticPanel diagnostic={diagnostic} />
 
       {/* ElevenLabs Voice Library */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
@@ -479,6 +577,199 @@ export default function AdminIvrPage() {
           multiline
           rows={2}
           description="Spoken when the caller stops responding. Leave blank to hang up quietly."
+        />
+      </section>
+
+      {/* Limits & Timeouts */}
+      <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
+        <h2
+          className="text-base font-bold text-ink"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          Limits & Timeouts
+        </h2>
+        <p className="text-xs text-ink/50">
+          All durations in <strong>minutes</strong> (decimals allowed — 0.5 = 30 seconds). Changes apply on the next call.
+        </p>
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Max Call Duration"
+          settingKey="ivrMaxCallDurationMin"
+          type="number"
+          min={1}
+          step="0.5"
+          suffix={`= ${fmtMinutes(settings.ivrMaxCallDurationMin)}`}
+          description="Hard cap on total call length. Twilio enforces a 4-hour ceiling regardless."
+        />
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Initial Silence"
+          settingKey="ivrInitialSilenceMin"
+          type="number"
+          min={0.05}
+          step="0.05"
+          suffix={`= ${fmtMinutes(settings.ivrInitialSilenceMin)}`}
+          description="How long Emma waits for the caller to speak after the greeting before re-engaging."
+        />
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Inter-Turn Silence"
+          settingKey="ivrInterTurnSilenceMin"
+          type="number"
+          min={0.05}
+          step="0.05"
+          suffix={`= ${fmtMinutes(settings.ivrInterTurnSilenceMin)}`}
+          description="How long Emma waits between turns after she finishes speaking."
+        />
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Voicemail Max Length"
+          settingKey="voicemailMaxLengthMin"
+          type="number"
+          min={0.25}
+          step="0.25"
+          suffix={`= ${fmtMinutes(settings.voicemailMaxLengthMin)}`}
+          description="Maximum recording length on voicemail (after-hours, anonymous, fallback). Capped at 10 min by Twilio."
+        />
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="SMS History Window"
+          settingKey="smsHistoryWindowMin"
+          type="number"
+          min={5}
+          step="5"
+          suffix={`= ${fmtMinutes(settings.smsHistoryWindowMin)}`}
+          description="How far back Emma reads SMS history for context. Older messages are ignored. (1440 = 24 hours)"
+        />
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="SMS History Turns"
+          settingKey="smsHistoryTurns"
+          type="number"
+          min={1}
+          step="1"
+          description="Max number of recent SMS turn pairs (user + Emma) loaded into context."
+        />
+      </section>
+
+      {/* Rate Limiting & Abuse Guards */}
+      <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
+        <h2
+          className="text-base font-bold text-ink"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          Rate Limiting & Abuse
+        </h2>
+        <p className="text-xs text-ink/50">
+          Set any count to <code>0</code> to disable that guard.
+        </p>
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Max Calls Per Hour"
+          settingKey="ivrMaxCallsPerHour"
+          type="number"
+          min={0}
+          step="1"
+          description="Per-phone-number cap on inbound calls in a rolling 1-hour window. Excess calls hear a polite reject message."
+        />
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Max SMS Per Hour"
+          settingKey="smsMaxPerHour"
+          type="number"
+          min={0}
+          step="1"
+          description="Per-phone cap on inbound SMS in a rolling 1-hour window. Excess messages get an empty reply (silent)."
+        />
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Rate-Limit Allowlist"
+          settingKey="ivrRateLimitAllowlist"
+          multiline
+          rows={3}
+          description="Comma-separated E.164 numbers that bypass the voice rate limit. Use for staff/test phones. e.g. +18187267258, +15551234567"
+        />
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Max Prompts Per Call"
+          settingKey="ivrMaxPrompts"
+          type="number"
+          min={1}
+          step="1"
+          description="Runaway-loop guard. Once Emma has produced this many turns in a single call, she wraps up and hangs up."
+        />
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Re-Engage Attempts"
+          settingKey="ivrReEngageAttempts"
+          type="number"
+          min={0}
+          step="1"
+          description='Number of "still there?" prompts Emma sends on caller silence before hanging up.'
+        />
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Soft Token Budget"
+          settingKey="ivrSoftTokenBudget"
+          type="number"
+          min={1000}
+          step="1000"
+          description="Once a call's running token total crosses this, Emma is nudged to wrap up politely. Cost guardrail — not a hard cap."
+        />
+      </section>
+
+      {/* Business Hours */}
+      <section className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
+        <h2
+          className="text-base font-bold text-ink"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          Business Hours
+        </h2>
+        <p className="text-xs text-ink/50">
+          Outside the window, calls go straight to voicemail. Leave the window blank to stay always-open.
+        </p>
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Window"
+          settingKey="ivrBusinessHours"
+          placeholder="9-21"
+          description='Format: "openHour-closeHour" in 24h time. e.g. "9-21" = 9am to 9pm. "20-6" = 8pm to 6am (overnight). Empty = always open.'
+        />
+
+        <SaveForm
+          fetcher={fetcher}
+          settings={settings}
+          label="Timezone"
+          settingKey="ivrBusinessTz"
+          placeholder="America/Chicago"
+          description="IANA timezone. e.g. America/New_York, America/Chicago, America/Los_Angeles."
         />
       </section>
     </div>

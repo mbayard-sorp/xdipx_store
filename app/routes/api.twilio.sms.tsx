@@ -11,10 +11,7 @@ import { twiml, verifyTwilioRequest, xmlEscape } from '~/lib/twilio.server'
 import { db } from '~/lib/db.server'
 import { smsAgeConsent, smsMessages, smsOptouts } from '../../db/schema'
 import { generateSmsReply, type SmsTurn } from '~/lib/ai-agent/sms.server'
-
-const HISTORY_TURNS = 10
-const HISTORY_WINDOW_HOURS = 24
-const MAX_SMS_PER_HOUR = Number(process.env['SMS_MAX_PER_HOUR'] ?? 15)
+import { getIvrConfig } from '~/lib/ivr-config.server'
 
 const STOP_WORDS = new Set(['stop', 'stopall', 'unsubscribe', 'cancel', 'end', 'quit', 'revoke'])
 // START is a resubscribe keyword; YES is reserved for age-gate consent only and
@@ -114,8 +111,10 @@ async function handleSmsAction(request: Request): Promise<Response> {
     return twiml(replyTwiml(AGE_GATE_REPLY))
   }
 
+  const config = await getIvrConfig()
+
   // Rate limit — swallow further messages silently so we don't feed a loop.
-  if (await isRateLimited(from)) {
+  if (await isRateLimited(from, config.smsMaxPerHour)) {
     console.warn(`[sms] rate-limited from=${from}`)
     await recordInbound(from, body, twilioSid)
     return twiml(EMPTY_TWIML)
@@ -123,7 +122,7 @@ async function handleSmsAction(request: Request): Promise<Response> {
 
   // Load history first, then record the new inbound so it isn't in the loaded
   // window twice. generateSmsReply appends the new turn itself via the push below.
-  const history = await loadHistory(from)
+  const history = await loadHistory(from, config.smsHistoryWindowHours, config.smsHistoryTurns)
   history.push({ role: 'user', text: body })
   await recordInbound(from, body, twilioSid)
 
@@ -166,9 +165,9 @@ async function isOptedOut(phone: string): Promise<boolean> {
   }
 }
 
-async function isRateLimited(phone: string): Promise<boolean> {
+async function isRateLimited(phone: string, maxPerHour: number): Promise<boolean> {
   // 0 (or negative) = disabled — use during testing.
-  if (MAX_SMS_PER_HOUR <= 0) return false
+  if (maxPerHour <= 0) return false
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
   try {
     const rows = await db
@@ -181,20 +180,20 @@ async function isRateLimited(phone: string): Promise<boolean> {
           gte(smsMessages.createdAt, oneHourAgo),
         ),
       )
-    return (rows[0]?.n ?? 0) >= MAX_SMS_PER_HOUR
+    return (rows[0]?.n ?? 0) >= maxPerHour
   } catch {
     return false
   }
 }
 
-async function loadHistory(phone: string): Promise<SmsTurn[]> {
-  const since = new Date(Date.now() - HISTORY_WINDOW_HOURS * 60 * 60 * 1000)
+async function loadHistory(phone: string, windowHours: number, turns: number): Promise<SmsTurn[]> {
+  const since = new Date(Date.now() - windowHours * 60 * 60 * 1000)
   const rows = await db
     .select({ direction: smsMessages.direction, body: smsMessages.body, createdAt: smsMessages.createdAt })
     .from(smsMessages)
     .where(and(eq(smsMessages.phone, phone), gte(smsMessages.createdAt, since)))
     .orderBy(asc(smsMessages.createdAt))
-    .limit(HISTORY_TURNS * 2)
+    .limit(turns * 2)
 
   return rows.map((r) => ({
     role: r.direction === 'inbound' ? 'user' : 'assistant',

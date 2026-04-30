@@ -13,17 +13,7 @@ import { db } from '~/lib/db.server'
 import { normalizeForTTS } from '~/lib/tts-normalize'
 import { callLog, pipelineSettings } from '../../db/schema'
 import { getActiveIvrVoiceId } from '~/lib/ivr-voice.server'
-
-const MAX_CALLS_PER_HOUR = Number(process.env['IVR_MAX_CALLS_PER_HOUR'] ?? 5)
-
-// Comma-separated E.164 numbers (e.g. "+18187267258,+15551234567") that bypass
-// the per-hour rate limit. Use for staff/test phones during dev.
-const RATE_LIMIT_ALLOWLIST = new Set(
-  (process.env['IVR_RATE_LIMIT_ALLOWLIST'] ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
-)
+import { getIvrConfig, type IvrConfig } from '~/lib/ivr-config.server'
 
 // Kept in sync with ivr/src/config.ts CallEndReason. The IVR service writes
 // the first five from the Fly runtime; this Vercel route owns the last three
@@ -40,8 +30,7 @@ type CallEndReason =
 
 // Business hours gate — outside window, skip live agent and go straight to voicemail.
 // Format: "9-21" (9am–9pm local). Empty/invalid disables the gate (always live).
-const BUSINESS_HOURS = process.env['IVR_BUSINESS_HOURS'] ?? ''
-const BUSINESS_TZ = process.env['IVR_BUSINESS_TZ'] ?? 'America/Chicago'
+// Resolved per-request from getIvrConfig() so admin edits take effect without redeploy.
 
 // All human-authored strings here pass through normalizeForTTS so punctuation
 // quirks (smart quotes, em-dashes, stray URLs, markdown) can't leak into what
@@ -54,13 +43,14 @@ const REJECT_TWIML = `<?xml version="1.0" encoding="UTF-8"?>
   <Hangup/>
 </Response>`
 
-function afterHoursTwiml(): string {
+function afterHoursTwiml(maxLengthSec: number): string {
   const appUrl = process.env['APP_URL'] ?? ''
   const cb = appUrl ? `${appUrl}/api/twilio/recording-status` : '/api/twilio/recording-status'
+  const safeMax = Number.isFinite(maxLengthSec) && maxLengthSec > 0 ? Math.min(maxLengthSec, 600) : 120
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="Polly.Joanna">${xmlEscape(normalizeForTTS("Hey — you've reached ex-dip-ex. We're closed right now but leave a message after the beep and we'll get back to you first thing."))}</Say>
-  <Record maxLength="120" playBeep="true" trim="trim-silence" recordingStatusCallback="${xmlEscape(cb)}"/>
+  <Record maxLength="${safeMax}" playBeep="true" trim="trim-silence" recordingStatusCallback="${xmlEscape(cb)}"/>
   <Say voice="Polly.Joanna">${xmlEscape(normalizeForTTS('Thanks — talk soon.'))}</Say>
   <Hangup/>
 </Response>`
@@ -133,8 +123,25 @@ const STT_HINTS = [
  * Returns null when required ConversationRelay config is missing — caller
  * should route to voicemail instead of emitting broken TwiML that Twilio
  * would render as an "application error" to the caller.
+ *
+ * `limits` is optional: when present, its values are appended as URL params
+ * so the Fly WS server can apply admin-configured per-call overrides without
+ * a Fly redeploy. The Fly side falls back to its own env-based defaults if
+ * any param is missing or unparseable.
  */
-function buildTwiml(greeting: string, voiceId: string): string | null {
+function buildTwiml(
+  greeting: string,
+  voiceId: string,
+  limits?: Pick<
+    IvrConfig,
+    | 'initialSilenceMs'
+    | 'interTurnSilenceMs'
+    | 'maxCallDurationMs'
+    | 'maxPrompts'
+    | 'reEngageAttempts'
+    | 'softTokenBudget'
+  >,
+): string | null {
   const base = process.env['IVR_WS_URL'] ?? ''
   const secret = process.env['IVR_WS_SECRET'] ?? ''
   if (!base || !voiceId) {
@@ -147,6 +154,20 @@ function buildTwiml(greeting: string, voiceId: string): string | null {
   let wsUrl = secret ? `${base}${base.includes('?') ? '&' : '?'}token=${encodeURIComponent(secret)}` : base
   const sep = wsUrl.includes('?') ? '&' : '?'
   wsUrl += `${sep}greeting=${encodeURIComponent(greeting)}`
+
+  if (limits) {
+    const params: Record<string, number> = {
+      initialSilenceMs: limits.initialSilenceMs,
+      interTurnSilenceMs: limits.interTurnSilenceMs,
+      maxCallDurationMs: limits.maxCallDurationMs,
+      maxPrompts: limits.maxPrompts,
+      reEngageAttempts: limits.reEngageAttempts,
+      softTokenBudget: limits.softTokenBudget,
+    }
+    for (const [k, v] of Object.entries(params)) {
+      if (Number.isFinite(v) && v > 0) wsUrl += `&${k}=${encodeURIComponent(String(v))}`
+    }
+  }
 
   // ConversationRelay keeps the call media on Twilio; we exchange text over WSS.
   // ElevenLabs handles TTS; Deepgram handles STT on Twilio's side.
@@ -189,6 +210,8 @@ export async function action({ request }: ActionFunctionArgs) {
     const callSid = params['CallSid'] ?? ''
     const toNumber = params['To'] ?? null
 
+    const config = await getIvrConfig()
+
     // Anonymous / blocked callers skip the live agent — voicemail only.
     const isAnonymous = !fromNumber || /anonymous|private|unknown/i.test(fromNumber)
     if (isAnonymous) {
@@ -199,10 +222,10 @@ export async function action({ request }: ActionFunctionArgs) {
         undefined,
         'recordRejectedCall.anonymous',
       )
-      return twiml(afterHoursTwiml())
+      return twiml(afterHoursTwiml(config.voicemailMaxLengthSec))
     }
 
-    if (fromNumber && (await withTimeout(isRateLimited(fromNumber), 2000, false, 'isRateLimited'))) {
+    if (fromNumber && (await withTimeout(isRateLimited(fromNumber, config), 2000, false, 'isRateLimited'))) {
       console.warn(`[ivr] rate-limited caller from=${fromNumber} sid=${callSid}`)
       await withTimeout(
         recordRejectedCall(callSid, fromNumber, toNumber, 'rate_limited'),
@@ -213,44 +236,44 @@ export async function action({ request }: ActionFunctionArgs) {
       return twiml(REJECT_TWIML)
     }
 
-    if (!isBusinessHoursNow()) {
-      console.info(`[ivr] after-hours sid=${callSid} tz=${BUSINESS_TZ} window=${BUSINESS_HOURS}`)
+    if (!isBusinessHoursNow(config.businessHours, config.businessTz)) {
+      console.info(`[ivr] after-hours sid=${callSid} tz=${config.businessTz} window=${config.businessHours}`)
       await withTimeout(
         recordRejectedCall(callSid, fromNumber, toNumber, 'after_hours'),
         2000,
         undefined,
         'recordRejectedCall.after_hours',
       )
-      return twiml(afterHoursTwiml())
+      return twiml(afterHoursTwiml(config.voicemailMaxLengthSec))
     }
 
     const greeting = await getGreeting()
     const voiceId = await getActiveIvrVoiceId()
-    const xml = buildTwiml(greeting, voiceId)
+    const xml = buildTwiml(greeting, voiceId, config)
     // Missing env → no valid ConversationRelay TwiML; send caller to voicemail
     // rather than letting Twilio play a generic "application error" message.
-    if (!xml) return twiml(afterHoursTwiml())
+    if (!xml) return twiml(afterHoursTwiml(config.voicemailMaxLengthSec))
     return twiml(xml)
   } catch (err) {
     // Never throw out of this action — Twilio would serve its generic error
     // message or (worse) Vercel returns FUNCTION_INVOCATION_FAILED. Always
     // return a valid TwiML voicemail response so the caller gets heard.
     console.error('[ivr] voice action crashed — falling back to voicemail', err)
-    return twiml(afterHoursTwiml())
+    return twiml(afterHoursTwiml(120))
   }
 }
 
-async function isRateLimited(fromNumber: string): Promise<boolean> {
+async function isRateLimited(fromNumber: string, config: IvrConfig): Promise<boolean> {
   // 0 (or negative) = disabled — use during testing so every call goes through.
-  if (MAX_CALLS_PER_HOUR <= 0) return false
-  if (RATE_LIMIT_ALLOWLIST.has(fromNumber)) return false
+  if (config.maxCallsPerHour <= 0) return false
+  if (config.rateLimitAllowlist.has(fromNumber)) return false
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
   try {
     const rows = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(callLog)
       .where(and(eq(callLog.fromNumber, fromNumber), gte(callLog.createdAt, oneHourAgo)))
-    return (rows[0]?.n ?? 0) >= MAX_CALLS_PER_HOUR
+    return (rows[0]?.n ?? 0) >= config.maxCallsPerHour
   } catch (err) {
     console.error('[ivr] rate-limit query failed — allowing call', err)
     return false
@@ -275,12 +298,12 @@ async function recordRejectedCall(
 }
 
 /**
- * Returns true when current local time (in BUSINESS_TZ) falls inside the
- * configured hours window. Unconfigured = always open.
+ * Returns true when current local time (in `tz`) falls inside the configured
+ * hours window. Unconfigured = always open.
  */
-function isBusinessHoursNow(): boolean {
-  if (!BUSINESS_HOURS) return true
-  const m = /^(\d{1,2})\s*-\s*(\d{1,2})$/.exec(BUSINESS_HOURS)
+function isBusinessHoursNow(window: string, tz: string): boolean {
+  if (!window) return true
+  const m = /^(\d{1,2})\s*-\s*(\d{1,2})$/.exec(window)
   if (!m) return true
   const openHour = Number(m[1])
   const closeHour = Number(m[2])
@@ -288,12 +311,12 @@ function isBusinessHoursNow(): boolean {
   // Reject out-of-range hours loudly — otherwise a typo ("25-30") silently
   // bypasses the gate and every caller hits the live agent.
   if (openHour < 0 || openHour > 23 || closeHour < 0 || closeHour > 23) {
-    console.warn(`[ivr] IVR_BUSINESS_HOURS out of range: ${BUSINESS_HOURS} — gate disabled`)
+    console.warn(`[ivr] business hours out of range: ${window} — gate disabled`)
     return true
   }
   let hour: number
   try {
-    const s = new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: BUSINESS_TZ }).format(new Date())
+    const s = new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: tz }).format(new Date())
     hour = Number(s.replace(/[^\d]/g, ''))
   } catch {
     return true
@@ -311,5 +334,5 @@ export async function loader({ request: _request }: LoaderFunctionArgs) {
   }
   const voiceId = await getActiveIvrVoiceId()
   const xml = buildTwiml('Hi, thanks for calling xdipx. How can I help you today?', voiceId)
-  return twiml(xml ?? afterHoursTwiml())
+  return twiml(xml ?? afterHoursTwiml(120))
 }
