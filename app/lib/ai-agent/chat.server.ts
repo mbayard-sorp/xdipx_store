@@ -39,6 +39,13 @@ export async function generateChatReply(
   const collected = new Map<string, IvrProductCard>()
   let quickReply: QuickReplyPayload | undefined
   let cartUpdated = false
+  let totalInputTokens = 0
+  let totalOutputTokens = 0
+  const tally = (u: { input_tokens?: number; output_tokens?: number } | undefined) => {
+    if (!u) return
+    totalInputTokens += u.input_tokens ?? 0
+    totalOutputTokens += u.output_tokens ?? 0
+  }
   // Wrap any caller-provided callbacks so we still propagate their side-effects
   // (cookie setting, etc.) AND record that the cart changed for the reply payload.
   const baseOnCartCreated = ctx.onCartCreated
@@ -63,6 +70,7 @@ export async function generateChatReply(
       tools: QA_TOOL_DEFINITIONS,
       messages,
     })
+    tally(res.usage)
 
     if (res.stop_reason === 'tool_use') {
       messages.push({ role: 'assistant', content: res.content })
@@ -110,6 +118,7 @@ export async function generateChatReply(
           system: systemPrompt + '\n\nRespond in plain text only — no further tool calls. Never reference pills, buttons, instructions, or what you are about to say.',
           messages,
         })
+        tally(follow.usage)
         const followText = follow.content.find((b): b is Anthropic.TextBlock => b.type === 'text')
         replyText = stripMetaPreamble((followText?.text ?? '').trim())
       } catch (err) {
@@ -129,6 +138,7 @@ export async function generateChatReply(
       history: [...bounded, { role: 'assistant', text: replyText || fallback }],
       ...(quickReply ? { quickReply } : {}),
       ...(cartUpdated ? { cartUpdated: true } : {}),
+      usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
     }
   }
 
@@ -139,6 +149,7 @@ export async function generateChatReply(
     system: systemPrompt + '\n\nRespond in plain text only — no further tool calls.',
     messages,
   })
+  tally(final.usage)
   const block = final.content.find((b): b is Anthropic.TextBlock => b.type === 'text')
   const replyText = fixCartUrls((block?.text ?? '').trim())
   const products = await hydrateCards([...collected.values()].slice(0, MAX_CARDS_PER_REPLY))
@@ -148,6 +159,7 @@ export async function generateChatReply(
     history: [...bounded, { role: 'assistant', text: replyText }],
     ...(quickReply ? { quickReply } : {}),
     ...(cartUpdated ? { cartUpdated: true } : {}),
+    usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
   }
 }
 

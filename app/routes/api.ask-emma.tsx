@@ -1,18 +1,70 @@
 import type { ActionFunctionArgs } from 'react-router'
+import { checkBotId } from 'botid/server'
 import { generateChatReply, type ChatTurn } from '~/lib/ai-agent/chat.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import { getOrCreateEmmaSession, logEmmaTurns } from '~/lib/emma-log.server'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
+import {
+  isWithinDailyCeiling,
+  recordDailyUsage,
+  recordSessionUsage,
+  reserveSessionBudget,
+} from '~/lib/emma-budget.server'
+
+const ALLOWED_ORIGINS = new Set([
+  'https://xdipx.com',
+  'https://www.xdipx.com',
+])
+
+function isAllowedOrigin(origin: string | null): boolean {
+  if (process.env['NODE_ENV'] !== 'production') return true
+  if (!origin) return false
+  if (ALLOWED_ORIGINS.has(origin)) return true
+  // Allow Vercel preview deployments (xdipx-store-*.vercel.app)
+  try {
+    const host = new URL(origin).hostname
+    return host.endsWith('.vercel.app') && host.includes('xdipx')
+  } catch {
+    return false
+  }
+}
+
+const NAP_REPLY = "Emma's taking a quick nap. Try again in a bit ♥"
+const SESSION_DONE_REPLY =
+  "We've covered a lot today. Refresh to start a fresh chat with me ♥"
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method !== 'POST') {
     return Response.json({ error: 'method_not_allowed' }, { status: 405 })
   }
 
-  // Dev: generous cap so local testing doesn't hit the wall. Prod: 60 / 5 min / ip.
+  // 1. Origin check — kills lazy scrapers that don't bother forging headers.
+  if (!isAllowedOrigin(request.headers.get('origin'))) {
+    return Response.json({ error: 'forbidden_origin' }, { status: 403 })
+  }
+
+  // 2. Vercel BotID — invisible bot block at the request layer.
+  if (process.env['NODE_ENV'] === 'production') {
+    try {
+      const verdict = await checkBotId()
+      if (verdict.isBot && !verdict.isVerifiedBot) {
+        return Response.json({ error: 'bot_blocked' }, { status: 403 })
+      }
+    } catch (err) {
+      // Fail open on BotID infra errors — IP rate limit + budget are still in front.
+      console.error('[api.ask-emma] botid check failed', err)
+    }
+  }
+
+  // 3. IP-based rate limit (existing).
   const limit = process.env['NODE_ENV'] === 'production' ? 60 : 500
   const rl = await checkRateLimit(request, 'ask-emma', limit, 300)
   if (!rl.ok) return rateLimited()
+
+  // 4. Global daily token ceiling — friendly nap response, no 5xx.
+  if (!(await isWithinDailyCeiling())) {
+    return Response.json({ reply: NAP_REPLY, products: [], history: [] })
+  }
 
   let payload: unknown
   try {
@@ -42,6 +94,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.error('[api.ask-emma] session init failed', err)
   }
 
+  // 5. Per-session budget reservation. Without a session handle (Neon down) we
+  // skip the per-session check and rely on IP rate limit + global ceiling.
+  if (sessionHandle) {
+    const reservation = await reserveSessionBudget(sessionHandle.sessionId)
+    if (!reservation.ok) {
+      const headers = new Headers()
+      if (sessionHandle.setCookieHeader) headers.append('Set-Cookie', sessionHandle.setCookieHeader)
+      return Response.json(
+        { reply: SESSION_DONE_REPLY, products: [], history: nextHistory },
+        { headers },
+      )
+    }
+  }
+
   const existingCartId = getCartIdFromCookie(request)
   let newCartId: string | null = null
 
@@ -55,6 +121,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ...(pageContext ? { pageContext } : {}),
     })
     const latencyMs = Date.now() - startedAt
+
+    // 6. Record actual token usage against session + global counters. Strip
+    // `usage` from the client payload — it's a server-side accounting field.
+    if (result.usage) {
+      const { inputTokens, outputTokens } = result.usage
+      await Promise.all([
+        sessionHandle ? recordSessionUsage(sessionHandle.sessionId, inputTokens, outputTokens) : Promise.resolve(),
+        recordDailyUsage(inputTokens, outputTokens),
+      ])
+    }
 
     if (sessionHandle) {
       try {
@@ -78,7 +154,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const headers = new Headers()
     if (sessionHandle?.setCookieHeader) headers.append('Set-Cookie', sessionHandle.setCookieHeader)
     if (newCartId) headers.append('Set-Cookie', setCartCookie(newCartId))
-    return Response.json(result, { headers })
+
+    const { usage: _usage, ...clientPayload } = result
+    return Response.json(clientPayload, { headers })
   } catch (err) {
     console.error('[api.ask-emma] generate failed', err)
     return Response.json(

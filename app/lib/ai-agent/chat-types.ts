@@ -47,4 +47,6 @@ export interface ChatReply {
   quickReply?: QuickReplyPayload
   /** Signals that Emma added something to the site cart. Client should revalidate the cart loader and open the drawer. */
   cartUpdated?: boolean
+  /** Total Anthropic token usage across all hops in this reply. Server-only; not sent to the client. */
+  usage?: { inputTokens: number; outputTokens: number }
 }
