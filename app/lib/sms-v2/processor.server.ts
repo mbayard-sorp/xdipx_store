@@ -88,23 +88,11 @@ export async function processSmsMessageV2(
     // Non-fatal — we already have a conversation object from the first call
   }
 
-  // --- Step 3: AGE_CONFIRM consent upgrade + Klaviyo subscribe ---
-  if (intentResult.intent === 'AGE_CONFIRM') {
-    // Upgrade consent record (written by v1 processor below) to 'sms_yes_v2'
-    void upgradeConsentMethod(phone)
-
-    // Fire-and-forget Klaviyo subscribe — non-fatal
-    void subscribeToSms(phone, {
-      source: 'sms_consent_yes',
-      consentTimestamp: new Date(),
-    }).catch((err) => {
-      console.warn('[processor-v2] subscribeToSms failed (non-fatal)', err)
-    })
-  }
-
-  // --- Step 4: Call v1 processor via withTurnLogging, passing observability ---
+  // --- Step 3: Call v1 processor via withTurnLogging, passing observability ---
+  // Must run BEFORE the consent upgrade so the consent row exists by the time
+  // upgradeConsentMethod() runs.
   const stageLabel = conversation.stage as string
-  return withTurnLogging(
+  const result = await withTurnLogging(
     input,
     processSmsMessage,
     'v2',
@@ -115,4 +103,20 @@ export async function processSmsMessageV2(
       stageOut: stageLabel,  // Phase 1: no stage transitions yet; stageOut = stageIn
     },
   )
+
+  // --- Step 4: AGE_CONFIRM post-processing — consent upgrade + Klaviyo subscribe ---
+  // Runs after v1's consent insert so the UPDATE has a row to hit. Both writes
+  // are non-fatal: failure is logged and the reply has already been sent.
+  if (intentResult.intent === 'AGE_CONFIRM') {
+    void upgradeConsentMethod(phone)
+
+    void subscribeToSms(phone, {
+      source: 'sms_consent_yes',
+      consentTimestamp: new Date(),
+    }).catch((err) => {
+      console.warn('[processor-v2] subscribeToSms failed (non-fatal)', err)
+    })
+  }
+
+  return result
 }
