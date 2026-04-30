@@ -109,7 +109,7 @@ export async function processSmsMessage(input: ProcessSmsInput): Promise<Process
     if (AGE_CONFIRM_RE.test(body)) {
       await db
         .insert(smsAgeConsent)
-        .values({ phone: from, method: simulated ? 'sim_yes' : 'sms_yes_v2' })
+        .values({ phone: from, method: simulated ? 'sms_yes_v2_sim' : 'sms_yes_v2' })
         .onConflictDoNothing({ target: smsAgeConsent.phone })
       await recordOutbound(from, AGE_WELCOME_REPLY, null, simulated)
       return single(AGE_WELCOME_REPLY, 'age_gate_confirmed')

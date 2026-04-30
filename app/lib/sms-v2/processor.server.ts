@@ -12,8 +12,9 @@
  *   2. classifyIntent() — labels every inbound turn with an Intent.
  *   3. withTurnLogging() receives intent + stage fields via the new
  *      TurnObservabilityUpdate param so sms_turns rows are populated.
- *   4. On AGE_CONFIRM intent: write 'sms_yes_v2' consent method + fire
- *      subscribeToSms() (fire-and-forget, non-fatal).
+ *   4. On AGE_CONFIRM intent (real path only): fire subscribeToSms() to
+ *      Klaviyo SMS list (fire-and-forget, non-fatal). v1 writes the consent
+ *      method tag directly: 'sms_yes_v2' for real, 'sms_yes_v2_sim' for sim.
  *
  * The contract still matches processSmsMessage byte-for-byte on outputs
  * (ProcessSmsResult). v2's dark-launch path is byte-identical to v1.
@@ -23,32 +24,10 @@ import { getOrCreateConversation } from './conversation.server'
 import { classifyIntent } from './intent-classifier.server'
 import { withTurnLogging } from './turn-logger.server'
 import { subscribeToSms } from './klaviyo.server'
-import { db } from '~/lib/db.server'
-import { smsAgeConsent } from '../../../db/schema'
-import { eq } from 'drizzle-orm'
 import type { Stage } from './types.server'
 
 // Re-export types so callers can switch by import only — no re-definition needed.
 export type { ProcessSmsInput, ProcessSmsResult, SmsSegment } from '~/lib/sms-processor.server'
-
-// ---------------------------------------------------------------------------
-// Consent v2 helper
-// ---------------------------------------------------------------------------
-
-/**
- * Upgrade consent record to 'sms_yes_v2' if it exists with an older method.
- * Non-fatal — any error is logged and swallowed.
- */
-async function upgradeConsentMethod(phone: string): Promise<void> {
-  try {
-    await db
-      .update(smsAgeConsent)
-      .set({ method: 'sms_yes_v2' })
-      .where(eq(smsAgeConsent.phone, phone))
-  } catch (err) {
-    console.warn('[processor-v2] upgradeConsentMethod failed', err)
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Main
@@ -89,8 +68,10 @@ export async function processSmsMessageV2(
   }
 
   // --- Step 3: Call v1 processor via withTurnLogging, passing observability ---
-  // Must run BEFORE the consent upgrade so the consent row exists by the time
-  // upgradeConsentMethod() runs.
+  // v1 directly writes the correct consent method tag based on input.simulated:
+  //   - real Twilio path → 'sms_yes_v2'
+  //   - simulator path   → 'sms_yes_v2_sim'
+  // No post-insert upgrade needed.
   const stageLabel = conversation.stage as string
   const result = await withTurnLogging(
     input,
@@ -104,12 +85,10 @@ export async function processSmsMessageV2(
     },
   )
 
-  // --- Step 4: AGE_CONFIRM post-processing — consent upgrade + Klaviyo subscribe ---
-  // Runs after v1's consent insert so the UPDATE has a row to hit. Both writes
-  // are non-fatal: failure is logged and the reply has already been sent.
-  if (intentResult.intent === 'AGE_CONFIRM') {
-    void upgradeConsentMethod(phone)
-
+  // --- Step 4: AGE_CONFIRM post-processing — Klaviyo subscribe ---
+  // Fire-and-forget; non-fatal. Klaviyo is for real consents only — simulator
+  // turns shouldn't pollute the marketing list.
+  if (intentResult.intent === 'AGE_CONFIRM' && !(input.simulated ?? false)) {
     void subscribeToSms(phone, {
       source: 'sms_consent_yes',
       consentTimestamp: new Date(),

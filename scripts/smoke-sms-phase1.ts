@@ -186,14 +186,16 @@ async function testV2TurnsObservability(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Test 4: Consent v2 — AGE_CONFIRM writes sms_yes_v2
+// Test 4: Consent v2 — AGE_CONFIRM writes split-by-simulator method
+//   real path → 'sms_yes_v2'
+//   sim path  → 'sms_yes_v2_sim'
 // ---------------------------------------------------------------------------
 
 async function testConsentV2(): Promise<void> {
-  console.log('\n── Test 4: Consent v2 — sms_yes_v2 method ──')
+  console.log('\n── Test 4: Consent v2 — sms_yes_v2_sim (simulator) method ──')
   await cleanupPhone(TEST_PHONE_D)
 
-  // No existing consent — first message is "YES"
+  // No existing consent — first message is "YES" via simulator path.
   await processSmsMessageV2({
     from: TEST_PHONE_D,
     body: 'yes',
@@ -210,7 +212,10 @@ async function testConsentV2(): Promise<void> {
     .limit(1)
 
   assert(consent.length > 0, 'smsAgeConsent row exists')
-  assert(consent[0]!.method === 'sms_yes_v2', `consent method = 'sms_yes_v2' (got '${consent[0]!.method}')`)
+  assert(
+    consent[0]!.method === 'sms_yes_v2_sim',
+    `consent method = 'sms_yes_v2_sim' for simulator path (got '${consent[0]!.method}')`,
+  )
 }
 
 // ---------------------------------------------------------------------------
