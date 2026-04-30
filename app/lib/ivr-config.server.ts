@@ -9,7 +9,7 @@
  * One DB query per call, wrapped in withTimeout so a slow Neon never blocks
  * a Twilio webhook past its 15s ceiling.
  */
-import { sql } from 'drizzle-orm'
+import { inArray } from 'drizzle-orm'
 import { db } from './db.server'
 import { pipelineSettings } from '../../db/schema'
 import { withTimeout } from './twilio.server'
@@ -164,7 +164,7 @@ export async function getIvrConfigDiagnostic(): Promise<IvrConfigDiagnosticRow[]
       db
         .select({ key: pipelineSettings.key, value: pipelineSettings.value })
         .from(pipelineSettings)
-        .where(sql`${pipelineSettings.key} = ANY(${IVR_CONFIG_KEYS as unknown as string[]})`),
+        .where(inArray(pipelineSettings.key, IVR_CONFIG_KEYS as unknown as string[])),
       2000,
       [] as { key: string; value: string | null }[],
       'getIvrConfigDiagnostic',
@@ -197,7 +197,7 @@ export async function getIvrConfig(): Promise<IvrConfig> {
       db
         .select({ key: pipelineSettings.key, value: pipelineSettings.value })
         .from(pipelineSettings)
-        .where(sql`${pipelineSettings.key} = ANY(${IVR_CONFIG_KEYS as unknown as string[]})`),
+        .where(inArray(pipelineSettings.key, IVR_CONFIG_KEYS as unknown as string[])),
       2000,
       [] as { key: string; value: string | null }[],
       'getIvrConfig',
