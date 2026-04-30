@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useFetcher, useLoaderData, useNavigate } from 'react-router'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useLoaderData, useNavigate } from 'react-router'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { searchAll } from '~/lib/search.server'
-import type { ContentResult, SearchProductResult } from '~/lib/search.server'
+import type { ContentResult } from '~/lib/search.server'
 import { getLiveDealHandle } from '~/lib/shopify.server'
 import { getPage, getEmmaPresets } from '~/lib/sanity.server'
 import { readRecentHandles } from '~/lib/recent-views.server'
@@ -10,14 +10,15 @@ import { AskEmmaRail } from '~/components/store/AskEmmaRail'
 import { EmmaDiscoveryRail } from '~/components/store/EmmaDiscoveryRail'
 import { LetMeLookAgainCTA } from '~/components/store/LetMeLookAgainCTA'
 import { EmmaEncouragementStrip } from '~/components/store/EmmaEncouragementStrip'
+import { InfiniteProductGrid } from '~/components/store/SearchProductGrid'
+import { FilterSection, DrawerPill, FilterIcon, SortIcon } from '~/components/store/SearchFilterControls'
 import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import type { TaxonomyGroup } from './admin.search-filters'
-import ProductTileMedia from '~/components/store/ProductTileMedia'
-import LiveDealBadge from '~/components/store/LiveDealBadge'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import type { ContentBlock } from '~/types/cms'
+import { normalizeTag } from '~/lib/tag-normalize'
 
 import { trackSearch, trackViewSearchResults } from '~/lib/analytics.client'
 
@@ -72,7 +73,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const budgetMaxS = url.searchParams.get('budgetMax')
   const budgetMax  = budgetMaxS ? parseFloat(budgetMaxS) : null
 
-  const [searchResult, taxonomyRow, liveDealHandle, bannerPage, presets] = await Promise.all([
+  // Load taxonomy first so we can pass compound tags through to searchAll for
+  // accurate server-side counting. Cheap query — DB lookup, not an API call.
+  const taxonomyRow = await db.select().from(pipelineSettings).where(eq(pipelineSettings.key, 'searchFilterTaxonomy'))
+  let taxonomy: TaxonomyGroup[] = []
+  if (taxonomyRow.length > 0) {
+    try { taxonomy = JSON.parse(taxonomyRow[0]!.value) } catch { /* ignore */ }
+  }
+  const compoundTags = taxonomy
+    .flatMap(g => g.tags.map(t => t.tag))
+    .filter(t => t.includes(','))
+
+  const [searchResult, liveDealHandle, bannerPage, presets] = await Promise.all([
     searchAll({
       query: q,
       tags,
@@ -85,10 +97,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       audiences,
       matters,
       budgetMax,
+      compoundTags,
       sort,
       page,
     }),
-    db.select().from(pipelineSettings).where(eq(pipelineSettings.key, 'searchFilterTaxonomy')),
     getLiveDealHandle(),
     getPage('search-banner'),
     getEmmaPresets(),
@@ -97,11 +109,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const recentViews = readRecentHandles(request)
 
   const bannerBlocks: ContentBlock[] = bannerPage?.sections?.filter(s => s.active !== false) ?? []
-
-  let taxonomy: TaxonomyGroup[] = []
-  if (taxonomyRow.length > 0) {
-    try { taxonomy = JSON.parse(taxonomyRow[0]!.value) } catch { /* ignore */ }
-  }
 
   return {
     q,
@@ -124,7 +131,39 @@ export default function SearchPage() {
   } = useLoaderData<typeof loader>()
   const navigate = useNavigate()
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false)
+  const [sortSheetOpen, setSortSheetOpen] = useState(false)
   const [starred, setStarred] = useState<Record<string, string>>({})
+
+  const activeFilterCount =
+    activeFilters.vendors.length +
+    activeFilters.tags.length +
+    activeFilters.features.length +
+    activeFilters.experience.length +
+    (activeFilters.priceMin || activeFilters.priceMax ? 1 : 0) +
+    activeFilters.moods.length +
+    activeFilters.audiences.length +
+    activeFilters.matters.length +
+    (activeFilters.budgetMax != null ? 1 : 0)
+
+  const currentSortLabel = SORT_OPTIONS.find(o => o.value === sort)?.label ?? 'Relevance'
+
+  function clearAllFilters() {
+    navigate(buildUrl({
+      vendor: null, tag: null, feature: null, experience: null,
+      price_min: null, price_max: null,
+      mood: null, audience: null, matters: null, budgetMax: null,
+    }))
+  }
+
+  function removeCsvFilter(key: 'mood' | 'audience' | 'matters', value: string) {
+    const currentMap: Record<string, string[]> = {
+      mood:     activeFilters.moods,
+      audience: activeFilters.audiences,
+      matters:  activeFilters.matters,
+    }
+    const next = currentMap[key]!.filter(v => v !== value)
+    navigate(buildUrl({ [key]: next.length ? next.join(',') : null }))
+  }
 
   const { products: initialProducts, pages, blogPosts, totalProducts, hasNextPage: initialHasNextPage, facets } = searchResult
 
@@ -235,23 +274,26 @@ export default function SearchPage() {
     return m
   }, [taxonomy])
 
-  // Tag counts: prefer server facets; fall back to compound-tag derivation
+  // Tag counts: server provides single-tag counts (keyed by normalized slug,
+  // e.g. "plugs-and-probes") and compound counts (keyed by the original CSV
+  // the user passed in, e.g. "cat:plugs-and-probes,cat:foo"). Lookups go
+  // through `lookupTagCount` which normalizes single-tag keys before reading
+  // the map, so admin entries like "cat:plugs-and-probes" resolve to the
+  // count stored under "plugs-and-probes". Compound entries hit the map
+  // directly because the server keys them by their original CSV input.
   const tagCountMap = useMemo(() => {
     const m = new Map<string, number>()
-    const facetTagCounts = facets?.tagCounts ?? {}
-    for (const [tag, count] of Object.entries(facetTagCounts)) m.set(tag, count)
-    for (const group of taxonomy) {
-      for (const t of group.tags) {
-        if (m.has(t.tag)) continue
-        const parts = t.tag.split(',').map((s: string) => s.trim()).filter(Boolean)
-        if (parts.length <= 1) continue
-        let count = 0
-        for (const part of parts) count += m.get(part) ?? 0
-        if (count > 0) m.set(t.tag, count)
-      }
-    }
+    const facetTagCounts      = facets?.tagCounts         ?? {}
+    const compoundTagCounts   = facets?.compoundTagCounts ?? {}
+    for (const [tag, count] of Object.entries(facetTagCounts))    m.set(tag, count)
+    for (const [tag, count] of Object.entries(compoundTagCounts)) m.set(tag, count)
     return m
-  }, [facets, taxonomy])
+  }, [facets])
+
+  function lookupTagCount(tag: string): number | undefined {
+    if (tag.includes(',')) return tagCountMap.get(tag)
+    return tagCountMap.get(normalizeTag(tag))
+  }
 
   // Active-filter chips above the grid still surface vendor/feature/
   // experience/price selections that arrive via direct URL params, even
@@ -282,7 +324,7 @@ export default function SearchPage() {
           <ul className="space-y-2">
             {group.tags.map(t => {
               const checked = activeFilters.tags.includes(t.tag)
-              const count = tagCountMap.get(t.tag)
+              const count = lookupTagCount(t.tag)
               return (
                 <li key={t.tag}>
                   <label className="flex items-center gap-2 cursor-pointer group">
@@ -314,7 +356,7 @@ export default function SearchPage() {
   )
 
   return (
-    <div className="min-h-screen bg-cream">
+    <div className="min-h-screen bg-cream pb-[calc(64px+env(safe-area-inset-bottom))] md:pb-0">
       <div className="max-w-6xl mx-auto px-4 py-8">
 
         {/* Header */}
@@ -437,22 +479,43 @@ export default function SearchPage() {
           {/* ── Main content ──────────────────────────────────────────── */}
           <div className="flex-1 min-w-0">
 
-            {/* Sort bar + Emma encouragement strip */}
-            <div className="flex items-center mb-5 gap-3">
-              <button
-                onClick={() => setFilterDrawerOpen(true)}
-                className="lg:hidden flex items-center gap-2 px-4 py-2 border border-cream-2 rounded-xl text-sm font-medium text-ink hover:border-sage/40 transition-colors shrink-0"
-              >
-                <FilterIcon className="w-4 h-4" />
-                Filter & Sort
-                {hasActiveFilters && (
-                  <span className="w-2 h-2 rounded-full bg-sage" />
-                )}
-              </button>
+            {/* Mobile sticky filter/sort bar */}
+            <div className="lg:hidden sticky top-0 z-30 -mx-4 px-4 py-2 mb-3 bg-cream/95 backdrop-blur supports-[backdrop-filter]:bg-cream/80 border-b border-cream-2">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setFilterDrawerOpen(true)}
+                  aria-label={`Open filters${activeFilterCount ? `, ${activeFilterCount} active` : ''}`}
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-cream-2 rounded-xl text-sm font-semibold text-ink active:scale-[0.98] transition-transform"
+                >
+                  <FilterIcon className="w-4 h-4" />
+                  <span>Filter</span>
+                  {activeFilterCount > 0 && (
+                    <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-coral text-white text-[11px] font-bold">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setSortSheetOpen(true)}
+                  aria-label={`Sort, current: ${currentSortLabel}`}
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-cream-2 rounded-xl text-sm font-semibold text-ink active:scale-[0.98] transition-transform"
+                >
+                  <SortIcon className="w-4 h-4" />
+                  <span className="truncate">{currentSortLabel}</span>
+                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 shrink-0 text-ink/40" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+              </div>
+              <div className="mt-2">
+                <EmmaEncouragementStrip surface="search" query={q} />
+              </div>
+            </div>
 
+            {/* Desktop sort bar */}
+            <div className="hidden lg:flex items-center mb-5 gap-3">
               <EmmaEncouragementStrip surface="search" query={q} />
-
-              <div className="hidden lg:flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 <label htmlFor="sort-select" className="text-sm text-ink/50">Sort:</label>
                 <select
                   id="sort-select"
@@ -496,55 +559,166 @@ export default function SearchPage() {
         </div>
       </div>
 
-      {/* Mobile filter drawer */}
-      {filterDrawerOpen && (
+      {/* Mobile sort sheet */}
+      {sortSheetOpen && (
         <>
           <div
-            className="fixed inset-0 z-50 bg-ink/40 backdrop-blur-sm lg:hidden"
-            onClick={() => setFilterDrawerOpen(false)}
+            className="fixed inset-0 z-[60] bg-ink/40 backdrop-blur-sm lg:hidden"
+            onClick={() => setSortSheetOpen(false)}
             aria-hidden="true"
           />
-          <div className="fixed bottom-0 left-0 right-0 z-50 bg-cream rounded-t-2xl shadow-2xl lg:hidden max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-cream-2">
+          <div
+            role="dialog"
+            aria-label="Sort products"
+            className="fixed bottom-0 left-0 right-0 z-[60] bg-cream rounded-t-2xl shadow-2xl lg:hidden flex flex-col pb-[env(safe-area-inset-bottom)]"
+          >
+            <div className="flex items-center justify-center pt-2.5 pb-1">
+              <span className="w-10 h-1 rounded-full bg-ink/15" aria-hidden="true" />
+            </div>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-cream-2">
               <h2
-                className="font-bold text-ink"
+                className="font-bold text-ink text-base"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
-                Filter & Sort
+                Sort by
               </h2>
               <button
-                onClick={() => setFilterDrawerOpen(false)}
+                onClick={() => setSortSheetOpen(false)}
                 className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-cream-2 transition-colors"
-                aria-label="Close filters"
+                aria-label="Close sort"
               >
                 <svg viewBox="0 0 14 14" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
                   <path d="M1 1l12 12M13 1L1 13" />
                 </svg>
               </button>
             </div>
+            <ul className="py-2">
+              {SORT_OPTIONS.map(o => {
+                const active = sort === o.value
+                return (
+                  <li key={o.value}>
+                    <button
+                      onClick={() => { setSort(o.value); setSortSheetOpen(false) }}
+                      className={`w-full flex items-center justify-between px-5 py-3.5 text-left text-sm transition-colors ${active ? 'text-coral font-semibold bg-coral/5' : 'text-ink hover:bg-cream-2'}`}
+                    >
+                      <span>{o.label}</span>
+                      {active && (
+                        <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        </>
+      )}
 
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
-              <FilterSection title="Sort by">
-                <ul className="space-y-1.5">
-                  {SORT_OPTIONS.map(o => (
-                    <li key={o.value}>
-                      <button
-                        onClick={() => { setSort(o.value); setFilterDrawerOpen(false) }}
-                        className={`text-sm transition-colors ${sort === o.value ? 'text-sage font-semibold' : 'text-ink/70 hover:text-sage'}`}
-                      >
-                        {o.label}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </FilterSection>
+      {/* Mobile filter drawer */}
+      {filterDrawerOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-[60] bg-ink/40 backdrop-blur-sm lg:hidden"
+            onClick={() => setFilterDrawerOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            role="dialog"
+            aria-label="Filter products"
+            className="fixed bottom-0 left-0 right-0 z-[60] bg-cream rounded-t-2xl shadow-2xl lg:hidden max-h-[88vh] flex flex-col pb-[env(safe-area-inset-bottom)]"
+          >
+            <div className="flex items-center justify-center pt-2.5 pb-1">
+              <span className="w-10 h-1 rounded-full bg-ink/15" aria-hidden="true" />
+            </div>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-cream-2">
+              <div className="flex items-center gap-2">
+                <h2
+                  className="font-bold text-ink text-base"
+                  style={{ fontFamily: 'var(--font-display)' }}
+                >
+                  Filter
+                </h2>
+                {activeFilterCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-coral text-white text-[11px] font-bold">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                {activeFilterCount > 0 && (
+                  <button
+                    onClick={clearAllFilters}
+                    className="text-xs font-semibold text-sage hover:text-coral transition-colors px-3 py-2"
+                  >
+                    Clear all
+                  </button>
+                )}
+                <button
+                  onClick={() => setFilterDrawerOpen(false)}
+                  className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-cream-2 transition-colors"
+                  aria-label="Close filters"
+                >
+                  <svg viewBox="0 0 14 14" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                    <path d="M1 1l12 12M13 1L1 13" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-6">
+              {activeFilterCount > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold text-ink uppercase tracking-wider mb-3">
+                    Selected
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {activeFilters.tags.map(t => (
+                      <DrawerPill key={`t-${t}`} label={tagLabelMap.get(t) ?? t} onRemove={() => toggleArrayFilter('tag', t)} />
+                    ))}
+                    {activeFilters.moods.map(m => (
+                      <DrawerPill key={`m-${m}`} label={m} onRemove={() => removeCsvFilter('mood', m)} />
+                    ))}
+                    {activeFilters.audiences.map(a => (
+                      <DrawerPill key={`a-${a}`} label={a} onRemove={() => removeCsvFilter('audience', a)} />
+                    ))}
+                    {activeFilters.matters.map(m => (
+                      <DrawerPill key={`mt-${m}`} label={m} onRemove={() => removeCsvFilter('matters', m)} />
+                    ))}
+                    {activeFilters.vendors.map(v => (
+                      <DrawerPill key={`v-${v}`} label={v} onRemove={() => toggleArrayFilter('vendor', v)} />
+                    ))}
+                    {activeFilters.features.map(f => (
+                      <DrawerPill key={`f-${f}`} label={f} onRemove={() => toggleArrayFilter('feature', f)} />
+                    ))}
+                    {activeFilters.experience.map(e => (
+                      <DrawerPill key={`e-${e}`} label={e} onRemove={() => toggleArrayFilter('experience', e)} />
+                    ))}
+                    {(activeFilters.priceMin || activeFilters.priceMax) && (
+                      <DrawerPill
+                        label={activeFilters.priceMin && activeFilters.priceMax
+                          ? `$${activeFilters.priceMin}–$${activeFilters.priceMax}`
+                          : activeFilters.priceMax ? `Under $${activeFilters.priceMax}` : `$${activeFilters.priceMin}+`}
+                        onRemove={() => setPriceRange(null, null)}
+                      />
+                    )}
+                    {activeFilters.budgetMax != null && (
+                      <DrawerPill
+                        label={`Under $${activeFilters.budgetMax}`}
+                        onRemove={() => navigate(buildUrl({ budgetMax: null }))}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
               {filterSidebar}
             </div>
 
-            <div className="px-5 py-4 border-t border-cream-2">
+            <div className="px-5 py-3 border-t border-cream-2 bg-cream">
               <button
                 onClick={() => setFilterDrawerOpen(false)}
-                className="w-full py-3 bg-coral text-white font-bold rounded-full text-sm hover:opacity-90 transition-opacity"
+                className="w-full py-3.5 bg-coral text-white font-bold rounded-full text-sm hover:opacity-90 active:scale-[0.99] transition-all"
               >
                 Show {totalProducts} result{totalProducts !== 1 ? 's' : ''} ♥
               </button>
@@ -553,220 +727,6 @@ export default function SearchPage() {
         </>
       )}
     </div>
-  )
-}
-
-// ─── Infinite product grid ──────────────────────────────────────────────────
-
-function InfiniteProductGrid({
-  initialProducts,
-  initialPage,
-  initialHasNextPage,
-  liveDealHandle,
-  starred,
-}: {
-  initialProducts: SearchProductResult[]
-  initialPage: number
-  initialHasNextPage: boolean
-  liveDealHandle: string | null
-  starred: Record<string, string>
-}) {
-  const fetcher = useFetcher<{ searchResult: { products: SearchProductResult[]; hasNextPage: boolean } }>()
-  const [items, setItems] = useState<SearchProductResult[]>(initialProducts)
-  const [page, setPage] = useState(initialPage)
-  const [hasNext, setHasNext] = useState(initialHasNextPage)
-  const sentinelRef = useRef<HTMLDivElement>(null)
-
-  // Reset when loader gives us new initial data (query/filter/sort changed)
-  useEffect(() => {
-    setItems(initialProducts)
-    setPage(initialPage)
-    setHasNext(initialHasNextPage)
-  }, [initialProducts, initialPage, initialHasNextPage])
-
-  // Append fetcher results as they arrive
-  useEffect(() => {
-    if (fetcher.state !== 'idle') return
-    const data = fetcher.data
-    if (!data?.searchResult) return
-    const incoming = data.searchResult.products ?? []
-    if (incoming.length === 0) { setHasNext(false); return }
-    setItems(prev => {
-      const seen = new Set(prev.map(p => p.handle))
-      const merged = [...prev]
-      for (const p of incoming) if (!seen.has(p.handle)) merged.push(p)
-      return merged
-    })
-    setHasNext(data.searchResult.hasNextPage)
-  }, [fetcher.state, fetcher.data])
-
-  // IntersectionObserver sentinel
-  useEffect(() => {
-    const el = sentinelRef.current
-    if (!el || !hasNext) return
-    const observer = new IntersectionObserver(entries => {
-      if (entries[0]?.isIntersecting && fetcher.state === 'idle') {
-        const next = page + 1
-        const params = new URLSearchParams(window.location.search)
-        params.set('page', String(next))
-        fetcher.load(`/search?${params.toString()}`)
-        setPage(next)
-      }
-    }, { rootMargin: '400px 0px' })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [hasNext, page, fetcher])
-
-  return (
-    <>
-      <ul className="grid grid-cols-2 sm:grid-cols-3 gap-4 auto-rows-fr">
-        {items.map(product => (
-          <SearchTile
-            key={product.handle}
-            product={product}
-            isLiveDeal={!!liveDealHandle && product.handle === liveDealHandle}
-            {...(starred[product.handle] ? { starredReason: starred[product.handle]! } : {})}
-          />
-        ))}
-      </ul>
-      {hasNext && (
-        <div ref={sentinelRef} className="mt-8 flex justify-center">
-          <div className="text-xs text-ink/40">Loading more…</div>
-        </div>
-      )}
-    </>
-  )
-}
-
-// ─── Product tile ───────────────────────────────────────────────────────────
-
-function SearchTile({ product, isLiveDeal, starredReason }: { product: SearchProductResult; isLiveDeal: boolean; starredReason?: string }) {
-  const addToCart = useFetcher<{ ok?: boolean }>()
-  const [justAdded, setJustAdded] = useState(false)
-  const wasSubmitting = useRef(false)
-
-  useEffect(() => {
-    if (addToCart.state === 'submitting') wasSubmitting.current = true
-    else if (addToCart.state === 'idle' && wasSubmitting.current) {
-      wasSubmitting.current = false
-      if (addToCart.data?.ok) {
-        setJustAdded(true)
-        window.dispatchEvent(new CustomEvent('xdipx:cart-added'))
-        const t = setTimeout(() => setJustAdded(false), 1200)
-        return () => clearTimeout(t)
-      }
-    }
-  }, [addToCart.state, addToCart.data])
-
-  const price = product.price ? parseFloat(product.price) : null
-  const compareAt = product.compareAtPrice ? parseFloat(product.compareAtPrice) : null
-  const discount = price && compareAt && compareAt > price
-    ? Math.round(((compareAt - price) / compareAt) * 100)
-    : 0
-
-  const canAtc = product.availableForSale && !product.hasMultipleVariants && !!product.defaultVariantId
-  const video = product.firstVideo
-    ? { previewUrl: product.firstVideo.previewUrl, src: product.firstVideo.src }
-    : null
-
-  function handleAtcClick(e: React.MouseEvent<HTMLButtonElement>) {
-    if (!canAtc) return // let link navigation happen
-    e.preventDefault()
-    e.stopPropagation()
-    if (!product.defaultVariantId) return
-    const form = new FormData()
-    form.set('intent', 'add-item')
-    form.set('variantId', product.defaultVariantId)
-    form.set('quantity', '1')
-    addToCart.submit(form, { method: 'post', action: '/api/cart' })
-  }
-
-  return (
-    <li className="h-full">
-      <Link
-        to={`/products/${product.handle}`}
-        className="group flex flex-col h-full bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
-      >
-        <div className="aspect-square overflow-hidden bg-cream-2 relative">
-          {product.featuredImage ? (
-            <ProductTileMedia
-              imageUrl={product.featuredImage.url}
-              imageAlt={product.featuredImage.altText ?? product.title}
-              video={video}
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-ink/10 text-5xl">♥</div>
-          )}
-          {discount >= 10 && (
-            <span className="absolute top-2 left-2 z-10 bg-sage text-white text-xs font-bold px-2 py-0.5 rounded-full">
-              {discount}% off
-            </span>
-          )}
-          {starredReason && !isLiveDeal && (
-            <div className="absolute top-2 right-2 z-10 group/starred">
-              <span
-                className="inline-flex items-center gap-1 bg-coral text-paper text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm"
-                style={{ fontFamily: 'var(--font-display)' }}
-                aria-label={`Emma's pick: ${starredReason}`}
-              >
-                ★ Emma
-              </span>
-              <span
-                className="hidden group-hover/starred:block absolute top-full right-0 mt-1 w-44 p-2 rounded-md bg-ink text-paper text-[11px] leading-snug shadow-lg z-20"
-                role="tooltip"
-              >
-                {starredReason}
-              </span>
-            </div>
-          )}
-          {isLiveDeal && <LiveDealBadge />}
-
-          {/* ATC button */}
-          <button
-            type="button"
-            onClick={handleAtcClick}
-            disabled={addToCart.state !== 'idle'}
-            aria-label={canAtc ? `Add ${product.title} to cart` : `View ${product.title}`}
-            className={`absolute bottom-2 right-2 z-10 inline-flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-1.5 text-white text-xs font-bold shadow-md transition-all ${
-              justAdded ? 'bg-sage scale-105' : 'bg-coral hover:bg-coral/90 hover:scale-105'
-            } ${addToCart.state !== 'idle' ? 'opacity-70' : ''}`}
-          >
-            {justAdded ? (
-              <>
-                <span aria-hidden="true">♥</span>
-                <span>Added</span>
-              </>
-            ) : (
-              <>
-                <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" />
-                  <line x1="3" y1="6" x2="21" y2="6" />
-                  <path d="M16 10a4 4 0 01-8 0" />
-                </svg>
-                <span>+ Add</span>
-              </>
-            )}
-          </button>
-        </div>
-        <div className="p-3 flex flex-col flex-1">
-          <p className="text-xs text-ink/50 truncate">{product.vendor}</p>
-          <h3
-            className="text-sm font-semibold text-ink line-clamp-2 group-hover:text-coral transition-colors mt-0.5 min-h-[2.5rem]"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            {product.title}
-          </h3>
-          <div className="flex items-center gap-2 mt-auto pt-2">
-            {price != null && (
-              <span className="text-sm font-bold text-coral">${price.toFixed(2)}</span>
-            )}
-            {compareAt != null && price != null && compareAt > price && (
-              <span className="text-xs text-ink/40 line-through">${compareAt.toFixed(2)}</span>
-            )}
-          </div>
-        </div>
-      </Link>
-    </li>
   )
 }
 
@@ -813,43 +773,6 @@ function ContentSection({
 }
 
 // ─── Shared components ──────────────────────────────────────────────────────
-
-function FilterSection({ title, children, collapsible = false, defaultExpanded = true }: {
-  title: string
-  children: React.ReactNode
-  collapsible?: boolean
-  defaultExpanded?: boolean
-}) {
-  const [expanded, setExpanded] = useState(defaultExpanded)
-
-  return (
-    <div>
-      {collapsible ? (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex items-center justify-between w-full mb-3 group"
-        >
-          <h3 className="text-xs font-bold text-ink uppercase tracking-wider group-hover:text-sage transition-colors">
-            {title}
-          </h3>
-          <svg
-            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`text-ink/30 group-hover:text-sage transition-transform ${expanded ? 'rotate-180' : ''}`}
-            aria-hidden="true"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </button>
-      ) : (
-        <h3 className="text-xs font-bold text-ink uppercase tracking-wider mb-3">
-          {title}
-        </h3>
-      )}
-      {(!collapsible || expanded) && children}
-    </div>
-  )
-}
 
 function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
@@ -907,10 +830,3 @@ function NoResults({ query, onClear }: { query: string; onClear?: () => void }) 
   )
 }
 
-function FilterIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-    </svg>
-  )
-}
