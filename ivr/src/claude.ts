@@ -15,7 +15,6 @@ import { buildSystemPrompt } from './prompts.ts'
 import { DEFAULT_BRAND_VOICE } from './settings.ts'
 import type { AnyContentBlockParam, Session } from './session.ts'
 import { TOOL_DEFINITIONS, runTool } from './tools/index.ts'
-import { IVR_LIMITS } from './config.ts'
 import { normalizeForTTS } from './tts-normalize.ts'
 
 const MODEL = 'claude-haiku-4-5-20251001'
@@ -237,7 +236,7 @@ async function runOneHop(
     (usage.cache_read_input_tokens ?? 0) +
     (usage.cache_creation_input_tokens ?? 0)
   session.tokensUsed += hopTokens
-  if (!session.wrapUpMode && session.tokensUsed > IVR_LIMITS.softTokenBudget) {
+  if (!session.wrapUpMode && session.tokensUsed > session.limits.softTokenBudget) {
     console.warn(`[ivr] soft token budget exceeded callSid=${session.callSid} tokens=${session.tokensUsed}`)
     session.wrapUpMode = true
   }

@@ -11,7 +11,7 @@ import crypto from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { streamReply } from './claude.ts'
 import { Session } from './session.ts'
-import { IVR_LIMITS, type CallEndReason } from './config.ts'
+import { type CallEndReason } from './config.ts'
 import { recordCall } from './db.ts'
 import { loadIvrSettings } from './settings.ts'
 import { buildSystemPrompt } from './prompts.ts'
@@ -40,6 +40,34 @@ const wss = new WebSocketServer({ noServer: true })
 // which includes ?token=…; any other caller trying the WS gets 401 at upgrade
 // time before we allocate session state.
 const EXPECTED_WS_TOKEN = process.env['IVR_WS_SECRET'] ?? ''
+
+/**
+ * Override session.limits with any per-call values Vercel passed via URL
+ * params. Each param is optional; missing/invalid values keep the default
+ * from config.ts (which already honors env vars).
+ */
+function applyLimitsFromUrl(session: Session, url: URL): void {
+  const fields = [
+    'initialSilenceMs',
+    'interTurnSilenceMs',
+    'maxCallDurationMs',
+    'maxPrompts',
+    'reEngageAttempts',
+    'softTokenBudget',
+  ] as const
+  const overrides: string[] = []
+  for (const f of fields) {
+    const raw = url.searchParams.get(f)
+    if (raw == null || raw === '') continue
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n <= 0) continue
+    session.limits[f] = n
+    overrides.push(`${f}=${n}`)
+  }
+  if (overrides.length > 0) {
+    console.log(`[ivr] limits overridden via URL: ${overrides.join(' ')}`)
+  }
+}
 
 function timingSafeStringEq(a: string, b: string): boolean {
   const ab = Buffer.from(a)
@@ -77,6 +105,7 @@ wss.on('connection', (ws, req) => {
   const greetingFromUrl = decodeURIComponent(wsUrl.searchParams.get('greeting') ?? '')
 
   const session = new Session()
+  applyLimitsFromUrl(session, wsUrl)
   if (greetingFromUrl) session.addTurn('assistant', greetingFromUrl)
 
   ws.on('message', (raw) => {
@@ -123,7 +152,7 @@ wss.on('connection', (ws, req) => {
         // duration — the caller can't respond until TTS finishes speaking.
         const greetingBuffer = greetingFromUrl ? estimateTtsMs(greetingFromUrl) : 5_000
         armInitialSilence(ws, session, greetingBuffer)
-        session.armDuration(IVR_LIMITS.maxCallDurationMs, () => wrapUp(ws, session))
+        session.armDuration(session.limits.maxCallDurationMs, () => wrapUp(ws, session))
         return
       }
       case 'prompt': {
@@ -132,7 +161,7 @@ wss.on('connection', (ws, req) => {
         session.clearSilence()
         console.log(`[ivr] prompt callSid=${session.callSid}: ${msg.voicePrompt}`)
 
-        if (session.promptCount > IVR_LIMITS.maxPrompts) {
+        if (session.promptCount > session.limits.maxPrompts) {
           console.warn(`[ivr] max prompts exceeded callSid=${session.callSid}`)
           endCall(ws, session, 'max_prompts', farewellFor(session, 'maxPrompts'))
           return
@@ -213,8 +242,8 @@ function handlePrompt(ws: WebSocket, session: Session, voicePrompt: string): voi
         firstTokenAt = Date.now()
         const ms = firstTokenAt - started
         console.log(`[ivr] first-token latency callSid=${session.callSid} ms=${ms}`)
-        if (ms > IVR_LIMITS.firstTokenSloMs) {
-          console.warn(`[ivr] first-token SLO breach callSid=${session.callSid} ms=${ms} slo=${IVR_LIMITS.firstTokenSloMs}`)
+        if (ms > session.limits.firstTokenSloMs) {
+          console.warn(`[ivr] first-token SLO breach callSid=${session.callSid} ms=${ms} slo=${session.limits.firstTokenSloMs}`)
         }
       }
       spokenText += token
@@ -243,16 +272,16 @@ function handlePrompt(ws: WebSocket, session: Session, voicePrompt: string): voi
 // ─── Silence handling ────────────────────────────────────────────────────────
 
 function armInitialSilence(ws: WebSocket, session: Session, ttsBufferMs = 0): void {
-  session.armSilence(IVR_LIMITS.initialSilenceMs + ttsBufferMs, () => onSilence(ws, session))
+  session.armSilence(session.limits.initialSilenceMs + ttsBufferMs, () => onSilence(ws, session))
 }
 
 function armInterTurnSilence(ws: WebSocket, session: Session, ttsBufferMs = 0): void {
-  session.armSilence(IVR_LIMITS.interTurnSilenceMs + ttsBufferMs, () => onSilence(ws, session))
+  session.armSilence(session.limits.interTurnSilenceMs + ttsBufferMs, () => onSilence(ws, session))
 }
 
 function onSilence(ws: WebSocket, session: Session): void {
   if (ws.readyState !== ws.OPEN) return
-  if (session.reEngageCount < IVR_LIMITS.reEngageAttempts) {
+  if (session.reEngageCount < session.limits.reEngageAttempts) {
     session.reEngageCount += 1
     console.log(`[ivr] re-engage callSid=${session.callSid} attempt=${session.reEngageCount}`)
     sendText(ws, "Still with me? Just say what you're calling about.", true)

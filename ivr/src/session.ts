@@ -6,8 +6,14 @@
  * top of the message list. This keeps input tokens flat as calls get long.
  */
 import type Anthropic from '@anthropic-ai/sdk'
-import type { CallEndReason } from './config.ts'
+import { IVR_LIMITS, type CallEndReason } from './config.ts'
 import type { IvrSettings } from './settings.ts'
+
+/** Per-call runtime limits. Defaults come from IVR_LIMITS but Vercel can
+ *  override any field by appending it as a URL param when handing the call
+ *  off, so admin edits in /admin/ivr take effect on the next call without a
+ *  Fly redeploy. */
+export type SessionLimits = typeof IVR_LIMITS
 
 type Role = 'user' | 'assistant'
 /** SDK 0.32.x doesn't export a single ContentBlockParam alias, but
@@ -60,6 +66,10 @@ export class Session {
   settings: IvrSettings | null = null
   /** Resolved system prompt for this call (built from settings.brandVoice). */
   systemPrompt = ''
+  /** Per-call limits (initialSilenceMs, maxPrompts, etc.). Starts as a copy of
+   *  IVR_LIMITS; the WS upgrade handler overrides any fields the Vercel TwiML
+   *  passed as URL params. */
+  limits: SessionLimits = { ...IVR_LIMITS }
   /** Active silence/duration timers owned by the session. */
   private silenceTimer: NodeJS.Timeout | null = null
   private durationTimer: NodeJS.Timeout | null = null
