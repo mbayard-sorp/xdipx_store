@@ -6,10 +6,12 @@ import {
   integer,
   json,
   pgTable,
+  real,
   serial,
   text,
   timestamp,
   uniqueIndex,
+  uuid,
   varchar,
 } from 'drizzle-orm/pg-core'
 
@@ -453,5 +455,60 @@ export const productEnrichmentCache = pgTable('product_enrichment_cache', {
   cacheKeyUniq:    uniqueIndex('enrich_cache_key_uniq').on(t.productId, t.fieldName, t.voiceHash, t.promptVersion),
   productIdx:      index('enrich_cache_product_idx').on(t.productId),
   generatedAtIdx:  index('enrich_cache_generated_idx').on(t.generatedAt),
+}))
+
+// ---------------------------------------------------------------------------
+// Phase 0 SMS Observability
+// ---------------------------------------------------------------------------
+
+/**
+ * One row per phone. Created lazily on the first inbound message for that
+ * number. Tracks the conversation stage so Phase 1 can route to the right
+ * v2 handler without reading back the full turn log.
+ */
+export const smsConversations = pgTable('sms_conversations', {
+  phone:               varchar('phone', { length: 20 }).primaryKey(),
+  stage:               varchar('stage', { length: 32 }).notNull().default('GREETING'),
+  currentPitchHandle:  text('current_pitch_handle'),
+  currentUpsellHandle: text('current_upsell_handle'),
+  lastQuoteUrl:        text('last_quote_url'),
+  lastQuoteItems:      json('last_quote_items').$type<unknown>(),
+  lastQuoteCreatedAt:  timestamp('last_quote_created_at'),
+  customerGid:         text('customer_gid'),
+  stageSetAt:          timestamp('stage_set_at').notNull().defaultNow(),
+  lastActiveAt:        timestamp('last_active_at').notNull().defaultNow(),
+  conversationId:      uuid('conversation_id').notNull().defaultRandom(),
+})
+
+/**
+ * One row per SMS turn (inbound + outbound) across both pipelines.
+ * The unique index on twilio_message_sid enables idempotent dedup of Twilio
+ * retries: the webhook inserts a sentinel inbound row before calling Claude
+ * and updates it after; if the SID already exists the insert is a no-op and
+ * the caller returns the cached TwiML immediately.
+ */
+export const smsTurns = pgTable('sms_turns', {
+  id:               serial('id').primaryKey(),
+  phone:            varchar('phone', { length: 20 }).notNull(),
+  conversationId:   uuid('conversation_id').notNull(),
+  twilioMessageSid: varchar('twilio_message_sid', { length: 64 }),
+  direction:        varchar('direction', { length: 10 }).notNull(),
+  stageIn:          varchar('stage_in', { length: 32 }),
+  stageOut:         varchar('stage_out', { length: 32 }),
+  intent:           varchar('intent', { length: 32 }),
+  intentConfidence: real('intent_confidence'),
+  customerMsg:      text('customer_msg'),
+  emmaMsg:          text('emma_msg'),
+  toolCalls:        json('tool_calls').$type<unknown[]>(),
+  inputTokens:      integer('input_tokens'),
+  outputTokens:     integer('output_tokens'),
+  latencyMs:        integer('latency_ms'),
+  errors:           json('errors').$type<unknown[]>(),
+  fabricationCaught: varchar('fabrication_caught', { length: 32 }),
+  pipelineVersion:  varchar('pipeline_version', { length: 8 }).notNull(),
+  createdAt:        timestamp('created_at').notNull().defaultNow(),
+}, t => ({
+  twilioSidUniq:    uniqueIndex('sms_turns_twilio_sid_uniq').on(t.twilioMessageSid),
+  phoneCreatedIdx:  index('sms_turns_phone_created_idx').on(t.phone, t.createdAt),
 }))
 
