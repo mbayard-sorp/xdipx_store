@@ -569,7 +569,11 @@ var init_schema = __esm({
       stageSetAt: timestamp("stage_set_at").notNull().defaultNow(),
       lastActiveAt: timestamp("last_active_at").notNull().defaultNow(),
       conversationId: uuid("conversation_id").notNull().defaultRandom()
-    });
+    }, (t) => ({
+      // Phase 10: customer_gid indexes for cross-channel joins (additive).
+      customerGidIdx: index("sms_conversations_customer_gid_idx").on(t.customerGid),
+      customerGidActiveIdx: index("sms_conversations_gid_active_idx").on(t.customerGid, t.lastActiveAt)
+    }));
     smsTurns = pgTable("sms_turns", {
       id: serial("id").primaryKey(),
       phone: varchar("phone", { length: 20 }).notNull(),
@@ -613,7 +617,11 @@ var init_schema = __esm({
       stageSetAt: timestamp("stage_set_at").notNull().defaultNow(),
       lastActiveAt: timestamp("last_active_at").notNull().defaultNow(),
       conversationId: uuid("conversation_id").notNull().defaultRandom()
-    });
+    }, (t) => ({
+      // Phase 10: customer_gid indexes for cross-channel joins (additive).
+      customerGidIdx: index("web_conversations_customer_gid_idx").on(t.customerGid),
+      customerGidActiveIdx: index("web_conversations_gid_active_idx").on(t.customerGid, t.lastActiveAt)
+    }));
   }
 });
 

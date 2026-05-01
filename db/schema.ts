@@ -480,7 +480,11 @@ export const smsConversations = pgTable('sms_conversations', {
   stageSetAt:          timestamp('stage_set_at').notNull().defaultNow(),
   lastActiveAt:        timestamp('last_active_at').notNull().defaultNow(),
   conversationId:      uuid('conversation_id').notNull().defaultRandom(),
-})
+}, t => ({
+  // Phase 10: customer_gid indexes for cross-channel joins (additive).
+  customerGidIdx:       index('sms_conversations_customer_gid_idx').on(t.customerGid),
+  customerGidActiveIdx: index('sms_conversations_gid_active_idx').on(t.customerGid, t.lastActiveAt),
+}))
 
 /**
  * One row per SMS turn (inbound + outbound) across both pipelines.
@@ -542,5 +546,9 @@ export const webConversations = pgTable('web_conversations', {
   stageSetAt:          timestamp('stage_set_at').notNull().defaultNow(),
   lastActiveAt:        timestamp('last_active_at').notNull().defaultNow(),
   conversationId:      uuid('conversation_id').notNull().defaultRandom(),
-})
+}, t => ({
+  // Phase 10: customer_gid indexes for cross-channel joins (additive).
+  customerGidIdx:       index('web_conversations_customer_gid_idx').on(t.customerGid),
+  customerGidActiveIdx: index('web_conversations_gid_active_idx').on(t.customerGid, t.lastActiveAt),
+}))
 

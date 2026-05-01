@@ -22,6 +22,7 @@
 import { getOrCreateWebConversation, applyWebStateWrites } from '../web-conversation.server'
 import { classifyIntent } from '../intent-classifier.server'
 import { buildWebEmmaContext } from '../web-context-builder.server'
+import { findRecentCrossChannelActivity } from '../cross-channel.server'
 import { pickEffectiveStage, dispatchStage } from '../stage-dispatch.server'
 import { logWebStageResponse } from '../web-turn-logger.server'
 import type { ChatReply, ChatProductCard } from '~/lib/ai-agent/chat-types'
@@ -224,6 +225,9 @@ export async function processWebMessageV2(
     if (pageContext !== undefined) extras.pageContext = pageContext
     if (cartId !== undefined) extras.cartId = cartId
     ctx = await buildWebEmmaContext(conversation, extras)
+    // Phase 10: attach cross-channel hint (SMS/voice → web direction).
+    const hint = await findRecentCrossChannelActivity(conversation.customerGid, 'web')
+    if (hint) (ctx as typeof ctx & { crossChannelHint?: typeof hint }).crossChannelHint = hint
   } catch (err) {
     console.error('[web-adapter] buildWebEmmaContext failed', err)
     throw err

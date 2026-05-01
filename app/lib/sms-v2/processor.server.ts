@@ -25,7 +25,7 @@ import { classifyIntent } from './intent-classifier.server'
 import { withTurnLogging, withTurnLoggingForStageResponse } from './turn-logger.server'
 import { subscribeToSms } from './klaviyo.server'
 import { pickEffectiveStage, dispatchStage } from './stage-dispatch.server'
-import { buildEmmaContext } from './context-builder.server'
+import { buildEmmaContextWithCrossChannel } from './cross-channel.server'
 import type { Stage } from './types.server'
 
 // Re-export types so callers can switch by import only — no re-definition needed.
@@ -79,7 +79,7 @@ export async function processSmsMessageV2(
 
   let result: Awaited<ReturnType<typeof processSmsMessage>>
 
-  const ctx = await buildEmmaContext(conversation)
+  const ctx = await buildEmmaContextWithCrossChannel(conversation, 'sms')
   const stageRespPromise = dispatchStage(effectiveStage, ctx, intentResult, input.body)
 
   if (stageRespPromise !== null) {
