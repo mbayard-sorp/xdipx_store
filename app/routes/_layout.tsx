@@ -62,13 +62,12 @@ export default function StoreLayout() {
   const ga4Id = rootData?.ENV?.GA4_ID ?? ''
   const ageGateLevel = (rootData?.ENV?.AGE_GATE_LEVEL ?? 'click_through') as 'click_through' | 'dob_entry' | 'id_verify'
 
-  // Hide the mobile explore menu on PDP (pinned "Dip In" CTA owns the
-  // bottom) and the checkout flow. Everywhere else, the explore menu
-  // pops UP from the bottom on tap so shoppers can browse categories
-  // without using the top nav. The AskEmmaWidget renders on every page.
-  const isPdp        = pathname.startsWith('/products/')
+  // Mobile explore menu sits at the very bottom of every page except
+  // checkout. On PDP the sticky buy CTA is offset upward so it stacks
+  // directly above the menu instead of covering it. The AskEmmaWidget
+  // renders on every page.
   const isCheckout   = pathname.startsWith('/checkout-extras')
-  const showMobileShell = !isPdp && !isCheckout
+  const showMobileShell = !isCheckout
 
   return (
     <SessionProvider>
