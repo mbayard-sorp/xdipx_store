@@ -650,6 +650,93 @@ ${pairContext}`
       return { type, content: staticFallback() }
     }
 
+    case 'endorsement': {
+      // Single-product editorial card — Emma's intro tagline + a 3-line
+      // pull quote about the product, plus optional contextual product
+      // rails to render below the hero.
+      const nowISO = () => new Date().toISOString()
+
+      const staticFallback = (): import('~/types').EndorsementCopy => ({
+        emmaIntro: 'updated whenever I change my mind',
+        quote:
+          `I’ve been a little obsessed with this one.\nIt’s got a kind of _slow-burn energy_ I wasn’t expecting.\nCome see.`,
+        alsoIntoLabel: "I'm also into",
+        alsoIntoCollectionHandle: '',
+        noteLabel: product.mapRestricted
+          ? 'quiet endorsement · works for MAP-restricted'
+          : 'quiet endorsement · editor’s pick',
+        rails: [
+          { title: 'If you liked this, try', collectionHandle: '' },
+          { title: 'Pair it with', collectionHandle: '' },
+        ],
+        generatedAt: nowISO(),
+      })
+
+      const productContext = `Product:\n- Title: ${product.title}\n- Brand: ${product.brand}\n- Description: ${product.description}\n- Categories: ${product.categories.join(', ')}${product.dealPrice ? `\n- Deal price: $${product.dealPrice}` : ''}${product.mapRestricted ? `\n- MAP-restricted: yes` : ''}`
+
+      const voiceRules = `VOICE RULES (strict):
+- Emma is a persona — she does NOT claim to have personally used or tested any product.
+- NEVER say: "I tried", "I tested", "I've been using", "been living with", "spent X weeks", "I reached for this", "since April", "a month of use", or any similar first-person use claim.
+- NEVER invent usage stats ("238 grabbed", "top 5%", "my #1").
+- Emma curates and recommends — she speaks about why something WOULD click, not what she felt physically.
+- OK to say: "I'm a little obsessed", "this one's for the ___ crowd", "comes recommended", "I'd hand this to a friend who said pick something for me".
+- Do NOT name the brand. Do NOT restate the product title. Do NOT surface countdowns or "until midnight".
+- Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction" — never "sex" as an adjective.
+- Avoid em-dashes (—). Use periods, commas, or short sentences instead. Hyphens in compound words (slow-burn) are fine.`
+
+      const shapeSpec = `Return ONLY a raw JSON object (no markdown fences, no prose around it) with EXACTLY these keys:
+
+{
+  "emmaIntro": string         // ≤ 60 chars, lowercase, casual. Emma's "what she's about right now" tagline shown next to her avatar. e.g. "updated whenever I change my mind" or "still on a slow-burn kick"
+  "quote":     string         // 3 lines, separated by real newline characters (\\n). Each line ≤ 70 chars. First-person editorial voice, NOT a usage testimonial. Wrap exactly ONE 1–4 word phrase in underscores like _slow-burn energy_ for coral highlight. End on a soft curiosity nudge.
+  "alsoIntoLabel":  string    // 2–4 words, label for the secondary CTA. Default "I'm also into". Stay in Emma's lowercase, friend-voice register.
+  "alsoIntoCollectionHandle": string  // empty string "" — admin will fill this in.
+  "noteLabel": string         // ≤ 50 chars, sticky-note label shown above the avatar. Two short phrases joined by " · " (middle dot U+00B7). e.g. "quiet endorsement · works for MAP-restricted"
+  "rails": [                  // EXACTLY 2 entries — contextual rail suggestions for below the hero.
+    { "title": string,        // 2–5 words, Emma-voice rail heading. e.g. "Slow-burn picks", "If you liked this, try"
+      "collectionHandle": "" } // leave empty; admin fills.
+  ]
+}
+
+Rules:
+- The quote is the centerpiece — make those 3 lines feel earned, like she means them.
+- "rails" should be DIFFERENT angles (e.g. "more like this" + "pair it with").
+- Output strictly the JSON object — no preamble, no fences, no commentary.`
+
+      const isValid = (v: unknown): v is import('~/types').EndorsementCopy => {
+        const o = v as Partial<import('~/types').EndorsementCopy> | null | undefined
+        if (!o || typeof o !== 'object') return false
+        if (typeof o.emmaIntro !== 'string' || !o.emmaIntro.trim()) return false
+        if (typeof o.quote !== 'string' || !o.quote.trim()) return false
+        return true
+      }
+
+      const wrap = (raw: import('~/types').EndorsementCopy): import('~/types').EndorsementCopy => ({
+        ...raw,
+        alsoIntoLabel: raw.alsoIntoLabel || "I'm also into",
+        alsoIntoCollectionHandle: raw.alsoIntoCollectionHandle || '',
+        rails: raw.rails || [],
+        generatedAt: nowISO(),
+      })
+
+      const prompt = `${voiceRules}\n\n${productContext}\n\n${shapeSpec}`
+
+      const text = await generate(prompt, 1024, MODEL_FAST, llmClient)
+      try {
+        const parsed = JSON.parse(stripFences(text))
+        if (isValid(parsed)) return { type, content: wrap(parsed) }
+      } catch { /* fall through to retry */ }
+
+      // Single retry with a corrective prompt
+      const retried = await generate(`${prompt}\n\nThe previous response wasn't valid JSON or was missing required keys. Output ONLY the JSON object, no fences, no prose.`, 1024, MODEL_FAST, llmClient)
+      try {
+        const parsed = JSON.parse(stripFences(retried))
+        if (isValid(parsed)) return { type, content: wrap(parsed) }
+      } catch { /* fall through */ }
+
+      return { type, content: staticFallback() }
+    }
+
     case 'specifications': {
       // Phase 2 — emit a JSON array of "Label: Value" bullet pairs (mirrors
       // care_instructions / box_contents shape). Renders as <ul> on the PDP
