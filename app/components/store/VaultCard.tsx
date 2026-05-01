@@ -3,6 +3,7 @@ import { Link, useFetcher } from 'react-router'
 import type { VaultDeal } from '~/types'
 import { HeartButton } from './HeartButton'
 import { CardVideo } from './CardVideo'
+import { abbreviate, buildPieGradient } from './CircleOptionSelector'
 import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
 interface VaultCardProps {
@@ -122,6 +123,7 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
               )}
             </button>
           )}
+
         </div>
 
         <div className="p-4">
@@ -140,6 +142,31 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
             )}
             {discount > 0 && (
               <span className="text-coral text-xs font-semibold">{discount}% off</span>
+            )}
+
+            {/* Scaled swatch — sits in the right side of the price row when
+                the product has multiple colors or sizes. Decorative; tap on
+                the card still goes to the PDP via the wrapping <Link>. */}
+            {(deal.colorValues || deal.sizeValues) && (
+              <span
+                aria-hidden="true"
+                className="ml-auto flex items-center gap-1.5"
+              >
+                {deal.colorValues && deal.colorValues.length > 1 && (
+                  <span
+                    className="block h-6 w-6 rounded-full border border-ink/80 shadow-sm"
+                    style={{ background: buildPieGradient(deal.colorValues) }}
+                  />
+                )}
+                {deal.sizeValues && deal.sizeValues.length > 1 && (
+                  <span
+                    className="inline-flex items-center justify-center h-6 px-1.5 rounded-full bg-paper border border-ink/80 shadow-sm text-[9px] font-bold tracking-wide text-ink"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
+                    {deal.sizeValues.slice(0, 3).map(v => abbreviate(v)).join(' / ')}
+                  </span>
+                )}
+              </span>
             )}
           </div>
         </div>

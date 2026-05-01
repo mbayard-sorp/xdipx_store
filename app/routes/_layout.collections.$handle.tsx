@@ -402,14 +402,6 @@ export default function CollectionPage() {
         </h1>
       </header>
 
-      {/* Side-by-side info boxes (description + FAQ accordion) — page 1 only.
-          Both blocks live in the SSR'd DOM so Google reads everything; the
-          "more" toggle is a CSS class swap, and the FAQ uses native <details>
-          which keeps every answer in DOM regardless of open state. */}
-      {isCanonicalPage && (introHtml || faqs.length > 0) && (
-        <CollectionInfoBoxes introHtml={introHtml} faqs={faqs} />
-      )}
-
       <div className="flex flex-col md:flex-row gap-8">
         <div className="flex flex-col gap-4 md:w-[260px] md:shrink-0">
           <EmmaDiscoveryRail
@@ -427,6 +419,7 @@ export default function CollectionPage() {
             priceMax={priceMax}
             products={facetProducts}
             presets={presets}
+            relatedCategories={relatedCollections}
           />
         </div>
 
@@ -523,8 +516,7 @@ export default function CollectionPage() {
       </div>
 
       {/* Notebook section renders only on page 1 to keep deeper paginated
-          pages clearly secondary documents. The FAQ block formerly here has
-          moved to the top-of-page CollectionInfoBoxes side-by-side layout. */}
+          pages clearly secondary documents. */}
       {isCanonicalPage && notebookPosts.length > 0 && (
         <section className="mt-16" aria-labelledby="notebook-rail-heading">
           <h2
@@ -567,28 +559,14 @@ export default function CollectionPage() {
         </section>
       )}
 
-      {relatedCollections.length > 0 && (
-        <section className="mt-16" aria-labelledby="related-collections-heading">
-          <h2
-            id="related-collections-heading"
-            className="text-xl font-bold text-ink mb-4"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            Browse other categories
-          </h2>
-          <ul className="flex flex-wrap gap-2">
-            {relatedCollections.map(rc => (
-              <li key={rc.handle}>
-                <Link
-                  to={`/collections/${rc.handle}`}
-                  className="inline-block px-4 py-2 rounded-full border border-line bg-paper text-sm text-ink hover:bg-cream-2 transition-colors"
-                >
-                  {rc.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {/* Side-by-side info boxes (description + FAQ accordion) — page 1 only.
+          Both blocks live in the SSR'd DOM so Google reads everything; the
+          "more" toggle is a CSS class swap, and the FAQ uses native <details>
+          which keeps every answer in DOM regardless of open state. */}
+      {isCanonicalPage && (introHtml || faqs.length > 0) && (
+        <div className="mt-16">
+          <CollectionInfoBoxes introHtml={introHtml} faqs={faqs} />
+        </div>
       )}
     </div>
   )

@@ -4,37 +4,69 @@ import type { ProductVariant } from '~/types'
 import { isValueAvailable, valueExists } from '~/components/store/VariantSelector'
 
 const COLOR_MAP: Record<string, string> = {
-  black:    '#151211',
-  white:    '#FFFFFF',
-  cream:    '#FAF4EA',
-  ivory:    '#F5EFE0',
-  rose:     '#E8B4B8',
-  pink:     '#FFC0CB',
-  coral:    '#FF6A3D',
-  red:      '#D93A15',
-  lilac:    '#C8A2D9',
-  purple:   '#7C3AED',
-  sage:     '#7C8F78',
-  green:    '#4A7C59',
-  navy:     '#1E3A5F',
-  blue:     '#3B6BCE',
-  gold:     '#D4AF37',
-  silver:   '#C0C0C0',
-  teal:     '#2BA19F',
-  sand:     '#D9C7A7',
-  charcoal: '#36332F',
-  plum:     '#6B2D5C',
-  nude:     '#E3C4A8',
-  clear:    'transparent',
+  black:     '#151211',
+  white:     '#FFFFFF',
+  cream:     '#FAF4EA',
+  ivory:     '#F5EFE0',
+  rose:      '#E8B4B8',
+  pink:      '#FFC0CB',
+  fuchsia:   '#D81B60',
+  magenta:   '#C2185B',
+  hotpink:   '#E94B8A',
+  coral:     '#FF6A3D',
+  red:       '#D93A15',
+  crimson:   '#A01432',
+  burgundy:  '#6E1423',
+  wine:      '#722F37',
+  maroon:    '#7A1D1D',
+  scarlet:   '#C0322B',
+  cherry:    '#B51F2A',
+  ruby:      '#9B1B30',
+  brown:     '#5D3A1A',
+  tan:       '#C9A26B',
+  copper:    '#B87333',
+  bronze:    '#8C6A2B',
+  caramel:   '#A6651E',
+  beige:     '#E3D5B8',
+  orange:    '#F0792E',
+  amber:     '#E2A03F',
+  yellow:    '#F2C94C',
+  lilac:     '#C8A2D9',
+  lavender:  '#B68FCE',
+  violet:    '#7C3AED',
+  purple:    '#7C3AED',
+  plum:      '#6B2D5C',
+  sage:      '#7C8F78',
+  mint:      '#A8D8B0',
+  olive:     '#7F7C32',
+  green:     '#4A7C59',
+  emerald:   '#2E7D5C',
+  forest:    '#2A4D3A',
+  navy:      '#1E3A5F',
+  blue:      '#3B6BCE',
+  cobalt:    '#2A4FB1',
+  sky:       '#7CB7E8',
+  turquoise: '#2BB1B5',
+  teal:      '#2BA19F',
+  aqua:      '#5FCBC9',
+  gold:      '#D4AF37',
+  silver:    '#C0C0C0',
+  grey:      '#8B8786',
+  gray:      '#8B8786',
+  charcoal:  '#36332F',
+  graphite:  '#3D3A37',
+  sand:      '#D9C7A7',
+  nude:      '#E3C4A8',
+  clear:     'transparent',
 }
 
-function resolveColor(value: string, swatches?: Record<string, string>): string {
+export function resolveColor(value: string, swatches?: Record<string, string>): string {
   const full = value.toLowerCase().trim()
   const first = full.split(/\s+/)[0] ?? ''
   return swatches?.[full] ?? COLOR_MAP[first] ?? '#F2EADD'
 }
 
-function abbreviate(value: string): string {
+export function abbreviate(value: string): string {
   const v = value.trim()
   if (v.length <= 4) return v.toUpperCase()
   // Prefer well-known size abbreviations
@@ -53,7 +85,7 @@ function abbreviate(value: string): string {
   return v.slice(0, 2).toUpperCase()
 }
 
-function buildPieGradient(values: string[], swatches?: Record<string, string>): string {
+export function buildPieGradient(values: string[], swatches?: Record<string, string>): string {
   if (values.length === 0) return '#F2EADD'
   if (values.length === 1) return resolveColor(values[0]!, swatches)
   const slice = 100 / values.length
