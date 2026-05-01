@@ -16,6 +16,8 @@ import {
   pickReconnectWithOrderTemplate,
   pickReconnectColdTemplate,
 } from '../templates/reconnect-templates'
+import { getCrossChannelHint } from '../cross-channel.server'
+import { pickCrossChannelTemplate } from '../templates/cross-channel-templates'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -25,6 +27,26 @@ export async function executeReconnectStage(
   intent: IntentResult,
   _customerText: string,
 ): Promise<StageResponse> {
+  // Phase 10 — Cross-channel continuation: if the customer was active on
+  // another channel recently and was looking at a specific product, surface
+  // that immediately and route to DISCOVERY so the next turn can pick up.
+  const xchannel = getCrossChannelHint(ctx)
+  if (xchannel && xchannel.topic.kind === 'product') {
+    return {
+      stageOut: resolveTransition('RECONNECT', 'DISCOVERY'),
+      goalAchieved: false,
+      segments: [{
+        prose: pickCrossChannelTemplate({
+          channelLabel: xchannel.otherChannel === 'web' ? 'web chat' : 'text',
+          productTitle: xchannel.topic.title ?? xchannel.topic.handle,
+        }),
+      }],
+      stateWrites: { stage: 'DISCOVERY', currentPitchHandle: xchannel.topic.handle },
+      telemetry: { intent: intent.intent, intentConfidence: intent.confidence },
+    }
+  }
+  // If xchannel hint is topic.kind='stage', fall through to existing logic below.
+
   const lastItem = ctx.customer?.lastOrderItems?.[0]
 
   const prose = lastItem

@@ -29,7 +29,7 @@
 import { getOrCreateConversation, applyStateWrites } from '../conversation.server'
 import { classifyIntent } from '../intent-classifier.server'
 import { pickEffectiveStage, dispatchStage } from '../stage-dispatch.server'
-import { buildEmmaContext } from '../context-builder.server'
+import { buildEmmaContextWithCrossChannel } from '../cross-channel.server'
 import { sendSms } from '~/lib/twilio.server'
 import { db } from '~/lib/db.server'
 import { smsTurns } from '../../../../db/schema'
@@ -290,7 +290,7 @@ export async function processVoiceMessageV2(
   let voiceReply: VoiceReply
 
   try {
-    const ctx = await buildEmmaContext(conversation)
+    const ctx = await buildEmmaContextWithCrossChannel(conversation, 'voice')
     const stageRespPromise = dispatchStage(effectiveStage, ctx, intentResult, customerText)
 
     if (stageRespPromise !== null) {
