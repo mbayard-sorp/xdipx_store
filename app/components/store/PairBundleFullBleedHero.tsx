@@ -104,51 +104,49 @@ function MobilePairItem({
   const colorOpt = (deal.options ?? []).find(o => isColorOption(o.name))
 
   return (
-    <div className="relative flex flex-col bg-cream rounded-[16px] border-[1.2px] border-line-2">
+    <div className="relative flex flex-row items-center gap-4 py-4">
       <Link
         to={`/products/${deal.handle}`}
-        className="flex items-center justify-center pt-7 pb-3 px-5"
+        className="shrink-0 flex items-center justify-center w-[62%] -ml-2"
       >
         {img ? (
           <img
             src={img.url}
             alt={img.altText ?? deal.seoTitle}
-            className="max-h-[160px] w-auto"
-            style={{ filter: 'drop-shadow(0 10px 20px rgba(21,18,17,0.12))' }}
+            className="w-full h-auto max-h-[260px] object-contain"
+            style={{ filter: 'drop-shadow(0 12px 22px rgba(21,18,17,0.14))' }}
             loading="eager"
             fetchPriority="high"
           />
         ) : null}
       </Link>
 
-      <div className="px-5 pb-5">
-        <div className="flex items-center justify-between gap-3">
-          <div
-            className="flex-1 min-w-0 text-left text-[19px] font-bold leading-tight"
-            style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
-          >
-            {deal.seoTitle}
-          </div>
-          {colorOpt && colorOpt.values.length > 1 && (
-            <div className={highlightColor ? 'pulse-outline' : undefined}>
-              <CircleOptionSelector
-                optionName={colorOpt.name}
-                values={colorOpt.values}
-                {...(selected[colorOpt.name] ? { selected: selected[colorOpt.name] } : {})}
-                onSelect={(v) => setSelected({ ...selected, [colorOpt.name]: v })}
-                onClear={() => {
-                  const next = { ...selected }
-                  delete next[colorOpt.name]
-                  setSelected(next)
-                }}
-                kind="color"
-                swatches={swatches}
-                variants={deal.variants ?? []}
-                selectedOptions={selected}
-              />
-            </div>
-          )}
+      <div className="flex-1 min-w-0">
+        <div
+          className="text-left text-[17px] font-bold leading-tight"
+          style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
+        >
+          {deal.seoTitle}
         </div>
+        {colorOpt && colorOpt.values.length > 1 && (
+          <div className={`mt-3 ${highlightColor ? 'pulse-outline' : ''}`.trim()}>
+            <CircleOptionSelector
+              optionName={colorOpt.name}
+              values={colorOpt.values}
+              {...(selected[colorOpt.name] ? { selected: selected[colorOpt.name] } : {})}
+              onSelect={(v) => setSelected({ ...selected, [colorOpt.name]: v })}
+              onClear={() => {
+                const next = { ...selected }
+                delete next[colorOpt.name]
+                setSelected(next)
+              }}
+              kind="color"
+              swatches={swatches}
+              variants={deal.variants ?? []}
+              selectedOptions={selected}
+            />
+          </div>
+        )}
       </div>
     </div>
   )
@@ -200,7 +198,7 @@ function DesktopPairItem({
         ) : null}
       </Link>
 
-      <div className="pt-[18px] flex-1 flex flex-col" style={{ borderTop: '1px dashed var(--color-line-2)' }}>
+      <div className="pt-[18px] flex-1 flex flex-col">
         <div className="flex items-center justify-between gap-3">
           <div
             className="flex-1 min-w-0 text-left leading-[1.15]"
@@ -317,100 +315,68 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, t
 
         {/* ================= MOBILE (top) ================= */}
         <div className="md:hidden">
-          <div className="relative bg-paper border border-line border-b-0 p-6">
-            {/* Emma's intro — mobile (avatar + message + tel/message links) */}
-            <div
-              className="flex items-start gap-3 mb-5 pb-5"
-              style={{ borderBottom: '1px dashed var(--color-line-2)' }}
-            >
-              {emmaPersona?.avatarUrl ? (
-                <img
-                  src={emmaPersona.avatarUrl}
-                  alt={emmaPersona.avatarAlt || emmaPersona.displayName || 'Emma'}
-                  width={64}
-                  height={64}
-                  className="w-16 h-16 rounded-full object-cover shrink-0"
-                  style={{
-                    border:    '1.5px solid var(--color-ink)',
-                    boxShadow: '2px 2px 0 var(--color-ink)',
-                  }}
-                  loading="eager"
-                />
-              ) : (
-                <span
-                  className="w-16 h-16 rounded-full bg-coral text-cream inline-flex items-center justify-center shrink-0"
-                  style={{
-                    border:     '1.5px solid var(--color-ink)',
-                    boxShadow:  '2px 2px 0 var(--color-ink)',
-                    fontFamily: 'var(--font-display)',
-                    fontWeight: 800,
-                    fontSize:   '26px',
-                  }}
-                  aria-hidden="true"
-                >
-                  E
-                </span>
-              )}
-              <div className="min-w-0">
+          <div className="relative bg-cream-2 border border-line border-b-0 px-6 pt-6 pb-5">
+            {/* Centered headline + Emma byline (mirrors the desktop top header) */}
+            <div className="flex flex-col items-center text-center mb-6">
+              <h1
+                className="text-ink italic m-0 max-w-[600px]"
+                style={{
+                  fontFamily:    'var(--font-display)',
+                  fontStyle:     'italic',
+                  fontWeight:    500,
+                  fontSize:      '32px',
+                  lineHeight:    1.05,
+                  letterSpacing: '-0.015em',
+                  textWrap:      'balance',
+                }}
+              >
+                {copy.headline}
+              </h1>
+
+              <div className="mt-4 flex items-center gap-4 max-w-[440px]">
+                {emmaPersona?.avatarUrl ? (
+                  <img
+                    src={emmaPersona.avatarUrl}
+                    alt={emmaPersona.avatarAlt || emmaPersona.displayName || 'Emma'}
+                    width={64}
+                    height={64}
+                    className="w-16 h-16 rounded-full object-cover shrink-0"
+                    style={{
+                      border:    '1.5px solid var(--color-ink)',
+                      boxShadow: '2px 2px 0 var(--color-ink)',
+                    }}
+                    loading="eager"
+                  />
+                ) : (
+                  <span
+                    className="w-16 h-16 rounded-full bg-coral text-cream inline-flex items-center justify-center shrink-0"
+                    style={{
+                      border:     '1.5px solid var(--color-ink)',
+                      boxShadow:  '2px 2px 0 var(--color-ink)',
+                      fontFamily: 'var(--font-display)',
+                      fontWeight: 800,
+                      fontSize:   '26px',
+                    }}
+                    aria-hidden="true"
+                  >
+                    E
+                  </span>
+                )}
                 <p
+                  className="m-0 text-left"
                   style={{
                     fontFamily: 'var(--font-body)',
                     fontWeight: 500,
                     fontSize:   '13px',
-                    color:      'var(--color-ink)',
+                    color:      'var(--color-muted)',
                     lineHeight: 1.45,
                   }}
                 >
-                  Hi, I&rsquo;m Emma! Think of me as your shopping sidekick. Message or call anytime while you browse, and I&rsquo;ll help you find what you need or answer anything you&rsquo;re wondering about.
+                  <span className="font-bold text-ink">Picked by Emma.</span>{' '}
+                  Tested both, loved both, this pair just clicks.
                 </p>
-                <div
-                  className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2"
-                  style={{
-                    fontFamily: 'var(--font-body)',
-                    fontWeight: 700,
-                    fontSize:   '13px',
-                  }}
-                >
-                  <a
-                    href="tel:+16239001188"
-                    className="inline-flex items-center gap-1.5 underline decoration-[1.5px] underline-offset-[3px] hover:opacity-80"
-                    style={{ color: 'var(--color-coral)' }}
-                  >
-                    <svg aria-hidden="true" width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M2.5 4.25C2.5 3.28 3.28 2.5 4.25 2.5h1.69c.78 0 1.46.55 1.62 1.32l.45 2.16c.14.66-.13 1.34-.69 1.71l-1.16.77a11.5 11.5 0 005.38 5.38l.77-1.16a1.6 1.6 0 011.71-.69l2.16.45c.77.16 1.32.84 1.32 1.62v1.69c0 .97-.78 1.75-1.75 1.75H14.5C7.6 17.5 2.5 12.4 2.5 5.5v-1.25z" />
-                    </svg>
-                    (623) 900-1188
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (typeof window === 'undefined') return
-                      window.dispatchEvent(
-                        new CustomEvent('xdipx:emma:openWith', {
-                          detail: {
-                            prompt: "Hi Emma! I could use a hand finding what I'm looking for.",
-                          },
-                        }),
-                      )
-                    }}
-                    className="inline-flex items-center gap-1.5 underline decoration-[1.5px] underline-offset-[3px] hover:opacity-80"
-                    style={{ color: 'var(--color-coral)', fontFamily: 'var(--font-body)', fontWeight: 700, fontSize: '13px' }}
-                  >
-                    <svg aria-hidden="true" width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M2.5 4.5A1.5 1.5 0 014 3h12a1.5 1.5 0 011.5 1.5v9A1.5 1.5 0 0116 15H7.41l-3.7 3.05A.6.6 0 012.5 17.6V4.5z" />
-                    </svg>
-                    Message Emma
-                  </button>
-                </div>
               </div>
             </div>
-
-            <h1
-              className="text-ink text-[32px] italic mb-7 max-w-[880px]"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.08 }}
-            >
-              {copy.headline}
-            </h1>
 
             <div className="relative mb-6 overflow-visible bg-transparent">
               <div className="grid grid-cols-1 relative">
@@ -481,27 +447,51 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, t
         </div>
         {/* ================= DESKTOP (top: header + tied stage) ================= */}
         <article
-          className="hidden md:block relative bg-paper"
+          className="hidden md:block relative bg-cream-2 overflow-hidden"
           style={{
             boxShadow:    '0 30px 60px -30px rgba(21,18,17,0.2)',
           }}
         >
-          {/* ---------- HEAD (two-column: Emma left, headline right) ---------- */}
+          {/* Shared coral/sage tint that spans the full article so the
+              header and the products stage read as one continuous surface. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(ellipse at 20% 20%, rgba(255,75,31,0.06), transparent 45%), radial-gradient(ellipse at 80% 80%, rgba(124,143,120,0.08), transparent 45%)',
+            }}
+          />
+          {/* ---------- HEAD (centered: headline on top, Emma byline beneath) ---------- */}
           <header
-            className="relative px-10 pt-9 pb-7 flex items-stretch gap-8"
-            style={{ borderBottom: '1px dashed var(--color-line-2)' }}
+            className="relative px-10 pt-5 pb-3.5 flex flex-col items-center text-center"
           >
             <div aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-1.5 bg-coral" />
 
-            {/* LEFT — Emma's section: avatar + greeting (natural width) */}
-            <div className="flex items-start gap-4 shrink-0 max-w-[420px]">
+            <h2
+              className="italic m-0 max-w-[1000px]"
+              style={{
+                fontFamily:    'var(--font-display)',
+                fontStyle:     'italic',
+                fontWeight:    500,
+                fontSize:      'clamp(28px, 3.6vw, 60px)',
+                lineHeight:    1.03,
+                letterSpacing: '-0.022em',
+                textWrap:      'balance',
+              }}
+            >
+              {renderHeadlineItalic(copy.headline)}
+            </h2>
+
+            {/* Emma byline — avatar + short Emma-voice tagline, centered below the headline */}
+            <div className="mt-5 flex items-center gap-4 max-w-[520px]">
               {emmaPersona?.avatarUrl ? (
                 <img
                   src={emmaPersona.avatarUrl}
                   alt={emmaPersona.avatarAlt || emmaPersona.displayName || 'Emma'}
-                  width={84}
-                  height={84}
-                  className="w-[84px] h-[84px] rounded-full object-cover shrink-0"
+                  width={73}
+                  height={73}
+                  className="w-[73px] h-[73px] rounded-full object-cover shrink-0"
                   style={{
                     border:    '1.5px solid var(--color-ink)',
                     boxShadow: '2px 2px 0 var(--color-ink)',
@@ -510,99 +500,38 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, t
                 />
               ) : (
                 <span
-                  className="w-[84px] h-[84px] rounded-full bg-coral text-cream inline-flex items-center justify-center shrink-0"
+                  className="w-[73px] h-[73px] rounded-full bg-coral text-cream inline-flex items-center justify-center shrink-0"
                   style={{
                     border:     '1.5px solid var(--color-ink)',
                     boxShadow:  '2px 2px 0 var(--color-ink)',
                     fontFamily: 'var(--font-display)',
                     fontWeight: 800,
-                    fontSize:   '34px',
+                    fontSize:   '32px',
                   }}
                   aria-hidden="true"
                 >
                   E
                 </span>
               )}
-              <div className="min-w-0">
-                <p
-                  style={{
-                    fontFamily: 'var(--font-body)',
-                    fontWeight: 500,
-                    fontSize:   '13.5px',
-                    color:      'var(--color-ink)',
-                    lineHeight: 1.45,
-                  }}
-                >
-                  Hi, I&rsquo;m Emma! Think of me as your shopping sidekick. Message or call anytime while you browse, and I&rsquo;ll help you find what you need or answer anything you&rsquo;re wondering about.
-                </p>
-                <div
-                  className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2"
-                  style={{
-                    fontFamily: 'var(--font-body)',
-                    fontWeight: 700,
-                    fontSize:   '13.5px',
-                  }}
-                >
-                  <a
-                    href="tel:+16239001188"
-                    className="inline-flex items-center gap-1.5 underline decoration-[1.5px] underline-offset-[3px] hover:opacity-80"
-                    style={{ color: 'var(--color-coral)' }}
-                  >
-                    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M2.5 4.25C2.5 3.28 3.28 2.5 4.25 2.5h1.69c.78 0 1.46.55 1.62 1.32l.45 2.16c.14.66-.13 1.34-.69 1.71l-1.16.77a11.5 11.5 0 005.38 5.38l.77-1.16a1.6 1.6 0 011.71-.69l2.16.45c.77.16 1.32.84 1.32 1.62v1.69c0 .97-.78 1.75-1.75 1.75H14.5C7.6 17.5 2.5 12.4 2.5 5.5v-1.25z" />
-                    </svg>
-                    (623) 900-1188
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (typeof window === 'undefined') return
-                      window.dispatchEvent(
-                        new CustomEvent('xdipx:emma:openWith', {
-                          detail: {
-                            prompt: "Hi Emma! I could use a hand finding what I'm looking for.",
-                          },
-                        }),
-                      )
-                    }}
-                    className="inline-flex items-center gap-1.5 underline decoration-[1.5px] underline-offset-[3px] hover:opacity-80"
-                    style={{ color: 'var(--color-coral)', fontFamily: 'var(--font-body)', fontWeight: 700, fontSize: '13.5px' }}
-                  >
-                    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M2.5 4.5A1.5 1.5 0 014 3h12a1.5 1.5 0 011.5 1.5v9A1.5 1.5 0 0116 15H7.41l-3.7 3.05A.6.6 0 012.5 17.6V4.5z" />
-                    </svg>
-                    Message Emma
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* RIGHT — headline (flexes to fill remaining space, text vertically centered) */}
-            <div className="flex-1 min-w-0 flex items-center">
-              <h2
-                className="italic m-0 w-full"
+              <p
+                className="m-0 text-left max-w-[280px]"
                 style={{
-                  fontFamily:    'var(--font-display)',
-                  fontStyle:     'italic',
-                  fontWeight:    500,
-                  fontSize:      'clamp(22px, 3.4vw, 56px)',
-                  lineHeight:    1.03,
-                  letterSpacing: '-0.022em',
-                  textWrap:      'balance',
+                  fontFamily: 'var(--font-body)',
+                  fontWeight: 500,
+                  fontSize:   '13.5px',
+                  color:      'var(--color-muted)',
+                  lineHeight: 1.45,
                 }}
               >
-                {renderHeadlineItalic(copy.headline)}
-              </h2>
+                <span className="font-bold text-ink">Picked by Emma.</span>{' '}
+                Tested both, loved both, this pair just clicks.
+              </p>
             </div>
           </header>
 
           {/* ---------- TIED STAGE ---------- */}
           <section
             className="relative grid grid-cols-2 bg-cream-2"
-            style={{
-              borderTop:    '1px solid var(--color-line)',
-              borderBottom: '1px solid var(--color-line)',
-            }}
           >
             <div
               aria-hidden="true"
@@ -612,18 +541,6 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, t
                   'radial-gradient(ellipse at 20% 20%, rgba(255,75,31,0.06), transparent 45%), radial-gradient(ellipse at 80% 80%, rgba(124,143,120,0.08), transparent 45%)',
               }}
             />
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute"
-              style={{
-                left:        '50%',
-                top:         '40px',
-                bottom:      '40px',
-                borderLeft:  '1.5px dashed var(--color-line-2)',
-                transform:   'translateX(-50%)',
-              }}
-            />
-
             <DesktopPairItem
               deal={primary}
               selected={primaryPicker.selected}
@@ -710,74 +627,76 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, t
 
         {/* ================= MOBILE (price + buy) ================= */}
         <div className="md:hidden">
-          <div className="relative bg-paper border border-line border-t-0 border-b-0 px-6 pb-6">
-            <div
-              className="grid grid-cols-1 gap-5 p-6 rounded-[16px] bg-cream-2"
-              style={{ border: '1.2px solid var(--color-ink)' }}
-            >
-              <div className="flex flex-wrap items-baseline gap-3.5">
-                <span className="text-coral" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '38px', letterSpacing: '-0.01em' }}>
-                  {fmtPrice(bundlePrice)}
+          <div
+            className="relative px-6 py-6 flex flex-col gap-5"
+            style={{
+              background: 'linear-gradient(180deg, var(--color-butter) 0%, #FFD76B 100%)',
+            }}
+          >
+            <div className="flex flex-wrap items-baseline gap-3.5">
+              <span className="text-coral" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '38px', letterSpacing: '-0.01em' }}>
+                {fmtPrice(bundlePrice)}
+              </span>
+              {showStrike && (
+                <span className="text-muted line-through text-[18px]" style={{ fontFamily: 'var(--font-display)' }}>
+                  {fmtPrice(combinedMsrp)}
                 </span>
-                {showStrike && (
-                  <span className="text-muted line-through text-[18px]" style={{ fontFamily: 'var(--font-display)' }}>
-                    {fmtPrice(combinedMsrp)}
-                  </span>
-                )}
-                {savings > 0 && (
-                  <span
-                    className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-[0.04em]"
-                    style={{
-                      background: 'var(--color-butter)',
-                      border:     '1.2px solid var(--color-ink)',
-                      fontFamily: 'var(--font-body)',
-                    }}
-                  >
-                    save {fmtPrice(savings)} as a pair
-                  </span>
-                )}
-              </div>
-
-              <div className="relative">
-                {toastState && (
-                  <div
-                    key={toastState.nonce}
-                    role="status"
-                    aria-live="polite"
-                    className="float-up-fade absolute bottom-full left-1/2 mb-2 z-10 pointer-events-none whitespace-nowrap"
-                  >
-                    <div
-                      className="inline-flex items-center gap-2 bg-white border border-cream-2 rounded-full shadow-lg px-4 py-2 text-[13px] font-semibold text-ink"
-                      style={{ fontFamily: 'var(--font-display)' }}
-                    >
-                      <span aria-hidden="true" className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
-                      {toastState.message}
-                    </div>
-                  </div>
-                )}
-                <button
-                  type="submit"
-                  form="pair-bundle-form"
-                  disabled={isPending}
-                  className="w-full inline-flex items-center justify-between gap-2.5 px-5 py-3.5 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
+              )}
+              {savings > 0 && (
+                <span
+                  className="bg-ink text-cream relative"
                   style={{
-                    border:     '1.5px solid var(--color-ink)',
-                    boxShadow:  '3px 3px 0 var(--color-ink)',
-                    fontFamily: 'var(--font-body)',
-                    fontWeight: 800,
-                    fontSize:   '14.5px',
+                    padding:       '6px 14px 6px 18px',
+                    borderRadius:  '2px',
+                    fontFamily:    'var(--font-body)',
+                    fontWeight:    800,
+                    fontSize:      '11px',
+                    letterSpacing: '0.12em',
+                    textTransform: 'uppercase',
+                    clipPath:      'polygon(0 0, 100% 0, calc(100% - 10px) 50%, 100% 100%, 0 100%)',
                   }}
                 >
-                  <span>{isPending ? 'Adding…' : 'Buy the bundle ♥'}</span>
-                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '15px' }}>
-                    {fmtPrice(bundlePrice)}
-                  </span>
-                </button>
-              </div>
+                  save{' '}
+                  <strong style={{ color: 'var(--color-butter)', margin: '0 2px' }}>
+                    {fmtPrice(savings)}
+                  </strong>{' '}
+                  as a pair
+                </span>
+              )}
+            </div>
 
-              <p className="text-[11.5px] text-muted text-center" style={{ fontFamily: 'var(--font-body)' }}>
-                Shipping free on this pair · plain packaging · 30-day returns
-              </p>
+            <div className="relative">
+              {toastState && (
+                <div
+                  key={toastState.nonce}
+                  role="status"
+                  aria-live="polite"
+                  className="float-up-fade absolute bottom-full left-1/2 mb-2 z-10 pointer-events-none whitespace-nowrap"
+                >
+                  <div
+                    className="inline-flex items-center gap-2 bg-white border border-cream-2 rounded-full shadow-lg px-4 py-2 text-[13px] font-semibold text-ink"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
+                    <span aria-hidden="true" className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
+                    {toastState.message}
+                  </div>
+                </div>
+              )}
+              <button
+                type="submit"
+                form="pair-bundle-form"
+                disabled={isPending}
+                className="w-full inline-flex items-center justify-center gap-2.5 px-5 py-3.5 rounded-full bg-coral text-cream disabled:opacity-60 disabled:cursor-not-allowed"
+                style={{
+                  border:     '1.5px solid var(--color-ink)',
+                  boxShadow:  '3px 3px 0 var(--color-ink)',
+                  fontFamily: 'var(--font-body)',
+                  fontWeight: 800,
+                  fontSize:   '14.5px',
+                }}
+              >
+                <span>{isPending ? 'Adding…' : 'Buy the bundle ♥'}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -794,18 +713,8 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, t
             className="relative grid grid-cols-[1fr_auto] gap-8 px-10 py-8 items-center"
             style={{
               background:  'linear-gradient(180deg, var(--color-butter) 0%, #FFD76B 100%)',
-              borderTop:   '1.5px solid var(--color-ink)',
             }}
           >
-            <div
-              aria-hidden="true"
-              className="absolute left-5 right-5 h-1"
-              style={{
-                top: '-2px',
-                background: 'repeating-linear-gradient(90deg, var(--color-ink) 0 8px, transparent 8px 14px)',
-              }}
-            />
-
             <div className="flex flex-col gap-2">
               <div className="flex items-baseline gap-3.5 flex-wrap">
                 <span
