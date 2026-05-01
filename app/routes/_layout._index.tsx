@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { useLoaderData, useOutletContext } from 'react-router'
+import { Link, useLoaderData, useOutletContext } from 'react-router'
 import {
   getDealByShopifyId, getDealByHandle, getProductsByTag, getBonusDeal,
   getCollectionProducts, getProductsByHandles,
@@ -20,6 +20,7 @@ import { BundleHero }            from '~/components/store/BundleHero'
 import { QuietEndorsementHero }  from '~/components/store/QuietEndorsementHero'
 import { PairBundleHero }        from '~/components/store/PairBundleHero'
 import { PairBundleFullBleedHero } from '~/components/store/PairBundleFullBleedHero'
+import { EndorsementHero }       from '~/components/store/EndorsementHero'
 import { ProductCarousel }       from '~/components/cms/ProductCarousel'
 import { EmmaContextRow }        from '~/components/home/EmmaContextRow'
 import { EmailSubscribe }        from '~/components/store/EmailSubscribe'
@@ -73,25 +74,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ])
 
   const homepageSettings = {
-    template: (templateRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed',
+    template: (templateRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed' | 'endorsement',
     showFreeShipping: (templateRows.find(r => r.key === 'homepage_show_free_shipping')?.value ?? 'true') === 'true',
     pairProductHandle: (templateRows.find(r => r.key === 'homepage_pair_product_handle')?.value ?? '').trim(),
     pairDiscountPct: parseInt(templateRows.find(r => r.key === 'homepage_pair_discount_pct')?.value ?? '0', 10) || 0,
   }
 
-  // Resolve pair deal only when a pair_bundle template is active
+  // Resolve pair deal only when a pair_bundle template is active.
   const pairBundleDeal = (homepageSettings.template === 'pair_bundle' || homepageSettings.template === 'pair_bundle_fullbleed') && homepageSettings.pairProductHandle
     ? await getDealByHandle(homepageSettings.pairProductHandle)
     : null
 
-  // For the FullBleed pair template, fetch swatch hexes for both products'
-  // color options so the inline CircleOptionSelector matches the PDP look.
+  // For the FullBleed pair / endorsement templates, fetch swatch hexes so
+  // the inline CircleOptionSelector matches the PDP look. FullBleed pulls
+  // both primary + partner; endorsement is single-product.
   const pairColorLabels = homepageSettings.template === 'pair_bundle_fullbleed' && deal && pairBundleDeal
     ? [
         ...((deal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
         ...((pairBundleDeal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
       ]
-    : []
+    : homepageSettings.template === 'endorsement' && deal
+      ? (deal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)
+      : []
   const pairSwatches: Record<string, string> = pairColorLabels.length > 0
     ? await getSwatchMap(pairColorLabels)
     : {}
@@ -275,10 +279,12 @@ export default function Homepage() {
   const cmsSections = cmsData?.sections ?? []
   // announcementBar is handled in _layout.tsx — exclude it here
   const allContentBlocks = cmsSections.filter(s => s._type !== 'announcementBar')
-  // For the pair_bundle_fullbleed template, lift the first trust bar out of
-  // the regular content stream so it can render directly below the price strip.
+  // For the pair_bundle_fullbleed and endorsement templates, lift the first
+  // trust bar out of the regular content stream so it can render directly
+  // below the price strip inside the hero.
   const isFullBleedPair = !!(deal && homepageSettings.template === 'pair_bundle_fullbleed' && pairBundleDeal && deal.pairBundleCopy)
-  const liftedTrustBar  = isFullBleedPair
+  const isEndorsement   = !!(deal && homepageSettings.template === 'endorsement' && deal.endorsementCopy)
+  const liftedTrustBar  = (isFullBleedPair || isEndorsement)
     ? (allContentBlocks.find((b): b is TrustBarBlockType => b._type === 'trustBar') ?? null)
     : null
   const contentBlocks = liftedTrustBar
@@ -335,6 +341,55 @@ export default function Homepage() {
             trustBar={liftedTrustBar ? <TrustBarBlock block={liftedTrustBar} frameless /> : null}
             swatches={pairSwatches ?? {}}
           />
+          <ProductStructuredData deal={deal} />
+        </>
+      ) : deal && homepageSettings.template === 'endorsement' && deal.endorsementCopy ? (
+        <>
+          <EndorsementHero
+            deal={deal}
+            copy={deal.endorsementCopy}
+            showFreeShipping={homepageSettings.showFreeShipping}
+            swatches={pairSwatches ?? {}}
+          />
+          {/* Emma contextual rails — sit between the hero and the trust bar.
+              Each rail links to its configured collection; empty / unconfigured
+              rails are skipped so half-edited drafts don't render dead links.
+              The first rail is positioned as "Staff Picks" and the second as
+              "Try something new" — admin-editable rail titles still render
+              as the curated headline beneath. */}
+          {deal.endorsementCopy.rails && deal.endorsementCopy.rails.filter(r => r.collectionHandle && r.title).length > 0 && (
+            <section className="bg-cream">
+              <div className="max-w-6xl mx-auto px-4 pt-3 pb-3 grid gap-3 md:grid-cols-2">
+                {deal.endorsementCopy.rails
+                  .filter(r => r.collectionHandle && r.title)
+                  .slice(0, 2)
+                  .map((rail, i) => (
+                    <Link
+                      key={rail.collectionHandle}
+                      to={`/collections/${rail.collectionHandle}`}
+                      className="group block rounded-[var(--radius-lg)] border border-line bg-paper px-5 py-4 hover:bg-cream-2 transition-colors"
+                    >
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-coral font-bold" style={{ fontFamily: 'var(--font-display)' }}>
+                        {i === 0 ? 'Staff Picks' : 'Try something new'}
+                      </p>
+                      <p className="mt-1 text-base md:text-lg italic text-ink group-hover:text-coral transition-colors" style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}>
+                        {rail.title} <span aria-hidden="true">→</span>
+                      </p>
+                    </Link>
+                  ))}
+              </div>
+            </section>
+          )}
+          {/* Trust bar — anchors the foot of the endorsement section, below
+              the rails. Lifted out of the regular content stream upstream so
+              it only renders here for the endorsement template. */}
+          {liftedTrustBar && (
+            <div className="bg-cream">
+              <div className="max-w-6xl mx-auto px-4 pt-3 pb-10 md:pb-14">
+                <TrustBarBlock block={liftedTrustBar} frameless />
+              </div>
+            </div>
+          )}
           <ProductStructuredData deal={deal} />
         </>
       ) : deal && homepageSettings.template === 'quiet_endorsement' && deal.quietEndorsementCopy ? (

@@ -174,7 +174,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const homepageSettings = {
-    template: (templateSettingRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed',
+    template: (templateSettingRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed' | 'endorsement',
     showFreeShipping: (templateSettingRows.find(r => r.key === 'homepage_show_free_shipping')?.value ?? 'true') === 'true',
     pairProductHandle: pairHandle,
     pairDiscountPct,
@@ -984,7 +984,7 @@ function ReadinessChecklist({ deal }: {
 // ─── Homepage Template Toggle ───────────────────────────────────────────
 
 type HomepageSettings = {
-  template:          'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed'
+  template:          'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed' | 'endorsement'
   showFreeShipping:  boolean
   pairProductHandle: string
   pairDiscountPct:   number
@@ -1020,7 +1020,9 @@ function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
       ? 'Pair bundle'
       : settings.template === 'pair_bundle_fullbleed'
         ? 'Pair bundle · Full Bleed'
-        : 'Default'
+        : settings.template === 'endorsement'
+          ? 'Endorsement'
+          : 'Default'
 
   return (
     <div ref={ref} className="relative shrink-0">
@@ -1053,6 +1055,7 @@ function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
               <option value="quiet_endorsement">Quiet endorsement</option>
               <option value="pair_bundle">Pair bundle</option>
               <option value="pair_bundle_fullbleed">Pair bundle · Full Bleed</option>
+              <option value="endorsement">Endorsement</option>
             </select>
           </div>
           <label className="flex items-center gap-2 text-sm text-ink cursor-pointer">
@@ -1379,6 +1382,213 @@ function PairBundlePanel({ deal, pairSettings }: {
       {!copy && (
         <p className="text-xs text-ink/40 italic">
           No copy yet — generate above, then save to make it visible on the pair-bundle homepage.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── Endorsement Editor Panel (single-product editorial template) ──────
+
+function EndorsementPanel({ deal }: {
+  deal: NonNullable<Awaited<ReturnType<typeof getDealByShopifyId>>>
+}) {
+  const genFetcher  = useFetcher<{ result?: { type: string; content: import('~/types').EndorsementCopy }; error?: string }>()
+  const saveFetcher = useFetcher<{ ok: boolean }>()
+
+  const initial = deal.endorsementCopy ?? null
+  const [copy, setCopy] = useState<import('~/types').EndorsementCopy | null>(initial)
+
+  const generated = genFetcher.data?.result?.content
+  useEffect(() => {
+    if (generated) setCopy(generated)
+  }, [generated])
+
+  const generating = genFetcher.state !== 'idle'
+  const saving     = saveFetcher.state !== 'idle'
+  const saved      = saveFetcher.state === 'idle' && saveFetcher.data?.ok === true
+
+  const handleGenerate = () => {
+    const fd = new FormData()
+    fd.set('type', 'endorsement')
+    fd.set('product', JSON.stringify({
+      title:         deal.seoTitle ?? deal.sku,
+      brand:         deal.brand,
+      description:   deal.fullStory ?? deal.metaDescription ?? '',
+      categories:    deal.category,
+      dealPrice:     deal.dealPrice,
+      msrp:          deal.msrp,
+      mapRestricted: (deal as { mapRestricted?: boolean }).mapRestricted ?? false,
+    }))
+    genFetcher.submit(fd, { method: 'post', action: '/api/generate-copy' })
+  }
+
+  const handleSave = () => {
+    if (!copy) return
+    const toSave: import('~/types').EndorsementCopy = {
+      ...copy,
+      generatedAt: copy.generatedAt || new Date().toISOString(),
+    }
+    const fd = new FormData()
+    fd.set('intent',    'save-field')
+    fd.set('productId', deal.shopifyProductId)
+    fd.set('key',       'endorsement_copy')
+    fd.set('type',      'json')
+    fd.set('value',     JSON.stringify(toSave))
+    saveFetcher.submit(fd, { method: 'post' })
+  }
+
+  // Inline edits — keep it minimal: just the copy fields the admin will tweak
+  const updateField = <K extends keyof import('~/types').EndorsementCopy>(key: K, value: import('~/types').EndorsementCopy[K]) => {
+    setCopy(prev => prev ? { ...prev, [key]: value } : prev)
+  }
+
+  return (
+    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+          Endorsement copy
+        </h3>
+        <span className="text-[11px] text-ink/40">single-product homepage template</span>
+      </div>
+
+      <p className="text-xs text-ink/60">
+        Single-product editorial card for the homepage. Generate Emma&rsquo;s 3-line quote, then set the &ldquo;I&rsquo;m also into&rdquo; collection so the secondary CTA links somewhere useful.
+      </p>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={generating}
+          className={
+            generating
+              ? 'flex-1 py-2 rounded-xl text-xs font-semibold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : 'flex-1 py-2 rounded-xl text-xs font-semibold bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
+          }
+        >
+          {generating ? 'Generating…' : '♥ Generate endorsement copy'}
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!copy || saving}
+          className={
+            !copy || saving
+              ? 'px-4 py-2 rounded-xl text-xs font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
+              : saved
+                ? 'px-4 py-2 rounded-xl text-xs font-bold bg-green-100 text-green-700'
+                : 'px-4 py-2 rounded-xl text-xs font-bold bg-coral text-white hover:opacity-90 transition-opacity'
+          }
+        >
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Use this ♥'}
+        </button>
+      </div>
+
+      {genFetcher.data?.error && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          ⚠ {genFetcher.data.error}
+        </p>
+      )}
+
+      {copy && (
+        <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-3 space-y-3">
+          <div>
+            <label className="block uppercase tracking-wide text-ink/50 font-semibold mb-1">Note label</label>
+            <input
+              type="text"
+              value={copy.noteLabel ?? ''}
+              onChange={e => updateField('noteLabel', e.target.value)}
+              className="w-full px-2 py-1.5 text-xs border border-cream-2 rounded-lg bg-white text-ink"
+              placeholder="quiet endorsement · works for MAP-restricted"
+            />
+          </div>
+
+          <div>
+            <label className="block uppercase tracking-wide text-ink/50 font-semibold mb-1">Emma intro</label>
+            <input
+              type="text"
+              value={copy.emmaIntro}
+              onChange={e => updateField('emmaIntro', e.target.value)}
+              className="w-full px-2 py-1.5 text-xs border border-cream-2 rounded-lg bg-white text-ink italic"
+              placeholder="updated whenever I change my mind"
+            />
+          </div>
+
+          <div>
+            <label className="block uppercase tracking-wide text-ink/50 font-semibold mb-1">
+              Quote (3 lines, wrap _phrase_ for coral highlight)
+            </label>
+            <textarea
+              value={copy.quote}
+              onChange={e => updateField('quote', e.target.value)}
+              rows={4}
+              className="w-full px-2 py-1.5 text-xs border border-cream-2 rounded-lg bg-white text-ink"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block uppercase tracking-wide text-ink/50 font-semibold mb-1">&ldquo;I&rsquo;m also into&rdquo; label</label>
+              <input
+                type="text"
+                value={copy.alsoIntoLabel ?? ''}
+                onChange={e => updateField('alsoIntoLabel', e.target.value)}
+                className="w-full px-2 py-1.5 text-xs border border-cream-2 rounded-lg bg-white text-ink"
+                placeholder="I'm also into"
+              />
+            </div>
+            <div>
+              <label className="block uppercase tracking-wide text-ink/50 font-semibold mb-1">Linked collection handle</label>
+              <input
+                type="text"
+                value={copy.alsoIntoCollectionHandle ?? ''}
+                onChange={e => updateField('alsoIntoCollectionHandle', e.target.value)}
+                className="w-full px-2 py-1.5 text-xs border border-cream-2 rounded-lg bg-white text-ink"
+                placeholder="all-vibrators"
+              />
+            </div>
+          </div>
+
+          {copy.rails && copy.rails.length > 0 && (
+            <div>
+              <label className="block uppercase tracking-wide text-ink/50 font-semibold mb-1">Suggested rails (below the hero)</label>
+              <ul className="space-y-1">
+                {copy.rails.map((rail, i) => (
+                  <li key={i} className="grid grid-cols-[1fr_1fr] gap-2">
+                    <input
+                      type="text"
+                      value={rail.title}
+                      onChange={e => {
+                        const next = [...(copy.rails ?? [])]
+                        next[i] = { ...rail, title: e.target.value }
+                        updateField('rails', next)
+                      }}
+                      className="px-2 py-1 text-[11px] border border-cream-2 rounded-md bg-white"
+                      placeholder="Rail title"
+                    />
+                    <input
+                      type="text"
+                      value={rail.collectionHandle ?? ''}
+                      onChange={e => {
+                        const next = [...(copy.rails ?? [])]
+                        next[i] = { ...rail, collectionHandle: e.target.value }
+                        updateField('rails', next)
+                      }}
+                      className="px-2 py-1 text-[11px] border border-cream-2 rounded-md bg-white"
+                      placeholder="collection handle"
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!copy && (
+        <p className="text-xs text-ink/40 italic">
+          No copy yet — generate above, then save to make it visible on the endorsement homepage.
         </p>
       )}
     </div>
@@ -2174,7 +2384,9 @@ export default function AdminDealsPage() {
         onBumpToBottom={handleBumpToBottom}
       />
 
-      {/* Pair Slot Card — shown when either pair_bundle template is active */}
+      {/* Pair Slot Card — shown when either pair_bundle template is active.
+          The endorsement template is single-product and doesn't use a
+          partner slot. */}
       {(homepageSettings.template === 'pair_bundle' || homepageSettings.template === 'pair_bundle_fullbleed') && (
         <PairSlotCard
           pairProduct={homepageSettings.pairProduct}
@@ -2567,6 +2779,9 @@ export default function AdminDealsPage() {
                     deal={editorData.deal}
                     pairSettings={{ handle: homepageSettings.pairProductHandle, product: homepageSettings.pairProduct }}
                   />
+
+                  {/* Endorsement copy (single-product editorial template) */}
+                  <EndorsementPanel deal={editorData.deal} />
 
                   {/* Emma-curated rails (agent-generated cross-sell) */}
                   <RailGenerationPanel
