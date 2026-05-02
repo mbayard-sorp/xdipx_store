@@ -805,6 +805,10 @@ function nodeToVaultDeal(node) {
   const audienceTags = parseMetafieldJSON(mf, "audience_tags", []);
   const mattersTags = parseMetafieldJSON(mf, "matters_tags", []);
   const heroVideo = parseMetafieldJSON(mf, "hero_video", {});
+  const colorOpt = (node.options ?? []).find((o) => /^colou?r$/i.test(o.name));
+  const sizeOpt = (node.options ?? []).find((o) => /^size$/i.test(o.name));
+  const colorValues = colorOpt && colorOpt.values.length > 1 ? colorOpt.values : void 0;
+  const sizeValues = sizeOpt && sizeOpt.values.length > 1 ? sizeOpt.values : void 0;
   return {
     id: node.id,
     handle: node.handle,
@@ -819,6 +823,8 @@ function nodeToVaultDeal(node) {
     qty: variant?.quantityAvailable ?? 0,
     defaultVariantId: variant?.id ?? null,
     hasMultipleVariants: variantEdges.length > 1,
+    ...colorValues ? { colorValues } : {},
+    ...sizeValues ? { sizeValues } : {},
     ...moodTags.length > 0 ? { moodTags } : {},
     ...audienceTags.length > 0 ? { audienceTags } : {},
     ...mattersTags.length > 0 ? { mattersTags } : {},
@@ -1017,6 +1023,7 @@ function nodeToDeal(node) {
   const emmaHero = parseMetafieldJSON(mf, "emma_hero", {});
   const quietEndorsementCopy = parseMetafieldJSON(mf, "quiet_endorsement_copy", {});
   const pairBundleCopy = parseMetafieldJSON(mf, "pair_bundle_copy", {});
+  const endorsementCopy = parseMetafieldJSON(mf, "endorsement_copy", {});
   const sellingPlanGroups = parseSellingPlanGroups(node.sellingPlanGroups);
   return {
     id: node.id,
@@ -1079,7 +1086,8 @@ function nodeToDeal(node) {
     ...pairingWhy && Object.keys(pairingWhy).length > 0 ? { pairingWhy } : {},
     ...emmaHero?.headline && emmaHero?.variant ? { emmaHero } : {},
     ...quietEndorsementCopy?.eyebrow && quietEndorsementCopy?.body && quietEndorsementCopy?.bannerHeadline ? { quietEndorsementCopy } : {},
-    ...pairBundleCopy?.headline && pairBundleCopy?.body && pairBundleCopy?.pairedHandle ? { pairBundleCopy } : {},
+    ...pairBundleCopy?.headline && pairBundleCopy?.pairedHandle ? { pairBundleCopy } : {},
+    ...endorsementCopy?.quote && endorsementCopy?.emmaIntro ? { endorsementCopy } : {},
     ...sellingPlanGroups && sellingPlanGroups.length > 0 ? { sellingPlanGroups } : {},
     ...node.collections?.edges?.length ? { collections: node.collections.edges.map((e) => ({ handle: e.node.handle, title: e.node.title })) } : {},
     ...node.createdAt ? { createdAt: node.createdAt } : {},
@@ -1199,7 +1207,9 @@ async function getDealByShopifyId(numericId) {
   const quietEndorsementCopyRaw = mfJSON("quiet_endorsement_copy", {});
   const quietEndorsementCopy = quietEndorsementCopyRaw?.eyebrow && quietEndorsementCopyRaw?.body && quietEndorsementCopyRaw?.bannerHeadline ? quietEndorsementCopyRaw : null;
   const pairBundleCopyRaw = mfJSON("pair_bundle_copy", {});
-  const pairBundleCopy = pairBundleCopyRaw?.headline && pairBundleCopyRaw?.body && pairBundleCopyRaw?.pairedHandle ? pairBundleCopyRaw : null;
+  const pairBundleCopy = pairBundleCopyRaw?.headline && pairBundleCopyRaw?.pairedHandle ? pairBundleCopyRaw : null;
+  const endorsementCopyRaw = mfJSON("endorsement_copy", {});
+  const endorsementCopy = endorsementCopyRaw?.quote && endorsementCopyRaw?.emmaIntro ? endorsementCopyRaw : null;
   const mapRestricted = mfVal("map_restricted") === "true";
   const productTypeDialAdmin = mfVal("product_type_dial");
   const legacyDialAdmin = mfJSON("sensation_dial", {});
@@ -1244,6 +1254,7 @@ async function getDealByShopifyId(numericId) {
     ...emmaHero ? { emmaHero } : {},
     ...quietEndorsementCopy ? { quietEndorsementCopy } : {},
     ...pairBundleCopy ? { pairBundleCopy } : {},
+    ...endorsementCopy ? { endorsementCopy } : {},
     ...productTypeDialAdmin ? { productTypeDial: productTypeDialAdmin } : {},
     ...Object.keys(legacyDialAdmin).length > 0 ? { sensationDial: legacyDialAdmin } : {},
     ...sensationDialV2Admin ? { sensationDialV2: sensationDialV2Admin } : {},
@@ -3750,6 +3761,7 @@ var init_shopify_server = __esm({
     { namespace: "xdipx", key: "emma_hero" }
     { namespace: "xdipx", key: "quiet_endorsement_copy" }
     { namespace: "xdipx", key: "pair_bundle_copy" }
+    { namespace: "xdipx", key: "endorsement_copy" }
     { namespace: "custom", key: "original_description" }
   ]) {
     namespace key value
@@ -3837,6 +3849,7 @@ var init_shopify_server = __esm({
 `;
     PRODUCT_CARD_FRAGMENT = `
   id handle title vendor tags
+  options { name values }
   images(first: 1) {
     edges { node { url altText } }
   }
@@ -4846,10 +4859,17 @@ async function getRailsByDealId(dealId, opts) {
 async function archiveHomepageRailsForDeal(dealId) {
   const writeClient = getClient(true);
   if (!writeClient) return { archived: [] };
-  const rails = await getRailsByDealId(dealId, { target: "homepage", status: "live" });
-  if (!rails.length) return { archived: [] };
+  const homepageTargeted = await getRailsByDealId(dealId, { target: "homepage", status: "live" });
+  const allLiveForDeal = await getRailsByDealId(dealId, { status: "live" });
+  const homepageRefIds = await writeClient.fetch(
+    `*[_id == "singleton.homepage"][0].sections[defined(_ref)]._ref`
+  ).catch(() => []);
+  const homepageRefSet = new Set(homepageRefIds);
+  const leaked = allLiveForDeal.filter((r) => homepageRefSet.has(r._id) && !homepageTargeted.find((h) => h._id === r._id));
+  const toArchive = [...homepageTargeted, ...leaked];
+  if (!toArchive.length) return { archived: [] };
   const archived = [];
-  for (const r of rails) {
+  for (const r of toArchive) {
     try {
       await writeClient.patch(r._id).set({ status: "archived", active: false }).commit();
       await removeRailRefFromHomepage(r._id);
@@ -6364,17 +6384,11 @@ ${productContext}`;
       const partner = product.partner;
       const nowISO = () => (/* @__PURE__ */ new Date()).toISOString();
       const staticFallback = () => ({
-        eyebrow: "emma recommends \xB7 a pair",
-        subhead: "better together \xB7 save when you grab both",
         headline: "These two were made for each other.",
-        body: `One sets the mood, the other carries it. It\u2019s the kind of _slow-burn pairing_ that just clicks. Come see.`,
-        bannerLine: "\u2014 Emma \xB7 picked this pair because they click \xB7 swaps it when something better lands",
+        emmaByline: "two picks I think really click together",
         pairedHandle: "",
         generatedAt: nowISO(),
-        primaryTag: "this one",
-        partnerTag: "and this",
         knotCaption: "tied together on purpose",
-        conciergeSalutation: "great to have you",
         whyCards: [
           { head: "One handles the fun part.", body: "The rumble, the tease, the main event. Dialed in and ready to go." },
           { head: "The other handles the smart part.", body: "Keeps everything gliding, safe on toys, easy on skin. No drama, no cleanup headache." },
@@ -6383,7 +6397,7 @@ ${productContext}`;
         emmaQuote: `This is the pair I\u2019d hand a friend who asked \u201Cjust pick something for me.\u201D One does the work, one does the _finish_, and together they feel intentional. That\u2019s the whole point of a good pair.`,
         momentTitle: "how to make this pair click",
         moments: [
-          { lead: "Start with the lube.", body: "A little goes a long way \u2014 warm it in your hands first so it lands smooth instead of startling." },
+          { lead: "Start with the lube.", body: "A little goes a long way. Warm it in your hands first so it lands smooth instead of startling." },
           { lead: "Then bring in the other.", body: "Let the rhythm build before you ramp up. The pair wants you unhurried." }
         ]
       });
@@ -6392,8 +6406,7 @@ ${productContext}`;
           type,
           content: {
             ...staticFallback(),
-            body: `Set a pair in the toolbar first \u2014 I\u2019ll write this once I can see both.`,
-            bannerLine: "\u2014 Emma \xB7 waiting on a pairing"
+            emmaByline: "waiting on a pairing"
           }
         };
       }
@@ -6412,24 +6425,19 @@ Partner product:
 - Deal price: $${partner.dealPrice}` : ""}`;
       const voiceRules = `VOICE RULES (strict):
 - Emma is a persona \u2014 she does NOT claim to have personally used or tested any product.
-- NEVER say: "I tried", "I tested", "I've been using", "been living with", "spent X weeks", "I reached for this", "since April", "a month of use", or any similar first-person use claim.
+- NEVER say: "I tried", "I tested", "I've been using", "tested both", "loved both", "been living with", "spent X weeks", "I reached for this", "since April", "a month of use", or any similar first-person use claim.
 - NEVER invent usage stats ("238 pairs grabbed", "top 5%", "my #1").
 - Emma curates, pairs, and recommends \u2014 she speaks about why things WOULD click, not what she felt.
 - OK to say: "picks this pair", "I\u2019d hand this to a friend", "why they click", "made for each other", "the slow one", "the fix-it one", "a pairing that works".
 - Do NOT name the brands. Do NOT restate the product titles. Do NOT surface countdowns or "until midnight".
-- Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction" \u2014 never "sex" as an adjective.`;
+- Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction" \u2014 never "sex" as an adjective.
+- Avoid em-dashes (\u2014). Use periods, commas, or short sentences. Hyphens in compounds (slow-burn) are fine.`;
       const shapeSpec = `Return ONLY a raw JSON object (no markdown fences, no prose around it) with EXACTLY these keys:
 
 {
-  "eyebrow":     string  // \u2264 60 chars, two short phrases joined by " \xB7 " (middle dot U+00B7). e.g. "emma recommends \xB7 a powerful pair"
-  "subhead":     string  // \u2264 70 chars, lowercase, casual. e.g. "better together \xB7 save when you grab both"
-  "headline":    string  // 6\u201310 words, editorial italic feel, the hook. e.g. "These two were made for each other."
-  "body":        string  // 25\u201345 words, 2 sentences. Wrap ONE 1\u20134 word phrase in underscores like _slow-burn energy_. Describe both products' ROLES (one does X, the other does Y). End with a soft curiosity nudge.
-  "bannerLine":  string  // one short italic Emma sign-off, no testimony. e.g. "\u2014 Emma \xB7 picks this pair for slow-burn nights \xB7 swaps it when something better lands"
-  "primaryTag":  string  // 2\u20133 lowercase words, curator voice, describes the primary's ROLE. e.g. "the buzz one" or "the slow one"
-  "partnerTag":  string  // 2\u20133 lowercase words, curator voice, describes the partner's ROLE. e.g. "the glide one" or "the fix-it one"
+  "headline":    string  // 6\u201310 words, editorial italic feel, the hero hook. e.g. "These two were made for each other."
+  "emmaByline":  string  // 6\u201312 words, lowercase, curator voice. Renders next to Emma's avatar AFTER the bold "Picked by Emma." label, so it reads as a continuation of that phrase. NEVER "tested both", "loved both", "I tried", or any first-person use claim. e.g. "two picks I think really click together" or "a slow-burn pairing worth the time"
   "knotCaption": string  // 3\u20136 words, short label for why they're tied together. e.g. "tied together on purpose" or "one better idea"
-  "conciergeSalutation": string  // 2\u20135 lowercase words, warm Emma-voice greeting shown next to her avatar after "Hello, I'm Emma your shop concierge." e.g. "great to meet you" or "happy you stopped by". No exclamation marks, no first-person product claims.
   "whyCards": [          // EXACTLY 3 entries explaining why the pairing works
     { "head": string,    // 5\u20139 words ending in a period. Short editorial hook. e.g. "One handles the fun part."
       "body": string }   // 15\u201325 words, no testimony, factual + evocative
@@ -6450,7 +6458,7 @@ ${voiceRules}
 ${shapeSpec}
 
 ${pairContext}`;
-      const retryPrompt = `Return ONLY raw JSON matching this exact shape: {"eyebrow","subhead","headline","body","bannerLine","primaryTag","partnerTag","knotCaption","conciergeSalutation","whyCards":[{"head","body"},{"head","body"},{"head","body"}],"emmaQuote","momentTitle","moments":[{"lead","body"},{"lead","body"}]}.
+      const retryPrompt = `Return ONLY raw JSON matching this exact shape: {"headline","emmaByline","knotCaption","whyCards":[{"head","body"},{"head","body"},{"head","body"}],"emmaQuote","momentTitle","moments":[{"lead","body"},{"lead","body"}]}.
 
 ${voiceRules}
 
@@ -6461,7 +6469,7 @@ ${pairContext}`;
       const isValid = (v) => {
         if (!v || typeof v !== "object") return false;
         const o = v;
-        return isStr(o.eyebrow) && isStr(o.subhead) && isStr(o.headline) && isStr(o.body) && isStr(o.bannerLine) && isStr(o.primaryTag) && isStr(o.partnerTag) && isStr(o.knotCaption) && isStr(o.emmaQuote) && isStr(o.momentTitle) && Array.isArray(o.whyCards) && o.whyCards.length === 3 && o.whyCards.every(isCard) && Array.isArray(o.moments) && (o.moments.length === 2 || o.moments.length === 3) && o.moments.every(isMoment);
+        return isStr(o.headline) && isStr(o.emmaByline) && isStr(o.knotCaption) && isStr(o.emmaQuote) && isStr(o.momentTitle) && Array.isArray(o.whyCards) && o.whyCards.length === 3 && o.whyCards.every(isCard) && Array.isArray(o.moments) && (o.moments.length === 2 || o.moments.length === 3) && o.moments.every(isMoment);
       };
       const wrap = (copy) => ({
         ...copy,
@@ -6475,6 +6483,111 @@ ${pairContext}`;
       } catch {
       }
       const retried = await generate(retryPrompt, 1800, MODEL_FAST, llmClient);
+      try {
+        const parsed = JSON.parse(stripFences(retried));
+        if (isValid(parsed)) return { type, content: wrap(parsed) };
+      } catch {
+      }
+      return { type, content: staticFallback() };
+    }
+    case "endorsement": {
+      const nowISO = () => (/* @__PURE__ */ new Date()).toISOString();
+      const collections = req.availableCollections ?? [];
+      const validHandles = new Set(collections.map((c) => c.handle));
+      const staticFallback = () => ({
+        emmaIntro: "updated whenever I change my mind",
+        quote: `I\u2019ve been a little obsessed with this one.
+It\u2019s got a kind of _slow-burn energy_ I wasn\u2019t expecting.
+Come see.`,
+        alsoIntoLabel: "I'm also into",
+        alsoIntoCollectionHandle: "",
+        noteLabel: product.mapRestricted ? "quiet endorsement \xB7 works for MAP-restricted" : "quiet endorsement \xB7 editor\u2019s pick",
+        rails: [
+          { title: "If you liked this, try", collectionHandle: "" },
+          { title: "Pair it with", collectionHandle: "" }
+        ],
+        generatedAt: nowISO()
+      });
+      const productContext2 = `Product:
+- Title: ${product.title}
+- Brand: ${product.brand}
+- Description: ${product.description}
+- Categories: ${product.categories.join(", ")}${product.dealPrice ? `
+- Deal price: $${product.dealPrice}` : ""}${product.mapRestricted ? `
+- MAP-restricted: yes` : ""}${product.moodTags?.length ? `
+- Mood tags: ${product.moodTags.join(", ")}` : ""}${product.audienceTags?.length ? `
+- Audience tags: ${product.audienceTags.join(", ")}` : ""}${product.mattersTags?.length ? `
+- Matters tags: ${product.mattersTags.join(", ")}` : ""}`;
+      const collectionRoster = collections.length ? `AVAILABLE COLLECTIONS \u2014 pick handles ONLY from this list. Each line is "<handle> \xB7 <title>[ \xB7 <description>]":
+${collections.map((c) => `- ${c.handle} \xB7 ${c.title}${c.description ? ` \xB7 ${c.description}` : ""}`).join("\n")}` : `AVAILABLE COLLECTIONS \u2014 none provided; leave all collection handles as empty strings.`;
+      const voiceRules = `VOICE RULES (strict):
+- Emma is a persona \u2014 she does NOT claim to have personally used or tested any product.
+- NEVER say: "I tried", "I tested", "I've been using", "been living with", "spent X weeks", "I reached for this", "since April", "a month of use", or any similar first-person use claim.
+- NEVER invent usage stats ("238 grabbed", "top 5%", "my #1").
+- Emma curates and recommends \u2014 she speaks about why something WOULD click, not what she felt physically.
+- OK to say: "I'm a little obsessed", "this one's for the ___ crowd", "comes recommended", "I'd hand this to a friend who said pick something for me".
+- Do NOT name the brand. Do NOT restate the product title. Do NOT surface countdowns or "until midnight".
+- Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction" \u2014 never "sex" as an adjective.
+- Avoid em-dashes (\u2014). Use periods, commas, or short sentences instead. Hyphens in compound words (slow-burn) are fine.`;
+      const shapeSpec = `Return ONLY a raw JSON object (no markdown fences, no prose around it) with EXACTLY these keys:
+
+{
+  "emmaIntro": string         // \u2264 60 chars, lowercase, casual. Emma's "what she's about right now" tagline shown next to her avatar. e.g. "updated whenever I change my mind" or "still on a slow-burn kick"
+  "quote":     string         // 3 lines, separated by real newline characters (\\n). Each line \u2264 70 chars. First-person editorial voice, NOT a usage testimonial. Wrap exactly ONE 1\u20134 word phrase in underscores like _slow-burn energy_ for coral highlight. End on a soft curiosity nudge.
+  "alsoIntoLabel":  string    // 2\u20134 words, label for the secondary CTA. Default "I'm also into". Stay in Emma's lowercase, friend-voice register.
+  "alsoIntoCollectionHandle": string  // EXACT handle from AVAILABLE COLLECTIONS that fits an "if you liked this, also try" angle \u2014 different from both rails. Use "" only if no listed collection fits.
+  "noteLabel": string         // \u2264 50 chars, sticky-note label shown above the avatar. Two short phrases joined by " \xB7 " (middle dot U+00B7). e.g. "quiet endorsement \xB7 works for MAP-restricted"
+  "rails": [                  // EXACTLY 2 entries \u2014 contextual rail suggestions for below the hero.
+    { "title": string,        // 2\u20135 words, Emma-voice rail heading. e.g. "Slow-burn picks", "If you liked this, try"
+      "collectionHandle": string }  // EXACT handle from AVAILABLE COLLECTIONS that matches the rail's angle. "" only if nothing fits.
+  ]
+}
+
+Rules:
+- The quote is the centerpiece \u2014 make those 3 lines feel earned, like she means them.
+- The two rails should be DIFFERENT angles. Rail 1 = "more like this" (similar product type / sensation / category). Rail 2 = "pair it with" (complementary \u2014 the thing that makes this one shine).
+- "alsoIntoCollectionHandle" should be a THIRD distinct angle from the rails \u2014 adjacent crowd, mood, or use case Emma's also into.
+- Collection handles MUST come verbatim from the AVAILABLE COLLECTIONS list. Do NOT invent handles. If nothing in the list fits, use "" and the admin will fill it in.
+- The three picks (alsoInto + 2 rails) should be three DIFFERENT handles when possible.
+- Output strictly the JSON object \u2014 no preamble, no fences, no commentary.`;
+      const isValid = (v) => {
+        const o = v;
+        if (!o || typeof o !== "object") return false;
+        if (typeof o.emmaIntro !== "string" || !o.emmaIntro.trim()) return false;
+        if (typeof o.quote !== "string" || !o.quote.trim()) return false;
+        return true;
+      };
+      const cleanHandle = (h) => {
+        if (!h) return "";
+        if (validHandles.size === 0) return "";
+        return validHandles.has(h) ? h : "";
+      };
+      const wrap = (raw) => ({
+        ...raw,
+        alsoIntoLabel: raw.alsoIntoLabel || "I'm also into",
+        alsoIntoCollectionHandle: cleanHandle(raw.alsoIntoCollectionHandle),
+        rails: (raw.rails || []).map((r) => ({
+          ...r,
+          collectionHandle: cleanHandle(r.collectionHandle)
+        })),
+        generatedAt: nowISO()
+      });
+      const prompt = `${voiceRules}
+
+${productContext2}
+
+${collectionRoster}
+
+${shapeSpec}`;
+      const text2 = await generate(prompt, 1024, MODEL_FAST, llmClient);
+      try {
+        const parsed = JSON.parse(stripFences(text2));
+        if (isValid(parsed)) return { type, content: wrap(parsed) };
+      } catch {
+      }
+      const retried = await generate(`${prompt}
+
+The previous response wasn't valid JSON or was missing required keys. Output ONLY the JSON object, no fences, no prose.`, 1024, MODEL_FAST, llmClient);
       try {
         const parsed = JSON.parse(stripFences(retried));
         if (isValid(parsed)) return { type, content: wrap(parsed) };
