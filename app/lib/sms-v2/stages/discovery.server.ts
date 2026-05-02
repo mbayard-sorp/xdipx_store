@@ -165,13 +165,19 @@ async function runNameItemPath(
   intent: IntentResult,
   customerText: string,
 ): Promise<StageResponse | null> {
-  // Search for a matching product handle
+  // Search for a matching product handle. Prefer the extracted slot (just the
+  // category noun like "plug") over the full customer text — passing the
+  // whole sentence dilutes the signal and search returns wrong products
+  // (e.g., "I'm looking for a plug for my boyfriend" returned a cock ring
+  // because the search was matching "boyfriend" / "looking" noise instead
+  // of the actual category).
+  const searchQuery = intent.slots?.['item'] ?? customerText
   let candidates: Awaited<ReturnType<typeof searchForIvr>> = []
   let toolCallOk = true
   let toolError: string | undefined
 
   try {
-    candidates = await searchForIvr({ query: customerText, limit: 1 })
+    candidates = await searchForIvr({ query: searchQuery, limit: 1 })
   } catch (err) {
     toolCallOk = false
     toolError = err instanceof Error ? err.message : String(err)
@@ -192,7 +198,7 @@ async function runNameItemPath(
   // "show me a wand" once and gets the actual MMS pitch in one reply.
   const searchToolCall = {
     name: 'searchForIvr',
-    input: { query: customerText, limit: 1 },
+    input: { query: searchQuery, limit: 1 },
     ok: toolCallOk,
     ...(toolError ? { error: toolError } : {}),
   } as const
