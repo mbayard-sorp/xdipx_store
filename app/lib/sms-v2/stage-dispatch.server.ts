@@ -110,6 +110,51 @@ export function dispatchStage(
 // ---------------------------------------------------------------------------
 
 /**
+ * Strip Markdown formatting from prose so it renders cleanly in SMS clients
+ * (which don't parse Markdown — customers see literal asterisks otherwise).
+ *
+ * Specifically:
+ *   - **bold** / __bold__ → bold (drop the marker pair)
+ *   - *italic* / _italic_ → italic (drop the marker pair, only when wrapping word chars)
+ *   - [text](url) → url (preserve the link, drop the link-text since it's
+ *     usually redundant or truncated on SMS — the URL is what matters)
+ *   - `inline code` → inline code (drop backticks)
+ *   - ```code blocks``` → contents (drop the fences)
+ *   - Heading prefixes (#, ##, etc.) → strip (rare in our output but cheap to handle)
+ *   - Collapses 3+ consecutive blank lines to 2
+ *
+ * Pure text in / pure text out. Idempotent.
+ */
+function stripMarkdownForSms(prose: string): string {
+  let out = prose
+
+  // Code fences first (so we don't process their contents as bold/italic).
+  out = out.replace(/```(?:\w+)?\s*([\s\S]*?)```/g, '$1')
+  // Inline code.
+  out = out.replace(/`([^`]+)`/g, '$1')
+
+  // Markdown links: [text](url) → url (the URL is the value on SMS).
+  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$2')
+
+  // Bold (** or __) — drop the wrapper pair.
+  out = out.replace(/\*\*([^*]+)\*\*/g, '$1')
+  out = out.replace(/__([^_]+)__/g, '$1')
+
+  // Italic (single * or _) when it wraps word chars. Conservative: require
+  // at least one non-whitespace, non-marker char inside.
+  out = out.replace(/(^|[\s(])\*([^\s*][^*]*?)\*(?=[\s).,!?:;]|$)/g, '$1$2')
+  out = out.replace(/(^|[\s(])_([^\s_][^_]*?)_(?=[\s).,!?:;]|$)/g, '$1$2')
+
+  // Heading prefixes at the start of a line.
+  out = out.replace(/^#{1,6}\s+/gm, '')
+
+  // Collapse triple+ blank lines to double.
+  out = out.replace(/\n{3,}/g, '\n\n')
+
+  return out.trim()
+}
+
+/**
  * Convert a StageResponse to the ProcessSmsResult shape expected by the
  * webhook route and turn-logger.
  *
@@ -137,7 +182,10 @@ export function stageResponseToProcessResult(
   const replies: SmsSegment[] = resp.segments
     .filter((s) => s.prose.trim().length > 0)
     .map((s): SmsSegment => ({
-      body: s.prose,
+      // Strip Markdown — Twilio SMS doesn't render it and customers see
+      // literal asterisks, double-underscores, [text](url) etc. as garbage
+      // characters. Web chat keeps Markdown via its own adapter.
+      body: stripMarkdownForSms(s.prose),
       // Intentionally NO mediaUrl — see header comment. iMessage previews
       // the product URL auto-magically; plain SMS clients see a link.
     }))
