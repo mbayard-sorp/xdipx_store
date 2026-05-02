@@ -1373,10 +1373,22 @@ export async function getRailsByDealId(
 export async function archiveHomepageRailsForDeal(dealId: string): Promise<{ archived: string[] }> {
   const writeClient = getClient(true)
   if (!writeClient) return { archived: [] }
-  const rails = await getRailsByDealId(dealId, { target: 'homepage', status: 'live' })
-  if (!rails.length) return { archived: [] }
+  // Catch BOTH cases: rails correctly targeted to homepage, AND rails for this
+  // deal whose ref ended up in homepage sections regardless of target (a legacy
+  // publish-flow bug could leak PDP rails into homepage sections — defensive
+  // sweep here means rotator cleans up either way).
+  const homepageTargeted = await getRailsByDealId(dealId, { target: 'homepage', status: 'live' })
+  const allLiveForDeal   = await getRailsByDealId(dealId, { status: 'live' })
+  const homepageRefIds   = await writeClient.fetch<string[]>(
+    `*[_id == "singleton.homepage"][0].sections[defined(_ref)]._ref`,
+  ).catch(() => [] as string[])
+  const homepageRefSet   = new Set(homepageRefIds)
+  const leaked = allLiveForDeal.filter(r => homepageRefSet.has(r._id) && !homepageTargeted.find(h => h._id === r._id))
+
+  const toArchive = [...homepageTargeted, ...leaked]
+  if (!toArchive.length) return { archived: [] }
   const archived: string[] = []
-  for (const r of rails) {
+  for (const r of toArchive) {
     try {
       await writeClient.patch(r._id).set({ status: 'archived', active: false }).commit()
       await removeRailRefFromHomepage(r._id)

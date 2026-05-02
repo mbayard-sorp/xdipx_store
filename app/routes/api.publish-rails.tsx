@@ -48,7 +48,11 @@ export async function action({ request }: ActionFunctionArgs) {
   for (const rail of rails) {
     if (rail.skip) continue
     try {
-      // Apply admin edits to the draft first so the published doc has them
+      // Apply admin edits to the draft first so the published doc has them.
+      // `target` is critical here — admins can flip a rail from pdp → homepage
+      // (or vice versa) in the flyout. We must persist that change to the doc
+      // BEFORE routing the ref, otherwise the doc says one thing and the ref
+      // lives in the other surface (the bug we're fixing).
       const patch: Record<string, unknown> = {}
       if (rail.heading        !== undefined) patch.heading        = rail.heading
       if (rail.eyebrow        !== undefined) patch.eyebrow        = rail.eyebrow
@@ -59,6 +63,7 @@ export async function action({ request }: ActionFunctionArgs) {
       if (rail.ctaLabel       !== undefined) patch.ctaLabel       = rail.ctaLabel
       if (rail.ctaLink        !== undefined) patch.ctaLink        = rail.ctaLink
       if (rail.order          !== undefined) patch.order          = rail.order
+      if (rail.target         !== undefined) patch.target         = rail.target
 
       if (Object.keys(patch).length) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,6 +72,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
       const { _id: publishedId } = await publishEmmaRailDraft(rail._id)
 
+      // Route the ref based on the rail's own (now-patched) target — single
+      // source of truth, doc and ref can't drift.
       if (rail.target === 'homepage') {
         await addRailRefToHomepage(publishedId)
       } else {
