@@ -658,7 +658,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     ...(quietEndorsementCopy?.eyebrow && quietEndorsementCopy?.body && quietEndorsementCopy?.bannerHeadline
       ? { quietEndorsementCopy: quietEndorsementCopy as import('~/types').QuietEndorsementCopy }
       : {}),
-    ...(pairBundleCopy?.headline && pairBundleCopy?.body && pairBundleCopy?.pairedHandle
+    ...(pairBundleCopy?.headline && pairBundleCopy?.pairedHandle
       ? { pairBundleCopy: pairBundleCopy as import('~/types').PairBundleCopy }
       : {}),
     ...(endorsementCopy?.quote && endorsementCopy?.emmaIntro
@@ -846,7 +846,7 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     ? (quietEndorsementCopyRaw as import('~/types').QuietEndorsementCopy)
     : null
   const pairBundleCopyRaw = mfJSON<Partial<import('~/types').PairBundleCopy>>('pair_bundle_copy', {})
-  const pairBundleCopy = pairBundleCopyRaw?.headline && pairBundleCopyRaw?.body && pairBundleCopyRaw?.pairedHandle
+  const pairBundleCopy = pairBundleCopyRaw?.headline && pairBundleCopyRaw?.pairedHandle
     ? (pairBundleCopyRaw as import('~/types').PairBundleCopy)
     : null
   const endorsementCopyRaw = mfJSON<Partial<import('~/types').EndorsementCopy>>('endorsement_copy', {})

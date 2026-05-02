@@ -373,7 +373,7 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, t
                   }}
                 >
                   <span className="font-bold text-ink">Picked by Emma.</span>{' '}
-                  Tested both, loved both, this pair just clicks.
+                  {copy.emmaByline ?? 'a pair I think really clicks'}
                 </p>
               </div>
             </div>
@@ -524,7 +524,7 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, t
                 }}
               >
                 <span className="font-bold text-ink">Picked by Emma.</span>{' '}
-                Tested both, loved both, this pair just clicks.
+                {copy.emmaByline ?? 'a pair I think really clicks'}
               </p>
             </div>
           </header>

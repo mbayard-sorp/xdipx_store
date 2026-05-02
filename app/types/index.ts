@@ -202,23 +202,31 @@ export interface EndorsementCopy {
   generatedAt?:             string
 }
 
-/** Pair-bundle homepage template copy (Haiku-generated per primary product). */
+/** Pair-bundle homepage template copy (Haiku-generated per primary product).
+ *  The Pair bundle · Full Bleed template (the only live pair template) renders
+ *  `headline`, `emmaByline`, `knotCaption`, `whyCards`, `emmaQuote`, `momentTitle`,
+ *  and `moments`. The other fields are retained as optional so legacy metafields
+ *  written by the deprecated `pair_bundle` template still parse without error. */
 export interface PairBundleCopy {
-  eyebrow:      string
-  subhead:      string
   headline:     string
-  body:         string
-  bannerLine:   string
+  /** Short Emma-voice continuation of "Picked by Emma." shown next to her avatar
+   *  in the Full Bleed hero. e.g. "two picks I think really click together". */
+  emmaByline?:  string
   pairedHandle: string
   generatedAt:  string
-  primaryTag:   string
-  partnerTag:   string
   knotCaption:  string
   whyCards:     PairBundleCopyWhyCard[]
   emmaQuote:    string
   momentTitle:  string
   moments:      PairBundleCopyMoment[]
-  /** Short Emma-voice greeting shown next to her avatar (e.g. "great to meet you"). */
+  // ── Legacy fields (deprecated `pair_bundle` template — Full Bleed ignores) ──
+  eyebrow?:     string
+  subhead?:     string
+  body?:        string
+  bannerLine?:  string
+  primaryTag?:  string
+  partnerTag?:  string
+  /** @deprecated never rendered; superseded by emmaByline */
   conciergeSalutation?: string
 }
 
@@ -592,6 +600,12 @@ export interface GenerateCopyRequest {
    * keyword bank entirely (e.g. internal admin previews).
    */
   seoMode?: 'aggressive' | 'natural' | 'off'
+  /**
+   * Roster of published Shopify collections — the AI picks from this list
+   * when populating endorsement `alsoIntoCollectionHandle` and `rails[].collectionHandle`
+   * so handles always resolve. Required for `endorsement` to populate handles.
+   */
+  availableCollections?: { handle: string; title: string; description?: string }[]
 }
 
 /** Blog article generation output — Sanity Portable Text body + metadata. */
