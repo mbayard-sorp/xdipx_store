@@ -19,19 +19,19 @@ export interface UpsellTemplateSlots {
 
 const TEMPLATES: ReadonlyArray<(slots: UpsellTemplateSlots) => string> = [
   ({ name, price, pdpUrl }) =>
-    `One quick add before the link: ${name} (${price}). Pairs really well together.\n${pdpUrl}\n\nReply 'yes' to toss it in, or 'checkout' if you're set.`,
+    `One quick add before the link: ${name} (${price}). Pairs really well together.\n${pdpUrl}\n\nSend a 👍 (or 'yes') to toss it in, or 'checkout' if you're set.`,
 
   ({ name, price, pdpUrl }) =>
-    `If you're grabbing this, ${name} is the one I tell everyone about. ${price}.\n${pdpUrl}\n\nWant it in too? Just say 'yes'. Or 'checkout' to skip.`,
+    `If you're grabbing this, ${name} is the one I tell everyone about. ${price}.\n${pdpUrl}\n\nWant it in too? 👍 or 'yes' adds it. 'checkout' to skip.`,
 
   ({ name, price, pdpUrl }) =>
-    `Quick one: ${name} (${price}) goes really nicely with this pick.\n${pdpUrl}\n\nAdd it? Reply 'yes' or 'checkout' to skip ahead.`,
+    `Quick one: ${name} (${price}) goes really nicely with this pick.\n${pdpUrl}\n\nAdd it? Reply 👍 / 'yes', or 'checkout' to skip ahead.`,
 
   ({ name, price, pdpUrl }) =>
-    `Before I send the link, worth a look: ${name} at ${price}.\n${pdpUrl}\n\nI've been recommending this combo a lot. 'yes' to add, 'checkout' to skip.`,
+    `Before I send the link, worth a look: ${name} at ${price}.\n${pdpUrl}\n\nI've been recommending this combo a lot. 👍 or 'yes' to add, 'checkout' to skip.`,
 
   ({ name, price, pdpUrl }) =>
-    `Almost done. ${name} (${price}) rounds this out nicely, been living on my nightstand.\n${pdpUrl}\n\nReply 'yes' to add it, or 'checkout' and I'll send your cart link.`,
+    `Almost done. ${name} (${price}) rounds this out nicely, been living on my nightstand.\n${pdpUrl}\n\nSend 👍 or 'yes' to add it, or 'checkout' and I'll send your cart link.`,
 ]
 
 /**

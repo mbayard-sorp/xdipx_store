@@ -107,12 +107,32 @@ async function testIntentClassifier(): Promise<void> {
     }
   }
 
-  assert(regexHits >= 8, `at least 8/10 messages hit regex (got ${regexHits})`)
+  // 7/10 expected after stage-gating: "yes" in DISCOVERY is no longer a
+  // regex hit (it's stage-gated to GREETING/UPSELL/PRESENTATION). The
+  // stage-aware sub-test below validates that gating works.
+  assert(regexHits >= 7, `at least 7/10 messages hit regex (got ${regexHits})`)
 
   console.log('\n  Classification results:')
   for (const r of results) {
     console.log(`    "${r.text}" → ${r.intent} [${r.source}, conf=${r.confidence.toFixed(2)}]`)
   }
+
+  // Stage-aware sub-test: "yes" must classify differently per stage.
+  console.log('\n  Stage-aware "yes" classification:')
+  const greetingResult = await classifyIntent({ stage: 'GREETING' }, 'yes')
+  const upsellResult = await classifyIntent({ stage: 'UPSELL' }, 'yes')
+  const presentationResult = await classifyIntent({ stage: 'PRESENTATION' }, 'yes')
+  console.log(`    GREETING:     "yes" → ${greetingResult.intent} [${greetingResult.source}]`)
+  console.log(`    UPSELL:       "yes" → ${upsellResult.intent} [${upsellResult.source}]`)
+  console.log(`    PRESENTATION: "yes" → ${presentationResult.intent} [${presentationResult.source}]`)
+  assert(greetingResult.intent === 'AGE_CONFIRM', `"yes" in GREETING → AGE_CONFIRM (got ${greetingResult.intent})`)
+  assert(upsellResult.intent === 'UPSELL_ACCEPT', `"yes" in UPSELL → UPSELL_ACCEPT (got ${upsellResult.intent})`)
+  assert(presentationResult.intent === 'COMMIT_PICK', `"yes" in PRESENTATION → COMMIT_PICK (got ${presentationResult.intent})`)
+
+  // Thumbs-up emoji should also work in UPSELL (per the prompt copy update).
+  const thumbsUpUpsell = await classifyIntent({ stage: 'UPSELL' }, '👍')
+  console.log(`    UPSELL:       "👍" → ${thumbsUpUpsell.intent} [${thumbsUpUpsell.source}]`)
+  assert(thumbsUpUpsell.intent === 'UPSELL_ACCEPT', `"👍" in UPSELL → UPSELL_ACCEPT (got ${thumbsUpUpsell.intent})`)
 }
 
 // ---------------------------------------------------------------------------

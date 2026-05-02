@@ -14,7 +14,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
-import type { Intent, IntentResult } from './types.server'
+import type { Intent, IntentResult, Stage } from './types.server'
 import type { EmmaContext } from './types.server'
 
 const client = new Anthropic({ apiKey: (process.env['ANTHROPIC_API_KEY'] ?? '').trim() })
@@ -24,10 +24,14 @@ const HAIKU_MODEL = 'claude-haiku-4-5-20251001'
 // 1. High-precision regex bank
 // ---------------------------------------------------------------------------
 
-// Each entry: [regex, intent, optional slots extractor]
+// Each entry: [regex, intent, optional stage filter, optional slots extractor].
+// `stages` — if set, the entry only matches when conversation.stage is in this
+// list. If unset, matches in all stages. This is what makes "yes" mean
+// AGE_CONFIRM in GREETING but UPSELL_ACCEPT in UPSELL.
 type RegexEntry = {
   re: RegExp
   intent: Intent
+  stages?: ReadonlyArray<Stage>
   extractSlots?: (match: RegExpMatchArray) => Record<string, string>
 }
 
@@ -36,37 +40,55 @@ const REGEX_BANK: RegexEntry[] = [
   { re: /^\s*(stop|stopall|unsubscribe|cancel|end|quit|revoke)\s*$/i, intent: 'STOP_HELP_START' },
   { re: /^\s*(start|unstop|subscribe|help|info)\s*$/i,               intent: 'STOP_HELP_START' },
 
-  // AGE_CONFIRM — relaxed list matching the processor's AGE_CONFIRM_RE
+  // ─── Stage-gated bare-affirmation patterns (highest priority within each stage) ───
+  // "yes"/"sure"/"ok" in GREETING/CONSENT_GATE → AGE_CONFIRM (consent flow)
   {
-    re: /^\s*(y|ya|yes|yep|yup|sure|ok|okay|confirm|im\s*18|i\s*am\s*18|18\+?|18plus)\s*$/i,
+    re: /^\s*(y|ya|yes|yep|yup|sure|ok|okay|confirm|im\s*18|i\s*am\s*18|18\+?|18plus)\s*[!.]*\s*$/i,
     intent: 'AGE_CONFIRM',
+    stages: ['GREETING', 'CONSENT_GATE'],
   },
 
-  // COMMIT_PICK — "I'll take it", "let's do it", "add to cart", "buy", "order", "get it", "send it"
+  // "yes"/"sure"/"ok"/👍/✅ in UPSELL → UPSELL_ACCEPT (customer wants the accessory too)
+  {
+    re: /^\s*(y|ya|yes|yep|yup|sure|ok|okay|add|add\s+it|please|sounds\s+good|👍|👍🏻|👍🏼|👍🏽|👍🏾|👍🏿|✅|💯)\s*[!.]*\s*$/iu,
+    intent: 'UPSELL_ACCEPT',
+    stages: ['UPSELL'],
+  },
+
+  // "yes"/"sure"/"ok" in PRESENTATION/OBJECTION → COMMIT_PICK (customer accepts the pitched product)
+  {
+    re: /^\s*(y|ya|yes|yep|yup|sure|ok|okay|sold|please|sounds\s+good|👍|👍🏻|👍🏼|👍🏽|👍🏾|👍🏿|✅|💯)\s*[!.]*\s*$/iu,
+    intent: 'COMMIT_PICK',
+    stages: ['PRESENTATION', 'OBJECTION'],
+  },
+
+  // ─── Phrase-based COMMIT_PICK (works in all stages, customer signals buy intent) ───
   {
     re: /\b(i'?ll\s+take\s+it|let'?s\s+do\s+it|add\s+to\s+cart|buy\s+it|buy\s+now|place\s+order|order\s+now|check\s+out|get\s+it|send\s+it|i\s+want\s+it|i\s+want\s+that|i'?ll\s+get\s+it|i'?m\s+in)\b/i,
     intent: 'COMMIT_PICK',
   },
-  // Short buy signals
+  // Short buy signals (any stage)
   {
-    re: /^\s*(buy|order|checkout|get|yep\s+get\s+it|sold|yes\s+please|yes\s+buy|i\s+want)\s*[!.]*\s*$/i,
+    re: /^\s*(buy|order|checkout|sold|yes\s+please|yes\s+buy|i\s+want)\s*[!.]*\s*$/i,
     intent: 'COMMIT_PICK',
   },
 
-  // UPSELL_ACCEPT — "yes add", "sure add", "add the lube", "yeah get it too", "and the [item]"
+  // ─── UPSELL_ACCEPT — phrase form (works in any stage but typically UPSELL) ───
   {
     re: /\b(yes\s+add|sure\s+add|add\s+the|yeah\s+add|add\s+it\s+too|get\s+it\s+too|and\s+the|throw\s+in|include\s+the)\b/i,
     intent: 'UPSELL_ACCEPT',
   },
 
-  // UPSELL_DECLINE — "no thanks", "just the", "skip it", "no add-on", "no upsell"
+  // ─── UPSELL_DECLINE — phrase form ───
   {
     re: /\b(no\s+thanks|nah|nope|skip|just\s+the\s+one|just\s+this\s+one|no\s+add[- ]?on|don'?t\s+need|not\s+now|maybe\s+later|pass)\b/i,
     intent: 'UPSELL_DECLINE',
   },
+  // Bare "no" in UPSELL → decline. In other stages it's ambiguous, leave for Haiku.
   {
-    re: /^\s*(no|nope|nah|skip|pass)\s*[!.]*\s*$/i,
+    re: /^\s*(no|nope|nah|skip|pass|👎|👎🏻|👎🏼|👎🏽|👎🏾|👎🏿|❌|🚫)\s*[!.]*\s*$/iu,
     intent: 'UPSELL_DECLINE',
+    stages: ['UPSELL'],
   },
 
   // NAME_ITEM — "show me [X]", "tell me about [X]", "what about [X]", "I want to see [X]"
@@ -203,7 +225,12 @@ export async function classifyIntent(
   if (!text) return { intent: 'OFF_TOPIC', confidence: 0.0, source: 'fallback' }
 
   // --- Step 1: Regex bank ---
+  // Stage-aware: skip entries whose `stages` filter excludes the current stage.
+  // Without this, AGE_CONFIRM's bare-"yes" pattern would always win over
+  // UPSELL_ACCEPT and COMMIT_PICK because it appears earlier in the list.
+  const currentStage = conversation.stage as Stage
   for (const entry of REGEX_BANK) {
+    if (entry.stages && !entry.stages.includes(currentStage)) continue
     const match = text.match(entry.re)
     if (match) {
       const result: IntentResult = {
