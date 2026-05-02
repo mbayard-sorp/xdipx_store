@@ -165,43 +165,72 @@ async function runNameItemPath(
   intent: IntentResult,
   customerText: string,
 ): Promise<StageResponse | null> {
-  // Search for a matching product handle. Prefer the extracted slot (just the
+  // Search for matching product handles. Prefer the extracted slot (just the
   // category noun like "plug") over the full customer text — passing the
-  // whole sentence dilutes the signal and search returns wrong products
-  // (e.g., "I'm looking for a plug for my boyfriend" returned a cock ring
-  // because the search was matching "boyfriend" / "looking" noise instead
-  // of the actual category).
+  // whole sentence dilutes the signal and search returns wrong products.
+  // Fetch up to 3 candidates so we can either inline-pitch the single match
+  // or surface a small list when several products fit (lets the customer
+  // disambiguate "for my boyfriend" / "compact" / etc. without us guessing).
   const searchQuery = intent.slots?.['item'] ?? customerText
   let candidates: Awaited<ReturnType<typeof searchForIvr>> = []
   let toolCallOk = true
   let toolError: string | undefined
 
   try {
-    candidates = await searchForIvr({ query: searchQuery, limit: 1 })
+    candidates = await searchForIvr({ query: searchQuery, limit: 3 })
   } catch (err) {
     toolCallOk = false
     toolError = err instanceof Error ? err.message : String(err)
     console.warn('[discovery] searchForIvr failed', toolError)
   }
 
-  const candidate = candidates[0]
-
-  if (!candidate) {
+  if (candidates.length === 0) {
     // No result — fall back to Path A with a bridge acknowledgment
     return null
   }
 
-  // Inline-execute PRESENTATION so the customer sees the actual pitch in ONE
-  // turn. Previously this returned a "give me a sec" bridge and required the
-  // customer to send another message to trigger PRESENTATION on the next turn —
-  // confusing for real users (they'd think Emma was hung). The customer sends
-  // "show me a wand" once and gets the actual MMS pitch in one reply.
   const searchToolCall = {
     name: 'searchForIvr',
-    input: { query: searchQuery, limit: 1 },
+    input: { query: searchQuery, limit: 3 },
     ok: toolCallOk,
     ...(toolError ? { error: toolError } : {}),
   } as const
+
+  // Multi-candidate path: surface 2–3 options in DISCOVERY and let the
+  // customer pick by name. Their next message is a fresh search query
+  // (e.g., "the lush one" → searchForIvr finds Lush specifically).
+  // No state needed — the customer's reply IS the disambiguation.
+  if (candidates.length > 1) {
+    const lines = candidates.map((c, i) => {
+      const tag = c.tagline?.trim()
+      // Keep each line concise: number, title, price, optional 1-line tagline
+      return `${i + 1}. ${c.title} — $${c.price.toFixed(2)}${tag ? `. ${truncateTagline(tag)}` : ''}`
+    })
+    const prose =
+      `A few "${searchQuery}" options worth a look:\n\n` +
+      lines.join('\n') +
+      `\n\nReply with the name (or describe what you want — pricier, more compact, for him, etc.).`
+
+    return {
+      stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
+      goalAchieved: false,
+      segments: [{ prose }],
+      stateWrites: {
+        stage: 'DISCOVERY', // stay in DISCOVERY — customer's next text is a new search
+      },
+      telemetry: {
+        intent: 'NAME_ITEM',
+        intentConfidence: intent.confidence,
+        inputTokens: 0,
+        outputTokens: 0,
+        toolCalls: [searchToolCall],
+      },
+    }
+  }
+
+  // Single match — inline-pitch via PRESENTATION (the customer's intent is
+  // unambiguous, no need to surface a list of one).
+  const candidate = candidates[0]!
 
   const patchedCtx: EmmaContext = {
     ...ctx,
@@ -215,15 +244,10 @@ async function runNameItemPath(
     const presentationResp = await executePresentationStage(patchedCtx, intent, customerText)
     return {
       ...presentationResp,
-      // Force the resolved candidate handle into state writes (defensive — PRESENTATION
-      // already does this, but guarantees we persist the choice even if its
-      // fabrication-fallback path skipped it).
       stateWrites: {
         ...presentationResp.stateWrites,
         currentPitchHandle: candidate.handle,
       },
-      // Prepend the searchForIvr tool call so the telemetry trail shows
-      // "DISCOVERY found candidate → PRESENTATION pitched it" in order.
       telemetry: {
         ...presentationResp.telemetry,
         toolCalls: [
@@ -233,9 +257,6 @@ async function runNameItemPath(
       },
     }
   } catch (err) {
-    // PRESENTATION failed inline — fall back to the old two-turn bridge so
-    // the conversation still progresses. State is still set so the next turn
-    // will run PRESENTATION normally.
     console.error('[discovery] inline PRESENTATION failed — falling back to two-turn bridge', err)
     return {
       stageOut: resolveTransition('DISCOVERY', 'PRESENTATION'),
@@ -258,6 +279,13 @@ async function runNameItemPath(
       },
     }
   }
+}
+
+/** Trim a tagline so the multi-option list stays readable on SMS. */
+function truncateTagline(tag: string): string {
+  const trimmed = tag.trim()
+  if (trimmed.length <= 60) return trimmed
+  return trimmed.slice(0, 57).replace(/\s+\S*$/, '') + '…'
 }
 
 // ─── Main export ─────────────────────────────────────────────────────────────
