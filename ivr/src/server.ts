@@ -5,6 +5,11 @@
  * turn loop for each caller utterance, and forwards text deltas back to
  * Twilio for ElevenLabs TTS. Phase G adds silent-caller / runaway guards so
  * no call stays connected burning minutes when the caller isn't speaking.
+ *
+ * Phase 9: per-turn routing between v1 (local Claude) and v2 (Vercel engine).
+ * When IVR_PIPELINE_VERSION=v2 or the caller's phone is in IVR_V2_PHONES,
+ * each prompt is forwarded to the Vercel /api/emma-engine/turn endpoint.
+ * The v1 local path is the fallback when v2 is unreachable or slow.
  */
 import http from 'node:http'
 import crypto from 'node:crypto'
@@ -17,6 +22,25 @@ import { loadIvrSettings } from './settings.ts'
 import { buildSystemPrompt } from './prompts.ts'
 import { callQaTool } from './tools/catalog.ts'
 import type { OutboundMessage, TwilioInboundMessage } from './types.ts'
+import { callEngineV2 } from './v2-bridge.ts'
+
+// ---------------------------------------------------------------------------
+// Phase 9 — IVR pipeline version flag (mirrors Vercel-side ivr-pipeline-flag)
+// ---------------------------------------------------------------------------
+
+/** Parse a comma-separated E.164 allowlist from an env string. */
+function parseIvrAllowlist(envVal: string | undefined): Set<string> {
+  if (!envVal) return new Set()
+  return new Set(envVal.split(',').map((p) => p.trim()).filter(Boolean))
+}
+
+const IVR_V2_PHONES = parseIvrAllowlist(process.env['IVR_V2_PHONES'])
+
+function pickIvrPipelineVersion(callerPhone: string): 'v1' | 'v2' {
+  if (IVR_V2_PHONES.has(callerPhone)) return 'v2'
+  const raw = (process.env['IVR_PIPELINE_VERSION'] ?? 'v1').trim()
+  return raw === 'v2' ? 'v2' : 'v1'
+}
 
 const PORT = Number(process.env['PORT'] ?? 8080)
 
@@ -231,6 +255,82 @@ function handlePrompt(ws: WebSocket, session: Session, voicePrompt: string): voi
   }
   session.addTurn('user', voicePrompt)
 
+  // Phase 9: route to v2 engine or fall through to v1 local Claude.
+  const pipelineVersion = session.fromNumber
+    ? pickIvrPipelineVersion(session.fromNumber)
+    : 'v1'
+
+  if (pipelineVersion === 'v2') {
+    handlePromptV2(ws, session, voicePrompt)
+    return
+  }
+
+  handlePromptV1(ws, session, voicePrompt)
+}
+
+/**
+ * Phase 9 v2 path — call the Vercel engine via HTTP, then speak the SSML
+ * reply. Falls back to v1 if the engine is unreachable or returns null.
+ */
+function handlePromptV2(ws: WebSocket, session: Session, voicePrompt: string): void {
+  const started = Date.now()
+
+  callEngineV2({
+    channel: 'voice',
+    callerPhone: session.fromNumber,
+    customerText: voicePrompt,
+    callSid: session.callSid,
+  }).then((reply) => {
+    if (!reply) {
+      // v2 engine unavailable — fall through to v1.
+      console.warn(`[ivr] v2 engine unavailable callSid=${session.callSid} — falling back to v1`)
+      handlePromptV1(ws, session, voicePrompt)
+      return
+    }
+
+    const elapsed = Date.now() - started
+    console.log(`[ivr] v2 reply callSid=${session.callSid} elapsed=${elapsed}ms hangup=${reply.hangup ?? false}`)
+
+    if (ws.readyState !== ws.OPEN) return
+
+    // Strip SSML tags for TTS — the Fly ConversationRelay bridge sends raw
+    // text to ElevenLabs. The SSML is for structuring the reply on the
+    // Vercel side; we extract the spoken text here.
+    const spokenText = reply.ssml
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    if (spokenText) {
+      sendText(ws, spokenText, true)
+      session.addTurn('assistant', spokenText)
+    } else {
+      sendText(ws, '', true)
+    }
+
+    // Handle hangup signal.
+    if (reply.hangup) {
+      endCall(ws, session, 'user_hangup', null)
+      return
+    }
+
+    // Arm silence timer with TTS buffer.
+    const ttsBuffer = estimateTtsMs(spokenText)
+    armInterTurnSilence(ws, session, ttsBuffer)
+  }).catch((err) => {
+    console.error(`[ivr] v2 handlePromptV2 unexpected error callSid=${session.callSid}`, err)
+    if (ws.readyState === ws.OPEN) {
+      sendText(ws, "Sorry — I lost my train of thought. Can you say that again?", true)
+    }
+    armInterTurnSilence(ws, session)
+  })
+}
+
+/**
+ * Phase 9 v1 path — original local Claude streaming loop.
+ * Renamed from handlePrompt to be callable from both routing branches.
+ */
+function handlePromptV1(ws: WebSocket, session: Session, voicePrompt: string): void {
   const started = Date.now()
   let firstTokenAt = 0
   let spokenText = ''

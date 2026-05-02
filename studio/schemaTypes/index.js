@@ -44,6 +44,16 @@ import seoCluster         from '../schemas/seo/seoCluster.js'
 import editorialAuthor    from '../schemas/authors/editorialAuthor.js'
 import collectionPage     from '../schemas/collectionPage.js'
 import collectionsHub     from '../schemas/collectionsHub.js'
+// Phase 6d — Manufacturer specs data layer (additive; does not touch existing schemas).
+import mfgProductSpecs    from '../schemas/mfgProductSpecs.js'
+
+// Phase 6c — Knowledge-base doc types for SMS / IVR / chat kbLookup tool.
+// Additive — existing schemas untouched.
+import kbShippingPolicy    from '../schemas/kbShippingPolicy.js'
+import kbReturnsPolicy     from '../schemas/kbReturnsPolicy.js'
+import kbCompatibilityRule from '../schemas/kbCompatibilityRule.js'
+import kbTroubleshooting   from '../schemas/kbTroubleshooting.js'
+import kbBrandFaq          from '../schemas/kbBrandFaq.js'
 
 export const schemaTypes = [
   // Documents (singletons)
@@ -95,6 +105,8 @@ export const schemaTypes = [
   // Hub SEO — editorial copy + FAQs for the /collections hub PLP. Singleton.
   // Additive — falls back to hardcoded defaults when the doc doesn't exist.
   collectionsHub,
+  // Phase 6d — Manufacturer specs per product (additive; does not touch existing schemas).
+  mfgProductSpecs,
   // Block object types
   announcementBar,
   promoBanner,
@@ -119,4 +131,10 @@ export const schemaTypes = [
   blogCta,
   blogVideoEmbed,
   richText,
+  // Phase 6c — Knowledge-base doc types (additive; existing schemas untouched)
+  kbShippingPolicy,
+  kbReturnsPolicy,
+  kbCompatibilityRule,
+  kbTroubleshooting,
+  kbBrandFaq,
 ]
