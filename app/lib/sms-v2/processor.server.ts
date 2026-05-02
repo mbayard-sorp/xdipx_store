@@ -26,6 +26,9 @@ import { withTurnLogging, withTurnLoggingForStageResponse } from './turn-logger.
 import { subscribeToSms } from './klaviyo.server'
 import { pickEffectiveStage, dispatchStage } from './stage-dispatch.server'
 import { buildEmmaContextWithCrossChannel } from './cross-channel.server'
+import { db } from '~/lib/db.server'
+import { smsAgeConsent } from '../../../db/schema'
+import { eq } from 'drizzle-orm'
 import type { Stage } from './types.server'
 
 // Re-export types so callers can switch by import only — no re-definition needed.
@@ -138,6 +141,37 @@ export async function processSmsMessageV2(
     }).catch((err) => {
       console.warn('[processor-v2] subscribeToSms failed (non-fatal)', err)
     })
+  }
+
+  // --- Step 5: GREETING → DISCOVERY transition once consent is on file ---
+  // The conversation row defaults to stage='GREETING'. Nothing else in the
+  // pipeline transitions out of it: GREETING has no v2 stage handler, and
+  // v1's processSmsMessage inserts the consent row but doesn't update the
+  // conversation row. Result: stuck in GREETING forever, every turn falls
+  // through to v1.
+  //
+  // Fix: post-turn, if we're still in GREETING but the customer is past the
+  // consent gate (consent row exists), bump to DISCOVERY so the next turn
+  // dispatches to the DISCOVERY stage handler. This handles two cases:
+  //   1. AGE_CONFIRM turn: v1 just inserted consent → bump now → next turn
+  //      lands in DISCOVERY.
+  //   2. Returning consented customer with a fresh conversation row: bump
+  //      immediately on first contact → no wasted v1 turns.
+  // RECONNECT (set by getOrCreateConversation's 24h rotation) is preserved
+  // because we only bump when stage === 'GREETING'.
+  if (conversation.stage === 'GREETING') {
+    try {
+      const consent = await db
+        .select({ phone: smsAgeConsent.phone })
+        .from(smsAgeConsent)
+        .where(eq(smsAgeConsent.phone, phone))
+        .limit(1)
+      if (consent.length > 0) {
+        await applyStateWrites(phone, { stage: 'DISCOVERY' })
+      }
+    } catch (err) {
+      console.warn('[processor-v2] post-consent stage bump failed (non-fatal)', err)
+    }
   }
 
   return result
