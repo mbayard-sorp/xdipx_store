@@ -41,7 +41,6 @@ import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
 import FrequentlyBoughtWith       from '~/components/store/FrequentlyBoughtWith'
 import { SensationDial }          from '~/components/store/SensationDial'
 import { PairsWith, type PairsWithItem } from '~/components/store/PairsWith'
-import { AlsoBuyMini }                from '~/components/store/AlsoBuyMini'
 import { VariantSelector, resolveVariant } from '~/components/store/VariantSelector'
 import { CircleOptionSelector } from '~/components/store/CircleOptionSelector'
 import { ProductSummaryGrid } from '~/components/store/ProductSummaryGrid'
@@ -490,19 +489,6 @@ function ProductPage() {
   const [productVoteAggregate, setProductVoteAggregate] = useState<ProductVoteAggregate>(productVoteAggregateLoaded)
   const [customerVote, setCustomerVote] = useState<1 | -1 | null>(customerProductVoteLoaded)
   const [voteToast, setVoteToast] = useState<{ vote: 1 | -1; key: number } | null>(null)
-  // Variant ids of "Customers also buy" thumbs the shopper has ticked. The
-  // Add-to-cart form below reads this set and switches its payload to
-  // intent=addMany when non-empty so the main + extras land in cart in one
-  // round trip via /api/cart's existing handler.
-  const [extraVariantIds, setExtraVariantIds] = useState<Set<string>>(new Set())
-  const toggleExtra = useCallback((variantId: string) => {
-    setExtraVariantIds(prev => {
-      const next = new Set(prev)
-      if (next.has(variantId)) next.delete(variantId)
-      else next.add(variantId)
-      return next
-    })
-  }, [])
 
   useEffect(() => {
     if (voteFetcher.state !== 'idle' || !voteFetcher.data) return
@@ -556,14 +542,17 @@ function ProductPage() {
   const options      = deal.options  ?? []
   const multiVariant = variants.length > 1
 
-  // Resolve initial variant from URL ?variant= param or first available
+  // Seed the option selection only when the URL pins a specific variant
+  // (share-links, post-add-to-cart returns). Otherwise leave color and size
+  // unselected on landing so the shopper makes a deliberate choice — the
+  // CTA reads "Pick a size and color" until they do.
   const urlVariantId = searchParams.get('variant')
   const urlVariant = urlVariantId ? variants.find(v => v.id === urlVariantId) : undefined
-  const initialVariant = urlVariant
-    ?? variants.find(v => v.availableForSale) ?? variants[0]
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>(() => {
     const seed: Record<string, string> = {}
-    for (const opt of initialVariant?.selectedOptions ?? []) seed[opt.name] = opt.value
+    if (urlVariant) {
+      for (const opt of urlVariant.selectedOptions) seed[opt.name] = opt.value
+    }
     return seed
   })
   const [quantity,   setQuantity]   = useState(1)
@@ -826,44 +815,17 @@ function ProductPage() {
             </p>
           )}
 
-          {/* Sensation dial (left) + Customers also buy (right).
-              Side-by-side at lg+ so the dial bars run shorter and the
-              impulse cross-sell sits at eye level next to it. Stacks
-              vertically below lg where the buy column is too narrow to
-              split. Either side may render alone if its data is empty. */}
-          {(() => {
-            const hasDial = !!deal.productTypeDial && !!(deal.sensationDialV2?.items?.length || (deal.sensationDial && Object.keys(deal.sensationDial).length > 0))
-            const alsoBuyItems = (loaderData.fbtProducts ?? []).slice(0, 2)
-            const hasAlsoBuy = alsoBuyItems.length > 0
-            if (!hasDial && !hasAlsoBuy) return null
-            const dialNode = hasDial && deal.productTypeDial ? (
-              <SensationDial
-                type={deal.productTypeDial}
-                {...(deal.sensationDial ? { values: deal.sensationDial } : {})}
-                {...(deal.sensationDialV2 ? { valuesV2: deal.sensationDialV2 } : {})}
-                aggregate={productVoteAggregate}
-                customerVote={customerVote}
-                onAggregateVote={handleAggregateVote}
-                voting={voteFetcher.state !== 'idle'}
-              />
-            ) : null
-            const alsoBuyNode = hasAlsoBuy ? (
-              <AlsoBuyMini
-                items={alsoBuyItems}
-                checked={extraVariantIds}
-                onToggle={toggleExtra}
-              />
-            ) : null
-            if (hasDial && hasAlsoBuy) {
-              return (
-                <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3 items-start">
-                  {dialNode}
-                  {alsoBuyNode}
-                </div>
-              )
-            }
-            return dialNode ?? alsoBuyNode
-          })()}
+          {deal.productTypeDial && (deal.sensationDialV2?.items?.length || (deal.sensationDial && Object.keys(deal.sensationDial).length > 0)) && (
+            <SensationDial
+              type={deal.productTypeDial}
+              {...(deal.sensationDial ? { values: deal.sensationDial } : {})}
+              {...(deal.sensationDialV2 ? { valuesV2: deal.sensationDialV2 } : {})}
+              aggregate={productVoteAggregate}
+              customerVote={customerVote}
+              onAggregateVote={handleAggregateVote}
+              voting={voteFetcher.state !== 'idle'}
+            />
+          )}
 
           {/* Social proof */}
           <SocialProofBar />
@@ -882,8 +844,10 @@ function ProductPage() {
 
           {/* Qty + Add to cart (with inline color/size circles) — circles
               always render so users can still switch variants when the current
-              one is out of stock and the waitlist UI is showing instead. */}
-          <div className="flex items-stretch gap-2">
+              one is out of stock and the waitlist UI is showing instead.
+              max-w-md keeps this row aligned under the SensationDial above
+              so the buy controls visually sit within the dial's width. */}
+          <div className="flex items-stretch gap-2 max-w-md">
             {multiVariant && options.map(opt => {
               const lower = opt.name.toLowerCase()
               const isColor = lower === 'color' || lower === 'colour'
@@ -911,29 +875,9 @@ function ProductPage() {
 
             {inStock || needsSelection ? (
               <fetcher.Form method="post" action="/api/cart" className="flex items-stretch gap-2 flex-1 min-w-0">
-                {extraVariantIds.size === 0 ? (
-                  // Default single-add path — unchanged from pre-AlsoBuyMini.
-                  <>
-                    <input type="hidden" name="intent"    value="add-item" />
-                    <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
-                    {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
-                  </>
-                ) : (
-                  // Cross-sell extras checked → switch to /api/cart's
-                  // addMany handler so main + extras land in cart in one
-                  // round trip. Per-line subscription (sellingPlanId) is
-                  // not honored by addMany today; if a plan is selected it
-                  // is dropped here and the main goes in at one-time price.
-                  <>
-                    <input type="hidden" name="intent"      value="addMany" />
-                    <input type="hidden" name="variantId_0" value={selectedVariant?.id ?? deal.variantId} />
-                    <input type="hidden" name="quantity_0"  value={quantity} />
-                    {Array.from(extraVariantIds).flatMap((vid, i) => [
-                      <input key={`v-${vid}`} type="hidden" name={`variantId_${i + 1}`} value={vid} />,
-                      <input key={`q-${vid}`} type="hidden" name={`quantity_${i + 1}`}  value="1" />,
-                    ])}
-                  </>
-                )}
+                <input type="hidden" name="intent"    value="add-item" />
+                <input type="hidden" name="variantId" value={selectedVariant?.id ?? deal.variantId} />
+                {selectedPlanId && <input type="hidden" name="sellingPlanId" value={selectedPlanId} />}
 
                 <button
                   ref={ctaRef}
@@ -1095,9 +1039,12 @@ function ProductPage() {
 
       <EmailSubscribe />
 
-      {/* Sticky mobile CTA */}
+      {/* Sticky mobile CTA — lifted above the MobileExploreMenu (56px tab bar
+          + safe-area). When the buy CTA is visible, it sits between the page
+          content and the persistent bottom menu, matching how desktop stacks
+          its CTA above the footer chrome. */}
       {inStock && showSticky && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-white border-t border-cream-2 px-4 py-3 flex items-center gap-3 shadow-lg shadow-ink/10">
+        <div className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 z-50 md:hidden bg-white border-t border-cream-2 px-4 py-3 flex items-center gap-3 shadow-lg shadow-ink/10">
           {deal.images[0] && (
             <img
               src={deal.images[0].url}

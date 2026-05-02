@@ -520,7 +520,7 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
               className="text-[15px] text-muted max-w-[640px] leading-[1.5] mb-7"
               style={{ fontFamily: 'var(--font-body)' }}
             >
-              {renderWithHighlight(copy.body)}
+              {renderWithHighlight(copy.body ?? '')}
             </p>
 
             <div className="relative mb-6 overflow-visible bg-transparent">
@@ -673,7 +673,7 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
                 className="text-ink-2 max-w-[680px]"
                 style={{ fontFamily: 'var(--font-body)', fontSize: '14.5px', lineHeight: 1.6 }}
               >
-                {renderDekWithPill(copy.body)}
+                {renderDekWithPill(copy.body ?? '')}
               </p>
             </div>
 

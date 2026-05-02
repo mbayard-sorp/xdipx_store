@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import type { EmmaPreset } from '~/types/cms'
 
 export interface AskEmmaRailProduct {
@@ -24,6 +24,8 @@ interface AskEmmaRailProps {
   products?: AskEmmaRailProduct[]
   /** Featured Emma presets (already sorted by order). */
   presets?:  EmmaPreset[]
+  /** Sibling collections rendered as a "Related Categories" section. */
+  relatedCategories?: Array<{ handle: string; label: string }>
 }
 
 const csvToSet = (csv: string | null): Set<string> =>
@@ -43,6 +45,7 @@ export function AskEmmaRail({
   priceMax,
   products,
   presets,
+  relatedCategories,
 }: AskEmmaRailProps) {
   const [params, setParams] = useSearchParams()
   const [open, setOpen] = useState(false) // mobile sheet
@@ -213,6 +216,23 @@ export function AskEmmaRail({
               value={budgetCap}
               onChange={setBudget}
             />
+          </Section>
+        )}
+
+        {relatedCategories && relatedCategories.length > 0 && (
+          <Section title="Related Categories">
+            <ul className="flex flex-col divide-y divide-line">
+              {relatedCategories.map(rc => (
+                <li key={rc.handle}>
+                  <Link
+                    to={`/collections/${rc.handle}`}
+                    className="block py-2 text-sm text-ink hover:text-coral transition-colors"
+                  >
+                    {rc.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
           </Section>
         )}
 

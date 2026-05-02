@@ -101,6 +101,7 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "emma_hero" }
     { namespace: "xdipx", key: "quiet_endorsement_copy" }
     { namespace: "xdipx", key: "pair_bundle_copy" }
+    { namespace: "xdipx", key: "endorsement_copy" }
     { namespace: "custom", key: "original_description" }
   ]) {
     namespace key value
@@ -194,6 +195,7 @@ const CARD_METAFIELDS_FRAGMENT = `
 
 const PRODUCT_CARD_FRAGMENT = `
   id handle title vendor tags
+  options { name values }
   images(first: 1) {
     edges { node { url altText } }
   }
@@ -217,6 +219,7 @@ interface ShopifyProductCardNode {
   title: string
   vendor: string
   tags: string[]
+  options?: { name: string; values: string[] }[]
   images: { edges: { node: { url: string; altText: string | null } }[] }
   variants: {
     edges: {
@@ -241,6 +244,10 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
   const audienceTags = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
   const mattersTags  = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
   const heroVideo    = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
+  const colorOpt = (node.options ?? []).find(o => /^colou?r$/i.test(o.name))
+  const sizeOpt  = (node.options ?? []).find(o => /^size$/i.test(o.name))
+  const colorValues = colorOpt && colorOpt.values.length > 1 ? colorOpt.values : undefined
+  const sizeValues  = sizeOpt  && sizeOpt.values.length  > 1 ? sizeOpt.values  : undefined
   return {
     id: node.id,
     handle: node.handle,
@@ -255,6 +262,8 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
     qty: variant?.quantityAvailable ?? 0,
     defaultVariantId:    variant?.id ?? null,
     hasMultipleVariants: variantEdges.length > 1,
+    ...(colorValues ? { colorValues } : {}),
+    ...(sizeValues  ? { sizeValues }  : {}),
     ...(moodTags.length     > 0 ? { moodTags }     : {}),
     ...(audienceTags.length > 0 ? { audienceTags } : {}),
     ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
@@ -579,6 +588,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
   const emmaHero         = parseMetafieldJSON<Partial<import('~/types').EmmaHeroCopy>>(mf, 'emma_hero', {})
   const quietEndorsementCopy = parseMetafieldJSON<Partial<import('~/types').QuietEndorsementCopy>>(mf, 'quiet_endorsement_copy', {})
   const pairBundleCopy       = parseMetafieldJSON<Partial<import('~/types').PairBundleCopy>>(mf, 'pair_bundle_copy', {})
+  const endorsementCopy      = parseMetafieldJSON<Partial<import('~/types').EndorsementCopy>>(mf, 'endorsement_copy', {})
   const sellingPlanGroups    = parseSellingPlanGroups(node.sellingPlanGroups)
 
   return {
@@ -648,8 +658,11 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     ...(quietEndorsementCopy?.eyebrow && quietEndorsementCopy?.body && quietEndorsementCopy?.bannerHeadline
       ? { quietEndorsementCopy: quietEndorsementCopy as import('~/types').QuietEndorsementCopy }
       : {}),
-    ...(pairBundleCopy?.headline && pairBundleCopy?.body && pairBundleCopy?.pairedHandle
+    ...(pairBundleCopy?.headline && pairBundleCopy?.pairedHandle
       ? { pairBundleCopy: pairBundleCopy as import('~/types').PairBundleCopy }
+      : {}),
+    ...(endorsementCopy?.quote && endorsementCopy?.emmaIntro
+      ? { endorsementCopy: endorsementCopy as import('~/types').EndorsementCopy }
       : {}),
     ...(sellingPlanGroups && sellingPlanGroups.length > 0 ? { sellingPlanGroups } : {}),
     ...(node.collections?.edges?.length
@@ -833,8 +846,12 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     ? (quietEndorsementCopyRaw as import('~/types').QuietEndorsementCopy)
     : null
   const pairBundleCopyRaw = mfJSON<Partial<import('~/types').PairBundleCopy>>('pair_bundle_copy', {})
-  const pairBundleCopy = pairBundleCopyRaw?.headline && pairBundleCopyRaw?.body && pairBundleCopyRaw?.pairedHandle
+  const pairBundleCopy = pairBundleCopyRaw?.headline && pairBundleCopyRaw?.pairedHandle
     ? (pairBundleCopyRaw as import('~/types').PairBundleCopy)
+    : null
+  const endorsementCopyRaw = mfJSON<Partial<import('~/types').EndorsementCopy>>('endorsement_copy', {})
+  const endorsementCopy = endorsementCopyRaw?.quote && endorsementCopyRaw?.emmaIntro
+    ? (endorsementCopyRaw as import('~/types').EndorsementCopy)
     : null
   const mapRestricted = mfVal('map_restricted') === 'true'
 
@@ -886,6 +903,7 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
     ...(emmaHero ? { emmaHero } : {}),
     ...(quietEndorsementCopy ? { quietEndorsementCopy } : {}),
     ...(pairBundleCopy ? { pairBundleCopy } : {}),
+    ...(endorsementCopy ? { endorsementCopy } : {}),
     ...(productTypeDialAdmin ? { productTypeDial: productTypeDialAdmin } : {}),
     ...(Object.keys(legacyDialAdmin).length > 0 ? { sensationDial: legacyDialAdmin } : {}),
     ...(sensationDialV2Admin ? { sensationDialV2: sensationDialV2Admin } : {}),
