@@ -114,7 +114,18 @@ export function dispatchStage(
  * webhook route and turn-logger.
  *
  * - replies: each segment maps to an SmsSegment. body = segment.prose.
- *   mediaUrl = segment.productCard?.imageUrl. Empty prose segments are dropped.
+ *   mediaUrl is intentionally NOT set even when productCard.imageUrl is
+ *   available — iMessage and most modern messaging clients auto-fetch the
+ *   Open Graph preview when the body contains a product URL, so we get the
+ *   image effectively for free. Twilio MMS costs ~2-3× SMS per segment
+ *   (~$0.029 vs ~$0.013 in 2026 pricing) and the visual outcome on iMessage
+ *   is identical. Customers on plain SMS clients see a clickable link
+ *   without auto-preview, which is fine.
+ *
+ *   To re-enable MMS attachments on a per-channel basis later (e.g., for
+ *   web chat or non-iMessage carriers we measure as cost-effective),
+ *   reintroduce the mediaUrl spread here behind a feature flag.
+ *
  * - reply: all prose joined with "\n\n", or null if no segments.
  * - outcome: 'reply_fallback' if telemetry.fabricationCaught, else 'reply'.
  * - simulated: threaded through from caller (not part of StageResponse).
@@ -127,7 +138,8 @@ export function stageResponseToProcessResult(
     .filter((s) => s.prose.trim().length > 0)
     .map((s): SmsSegment => ({
       body: s.prose,
-      ...(s.productCard?.imageUrl ? { mediaUrl: s.productCard.imageUrl } : {}),
+      // Intentionally NO mediaUrl — see header comment. iMessage previews
+      // the product URL auto-magically; plain SMS clients see a link.
     }))
 
   const reply =
