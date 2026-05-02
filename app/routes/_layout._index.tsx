@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
-import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { Link, useLoaderData, useOutletContext } from 'react-router'
+import type { HeadersFunction, LoaderFunctionArgs, MetaFunction } from 'react-router'
+import { Link, data, useLoaderData, useOutletContext } from 'react-router'
+import { getAdminUser } from '~/lib/session.server'
 import {
   getDealByShopifyId, getDealByHandle, getProductsByTag, getBonusDeal,
   getCollectionProducts, getProductsByHandles,
@@ -42,7 +43,18 @@ async function getLiveDealRow() {
   return dbDeal ?? null
 }
 
-export function headers() {
+export const headers: HeadersFunction = ({ loaderHeaders }) => {
+  // When the loader detects an admin session it returns `Cache-Control: private,
+  // no-store` so admins always see fresh data after switching templates / saving
+  // settings — no waiting on the 60s edge cache to expire.
+  const fromLoader = loaderHeaders.get('Cache-Control')
+  if (fromLoader) {
+    const cdn = loaderHeaders.get('Vercel-CDN-Cache-Control') ?? 'no-store'
+    return {
+      'Cache-Control': fromLoader,
+      'Vercel-CDN-Cache-Control': cdn,
+    }
+  }
   // Edge-cache the homepage so burst traffic doesn't fan out to Shopify/Sanity.
   // Deal rotations happen at midnight (and inventory sellouts), so 60s
   // revalidation is safe — SWR keeps users fast during revalidation.
@@ -54,10 +66,21 @@ export function headers() {
   }
 }
 
+// Admin sessions get fresh-every-request HTML so template / setting changes
+// in /admin/deals propagate immediately. Anonymous visitors keep the edge cache.
+const ADMIN_BYPASS_HEADERS = {
+  'Cache-Control': 'private, no-store, max-age=0',
+  'Vercel-CDN-Cache-Control': 'no-store',
+} as const
+
 export async function loader({ request }: LoaderFunctionArgs) {
   // Read the live-deal row first (indexed, cheap); then fan out the Shopify
   // fetch alongside the other branches so it overlaps rather than chains.
-  const dbDeal = await getLiveDealRow()
+  const [dbDeal, adminUser] = await Promise.all([
+    getLiveDealRow(),
+    getAdminUser(request).catch(() => null),
+  ])
+  const isAdmin = !!adminUser
   const [deal, forHim, forHer, bonusDeal, cmsData, emmaHero, templateRows] = await Promise.all([
     dbDeal?.shopifyProductId ? getDealByShopifyId(dbDeal.shopifyProductId) : Promise.resolve(null),
     getProductsByTag('for-him', 8),
@@ -74,7 +97,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ])
 
   const homepageSettings = {
-    template: (templateRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed' | 'endorsement',
+    template: (templateRows.find(r => r.key === 'homepage_template')?.value ?? 'endorsement') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed' | 'endorsement',
     showFreeShipping: (templateRows.find(r => r.key === 'homepage_show_free_shipping')?.value ?? 'true') === 'true',
     pairProductHandle: (templateRows.find(r => r.key === 'homepage_pair_product_handle')?.value ?? '').trim(),
     pairDiscountPct: parseInt(templateRows.find(r => r.key === 'homepage_pair_discount_pct')?.value ?? '0', 10) || 0,
@@ -149,12 +172,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   if (!deal) {
-    return {
+    const value = {
       deal: null, bundle: null, forHim, forHer, bonusDeal,
       viewers: 0, soldToday: 0, cmsData, carouselProductMap,
       emmaHero: null, pairDeal: null, homepageSettings, pairBundleDeal: null,
       emmaContextRows: [], pairSwatches: {} as Record<string, string>,
     }
+    return isAdmin ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
   }
 
   // Session seed: prefer the cart cookie (stable per visitor once they engage);
@@ -174,7 +198,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }),
   ])
 
-  return {
+  const value = {
     deal, bundle, forHim, forHer, bonusDeal,
     viewers, soldToday: 0, cmsData, carouselProductMap,
     reviews: reviewData.reviews,
@@ -183,6 +207,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     emmaHero, pairDeal, homepageSettings, pairBundleDeal,
     emmaContextRows, pairSwatches,
   }
+  return isAdmin ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
 }
 
 // LCP preload — mirrors the helper in _layout.products.$slug.tsx so the
@@ -279,6 +304,12 @@ export default function Homepage() {
   const cmsSections = cmsData?.sections ?? []
   // announcementBar is handled in _layout.tsx — exclude it here
   const allContentBlocks = cmsSections.filter(s => s._type !== 'announcementBar')
+  // Lift Emma-curated rails out of the regular content stream so they render
+  // directly below the hero, matching the editorial intent (rails are deal-
+  // specific cross-sell, not bottom-of-page CMS modules).
+  const emmaCuratedRails = allContentBlocks.filter(
+    (b): b is import('~/types/cms').EmmaCuratedRailBlock => b._type === 'emmaCuratedRail',
+  )
   // For the pair_bundle_fullbleed and endorsement templates, lift the first
   // trust bar out of the regular content stream so it can render directly
   // below the price strip inside the hero.
@@ -287,9 +318,9 @@ export default function Homepage() {
   const liftedTrustBar  = (isFullBleedPair || isEndorsement)
     ? (allContentBlocks.find((b): b is TrustBarBlockType => b._type === 'trustBar') ?? null)
     : null
-  const contentBlocks = liftedTrustBar
-    ? allContentBlocks.filter(b => b._key !== liftedTrustBar._key)
-    : allContentBlocks
+  const liftedKeys = new Set<string>(emmaCuratedRails.map(b => b._key))
+  if (liftedTrustBar) liftedKeys.add(liftedTrustBar._key)
+  const contentBlocks = allContentBlocks.filter(b => !liftedKeys.has(b._key))
 
   // MAP-restricted: prefer the Shopify metafield; fall back to MAP-vs-MSRP heuristic
   // for legacy products without the `map_restricted` flag set.
@@ -423,6 +454,18 @@ export default function Homepage() {
           </p>
         </div>
       )}
+
+      {/* ── Emma curated rails (admin-published cross-sell, lifted to sit
+            directly under the hero so deal-specific rails read as part of
+            the editorial spread). ──────────────────────────────────────── */}
+      {emmaCuratedRails.map(block => (
+        <ContentBlockRenderer
+          key={block._key}
+          block={block}
+          carouselProductMap={carouselProductMap}
+          bonusDealProduct={bonusDeal}
+        />
+      ))}
 
       {/* ── Emma context rows (AI-personalized rails under the hero) ──────── */}
       {emmaContextRows && emmaContextRows.length > 0 && emmaContextRows.map(row => (

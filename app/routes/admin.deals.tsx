@@ -173,12 +173,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
     } catch { /* ignore */ }
   }
 
+  // Readiness: does the LIVE deal have the metafields the selected template
+  // needs to render? If not, the storefront silently falls back to the default
+  // Emma hero — surface this in the toolbar so admins know to generate copy.
+  const liveDeal = liveDealRow?.shopifyProductId
+    ? await getDealByShopifyId(liveDealRow.shopifyProductId).catch(() => null)
+    : null
+  const readiness = {
+    endorsement:        Boolean(liveDeal?.endorsementCopy?.quote),
+    pair_bundle:        Boolean(liveDeal?.pairBundleCopy?.headline && liveDeal?.pairBundleCopy?.pairedHandle && pairProduct),
+    pair_bundle_fullbleed: Boolean(liveDeal?.pairBundleCopy?.headline && liveDeal?.pairBundleCopy?.pairedHandle && pairProduct),
+    quiet_endorsement:  Boolean(liveDeal?.quietEndorsementCopy?.body),
+    default:            Boolean(liveDeal),
+  } as const
+
   const homepageSettings = {
-    template: (templateSettingRows.find(r => r.key === 'homepage_template')?.value ?? 'default') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed' | 'endorsement',
+    template: (templateSettingRows.find(r => r.key === 'homepage_template')?.value ?? 'endorsement') as 'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed' | 'endorsement',
     showFreeShipping: (templateSettingRows.find(r => r.key === 'homepage_show_free_shipping')?.value ?? 'true') === 'true',
     pairProductHandle: pairHandle,
     pairDiscountPct,
     pairProduct,
+    readiness,
+    liveDealTitle: liveDeal?.seoTitle ?? null,
   }
 
   // Full export list — all pending/live deals (and the live row), unpaginated,
@@ -559,48 +575,6 @@ export async function action({ request }: ActionFunctionArgs) {
   return null
 }
 
-// ─── SaveableField ─────────────────────────────────────────────────────────
-
-function SaveableField({
-  label, fieldKey, fieldType, defaultValue, productId, rows = 3, intent = 'save-field',
-  hint,
-}: {
-  label: string; fieldKey?: string; fieldType?: string; defaultValue: string
-  productId: string; rows?: number; intent?: string; hint?: string
-}) {
-  const fetcher = useFetcher<{ ok: boolean }>()
-  const saved = fetcher.state === 'idle' && fetcher.data?.ok === true
-
-  const buttonLabel = fetcher.state === 'submitting' ? 'Saving...' : saved ? 'Saved!' : 'Save'
-  const buttonClass = fetcher.state === 'submitting'
-    ? 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-ink/10 text-ink/40 cursor-not-allowed'
-    : saved
-      ? 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-green-100 text-green-700 transition-colors'
-      : 'self-end text-xs font-bold px-3 py-1.5 rounded-full bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
-
-  return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm">
-      <h3 className="font-semibold text-ink mb-1" style={{ fontFamily: 'var(--font-display)' }}>{label}</h3>
-      {hint && <p className="text-xs text-ink/40 mb-3">{hint}</p>}
-      <fetcher.Form method="post" className="flex flex-col gap-2">
-        <input type="hidden" name="intent"    value={intent} />
-        <input type="hidden" name="productId" value={productId} />
-        {fieldKey  && <input type="hidden" name="key"  value={fieldKey} />}
-        {fieldType && <input type="hidden" name="type" value={fieldType} />}
-        <textarea
-          name="value"
-          defaultValue={defaultValue}
-          rows={rows}
-          className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm text-ink resize-y focus:outline-none focus:ring-2 focus:ring-coral/30 font-mono"
-        />
-        <button type="submit" disabled={fetcher.state === 'submitting'} className={buttonClass}>
-          {buttonLabel}
-        </button>
-      </fetcher.Form>
-    </div>
-  )
-}
-
 // ─── RailGenerationPanel ─────────────────────────────────────────────────
 // Two-step Emma rail generation: ♥ Generate rails → review/edit drafts → publish.
 // POSTs to /api/generate-rails and /api/publish-rails (both admin-auth-gated).
@@ -869,77 +843,6 @@ function RailDraftCard({
   )
 }
 
-// ─── RawDescriptionPanel ─────────────────────────────────────────────────
-
-function RawDescriptionPanel({ deal, categories, editId }: {
-  deal: NonNullable<Awaited<ReturnType<typeof getDealByShopifyId>>>
-  categories: string[]
-  editId: string
-}) {
-  const saveFetcher     = useFetcher<{ ok: boolean }>()
-  const generateFetcher = useFetcher<{ ok: boolean; error?: string }>()
-  const textareaRef     = useRef<HTMLTextAreaElement>(null)
-  const hasSaved        = saveFetcher.state === 'idle' && saveFetcher.data?.ok === true
-  const genError        = generateFetcher.data && 'error' in generateFetcher.data ? (generateFetcher.data as { error: string }).error : null
-
-  return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
-      <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
-        Raw Description
-      </h3>
-      <saveFetcher.Form method="post" className="flex flex-col gap-2">
-        <input type="hidden" name="intent"    value="save-raw-description" />
-        <input type="hidden" name="productId" value={deal.shopifyProductId} />
-        <textarea
-          ref={textareaRef}
-          name="value"
-          defaultValue={deal.rawDescription ?? ''}
-          rows={8}
-          className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm text-ink resize-y focus:outline-none focus:ring-2 focus:ring-coral/30 font-mono"
-        />
-        <button
-          type="submit"
-          className="self-end text-xs font-bold px-3 py-1.5 rounded-full bg-cream-2 text-sage hover:bg-sage/10 transition-colors"
-        >
-          {saveFetcher.state === 'submitting' ? 'Saving...' : hasSaved ? 'Saved!' : 'Save Description'}
-        </button>
-      </saveFetcher.Form>
-
-      <generateFetcher.Form method="post" className="pt-2 border-t border-cream-2">
-        <input type="hidden" name="intent"         value="generate-all" />
-        <input type="hidden" name="productId"       value={deal.shopifyProductId} />
-        <input type="hidden" name="rawDescription"  value={deal.rawDescription ?? ''} />
-        <input type="hidden" name="title"           value={deal.seoTitle} />
-        <input type="hidden" name="brand"           value={deal.brand} />
-        <input type="hidden" name="categories"      value={categories.join(',')} />
-        <input type="hidden" name="dealPrice"       value={deal.dealPrice} />
-        <input type="hidden" name="msrp"            value={deal.msrp} />
-        <input type="hidden" name="editId"          value={editId} />
-        <button
-          type="submit"
-          disabled={generateFetcher.state !== 'idle' || !deal.rawDescription}
-          className={
-            generateFetcher.state !== 'idle' || !deal.rawDescription
-              ? 'w-full py-2.5 rounded-xl text-sm font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
-              : 'w-full py-2.5 rounded-xl text-sm font-bold bg-coral text-white hover:opacity-90 transition-opacity'
-          }
-        >
-          {generateFetcher.state !== 'idle' ? 'Generating... (~30s)' : 'Generate All Fields'}
-        </button>
-        {!deal.rawDescription && (
-          <p className="text-xs text-ink/40 mt-2 text-center">Save a raw description first</p>
-        )}
-      </generateFetcher.Form>
-
-      {genError && (
-        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
-          {genError}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ─── Readiness Checklist ─────────────────────────────────────────────────
 
 function ReadinessChecklist({ deal }: {
@@ -989,6 +892,12 @@ type HomepageSettings = {
   pairProductHandle: string
   pairDiscountPct:   number
   pairProduct:       { title: string; brand: string; handle: string; dealPrice: number; image: string | null } | null
+  /** Per-template readiness: does the live deal have the metafields the
+   *  storefront needs to actually render the chosen template? Computed in
+   *  the loader against the live deal's `pair_bundle_copy`, `endorsement_copy`,
+   *  etc. — when false, the storefront silently falls back to the default Emma hero. */
+  readiness: Record<'default' | 'quiet_endorsement' | 'pair_bundle' | 'pair_bundle_fullbleed' | 'endorsement', boolean>
+  liveDealTitle: string | null
 }
 
 function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
@@ -1014,15 +923,17 @@ function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
     fetcher.submit(fd, { method: 'post' })
   }
 
-  const label = settings.template === 'quiet_endorsement'
-    ? 'Quiet endorsement'
-    : settings.template === 'pair_bundle'
-      ? 'Pair bundle'
-      : settings.template === 'pair_bundle_fullbleed'
-        ? 'Pair bundle · Full Bleed'
-        : settings.template === 'endorsement'
-          ? 'Endorsement'
-          : 'Default'
+  const label = settings.template === 'pair_bundle_fullbleed'
+    ? 'Pair bundle · Full Bleed'
+    : settings.template === 'endorsement'
+      ? 'Endorsement'
+      : settings.template === 'pair_bundle'
+        ? 'Pair bundle (legacy)'
+        : settings.template === 'quiet_endorsement'
+          ? 'Quiet endorsement (legacy)'
+          : 'Emma hero (legacy)'
+
+  const ready = settings.readiness[settings.template]
 
   return (
     <div ref={ref} className="relative shrink-0">
@@ -1038,6 +949,7 @@ function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
           <rect x="14" y="14" width="7" height="7" rx="1" />
         </svg>
         Homepage: {label}
+        {!ready && <span aria-label="Live deal missing copy for this template" title="Live deal missing copy for this template — storefront will fall back to default Emma hero">⚠</span>}
         {saving && <span className="text-ink/30">…</span>}
       </button>
       {open && (
@@ -1051,13 +963,26 @@ function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
               onChange={e => save('homepage_template', e.target.value)}
               className="w-full px-2 py-1.5 text-sm border border-cream-2 rounded-lg bg-white text-ink focus:outline-none focus:ring-2 focus:ring-coral/30"
             >
-              <option value="default">Default (Emma hero)</option>
-              <option value="quiet_endorsement">Quiet endorsement</option>
-              <option value="pair_bundle">Pair bundle</option>
-              <option value="pair_bundle_fullbleed">Pair bundle · Full Bleed</option>
               <option value="endorsement">Endorsement</option>
+              <option value="pair_bundle_fullbleed">Pair bundle · Full Bleed</option>
             </select>
           </div>
+          {!ready && (
+            <div className="text-[11px] leading-relaxed bg-coral/5 border border-coral/30 rounded-lg px-3 py-2 text-ink space-y-1">
+              <p className="font-semibold text-coral">Live deal isn't ready for this template.</p>
+              <p className="text-ink/70">
+                {settings.liveDealTitle ? <><span className="italic">{settings.liveDealTitle}</span> needs </> : 'The live deal needs '}
+                {settings.template === 'endorsement'
+                  ? <><strong>endorsement copy</strong> — open the deal and click <em>Generate endorsement copy</em>.</>
+                  : settings.template === 'pair_bundle_fullbleed' || settings.template === 'pair_bundle'
+                    ? <><strong>pair-bundle copy</strong> {settings.pairProduct ? '' : <>+ a pair partner in the slot below </>}— open the deal and click <em>Generate pair-bundle copy</em>.</>
+                    : settings.template === 'quiet_endorsement'
+                      ? <><strong>quiet-endorsement copy</strong>.</>
+                      : 'a live deal to render.'}
+              </p>
+              <p className="text-ink/50">Until then the storefront falls back to the default Emma hero.</p>
+            </div>
+          )}
           <label className="flex items-center gap-2 text-sm text-ink cursor-pointer">
             <input
               type="checkbox"
@@ -1087,110 +1012,6 @@ function HomepageTemplateToggle({ settings }: { settings: HomepageSettings }) {
             Applies to whichever deal is currently live. Bundle hero always wins.
           </p>
         </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Quiet Endorsement Editor Panel ─────────────────────────────────────
-
-function QuietEndorsementPanel({ deal }: {
-  deal: NonNullable<Awaited<ReturnType<typeof getDealByShopifyId>>>
-}) {
-  const genFetcher  = useFetcher<{ result?: { type: string; content: { eyebrow: string; subhead: string; body: string; bannerHeadline: string } }; error?: string }>()
-  const saveFetcher = useFetcher<{ ok: boolean }>()
-
-  const initial = deal.quietEndorsementCopy ?? null
-  const [copy, setCopy] = useState<{ eyebrow: string; subhead: string; body: string; bannerHeadline: string } | null>(initial)
-
-  const generated = genFetcher.data?.result?.content
-  useEffect(() => {
-    if (generated) setCopy(generated)
-  }, [generated])
-
-  const generating = genFetcher.state !== 'idle'
-  const saving     = saveFetcher.state !== 'idle'
-  const saved      = saveFetcher.state === 'idle' && saveFetcher.data?.ok === true
-
-  const handleGenerate = () => {
-    const fd = new FormData()
-    fd.set('type', 'quiet_endorsement')
-    fd.set('product', JSON.stringify({
-      title:         deal.seoTitle ?? deal.sku,
-      brand:         deal.brand,
-      description:   deal.fullStory ?? deal.metaDescription ?? '',
-      categories:    [deal.category],
-      dealPrice:     deal.dealPrice,
-      msrp:          deal.msrp,
-      mapRestricted: deal.mapRestricted ?? false,
-    }))
-    genFetcher.submit(fd, { method: 'post', action: '/api/generate-copy' })
-  }
-
-  const handleSave = () => {
-    if (!copy) return
-    const fd = new FormData()
-    fd.set('intent',    'save-field')
-    fd.set('productId', deal.shopifyProductId)
-    fd.set('key',       'quiet_endorsement_copy')
-    fd.set('type',      'json')
-    fd.set('value',     JSON.stringify(copy))
-    saveFetcher.submit(fd, { method: 'post' })
-  }
-
-  return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
-          Quiet endorsement copy
-        </h3>
-        <span className="text-[11px] text-ink/40">homepage alt template</span>
-      </div>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={generating}
-          className={
-            generating
-              ? 'flex-1 py-2 rounded-xl text-xs font-semibold bg-ink/10 text-ink/40 cursor-not-allowed'
-              : 'flex-1 py-2 rounded-xl text-xs font-semibold bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
-          }
-        >
-          {generating ? 'Generating…' : '♥ Generate quiet-endorsement copy'}
-        </button>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={!copy || saving}
-          className={
-            !copy || saving
-              ? 'px-4 py-2 rounded-xl text-xs font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
-              : saved
-                ? 'px-4 py-2 rounded-xl text-xs font-bold bg-green-100 text-green-700'
-                : 'px-4 py-2 rounded-xl text-xs font-bold bg-coral text-white hover:opacity-90 transition-opacity'
-          }
-        >
-          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Use this ♥'}
-        </button>
-      </div>
-      {genFetcher.data?.error && (
-        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          ⚠ {genFetcher.data.error}
-        </p>
-      )}
-      {copy && (
-        <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-2 space-y-1.5">
-          <p className="uppercase tracking-wide text-ink/50 font-semibold">{copy.eyebrow}</p>
-          <p className="text-ink/60 italic">{copy.subhead}</p>
-          <p className="text-ink">{copy.body}</p>
-          <p className="text-ink/70 font-mono">banner: {copy.bannerHeadline}</p>
-        </div>
-      )}
-      {!copy && (
-        <p className="text-xs text-ink/40 italic">
-          No copy yet — generate above, then save to make it visible on the quiet-endorsement homepage.
-        </p>
       )}
     </div>
   )
@@ -1265,7 +1086,7 @@ function PairBundlePanel({ deal, pairSettings }: {
         <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Pair bundle copy
         </h3>
-        <span className="text-[11px] text-ink/40">homepage alt template</span>
+        <span className="text-[11px] text-ink/40">Pair bundle · Full Bleed template</span>
       </div>
       {!hasPair && (
         <p className="text-xs text-ink/50 bg-cream-2/60 border border-line rounded-lg px-3 py-2">
@@ -1318,17 +1139,16 @@ function PairBundlePanel({ deal, pairSettings }: {
       {copy && (
         <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-2 space-y-2">
           <div className="space-y-1">
-            <p className="uppercase tracking-wide text-ink/50 font-semibold">{copy.eyebrow}</p>
-            <p className="text-ink/60 italic">{copy.subhead}</p>
             <p className="text-ink font-semibold">{copy.headline}</p>
-            <p className="text-ink">{copy.body}</p>
+            {copy.emmaByline && (
+              <p className="text-muted italic">
+                <span className="font-bold text-ink not-italic">Picked by Emma.</span>{' '}
+                {copy.emmaByline}
+              </p>
+            )}
           </div>
 
-          <dl className="grid grid-cols-2 gap-x-3 gap-y-1 pt-2 border-t border-line/60">
-            <dt className="text-ink/50 uppercase tracking-wide text-[10px]">Primary tag</dt>
-            <dd className="text-ink" style={{ fontFamily: 'var(--font-script)' }}>{copy.primaryTag}</dd>
-            <dt className="text-ink/50 uppercase tracking-wide text-[10px]">Partner tag</dt>
-            <dd className="text-ink" style={{ fontFamily: 'var(--font-script)' }}>{copy.partnerTag}</dd>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pt-2 border-t border-line/60">
             <dt className="text-ink/50 uppercase tracking-wide text-[10px]">Knot caption</dt>
             <dd className="text-ink" style={{ fontFamily: 'var(--font-script)' }}>{copy.knotCaption}</dd>
           </dl>
@@ -1375,8 +1195,6 @@ function PairBundlePanel({ deal, pairSettings }: {
               </ol>
             </div>
           )}
-
-          <p className="text-ink/70 italic pt-2 border-t border-line/60">{copy.bannerLine}</p>
         </div>
       )}
       {!copy && (
@@ -1419,6 +1237,9 @@ function EndorsementPanel({ deal }: {
       dealPrice:     deal.dealPrice,
       msrp:          deal.msrp,
       mapRestricted: (deal as { mapRestricted?: boolean }).mapRestricted ?? false,
+      moodTags:      deal.moodTags ?? [],
+      audienceTags:  deal.audienceTags ?? [],
+      mattersTags:   deal.mattersTags ?? [],
     }))
     genFetcher.submit(fd, { method: 'post', action: '/api/generate-copy' })
   }
@@ -1449,7 +1270,7 @@ function EndorsementPanel({ deal }: {
         <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Endorsement copy
         </h3>
-        <span className="text-[11px] text-ink/40">single-product homepage template</span>
+        <span className="text-[11px] text-ink/40">Endorsement template (default)</span>
       </div>
 
       <p className="text-xs text-ink/60">
@@ -1591,265 +1412,6 @@ function EndorsementPanel({ deal }: {
           No copy yet — generate above, then save to make it visible on the endorsement homepage.
         </p>
       )}
-    </div>
-  )
-}
-
-// ─── Emma Hero Regen ────────────────────────────────────────────────────
-
-function EmmaHeroRegen({ productId }: { productId: string }) {
-  const fetcher = useFetcher<{ ok: boolean; error?: string; copy?: { eyebrow: string; headline: string; body: string; aside: string; pullQuote?: string } }>()
-  const busy = fetcher.state !== 'idle'
-  const copy = fetcher.data?.ok ? fetcher.data.copy : null
-  return (
-    <fetcher.Form method="post" action="/api/admin/emma-hero/regenerate" className="space-y-2">
-      <input type="hidden" name="productId" value={productId} />
-      <button
-        type="submit"
-        disabled={busy}
-        className={
-          busy
-            ? 'w-full py-2.5 rounded-xl text-sm font-semibold bg-ink/10 text-ink/40 cursor-not-allowed'
-            : 'w-full py-2.5 rounded-xl text-sm font-semibold bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
-        }
-      >
-        {busy ? 'Regenerating Emma hero…' : '♥ Regenerate Emma hero'}
-      </button>
-      {fetcher.data?.error && (
-        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          ⚠ {fetcher.data.error}
-        </p>
-      )}
-      {copy && (
-        <div className="text-xs bg-cream-2/50 border border-line rounded-lg px-3 py-2 space-y-1">
-          <p className="uppercase tracking-wide text-ink/50 font-semibold">{copy.eyebrow}</p>
-          <p className="font-bold text-ink">{copy.headline}</p>
-          <p className="text-ink/75">{copy.body}</p>
-          {copy.pullQuote && <p className="italic text-ink/80">“{copy.pullQuote}”</p>}
-          <p className="text-muted font-mono">{copy.aside}</p>
-        </div>
-      )}
-    </fetcher.Form>
-  )
-}
-
-// ─── PDP v2 — Emma's take · Care · Sensation dial ──────────────────────
-
-type DialItem = { label: string; value: number; proposed?: boolean }
-
-function PdpReviseEmmaContent({
-  productId, productTypeDial,
-}: { productId: string; productTypeDial: string | null }) {
-  const takeFetcher  = useFetcher<{ ok: boolean; html?: string; error?: string; written?: boolean }>()
-  const careFetcher  = useFetcher<{ ok: boolean; bullets?: string[]; error?: string; written?: boolean }>()
-  const dialFetcher  = useFetcher<{
-    ok: boolean
-    error?: string
-    written?: boolean
-    dial?: { items: DialItem[] }
-    proposed?: string[]
-    preferredLabels?: string[]
-  }>()
-  const acceptFetcher = useFetcher<{ ok: boolean; error?: string; registry?: string[] }>()
-  const renameFetcher = useFetcher<{ ok: boolean; error?: string; dial?: { items: DialItem[] } }>()
-
-  const proposed = dialFetcher.data?.ok ? (dialFetcher.data.proposed ?? []) : []
-  const preferred = dialFetcher.data?.ok ? (dialFetcher.data.preferredLabels ?? []) : []
-
-  return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
-      <div>
-        <h3 className="font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
-          PDP v2 · Emma's take · Care · Dial
-        </h3>
-        <p className="text-xs text-muted mt-1">
-          Dry-run previews the copy without writing to Shopify. Save writes the metafield (or product description for the take).
-        </p>
-      </div>
-
-      {/* Emma's take */}
-      <div className="border border-line rounded-xl p-4 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <h4 className="font-bold text-sm text-ink">Emma's take</h4>
-          <div className="flex gap-2">
-            <takeFetcher.Form method="post" action="/api/admin/emma-take/regenerate">
-              <input type="hidden" name="productId" value={productId} />
-              <input type="hidden" name="dryRun" value="1" />
-              <button
-                type="submit"
-                disabled={takeFetcher.state !== 'idle'}
-                className="text-xs px-3 py-1.5 rounded-lg bg-cream-2 text-ink hover:bg-line/40 disabled:opacity-50"
-              >
-                {takeFetcher.state !== 'idle' ? 'Generating…' : 'Preview'}
-              </button>
-            </takeFetcher.Form>
-            <takeFetcher.Form method="post" action="/api/admin/emma-take/regenerate">
-              <input type="hidden" name="productId" value={productId} />
-              <button
-                type="submit"
-                disabled={takeFetcher.state !== 'idle'}
-                className="text-xs px-3 py-1.5 rounded-lg bg-coral text-white hover:bg-coral-deep disabled:opacity-50"
-              >
-                Generate &amp; save
-              </button>
-            </takeFetcher.Form>
-          </div>
-        </div>
-        {takeFetcher.data?.error && (
-          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {takeFetcher.data.error}</p>
-        )}
-        {takeFetcher.data?.ok && takeFetcher.data.html && (
-          <div
-            className="text-xs prose prose-sm max-w-none text-ink/80 bg-cream-2/50 border border-line rounded-lg px-3 py-2"
-            dangerouslySetInnerHTML={{ __html: takeFetcher.data.html }}
-          />
-        )}
-        {takeFetcher.data?.ok && takeFetcher.data.written && (
-          <p className="text-[11px] text-sage">Written to Shopify product description.</p>
-        )}
-      </div>
-
-      {/* Care instructions */}
-      <div className="border border-line rounded-xl p-4 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <h4 className="font-bold text-sm text-ink">Care instructions</h4>
-          <div className="flex gap-2">
-            <careFetcher.Form method="post" action="/api/admin/care-instructions/regenerate">
-              <input type="hidden" name="productId" value={productId} />
-              <input type="hidden" name="dryRun" value="1" />
-              <button
-                type="submit"
-                disabled={careFetcher.state !== 'idle'}
-                className="text-xs px-3 py-1.5 rounded-lg bg-cream-2 text-ink hover:bg-line/40 disabled:opacity-50"
-              >
-                {careFetcher.state !== 'idle' ? 'Generating…' : 'Preview'}
-              </button>
-            </careFetcher.Form>
-            <careFetcher.Form method="post" action="/api/admin/care-instructions/regenerate">
-              <input type="hidden" name="productId" value={productId} />
-              <button
-                type="submit"
-                disabled={careFetcher.state !== 'idle'}
-                className="text-xs px-3 py-1.5 rounded-lg bg-coral text-white hover:bg-coral-deep disabled:opacity-50"
-              >
-                Generate &amp; save
-              </button>
-            </careFetcher.Form>
-          </div>
-        </div>
-        {careFetcher.data?.error && (
-          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {careFetcher.data.error}</p>
-        )}
-        {careFetcher.data?.ok && careFetcher.data.bullets && (
-          <ul className="text-xs space-y-1 bg-cream-2/50 border border-line rounded-lg px-3 py-2">
-            {careFetcher.data.bullets.map((b, i) => (
-              <li key={i} className="flex gap-2"><span className="text-sage">·</span>{b}</li>
-            ))}
-          </ul>
-        )}
-        {careFetcher.data?.ok && careFetcher.data.written && (
-          <p className="text-[11px] text-sage">Written to xdipx.care_instructions.</p>
-        )}
-      </div>
-
-      {/* Sensation dial v2 */}
-      <div className="border border-line rounded-xl p-4 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h4 className="font-bold text-sm text-ink">Sensation dial v2</h4>
-            <p className="text-[11px] text-muted">
-              {productTypeDial ? `Type: ${productTypeDial}` : 'No xdipx.product_type_dial set — required.'}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <dialFetcher.Form method="post" action="/api/admin/sensation-dial/regenerate">
-              <input type="hidden" name="productId" value={productId} />
-              <input type="hidden" name="dryRun" value="1" />
-              <button
-                type="submit"
-                disabled={!productTypeDial || dialFetcher.state !== 'idle'}
-                className="text-xs px-3 py-1.5 rounded-lg bg-cream-2 text-ink hover:bg-line/40 disabled:opacity-50"
-              >
-                {dialFetcher.state !== 'idle' ? 'Generating…' : 'Preview'}
-              </button>
-            </dialFetcher.Form>
-            <dialFetcher.Form method="post" action="/api/admin/sensation-dial/regenerate">
-              <input type="hidden" name="productId" value={productId} />
-              <button
-                type="submit"
-                disabled={!productTypeDial || dialFetcher.state !== 'idle'}
-                className="text-xs px-3 py-1.5 rounded-lg bg-coral text-white hover:bg-coral-deep disabled:opacity-50"
-              >
-                Generate &amp; save
-              </button>
-            </dialFetcher.Form>
-          </div>
-        </div>
-        {dialFetcher.data?.error && (
-          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {dialFetcher.data.error}</p>
-        )}
-        {dialFetcher.data?.ok && dialFetcher.data.dial && (
-          <ul className="text-xs space-y-1 bg-cream-2/50 border border-line rounded-lg px-3 py-2">
-            {dialFetcher.data.dial.items.map((it, i) => (
-              <li key={i} className="flex items-center justify-between gap-2">
-                <span className="flex items-center gap-2">
-                  {it.label}
-                  {it.proposed && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-sun/30 text-ink-2">new</span>}
-                </span>
-                <span className="font-mono text-ink/60">{it.value}/5</span>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {/* Triage proposed labels */}
-        {productTypeDial && proposed.length > 0 && (
-          <div className="mt-2 space-y-2">
-            <p className="text-[11px] text-muted uppercase tracking-wider">Proposed labels — accept or rename</p>
-            {proposed.map(label => (
-              <div key={label} className="flex flex-wrap items-center gap-2 bg-sun/10 border border-sun/30 rounded-lg px-3 py-2">
-                <span className="text-xs font-bold text-ink">{label}</span>
-                <acceptFetcher.Form method="post" action="/api/admin/dial-registry/append" className="contents">
-                  <input type="hidden" name="productId" value={productId} />
-                  <input type="hidden" name="productTypeDial" value={productTypeDial} />
-                  <input type="hidden" name="label" value={label} />
-                  <button
-                    type="submit"
-                    disabled={acceptFetcher.state !== 'idle'}
-                    className="text-[11px] px-2 py-1 rounded bg-sage text-white hover:bg-sage/80 disabled:opacity-50"
-                  >
-                    Accept → registry
-                  </button>
-                </acceptFetcher.Form>
-                <renameFetcher.Form method="post" action="/api/admin/sensation-dial/rename-label" className="contents">
-                  <input type="hidden" name="productId" value={productId} />
-                  <input type="hidden" name="fromLabel" value={label} />
-                  <select name="toLabel" className="text-[11px] px-2 py-1 rounded border border-line bg-white" required>
-                    <option value="">Rename to…</option>
-                    {preferred.map(l => <option key={l} value={l}>{l}</option>)}
-                  </select>
-                  <button
-                    type="submit"
-                    disabled={renameFetcher.state !== 'idle'}
-                    className="text-[11px] px-2 py-1 rounded bg-cream-2 text-ink hover:bg-line/40 disabled:opacity-50"
-                  >
-                    Rename
-                  </button>
-                </renameFetcher.Form>
-              </div>
-            ))}
-          </div>
-        )}
-        {acceptFetcher.data?.ok && (
-          <p className="text-[11px] text-sage">Registry updated · {acceptFetcher.data.registry?.length ?? 0} labels.</p>
-        )}
-        {renameFetcher.data?.ok && (
-          <p className="text-[11px] text-sage">Label renamed on this product.</p>
-        )}
-        {dialFetcher.data?.ok && dialFetcher.data.written && (
-          <p className="text-[11px] text-sage">Written to xdipx.sensation_dial_v2.</p>
-        )}
-      </div>
     </div>
   )
 }
@@ -2151,7 +1713,6 @@ export default function AdminDealsPage() {
   const confirmFetcher  = useFetcher()
   const [draggedId, setDraggedId] = useState<number | null>(null)
   const [dragOverId, setDragOverId] = useState<number | null>(null)
-  const [contentOpen, setContentOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [moveToTopDragOver, setMoveToTopDragOver] = useState(false)
   const dragRef = useRef(false)
@@ -2762,26 +2323,14 @@ export default function AdminDealsPage() {
                   {/* Tags (editable) */}
                   <TagsEditor deal={editorData.deal} editId={editId!} />
 
-                  {/* Emma hero (Claude-generated voice copy) */}
-                  <EmmaHeroRegen productId={editorData.deal.shopifyProductId} />
+                  {/* Endorsement copy (single-product editorial template — default) */}
+                  <EndorsementPanel deal={editorData.deal} />
 
-                  {/* PDP v2 — Emma's take, Care, Sensation dial */}
-                  <PdpReviseEmmaContent
-                    productId={editorData.deal.shopifyProductId}
-                    productTypeDial={editorData.deal.productTypeDial ?? null}
-                  />
-
-                  {/* Quiet endorsement copy (alt homepage template) */}
-                  <QuietEndorsementPanel deal={editorData.deal} />
-
-                  {/* Pair bundle copy (alt homepage template) */}
+                  {/* Pair bundle copy (Pair bundle · Full Bleed template) */}
                   <PairBundlePanel
                     deal={editorData.deal}
                     pairSettings={{ handle: homepageSettings.pairProductHandle, product: homepageSettings.pairProduct }}
                   />
-
-                  {/* Endorsement copy (single-product editorial template) */}
-                  <EndorsementPanel deal={editorData.deal} />
 
                   {/* Emma-curated rails (agent-generated cross-sell) */}
                   <RailGenerationPanel
@@ -2789,42 +2338,6 @@ export default function AdminDealsPage() {
                     hasCopy={Boolean(editorData.deal.tagline)}
                     initialDrafts={editorData.railDrafts}
                   />
-
-                  {/* Copy & Content (collapsible) */}
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setContentOpen(!contentOpen)}
-                      aria-expanded={contentOpen}
-                      className="flex items-center gap-2 w-full text-left py-2 text-sm font-semibold text-ink hover:text-ink/80 transition-colors"
-                    >
-                      <svg
-                        width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                        className={`shrink-0 transition-transform duration-200 ${contentOpen ? 'rotate-180' : ''}`}
-                      >
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
-                      Copy & Content
-                      {!contentOpen && <span className="text-xs font-normal text-ink/40 ml-1">9 fields</span>}
-                    </button>
-                    {contentOpen && (
-                      <div className="space-y-5 pt-2">
-                        <RawDescriptionPanel
-                          deal={editorData.deal}
-                          categories={editorData.dealCategories}
-                          editId={editId!}
-                        />
-                        <SaveableField label="Tagline" fieldKey="tagline" defaultValue={editorData.deal.tagline} productId={editorData.deal.shopifyProductId} rows={2} />
-                        <SaveableField label="Full Story" fieldKey="full_story" fieldType="multi_line_text_field" defaultValue={editorData.deal.fullStory} productId={editorData.deal.shopifyProductId} rows={8} />
-                        <SaveableField label="Works For Him" fieldKey="works_for_him" fieldType="multi_line_text_field" defaultValue={editorData.deal.worksForHim} productId={editorData.deal.shopifyProductId} rows={3} />
-                        <SaveableField label="Works For Her" fieldKey="works_for_her" fieldType="multi_line_text_field" defaultValue={editorData.deal.worksForHer} productId={editorData.deal.shopifyProductId} rows={3} />
-                        <SaveableField label="Specifications" fieldKey="specifications" fieldType="multi_line_text_field" defaultValue={(editorData.deal.specifications ?? []).join('\n')} productId={editorData.deal.shopifyProductId} rows={5} hint="One bullet per line: 'Label: Value'" />
-                        <SaveableField label="What's In The Box" intent="save-box-contents" defaultValue={(editorData.deal.boxContents ?? []).join('\n')} productId={editorData.deal.shopifyProductId} rows={4} hint="One item per line" />
-                        <SaveableField label="SEO Meta Description" fieldKey="seo_meta_description" fieldType="multi_line_text_field" defaultValue={editorData.deal.metaDescription} productId={editorData.deal.shopifyProductId} rows={2} />
-                      </div>
-                    )}
-                  </div>
                 </>
               ) : (
                 <div className="text-center py-20 text-ink/40">
