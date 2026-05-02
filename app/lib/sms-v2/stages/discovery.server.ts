@@ -18,6 +18,7 @@ import { buildEmmaSystemBlocks } from '~/lib/claude.server'
 import { searchForIvr } from '~/lib/ivr-search.server'
 import { resolveTransition } from '../transitions.server'
 import { SPIN_BANK } from '../templates/discovery-spin-bank'
+import { executePresentationStage } from './presentation.server'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -160,7 +161,8 @@ function buildFallbackPick(customerText: string): LlmPick {
 // ─── Path B: NAME_ITEM → candidate search + transition to PRESENTATION ────────
 
 async function runNameItemPath(
-  _ctx: EmmaContext,
+  ctx: EmmaContext,
+  intent: IntentResult,
   customerText: string,
 ): Promise<StageResponse | null> {
   // Search for a matching product handle
@@ -183,32 +185,72 @@ async function runNameItemPath(
     return null
   }
 
-  return {
-    stageOut: resolveTransition('DISCOVERY', 'PRESENTATION'),
-    goalAchieved: false, // PRESENTATION hasn't run yet
-    segments: [
-      {
-        prose: `Oh, I've got something for you. Give me just a sec.`,
-      },
-    ],
-    stateWrites: {
-      stage: 'PRESENTATION',
+  // Inline-execute PRESENTATION so the customer sees the actual pitch in ONE
+  // turn. Previously this returned a "give me a sec" bridge and required the
+  // customer to send another message to trigger PRESENTATION on the next turn —
+  // confusing for real users (they'd think Emma was hung). The customer sends
+  // "show me a wand" once and gets the actual MMS pitch in one reply.
+  const searchToolCall = {
+    name: 'searchForIvr',
+    input: { query: customerText, limit: 1 },
+    ok: toolCallOk,
+    ...(toolError ? { error: toolError } : {}),
+  } as const
+
+  const patchedCtx: EmmaContext = {
+    ...ctx,
+    conversation: {
+      ...ctx.conversation,
       currentPitchHandle: candidate.handle,
     },
-    telemetry: {
-      intent: 'NAME_ITEM',
-      intentConfidence: 1.0,
-      inputTokens: 0,
-      outputTokens: 0,
-      toolCalls: [
+  }
+
+  try {
+    const presentationResp = await executePresentationStage(patchedCtx, intent, customerText)
+    return {
+      ...presentationResp,
+      // Force the resolved candidate handle into state writes (defensive — PRESENTATION
+      // already does this, but guarantees we persist the choice even if its
+      // fabrication-fallback path skipped it).
+      stateWrites: {
+        ...presentationResp.stateWrites,
+        currentPitchHandle: candidate.handle,
+      },
+      // Prepend the searchForIvr tool call so the telemetry trail shows
+      // "DISCOVERY found candidate → PRESENTATION pitched it" in order.
+      telemetry: {
+        ...presentationResp.telemetry,
+        toolCalls: [
+          searchToolCall,
+          ...(presentationResp.telemetry.toolCalls ?? []),
+        ],
+      },
+    }
+  } catch (err) {
+    // PRESENTATION failed inline — fall back to the old two-turn bridge so
+    // the conversation still progresses. State is still set so the next turn
+    // will run PRESENTATION normally.
+    console.error('[discovery] inline PRESENTATION failed — falling back to two-turn bridge', err)
+    return {
+      stageOut: resolveTransition('DISCOVERY', 'PRESENTATION'),
+      goalAchieved: false,
+      segments: [
         {
-          name: 'searchForIvr',
-          input: { query: customerText, limit: 1 },
-          ok: toolCallOk,
-          ...(toolError ? { error: toolError } : {}),
+          prose: `Oh, I've got something for you. Give me just a sec.`,
         },
       ],
-    },
+      stateWrites: {
+        stage: 'PRESENTATION',
+        currentPitchHandle: candidate.handle,
+      },
+      telemetry: {
+        intent: 'NAME_ITEM',
+        intentConfidence: intent.confidence,
+        inputTokens: 0,
+        outputTokens: 0,
+        toolCalls: [searchToolCall],
+      },
+    }
   }
 }
 
@@ -221,7 +263,7 @@ export async function executeDiscoveryStage(
 ): Promise<StageResponse> {
   // ── Path B: explicit product-type request ──────────────────────────────────
   if (intent.intent === 'NAME_ITEM') {
-    const nameItemResult = await runNameItemPath(ctx, customerText)
+    const nameItemResult = await runNameItemPath(ctx, intent, customerText)
     if (nameItemResult) return nameItemResult
     // Fall through to Path A if no candidate found
   }
