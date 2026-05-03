@@ -462,6 +462,26 @@ export async function executeDiscoveryStage(
     return runSearchBranch(ctx, intent, customerText, mergedSlots, adv.nextState)
   }
 
+  // Branch 2b — STUCK GATE ESCAPE VALVE
+  // If we asked the same gate last turn and the gate machine wants to ask it
+  // AGAIN, the customer's answer didn't parse into a slot the gate cares
+  // about. The most common cause: free-form natural-language answers
+  // ("vibrating", "feel good", "comfortable") that the matters regex doesn't
+  // match. Looping on the same question is worse than searching with what
+  // we have — as long as audience and category are known, the catalog
+  // search has enough signal to surface candidates. Caught during voice
+  // Stage D testing where a caller looped 3 turns on the MATTERS opener
+  // before hanging up.
+  if (
+    currentDiscoveryState !== null &&
+    currentDiscoveryState.gate === adv.nextState.gate &&
+    currentDiscoveryState.gate !== 'EXPLAIN' &&
+    !!mergedSlots.audience &&
+    !!mergedSlots.category
+  ) {
+    return runSearchBranch(ctx, intent, customerText, mergedSlots, adv.nextState)
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Branch 1 — GATE PROGRESSION (default)
   // Serve the next gate question: MOOD, WHO, or MATTERS.
