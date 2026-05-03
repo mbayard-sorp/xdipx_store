@@ -58,12 +58,16 @@ export interface ProcessWebInput {
  * (variants, pctOff, etc.) require a full Shopify fetch.
  */
 function productRefToCard(ref: ProductRef | ProductContext): ChatProductCard {
-  // Parse price string like "$49.99" → number of cents
+  // Parse price string like "$49.99" → number of dollars.
+  // ChatProductCard.price is dollars (matches v1 productToCard, which uses
+  // Number(variant.price)); AskEmmaProductCard's formatPrice does
+  // `$${n.toFixed(2)}` with no division, so passing cents would render as
+  // "$4999.00".
   let price = 0
   if (ref.price) {
     const cleaned = ref.price.replace(/[^0-9.]/g, '')
     const parsed = parseFloat(cleaned)
-    if (!isNaN(parsed)) price = Math.round(parsed * 100)
+    if (!isNaN(parsed)) price = parsed
   }
 
   // description lives on ProductContext (superset of ProductRef)
