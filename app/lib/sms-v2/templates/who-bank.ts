@@ -115,6 +115,17 @@ export const WHO_BANK: ReadonlyArray<WhoEntry> = [
     prose:
       "Nice. Any features that matter to you right off the bat? Quiet motors, waterproof, rechargeable, anything like that?",
   },
+  {
+    // B-2f added during voice Stage D testing — solo callers often answered
+    // "for me" without volunteering gender, leaving audience ambiguous. This
+    // variant asks body type directly so the slot extractor can resolve
+    // for-her vs for-him and the gate can advance.
+    id: 'B-2f',
+    channel: 'both',
+    trigger: 'solo',
+    prose:
+      "Real quick so I point you at the right thing: are we shopping for a 'for her' body or a 'for him' body?",
+  },
 
   // ─── B-3: couples (5 variants) ───────────────────────────────────────────────
   {

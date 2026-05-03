@@ -116,8 +116,22 @@ function extractAudienceByRelationshipNoun(
 
 /** Scans for gendered relationship nouns anywhere — husband/boyfriend → for-him, etc. */
 function extractGendered(norm: string): DiscoverySlots['audience'] | undefined {
+  // Partner relationship nouns (existing).
   if (/\bmy\s+(?:husband|boyfriend)\b/.test(norm)) return 'for-him'
   if (/\bmy\s+(?:wife|girlfriend)\b/.test(norm)) return 'for-her'
+
+  // Self-gender disclosure — "I'm a woman" / "I'm female" → for-her, etc.
+  // These take precedence over the bare "for me" pattern below because the
+  // gender info is unambiguous. Discovered during voice Stage D testing
+  // where callers said "I'm a woman" / "I'm a man" alone and the gate
+  // never advanced for lack of audience.
+  if (/\bi'?m\s+(?:a\s+)?(?:woman|female|gal|lady)\b/.test(norm)) return 'for-her'
+  if (/\bi'?m\s+(?:a\s+)?(?:man|male|guy|dude)\b/.test(norm))     return 'for-him'
+
+  // Self-side phrasing without explicit gender — "her side", "his side".
+  if (/\b(?:her\s+side|for\s+her\s+side|woman'?s\s+side)\b/.test(norm)) return 'for-her'
+  if (/\b(?:his\s+side|for\s+his\s+side|man'?s\s+side)\b/.test(norm))   return 'for-him'
+
   return undefined
 }
 

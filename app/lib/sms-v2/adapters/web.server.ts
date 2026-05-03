@@ -287,6 +287,10 @@ export async function processWebMessageV2(
     if (writes.lastQuoteItems      !== undefined) stateUpdate.lastQuoteItems      = writes.lastQuoteItems
     if (writes.lastQuoteCreatedAt  !== undefined) stateUpdate.lastQuoteCreatedAt  = writes.lastQuoteCreatedAt
     if (writes.customerGid         !== undefined) stateUpdate.customerGid         = writes.customerGid
+    // Discovery gate persistence — without these, the gate machine resets
+    // every turn (caught during voice Stage D testing; same omission here).
+    if (writes.discoveryState      !== undefined) stateUpdate.discoveryState      = writes.discoveryState
+    if (writes.discoveredSlots     !== undefined) stateUpdate.discoveredSlots     = writes.discoveredSlots
     if (pageContext?.handle        !== undefined) stateUpdate.pageHandle          = pageContext.handle
     if (pageContext?.route         !== undefined) stateUpdate.pageRoute           = pageContext.route
     await applyWebStateWrites(sessionId, stateUpdate)
