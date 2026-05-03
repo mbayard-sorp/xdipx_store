@@ -28,6 +28,7 @@ import {
   runDiscoveryTool,
   type DiscoveryAgentToolContext,
 } from './discovery-agent-tools.server'
+import { extractSlots, type DiscoverySlots } from './slot-extractor.server'
 import { resolveTransition } from './transitions.server'
 import { BRAND_VOICE } from '~/lib/ai-agent/prompt'
 import type { IvrProductCard } from '~/lib/ivr-search.server'
@@ -242,6 +243,19 @@ export async function executeDiscoveryAgent(
     intentConfidence: intent.confidence,
   }
 
+  // ── Kick off slot extraction in parallel (analytics only) ─────────────────
+  // The Sonnet agent does NOT consume slots — they're not used to gate the
+  // conversation. We run extractSlots alongside the Sonnet call so the
+  // accumulated slot state on sms_conversations.discoveredSlots stays
+  // populated (downstream stages and analytics consume that). This call is
+  // best-effort: if it throws, we ignore and continue with the prior slots.
+  const priorSlots: Partial<DiscoverySlots> =
+    (ctx.conversation.discoveredSlots as Partial<DiscoverySlots> | undefined) ?? {}
+  const slotsPromise = extractSlots({ text: customerText, priorSlots }).catch((err) => {
+    console.warn('[discovery-agent] extractSlots failed (non-fatal)', err)
+    return null
+  })
+
   // ── Build messages ────────────────────────────────────────────────────────
   // History plus the current inbound. We never persist the agent's reply here;
   // the caller (processor) is responsible for that via sms_turns insert.
@@ -371,6 +385,28 @@ export async function executeDiscoveryAgent(
   }
   const pitched = detectPitchedCard(finalProse, allCards)
 
+  // ── Resolve parallel slot extraction ──────────────────────────────────────
+  // Merge whatever extractSlots produced into the prior slot bag and persist.
+  // Non-blocking on the LLM path: if extraction failed we just write priors.
+  const slotsResult = await slotsPromise
+  const mergedSlots: Partial<DiscoverySlots> = slotsResult
+    ? { ...priorSlots, ...slotsResult.slots }
+    : priorSlots
+
+  // One-line analytics log so ops can see what slots the extractor pulled
+  // alongside the agent's prose. No PII — just the extracted shape.
+  if (slotsResult && Object.keys(slotsResult.slots).length > 0) {
+    console.info(
+      '[discovery-agent] slots',
+      JSON.stringify({
+        channel,
+        source: slotsResult.source,
+        slots: slotsResult.slots,
+        pitched: pitched?.handle ?? null,
+      }),
+    )
+  }
+
   // ── Build StageResponse ───────────────────────────────────────────────────
   const stageOut = pitched
     ? resolveTransition('DISCOVERY', 'PRESENTATION')
@@ -378,6 +414,7 @@ export async function executeDiscoveryAgent(
 
   const stateWrites: ConversationStateWrites = {
     stage: stageOut,
+    discoveredSlots: mergedSlots as Record<string, unknown>,
     ...(pitched
       ? { currentPitchHandle: pitched.handle }
       : {}),
