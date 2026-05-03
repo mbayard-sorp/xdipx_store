@@ -416,7 +416,11 @@ export async function processVoiceMessageV2(
     if (stageRespPromise !== null) {
       stageResp = await stageRespPromise
 
-      // Persist state writes from the stage handler.
+      // Persist state writes from the stage handler. Without this, the
+      // discovery gate machine resets to MOOD on every turn because
+      // discoveryState and discoveredSlots never make it back to the row —
+      // Emma rotates through opener questions with no memory of prior
+      // answers (caught during Stage D testing).
       const writes = stageResp.stateWrites
       await applyStateWrites(callerPhone, {
         stage: writes.stage ?? stageResp.stageOut,
@@ -426,6 +430,8 @@ export async function processVoiceMessageV2(
         ...(writes.lastQuoteItems      !== undefined && { lastQuoteItems:      writes.lastQuoteItems }),
         ...(writes.lastQuoteCreatedAt  !== undefined && { lastQuoteCreatedAt:  writes.lastQuoteCreatedAt }),
         ...(writes.customerGid         !== undefined && { customerGid:         writes.customerGid }),
+        ...(writes.discoveryState      !== undefined && { discoveryState:      writes.discoveryState }),
+        ...(writes.discoveredSlots     !== undefined && { discoveredSlots:     writes.discoveredSlots }),
       })
 
       const built = await stageResponseToVoiceReply(stageResp, callerPhone)
