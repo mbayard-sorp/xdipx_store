@@ -46,11 +46,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   // 2. Vercel BotID — invisible bot block at the request layer.
+  // Gated behind BOTID_BLOCK_ENABLED because the project-level BotID config
+  // isn't onboarded yet (dashboard shows "Get Started"), so checkBotId()
+  // returns isBot:true for real users. Until the dashboard is configured,
+  // we run the check in shadow mode (log-only). Origin allowlist + IP rate
+  // limit + daily token ceiling + per-session budget remain in front.
   if (process.env['NODE_ENV'] === 'production') {
     try {
       const verdict = await checkBotId()
-      if (verdict.isBot && !verdict.isVerifiedBot) {
+      const shouldBlock = verdict.isBot && !verdict.isVerifiedBot
+      if (shouldBlock && process.env['BOTID_BLOCK_ENABLED'] === 'true') {
         return Response.json({ error: 'bot_blocked' }, { status: 403 })
+      }
+      if (shouldBlock) {
+        console.warn('[api.ask-emma] botid shadow-mode allow', { isBot: verdict.isBot, isVerifiedBot: verdict.isVerifiedBot })
       }
     } catch (err) {
       // Fail open on BotID infra errors — IP rate limit + budget are still in front.
