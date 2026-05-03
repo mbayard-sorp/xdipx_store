@@ -17,7 +17,7 @@
  */
 
 const VERCEL_URL = process.env['VERCEL_URL'] ?? ''
-const INTERNAL_SECRET = process.env['INTERNAL_SECRET'] ?? ''
+const INTERNAL_API_SECRET = process.env['INTERNAL_API_SECRET'] ?? ''
 
 // p99 latency budget for the Vercel round-trip (network hop + engine).
 // If we exceed this we log a warning but still attempt to use the reply
@@ -52,8 +52,8 @@ interface TurnRequestBody {
  * to the v1 local Claude path.
  */
 export async function callEngineV2(body: TurnRequestBody): Promise<VoiceReply | null> {
-  if (!VERCEL_URL || !INTERNAL_SECRET) {
-    console.error('[v2-bridge] VERCEL_URL or INTERNAL_SECRET not set — cannot call v2 engine')
+  if (!VERCEL_URL || !INTERNAL_API_SECRET) {
+    console.error('[v2-bridge] VERCEL_URL or INTERNAL_API_SECRET not set — cannot call v2 engine')
     return null
   }
 
@@ -70,7 +70,7 @@ export async function callEngineV2(body: TurnRequestBody): Promise<VoiceReply | 
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-internal-secret': INTERNAL_SECRET,
+          'x-internal-secret': INTERNAL_API_SECRET,
         },
         body: JSON.stringify(body),
         signal: controller.signal,

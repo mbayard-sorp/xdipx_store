@@ -82,7 +82,7 @@ async function startDevServer(secret: string): Promise<void> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PORT: String(PORT),
-    INTERNAL_SECRET: secret,
+    INTERNAL_API_SECRET: secret,
     NODE_ENV: 'development', // so the loader returns 200 for GET health check
   }
 
@@ -349,9 +349,9 @@ async function main(): Promise<void> {
   await scenario5()
 
   // Scenario 2 — dev server
-  const SECRET = process.env['INTERNAL_SECRET'] ?? crypto.randomBytes(32).toString('hex')
-  if (!process.env['INTERNAL_SECRET']) {
-    console.warn('[smoke] INTERNAL_SECRET not set — using a random secret for scenario 2')
+  const SECRET = process.env['INTERNAL_API_SECRET'] ?? crypto.randomBytes(32).toString('hex')
+  if (!process.env['INTERNAL_API_SECRET']) {
+    console.warn('[smoke] INTERNAL_API_SECRET not set — using a random secret for scenario 2')
   }
 
   try {
