@@ -36,6 +36,8 @@ import { searchForIvrWithDiagnostics } from '~/lib/ivr-search.server'
 import { resolveTransition } from '../transitions.server'
 import { executePresentationStage } from './presentation.server'
 import { generateDiscoveryWelcome } from '../discovery-welcome.server'
+import { pickDiscoveryAgentVersion } from '../discovery-agent-flag.server'
+import { executeDiscoveryAgent } from '../discovery-agent.server'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -342,7 +344,34 @@ async function runSearchBranch(
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
+/**
+ * DISCOVERY entry point. Picks between the legacy gate-state-machine handler
+ * (executeDiscoveryGate) and the Sonnet-driven agent (executeDiscoveryAgent)
+ * based on the env-flag allowlist (`DISCOVERY_AGENT_VERSION`,
+ * `DISCOVERY_AGENT_V2_PHONES`, `DISCOVERY_AGENT_V2_SESSIONS`).
+ *
+ * Default: 'v2-gate' → no behavior change in production. The Sonnet agent
+ * only runs when the env flag is flipped or the caller is on the allowlist.
+ */
 export async function executeDiscoveryStage(
+  ctx: EmmaContext,
+  intent: IntentResult,
+  customerText: string,
+): Promise<StageResponse> {
+  const version = pickDiscoveryAgentVersion(ctx.conversation.phone)
+  if (version === 'v2-agent') {
+    return executeDiscoveryAgent(ctx, intent, customerText)
+  }
+  return executeDiscoveryGate(ctx, intent, customerText)
+}
+
+/**
+ * Legacy gate-state-machine DISCOVERY handler (Branches -1, 0, 1, 2, 4).
+ * Renamed from `executeDiscoveryStage` so the new dispatcher above can sit on
+ * top without a callers churn. Phase 6 cleanup deletes this body entirely
+ * once the Sonnet agent has soaked.
+ */
+async function executeDiscoveryGate(
   ctx: EmmaContext,
   intent: IntentResult,
   customerText: string,
