@@ -30,15 +30,41 @@ import { executeReconnectStage } from './stages/reconnect.server'
 /**
  * Some intents force a stage transition BEFORE the handler runs.
  *
- * Transition table (from spec Deliverable 1):
- *   PRESENTATION + COMMIT_PICK   → UPSELL (pitch the upsell first)
+ * Transition table:
+ *   PRESENTATION + COMMIT_PICK   → UPSELL    (pitch the upsell first)
+ *   PRESENTATION + NAME_ITEM     → DISCOVERY (customer pivoted to a different product)
+ *   PRESENTATION + RESEARCH      → RESEARCH  (customer has questions / wants alternatives)
  *   UPSELL       + UPSELL_ACCEPT → CHECKOUT
  *   UPSELL       + UPSELL_DECLINE → CHECKOUT
  *   UPSELL       + COMMIT_PICK   → CHECKOUT
  *   OBJECTION    + COMMIT_PICK   → CHECKOUT
+ *   OBJECTION    + NAME_ITEM     → DISCOVERY (mirror of PRESENTATION)
+ *   OBJECTION    + RESEARCH      → RESEARCH  (mirror of PRESENTATION)
  *   DISCOVERY    + NAME_ITEM     → DISCOVERY (handler itself decides)
  *
  * All other pairs: return currentStage unchanged.
+ *
+ * Why the PRESENTATION/OBJECTION pre-transitions on RESEARCH and NAME_ITEM:
+ *
+ *   The deterministic PRESENTATION and OBJECTION handlers anchor on
+ *   ctx.conversation.currentPitchHandle. They produce a pitch / objection
+ *   reply tied to that one handle. If the customer pivots within the stage
+ *   ("does it come in another color?", "any other options?", "how about a
+ *   harness?") the handlers re-pitch the same product because they have no
+ *   internal branch for those intents — the prompt is hyper-anchored on the
+ *   handle and the tool surface doesn't include alternatives. Caught in
+ *   production where three turns in a row emitted the identical pitch:
+ *
+ *     21:46:30  RESEARCH "does it come in any other colors?"  → re-pitch
+ *     21:47:21  RESEARCH "any other options?"                 → re-pitch
+ *     21:47:53  NAME_ITEM "how about a harness?"              → re-pitch
+ *
+ *   Routing those intents to handlers that DO know how to roam (DISCOVERY's
+ *   Sonnet agent has searchProducts; RESEARCH's handler runs comparison
+ *   queries against the catalog) unsticks the conversation without any
+ *   schema or prompt churn. The DISCOVERY agent already sees the prior
+ *   PRESENTATION turn in conversation history so it has the context it
+ *   needs to acknowledge and pivot.
  */
 export function pickEffectiveStage(currentStage: Stage, intent: IntentResult): Stage {
   const i = intent.intent
@@ -46,6 +72,8 @@ export function pickEffectiveStage(currentStage: Stage, intent: IntentResult): S
   switch (currentStage) {
     case 'PRESENTATION':
       if (i === 'COMMIT_PICK') return 'UPSELL'
+      if (i === 'NAME_ITEM')   return 'DISCOVERY'
+      if (i === 'RESEARCH')    return 'RESEARCH'
       break
 
     case 'UPSELL':
@@ -54,6 +82,8 @@ export function pickEffectiveStage(currentStage: Stage, intent: IntentResult): S
 
     case 'OBJECTION':
       if (i === 'COMMIT_PICK') return 'CHECKOUT'
+      if (i === 'NAME_ITEM')   return 'DISCOVERY'
+      if (i === 'RESEARCH')    return 'RESEARCH'
       break
 
     default:
