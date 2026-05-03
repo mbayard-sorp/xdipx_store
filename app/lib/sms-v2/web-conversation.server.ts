@@ -44,6 +44,11 @@ export interface WebConversationRow {
   discoveryState: unknown | null
   /** Accumulated discovery slots. Defaults to {} for pre-gate rows. */
   discoveredSlots: Record<string, unknown>
+  /**
+   * Pending PDP link awaiting affirmation. Voice-only today; the column
+   * exists on web_conversations for forward-compatibility.
+   */
+  pendingPdpUrl: string | null
 }
 
 // ---------------------------------------------------------------------------
