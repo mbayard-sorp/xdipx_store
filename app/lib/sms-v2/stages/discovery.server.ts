@@ -28,7 +28,7 @@ import {
 } from '../discovery-gate.server'
 import { extractSlots } from '../slot-extractor.server'
 import { pickMoodOpener, type MoodOpenerTrigger } from '../templates/mood-opener-bank'
-import { pickWho, type WhoTrigger } from '../templates/who-bank'
+import { pickWho, WHO_BANK, type WhoTrigger } from '../templates/who-bank'
 import { pickMatters, type MattersTrigger } from '../templates/matters-bank'
 import { pickVulnerability, type VulnerabilityTrigger } from '../templates/vulnerability-bank'
 import { getExplainer, type ExplainerCategory } from '../templates/category-explainers'
@@ -94,8 +94,22 @@ function inferWhoTrigger(customerText: string, slots: Partial<DiscoverySlots>): 
     return 'gendered-acknowledged'
   }
   if (/\bpartner\b/.test(norm)) return 'partner-hinted'
+  // Self-shopping ("for me" / "myself") — prefer the solo bank, which is
+  // where the body-type-asking variant lives.
+  if (
+    /\b(?:for\s+me|for\s+myself|myself|just\s+me|on\s+my\s+own|personal\s+use|solo)\b/.test(norm) ||
+    slots.audience === 'for-her' ||
+    slots.audience === 'for-him'
+  ) {
+    return 'solo'
+  }
 
-  return 'partner-hinted'
+  // Default — when no info points to partner / gift / couples / solo, the
+  // safest WHO bank is solo. partner-hinted presupposes a partner the caller
+  // may not have. Discovered during voice Stage D testing where the prior
+  // partner-hinted default asked "is your partner in on this?" of a caller
+  // who never mentioned a partner.
+  return 'solo'
 }
 
 /**
@@ -463,7 +477,18 @@ export async function executeDiscoveryStage(
     questionProse = entry.prose + `\n\nOr just say 'show me' and I'll guess.`
   } else if (question.prose === '<<WHO>>') {
     const trigger = inferWhoTrigger(customerText, mergedSlots)
-    const entry = pickWho(trigger, 'sms')
+    // When audience is unknown, prefer the body-type-asking solo variant
+    // (B-2f) over a random pick — it's the question that most directly
+    // resolves the audience slot so the gate can advance. Random pickWho
+    // gave us 1-in-6 odds of asking for the actual answer we needed,
+    // which on voice translated to multiple turns of question loops.
+    let entry
+    if (trigger === 'solo' && !mergedSlots.audience) {
+      const bodyAsker = WHO_BANK.find((e) => e.id === 'B-2f')
+      entry = bodyAsker ?? pickWho(trigger, 'sms')
+    } else {
+      entry = pickWho(trigger, 'sms')
+    }
     questionProse = entry.prose
   } else if (question.prose === '<<MATTERS>>') {
     const trigger = inferMattersTrigger(mergedSlots)
