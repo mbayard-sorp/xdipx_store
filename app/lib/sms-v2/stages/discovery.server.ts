@@ -383,8 +383,20 @@ export async function executeDiscoveryStage(
   // whatever slots got extracted from the first message), so subsequent
   // turns route through the gate machine normally.
   // ─────────────────────────────────────────────────────────────────────────────
+  // "First contact" includes BOTH:
+  //   - Truly null discoveryState (brand-new conversation row).
+  //   - Stale-but-empty state: gate=MOOD with no slots (an earlier session
+  //     that initialized the row but never produced a welcome — e.g. a
+  //     deploy-and-clear sequence where a row was created pre-welcome
+  //     and then the welcome code shipped). Without this, returning users
+  //     with abandoned empty sessions never see the welcome.
+  const isStaleEmptyInit =
+    currentDiscoveryState !== null &&
+    currentDiscoveryState.gate === 'MOOD' &&
+    Object.keys(currentDiscoveryState.slots ?? {}).length === 0 &&
+    Object.keys(priorSlots ?? {}).length === 0
   if (
-    currentDiscoveryState === null &&
+    (currentDiscoveryState === null || isStaleEmptyInit) &&
     mergedSlots.vulnerabilitySignaled !== true &&
     mergedSlots.isAdviceRequest !== true
   ) {
