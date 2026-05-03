@@ -180,6 +180,20 @@ export async function processWebMessageV2(
     throw err
   }
 
+  // --- Step 1b: Web has no consent gate — opening the chat widget IS consent.
+  // GREETING has no v2 handler, so a stuck-in-GREETING conversation falls
+  // through to the holding reply ("Hey! What can I help you find today?")
+  // forever. Bump to DISCOVERY immediately so the first message gets a real
+  // discovery response. RECONNECT (set by 24h rotation) is preserved.
+  if (conversation.stage === 'GREETING') {
+    try {
+      await applyWebStateWrites(sessionId, { stage: 'DISCOVERY' })
+      conversation = { ...conversation, stage: 'DISCOVERY' }
+    } catch (err) {
+      console.warn('[web-adapter] pre-dispatch GREETING→DISCOVERY bump failed (non-fatal)', err)
+    }
+  }
+
   // --- Step 2: Classify intent ---
   let intentResult: Awaited<ReturnType<typeof classifyIntent>>
   try {
