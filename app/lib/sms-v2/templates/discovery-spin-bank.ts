@@ -52,8 +52,8 @@ export const SPIN_BANK: ReadonlyArray<SpinQuestion> = [
     dimension: 'situation',
     prose: ({ firstName }) =>
       firstName
-        ? `${firstName}, what's the occasion? Date night, treating yourself, or just an ordinary Tuesday that deserves an upgrade?`
-        : `What's the occasion? Date night, treating yourself, or just an ordinary Tuesday that deserves an upgrade?`,
+        ? `${firstName}, what's the occasion? Date night, treating yourself, or just because?`
+        : `What's the occasion? Date night, treating yourself, or just because?`,
     signalsCovered: ['occasion', 'use_case'],
   },
   {
