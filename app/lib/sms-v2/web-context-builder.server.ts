@@ -79,6 +79,7 @@ export async function buildWebEmmaContext(
   // Build the base context via the locked builder.
   const baseRow = webRowToConversationRow(webConv)
   const ctx = await buildEmmaContext(baseRow)
+  ctx.channel = 'web'
 
   // Layer in page context: if we have a page handle, set it as the pitch
   // product context hint so RESEARCH/DISCOVERY can use it.

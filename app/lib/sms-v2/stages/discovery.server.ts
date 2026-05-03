@@ -35,6 +35,7 @@ import { getExplainer, type ExplainerCategory } from '../templates/category-expl
 import { searchForIvrWithDiagnostics } from '~/lib/ivr-search.server'
 import { resolveTransition } from '../transitions.server'
 import { executePresentationStage } from './presentation.server'
+import { generateDiscoveryWelcome } from '../discovery-welcome.server'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -361,6 +362,56 @@ export async function executeDiscoveryStage(
   // ── Advance the gate machine with extracted slots ────────────────────────────
   const adv = advanceGate(currentDiscoveryState, extractedSlots)
   const mergedSlots = mergeSlots(priorSlots, extractedSlots)
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Branch -1 — WARM WELCOME (FIRST TURN)
+  // When the discovery state is null (this is the customer's first turn in
+  // a fresh discovery conversation), use a Haiku-generated personal welcome
+  // instead of the static MOOD opener bank. The welcome:
+  //   1. Sets a safe, non-judgmental tone for sexual-wellness shopping
+  //   2. Branches on returning vs first-time customer
+  //   3. Invites vulnerability without forcing it
+  //   4. Asks ONE open mood/feeling/sensation question with concrete examples
+  //
+  // Skipped when:
+  //   - vulnerability is signaled in this first message → Branch 0 handles
+  //   - advice request in this first message → Branch 4 (explainer) handles
+  // Both of those flows are more important than a generic warm welcome and
+  // should run their own response.
+  //
+  // After this turn, discoveryState is non-null (initialized to MOOD with
+  // whatever slots got extracted from the first message), so subsequent
+  // turns route through the gate machine normally.
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (
+    currentDiscoveryState === null &&
+    mergedSlots.vulnerabilitySignaled !== true &&
+    mergedSlots.isAdviceRequest !== true
+  ) {
+    const welcome = await generateDiscoveryWelcome({
+      channel: ctx.channel ?? 'sms',
+      customerFirstName: ctx.customer?.firstName ?? null,
+      customerGid: ctx.customer?.gid ?? null,
+      customerText,
+    })
+    const initialState: DiscoveryState = { gate: 'MOOD', slots: mergedSlots }
+    return {
+      stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
+      goalAchieved: false,
+      segments: [{ prose: welcome.prose }],
+      stateWrites: {
+        stage: 'DISCOVERY',
+        discoveryState: initialState,
+        discoveredSlots: mergedSlots,
+      },
+      telemetry: {
+        intent: intent.intent,
+        intentConfidence: intent.confidence,
+        inputTokens: welcome.inputTokens,
+        outputTokens: welcome.outputTokens,
+      },
+    }
+  }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Branch 0 — VULNERABILITY SOFT-BEAT
