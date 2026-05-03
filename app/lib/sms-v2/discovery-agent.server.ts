@@ -110,7 +110,9 @@ const DISCOVERY_RULES_VOICE = `CHANNEL: VOICE (the message will be spoken aloud 
 const DISCOVERY_RULES_SMS = `CHANNEL: SMS (plain text — Twilio).
 - No markdown, no **bold**, no [text](url) syntax, no bullet lists, no emoji spam (one emoji max if it lands).
 - Aim 40-80 words. Two sentences max.
-- If you want to share a PDP URL, just paste it inline as plain text (https://xdipx.com/products/<handle>). Don't gate behind "want me to text the link?" — if you have a fit, share it now.
+- PDP URL formatting (REQUIRED for iMessage preview to render the product image): when sharing a PDP URL, put it on its OWN LINE with the https:// prefix, ideally as the LAST line before any closing question. The URL must read https://xdipx.com/products/<handle> verbatim from the searchProducts tool result. Don't bury it mid-sentence — iMessage only auto-previews URLs that aren't sandwiched between other text.
+- Don't gate behind "want me to text the link?" — if you have a fit, share it now.
+- Pitch shape: one beat that flexes Emma's expertise (why THIS product for THEIR situation — what makes it the right call from someone who tests these), then the URL on its own line, then a fit-confirming question. Lead with insight, not specs.
 - Discovery stage NEVER includes a checkout URL. The customer hasn't committed. Pitch and ask.
 - Contractions. Friendly. Short.`
 

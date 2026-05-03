@@ -5,6 +5,18 @@
  * No LLM — slots are filled server-side. Emma voice: warm, direct, no em-dashes,
  * no "buy now", no "sex" as adjective, no countdowns.
  *
+ * Each template:
+ *   - Leads with one beat of EXPERTISE so Emma sounds like a guru, not a checkout
+ *     prompt. Establishing trust at the upsell moment is the difference between
+ *     a thoughtful pairing and an empty "want fries with that".
+ *   - Does NOT reveal the existence of a checkout link yet. The customer hasn't
+ *     been told a link is coming, and saying "before the link" leaks the next
+ *     step before they've seen the value.
+ *   - Puts the PDP URL on its own line with https:// prefix so iMessage and
+ *     other modern messaging clients auto-render the OG preview without us
+ *     paying for MMS.
+ *   - Ends with a clear yes/no so the next-turn parser can act.
+ *
  * Slots: {name}, {price}, {pdp_url}
  *
  * Variant selection: rotate by seconds-epoch mod N so repeated calls within a
@@ -19,19 +31,19 @@ export interface UpsellTemplateSlots {
 
 const TEMPLATES: ReadonlyArray<(slots: UpsellTemplateSlots) => string> = [
   ({ name, price, pdpUrl }) =>
-    `One quick add before the link: ${name} (${price}). Pairs really well together.\n${pdpUrl}\n\nSend a 👍 (or 'yes') to toss it in, or 'checkout' if you're set.`,
+    `Real talk — skipping a good lube is the #1 regret folks tell me about. ${name} (${price}) is the one I'd send a friend home with.\n\n${pdpUrl}\n\n👍 to toss it in, 'no' to skip.`,
 
   ({ name, price, pdpUrl }) =>
-    `If you're grabbing this, ${name} is the one I tell everyone about. ${price}.\n${pdpUrl}\n\nWant it in too? 👍 or 'yes' adds it. 'checkout' to skip.`,
+    `One thing I've learned testing a lot of these: the right pairing matters more than people think. ${name} (${price}) is the move here.\n\n${pdpUrl}\n\n👍 / 'yes' to add it, 'no' to skip.`,
 
   ({ name, price, pdpUrl }) =>
-    `Quick one: ${name} (${price}) goes really nicely with this pick.\n${pdpUrl}\n\nAdd it? Reply 👍 / 'yes', or 'checkout' to skip ahead.`,
+    `If you're new to this, trust me on ${name} (${price}). It's the difference between 'this is fine' and 'oh, that's why people love this'.\n\n${pdpUrl}\n\n👍 to add it, 'no thanks' to skip.`,
 
   ({ name, price, pdpUrl }) =>
-    `Before I send the link, worth a look: ${name} at ${price}.\n${pdpUrl}\n\nI've been recommending this combo a lot. 👍 or 'yes' to add, 'checkout' to skip.`,
+    `Worth knowing — ${name} (${price}) lives on my nightstand. The folks who skip it always come back asking what they missed.\n\n${pdpUrl}\n\n👍 / 'yes' to toss it in, 'no' to skip.`,
 
   ({ name, price, pdpUrl }) =>
-    `Almost done. ${name} (${price}) rounds this out nicely, been living on my nightstand.\n${pdpUrl}\n\nSend 👍 or 'yes' to add it, or 'checkout' and I'll send your cart link.`,
+    `Honest pro tip: ${name} (${price}) turns a good experience into a great one. Most folks regret skipping it more than any toy choice.\n\n${pdpUrl}\n\n👍 to add it, 'no' to skip.`,
 ]
 
 /**
