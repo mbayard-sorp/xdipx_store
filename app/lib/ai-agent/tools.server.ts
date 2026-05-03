@@ -65,6 +65,8 @@ export interface AgentContext {
   onCartMutated?: () => void
   /** Current page the shopper is on. chat.server.ts hydrates this into the system prompt so Emma can reference the page naturally. */
   pageContext?: { pathname: string } | undefined
+  /** Web chat session ID (UUID cookie). Used by chat.server.ts to read/write gate state in web_conversations. */
+  sessionId?: string
 }
 
 export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [

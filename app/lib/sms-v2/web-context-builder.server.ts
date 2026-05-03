@@ -40,6 +40,9 @@ function webRowToConversationRow(webRow: WebConversationRow): ConversationRow {
     customerDefaultZip: webRow.customerDefaultZip,
     stageSetAt: webRow.stageSetAt,
     lastActiveAt: webRow.lastActiveAt,
+    // Pass through discovery gate fields so context-builder populates them.
+    discoveryState: webRow.discoveryState ?? null,
+    discoveredSlots: webRow.discoveredSlots ?? {},
   }
 }
 

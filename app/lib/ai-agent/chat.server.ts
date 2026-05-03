@@ -1,9 +1,66 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { eq } from 'drizzle-orm'
 import { CHAT_SYSTEM_PROMPT, SMS_SYSTEM_PROMPT } from './prompt'
 import { QA_TOOL_DEFINITIONS, runQaTool, type AgentContext, type ToolResult } from './tools.server'
 import type { IvrProductCard } from '~/lib/ivr-search.server'
 import { getProductByHandle, getProductsByHandles } from '~/lib/shopify.server'
 import type { ChatTurn, ChatProductCard, ChatReply, QuickReplyPayload } from './chat-types'
+import { extractSlots } from '~/lib/sms-v2/slot-extractor.server'
+import {
+  advanceGate,
+  suspendForExplain,
+  initDiscoveryState,
+  type DiscoveryState,
+  type DiscoverySlots,
+} from '~/lib/sms-v2/discovery-gate.server'
+import {
+  getExplainer,
+  type ExplainerCategory,
+} from '~/lib/sms-v2/templates/category-explainers'
+import {
+  pickVulnerability,
+  type VulnerabilityTrigger,
+} from '~/lib/sms-v2/templates/vulnerability-bank'
+import { db } from '~/lib/db.server'
+import { webConversations } from '../../../db/schema'
+
+/**
+ * Map a canonical ProductTypeDial slot to the explainer-bank key.
+ * The explainer bank uses customer-facing labels ('plug', 'wand') while the
+ * dial uses canonical parents ('anal', 'vibrator'). Subtype disambiguates.
+ */
+function toExplainerCategory(
+  category: string | undefined,
+  subtype: string | undefined,
+): ExplainerCategory | undefined {
+  if (!category) return undefined
+  if (category === 'lube') return 'lube'
+  if (category === 'dildo') return 'dildo'
+  if (category === 'wear') return 'wear'
+  if (category === 'anal') {
+    // Default anal explainer is 'plug'; could later branch on subtype.
+    return 'plug'
+  }
+  if (category === 'vibrator') {
+    if (subtype === 'wand') return 'wand'
+    return 'vibrator'
+  }
+  return undefined
+}
+
+/** Infer the vulnerability trigger from raw text (mirror of discovery.server.ts). */
+function inferVulnerabilityTrigger(text: string): VulnerabilityTrigger {
+  const t = text.toLowerCase()
+  if (/embarrass|stupid question|silly question|dumb question|weird question|weird to ask|sorry if this is weird/.test(t)) return 'embarrassed'
+  if (/never bought|never done this|never tried/.test(t)) return 'never-done-this'
+  if (/after (a |the |my )?(surgery|divorce|breakup|separation)|post[- ]?partum|post[- ]?surgery|recovery|having a baby|chronic pain|mobility|disability/.test(t)) return 'after-health-thing'
+  if (/haven't been with anyone in|haven't had sex in|long pause|long-distance|long distance/.test(t)) return 'long-pause'
+  if (/don't know what i'm doing|no idea what i'm doing/.test(t)) return 'dont-know-what-im-doing'
+  if (/(my|fit my) body|body image|not sure if it would work for my body/.test(t)) return 'body-image'
+  if (/performance|doesn't happen|can't get|can't keep/.test(t)) return 'performance-worry'
+  if (/partner had|specific need|after losing/.test(t)) return 'partner-specific-need'
+  return 'never-done-this'
+}
 
 export type { ChatTurn, ChatProductCard, ChatReply, QuickReplyPayload }
 
@@ -61,26 +118,85 @@ function tuningFor(channel: AgentContext['channel'], systemPromptBase: string): 
 }
 
 /**
- * Build the `system` parameter for an Anthropic API call. When `cached` is
- * true, returns the array form with `cache_control: { type: 'ephemeral' }` on
- * the base prompt so subsequent turns within the 5-minute TTL hit the cache
- * (10% of base input rate). The optional `suffix` is appended as an uncached
- * second block — useful for per-call modifiers like "respond in plain text only"
- * that we don't want polluting the cache key.
+ * Extended version of buildSystem that also inserts an optional gate context
+ * block between the cached base prompt and any plain-text suffix.
+ * Gate context is never cached (it changes every turn — includes extracted slots).
  */
-function buildSystem(
+function buildSystemWithGate(
   prompt: string,
   cached: boolean,
+  gateBlock: Anthropic.TextBlockParam | null,
   suffix?: string,
 ): string | Anthropic.TextBlockParam[] {
-  if (!cached) {
+  if (!cached && !gateBlock) {
     return suffix ? prompt + suffix : prompt
   }
+  // Return array form so we can include the gate block.
   const blocks: Anthropic.TextBlockParam[] = [
-    { type: 'text', text: prompt, cache_control: { type: 'ephemeral' } },
+    cached
+      ? { type: 'text', text: prompt, cache_control: { type: 'ephemeral' } }
+      : { type: 'text', text: prompt },
   ]
+  if (gateBlock) blocks.push(gateBlock)
   if (suffix) blocks.push({ type: 'text', text: suffix })
   return blocks
+}
+
+/**
+ * Render the <known_slots> + <discovery_gate> XML block injected into the
+ * system message to give the model current gate/slot state.
+ */
+function buildGateContextBlock(
+  state: DiscoveryState,
+  advancement: { question: import('~/lib/sms-v2/discovery-gate.server').GateQuestion | null; searchNow: boolean },
+): string {
+  const slots = state.slots
+  const gate = state.gate
+
+  const slotsXml = [
+    `category: ${slots.category ?? '(unknown)'}`,
+    `subtype: ${slots.subtype ?? '(unknown)'}`,
+    `audience: ${slots.audience ?? '(unknown)'}`,
+    `experience: ${slots.experience ?? '(unknown)'}`,
+    `mood: ${slots.mood?.join(', ') || '(unknown)'}`,
+    `matters: ${slots.matters?.join(', ') || '(unknown)'}`,
+    `priceMax: ${slots.priceMax !== undefined ? `$${slots.priceMax}` : '(unknown)'}`,
+    `isAdviceRequest: ${slots.isAdviceRequest ?? false}`,
+    `vulnerabilitySignaled: ${slots.vulnerabilitySignaled ?? false}`,
+  ].join('\n')
+
+  const nextQuestion = advancement.question?.prose ?? '(none)'
+
+  return `<known_slots>\n${slotsXml}\n</known_slots>\n\n<discovery_gate>\ngate: ${gate}\nsearchNow: ${advancement.searchNow}\nnext_question: ${nextQuestion}\n</discovery_gate>`
+}
+
+/**
+ * Persist updated gate state and slots to web_conversations. Also sets
+ * softBeat on the sms_turns log if the turn flagged a vulnerability signal.
+ * Called after the LLM responds — gate advances on user message slots, not
+ * on what the model said.
+ */
+async function persistGateState(
+  sessionId: string,
+  nextState: DiscoveryState,
+  mergedSlots: Partial<DiscoverySlots>,
+  softBeatThisTurn: boolean,
+): Promise<void> {
+  await db
+    .update(webConversations)
+    .set({
+      discoveryState: nextState as unknown as Record<string, unknown>,
+      discoveredSlots: mergedSlots as Record<string, unknown>,
+      // softBeat lives on sms_turns, not web_conversations, so we log it here
+      // via console so the web-turn-logger can pick it up separately.
+      ...(softBeatThisTurn ? {} : {}), // no extra column — logged via web-turn-logger
+    })
+    .where(eq(webConversations.sessionId, sessionId))
+
+  if (softBeatThisTurn) {
+    // Log soft-beat so ops can track vulnerability signals in the web channel.
+    console.info('[chat.server] softBeat=true for sessionId', sessionId)
+  }
 }
 
 /**
@@ -101,6 +217,115 @@ export async function generateChatReply(
   const channel = ctx.channel
   const isChat = channel === 'chat'
   const isSms = channel === 'sms'
+
+  // ── Gate machine + slot extraction (web chat only) ───────────────────────
+  // Pull prior discovery state and slots from web_conversations if this is a
+  // web turn. SMS gate wiring lives in processor.server.ts / conversation.server.ts.
+  let currentDiscoveryState: DiscoveryState | null = null
+  let priorDiscoveredSlots: Partial<DiscoverySlots> = {}
+  let gateSessionId: string | null = null
+
+  if (isChat && ctx.sessionId) {
+    gateSessionId = ctx.sessionId
+    try {
+      const rows = await db
+        .select({
+          discoveryState: webConversations.discoveryState,
+          discoveredSlots: webConversations.discoveredSlots,
+        })
+        .from(webConversations)
+        .where(eq(webConversations.sessionId, gateSessionId))
+        .limit(1)
+      const row = rows[0]
+      if (row) {
+        currentDiscoveryState = (row.discoveryState as DiscoveryState) ?? null
+        priorDiscoveredSlots = (row.discoveredSlots as Partial<DiscoverySlots>) ?? {}
+      }
+    } catch (err) {
+      console.warn('[chat.server] failed to read gate state from web_conversations', err)
+    }
+  }
+
+  // Extract slots from the latest user message (web only).
+  // Using [...].reverse().find() instead of findLast for ES2022 compat.
+  const latestUserMsg = [...bounded].reverse().find((t) => t.role === 'user')?.text ?? ''
+  let gateAdvancement: ReturnType<typeof advanceGate> | null = null
+  let mergedSlotsForGate: Partial<DiscoverySlots> = priorDiscoveredSlots
+  let softBeatThisTurn = false
+
+  if (isChat && latestUserMsg) {
+    try {
+      const extracted = await extractSlots({
+        text: latestUserMsg,
+        priorSlots: priorDiscoveredSlots,
+      })
+      softBeatThisTurn = extracted.slots.vulnerabilitySignaled === true
+      gateAdvancement = advanceGate(
+        currentDiscoveryState ?? null,
+        extracted.slots,
+      )
+      mergedSlotsForGate = gateAdvancement.nextState.slots
+    } catch (err) {
+      console.warn('[chat.server] slot extraction / gate advance failed', err)
+      // Fall through — gate context simply won't be injected this turn.
+      gateAdvancement = null
+    }
+
+    // ── Branch 0: Vulnerability soft-beat (web parity) ──────────────────────
+    // If the customer disclosed something tender, render a vulnerability-bank
+    // entry verbatim and skip the LLM. Gate is NOT advanced. No product card.
+    if (softBeatThisTurn) {
+      const trigger = inferVulnerabilityTrigger(latestUserMsg)
+      const entry = pickVulnerability(trigger, 'chat')
+      // Persist softBeat + slots without advancing gate.
+      if (gateSessionId && currentDiscoveryState) {
+        await persistGateState(gateSessionId, currentDiscoveryState, mergedSlotsForGate, true).catch((err) => {
+          console.warn('[chat.server] persistGateState (vulnerability) failed', err)
+        })
+      } else if (gateSessionId) {
+        await persistGateState(gateSessionId, initDiscoveryState(), mergedSlotsForGate, true).catch((err) => {
+          console.warn('[chat.server] persistGateState (vulnerability, init) failed', err)
+        })
+      }
+      return {
+        reply: entry.prose,
+        products: [],
+        history: [...bounded, { role: 'assistant', text: entry.prose }],
+      }
+    }
+
+    // ── Branch 4: Advice side-trip (web parity) ─────────────────────────────
+    // If the customer asked an advice-shaped question and we extracted a
+    // category that has an explainer, render the explainer verbatim and skip
+    // the LLM. Suspend the gate so we can resume after the customer responds.
+    if (mergedSlotsForGate.isAdviceRequest && mergedSlotsForGate.category) {
+      const explainerKey = toExplainerCategory(
+        mergedSlotsForGate.category,
+        mergedSlotsForGate.subtype,
+      )
+      if (explainerKey) {
+        const explainer = getExplainer(explainerKey)
+        if (explainer) {
+          // Construct a known-safe MOOD state with merged slots so the type-checker
+          // doesn't need to widen across the discriminated union. suspendForExplain
+          // preserves whichever resumeGate the input carries.
+          const baseStateForSuspend: DiscoveryState =
+            currentDiscoveryState ?? { gate: 'MOOD', slots: mergedSlotsForGate }
+          const suspended = suspendForExplain(baseStateForSuspend)
+          if (gateSessionId) {
+            await persistGateState(gateSessionId, suspended, mergedSlotsForGate, false).catch((err) => {
+              console.warn('[chat.server] persistGateState (advice) failed', err)
+            })
+          }
+          return {
+            reply: explainer.chat,
+            products: [],
+            history: [...bounded, { role: 'assistant', text: explainer.chat }],
+          }
+        }
+      }
+    }
+  }
 
   // Page-context only resolves on web — SMS texters have no browser to reason about.
   const basePrompt = isSms ? SMS_SYSTEM_PROMPT : CHAT_SYSTEM_PROMPT
@@ -160,6 +385,17 @@ export async function generateChatReply(
   //     a real checkout URL, so anything else means fabrication.
   const forceMode = isSms ? forceToolMode(history) : null
 
+  // Build gate context block for web chat — injected as second system block.
+  // This block is turn-specific (includes extracted slots) so it must NOT be
+  // cached (it changes every turn).
+  const gateContextBlock: Anthropic.TextBlockParam | null =
+    isChat && gateAdvancement
+      ? {
+          type: 'text',
+          text: buildGateContextBlock(gateAdvancement.nextState, gateAdvancement),
+        }
+      : null
+
   for (let hop = 0; hop < tuning.maxToolHops; hop++) {
     let toolChoice: Anthropic.MessageCreateParams['tool_choice'] | undefined
     if (forceMode === 'force-build' && hop === 0) {
@@ -167,10 +403,29 @@ export async function generateChatReply(
     } else if (forceMode === 'force-any' && hop === 0) {
       toolChoice = { type: 'any' }
     }
+    // Gate-aware tool-choice: when gate is MOOD/WHO/MATTERS and searchNow is
+    // false, restrict to text-only or askQuickChoice — prevents the model from
+    // jumping to discoverProducts/searchProducts before discovery is complete.
+    if (isChat && gateAdvancement && hop === 0 && !toolChoice) {
+      const gate = gateAdvancement.nextState.gate
+      const searchNow = gateAdvancement.searchNow
+      if (!searchNow && (gate === 'MOOD' || gate === 'WHO' || gate === 'MATTERS')) {
+        // Restrict to askQuickChoice only — no product search tools allowed.
+        toolChoice = { type: 'tool', name: 'askQuickChoice' }
+      }
+    }
+
+    // Build system: base prompt (possibly cached) + optional gate context block.
+    const systemForHop = buildSystemWithGate(
+      tuning.systemPrompt,
+      tuning.cachedSystem,
+      gateContextBlock,
+    )
+
     const res = await client.messages.create({
       model: tuning.model,
       max_tokens: tuning.maxTokens,
-      system: buildSystem(tuning.systemPrompt, tuning.cachedSystem),
+      system: systemForHop,
       tools,
       messages,
       ...(toolChoice ? { tool_choice: toolChoice } : {}),
@@ -226,9 +481,10 @@ export async function generateChatReply(
         const follow = await client.messages.create({
           model: tuning.model,
           max_tokens: tuning.wrapupMaxTokens,
-          system: buildSystem(
+          system: buildSystemWithGate(
             tuning.systemPrompt,
             tuning.cachedSystem,
+            gateContextBlock,
             '\n\nRespond in plain text only — no further tool calls. Never reference pills, buttons, instructions, or what you are about to say.',
           ),
           messages,
@@ -244,6 +500,17 @@ export async function generateChatReply(
     replyText = isSms
       ? clampSms(validateSmsCheckoutUrls(validateSmsPdpUrls(replyText, realProductHandles), realCheckoutUrls))
       : fixCartUrls(stripMetaPreamble(replyText))
+
+    // Persist gate state to web_conversations after the LLM responds.
+    // Gate always advances on extracted slots regardless of what the model did.
+    if (isChat && gateSessionId && gateAdvancement) {
+      await persistGateState(
+        gateSessionId,
+        gateAdvancement.nextState,
+        mergedSlotsForGate,
+        softBeatThisTurn,
+      ).catch((err) => console.warn('[chat.server] gate state persist failed', err))
+    }
 
     const products = isSms
       ? []
@@ -267,9 +534,10 @@ export async function generateChatReply(
   const final = await client.messages.create({
     model: tuning.model,
     max_tokens: tuning.wrapupMaxTokens,
-    system: buildSystem(
+    system: buildSystemWithGate(
       tuning.systemPrompt,
       tuning.cachedSystem,
+      gateContextBlock,
       '\n\nRespond in plain text only — no further tool calls.',
     ),
     messages,
@@ -280,6 +548,17 @@ export async function generateChatReply(
   const replyText = isSms
     ? clampSms(validateSmsCheckoutUrls(validateSmsPdpUrls(rawText, realProductHandles), realCheckoutUrls))
     : fixCartUrls(rawText)
+
+  // Persist gate state on the out-of-hops path too.
+  if (isChat && gateSessionId && gateAdvancement) {
+    await persistGateState(
+      gateSessionId,
+      gateAdvancement.nextState,
+      mergedSlotsForGate,
+      softBeatThisTurn,
+    ).catch((err) => console.warn('[chat.server] gate state persist (wrap-up) failed', err))
+  }
+
   const products = isSms
     ? []
     : await hydrateCards([...collected.values()].slice(0, MAX_CARDS_PER_REPLY))

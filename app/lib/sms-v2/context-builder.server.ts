@@ -31,6 +31,9 @@ function rowToConversationContext(row: ConversationRow): EmmaContext['conversati
     currentPitchHandle: row.currentPitchHandle,
     currentUpsellHandle: row.currentUpsellHandle,
     lastQuoteUrl: row.lastQuoteUrl,
+    // Discovery gate fields — null/empty-object for legacy rows.
+    discoveryState: row.discoveryState ?? null,
+    discoveredSlots: row.discoveredSlots ?? {},
   }
 }
 

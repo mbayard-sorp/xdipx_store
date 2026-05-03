@@ -29,6 +29,13 @@ function todayUtc(): string {
  * current token total. Caller records actual token usage after the LLM call.
  */
 export async function reserveSessionBudget(sessionId: number | string): Promise<BudgetReservation> {
+  // Dev bypass: local testing of the gate machine + explainers easily blows
+  // through the 20k-token cap in 2-3 turns once the system prompt + gate
+  // context block are accounted for. The cap is a production cost control,
+  // not a correctness check.
+  if (process.env['NODE_ENV'] !== 'production') {
+    return { ok: true, turnsUsed: 0, tokensUsed: 0 }
+  }
   try {
     const turnsUsed = await kvIncr(turnKey(sessionId))
     if (turnsUsed === 1) await kvSet(turnKey(sessionId), turnsUsed, SESSION_TTL_SECONDS)

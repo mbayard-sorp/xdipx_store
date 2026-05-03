@@ -19,13 +19,13 @@ export interface PresentationSlots {
 
 export type PresentationTemplate = (slots: PresentationSlots) => string
 
-/** Variant A — leading with the product name and value. */
+/** Variant A — leading with the product name; price mid-reply; closes with a fit question. */
 export const templateA: PresentationTemplate = ({ title, price, pdpUrl }) =>
-  `${title} is ${price} and honestly, it earns its price. This one keeps coming up when people ask me what to get first. Ready to take a peek? ${pdpUrl}`
+  `This is the one I'd pick for this. ${title}: ${pdpUrl}. It's ${price}, and honestly it earns it. Does this feel like the one?`
 
-/** Variant B — curiosity hook, price reveal at end. */
+/** Variant B — curiosity hook; price mid-reply; closes with fit question. */
 export const templateB: PresentationTemplate = ({ title, price, pdpUrl }) =>
-  `${title} has been on my radar for a reason. ${price}, ships discreetly, and it delivers. Take a look: ${pdpUrl}\nWant the rundown or ready to grab it?`
+  `${title} has been on my radar for a reason. Take a look: ${pdpUrl}. ${price}, ships discreetly, and it delivers. Want the rundown or ready to grab it?`
 
 /** Variant C — Emma aside first, hard facts second. */
 export const templateC: PresentationTemplate = ({ title, price, pdpUrl }) =>

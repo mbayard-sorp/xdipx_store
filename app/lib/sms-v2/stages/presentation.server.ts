@@ -16,7 +16,7 @@ import { searchForIvr } from '~/lib/ivr-search.server'
 import { resolveTransition } from '../transitions.server'
 import type { EmmaContext, IntentResult, StageResponse, ProductRef } from '../types.server'
 import { fetchProductContext } from './_product-context.server'
-import { pickPresentationTemplate } from '../templates/presentation-templates'
+import { pickFitCloser, type FitCloserContext } from '../templates/fit-closer-bank'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
@@ -110,6 +110,7 @@ export async function executePresentationStage(
   const userContent = JSON.stringify({
     stage:             'PRESENTATION',
     goal:              'Pitch this specific product. Be concrete: name, what makes it click, price + PDP URL. End with one CTA: "I\'ll take it ♥" or "Tell me more". Do not invent specs or reviews — only use what\'s in product.reviews or product.description. Keep under 480 chars total.',
+    costLastRule:      'HARD CONSTRAINT: the closing sentence of your reply MUST be a fit-confirming question, not a price. Mid-reply price is fine. Never end on a number. BAD: "The Lovense Osci 3 is great, $129 right now, want it?" GOOD: "This is the one I\'d pick for what you described, Lovense Osci 3 (xdipx.com/products/lovense-osci-3). It\'s $129. Does that feel like the one?"',
     product: {
       handle:      productCtx.handle,
       title:       productCtx.title,
@@ -247,9 +248,17 @@ export async function executePresentationStage(
 
   if (!hasPdpUrl || !hasPrice) {
     fabricationCaught = 'pdp_url_or_price_mismatch'
-    // Swap in deterministic fallback
-    finalProse = pickPresentationTemplate({
-      title:  productCtx.title,
+    // Swap in deterministic fallback from the fit-closer bank (8 contextual
+    // variants, all cost-last compliant). Context is derived from discovered slots.
+    const slots = (ctx.conversation.discoveredSlots ?? {}) as Record<string, unknown>
+    const fitCtx = selectFitCloserContext(
+      focusHandle,
+      ctx.conversation.currentPitchHandle,
+      slots,
+    )
+    const closerFn = pickFitCloser(fitCtx)
+    finalProse = closerFn({
+      name:   productCtx.title,
       price:  productCtx.price ?? '',
       pdpUrl: productCtx.pdpUrl,
     })
@@ -285,4 +294,34 @@ export async function executePresentationStage(
       fabricationCaught,
     },
   }
+}
+
+// ---------------------------------------------------------------------------
+// FitCloser context selection
+// ---------------------------------------------------------------------------
+
+/**
+ * Choose a FitCloserContext based on discovered slots and conversation state.
+ *
+ * Priority order:
+ *   1. Single pitched product (handle matches currentPitchHandle) → 'single-strong-match'
+ *   2. Budget concern in slots (priceMax set) → 'single-budget-sensitive'
+ *   3. First-timer experience → 'first-timer-needs-reassurance'
+ *   4. Default → 'single-strong-match'
+ */
+function selectFitCloserContext(
+  focusHandle: string,
+  currentPitchHandle: string | null,
+  slots: Record<string, unknown>,
+): FitCloserContext {
+  const hasBudgetConcern = typeof slots['priceMax'] === 'number'
+  const isFirstTimer = slots['experience'] === 'first-time'
+
+  if (isFirstTimer) return 'first-timer-needs-reassurance'
+  if (hasBudgetConcern) return 'single-budget-sensitive'
+  // Named product from NAME_ITEM intent or existing pitch
+  if (focusHandle && (currentPitchHandle === focusHandle || currentPitchHandle)) {
+    return 'single-strong-match'
+  }
+  return 'single-strong-match'
 }
