@@ -1,10 +1,13 @@
 /**
  * app/lib/sms-v2/stages/objection.server.ts
  *
- * Phase 6a — OBJECTION stage handler.
+ * Phase 6a — OBJECTION stage handler (legacy gate flow).
+ * Phase 6  — wrapped by `executeObjectionStage` which routes between this
+ * legacy handler and the unified Sonnet conversation agent based on the env
+ * flag allowlist (`pickDiscoveryAgentVersion`).
  *
- * The customer is pushing back on the current pitched product. Surface their
- * concern with real facts. Do not pivot to a different product.
+ * Legacy handler: customer is pushing back on the current pitched product.
+ * Surface their concern with real facts. Do not pivot to a different product.
  *
  * Fabrication guard: asserts the LLM prose contains the real PDP URL (when
  * the product is referenced) and the real price. Mismatch swaps to a
@@ -16,6 +19,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { buildEmmaSystemBlocks } from '~/lib/claude.server'
 import { searchForIvr } from '~/lib/ivr-search.server'
+import { executeConversationAgent } from '../conversation-agent.server'
+import { pickDiscoveryAgentVersion } from '../discovery-agent-flag.server'
 import { resolveTransition } from '../transitions.server'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 import { fetchProductContext } from './_product-context.server'
@@ -64,9 +69,36 @@ const SEARCH_FOR_IVR_TOOL: Anthropic.Tool = {
 // TODO (Phase 6c): register kbLookup tool here once available.
 // const KB_LOOKUP_TOOL: Anthropic.Tool = { name: 'kbLookup', ... }
 
-// ─── Main handler ─────────────────────────────────────────────────────────────
+// ─── Main handler — flag-aware dispatch (Phase 6) ─────────────────────────────
 
+/**
+ * OBJECTION entry point. Picks between the legacy gate-style handler
+ * (executeObjectionStageGate) and the Phase 6 Sonnet conversation agent
+ * (executeConversationAgent) based on the env-flag allowlist.
+ *
+ * Default: 'v2-gate' → no behavior change in production. The agent only runs
+ * when the env flag is flipped or the caller is on the allowlist. Same flag
+ * that governs the discovery + presentation agents — Phase 6 expanded scope
+ * to cover OBJECTION uniformly.
+ */
 export async function executeObjectionStage(
+  ctx: EmmaContext,
+  intent: IntentResult,
+  customerText: string,
+): Promise<StageResponse> {
+  const version = pickDiscoveryAgentVersion(ctx.conversation.phone)
+  if (version === 'v2-agent') {
+    return executeConversationAgent({ ctx, intent, customerText, stage: 'OBJECTION' })
+  }
+  return executeObjectionStageGate(ctx, intent, customerText)
+}
+
+/**
+ * Legacy gate-style OBJECTION handler. Kept as the fallback path when the
+ * conversation agent isn't enabled. Replaced by executeConversationAgent in
+ * Phase 6 cleanup.
+ */
+async function executeObjectionStageGate(
   ctx: EmmaContext,
   intent: IntentResult,
   customerText: string,

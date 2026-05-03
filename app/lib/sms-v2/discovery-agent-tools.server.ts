@@ -26,7 +26,7 @@
  */
 import type Anthropic from '@anthropic-ai/sdk'
 import { searchForIvrWithDiagnostics, type IvrProductCard } from '~/lib/ivr-search.server'
-import { findCustomerByPhone } from '~/lib/shopify.server'
+import { findCustomerByPhone, getProductByHandle } from '~/lib/shopify.server'
 import { getExplainer, type ExplainerCategory } from './templates/category-explainers'
 
 // ─── Tool surface (model-facing definitions) ─────────────────────────────────
@@ -93,12 +93,29 @@ export const DISCOVERY_AGENT_TOOLS: Anthropic.Tool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'getProductDetails',
+    description:
+      "Fetch detailed info on a specific product by its handle — variant options (colors/sizes), tagline, description, in-stock flag. Use when the customer asks about variants ('what colors?', 'do you have it in red?', 'what sizes?') or specs of a product you've already mentioned. Pass the handle from a prior tool result; never invent one.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        handle: {
+          type: 'string',
+          description: "Product handle (e.g. 'lovense-osci-3'). Must come from a prior searchProducts result or ctx.currentPitchHandle.",
+        },
+      },
+      required: ['handle'],
+      additionalProperties: false,
+    },
+  },
 ]
 
 export type DiscoveryToolName =
   | 'searchProducts'
   | 'lookupReturningCustomer'
   | 'getCategoryExplainer'
+  | 'getProductDetails'
 
 export interface DiscoveryAgentToolContext {
   /** Caller phone (E.164) for voice/sms, or `web:<sessionId>` for web chat. */
@@ -271,6 +288,60 @@ export async function runDiscoveryTool(
         data: {
           sms: explainer.sms,
           chat: explainer.chat,
+        },
+      }
+    }
+
+    if (name === 'getProductDetails') {
+      const handle = String(input['handle'] ?? '').trim()
+      if (!handle) {
+        return { ok: false, error: 'missing_handle', message: 'getProductDetails needs a non-empty handle.' }
+      }
+      const product = await getProductByHandle(handle)
+      if (!product) {
+        return { ok: false, error: 'not_found', message: `No product with handle "${handle}".` }
+      }
+      // Stash a card in cardSink the same way searchProducts does so
+      // detectPitchedCard can recognize follow-up mentions and the fabrication
+      // guard's real-handles set picks up this handle on the next pass.
+      const variantOptions =
+        product.variants.length > 1
+          ? product.variants.slice(0, 5).map((v) => ({
+              variantId: v.id,
+              label: v.title,
+              price: Number(v.price),
+              inStock: v.availableForSale,
+            }))
+          : undefined
+      const inStock = product.variants.some((v) => v.availableForSale)
+      const firstVariantPrice = product.variants[0]?.price
+      const price = firstVariantPrice !== undefined ? Number(firstVariantPrice) : Number(product.price ?? 0)
+      const ivrCard: IvrProductCard = {
+        title: product.title,
+        handle: product.handle,
+        category: product.category ?? '',
+        tagline: product.metaDescription ?? '',
+        inStock,
+        price,
+        pctOff: 0,
+        phrasing: 'msrp_only',
+        variantId: product.variants[0]?.id ?? '',
+        ...(variantOptions !== undefined && { variantOptions }),
+      }
+      if (ctx.cardSink && ctx.toolUseId) {
+        ctx.cardSink.set(ctx.toolUseId, [ivrCard])
+      }
+      return {
+        ok: true,
+        data: {
+          title: product.title,
+          handle: product.handle,
+          pdpUrl: `https://xdipx.com/products/${product.handle}`,
+          tagline: product.metaDescription ?? '',
+          description: (product.metaDescription ?? '').slice(0, 500),
+          in_stock: inStock,
+          variant_options: variantOptions ?? [],
+          price,
         },
       }
     }
