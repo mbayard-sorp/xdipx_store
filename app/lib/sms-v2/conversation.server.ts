@@ -39,6 +39,10 @@ export interface ConversationRow {
   customerDefaultZip: string | null
   stageSetAt: Date
   lastActiveAt: Date
+  /** Discovery gate state machine snapshot. Null for pre-gate rows. */
+  discoveryState: unknown | null
+  /** Accumulated discovery slots. Defaults to {} for pre-gate rows. */
+  discoveredSlots: Record<string, unknown>
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +206,8 @@ export async function applyStateWrites(
     lastQuoteItems?: unknown | null
     lastQuoteCreatedAt?: Date | null
     customerGid?: string | null
+    discoveryState?: unknown | null
+    discoveredSlots?: Record<string, unknown>
   },
 ): Promise<void> {
   const now = new Date()
@@ -217,6 +223,8 @@ export async function applyStateWrites(
   if (writes.lastQuoteItems !== undefined) updates.lastQuoteItems = writes.lastQuoteItems
   if (writes.lastQuoteCreatedAt !== undefined) updates.lastQuoteCreatedAt = writes.lastQuoteCreatedAt
   if (writes.customerGid !== undefined) updates.customerGid = writes.customerGid
+  if (writes.discoveryState !== undefined) updates.discoveryState = writes.discoveryState
+  if (writes.discoveredSlots !== undefined) updates.discoveredSlots = writes.discoveredSlots
 
   await db.update(smsConversations).set(updates).where(eq(smsConversations.phone, phone))
 }

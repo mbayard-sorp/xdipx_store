@@ -40,6 +40,10 @@ export interface WebConversationRow {
   pageRoute: string | null
   stageSetAt: Date
   lastActiveAt: Date
+  /** Discovery gate state machine snapshot. Null for pre-gate rows. */
+  discoveryState: unknown | null
+  /** Accumulated discovery slots. Defaults to {} for pre-gate rows. */
+  discoveredSlots: Record<string, unknown>
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +186,8 @@ export async function applyWebStateWrites(
     customerGid?: string | null
     pageHandle?: string | null
     pageRoute?: string | null
+    discoveryState?: unknown | null
+    discoveredSlots?: Record<string, unknown>
   },
 ): Promise<void> {
   const now = new Date()
@@ -199,6 +205,8 @@ export async function applyWebStateWrites(
   if (writes.customerGid !== undefined) updates.customerGid = writes.customerGid
   if (writes.pageHandle !== undefined) updates.pageHandle = writes.pageHandle
   if (writes.pageRoute !== undefined) updates.pageRoute = writes.pageRoute
+  if (writes.discoveryState !== undefined) updates.discoveryState = writes.discoveryState
+  if (writes.discoveredSlots !== undefined) updates.discoveredSlots = writes.discoveredSlots
 
   await db.update(webConversations).set(updates).where(eq(webConversations.sessionId, sessionId))
 }

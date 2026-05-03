@@ -101,6 +101,10 @@ export async function processSmsMessageV2(
       ...(writes.lastQuoteItems      !== undefined && { lastQuoteItems:      writes.lastQuoteItems }),
       ...(writes.lastQuoteCreatedAt  !== undefined && { lastQuoteCreatedAt:  writes.lastQuoteCreatedAt }),
       ...(writes.customerGid         !== undefined && { customerGid:         writes.customerGid }),
+      // Discovery gate columns — passed through as raw JSON (types are unknown
+      // here to avoid circular imports; the DB column is JSONB).
+      ...(writes.discoveryState  !== undefined && { discoveryState:  writes.discoveryState }),
+      ...(writes.discoveredSlots !== undefined && { discoveredSlots: writes.discoveredSlots }),
     })
 
     result = await withTurnLoggingForStageResponse(input, stageResp, 'v2', {
@@ -112,6 +116,7 @@ export async function processSmsMessageV2(
       outputTokens: stageResp.telemetry.outputTokens,
       toolCalls: stageResp.telemetry.toolCalls,
       fabricationCaught: stageResp.telemetry.fabricationCaught,
+      softBeat: stageResp.telemetry.softBeat,
     })
   } else {
     // No v2 handler for this stage — fall through to v1 (existing Phase 1 behavior).

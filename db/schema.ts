@@ -480,6 +480,9 @@ export const smsConversations = pgTable('sms_conversations', {
   stageSetAt:          timestamp('stage_set_at').notNull().defaultNow(),
   lastActiveAt:        timestamp('last_active_at').notNull().defaultNow(),
   conversationId:      uuid('conversation_id').notNull().defaultRandom(),
+  // Migration 030: Emma discovery state machine + slot accumulator.
+  discoveryState:      json('discovery_state').$type<unknown>(),
+  discoveredSlots:     json('discovered_slots').$type<Record<string, unknown>>().notNull().default({}),
 }, t => ({
   // Phase 10: customer_gid indexes for cross-channel joins (additive).
   customerGidIdx:       index('sms_conversations_customer_gid_idx').on(t.customerGid),
@@ -514,6 +517,9 @@ export const smsTurns = pgTable('sms_turns', {
   pipelineVersion:  varchar('pipeline_version', { length: 8 }).notNull(),
   // Migration 028: channel='sms' (default) or 'web'. Existing rows backfilled to 'sms'.
   channel:          varchar('channel', { length: 8 }).notNull().default('sms'),
+  // Migration 030: turn flagged when the engine recognized a vulnerability
+  // disclosure and suspended the gate / suppressed the product pitch.
+  softBeat:         boolean('soft_beat').notNull().default(false),
   createdAt:        timestamp('created_at').notNull().defaultNow(),
 }, t => ({
   twilioSidUniq:    uniqueIndex('sms_turns_twilio_sid_uniq').on(t.twilioMessageSid),
@@ -546,6 +552,9 @@ export const webConversations = pgTable('web_conversations', {
   stageSetAt:          timestamp('stage_set_at').notNull().defaultNow(),
   lastActiveAt:        timestamp('last_active_at').notNull().defaultNow(),
   conversationId:      uuid('conversation_id').notNull().defaultRandom(),
+  // Migration 030: Emma discovery state machine + slot accumulator (web parity).
+  discoveryState:      json('discovery_state').$type<unknown>(),
+  discoveredSlots:     json('discovered_slots').$type<Record<string, unknown>>().notNull().default({}),
 }, t => ({
   // Phase 10: customer_gid indexes for cross-channel joins (additive).
   customerGidIdx:       index('web_conversations_customer_gid_idx').on(t.customerGid),

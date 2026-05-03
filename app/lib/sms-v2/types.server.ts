@@ -78,6 +78,10 @@ export interface EmmaContext {
     currentPitchHandle: string | null
     currentUpsellHandle: string | null
     lastQuoteUrl: string | null
+    /** Discovery gate state machine snapshot. Null for legacy rows. */
+    discoveryState?: unknown | null
+    /** Accumulated discovery slots. Empty object for legacy rows. */
+    discoveredSlots?: Record<string, unknown>
   }
   customer?: CustomerContext | undefined
   todaysPick?: ProductContext | undefined
@@ -96,6 +100,11 @@ export interface ConversationStateWrites {
   lastQuoteItems?: Array<{ handle: string; quantity: number }> | null | undefined
   lastQuoteCreatedAt?: Date | null | undefined
   customerGid?: string | null | undefined
+  /** Discovery gate state machine snapshot. Typed as unknown to avoid circular
+   *  imports — the processor passes it through as raw JSON. */
+  discoveryState?: unknown | null | undefined
+  /** Accumulated discovery slots. Typed as Record to avoid circular imports. */
+  discoveredSlots?: Record<string, unknown> | undefined
 }
 
 export interface StageResponse {
@@ -115,5 +124,8 @@ export interface StageResponse {
     outputTokens?: number | undefined
     toolCalls?: Array<{ name: string; input: unknown; ok: boolean; error?: string | undefined }> | undefined
     fabricationCaught?: string | undefined
+    /** True when this turn was a vulnerability soft-beat (gate not advanced,
+     *  no product surfaced). Written to sms_turns.soft_beat column. */
+    softBeat?: boolean | undefined
   }
 }

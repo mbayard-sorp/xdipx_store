@@ -49,6 +49,10 @@ export interface IvrSearchOpts {
   category?: string | undefined
   priceMax?: number | undefined
   tags?: string[] | undefined
+  /** Filter to a specific productTypeDial value (e.g. 'vibrator', 'wear', 'plug'). */
+  productTypeDial?: string | undefined
+  /** Filter to a specific productSubtypeDial value. Only applied when productTypeDial is also set. */
+  productSubtypeDial?: string | undefined
 }
 
 export interface IvrDiscoverOpts {
@@ -59,6 +63,27 @@ export interface IvrDiscoverOpts {
   category?: string | undefined
   priceMax?: number | undefined
   limit?: number | undefined
+  /** Filter to a specific productTypeDial value (e.g. 'vibrator', 'wear', 'plug'). */
+  productTypeDial?: string | undefined
+  /** Filter to a specific productSubtypeDial value. Only applied when productTypeDial is also set. */
+  productSubtypeDial?: string | undefined
+}
+
+// ─── Diagnostics return type ──────────────────────────────────────────────────
+
+export interface SearchDiagnostics {
+  cards: IvrProductCard[]
+  /**
+   * - 'matched'           — at least one card was found.
+   * - 'filtered-to-zero'  — base results existed but filters (productTypeDial /
+   *                         productSubtypeDial / category / priceMax / tags) reduced
+   *                         the set to zero. Caller should consider dropping a filter.
+   * - 'no-base-results'   — the keyword/discovery query itself returned nothing.
+   *                         No filters to blame.
+   * - 'sanity-unavailable'— Sanity client could not be reached (env vars missing or
+   *                         network error). Shopify fallback may have been used.
+   */
+  reason: 'matched' | 'filtered-to-zero' | 'no-base-results' | 'sanity-unavailable'
 }
 
 // ─── Shopify product → compact IVR card ──────────────────────────────────────
@@ -122,13 +147,33 @@ const STRICT_CATEGORY_TERMS = new Set([
   'plug', 'plugs',
   'ring', 'rings',
   'cleaner', 'cleaners',
+  // wear / lingerie
+  'outfit', 'outfits', 'lingerie', 'teddy', 'bodysuit', 'bodystocking', 'stockings', 'pasties',
+  // bondage / restraint
+  'harness', 'harnesses', 'blindfold', 'restraints', 'paddle', 'flogger', 'gag', 'cuffs', 'bondage',
+  // anal / prostate
+  'anal beads', 'prostate',
+  // stroker / masturbator
+  'masturbator', 'stroker', 'sleeve',
+  // safer-sex
+  'condom', 'condoms',
 ])
 
-export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[]> {
-  const { query, limit = 3, category, priceMax, tags } = opts
+/**
+ * searchForIvrWithDiagnostics — full result with reason code.
+ * Use when the caller needs to distinguish "filtered-to-zero" from
+ * "no candidates in Sanity at all" in order to decide whether to retry
+ * with a looser filter.
+ */
+export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<SearchDiagnostics> {
+  const { query, limit = 3, category, priceMax, tags, productTypeDial, productSubtypeDial } = opts
   const client = getSanityClient()
 
-  if (!client) return shuffle(await shopifyFallback(query, Math.max(limit * 2, 8))).slice(0, limit)
+  if (!client) {
+    const cards = shuffle(await shopifyFallback(query, Math.max(limit * 2, 8))).slice(0, limit)
+    return { cards, reason: 'sanity-unavailable' }
+  }
+
   // Fetch a wider candidate pool so we can shuffle within similar relevance
   // and avoid pitching the same product on every call. Top-N matches usually
   // have similar scores; shuffling them gives variety without sacrificing
@@ -138,15 +183,20 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
 
   const strictCategory = STRICT_CATEGORY_TERMS.has(query.trim().toLowerCase())
 
+  // Track whether any extra filters beyond the base keyword are active so we
+  // can distinguish "filtered-to-zero" from "no-base-results" below.
+  const hasExtraFilters = Boolean(category || priceMax != null || (tags && tags.length > 0) || productTypeDial)
+
   try {
     const patterns = buildQueryPatterns(query)
-    if (patterns.length === 0) return []
+    if (patterns.length === 0) return { cards: [], reason: 'no-base-results' }
 
     const paramNames = patterns.map((_, i) => `q${i}`)
     const groqParams: Record<string, unknown> = {}
     patterns.forEach((p, i) => { groqParams[`q${i}`] = p })
 
-    const conditions: string[] = [
+    // ── Base conditions (keyword match) ──────────────────────────────────────
+    const baseConditions: string[] = [
       '_type == "productPage"',
       'archived != true',
     ]
@@ -157,28 +207,40 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
     const categoryMatch = fieldMatchAny('category', paramNames)
     const descMatch = fieldMatchAny('pt::text(description)', paramNames)
     const seoMatch = fieldMatchAny('seoDescription', paramNames)
-    conditions.push(
+    baseConditions.push(
       strictCategory
         ? `(${titleMatch} || ${taglineMatch} || ${vendorMatch} || ${categoryMatch})`
         : `(${titleMatch} || ${taglineMatch} || ${vendorMatch} || ${categoryMatch} || ${descMatch} || ${seoMatch})`,
     )
 
+    // ── Extra filter conditions ───────────────────────────────────────────────
+    const filterConditions: string[] = []
+
     if (category) {
-      conditions.push('$cat in category')
+      filterConditions.push('$cat in category')
       groqParams.cat = category
     }
     if (priceMax != null) {
-      conditions.push('price <= $priceMax')
+      filterConditions.push('price <= $priceMax')
       groqParams.priceMax = priceMax
     }
     if (tags && tags.length > 0) {
       for (let i = 0; i < tags.length; i++) {
-        conditions.push(`$tag${i} in tags`)
+        filterConditions.push(`$tag${i} in tags`)
         groqParams[`tag${i}`] = tags[i]
       }
     }
+    if (productTypeDial) {
+      filterConditions.push('productTypeDial == $typeDial')
+      groqParams.typeDial = productTypeDial
+      if (productSubtypeDial) {
+        filterConditions.push('productSubtypeDial == $subtypeDial')
+        groqParams.subtypeDial = productSubtypeDial
+      }
+    }
 
-    const filter = conditions.join(' && ')
+    const allConditions = [...baseConditions, ...filterConditions]
+    const filter = allConditions.join(' && ')
     const boosts = [
       ...paramNames.map((n) => `boost(title match $${n}, 5)`),
       ...paramNames.map((n) => `boost(tagline match $${n}, 3)`),
@@ -199,11 +261,30 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
     >(groq, groqParams)
 
     if (!sanityResults || sanityResults.length === 0) {
-      // Shopify's full-text search matches description bodies too, which is the
-      // same trap the strict path avoids. Return empty so Emma says "no match"
-      // instead of surfacing a massager for a "lube" query.
-      if (strictCategory) return []
-      return marginWeightedSelect(await shopifyFallback(query, Math.max(limit * 2, 8)), limit)
+      if (strictCategory) {
+        // Determine whether the base query (without extra filters) would have
+        // found anything — if yes, it's filtered-to-zero; otherwise no-base-results.
+        if (hasExtraFilters) {
+          // Re-query with only base conditions to check if unfiltered results exist
+          const baseFilter = baseConditions.join(' && ')
+          const baseGroq = `*[${baseFilter}] [0...1] { "handle": shopifyHandle }`
+          const baseCheck = await client.fetch<{ handle: string }[]>(baseGroq, groqParams)
+          const reason = baseCheck.length > 0 ? 'filtered-to-zero' : 'no-base-results'
+          return { cards: [], reason }
+        }
+        return { cards: [], reason: 'no-base-results' }
+      }
+      // Non-strict path: try Shopify fallback. If we had extra filters and
+      // Shopify is also empty, classify as filtered-to-zero when filters were active.
+      const fallback = await shopifyFallback(query, Math.max(limit * 2, 8))
+      if (fallback.length === 0 && hasExtraFilters) {
+        return { cards: [], reason: 'filtered-to-zero' }
+      }
+      if (fallback.length === 0) {
+        return { cards: [], reason: 'no-base-results' }
+      }
+      const cards = marginWeightedSelect(fallback, limit)
+      return { cards, reason: cards.length > 0 ? 'matched' : 'no-base-results' }
     }
 
     const handles = sanityResults.map((r) => r.handle).filter(Boolean)
@@ -221,11 +302,22 @@ export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[
     // Sanity has already filtered for context relevance (the candidate pool
     // is "products that match this query"); within that pool, prefer items
     // that make us money AND are sellable.
-    return marginWeightedSelect(cards, limit)
+    const ranked = marginWeightedSelect(cards, limit)
+    return { cards: ranked, reason: ranked.length > 0 ? 'matched' : 'filtered-to-zero' }
   } catch (err) {
     console.error('[ivr-search] Sanity search failed, falling back to Shopify:', err)
-    return marginWeightedSelect(await shopifyFallback(query, Math.max(limit * 2, 8)), limit)
+    const cards = marginWeightedSelect(await shopifyFallback(query, Math.max(limit * 2, 8)), limit)
+    return { cards, reason: 'sanity-unavailable' }
   }
+}
+
+/**
+ * searchForIvr — backward-compatible wrapper. Returns only the cards array.
+ * Existing callers continue to work unchanged.
+ */
+export async function searchForIvr(opts: IvrSearchOpts): Promise<IvrProductCard[]> {
+  const { cards } = await searchForIvrWithDiagnostics(opts)
+  return cards
 }
 
 /**
@@ -293,11 +385,19 @@ function pickWeightedIndex(cards: IvrProductCard[]): number {
 
 // ─── Discovery search (structured filters, no free-text) ─────────────────────
 
-export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductCard[]> {
-  const { mood, experience, useCase, features, category, priceMax, limit = 3 } = opts
+/**
+ * discoverForIvrWithDiagnostics — structured-filter discovery with reason code.
+ */
+export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Promise<SearchDiagnostics> {
+  const { mood, experience, useCase, features, category, priceMax, limit = 3, productTypeDial, productSubtypeDial } = opts
   const client = getSanityClient()
 
-  if (!client) return []
+  if (!client) return { cards: [], reason: 'sanity-unavailable' }
+
+  // Track whether any non-mood/experience/useCase/feature filters are active so
+  // we can distinguish "filtered-to-zero" from "no-base-results".
+  const hasPrimaryFilters = Boolean(mood?.length || experience || useCase?.length || features?.length)
+  const hasNarrowingFilters = Boolean(category || priceMax != null || productTypeDial)
 
   try {
     const conditions: string[] = [
@@ -352,6 +452,15 @@ export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductC
       groqParams.priceMax = priceMax
     }
 
+    if (productTypeDial) {
+      conditions.push('productTypeDial == $typeDial')
+      groqParams.typeDial = productTypeDial
+      if (productSubtypeDial) {
+        conditions.push('productSubtypeDial == $subtypeDial')
+        groqParams.subtypeDial = productSubtypeDial
+      }
+    }
+
     const filter = conditions.join(' && ')
     const scoreClause = boostClauses.length > 0
       ? `| score(${boostClauses.join(', ')})`
@@ -368,7 +477,27 @@ export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductC
       { handle: string; title: string; category: string | null; tagline: string | null }[]
     >(groq, groqParams)
 
-    if (!sanityResults || sanityResults.length === 0) return []
+    if (!sanityResults || sanityResults.length === 0) {
+      // Determine whether this is "filtered-to-zero" or truly "no base results".
+      // Only worth checking when we have both primary filters (mood/exp/useCase/features)
+      // AND narrowing filters (category/price/typeDial).
+      if (hasPrimaryFilters && hasNarrowingFilters) {
+        const baseConditions = conditions.filter(
+          (c) =>
+            !c.includes('$cat') &&
+            !c.includes('price <=') &&
+            !c.includes('productTypeDial') &&
+            !c.includes('productSubtypeDial'),
+        )
+        const baseFilter = baseConditions.join(' && ')
+        const baseGroq = `*[${baseFilter}] [0...1] { "handle": shopifyHandle }`
+        const baseCheck = await client.fetch<{ handle: string }[]>(baseGroq, groqParams)
+        const reason = baseCheck.length > 0 ? 'filtered-to-zero' : 'no-base-results'
+        return { cards: [], reason }
+      }
+      const reason = hasPrimaryFilters || hasNarrowingFilters ? 'no-base-results' : 'no-base-results'
+      return { cards: [], reason }
+    }
 
     const handles = sanityResults.map((r) => r.handle).filter(Boolean)
     const shopifyProducts = await getProductsByHandles(handles)
@@ -381,11 +510,20 @@ export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductC
       cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
     }
 
-    return cards
+    return { cards, reason: cards.length > 0 ? 'matched' : 'filtered-to-zero' }
   } catch (err) {
     console.error('[ivr-search] Sanity discover failed:', err)
-    return []
+    return { cards: [], reason: 'sanity-unavailable' }
   }
+}
+
+/**
+ * discoverForIvr — backward-compatible wrapper. Returns only the cards array.
+ * Existing callers continue to work unchanged.
+ */
+export async function discoverForIvr(opts: IvrDiscoverOpts): Promise<IvrProductCard[]> {
+  const { cards } = await discoverForIvrWithDiagnostics(opts)
+  return cards
 }
 
 // ─── Direct handle lookup (for recommendations) ─────────────────────────────
