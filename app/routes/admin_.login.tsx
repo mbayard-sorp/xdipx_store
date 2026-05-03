@@ -3,7 +3,6 @@ import { useActionData, redirect, Form } from 'react-router'
 import { loginAdmin, logoutAdmin, getSession } from '~/lib/session.server'
 import { checkRateLimit, rateLimited, getClientIp } from '~/lib/rate-limit.server'
 import { kvIncr, kvSet } from '~/lib/kv.server'
-import { rejectIfBot } from '~/lib/botid.server'
 
 export const meta: MetaFunction = () => [{ title: 'Admin Login — xdipx' }]
 
@@ -14,8 +13,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const bot = await rejectIfBot()
-  if (bot) return bot
   // IP-level throttle — blunt but effective against distributed credential stuffing from one source
   const rl = await checkRateLimit(request, 'admin-login', 20, 900)
   if (!rl.ok) return rateLimited()
