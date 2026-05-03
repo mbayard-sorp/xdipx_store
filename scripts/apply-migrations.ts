@@ -50,10 +50,20 @@ async function main(): Promise<void> {
   for (const f of files) {
     const path = join(MIGRATIONS_DIR, f)
     const body = readFileSync(path, 'utf8')
+    // Split on `;\n` (statement terminator). Within each chunk, drop SQL
+    // line-comments (`-- ...`) so a chunk that begins with a comment block
+    // still runs the SQL after it. The previous filter (`!/^--/.test(s)`)
+    // silently dropped the entire chunk if it began with a comment, which
+    // caused 3 of 6 statements in migration 030 to be skipped.
     const statements = body
       .split(/;\s*\n/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0 && !/^--/.test(s))
+      .map((s) =>
+        s.split('\n')
+          .filter((line) => !line.trim().startsWith('--'))
+          .join('\n')
+          .trim(),
+      )
+      .filter((s) => s.length > 0)
     console.log(`→ ${f} (${statements.length} statements)`)
     for (const stmt of statements) {
       try {
