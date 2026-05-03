@@ -8,7 +8,7 @@
  * IVR_V2_PHONES allowlist).
  *
  * Authentication: constant-time comparison of the `x-internal-secret` header
- * against the INTERNAL_SECRET env var (32+ char shared secret). 401 on mismatch.
+ * against the INTERNAL_API_SECRET env var (32+ char shared secret). 401 on mismatch.
  *
  * Rate limiting: keyed by callerPhone, 20 req/min. 429 on breach.
  *
@@ -37,16 +37,16 @@ import type { ProcessVoiceInput, VoiceReply } from '~/lib/sms-v2/adapters/voice.
 
 /**
  * Constant-time comparison of the x-internal-secret header against the
- * INTERNAL_SECRET env var. Returns false if the env var is unset or empty.
+ * INTERNAL_API_SECRET env var. Returns false if the env var is unset or empty.
  *
  * timingSafeEqual requires equal-length buffers. We pad/truncate with a
  * fixed-length HMAC so the comparison is always constant-time regardless of
  * secret or header length.
  */
 function checkInternalSecret(request: Request): boolean {
-  const envSecret = process.env['INTERNAL_SECRET'] ?? ''
+  const envSecret = process.env['INTERNAL_API_SECRET'] ?? ''
   if (!envSecret) {
-    console.error('[engine-turn] INTERNAL_SECRET not set — rejecting all requests')
+    console.error('[engine-turn] INTERNAL_API_SECRET not set — rejecting all requests')
     return false
   }
   const header = request.headers.get('x-internal-secret') ?? ''
