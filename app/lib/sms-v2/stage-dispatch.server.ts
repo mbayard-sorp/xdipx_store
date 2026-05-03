@@ -11,6 +11,7 @@
  */
 import type { EmmaContext, IntentResult, StageResponse, Stage } from './types.server'
 import type { ProcessSmsResult, SmsSegment } from '~/lib/sms-processor.server'
+import { splitProseAtUrl } from '~/lib/sms-reply-segments.server'
 import { executeCheckoutStage } from './stages/checkout.server'
 import { executeUpsellStage } from './stages/upsell.server'
 import { executePresentationStage } from './stages/presentation.server'
@@ -158,14 +159,18 @@ function stripMarkdownForSms(prose: string): string {
  * Convert a StageResponse to the ProcessSmsResult shape expected by the
  * webhook route and turn-logger.
  *
- * - replies: each segment maps to an SmsSegment. body = segment.prose.
- *   mediaUrl is intentionally NOT set even when productCard.imageUrl is
- *   available — iMessage and most modern messaging clients auto-fetch the
- *   Open Graph preview when the body contains a product URL, so we get the
- *   image effectively for free. Twilio MMS costs ~2-3× SMS per segment
+ * - replies: each StageResponse segment becomes one or more SmsSegments.
+ *   body = segment.prose, with two transformations:
+ *     1. Markdown stripped (SMS doesn't render it).
+ *     2. Any PDP URL on its own line is pulled into its OWN SmsSegment so
+ *        iMessage's auto-preview heuristic actually fires — a URL alone in
+ *        a bubble previews reliably; mixed in with prose it usually doesn't.
+ *
+ *   mediaUrl is intentionally NOT set. iMessage's URL preview replaces the
+ *   MMS image we used to send; Twilio MMS costs ~2-3× SMS per segment
  *   (~$0.029 vs ~$0.013 in 2026 pricing) and the visual outcome on iMessage
- *   is identical. Customers on plain SMS clients see a clickable link
- *   without auto-preview, which is fine.
+ *   is now better (rich product card via OG preview). Plain-SMS clients see
+ *   two short messages: prose + a tappable link. Acceptable.
  *
  *   To re-enable MMS attachments on a per-channel basis later (e.g., for
  *   web chat or non-iMessage carriers we measure as cost-effective),
@@ -181,14 +186,20 @@ export function stageResponseToProcessResult(
 ): ProcessSmsResult {
   const replies: SmsSegment[] = resp.segments
     .filter((s) => s.prose.trim().length > 0)
-    .map((s): SmsSegment => ({
+    .flatMap((s): SmsSegment[] => {
       // Strip Markdown — Twilio SMS doesn't render it and customers see
       // literal asterisks, double-underscores, [text](url) etc. as garbage
       // characters. Web chat keeps Markdown via its own adapter.
-      body: stripMarkdownForSms(s.prose),
-      // Intentionally NO mediaUrl — see header comment. iMessage previews
-      // the product URL auto-magically; plain SMS clients see a link.
-    }))
+      const stripped = stripMarkdownForSms(s.prose)
+      // Pull any PDP URL onto its own bubble so iMessage renders the OG
+      // preview card reliably. The closing CTA stays with the prose so the
+      // ask is still above the preview. See sms-reply-segments.server.ts
+      // for the full splitter rationale.
+      return splitProseAtUrl(stripped).map((part) => ({ body: part }))
+      // Intentionally NO mediaUrl — iMessage's URL preview replaces the
+      // MMS image we used to send (commit 3209c0b), at a fraction of the
+      // cost.
+    })
 
   const reply =
     replies.length > 0
