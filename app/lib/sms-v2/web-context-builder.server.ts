@@ -43,6 +43,10 @@ function webRowToConversationRow(webRow: WebConversationRow): ConversationRow {
     // Pass through discovery gate fields so context-builder populates them.
     discoveryState: webRow.discoveryState ?? null,
     discoveredSlots: webRow.discoveredSlots ?? {},
+    // Voice-only field — web doesn't currently set it but the type requires
+    // it. Default null is harmless on web; the voice adapter is the only
+    // caller that reads or writes pendingPdpUrl today.
+    pendingPdpUrl: webRow.pendingPdpUrl ?? null,
   }
 }
 

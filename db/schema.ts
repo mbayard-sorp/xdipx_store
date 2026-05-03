@@ -483,6 +483,8 @@ export const smsConversations = pgTable('sms_conversations', {
   // Migration 030: Emma discovery state machine + slot accumulator.
   discoveryState:      json('discovery_state').$type<unknown>(),
   discoveredSlots:     json('discovered_slots').$type<Record<string, unknown>>().notNull().default({}),
+  // Migration 031: voice-channel pending pdp link awaiting caller permission.
+  pendingPdpUrl:       text('pending_pdp_url'),
 }, t => ({
   // Phase 10: customer_gid indexes for cross-channel joins (additive).
   customerGidIdx:       index('sms_conversations_customer_gid_idx').on(t.customerGid),
@@ -555,6 +557,8 @@ export const webConversations = pgTable('web_conversations', {
   // Migration 030: Emma discovery state machine + slot accumulator (web parity).
   discoveryState:      json('discovery_state').$type<unknown>(),
   discoveredSlots:     json('discovered_slots').$type<Record<string, unknown>>().notNull().default({}),
+  // Migration 031: pending pdp link awaiting caller permission (voice; reserved for web).
+  pendingPdpUrl:       text('pending_pdp_url'),
 }, t => ({
   // Phase 10: customer_gid indexes for cross-channel joins (additive).
   customerGidIdx:       index('web_conversations_customer_gid_idx').on(t.customerGid),

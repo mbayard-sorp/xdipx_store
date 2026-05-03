@@ -43,6 +43,13 @@ export interface ConversationRow {
   discoveryState: unknown | null
   /** Accumulated discovery slots. Defaults to {} for pre-gate rows. */
   discoveredSlots: Record<string, unknown>
+  /**
+   * Voice-channel pending PDP link awaiting caller permission.
+   * The voice adapter sets this when a stage handler returns a productCard
+   * with pdpUrl; the next caller turn can affirm ("yes", "send it") to trigger
+   * the SMS, or any other response clears it. Null when no link is pending.
+   */
+  pendingPdpUrl: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +215,7 @@ export async function applyStateWrites(
     customerGid?: string | null
     discoveryState?: unknown | null
     discoveredSlots?: Record<string, unknown>
+    pendingPdpUrl?: string | null
   },
 ): Promise<void> {
   const now = new Date()
@@ -225,6 +233,7 @@ export async function applyStateWrites(
   if (writes.customerGid !== undefined) updates.customerGid = writes.customerGid
   if (writes.discoveryState !== undefined) updates.discoveryState = writes.discoveryState
   if (writes.discoveredSlots !== undefined) updates.discoveredSlots = writes.discoveredSlots
+  if (writes.pendingPdpUrl !== undefined) updates.pendingPdpUrl = writes.pendingPdpUrl
 
   await db.update(smsConversations).set(updates).where(eq(smsConversations.phone, phone))
 }
