@@ -110,6 +110,16 @@ function extractAudienceByRelationshipNoun(
   if (forHimPhrase) return 'for-him'
   if (forHerPhrase) return 'for-her'
 
+  // Bare body-type answers — when a caller is replying to a body-type
+  // question they often say "for him" / "for her" / "a for him body"
+  // / "for her body" without "my". Caught during voice Stage D testing
+  // where these answers were being missed and the gate looped on the
+  // same question.
+  if (/\b(?:a\s+)?for\s+her(?:\s+body)?\b/.test(norm)) return 'for-her'
+  if (/\b(?:a\s+)?for\s+him(?:\s+body)?\b/.test(norm)) return 'for-him'
+  if (/\b(?:female|her)\s+body\b/.test(norm)) return 'for-her'
+  if (/\b(?:male|his)\s+body\b/.test(norm))   return 'for-him'
+
   // Gendered relationship nouns anywhere in text (overrule fallbacks)
   return extractGendered(norm)
 }

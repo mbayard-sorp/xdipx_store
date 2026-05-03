@@ -118,13 +118,15 @@ export const WHO_BANK: ReadonlyArray<WhoEntry> = [
   {
     // B-2f added during voice Stage D testing — solo callers often answered
     // "for me" without volunteering gender, leaving audience ambiguous. This
-    // variant asks body type directly so the slot extractor can resolve
-    // for-her vs for-him and the gate can advance.
+    // variant asks body type in Emma's voice so the slot extractor can
+    // resolve for-her vs for-him and the gate can advance. Phrased softly:
+    // "you" + "anatomy" rather than "for her body / for him body" which
+    // user feedback flagged as too clinical.
     id: 'B-2f',
     channel: 'both',
     trigger: 'solo',
     prose:
-      "Real quick so I point you at the right thing: are we shopping for a 'for her' body or a 'for him' body?",
+      "So I can point you the right way, can I ask which side you're shopping for? Things designed with her anatomy in mind, with his, or honestly both work for you?",
   },
 
   // ─── B-3: couples (5 variants) ───────────────────────────────────────────────

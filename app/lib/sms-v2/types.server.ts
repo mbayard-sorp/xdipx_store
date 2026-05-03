@@ -90,6 +90,13 @@ export interface EmmaContext {
   cart?: CartContext | undefined
   shippingEta?: ShippingContext | undefined
   kb?: KbContext | undefined
+  /**
+   * Channel the current turn is running on. Stage handlers can use this to
+   * adapt prose length / TTS-friendliness. Matches the cross-channel.server
+   * Channel type ('sms' | 'voice' | 'web'). Defaults to 'sms' for backward
+   * compatibility when adapters don't set it.
+   */
+  channel?: 'sms' | 'voice' | 'web'
 }
 
 export interface ConversationStateWrites {
