@@ -17,7 +17,7 @@
  *      the customer's accept/decline on the next turn.
  */
 import { searchForIvr as _searchForIvr } from '~/lib/ivr-search.server'
-import type { IvrProductCard } from '~/lib/ivr-search.server'
+import type { IvrProductCard, IvrSearchOpts } from '~/lib/ivr-search.server'
 import { getProductByHandle } from '~/lib/shopify.server'
 import { resolveTransition } from '../transitions.server'
 import { pickUpsellTemplate } from '../templates/upsell-templates'
@@ -25,8 +25,12 @@ import type { EmmaContext, IntentResult, StageResponse, ProductRef } from '../ty
 
 // ─── Injectable search function (for testing) ────────────────────────────────
 
-/** Override in tests via executeUpsellStage(ctx, intent, text, { searchFn }). */
-export type SearchForIvrFn = (opts: { query: string; limit: number }) => Promise<IvrProductCard[]>
+/**
+ * Override in tests via executeUpsellStage(ctx, intent, text, { searchFn }).
+ * Accepts the full IvrSearchOpts so the upsell handler can pass productTypeDial
+ * (and any future filter) to constrain results to a specific catalog category.
+ */
+export type SearchForIvrFn = (opts: IvrSearchOpts) => Promise<IvrProductCard[]>
 
 export interface UpsellStageOverrides {
   searchFn?: SearchForIvrFn
@@ -109,8 +113,16 @@ export async function executeUpsellStage(
   // Step 1: pick accessory search query based on main product's type
   const query = await pickAccessoryQuery(mainHandle)
 
-  // Step 2: call searchForIvr (margin-weighted random selection is built in)
-  const searchInput = { query, limit: 5 } as const
+  // Step 2: call searchForIvr (margin-weighted random selection is built in).
+  //
+  // productTypeDial='lube' is REQUIRED here. Without it a query like
+  // "anal lube" matches any product with "anal" or "lube" in title/tagline,
+  // and the margin-weighted ranker happily surfaces a higher-margin butt
+  // plug above the actual lubes. We always upsell a lube in this stage
+  // (pickAccessoryQuery returns 'anal lube' / 'water-based lube' on every
+  // path), so constraining to productTypeDial='lube' is universally correct.
+  // Caught in production when an Aneros pitch upsold a Hush 2 plug.
+  const searchInput: IvrSearchOpts = { query, limit: 5, productTypeDial: 'lube' }
   let searchResults: IvrProductCard[] = []
   let searchOk = true
   let searchError: string | undefined
