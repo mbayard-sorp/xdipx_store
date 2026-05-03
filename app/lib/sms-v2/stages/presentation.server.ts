@@ -1,11 +1,14 @@
 /**
  * app/lib/sms-v2/stages/presentation.server.ts
  *
- * Phase 4 — PRESENTATION stage handler.
+ * Phase 4 — PRESENTATION stage handler (legacy gate flow).
+ * Phase 6 — wrapped by `executePresentationStage` which routes between this
+ * legacy handler and the unified Sonnet conversation agent based on the env
+ * flag allowlist (`pickDiscoveryAgentVersion`).
  *
- * Pitches one specific product. LLM writes the prose; server supplies all
- * facts (price, name, URL, image). Fabrication guard asserts the output
- * contains the real PDP URL and price before delivering.
+ * Legacy handler: pitches one specific product. LLM writes the prose; server
+ * supplies all facts (price, name, URL, image). Fabrication guard asserts the
+ * output contains the real PDP URL and price before delivering.
  *
  * Tool list: searchForIvr only. kbLookup is a Phase 6c forward reference —
  * prompt structure is ready but the tool is not registered here yet.
@@ -13,6 +16,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { buildEmmaSystemBlocks } from '~/lib/claude.server'
 import { searchForIvr } from '~/lib/ivr-search.server'
+import { executeConversationAgent } from '../conversation-agent.server'
+import { pickDiscoveryAgentVersion } from '../discovery-agent-flag.server'
 import { resolveTransition } from '../transitions.server'
 import type { EmmaContext, IntentResult, StageResponse, ProductRef } from '../types.server'
 import { fetchProductContext } from './_product-context.server'
@@ -48,10 +53,37 @@ function extractHandleSlot(intent: IntentResult): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Main handler
+// Main handler — flag-aware dispatch (Phase 6)
 // ---------------------------------------------------------------------------
 
+/**
+ * PRESENTATION entry point. Picks between the legacy LLM-with-anchored-prompt
+ * handler (executePresentationStageGate) and the Phase 6 Sonnet conversation
+ * agent (executeConversationAgent) based on the env-flag allowlist.
+ *
+ * Default: 'v2-gate' → no behavior change in production. The agent only runs
+ * when the env flag is flipped or the caller is on the allowlist. Same flag
+ * that governs the discovery agent — Phase 6 expanded the agent's scope to
+ * cover PRESENTATION + OBJECTION uniformly.
+ */
 export async function executePresentationStage(
+  ctx: EmmaContext,
+  intent: IntentResult,
+  customerText: string,
+): Promise<StageResponse> {
+  const version = pickDiscoveryAgentVersion(ctx.conversation.phone)
+  if (version === 'v2-agent') {
+    return executeConversationAgent({ ctx, intent, customerText, stage: 'PRESENTATION' })
+  }
+  return executePresentationStageGate(ctx, intent, customerText)
+}
+
+/**
+ * Legacy gate-style PRESENTATION handler — Sonnet-anchored on
+ * currentPitchHandle. Kept as the fallback path when the conversation agent
+ * isn't enabled. Replaced by executeConversationAgent in Phase 6 cleanup.
+ */
+async function executePresentationStageGate(
   ctx: EmmaContext,
   intent: IntentResult,
   customerText: string,
