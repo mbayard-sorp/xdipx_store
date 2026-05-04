@@ -18,11 +18,8 @@
  */
 import { getProductByHandle, createCartWithLines } from '~/lib/shopify.server'
 import { resolveTransition } from '../transitions.server'
-import {
-  acceptTemplate,
-  commitTemplate,
-  discoveryFallbackTemplate,
-} from '../templates/checkout-templates'
+import { discoveryFallbackTemplate } from '../templates/checkout-templates'
+import { getSmsConfig, fillCheckoutClosing, SMS_DEFAULTS } from '../sms-config.server'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 
 // ---------------------------------------------------------------------------
@@ -310,10 +307,21 @@ export async function executeCheckoutStage(
   }
 
   // --- Compose reply ---
-  const prose =
-    intent.intent === 'UPSELL_ACCEPT'
-      ? acceptTemplate({ url: cartUrl })
-      : commitTemplate({ url: cartUrl })
+  // Trade-off: previously we picked a random variant from acceptTemplate /
+  // commitTemplate (cosmetic variety across orders). Now we honor a single
+  // admin-editable closing line (key `smsCheckoutClosing` on /admin/voice-and-sms)
+  // — admin control trumps variety because the closing line is a high-leverage
+  // brand moment. The {url} slot is substituted server-side. Falls back to
+  // SMS_DEFAULTS.checkoutClosing on DB timeout so a Neon hiccup can't strand
+  // a paying customer mid-cart.
+  let closing = SMS_DEFAULTS.checkoutClosing
+  try {
+    const smsCfg = await getSmsConfig()
+    closing = smsCfg.checkoutClosing
+  } catch (err) {
+    console.error('[checkout_stage] sms config load failed — using default checkout closing', err)
+  }
+  const prose = fillCheckoutClosing(closing, cartUrl)
 
   // --- State writes ---
   const stateWrites = {

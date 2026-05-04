@@ -12,6 +12,7 @@ import { smsAgeConsent, smsMessages, smsOptouts } from '../../db/schema'
 import { generateChatReply } from '~/lib/ai-agent/chat.server'
 import type { ChatTurn } from '~/lib/ai-agent/chat-types'
 import { getIvrConfig } from '~/lib/ivr-config.server'
+import { getSmsConfig } from '~/lib/sms-v2/sms-config.server'
 import { splitSmsReplyForMms, type SmsSegment } from '~/lib/sms-reply-segments.server'
 
 export type { SmsSegment } from '~/lib/sms-reply-segments.server'
@@ -111,9 +112,14 @@ export async function processSmsMessage(input: ProcessSmsInput): Promise<Process
         .insert(smsAgeConsent)
         .values({ phone: from, method: simulated ? 'sms_yes_v2_sim' : 'sms_yes_v2' })
         .onConflictDoNothing({ target: smsAgeConsent.phone })
-      await recordOutbound(from, AGE_WELCOME_REPLY, null, simulated)
-      return single(AGE_WELCOME_REPLY, 'age_gate_confirmed')
+      // Welcome copy is admin-editable via /admin/voice-and-sms; falls back
+      // to AGE_WELCOME_REPLY when no override is saved or the DB is slow.
+      const smsConfig = await getSmsConfig()
+      const welcome = smsConfig.ageWelcome
+      await recordOutbound(from, welcome, null, simulated)
+      return single(welcome, 'age_gate_confirmed')
     }
+    // AGE_GATE_REPLY is regulatory copy and is intentionally NOT admin-editable.
     await recordOutbound(from, AGE_GATE_REPLY, null, simulated)
     return single(AGE_GATE_REPLY, 'age_gate_prompt')
   }

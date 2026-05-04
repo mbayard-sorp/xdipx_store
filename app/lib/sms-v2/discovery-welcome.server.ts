@@ -24,6 +24,7 @@
  *     any error so a Haiku failure can't break the call.
  */
 import Anthropic from '@anthropic-ai/sdk'
+import { getSmsConfig, fillReturningGreeting, SMS_DEFAULTS } from './sms-config.server'
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001'
 
@@ -118,7 +119,7 @@ export async function generateDiscoveryWelcome(
       .join('')
       .trim()
 
-    if (!text) return staticFallback(input)
+    if (!text) return await staticFallback(input)
 
     return {
       prose: text,
@@ -127,15 +128,28 @@ export async function generateDiscoveryWelcome(
     }
   } catch (err) {
     console.error('[discovery-welcome] Haiku call failed — falling back', err)
-    return staticFallback(input)
+    return await staticFallback(input)
   }
 }
 
-function staticFallback(input: WelcomeInput): WelcomeOutput {
+async function staticFallback(input: WelcomeInput): Promise<WelcomeOutput> {
   // Safe, voice-friendly default. Used when Haiku is unreachable or empty.
-  const opener = input.customerFirstName
-    ? `Hey ${input.customerFirstName}, welcome back. `
-    : ''
+  // The returning-customer greeting prefix is admin-editable via
+  // /admin/voice-and-sms (key `smsReturningGreeting`); we fall back to
+  // SMS_DEFAULTS.returningGreeting on DB timeout so a Neon hiccup never
+  // breaks the welcome path.
+  let opener = ''
+  if (input.customerFirstName) {
+    let template = SMS_DEFAULTS.returningGreeting
+    try {
+      const cfg = await getSmsConfig()
+      template = cfg.returningGreeting
+    } catch (err) {
+      console.error('[discovery-welcome] sms config load failed — using default returning greeting', err)
+    }
+    const filled = fillReturningGreeting(template, input.customerFirstName).trim()
+    if (filled) opener = `${filled} `
+  }
   const prose = `${opener}I know our picks are personal, so I want to help you find exactly the right thing. If you're open to sharing, I'm open to hearing. To start: is there a mood or feeling you're after? Something gentle and warming, something powerful and intense, or somewhere in between?`
   return { prose, inputTokens: 0, outputTokens: 0 }
 }
