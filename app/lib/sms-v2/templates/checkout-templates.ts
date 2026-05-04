@@ -4,6 +4,18 @@
  * Pure-function SMS reply templates for the CHECKOUT stage.
  * No state, no async, no LLM calls.
  *
+ * NOTE (Phase 6a): `acceptTemplate` and `commitTemplate` are no longer the
+ * source of truth for the checkout closing line. The closing line is now
+ * admin-editable via /admin/voice-and-sms (pipelineSettings key
+ * `smsCheckoutClosing`); see `app/lib/sms-v2/sms-config.server.ts` and the
+ * resolution in `stages/checkout.server.ts`. The variant arrays below are
+ * left in place (no behavioral references) so the file isn't disruptive
+ * to read in a single PR — they may be removed in a Phase 6b cleanup once
+ * we're sure no one wants to reintroduce variant rotation.
+ *
+ * `discoveryFallbackTemplate` IS still live — used when CHECKOUT is
+ * entered without a pitch handle.
+ *
  * Variant selection: index into the array using Math.floor(Math.random() * N).
  * Math.random() is fine here — this is cosmetic variety, not crypto.
  *

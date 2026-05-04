@@ -130,7 +130,7 @@ const NAV_ITEMS = [
   { to: '/admin/bulk-import',       label: 'Bulk Import',      Icon: UploadIcon     },
   { to: '/admin/collections-mgr', label: 'Collections Mgr.',  Icon: VaultIcon     },
   { to: '/admin/reviews',        label: 'Reviews',      Icon: ReviewsIcon,  badgeKey: 'reviews' },
-  { to: '/admin/ivr',            label: 'IVR',          Icon: IvrIcon       },
+  { to: '/admin/voice-and-sms',  label: 'Voice & SMS',  Icon: IvrIcon       },
   { to: '/admin/voicemails',     label: 'Voicemails',   Icon: PhoneIcon,    badgeKey: 'voicemails' },
   { to: '/admin/calls',          label: 'Calls',        Icon: PhoneIcon     },
   { to: '/admin/phone-orders',   label: 'Phone Orders', Icon: CartUpsellIcon },

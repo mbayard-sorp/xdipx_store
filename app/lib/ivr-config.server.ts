@@ -3,8 +3,8 @@
  *
  * Resolution priority for each key: pipelineSettings row → env var → hardcoded default.
  * Storage in pipeline_settings is human-readable (minutes for durations) so the
- * /admin/ivr UI can edit values directly. This accessor converts to the units
- * the runtime needs (ms, seconds, hours, sets, etc).
+ * /admin/voice-and-sms UI can edit values directly. This accessor converts to
+ * the units the runtime needs (ms, seconds, hours, sets, etc).
  *
  * One DB query per call, wrapped in withTimeout so a slow Neon never blocks
  * a Twilio webhook past its 15s ceiling.
