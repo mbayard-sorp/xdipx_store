@@ -199,6 +199,13 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
     const baseConditions: string[] = [
       '_type == "productPage"',
       'archived != true',
+      // dealStatus=='archived' products are Shopify-active but past-deal:
+      // their PDP route returns 410 Gone (see app/routes/_layout.products.$slug.tsx).
+      // Surface in search and we'll send broken URLs. Filter here, NOT in
+      // the Shopify→Sanity sync, because dealStatus is the editorial archive
+      // signal and should stay editable from the admin (vs. the soft-delete
+      // archived flag which the sync mass-toggles).
+      'dealStatus != "archived"',
     ]
 
     const titleMatch = fieldMatchAny('title', paramNames)
@@ -403,6 +410,13 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
     const conditions: string[] = [
       '_type == "productPage"',
       'archived != true',
+      // dealStatus=='archived' products are Shopify-active but past-deal:
+      // their PDP route returns 410 Gone (see app/routes/_layout.products.$slug.tsx).
+      // Surface in search and we'll send broken URLs. Filter here, NOT in
+      // the Shopify→Sanity sync, because dealStatus is the editorial archive
+      // signal and should stay editable from the admin (vs. the soft-delete
+      // archived flag which the sync mass-toggles).
+      'dealStatus != "archived"',
     ]
     const groqParams: Record<string, unknown> = {}
     const boostClauses: string[] = []
