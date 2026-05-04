@@ -186,12 +186,20 @@ export async function executeUpsellStage(
     ...(imageUrl ? { imageUrl } : {}),
   }
 
-  // Step 5: fill a template variant
-  const prose = pickUpsellTemplate({
-    name: accessory.title,
-    price: priceStr,
-    pdpUrl,
-  })
+  // Step 5: fill a template variant — channel-aware so voice gets a
+  // TTS-friendly variant (no URLs, no emoji, natural spoken closer) instead
+  // of the SMS template ("👍 / 'yes' to toss it in") which TTS reads as
+  // garbage. The voice adapter's permission gate picks up productCard.pdpUrl
+  // separately and handles the link-text permission flow on the NEXT turn.
+  const channel = ctx.channel ?? 'sms'
+  const prose = pickUpsellTemplate(
+    {
+      name: accessory.title,
+      price: priceStr,
+      pdpUrl,
+    },
+    channel,
+  )
 
   // Step 6: return with stageOut: 'UPSELL' — wait for accept/decline next turn
   return {
