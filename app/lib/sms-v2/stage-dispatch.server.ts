@@ -22,6 +22,10 @@ import { executeResearchStage } from './stages/research.server'
 import { executeSupportStage } from './stages/support.server'
 import { executePostPurchaseStage } from './stages/post-purchase.server'
 import { executeReconnectStage } from './stages/reconnect.server'
+// V1 retirement: GREETING / CONSENT_GATE / POST_CHECKOUT now handled in v2.
+import { executeGreetingStage } from './stages/greeting.server'
+import { executeConsentGateStage } from './stages/consent-gate.server'
+import { executePostCheckoutStage } from './stages/post-checkout.server'
 
 // ---------------------------------------------------------------------------
 // 1. Intent-driven stage shim
@@ -30,7 +34,8 @@ import { executeReconnectStage } from './stages/reconnect.server'
 /**
  * Some intents force a stage transition BEFORE the handler runs.
  *
- * Transition table (from spec Deliverable 1):
+ * Transition table:
+ *   GREETING     + AGE_CONFIRM   → CONSENT_GATE (record consent + welcome)
  *   PRESENTATION + COMMIT_PICK   → UPSELL (pitch the upsell first)
  *   UPSELL       + UPSELL_ACCEPT → CHECKOUT
  *   UPSELL       + UPSELL_DECLINE → CHECKOUT
@@ -39,11 +44,24 @@ import { executeReconnectStage } from './stages/reconnect.server'
  *   DISCOVERY    + NAME_ITEM     → DISCOVERY (handler itself decides)
  *
  * All other pairs: return currentStage unchanged.
+ *
+ * Note: STOP_HELP_START and OPT_OUT-shaped intents are NOT pre-transitioned
+ * here. The Twilio webhook catches the carrier-required STOP/HELP/START
+ * keywords upstream of stage dispatch and routes them through v1's
+ * processSmsMessage, which is the carrier-required compliance path. We
+ * deliberately leave that on v1 — it's well-tested and shouldn't drift.
  */
 export function pickEffectiveStage(currentStage: Stage, intent: IntentResult): Stage {
   const i = intent.intent
 
   switch (currentStage) {
+    case 'GREETING':
+      // AGE_CONFIRM means the customer just texted YES (or equivalent) to the
+      // age gate. Route to CONSENT_GATE so the consent insert + welcome fire
+      // on this turn instead of waiting for the next inbound.
+      if (i === 'AGE_CONFIRM') return 'CONSENT_GATE'
+      break
+
     case 'PRESENTATION':
       if (i === 'COMMIT_PICK') return 'UPSELL'
       break
@@ -86,6 +104,13 @@ export const STAGE_HANDLERS: Partial<Record<Stage, StageHandler>> = {
   SUPPORT:       executeSupportStage,
   POST_PURCHASE: executePostPurchaseStage,
   RECONNECT:     executeReconnectStage,
+  // V1 retirement — GREETING / CONSENT_GATE / POST_CHECKOUT now route to v2
+  // handlers instead of falling through to v1's processSmsMessage. v1 is
+  // reserved for the SMS_PIPELINE_VERSION='v1' kill-switch and the
+  // STOP/HELP/START compliance keywords (handled upstream of dispatch).
+  GREETING:      executeGreetingStage,
+  CONSENT_GATE:  executeConsentGateStage,
+  POST_CHECKOUT: executePostCheckoutStage,
 }
 
 // ---------------------------------------------------------------------------
