@@ -1,0 +1,50 @@
+{
+  "id": "037-anal-context-authorized-search",
+  "description": "ADR-003a Issue X inverse guard. When the customer explicitly mentions anal in their query, isAnalContextAuthorized returns true (Signal 1: query string match) and anal-tagged products MUST be returned. The filter must not suppress anal results when the context is authorized. This guards against over-firing of the anal filter.",
+  "channel": "web",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "simulatedToolResults": {
+    "searchProducts": {
+      "results": [
+        {
+          "title": "Vedo Bump Rechargeable Anal Vibe",
+          "handle": "vedo-bump-rechargeable-anal-vibe-just-black",
+          "price": 49,
+          "tagline": "Targeted pressure for prostate and anal play",
+          "in_stock": true,
+          "pdpUrl": "https://xdipx.com/products/vedo-bump-rechargeable-anal-vibe-just-black"
+        },
+        {
+          "title": "Njoy Pure Plug",
+          "handle": "njoy-pure-plug-small",
+          "price": 75,
+          "tagline": "Stainless steel, temperature-play ready, beginner size",
+          "in_stock": true,
+          "pdpUrl": "https://xdipx.com/products/njoy-pure-plug-small"
+        }
+      ],
+      "reason": "base_results"
+    }
+  },
+  "turns": [
+    {
+      "role": "user",
+      "text": "I'm curious about anal vibrators, what do you have?"
+    },
+    {
+      "role": "expected_behavior",
+      "tags": [
+        "anal_product_allowed",
+        "pitches_anal_vibrator_or_plug",
+        "no_filter_suppression",
+        "warm_emma_voice",
+        "one_product_pitched"
+      ]
+    }
+  ],
+  "evalDimensions": ["no_fabrication", "emma_voice", "coherence"],
+  "regressionFor": "ADR-003a-Issue-X-inverse",
+  "notes": "isAnalContextAuthorized(query='anal vibrators', pitchedHandlesLog=[], category=undefined) returns true (query contains 'anal'). Anal-tagged cards must pass through the filter. Emma must pitch one of the returned anal products, not suppress them."
+}

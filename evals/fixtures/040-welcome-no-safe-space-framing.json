@@ -1,0 +1,32 @@
+{
+  "id": "040-welcome-no-safe-space-framing",
+  "description": "ADR-003 Sub-decision F1 regression guard (Fix 1). On the very first contact with no prior context, Emma's welcome must: (1) be under 40 words, (2) never open with safe-space or judgment-free framing ('this is a judgment-free zone', 'you are in a safe space', 'I am here to make you feel comfortable', 'no judgment here', etc.), (3) contain one warm line toward the customer and one open question, (4) contain no menus or checklists. The 40+ word wall-of-text welcome with safe-space preamble was the ADR-003 F1 failure mode.",
+  "channel": "web",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    {
+      "role": "user",
+      "text": "hi"
+    },
+    {
+      "role": "expected_behavior",
+      "tags": [
+        "under_40_words",
+        "no_safe_space_framing",
+        "no_judgment_free_zone",
+        "no_comfortable_zone_preamble",
+        "one_warm_line",
+        "one_open_question",
+        "no_menus",
+        "no_checklists",
+        "no_wall_of_text",
+        "no_em_dash_in_reply"
+      ]
+    }
+  ],
+  "evalDimensions": ["emma_voice", "coherence", "no_derail"],
+  "regressionFor": "ADR-003-sub-decision-F1",
+  "notes": "CONVERSATION_RULES_CORE WELCOME TURN (F1) block governs this. Max 40 words. One warm line + one question. Never 'this is a safe space', 'no judgment', 'comfortable', 'judgment-free' as opener framing. Warmth goes toward the customer, not an announcement about the brand's posture. This fixture guards the v2 conversation-agent path specifically (not just prompt.ts CHAT_MODE where F1 was originally added)."
+}

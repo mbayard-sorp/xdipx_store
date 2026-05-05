@@ -1,0 +1,58 @@
+{
+  "id": "038-no-repeat-pitch-on-show-alternatives",
+  "description": "ADR-003a Issue Y regression guard. The customer was pitched satisfyer-pro-2 in a prior turn (it appears in pitchedHandlesLog). When they ask 'show me some alternatives,' the dedup filter must prevent satisfyer-pro-2 from appearing in the new result set. Emma must surface a different handle. This guards against the five-turn repeat-pitch failure observed in Phase 0.5.",
+  "channel": "web",
+  "priorSummary": "Customer is looking for a first vibrator. Emma recommended the Satisfyer Pro 2 last turn.",
+  "priorSlots": { "category": "vibrator", "audience": "for-her" },
+  "pitchedHandlesLog": ["satisfyer-pro-2"],
+  "simulatedToolResults": {
+    "searchProducts": {
+      "results": [
+        {
+          "title": "Satisfyer Pro 2",
+          "handle": "satisfyer-pro-2",
+          "price": 39,
+          "tagline": "Gentle air-pulse stimulation, beginner-friendly",
+          "in_stock": true,
+          "pdpUrl": "https://xdipx.com/products/satisfyer-pro-2"
+        },
+        {
+          "title": "We-Vibe Tango X",
+          "handle": "we-vibe-tango-x",
+          "price": 79,
+          "tagline": "Whisper-quiet, warming, pinpoint vibration",
+          "in_stock": true,
+          "pdpUrl": "https://xdipx.com/products/we-vibe-tango-x"
+        },
+        {
+          "title": "Dame Eva II",
+          "handle": "dame-eva-ii",
+          "price": 95,
+          "tagline": "Hands-free couples vibrator, wearable",
+          "in_stock": true,
+          "pdpUrl": "https://xdipx.com/products/dame-eva-ii"
+        }
+      ],
+      "reason": "base_results"
+    }
+  },
+  "turns": [
+    {
+      "role": "user",
+      "text": "hmm not sure, show me some alternatives"
+    },
+    {
+      "role": "expected_behavior",
+      "tags": [
+        "no_repeat_pitch_of_satisfyer_pro_2",
+        "different_handle_pitched",
+        "pitches_we_vibe_tango_or_dame_eva",
+        "warm_emma_voice",
+        "one_product_pitched"
+      ]
+    }
+  ],
+  "evalDimensions": ["memory", "no_derail", "emma_voice", "coherence"],
+  "regressionFor": "ADR-003a-Issue-Y",
+  "notes": "pitchedHandlesLog contains ['satisfyer-pro-2']. The dedup filter must drop the satisfyer-pro-2 card from the result set. Emma receives only we-vibe-tango-x and dame-eva-ii as options and must pitch one of those, not satisfyer-pro-2."
+}
