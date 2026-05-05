@@ -347,7 +347,7 @@ export function buildKnownAboutCustomer(
     const productName = handleToReadableName(pageContext.handle)
     // Context-only framing: "viewing" conveys presence, not intent.
     // The empathy reviewer must verify this does not read as purchase pressure.
-    pageContextLine = `Customer is viewing: ${productName} — they may be browsing or comparing options.`
+    pageContextLine = `Customer is currently on the ${productName} page. No intent signal yet, just page presence.`
   }
 
   // If nothing to inject, return empty — block will be omitted.
