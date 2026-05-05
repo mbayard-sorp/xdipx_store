@@ -646,6 +646,8 @@ export interface BulkImportRow extends NalpacProduct {
   'Master SKU': string
   'Variant Option Name': string
   'Variant Option Value': string
+  'Variant Option Name 2': string
+  'Variant Option Value 2': string
   'Nav Category': string
   'Nav Path': string
   Collections: string
@@ -654,7 +656,8 @@ export interface BulkImportRow extends NalpacProduct {
 
 export interface BulkVariantRow {
   sku: string
-  optionValue: string
+  /** Length 1 for single-axis groups, 2 for two-axis groups. Index 0 = primary option, index 1 = secondary. */
+  optionValues: string[]
   price: number
   compareAtPrice: number
   qty: number

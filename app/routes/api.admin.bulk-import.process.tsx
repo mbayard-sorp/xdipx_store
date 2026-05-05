@@ -68,6 +68,17 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: 'No active import job' }, { status: 404 })
   }
 
+  // KV deserialization shim: jobs written by pre-2-axis code store
+  // BulkVariantRow.optionValue (string). Coerce to optionValues (string[]).
+  for (const group of job.groups) {
+    for (const v of group.variants) {
+      const legacy = v as unknown as { optionValue?: string }
+      if (typeof legacy.optionValue === 'string' && !Array.isArray(v.optionValues)) {
+        v.optionValues = [legacy.optionValue]
+      }
+    }
+  }
+
   // ── begin: transition idle → running ───────────────────────────────────────
   if (intent === 'begin') {
     job.status    = 'running'

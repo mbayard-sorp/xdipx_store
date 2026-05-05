@@ -91,7 +91,7 @@ export function parseBulkImportCSV(csvText: string): {
     const masterSku = master.SKU
     const children  = childRows.filter(r => r['Master SKU'] === masterSku)
 
-    if (children.length === 0 && !master['Variant Option Value']) {
+    if (children.length === 0 && !master['Variant Option Value'] && !master['Variant Option Value 2']) {
       // Standalone product — no variants
       groups.push({ masterRow: master, variants: [], isSingleVariant: true })
       continue
@@ -102,14 +102,49 @@ export function parseBulkImportCSV(csvText: string): {
       ? [master, ...children]
       : children
 
-    // Validate consistent Variant Option Name across the group
-    const optionNames = new Set(allVariantRows.map(r => r['Variant Option Name']).filter(Boolean))
-    if (optionNames.size > 1) {
+    // Validate consistent Variant Option Name (axis 1) across the group
+    const optionNames1 = new Set(allVariantRows.map(r => r['Variant Option Name']).filter(Boolean))
+    if (optionNames1.size > 1) {
       parseErrors.push({
         sku:     masterSku,
-        message: `Inconsistent Variant Option Name: ${[...optionNames].join(', ')}`,
+        message: `Inconsistent Variant Option Name: ${[...optionNames1].join(', ')}`,
       })
       continue
+    }
+
+    // Validate consistent Variant Option Name 2 (axis 2) across the group
+    const optionNames2 = new Set(allVariantRows.map(r => r['Variant Option Name 2']).filter(Boolean))
+    if (optionNames2.size > 1) {
+      parseErrors.push({
+        sku:     masterSku,
+        message: `Inconsistent Variant Option Name 2: ${[...optionNames2].join(', ')}`,
+      })
+      continue
+    }
+
+    // Axis-2 must be uniformly present or uniformly absent across the group.
+    // Partial population (some rows have Value 2, others don't) is a data error.
+    const hasAxis2Name = optionNames2.size === 1
+    if (hasAxis2Name) {
+      for (const r of allVariantRows) {
+        if (!r['Variant Option Value 2']) {
+          parseErrors.push({
+            sku:     masterSku,
+            message: `Row SKU ${r.SKU} is missing Variant Option Value 2 but other rows in this group supply one`,
+          })
+        }
+      }
+      if (parseErrors.some(e => e.sku === masterSku)) continue
+    } else {
+      for (const r of allVariantRows) {
+        if (r['Variant Option Value 2']) {
+          parseErrors.push({
+            sku:     masterSku,
+            message: `Row SKU ${r.SKU} supplies Variant Option Value 2 but Variant Option Name 2 is missing or inconsistent`,
+          })
+        }
+      }
+      if (parseErrors.some(e => e.sku === masterSku)) continue
     }
 
     const variants: BulkVariantRow[] = allVariantRows.map(r => {
@@ -117,9 +152,13 @@ export function parseBulkImportCSV(csvText: string): {
       const msrp          = parseFloat(r.MSRP)      || 0
       const map           = parseFloat(r.MAP ?? '0') || 0
       const qty           = parseInt(r['Total qty available']) || 0
+      const value1        = r['Variant Option Value'] || r.SKU
+      const optionValues  = hasAxis2Name
+        ? [value1, r['Variant Option Value 2']]
+        : [value1]
       return {
         sku:            r.SKU,
-        optionValue:    r['Variant Option Value'] || r.SKU,
+        optionValues,
         price:          computeDealPrice(wholesale, msrp, map),
         compareAtPrice: msrp,
         qty,
@@ -225,7 +264,9 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       numericId = await createShopifyProductFromFeed(productScore, handle)
     } else {
       // Multi-variant
-      const optionName = group.masterRow['Variant Option Name'] || 'Option'
+      const name1 = group.masterRow['Variant Option Name'] || 'Option'
+      const name2 = group.masterRow['Variant Option Name 2']
+      const optionNames = name2 ? [name1, name2] : [name1]
       const handle = slugifyHandle(masterRow['Product Title'])
       numericId = await createShopifyProductWithVariants(
         {
@@ -237,7 +278,7 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
           categories,
         },
         variants,
-        optionName,
+        optionNames,
         handle,
       )
     }

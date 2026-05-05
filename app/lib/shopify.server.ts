@@ -2518,9 +2518,12 @@ export async function createShopifyProductWithVariants(
     categories: string[]
   },
   variants: import('~/types').BulkVariantRow[],
-  optionName: string,
+  optionNames: string[],
   handle: string,
 ): Promise<string> {
+  if (optionNames.length === 0 || optionNames.length > 2) {
+    throw new Error(`createShopifyProductWithVariants: optionNames must have 1 or 2 entries, got ${optionNames.length}`)
+  }
 
   const tags: string[] = [
     `brand:${master.brand.toLowerCase().replace(/\s+/g, '-')}`,
@@ -2544,10 +2547,14 @@ export async function createShopifyProductWithVariants(
       vendor:  master.brand,
       tags:    tags.join(', '),
       status:  'draft',
-      options: [{ name: optionName, values: variants.map(v => v.optionValue) }],
+      options: optionNames.map((name, i) => ({
+        name,
+        values: [...new Set(variants.map(v => v.optionValues[i]).filter(Boolean))],
+      })),
       variants: variants.map(v => ({
         sku:                  v.sku,
-        option1:              v.optionValue,
+        option1:              v.optionValues[0],
+        ...(optionNames.length > 1 ? { option2: v.optionValues[1] } : {}),
         price:                v.price.toFixed(2),
         compare_at_price:     v.compareAtPrice.toFixed(2),
         inventory_management: 'shopify',
