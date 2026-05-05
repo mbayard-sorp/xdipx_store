@@ -86,6 +86,14 @@ export interface EmmaContext {
     conversationSummary?: string | null
     /** Migration 032: ordered log of last 10 pitched handles (most-recent last). */
     pitchedHandlesLog?: string[] | null
+    /**
+     * Web-only: the product handle of the page the customer currently has open.
+     * Populated by the web context builder from WebConversationRow.pageHandle.
+     * Null on SMS/voice (those channels have no browser page context).
+     * Used by conversation-agent to build the page-context line in
+     * <known_about_customer> even before any pitch has been set (cold PDP visit).
+     */
+    pageHandle?: string | null
   }
   customer?: CustomerContext | undefined
   todaysPick?: ProductContext | undefined

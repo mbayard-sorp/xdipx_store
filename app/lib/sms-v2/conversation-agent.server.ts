@@ -616,11 +616,17 @@ export async function executeConversationAgent(
   const pitchedHandlesLog = ctx.conversation.pitchedHandlesLog ?? null
 
   // ADR-003 Sub-decision C: extract page context from ctx for the system prompt.
-  // Only set on web channel turns where the customer is viewing a product page.
-  // SMS/voice do not have a page handle — pageContext will be null/undefined.
+  // C-01h fix: prefer ctx.conversation.pageHandle (the URL the customer has open
+  // right now, set by the web context builder from WebConversationRow.pageHandle)
+  // over currentPitchHandle so that cold PDP visits — where no pitch has been
+  // set yet — still produce the page-context line in <known_about_customer>.
+  // currentPitchHandle remains the fallback for back-compat when pageHandle is
+  // absent (SMS/voice paths never populate pageHandle).
+  const resolvedPageHandle =
+    (ctx.conversation.pageHandle ?? ctx.conversation.currentPitchHandle) ?? null
   const pageContextForPrompt: { handle?: string; route?: string } | null =
-    channel === 'web' && ctx.conversation.currentPitchHandle
-      ? { handle: ctx.conversation.currentPitchHandle }
+    channel === 'web' && resolvedPageHandle
+      ? { handle: resolvedPageHandle }
       : null
 
   // Two-block system: stable rules block (cached) + dynamic <known_about_customer>
