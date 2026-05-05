@@ -5551,6 +5551,91 @@ export async function getProductDetailForEmma(handle: string): Promise<EmmaProdu
   }
 }
 
+// https://shopify.dev/docs/api/admin-graphql/2024-10/objects/Product
+export async function getProductsForMerge(productIds: string[]): Promise<Record<string, {
+  id: string
+  title: string
+  handle: string
+  status: 'ACTIVE' | 'ARCHIVED' | 'DRAFT'
+  options: Array<{ name: string; values: string[] }>
+  firstVariant: {
+    id: string
+    price: string
+    compareAtPrice: string | null
+    sku: string | null
+    barcode: string | null
+    inventoryQuantity: number
+  } | null
+  images: Array<{ url: string; altText: string | null }>
+}>> {
+  const gids = productIds.map(id =>
+    id.startsWith('gid://') ? id : `gid://shopify/Product/${id}`
+  )
+  const res = await adminGraphQL<{
+    nodes: Array<{
+      __typename: string
+      id: string
+      title: string
+      handle: string
+      status: 'ACTIVE' | 'ARCHIVED' | 'DRAFT'
+      options: Array<{ name: string; values: string[] }>
+      variants: { nodes: Array<{ id: string; price: string; compareAtPrice: string | null; sku: string | null; barcode: string | null; inventoryQuantity: number }> }
+      images: { nodes: Array<{ url: string; altText: string | null }> }
+    } | null>
+  }>(`
+    query GetProductsForMerge($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        __typename
+        ... on Product {
+          id
+          title
+          handle
+          status
+          options { name values }
+          variants(first: 1) {
+            nodes { id price compareAtPrice sku barcode inventoryQuantity }
+          }
+          images(first: 20) {
+            nodes { url altText }
+          }
+        }
+      }
+    }
+  `, { ids: gids })
+
+  const result: Record<string, {
+    id: string
+    title: string
+    handle: string
+    status: 'ACTIVE' | 'ARCHIVED' | 'DRAFT'
+    options: Array<{ name: string; values: string[] }>
+    firstVariant: {
+      id: string
+      price: string
+      compareAtPrice: string | null
+      sku: string | null
+      barcode: string | null
+      inventoryQuantity: number
+    } | null
+    images: Array<{ url: string; altText: string | null }>
+  }> = {}
+
+  for (const node of res.nodes) {
+    if (!node || node.__typename !== 'Product') continue
+    const numericId = node.id.replace('gid://shopify/Product/', '')
+    result[numericId] = {
+      id: node.id,
+      title: node.title,
+      handle: node.handle,
+      status: node.status,
+      options: node.options,
+      firstVariant: node.variants.nodes[0] ?? null,
+      images: node.images.nodes,
+    }
+  }
+  return result
+}
+
 // ============ Merge Variants Helpers ============
 
 function toProductGid(productId: string): string {
