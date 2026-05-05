@@ -277,6 +277,23 @@ function serializeSlots(slots: Partial<DiscoverySlots>): string {
 }
 
 /**
+ * Convert a URL handle (e.g. "we-vibe-tango-x") to a human-readable product
+ * name ("We Vibe Tango X") for use in the <known_about_customer> page context
+ * line. This avoids leaking internal handle strings to Emma while also avoiding
+ * an extra Shopify round-trip per turn. The agent can refine with a tool call
+ * if it needs the canonical product title.
+ *
+ * ADR-003 Sub-decision C: empathy review required — the output must not cause
+ * Emma to assume purchase intent from page presence alone.
+ */
+function handleToReadableName(handle: string): string {
+  return handle
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+/**
  * Build the dynamic <known_about_customer> XML block.
  *
  * This block is injected as the SECOND system-prompt block (no cache_control)
@@ -293,14 +310,19 @@ function serializeSlots(slots: Partial<DiscoverySlots>): string {
  *   - Reference the full pitched-handles log verbatim — only show the oldest
  *     2 handles as "prior options shown" for the "first one you showed me" case.
  *
+ * ADR-003 Sub-decision C (empathy gate required): the page context line must
+ * NOT cause Emma to assume purchase intent from page presence alone.
+ *
  * @param slots - The merged discovered slots for this turn.
  * @param summary - The rolling conversation summary (may be null on first turn).
  * @param pitchedHandlesLog - Ordered log of previously pitched handles (most-recent last).
+ * @param pageContext - Optional page context from the current browser URL.
  */
 export function buildKnownAboutCustomer(
   slots: Partial<DiscoverySlots>,
   summary: string | null,
   pitchedHandlesLog: string[] | null,
+  pageContext?: { handle?: string; route?: string } | null,
 ): string {
   const summaryLine = summary?.trim() || null
   const slotLine = serializeSlots(slots)
@@ -314,13 +336,28 @@ export function buildKnownAboutCustomer(
     priorOptionsLine = `Prior options shown (if customer refers back): ${oldest.join(', ')}`
   }
 
+  // ADR-003 Sub-decision C: page context line.
+  // Added only for PDP routes (/products/<handle>) where the customer is
+  // actively viewing a product. Does NOT imply purchase intent — Emma uses
+  // this as context only, not as a signal to assume they want to buy.
+  // Format: human-readable product name (not the raw handle).
+  // Empathy gate: this line must be reviewed before merge.
+  let pageContextLine: string | null = null
+  if (pageContext?.handle) {
+    const productName = handleToReadableName(pageContext.handle)
+    // Context-only framing: "viewing" conveys presence, not intent.
+    // The empathy reviewer must verify this does not read as purchase pressure.
+    pageContextLine = `Customer is viewing: ${productName} — they may be browsing or comparing options.`
+  }
+
   // If nothing to inject, return empty — block will be omitted.
-  if (!summaryLine && !slotLine && !priorOptionsLine) return ''
+  if (!summaryLine && !slotLine && !priorOptionsLine && !pageContextLine) return ''
 
   const lines: string[] = ['<known_about_customer>']
   if (summaryLine) lines.push(`Summary: ${summaryLine}`)
   if (slotLine) lines.push(`Known: ${slotLine}`)
   if (priorOptionsLine) lines.push(priorOptionsLine)
+  if (pageContextLine) lines.push(pageContextLine)
   lines.push('</known_about_customer>')
   lines.push(
     'Note: Emma sees the full conversation history. Use this block for context that may have scrolled',
@@ -350,6 +387,7 @@ function buildSystemBlocks(
   discoveredSlots: Partial<DiscoverySlots>,
   conversationSummary: string | null,
   pitchedHandlesLog: string[] | null,
+  pageContext?: { handle?: string; route?: string } | null,
 ): Anthropic.TextBlockParam[] {
   const tuning = tuningFor(channel)
   const stableText = `${BRAND_VOICE}\n\n${CONVERSATION_RULES_CORE}\n\n${stageAddendum(stage, currentPitchHandle)}\n\n${tuning.rules}`
@@ -362,7 +400,14 @@ function buildSystemBlocks(
     cache_control: { type: 'ephemeral' },
   }
 
-  const knownBlock = buildKnownAboutCustomer(discoveredSlots, conversationSummary, pitchedHandlesLog)
+  // ADR-003 Sub-decision C: pass pageContext so the <known_about_customer>
+  // block includes the current PDP when the customer is viewing a product page.
+  const knownBlock = buildKnownAboutCustomer(
+    discoveredSlots,
+    conversationSummary,
+    pitchedHandlesLog,
+    pageContext ?? null,
+  )
   if (!knownBlock) {
     // First turn or no context yet — single-block system prompt.
     return [stableBlock]
@@ -570,6 +615,14 @@ export async function executeConversationAgent(
   const conversationSummary = ctx.conversation.conversationSummary ?? null
   const pitchedHandlesLog = ctx.conversation.pitchedHandlesLog ?? null
 
+  // ADR-003 Sub-decision C: extract page context from ctx for the system prompt.
+  // Only set on web channel turns where the customer is viewing a product page.
+  // SMS/voice do not have a page handle — pageContext will be null/undefined.
+  const pageContextForPrompt: { handle?: string; route?: string } | null =
+    channel === 'web' && ctx.conversation.currentPitchHandle
+      ? { handle: ctx.conversation.currentPitchHandle }
+      : null
+
   // Two-block system: stable rules block (cached) + dynamic <known_about_customer>
   // block (uncached). See buildSystemBlocks for the full architecture rationale.
   const systemParam: Anthropic.TextBlockParam[] = buildSystemBlocks(
@@ -579,6 +632,7 @@ export async function executeConversationAgent(
     priorSlots,
     conversationSummary,
     pitchedHandlesLog,
+    pageContextForPrompt,
   )
 
   // ── Card accumulator + telemetry ──────────────────────────────────────────
