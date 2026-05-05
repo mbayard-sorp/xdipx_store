@@ -5550,3 +5550,296 @@ export async function getProductDetailForEmma(handle: string): Promise<EmmaProdu
     variants,
   }
 }
+
+// ============ Merge Variants Helpers ============
+
+function toProductGid(productId: string): string {
+  return productId.startsWith('gid://') ? productId : `gid://shopify/Product/${productId}`
+}
+
+// https://shopify.dev/docs/api/admin-graphql/2024-10/mutations/productUpdate
+export async function updateProductTitle(productId: string, newTitle: string): Promise<void> {
+  const gid = toProductGid(productId)
+  const res = await adminGraphQL<{
+    productUpdate: { userErrors: { field: string[]; message: string }[] }
+  }>(`
+    mutation MergeUpdateTitle($input: ProductInput!) {
+      productUpdate(input: $input) {
+        userErrors { field message }
+      }
+    }
+  `, { input: { id: gid, title: newTitle } })
+  if (res.productUpdate.userErrors.length > 0) {
+    const errs = res.productUpdate.userErrors.map(e => `${e.field.join('.')}: ${e.message}`).join('; ')
+    throw new Error(`updateProductTitle: ${errs}`)
+  }
+}
+
+// https://shopify.dev/docs/api/admin-graphql/2024-10/mutations/productUpdate
+export async function archiveProduct(productId: string): Promise<void> {
+  const gid = toProductGid(productId)
+  const res = await adminGraphQL<{
+    productUpdate: { userErrors: { field: string[]; message: string }[] }
+  }>(`
+    mutation MergeArchiveProduct($input: ProductInput!) {
+      productUpdate(input: $input) {
+        userErrors { field message }
+      }
+    }
+  `, { input: { id: gid, status: 'ARCHIVED' } })
+  if (res.productUpdate.userErrors.length > 0) {
+    const errs = res.productUpdate.userErrors.map(e => `${e.field.join('.')}: ${e.message}`).join('; ')
+    throw new Error(`archiveProduct: ${errs}`)
+  }
+}
+
+// https://shopify.dev/docs/api/admin-graphql/2024-10/mutations/urlRedirectCreate
+export async function createUrlRedirect(fromPath: string, toPath: string): Promise<{ id: string }> {
+  const path = fromPath.startsWith('/') ? fromPath : `/${fromPath}`
+  const res = await adminGraphQL<{
+    urlRedirectCreate: {
+      urlRedirect: { id: string; path: string; target: string } | null
+      userErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation MergeCreateRedirect($urlRedirect: UrlRedirectInput!) {
+      urlRedirectCreate(urlRedirect: $urlRedirect) {
+        urlRedirect { id path target }
+        userErrors { field message }
+      }
+    }
+  `, { urlRedirect: { path, target: toPath } })
+  if (res.urlRedirectCreate.userErrors.length > 0) {
+    const msgs = res.urlRedirectCreate.userErrors.map(e => e.message)
+    // Non-fatal if a redirect for this path already exists — surface warning, return placeholder.
+    const isDuplicate = msgs.some(m => /already exist|duplicate/i.test(m))
+    if (isDuplicate) {
+      console.warn(`[createUrlRedirect] redirect already exists for ${path}: ${msgs.join('; ')}`)
+      return { id: '' }
+    }
+    const errs = res.urlRedirectCreate.userErrors.map(e => `${e.field.join('.')}: ${e.message}`).join('; ')
+    throw new Error(`createUrlRedirect: ${errs}`)
+  }
+  return { id: res.urlRedirectCreate.urlRedirect!.id }
+}
+
+// https://shopify.dev/docs/api/admin-graphql/2024-10/mutations/productCreateMedia
+export async function copyMediaToProduct(
+  masterProductId: string,
+  mediaSources: { originalSrc: string; alt?: string }[],
+): Promise<{ mediaId: string; originalSrc: string }[]> {
+  if (mediaSources.length === 0) return []
+  const gid = toProductGid(masterProductId)
+  const res = await adminGraphQL<{
+    productCreateMedia: {
+      media: { id: string; status: string; mediaErrors: { message: string }[] }[]
+      mediaUserErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation MergeCopyMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+      productCreateMedia(productId: $productId, media: $media) {
+        media { id status mediaErrors { message } }
+        mediaUserErrors { field message }
+      }
+    }
+  `, {
+    productId: gid,
+    media: mediaSources.map(s => ({
+      originalSource: s.originalSrc,
+      mediaContentType: 'IMAGE',
+      alt: s.alt ?? '',
+    })),
+  })
+  if (res.productCreateMedia.mediaUserErrors.length > 0) {
+    const errs = res.productCreateMedia.mediaUserErrors.map(e => `${e.field.join('.')}: ${e.message}`).join('; ')
+    throw new Error(`copyMediaToProduct: ${errs}`)
+  }
+  const created = res.productCreateMedia.media
+
+  // Poll each media item until READY or FAILED (30s timeout per image, 1s interval).
+  const results: { mediaId: string; originalSrc: string }[] = []
+  for (let i = 0; i < created.length; i++) {
+    const deadline = Date.now() + 30_000
+    let item = created[i]!
+    while (item.status !== 'READY' && item.status !== 'FAILED') {
+      if (Date.now() > deadline) throw new Error(`copyMediaToProduct: timeout polling media ${item.id}`)
+      await new Promise(r => setTimeout(r, 1000))
+      const poll = await adminGraphQL<{
+        node: { id: string; status: string; mediaErrors: { message: string }[] } | null
+      }>(`
+        query MergeMediaStatus($id: ID!) {
+          node(id: $id) {
+            ... on MediaImage { id status mediaErrors { message } }
+          }
+        }
+      `, { id: item.id })
+      if (poll.node) item = poll.node as typeof item
+    }
+    if (item.status === 'FAILED') {
+      const errMsg = item.mediaErrors?.[0]?.message ?? 'unknown'
+      throw new Error(`copyMediaToProduct: media ${item.id} failed — ${errMsg}`)
+    }
+    results.push({ mediaId: item.id, originalSrc: mediaSources[i]!.originalSrc })
+  }
+  return results
+}
+
+// Assumes single-location Shopify store; cache is per-process (serverless cold starts re-query).
+// Lazy cache — fetched once per server process to avoid repeated round-trips.
+let _primaryLocationId: string | null = null
+async function getPrimaryLocationId(): Promise<string> {
+  if (_primaryLocationId) return _primaryLocationId
+  const res = await adminGraphQL<{
+    locations: { edges: { node: { id: string } }[] }
+  }>(`
+    query MergePrimaryLocation {
+      locations(first: 1, query: "active:true") {
+        edges { node { id } }
+      }
+    }
+  `)
+  const id = res.locations.edges[0]?.node.id
+  if (!id) throw new Error('addVariantsToProduct: no active Shopify location found')
+  _primaryLocationId = id
+  return id
+}
+
+// https://shopify.dev/docs/api/admin-graphql/2024-10/mutations/productOptionsCreate
+// https://shopify.dev/docs/api/admin-graphql/2024-10/mutations/productOptionUpdate
+// https://shopify.dev/docs/api/admin-graphql/2024-10/mutations/productVariantsBulkCreate
+export async function addVariantsToProduct(
+  masterProductId: string,
+  optionName: string,
+  variants: Array<{
+    optionValue: string
+    price: string
+    compareAtPrice?: string | null
+    sku?: string | null
+    barcode?: string | null
+    inventoryQuantity?: number
+    mediaId?: string | null
+  }>,
+): Promise<void> {
+  const gid = toProductGid(masterProductId)
+
+  // Read current options to decide whether to create or extend.
+  const productRes = await adminGraphQL<{
+    product: {
+      options: { id: string; name: string; optionValues: { id: string; name: string }[] }[]
+    } | null
+  }>(`
+    query MergeProductOptions($id: ID!) {
+      product(id: $id) {
+        options { id name optionValues { id name } }
+      }
+    }
+  `, { id: gid })
+
+  const existingOptions = productRes.product?.options ?? []
+  const isDefaultOnly =
+    existingOptions.length === 1 &&
+    existingOptions[0]!.name === 'Title' &&
+    existingOptions[0]!.optionValues.length === 1 &&
+    existingOptions[0]!.optionValues[0]!.name === 'Default Title'
+
+  const existingOption = existingOptions.find(o => o.name === optionName)
+
+  if (isDefaultOnly) {
+    // Create the option from scratch; variantStrategy CREATE also removes the default variant.
+    const createRes = await adminGraphQL<{
+      productOptionsCreate: { userErrors: { field: string[]; message: string }[] }
+    }>(`
+      mutation MergeOptionsCreate($productId: ID!, $options: [OptionCreateInput!]!, $variantStrategy: ProductOptionCreateVariantStrategy) {
+        productOptionsCreate(productId: $productId, options: $options, variantStrategy: $variantStrategy) {
+          userErrors { field message }
+        }
+      }
+    `, {
+      productId: gid,
+      options: [{ name: optionName, values: variants.map(v => ({ name: v.optionValue })) }],
+      variantStrategy: 'CREATE',
+    })
+    if (createRes.productOptionsCreate.userErrors.length > 0) {
+      const errs = createRes.productOptionsCreate.userErrors.map(e => `${e.field.join('.')}: ${e.message}`).join('; ')
+      throw new Error(`addVariantsToProduct productOptionsCreate: ${errs}`)
+    }
+  } else if (existingOption) {
+    // Append any new option values not already present.
+    const existingNames = new Set(existingOption.optionValues.map(v => v.name))
+    const newValues = variants.filter(v => !existingNames.has(v.optionValue))
+    if (newValues.length > 0) {
+      const updateRes = await adminGraphQL<{
+        productOptionUpdate: { userErrors: { field: string[]; message: string }[] }
+      }>(`
+        mutation MergeOptionUpdate($productId: ID!, $option: OptionUpdateInput!, $optionValuesToAdd: [OptionValueCreateInput!]) {
+          productOptionUpdate(productId: $productId, option: $option, optionValuesToAdd: $optionValuesToAdd) {
+            userErrors { field message }
+          }
+        }
+      `, {
+        productId: gid,
+        option: { id: existingOption.id },
+        optionValuesToAdd: newValues.map(v => ({ name: v.optionValue })),
+      })
+      if (updateRes.productOptionUpdate.userErrors.length > 0) {
+        const errs = updateRes.productOptionUpdate.userErrors.map(e => `${e.field.join('.')}: ${e.message}`).join('; ')
+        throw new Error(`addVariantsToProduct productOptionUpdate: ${errs}`)
+      }
+    }
+  }
+
+  // Filter out variants whose optionValue already exists on the master product to make this retry-safe.
+  const existingVariantsRes = await adminGraphQL<{
+    product: { variants: { nodes: { id: string; selectedOptions: { name: string; value: string }[] }[] } } | null
+  }>(`
+    query MergeExistingVariants($id: ID!) {
+      product(id: $id) {
+        variants(first: 100) {
+          nodes { id selectedOptions { name value } }
+        }
+      }
+    }
+  `, { id: gid })
+  const existingOptionValues = new Set(
+    (existingVariantsRes.product?.variants.nodes ?? [])
+      .flatMap(v => v.selectedOptions)
+      .filter(o => o.name === optionName)
+      .map(o => o.value),
+  )
+  const variantsToCreate = variants.filter(v => !existingOptionValues.has(v.optionValue))
+  if (variantsToCreate.length === 0) return
+
+  const locationId = await getPrimaryLocationId()
+
+  const bulkRes = await adminGraphQL<{
+    productVariantsBulkCreate: {
+      productVariants: { id: string }[]
+      userErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation MergeBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!, $strategy: ProductVariantsBulkCreateStrategy) {
+      productVariantsBulkCreate(productId: $productId, variants: $variants, strategy: $strategy) {
+        productVariants { id }
+        userErrors { field message }
+      }
+    }
+  `, {
+    productId: gid,
+    strategy: isDefaultOnly ? 'REMOVE_STANDALONE_VARIANT' : 'DEFAULT',
+    variants: variantsToCreate.map(v => ({
+      price: v.price,
+      ...(v.compareAtPrice != null ? { compareAtPrice: v.compareAtPrice } : {}),
+      optionValues: [{ name: v.optionValue, optionName }],
+      inventoryItem: { sku: v.sku ?? null },
+      ...(v.barcode != null ? { barcode: v.barcode } : {}),
+      ...(v.mediaId != null ? { mediaId: v.mediaId } : {}),
+      ...((v.inventoryQuantity ?? 0) > 0
+        ? { inventoryQuantities: [{ availableQuantity: v.inventoryQuantity!, locationId }] }
+        : {}),
+    })),
+  })
+  if (bulkRes.productVariantsBulkCreate.userErrors.length > 0) {
+    const errs = bulkRes.productVariantsBulkCreate.userErrors.map(e => `${e.field.join('.')}: ${e.message}`).join('; ')
+    throw new Error(`addVariantsToProduct productVariantsBulkCreate: ${errs}`)
+  }
+}
