@@ -159,5 +159,12 @@ export interface StageResponse {
      * sms_turns.tool_budget_exhausted column for dashboard telemetry.
      */
     toolBudgetExhausted?: boolean | undefined
+    /**
+     * ADR-003a Fix 3: true when searchProducts returned all_results_previously_pitched
+     * (dedup emptied the result set because every candidate was in pitchedHandlesLog).
+     * Distinct from tool_budget_exhausted. Written to sms_turns for dashboard telemetry
+     * so this failure mode is visible without parsing the tool result reason code.
+     */
+    searchRepeatedPitch?: boolean | undefined
   }
 }

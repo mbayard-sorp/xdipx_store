@@ -130,6 +130,16 @@ export interface DiscoveryAgentToolContext {
   cardSink?: Map<string, IvrProductCard[]> | null | undefined
   /** The current tool_use.id — used as the key when stashing cards. */
   toolUseId?: string | undefined
+  /**
+   * ADR-003a Fix 2+3: ordered log of handles pitched in prior turns
+   * (most-recent last). Used by:
+   *   - isAnalContextAuthorized: if any prior handle is anal-tagged, the
+   *     current search is considered anal-context authorized.
+   *   - dedup filter: cards whose handle appears here are dropped so the
+   *     agent never re-pitches an already-shown product.
+   * Undefined or null treated identically: no dedup, no prior-handle auth.
+   */
+  pitchedHandlesLog?: string[] | null | undefined
 }
 
 export interface DiscoveryToolResult {
@@ -137,6 +147,82 @@ export interface DiscoveryToolResult {
   data?: unknown
   error?: string
   message?: string
+}
+
+// ─── ADR-003a: anal-product filter + dedup helpers ───────────────────────────
+
+/**
+ * Substrings checked against a card handle (case-insensitive) to decide
+ * whether the card represents an anal-targeted product.
+ *
+ * ADR-003a condition 1: drop 'beads' from this list. Vibrating-bead products
+ * often carry 'beads' in their handle but are not anal products. Rely on the
+ * category field for anal-bead products that are correctly tagged in Sanity.
+ */
+const ANAL_HANDLE_SUBSTRINGS = ['anal', 'plug', 'prostate'] as const
+
+/**
+ * Returns true when a product card should be treated as anal-targeted.
+ *
+ * Primary signal: handle substring match (catches handle-tagged products
+ * regardless of Sanity tagging hygiene).
+ * Secondary signal: category field equals 'anal' or 'plug'.
+ *
+ * ADR-003a: 'beads' is intentionally excluded from the substring list to
+ * avoid false positives on vibrating-bead products.
+ */
+export function isAnalTagged(card: IvrProductCard): boolean {
+  const handle = (card.handle ?? '').toLowerCase()
+  for (const sub of ANAL_HANDLE_SUBSTRINGS) {
+    if (handle.includes(sub)) return true
+  }
+  const category = (card.category ?? '').toLowerCase().trim()
+  return category === 'anal' || category === 'plug'
+}
+
+/**
+ * Returns true when the current search context justifies returning
+ * anal-tagged products to the agent.
+ *
+ * Three authorization signals (any one is sufficient):
+ *  1. The agent's query string contains explicit anal language.
+ *  2. A prior pitched handle is itself anal-tagged (user tolerated it).
+ *  3. The explicit category input to searchProducts is 'plug' or 'anal'.
+ *
+ * Default-deny: when all signals are absent, returns false.
+ * A false negative (legitimate anal query gets filtered) is recoverable
+ * (user re-asks). A false positive (anal product on a general query) is
+ * trust-breaking on first contact.
+ */
+const ANAL_QUERY_TERMS = ['anal', 'plug', 'prostate', 'butt', 'rear', 'backdoor'] as const
+
+export function isAnalContextAuthorized(
+  query: string,
+  pitchedHandlesLog: string[] | null | undefined,
+  category: string | undefined,
+): boolean {
+  // Signal 1: agent's query contains explicit anal language.
+  const q = query.toLowerCase()
+  for (const term of ANAL_QUERY_TERMS) {
+    if (q.includes(term)) return true
+  }
+
+  // Signal 2: a prior pitched handle is anal-tagged. We create a minimal
+  // stub card with only handle set so isAnalTagged can run its check.
+  if (pitchedHandlesLog && pitchedHandlesLog.length > 0) {
+    for (const h of pitchedHandlesLog) {
+      const stubCard = { handle: h, category: '', title: '', tagline: '', inStock: false, price: 0, pctOff: 0, phrasing: 'msrp_only' as const, variantId: '' }
+      if (isAnalTagged(stubCard)) return true
+    }
+  }
+
+  // Signal 3: explicit category parameter is anal/plug.
+  if (category) {
+    const cat = category.toLowerCase().trim()
+    if (cat === 'anal' || cat === 'plug') return true
+  }
+
+  return false
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
@@ -213,7 +299,48 @@ export async function runDiscoveryTool(
       }
 
       const diag = await searchForIvrWithDiagnostics(opts)
-      const top = diag.cards.slice(0, 3)
+      const rawTop = diag.cards.slice(0, 3)
+
+      // ── ADR-003a Fix 2: anal-product filter ─────────────────────────────
+      // Filter runs before the dedup so the dedup receives a clean set.
+      // Default-deny: unless the context authorizes anal results, drop them.
+      const analAuthorized = isAnalContextAuthorized(
+        query,
+        ctx.pitchedHandlesLog,
+        categoryRaw,
+      )
+      const analFiltered = analAuthorized
+        ? rawTop
+        : rawTop.filter((card) => !isAnalTagged(card))
+
+      // ── ADR-003a Fix 3: pitched-handle dedup ────────────────────────────
+      // Drop any card whose handle was pitched in a prior turn. Applied after
+      // the anal filter so the prior-pitch anal-authorization check still
+      // considers the full log (the dedup doesn't need to see anal cards to
+      // authorize them — isAnalContextAuthorized does that separately).
+      const priorHandles = new Set(
+        (ctx.pitchedHandlesLog ?? []).map((h) => h.toLowerCase()),
+      )
+      const deduped = analFiltered.filter(
+        (card) => !priorHandles.has(card.handle.toLowerCase()),
+      )
+
+      // Broaden-on-exhaustion: all results were previously pitched (dedup
+      // emptied the list but anal-filter found real candidates).
+      if (deduped.length === 0 && analFiltered.length > 0) {
+        // No card stashed in cardSink — nothing to pitch.
+        return {
+          ok: true,
+          data: {
+            results: [],
+            reason: 'all_results_previously_pitched',
+            message:
+              'All matching products have already been shown in this conversation. Try a different search angle: broader query, different category, or drop a filter.',
+          },
+        }
+      }
+
+      const top = deduped
 
       // Stash the raw cards so the caller can pull a productCard for the segment.
       if (ctx.cardSink && ctx.toolUseId) {

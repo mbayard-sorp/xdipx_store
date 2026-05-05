@@ -108,6 +108,11 @@ export interface TurnObservabilityUpdate {
    * pending tool_use stop_reason. Written to sms_turns.tool_budget_exhausted.
    */
   toolBudgetExhausted?: boolean | undefined
+  /**
+   * ADR-003a Fix 3: true when the dedup filter returned all_results_previously_pitched.
+   * Surfaces the repeat-pitch failure mode in turn logs without parsing tool result codes.
+   */
+  searchRepeatedPitch?: boolean | undefined
 }
 
 /**
@@ -333,6 +338,10 @@ export interface StageTelemetryOverride {
    * pending tool_use stop_reason. Written to sms_turns.tool_budget_exhausted.
    */
   toolBudgetExhausted?: boolean | undefined
+  /**
+   * ADR-003a Fix 3: true when the dedup filter returned all_results_previously_pitched.
+   */
+  searchRepeatedPitch?: boolean | undefined
 }
 
 /**

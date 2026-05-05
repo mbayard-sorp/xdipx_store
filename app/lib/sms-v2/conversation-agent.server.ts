@@ -142,6 +142,7 @@ TOOL USE:
 - lookupReturningCustomer is voice/sms-only. Call it on the first inbound turn of voice/sms to personalize. On web it returns an error — ignore the error and proceed.
 - getCategoryExplainer renders the canonical explainer for a category the customer is unfamiliar with. Use it once and bridge to a narrowing question.
 - Max 3 tool hops per turn. If a search returned no results, acknowledge plainly and offer a different angle.
+- When searchProducts returns reason: "all_results_previously_pitched", do NOT re-pitch any product you have already shown. Either: (a) broaden the search immediately by dropping one filter and calling searchProducts again, OR (b) acknowledge you have shown everything at that setting and ask one question to open a new direction ("I have shown you the options at that price point in this category. Want me to widen the search, or try a different direction?"). Never respond with "I cannot find any more results." Never re-pitch a handle you already shared.
 - When you need to call a tool, do NOT narrate that you're going to do it. Never say "Let me search for you," "Let me look that up," "Let me check the catalog," or any variant. Just call the tool and reply with what you found. The customer sees only your final prose — not your tool calls.
 
 OUTPUT:
@@ -673,6 +674,9 @@ export async function executeConversationAgent(
     phone: ctx.conversation.phone,
     channel,
     cardSink: cardsByToolUseId,
+    // ADR-003a: pass prior pitched handles so the anal filter and dedup
+    // can gate results at the tool-wrapper layer (deterministic enforcement).
+    pitchedHandlesLog: ctx.conversation.pitchedHandlesLog ?? null,
   }
 
   // ── Sonnet loop (Task 0.7: tool-result pitch detection; Task 0.9: budget flag) ──
@@ -684,6 +688,9 @@ export async function executeConversationAgent(
   // Task 0.9: set true when the loop exhausts MAX_TOOL_HOPS with a pending
   // tool_use stop_reason, causing safeFallback to run. Written to telemetry.
   let toolBudgetExhausted = false
+  // ADR-003a Fix 3: set true when any searchProducts call returned
+  // all_results_previously_pitched this turn. Written to telemetry.
+  let searchRepeatedPitch = false
 
   try {
     for (let hop = 0; hop < MAX_TOOL_HOPS; hop++) {
@@ -735,6 +742,17 @@ export async function executeConversationAgent(
             !toolResultPitchedHandle
           ) {
             toolResultPitchedHandle = cards[0].handle
+          }
+
+          // ADR-003a Fix 3: detect all_results_previously_pitched telemetry signal.
+          if (
+            block.name === 'searchProducts' &&
+            result.ok &&
+            typeof result.data === 'object' &&
+            result.data !== null &&
+            (result.data as Record<string, unknown>)['reason'] === 'all_results_previously_pitched'
+          ) {
+            searchRepeatedPitch = true
           }
 
           toolCalls.push({
@@ -871,6 +889,8 @@ export async function executeConversationAgent(
     // Task 0.9: only set when budget was truly exhausted (false would be noise
     // in the telemetry column — omit it for normal turns).
     ...(toolBudgetExhausted && { toolBudgetExhausted: true }),
+    // ADR-003a Fix 3: only set when dedup emptied the result set this turn.
+    ...(searchRepeatedPitch && { searchRepeatedPitch: true }),
   }
 
   // ADR-003 Sub-decision B: summarizer is now fired from the PROCESSOR layer
