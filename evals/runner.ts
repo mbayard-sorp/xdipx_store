@@ -4,8 +4,9 @@
  * Eval harness runner for Emma conversation quality.
  *
  * For each fixture:
- *   1. Build the "agent input" by combining priorSummary, priorSlots,
- *      pitchedHandlesLog, and the fixture's user turn into a messages array.
+ *   1. Build the "agent input" by injecting priorSummary, priorSlots, and
+ *      pitchedHandlesLog into the SYSTEM PROMPT (via buildKnownAboutCustomer),
+ *      exactly as production does — NOT as a synthetic assistant message.
  *   2. Call the Anthropic API with the v2 SMS system prompt (or an override).
  *   3. Send Emma's reply + fixture context to the Sonnet-as-judge.
  *   4. Collect per-dimension scores.
@@ -24,6 +25,71 @@ import Anthropic from '@anthropic-ai/sdk'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { JUDGE_SYSTEM_PROMPT } from './judge/prompt.js'
+
+// ---------------------------------------------------------------------------
+// Inline port of buildKnownAboutCustomer from conversation-agent.server.ts
+// (pure string builder — no side effects, safe to run in eval context)
+// ---------------------------------------------------------------------------
+
+/**
+ * Serialize prior slots to the same compact format production uses.
+ * Identity-adjacent keys (audience, experience) are excluded per the
+ * IDENTITY_ADJACENT_SLOT_KEYS rule in the production module.
+ */
+function serializeSlotsForHarness(slots: Record<string, unknown>): string {
+  const IDENTITY_ADJACENT = new Set(['audience', 'experience'])
+  const MAX_SLOTS = 8
+  const pairs: string[] = []
+  for (const [key, val] of Object.entries(slots)) {
+    if (IDENTITY_ADJACENT.has(key)) continue
+    if (!val && val !== 0) continue
+    if (Array.isArray(val)) {
+      if (val.length === 0) continue
+      pairs.push(`${key}=${val.join(',')}`)
+    } else {
+      pairs.push(`${key}=${String(val)}`)
+    }
+    if (pairs.length >= MAX_SLOTS) break
+  }
+  return pairs.join(' | ')
+}
+
+/**
+ * Build the <known_about_customer> block exactly as production does via
+ * buildKnownAboutCustomer() in conversation-agent.server.ts. Returns an
+ * empty string when there is nothing to inject.
+ *
+ * This is appended to the system prompt so the eval harness faithfully
+ * simulates how production injects slot/summary context — NOT as a synthetic
+ * assistant message (which the model treats differently).
+ */
+function buildKnownAboutCustomerBlock(
+  slots: Record<string, unknown>,
+  summary: string | null,
+  pitchedHandlesLog: string[],
+): string {
+  const summaryLine = summary?.trim() || null
+  const slotLine = serializeSlotsForHarness(slots)
+
+  let priorOptionsLine: string | null = null
+  if (pitchedHandlesLog.length > 1) {
+    const oldest = pitchedHandlesLog.slice(0, 2)
+    priorOptionsLine = `Prior options shown (if customer refers back): ${oldest.join(', ')}`
+  }
+
+  if (!summaryLine && !slotLine && !priorOptionsLine) return ''
+
+  const lines: string[] = ['<known_about_customer>']
+  if (summaryLine) lines.push(`Summary: ${summaryLine}`)
+  if (slotLine) lines.push(`Known: ${slotLine}`)
+  if (priorOptionsLine) lines.push(priorOptionsLine)
+  lines.push('</known_about_customer>')
+  lines.push(
+    'Note: Emma sees the full conversation history. Use this block for context that may have scrolled',
+    'out of the history window. If history and this block conflict, history takes precedence.',
+  )
+  return lines.join('\n')
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -84,6 +150,7 @@ HARD RULES (these override anything that conflicts):
 - Never use "buy now," "checkout now," or any pushy CTA. Use "Take a peek," "Want to see it?", "I'll take it" — Emma voice.
 - Never claim you've sent / created / texted / saved anything you haven't actually called a tool for. If you have no tool result for it, you didn't do it.
 - Never paste cart URLs or checkout URLs. The only links you may share are PDP URLs that came back from a searchProducts or getProductDetails result THIS turn.
+- NEVER narrate a pivot. When the customer changes direction, just engage with what they asked for as if it were the natural next thing to discuss. Do not acknowledge the pivot itself. Forbidden openers (apply in ALL stages): "great pivot," "love that energy," "switching gears," "got it, switching things up," "sure, going in a new direction," "love that you're exploring," "happy to switch," "totally switching," "changing gears." The customer is in their own conversation — they don't need narration of their own choice.
 
 PITCHING (when you actually have a fit):
 - One product per turn. Name it once with the title from the tool result (don't paraphrase the product name).
@@ -97,43 +164,27 @@ CHANNEL: SMS (plain text — Twilio).
 - PDP URL formatting (REQUIRED for iMessage preview to render the product image): when sharing a PDP URL, put it on its OWN LINE with the https:// prefix, ideally as the LAST line before any closing question. The URL must read https://xdipx.com/products/<handle> verbatim from the tool result. Don't bury it mid-sentence — iMessage only auto-previews URLs that aren't sandwiched between other text.
 - Don't gate behind "want me to text the link?" — if you have a fit, share it now.
 - This stage NEVER includes a checkout URL. Pitch and ask.
-- Contractions. Friendly. Short.`
+- Contractions. Friendly. Short.
+- When you need to search, do not narrate that you're going to search. Never say "Let me search," "Let me look that up," or any variant. Call the tool and reply with what you found.`
 
 // ---------------------------------------------------------------------------
 // Build agent input messages from fixture
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the messages array for a fixture. Prior context (slots, summary,
+ * pitched handles) is NOT injected here — it goes into the system prompt via
+ * buildSystemPromptForFixture() so the harness is faithful to production.
+ */
 function buildAgentMessages(
   fixture: EvalFixture,
 ): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = []
 
-  // Inject prior context as a synthetic assistant message to simulate the
-  // agent "knowing" what it already knows this turn. This is what the
-  // <known_about_customer> block does in production — in evals we simulate it
-  // as a prior assistant turn for simplicity.
-  const contextParts: string[] = []
-  if (fixture.priorSummary) {
-    contextParts.push(`[Prior summary: ${fixture.priorSummary}]`)
-  }
-  if (Object.keys(fixture.priorSlots).length > 0) {
-    const slots = Object.entries(fixture.priorSlots)
-      .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(',') : String(v)}`)
-      .join(' | ')
-    contextParts.push(`[Known slots: ${slots}]`)
-  }
-  if (fixture.pitchedHandlesLog.length > 0) {
-    contextParts.push(`[Prior pitched products: ${fixture.pitchedHandlesLog.join(', ')}]`)
-  }
-
-  if (contextParts.length > 0) {
-    messages.push({
-      role: 'assistant',
-      content: `I have context from our prior conversation: ${contextParts.join(' ')}`,
-    })
-  }
-
-  // Add the user turns (skip expected_behavior entries)
+  // Add the user turns (skip expected_behavior entries).
+  // Do NOT inject a synthetic assistant message here — that is the harness
+  // fidelity bug. Prior context must flow through the system prompt, not the
+  // message stream. See buildSystemPromptForFixture().
   for (const turn of fixture.turns) {
     if (turn.role === 'user') {
       messages.push({ role: 'user', content: turn.text })
@@ -141,6 +192,26 @@ function buildAgentMessages(
   }
 
   return messages
+}
+
+/**
+ * Build the system prompt for a fixture by appending the <known_about_customer>
+ * block to the base system prompt, exactly as production's buildSystemBlocks()
+ * does. This is the fix for the harness fidelity bug in fixture 008:
+ * production injects slots/summary into the system prompt, not as a synthetic
+ * assistant message.
+ */
+function buildSystemPromptForFixture(
+  basePrompt: string,
+  fixture: EvalFixture,
+): string {
+  const knownBlock = buildKnownAboutCustomerBlock(
+    fixture.priorSlots as Record<string, unknown>,
+    fixture.priorSummary,
+    fixture.pitchedHandlesLog,
+  )
+  if (!knownBlock) return basePrompt
+  return `${basePrompt}\n\n${knownBlock}`
 }
 
 // ---------------------------------------------------------------------------
@@ -155,11 +226,15 @@ async function callEmma(
   const messages = buildAgentMessages(fixture)
   if (messages.length === 0) return ''
 
+  // Inject prior context into the system prompt, not the message stream.
+  // This matches production's buildSystemBlocks() behavior exactly.
+  const fixtureSystemPrompt = buildSystemPromptForFixture(systemPrompt, fixture)
+
   try {
     const res = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 480,
-      system: systemPrompt,
+      system: fixtureSystemPrompt,
       messages,
     })
     const textBlock = res.content.find((b): b is Anthropic.TextBlock => b.type === 'text')
