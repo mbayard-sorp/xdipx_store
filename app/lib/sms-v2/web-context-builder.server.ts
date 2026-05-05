@@ -47,6 +47,10 @@ function webRowToConversationRow(webRow: WebConversationRow): ConversationRow {
     // it. Default null is harmless on web; the voice adapter is the only
     // caller that reads or writes pendingPdpUrl today.
     pendingPdpUrl: webRow.pendingPdpUrl ?? null,
+    // Migration 032: memory primitive fields — present on web_conversations
+    // after migration 032. Default null before the first summarizer run.
+    conversationSummary: webRow.conversationSummary ?? null,
+    pitchedHandlesLog: webRow.pitchedHandlesLog ?? null,
   }
 }
 

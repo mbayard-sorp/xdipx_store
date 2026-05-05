@@ -49,6 +49,15 @@ export interface WebConversationRow {
    * exists on web_conversations for forward-compatibility.
    */
   pendingPdpUrl: string | null
+  /**
+   * Migration 032: rolling Haiku-generated conversation summary.
+   * Null until the first summarizer run after migration 032 ships.
+   */
+  conversationSummary: string | null
+  /**
+   * Migration 032: ordered log of last 10 pitched handles (most-recent last).
+   */
+  pitchedHandlesLog: string[] | null
 }
 
 // ---------------------------------------------------------------------------

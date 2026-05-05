@@ -82,6 +82,10 @@ export interface EmmaContext {
     discoveryState?: unknown | null
     /** Accumulated discovery slots. Empty object for legacy rows. */
     discoveredSlots?: Record<string, unknown>
+    /** Migration 032: rolling summary injected into system prompt. Null until first summarizer run. */
+    conversationSummary?: string | null
+    /** Migration 032: ordered log of last 10 pitched handles (most-recent last). */
+    pitchedHandlesLog?: string[] | null
   }
   customer?: CustomerContext | undefined
   todaysPick?: ProductContext | undefined
@@ -112,6 +116,13 @@ export interface ConversationStateWrites {
   discoveryState?: unknown | null | undefined
   /** Accumulated discovery slots. Typed as Record to avoid circular imports. */
   discoveredSlots?: Record<string, unknown> | undefined
+  /** Migration 032: Haiku-generated rolling summary. Written fire-and-forget. */
+  conversationSummary?: string | null | undefined
+  /**
+   * Migration 032: ordered log of last 10 pitched handles (most-recent last).
+   * Application layer enforces the cap before writing.
+   */
+  pitchedHandlesLog?: string[] | null | undefined
 }
 
 export interface StageResponse {
@@ -134,5 +145,11 @@ export interface StageResponse {
     /** True when this turn was a vulnerability soft-beat (gate not advanced,
      *  no product surfaced). Written to sms_turns.soft_beat column. */
     softBeat?: boolean | undefined
+    /**
+     * Migration 032: true when the Sonnet loop exhausted MAX_TOOL_HOPS with a
+     * pending tool_use stop_reason, causing safeFallback to run. Written to
+     * sms_turns.tool_budget_exhausted column for dashboard telemetry.
+     */
+    toolBudgetExhausted?: boolean | undefined
   }
 }

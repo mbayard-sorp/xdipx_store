@@ -64,10 +64,11 @@ export async function processSmsMessageV2(
     intentResult = { intent: 'OFF_TOPIC', confidence: 0.0, source: 'fallback' }
   }
 
-  // Re-run getOrCreateConversation with the intent so the 6h stage TTL check
-  // can fire if needed. This second call is cheap (the DB row was just read).
+  // Re-run getOrCreateConversation with the intent so the stage TTL check
+  // can fire if needed (Task 0.8: now gated on 24h + confidence >= 0.75).
+  // Pass intentConfidence so low-confidence intent labels don't silently reset stage.
   try {
-    conversation = await getOrCreateConversation(phone, intentResult.intent)
+    conversation = await getOrCreateConversation(phone, intentResult.intent, intentResult.confidence)
   } catch {
     // Non-fatal — we already have a conversation object from the first call
   }
@@ -105,6 +106,12 @@ export async function processSmsMessageV2(
       // here to avoid circular imports; the DB column is JSONB).
       ...(writes.discoveryState  !== undefined && { discoveryState:  writes.discoveryState }),
       ...(writes.discoveredSlots !== undefined && { discoveredSlots: writes.discoveredSlots }),
+      // Migration 032: memory primitive writes.
+      // conversationSummary is written separately (fire-and-forget from the agent),
+      // but if the stage handler explicitly sets it, honor it here.
+      ...(writes.conversationSummary !== undefined && { conversationSummary: writes.conversationSummary }),
+      // pitched_handles_log — built and written by conversation-agent.server.ts.
+      ...(writes.pitchedHandlesLog   !== undefined && { pitchedHandlesLog:   writes.pitchedHandlesLog }),
     })
 
     result = await withTurnLoggingForStageResponse(input, stageResp, 'v2', {
@@ -117,6 +124,7 @@ export async function processSmsMessageV2(
       toolCalls: stageResp.telemetry.toolCalls,
       fabricationCaught: stageResp.telemetry.fabricationCaught,
       softBeat: stageResp.telemetry.softBeat,
+      toolBudgetExhausted: stageResp.telemetry.toolBudgetExhausted,
     })
   } else {
     // No v2 handler for this stage — fall through to v1 (existing Phase 1 behavior).
