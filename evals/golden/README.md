@@ -59,3 +59,23 @@ Keep the total fixture count reasonable: 30 is the Phase 0 baseline. Grow by
 Fixtures 007 and 008 are phase-gating fixtures (architect condition #3). Their
 `memory` dimension score must be >= 4 for the Phase 0 gate to pass. Do not
 change these fixtures without architect sign-off.
+
+## Live memory observability script
+
+`scripts/test-conversation-memory.ts` sends a 4-turn synthetic conversation
+through `processSmsMessageV2` (the real production entry point) and prints the
+`sms_conversations` row after each turn so you can watch memory propagate
+through the real code path against the preview DB without needing browser auth.
+
+```
+npx tsx scripts/test-conversation-memory.ts
+npx tsx scripts/test-conversation-memory.ts --phone +15555550199
+```
+
+The script resets the test row before each run so it is safe to run repeatedly.
+It prints `phone`, `stage`, `currentPitchHandle`, `conversation_summary`, and
+`pitched_handles_log` after every turn.
+
+Requires: `DATABASE_URL` (preview DB), `ANTHROPIC_API_KEY`, `SHOPIFY_*` env
+vars. Run `bash scripts/setup-worktree.sh` first to symlink `.env` from the
+main repo root.
