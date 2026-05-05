@@ -535,6 +535,10 @@ export const smsTurns = pgTable('sms_turns', {
   // pending tool_use stop_reason — no final text was generated, safeFallback ran.
   // Powers the "tool budget exhausted rate" dashboard query in Phase 3.
   toolBudgetExhausted: boolean('tool_budget_exhausted').notNull().default(false),
+  // Migration 033: set true when the dedup filter returned all_results_previously_pitched
+  // (every search result was already in pitchedHandlesLog). Distinct from toolBudgetExhausted.
+  // Powers the "repeat-pitch rate" dashboard query in Phase 3.
+  searchRepeatedPitch: boolean('search_repeated_pitch').notNull().default(false),
   createdAt:        timestamp('created_at').notNull().defaultNow(),
 }, t => ({
   twilioSidUniq:    uniqueIndex('sms_turns_twilio_sid_uniq').on(t.twilioMessageSid),

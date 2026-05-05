@@ -150,6 +150,8 @@ export async function finaliseTurnRows(opts: {
       ...(observability?.softBeat !== undefined          && { softBeat: observability.softBeat }),
       // Migration 032: tool-budget exhaustion telemetry
       ...(observability?.toolBudgetExhausted !== undefined && { toolBudgetExhausted: observability.toolBudgetExhausted }),
+      // Migration 033: dedup-exhaustion telemetry (all results previously pitched)
+      ...(observability?.searchRepeatedPitch !== undefined && { searchRepeatedPitch: observability.searchRepeatedPitch }),
     })
     .where(eq(smsTurns.id, sentinelId))
 
@@ -169,6 +171,7 @@ export async function finaliseTurnRows(opts: {
       fabricationCaught: observability?.fabricationCaught,
       softBeat: observability?.softBeat,
       toolBudgetExhausted: observability?.toolBudgetExhausted ?? false,
+      searchRepeatedPitch: observability?.searchRepeatedPitch ?? false,
       emmaMsg,
       latencyMs,
       pipelineVersion,
