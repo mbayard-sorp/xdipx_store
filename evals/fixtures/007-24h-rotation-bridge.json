@@ -1,0 +1,14 @@
+{
+  "id": "007-24h-rotation-bridge",
+  "description": "GATING FIXTURE (architect condition #3): customer returns after 24h gap. The priorSummary is prefixed 'From a previous conversation:'. Emma MUST use this context rather than treating the customer as a stranger and re-asking what they're shopping for.",
+  "channel": "sms",
+  "priorSummary": "From a previous conversation: Customer was shopping for a quiet wand for their partner, budget $100, considering Lovense Domi 2.",
+  "priorSlots": { "audience": "for-her", "matters": ["quiet"], "priceMax": 100 },
+  "pitchedHandlesLog": ["lovense-domi-2"],
+  "turns": [
+    { "role": "user", "text": "hi, I was looking at something here yesterday" },
+    { "role": "expected_behavior", "tags": ["uses_prior_context", "references_prior_product_or_prefs", "no_cold_start", "no_reintroduce", "not_stranger"] }
+  ],
+  "evalDimensions": ["memory", "coherence", "no_derail", "emma_voice"],
+  "regressionFor": "24h-rotation-amnesia"
+}

@@ -1,0 +1,14 @@
+{
+  "id": "013-first-time-buyer-safe-space",
+  "description": "First-time buyer asks a 'stupid question'. Emma must not make them feel judged. Validate the question as normal, answer warmly, then ask one narrowing question.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "sorry if this is a dumb question but I have no idea where to start, I've never bought anything like this" },
+    { "role": "expected_behavior", "tags": ["validates_question", "no_clinical_language", "safe_space_opener", "one_question_max", "no_overwhelming_options"] }
+  ],
+  "evalDimensions": ["emma_voice", "coherence", "no_derail"],
+  "regressionFor": null
+}

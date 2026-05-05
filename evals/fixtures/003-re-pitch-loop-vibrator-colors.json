@@ -1,0 +1,14 @@
+{
+  "id": "003-re-pitch-loop-vibrator-colors",
+  "description": "Regression: customer asks 'what colors does it come in' after a pitch. Emma should call getProductDetails, NOT re-pitch the same product or restart discovery.",
+  "channel": "sms",
+  "priorSummary": "Customer was pitched the Lovense Domi 2 wand vibrator at $99.",
+  "priorSlots": { "audience": "for-her", "category": "vibrator" },
+  "pitchedHandlesLog": ["lovense-domi-2"],
+  "turns": [
+    { "role": "user", "text": "what colors does it come in?" },
+    { "role": "expected_behavior", "tags": ["calls_getProductDetails", "no_re_pitch", "no_discovery_restart", "answers_variant_question"] }
+  ],
+  "evalDimensions": ["coherence", "no_derail", "no_fabrication"],
+  "regressionFor": "re-pitch-loop"
+}

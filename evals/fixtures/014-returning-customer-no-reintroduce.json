@@ -1,0 +1,14 @@
+{
+  "id": "014-returning-customer-no-reintroduce",
+  "description": "Returning customer by name in the summary. Emma should NOT say 'welcome back' twice or re-introduce herself. Acknowledge them naturally and continue.",
+  "channel": "sms",
+  "priorSummary": "Sarah was browsing vibrators last week, left before buying. Mentioned quiet is important.",
+  "priorSlots": { "audience": "for-her", "matters": ["quiet"] },
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "Sarah here again, thinking I'm ready to pull the trigger" },
+    { "role": "expected_behavior", "tags": ["acknowledges_return", "no_double_welcome_back", "no_reintroduce", "uses_name_once", "moves_forward_naturally"] }
+  ],
+  "evalDimensions": ["memory", "coherence", "emma_voice"],
+  "regressionFor": null
+}

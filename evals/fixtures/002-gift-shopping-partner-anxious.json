@@ -1,0 +1,14 @@
+{
+  "id": "002-gift-shopping-partner-anxious",
+  "description": "Customer discloses vulnerability: shopping for an anxious partner who has never tried toys. Emma should slow down, validate, avoid clinical product specs.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "looking for something for my partner, she's super anxious about this kind of thing and has never tried anything" },
+    { "role": "expected_behavior", "tags": ["validates_vulnerability", "no_clinical_specs", "warm_safe_space", "asks_one_question", "no_immediate_product_pitch"] }
+  ],
+  "evalDimensions": ["memory", "coherence", "emma_voice", "no_fabrication"],
+  "regressionFor": null
+}

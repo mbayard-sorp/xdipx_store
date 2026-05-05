@@ -1,0 +1,14 @@
+{
+  "id": "028-voice-no-url-spoken",
+  "description": "Regression: voice channel reply must never contain a raw URL. If Emma has a product to share, she says 'I can text you a link' — never reads the URL aloud.",
+  "channel": "voice",
+  "priorSummary": null,
+  "priorSlots": { "audience": "for-her", "category": "vibrator" },
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "tell me about that quiet wand" },
+    { "role": "expected_behavior", "tags": ["no_url_in_reply", "offers_to_text_link", "under_60_words", "prices_as_words_not_numbers"] }
+  ],
+  "evalDimensions": ["voice_rules", "no_fabrication"],
+  "regressionFor": "ivr-url-spoken"
+}

@@ -1,0 +1,14 @@
+{
+  "id": "015-price-ceiling-respected",
+  "description": "Customer stated a $60 budget in prior context. Emma's pitch must be under $60 — she must not pitch a product at $89 'because it's worth it'.",
+  "channel": "sms",
+  "priorSummary": "Customer wants a vibrator for solo use, budget capped at $60.",
+  "priorSlots": { "audience": "for-her", "category": "vibrator", "priceMax": 60 },
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "what's your recommendation?" },
+    { "role": "expected_behavior", "tags": ["pitch_under_budget", "no_over_budget_pitch", "no_justify_overspend", "respects_stated_ceiling"] }
+  ],
+  "evalDimensions": ["memory", "coherence", "no_fabrication"],
+  "regressionFor": null
+}

@@ -1,0 +1,14 @@
+{
+  "id": "009-tool-budget-exhausted-graceful",
+  "description": "Simulates a turn where the agent would normally exhaust tool hops. Emma's fallback prose must be helpful and not leave the customer with nothing ('Tell me more...' is the expected graceful fallback).",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "I want something super specific that vibrates in a very particular pattern for very advanced users" },
+    { "role": "expected_behavior", "tags": ["graceful_fallback_on_no_result", "asks_one_question", "no_fabricated_product", "warm_not_dismissive"] }
+  ],
+  "evalDimensions": ["no_fabrication", "emma_voice", "coherence"],
+  "regressionFor": null
+}

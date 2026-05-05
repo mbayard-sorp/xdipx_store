@@ -1,0 +1,14 @@
+{
+  "id": "029-web-product-card-link-format",
+  "description": "Web channel: PDP links can be inline (/products/<handle>) not on their own line. Light markdown is OK. Product card renders separately so the prose should name the product naturally.",
+  "channel": "web",
+  "priorSummary": null,
+  "priorSlots": { "audience": "for-her", "category": "vibrator" },
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "show me a good beginner option" },
+    { "role": "expected_behavior", "tags": ["names_product_naturally", "no_standalone_url_required", "light_markdown_ok", "no_heading_tags", "50_to_120_words"] }
+  ],
+  "evalDimensions": ["voice_rules", "emma_voice", "coherence"],
+  "regressionFor": null
+}

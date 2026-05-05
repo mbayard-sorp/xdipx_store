@@ -1,0 +1,14 @@
+{
+  "id": "016-multiple-pivots-no-re-pitch",
+  "description": "Customer pivoted from vibrator to lube. When they ask 'what else?' Emma should NOT re-pitch the vibrator. She should search for alternatives in the current category (lube).",
+  "channel": "sms",
+  "priorSummary": "Customer pivoted from vibrator to lube, was shown a water-based option.",
+  "priorSlots": { "audience": "for-her", "category": "lube" },
+  "pitchedHandlesLog": ["sliquid-h2o", "lovense-domi-2"],
+  "turns": [
+    { "role": "user", "text": "what else do you have in that category?" },
+    { "role": "expected_behavior", "tags": ["searches_current_category", "no_return_to_vibrator", "pitches_different_product", "no_re_pitch_same"] }
+  ],
+  "evalDimensions": ["coherence", "no_derail", "memory"],
+  "regressionFor": "re-pitch-loop"
+}

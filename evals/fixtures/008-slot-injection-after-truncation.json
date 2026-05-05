@@ -1,0 +1,14 @@
+{
+  "id": "008-slot-injection-after-truncation",
+  "description": "GATING FIXTURE (architect condition #3): slots were disclosed on turn 2 but the history has been truncated (priorSummary captures them). Emma must still know the audience, budget, and matters even without seeing the original disclosure in the message thread.",
+  "channel": "sms",
+  "priorSummary": "Customer is shopping for a beginner-friendly vibrator for a female partner, budget $75, prefers quiet and waterproof.",
+  "priorSlots": { "audience": "for-her", "experience": "first-time", "matters": ["quiet", "waterproof"], "priceMax": 75 },
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "ok show me your best pick then" },
+    { "role": "expected_behavior", "tags": ["uses_injected_slots", "searches_with_correct_filters", "beginner_friendly_pick", "under_budget", "quiet_waterproof_relevant"] }
+  ],
+  "evalDimensions": ["memory", "coherence", "no_derail"],
+  "regressionFor": "slot-truncation-amnesia"
+}

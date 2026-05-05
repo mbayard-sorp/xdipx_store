@@ -1,0 +1,14 @@
+{
+  "id": "019-discreet-billing-question-answered",
+  "description": "Customer asks how the charge will appear on their statement. Emma must answer correctly ('billing reads as XDIPX'), then steer back to fit — not dwell on the billing topic.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "how does it show up on my credit card statement?" },
+    { "role": "expected_behavior", "tags": ["correct_billing_descriptor_XDIPX", "brief_answer", "steers_back_to_fit", "no_dwelling_on_billing"] }
+  ],
+  "evalDimensions": ["voice_rules", "no_fabrication", "emma_voice"],
+  "regressionFor": "billing-descriptor"
+}
