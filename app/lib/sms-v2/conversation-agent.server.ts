@@ -46,6 +46,8 @@ import {
 import { extractSlots, type DiscoverySlots } from './slot-extractor.server'
 import { resolveTransition } from './transitions.server'
 import { BRAND_VOICE } from '~/lib/ai-agent/prompt'
+import { generateConversationSummary } from './summary.server'
+import { applyStateWrites } from './conversation.server'
 import type { IvrProductCard } from '~/lib/ivr-search.server'
 import type {
   ConversationStateWrites,
@@ -68,7 +70,17 @@ export interface ConversationAgentInput {
 
 // ─── Module-scope client ─────────────────────────────────────────────────────
 
-const client = new Anthropic({ apiKey: (process.env['ANTHROPIC_API_KEY'] ?? '').trim() })
+let _client = new Anthropic({ apiKey: (process.env['ANTHROPIC_API_KEY'] ?? '').trim() })
+
+/**
+ * Swap out the Anthropic client in tests to prevent real API calls.
+ * Task 0.4 (gotcha #7 from feasibility doc): mirrors slot-extractor.server.ts:56-58.
+ * Required for the eval harness so fixtures can exercise the agent without
+ * burning real tokens.
+ */
+export function _setConversationAgentClient(c: Anthropic): void {
+  _client = c
+}
 
 // Sonnet 4.6 — same model SMS Sonnet uses elsewhere. Keep in sync.
 const SONNET_MODEL = 'claude-sonnet-4-6'
@@ -208,14 +220,131 @@ function stageAddendum(stage: ConversationStage, currentPitchHandle: string | nu
   return OBJECTION_ADDENDUM(currentPitchHandle)
 }
 
-function buildSystemPrompt(
+// ─── Known-about-customer block (Task 0.5 + 0.6) ────────────────────────────
+
+/**
+ * Serialize discovered slots to a compact key=value string for the
+ * <known_about_customer> block. Skips falsy values so the block never
+ * contains "audience=undefined" or "priceMax=null" noise.
+ *
+ * Cap at 8 slots to keep the block tight — the rolling summary carries
+ * additional context from older turns.
+ */
+function serializeSlots(slots: Partial<DiscoverySlots>): string {
+  const MAX_SLOTS = 8
+  const pairs: string[] = []
+  for (const [key, val] of Object.entries(slots)) {
+    if (!val && val !== 0) continue
+    if (Array.isArray(val)) {
+      if (val.length === 0) continue
+      pairs.push(`${key}=${val.join(',')}`)
+    } else {
+      pairs.push(`${key}=${String(val)}`)
+    }
+    if (pairs.length >= MAX_SLOTS) break
+  }
+  return pairs.join(' | ')
+}
+
+/**
+ * Build the dynamic <known_about_customer> XML block.
+ *
+ * This block is injected as the SECOND system-prompt block (no cache_control)
+ * so it is fresh every turn without invalidating the stable rules block.
+ *
+ * Returns empty string when all inputs are empty — the block is then omitted
+ * entirely from the system prompt to avoid injecting noise on turn 1.
+ *
+ * Architect condition #2 (binding): this block is subject to emma-empathy-
+ * reviewer gate before the branch merges. It must not:
+ *   - Disclose internal slot key names to the customer.
+ *   - Make assumptions beyond what the customer explicitly stated.
+ *   - Contain clinical language or em-dashes.
+ *   - Reference the full pitched-handles log verbatim — only show the oldest
+ *     2 handles as "prior options shown" for the "first one you showed me" case.
+ *
+ * @param slots - The merged discovered slots for this turn.
+ * @param summary - The rolling conversation summary (may be null on first turn).
+ * @param pitchedHandlesLog - Ordered log of previously pitched handles (most-recent last).
+ */
+export function buildKnownAboutCustomer(
+  slots: Partial<DiscoverySlots>,
+  summary: string | null,
+  pitchedHandlesLog: string[] | null,
+): string {
+  const summaryLine = summary?.trim() || null
+  const slotLine = serializeSlots(slots)
+
+  // Build the "prior options shown" line — capped to the 2 oldest so
+  // "the first one you showed me" resolves without bloating context.
+  let priorOptionsLine: string | null = null
+  if (pitchedHandlesLog && pitchedHandlesLog.length > 1) {
+    // log is most-recent last, so oldest = [0], second-oldest = [1]
+    const oldest = pitchedHandlesLog.slice(0, 2)
+    priorOptionsLine = `Prior options shown (if customer refers back): ${oldest.join(', ')}`
+  }
+
+  // If nothing to inject, return empty — block will be omitted.
+  if (!summaryLine && !slotLine && !priorOptionsLine) return ''
+
+  const lines: string[] = ['<known_about_customer>']
+  if (summaryLine) lines.push(`Summary: ${summaryLine}`)
+  if (slotLine) lines.push(`Known: ${slotLine}`)
+  if (priorOptionsLine) lines.push(priorOptionsLine)
+  lines.push('</known_about_customer>')
+  lines.push(
+    'Note: Emma sees the full conversation history. Use this block for context that may have scrolled',
+    'out of the history window. If history and this block conflict, history takes precedence.',
+  )
+
+  return lines.join('\n')
+}
+
+/**
+ * Build the stable (cacheable) part of the system prompt.
+ *
+ * Task 0.5: split into two TextBlockParams:
+ *   Block 1 — stable rules (BRAND_VOICE + CONVERSATION_RULES_CORE + stage addendum
+ *              + channel rules). Gets cache_control so Anthropic caches it across
+ *              turns within the same stage+channel+pitch-handle combination.
+ *   Block 2 — dynamic <known_about_customer> block (no cache_control). Changes
+ *              every turn as slots and summary update.
+ *
+ * This preserves prompt-cache hits on the expensive rules block while still
+ * injecting fresh per-turn memory context.
+ */
+function buildSystemBlocks(
   stage: ConversationStage,
   channel: 'sms' | 'voice' | 'web',
   currentPitchHandle: string | null,
-): string {
+  discoveredSlots: Partial<DiscoverySlots>,
+  conversationSummary: string | null,
+  pitchedHandlesLog: string[] | null,
+): Anthropic.TextBlockParam[] {
   const tuning = tuningFor(channel)
-  return `${BRAND_VOICE}\n\n${CONVERSATION_RULES_CORE}\n\n${stageAddendum(stage, currentPitchHandle)}\n\n${tuning.rules}`
+  const stableText = `${BRAND_VOICE}\n\n${CONVERSATION_RULES_CORE}\n\n${stageAddendum(stage, currentPitchHandle)}\n\n${tuning.rules}`
+
+  const stableBlock: Anthropic.TextBlockParam = {
+    type: 'text',
+    text: stableText,
+    // Cached per stage+channel+currentPitchHandle. Invalidates when any of
+    // those change — exactly when we want a fresh cache write.
+    cache_control: { type: 'ephemeral' },
+  }
+
+  const knownBlock = buildKnownAboutCustomer(discoveredSlots, conversationSummary, pitchedHandlesLog)
+  if (!knownBlock) {
+    // First turn or no context yet — single-block system prompt.
+    return [stableBlock]
+  }
+
+  return [
+    stableBlock,
+    // Dynamic block: no cache_control — changes every turn.
+    { type: 'text', text: knownBlock },
+  ]
 }
+
 
 // ─── Fabrication guard ───────────────────────────────────────────────────────
 
@@ -275,18 +404,36 @@ function applyFabricationGuard(text: string, realHandles: Set<string>): Fabricat
 
 /**
  * Pick at most ONE pitched product from this turn's accumulated cards.
- * Same logic the discovery agent used: PDP URL mention wins, title mention is
- * the fallback. Used to decide whether the customer should advance to
- * PRESENTATION (or stay there) and what currentPitchHandle to write.
+ *
+ * Task 0.7: when `preferredHandle` is set (captured from tool results during
+ * the Sonnet loop), use it as ground truth — no prose scanning needed. This
+ * fixes re-pitch loops caused by paraphrased product names escaping the regex.
+ *
+ * The regex fallback runs only when preferredHandle is null, which means:
+ *   - No getProductDetails call happened this turn, AND
+ *   - No single-card searchProducts result was returned.
+ * In that case the agent pitched a product that came through prose alone
+ * (edge case — the old behavior is the right fallback here).
  */
 function detectPitchedCard(
   text: string,
   cards: IvrProductCard[],
+  preferredHandle: string | null = null,
 ): IvrProductCard | undefined {
-  if (!text || cards.length === 0) return undefined
+  if (cards.length === 0) return undefined
+
+  // Task 0.7: tool-result truth — prefer the handle captured during the loop.
+  if (preferredHandle) {
+    const preferred = cards.find(
+      (c) => c.handle?.toLowerCase() === preferredHandle.toLowerCase(),
+    )
+    if (preferred) return preferred
+  }
+
+  if (!text) return undefined
   const lower = text.toLowerCase()
 
-  // First pass: direct PDP URL mention.
+  // Regex fallback: PDP URL mention wins over title mention.
   for (const card of cards) {
     if (!card.handle) continue
     const needle = `/products/${card.handle.toLowerCase()}`
@@ -387,16 +534,22 @@ export async function executeConversationAgent(
     { role: 'user' as const, content: customerText },
   ]
 
-  // ── System + tools ────────────────────────────────────────────────────────
+  // ── System + tools (Task 0.5: two-block system prompt) ───────────────────
   const tuning = tuningFor(channel)
   const currentPitchHandle = ctx.conversation.currentPitchHandle ?? null
-  const systemText = buildSystemPrompt(stage, channel, currentPitchHandle)
-  // Cache the system block — stable per stage+channel+currentPitchHandle within
-  // a 5-min window. It will rebuild when stage flips or the pitched handle
-  // changes (which is exactly when we'd want a fresh cache anyway).
-  const systemParam: Anthropic.TextBlockParam[] = [
-    { type: 'text', text: systemText, cache_control: { type: 'ephemeral' } },
-  ]
+  const conversationSummary = ctx.conversation.conversationSummary ?? null
+  const pitchedHandlesLog = ctx.conversation.pitchedHandlesLog ?? null
+
+  // Two-block system: stable rules block (cached) + dynamic <known_about_customer>
+  // block (uncached). See buildSystemBlocks for the full architecture rationale.
+  const systemParam: Anthropic.TextBlockParam[] = buildSystemBlocks(
+    stage,
+    channel,
+    currentPitchHandle,
+    priorSlots,
+    conversationSummary,
+    pitchedHandlesLog,
+  )
 
   // ── Card accumulator + telemetry ──────────────────────────────────────────
   const cardsByToolUseId = new Map<string, IvrProductCard[]>()
@@ -423,12 +576,19 @@ export async function executeConversationAgent(
     cardSink: cardsByToolUseId,
   }
 
-  // ── Sonnet loop ───────────────────────────────────────────────────────────
+  // ── Sonnet loop (Task 0.7: tool-result pitch detection; Task 0.9: budget flag) ──
   let finalText = ''
+  // Task 0.7: capture the pitched handle from tool results rather than prose regex.
+  // Set when getProductDetails is called on a specific handle, or when searchProducts
+  // returns exactly one card (unambiguous pitch from tool truth).
+  let toolResultPitchedHandle: string | null = null
+  // Task 0.9: set true when the loop exhausts MAX_TOOL_HOPS with a pending
+  // tool_use stop_reason, causing safeFallback to run. Written to telemetry.
+  let toolBudgetExhausted = false
 
   try {
     for (let hop = 0; hop < MAX_TOOL_HOPS; hop++) {
-      const res = await client.messages.create({
+      const res = await _client.messages.create({
         model: SONNET_MODEL,
         max_tokens: tuning.maxTokens,
         system: systemParam,
@@ -444,6 +604,17 @@ export async function executeConversationAgent(
         for (const block of res.content) {
           if (block.type !== 'tool_use') continue
           const toolInput = (block.input ?? {}) as Record<string, unknown>
+
+          // Task 0.7: capture handle directly from getProductDetails tool input.
+          // This is ground truth — the tool was called on this specific handle.
+          if (
+            block.name === 'getProductDetails' &&
+            typeof toolInput['handle'] === 'string' &&
+            toolInput['handle']
+          ) {
+            toolResultPitchedHandle = toolInput['handle']
+          }
+
           const result = await runDiscoveryTool(block.name, toolInput, {
             ...toolCtxBase,
             toolUseId: block.id,
@@ -453,6 +624,18 @@ export async function executeConversationAgent(
           const cards = cardsByToolUseId.get(block.id) ?? []
           for (const c of cards) {
             if (c.handle) realHandles.add(c.handle.toLowerCase())
+          }
+
+          // Task 0.7: if searchProducts returned exactly one card, that IS the
+          // pitched product — no ambiguity. Only applicable when getProductDetails
+          // wasn't called this turn (getProductDetails takes precedence).
+          if (
+            block.name === 'searchProducts' &&
+            cards.length === 1 &&
+            cards[0]?.handle &&
+            !toolResultPitchedHandle
+          ) {
+            toolResultPitchedHandle = cards[0].handle
           }
 
           toolCalls.push({
@@ -470,6 +653,16 @@ export async function executeConversationAgent(
           })
         }
 
+        // Task 0.9: detect budget exhaustion on the last hop.
+        // When hop === MAX_TOOL_HOPS - 1 and stop_reason is still 'tool_use',
+        // the loop will exit after this iteration without setting finalText.
+        if (hop === MAX_TOOL_HOPS - 1) {
+          toolBudgetExhausted = true
+          console.warn(
+            `[conversation-agent] tool budget exhausted at hop=${hop + 1} — safeFallback will run`,
+          )
+        }
+
         messages.push({ role: 'user', content: toolResultBlocks })
         continue
       }
@@ -483,23 +676,25 @@ export async function executeConversationAgent(
     }
   } catch (err) {
     console.error('[conversation-agent] Sonnet call failed', err)
-    return safeFallback(stage, baseTelemetry)
+    return safeFallback(stage, baseTelemetry, toolBudgetExhausted)
   }
 
   if (!finalText) {
-    return safeFallback(stage, baseTelemetry)
+    // Task 0.9: when finalText is empty the loop exited via budget exhaustion.
+    toolBudgetExhausted = true
+    return safeFallback(stage, baseTelemetry, toolBudgetExhausted)
   }
 
   // ── Fabrication guard ─────────────────────────────────────────────────────
   const guarded = applyFabricationGuard(finalText, realHandles)
   const finalProse = guarded.text || finalText // never ship empty
 
-  // ── Detect pitched product ────────────────────────────────────────────────
+  // ── Detect pitched product (Task 0.7: tool-result truth first) ──────────
   const allCards: IvrProductCard[] = []
   for (const list of cardsByToolUseId.values()) {
     allCards.push(...list)
   }
-  const pitched = detectPitchedCard(finalProse, allCards)
+  const pitched = detectPitchedCard(finalProse, allCards, toolResultPitchedHandle)
 
   // ── Resolve parallel slot extraction ──────────────────────────────────────
   const slotsResult = await slotsPromise
@@ -534,10 +729,24 @@ export async function executeConversationAgent(
     ? pitched.handle
     : undefined
 
+  // Task 0.6: build the updated pitched_handles_log.
+  // Append the new handle (most-recent last), cap at 10 entries.
+  // The log is how "the first one you showed me" resolves: log[0] is the oldest.
+  const updatedPitchedHandlesLog: string[] | undefined = newPitchHandle
+    ? (() => {
+        const prev = ctx.conversation.pitchedHandlesLog ?? []
+        const next = [...prev, newPitchHandle]
+        // Keep the most-recent 10 (slice from the end).
+        return next.length > 10 ? next.slice(next.length - 10) : next
+      })()
+    : undefined
+
   const stateWrites: ConversationStateWrites = {
     stage: stageOut,
     discoveredSlots: mergedSlots as Record<string, unknown>,
     ...(newPitchHandle !== undefined && { currentPitchHandle: newPitchHandle }),
+    // Task 0.6: write updated pitched handles log when a new pitch occurred.
+    ...(updatedPitchedHandlesLog !== undefined && { pitchedHandlesLog: updatedPitchedHandlesLog }),
   }
 
   const productCard: ProductRef | undefined = pitched
@@ -560,7 +769,25 @@ export async function executeConversationAgent(
     outputTokens: totalOutputTokens,
     ...(toolCalls.length > 0 && { toolCalls }),
     ...(guarded.caught && { fabricationCaught: guarded.caught }),
+    // Task 0.9: only set when budget was truly exhausted (false would be noise
+    // in the telemetry column — omit it for normal turns).
+    ...(toolBudgetExhausted && { toolBudgetExhausted: true }),
   }
+
+  // Task 0.4: fire-and-forget summary update.
+  // This MUST fire AFTER the reply is assembled and MUST NOT be awaited before
+  // returning. The summary is ready for the NEXT turn, not this one.
+  //
+  // Non-blocking: do not await before returning reply to Twilio.
+  void generateConversationSummary(history, conversationSummary)
+    .then((summary) => {
+      if (summary) {
+        return applyStateWrites(ctx.conversation.phone, { conversationSummary: summary })
+      }
+    })
+    .catch((err) => {
+      console.warn('[conversation-agent] summary update failed (non-fatal)', err)
+    })
 
   return {
     stageOut,
@@ -576,10 +803,14 @@ export async function executeConversationAgent(
 /**
  * Returned when the Anthropic call throws or yields no text. Stays on the
  * input stage so the next turn can re-attempt without loss of state.
+ *
+ * Task 0.9: accepts toolBudgetExhausted flag so it appears in telemetry even
+ * when the loop exits via budget exhaustion (not just via exception).
  */
 function safeFallback(
   stage: ConversationStage,
   baseTelemetry: StageResponse['telemetry'],
+  toolBudgetExhaustedFlag = false,
 ): StageResponse {
   return {
     stageOut: stage,
@@ -597,6 +828,9 @@ function safeFallback(
       ...baseTelemetry,
       inputTokens: 0,
       outputTokens: 0,
+      // Task 0.9: record budget exhaustion in telemetry so the dashboard can
+      // aggregate "turns where tool budget ran out" by week/channel.
+      ...(toolBudgetExhaustedFlag && { toolBudgetExhausted: true }),
     },
   }
 }
