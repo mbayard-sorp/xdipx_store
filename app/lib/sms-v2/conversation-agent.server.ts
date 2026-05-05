@@ -143,7 +143,7 @@ const DISCOVERY_ADDENDUM = `STAGE: DISCOVERY.
 - After 4 inbound customer turns without calling searchProducts, you MUST call searchProducts with whatever signal you have. Don't loop on the same question — a guessed pitch beats an interrogation.
 - First-time-contact rule: warmth + safe-space framing in 2 sentences max, then ONE narrowing question. No menus, no checklists, no "pick from these five things."
 - Returning-customer rule: if lookupReturningCustomer returned a firstName, acknowledge by first name once at the top of your reply. Don't re-introduce yourself, don't say "welcome back" twice.
-- If the customer asks "is this discreet?" / "how is it billed?" / shipping basics, answer briefly and steer back to fit ("billing reads as XDIPX, packaging is plain. Now, was it more for solo or partner moments?").
+- If the customer asks "is this discreet?" / "how is it billed?" / shipping basics, answer briefly and steer back to fit ("billing reads as XDIPX, packaging is plain. Now, is it more for solo or with a partner?").
 - The discovery stage NEVER builds a checkout. The only links are PDP URLs from a searchProducts result THIS turn.`
 
 const PRESENTATION_ADDENDUM = (currentPitchHandle: string | null) =>
