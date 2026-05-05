@@ -137,6 +137,7 @@ const NAV_ITEMS = [
   { to: '/admin/deals',              label: 'Deals',            Icon: StarIcon       },
   { to: '/admin/checkout-upsells',  label: 'Checkout Upsells', Icon: CartUpsellIcon },
   { to: '/admin/bulk-import',       label: 'Bulk Import',      Icon: UploadIcon     },
+  { to: '/admin/merge-variants',   label: 'Merge Variants',   Icon: VaultIcon      },
   { to: '/admin/collections-mgr', label: 'Collections Mgr.',  Icon: VaultIcon     },
   { to: '/admin/reviews',        label: 'Reviews',      Icon: ReviewsIcon,  badgeKey: 'reviews' },
   { to: '/admin/voice-and-sms',  label: 'Voice & SMS',  Icon: IvrIcon       },
