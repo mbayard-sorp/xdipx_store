@@ -113,7 +113,13 @@ function tuningFor(channel: AgentContext['channel'], systemPromptBase: string): 
     maxToolHops: 5,
     maxTokens: 700,
     wrapupMaxTokens: 400,
-    cachedSystem: false,
+    // Cache BRAND_VOICE + CHAT_MODE on the first system block — same pattern
+    // SMS uses. The dynamic gate context block (buildGateContextBlock) is
+    // appended as a separate uncached block, so caching the static system
+    // prompt is safe across turns. Without this, every web turn paid full
+    // input cost for ~5k tokens of system prompt — and with maxToolHops=5,
+    // a single tool-heavy turn could blow past the 20k session token cap.
+    cachedSystem: true,
   }
 }
 
