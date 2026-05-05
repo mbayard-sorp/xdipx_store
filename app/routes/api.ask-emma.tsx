@@ -12,6 +12,7 @@ import {
 } from '~/lib/emma-budget.server'
 import { pickWebPipelineVersion } from '~/lib/sms-v2/web-pipeline-flag.server'
 import { processWebMessageV2 } from '~/lib/sms-v2/adapters/web.server'
+import { kvGet, kvSet } from '~/lib/kv.server'
 
 const ALLOWED_ORIGINS = new Set([
   'https://xdipx.com',
@@ -147,6 +148,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // for the web pipeline flag allowlist. All pre-flights above run regardless
   // of which version is picked.
   const emmaSessionCookieId = sessionHandle?.cookieId ?? `anon-${Date.now()}`
+
+  // Fix 4: server-side double-submit dedup (defense-in-depth behind the client guard).
+  // Key: sessionId + message + 1500ms bucket. TTL: 2s. If the key already exists,
+  // the request is a duplicate — return a 202 stub so the client stays calm.
+  // Failure is fail-open (KV down, bucket key unset) — we never block a real request.
+  try {
+    const bucket = Math.floor(Date.now() / 1500)
+    const dedupeKey = `emma:dedup:${emmaSessionCookieId}:${bucket}:${message.slice(0, 80)}`
+    const existing = await kvGet<1>(dedupeKey)
+    if (existing) {
+      // Duplicate in-flight — return empty 202 so the client's pending state
+      // resolves cleanly without a second agent turn firing.
+      const headers = new Headers()
+      if (sessionHandle?.setCookieHeader) headers.append('Set-Cookie', sessionHandle.setCookieHeader)
+      return Response.json({ reply: null, products: [], history: [] }, { status: 202, headers })
+    }
+    await kvSet(dedupeKey, 1, 2) // 2-second TTL
+  } catch {
+    // KV unavailable — fail open, let the request proceed.
+  }
   const webPipelineVersion = pickWebPipelineVersion(emmaSessionCookieId)
 
   // --- v2 path ---

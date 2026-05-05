@@ -69,6 +69,9 @@ export function AskEmmaWidget() {
   const submittedAtRef = useRef<number>(0)
   const revealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Fix 4: client-side double-click guard. Tracks the last submitted message
+  // and its timestamp so identical messages within 1500ms are silently dropped.
+  const lastSubmittedRef = useRef<{ msg: string; at: number } | null>(null)
 
   // Typing pill shows during network request OR while we're artificially holding
   // before committing, so Emma never "teleports" her reply in.
@@ -304,6 +307,12 @@ export function AskEmmaWidget() {
   const sendMessage = (rawMsg: string, opts: { hidden?: boolean } = {}) => {
     const msg = rawMsg.trim()
     if (!msg || isSending || isRevealing) return
+    // Fix 4: client-side double-click guard. Drop identical messages submitted
+    // within 1500ms of each other to prevent duplicate turns from fast taps.
+    const now = Date.now()
+    const last = lastSubmittedRef.current
+    if (last && last.msg === msg && now - last.at < 1500) return
+    lastSubmittedRef.current = { msg, at: now }
     // Any prior quickReply pills are now stale — mark the latest assistant turn
     // with one as answered so the pills disappear.
     const markedTurns = markLatestQuickReplyAnswered(turns)
