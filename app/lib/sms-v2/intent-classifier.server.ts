@@ -102,7 +102,11 @@ const REGEX_BANK: RegexEntry[] = [
 
   // ─── Phrase-based COMMIT_PICK (works in all stages, customer signals buy intent) ───
   {
-    re: /\b(i'?ll\s+take\s+it|let'?s\s+do\s+it|add\s+to\s+cart|buy\s+it|buy\s+now|place\s+order|order\s+now|check\s+out|get\s+it|send\s+it|i\s+want\s+it|i\s+want\s+that|i'?ll\s+get\s+it|i'?m\s+in)\b/i,
+    // ADR-003 Sub-decision D: negative lookahead on `i want it` so "I want it to
+    // help me relax" (use-case disclosure) does NOT fire COMMIT_PICK.
+    // "I want it to..." → NAME_ITEM/DISCOVERY via Haiku fallback.
+    // "I want it now", "I want it ♥", "I want it shipped" → still match (no \s+to\b after).
+    re: /\b(i'?ll\s+take\s+it|let'?s\s+do\s+it|add\s+to\s+cart|buy\s+it|buy\s+now|place\s+order|order\s+now|check\s+out|get\s+it|send\s+it|i\s+want\s+it(?!\s+to\b)|i\s+want\s+that|i'?ll\s+get\s+it|i'?m\s+in)\b/i,
     intent: 'COMMIT_PICK',
   },
   // Short buy signals (any stage)

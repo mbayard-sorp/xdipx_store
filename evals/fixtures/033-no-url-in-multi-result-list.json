@@ -1,0 +1,25 @@
+{
+  "id": "033-no-url-in-multi-result-list",
+  "description": "ADR-003 Sub-decision A regression guard. When the gate-machine DISCOVERY branch fires buildMultiResultProse, the numbered list MUST include /products/<handle> PDP URLs for each item so web widget renders tappable links. A bare 'Title ($price)' list without links is the failure mode this guards against.",
+  "channel": "web",
+  "priorSummary": null,
+  "priorSlots": { "category": "vibrator", "audience": "for-her" },
+  "pitchedHandlesLog": [],
+  "turns": [
+    {
+      "role": "user",
+      "text": "show me a few options for a quiet vibrator"
+    },
+    {
+      "role": "expected_behavior",
+      "tags": [
+        "includes_pdp_urls",
+        "numbered_list_has_links",
+        "links_format_slash_products_handle",
+        "no_bare_title_only_list"
+      ]
+    }
+  ],
+  "evalDimensions": ["no_fabrication", "voice_rules", "coherence"],
+  "regressionFor": "ADR-003-sub-decision-A"
+}

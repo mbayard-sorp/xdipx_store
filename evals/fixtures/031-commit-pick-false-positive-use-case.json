@@ -1,0 +1,27 @@
+{
+  "id": "031-commit-pick-false-positive-use-case",
+  "description": "ADR-003 Sub-decision D regression guard. The message 'I want it to help me relax and give me an orgasm when I'm stressed' contains the substring 'I want it' but is NOT a commit signal — it is a use-case disclosure. The regex bank's COMMIT_PICK phrase pattern must NOT match when 'it' is followed by 'to'. Expected: Haiku classifier routes this to NAME_ITEM (or DISCOVERY fallback), never COMMIT_PICK. Emma should acknowledge the use-case and ask a narrowing question, not route to checkout.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    {
+      "role": "user",
+      "text": "I want it to help me relax and give me an orgasm when I'm stressed"
+    },
+    {
+      "role": "expected_behavior",
+      "tags": [
+        "not_commit_pick",
+        "acknowledges_use_case",
+        "asks_one_narrowing_question",
+        "no_checkout_url",
+        "no_cart_created",
+        "stays_in_discovery"
+      ]
+    }
+  ],
+  "evalDimensions": ["coherence", "no_derail", "emma_voice", "no_fabrication"],
+  "regressionFor": "ADR-003-sub-decision-D"
+}
