@@ -46,8 +46,9 @@ import {
 import { extractSlots, type DiscoverySlots } from './slot-extractor.server'
 import { resolveTransition } from './transitions.server'
 import { BRAND_VOICE } from '~/lib/ai-agent/prompt'
-import { generateConversationSummary } from './summary.server'
-import { applyStateWrites } from './conversation.server'
+// generateConversationSummary and applyStateWrites are no longer called from
+// this file — ADR-003 Sub-decision B moved the summarizer to the processor layer
+// so it fires on ALL dispatch paths, not just executeConversationAgent.
 import type { IvrProductCard } from '~/lib/ivr-search.server'
 import type {
   ConversationStateWrites,
@@ -803,20 +804,11 @@ export async function executeConversationAgent(
     ...(toolBudgetExhausted && { toolBudgetExhausted: true }),
   }
 
-  // Task 0.4: fire-and-forget summary update.
-  // This MUST fire AFTER the reply is assembled and MUST NOT be awaited before
-  // returning. The summary is ready for the NEXT turn, not this one.
-  //
-  // Non-blocking: do not await before returning reply to Twilio.
-  void generateConversationSummary(history, conversationSummary)
-    .then((summary) => {
-      if (summary) {
-        return applyStateWrites(ctx.conversation.phone, { conversationSummary: summary })
-      }
-    })
-    .catch((err) => {
-      console.warn('[conversation-agent] summary update failed (non-fatal)', err)
-    })
+  // ADR-003 Sub-decision B: summarizer is now fired from the PROCESSOR layer
+  // (processSmsMessageV2 / processWebMessageV2) so ALL stage handlers trigger it,
+  // not just the executeConversationAgent path. The processor fires it after
+  // applyStateWrites returns — per architect condition #3.
+  // Do not re-fire here; the processor is the single authoritative location.
 
   return {
     stageOut,

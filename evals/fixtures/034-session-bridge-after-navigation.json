@@ -1,0 +1,26 @@
+{
+  "id": "034-session-bridge-after-navigation",
+  "description": "ADR-003 Sub-decision E regression guard. After a customer navigates from one page to another and returns to chat, Emma should retain prior conversation context — the conversation summary should be populated and Emma should reference prior context rather than restarting from scratch. This guards against the 'blank conversation after navigation' failure where a new web_conversations row was being created on each page change.",
+  "channel": "web",
+  "priorSummary": "Customer was shopping for a quiet vibrator for their partner, mentioned $80 budget.",
+  "priorSlots": { "category": "vibrator", "priceMax": 80 },
+  "pitchedHandlesLog": ["we-vibe-tango-x"],
+  "turns": [
+    {
+      "role": "user",
+      "text": "hey I'm back — what was that vibrator you mentioned?"
+    },
+    {
+      "role": "expected_behavior",
+      "tags": [
+        "uses_prior_context",
+        "references_prior_pitch_or_budget",
+        "no_restart_question",
+        "no_generic_what_brings_you_in",
+        "conversation_summary_populated"
+      ]
+    }
+  ],
+  "evalDimensions": ["memory", "coherence", "no_derail", "emma_voice"],
+  "regressionFor": "ADR-003-sub-decision-E"
+}

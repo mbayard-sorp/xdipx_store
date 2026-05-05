@@ -26,6 +26,8 @@ import { withTurnLogging, withTurnLoggingForStageResponse } from './turn-logger.
 import { subscribeToSms } from './klaviyo.server'
 import { pickEffectiveStage, dispatchStage } from './stage-dispatch.server'
 import { buildEmmaContextWithCrossChannel } from './cross-channel.server'
+import { loadConversationHistory } from './conversation-history.server'
+import { generateConversationSummary } from './summary.server'
 import { db } from '~/lib/db.server'
 import { smsAgeConsent } from '../../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -84,6 +86,19 @@ export async function processSmsMessageV2(
   let result: Awaited<ReturnType<typeof processSmsMessage>>
 
   const ctx = await buildEmmaContextWithCrossChannel(conversation, 'sms')
+
+  // ADR-003 Sub-decision B: load history BEFORE dispatch so the summarizer
+  // has it regardless of which stage handler runs (agent path or gate-machine).
+  // The conversation agent also loads history internally for the Sonnet call;
+  // this second load is acceptable at current volume and keeps the dispatcher
+  // self-contained. See coupling analysis in ADR-003.
+  let historyForSummarizer: Awaited<ReturnType<typeof loadConversationHistory>> = []
+  try {
+    historyForSummarizer = await loadConversationHistory(conversation.conversationId, 12)
+  } catch (err) {
+    console.warn('[processor-v2] failed to load history for summarizer (non-fatal)', err)
+  }
+
   const stageRespPromise = dispatchStage(effectiveStage, ctx, intentResult, input.body)
 
   if (stageRespPromise !== null) {
@@ -107,12 +122,49 @@ export async function processSmsMessageV2(
       ...(writes.discoveryState  !== undefined && { discoveryState:  writes.discoveryState }),
       ...(writes.discoveredSlots !== undefined && { discoveredSlots: writes.discoveredSlots }),
       // Migration 032: memory primitive writes.
-      // conversationSummary is written separately (fire-and-forget from the agent),
-      // but if the stage handler explicitly sets it, honor it here.
+      // conversationSummary is written by the fire-and-forget below (not the agent).
+      // If the stage handler explicitly sets it, honor it here too.
       ...(writes.conversationSummary !== undefined && { conversationSummary: writes.conversationSummary }),
-      // pitched_handles_log — built and written by conversation-agent.server.ts.
+      // pitched_handles_log — built by conversation-agent; also updated by the
+      // fire-and-forget block below when the agent path ran.
       ...(writes.pitchedHandlesLog   !== undefined && { pitchedHandlesLog:   writes.pitchedHandlesLog }),
     })
+
+    // ADR-003 Sub-decision B: fire-and-forget memory primitives AFTER applyStateWrites.
+    // Covers the gate-machine path (runSearchBranch, executeDiscoveryGate) which
+    // previously bypassed generateConversationSummary entirely (Phase 0 regression).
+    // Also covers the agent path — executeConversationAgent no longer fires the
+    // summarizer internally (deduplication: dispatcher is the single location).
+    //
+    // Non-blocking: do not await before returning reply to caller. Phase 0 condition #1.
+    void (async () => {
+      try {
+        // Append new pitch handle to the log when the handler pitched something
+        // via a path that didn't go through conversation-agent (which handles
+        // pitchedHandlesLog internally). Guard: skip if already written above.
+        const newPitchHandle = writes.currentPitchHandle
+        if (newPitchHandle && writes.pitchedHandlesLog === undefined) {
+          const prior = conversation.pitchedHandlesLog ?? []
+          const updated = [...prior, newPitchHandle].slice(-10)
+          await applyStateWrites(phone, { pitchedHandlesLog: updated }).catch((err) =>
+            console.warn('[processor-v2] pitchedHandlesLog update failed (non-fatal)', err)
+          )
+        }
+
+        // Haiku summarizer — uses the history snapshot loaded before dispatch.
+        const summary = await generateConversationSummary(
+          historyForSummarizer,
+          conversation.conversationSummary ?? null,
+        )
+        if (summary) {
+          await applyStateWrites(phone, { conversationSummary: summary }).catch((err) =>
+            console.warn('[processor-v2] conversationSummary update failed (non-fatal)', err)
+          )
+        }
+      } catch (err) {
+        console.warn('[processor-v2] memory primitive update failed (non-fatal)', err)
+      }
+    })()
 
     result = await withTurnLoggingForStageResponse(input, stageResp, 'v2', {
       intent: intentResult.intent,
