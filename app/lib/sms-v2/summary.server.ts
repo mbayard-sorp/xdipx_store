@@ -74,6 +74,7 @@ const SUMMARY_SYSTEM_PROMPT = `You summarize a sexual-wellness shopping conversa
 RULES:
 - Write 1-2 sentences only. Maximum 200 characters total.
 - Only include facts the customer explicitly stated. Do not infer or elaborate.
+- Do not describe emotional states, hesitations, or psychological characterizations for the customer or anyone they mention. State only concrete facts: what they want, budget constraints, product type, who it is for.
 - If a product was pitched, name it by its handle (e.g. "lovense-domi-2"), not by marketing copy.
 - Write in third person about the customer ("Customer is shopping for...").
 - No em-dashes. Use commas, periods, or hyphens in compound words.
