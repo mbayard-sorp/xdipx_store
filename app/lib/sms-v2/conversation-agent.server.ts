@@ -223,9 +223,34 @@ function stageAddendum(stage: ConversationStage, currentPitchHandle: string | nu
 // ─── Known-about-customer block (Task 0.5 + 0.6) ────────────────────────────
 
 /**
+ * Slot keys that carry identity or experience-level framing and must NOT be
+ * emitted verbatim into Emma's <known_about_customer> block.
+ *
+ * Rationale (empathy review binding conditions #2, principles 9 + 15):
+ *   - `audience` — demographic/gender label ("for-her", "for-him"). If Emma
+ *     sees this she may narrate it back, violating principle 9 (use-case
+ *     before identity). The rolling summary, written from the customer's own
+ *     phrasing, is the correct channel for this context.
+ *   - `experience` — experience-level flag ("first-time"). If Emma sees this
+ *     she may narrate it back, violating principle 15 (never assume the
+ *     reader's experience level). The summary carries this in the customer's
+ *     own words if they stated it.
+ *
+ * These keys are still extracted and merged into discoveredSlots for internal
+ * analytics and slot-accumulation — they are only excluded from the text
+ * block that Emma reads.
+ */
+const IDENTITY_ADJACENT_SLOT_KEYS: ReadonlySet<string> = new Set(['audience', 'experience'])
+
+/**
  * Serialize discovered slots to a compact key=value string for the
  * <known_about_customer> block. Skips falsy values so the block never
  * contains "audience=undefined" or "priceMax=null" noise.
+ *
+ * Identity-adjacent keys (see IDENTITY_ADJACENT_SLOT_KEYS) are excluded so
+ * Emma never sees demographic or experience-level labels verbatim in her
+ * context block. The rolling summary carries that context in customer-stated
+ * language instead.
  *
  * Cap at 8 slots to keep the block tight — the rolling summary carries
  * additional context from older turns.
@@ -234,6 +259,7 @@ function serializeSlots(slots: Partial<DiscoverySlots>): string {
   const MAX_SLOTS = 8
   const pairs: string[] = []
   for (const [key, val] of Object.entries(slots)) {
+    if (IDENTITY_ADJACENT_SLOT_KEYS.has(key)) continue
     if (!val && val !== 0) continue
     if (Array.isArray(val)) {
       if (val.length === 0) continue
