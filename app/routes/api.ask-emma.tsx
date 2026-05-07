@@ -12,6 +12,7 @@ import {
 } from '~/lib/emma-budget.server'
 import { pickWebPipelineVersion } from '~/lib/sms-v2/web-pipeline-flag.server'
 import { processWebMessageV2 } from '~/lib/sms-v2/adapters/web.server'
+import { kvGet, kvSet } from '~/lib/kv.server'
 
 const ALLOWED_ORIGINS = new Set([
   'https://xdipx.com',
@@ -84,7 +85,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({ error: 'invalid_json' }, { status: 400 })
   }
 
-  const body = (payload ?? {}) as { message?: unknown; history?: unknown; hidden?: unknown; pageContext?: unknown }
+  const body = (payload ?? {}) as { message?: unknown; history?: unknown; hidden?: unknown; pageContext?: unknown; sessionId?: unknown }
   const message = typeof body.message === 'string' ? body.message.trim() : ''
   if (!message) return Response.json({ error: 'empty_message' }, { status: 400 })
   if (message.length > 1000) {
@@ -97,9 +98,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const nextHistory: ChatTurn[] = [...history, { role: 'user', text: message }]
 
   const startedAt = Date.now()
+
+  // ADR-003 Sub-decision E (Part 2, server): if the HttpOnly session cookie was
+  // lost during navigation in preview environments, the client sends back the
+  // cookieId it persisted in localStorage as `sessionId` in the request body.
+  // We inject it as a synthetic Cookie header so getOrCreateEmmaSession can find
+  // the existing row instead of minting a new session every request.
+  // Only used when the real cookie header is absent (defense-in-depth).
+  const existingCookieHeader = request.headers.get('Cookie')
+  const bodyCookieId = typeof body.sessionId === 'string' && body.sessionId.length > 0
+    ? body.sessionId.trim()
+    : null
+  const requestForSession = (bodyCookieId && !existingCookieHeader?.includes('xdipx_emma_sid'))
+    ? new Request(request.url, {
+        headers: new Headers({
+          ...Object.fromEntries(request.headers.entries()),
+          Cookie: `xdipx_emma_sid=${encodeURIComponent(bodyCookieId)}${existingCookieHeader ? `; ${existingCookieHeader}` : ''}`,
+        }),
+        method: request.method,
+      })
+    : request
+
   let sessionHandle: Awaited<ReturnType<typeof getOrCreateEmmaSession>> | null = null
   try {
-    sessionHandle = await getOrCreateEmmaSession(request)
+    sessionHandle = await getOrCreateEmmaSession(requestForSession)
   } catch (err) {
     // Logging is best-effort — don't block the reply if Neon is unreachable.
     console.error('[api.ask-emma] session init failed', err)
@@ -126,6 +148,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // for the web pipeline flag allowlist. All pre-flights above run regardless
   // of which version is picked.
   const emmaSessionCookieId = sessionHandle?.cookieId ?? `anon-${Date.now()}`
+
+  // Fix 4: server-side double-submit dedup (defense-in-depth behind the client guard).
+  // Key: sessionId + message + 1500ms bucket. TTL: 2s. If the key already exists,
+  // the request is a duplicate — return a 202 stub so the client stays calm.
+  // Failure is fail-open (KV down, bucket key unset) — we never block a real request.
+  try {
+    const bucket = Math.floor(Date.now() / 1500)
+    const dedupeKey = `emma:dedup:${emmaSessionCookieId}:${bucket}:${message.slice(0, 80)}`
+    const existing = await kvGet<1>(dedupeKey)
+    if (existing) {
+      // Duplicate in-flight — return empty 202 so the client's pending state
+      // resolves cleanly without a second agent turn firing.
+      const headers = new Headers()
+      if (sessionHandle?.setCookieHeader) headers.append('Set-Cookie', sessionHandle.setCookieHeader)
+      return Response.json({ reply: null, products: [], history: [] }, { status: 202, headers })
+    }
+    await kvSet(dedupeKey, 1, 2) // 2-second TTL
+  } catch {
+    // KV unavailable — fail open, let the request proceed.
+  }
   const webPipelineVersion = pickWebPipelineVersion(emmaSessionCookieId)
 
   // --- v2 path ---
@@ -153,8 +195,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // checkout URL is embedded in the reply prose. cartUpdated flag signals
       // the client to revalidate the cart loader.
 
+      // ADR-003 Sub-decision E: include cookieId in the response so the client
+      // can persist it to localStorage and send it back as a fallback on subsequent
+      // requests if the HttpOnly cookie is lost during navigation.
       const { usage: _usage, ...clientPayload } = result
-      return Response.json(clientPayload, { headers })
+      const v2Payload = sessionHandle?.cookieId
+        ? { ...clientPayload, sessionId: sessionHandle.cookieId }
+        : clientPayload
+      return Response.json(v2Payload, { headers })
     } catch (err) {
       console.error('[api.ask-emma] v2 generate failed — falling through to v1', err)
       // Fall through to v1 on error.
@@ -206,8 +254,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (sessionHandle?.setCookieHeader) headers.append('Set-Cookie', sessionHandle.setCookieHeader)
     if (newCartId) headers.append('Set-Cookie', setCartCookie(newCartId))
 
+    // ADR-003 Sub-decision E: include cookieId for session persistence defense.
     const { usage: _usage, ...clientPayload } = result
-    return Response.json(clientPayload, { headers })
+    const v1Payload = sessionHandle?.cookieId
+      ? { ...clientPayload, sessionId: sessionHandle.cookieId }
+      : clientPayload
+    return Response.json(v1Payload, { headers })
   } catch (err) {
     console.error('[api.ask-emma] generate failed', err)
     return Response.json(

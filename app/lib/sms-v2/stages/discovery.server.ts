@@ -1,236 +1,314 @@
 /**
  * app/lib/sms-v2/stages/discovery.server.ts
  *
- * Phase 5 — DISCOVERY stage handler.
+ * DISCOVERY stage handler — gate-state machine rewrite.
  *
- * Open-ended exploration, qualifying questions, vibe matching.
- * LLM picks among templated SPIN questions; it does NOT free-generate prose.
+ * Branch dispatch order (highest priority first):
+ *   Branch 0 — Vulnerability soft-beat: acknowledge, normalize, invite. No gate advance.
+ *   Branch 4 — Advice side-trip: suspend gate, serve category explainer.
+ *   Branch 2 — Ready to search: gate says searchNow OR question===null.
+ *   Branch 1 — Gate progression: serve the next gate question (MOOD / WHO / MATTERS).
  *
- * Two paths:
- *   Path A — typical turn: LLM picks a SPIN question id and writes a 1-sentence
- *             acknowledgment. Server renders the prose from the SPIN bank template.
- *   Path B — NAME_ITEM intent: customer explicitly named a product type.
- *             Run searchForIvr, set currentPitchHandle, transition to PRESENTATION.
+ * Branch 3 note: high-stakes category + audience unknown is handled implicitly by
+ * advanceGate() returning gate=WHO, which Branch 1 routes to a who-question.
+ * There is no explicit Branch 3 code block here.
+ *
+ * NAME_ITEM intent: no longer a special code path. The slot extractor extracts
+ * category/subtype from the named noun; advanceGate decides whether that is enough
+ * to search (Branch 2) or whether a gate question is needed first (Branch 1).
+ * This is identical behavior to the old Path B, plus audience/subtype filtering.
  */
-import Anthropic from '@anthropic-ai/sdk'
-import { z } from 'zod'
-import { buildEmmaSystemBlocks } from '~/lib/claude.server'
-import { searchForIvr } from '~/lib/ivr-search.server'
+
+import {
+  advanceGate,
+  mergeSlots,
+  suspendForExplain,
+  type DiscoveryState,
+  type DiscoverySlots,
+} from '../discovery-gate.server'
+import { extractSlots } from '../slot-extractor.server'
+import { pickMoodOpener, type MoodOpenerTrigger } from '../templates/mood-opener-bank'
+import { pickWho, WHO_BANK, type WhoTrigger } from '../templates/who-bank'
+import { pickMatters, type MattersTrigger } from '../templates/matters-bank'
+import { pickVulnerability, type VulnerabilityTrigger } from '../templates/vulnerability-bank'
+import { getExplainer, type ExplainerCategory } from '../templates/category-explainers'
+import { searchForIvrWithDiagnostics } from '~/lib/ivr-search.server'
 import { resolveTransition } from '../transitions.server'
-import { SPIN_BANK } from '../templates/discovery-spin-bank'
 import { executePresentationStage } from './presentation.server'
+import { generateDiscoveryWelcome } from '../discovery-welcome.server'
+import { pickDiscoveryAgentVersion } from '../discovery-agent-flag.server'
+import { executeDiscoveryAgent } from '../discovery-agent.server'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const MODEL = 'claude-sonnet-4-20250514'
-const MAX_TOKENS = 200
-
-// ─── Zod schema for structured LLM output ────────────────────────────────────
-
-const LlmPickSchema = z.object({
-  acknowledgment: z.string().min(1).max(300),
-  spinId: z.string().min(1),
-})
-
-type LlmPick = z.infer<typeof LlmPickSchema>
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Module-level client reference. Exposed as a mutable export so smoke tests
- * can swap it with a mock without going through the constructor.
+ * Infer vulnerability trigger from customer text.
+ * Called only when slots.vulnerabilitySignaled === true.
  */
-export let _anthropicClient: Anthropic = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
+function inferVulnerabilityTrigger(customerText: string): VulnerabilityTrigger {
+  const norm = customerText.toLowerCase()
 
-/** Replace the client (test seam only). Returns the old client for restore. */
-export function _setAnthropicClient(c: Anthropic): Anthropic {
-  const prev = _anthropicClient
-  _anthropicClient = c
-  return prev
-}
+  if (/embarrass(ed|ing)/.test(norm)) return 'embarrassed'
+  if (/never\s+(done|bought)|haven'?t\s+done\s+this/.test(norm)) return 'never-done-this'
+  if (/after\s+(surgery|my\s+surgery)|post[- ]?partum|post[- ]?surgery|having\s+a\s+baby/.test(norm))
+    return 'after-health-thing'
+  if (/haven'?t\s+been\s+with\s+anyone\s+in|haven'?t\s+had\s+sex\s+in|long[- ]?(?:pause|time\s+since)/.test(norm))
+    return 'long-pause'
+  if (/don'?t\s+know\s+what\s+i'?m\s+doing/.test(norm)) return 'dont-know-what-im-doing'
+  if (/body|fit\s+my\s+body/.test(norm)) return 'body-image'
+  if (/performance|doesn'?t\s+happen/.test(norm)) return 'performance-worry'
+  if (/partner\s+had|specific\s+need|mobility|disability/.test(norm)) return 'partner-specific-need'
 
-/** Pick a random question from a given dimension as a fallback. */
-function fallbackSpinQuestion(dimension: 'situation' | 'problem' = 'situation') {
-  const pool = SPIN_BANK.filter((q) => q.dimension === dimension)
-  // Safe cast: SPIN_BANK always has situation questions
-  return pool[Math.floor(Math.random() * pool.length)]!
-}
-
-/** Find a SPIN question by id. Returns undefined if not found. */
-function findSpinById(id: string) {
-  return SPIN_BANK.find((q) => q.id === id)
+  return 'never-done-this'
 }
 
 /**
- * Strip common LLM wrapping (markdown fences, "json" prefix) and parse JSON.
- * Returns the raw object or throws on parse failure.
+ * Infer mood-opener trigger from customer text and prior slots.
  */
-function parseJsonLenient(raw: string): unknown {
-  let s = raw.trim()
-  // Strip ```json ... ``` or ``` ... ``` fences
-  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
-  return JSON.parse(s)
+function inferMoodTrigger(customerText: string, _slots: Partial<DiscoverySlots>): MoodOpenerTrigger {
+  const norm = customerText.toLowerCase()
+
+  if (/first\s+time|new\s+to/.test(norm)) return 'first-time'
+  if (/\bgift\b|\bpresent\b/.test(norm)) return 'gift'
+  if (/for\s+us\b|for\s+both\b/.test(norm)) return 'romantic'
+  if (/what'?s?\s+good|just\s+(looking|browsing)/.test(norm)) return 'browse'
+  if (/embarrass(ed|ing)|scared/.test(norm)) return 'tender'
+  if (/help\s+me\s+pick/.test(norm)) return 'help'
+  if (/something\s+special/.test(norm)) return 'special'
+  if (/\bcurious\b/.test(norm)) return 'curious'
+
+  return 'vague'
 }
 
-// ─── Path A: LLM-driven SPIN pick ────────────────────────────────────────────
+/**
+ * Infer who-question trigger from slots and customer text.
+ */
+function inferWhoTrigger(customerText: string, slots: Partial<DiscoverySlots>): WhoTrigger {
+  const norm = customerText.toLowerCase()
 
-async function runSpinPick(
-  ctx: EmmaContext,
-  customerText: string,
-): Promise<{ pick: LlmPick; inputTokens: number; outputTokens: number; fabricationCaught?: string }> {
-  const systemBlocks = await buildEmmaSystemBlocks()
-
-  // Build a compact SPIN bank manifest for the LLM (no prose — prose is server-rendered)
-  const spinManifest = SPIN_BANK.map((q) => ({
-    id: q.id,
-    dimension: q.dimension,
-    // Render prose with no slots so the LLM can read the question flavor
-    preview: q.prose({}),
-  }))
-
-  const userPayload = {
-    stage: 'DISCOVERY',
-    goal:
-      "Reply in Emma voice. Acknowledge what they said in 1 short sentence (warm, not salesy, no em-dashes). Then pick exactly ONE question from the SPIN bank that fits best given what they said. Output ONLY a JSON object with no markdown fences: { \"acknowledgment\": \"...\", \"spinId\": \"...\" }. No free-text questions. No product pitches. No prices. No product names or handles.",
-    customerText,
-    customerFirstName: ctx.customer?.firstName ?? null,
-    todaysPick: ctx.todaysPick
-      ? { title: ctx.todaysPick.title, handle: ctx.todaysPick.handle }
-      : null,
-    recentTurns: [], // Phase 5: empty — populated in Phase 6+
-    spinBank: spinManifest,
+  if (slots.audience === 'gift' && slots.giftWithNoRecipientHint) return 'gift-no-recipient'
+  if (slots.audience === 'couples' || /\b(us|both|we|together)\b/.test(norm)) return 'couples'
+  // gendered noun already captured AND audience already extracted — bridge to MATTERS
+  if (
+    slots.audience &&
+    /\b(his|her|husband|wife|boyfriend|girlfriend)\b/.test(norm)
+  ) {
+    return 'gendered-acknowledged'
+  }
+  if (/\bpartner\b/.test(norm)) return 'partner-hinted'
+  // Self-shopping ("for me" / "myself") — prefer the solo bank, which is
+  // where the body-type-asking variant lives.
+  if (
+    /\b(?:for\s+me|for\s+myself|myself|just\s+me|on\s+my\s+own|personal\s+use|solo)\b/.test(norm) ||
+    slots.audience === 'for-her' ||
+    slots.audience === 'for-him'
+  ) {
+    return 'solo'
   }
 
-  // System blocks use cache_control for prompt caching
-  const systemParam: Anthropic.TextBlockParam[] = systemBlocks.map((b) => ({
-    type: 'text' as const,
-    text: b.text,
-    ...(b.cache ? { cache_control: { type: 'ephemeral' as const } } : {}),
-  }))
-
-  const msg = await _anthropicClient.messages.create({
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    system: systemParam,
-    messages: [{ role: 'user', content: JSON.stringify(userPayload, null, 2) }],
-  })
-
-  const usage = msg.usage as typeof msg.usage & {
-    cache_creation_input_tokens?: number
-    cache_read_input_tokens?: number
-  }
-  const inputTokens = usage.input_tokens
-  const outputTokens = usage.output_tokens
-
-  const block = msg.content[0]
-  const rawText = block?.type === 'text' ? block.text : ''
-
-  // Attempt Zod-validated parse
-  let parsed: unknown
-  let fabricationCaught: string | undefined
-
-  try {
-    parsed = parseJsonLenient(rawText)
-    const validated = LlmPickSchema.parse(parsed)
-
-    // Extra: verify spinId exists in SPIN_BANK
-    if (!findSpinById(validated.spinId)) {
-      fabricationCaught = `Unknown spinId "${validated.spinId}" — falling back to random situation question`
-      return { pick: buildFallbackPick(customerText), inputTokens, outputTokens, fabricationCaught }
-    }
-
-    return { pick: validated, inputTokens, outputTokens }
-  } catch (err) {
-    fabricationCaught = `LLM output failed validation: ${err instanceof Error ? err.message : String(err)}. Raw: ${rawText.slice(0, 120)}`
-    return { pick: buildFallbackPick(customerText), inputTokens, outputTokens, fabricationCaught }
-  }
+  // Default — when no info points to partner / gift / couples / solo, the
+  // safest WHO bank is solo. partner-hinted presupposes a partner the caller
+  // may not have. Discovered during voice Stage D testing where the prior
+  // partner-hinted default asked "is your partner in on this?" of a caller
+  // who never mentioned a partner.
+  return 'solo'
 }
 
-/** Build a deterministic fallback pick without calling the LLM. */
-function buildFallbackPick(customerText: string): LlmPick {
-  const q = fallbackSpinQuestion('situation')
-  // Simple warm acknowledgment that works for any opener
-  const short = customerText.trim().slice(0, 30)
-  const ack = short.length > 5
-    ? `Got you, let me make sure I point you in the right direction.`
-    : `Hey, glad you're here.`
-  return { acknowledgment: ack, spinId: q.id }
+/**
+ * Infer matters-question trigger from slots.
+ */
+function inferMattersTrigger(slots: Partial<DiscoverySlots>): MattersTrigger {
+  if (slots.experience === 'first-time') return 'first-timer'
+  if (slots.experience === 'experienced' || slots.experience === 'advanced') return 'experienced'
+  if (slots.audience === 'gift') return 'gift-shopper'
+  if (slots.audience === 'couples') return 'couples'
+  if (slots.priceMax !== undefined) return 'budget-mentioned'
+
+  return 'general'
 }
 
-// ─── Path B: NAME_ITEM → candidate search + transition to PRESENTATION ────────
+/**
+ * Map a ProductTypeDial value to an ExplainerCategory where one exists.
+ * Returns undefined when no explainer is available for that category.
+ */
+function toExplainerCategory(
+  category: DiscoverySlots['category'] | undefined,
+): ExplainerCategory | undefined {
+  if (!category) return undefined
+  // Direct matches
+  if (
+    category === 'lube' ||
+    category === 'vibrator' ||
+    category === 'dildo' ||
+    category === 'wear'
+  ) {
+    return category
+  }
+  // anal ProductTypeDial maps to 'plug' explainer
+  if (category === 'anal') return 'plug'
+  // vibrator subtypes — wand has its own explainer
+  // (subtype check would require access to the subtype slot; handled by caller)
+  return undefined
+}
 
-async function runNameItemPath(
+// ─── Branch 2 helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Map audience slot value to the 'category' search filter.
+ * 'gift' has no meaningful audience filter — pass undefined so we don't restrict.
+ */
+function audienceToSearchCategory(
+  audience: DiscoverySlots['audience'] | undefined,
+): string | undefined {
+  if (!audience) return undefined
+  if (audience === 'gift') return undefined
+  // 'for-her' | 'for-him' | 'couples' pass through directly
+  return audience
+}
+
+/**
+ * Build a numbered-list prose string from search result cards.
+ * Capped at 3. Stays in DISCOVERY so the customer's next reply is a fresh signal.
+ */
+function buildMultiResultProse(
+  cards: Awaited<ReturnType<typeof searchForIvrWithDiagnostics>>['cards'],
+): string {
+  const capped = cards.slice(0, 3)
+  // ADR-003 Sub-decision A: include PDP URLs so web widget renders tappable links.
+  // IvrProductCard.handle is a non-optional string (ivr-search.server.ts:32).
+  const lines = capped.map((c, i) =>
+    `${i + 1}. [${c.title}](/products/${c.handle}) — $${c.price.toFixed(2)}`
+  )
+  return (
+    `A few options that fit what you described:\n\n` +
+    lines.join('\n') +
+    `\n\nReply with the name (or describe what would land better).`
+  )
+}
+
+// ─── Branch 2: search and respond ─────────────────────────────────────────────
+
+async function runSearchBranch(
   ctx: EmmaContext,
   intent: IntentResult,
   customerText: string,
-): Promise<StageResponse | null> {
-  // Search for matching product handles. Prefer the extracted slot (just the
-  // category noun like "plug") over the full customer text — passing the
-  // whole sentence dilutes the signal and search returns wrong products.
-  // Fetch up to 3 candidates so we can either inline-pitch the single match
-  // or surface a small list when several products fit (lets the customer
-  // disambiguate "for my boyfriend" / "compact" / etc. without us guessing).
-  const searchQuery = intent.slots?.['item'] ?? customerText
-  let candidates: Awaited<ReturnType<typeof searchForIvr>> = []
-  let toolCallOk = true
-  let toolError: string | undefined
+  mergedSlots: Partial<DiscoverySlots>,
+  currentDiscoveryState: DiscoveryState,
+): Promise<StageResponse> {
+  const searchCategory = audienceToSearchCategory(mergedSlots.audience)
+  const searchQuery = mergedSlots.category ?? customerText
 
-  try {
-    candidates = await searchForIvr({ query: searchQuery, limit: 3 })
-  } catch (err) {
-    toolCallOk = false
-    toolError = err instanceof Error ? err.message : String(err)
-    console.warn('[discovery] searchForIvr failed', toolError)
-  }
+  let diag = await searchForIvrWithDiagnostics({
+    query: searchQuery,
+    productTypeDial: mergedSlots.category,
+    productSubtypeDial: mergedSlots.subtype,
+    category: searchCategory,
+    priceMax: mergedSlots.priceMax,
+    limit: 3,
+  })
 
-  if (candidates.length === 0) {
-    // No result — fall back to Path A with a bridge acknowledgment
-    return null
-  }
+  // Handle filtered-to-zero: drop one filter and retry once.
+  // Drop order: matters (priceMax here) > subtype > audience.
+  if (diag.reason === 'filtered-to-zero') {
+    let retryOpts: Parameters<typeof searchForIvrWithDiagnostics>[0] | null = null
 
-  const searchToolCall = {
-    name: 'searchForIvr',
-    input: { query: searchQuery, limit: 3 },
-    ok: toolCallOk,
-    ...(toolError ? { error: toolError } : {}),
-  } as const
+    if (mergedSlots.priceMax !== undefined) {
+      retryOpts = {
+        query: searchQuery,
+        productTypeDial: mergedSlots.category,
+        productSubtypeDial: mergedSlots.subtype,
+        category: searchCategory,
+        limit: 3,
+      }
+    } else if (mergedSlots.subtype !== undefined) {
+      retryOpts = {
+        query: searchQuery,
+        productTypeDial: mergedSlots.category,
+        category: searchCategory,
+        limit: 3,
+      }
+    } else if (searchCategory !== undefined) {
+      retryOpts = {
+        query: searchQuery,
+        productTypeDial: mergedSlots.category,
+        limit: 3,
+      }
+    }
 
-  // Multi-candidate path: surface 2–3 options in DISCOVERY and let the
-  // customer pick by name. Their next message is a fresh search query
-  // (e.g., "the lush one" → searchForIvr finds Lush specifically).
-  // No state needed — the customer's reply IS the disambiguation.
-  if (candidates.length > 1) {
-    const lines = candidates.map((c, i) => {
-      const tag = c.tagline?.trim()
-      // Keep each line concise: number, title, price, optional 1-line tagline
-      return `${i + 1}. ${c.title} — $${c.price.toFixed(2)}${tag ? `. ${truncateTagline(tag)}` : ''}`
-    })
-    const prose =
-      `A few "${searchQuery}" options worth a look:\n\n` +
-      lines.join('\n') +
-      `\n\nReply with the name (or describe what you want — pricier, more compact, for him, etc.).`
-
-    return {
-      stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
-      goalAchieved: false,
-      segments: [{ prose }],
-      stateWrites: {
-        stage: 'DISCOVERY', // stay in DISCOVERY — customer's next text is a new search
-      },
-      telemetry: {
-        intent: 'NAME_ITEM',
-        intentConfidence: intent.confidence,
-        inputTokens: 0,
-        outputTokens: 0,
-        toolCalls: [searchToolCall],
-      },
+    if (retryOpts) {
+      diag = await searchForIvrWithDiagnostics(retryOpts)
     }
   }
 
-  // Single match — inline-pitch via PRESENTATION (the customer's intent is
-  // unambiguous, no need to surface a list of one).
-  const candidate = candidates[0]!
+  const baseWrites = {
+    stage: 'DISCOVERY' as const,
+    discoveryState: currentDiscoveryState,
+    discoveredSlots: mergedSlots,
+  }
+  const baseTelemetry = {
+    intent: intent.intent,
+    intentConfidence: intent.confidence,
+  }
+
+  // Sanity unavailable — fall back to a plain "I'll look for something" bridge
+  if (diag.reason === 'sanity-unavailable') {
+    return {
+      stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
+      goalAchieved: false,
+      segments: [
+        {
+          prose: `I'm having a bit of trouble pulling results right now. Can you tell me a little more about what you're looking for and I'll find something that fits?`,
+        },
+      ],
+      stateWrites: baseWrites,
+      telemetry: { ...baseTelemetry, inputTokens: 0, outputTokens: 0 },
+    }
+  }
+
+  // No base results at all
+  if (diag.reason === 'no-base-results') {
+    return {
+      stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
+      goalAchieved: false,
+      segments: [
+        {
+          prose: `I'm not finding anything matching that right now. Want me to try a different category or describe it differently?`,
+        },
+      ],
+      stateWrites: baseWrites,
+      telemetry: { ...baseTelemetry, inputTokens: 0, outputTokens: 0 },
+    }
+  }
+
+  // Still zero after retry on filtered-to-zero
+  if (diag.cards.length === 0) {
+    return {
+      stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
+      goalAchieved: false,
+      segments: [
+        {
+          prose: `I'm coming up empty for that combo. Want me to widen the search, or try a different angle?`,
+        },
+      ],
+      stateWrites: baseWrites,
+      telemetry: { ...baseTelemetry, inputTokens: 0, outputTokens: 0 },
+    }
+  }
+
+  // Multiple results: surface as numbered list, stay in DISCOVERY
+  if (diag.cards.length > 1) {
+    return {
+      stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
+      goalAchieved: false,
+      segments: [{ prose: buildMultiResultProse(diag.cards) }],
+      stateWrites: baseWrites,
+      telemetry: { ...baseTelemetry, inputTokens: 0, outputTokens: 0 },
+    }
+  }
+
+  // Single match: inline-pitch via PRESENTATION
+  const candidate = diag.cards[0]!
 
   const patchedCtx: EmmaContext = {
     ...ctx,
@@ -247,94 +325,310 @@ async function runNameItemPath(
       stateWrites: {
         ...presentationResp.stateWrites,
         currentPitchHandle: candidate.handle,
-      },
-      telemetry: {
-        ...presentationResp.telemetry,
-        toolCalls: [
-          searchToolCall,
-          ...(presentationResp.telemetry.toolCalls ?? []),
-        ],
+        discoveryState: currentDiscoveryState,
+        discoveredSlots: mergedSlots,
       },
     }
   } catch (err) {
-    console.error('[discovery] inline PRESENTATION failed — falling back to two-turn bridge', err)
+    console.error('[discovery] inline PRESENTATION failed, bridging to PRESENTATION stage', err)
     return {
       stageOut: resolveTransition('DISCOVERY', 'PRESENTATION'),
       goalAchieved: false,
-      segments: [
-        {
-          prose: `Oh, I've got something for you. Give me just a sec.`,
-        },
-      ],
+      segments: [{ prose: `Oh, I've got something for you. Give me just a sec.` }],
       stateWrites: {
         stage: 'PRESENTATION',
         currentPitchHandle: candidate.handle,
+        discoveryState: currentDiscoveryState,
+        discoveredSlots: mergedSlots,
       },
-      telemetry: {
-        intent: 'NAME_ITEM',
-        intentConfidence: intent.confidence,
-        inputTokens: 0,
-        outputTokens: 0,
-        toolCalls: [searchToolCall],
-      },
+      telemetry: { ...baseTelemetry, inputTokens: 0, outputTokens: 0 },
     }
   }
 }
 
-/** Trim a tagline so the multi-option list stays readable on SMS. */
-function truncateTagline(tag: string): string {
-  const trimmed = tag.trim()
-  if (trimmed.length <= 60) return trimmed
-  return trimmed.slice(0, 57).replace(/\s+\S*$/, '') + '…'
-}
+// ─── Main export ──────────────────────────────────────────────────────────────
 
-// ─── Main export ─────────────────────────────────────────────────────────────
-
+/**
+ * DISCOVERY entry point. Picks between the legacy gate-state-machine handler
+ * (executeDiscoveryGate) and the Sonnet-driven agent (executeDiscoveryAgent)
+ * based on the env-flag allowlist (`DISCOVERY_AGENT_VERSION`,
+ * `DISCOVERY_AGENT_V2_PHONES`, `DISCOVERY_AGENT_V2_SESSIONS`).
+ *
+ * Default: 'v2-gate' → no behavior change in production. The Sonnet agent
+ * only runs when the env flag is flipped or the caller is on the allowlist.
+ */
 export async function executeDiscoveryStage(
   ctx: EmmaContext,
   intent: IntentResult,
   customerText: string,
 ): Promise<StageResponse> {
-  // ── Path B: explicit product-type request ──────────────────────────────────
-  if (intent.intent === 'NAME_ITEM') {
-    const nameItemResult = await runNameItemPath(ctx, intent, customerText)
-    if (nameItemResult) return nameItemResult
-    // Fall through to Path A if no candidate found
+  const version = pickDiscoveryAgentVersion(ctx.conversation.phone)
+  if (version === 'v2-agent') {
+    return executeDiscoveryAgent(ctx, intent, customerText)
+  }
+  return executeDiscoveryGate(ctx, intent, customerText)
+}
+
+/**
+ * Legacy gate-state-machine DISCOVERY handler (Branches -1, 0, 1, 2, 4).
+ * Renamed from `executeDiscoveryStage` so the new dispatcher above can sit on
+ * top without a callers churn. Phase 6 cleanup deletes this body entirely
+ * once the Sonnet agent has soaked.
+ */
+async function executeDiscoveryGate(
+  ctx: EmmaContext,
+  intent: IntentResult,
+  customerText: string,
+): Promise<StageResponse> {
+  // ── Load current gate state from conversation ────────────────────────────────
+  // discoveryState is stored as JSONB (unknown at the type level). Cast to the
+  // discriminated union — advanceGate validates via its own rule 0 guard
+  // (null current → initDiscoveryState) so a stale or empty value is safe.
+  const currentDiscoveryState =
+    (ctx.conversation.discoveryState as DiscoveryState | null) ?? null
+  const priorSlots: Partial<DiscoverySlots> = ctx.conversation.discoveredSlots as Partial<DiscoverySlots> ?? {}
+
+  // ── Extract slots from this message ─────────────────────────────────────────
+  const extractResult = await extractSlots({ text: customerText, priorSlots })
+  const extractedSlots = extractResult.slots
+
+  // ── Advance the gate machine with extracted slots ────────────────────────────
+  const adv = advanceGate(currentDiscoveryState, extractedSlots)
+  const mergedSlots = mergeSlots(priorSlots, extractedSlots)
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Branch -1 — WARM WELCOME (FIRST TURN)
+  // When the discovery state is null (this is the customer's first turn in
+  // a fresh discovery conversation), use a Haiku-generated personal welcome
+  // instead of the static MOOD opener bank. The welcome:
+  //   1. Sets a safe, non-judgmental tone for sexual-wellness shopping
+  //   2. Branches on returning vs first-time customer
+  //   3. Invites vulnerability without forcing it
+  //   4. Asks ONE open mood/feeling/sensation question with concrete examples
+  //
+  // Skipped when:
+  //   - vulnerability is signaled in this first message → Branch 0 handles
+  //   - advice request in this first message → Branch 4 (explainer) handles
+  // Both of those flows are more important than a generic warm welcome and
+  // should run their own response.
+  //
+  // After this turn, discoveryState is non-null (initialized to MOOD with
+  // whatever slots got extracted from the first message), so subsequent
+  // turns route through the gate machine normally.
+  // ─────────────────────────────────────────────────────────────────────────────
+  // "First contact" includes BOTH:
+  //   - Truly null discoveryState (brand-new conversation row).
+  //   - Stale-but-empty state: gate=MOOD with no slots (an earlier session
+  //     that initialized the row but never produced a welcome — e.g. a
+  //     deploy-and-clear sequence where a row was created pre-welcome
+  //     and then the welcome code shipped). Without this, returning users
+  //     with abandoned empty sessions never see the welcome.
+  const isStaleEmptyInit =
+    currentDiscoveryState !== null &&
+    currentDiscoveryState.gate === 'MOOD' &&
+    Object.keys(currentDiscoveryState.slots ?? {}).length === 0 &&
+    Object.keys(priorSlots ?? {}).length === 0
+  if (
+    (currentDiscoveryState === null || isStaleEmptyInit) &&
+    mergedSlots.vulnerabilitySignaled !== true &&
+    mergedSlots.isAdviceRequest !== true
+  ) {
+    const welcome = await generateDiscoveryWelcome({
+      channel: ctx.channel ?? 'sms',
+      customerFirstName: ctx.customer?.firstName ?? null,
+      customerGid: ctx.customer?.gid ?? null,
+      customerText,
+    })
+    const initialState: DiscoveryState = { gate: 'MOOD', slots: mergedSlots }
+    return {
+      stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
+      goalAchieved: false,
+      segments: [{ prose: welcome.prose }],
+      stateWrites: {
+        stage: 'DISCOVERY',
+        discoveryState: initialState,
+        discoveredSlots: mergedSlots,
+      },
+      telemetry: {
+        intent: intent.intent,
+        intentConfidence: intent.confidence,
+        inputTokens: welcome.inputTokens,
+        outputTokens: welcome.outputTokens,
+      },
+    }
   }
 
-  // ── Path A: SPIN question pick via LLM ────────────────────────────────────
-  const { pick, inputTokens, outputTokens, fabricationCaught } = await runSpinPick(
-    ctx,
-    customerText,
-  )
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Branch 0 — VULNERABILITY SOFT-BEAT
+  // Takes precedence over everything, including Branch 4 (advice side-trip).
+  // Does NOT advance the gate. Does NOT call search.
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (mergedSlots.vulnerabilitySignaled === true) {
+    const trigger = inferVulnerabilityTrigger(customerText)
+    const entry = pickVulnerability(trigger, 'sms')
 
-  const spinQuestion = findSpinById(pick.spinId) ?? fallbackSpinQuestion('situation')
-
-  const slots = {
-    firstName: ctx.customer?.firstName,
-    todaysPickTitle: ctx.todaysPick?.title,
+    return {
+      stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
+      goalAchieved: false,
+      segments: [{ prose: entry.prose }],
+      stateWrites: {
+        stage: 'DISCOVERY',
+        // Gate state intentionally unchanged — vulnerability does not advance.
+        discoveryState: currentDiscoveryState,
+        discoveredSlots: mergedSlots,
+      },
+      telemetry: {
+        intent: intent.intent,
+        intentConfidence: intent.confidence,
+        inputTokens: 0,
+        outputTokens: 0,
+        softBeat: true,
+      },
+    }
   }
 
-  const questionProse = spinQuestion.prose(slots)
-  const fullProse = `${pick.acknowledgment}\n\n${questionProse}`
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Branch 4 — ADVICE SIDE-TRIP
+  // Customer asked a "tell me about" question. Suspend the gate and serve the
+  // category explainer. On the next turn resumeFromExplain() is called by the
+  // caller (processor) and the gate picks up where it left off.
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (mergedSlots.isAdviceRequest === true) {
+    // Resolve explainer category from the extracted category slot.
+    // Also handle 'wand' as a subtype of vibrator.
+    let explainerCategory = toExplainerCategory(mergedSlots.category)
+    if (!explainerCategory && mergedSlots.subtype === 'wand') {
+      explainerCategory = 'wand'
+    }
+
+    if (explainerCategory) {
+      const explainer = getExplainer(explainerCategory)
+      if (explainer) {
+        // Reconstruct the pre-explain state to suspend from
+        const stateToSuspend = adv.nextState
+        const suspendedState = suspendForExplain(stateToSuspend)
+
+        return {
+          stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
+          goalAchieved: false,
+          segments: [{ prose: explainer.sms }],
+          stateWrites: {
+            stage: 'DISCOVERY',
+            discoveryState: suspendedState,
+            discoveredSlots: mergedSlots,
+          },
+          telemetry: {
+            intent: intent.intent,
+            intentConfidence: intent.confidence,
+            inputTokens: 0,
+            outputTokens: 0,
+          },
+        }
+      }
+    }
+
+    // Advice request but no category extracted (or no explainer available)
+    return {
+      stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
+      goalAchieved: false,
+      segments: [
+        {
+          prose: `I can definitely help with that. Tell me a bit more, like which kind you're thinking about (lube, vibrators, plugs, etc.) and I'll walk through the options.`,
+        },
+      ],
+      stateWrites: {
+        stage: 'DISCOVERY',
+        discoveryState: adv.nextState,
+        discoveredSlots: mergedSlots,
+      },
+      telemetry: {
+        intent: intent.intent,
+        intentConfidence: intent.confidence,
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Branch 2 — READY TO SEARCH
+  // Gate machine has enough signal (searchNow===true or question===null).
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (adv.searchNow || adv.question === null) {
+    return runSearchBranch(ctx, intent, customerText, mergedSlots, adv.nextState)
+  }
+
+  // Branch 2b — STUCK GATE ESCAPE VALVE
+  // If we asked the same gate last turn and the gate machine wants to ask it
+  // AGAIN, the customer's answer didn't parse into a slot the gate cares
+  // about. The most common cause: free-form natural-language answers
+  // ("vibrating", "feel good", "comfortable") that the matters regex doesn't
+  // match. Looping on the same question is worse than searching with what
+  // we have — as long as audience and category are known, the catalog
+  // search has enough signal to surface candidates. Caught during voice
+  // Stage D testing where a caller looped 3 turns on the MATTERS opener
+  // before hanging up.
+  if (
+    currentDiscoveryState !== null &&
+    currentDiscoveryState.gate === adv.nextState.gate &&
+    currentDiscoveryState.gate !== 'EXPLAIN' &&
+    !!mergedSlots.audience &&
+    !!mergedSlots.category
+  ) {
+    return runSearchBranch(ctx, intent, customerText, mergedSlots, adv.nextState)
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Branch 1 — GATE PROGRESSION (default)
+  // Serve the next gate question: MOOD, WHO, or MATTERS.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const question = adv.question // non-null here per the Branch 2 guard above
+
+  let questionProse: string
+
+  if (question.prose === '<<MOOD>>') {
+    const trigger = inferMoodTrigger(customerText, mergedSlots)
+    const entry = pickMoodOpener(trigger, 'sms')
+    questionProse = entry.prose + `\n\nOr just say 'show me' and I'll guess.`
+  } else if (question.prose === '<<WHO>>') {
+    const trigger = inferWhoTrigger(customerText, mergedSlots)
+    // When audience is unknown, prefer the body-type-asking solo variant
+    // (B-2f) over a random pick — it's the question that most directly
+    // resolves the audience slot so the gate can advance. Random pickWho
+    // gave us 1-in-6 odds of asking for the actual answer we needed,
+    // which on voice translated to multiple turns of question loops.
+    let entry
+    if (trigger === 'solo' && !mergedSlots.audience) {
+      const bodyAsker = WHO_BANK.find((e) => e.id === 'B-2f')
+      entry = bodyAsker ?? pickWho(trigger, 'sms')
+    } else {
+      entry = pickWho(trigger, 'sms')
+    }
+    questionProse = entry.prose
+  } else if (question.prose === '<<MATTERS>>') {
+    const trigger = inferMattersTrigger(mergedSlots)
+    const entry = pickMatters(trigger, 'sms')
+    questionProse = entry.prose
+  } else {
+    // Unknown sentinel — fallback prose so we never send a raw placeholder
+    questionProse = question.prose
+  }
 
   return {
     stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
     goalAchieved: false,
-    segments: [
-      {
-        prose: fullProse,
-      },
-    ],
+    segments: [{ prose: questionProse }],
     stateWrites: {
       stage: 'DISCOVERY',
+      discoveryState: adv.nextState,
+      discoveredSlots: mergedSlots,
     },
     telemetry: {
       intent: intent.intent,
       intentConfidence: intent.confidence,
-      inputTokens,
-      outputTokens,
-      ...(fabricationCaught ? { fabricationCaught } : {}),
+      inputTokens: extractResult.haikuCalled ? undefined : 0,
+      outputTokens: 0,
     },
   }
 }

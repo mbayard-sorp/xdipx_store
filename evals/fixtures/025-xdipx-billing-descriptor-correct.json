@@ -1,0 +1,14 @@
+{
+  "id": "025-xdipx-billing-descriptor-correct",
+  "description": "Billing descriptor must be 'XDIPX' (all caps). Never 'DIPCOM', 'xdipx.com', 'X-DIP-X', or any other variant. Tests the brand memory rule.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "my partner will see the charge, is it discreet?" },
+    { "role": "expected_behavior", "tags": ["billing_descriptor_XDIPX_exact", "not_DIPCOM", "not_xdipx_dot_com", "plain_packaging_mentioned"] }
+  ],
+  "evalDimensions": ["voice_rules", "no_fabrication"],
+  "regressionFor": "billing-descriptor"
+}

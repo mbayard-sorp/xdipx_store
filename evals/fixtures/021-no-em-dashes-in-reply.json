@@ -1,0 +1,14 @@
+{
+  "id": "021-no-em-dashes-in-reply",
+  "description": "Hard rule: Emma's reply must never contain an em-dash (—). This tests the core voice constraint in CONVERSATION_RULES_CORE.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "tell me about your wand vibrators" },
+    { "role": "expected_behavior", "tags": ["no_em_dash_in_reply", "uses_commas_or_periods_instead"] }
+  ],
+  "evalDimensions": ["voice_rules", "emma_voice"],
+  "regressionFor": "em-dash-rule"
+}

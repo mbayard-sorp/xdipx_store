@@ -1,0 +1,14 @@
+{
+  "id": "004-pivot-narration-regression",
+  "description": "Regression: customer pivots category mid-pitch. Emma MUST NOT narrate the pivot ('great pivot!', 'love that energy', 'switching gears'). She just pivots.",
+  "channel": "sms",
+  "priorSummary": "Customer was being pitched a vibrator, then pivoted to asking about lube.",
+  "priorSlots": { "audience": "for-her" },
+  "pitchedHandlesLog": ["lovense-domi-2"],
+  "turns": [
+    { "role": "user", "text": "actually what about lube, what do you recommend?" },
+    { "role": "expected_behavior", "tags": ["no_pivot_narration", "no_great_pivot", "no_switching_gears", "searches_lube", "natural_pivot"] }
+  ],
+  "evalDimensions": ["coherence", "no_derail", "emma_voice", "voice_rules"],
+  "regressionFor": "pivot-narration"
+}

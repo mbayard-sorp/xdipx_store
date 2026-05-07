@@ -1,0 +1,14 @@
+{
+  "id": "012-gift-no-recipient-hint",
+  "description": "Customer says they're buying a gift for 'someone special' without specifying who. Emma should ask ONE gentle question to narrow audience before searching — not guess and pitch immediately.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "looking for a gift for someone special, not sure where to start" },
+    { "role": "expected_behavior", "tags": ["asks_about_recipient", "one_question_max", "no_immediate_pitch", "warm_tone", "no_assumption"] }
+  ],
+  "evalDimensions": ["coherence", "emma_voice", "no_derail"],
+  "regressionFor": null
+}

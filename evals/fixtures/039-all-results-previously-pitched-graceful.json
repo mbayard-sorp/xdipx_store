@@ -1,0 +1,37 @@
+{
+  "id": "039-all-results-previously-pitched-graceful",
+  "description": "ADR-003a Issue Y broaden-on-exhaustion guard. All three search results have been pitched in prior turns (pitchedHandlesLog contains all returned handles). The dedup filter returns { reason: 'all_results_previously_pitched', cards: [] }. Emma must respond gracefully: acknowledge without blaming the customer, propose a broader angle (different category, broader query, or drop a filter), and not make the customer feel they have broken something or run out of catalog. Must not say 'I cannot find any more results' or use cold/brick-wall language.",
+  "channel": "web",
+  "priorSummary": "Customer has been looking at vibrators. Emma has already shown the Satisfyer Pro 2, We-Vibe Tango X, and Dame Eva II across multiple turns.",
+  "priorSlots": { "category": "vibrator", "audience": "for-her", "priceMax": 100 },
+  "pitchedHandlesLog": ["satisfyer-pro-2", "we-vibe-tango-x", "dame-eva-ii"],
+  "simulatedToolResults": {
+    "searchProducts": {
+      "results": [],
+      "reason": "all_results_previously_pitched",
+      "message": "All matching products have already been shown in this conversation. Try a different search angle: broader query, different category, or drop a filter."
+    }
+  },
+  "turns": [
+    {
+      "role": "user",
+      "text": "show me what else you like"
+    },
+    {
+      "role": "expected_behavior",
+      "tags": [
+        "graceful_exhaustion_acknowledgement",
+        "no_blame_customer",
+        "proposes_broader_angle",
+        "no_brick_wall",
+        "no_cannot_find_any_more_results",
+        "warm_emma_voice",
+        "asks_a_question",
+        "no_em_dash_in_reply"
+      ]
+    }
+  ],
+  "evalDimensions": ["emma_voice", "coherence", "no_derail"],
+  "regressionFor": "ADR-003a-Issue-Y-exhaustion",
+  "notes": "When all search results are in pitchedHandlesLog, runDiscoveryTool returns reason='all_results_previously_pitched'. Emma must NOT say 'I cannot find' or 'catalog exhausted' or anything that implies failure. Acceptable: 'Hmm, I've shown you everything I have at that price point. Want me to widen the search, or try a different direction?' Unacceptable: 'I can't find any more results' or 'the catalog is empty.'"
+}

@@ -21,6 +21,44 @@ const client = new Anthropic({ apiKey: (process.env['ANTHROPIC_API_KEY'] ?? '').
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001'
 
 // ---------------------------------------------------------------------------
+// 0. Category hint resolver
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps a matched product keyword to a productTypeDial value so downstream
+ * search filters can narrow to the right catalog segment.
+ *
+ * Returns undefined when the word doesn't map cleanly (e.g. "toy", "toys")
+ * because those are too broad to assert a specific dial value.
+ */
+function resolveCategoryHint(word: string): string | undefined {
+  // Returns the canonical top-level ProductTypeDial value (see app/types/index.ts).
+  // 'plug', 'wand', 'beads' are SUBTYPES, not top-level dials — map to their
+  // parent category here. The slot extractor handles subtype assignment separately.
+  const w = word.trim().toLowerCase()
+  if (['vibrator', 'wand', 'rabbit', 'bullet', 'clitoral', 'suction', 'air pulsation'].includes(w)) {
+    return 'vibrator'
+  }
+  if (w === 'dildo') return 'dildo'
+  if (['plug', 'butt plug', 'anal plug', 'anal beads', 'prostate massager', 'prostate'].includes(w)) {
+    return 'anal'
+  }
+  if (['lube', 'lubricant'].includes(w)) return 'lube'
+  if (['harness'].includes(w)) return 'harness'
+  if (['strap-on', 'strap on'].includes(w)) return 'extender'
+  if (w === 'cock ring') return 'cock-ring'
+  if (['sleeve', 'masturbator', 'stroker'].includes(w)) return 'stroker'
+  if (['lingerie', 'outfit', 'outfits', 'teddy', 'bodysuit', 'bodystocking', 'stockings', 'pasties'].includes(w)) {
+    return 'wear'
+  }
+  if (['blindfold', 'restraints', 'paddle', 'flogger', 'gag', 'cuffs', 'bondage'].includes(w)) {
+    return 'bondage'
+  }
+  if (['condom', 'condoms'].includes(w)) return 'condom'
+  return undefined
+}
+
+// ---------------------------------------------------------------------------
 // 1. High-precision regex bank
 // ---------------------------------------------------------------------------
 
@@ -64,7 +102,11 @@ const REGEX_BANK: RegexEntry[] = [
 
   // ─── Phrase-based COMMIT_PICK (works in all stages, customer signals buy intent) ───
   {
-    re: /\b(i'?ll\s+take\s+it|let'?s\s+do\s+it|add\s+to\s+cart|buy\s+it|buy\s+now|place\s+order|order\s+now|check\s+out|get\s+it|send\s+it|i\s+want\s+it|i\s+want\s+that|i'?ll\s+get\s+it|i'?m\s+in)\b/i,
+    // ADR-003 Sub-decision D: negative lookahead on `i want it` so "I want it to
+    // help me relax" (use-case disclosure) does NOT fire COMMIT_PICK.
+    // "I want it to..." → NAME_ITEM/DISCOVERY via Haiku fallback.
+    // "I want it now", "I want it ♥", "I want it shipped" → still match (no \s+to\b after).
+    re: /\b(i'?ll\s+take\s+it|let'?s\s+do\s+it|add\s+to\s+cart|buy\s+it|buy\s+now|place\s+order|order\s+now|check\s+out|get\s+it|send\s+it|i\s+want\s+it(?!\s+to\b)|i\s+want\s+that|i'?ll\s+get\s+it|i'?m\s+in)\b/i,
     intent: 'COMMIT_PICK',
   },
   // Short buy signals (any stage)
@@ -103,9 +145,13 @@ const REGEX_BANK: RegexEntry[] = [
   },
   // Direct product category mentions
   {
-    re: /\b(vibrator|wand|rabbit|dildo|plug|lube|lubricant|toy|toys|bullet|clitoral|suction|air\s+pulsation|couples\s+toy|strap[- ]?on|harness|cock\s+ring|sleeve|masturbator|stroker|prostate)\b/i,
+    re: /\b(vibrator|wand|rabbit|dildo|plug|lube|lubricant|toy|toys|bullet|clitoral|suction|air\s+pulsation|couples\s+toy|strap[- ]?on|harness|cock\s+ring|sleeve|masturbator|stroker|prostate\s+massager|prostate|lingerie|outfit|outfits|teddy|bodysuit|bodystocking|stockings|pasties|anal\s+beads|blindfold|restraints|paddle|flogger|gag|cuffs|bondage|condom|condoms)\b/i,
     intent: 'NAME_ITEM',
-    extractSlots: (m) => ({ item: m[0].toLowerCase() }),
+    extractSlots: (m) => {
+      const item = m[0].toLowerCase()
+      const categoryHint = resolveCategoryHint(item)
+      return categoryHint ? { item, categoryHint } : { item }
+    },
   },
 ]
 

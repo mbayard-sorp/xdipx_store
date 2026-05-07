@@ -24,6 +24,8 @@ interface ChatApiResponse {
   quickReply?: QuickReplyPayload
   cartUpdated?: boolean
   error?: string
+  /** ADR-003 Sub-decision E: server echoes cookieId for session persistence defense. */
+  sessionId?: string
 }
 
 const STORAGE_KEY = 'xdipx:emma:state:v1'
@@ -54,6 +56,11 @@ export function AskEmmaWidget() {
   const [hasUnread, setHasUnread] = useState(false)
   const [isRevealing, setIsRevealing] = useState(false)
   const [tagline, setTagline] = useState(DEFAULT_TAGLINE)
+  // ADR-003 Sub-decision E: persisted cookieId for session bridge across navigation.
+  // The server echoes its cookieId in the response body; we persist it to localStorage
+  // and send it back as `sessionId` in the request body as a fallback when the
+  // HttpOnly cookie is absent (preview environment navigation issue).
+  const [persistedSessionId, setPersistedSessionId] = useState<string | null>(null)
   const fetcher = useFetcher<ChatApiResponse>()
   const revalidator = useRevalidator()
   const listRef = useRef<HTMLDivElement>(null)
@@ -62,6 +69,9 @@ export function AskEmmaWidget() {
   const submittedAtRef = useRef<number>(0)
   const revealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Fix 4: client-side double-click guard. Tracks the last submitted message
+  // and its timestamp so identical messages within 1500ms are silently dropped.
+  const lastSubmittedRef = useRef<{ msg: string; at: number } | null>(null)
 
   // Typing pill shows during network request OR while we're artificially holding
   // before committing, so Emma never "teleports" her reply in.
@@ -73,9 +83,13 @@ export function AskEmmaWidget() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (raw) {
-        const saved = JSON.parse(raw) as { open?: boolean; turns?: Turn[] }
+        // ADR-003 Sub-decision E: read back persisted sessionId for session bridge.
+        const saved = JSON.parse(raw) as { open?: boolean; turns?: Turn[]; sessionId?: string }
         if (Array.isArray(saved.turns)) setTurns(saved.turns.slice(-20))
         if (typeof saved.open === 'boolean') setOpen(saved.open)
+        if (typeof saved.sessionId === 'string' && saved.sessionId) {
+          setPersistedSessionId(saved.sessionId)
+        }
       }
     } catch {
       // ignore
@@ -131,15 +145,20 @@ export function AskEmmaWidget() {
 
   // Persist state whenever it changes. Strip transient `reveal` so persisted
   // turns hydrate as fully-revealed on page reload.
+  // ADR-003 Sub-decision E: also persist sessionId so the server can align the
+  // session if the HttpOnly cookie is absent during navigation in preview envs.
   useEffect(() => {
     if (!mounted) return
     try {
       const sanitized = turns.slice(-20).map(({ reveal: _reveal, ...rest }) => rest)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ open, turns: sanitized }))
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ open, turns: sanitized, sessionId: persistedSessionId ?? undefined }),
+      )
     } catch {
       // quota or privacy mode — fail silent
     }
-  }, [open, turns, mounted])
+  }, [open, turns, mounted, persistedSessionId])
 
   // Clean up any in-flight timers on unmount.
   useEffect(() => {
@@ -157,6 +176,10 @@ export function AskEmmaWidget() {
     const data = fetcher.data
     if (!data) return
 
+    // ADR-003 Sub-decision E: capture server-echoed sessionId and persist it.
+    if (data.sessionId && typeof data.sessionId === 'string') {
+      setPersistedSessionId(data.sessionId)
+    }
     const quickReply = data.quickReply
     const products = data.products ?? []
     if (data.cartUpdated) {
@@ -284,6 +307,12 @@ export function AskEmmaWidget() {
   const sendMessage = (rawMsg: string, opts: { hidden?: boolean } = {}) => {
     const msg = rawMsg.trim()
     if (!msg || isSending || isRevealing) return
+    // Fix 4: client-side double-click guard. Drop identical messages submitted
+    // within 1500ms of each other to prevent duplicate turns from fast taps.
+    const now = Date.now()
+    const last = lastSubmittedRef.current
+    if (last && last.msg === msg && now - last.at < 1500) return
+    lastSubmittedRef.current = { msg, at: now }
     // Any prior quickReply pills are now stale — mark the latest assistant turn
     // with one as answered so the pills disappear.
     const markedTurns = markLatestQuickReplyAnswered(turns)
@@ -302,6 +331,10 @@ export function AskEmmaWidget() {
         history: historyForServer,
         hidden: opts.hidden === true,
         pageContext: { pathname: location.pathname },
+        // ADR-003 Sub-decision E: send back persisted sessionId as a cookie
+        // fallback so the server can align the session if the HttpOnly cookie
+        // was lost during navigation in preview environments.
+        ...(persistedSessionId ? { sessionId: persistedSessionId } : {}),
       }),
       { method: 'post', action: '/api/ask-emma', encType: 'application/json' },
     )

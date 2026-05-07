@@ -25,6 +25,8 @@ import { buildWebEmmaContext } from '../web-context-builder.server'
 import { findRecentCrossChannelActivity } from '../cross-channel.server'
 import { pickEffectiveStage, dispatchStage } from '../stage-dispatch.server'
 import { logWebStageResponse } from '../web-turn-logger.server'
+import { loadConversationHistory } from '../conversation-history.server'
+import { generateConversationSummary } from '../summary.server'
 import type { ChatReply, ChatProductCard } from '~/lib/ai-agent/chat-types'
 import type { StageResponse, ProductRef, ProductContext } from '../types.server'
 import type { BudgetReservation } from '~/lib/emma-budget.server'
@@ -251,6 +253,19 @@ export async function processWebMessageV2(
     throw err
   }
 
+  // --- Step 3b: Load history BEFORE dispatch (ADR-003 Sub-decision B) ---
+  // The summarizer needs history to generate a meaningful summary. Loading here
+  // (not inside executeConversationAgent) ensures the history is available for
+  // the fire-and-forget summarizer call regardless of which stage handler ran.
+  // The conversation agent also loads history internally for its own Sonnet call;
+  // this second load is a read-only DB query and is acceptable at current volume.
+  let historyForSummarizer: import('../conversation-history.server').HistoryTurn[] = []
+  try {
+    historyForSummarizer = await loadConversationHistory(conversation.conversationId, 12)
+  } catch (err) {
+    console.warn('[web-adapter] failed to load history for summarizer (non-fatal)', err)
+  }
+
   // --- Step 4: Stage dispatch ---
   const effectiveStage = pickEffectiveStage(conversation.stage, intentResult)
   const stageRespPromise = dispatchStage(effectiveStage, ctx, intentResult, customerText)
@@ -287,12 +302,55 @@ export async function processWebMessageV2(
     if (writes.lastQuoteItems      !== undefined) stateUpdate.lastQuoteItems      = writes.lastQuoteItems
     if (writes.lastQuoteCreatedAt  !== undefined) stateUpdate.lastQuoteCreatedAt  = writes.lastQuoteCreatedAt
     if (writes.customerGid         !== undefined) stateUpdate.customerGid         = writes.customerGid
+    // Discovery gate persistence — without these, the gate machine resets
+    // every turn (caught during voice Stage D testing; same omission here).
+    if (writes.discoveryState      !== undefined) stateUpdate.discoveryState      = writes.discoveryState
+    if (writes.discoveredSlots     !== undefined) stateUpdate.discoveredSlots     = writes.discoveredSlots
     if (pageContext?.handle        !== undefined) stateUpdate.pageHandle          = pageContext.handle
     if (pageContext?.route         !== undefined) stateUpdate.pageRoute           = pageContext.route
     await applyWebStateWrites(sessionId, stateUpdate)
   } catch (err) {
     console.error('[web-adapter] applyWebStateWrites failed (non-fatal)', err)
   }
+
+  // --- Step 5b: Memory primitives — summarizer + pitched-handles log (ADR-003 Sub-decision B) ---
+  // Fires AFTER applyWebStateWrites returns. NEVER before — per architect condition #3.
+  // The executeConversationAgent path also fires the summarizer internally for SMS; for web
+  // the gate-machine path (runSearchBranch, executeDiscoveryGate) bypassed it entirely.
+  // Moving it here ensures EVERY stage handler triggers the summary update, regardless
+  // of dispatch path. OQ2 resolution: processWebMessageV2 is a separate function from
+  // processSmsMessageV2 — both need this wiring.
+  //
+  // Non-blocking: do not await before returning reply to caller. Phase 0 condition #1.
+  void (async () => {
+    try {
+      // Append new pitch handle to the log when the handler pitched something.
+      const newPitchHandle = stageResp.stateWrites.currentPitchHandle
+      let pitchedLog: string[] | null = conversation.pitchedHandlesLog ?? null
+      if (newPitchHandle) {
+        const prior = pitchedLog ?? []
+        // Append new handle (most-recent last), cap at 10.
+        const updated = [...prior, newPitchHandle].slice(-10)
+        pitchedLog = updated
+        await applyWebStateWrites(sessionId, { pitchedHandlesLog: updated }).catch((err) =>
+          console.warn('[web-adapter] pitchedHandlesLog update failed (non-fatal)', err)
+        )
+      }
+
+      // Run the Haiku summarizer with the history loaded before dispatch.
+      const summary = await generateConversationSummary(
+        historyForSummarizer,
+        conversation.conversationSummary ?? null,
+      )
+      if (summary) {
+        await applyWebStateWrites(sessionId, { conversationSummary: summary }).catch((err) =>
+          console.warn('[web-adapter] conversationSummary update failed (non-fatal)', err)
+        )
+      }
+    } catch (err) {
+      console.warn('[web-adapter] memory primitive update failed (non-fatal)', err)
+    }
+  })()
 
   // --- Step 6: Turn logging (fire-and-forget, non-fatal) ---
   void logWebStageResponse(sessionId, customerText, stageResp, {

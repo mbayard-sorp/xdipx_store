@@ -229,6 +229,7 @@ export async function buildEmmaContextWithCrossChannel(
   channel: Channel,
 ): Promise<EmmaContext> {
   const ctx = await buildEmmaContext(conversation)
+  ctx.channel = channel
 
   const hint = await findRecentCrossChannelActivity(
     conversation.customerGid,

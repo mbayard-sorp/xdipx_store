@@ -1,0 +1,14 @@
+{
+  "id": "006-pdp-imessage-url-format",
+  "description": "Regression: PDP URL must appear on its OWN LINE in SMS replies for iMessage link preview to render. URL must not be buried mid-sentence.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": { "audience": "for-her", "category": "vibrator" },
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "show me something quiet for solo time" },
+    { "role": "expected_behavior", "tags": ["url_on_own_line", "url_not_buried_mid_sentence", "url_starts_with_https", "correct_xdipx_domain"] }
+  ],
+  "evalDimensions": ["voice_rules", "no_fabrication"],
+  "regressionFor": "pdp-imessage-preview"
+}

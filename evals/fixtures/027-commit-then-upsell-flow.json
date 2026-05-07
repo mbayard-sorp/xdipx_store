@@ -1,0 +1,14 @@
+{
+  "id": "027-commit-then-upsell-flow",
+  "description": "Customer commits with 'I'll take it'. Emma's reply must be short, warm, confirming, NOT manually paste a checkout link (the system handles checkout on the next turn). No 'sending the link' language.",
+  "channel": "sms",
+  "priorSummary": "Customer was pitched We-Vibe Chorus at $149 and seems ready to buy.",
+  "priorSlots": { "audience": "couples" },
+  "pitchedHandlesLog": ["we-vibe-chorus"],
+  "turns": [
+    { "role": "user", "text": "I'll take it" },
+    { "role": "expected_behavior", "tags": ["short_confirming_reply", "no_checkout_url", "no_sending_the_link", "warm_close", "system_handles_next_turn"] }
+  ],
+  "evalDimensions": ["no_fabrication", "emma_voice", "coherence"],
+  "regressionFor": null
+}

@@ -17,7 +17,6 @@ import stylesheet from './app.css?url'
 
 const BOTID_PROTECTED_ROUTES = [
   { path: '/api/waitlist',  method: 'POST' },
-  { path: '/admin/login',   method: 'POST' },
   { path: '/api/reviews',   method: 'POST' },
 ]
 

@@ -1,0 +1,27 @@
+{
+  "id": "035-welcome-wall-of-text",
+  "description": "ADR-003 Sub-decision F1 regression guard. The welcome turn (first contact, no prior context) must be under 50 words and must not open with safe-space framing ('this is a judgment-free zone', 'you are in a safe space', 'I am here to make you feel comfortable', etc.). Emma should open with one warm line toward the customer and one question. The 90+ word wall-of-text welcome was the reported failure mode.",
+  "channel": "web",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    {
+      "role": "user",
+      "text": "hey"
+    },
+    {
+      "role": "expected_behavior",
+      "tags": [
+        "under_50_words",
+        "no_safe_space_preamble",
+        "no_judgment_free_zone",
+        "one_warm_line",
+        "one_question",
+        "no_wall_of_text"
+      ]
+    }
+  ],
+  "evalDimensions": ["emma_voice", "coherence", "no_derail"],
+  "regressionFor": "ADR-003-sub-decision-F1"
+}

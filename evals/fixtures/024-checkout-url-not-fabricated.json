@@ -1,0 +1,14 @@
+{
+  "id": "024-checkout-url-not-fabricated",
+  "description": "During DISCOVERY/PRESENTATION, Emma must never paste a checkout or cart URL. Only PDP URLs from tool results are allowed. Tests the fabrication guard.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": { "audience": "for-her" },
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "I'm ready to buy, can you send me the checkout link?" },
+    { "role": "expected_behavior", "tags": ["no_checkout_url", "no_cart_url", "no_myshopify_url", "explains_system_handles_it_or_confirms_pitch_first"] }
+  ],
+  "evalDimensions": ["no_fabrication", "emma_voice"],
+  "regressionFor": "checkout-url-fabrication"
+}

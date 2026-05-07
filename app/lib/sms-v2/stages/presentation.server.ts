@@ -1,11 +1,14 @@
 /**
  * app/lib/sms-v2/stages/presentation.server.ts
  *
- * Phase 4 — PRESENTATION stage handler.
+ * Phase 4 — PRESENTATION stage handler (legacy gate flow).
+ * Phase 6 — wrapped by `executePresentationStage` which routes between this
+ * legacy handler and the unified Sonnet conversation agent based on the env
+ * flag allowlist (`pickDiscoveryAgentVersion`).
  *
- * Pitches one specific product. LLM writes the prose; server supplies all
- * facts (price, name, URL, image). Fabrication guard asserts the output
- * contains the real PDP URL and price before delivering.
+ * Legacy handler: pitches one specific product. LLM writes the prose; server
+ * supplies all facts (price, name, URL, image). Fabrication guard asserts the
+ * output contains the real PDP URL and price before delivering.
  *
  * Tool list: searchForIvr only. kbLookup is a Phase 6c forward reference —
  * prompt structure is ready but the tool is not registered here yet.
@@ -13,10 +16,12 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { buildEmmaSystemBlocks } from '~/lib/claude.server'
 import { searchForIvr } from '~/lib/ivr-search.server'
+import { executeConversationAgent } from '../conversation-agent.server'
+import { pickDiscoveryAgentVersion } from '../discovery-agent-flag.server'
 import { resolveTransition } from '../transitions.server'
 import type { EmmaContext, IntentResult, StageResponse, ProductRef } from '../types.server'
 import { fetchProductContext } from './_product-context.server'
-import { pickPresentationTemplate } from '../templates/presentation-templates'
+import { pickFitCloser, type FitCloserContext } from '../templates/fit-closer-bank'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
@@ -48,10 +53,37 @@ function extractHandleSlot(intent: IntentResult): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Main handler
+// Main handler — flag-aware dispatch (Phase 6)
 // ---------------------------------------------------------------------------
 
+/**
+ * PRESENTATION entry point. Picks between the legacy LLM-with-anchored-prompt
+ * handler (executePresentationStageGate) and the Phase 6 Sonnet conversation
+ * agent (executeConversationAgent) based on the env-flag allowlist.
+ *
+ * Default: 'v2-gate' → no behavior change in production. The agent only runs
+ * when the env flag is flipped or the caller is on the allowlist. Same flag
+ * that governs the discovery agent — Phase 6 expanded the agent's scope to
+ * cover PRESENTATION + OBJECTION uniformly.
+ */
 export async function executePresentationStage(
+  ctx: EmmaContext,
+  intent: IntentResult,
+  customerText: string,
+): Promise<StageResponse> {
+  const version = pickDiscoveryAgentVersion(ctx.conversation.phone)
+  if (version === 'v2-agent') {
+    return executeConversationAgent({ ctx, intent, customerText, stage: 'PRESENTATION' })
+  }
+  return executePresentationStageGate(ctx, intent, customerText)
+}
+
+/**
+ * Legacy gate-style PRESENTATION handler — Sonnet-anchored on
+ * currentPitchHandle. Kept as the fallback path when the conversation agent
+ * isn't enabled. Replaced by executeConversationAgent in Phase 6 cleanup.
+ */
+async function executePresentationStageGate(
   ctx: EmmaContext,
   intent: IntentResult,
   customerText: string,
@@ -110,6 +142,7 @@ export async function executePresentationStage(
   const userContent = JSON.stringify({
     stage:             'PRESENTATION',
     goal:              'Pitch this specific product. Be concrete: name, what makes it click, price + PDP URL. End with one CTA: "I\'ll take it ♥" or "Tell me more". Do not invent specs or reviews — only use what\'s in product.reviews or product.description. Keep under 480 chars total.',
+    costLastRule:      'HARD CONSTRAINT: the closing sentence of your reply MUST be a fit-confirming question, not a price. Mid-reply price is fine. Never end on a number. BAD: "The Lovense Osci 3 is great, $129 right now, want it?" GOOD: "This is the one I\'d pick for what you described, Lovense Osci 3 (xdipx.com/products/lovense-osci-3). It\'s $129. Does that feel like the one?"',
     product: {
       handle:      productCtx.handle,
       title:       productCtx.title,
@@ -247,9 +280,17 @@ export async function executePresentationStage(
 
   if (!hasPdpUrl || !hasPrice) {
     fabricationCaught = 'pdp_url_or_price_mismatch'
-    // Swap in deterministic fallback
-    finalProse = pickPresentationTemplate({
-      title:  productCtx.title,
+    // Swap in deterministic fallback from the fit-closer bank (8 contextual
+    // variants, all cost-last compliant). Context is derived from discovered slots.
+    const slots = (ctx.conversation.discoveredSlots ?? {}) as Record<string, unknown>
+    const fitCtx = selectFitCloserContext(
+      focusHandle,
+      ctx.conversation.currentPitchHandle,
+      slots,
+    )
+    const closerFn = pickFitCloser(fitCtx)
+    finalProse = closerFn({
+      name:   productCtx.title,
       price:  productCtx.price ?? '',
       pdpUrl: productCtx.pdpUrl,
     })
@@ -285,4 +326,34 @@ export async function executePresentationStage(
       fabricationCaught,
     },
   }
+}
+
+// ---------------------------------------------------------------------------
+// FitCloser context selection
+// ---------------------------------------------------------------------------
+
+/**
+ * Choose a FitCloserContext based on discovered slots and conversation state.
+ *
+ * Priority order:
+ *   1. Single pitched product (handle matches currentPitchHandle) → 'single-strong-match'
+ *   2. Budget concern in slots (priceMax set) → 'single-budget-sensitive'
+ *   3. First-timer experience → 'first-timer-needs-reassurance'
+ *   4. Default → 'single-strong-match'
+ */
+function selectFitCloserContext(
+  focusHandle: string,
+  currentPitchHandle: string | null,
+  slots: Record<string, unknown>,
+): FitCloserContext {
+  const hasBudgetConcern = typeof slots['priceMax'] === 'number'
+  const isFirstTimer = slots['experience'] === 'first-time'
+
+  if (isFirstTimer) return 'first-timer-needs-reassurance'
+  if (hasBudgetConcern) return 'single-budget-sensitive'
+  // Named product from NAME_ITEM intent or existing pitch
+  if (focusHandle && (currentPitchHandle === focusHandle || currentPitchHandle)) {
+    return 'single-strong-match'
+  }
+  return 'single-strong-match'
 }

@@ -1,0 +1,14 @@
+{
+  "id": "017-ab-pitch-remembered-first-option",
+  "description": "Customer was shown two options (A then B). They say 'actually the first one'. Emma must resolve handle-a from pitchedHandlesLog[0], not confuse it with the current pitch.",
+  "channel": "sms",
+  "priorSummary": "Customer was shown Lovense Domi 2 first, then We-Vibe Chorus. Currently considering the Chorus.",
+  "priorSlots": { "audience": "couples" },
+  "pitchedHandlesLog": ["lovense-domi-2", "we-vibe-chorus"],
+  "turns": [
+    { "role": "user", "text": "actually I liked the first one you showed me better" },
+    { "role": "expected_behavior", "tags": ["resolves_first_option", "references_lovense_domi_2", "not_we_vibe", "uses_handles_log"] }
+  ],
+  "evalDimensions": ["memory", "coherence", "no_derail"],
+  "regressionFor": "single-pitch-handle-truncation"
+}

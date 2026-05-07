@@ -100,6 +100,19 @@ export interface TurnObservabilityUpdate {
   outputTokens?: number | undefined
   toolCalls?: Array<{ name: string; input: unknown; ok: boolean; error?: string | undefined }> | undefined
   fabricationCaught?: string | undefined
+  /** True when this turn was a vulnerability soft-beat (gate not advanced,
+   *  no product surfaced). Written to sms_turns.soft_beat column. */
+  softBeat?: boolean | undefined
+  /**
+   * Migration 032: true when the Sonnet loop exhausted MAX_TOOL_HOPS with a
+   * pending tool_use stop_reason. Written to sms_turns.tool_budget_exhausted.
+   */
+  toolBudgetExhausted?: boolean | undefined
+  /**
+   * ADR-003a Fix 3: true when the dedup filter returned all_results_previously_pitched.
+   * Surfaces the repeat-pitch failure mode in turn logs without parsing tool result codes.
+   */
+  searchRepeatedPitch?: boolean | undefined
 }
 
 /**
@@ -133,6 +146,12 @@ export async function finaliseTurnRows(opts: {
       ...(observability?.outputTokens !== undefined      && { outputTokens: observability.outputTokens }),
       ...(observability?.toolCalls !== undefined         && { toolCalls: observability.toolCalls }),
       ...(observability?.fabricationCaught !== undefined && { fabricationCaught: observability.fabricationCaught }),
+      // Gate-state: soft-beat flag for vulnerability turns
+      ...(observability?.softBeat !== undefined          && { softBeat: observability.softBeat }),
+      // Migration 032: tool-budget exhaustion telemetry
+      ...(observability?.toolBudgetExhausted !== undefined && { toolBudgetExhausted: observability.toolBudgetExhausted }),
+      // Migration 033: dedup-exhaustion telemetry (all results previously pitched)
+      ...(observability?.searchRepeatedPitch !== undefined && { searchRepeatedPitch: observability.searchRepeatedPitch }),
     })
     .where(eq(smsTurns.id, sentinelId))
 
@@ -150,6 +169,9 @@ export async function finaliseTurnRows(opts: {
       outputTokens: observability?.outputTokens,
       toolCalls: observability?.toolCalls,
       fabricationCaught: observability?.fabricationCaught,
+      softBeat: observability?.softBeat,
+      toolBudgetExhausted: observability?.toolBudgetExhausted ?? false,
+      searchRepeatedPitch: observability?.searchRepeatedPitch ?? false,
       emmaMsg,
       latencyMs,
       pipelineVersion,
@@ -312,6 +334,17 @@ export interface StageTelemetryOverride {
   outputTokens?: number | undefined
   toolCalls?: Array<{ name: string; input: unknown; ok: boolean; error?: string | undefined }> | undefined
   fabricationCaught?: string | undefined
+  /** True when this turn was a vulnerability soft-beat. Written to soft_beat column. */
+  softBeat?: boolean | undefined
+  /**
+   * Migration 032: true when the Sonnet loop exhausted MAX_TOOL_HOPS with a
+   * pending tool_use stop_reason. Written to sms_turns.tool_budget_exhausted.
+   */
+  toolBudgetExhausted?: boolean | undefined
+  /**
+   * ADR-003a Fix 3: true when the dedup filter returned all_results_previously_pitched.
+   */
+  searchRepeatedPitch?: boolean | undefined
 }
 
 /**
@@ -404,10 +437,14 @@ export async function withTurnLoggingForStageResponse(
     intentConfidence: telemetry.intentConfidence,
     stageIn: telemetry.stageIn,
     stageOut: telemetry.stageOut,
-    ...(telemetry.inputTokens !== undefined      && { inputTokens: telemetry.inputTokens }),
-    ...(telemetry.outputTokens !== undefined     && { outputTokens: telemetry.outputTokens }),
-    ...(telemetry.toolCalls !== undefined        && { toolCalls: telemetry.toolCalls }),
+    ...(telemetry.inputTokens !== undefined       && { inputTokens: telemetry.inputTokens }),
+    ...(telemetry.outputTokens !== undefined      && { outputTokens: telemetry.outputTokens }),
+    ...(telemetry.toolCalls !== undefined         && { toolCalls: telemetry.toolCalls }),
     ...(telemetry.fabricationCaught !== undefined && { fabricationCaught: telemetry.fabricationCaught }),
+    // Gate-state: soft-beat flag for vulnerability turns
+    ...(telemetry.softBeat !== undefined          && { softBeat: telemetry.softBeat }),
+    // Migration 032: tool-budget exhaustion telemetry
+    ...(telemetry.toolBudgetExhausted !== undefined && { toolBudgetExhausted: telemetry.toolBudgetExhausted }),
   }
 
   if (sentinelId !== null) {

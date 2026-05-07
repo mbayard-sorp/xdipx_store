@@ -80,6 +80,15 @@ function IvrIcon() {
     </svg>
   )
 }
+function ChatBubbleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <line x1="9" y1="10" x2="15" y2="10" />
+      <line x1="9" y1="14" x2="13" y2="14" />
+    </svg>
+  )
+}
 function SettingsIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -130,7 +139,7 @@ const NAV_ITEMS = [
   { to: '/admin/bulk-import',       label: 'Bulk Import',      Icon: UploadIcon     },
   { to: '/admin/collections-mgr', label: 'Collections Mgr.',  Icon: VaultIcon     },
   { to: '/admin/reviews',        label: 'Reviews',      Icon: ReviewsIcon,  badgeKey: 'reviews' },
-  { to: '/admin/ivr',            label: 'IVR',          Icon: IvrIcon       },
+  { to: '/admin/voice-and-sms',  label: 'Voice & SMS',  Icon: IvrIcon       },
   { to: '/admin/voicemails',     label: 'Voicemails',   Icon: PhoneIcon,    badgeKey: 'voicemails' },
   { to: '/admin/calls',          label: 'Calls',        Icon: PhoneIcon     },
   { to: '/admin/phone-orders',   label: 'Phone Orders', Icon: CartUpsellIcon },
@@ -139,6 +148,7 @@ const NAV_ITEMS = [
   { to: '/admin/search-filters', label: 'Search Filters', Icon: SearchFilterIcon },
   { to: '/admin/seo-regen',      label: 'SEO Regen',     Icon: LabsIcon      },
   { to: '/admin/labs',           label: 'Labs',          Icon: LabsIcon      },
+  { to: '/admin/emma-chat',      label: 'Emma Chat',    Icon: ChatBubbleIcon },
   { to: '/admin/settings',       label: 'Settings',     Icon: SettingsIcon  },
 ]
 

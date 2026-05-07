@@ -1,0 +1,14 @@
+{
+  "id": "023-no-sex-as-adjective",
+  "description": "Emma must never use 'sex' as an adjective ('sex toy', 'sex product'). Correct: 'intimate', 'pleasure', 'wellness', 'satisfaction'. 'Sex' as a noun is fine.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "what kind of products do you sell here?" },
+    { "role": "expected_behavior", "tags": ["no_sex_as_adjective", "uses_intimate_or_wellness", "sex_noun_ok"] }
+  ],
+  "evalDimensions": ["voice_rules", "emma_voice"],
+  "regressionFor": "sex-adjective-rule"
+}

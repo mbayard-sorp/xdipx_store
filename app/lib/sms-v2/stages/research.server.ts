@@ -25,6 +25,16 @@ import type { IvrProductCard } from '~/lib/ivr-search.server'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 import { fetchProductContext } from './_product-context.server'
 import { pickResearchFallbackTemplate } from '../templates/research-templates'
+import { extractSlots } from '../slot-extractor.server'
+import { getExplainer, type ExplainerCategory } from '../templates/category-explainers'
+import {
+  suspendForExplain,
+  initDiscoveryState,
+  mergeSlots,
+  resumeFromExplain,
+  type DiscoveryState,
+  type DiscoverySlots,
+} from '../discovery-gate.server'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -107,6 +117,93 @@ export async function executeResearchStage(
   intent: IntentResult,
   customerText: string,
 ): Promise<StageResponse> {
+  // ── 0. Slot extraction (shared by sub-dispatcher and resume logic) ────────────
+  //
+  // Run extractSlots once at the top so both the advice sub-dispatcher and the
+  // EXPLAIN resume check can use the results without a second LLM call.
+  const priorSlots = (ctx.conversation.discoveredSlots ?? {}) as Partial<DiscoverySlots>
+  const { slots: extractedSlots } = await extractSlots({
+    text: customerText,
+    priorSlots,
+  })
+
+  // ── 0a. Advice sub-dispatcher (Branch 4 entry) ───────────────────────────────
+  //
+  // When the customer asks an educational question ("tell me about lube", "what's
+  // the difference between water and silicone"), route to the explainer bank
+  // instead of spinning up a full LLM comparison session. This keeps the RESEARCH
+  // handler from returning product links on what is clearly an information request.
+  //
+  // The gate is suspended via suspendForExplain() so we can resume discovery from
+  // the same gate position on the customer's next message.
+  //
+  // Falls through to the existing LLM-driven prose path when either condition is
+  // not met (not an advice request, or no explainer for the category).
+  if (extractedSlots.isAdviceRequest && extractedSlots.category) {
+    const explainerCategory = extractedSlots.category as ExplainerCategory
+    const explainer = getExplainer(explainerCategory)
+
+    if (explainer) {
+      // Suspend the discovery gate at its current position. The discovery handler
+      // calls resumeFromExplain() on the customer's next message.
+      const currentRaw = ctx.conversation.discoveryState ?? null
+      const currentState: DiscoveryState = currentRaw !== null
+        ? (currentRaw as DiscoveryState)
+        : initDiscoveryState()
+      const suspended = suspendForExplain(currentState)
+
+      // Merge the extracted slots so the resume has full signal.
+      const mergedSlots = mergeSlots(priorSlots, extractedSlots)
+
+      return {
+        stageOut: 'RESEARCH',
+        goalAchieved: false,
+        segments: [{ prose: explainer.sms }],
+        stateWrites: {
+          stage: 'RESEARCH',
+          discoveryState: suspended,
+          discoveredSlots: mergedSlots as Record<string, unknown>,
+        },
+        telemetry: {
+          intent: intent.intent,
+          intentConfidence: intent.confidence,
+          inputTokens: 0,
+          outputTokens: 0,
+        },
+      }
+    }
+  }
+
+  // ── 0b. Resume-from-EXPLAIN detection ────────────────────────────────────────
+  //
+  // Safety net (Edit 7): if the prior discovery state was EXPLAIN (the customer
+  // was on an advice side-trip) and the new message is NOT another advice
+  // question but DOES carry shopping signal (category / audience / matters),
+  // resume the gate machine and transition stage to DISCOVERY so the next turn
+  // lands in the discovery handler with the correct gate position.
+  //
+  // The current turn still runs the existing LLM path — the customer gets a
+  // useful comparison reply AND the machine is correctly resumed. The resume
+  // stateWrites are injected into the final StageResponse at step 5 below.
+  const priorDiscoveryState = ctx.conversation.discoveryState as DiscoveryState | null | undefined
+  const wasExplaining = priorDiscoveryState?.gate === 'EXPLAIN'
+  const hasShoppingSignal =
+    (extractedSlots.category !== undefined) ||
+    (extractedSlots.audience !== undefined) ||
+    ((extractedSlots.matters?.length ?? 0) > 0)
+
+  // These are injected into stateWrites at step 5 if set.
+  let resumedDiscoveryState: DiscoveryState | undefined
+  let resumedSlots: Partial<DiscoverySlots> | undefined
+
+  if (wasExplaining && !extractedSlots.isAdviceRequest && hasShoppingSignal) {
+    // Resume the gate from where it was before the explain side-trip.
+    resumedDiscoveryState = resumeFromExplain(
+      priorDiscoveryState as DiscoveryState & { gate: 'EXPLAIN' },
+    )
+    resumedSlots = mergeSlots(priorSlots, extractedSlots)
+  }
+
   // ── 1. Build candidate pool ──────────────────────────────────────────────────
   const toolCalls: StageResponse['telemetry']['toolCalls'] = []
   let inputTokens  = 0
@@ -270,14 +367,28 @@ export async function executeResearchStage(
   // ── 5. Compose StageResponse ─────────────────────────────────────────────────
   // RESEARCH stays in RESEARCH until intent shifts (DISCOVERY's NAME_ITEM/COMMIT_PICK
   // or classifier routes OBJECTION). No stage transition here.
+  //
+  // Exception: if step 0b detected a resume-from-EXPLAIN, we transition to
+  // DISCOVERY so the next inbound routes to the discovery handler. The current
+  // turn's prose is still the LLM comparison reply above.
+  const stageOut: typeof ctx.conversation.stage = resumedDiscoveryState !== undefined
+    ? 'DISCOVERY'
+    : 'RESEARCH'
+
   return {
-    stageOut:     'RESEARCH',
+    stageOut,
     goalAchieved: false,
     segments: [{
       prose: finalProse,
     }],
     stateWrites: {
-      stage: 'RESEARCH',
+      stage: stageOut,
+      // If we resumed from EXPLAIN, persist the resumed gate state and merged
+      // slots so the next discovery turn has the correct starting point.
+      ...(resumedDiscoveryState !== undefined && {
+        discoveryState: resumedDiscoveryState,
+        discoveredSlots: resumedSlots as Record<string, unknown>,
+      }),
     },
     telemetry: {
       intent:           intent.intent,

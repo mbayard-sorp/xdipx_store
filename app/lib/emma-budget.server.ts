@@ -1,9 +1,15 @@
 import { kvGet, kvIncr, kvSet } from './kv.server'
 
-// Per-session caps. A casual shopper sends 5–10 turns; 30 turns or 20k tokens
+// Per-session caps. A casual shopper sends 5–10 turns; 40 turns or 30k tokens
 // covers any legitimate browsing pattern with margin and stops a runaway loop.
-const SESSION_TURN_CAP = 30
-const SESSION_TOKEN_CAP = 20_000
+//
+// Token budget counts only `input_tokens` (uncached) + `output_tokens` from the
+// Anthropic API response — cache reads (`cache_read_input_tokens`) are
+// excluded, so the cap effectively measures the dynamic portion of each turn.
+// Bumped from 20k → 30k to give headroom for tool-heavy discovery turns once
+// the v2 web pipeline lands. The global daily ceiling is the real cost gate.
+const SESSION_TURN_CAP = 40
+const SESSION_TOKEN_CAP = 30_000
 const SESSION_TTL_SECONDS = 60 * 60 * 6 // 6h rolling window
 
 // Global wallet ceiling. Tuned for Haiku 4.5 ($1/MTok in, $5/MTok out) — 5M
@@ -29,6 +35,13 @@ function todayUtc(): string {
  * current token total. Caller records actual token usage after the LLM call.
  */
 export async function reserveSessionBudget(sessionId: number | string): Promise<BudgetReservation> {
+  // Dev bypass: local testing of the gate machine + explainers easily blows
+  // through the 20k-token cap in 2-3 turns once the system prompt + gate
+  // context block are accounted for. The cap is a production cost control,
+  // not a correctness check.
+  if (process.env['NODE_ENV'] !== 'production') {
+    return { ok: true, turnsUsed: 0, tokensUsed: 0 }
+  }
   try {
     const turnsUsed = await kvIncr(turnKey(sessionId))
     if (turnsUsed === 1) await kvSet(turnKey(sessionId), turnsUsed, SESSION_TTL_SECONDS)

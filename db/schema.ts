@@ -480,6 +480,20 @@ export const smsConversations = pgTable('sms_conversations', {
   stageSetAt:          timestamp('stage_set_at').notNull().defaultNow(),
   lastActiveAt:        timestamp('last_active_at').notNull().defaultNow(),
   conversationId:      uuid('conversation_id').notNull().defaultRandom(),
+  // Migration 030: Emma discovery state machine + slot accumulator.
+  discoveryState:      json('discovery_state').$type<unknown>(),
+  discoveredSlots:     json('discovered_slots').$type<Record<string, unknown>>().notNull().default({}),
+  // Migration 031: voice-channel pending pdp link awaiting caller permission.
+  pendingPdpUrl:       text('pending_pdp_url'),
+  // Migration 032: Phase 0 memory primitives.
+  // conversation_summary — Haiku-generated 1-2 sentence rolling summary. Updated
+  //   fire-and-forget after each turn. Injected into the system prompt so the
+  //   agent retains context beyond the HISTORY_LIMIT window. Copied forward on
+  //   24h rotation as "From a previous conversation: {summary}".
+  conversationSummary: text('conversation_summary'),
+  // pitched_handles_log — ordered array (most-recent last) of the last 10 pitched
+  //   product handles. Enables "the first one you showed me" resolution.
+  pitchedHandlesLog:   text('pitched_handles_log').array(),
 }, t => ({
   // Phase 10: customer_gid indexes for cross-channel joins (additive).
   customerGidIdx:       index('sms_conversations_customer_gid_idx').on(t.customerGid),
@@ -514,6 +528,17 @@ export const smsTurns = pgTable('sms_turns', {
   pipelineVersion:  varchar('pipeline_version', { length: 8 }).notNull(),
   // Migration 028: channel='sms' (default) or 'web'. Existing rows backfilled to 'sms'.
   channel:          varchar('channel', { length: 8 }).notNull().default('sms'),
+  // Migration 030: turn flagged when the engine recognized a vulnerability
+  // disclosure and suspended the gate / suppressed the product pitch.
+  softBeat:         boolean('soft_beat').notNull().default(false),
+  // Migration 032: set true when the Sonnet loop exhausted MAX_TOOL_HOPS with a
+  // pending tool_use stop_reason — no final text was generated, safeFallback ran.
+  // Powers the "tool budget exhausted rate" dashboard query in Phase 3.
+  toolBudgetExhausted: boolean('tool_budget_exhausted').notNull().default(false),
+  // Migration 033: set true when the dedup filter returned all_results_previously_pitched
+  // (every search result was already in pitchedHandlesLog). Distinct from toolBudgetExhausted.
+  // Powers the "repeat-pitch rate" dashboard query in Phase 3.
+  searchRepeatedPitch: boolean('search_repeated_pitch').notNull().default(false),
   createdAt:        timestamp('created_at').notNull().defaultNow(),
 }, t => ({
   twilioSidUniq:    uniqueIndex('sms_turns_twilio_sid_uniq').on(t.twilioMessageSid),
@@ -546,9 +571,63 @@ export const webConversations = pgTable('web_conversations', {
   stageSetAt:          timestamp('stage_set_at').notNull().defaultNow(),
   lastActiveAt:        timestamp('last_active_at').notNull().defaultNow(),
   conversationId:      uuid('conversation_id').notNull().defaultRandom(),
+  // Migration 030: Emma discovery state machine + slot accumulator (web parity).
+  discoveryState:      json('discovery_state').$type<unknown>(),
+  discoveredSlots:     json('discovered_slots').$type<Record<string, unknown>>().notNull().default({}),
+  // Migration 031: pending pdp link awaiting caller permission (voice; reserved for web).
+  pendingPdpUrl:       text('pending_pdp_url'),
+  // Migration 032: Phase 0 memory primitives — mirror of sms_conversations columns.
+  // Added now to avoid Phase 2 schema reconciliation cost when the participants
+  // table aligns SMS and web identity.
+  conversationSummary: text('conversation_summary'),
+  pitchedHandlesLog:   text('pitched_handles_log').array(),
 }, t => ({
   // Phase 10: customer_gid indexes for cross-channel joins (additive).
   customerGidIdx:       index('web_conversations_customer_gid_idx').on(t.customerGid),
   customerGidActiveIdx: index('web_conversations_gid_active_idx').on(t.customerGid, t.lastActiveAt),
 }))
 
+// Migration 032: internal /admin/emma-chat — Emma as product SME for drafting Reddit replies.
+// Append-only message log; assistant rows carry tool_use blocks Claude emitted,
+// tool rows carry the tool_result payloads we returned in the next turn.
+
+export type EmmaChatToolCall = {
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+
+export type EmmaChatToolResult = {
+  tool_use_id: string
+  content: string
+  is_error?: boolean
+}
+
+export const emmaChatThreads = pgTable('emma_chat_threads', {
+  id:                serial('id').primaryKey(),
+  title:             varchar('title', { length: 200 }).notNull().default('New thread'),
+  redditPostUrl:     text('reddit_post_url'),
+  redditPostExcerpt: text('reddit_post_excerpt'),
+  archived:          boolean('archived').notNull().default(false),
+  createdAt:         timestamp('created_at').notNull().defaultNow(),
+  updatedAt:         timestamp('updated_at').notNull().defaultNow(),
+}, t => ({
+  updatedIdx: index('emma_chat_threads_updated_idx').on(t.updatedAt),
+  activeIdx:  index('emma_chat_threads_active_idx').on(t.archived, t.updatedAt),
+}))
+
+export const emmaChatMessages = pgTable('emma_chat_messages', {
+  id:           serial('id').primaryKey(),
+  threadId:     integer('thread_id').notNull().references(() => emmaChatThreads.id, { onDelete: 'cascade' }),
+  role:         varchar('role', { length: 10 }).notNull(), // 'user' | 'assistant' | 'tool'
+  content:      text('content').notNull().default(''),
+  toolCalls:    json('tool_calls').$type<EmmaChatToolCall[]>(),
+  toolResults:  json('tool_results').$type<EmmaChatToolResult[]>(),
+  stopReason:   varchar('stop_reason', { length: 20 }),
+  inputTokens:  integer('input_tokens'),
+  outputTokens: integer('output_tokens'),
+  latencyMs:    integer('latency_ms'),
+  createdAt:    timestamp('created_at').notNull().defaultNow(),
+}, t => ({
+  threadIdx: index('emma_chat_messages_thread_idx').on(t.threadId, t.createdAt),
+}))

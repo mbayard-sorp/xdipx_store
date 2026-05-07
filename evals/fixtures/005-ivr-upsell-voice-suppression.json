@@ -1,0 +1,14 @@
+{
+  "id": "005-ivr-upsell-voice-suppression",
+  "description": "Regression: on voice channel, Emma must NOT speak a URL aloud. If she has a product to share, she should offer to text the link, not read 'https://xdipx.com/products/...'.",
+  "channel": "voice",
+  "priorSummary": null,
+  "priorSlots": { "audience": "for-her", "category": "vibrator" },
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "what vibrators do you have that are quiet?" },
+    { "role": "expected_behavior", "tags": ["no_url_spoken", "offers_to_text_link", "under_60_words", "no_markdown"] }
+  ],
+  "evalDimensions": ["voice_rules", "no_fabrication", "emma_voice"],
+  "regressionFor": "ivr-url-spoken"
+}
