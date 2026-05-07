@@ -275,11 +275,11 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-function parseMetafield(metafields: ({ namespace: string; key: string; value: string } | null)[], key: string): string {
+export function parseMetafield(metafields: ({ namespace: string; key: string; value: string } | null)[], key: string): string {
   return metafields.find(m => m?.key === key)?.value ?? ''
 }
 
-function parseMetafieldJSON<T>(metafields: ({ namespace: string; key: string; value: string } | null)[], key: string, fallback: T): T {
+export function parseMetafieldJSON<T>(metafields: ({ namespace: string; key: string; value: string } | null)[], key: string, fallback: T): T {
   const raw = parseMetafield(metafields, key)
   if (!raw) return fallback
   try { return JSON.parse(raw) as T } catch { return fallback }
@@ -4442,6 +4442,7 @@ export interface SearchProduct {
   title: string
   vendor: string
   tags: string[]
+  availableForSale: boolean
   featuredImage: { url: string; altText: string | null } | null
   priceRange: { minVariantPrice: { amount: string; currencyCode: string } }
   // Bug fix: Storefront API field is maxVariantPrice (not maxVariantCompareAtPrice)
@@ -4456,7 +4457,7 @@ export interface SearchFilter {
 }
 
 const SEARCH_PRODUCT_FRAGMENT = `
-  id handle title vendor tags
+  id handle title vendor tags availableForSale
   featuredImage { url altText }
   priceRange { minVariantPrice { amount currencyCode } }
   compareAtPriceRange { maxVariantPrice { amount currencyCode } }
@@ -5263,4 +5264,270 @@ export async function sendDraftOrderInvoice(
     throw new Error(`draftOrderInvoiceSend: ${res.draftOrderInvoiceSend.userErrors.map(e => e.message).join('; ')}`)
   }
   return { invoiceUrl: res.draftOrderInvoiceSend.draftOrder?.invoiceUrl ?? null }
+}
+
+// ─── Emma Chat Catalog Helpers ────────────────────────────────────────────
+//
+// Read-only helpers consumed by the /admin/emma-chat tool executors.
+// All Shopify calls stay in this file (Oxygen migration seam).
+// List calls are wrapped in cached() to dedupe repeated tool invocations
+// within a single chat session.
+
+/**
+ * Build a Shopify Storefront `products(query: …)` search string from structured
+ * filters. All clauses are joined with AND.
+ *
+ * Examples:
+ *   buildShopifyQuery({ keyword: 'wand', tags: ['for-her'], priceMax: 100 })
+ *   // → 'title:*wand* AND tag:for-her AND variants.price:<=100'
+ *
+ *   buildShopifyQuery({ productType: 'vibrator', priceMin: 20, priceMax: 80 })
+ *   // → 'product_type:vibrator AND variants.price:>=20 AND variants.price:<=80'
+ *
+ *   buildShopifyQuery({ excludeArchivedDeals: true })
+ *   // → '-tag:deal-status-archived'
+ *
+ *   buildShopifyQuery({})
+ *   // → ''
+ */
+export function buildShopifyQuery(input: {
+  keyword?: string
+  tags?: string[]
+  productType?: string
+  priceMin?: number
+  priceMax?: number
+  excludeArchivedDeals?: boolean
+}): string {
+  // Strip Shopify query special chars from any user-supplied string
+  const sanitize = (s: string) => s.replace(/[:()*"]/g, '').trim().toLowerCase()
+
+  const clauses: string[] = []
+
+  if (input.keyword) {
+    const kw = sanitize(input.keyword)
+    if (kw) clauses.push(`title:*${kw}*`)
+  }
+
+  if (input.tags && input.tags.length > 0) {
+    for (const tag of input.tags) {
+      const t = sanitize(tag)
+      if (t) clauses.push(`tag:${t}`)
+    }
+  }
+
+  if (input.productType) {
+    const pt = sanitize(input.productType)
+    if (pt) clauses.push(`product_type:${pt}`)
+  }
+
+  if (typeof input.priceMin === 'number' && input.priceMin > 0) {
+    clauses.push(`variants.price:>=${input.priceMin}`)
+  }
+
+  if (typeof input.priceMax === 'number') {
+    clauses.push(`variants.price:<=${input.priceMax}`)
+  }
+
+  if (input.excludeArchivedDeals) {
+    clauses.push('-tag:deal-status-archived')
+  }
+
+  return clauses.join(' AND ')
+}
+
+// Stable hash of a search input object for use as a cache key.
+function hashSearchInput(input: Record<string, unknown>): string {
+  const stable = JSON.stringify(input, Object.keys(input).sort())
+  return crypto.createHash('sha1').update(stable).digest('hex').slice(0, 16)
+}
+
+export interface EmmaProductCard {
+  handle: string
+  url: string                    // 'https://xdipx.com/products/${handle}'
+  title: string
+  productType: string | null
+  priceUsd: number               // numeric, from first variant priceRange
+  compareAtUsd: number | null
+  available: boolean             // true if any variant is available
+  mapRestricted: boolean         // from xdipx.map_restricted metafield
+  tagline: string | null
+  productTypeDial: string | null // xdipx.product_type_dial
+  audienceTags: string[]         // xdipx.audience_tags (list.text, JSON-encoded)
+  moodTags: string[]             // xdipx.mood_tags
+  mattersTags: string[]          // xdipx.matters_tags
+}
+
+// Map a SearchProduct node (from searchProducts()) to an EmmaProductCard.
+// SearchProduct carries no metafields, so tag/dial fields will be empty/null
+// unless the node was enriched. The detail helper fills those in.
+function searchNodeToEmmaCard(node: SearchProduct): EmmaProductCard {
+  const priceUsd = parseFloat(node.priceRange.minVariantPrice.amount)
+  const compareAtRaw = node.compareAtPriceRange.maxVariantPrice?.amount
+  return {
+    handle: node.handle,
+    url: `https://xdipx.com/products/${node.handle}`,
+    title: node.title,
+    productType: null,       // not in SearchProduct fragment
+    priceUsd: isNaN(priceUsd) ? 0 : priceUsd,
+    compareAtUsd: compareAtRaw ? parseFloat(compareAtRaw) : null,
+    available: node.availableForSale,
+    mapRestricted: false,    // not in SearchProduct fragment
+    tagline: null,
+    productTypeDial: null,
+    audienceTags: [],
+    moodTags: [],
+    mattersTags: [],
+  }
+}
+
+// Map a full ShopifyProductNode (from getProductByHandle / getProductsByIds)
+// to an EmmaProductCard, using all available metafields.
+function productNodeToEmmaCard(node: ShopifyProductNode): EmmaProductCard {
+  const mf = node.metafields
+  const variant = node.variants.edges[0]?.node
+  const priceUsd = parseFloat(variant?.price.amount ?? '0')
+  const compareAtRaw = variant?.compareAtPrice?.amount
+  const mapRestrictedRaw = parseMetafield(mf, 'map_restricted')
+  const available = node.variants.edges.some(e => e.node.availableForSale)
+  return {
+    handle: node.handle,
+    url: `https://xdipx.com/products/${node.handle}`,
+    title: node.title,
+    productType: null,   // Shopify productType field is not in PRODUCT_CORE_FRAGMENT
+    priceUsd: isNaN(priceUsd) ? 0 : priceUsd,
+    compareAtUsd: compareAtRaw ? parseFloat(compareAtRaw) : null,
+    available,
+    mapRestricted: mapRestrictedRaw === 'true',
+    tagline: parseMetafield(mf, 'tagline') || null,
+    productTypeDial: parseMetafield(mf, 'product_type_dial') || null,
+    audienceTags: parseMetafieldJSON<string[]>(mf, 'audience_tags', []),
+    moodTags: parseMetafieldJSON<string[]>(mf, 'mood_tags', []),
+    mattersTags: parseMetafieldJSON<string[]>(mf, 'matters_tags', []),
+  }
+}
+
+/**
+ * Search the live catalog and return compact product cards for Claude tool use.
+ * Results are cached for READ_TTL seconds so repeated identical tool calls
+ * within one chat session are O(1) on the second hit.
+ *
+ * limit defaults to 12, hard max 20.
+ */
+export async function searchCatalogForEmma(input: {
+  keyword?: string
+  tags?: string[]
+  productType?: string
+  priceMin?: number
+  priceMax?: number
+  limit?: number
+}): Promise<EmmaProductCard[]> {
+  const limit = Math.min(Math.max(input.limit ?? 12, 1), 20)
+  const cacheKey = `emma-search:${hashSearchInput({ ...input, limit })}`
+
+  return cached(cacheKey, READ_TTL, async () => {
+    // Storefront `query` only handles keyword (title:*foo*) reliably.
+    // Tags + price filters MUST go through `productFilters` — the `tag:` and
+    // `variants.price:>=N` query-string forms silently return zero rows in
+    // Storefront 2024-10. Mirrors the canonical pattern in search.server.ts.
+    const queryInput: Parameters<typeof buildShopifyQuery>[0] = {}
+    if (input.keyword !== undefined) queryInput.keyword = input.keyword
+    if (input.productType !== undefined) queryInput.productType = input.productType
+    const query = buildShopifyQuery(queryInput) || (input.keyword ?? 'wellness')
+
+    const productFilters: Record<string, unknown>[] = []
+    for (const tag of input.tags ?? []) productFilters.push({ tag })
+    if (input.priceMin !== undefined || input.priceMax !== undefined) {
+      const price: { min?: number; max?: number } = {}
+      if (input.priceMin !== undefined) price.min = input.priceMin
+      if (input.priceMax !== undefined) price.max = input.priceMax
+      productFilters.push({ price })
+    }
+
+    const result = await searchProducts({ query, first: limit, productFilters })
+    return result.products.map(searchNodeToEmmaCard)
+  })
+}
+
+export interface EmmaProductDetail extends EmmaProductCard {
+  fullStory: string | null
+  featureBullets: string[] | null
+  sensationDial: Record<string, number> | null
+  pairingWhy: Record<string, string> | null
+  accessoryHandles: string[]
+  imageUrl: string | null
+  variants: Array<{ id: string; title: string; priceUsd: number; available: boolean }>
+}
+
+/**
+ * Fetch full product enrichment for a single product handle.
+ * Resolves accessory GIDs to handles via getProductsByIds().
+ * Returns null if the product does not exist.
+ */
+export async function getProductDetailForEmma(handle: string): Promise<EmmaProductDetail | null> {
+  const product = await getProductByHandle(handle)
+  if (!product) return null
+
+  // getProductByHandle returns a Product (our internal type), not the raw node.
+  // Re-fetch the raw node via storefront so we can use productNodeToEmmaCard
+  // and access the full metafield set.
+  const data = await storefront<{ product: ShopifyProductNode | null }>(`
+    query GetProductForEmma($handle: String!) {
+      product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
+    }
+  `, { handle })
+
+  const node = data.product
+  if (!node) return null
+
+  const mf = node.metafields
+  const baseCard = productNodeToEmmaCard(node)
+
+  // Parse sensation_dial as Record<string,number> for Claude legibility
+  const sensationDialRaw = parseMetafieldJSON<Record<string, unknown>>(mf, 'sensation_dial', {})
+  const sensationDial: Record<string, number> | null = (() => {
+    const entries = Object.entries(sensationDialRaw).filter(([, v]) => typeof v === 'number')
+    return entries.length > 0
+      ? Object.fromEntries(entries as [string, number][])
+      : null
+  })()
+
+  const pairingWhyRaw = parseMetafieldJSON<Record<string, string>>(mf, 'pairing_why', {})
+  const pairingWhy = Object.keys(pairingWhyRaw).length > 0 ? pairingWhyRaw : null
+
+  const accessoryIds = parseMetafieldJSON<string[]>(mf, 'accessory_product_ids', [])
+  let accessoryHandles: string[] = []
+  if (accessoryIds.length > 0) {
+    const accessories = await getProductsByIds(accessoryIds)
+    accessoryHandles = accessories.map(p => p.handle)
+  }
+
+  const featureBulletsRaw = parseMetafield(mf, 'feature_bullets')
+  const featureBullets: string[] | null = (() => {
+    if (!featureBulletsRaw) return null
+    try {
+      const parsed = JSON.parse(featureBulletsRaw)
+      if (Array.isArray(parsed)) return parsed.filter((s): s is string => typeof s === 'string')
+    } catch { /* fall through */ }
+    return null
+  })()
+
+  const imageUrl = node.images.edges[0]?.node.url ?? null
+
+  const variants = node.variants.edges.map(e => ({
+    id: e.node.id,
+    title: e.node.title,
+    priceUsd: parseFloat(e.node.price.amount),
+    available: e.node.availableForSale,
+  }))
+
+  return {
+    ...baseCard,
+    fullStory: parseMetafield(mf, 'full_story') || node.description || null,
+    featureBullets,
+    sensationDial,
+    pairingWhy,
+    accessoryHandles,
+    imageUrl,
+    variants,
+  }
 }
