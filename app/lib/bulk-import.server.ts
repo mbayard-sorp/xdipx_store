@@ -474,6 +474,182 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
   }
 }
 
+// ─── Raw import (no enrichment) ──────────────────────────────────────────────
+// Mirrors importProductGroup but skips the Sonnet orchestrator + AI metafield
+// push. Use this when you want to land products in Shopify quickly and run
+// enrichment as a separate batched pass (Anthropic Message Batches, 50% off).
+
+export async function importProductGroupRaw(group: MasterProductGroup): Promise<{
+  success: boolean
+  sku: string
+  shopifyProductId?: string
+  skipped?: boolean
+  error?: string
+  warnings?: { stage: string; message: string }[]
+}> {
+  const { masterRow, variants, isSingleVariant } = group
+  const masterSku = masterRow.SKU
+
+  try {
+    if (isDiscontinued({
+      'Sub-Category':       masterRow['Sub-Category'] ?? '',
+      'Product Title':      masterRow['Product Title'] ?? '',
+      'Product Description': masterRow['Product Description'] ?? '',
+    })) {
+      return { success: false, sku: masterSku, skipped: true, error: 'discontinued by manufacturer' }
+    }
+
+    if (await isSkuAlreadyImported(masterSku)) {
+      return { success: false, sku: masterSku, skipped: true }
+    }
+
+    const wholesale = parseFloat(masterRow.Wholesale) || 0
+    const msrp      = parseFloat(masterRow.MSRP)      || 0
+    const map       = parseFloat(masterRow.MAP ?? '0') || 0
+    const qty       = parseInt(masterRow['Total qty available']) || 0
+    const images    = getImages(masterRow)
+    const rawDesc   = masterRow['Product Description'] ?? ''
+    const description = cleanDescription(rawDesc) || `${masterRow.Brand} ${masterRow['Product Title']}`
+    const categories  = masterRow['Sub-Category']
+      ? masterRow['Sub-Category'].split(',').map(c => c.trim()).filter(Boolean)
+      : []
+    const dealPrice   = computeDealPrice(wholesale, msrp, map)
+    const category    = inferCategory(categories)
+
+    let numericId: string
+    const existingGid = await findProductBySKU(masterSku)
+
+    if (existingGid) {
+      numericId = existingGid.replace('gid://shopify/Product/', '')
+    } else if (isSingleVariant) {
+      const productScore: ProductScore = {
+        sku:           masterSku,
+        title:         masterRow['Product Title'],
+        brand:         masterRow.Brand,
+        description,
+        score:         0,
+        msrp,
+        wholesaleCost: wholesale,
+        mapPrice:      map,
+        dealPrice,
+        discountPct:   msrp > 0 ? ((msrp - dealPrice) / msrp) * 100 : 0,
+        profitPerUnit: dealPrice - wholesale,
+        qty,
+        mapType:       map === 0 ? 'no-map' : map < msrp ? 'below-msrp' : 'equals-msrp',
+        images,
+        categories,
+      }
+      const handle = slugifyHandle(masterRow['Product Title'])
+      numericId = await createShopifyProductFromFeed(productScore, handle)
+    } else {
+      const name1 = group.masterRow['Variant Option Name'] || 'Option'
+      const name2 = group.masterRow['Variant Option Name 2']
+      const optionNames = name2 ? [name1, name2] : [name1]
+      const handle = slugifyHandle(masterRow['Product Title'])
+      numericId = await createShopifyProductWithVariants(
+        {
+          title:      masterRow['Product Title'],
+          brand:      masterRow.Brand,
+          sku:        masterSku,
+          images,
+          msrp,
+          categories,
+        },
+        variants,
+        optionNames,
+        handle,
+      )
+    }
+
+    // Push BASE metafields only — no tagline, descriptionHtml, dial, mood/audience/
+    // matters tags, IVR, FAQs. Those are filled by the batched enrichment pass.
+    await pushProductToShopify({
+      shopifyProductId: numericId,
+      category,
+      dealStatus:       'pending_approval',
+      dealDate:         '2099-12-31',
+      originalPrice:    msrp,
+      wholesaleCost:    wholesale,
+      mapPrice:         map,
+      nalpacSku:        masterSku,
+      rawDescription:   rawDesc,
+      requireTagline:   false,
+    })
+
+    const [{ maxSort = 0 } = {}] = await db
+      .select({ maxSort: max(dealHistory.sortOrder) })
+      .from(dealHistory)
+    const nextSortOrder = (maxSort ?? 0) + 1
+
+    await db.insert(dealHistory).values({
+      sku:              masterSku,
+      seoTitle:         masterRow['Product Title'],  // raw title until enrichment runs
+      brand:            masterRow.Brand,
+      categories,
+      dealDate:         '2099-12-31',
+      wholesaleCost:    wholesale.toFixed(2),
+      dealPrice:        dealPrice.toFixed(2),
+      msrp:             msrp.toFixed(2),
+      mapPrice:         map.toFixed(2),
+      unitsAvailable:   qty,
+      dealScore:        null,
+      status:           'queued',
+      sortOrder:        nextSortOrder,
+      shopifyProductId: numericId,
+    }).onConflictDoNothing()
+
+    // Stub Sanity productPage — title/handle/vendor/raw description only.
+    // Enrichment pass will fill tagline, seoTitle, dial, tags, IVR, FAQs.
+    const warnings: { stage: string; message: string }[] = []
+    try {
+      const handle = await getProductHandleById(numericId)
+      if (!handle) {
+        warnings.push({ stage: 'sanity', message: 'could not resolve Shopify handle — skipping Sanity sync' })
+      } else {
+        const gid = `gid://shopify/Product/${numericId}`
+        const upsertParams: Parameters<typeof upsertProductPage>[0] = {
+          handle,
+          shopifyProductId: gid,
+          title:            masterRow['Product Title'],
+          vendor:           masterRow.Brand,
+          tags:             categories,
+          description,
+          category,
+        }
+        if (images[0]) upsertParams.imageUrl = images[0]
+
+        let lastErr: unknown
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            await upsertProductPage(upsertParams)
+            lastErr = null
+            break
+          } catch (err) {
+            lastErr = err
+            if (attempt === 1) await new Promise(r => setTimeout(r, 500))
+          }
+        }
+        if (lastErr) {
+          warnings.push({ stage: 'sanity', message: `sanity sync failed after retry: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}` })
+        }
+      }
+    } catch (err) {
+      warnings.push({ stage: 'sanity', message: err instanceof Error ? err.message : String(err) })
+    }
+
+    return {
+      success:          true,
+      sku:              masterSku,
+      shopifyProductId: numericId,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`[bulk-import-raw] Failed SKU ${masterSku}:`, message)
+    return { success: false, sku: masterSku, error: message }
+  }
+}
+
 // ─── Phase 1 forward pipeline — agent-friendly entry point ───────────────────
 // `importProductGroup` above stays the entry for the Nalpac CSV bulk path.
 // `importNewProduct` below is the entry the product-management agent uses
