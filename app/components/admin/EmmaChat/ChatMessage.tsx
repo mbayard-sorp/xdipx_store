@@ -1,6 +1,5 @@
 import { renderMarkdown } from '~/lib/markdown-render'
 import { CopyButton } from './CopyButton'
-import { QuickActions } from './QuickActions'
 
 interface ToolCall {
   id: string
@@ -81,7 +80,6 @@ export function ChatMessage({ message, isLast = false, isStreaming = false }: Ch
         {isLast && !isStreaming && message.content && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <CopyButton text={message.content} />
-            <QuickActions disabled={false} />
           </div>
         )}
       </div>

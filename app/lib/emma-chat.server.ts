@@ -33,26 +33,23 @@ function getAnthropicClient(): Anthropic {
 
 export const EMMA_SME_SYSTEM_PROMPT = `
 You are Emma, the in-house product expert at xdipx.com — an editorially-curated
-sexual-wellness storefront. This is an internal Slack-style chat with the xdipx
-team for drafting Reddit replies (mostly r/sextoys). It is NOT customer-facing.
+sexual-wellness storefront. This is an internal chat with the xdipx team. It
+is NOT customer-facing. Treat it like a Slack DM with a senior product person.
 
 Voice in THIS context (different from public site copy):
 - Frank, raw, factual. Talk like a senior product person who has actually tested
   the gear. Profanity is fine when it serves clarity. Em-dashes are fine.
-- You can name competitors (Lelo, We-Vibe, Lovense, Magic Wand, Womanizer,
-  Satisfyer, Tenga, Fleshlight, Doxy, Hitachi, etc.) and compare them honestly
-  to xdipx SKUs.
-- You can call out overhyped products. You can be opinionated.
-- You can discuss anatomy, materials (silicone vs TPE vs ABS vs porous vs
-  non-porous), motors (single vs dual, RPM, decibel level when known),
-  waterproofing, charging (USB-C vs proprietary, magnetic), noise levels,
-  sizing/girth, and what works/doesn't for which body.
+- Be direct. The team doesn't need warm-ups, hedging, or "great question!" framing.
+- Name competitors honestly (Lelo, We-Vibe, Lovense, Magic Wand, Womanizer,
+  Satisfyer, Tenga, Fleshlight, Doxy, Hitachi, etc.) and compare them to xdipx
+  SKUs. You can call out overhyped products. You can be opinionated.
+- Discuss anatomy, materials (silicone vs TPE vs ABS vs porous vs non-porous),
+  motors (single vs dual, RPM, decibel level when known), waterproofing,
+  charging (USB-C vs proprietary, magnetic), noise levels, sizing/girth, and
+  what works/doesn't for which body.
 - Do NOT use the heart symbol ♥ in this chat. Skip the public-Emma flourishes
   ("I'll take it ♥", "been living on my desk", etc.) — those are for storefront
   copy only.
-- For the FINISHED Reddit draft, avoid "sex" as an adjective — use "intimate",
-  "pleasure", "wellness", or "satisfaction". Internal reasoning between you and
-  the team can be however direct it needs to be.
 
 Catalog grounding (CRITICAL):
 - Whenever you would name an xdipx product, FIRST call the search_products tool
@@ -62,61 +59,23 @@ Catalog grounding (CRITICAL):
   product_type_dial, mood_tags, audience_tags, matters_tags) — those fields will
   be null/empty in the search payload. To pitch a product with depth, you MUST
   call get_product_details(handle) to get the full enrichment.
-- When you mention an xdipx product in your reply text, format it as:
-  [Product Title](https://xdipx.com/products/{handle})
-  That is exactly Reddit's link format — the user copies your reply verbatim.
+- When you mention an xdipx product in your reply text, format it as a Markdown
+  link: [Product Title](https://xdipx.com/products/{handle})
 - For competitor products, do NOT generate links — just name them in plain text.
 - Hard cap: at most 6 tool calls per turn. Plan your searches before you fire
   them; don't burn hops on duplicate queries.
 
-Reddit reply style:
-- Match the energy of the post you were given. Quick question = quick answer.
-  Long detailed post = thorough answer.
-- Lead with the recommendation, then the why. People scroll.
+Format:
+- Match the format of the question. A quick "what's good for X?" gets a quick
+  answer. A long detailed paste gets a thorough one.
+- Lead with the recommendation or answer, then the why.
 - If you are unsure, say so. Hype kills credibility.
-- Disclose nothing about being AI. Disclose nothing about being from xdipx
-  UNLESS the user explicitly asks you to add a disclosure. The user runs the
-  disclosure policy, not you.
 
-When the user pastes a Reddit post and asks for a draft, return ONLY the draft —
-no preamble, no "here's a draft of:" framing. They want to copy your reply.
+If the team pastes a Reddit/forum post or customer message and asks for a draft
+reply, write the reply directly — no preamble, no "here's a draft of:" framing.
+Otherwise just answer the question; no need to wrap responses as if they were
+Reddit posts.
 `.trim()
-
-// ---------------------------------------------------------------------------
-// Quick-action canned prompts — exposed so the route action can resolve them
-// to real user-message text (we persist them as actual user turns rather than
-// hidden directives so the conversation stays inspectable).
-// ---------------------------------------------------------------------------
-
-export type EmmaQuickActionId =
-  | 'more_direct'
-  | 'shorter'
-  | 'competitor_compare'
-  | 'safety_disclaimer'
-  | 'more_emma'
-
-export const EMMA_QUICK_ACTIONS: Record<EmmaQuickActionId, { label: string; prompt: string }> = {
-  more_direct: {
-    label: 'More direct',
-    prompt: 'Make that more direct. Cut the warmup. Lead with the recommendation.',
-  },
-  shorter: {
-    label: 'Shorter',
-    prompt: "Shorter. Half the length. Reddit doesn't read essays.",
-  },
-  competitor_compare: {
-    label: 'Add competitor compare',
-    prompt: 'Add a quick comparison to one or two competitor products so the rec has context.',
-  },
-  safety_disclaimer: {
-    label: 'Add safety disclaimer',
-    prompt: 'Add a brief safety / material note (silicone, body-safe, lube compatibility) where relevant.',
-  },
-  more_emma: {
-    label: 'More Emma personality',
-    prompt: 'More Emma personality. Funnier, warmer, less corporate. Still no heart symbols.',
-  },
-}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -150,23 +109,6 @@ export interface EmmaChatMessage {
 // Persistence
 // ---------------------------------------------------------------------------
 
-function deriveTitle(text: string): string {
-  const collapsed = text.replace(/\s+/g, ' ').trim()
-  if (!collapsed) return 'New thread'
-  return collapsed.length <= 80 ? collapsed : collapsed.slice(0, 77) + '...'
-}
-
-export async function listThreads(input?: { includeArchived?: boolean; limit?: number }): Promise<EmmaChatThread[]> {
-  const limit = Math.max(1, Math.min(input?.limit ?? 50, 200))
-  const rows = input?.includeArchived
-    ? await db.select().from(emmaChatThreads).orderBy(desc(emmaChatThreads.updatedAt)).limit(limit)
-    : await db.select().from(emmaChatThreads)
-        .where(eq(emmaChatThreads.archived, false))
-        .orderBy(desc(emmaChatThreads.updatedAt))
-        .limit(limit)
-  return rows.map(rowToThread)
-}
-
 export async function loadThread(threadId: number): Promise<{ thread: EmmaChatThread; messages: EmmaChatMessage[] } | null> {
   const [threadRow] = await db.select().from(emmaChatThreads).where(eq(emmaChatThreads.id, threadId)).limit(1)
   if (!threadRow) return null
@@ -177,29 +119,6 @@ export async function loadThread(threadId: number): Promise<{ thread: EmmaChatTh
     thread: rowToThread(threadRow),
     messages: messageRows.map(rowToMessage),
   }
-}
-
-export async function createThread(input: {
-  firstUserMessage: string
-  redditPostUrl?: string | null
-  redditPostExcerpt?: string | null
-}): Promise<{ threadId: number; messageId: number }> {
-  // Neon HTTP driver does not support transactions; sequential inserts.
-  const titleSource = input.redditPostExcerpt?.trim() || input.firstUserMessage
-  const title = deriveTitle(titleSource)
-  const [thread] = await db.insert(emmaChatThreads).values({
-    title,
-    redditPostUrl: input.redditPostUrl ?? null,
-    redditPostExcerpt: input.redditPostExcerpt ?? null,
-  }).returning({ id: emmaChatThreads.id })
-  if (!thread) throw new Error('createThread: insert returned no row')
-  const [message] = await db.insert(emmaChatMessages).values({
-    threadId: thread.id,
-    role: 'user',
-    content: input.firstUserMessage,
-  }).returning({ id: emmaChatMessages.id })
-  if (!message) throw new Error('createThread: message insert returned no row')
-  return { threadId: thread.id, messageId: message.id }
 }
 
 export async function appendUserMessage(threadId: number, content: string): Promise<{ messageId: number }> {
@@ -220,6 +139,45 @@ export async function archiveThread(threadId: number): Promise<void> {
   await db.update(emmaChatThreads)
     .set({ archived: true, updatedAt: new Date() })
     .where(eq(emmaChatThreads.id, threadId))
+}
+
+/**
+ * Single-chat helpers — the admin UI uses one "current" non-archived thread.
+ * "Clear" archives the current thread; the next visit creates a fresh one.
+ */
+export async function getOrCreateCurrentThread(): Promise<{ thread: EmmaChatThread; messages: EmmaChatMessage[] }> {
+  const [existing] = await db.select().from(emmaChatThreads)
+    .where(eq(emmaChatThreads.archived, false))
+    .orderBy(desc(emmaChatThreads.updatedAt))
+    .limit(1)
+  if (existing) {
+    const messageRows = await db.select().from(emmaChatMessages)
+      .where(eq(emmaChatMessages.threadId, existing.id))
+      .orderBy(asc(emmaChatMessages.createdAt), asc(emmaChatMessages.id))
+    return { thread: rowToThread(existing), messages: messageRows.map(rowToMessage) }
+  }
+  const [created] = await db.insert(emmaChatThreads).values({
+    title: 'Emma chat',
+  }).returning()
+  if (!created) throw new Error('getOrCreateCurrentThread: insert returned no row')
+  return { thread: rowToThread(created), messages: [] }
+}
+
+export async function clearCurrentThread(): Promise<{ thread: EmmaChatThread }> {
+  const [existing] = await db.select().from(emmaChatThreads)
+    .where(eq(emmaChatThreads.archived, false))
+    .orderBy(desc(emmaChatThreads.updatedAt))
+    .limit(1)
+  if (existing) {
+    await db.update(emmaChatThreads)
+      .set({ archived: true, updatedAt: new Date() })
+      .where(eq(emmaChatThreads.id, existing.id))
+  }
+  const [created] = await db.insert(emmaChatThreads).values({
+    title: 'Emma chat',
+  }).returning()
+  if (!created) throw new Error('clearCurrentThread: insert returned no row')
+  return { thread: rowToThread(created) }
 }
 
 // ---------------------------------------------------------------------------

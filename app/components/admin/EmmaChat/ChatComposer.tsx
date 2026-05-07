@@ -4,9 +4,13 @@ import { useRef, useEffect, useCallback } from 'react'
 interface ChatComposerProps {
   disabled?: boolean
   onSubmitted?: () => void
+  /** Required when the composer is mounted on the single-chat page where the
+   *  action lives at the parent route — the parent action needs the threadId.
+   *  Optional in legacy thread-page contexts where the threadId is in the URL. */
+  threadId?: number
 }
 
-export function ChatComposer({ disabled = false, onSubmitted }: ChatComposerProps) {
+export function ChatComposer({ disabled = false, onSubmitted, threadId }: ChatComposerProps) {
   const fetcher = useFetcher()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isSubmitting = fetcher.state !== 'idle'
@@ -46,6 +50,7 @@ export function ChatComposer({ disabled = false, onSubmitted }: ChatComposerProp
   return (
     <fetcher.Form method="post" className="flex gap-2 items-end">
       <input type="hidden" name="intent" value="send" />
+      {threadId != null && <input type="hidden" name="threadId" value={threadId} />}
       <textarea
         ref={textareaRef}
         name="content"
