@@ -11,7 +11,7 @@
  */
 
 import 'dotenv/config'
-import { ensureProductMetafieldDefinition } from '~/lib/shopify.server'
+import { ensureMetafieldDefinition } from '~/lib/shopify.server'
 
 const DEFINITION = {
   namespace:        'custom',
@@ -19,6 +19,7 @@ const DEFINITION = {
   type:             'json',
   name:             'Original Descriptions (per-variant)',
   description:      'Per-variant original Nalpac descriptions. JSON array of {sku, title, color, size, fluid_oz, description}.',
+  ownerType:        'PRODUCT' as const,
   storefrontAccess: true,
 }
 
@@ -33,7 +34,7 @@ async function main(): Promise<void> {
     return
   }
 
-  const { created } = await ensureProductMetafieldDefinition(DEFINITION)
+  const { created } = await ensureMetafieldDefinition(DEFINITION)
   console.log(created ? '✓ Created definition.' : '· Definition already existed — no change.')
 }
 

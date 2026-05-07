@@ -2383,23 +2383,22 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
 }
 
 /**
- * Set a single metafield on a product, overwriting any existing value at the
- * same namespace+key. Idempotent — safe to re-run with the same inputs.
+ * Set a single metafield on any owner (Product or ProductVariant), overwriting
+ * any existing value at the same namespace+key. Idempotent.
  *
- * Used by post-import passes that overlay content (e.g. per-variant original
- * descriptions JSON) without going through the full pushProductToShopify
- * payload shape.
+ * Caller passes a fully-qualified GID like `gid://shopify/Product/123` or
+ * `gid://shopify/ProductVariant/456`.
  */
-export async function setProductMetafield(
-  shopifyProductId: string,
+export async function setMetafield(
+  ownerGid: string,
   namespace: string,
   key: string,
   type: string,
   value: string,
 ): Promise<void> {
-  const ownerId = shopifyProductId.startsWith('gid://')
-    ? shopifyProductId
-    : `gid://shopify/Product/${shopifyProductId}`
+  if (!ownerGid.startsWith('gid://')) {
+    throw new Error(`setMetafield requires a fully-qualified GID, got ${ownerGid}`)
+  }
   const res = await adminGraphQL<{
     metafieldsSet: { userErrors: { field: string[]; message: string }[] }
   }>(`
@@ -2408,7 +2407,7 @@ export async function setProductMetafield(
         userErrors { field message }
       }
     }
-  `, { metafields: [{ namespace, key, type, value, ownerId }] })
+  `, { metafields: [{ namespace, key, type, value, ownerId: ownerGid }] })
   if (res.metafieldsSet.userErrors.length > 0) {
     const errs = res.metafieldsSet.userErrors.map(e => `${e.field.join('.')}: ${e.message}`).join('; ')
     throw new Error(`metafieldsSet rejected ${namespace}.${key}: ${errs}`)
@@ -2416,16 +2415,32 @@ export async function setProductMetafield(
 }
 
 /**
- * Ensure a product-level metafield definition exists. Idempotent — if a
- * definition already exists at the same namespace+key, returns without
- * creating a duplicate. Otherwise creates with the given type, name, and
- * Storefront-access flag.
+ * Look up a Shopify variant GID by its SKU. Returns null if no match.
  */
-export async function ensureProductMetafieldDefinition(input: {
+export async function findVariantBySKU(sku: string): Promise<string | null> {
+  const data = await adminGraphQL<{
+    productVariants: { edges: { node: { id: string } }[] }
+  }>(`
+    query FindVariantBySKU($query: String!) {
+      productVariants(first: 1, query: $query) {
+        edges { node { id } }
+      }
+    }
+  `, { query: `sku:${sku}` })
+  return data.productVariants.edges[0]?.node.id ?? null
+}
+
+/**
+ * Ensure a metafield definition exists for the given owner type. Idempotent —
+ * if a definition already exists at the same namespace+key+ownerType, returns
+ * without creating a duplicate.
+ */
+export async function ensureMetafieldDefinition(input: {
   namespace: string
   key: string
   type: string
   name: string
+  ownerType: 'PRODUCT' | 'PRODUCTVARIANT'
   description?: string
   storefrontAccess?: boolean
 }): Promise<{ created: boolean }> {
@@ -2448,7 +2463,7 @@ export async function ensureProductMetafieldDefinition(input: {
       name:      input.name,
       ...(input.description ? { description: input.description } : {}),
       type:      input.type,
-      ownerType: 'PRODUCT',
+      ownerType: input.ownerType,
       access:    input.storefrontAccess === false
         ? { storefront: 'NONE' }
         : { storefront: 'PUBLIC_READ' },
