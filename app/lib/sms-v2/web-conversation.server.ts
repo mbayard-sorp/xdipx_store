@@ -49,6 +49,15 @@ export interface WebConversationRow {
    * exists on web_conversations for forward-compatibility.
    */
   pendingPdpUrl: string | null
+  /**
+   * Migration 032: rolling Haiku-generated conversation summary.
+   * Null until the first summarizer run after migration 032 ships.
+   */
+  conversationSummary: string | null
+  /**
+   * Migration 032: ordered log of last 10 pitched handles (most-recent last).
+   */
+  pitchedHandlesLog: string[] | null
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +202,10 @@ export async function applyWebStateWrites(
     pageRoute?: string | null
     discoveryState?: unknown | null
     discoveredSlots?: Record<string, unknown>
+    /** ADR-003 Sub-decision B: rolling summary written by the dispatcher summarizer. */
+    conversationSummary?: string | null
+    /** ADR-003 Sub-decision B: ordered log of last 10 pitched handles. */
+    pitchedHandlesLog?: string[] | null
   },
 ): Promise<void> {
   const now = new Date()
@@ -212,6 +225,9 @@ export async function applyWebStateWrites(
   if (writes.pageRoute !== undefined) updates.pageRoute = writes.pageRoute
   if (writes.discoveryState !== undefined) updates.discoveryState = writes.discoveryState
   if (writes.discoveredSlots !== undefined) updates.discoveredSlots = writes.discoveredSlots
+  // ADR-003 Sub-decision B: memory primitive writes — mirrors sms applyStateWrites.
+  if (writes.conversationSummary !== undefined) updates.conversationSummary = writes.conversationSummary
+  if (writes.pitchedHandlesLog   !== undefined) updates.pitchedHandlesLog   = writes.pitchedHandlesLog
 
   await db.update(webConversations).set(updates).where(eq(webConversations.sessionId, sessionId))
 }

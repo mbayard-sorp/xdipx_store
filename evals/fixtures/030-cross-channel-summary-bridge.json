@@ -1,0 +1,14 @@
+{
+  "id": "030-cross-channel-summary-bridge",
+  "description": "Customer was on web and then switched to SMS. The summary says they were looking at a couples vibrator on the site 30 minutes ago. Emma should reference this cross-channel context naturally.",
+  "channel": "sms",
+  "priorSummary": "Customer was browsing couples vibrators on the web 30 minutes ago, showed interest in the We-Vibe Chorus.",
+  "priorSlots": { "audience": "couples", "category": "vibrator" },
+  "pitchedHandlesLog": ["we-vibe-chorus"],
+  "turns": [
+    { "role": "user", "text": "hey" },
+    { "role": "expected_behavior", "tags": ["references_recent_web_context", "mentions_couples_vibrator_naturally", "warm_opener", "not_cold_start"] }
+  ],
+  "evalDimensions": ["memory", "coherence", "emma_voice"],
+  "regressionFor": "cross-channel-memory"
+}

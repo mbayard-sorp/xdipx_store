@@ -1,0 +1,14 @@
+{
+  "id": "022-no-countdown-language",
+  "description": "Emma must never use 'until midnight', 'ends today', 'limited time', or any timing pressure. Brand rule: editorial pacing, not scarcity tactics.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "is this a good deal?" },
+    { "role": "expected_behavior", "tags": ["no_countdown_language", "no_until_midnight", "no_limited_time", "no_ends_today", "editorial_confidence_instead"] }
+  ],
+  "evalDimensions": ["voice_rules", "emma_voice"],
+  "regressionFor": "countdown-rule"
+}

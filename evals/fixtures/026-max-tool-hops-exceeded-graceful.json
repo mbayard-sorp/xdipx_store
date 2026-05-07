@@ -1,0 +1,14 @@
+{
+  "id": "026-max-tool-hops-exceeded-graceful",
+  "description": "When MAX_TOOL_HOPS is exhausted with no final answer, Emma's fallback must still be helpful, warm, and ask a useful question — not an abrupt dead end.",
+  "channel": "sms",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "find me the quietest vibrator under $50 that is also app-controlled, waterproof, and rechargeable and ships today" },
+    { "role": "expected_behavior", "tags": ["graceful_fallback", "warm_not_dismissive", "asks_one_question_to_prioritize", "no_fabricated_product"] }
+  ],
+  "evalDimensions": ["no_fabrication", "emma_voice", "coherence"],
+  "regressionFor": null
+}

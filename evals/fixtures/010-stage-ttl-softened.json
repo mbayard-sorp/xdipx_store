@@ -1,0 +1,14 @@
+{
+  "id": "010-stage-ttl-softened",
+  "description": "Simulates a customer in PRESENTATION stage whose message looks like DISCOVERY intent but with low confidence. Emma should stay in presentation mode and engage with the pitch context, not revert to 'what are you looking for?'.",
+  "channel": "sms",
+  "priorSummary": "Customer was pitched the Lelo Sona 2, a clitoral stimulator at $149.",
+  "priorSlots": { "audience": "for-her" },
+  "pitchedHandlesLog": ["lelo-sona-2"],
+  "turns": [
+    { "role": "user", "text": "hmm I don't know" },
+    { "role": "expected_behavior", "tags": ["stays_in_presentation_context", "references_pitch", "no_discovery_restart", "asks_helpful_followup"] }
+  ],
+  "evalDimensions": ["coherence", "no_derail", "emma_voice"],
+  "regressionFor": "stage-ttl-silent-reset"
+}

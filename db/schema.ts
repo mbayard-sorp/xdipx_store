@@ -485,6 +485,15 @@ export const smsConversations = pgTable('sms_conversations', {
   discoveredSlots:     json('discovered_slots').$type<Record<string, unknown>>().notNull().default({}),
   // Migration 031: voice-channel pending pdp link awaiting caller permission.
   pendingPdpUrl:       text('pending_pdp_url'),
+  // Migration 032: Phase 0 memory primitives.
+  // conversation_summary — Haiku-generated 1-2 sentence rolling summary. Updated
+  //   fire-and-forget after each turn. Injected into the system prompt so the
+  //   agent retains context beyond the HISTORY_LIMIT window. Copied forward on
+  //   24h rotation as "From a previous conversation: {summary}".
+  conversationSummary: text('conversation_summary'),
+  // pitched_handles_log — ordered array (most-recent last) of the last 10 pitched
+  //   product handles. Enables "the first one you showed me" resolution.
+  pitchedHandlesLog:   text('pitched_handles_log').array(),
 }, t => ({
   // Phase 10: customer_gid indexes for cross-channel joins (additive).
   customerGidIdx:       index('sms_conversations_customer_gid_idx').on(t.customerGid),
@@ -522,6 +531,14 @@ export const smsTurns = pgTable('sms_turns', {
   // Migration 030: turn flagged when the engine recognized a vulnerability
   // disclosure and suspended the gate / suppressed the product pitch.
   softBeat:         boolean('soft_beat').notNull().default(false),
+  // Migration 032: set true when the Sonnet loop exhausted MAX_TOOL_HOPS with a
+  // pending tool_use stop_reason — no final text was generated, safeFallback ran.
+  // Powers the "tool budget exhausted rate" dashboard query in Phase 3.
+  toolBudgetExhausted: boolean('tool_budget_exhausted').notNull().default(false),
+  // Migration 033: set true when the dedup filter returned all_results_previously_pitched
+  // (every search result was already in pitchedHandlesLog). Distinct from toolBudgetExhausted.
+  // Powers the "repeat-pitch rate" dashboard query in Phase 3.
+  searchRepeatedPitch: boolean('search_repeated_pitch').notNull().default(false),
   createdAt:        timestamp('created_at').notNull().defaultNow(),
 }, t => ({
   twilioSidUniq:    uniqueIndex('sms_turns_twilio_sid_uniq').on(t.twilioMessageSid),
@@ -559,6 +576,11 @@ export const webConversations = pgTable('web_conversations', {
   discoveredSlots:     json('discovered_slots').$type<Record<string, unknown>>().notNull().default({}),
   // Migration 031: pending pdp link awaiting caller permission (voice; reserved for web).
   pendingPdpUrl:       text('pending_pdp_url'),
+  // Migration 032: Phase 0 memory primitives — mirror of sms_conversations columns.
+  // Added now to avoid Phase 2 schema reconciliation cost when the participants
+  // table aligns SMS and web identity.
+  conversationSummary: text('conversation_summary'),
+  pitchedHandlesLog:   text('pitched_handles_log').array(),
 }, t => ({
   // Phase 10: customer_gid indexes for cross-channel joins (additive).
   customerGidIdx:       index('web_conversations_customer_gid_idx').on(t.customerGid),

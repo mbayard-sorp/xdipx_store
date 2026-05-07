@@ -1,0 +1,14 @@
+{
+  "id": "001-returning-customer-memory",
+  "description": "Customer returns after a gap; the rolling summary should keep Emma from re-introducing herself or re-asking questions already answered.",
+  "channel": "sms",
+  "priorSummary": "Customer is shopping for a quiet vibrator for solo use, beginner-friendly, budget around $80.",
+  "priorSlots": { "audience": "for-her", "experience": "first-time", "matters": ["quiet", "beginner-friendly"], "priceMax": 80 },
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "hey I was looking at that wand you mentioned" },
+    { "role": "expected_behavior", "tags": ["uses_prior_context", "no_reintroduce", "no_restarter_question", "references_prior_budget_or_prefs"] }
+  ],
+  "evalDimensions": ["memory", "coherence", "no_derail", "emma_voice"],
+  "regressionFor": null
+}

@@ -1,0 +1,59 @@
+{
+  "id": "036-anal-filter-on-general-vibrator",
+  "description": "ADR-003a Issue X regression guard. A first-time user with no prior context asks for a vibrator using gentle, warming, and beginner language. The anal-product filter must block any anal-tagged product (e.g. vedo-bump-rechargeable-anal-vibe-just-black) from appearing in the result set. pitchedHandlesLog is empty and no anal-context signals exist. Emma must pitch a non-anal vibrator. This is the exact failure session from Phase 0.5 testing.",
+  "channel": "web",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "simulatedToolResults": {
+    "searchProducts": {
+      "results": [
+        {
+          "title": "Vedo Bump Rechargeable Anal Vibe",
+          "handle": "vedo-bump-rechargeable-anal-vibe-just-black",
+          "price": 49,
+          "tagline": "Targeted pressure for prostate and anal play",
+          "in_stock": true,
+          "pdpUrl": "https://xdipx.com/products/vedo-bump-rechargeable-anal-vibe-just-black"
+        },
+        {
+          "title": "Satisfyer Pro 2",
+          "handle": "satisfyer-pro-2",
+          "price": 39,
+          "tagline": "Gentle air-pulse stimulation, beginner-friendly",
+          "in_stock": true,
+          "pdpUrl": "https://xdipx.com/products/satisfyer-pro-2"
+        },
+        {
+          "title": "We-Vibe Tango X",
+          "handle": "we-vibe-tango-x",
+          "price": 79,
+          "tagline": "Whisper-quiet, warming, pinpoint vibration",
+          "in_stock": true,
+          "pdpUrl": "https://xdipx.com/products/we-vibe-tango-x"
+        }
+      ],
+      "reason": "base_results"
+    }
+  },
+  "turns": [
+    {
+      "role": "user",
+      "text": "hi, I'm treating myself and looking for something gentle and warming. first time with a vibrator"
+    },
+    {
+      "role": "expected_behavior",
+      "tags": [
+        "no_anal_product_pitched",
+        "no_vedo_bump_anal_vibe",
+        "pitches_non_anal_vibrator",
+        "beginner_appropriate",
+        "warm_emma_voice",
+        "one_product_pitched"
+      ]
+    }
+  ],
+  "evalDimensions": ["no_fabrication", "emma_voice", "coherence", "no_derail"],
+  "regressionFor": "ADR-003a-Issue-X",
+  "notes": "isAnalTagged('vedo-bump-rechargeable-anal-vibe-just-black') returns true (handle contains 'anal'). isAnalContextAuthorized(query='gentle warming first-time vibrator', pitchedHandlesLog=[], category=undefined) returns false. The anal-tagged card must be filtered out before Emma sees it. Emma must pitch satisfyer-pro-2 or we-vibe-tango-x, not the Vedo Bump."
+}

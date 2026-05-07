@@ -82,6 +82,18 @@ export interface EmmaContext {
     discoveryState?: unknown | null
     /** Accumulated discovery slots. Empty object for legacy rows. */
     discoveredSlots?: Record<string, unknown>
+    /** Migration 032: rolling summary injected into system prompt. Null until first summarizer run. */
+    conversationSummary?: string | null
+    /** Migration 032: ordered log of last 10 pitched handles (most-recent last). */
+    pitchedHandlesLog?: string[] | null
+    /**
+     * Web-only: the product handle of the page the customer currently has open.
+     * Populated by the web context builder from WebConversationRow.pageHandle.
+     * Null on SMS/voice (those channels have no browser page context).
+     * Used by conversation-agent to build the page-context line in
+     * <known_about_customer> even before any pitch has been set (cold PDP visit).
+     */
+    pageHandle?: string | null
   }
   customer?: CustomerContext | undefined
   todaysPick?: ProductContext | undefined
@@ -112,6 +124,13 @@ export interface ConversationStateWrites {
   discoveryState?: unknown | null | undefined
   /** Accumulated discovery slots. Typed as Record to avoid circular imports. */
   discoveredSlots?: Record<string, unknown> | undefined
+  /** Migration 032: Haiku-generated rolling summary. Written fire-and-forget. */
+  conversationSummary?: string | null | undefined
+  /**
+   * Migration 032: ordered log of last 10 pitched handles (most-recent last).
+   * Application layer enforces the cap before writing.
+   */
+  pitchedHandlesLog?: string[] | null | undefined
 }
 
 export interface StageResponse {
@@ -134,5 +153,18 @@ export interface StageResponse {
     /** True when this turn was a vulnerability soft-beat (gate not advanced,
      *  no product surfaced). Written to sms_turns.soft_beat column. */
     softBeat?: boolean | undefined
+    /**
+     * Migration 032: true when the Sonnet loop exhausted MAX_TOOL_HOPS with a
+     * pending tool_use stop_reason, causing safeFallback to run. Written to
+     * sms_turns.tool_budget_exhausted column for dashboard telemetry.
+     */
+    toolBudgetExhausted?: boolean | undefined
+    /**
+     * ADR-003a Fix 3: true when searchProducts returned all_results_previously_pitched
+     * (dedup emptied the result set because every candidate was in pitchedHandlesLog).
+     * Distinct from tool_budget_exhausted. Written to sms_turns for dashboard telemetry
+     * so this failure mode is visible without parsing the tool result reason code.
+     */
+    searchRepeatedPitch?: boolean | undefined
   }
 }

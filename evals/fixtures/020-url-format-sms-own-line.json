@@ -1,0 +1,14 @@
+{
+  "id": "020-url-format-sms-own-line",
+  "description": "Regression: in SMS replies with a pitch, the PDP URL must be on its own line, not buried in a sentence. Tests that the iMessage link preview rule is consistently applied.",
+  "channel": "sms",
+  "priorSummary": "Customer is looking for a couples vibrator.",
+  "priorSlots": { "audience": "couples", "category": "vibrator" },
+  "pitchedHandlesLog": [],
+  "turns": [
+    { "role": "user", "text": "perfect, show me your top pick" },
+    { "role": "expected_behavior", "tags": ["url_on_own_line", "url_not_embedded", "url_before_question", "pitch_includes_insight_not_just_specs"] }
+  ],
+  "evalDimensions": ["voice_rules", "no_fabrication", "emma_voice"],
+  "regressionFor": "pdp-imessage-preview"
+}

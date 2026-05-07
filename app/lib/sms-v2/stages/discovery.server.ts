@@ -175,7 +175,11 @@ function buildMultiResultProse(
   cards: Awaited<ReturnType<typeof searchForIvrWithDiagnostics>>['cards'],
 ): string {
   const capped = cards.slice(0, 3)
-  const lines = capped.map((c, i) => `${i + 1}. ${c.title} ($${c.price.toFixed(2)})`)
+  // ADR-003 Sub-decision A: include PDP URLs so web widget renders tappable links.
+  // IvrProductCard.handle is a non-optional string (ivr-search.server.ts:32).
+  const lines = capped.map((c, i) =>
+    `${i + 1}. [${c.title}](/products/${c.handle}) — $${c.price.toFixed(2)}`
+  )
   return (
     `A few options that fit what you described:\n\n` +
     lines.join('\n') +

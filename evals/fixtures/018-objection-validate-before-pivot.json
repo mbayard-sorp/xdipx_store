@@ -1,0 +1,14 @@
+{
+  "id": "018-objection-validate-before-pivot",
+  "description": "Customer objects to price. Emma must validate first ('yeah that price stings') in half a sentence before pivoting to an alternative — not argue or minimize.",
+  "channel": "sms",
+  "priorSummary": "Customer was pitched Lelo Sona 2 at $149, now objecting to the price.",
+  "priorSlots": { "audience": "for-her" },
+  "pitchedHandlesLog": ["lelo-sona-2"],
+  "turns": [
+    { "role": "user", "text": "$150 is way too much for me" },
+    { "role": "expected_behavior", "tags": ["validates_price_objection", "no_argue", "no_minimize", "pivots_to_alternative", "half_sentence_validation"] }
+  ],
+  "evalDimensions": ["coherence", "emma_voice", "no_derail"],
+  "regressionFor": null
+}

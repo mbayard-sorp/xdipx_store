@@ -47,6 +47,10 @@ function webRowToConversationRow(webRow: WebConversationRow): ConversationRow {
     // it. Default null is harmless on web; the voice adapter is the only
     // caller that reads or writes pendingPdpUrl today.
     pendingPdpUrl: webRow.pendingPdpUrl ?? null,
+    // Migration 032: memory primitive fields — present on web_conversations
+    // after migration 032. Default null before the first summarizer run.
+    conversationSummary: webRow.conversationSummary ?? null,
+    pitchedHandlesLog: webRow.pitchedHandlesLog ?? null,
   }
 }
 
@@ -80,6 +84,16 @@ export async function buildWebEmmaContext(
   const baseRow = webRowToConversationRow(webConv)
   const ctx = await buildEmmaContext(baseRow)
   ctx.channel = 'web'
+
+  // Thread pageHandle into conversation context so the agent can surface the
+  // page-context line in <known_about_customer> even on a cold PDP visit where
+  // currentPitchHandle has not been set yet (C-01h fix).
+  // Prefer the live request's pageContext.handle over the stored DB value so
+  // navigating to a new PDP mid-session is reflected immediately.
+  const resolvedPageHandle = extras.pageContext?.handle ?? webConv.pageHandle ?? null
+  if (resolvedPageHandle) {
+    ctx.conversation.pageHandle = resolvedPageHandle
+  }
 
   // Layer in page context: if we have a page handle, set it as the pitch
   // product context hint so RESEARCH/DISCOVERY can use it.

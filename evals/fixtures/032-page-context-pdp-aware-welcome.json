@@ -1,0 +1,28 @@
+{
+  "id": "032-page-context-pdp-aware-welcome",
+  "description": "ADR-003 Sub-decision C: when a customer opens chat while on a product PDP, Emma's reply should acknowledge the product they are viewing rather than asking a generic 'what brings you in today?' The page context line is injected as 'Customer is viewing: [Product Name]' in the known_about_customer block. Emma should NOT assume the customer wants to buy — only that they are looking at it. She may offer to help them learn more or compare options.",
+  "channel": "web",
+  "priorSummary": null,
+  "priorSlots": {},
+  "pitchedHandlesLog": [],
+  "pageContext": { "handle": "we-vibe-tango-x", "route": "/products/we-vibe-tango-x" },
+  "turns": [
+    {
+      "role": "user",
+      "text": "hey"
+    },
+    {
+      "role": "expected_behavior",
+      "tags": [
+        "acknowledges_product_being_viewed",
+        "no_generic_what_brings_you_in",
+        "no_purchase_pressure",
+        "no_assume_they_want_to_buy",
+        "one_question_max",
+        "under_50_words"
+      ]
+    }
+  ],
+  "evalDimensions": ["coherence", "emma_voice", "no_derail"],
+  "regressionFor": "ADR-003-sub-decision-C"
+}
