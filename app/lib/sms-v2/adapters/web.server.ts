@@ -325,13 +325,13 @@ export async function processWebMessageV2(
   void (async () => {
     try {
       // Append new pitch handle to the log when the handler pitched something.
+      // Guard: skip if the conversation-agent path already wrote the log via
+      // stateWrites — same pattern as processor.server.ts:146 to avoid double-append.
       const newPitchHandle = stageResp.stateWrites.currentPitchHandle
-      let pitchedLog: string[] | null = conversation.pitchedHandlesLog ?? null
-      if (newPitchHandle) {
-        const prior = pitchedLog ?? []
+      if (newPitchHandle && stageResp.stateWrites.pitchedHandlesLog === undefined) {
+        const prior = conversation.pitchedHandlesLog ?? []
         // Append new handle (most-recent last), cap at 10.
         const updated = [...prior, newPitchHandle].slice(-10)
-        pitchedLog = updated
         await applyWebStateWrites(sessionId, { pitchedHandlesLog: updated }).catch((err) =>
           console.warn('[web-adapter] pitchedHandlesLog update failed (non-fatal)', err)
         )
