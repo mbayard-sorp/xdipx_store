@@ -9,7 +9,7 @@
  * Intent-driven transitions out of SUPPORT happen via the Phase 5.5 shim
  * (stage-dispatch.server.ts) on the next turn.
  *
- * Tools this stage may call (per tools-by-stage.server.ts):
+ * Tools this stage may call:
  *   - lookupReturningCustomer (via orderStatusLookup internal resolution)
  *   - orderStatusLookup
  */

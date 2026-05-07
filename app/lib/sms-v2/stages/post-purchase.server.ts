@@ -10,7 +10,7 @@
  * If the LLM output contains dollar signs, PDP URLs, or product handles,
  * the fabrication validator fires and swaps to a safe fallback template.
  *
- * Tools (per tools-by-stage.server.ts):
+ * Tools:
  *   - lookupReturningCustomer (via orderStatusLookup internal resolution)
  *   - orderStatusLookup
  * NOTE: kbLookup (Phase 6c) is NOT injected here yet — left as a TODO.

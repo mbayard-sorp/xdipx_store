@@ -716,9 +716,8 @@ export async function runQaTool(
 }
 
 // ─── Phase 6c — Knowledge-base lookup tool (additive) ─────────────────────
-// kbLookup is referenced as a forward ref in tools-by-stage.server.ts for
-// DISCOVERY, RESEARCH, PRESENTATION, OBJECTION, and POST_PURCHASE stages.
-// This definition is additive — existing QA_TOOL_DEFINITIONS untouched.
+// kbLookup is wired into DISCOVERY, RESEARCH, PRESENTATION, OBJECTION, and
+// POST_PURCHASE stages. Additive — existing QA_TOOL_DEFINITIONS untouched.
 
 export const KB_LOOKUP_TOOL_DEFINITION: Anthropic.Tool = {
   name: 'kbLookup',
