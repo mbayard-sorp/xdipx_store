@@ -565,3 +565,47 @@ export const webConversations = pgTable('web_conversations', {
   customerGidActiveIdx: index('web_conversations_gid_active_idx').on(t.customerGid, t.lastActiveAt),
 }))
 
+// Migration 032: internal /admin/emma-chat — Emma as product SME for drafting Reddit replies.
+// Append-only message log; assistant rows carry tool_use blocks Claude emitted,
+// tool rows carry the tool_result payloads we returned in the next turn.
+
+export type EmmaChatToolCall = {
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+
+export type EmmaChatToolResult = {
+  tool_use_id: string
+  content: string
+  is_error?: boolean
+}
+
+export const emmaChatThreads = pgTable('emma_chat_threads', {
+  id:                serial('id').primaryKey(),
+  title:             varchar('title', { length: 200 }).notNull().default('New thread'),
+  redditPostUrl:     text('reddit_post_url'),
+  redditPostExcerpt: text('reddit_post_excerpt'),
+  archived:          boolean('archived').notNull().default(false),
+  createdAt:         timestamp('created_at').notNull().defaultNow(),
+  updatedAt:         timestamp('updated_at').notNull().defaultNow(),
+}, t => ({
+  updatedIdx: index('emma_chat_threads_updated_idx').on(t.updatedAt),
+  activeIdx:  index('emma_chat_threads_active_idx').on(t.archived, t.updatedAt),
+}))
+
+export const emmaChatMessages = pgTable('emma_chat_messages', {
+  id:           serial('id').primaryKey(),
+  threadId:     integer('thread_id').notNull().references(() => emmaChatThreads.id, { onDelete: 'cascade' }),
+  role:         varchar('role', { length: 10 }).notNull(), // 'user' | 'assistant' | 'tool'
+  content:      text('content').notNull().default(''),
+  toolCalls:    json('tool_calls').$type<EmmaChatToolCall[]>(),
+  toolResults:  json('tool_results').$type<EmmaChatToolResult[]>(),
+  stopReason:   varchar('stop_reason', { length: 20 }),
+  inputTokens:  integer('input_tokens'),
+  outputTokens: integer('output_tokens'),
+  latencyMs:    integer('latency_ms'),
+  createdAt:    timestamp('created_at').notNull().defaultNow(),
+}, t => ({
+  threadIdx: index('emma_chat_messages_thread_idx').on(t.threadId, t.createdAt),
+}))
