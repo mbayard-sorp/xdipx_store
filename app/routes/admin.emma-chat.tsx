@@ -1,21 +1,22 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
-import { useLoaderData, Link, useFetcher } from 'react-router'
-import { redirect } from 'react-router'
+import { useLoaderData, useRevalidator, useFetcher } from 'react-router'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { requireAdmin } from '~/lib/session.server'
 import {
-  listThreads,
-  createThread,
-  archiveThread,
-  type EmmaChatThread,
+  getOrCreateCurrentThread,
+  clearCurrentThread,
+  appendUserMessage,
+  type EmmaChatMessage,
 } from '~/lib/emma-chat.server'
-import { NewThreadForm } from '~/components/admin/EmmaChat/NewThreadForm'
+import { ChatMessage, type ChatMessageData } from '~/components/admin/EmmaChat/ChatMessage'
+import { ChatComposer } from '~/components/admin/EmmaChat/ChatComposer'
 
 export const meta: MetaFunction = () => [{ title: 'Emma Chat — xdipx Admin' }]
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
-  const threads = await listThreads({ limit: 50 })
-  return { threads }
+  const { thread, messages } = await getOrCreateCurrentThread()
+  return { thread, messages }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -23,126 +24,297 @@ export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData()
   const intent = form.get('intent') as string
 
-  if (intent === 'create') {
-    const firstUserMessage = (form.get('firstUserMessage') as string | null)?.trim() ?? ''
-    if (firstUserMessage.length < 3) {
-      return { error: 'Message must be at least 3 characters.' }
+  if (intent === 'send') {
+    const threadId = Number(form.get('threadId'))
+    if (!Number.isFinite(threadId) || threadId <= 0) {
+      return { error: 'invalid thread' }
     }
-    const redditPostUrl = (form.get('redditPostUrl') as string | null)?.trim() || null
-    const redditPostExcerpt = (form.get('redditPostExcerpt') as string | null)?.trim() || null
-    const { threadId } = await createThread({ firstUserMessage, redditPostUrl, redditPostExcerpt })
-    return redirect(`/admin/emma-chat/${threadId}`)
+    const content = (form.get('content') as string | null)?.trim() ?? ''
+    if (content.length < 1) return { error: 'Message cannot be empty.' }
+    const { messageId } = await appendUserMessage(threadId, content)
+    return { ok: true, messageId }
   }
 
-  if (intent === 'archive') {
-    const threadId = Number(form.get('threadId'))
-    if (Number.isFinite(threadId) && threadId > 0) {
-      await archiveThread(threadId)
-    }
-    return { ok: true }
+  if (intent === 'clear') {
+    await clearCurrentThread()
+    return { ok: true, cleared: true }
   }
 
   return { error: 'Unknown intent' }
 }
 
-function timeAgo(date: Date): string {
-  const now = Date.now()
-  const diffMs = now - new Date(date).getTime()
-  const diffSec = Math.floor(diffMs / 1000)
-  if (diffSec < 60) return 'just now'
-  const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-  const diffDay = Math.floor(diffHr / 24)
-  return `${diffDay}d ago`
+// ---------------------------------------------------------------------------
+// Streaming SSE types
+// ---------------------------------------------------------------------------
+
+interface StreamingToolEvent {
+  type: 'tool_call' | 'tool_result'
+  id?: string
+  name?: string
+  input?: Record<string, unknown>
+  tool_use_id?: string
+  content?: string
+  is_error?: boolean
+  durationMs?: number
+  resultCount?: number
 }
 
-function ThreadRow({ thread }: { thread: EmmaChatThread }) {
-  const fetcher = useFetcher()
-  const isArchiving = fetcher.state !== 'idle'
-  // Optimistic hide
-  if (isArchiving) return null
+function useEmmaStream(threadId: number, onComplete: () => void) {
+  const [streamingDraft, setStreamingDraft] = useState('')
+  const [streamingTools, setStreamingTools] = useState<StreamingToolEvent[]>([])
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [streamError, setStreamError] = useState<string | null>(null)
+  const [kickCount, setKickCount] = useState(0)
+  const esRef = useRef<EventSource | null>(null)
+
+  const kick = useCallback(() => {
+    setKickCount(c => c + 1)
+  }, [])
+
+  useEffect(() => {
+    if (kickCount === 0) return
+
+    esRef.current?.close()
+
+    setStreamingDraft('')
+    setStreamingTools([])
+    setStreamError(null)
+    setIsStreaming(true)
+
+    const es = new EventSource(`/api/admin/emma-chat/stream/${threadId}`)
+    esRef.current = es
+
+    es.addEventListener('token', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as { text: string }
+        setStreamingDraft(prev => prev + data.text)
+      } catch { /* ignore */ }
+    })
+
+    es.addEventListener('tool_call', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as Omit<StreamingToolEvent, 'type'>
+        setStreamingTools(prev => [...prev, { type: 'tool_call' as const, ...data }])
+      } catch { /* ignore */ }
+    })
+
+    es.addEventListener('tool_result', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as Omit<StreamingToolEvent, 'type'>
+        setStreamingTools(prev => [...prev, { type: 'tool_result' as const, ...data }])
+      } catch { /* ignore */ }
+    })
+
+    es.addEventListener('done', () => {
+      es.close()
+      esRef.current = null
+      setIsStreaming(false)
+      setStreamingDraft('')
+      setStreamingTools([])
+      onComplete()
+    })
+
+    es.addEventListener('error', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as { message: string }
+        setStreamError(data.message)
+      } catch {
+        setStreamError('Stream error')
+      }
+      es.close()
+      esRef.current = null
+      setIsStreaming(false)
+    })
+
+    es.onerror = () => {
+      if (es.readyState === EventSource.CLOSED) {
+        esRef.current = null
+        setIsStreaming(false)
+      }
+    }
+
+    return () => {
+      es.close()
+      esRef.current = null
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kickCount, threadId])
+
+  useEffect(() => {
+    return () => {
+      esRef.current?.close()
+    }
+  }, [])
+
+  return { streamingDraft, streamingTools, isStreaming, streamError, kick }
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+function toDomain(m: EmmaChatMessage): ChatMessageData {
+  return {
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    toolCalls: m.toolCalls as ChatMessageData['toolCalls'],
+    toolResults: m.toolResults as ChatMessageData['toolResults'],
+  }
+}
+
+export default function EmmaChat() {
+  const { thread, messages } = useLoaderData<typeof loader>()
+  const { revalidate } = useRevalidator()
+  const clearFetcher = useFetcher()
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const { streamingDraft, streamingTools, isStreaming, streamError, kick } = useEmmaStream(
+    thread.id,
+    revalidate,
+  )
+
+  // Auto-kick when the page loads with a pending user message and no
+  // assistant reply yet (e.g. after a page refresh during generation, or
+  // when the composer's onSubmitted didn't run for some reason).
+  const kickedForUserIdRef = useRef<number | null>(null)
+  useEffect(() => {
+    const last = messages[messages.length - 1]
+    if (!last || last.role !== 'user') return
+    if (isStreaming) return
+    if (kickedForUserIdRef.current === last.id) return
+    kickedForUserIdRef.current = last.id
+    kick()
+  }, [messages, isStreaming, kick])
+
+  // Auto-scroll
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messages.length, streamingDraft])
+
+  const lastAssistantIdx = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.role === 'assistant') return i
+    }
+    return -1
+  })()
+
+  const isClearing = clearFetcher.state !== 'idle'
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 bg-paper rounded-xl border border-line hover:border-coral/30 transition-all group">
-      <Link
-        to={`/admin/emma-chat/${thread.id}`}
-        className="flex-1 min-w-0"
-      >
-        <p
-          className="text-sm font-semibold text-ink truncate group-hover:text-coral transition-colors"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          {thread.title}
-        </p>
-        <div className="flex items-center gap-2 mt-0.5">
-          <span className="text-xs text-muted" style={{ fontFamily: 'var(--font-body)' }}>
-            {timeAgo(thread.updatedAt)}
-          </span>
-          {thread.redditPostUrl && (
-            <>
-              <span className="text-muted/40">·</span>
-              <span className="text-xs text-coral/70">has post URL</span>
-            </>
-          )}
+    <div className="flex flex-col h-[calc(100vh-64px)] max-w-3xl">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
+        <div className="min-w-0">
+          <h1
+            className="text-lg font-bold text-ink"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Emma Chat
+          </h1>
+          <p className="text-xs text-muted mt-0.5" style={{ fontFamily: 'var(--font-body)' }}>
+            Internal SME. Not customer-facing.
+          </p>
         </div>
-      </Link>
-      <fetcher.Form method="post">
-        <input type="hidden" name="intent" value="archive" />
-        <input type="hidden" name="threadId" value={thread.id} />
-        <button
-          type="submit"
-          className="text-muted/40 hover:text-muted text-xs px-2 py-1 rounded-lg hover:bg-cream transition-all opacity-0 group-hover:opacity-100"
-          style={{ fontFamily: 'var(--font-display)' }}
-          title="Archive thread"
-        >
-          Archive
-        </button>
-      </fetcher.Form>
+        <clearFetcher.Form method="post" className="shrink-0">
+          <input type="hidden" name="intent" value="clear" />
+          <button
+            type="submit"
+            disabled={isClearing || messages.length === 0}
+            className="text-xs font-medium text-muted hover:text-ink px-3 py-1.5 rounded-lg border border-line hover:border-line/80 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            {isClearing ? 'Clearing…' : 'Clear'}
+          </button>
+        </clearFetcher.Form>
+      </div>
+
+      {/* Message list */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto py-2 pr-1 space-y-1 min-h-0"
+      >
+        {messages.length === 0 && !isStreaming && (
+          <div className="text-sm text-muted/70 px-1 py-2" style={{ fontFamily: 'var(--font-body)' }}>
+            Ask Emma anything — product questions, competitor compares, draft replies. She'll search the catalog before naming SKUs.
+          </div>
+        )}
+
+        {messages.map((msg, idx) => (
+          <ChatMessage
+            key={msg.id}
+            message={toDomain(msg)}
+            isLast={idx === lastAssistantIdx && !isStreaming}
+          />
+        ))}
+
+        {streamingTools.length > 0 && (
+          <div className="mb-2">
+            {streamingTools.filter(t => t.type === 'tool_result').map((t, i) => (
+              <InFlightToolRow key={i} event={t} />
+            ))}
+          </div>
+        )}
+
+        {isStreaming && (
+          <ChatMessage
+            message={{
+              id: -1,
+              role: 'assistant',
+              content: streamingDraft,
+              toolCalls: null,
+              toolResults: null,
+            }}
+            isLast={false}
+            isStreaming={true}
+          />
+        )}
+
+        {streamError && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700" style={{ fontFamily: 'var(--font-body)' }}>
+            Stream error: {streamError}
+          </div>
+        )}
+      </div>
+
+      {/* Composer */}
+      <div className="pt-3 border-t border-line shrink-0">
+        <ChatComposer
+          threadId={thread.id}
+          disabled={isStreaming}
+          onSubmitted={kick}
+        />
+      </div>
     </div>
   )
 }
 
-export default function EmmaChatList() {
-  const { threads } = useLoaderData<typeof loader>()
+function InFlightToolRow({ event }: { event: StreamingToolEvent }) {
+  let summary = 'tool result'
+  if (event.resultCount != null) {
+    summary = `search_products → ${event.resultCount} results`
+  } else if (event.name) {
+    summary = `${event.name} → done`
+  }
 
   return (
-    <div className="max-w-2xl">
-      <div className="mb-6">
-        <h1
-          className="text-2xl font-bold text-ink"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          Emma Chat
-        </h1>
-        <p className="text-sm text-muted mt-1" style={{ fontFamily: 'var(--font-body)' }}>
-          Internal SME for drafting Reddit replies. Not customer-facing.
-        </p>
+    <details className="mb-1">
+      <summary
+        className="text-xs px-3 py-1.5 rounded-lg cursor-pointer select-none list-none flex items-center gap-1.5 bg-cream text-muted hover:text-ink animate-pulse"
+        style={{ fontFamily: 'var(--font-display)' }}
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+        {summary}
+      </summary>
+      <div className="mt-1 ml-4 p-3 bg-cream rounded-lg">
+        <pre className="text-xs text-ink/70 overflow-x-auto whitespace-pre-wrap break-words" style={{ fontFamily: 'var(--font-body)' }}>
+          {event.content ?? '...'}
+        </pre>
       </div>
-
-      <NewThreadForm />
-
-      {threads.length === 0 ? (
-        <div className="text-center py-16 bg-paper rounded-2xl border border-line">
-          <div className="text-3xl mb-3">💬</div>
-          <p className="text-sm font-semibold text-ink mb-1" style={{ fontFamily: 'var(--font-display)' }}>
-            No threads yet
-          </p>
-          <p className="text-sm text-muted" style={{ fontFamily: 'var(--font-body)' }}>
-            Start a thread by pasting a Reddit post and asking Emma for a draft reply.
-          </p>
-          <p className="text-xs text-muted/60 mt-3 italic" style={{ fontFamily: 'var(--font-body)' }}>
-            Example: "I'm new to wands. Looking for something quiet under $150. Any recs?"
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {threads.map(thread => (
-            <ThreadRow key={thread.id} thread={thread} />
-          ))}
-        </div>
-      )}
-    </div>
+    </details>
   )
 }
