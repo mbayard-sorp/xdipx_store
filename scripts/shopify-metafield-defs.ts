@@ -113,7 +113,7 @@ const DEFS: MetafieldDef[] = [
   {
     key:         'sensation_dial_v2',
     name:        'Sensation dial (v2 — free-form)',
-    description: 'JSON { items: [{ label: string, value: 1-5, proposed?: boolean }] }. 5–6 items. Labels are free-form; the per-type dialRegistry in Sanity is the preferred set, but Emma can propose new ones (proposed: true) for editor triage.',
+    description: 'JSON { items: [{ label: string, value: 1-5, proposed?: boolean }] }. 5–6 items, integer values from {1,2,3,4,5} (no half-steps). Spread: values must span at least 3 distinct integers; at most one 5; at most one 1. Labels are free-form; the per-type dialRegistry in Sanity is the preferred set, but Emma can propose new ones (proposed: true) for editor triage.',
     type:        'json',
   },
   // PDP — "In the Box" tab content (orchestrator-generated)

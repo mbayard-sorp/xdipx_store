@@ -66,7 +66,20 @@ import {
 } from '../app/lib/feed-processor.server'
 import { makeLLMClient } from '../app/lib/llm-client.server'
 import { upsertProductPage } from '../app/lib/sanity.server'
-import { runBatchEmmaTake, type BatchEmmaTakeInput } from '../app/lib/batch-enrichment.server'
+import {
+  runBatchEmmaTake,
+  runBatchFullEnrichment,
+  runBatchDialRepair,
+  checkDialSpread,
+  type BatchEmmaTakeInput,
+  type BatchFullEnrichmentInput,
+  type BatchDialRepairInput,
+} from '../app/lib/batch-enrichment.server'
+import {
+  gatherProductBrief,
+  fetchProductSnapshot as fetchEnricherSnapshot,
+  loadSharedEnrichmentContext,
+} from '../app/lib/enricher-brief.server'
 import {
   getCachedWrites,
   setCachedWrites,
@@ -84,8 +97,30 @@ interface Args {
   sku?:                string
   fromHandle?:         string
   fromFile?:           string
+  /** Directory containing Anthropic batch result .jsonl files. When set,
+   *  resume an interrupted full-enrichment run by parsing pre-computed
+   *  results, running the dial-repair pass on violations, then pushing. */
+  fromBatchDir?:       string
   maxAgeDays:          number
   skipSanity:          boolean
+  /** When true with --via=batch: route to the single-call full ProductWrites
+   *  batch path (the 1K-product newcomer flow) instead of the legacy
+   *  Emma's-Take-only refresh. */
+  fullEnrichment:      boolean
+  /** Filter rows to Shopify product status === 'draft' before enriching.
+   *  Used for the 1K newly imported batch (they land as DRAFT). */
+  draftOnly:           boolean
+  /** Filter to products whose Shopify body_html is effectively empty
+   *  (after stripping tags + whitespace). Used to identify products that
+   *  fell through the main run and need to be re-enriched. */
+  missingDescriptionOnly: boolean
+  /** Path to a Shopify product CSV export. The driver parses rows where
+   *  `Body (HTML)` is empty and `Title` is non-empty, resolves each handle
+   *  to a Shopify gid via getProductByHandle, and feeds the resulting list
+   *  through the existing full-enrichment batch path. Bypasses dealHistory
+   *  entirely — used for products that were imported outside the Nalpac
+   *  feed (e.g. direct Shopify Admin imports). */
+  fromShopifyCsv?:     string
 }
 
 function parseArgs(argv: string[]): Args {
@@ -112,7 +147,12 @@ function parseArgs(argv: string[]): Args {
                                       'all',
     maxAgeDays: Number(valOf('--max-age') ?? '90'),
     skipSanity: has('--skip-sanity'),
+    fullEnrichment: has('--full-enrichment'),
+    draftOnly:      has('--draft-only'),
+    missingDescriptionOnly: has('--missing-description-only'),
   }
+  const fromShopifyCsv = valOf('--from-shopify-csv')
+  if (fromShopifyCsv) out.fromShopifyCsv = fromShopifyCsv
   if (limit) out.limit = Number(limit)
   if (!apply && out.limit === undefined) out.limit = 5
   const handle     = valOf('--handle')
@@ -123,6 +163,8 @@ function parseArgs(argv: string[]): Args {
   if (sku)        out.sku        = sku
   if (fromHandle) out.fromHandle = fromHandle
   if (fromFile)   out.fromFile   = fromFile
+  const fromBatchDir = valOf('--from-batch-dir')
+  if (fromBatchDir) out.fromBatchDir = fromBatchDir
   if (out.via !== 'api' && out.via !== 'claude-code' && out.via !== 'batch') {
     console.error(`Invalid --via=${out.via}. Use api, claude-code, or batch.`)
     process.exit(1)
@@ -164,6 +206,130 @@ async function listProducts(args: Args): Promise<ProductRow[]> {
   return rows
 }
 
+/**
+ * Admin GraphQL lookup: handle → product gid (sees DRAFT products, unlike
+ * the Storefront-API-backed getProductByHandle helper). Returns null if
+ * no product carries that handle in the store.
+ */
+async function adminLookupProductByHandle(handle: string): Promise<
+  { id: string; vendor: string; firstSku: string; status: string } | null
+> {
+  // adminGraphQL is imported via app/lib/shopify.server.ts already in this
+  // file (used elsewhere). Re-import lazily to avoid circular issues.
+  const { adminGraphQL } = await import('../app/lib/shopify.server')
+  const data = await adminGraphQL<{
+    productByHandle: {
+      id:     string
+      vendor: string
+      status: string
+      variants: { edges: Array<{ node: { sku: string | null } }> }
+    } | null
+  }>(`
+    query AdminProductByHandle($handle: String!) {
+      productByHandle(handle: $handle) {
+        id
+        vendor
+        status
+        variants(first: 1) { edges { node { sku } } }
+      }
+    }
+  `, { handle })
+  const p = data.productByHandle
+  if (!p) return null
+  return {
+    id:       p.id,
+    vendor:   p.vendor ?? '',
+    firstSku: p.variants.edges[0]?.node.sku ?? '',
+    status:   (p.status ?? '').toLowerCase(),
+  }
+}
+
+/**
+ * Read a Shopify product CSV export, filter to rows where `Body (HTML)` is
+ * empty AND `Title` is non-empty (the product-level row, not variant/image
+ * rows), then resolve each handle to a ProductRow via Admin API lookup.
+ *
+ * Used to recover the products that fell through the main 1K run — they
+ * were imported outside the Nalpac feed pipeline and never landed in
+ * dealHistory, so listProducts() can't see them. The CSV is the operator's
+ * source-of-truth for "what's in Shopify but not enriched."
+ */
+async function listProductsFromShopifyCsv(args: Args): Promise<ProductRow[]> {
+  const { readFile } = await import('node:fs/promises')
+  const { parse } = await import('csv-parse/sync')
+
+  const raw = await readFile(args.fromShopifyCsv!, 'utf8')
+  const records = parse(raw, { columns: true, skip_empty_lines: true, relax_column_count: true }) as Array<Record<string, string>>
+
+  // Build a unique-handle list. Variant/image rows share a handle but have
+  // empty Title — we want only the master row per product, where Body (HTML)
+  // is empty.
+  const seen = new Set<string>()
+  const candidates: Array<{ handle: string; vendor: string; status: string }> = []
+  for (const row of records) {
+    const handle = (row['Handle'] ?? '').trim()
+    const title  = (row['Title']  ?? '').trim()
+    const body   = (row['Body (HTML)'] ?? '').trim()
+    if (!handle || !title) continue
+    if (body.length > 0) continue
+    if (seen.has(handle)) continue
+    seen.add(handle)
+    candidates.push({
+      handle,
+      vendor: (row['Vendor'] ?? '').trim(),
+      status: (row['Status'] ?? '').trim().toLowerCase(),
+    })
+  }
+  console.log(`[csv] ${candidates.length} unique product(s) with empty Body (HTML) in CSV`)
+
+  if (args.draftOnly) {
+    const before = candidates.length
+    const filtered = candidates.filter(c => c.status === 'draft')
+    console.log(`[csv] --draft-only: ${filtered.length}/${before} are status=draft`)
+    candidates.length = 0
+    candidates.push(...filtered)
+  }
+
+  if (args.limit !== undefined && args.limit > 0 && candidates.length > args.limit) {
+    candidates.length = args.limit
+    console.log(`[csv] --limit=${args.limit} applied`)
+  }
+
+  // Resolve each handle to a Shopify product gid. getProductByHandle issues
+  // one GraphQL call each; pace at 200ms to stay under the rate limit.
+  const rows: ProductRow[] = []
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i]!
+    if (i > 0) await new Promise(r => setTimeout(r, 200))
+    if (i % 25 === 0) console.log(`[csv] resolving handles ${i + 1}/${candidates.length} (${c.handle})`)
+    // Admin API lookup — Storefront's getProductByHandle hides DRAFT
+    // products, which is the entire population we're trying to enrich.
+    let resolved: { id: string; vendor: string; firstSku: string; status: string } | null = null
+    try {
+      resolved = await adminLookupProductByHandle(c.handle)
+    } catch (err) {
+      console.warn(`[csv] adminLookupProductByHandle("${c.handle}") failed: ${err instanceof Error ? err.message : err}`)
+      continue
+    }
+    if (!resolved) {
+      console.warn(`[csv] no Shopify product for handle "${c.handle}"`)
+      continue
+    }
+    const numericId = resolved.id.replace(/^gid:\/\/shopify\/Product\//, '')
+    rows.push({
+      sku:              resolved.firstSku || c.handle,
+      brand:            c.vendor || resolved.vendor || '',
+      shopifyProductId: numericId,
+      status:           resolved.status || c.status || 'draft',
+    })
+  }
+  console.log(`[csv] resolved ${rows.length}/${candidates.length} handle(s) to Shopify products`)
+  return rows
+}
+
+// Local snapshot type kept for the apply path's existing fields. Sourced from
+// the GraphQL-based fetcher in enricher-brief.server.ts so we don't double up
+// REST calls (the original 3-REST version got throttled at 1K scale).
 interface ShopifyProductSnapshot {
   id:                string
   title:             string
@@ -180,52 +346,28 @@ interface ShopifyProductSnapshot {
 
 async function fetchProductSnapshot(numericId: string): Promise<ShopifyProductSnapshot | null> {
   try {
-    const { product } = await shopifyAdmin<{
-      product: {
-        id:           number
-        title:        string
-        handle:       string
-        vendor:       string
-        body_html:    string
-        status:       string
-        product_type: string
-        updated_at:   string
-        images:       { src: string }[]
-      } | null
-    }>(`/products/${numericId}.json`)
-    if (!product) return null
-
-    const xdipx = await shopifyAdmin<{
-      metafields: Array<{ namespace: string; key: string; value: string }>
-    }>(`/products/${numericId}/metafields.json?namespace=xdipx&limit=50`)
-    const custom = await shopifyAdmin<{
-      metafields: Array<{ namespace: string; key: string; value: string }>
-    }>(`/products/${numericId}/metafields.json?namespace=custom&limit=10`)
-
-    const metafields: Record<string, string> = {}
-    for (const m of [...(xdipx.metafields ?? []), ...(custom.metafields ?? [])]) {
-      metafields[`${m.namespace}.${m.key}`] = m.value
+    const snap = await fetchEnricherSnapshot(numericId)
+    if (!snap) return null
+    const out: ShopifyProductSnapshot = {
+      id:           snap.id,
+      title:        snap.title,
+      handle:       snap.handle,
+      vendor:       snap.vendor,
+      body_html:    snap.body_html,
+      status:       snap.status,
+      product_type: snap.product_type,
+      updated_at:   snap.updated_at,
+      metafields:   snap.metafields,
+      images:       snap.images,
     }
-
-    const result: ShopifyProductSnapshot = {
-      id:           String(product.id),
-      title:        product.title,
-      handle:       product.handle,
-      vendor:       product.vendor,
-      body_html:    product.body_html,
-      status:       product.status,
-      product_type: product.product_type,
-      updated_at:   product.updated_at,
-      metafields,
-      images:       product.images ?? [],
-    }
-    if (metafields['custom.original_description']) result.rawDescription = metafields['custom.original_description']
-    return result
+    if (snap.aggregatedDescription) out.rawDescription = snap.aggregatedDescription
+    return out
   } catch (err) {
     console.warn(`[backfill] fetchProductSnapshot ${numericId} failed:`, err instanceof Error ? err.message : err)
     return null
   }
 }
+
 
 interface BackfillSummary {
   processed:  number
@@ -903,6 +1045,432 @@ async function runFromFile(args: Args, summary: BackfillSummary) {
   }
 }
 
+// ─── Full-enrichment batch path (--via=batch --full-enrichment) ─────────────
+//
+// Single-call ProductWrites per product, submitted via Anthropic Batch API.
+// One Sonnet call generates the full editorial sheet (title rewrite, tagline,
+// SEO meta, Emma's take, sensation dial, mood/audience/matters tags, FAQs,
+// IVR fields, pairing blurbs). System blocks (Emma voice + agent prompt +
+// shared vocab/registry/taxonomy) are cached so 1K products write the cache
+// once and read it 999 times at 10% input price.
+//
+// Built for the 1K newly imported DRAFT products. Combines well with
+// --draft-only (filters to Shopify status === 'draft' before enriching).
+//
+// Chunking: 100 products per batch submission. Anthropic's hard cap is 100K
+// requests/batch but smaller chunks make resumption cheaper if a single
+// chunk fails. Sidecar at tmp/batch-runs/<timestamp>.json records every
+// batch ID + chunk for postmortem and resumption.
+async function runBatchFullEnrichmentJob(args: Args, summary: BackfillSummary) {
+  const CHUNK_SIZE = 100
+  const { writeFile, mkdir } = await import('node:fs/promises')
+  const { resolve } = await import('node:path')
+
+  const rows = args.fromShopifyCsv
+    ? await listProductsFromShopifyCsv(args)
+    : await listProducts(args)
+  console.log(`[batch-full] ${rows.length} candidate row(s) before status filter`)
+  if (rows.length === 0) return
+
+  // Build briefs in series. fetchProductSnapshot does 1 GraphQL call per
+  // product (with internal 429 retry). At ~250ms inter-product pacing we
+  // stay well below Shopify's standard 50 GraphQL points/sec budget for the
+  // ~80-point query we issue. 1K × 350ms ≈ 6 minutes of brief gathering.
+  const GATHER_PACE_MS = 250
+  const briefs: Array<{ row: ProductRow; brief: BatchFullEnrichmentInput['brief'] }> = []
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!
+    if (i > 0) await new Promise(r => setTimeout(r, GATHER_PACE_MS))
+    if (i % 25 === 0) console.log(`[batch-full] gathering briefs ${i + 1}/${rows.length} (sku=${row.sku})`)
+    const numericId = row.shopifyProductId.split('/').pop() || row.shopifyProductId
+    const snap = await fetchEnricherSnapshot(numericId)
+    if (!snap) {
+      summary.errors.push({ sku: row.sku, message: 'Shopify product not found' })
+      continue
+    }
+    if (args.draftOnly && snap.status !== 'draft') {
+      summary.skipped++
+      continue
+    }
+    if (args.missingDescriptionOnly) {
+      const stripped = (snap.body_html ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, '').trim()
+      if (stripped.length > 0) {
+        summary.skipped++
+        continue
+      }
+    }
+    const brief = await gatherProductBrief(numericId)
+    if (!brief) {
+      summary.errors.push({ sku: row.sku, message: 'gatherProductBrief returned null' })
+      continue
+    }
+    briefs.push({ row, brief })
+  }
+
+  console.log(`[batch-full] ${briefs.length} product(s) ready to submit (after ${args.draftOnly ? 'DRAFT filter + ' : ''}snapshot resolution); skipped ${summary.skipped}`)
+  if (briefs.length === 0) {
+    console.log('[batch-full] nothing to submit')
+    return
+  }
+
+  // Cost projection. Assumes ~3500 user input + ~3000 cached system per request,
+  // ~2000 output tokens. 50% batch discount on input + output. Cached reads at
+  // ~10% of input price after the first request creates the cache.
+  // Token sizes calibrated against the live smoke run (1 product, no cache):
+  //   inputTokens=3533 (per-product user prompt)
+  //   cacheCreationTokens=22201 (emma voice + agent prompt + shared context)
+  //   outputTokens=1444 (full ProductWrites JSON)
+  const projectedUsd = projectBatchCostUsd(briefs.length, { userInput: 3500, systemCached: 22000, output: 1500 })
+  console.log(`[cost-est] route: Anthropic Batch API single-call full enrichment (50% discount, async)`)
+  console.log(`[cost-est] projected spend: ~${formatUsd(projectedUsd)} for ${briefs.length} products (Sonnet, batched, with prompt caching)`)
+
+  if (!args.apply) {
+    console.log(`[batch-full] dry-run: skipping batch submission. Re-run with --apply to submit.`)
+    summary.processed = briefs.length
+    summary.skipped  += briefs.length
+    return
+  }
+
+  // Sidecar: record batch IDs + chunks so a crashed run can be resumed by
+  // re-fetching results from the Anthropic batch API by ID (results retained
+  // 29 days). Filename includes a timestamp for traceability.
+  const runId = new Date().toISOString().replace(/[:.]/g, '-')
+  const sidecarDir = resolve(process.cwd(), 'tmp', 'batch-runs')
+  await mkdir(sidecarDir, { recursive: true })
+  const sidecarPath = resolve(sidecarDir, `full-enrichment-${runId}.json`)
+  const sidecar: {
+    runId:       string
+    startedAt:   string
+    chunkSize:   number
+    totalCount:  number
+    chunks:      Array<{ index: number; productCount: number; batchId?: string; status?: string; succeeded?: number; errored?: number }>
+  } = {
+    runId,
+    startedAt: new Date().toISOString(),
+    chunkSize: CHUNK_SIZE,
+    totalCount: briefs.length,
+    chunks: [],
+  }
+
+  const sharedContext = await loadSharedEnrichmentContext()
+  const brandVoice = (await getPipelineSetting('brandVoice').catch(() => null)) ?? undefined
+
+  // Aggregate writes across chunks before applying — keeps the apply phase
+  // sequential per row so logs are readable.
+  const allWrites: Array<{ row: ProductRow; writes: ProductWrites }> = []
+  let actualUsd = 0
+
+  for (let chunkIndex = 0; chunkIndex < briefs.length; chunkIndex += CHUNK_SIZE) {
+    const chunk = briefs.slice(chunkIndex, chunkIndex + CHUNK_SIZE)
+    const idx = Math.floor(chunkIndex / CHUNK_SIZE)
+    console.log(`\n[batch-full] chunk ${idx + 1}/${Math.ceil(briefs.length / CHUNK_SIZE)}: submitting ${chunk.length} request(s)`)
+
+    const inputs: BatchFullEnrichmentInput[] = chunk.map(({ row, brief }) => ({
+      productId: row.shopifyProductId,
+      brief,
+    }))
+
+    const chunkRecord: typeof sidecar.chunks[number] = { index: idx, productCount: chunk.length }
+    sidecar.chunks.push(chunkRecord)
+
+    let result
+    try {
+      result = await runBatchFullEnrichment(inputs, sharedContext, brandVoice ? { brandVoice } : {})
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[batch-full] chunk ${idx + 1} failed at submission/poll: ${msg}`)
+      chunkRecord.status = 'failed'
+      for (const c of chunk) summary.errors.push({ sku: c.row.sku, message: `chunk submit/poll: ${msg}` })
+      await writeFile(sidecarPath, JSON.stringify(sidecar, null, 2))
+      continue
+    }
+
+    chunkRecord.batchId   = result.meta.batchId
+    chunkRecord.status    = 'ended'
+    chunkRecord.succeeded = result.meta.succeededCount
+    chunkRecord.errored   = result.meta.erroredCount
+    await writeFile(sidecarPath, JSON.stringify(sidecar, null, 2))
+
+    console.log(`[batch-full] chunk ${idx + 1} done: succeeded=${result.meta.succeededCount} errored=${result.meta.erroredCount} duration=${(result.meta.durationMs / 1000).toFixed(1)}s`)
+    console.log(`[batch-full]   tokens: input=${result.meta.usage.inputTokens} output=${result.meta.usage.outputTokens} cacheCreate=${result.meta.usage.cacheCreationTokens} cacheRead=${result.meta.usage.cacheReadTokens}`)
+
+    actualUsd += chunkUsdFromUsage(result.meta.usage)
+
+    for (const failure of result.failures) {
+      const c = chunk.find(x => x.row.shopifyProductId === failure.productId)
+      summary.errors.push({ sku: c?.row.sku ?? failure.productId, message: failure.error })
+    }
+
+    for (const [productId, writes] of result.results) {
+      const c = chunk.find(x => x.row.shopifyProductId === productId)
+      if (!c) continue
+      allWrites.push({ row: c.row, writes })
+    }
+  }
+
+  console.log(`\n[batch-full] all main chunks complete. ${allWrites.length} product(s) generated.`)
+
+  // ─── Dial spread repair pass ─────────────────────────────────────────────
+  // Scan every successful ProductWrites for dial spread violations and run a
+  // second focused batch to regenerate just sensationDialV2 for each one.
+  // Cheaper than reprocessing the whole product; preserves all the other
+  // fields the model already produced.
+  const repairInputs: BatchDialRepairInput[] = []
+  const repairBriefByProductId = new Map<string, BatchFullEnrichmentInput['brief']>()
+  for (const { row, writes } of allWrites) {
+    const items = writes.sensationDialV2?.items
+    const check = checkDialSpread(items)
+    if (!check.ok) {
+      const brief = briefs.find(b => b.row.shopifyProductId === row.shopifyProductId)?.brief
+      if (!brief || !items) continue
+      repairBriefByProductId.set(row.shopifyProductId, brief)
+      const input: BatchDialRepairInput = {
+        productId: row.shopifyProductId,
+        brief,
+        badDial:   items,
+      }
+      if (writes.productTypeDial) input.productTypeDial = writes.productTypeDial
+      repairInputs.push(input)
+    }
+  }
+
+  if (repairInputs.length > 0) {
+    console.log(`[batch-full] ${repairInputs.length}/${allWrites.length} product(s) had dial spread violations — submitting repair batch`)
+    try {
+      const repair = await runBatchDialRepair(repairInputs)
+      console.log(`[batch-full] dial repair done: succeeded=${repair.meta.succeededCount} errored=${repair.meta.erroredCount} duration=${(repair.meta.durationMs / 1000).toFixed(1)}s`)
+      console.log(`[batch-full]   tokens: input=${repair.meta.usage.inputTokens} output=${repair.meta.usage.outputTokens}`)
+      actualUsd += chunkUsdFromUsage(repair.meta.usage)
+
+      let repaired = 0
+      for (const w of allWrites) {
+        const items = repair.repairs.get(w.row.shopifyProductId)
+        if (items) {
+          w.writes.sensationDialV2 = { items }
+          repaired++
+        }
+      }
+      console.log(`[batch-full] dial repair: spliced ${repaired} corrected dial(s) into ProductWrites`)
+
+      for (const f of repair.failures) {
+        const c = allWrites.find(x => x.row.shopifyProductId === f.productId)
+        const sku = c?.row.sku ?? f.productId
+        // Warn-only: keep the original (bad) dial; editors clean up via admin UI.
+        console.warn(`[batch-full] dial repair WARN-ONLY for ${sku}: ${f.error}`)
+      }
+    } catch (err) {
+      console.warn(`[batch-full] dial repair batch failed (warn-only, keeping original dials): ${err instanceof Error ? err.message : String(err)}`)
+    }
+  } else {
+    console.log(`[batch-full] all dials passed spread check — no repair pass needed`)
+  }
+
+  console.log(`\n[batch-full] ${allWrites.length} product(s) ready to push to Shopify+Sanity.`)
+  console.log(`[cost-est] actual batch spend: ~${formatUsd(actualUsd)} (vs projected ~${formatUsd(projectedUsd)})`)
+  console.log(`[batch-full] sidecar: ${sidecarPath}`)
+
+  // Reuse the existing enrichOne(row, args, summary, preGeneratedWrites) path
+  // — same fill-gaps semantics, same Shopify push, same Sanity upsert that
+  // --from-file mode uses.
+  for (const { row, writes } of allWrites) {
+    await enrichOne(row, args, summary, writes)
+  }
+}
+
+/**
+ * Project Sonnet-via-batch spend for N products. Token guesses based on the
+ * batch-full prompt shape (system: emma voice + agent prompt + shared ctx;
+ * user: brief JSON; output: ProductWrites JSON). Includes prompt caching:
+ * one cache write across the run, (N-1) cache reads.
+ *
+ * Sonnet pricing: $3/M input, $15/M output. Batch = 50% off both.
+ * Cache write: 1.25× input. Cache read: 0.10× input.
+ */
+function projectBatchCostUsd(
+  productCount: number,
+  tokens: { userInput: number; systemCached: number; output: number },
+): number {
+  const SONNET_INPUT_PER_M  = 3
+  const SONNET_OUTPUT_PER_M = 15
+  const BATCH_DISCOUNT      = 0.5
+
+  const cacheWrite = tokens.systemCached  // first request writes the cache
+  const cacheReads = tokens.systemCached * Math.max(0, productCount - 1)
+  const userInput  = tokens.userInput * productCount
+  const output     = tokens.output * productCount
+
+  const inUsd =
+    ((userInput + cacheWrite * 1.25) / 1_000_000) * SONNET_INPUT_PER_M * BATCH_DISCOUNT
+    + (cacheReads / 1_000_000) * SONNET_INPUT_PER_M * 0.10 * BATCH_DISCOUNT
+  const outUsd = (output / 1_000_000) * SONNET_OUTPUT_PER_M * BATCH_DISCOUNT
+  return inUsd + outUsd
+}
+
+function chunkUsdFromUsage(usage: { inputTokens: number; outputTokens: number; cacheCreationTokens: number; cacheReadTokens: number }): number {
+  const fullPriceInput = usage.inputTokens - usage.cacheReadTokens
+  const inUsd =
+    ((fullPriceInput + usage.cacheCreationTokens * 1.25) / 1_000_000) * 3 * 0.5
+    + (usage.cacheReadTokens / 1_000_000) * 3 * 0.10 * 0.5
+  const outUsd = (usage.outputTokens / 1_000_000) * 15 * 0.5
+  return inUsd + outUsd
+}
+
+// ─── Resume from batch result JSONL files (--from-batch-dir) ───────────────
+//
+// When the main `runBatchFullEnrichmentJob` driver crashes between batch
+// completion and the apply phase, the batch results live in two places:
+//   1. The Anthropic batch results endpoint (29-day retention)
+//   2. The downloaded .jsonl files in the user's Downloads folder
+//
+// This driver takes path (2): a directory of .jsonl files, one per chunk,
+// each line containing { custom_id, result } per Anthropic batch format.
+// It rebuilds the ProductWrites map, runs the dial-repair pass on
+// violations, and pushes through the same enrichOne() apply path that the
+// full-enrichment job uses.
+async function runFromBatchDir(args: Args, summary: BackfillSummary) {
+  const { readdir, readFile } = await import('node:fs/promises')
+  const { resolve, join } = await import('node:path')
+
+  const dir = resolve(args.fromBatchDir!)
+  const files = (await readdir(dir)).filter(f => f.endsWith('.jsonl')).sort()
+  if (files.length === 0) {
+    console.error(`[resume] no .jsonl files in ${dir}`)
+    process.exit(1)
+  }
+  console.log(`[resume] reading ${files.length} JSONL file(s) from ${dir}`)
+
+  // Parse every line into productId → ProductWrites. Per-line failures
+  // (errored batch entries, JSON parse errors) accumulate into summary.errors
+  // — we still apply whatever parsed cleanly.
+  const writesById = new Map<string, ProductWrites>()
+  let parsedCount = 0
+  for (const file of files) {
+    const raw = await readFile(join(dir, file), 'utf8')
+    const lines = raw.split('\n').filter(l => l.trim().length > 0)
+    for (const line of lines) {
+      let entry: {
+        custom_id: string
+        result: {
+          type:     string
+          message?: { content: Array<{ type: string; text?: string }> }
+          error?:   { error?: { message?: string } }
+        }
+      }
+      try {
+        entry = JSON.parse(line)
+      } catch (err) {
+        summary.errors.push({ sku: '?', message: `${file}: JSONL line parse: ${err instanceof Error ? err.message : err}` })
+        continue
+      }
+      const productId = entry.custom_id.replace(/_fullEnrichment$/, '')
+      if (entry.result.type !== 'succeeded' || !entry.result.message) {
+        const msg = entry.result.type === 'errored'
+          ? entry.result.error?.error?.message ?? 'errored'
+          : entry.result.type
+        summary.errors.push({ sku: productId, message: `batch ${entry.result.type}: ${msg}` })
+        continue
+      }
+      const block = entry.result.message.content[0]
+      if (!block || block.type !== 'text' || !block.text) {
+        summary.errors.push({ sku: productId, message: 'unexpected non-text response' })
+        continue
+      }
+      const cleaned = block.text.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim()
+      let writes: ProductWrites
+      try {
+        writes = JSON.parse(cleaned) as ProductWrites
+      } catch (err) {
+        summary.errors.push({ sku: productId, message: `JSON parse: ${err instanceof Error ? err.message : err}` })
+        continue
+      }
+      writesById.set(productId, writes)
+      parsedCount++
+    }
+  }
+  console.log(`[resume] parsed ${parsedCount} ProductWrites; ${summary.errors.length} per-line failure(s)`)
+  if (writesById.size === 0) return
+
+  // Identify dial spread violations and re-gather briefs for those products
+  // only (cheaper than re-gathering all 600+). The repair batch needs the
+  // original brief to give the model the same context the main batch had.
+  const violations: Array<{ productId: string; writes: ProductWrites }> = []
+  for (const [productId, writes] of writesById) {
+    const check = checkDialSpread(writes.sensationDialV2?.items)
+    if (!check.ok) violations.push({ productId, writes })
+  }
+  console.log(`[resume] ${violations.length}/${writesById.size} product(s) have dial spread violations`)
+
+  if (violations.length > 0) {
+    console.log(`[resume] re-gathering briefs for the ${violations.length} violator(s) (250ms pacing) …`)
+    const repairInputs: BatchDialRepairInput[] = []
+    for (let i = 0; i < violations.length; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 250))
+      const { productId, writes } = violations[i]!
+      const brief = await gatherProductBrief(productId)
+      if (!brief || !writes.sensationDialV2?.items) {
+        console.warn(`[resume] could not re-gather brief for ${productId}; keeping bad dial`)
+        continue
+      }
+      const ri: BatchDialRepairInput = {
+        productId,
+        brief,
+        badDial: writes.sensationDialV2.items,
+      }
+      if (writes.productTypeDial) ri.productTypeDial = writes.productTypeDial
+      repairInputs.push(ri)
+    }
+
+    if (repairInputs.length > 0) {
+      console.log(`[resume] submitting dial repair batch for ${repairInputs.length} product(s)`)
+      try {
+        const repair = await runBatchDialRepair(repairInputs)
+        console.log(`[resume] dial repair: succeeded=${repair.meta.succeededCount} errored=${repair.meta.erroredCount}`)
+        for (const [productId, items] of repair.repairs) {
+          const w = writesById.get(productId)
+          if (w) w.sensationDialV2 = { items }
+        }
+        for (const f of repair.failures) {
+          console.warn(`[resume] dial repair WARN-ONLY for ${f.productId}: ${f.error}`)
+        }
+      } catch (err) {
+        console.warn(`[resume] dial repair batch failed (warn-only, keeping original dials): ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+  }
+
+  // Look up the deal_history row for each productId and run the existing
+  // enrichOne(row, args, summary, writes) path. enrichOne handles fill-gaps
+  // semantics, Shopify push, and Sanity upsert.
+  console.log(`\n[resume] pushing ${writesById.size} product(s) to Shopify+Sanity (mode=${args.mode})`)
+  let count = 0
+  for (const [productId, writes] of writesById) {
+    count++
+    if (count % 25 === 0) console.log(`[resume] applying ${count}/${writesById.size}`)
+    const histRows = await db
+      .select({
+        sku:              dealHistory.sku,
+        shopifyProductId: dealHistory.shopifyProductId,
+        brand:            dealHistory.brand,
+        status:           dealHistory.status,
+      })
+      .from(dealHistory)
+      .where(eq(dealHistory.shopifyProductId, productId))
+      .limit(1)
+    const histRow = histRows[0]
+    if (!histRow) {
+      summary.errors.push({ sku: productId, message: 'no deal_history row for productId' })
+      continue
+    }
+    const row: ProductRow = {
+      sku:              histRow.sku,
+      brand:            histRow.brand,
+      shopifyProductId: histRow.shopifyProductId,
+      status:           histRow.status,
+    }
+    await enrichOne(row, args, summary, writes)
+  }
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 /**
@@ -936,6 +1504,10 @@ async function main() {
     await runArchiveDiscontinued(args, summary)
   } else if (args.fromFile) {
     await runFromFile(args, summary)
+  } else if (args.fromBatchDir) {
+    await runFromBatchDir(args, summary)
+  } else if (args.via === 'batch' && args.fullEnrichment) {
+    await runBatchFullEnrichmentJob(args, summary)
   } else if (args.via === 'batch') {
     await runBatchVoiceRefresh(args, summary)
   } else {
