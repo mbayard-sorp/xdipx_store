@@ -33,6 +33,7 @@ import { categoryToLegacyString } from '~/types'
 import type { ProductCarouselBlock, TrustBarBlock as TrustBarBlockType } from '~/types/cms'
 import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~/lib/analytics.client'
 import { buildSocialMeta } from '~/lib/social-meta'
+import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
 
 async function getLiveDealRow() {
   const [dbDeal] = await db
@@ -245,18 +246,16 @@ function preloadHeroImageTag(imageUrl: string | undefined | null) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const canonical = 'https://xdipx.com/'
   if (!data?.deal) {
-    const title = "xdipx — Emma's picks · sexual wellness, edited"
-    const description = "Emma's picks — sexual wellness we've actually tried. Ships discreet."
     return [
-      { title },
-      { name: 'description', content: description },
+      { title: BRAND_TITLE },
+      { name: 'description', content: BRAND_DESCRIPTION },
       { tagName: 'link', rel: 'canonical', href: canonical },
-      ...buildSocialMeta({ title, description, url: canonical, image: null, type: 'website' }),
+      ...buildSocialMeta({ title: BRAND_TITLE, description: BRAND_DESCRIPTION, url: canonical, image: null, type: 'website' }),
     ]
   }
   const { deal } = data
-  const title = `${deal.seoTitle} — Emma's pick | xdipx`
-  const description = deal.metaDescription || `${deal.seoTitle} — Emma's pick at xdipx. Ships discreet.`
+  const title = `${deal.seoTitle} | ${BRAND_TITLE}`
+  const description = deal.metaDescription || BRAND_DESCRIPTION
   const heroPreload = preloadHeroImageTag(deal.images[0]?.url)
   return [
     { title },

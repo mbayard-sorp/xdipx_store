@@ -1,7 +1,10 @@
 import type { MetaDescriptor } from 'react-router'
+import { BRAND_TITLE } from '~/lib/brand'
 
 export const SITE_ORIGIN =
   (typeof process !== 'undefined' && process.env?.['SITE_ORIGIN']) || 'https://xdipx.com'
+
+const DEFAULT_OG_IMAGE = 'https://xdipx.com/og/og-default.png'
 
 export function ogImageUrl(
   url: string | undefined | null,
@@ -35,8 +38,10 @@ export function buildSocialMeta({
   twitterHandle = '@xdipx',
   imageAlt,
 }: BuildSocialMetaInput): MetaDescriptor[] {
-  const sized = ogImageUrl(image)
-  const alt = imageAlt ?? title
+  // For the static fallback OG image we skip resize query params (it's a
+  // fixed 1200×630 PNG; adding ?width= just pollutes the URL).
+  const sized = image ? ogImageUrl(image) : DEFAULT_OG_IMAGE
+  const alt = imageAlt ?? title ?? BRAND_TITLE
 
   const tags: MetaDescriptor[] = [
     { property: 'og:title',       content: title },
@@ -50,16 +55,14 @@ export function buildSocialMeta({
     { name: 'twitter:description', content: description },
   ]
 
-  if (sized) {
-    tags.push(
-      { property: 'og:image',        content: sized },
-      { property: 'og:image:width',  content: '1200' },
-      { property: 'og:image:height', content: '630' },
-      { property: 'og:image:alt',    content: alt },
-      { name: 'twitter:image',       content: sized },
-      { name: 'twitter:image:alt',   content: alt },
-    )
-  }
+  tags.push(
+    { property: 'og:image',        content: sized },
+    { property: 'og:image:width',  content: '1200' },
+    { property: 'og:image:height', content: '630' },
+    { property: 'og:image:alt',    content: alt },
+    { name: 'twitter:image',       content: sized },
+    { name: 'twitter:image:alt',   content: alt },
+  )
 
   return tags
 }
