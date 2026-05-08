@@ -125,7 +125,9 @@ __export(schema_exports, {
   dealHistory: () => dealHistory,
   draftOrders: () => draftOrders,
   emmaChatEvents: () => emmaChatEvents,
+  emmaChatMessages: () => emmaChatMessages,
   emmaChatSessions: () => emmaChatSessions,
+  emmaChatThreads: () => emmaChatThreads,
   emmaChatTurns: () => emmaChatTurns,
   ivrVoices: () => ivrVoices,
   orderLineItems: () => orderLineItems,
@@ -165,7 +167,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -568,7 +570,21 @@ var init_schema = __esm({
       customerDefaultZip: text("customer_default_zip"),
       stageSetAt: timestamp("stage_set_at").notNull().defaultNow(),
       lastActiveAt: timestamp("last_active_at").notNull().defaultNow(),
-      conversationId: uuid("conversation_id").notNull().defaultRandom()
+      conversationId: uuid("conversation_id").notNull().defaultRandom(),
+      // Migration 030: Emma discovery state machine + slot accumulator.
+      discoveryState: json("discovery_state").$type(),
+      discoveredSlots: json("discovered_slots").$type().notNull().default({}),
+      // Migration 031: voice-channel pending pdp link awaiting caller permission.
+      pendingPdpUrl: text("pending_pdp_url"),
+      // Migration 032: Phase 0 memory primitives.
+      // conversation_summary — Haiku-generated 1-2 sentence rolling summary. Updated
+      //   fire-and-forget after each turn. Injected into the system prompt so the
+      //   agent retains context beyond the HISTORY_LIMIT window. Copied forward on
+      //   24h rotation as "From a previous conversation: {summary}".
+      conversationSummary: text("conversation_summary"),
+      // pitched_handles_log — ordered array (most-recent last) of the last 10 pitched
+      //   product handles. Enables "the first one you showed me" resolution.
+      pitchedHandlesLog: text("pitched_handles_log").array()
     }, (t) => ({
       // Phase 10: customer_gid indexes for cross-channel joins (additive).
       customerGidIdx: index("sms_conversations_customer_gid_idx").on(t.customerGid),
@@ -595,6 +611,17 @@ var init_schema = __esm({
       pipelineVersion: varchar("pipeline_version", { length: 8 }).notNull(),
       // Migration 028: channel='sms' (default) or 'web'. Existing rows backfilled to 'sms'.
       channel: varchar("channel", { length: 8 }).notNull().default("sms"),
+      // Migration 030: turn flagged when the engine recognized a vulnerability
+      // disclosure and suspended the gate / suppressed the product pitch.
+      softBeat: boolean("soft_beat").notNull().default(false),
+      // Migration 032: set true when the Sonnet loop exhausted MAX_TOOL_HOPS with a
+      // pending tool_use stop_reason — no final text was generated, safeFallback ran.
+      // Powers the "tool budget exhausted rate" dashboard query in Phase 3.
+      toolBudgetExhausted: boolean("tool_budget_exhausted").notNull().default(false),
+      // Migration 033: set true when the dedup filter returned all_results_previously_pitched
+      // (every search result was already in pitchedHandlesLog). Distinct from toolBudgetExhausted.
+      // Powers the "repeat-pitch rate" dashboard query in Phase 3.
+      searchRepeatedPitch: boolean("search_repeated_pitch").notNull().default(false),
       createdAt: timestamp("created_at").notNull().defaultNow()
     }, (t) => ({
       twilioSidUniq: uniqueIndex("sms_turns_twilio_sid_uniq").on(t.twilioMessageSid),
@@ -616,11 +643,49 @@ var init_schema = __esm({
       pageRoute: text("page_route"),
       stageSetAt: timestamp("stage_set_at").notNull().defaultNow(),
       lastActiveAt: timestamp("last_active_at").notNull().defaultNow(),
-      conversationId: uuid("conversation_id").notNull().defaultRandom()
+      conversationId: uuid("conversation_id").notNull().defaultRandom(),
+      // Migration 030: Emma discovery state machine + slot accumulator (web parity).
+      discoveryState: json("discovery_state").$type(),
+      discoveredSlots: json("discovered_slots").$type().notNull().default({}),
+      // Migration 031: pending pdp link awaiting caller permission (voice; reserved for web).
+      pendingPdpUrl: text("pending_pdp_url"),
+      // Migration 032: Phase 0 memory primitives — mirror of sms_conversations columns.
+      // Added now to avoid Phase 2 schema reconciliation cost when the participants
+      // table aligns SMS and web identity.
+      conversationSummary: text("conversation_summary"),
+      pitchedHandlesLog: text("pitched_handles_log").array()
     }, (t) => ({
       // Phase 10: customer_gid indexes for cross-channel joins (additive).
       customerGidIdx: index("web_conversations_customer_gid_idx").on(t.customerGid),
       customerGidActiveIdx: index("web_conversations_gid_active_idx").on(t.customerGid, t.lastActiveAt)
+    }));
+    emmaChatThreads = pgTable("emma_chat_threads", {
+      id: serial("id").primaryKey(),
+      title: varchar("title", { length: 200 }).notNull().default("New thread"),
+      redditPostUrl: text("reddit_post_url"),
+      redditPostExcerpt: text("reddit_post_excerpt"),
+      archived: boolean("archived").notNull().default(false),
+      createdAt: timestamp("created_at").notNull().defaultNow(),
+      updatedAt: timestamp("updated_at").notNull().defaultNow()
+    }, (t) => ({
+      updatedIdx: index("emma_chat_threads_updated_idx").on(t.updatedAt),
+      activeIdx: index("emma_chat_threads_active_idx").on(t.archived, t.updatedAt)
+    }));
+    emmaChatMessages = pgTable("emma_chat_messages", {
+      id: serial("id").primaryKey(),
+      threadId: integer("thread_id").notNull().references(() => emmaChatThreads.id, { onDelete: "cascade" }),
+      role: varchar("role", { length: 10 }).notNull(),
+      // 'user' | 'assistant' | 'tool'
+      content: text("content").notNull().default(""),
+      toolCalls: json("tool_calls").$type(),
+      toolResults: json("tool_results").$type(),
+      stopReason: varchar("stop_reason", { length: 20 }),
+      inputTokens: integer("input_tokens"),
+      outputTokens: integer("output_tokens"),
+      latencyMs: integer("latency_ms"),
+      createdAt: timestamp("created_at").notNull().defaultNow()
+    }, (t) => ({
+      threadIdx: index("emma_chat_messages_thread_idx").on(t.threadId, t.createdAt)
     }));
   }
 });
@@ -652,6 +717,7 @@ __export(shopify_server_exports, {
   archiveShopifyProduct: () => archiveShopifyProduct,
   associateImageWithVariant: () => associateImageWithVariant,
   attachVideoToProduct: () => attachVideoToProduct,
+  buildShopifyQuery: () => buildShopifyQuery,
   cartBuyerIdentityUpdate: () => cartBuyerIdentityUpdate,
   closeReturn: () => closeReturn,
   createCart: () => createCart,
@@ -707,6 +773,7 @@ __export(shopify_server_exports, {
   getPairingCandidates: () => getPairingCandidates,
   getProductAdminImages: () => getProductAdminImages,
   getProductByHandle: () => getProductByHandle,
+  getProductDetailForEmma: () => getProductDetailForEmma,
   getProductHandleById: () => getProductHandleById,
   getProductImagesForSitemap: () => getProductImagesForSitemap,
   getProductVariantGids: () => getProductVariantGids,
@@ -723,6 +790,8 @@ __export(shopify_server_exports, {
   getVaultDeals: () => getVaultDeals,
   getWholesaleCostBySKU: () => getWholesaleCostBySKU,
   loginWithSocialIdentity: () => loginWithSocialIdentity,
+  parseMetafield: () => parseMetafield,
+  parseMetafieldJSON: () => parseMetafieldJSON,
   pollMediaReady: () => pollMediaReady,
   predictiveSearch: () => predictiveSearch,
   pushProductToShopify: () => pushProductToShopify,
@@ -730,6 +799,7 @@ __export(shopify_server_exports, {
   removeFromCart: () => removeFromCart,
   reorderProductImages: () => reorderProductImages,
   searchAdminProducts: () => searchAdminProducts,
+  searchCatalogForEmma: () => searchCatalogForEmma,
   searchProducts: () => searchProducts,
   sendDraftOrderInvoice: () => sendDraftOrderInvoice,
   setCartAttributes: () => setCartAttributes,
@@ -1164,6 +1234,9 @@ async function getProductHandleById(numericId) {
 }
 async function getDealByShopifyId(numericId) {
   const id = numericId.replace("gid://shopify/Product/", "");
+  return cached(`shopify:deal:byid:${id}`, READ_TTL, () => getDealByShopifyIdUncached(id));
+}
+async function getDealByShopifyIdUncached(id) {
   const [{ product }, { metafields: xdipxMF }, { metafields: customMF }] = await Promise.all([
     shopifyAdmin(`/products/${id}.json`),
     shopifyAdmin(`/products/${id}/metafields.json?namespace=xdipx&limit=50`),
@@ -1287,13 +1360,15 @@ async function getDealByShopifyId(numericId) {
   };
 }
 async function getDealByHandle(handle) {
-  const data = await storefront(`
-    query GetDealByHandle($handle: String!) {
-      product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
-    }
-  `, { handle });
-  if (!data.product) return null;
-  return nodeToDeal(data.product);
+  return cached(`shopify:deal:byhandle:${handle}`, READ_TTL, async () => {
+    const data = await storefront(`
+      query GetDealByHandle($handle: String!) {
+        product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
+      }
+    `, { handle });
+    if (!data.product) return null;
+    return nodeToDeal(data.product);
+  });
 }
 async function getProductsByIds(ids) {
   if (ids.length === 0) return [];
@@ -1913,12 +1988,18 @@ async function updateProductMetafield(productId, key, value, type = "single_line
   await shopifyAdmin(`/products/${numericId}/metafields.json`, "POST", {
     metafield: { namespace, key, value, type }
   });
+  invalidateCache(`shopify:deal:byid:${numericId}`);
+  invalidateCache("shopify:deal:byhandle:");
+  invalidateCache(`shopify:p:`);
 }
 async function updateProductDescriptionHtml(productId, bodyHtml) {
   const numericId = productId.replace("gid://shopify/Product/", "");
   await shopifyAdmin(`/products/${numericId}.json`, "PUT", {
     product: { id: Number(numericId), body_html: bodyHtml }
   });
+  invalidateCache(`shopify:deal:byid:${numericId}`);
+  invalidateCache("shopify:deal:byhandle:");
+  invalidateCache(`shopify:p:`);
 }
 async function setPairingWhy(productId, blurbs, opts = { merge: true }) {
   const numericId = productId.replace("gid://shopify/Product/", "");
@@ -3719,6 +3800,156 @@ async function sendDraftOrderInvoice(draftOrderId, opts) {
   }
   return { invoiceUrl: res.draftOrderInvoiceSend.draftOrder?.invoiceUrl ?? null };
 }
+function buildShopifyQuery(input) {
+  const sanitize = (s) => s.replace(/[:()*"]/g, "").trim().toLowerCase();
+  const clauses = [];
+  if (input.keyword) {
+    const kw = sanitize(input.keyword);
+    if (kw) clauses.push(`title:*${kw}*`);
+  }
+  if (input.tags && input.tags.length > 0) {
+    for (const tag of input.tags) {
+      const t = sanitize(tag);
+      if (t) clauses.push(`tag:${t}`);
+    }
+  }
+  if (input.productType) {
+    const pt = sanitize(input.productType);
+    if (pt) clauses.push(`product_type:${pt}`);
+  }
+  if (typeof input.priceMin === "number" && input.priceMin > 0) {
+    clauses.push(`variants.price:>=${input.priceMin}`);
+  }
+  if (typeof input.priceMax === "number") {
+    clauses.push(`variants.price:<=${input.priceMax}`);
+  }
+  if (input.excludeArchivedDeals) {
+    clauses.push("-tag:deal-status-archived");
+  }
+  return clauses.join(" AND ");
+}
+function hashSearchInput(input) {
+  const stable = JSON.stringify(input, Object.keys(input).sort());
+  return crypto.createHash("sha1").update(stable).digest("hex").slice(0, 16);
+}
+function searchNodeToEmmaCard(node) {
+  const priceUsd = parseFloat(node.priceRange.minVariantPrice.amount);
+  const compareAtRaw = node.compareAtPriceRange.maxVariantPrice?.amount;
+  return {
+    handle: node.handle,
+    url: `https://xdipx.com/products/${node.handle}`,
+    title: node.title,
+    productType: null,
+    // not in SearchProduct fragment
+    priceUsd: isNaN(priceUsd) ? 0 : priceUsd,
+    compareAtUsd: compareAtRaw ? parseFloat(compareAtRaw) : null,
+    available: node.availableForSale,
+    mapRestricted: false,
+    // not in SearchProduct fragment
+    tagline: null,
+    productTypeDial: null,
+    audienceTags: [],
+    moodTags: [],
+    mattersTags: []
+  };
+}
+function productNodeToEmmaCard(node) {
+  const mf = node.metafields;
+  const variant = node.variants.edges[0]?.node;
+  const priceUsd = parseFloat(variant?.price.amount ?? "0");
+  const compareAtRaw = variant?.compareAtPrice?.amount;
+  const mapRestrictedRaw = parseMetafield(mf, "map_restricted");
+  const available = node.variants.edges.some((e) => e.node.availableForSale);
+  return {
+    handle: node.handle,
+    url: `https://xdipx.com/products/${node.handle}`,
+    title: node.title,
+    productType: null,
+    // Shopify productType field is not in PRODUCT_CORE_FRAGMENT
+    priceUsd: isNaN(priceUsd) ? 0 : priceUsd,
+    compareAtUsd: compareAtRaw ? parseFloat(compareAtRaw) : null,
+    available,
+    mapRestricted: mapRestrictedRaw === "true",
+    tagline: parseMetafield(mf, "tagline") || null,
+    productTypeDial: parseMetafield(mf, "product_type_dial") || null,
+    audienceTags: parseMetafieldJSON(mf, "audience_tags", []),
+    moodTags: parseMetafieldJSON(mf, "mood_tags", []),
+    mattersTags: parseMetafieldJSON(mf, "matters_tags", [])
+  };
+}
+async function searchCatalogForEmma(input) {
+  const limit = Math.min(Math.max(input.limit ?? 12, 1), 20);
+  const cacheKey2 = `emma-search:${hashSearchInput({ ...input, limit })}`;
+  return cached(cacheKey2, READ_TTL, async () => {
+    const queryInput = {};
+    if (input.keyword !== void 0) queryInput.keyword = input.keyword;
+    if (input.productType !== void 0) queryInput.productType = input.productType;
+    const query = buildShopifyQuery(queryInput) || (input.keyword ?? "wellness");
+    const productFilters = [];
+    for (const tag of input.tags ?? []) productFilters.push({ tag });
+    if (input.priceMin !== void 0 || input.priceMax !== void 0) {
+      const price = {};
+      if (input.priceMin !== void 0) price.min = input.priceMin;
+      if (input.priceMax !== void 0) price.max = input.priceMax;
+      productFilters.push({ price });
+    }
+    const result = await searchProducts({ query, first: limit, productFilters });
+    return result.products.map(searchNodeToEmmaCard);
+  });
+}
+async function getProductDetailForEmma(handle) {
+  const product = await getProductByHandle(handle);
+  if (!product) return null;
+  const data = await storefront(`
+    query GetProductForEmma($handle: String!) {
+      product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
+    }
+  `, { handle });
+  const node = data.product;
+  if (!node) return null;
+  const mf = node.metafields;
+  const baseCard = productNodeToEmmaCard(node);
+  const sensationDialRaw = parseMetafieldJSON(mf, "sensation_dial", {});
+  const sensationDial = (() => {
+    const entries = Object.entries(sensationDialRaw).filter(([, v]) => typeof v === "number");
+    return entries.length > 0 ? Object.fromEntries(entries) : null;
+  })();
+  const pairingWhyRaw = parseMetafieldJSON(mf, "pairing_why", {});
+  const pairingWhy = Object.keys(pairingWhyRaw).length > 0 ? pairingWhyRaw : null;
+  const accessoryIds = parseMetafieldJSON(mf, "accessory_product_ids", []);
+  let accessoryHandles = [];
+  if (accessoryIds.length > 0) {
+    const accessories = await getProductsByIds(accessoryIds);
+    accessoryHandles = accessories.map((p) => p.handle);
+  }
+  const featureBulletsRaw = parseMetafield(mf, "feature_bullets");
+  const featureBullets = (() => {
+    if (!featureBulletsRaw) return null;
+    try {
+      const parsed = JSON.parse(featureBulletsRaw);
+      if (Array.isArray(parsed)) return parsed.filter((s) => typeof s === "string");
+    } catch {
+    }
+    return null;
+  })();
+  const imageUrl = node.images.edges[0]?.node.url ?? null;
+  const variants = node.variants.edges.map((e) => ({
+    id: e.node.id,
+    title: e.node.title,
+    priceUsd: parseFloat(e.node.price.amount),
+    available: e.node.availableForSale
+  }));
+  return {
+    ...baseCard,
+    fullStory: parseMetafield(mf, "full_story") || node.description || null,
+    featureBullets,
+    sensationDial,
+    pairingWhy,
+    accessoryHandles,
+    imageUrl,
+    variants
+  };
+}
 var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
@@ -3968,7 +4199,7 @@ var init_shopify_server = __esm({
   }
 `;
     SEARCH_PRODUCT_FRAGMENT = `
-  id handle title vendor tags
+  id handle title vendor tags availableForSale
   featuredImage { url altText }
   priceRange { minVariantPrice { amount currencyCode } }
   compareAtPriceRange { maxVariantPrice { amount currencyCode } }
@@ -9324,17 +9555,16 @@ async function getEmmaContextRows(opts) {
     const lockKey = `emma:rails:lock:${dealHandle}:${rail._id}`;
     const got = await acquireLock(lockKey, 60);
     if (!got) continue;
-    try {
-      const res = await regenerateRail(rail, dealHandle, "lazy");
-      if (res.ok) {
-        const refreshed = await getRailById(rail._id);
-        if (refreshed) railsById.set(rail._id, refreshed);
+    void (async () => {
+      try {
+        await regenerateRail(rail, dealHandle, "lazy");
+      } catch (err) {
+        console.error("[emma-rails] lazy regen failed for", rail.slug, err);
+      } finally {
+        await kvDel(lockKey).catch(() => {
+        });
       }
-    } catch (err) {
-      console.error("[emma-rails] lazy regen failed for", rail.slug, err);
-    } finally {
-      await kvDel(lockKey);
-    }
+    })();
   }
   const allIds = /* @__PURE__ */ new Set();
   for (const rail of railsById.values()) {
