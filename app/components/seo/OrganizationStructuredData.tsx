@@ -1,29 +1,39 @@
-export function OrganizationStructuredData() {
+import { BRAND_DESCRIPTION, BRAND_TITLE } from '~/lib/brand'
+
+interface OrganizationStructuredDataProps {
+  sameAs?: string[]
+}
+
+export function OrganizationStructuredData({ sameAs = [] }: OrganizationStructuredDataProps) {
   const schema = {
     '@context':   'https://schema.org',
     '@type':      'OnlineStore',
     '@id':        'https://xdipx.com/#organization',
-    name:         'xdipx',
+    name:         BRAND_TITLE,
     alternateName: 'xdipx.com',
     url:          'https://xdipx.com',
-    logo:         'https://xdipx.com/logo.png',
-    image:        'https://xdipx.com/logo.png',
-    slogan:       'Dip in. A new wellness deal every day.',
-    description:  'Daily flash-sale storefront for adult wellness and intimacy products. One featured deal every day, shipped discreetly across the United States.',
+    logo: {
+      '@type': 'ImageObject',
+      url:     'https://xdipx.com/og/logo-square.png',
+      width:   600,
+      height:  600,
+    },
+    image:        'https://xdipx.com/og/logo-square.png',
+    // Slogan is brand-voice neutral by design — CLAUDE.md says the UI
+    // never surfaces a daily/midnight cadence, and the same discipline
+    // applies to brand copy that ends up in Google's knowledge panel.
+    slogan:       'Sexual wellness, edited.',
+    description:  BRAND_DESCRIPTION,
     foundingDate: '2026',
     knowsAbout:   [
       'sexual wellness',
       'intimate products',
-      'daily deals',
+      'curated wellness',
       'discreet shipping',
       'couples wellness',
     ],
     areaServed:   { '@type': 'Country', name: 'United States' },
-    sameAs:       [
-      'https://www.instagram.com/xdipx',
-      'https://www.tiktok.com/@xdipx',
-      'https://x.com/xdipx',
-    ],
+    sameAs,
     contactPoint: {
       '@type':      'ContactPoint',
       contactType:  'customer service',

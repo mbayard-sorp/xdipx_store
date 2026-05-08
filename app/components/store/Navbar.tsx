@@ -371,7 +371,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
 
             {/* Drawer links */}
             <nav className="flex-1 overflow-y-auto py-4">
-              {/* Emma's picks link */}
+              {/* Home link */}
               <ul className="space-y-0.5 px-3 mb-2">
                 <li>
                   <Link
@@ -385,7 +385,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
                     ].join(' ')}
                     style={{ fontFamily: 'var(--font-display)' }}
                   >
-                    Emma's picks
+                    Home
                   </Link>
                 </li>
               </ul>
@@ -425,7 +425,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
             {/* Drawer footer */}
             <div className="px-5 py-4 border-t border-cream-2">
               <p className="text-xs text-ink/40 text-center">
-                Emma's picks. Plain envelope. Real humans. ♥
+                Curated picks. Plain envelope. Real humans. ♥
               </p>
             </div>
           </motion.div>

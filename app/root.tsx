@@ -14,6 +14,7 @@ import type { LoaderFunctionArgs, LinksFunction } from 'react-router'
 import * as Sentry from '@sentry/react'
 import { BotIdClient } from 'botid/client'
 import stylesheet from './app.css?url'
+import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
 
 const BOTID_PROTECTED_ROUTES = [
   { path: '/api/waitlist',  method: 'POST' },
@@ -142,34 +143,24 @@ export function Layout({ children }: { children: React.ReactNode }) {
         className="font-body text-ink antialiased"
         style={{ fontFamily: 'var(--font-body)' }}
       >
-        {/* Sitewide WebSite + Organization JSON-LD. WebSite enables the
-            sitelinks search box (in-SERP search input under the brand
-            result); Organization gives Google a canonical brand entity to
-            attach knowledge-panel data to. Both are static so we can render
-            them inside <body> as a single inert script tag. */}
+        {/* WebSite JSON-LD: enables the sitelinks search box (in-SERP search
+            input under the brand result). Static — no loader data needed.
+            Organization JSON-LD lives in _layout.tsx so it can read
+            socialLinks from the Sanity-backed layout loader. */}
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify([
-              {
-                '@context': 'https://schema.org',
-                '@type':    'WebSite',
-                url:        'https://xdipx.com',
-                name:       'xdipx',
-                potentialAction: {
-                  '@type':       'SearchAction',
-                  target:        'https://xdipx.com/search?q={search_term_string}',
-                  'query-input': 'required name=search_term_string',
-                },
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type':    'WebSite',
+              url:        'https://xdipx.com',
+              name:       'xdipx',
+              potentialAction: {
+                '@type':       'SearchAction',
+                target:        'https://xdipx.com/search?q={search_term_string}',
+                'query-input': 'required name=search_term_string',
               },
-              {
-                '@context': 'https://schema.org',
-                '@type':    'Organization',
-                url:        'https://xdipx.com',
-                name:       'xdipx',
-                logo:       'https://xdipx.com/apple-touch-icon.png',
-              },
-            ]),
+            }),
           }}
         />
         {gtmId && (
@@ -209,33 +200,58 @@ export default function App() {
 export function ErrorBoundary() {
   const error = useRouteError()
 
-  let heading = 'Something went wrong'
-  let message = 'An unexpected error occurred. Please try again.'
+  // Friendly, brand-voice copy for the user-facing page.
+  // The raw status code goes into a hidden HTML comment so we keep it for
+  // debugging without ever letting Google index "Error 499" as the page title
+  // or snippet (which is exactly what was happening in search results).
+  let heading = 'Something went sideways'
+  let message = "Try reloading, or take me back to today's pick."
+  let status: number | null = null
 
   if (isRouteErrorResponse(error)) {
-    heading = error.status === 404 ? 'Page not found' : `Error ${error.status}`
-    message = error.data ?? message
+    status = error.status
+    if (error.status === 404) {
+      heading = 'Page not found'
+      message = "That link's gone walkabout. Today's pick is right this way."
+    } else if (error.status === 410) {
+      heading = "That deal's been retired"
+      message = "It had its day. Here's what Emma's picking now."
+    }
   }
 
+  // Brand-safe SEO title + noindex so error pages never get indexed.
+  // React 19 hoists <title>/<meta> from anywhere in the tree into <head>.
+  // BRAND_TITLE and BRAND_DESCRIPTION come from app/lib/brand.ts — single source
+  // of truth shared with the homepage meta export.
+
   return (
-    <div className="min-h-screen bg-cream flex items-center justify-center px-4">
-      <div className="text-center max-w-md">
-        <div className="text-5xl mb-6">♥</div>
-        <h1
-          className="text-3xl font-bold mb-3 text-coral"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          {heading}
-        </h1>
-        <p className="text-ink/70 mb-8">{message}</p>
-        <a
-          href="/"
-          className="inline-block bg-coral text-white font-semibold px-8 py-3 rounded-full transition-opacity hover:opacity-90"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          Back to today's deal ♥
-        </a>
+    <>
+      <title>{BRAND_TITLE}</title>
+      <meta name="robots" content="noindex, nofollow" />
+      <meta name="description" content={BRAND_DESCRIPTION} />
+      {/* Keep the status code visible to ops without putting it in the title. */}
+      {status !== null && (
+        <meta name="x-error-status" content={String(status)} />
+      )}
+      <div className="min-h-screen bg-cream flex items-center justify-center px-4">
+        <div className="text-center max-w-md">
+          <div className="text-5xl mb-6">♥</div>
+          <h1
+            className="text-3xl font-bold mb-3 text-coral"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            {heading}
+          </h1>
+          <p className="text-ink/70 mb-8">{message}</p>
+          <a
+            href="/"
+            className="inline-block bg-coral text-white font-semibold px-8 py-3 rounded-full transition-opacity hover:opacity-90"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Take me to today's pick ♥
+          </a>
+        </div>
       </div>
-    </div>
+    </>
   )
 }

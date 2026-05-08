@@ -99,7 +99,7 @@ export default function StoreLayout() {
           <Analytics ga4Id={ga4Id} />
 
           {/* Sitewide brand entity + sitelinks search box. */}
-          <OrganizationStructuredData />
+          <OrganizationStructuredData sameAs={socialLinks.map(s => s.url).filter(Boolean)} />
           <WebsiteStructuredData />
 
           {/* Visual editing overlays — only active when Sanity studio is open */}
