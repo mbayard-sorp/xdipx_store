@@ -103,44 +103,52 @@ export async function loader({ request }: LoaderFunctionArgs) {
     pairDiscountPct: parseInt(templateRows.find(r => r.key === 'homepage_pair_discount_pct')?.value ?? '0', 10) || 0,
   }
 
-  // Resolve pair deal only when a pair_bundle template is active.
-  const pairBundleDeal = (homepageSettings.template === 'pair_bundle' || homepageSettings.template === 'pair_bundle_fullbleed') && homepageSettings.pairProductHandle
-    ? await getDealByHandle(homepageSettings.pairProductHandle)
-    : null
+  // Session seed: prefer the cart cookie (stable per visitor once they engage);
+  // anon visitors fall back to a 60s rotating bucket so the edge-cached window
+  // naturally reshuffles on each revalidation. Cheap enough to compute inline.
+  const cartId  = getCartIdFromCookie(request)
+  const minuteBucket = Math.floor(Date.now() / 60_000)
+  const sessionSeed = cartId ?? `anon-${minuteBucket}`
 
-  // For the FullBleed pair / endorsement templates, fetch swatch hexes so
-  // the inline CircleOptionSelector matches the PDP look. FullBleed pulls
-  // both primary + partner; endorsement is single-product.
-  const pairColorLabels = homepageSettings.template === 'pair_bundle_fullbleed' && deal && pairBundleDeal
-    ? [
-        ...((deal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
-        ...((pairBundleDeal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
-      ]
-    : homepageSettings.template === 'endorsement' && deal
-      ? (deal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)
-      : []
-  const pairSwatches: Record<string, string> = pairColorLabels.length > 0
-    ? await getSwatchMap(pairColorLabels)
-    : {}
-
-  // Resolve optional pair product for bundle variant (Shopify handle → Deal)
-  const pairDeal = emmaHero?.heroVariant === 'bundle' && emmaHero.pairProductHandle
-    ? await getDealByHandle(emmaHero.pairProductHandle)
-    : null
-
-  // If the live deal's Sanity doc is flagged as a bundle, render the bundle hero
-  // instead of the DailyDealHero. Falls back to the regular product hero when
-  // Sanity has no bundle doc for this handle.
-  const bundle = deal?.handle ? await getBundleByHandle(deal.handle) : null
-
-  // Resolve Shopify products for any CMS productCarousel blocks
+  // Phase 3: every remaining external call fans out in parallel. Previous code
+  // chained these sequentially (pairBundleDeal → swatches → pairDeal → bundle →
+  // carousel → rails → reviews) which on a cold cache could add 1.5–4s of
+  // serialization on top of each leg's own latency. Cold-instance hits during
+  // Googlebot crawls were tipping past the 60s function limit and returning
+  // 499s. Now the loader waits on a single Promise.all.
   const carouselBlocks = (cmsData?.sections ?? []).filter(
     (s): s is ProductCarouselBlock => s._type === 'productCarousel',
   )
-  const carouselProductMap: Record<string, Product[]> = {}
-  if (carouselBlocks.length > 0) {
-    const results = await Promise.all(
-      carouselBlocks.map(b => {
+  const emmaRailBlocks = (cmsData?.sections ?? []).filter(
+    (s): s is import('~/types/cms').EmmaCuratedRailBlock => s._type === 'emmaCuratedRail',
+  )
+
+  const pairBundleDealP = (homepageSettings.template === 'pair_bundle' || homepageSettings.template === 'pair_bundle_fullbleed') && homepageSettings.pairProductHandle
+    ? getDealByHandle(homepageSettings.pairProductHandle)
+    : Promise.resolve(null)
+
+  // Swatches depend on pairBundleDeal — chain rather than serialize the whole
+  // loader. The chained .then keeps it parallel with the rest of Promise.all.
+  const pairSwatchesP: Promise<Record<string, string>> = pairBundleDealP.then(pbd => {
+    const labels = homepageSettings.template === 'pair_bundle_fullbleed' && deal && pbd
+      ? [
+          ...((deal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
+          ...((pbd.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
+        ]
+      : homepageSettings.template === 'endorsement' && deal
+        ? (deal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)
+        : []
+    return labels.length > 0 ? getSwatchMap(labels) : Promise.resolve({})
+  })
+
+  const pairDealP = emmaHero?.heroVariant === 'bundle' && emmaHero.pairProductHandle
+    ? getDealByHandle(emmaHero.pairProductHandle)
+    : Promise.resolve(null)
+
+  const bundleP = deal?.handle ? getBundleByHandle(deal.handle) : Promise.resolve(null)
+
+  const carouselResultsP = carouselBlocks.length > 0
+    ? Promise.all(carouselBlocks.map(b => {
         const limit = b.productLimit ?? 8
         const source = b.source ?? 'tag'
         if (source === 'collection' && b.collectionHandle) {
@@ -149,27 +157,46 @@ export async function loader({ request }: LoaderFunctionArgs) {
         if (source === 'manual' && b.productHandles?.length) {
           return getProductsByHandles(b.productHandles.map(p => p.handle))
         }
-        // Default: tag-based (backwards compatible)
-        return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([])
-      }),
-    )
-    carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
-  }
+        return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([] as Product[])
+      }))
+    : Promise.resolve([] as Product[][])
 
-  // Resolve Shopify products for any Emma-curated rail blocks (manual handles only)
-  const emmaRailBlocks = (cmsData?.sections ?? []).filter(
-    (s): s is import('~/types/cms').EmmaCuratedRailBlock => s._type === 'emmaCuratedRail',
-  )
-  if (emmaRailBlocks.length > 0) {
-    const results = await Promise.all(
-      emmaRailBlocks.map(b =>
+  const emmaRailResultsP = emmaRailBlocks.length > 0
+    ? Promise.all(emmaRailBlocks.map(b =>
         b.productHandles?.length
           ? getProductsByHandles(b.productHandles.map(p => p.handle))
           : Promise.resolve([] as Product[]),
-      ),
-    )
-    emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
-  }
+      ))
+    : Promise.resolve([] as Product[][])
+
+  // Deal-dependent calls — only meaningful when there's a live deal. When
+  // there isn't, short-circuit with empty defaults so the Promise.all stays
+  // shape-stable.
+  const viewersP = deal
+    ? kvGet<number>(KV_KEYS.viewerCount(deal.handle)).then(n => n ?? 0)
+    : Promise.resolve(0)
+  const reviewDataP = deal
+    ? getProductReviews(deal.shopifyProductId, { sort: 'newest', page: 1, perPage: 10 })
+    : Promise.resolve({ reviews: [] as Awaited<ReturnType<typeof getProductReviews>>['reviews'], total: 0 })
+  const aggregateP = deal ? getProductAggregate(deal.shopifyProductId) : Promise.resolve(null)
+  const emmaContextRowsP = deal
+    ? getEmmaContextRows({ dealHandle: deal.handle, sessionSeed }).catch(err => {
+        console.error('[homepage] emma context rows failed:', err)
+        return [] as Awaited<ReturnType<typeof getEmmaContextRows>>
+      })
+    : Promise.resolve([] as Awaited<ReturnType<typeof getEmmaContextRows>>)
+
+  const [
+    pairBundleDeal, pairDeal, bundle, carouselResults, emmaRailResults,
+    pairSwatches, viewers, reviewData, aggregate, emmaContextRows,
+  ] = await Promise.all([
+    pairBundleDealP, pairDealP, bundleP, carouselResultsP, emmaRailResultsP,
+    pairSwatchesP, viewersP, reviewDataP, aggregateP, emmaContextRowsP,
+  ])
+
+  const carouselProductMap: Record<string, Product[]> = {}
+  carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = carouselResults[i] ?? [] })
+  emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = emmaRailResults[i] ?? [] })
 
   if (!deal) {
     const value = {
@@ -180,23 +207,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
     return isAdmin ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
   }
-
-  // Session seed: prefer the cart cookie (stable per visitor once they engage);
-  // anon visitors fall back to a 60s rotating bucket so the edge-cached window
-  // naturally reshuffles on each revalidation. Cheap enough to compute inline.
-  const cartId  = getCartIdFromCookie(request)
-  const minuteBucket = Math.floor(Date.now() / 60_000)
-  const sessionSeed = cartId ?? `anon-${minuteBucket}`
-
-  const [viewers, reviewData, aggregate, emmaContextRows] = await Promise.all([
-    kvGet<number>(KV_KEYS.viewerCount(deal.handle)).then(n => n ?? 0),
-    getProductReviews(deal.shopifyProductId, { sort: 'newest', page: 1, perPage: 10 }),
-    getProductAggregate(deal.shopifyProductId),
-    getEmmaContextRows({ dealHandle: deal.handle, sessionSeed }).catch(err => {
-      console.error('[homepage] emma context rows failed:', err)
-      return []
-    }),
-  ])
 
   const value = {
     deal, bundle, forHim, forHer, bonusDeal,
