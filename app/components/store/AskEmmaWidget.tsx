@@ -800,6 +800,13 @@ function toInternalPath(href: string): string | null {
     if (typeof window !== 'undefined' && u.origin === window.location.origin) {
       return u.pathname + u.search + u.hash
     }
+    // Preview deploys run on *.vercel.app, so an absolute xdipx.com link from
+    // Emma would otherwise be treated as external and open in a new tab —
+    // breaking chat persistence on the destination route. Canonicalize.
+    const host = u.hostname.toLowerCase()
+    if (host === 'xdipx.com' || host === 'www.xdipx.com') {
+      return u.pathname + u.search + u.hash
+    }
   } catch {
     return null
   }
