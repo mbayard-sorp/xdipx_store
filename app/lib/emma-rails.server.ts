@@ -430,7 +430,11 @@ export async function getEmmaContextRows(opts: {
   const rails = await listActiveRails()
   if (rails.length === 0) return []
 
-  // In-memory copy we may patch after lazy regen.
+  // Lazy regen runs in the background (fire-and-forget) so the homepage loader
+  // never blocks on a Claude/Shopify roundtrip. The next request after regen
+  // completes picks up fresh picks from KV. Until then we render whatever
+  // `rail.current` already has — possibly stale vs. today's deal — which is
+  // far better than a 60s function timeout / 499.
   const railsById = new Map(rails.map(r => [r._id, r]))
 
   for (const rail of rails) {
@@ -443,17 +447,15 @@ export async function getEmmaContextRows(opts: {
     const lockKey = `emma:rails:lock:${dealHandle}:${rail._id}`
     const got = await acquireLock(lockKey, 60)
     if (!got) continue
-    try {
-      const res = await regenerateRail(rail, dealHandle, 'lazy')
-      if (res.ok) {
-        const refreshed = await getRailById(rail._id)
-        if (refreshed) railsById.set(rail._id, refreshed)
+    void (async () => {
+      try {
+        await regenerateRail(rail, dealHandle, 'lazy')
+      } catch (err) {
+        console.error('[emma-rails] lazy regen failed for', rail.slug, err)
+      } finally {
+        await kvDel(lockKey).catch(() => {})
       }
-    } catch (err) {
-      console.error('[emma-rails] lazy regen failed for', rail.slug, err)
-    } finally {
-      await kvDel(lockKey)
-    }
+    })()
   }
 
   // One Shopify batch for every pick across all rails.

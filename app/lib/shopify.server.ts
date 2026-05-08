@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore, ProductTypeDial, SellingPlan, SellingPlanGroup, SensationDial, SensationDialV2, SensationDialItem, DialValue, CareInstructions, EmmaHeroCopy } from '~/types'
 import { toHTML } from '@portabletext/to-html'
-import { cached, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+import { cached, invalidateCache, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
 
 // Short TTL for read-through product caches — long enough to dedupe burst
 // traffic, short enough for admin edits to appear on the next page load.
@@ -769,6 +769,10 @@ export async function getProductHandleById(numericId: string): Promise<string | 
  */
 export async function getDealByShopifyId(numericId: string): Promise<Deal | null> {
   const id = numericId.replace('gid://shopify/Product/', '')
+  return cached(`shopify:deal:byid:${id}`, READ_TTL, () => getDealByShopifyIdUncached(id))
+}
+
+async function getDealByShopifyIdUncached(id: string): Promise<Deal | null> {
 
   interface RestVariant {
     id: number; title: string; price: string; compare_at_price: string | null
@@ -941,13 +945,15 @@ export async function getDealByShopifyId(numericId: string): Promise<Deal | null
 }
 
 export async function getDealByHandle(handle: string): Promise<Deal | null> {
-  const data = await storefront<{ product: ShopifyProductNode | null }>(`
-    query GetDealByHandle($handle: String!) {
-      product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
-    }
-  `, { handle })
-  if (!data.product) return null
-  return nodeToDeal(data.product)
+  return cached(`shopify:deal:byhandle:${handle}`, READ_TTL, async () => {
+    const data = await storefront<{ product: ShopifyProductNode | null }>(`
+      query GetDealByHandle($handle: String!) {
+        product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
+      }
+    `, { handle })
+    if (!data.product) return null
+    return nodeToDeal(data.product)
+  })
 }
 
 export async function getProductsByIds(ids: string[]): Promise<Product[]> {
@@ -1927,6 +1933,9 @@ export async function updateProductMetafield(
   await shopifyAdmin(`/products/${numericId}/metafields.json`, 'POST', {
     metafield: { namespace, key, value, type },
   })
+  invalidateCache(`shopify:deal:byid:${numericId}`)
+  invalidateCache('shopify:deal:byhandle:')
+  invalidateCache(`shopify:p:`)
 }
 
 /** Update the canonical Shopify product.descriptionHtml (body_html). */
@@ -1938,6 +1947,9 @@ export async function updateProductDescriptionHtml(
   await shopifyAdmin(`/products/${numericId}.json`, 'PUT', {
     product: { id: Number(numericId), body_html: bodyHtml },
   })
+  invalidateCache(`shopify:deal:byid:${numericId}`)
+  invalidateCache('shopify:deal:byhandle:')
+  invalidateCache(`shopify:p:`)
 }
 
 /**
