@@ -91,7 +91,7 @@ export function parseBulkImportCSV(csvText: string): {
     const masterSku = master.SKU
     const children  = childRows.filter(r => r['Master SKU'] === masterSku)
 
-    if (children.length === 0 && !master['Variant Option Value']) {
+    if (children.length === 0 && !master['Variant Option Value'] && !master['Variant Option Value 2']) {
       // Standalone product — no variants
       groups.push({ masterRow: master, variants: [], isSingleVariant: true })
       continue
@@ -102,14 +102,49 @@ export function parseBulkImportCSV(csvText: string): {
       ? [master, ...children]
       : children
 
-    // Validate consistent Variant Option Name across the group
-    const optionNames = new Set(allVariantRows.map(r => r['Variant Option Name']).filter(Boolean))
-    if (optionNames.size > 1) {
+    // Validate consistent Variant Option Name (axis 1) across the group
+    const optionNames1 = new Set(allVariantRows.map(r => r['Variant Option Name']).filter(Boolean))
+    if (optionNames1.size > 1) {
       parseErrors.push({
         sku:     masterSku,
-        message: `Inconsistent Variant Option Name: ${[...optionNames].join(', ')}`,
+        message: `Inconsistent Variant Option Name: ${[...optionNames1].join(', ')}`,
       })
       continue
+    }
+
+    // Validate consistent Variant Option Name 2 (axis 2) across the group
+    const optionNames2 = new Set(allVariantRows.map(r => r['Variant Option Name 2']).filter(Boolean))
+    if (optionNames2.size > 1) {
+      parseErrors.push({
+        sku:     masterSku,
+        message: `Inconsistent Variant Option Name 2: ${[...optionNames2].join(', ')}`,
+      })
+      continue
+    }
+
+    // Axis-2 must be uniformly present or uniformly absent across the group.
+    // Partial population (some rows have Value 2, others don't) is a data error.
+    const hasAxis2Name = optionNames2.size === 1
+    if (hasAxis2Name) {
+      for (const r of allVariantRows) {
+        if (!r['Variant Option Value 2']) {
+          parseErrors.push({
+            sku:     masterSku,
+            message: `Row SKU ${r.SKU} is missing Variant Option Value 2 but other rows in this group supply one`,
+          })
+        }
+      }
+      if (parseErrors.some(e => e.sku === masterSku)) continue
+    } else {
+      for (const r of allVariantRows) {
+        if (r['Variant Option Value 2']) {
+          parseErrors.push({
+            sku:     masterSku,
+            message: `Row SKU ${r.SKU} supplies Variant Option Value 2 but Variant Option Name 2 is missing or inconsistent`,
+          })
+        }
+      }
+      if (parseErrors.some(e => e.sku === masterSku)) continue
     }
 
     const variants: BulkVariantRow[] = allVariantRows.map(r => {
@@ -117,9 +152,13 @@ export function parseBulkImportCSV(csvText: string): {
       const msrp          = parseFloat(r.MSRP)      || 0
       const map           = parseFloat(r.MAP ?? '0') || 0
       const qty           = parseInt(r['Total qty available']) || 0
+      const value1        = r['Variant Option Value'] || r.SKU
+      const optionValues  = hasAxis2Name
+        ? [value1, r['Variant Option Value 2']]
+        : [value1]
       return {
         sku:            r.SKU,
-        optionValue:    r['Variant Option Value'] || r.SKU,
+        optionValues,
         price:          computeDealPrice(wholesale, msrp, map),
         compareAtPrice: msrp,
         qty,
@@ -225,7 +264,9 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       numericId = await createShopifyProductFromFeed(productScore, handle)
     } else {
       // Multi-variant
-      const optionName = group.masterRow['Variant Option Name'] || 'Option'
+      const name1 = group.masterRow['Variant Option Name'] || 'Option'
+      const name2 = group.masterRow['Variant Option Name 2']
+      const optionNames = name2 ? [name1, name2] : [name1]
       const handle = slugifyHandle(masterRow['Product Title'])
       numericId = await createShopifyProductWithVariants(
         {
@@ -237,7 +278,7 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
           categories,
         },
         variants,
-        optionName,
+        optionNames,
         handle,
       )
     }
@@ -429,6 +470,182 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[bulk-import] Failed SKU ${masterSku}:`, message)
+    return { success: false, sku: masterSku, error: message }
+  }
+}
+
+// ─── Raw import (no enrichment) ──────────────────────────────────────────────
+// Mirrors importProductGroup but skips the Sonnet orchestrator + AI metafield
+// push. Use this when you want to land products in Shopify quickly and run
+// enrichment as a separate batched pass (Anthropic Message Batches, 50% off).
+
+export async function importProductGroupRaw(group: MasterProductGroup): Promise<{
+  success: boolean
+  sku: string
+  shopifyProductId?: string
+  skipped?: boolean
+  error?: string
+  warnings?: { stage: string; message: string }[]
+}> {
+  const { masterRow, variants, isSingleVariant } = group
+  const masterSku = masterRow.SKU
+
+  try {
+    if (isDiscontinued({
+      'Sub-Category':       masterRow['Sub-Category'] ?? '',
+      'Product Title':      masterRow['Product Title'] ?? '',
+      'Product Description': masterRow['Product Description'] ?? '',
+    })) {
+      return { success: false, sku: masterSku, skipped: true, error: 'discontinued by manufacturer' }
+    }
+
+    if (await isSkuAlreadyImported(masterSku)) {
+      return { success: false, sku: masterSku, skipped: true }
+    }
+
+    const wholesale = parseFloat(masterRow.Wholesale) || 0
+    const msrp      = parseFloat(masterRow.MSRP)      || 0
+    const map       = parseFloat(masterRow.MAP ?? '0') || 0
+    const qty       = parseInt(masterRow['Total qty available']) || 0
+    const images    = getImages(masterRow)
+    const rawDesc   = masterRow['Product Description'] ?? ''
+    const description = cleanDescription(rawDesc) || `${masterRow.Brand} ${masterRow['Product Title']}`
+    const categories  = masterRow['Sub-Category']
+      ? masterRow['Sub-Category'].split(',').map(c => c.trim()).filter(Boolean)
+      : []
+    const dealPrice   = computeDealPrice(wholesale, msrp, map)
+    const category    = inferCategory(categories)
+
+    let numericId: string
+    const existingGid = await findProductBySKU(masterSku)
+
+    if (existingGid) {
+      numericId = existingGid.replace('gid://shopify/Product/', '')
+    } else if (isSingleVariant) {
+      const productScore: ProductScore = {
+        sku:           masterSku,
+        title:         masterRow['Product Title'],
+        brand:         masterRow.Brand,
+        description,
+        score:         0,
+        msrp,
+        wholesaleCost: wholesale,
+        mapPrice:      map,
+        dealPrice,
+        discountPct:   msrp > 0 ? ((msrp - dealPrice) / msrp) * 100 : 0,
+        profitPerUnit: dealPrice - wholesale,
+        qty,
+        mapType:       map === 0 ? 'no-map' : map < msrp ? 'below-msrp' : 'equals-msrp',
+        images,
+        categories,
+      }
+      const handle = slugifyHandle(masterRow['Product Title'])
+      numericId = await createShopifyProductFromFeed(productScore, handle)
+    } else {
+      const name1 = group.masterRow['Variant Option Name'] || 'Option'
+      const name2 = group.masterRow['Variant Option Name 2']
+      const optionNames = name2 ? [name1, name2] : [name1]
+      const handle = slugifyHandle(masterRow['Product Title'])
+      numericId = await createShopifyProductWithVariants(
+        {
+          title:      masterRow['Product Title'],
+          brand:      masterRow.Brand,
+          sku:        masterSku,
+          images,
+          msrp,
+          categories,
+        },
+        variants,
+        optionNames,
+        handle,
+      )
+    }
+
+    // Push BASE metafields only — no tagline, descriptionHtml, dial, mood/audience/
+    // matters tags, IVR, FAQs. Those are filled by the batched enrichment pass.
+    await pushProductToShopify({
+      shopifyProductId: numericId,
+      category,
+      dealStatus:       'pending_approval',
+      dealDate:         '2099-12-31',
+      originalPrice:    msrp,
+      wholesaleCost:    wholesale,
+      mapPrice:         map,
+      nalpacSku:        masterSku,
+      rawDescription:   rawDesc,
+      requireTagline:   false,
+    })
+
+    const [{ maxSort = 0 } = {}] = await db
+      .select({ maxSort: max(dealHistory.sortOrder) })
+      .from(dealHistory)
+    const nextSortOrder = (maxSort ?? 0) + 1
+
+    await db.insert(dealHistory).values({
+      sku:              masterSku,
+      seoTitle:         masterRow['Product Title'],  // raw title until enrichment runs
+      brand:            masterRow.Brand,
+      categories,
+      dealDate:         '2099-12-31',
+      wholesaleCost:    wholesale.toFixed(2),
+      dealPrice:        dealPrice.toFixed(2),
+      msrp:             msrp.toFixed(2),
+      mapPrice:         map.toFixed(2),
+      unitsAvailable:   qty,
+      dealScore:        null,
+      status:           'queued',
+      sortOrder:        nextSortOrder,
+      shopifyProductId: numericId,
+    }).onConflictDoNothing()
+
+    // Stub Sanity productPage — title/handle/vendor/raw description only.
+    // Enrichment pass will fill tagline, seoTitle, dial, tags, IVR, FAQs.
+    const warnings: { stage: string; message: string }[] = []
+    try {
+      const handle = await getProductHandleById(numericId)
+      if (!handle) {
+        warnings.push({ stage: 'sanity', message: 'could not resolve Shopify handle — skipping Sanity sync' })
+      } else {
+        const gid = `gid://shopify/Product/${numericId}`
+        const upsertParams: Parameters<typeof upsertProductPage>[0] = {
+          handle,
+          shopifyProductId: gid,
+          title:            masterRow['Product Title'],
+          vendor:           masterRow.Brand,
+          tags:             categories,
+          description,
+          category,
+        }
+        if (images[0]) upsertParams.imageUrl = images[0]
+
+        let lastErr: unknown
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            await upsertProductPage(upsertParams)
+            lastErr = null
+            break
+          } catch (err) {
+            lastErr = err
+            if (attempt === 1) await new Promise(r => setTimeout(r, 500))
+          }
+        }
+        if (lastErr) {
+          warnings.push({ stage: 'sanity', message: `sanity sync failed after retry: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}` })
+        }
+      }
+    } catch (err) {
+      warnings.push({ stage: 'sanity', message: err instanceof Error ? err.message : String(err) })
+    }
+
+    return {
+      success:          true,
+      sku:              masterSku,
+      shopifyProductId: numericId,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`[bulk-import-raw] Failed SKU ${masterSku}:`, message)
     return { success: false, sku: masterSku, error: message }
   }
 }

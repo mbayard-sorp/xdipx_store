@@ -743,10 +743,12 @@ __export(shopify_server_exports, {
   customerUpdate: () => customerUpdate,
   deleteProductImage: () => deleteProductImage,
   deleteProductMedia: () => deleteProductMedia,
+  ensureMetafieldDefinition: () => ensureMetafieldDefinition,
   fetchAllDealProducts: () => fetchAllDealProducts,
   findCollectionsByQuery: () => findCollectionsByQuery,
   findCustomerByPhone: () => findCustomerByPhone,
   findProductBySKU: () => findProductBySKU,
+  findVariantBySKU: () => findVariantBySKU,
   getAccessoryProducts: () => getAccessoryProducts,
   getAccessoryProductsAdmin: () => getAccessoryProductsAdmin,
   getAdminProductData: () => getAdminProductData,
@@ -805,6 +807,7 @@ __export(shopify_server_exports, {
   setCartAttributes: () => setCartAttributes,
   setDealStatus: () => setDealStatus,
   setMediaAsPrimary: () => setMediaAsPrimary,
+  setMetafield: () => setMetafield,
   setPairingWhy: () => setPairingWhy,
   shopifyAdmin: () => shopifyAdmin,
   slugifyHandle: () => slugifyHandle,
@@ -1065,7 +1068,8 @@ function nodeToProduct(node) {
       compareAtPrice: e.node.compareAtPrice?.amount ?? null,
       availableForSale: e.node.availableForSale,
       quantityAvailable: e.node.quantityAvailable,
-      ...e.node.barcode ? { barcode: e.node.barcode } : {}
+      ...e.node.barcode ? { barcode: e.node.barcode } : {},
+      ...e.node.metafields?.[0]?.value ? { originalDescription: e.node.metafields[0].value } : {}
     })),
     price: parseFloat(variant?.price.amount ?? "0"),
     ...variant?.compareAtPrice ? { compareAtPrice: parseFloat(variant.compareAtPrice.amount) } : {},
@@ -1138,7 +1142,8 @@ function nodeToDeal(node) {
       compareAtPrice: e.node.compareAtPrice?.amount ?? null,
       availableForSale: e.node.availableForSale,
       quantityAvailable: e.node.quantityAvailable,
-      ...e.node.barcode ? { barcode: e.node.barcode } : {}
+      ...e.node.barcode ? { barcode: e.node.barcode } : {},
+      ...e.node.metafields?.[0]?.value ? { originalDescription: e.node.metafields[0].value } : {}
     })),
     options: node.options,
     // rating populated by Judge.me integration — omitted until available
@@ -2164,7 +2169,7 @@ async function pushProductToShopify(doc) {
     if (!v || v === "") return;
     metafields.push({ namespace: "custom", key, value: v, type, ownerId: gid });
   };
-  add("tagline", doc.tagline, "single_line_text_field", true);
+  add("tagline", doc.tagline, "single_line_text_field", doc.requireTagline !== false);
   add("full_story", ptToHtml(doc.fullStory), "multi_line_text_field");
   add("works_for_him", ptToHtml(doc.worksForHim), "multi_line_text_field");
   add("works_for_her", ptToHtml(doc.worksForHer), "multi_line_text_field");
@@ -2297,6 +2302,59 @@ async function pushProductToShopify(doc) {
     }
   }
 }
+async function setMetafield(ownerGid, namespace, key, type, value) {
+  if (!ownerGid.startsWith("gid://")) {
+    throw new Error(`setMetafield requires a fully-qualified GID, got ${ownerGid}`);
+  }
+  const res = await adminGraphQL(`
+    mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        userErrors { field message }
+      }
+    }
+  `, { metafields: [{ namespace, key, type, value, ownerId: ownerGid }] });
+  if (res.metafieldsSet.userErrors.length > 0) {
+    const errs = res.metafieldsSet.userErrors.map((e) => `${e.field.join(".")}: ${e.message}`).join("; ");
+    throw new Error(`metafieldsSet rejected ${namespace}.${key}: ${errs}`);
+  }
+}
+async function findVariantBySKU(sku) {
+  const data = await adminGraphQL(`
+    query FindVariantBySKU($query: String!) {
+      productVariants(first: 1, query: $query) {
+        edges { node { id } }
+      }
+    }
+  `, { query: `sku:${sku}` });
+  return data.productVariants.edges[0]?.node.id ?? null;
+}
+async function ensureMetafieldDefinition(input) {
+  const res = await adminGraphQL(`
+    mutation CreateDef($definition: MetafieldDefinitionInput!) {
+      metafieldDefinitionCreate(definition: $definition) {
+        createdDefinition { id }
+        userErrors { field message code }
+      }
+    }
+  `, {
+    definition: {
+      namespace: input.namespace,
+      key: input.key,
+      name: input.name,
+      ...input.description ? { description: input.description } : {},
+      type: input.type,
+      ownerType: input.ownerType,
+      access: input.storefrontAccess === false ? { storefront: "NONE" } : { storefront: "PUBLIC_READ" }
+    }
+  });
+  if (res.metafieldDefinitionCreate.createdDefinition) return { created: true };
+  const alreadyExists = res.metafieldDefinitionCreate.userErrors.some(
+    (e) => e.code === "TAKEN" || /already exists|already taken/i.test(e.message)
+  );
+  if (alreadyExists) return { created: false };
+  const errs = res.metafieldDefinitionCreate.userErrors.map((e) => `${e.field.join(".")}: ${e.message}`).join("; ");
+  throw new Error(`metafieldDefinitionCreate failed for ${input.namespace}.${input.key}: ${errs}`);
+}
 async function activateShopifyProduct(numericId) {
   const id = numericId.replace("gid://shopify/Product/", "");
   const gid = `gid://shopify/Product/${id}`;
@@ -2363,7 +2421,10 @@ async function createShopifyProductFromFeed(product, handle) {
   }
   return String(res.product.id);
 }
-async function createShopifyProductWithVariants(master, variants, optionName, handle) {
+async function createShopifyProductWithVariants(master, variants, optionNames, handle) {
+  if (optionNames.length === 0 || optionNames.length > 2) {
+    throw new Error(`createShopifyProductWithVariants: optionNames must have 1 or 2 entries, got ${optionNames.length}`);
+  }
   const tags = [
     `brand:${master.brand.toLowerCase().replace(/\s+/g, "-")}`,
     `nalpac-sku-${master.sku}`,
@@ -2378,10 +2439,14 @@ async function createShopifyProductWithVariants(master, variants, optionName, ha
       vendor: master.brand,
       tags: tags.join(", "),
       status: "draft",
-      options: [{ name: optionName, values: variants.map((v) => v.optionValue) }],
+      options: optionNames.map((name, i) => ({
+        name,
+        values: [...new Set(variants.map((v) => v.optionValues[i]).filter(Boolean))]
+      })),
       variants: variants.map((v) => ({
         sku: v.sku,
-        option1: v.optionValue,
+        option1: v.optionValues[0],
+        ...optionNames.length > 1 ? { option2: v.optionValues[1] } : {},
         price: v.price.toFixed(2),
         compare_at_price: v.compareAtPrice.toFixed(2),
         inventory_management: "shopify",
@@ -2390,6 +2455,33 @@ async function createShopifyProductWithVariants(master, variants, optionName, ha
       images: master.images.slice(0, 10).map((src) => ({ src }))
     }
   });
+  const galleryByUrl = /* @__PURE__ */ new Map();
+  for (const img of res.product.images ?? []) galleryByUrl.set(img.src, img.id);
+  for (let i = 0; i < res.product.variants.length; i++) {
+    const sv = res.product.variants[i];
+    const bv = variants[i];
+    if (!sv || !bv || bv.images.length === 0) continue;
+    const firstImage = bv.images[0];
+    if (!firstImage) continue;
+    try {
+      const existingId = galleryByUrl.get(firstImage);
+      if (existingId) {
+        await shopifyAdmin(`/variants/${sv.id}.json`, "PUT", {
+          variant: { id: Number(sv.id), image_id: Number(existingId) }
+        });
+      } else {
+        const imgRes = await shopifyAdmin(
+          `/products/${res.product.id}/images.json`,
+          "POST",
+          { image: { src: firstImage, variant_ids: [Number(sv.id)] } }
+        );
+        galleryByUrl.set(firstImage, imgRes.image.id);
+      }
+    } catch (err) {
+      console.warn(`[shopify] variant image linkage failed for ${bv.sku}:`, err instanceof Error ? err.message : err);
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
   for (let i = 0; i < res.product.variants.length; i++) {
     const shopifyVariant = res.product.variants[i];
     const bulkVariant = variants[i];
@@ -3937,7 +4029,8 @@ async function getProductDetailForEmma(handle) {
     id: e.node.id,
     title: e.node.title,
     priceUsd: parseFloat(e.node.price.amount),
-    available: e.node.availableForSale
+    available: e.node.availableForSale,
+    ...e.node.metafields?.[0]?.value ? { originalDescription: e.node.metafields[0].value } : {}
   }));
   return {
     ...baseCard,
@@ -4031,6 +4124,9 @@ var init_shopify_server = __esm({
         availableForSale
         quantityAvailable
         barcode
+        metafields(identifiers: [{ namespace: "custom", key: "original_description" }]) {
+          value
+        }
       }
     }
   }
