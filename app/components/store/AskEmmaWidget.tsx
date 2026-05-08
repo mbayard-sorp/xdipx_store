@@ -792,6 +792,29 @@ function renderInline(line: string) {
   })
 }
 
+// Pathname prefixes that always belong to the storefront. If Emma emits an
+// absolute URL pointing at any of these, route it through <Link> so the
+// _layout-mounted AskEmmaWidget stays mounted and chat history persists.
+const INTERNAL_PATH_PREFIXES = [
+  '/products/',
+  '/vault',
+  '/collections',
+  '/notebook',
+  '/blog',
+  '/pages/',
+  '/for-him',
+  '/for-her',
+  '/about',
+  '/faq',
+  '/search',
+  '/view-all',
+  '/account',
+]
+
+function isInternalPathname(pathname: string): boolean {
+  return INTERNAL_PATH_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/') || pathname.startsWith(p))
+}
+
 /** Return a same-origin path for client-side nav, or null if the link is truly external. */
 function toInternalPath(href: string): string | null {
   if (href.startsWith('/')) return href
@@ -802,9 +825,14 @@ function toInternalPath(href: string): string | null {
     }
     // Preview deploys run on *.vercel.app, so an absolute xdipx.com link from
     // Emma would otherwise be treated as external and open in a new tab —
-    // breaking chat persistence on the destination route. Canonicalize.
+    // breaking chat persistence on the destination route.
     const host = u.hostname.toLowerCase()
-    if (host === 'xdipx.com' || host === 'www.xdipx.com') {
+    if (host === 'xdipx.com' || host === 'www.xdipx.com' || host.endsWith('.vercel.app')) {
+      return u.pathname + u.search + u.hash
+    }
+    // Fallback: the pathname matches a known storefront route. Catches Emma
+    // emitting links to wrong/unknown hosts as long as the path is ours.
+    if (isInternalPathname(u.pathname)) {
       return u.pathname + u.search + u.hash
     }
   } catch {

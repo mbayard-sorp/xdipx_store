@@ -670,6 +670,34 @@ export async function getEmmaPersona(): Promise<EmmaPersona | null> {
 
 // ─── Product Page Content ─────────────────────────────────────────────────────
 
+/**
+ * Batch-fetch productPage `previewImageUrl` values keyed by Shopify handle.
+ * Used as a thumbnail fallback in Emma chat product cards when a Shopify
+ * product has no `images[0]` (newly imported items often lack a featured
+ * image until the next sync run). Returns an empty Map on any failure so
+ * callers can degrade gracefully.
+ */
+export async function getPreviewImagesByHandles(
+  handles: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (!projectId || handles.length === 0) return out
+  try {
+    const client = getClient()
+    if (!client) return out
+    const rows = await client.fetch<{ shopifyHandle: string; previewImageUrl?: string }[]>(
+      `*[_type == "productPage" && shopifyHandle in $handles]{ shopifyHandle, previewImageUrl }`,
+      { handles },
+    )
+    for (const r of rows ?? []) {
+      if (r?.shopifyHandle && r.previewImageUrl) out.set(r.shopifyHandle, r.previewImageUrl)
+    }
+  } catch (err) {
+    console.error('[sanity] getPreviewImagesByHandles error:', err)
+  }
+  return out
+}
+
 export async function getProductPageBlocks(handle: string): Promise<ContentBlock[]> {
   if (!projectId) return []
   try {
