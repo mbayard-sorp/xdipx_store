@@ -49,8 +49,11 @@ export const EMMA_CHAT_TOOLS: Anthropic.Tool[] = [
     description:
       'Fetch full enrichment for one product by handle: Emma-voice tagline, full story, ' +
       'feature bullets, sensation_dial ratings (per-dimension 1-5), pairing_why for ' +
-      'accessories, all variants and prices. Use this AFTER search_products when the ' +
-      'user wants depth on a specific pick or you need to compare against a competitor.',
+      'accessories, all variants and prices. Each variant object includes: id, title, ' +
+      'priceUsd, available, and originalDescription (raw manufacturer text for that ' +
+      'variant — use for size, dimension, material, and fit questions; do not quote ' +
+      'verbatim). Use this AFTER search_products when the user wants depth on a ' +
+      'specific pick or you need to compare against a competitor.',
     input_schema: {
       type: 'object',
       properties: {

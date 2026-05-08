@@ -141,6 +141,9 @@ const PRODUCT_CORE_FRAGMENT = `
         availableForSale
         quantityAvailable
         barcode
+        metafields(identifiers: [{ namespace: "custom", key: "original_description" }]) {
+          value
+        }
       }
     }
   }
@@ -446,6 +449,7 @@ interface ShopifyVariantNode {
   availableForSale: boolean
   quantityAvailable: number
   barcode: string | null
+  metafields?: ({ value: string } | null)[]
 }
 
 interface ShopifyMediaNode {
@@ -555,6 +559,7 @@ function nodeToProduct(node: ShopifyProductNode): Product {
       availableForSale: e.node.availableForSale,
       quantityAvailable: e.node.quantityAvailable,
       ...(e.node.barcode ? { barcode: e.node.barcode } : {}),
+      ...(e.node.metafields?.[0]?.value ? { originalDescription: e.node.metafields[0].value } : {}),
     })),
     price: parseFloat(variant?.price.amount ?? '0'),
     ...(variant?.compareAtPrice ? { compareAtPrice: parseFloat(variant.compareAtPrice.amount) } : {}),
@@ -635,6 +640,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
       availableForSale: e.node.availableForSale,
       quantityAvailable: e.node.quantityAvailable,
       ...(e.node.barcode ? { barcode: e.node.barcode } : {}),
+      ...(e.node.metafields?.[0]?.value ? { originalDescription: e.node.metafields[0].value } : {}),
     })),
     options: node.options,
     // rating populated by Judge.me integration — omitted until available
@@ -5467,7 +5473,7 @@ export interface EmmaProductDetail extends EmmaProductCard {
   pairingWhy: Record<string, string> | null
   accessoryHandles: string[]
   imageUrl: string | null
-  variants: Array<{ id: string; title: string; priceUsd: number; available: boolean }>
+  variants: Array<{ id: string; title: string; priceUsd: number; available: boolean; originalDescription?: string }>
 }
 
 /**
@@ -5530,6 +5536,7 @@ export async function getProductDetailForEmma(handle: string): Promise<EmmaProdu
     title: e.node.title,
     priceUsd: parseFloat(e.node.price.amount),
     available: e.node.availableForSale,
+    ...(e.node.metafields?.[0]?.value ? { originalDescription: e.node.metafields[0].value } : {}),
   }))
 
   return {

@@ -17,6 +17,7 @@ import {
   findCustomerByPhone,
   getCollectionProducts,
   getProductByHandle,
+  getProductDetailForEmma,
   getStorefrontCollections,
   sendDraftOrderInvoice,
 } from '~/lib/shopify.server'
@@ -121,7 +122,7 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'getProductDetails',
     description:
-      "Fetch extra details on a specific product by its handle. Only needed if the user asks about specific variant options or details not covered by the search result tagline — searchProducts already returns title, tagline, pricing, and default variant.",
+      "Fetch enriched details on a specific product by its handle, including per-variant specs. Call this when the customer asks about size, dimensions, color, material, fit, or 'is this right for me' on a named product — and whenever the product has multiple variants (sizes, colors) and you need to describe what makes each one different. Also call it before createDraftOrder when the result has variantOptions and you don't yet have the right variantId. searchProducts already returns title, tagline, pricing, and default variant; this tool goes deeper with variant-level original descriptions, feature bullets, and full story.",
     input_schema: {
       type: 'object',
       properties: {
@@ -372,14 +373,33 @@ export async function runQaTool(
     if (name === 'getProductDetails') {
       const handle = String(input['handle'] ?? '').trim()
       if (!handle) return { ok: false, error: 'handle required' }
+      const detail = await getProductDetailForEmma(handle)
+      if (!detail) return { ok: false, error: 'not_found' }
+      // Build a compact card from the base product for pricing/variant GIDs,
+      // then layer on the enriched fields (feature bullets, sensation dial,
+      // and per-variant originalDescription for size/material/fit questions).
       const product = await getProductByHandle(handle)
-      if (!product) return { ok: false, error: 'not_found' }
+      const card = product ? productToCard(product) : undefined
       return {
         ok: true,
         data: {
-          ...productToCard(product),
-          description: (product.metaDescription || '').slice(0, 400),
-          tags: product.tags.slice(0, 8),
+          ...(card ?? {}),
+          title: detail.title,
+          handle: detail.handle,
+          tagline: detail.tagline ?? '',
+          fullStory: detail.fullStory ?? '',
+          featureBullets: detail.featureBullets ?? [],
+          sensationDial: detail.sensationDial,
+          // variantDetails includes per-variant originalDescription (raw
+          // manufacturer spec text — use for size, dimension, color, material,
+          // and fit answers; translate into Emma voice, do not quote verbatim).
+          variantDetails: detail.variants.map((v) => ({
+            variantId: v.id,
+            label: v.title,
+            priceUsd: v.priceUsd,
+            available: v.available,
+            ...(v.originalDescription ? { originalDescription: v.originalDescription } : {}),
+          })),
         },
       }
     }

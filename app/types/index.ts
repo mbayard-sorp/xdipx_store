@@ -35,6 +35,7 @@ export interface ProductVariant {
   availableForSale: boolean
   quantityAvailable: number
   barcode?: string
+  originalDescription?: string
 }
 
 // v2 redesign — sensation dial + hero video
