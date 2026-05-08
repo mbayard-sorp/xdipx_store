@@ -1,5 +1,9 @@
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
 import { buildEmmaSystemBlocks } from '~/lib/claude.server'
+import type { ProductWrites } from '~/lib/emma-orchestrator.server'
 import type { Deal } from '~/types'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
@@ -125,7 +129,7 @@ export async function runBatchEmmaTake(
   }))
 
   const requests: BatchRequest[] = inputs.map(({ productId, deal }) => ({
-    custom_id: `${productId}::emmaTake`,
+    custom_id: `${productId}_emmaTake`,
     params: {
       model:      MODEL_SONNET,
       max_tokens: 800,
@@ -148,7 +152,7 @@ export async function runBatchEmmaTake(
   const failures: Array<{ productId: string; error: string }> = []
 
   for (const input of inputs) {
-    const customId = `${input.productId}::emmaTake`
+    const customId = `${input.productId}_emmaTake`
     const entry = responses.get(customId)
     if (!entry) {
       failures.push({ productId: input.productId, error: 'no result returned for custom_id' })
@@ -224,3 +228,499 @@ function stripFences(raw: string): string {
 // re-discovering the model strings).
 export const BATCH_MODEL_SONNET = MODEL_SONNET
 export const BATCH_MODEL_HAIKU  = MODEL_HAIKU
+
+// ─── Full-enrichment batch path (single-call ProductWrites per product) ──────
+//
+// One Sonnet request per product produces the entire ProductWrites JSON. This
+// mirrors what the `emma-product-enricher` Claude Code subagent does, but runs
+// through the Anthropic Batch API for 50% off and async parallelism.
+//
+// System blocks (cached): EMMA_SYSTEM_PROMPT + brand voice + the agent prompt
+// loaded from .claude/agents/emma-product-enricher.md + per-batch shared
+// context (vocab + dial registry + dial taxonomy). All four blocks are tagged
+// cache_control: ephemeral so writes happen on the first request and reads on
+// the rest within the 5-min TTL — the dominant cost for 1K products is the
+// 999 cache reads at 10% input price.
+//
+// User block (per-product, uncached): the brief produced by gather-enricher-
+// brief.ts (snapshot + raw description + pairing candidates + existing
+// metafields).
+
+export interface SharedEnrichmentContext {
+  moodVocab:          string[]
+  audienceVocab:      string[]
+  mattersVocab:       string[]
+  dialRegistryByType: Record<string, readonly string[]>
+  dialTaxonomy:       Record<string, ReadonlyArray<{
+    label:      string
+    definition?: string
+    scaleLow?:   string
+    scaleMid?:   string
+    scaleHigh?:  string
+  }>>
+}
+
+export interface ProductBrief {
+  shopifyProductId:   string
+  sku?:               string
+  rawTitle:           string
+  brand:              string
+  vendor:             string
+  rawDescription:     string
+  categories:         string[]
+  dealPrice:          number
+  msrp:               number
+  existingMetafields: Record<string, string>
+  pairingCandidates:  Array<{
+    productId:        string
+    title:            string
+    brand?:           string
+    productTypeDial?: string
+    price?:           number
+  }>
+}
+
+export interface BatchFullEnrichmentInput {
+  /** Shopify product gid — used as the custom_id prefix and result key. */
+  productId: string
+  brief:     ProductBrief
+}
+
+export interface BatchFullEnrichmentResult {
+  /** productId → parsed ProductWrites. Ordering not guaranteed. */
+  results:  Map<string, ProductWrites>
+  failures: Array<{ productId: string; error: string }>
+  meta: {
+    batchId:        string
+    submittedCount: number
+    succeededCount: number
+    erroredCount:   number
+    durationMs:     number
+    usage: {
+      inputTokens:           number
+      outputTokens:          number
+      cacheCreationTokens:   number
+      cacheReadTokens:       number
+    }
+  }
+}
+
+let _cachedAgentPrompt: string | null = null
+
+/**
+ * Load .claude/agents/emma-product-enricher.md, strip the YAML frontmatter,
+ * and return the body as a single string. Cached for the process lifetime —
+ * the prompt only changes when an editor commits a new agent definition.
+ */
+async function loadEnricherAgentPrompt(): Promise<string> {
+  if (_cachedAgentPrompt !== null) return _cachedAgentPrompt
+  // app/lib/batch-enrichment.server.ts → repo root is two levels up.
+  const here = dirname(fileURLToPath(import.meta.url))
+  const path = resolve(here, '..', '..', '.claude', 'agents', 'emma-product-enricher.md')
+  const raw  = await readFile(path, 'utf8')
+  const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
+  if (!body) throw new Error(`empty agent prompt at ${path}`)
+  _cachedAgentPrompt = body
+  return body
+}
+
+function buildSharedContextBlock(ctx: SharedEnrichmentContext): string {
+  const dialReg = Object.entries(ctx.dialRegistryByType)
+    .map(([t, labels]) => `  ${t}: ${labels.join(', ')}`)
+    .join('\n')
+
+  const dialTax = Object.entries(ctx.dialTaxonomy).map(([t, items]) => {
+    const lines = items.map(i => {
+      const scaleParts: string[] = []
+      if (i.scaleLow)  scaleParts.push(`1=${i.scaleLow}`)
+      if (i.scaleMid)  scaleParts.push(`3=${i.scaleMid}`)
+      if (i.scaleHigh) scaleParts.push(`5=${i.scaleHigh}`)
+      const scaleSuffix = scaleParts.length > 0 ? `  (${scaleParts.join(' | ')})` : ''
+      const def = i.definition ? `: ${i.definition}` : ''
+      return `    - ${i.label}${def}${scaleSuffix}`
+    }).join('\n')
+    return `  ${t}:\n${lines}`
+  }).join('\n')
+
+  return `Shared editorial context for this batch (vocabularies, dial registry, dial taxonomy). Apply per the <inputs> section of your agent prompt.
+
+moodVocab: ${ctx.moodVocab.join(', ')}
+audienceVocab: ${ctx.audienceVocab.join(', ')}
+mattersVocab: ${ctx.mattersVocab.join(', ')}
+
+dialRegistryByType:
+${dialReg}
+
+dialTaxonomy:
+${dialTax}`
+}
+
+function buildPerProductUserPrompt(brief: ProductBrief): string {
+  return `Product brief:
+\`\`\`json
+${JSON.stringify(brief, null, 2)}
+\`\`\`
+
+Return ONLY the ProductWrites JSON object per your <output_schema>. No markdown fences. No commentary. No preamble.`
+}
+
+/**
+ * Submit a batch of single-call full-enrichment requests, poll until done,
+ * parse each result as ProductWrites. Per-product parse failures are isolated
+ * into `failures[]`; the rest are returned in `results`.
+ *
+ * Cost note: with N products, the system blocks are written once and read
+ * (N-1) times within the cache TTL. For 1K products at ~3K cached system
+ * tokens + ~1K per-product user tokens + ~2K output tokens (Sonnet-priced,
+ * 50% batch discount), expect roughly $20–30 total spend.
+ */
+export async function runBatchFullEnrichment(
+  inputs:  BatchFullEnrichmentInput[],
+  context: SharedEnrichmentContext,
+  opts:    { brandVoice?: string; pollIntervalMs?: number; timeoutMs?: number; maxTokens?: number } = {},
+): Promise<BatchFullEnrichmentResult> {
+  if (inputs.length === 0) throw new Error('runBatchFullEnrichment: no inputs')
+
+  const t0 = Date.now()
+  const emmaBlocks   = await buildEmmaSystemBlocks(opts.brandVoice)
+  const agentPrompt  = await loadEnricherAgentPrompt()
+  const contextBlock = buildSharedContextBlock(context)
+
+  const systemParam: Anthropic.TextBlockParam[] = [
+    ...emmaBlocks.map(b => ({
+      type: 'text' as const,
+      text: b.text,
+      ...(b.cache ? { cache_control: { type: 'ephemeral' as const } } : {}),
+    })),
+    { type: 'text', text: agentPrompt,  cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: contextBlock, cache_control: { type: 'ephemeral' } },
+  ]
+
+  const requests: BatchRequest[] = inputs.map(({ productId, brief }) => ({
+    custom_id: `${productId}_fullEnrichment`,
+    params: {
+      model:      MODEL_SONNET,
+      max_tokens: opts.maxTokens ?? 4096,
+      system:     systemParam,
+      messages: [{ role: 'user', content: buildPerProductUserPrompt(brief) }],
+    },
+  }))
+
+  const { batchId, responses } = await submitAndPollBatch(requests, {
+    ...(opts.pollIntervalMs !== undefined ? { pollIntervalMs: opts.pollIntervalMs } : {}),
+    ...(opts.timeoutMs      !== undefined ? { timeoutMs:      opts.timeoutMs      } : {}),
+  })
+
+  const results = new Map<string, ProductWrites>()
+  const failures: Array<{ productId: string; error: string }> = []
+  const usage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 }
+
+  for (const input of inputs) {
+    const customId = `${input.productId}_fullEnrichment`
+    const entry    = responses.get(customId)
+    if (!entry) {
+      failures.push({ productId: input.productId, error: 'no result for custom_id' })
+      continue
+    }
+    if (entry.result.type !== 'succeeded') {
+      const reason = entry.result.type === 'errored'
+        ? entry.result.error.error.message
+        : entry.result.type
+      failures.push({ productId: input.productId, error: `batch ${entry.result.type}: ${reason}` })
+      continue
+    }
+
+    const msg = entry.result.message
+    // Token accounting — Anthropic returns separate cache fields when prompt
+    // caching is in use. Defensive: read with optional chaining and treat as
+    // 0 if a field is absent (older SDK versions).
+    const u = msg.usage as {
+      input_tokens?:                 number
+      output_tokens?:                number
+      cache_creation_input_tokens?:  number
+      cache_read_input_tokens?:      number
+    }
+    usage.inputTokens         += u?.input_tokens                 ?? 0
+    usage.outputTokens        += u?.output_tokens                ?? 0
+    usage.cacheCreationTokens += u?.cache_creation_input_tokens  ?? 0
+    usage.cacheReadTokens     += u?.cache_read_input_tokens      ?? 0
+
+    const block = msg.content[0]
+    if (block?.type !== 'text') {
+      failures.push({ productId: input.productId, error: 'unexpected non-text response block' })
+      continue
+    }
+    const cleaned = stripFences(block.text).trim()
+    if (!cleaned) {
+      failures.push({ productId: input.productId, error: 'empty response' })
+      continue
+    }
+    let parsed: ProductWrites
+    try {
+      parsed = JSON.parse(cleaned) as ProductWrites
+    } catch (err) {
+      const preview = cleaned.slice(0, 200).replace(/\n/g, ' ')
+      failures.push({ productId: input.productId, error: `JSON parse failed: ${err instanceof Error ? err.message : String(err)} | preview: ${preview}` })
+      continue
+    }
+
+    results.set(input.productId, parsed)
+  }
+
+  return {
+    results,
+    failures,
+    meta: {
+      batchId,
+      submittedCount: inputs.length,
+      succeededCount: results.size,
+      erroredCount:   failures.length,
+      durationMs:     Date.now() - t0,
+      usage,
+    },
+  }
+}
+
+// ─── Dial spread repair (second-batch retry) ────────────────────────────────
+
+export interface DialItem {
+  label:     string
+  value:     number
+  proposed?: boolean
+}
+
+export interface DialSpreadCheck {
+  ok:        boolean
+  distinct:  number
+  fives:     number
+  ones:      number
+  values:    number[]
+}
+
+/**
+ * Check whether a dial passes the spread invariants enforced in the agent
+ * prompt:
+ *   - values span ≥ 3 distinct integers
+ *   - at most one 5
+ *   - at most one 1
+ * Empty / malformed dials return ok:false so callers can decide whether to
+ * skip or repair.
+ */
+export function checkDialSpread(items: ReadonlyArray<DialItem> | undefined | null): DialSpreadCheck {
+  const values = (items ?? [])
+    .map(i => i.value)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+  const distinct = new Set(values).size
+  const fives    = values.filter(v => v === 5).length
+  const ones     = values.filter(v => v === 1).length
+  const ok = values.length >= 5 && distinct >= 3 && fives <= 1 && ones <= 1
+  return { ok, distinct, fives, ones, values }
+}
+
+export interface BatchDialRepairInput {
+  productId:       string
+  /** Original brief — gives the model the same context the main batch had. */
+  brief:           ProductBrief
+  /** The bad dial that needs repair. */
+  badDial:         ReadonlyArray<DialItem>
+  /** Optional product type from the main batch — anchors the repair to the
+   *  same dial registry the main call used. */
+  productTypeDial?: string
+}
+
+export interface BatchDialRepairResult {
+  /** productId → repaired dial items. Missing entries failed and should be
+   *  treated as warn-only (caller keeps the original bad dial and logs). */
+  repairs:  Map<string, DialItem[]>
+  failures: Array<{ productId: string; error: string }>
+  meta: {
+    batchId:        string
+    submittedCount: number
+    succeededCount: number
+    erroredCount:   number
+    durationMs:     number
+    usage: {
+      inputTokens:         number
+      outputTokens:        number
+      cacheCreationTokens: number
+      cacheReadTokens:     number
+    }
+  }
+}
+
+function buildDialRepairUserPrompt(input: BatchDialRepairInput): string {
+  const badJson = JSON.stringify(input.badDial.map(i => ({ label: i.label, value: i.value, ...(i.proposed ? { proposed: true } : {}) })), null, 2)
+  return `Your previous response generated a sensationDialV2 that violates the spread rules. Regenerate ONLY the dial items array.
+
+Product type: ${input.productTypeDial ?? '(unknown — infer from brief)'}
+Product brief:
+\`\`\`json
+${JSON.stringify({
+  rawTitle:       input.brief.rawTitle,
+  brand:          input.brief.brand,
+  vendor:         input.brief.vendor,
+  rawDescription: input.brief.rawDescription.slice(0, 1500),
+  categories:     input.brief.categories,
+}, null, 2)}
+\`\`\`
+
+Your previous bad dial:
+\`\`\`json
+${badJson}
+\`\`\`
+
+ABSOLUTE rules — the response will be rejected if any is violated:
+1. 5 or 6 items, no duplicate labels.
+2. Each "value" is an integer from {1, 2, 3, 4, 5}. No half-steps.
+3. Values MUST include at least 3 distinct integers.
+4. AT MOST ONE item may have value 5. AT MOST ONE may have value 1.
+5. The single defining strength of the product gets the 5; everything else is scored honestly relative to category peers.
+
+Mental model: most products are MEDIUM at most things. A "medium" wand is a 3 on intensity, not 4. Reserve 4 for genuinely above-average and 5 for the one thing this product does best.
+
+Self-check before returning: count your 5s. If more than one, drop the weakest 5 to a 3 or below. Count distinct values. If fewer than 3, redistribute.
+
+Keep the SAME labels from the bad dial when they're appropriate; you may swap a label only if the original was wrong for the product.
+
+Return ONLY this JSON shape — no markdown fences, no commentary:
+{ "items": [ { "label": "...", "value": 1-5 }, ... ] }`
+}
+
+const DIAL_REPAIR_SYSTEM = `You are a careful editor. You generate sensationDialV2 items for product pages and you take the spread rules seriously: at most one 5, at most one 1, values span at least 3 distinct integers, integers only.`
+
+/**
+ * Submit a batch of dial-repair requests for products whose main-batch dial
+ * violated spread invariants. Each request is a fresh single-turn Sonnet call
+ * with a focused prompt; total output per request is small (~150 tokens), so
+ * this batch is much cheaper than the main full-enrichment batch.
+ *
+ * On success, returns repaired dials keyed by productId. The caller should
+ * splice these into the original ProductWrites before pushing to Shopify.
+ */
+export async function runBatchDialRepair(
+  inputs: BatchDialRepairInput[],
+  opts:   { pollIntervalMs?: number; timeoutMs?: number } = {},
+): Promise<BatchDialRepairResult> {
+  if (inputs.length === 0) throw new Error('runBatchDialRepair: no inputs')
+
+  const t0 = Date.now()
+
+  // No prompt cache here — the system prompt is short and per-product user
+  // prompts dominate token count. Skipping cache simplifies the logic and
+  // costs little since dial repair is small (~150 output tokens / request).
+  const systemParam: Anthropic.TextBlockParam[] = [
+    { type: 'text', text: DIAL_REPAIR_SYSTEM },
+  ]
+
+  const requests: BatchRequest[] = inputs.map(input => ({
+    custom_id: `${input.productId}_dialRepair`,
+    params: {
+      model:      MODEL_SONNET,
+      max_tokens: 400,
+      system:     systemParam,
+      messages: [{ role: 'user', content: buildDialRepairUserPrompt(input) }],
+    },
+  }))
+
+  const { batchId, responses } = await submitAndPollBatch(requests, {
+    ...(opts.pollIntervalMs !== undefined ? { pollIntervalMs: opts.pollIntervalMs } : {}),
+    ...(opts.timeoutMs      !== undefined ? { timeoutMs:      opts.timeoutMs      } : {}),
+  })
+
+  const repairs = new Map<string, DialItem[]>()
+  const failures: Array<{ productId: string; error: string }> = []
+  const usage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 }
+
+  for (const input of inputs) {
+    const customId = `${input.productId}_dialRepair`
+    const entry    = responses.get(customId)
+    if (!entry) {
+      failures.push({ productId: input.productId, error: 'no result for custom_id' })
+      continue
+    }
+    if (entry.result.type !== 'succeeded') {
+      const reason = entry.result.type === 'errored'
+        ? entry.result.error.error.message
+        : entry.result.type
+      failures.push({ productId: input.productId, error: `dial repair ${entry.result.type}: ${reason}` })
+      continue
+    }
+
+    const msg = entry.result.message
+    const u = msg.usage as {
+      input_tokens?:                 number
+      output_tokens?:                number
+      cache_creation_input_tokens?:  number
+      cache_read_input_tokens?:      number
+    }
+    usage.inputTokens         += u?.input_tokens                 ?? 0
+    usage.outputTokens        += u?.output_tokens                ?? 0
+    usage.cacheCreationTokens += u?.cache_creation_input_tokens  ?? 0
+    usage.cacheReadTokens     += u?.cache_read_input_tokens      ?? 0
+
+    const block = msg.content[0]
+    if (block?.type !== 'text') {
+      failures.push({ productId: input.productId, error: 'unexpected non-text response block' })
+      continue
+    }
+    const cleaned = stripFences(block.text).trim()
+    let parsed: { items?: unknown }
+    try {
+      parsed = JSON.parse(cleaned) as { items?: unknown }
+    } catch (err) {
+      failures.push({ productId: input.productId, error: `dial repair JSON parse: ${err instanceof Error ? err.message : String(err)}` })
+      continue
+    }
+    if (!Array.isArray(parsed.items)) {
+      failures.push({ productId: input.productId, error: 'dial repair missing items array' })
+      continue
+    }
+
+    const seen = new Set<string>()
+    const items: DialItem[] = []
+    for (const raw of parsed.items as Array<{ label?: unknown; value?: unknown; proposed?: unknown }>) {
+      const label = typeof raw.label === 'string' ? raw.label.trim() : ''
+      const value = typeof raw.value === 'number' ? Math.round(raw.value) : NaN
+      if (!label || label.length > 30) continue
+      if (!Number.isFinite(value) || value < 1 || value > 5) continue
+      const key = label.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      const item: DialItem = { label, value }
+      if (raw.proposed === true) item.proposed = true
+      items.push(item)
+      if (items.length >= 6) break
+    }
+
+    if (items.length < 5) {
+      failures.push({ productId: input.productId, error: `dial repair returned only ${items.length} valid items` })
+      continue
+    }
+
+    // Re-check the repaired dial. If it ALSO violates, accept warn-only —
+    // the caller logs and keeps the bad dial. We don't recurse into a third
+    // attempt; editors will fix the rare double-failures via admin UI.
+    const recheck = checkDialSpread(items)
+    if (!recheck.ok) {
+      failures.push({
+        productId: input.productId,
+        error: `dial repair STILL violates spread (distinct=${recheck.distinct} fives=${recheck.fives} ones=${recheck.ones} values=[${recheck.values.join(',')}])`,
+      })
+      continue
+    }
+    repairs.set(input.productId, items)
+  }
+
+  return {
+    repairs,
+    failures,
+    meta: {
+      batchId,
+      submittedCount: inputs.length,
+      succeededCount: repairs.size,
+      erroredCount:   failures.length,
+      durationMs:     Date.now() - t0,
+      usage,
+    },
+  }
+}

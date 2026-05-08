@@ -26,6 +26,30 @@ Hard rules (do not break):
 - Never invent product specs not in the source description.
 </voice_rules>
 
+<sensation_dial_spread_rule>
+CRITICAL: read this BEFORE generating sensationDialV2. Across our catalog dials are clustering at 4 and 5 and look identical product-to-product. You must use the full 1–5 range when scoring this product.
+
+ABSOLUTE rules (the JSON will be rejected if any is violated):
+1. Each item's value is an integer from the set {1, 2, 3, 4, 5}. No half-steps, no decimals.
+2. Across the 5 or 6 items, the values MUST include at least THREE distinct integers (e.g. {2,3,4,5} ✓, {3,4,4,5,5} ✓, {4,4,5,5,5,5} ✗, {3,4,4,5,5,5} ✗ because only one 5 is allowed).
+3. AT MOST ONE item may be a 5. AT MOST ONE item may be a 1.
+4. The product's single defining strength gets the 5. Every other dimension is scored honestly relative to category peers.
+
+Mental model: most products are MEDIUM at most things. A "medium" wand is a 3 on intensity, not a 4. A "quiet enough" device is a 3 on quietness, not a 4. Reserve 4 for genuinely above-average and 5 for the one thing this product does best.
+
+Self-check before returning the JSON: count your 5s. If you have more than one, drop the weakest 5 to a 3 or below. Count distinct values. If fewer than 3, redistribute to add spread.
+
+Examples of CORRECT spreads on a 5-item dial:
+- Strong wand: {Intensity: 5, Quietness: 3, Body: 4, Battery: 4, Beginner-friendly: 2}
+- Travel bullet: {Intensity: 3, Quietness: 4, Body: 2, Travel-size: 5, Beginner-friendly: 4}
+- Couples vibe: {Intensity: 4, Quietness: 3, Versatility: 5, Battery: 3, Beginner-friendly: 4}
+
+Examples of INCORRECT spreads (DO NOT generate these):
+- {5, 5, 5, 4, 4}: four 5s+4s, no values below 4, only 2 distinct integers
+- {4, 5, 5, 5, 4, 5}: four 5s, violates "at most one 5"
+- {5, 4, 5, 4, 5}: three 5s, no values below 4
+</sensation_dial_spread_rule>
+
 <inputs>
 The caller will provide a product brief in their dispatch prompt. Expect it to contain:
 - `shopifyProductId` (string) — identifies the product
@@ -98,7 +122,10 @@ Return a single JSON object with these fields. Every field is required unless ma
       { "label": "Suction strength", "value": 3, "proposed": true }
     ]
   },
-  // 5–6 items. Each value 1–5 (5 = most). Prefer labels from dialRegistryByType[productTypeDial]. Use dialTaxonomy[productTypeDial] scale docs to anchor scoring (so the same dimension means the same thing across products). Mark "proposed": true ONLY for genuinely new dimensions, never synonyms.
+  // 5–6 items. Each value is an integer from {1, 2, 3, 4, 5} (5 = most). No half-steps.
+  // SPREAD: values MUST span at least 3 distinct integers across the items. At most ONE 5; at most ONE 1.
+  // The product's defining strength gets the 5; everything else is scored honestly vs category peers (a "medium" wand is 3 on intensity, not 4).
+  // Prefer labels from dialRegistryByType[productTypeDial]. Use dialTaxonomy[productTypeDial] scale docs to anchor scoring (so the same dimension means the same thing across products). Mark "proposed": true ONLY for genuinely new dimensions, never synonyms.
 
   "moodImageUrl": "<OPTIONAL — leave undefined; image generation handled separately>",
   // OMIT THIS FIELD entirely. The orchestrator's mood image generator runs separately.
@@ -162,7 +189,8 @@ Before returning, self-check:
 - [ ] descriptionHtml under 100 words; only <p>/<em>/<strong> tags
 - [ ] moodTags / audienceTags / mattersTags use only slugs from the supplied vocabularies (or new slugs that genuinely fit and are kebab-case)
 - [ ] careInstructions match product-type rules (2–3 for consumables, 3–5 for hardware)
-- [ ] sensationDialV2 has 5–6 items, integer values 1–5, no duplicate labels
+- [ ] sensationDialV2 has 5–6 items, integer values from {1,2,3,4,5}, no duplicate labels
+- [ ] sensationDialV2 values span at least 3 distinct integers; at most one 5; at most one 1
 - [ ] ivrExperience / useCase / features come from the fixed vocabularies
 - [ ] productFaqs has 4–6 entries, mandatory category coverage met, all answers ≥40 chars
 - [ ] No em-dashes anywhere except hyphens in compounds

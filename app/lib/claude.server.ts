@@ -2422,9 +2422,15 @@ Return ONLY this JSON shape (no markdown, no fences):
 
 Rules:
 - 5 or 6 items, no duplicates.
-- Each "value" is an integer 1–5.
+- Each "value" is an integer from the set {1, 2, 3, 4, 5}. No half-steps. No values outside 1–5.
 - Keep labels under 24 chars, sentence case, no trailing punctuation.
-- Honest scoring — don't max everything. Use the dimension scale docs above (when present) to anchor "what 3 vs 5 means" — consistency across products matters.`
+- Honest scoring — don't max everything. Use the dimension scale docs above (when present) to anchor "what 3 vs 5 means" — consistency across products matters.
+
+Spread requirements (CRITICAL — dials look identical across products when these are ignored):
+- Use the full 1–5 range. Across the 5 or 6 dimensions, the values MUST span at least 3 distinct integers (e.g. {2, 3, 4, 5} is fine; {4, 4, 5, 5, 5} is not).
+- At MOST one dimension may be a 5. At MOST one dimension may be a 1.
+- The product's defining strength gets the 5; everything else is scored honestly relative to category peers. A "medium" wand is a 3 on intensity by default, not a 4. A "quiet" device is a 4 on quietness, not a 5 unless it's near-silent.
+- If you find yourself writing 4 or 5 on more than two dimensions, drop the weakest of those dimensions to a 3 or below before returning.`
 
   const { text } = await callClaude({
     llmClient: opts.llmClient,
@@ -2453,6 +2459,20 @@ Rules:
     if (items.length >= 6) break
   }
   if (items.length < 5) throw new Error(`only ${items.length} valid dial items returned`)
+
+  // Spread enforcement: values must span ≥3 distinct integers; at most one 5; at most one 1.
+  // The prompt asks for this, but cheaper models still cluster — we log a warning rather
+  // than throw so the orchestrator can move on; an editor can re-roll the dial via the
+  // admin UI if the spread looks wrong.
+  const distinct = new Set(items.map(i => i.value)).size
+  const fives = items.filter(i => i.value === 5).length
+  const ones  = items.filter(i => i.value === 1).length
+  if (distinct < 3 || fives > 1 || ones > 1) {
+    console.warn(
+      `[sensation-dial] spread violation: distinct=${distinct} fives=${fives} ones=${ones} ` +
+      `values=[${items.map(i => i.value).join(',')}] product="${opts.deal.seoTitle}"`,
+    )
+  }
 
   return { items }
 }
