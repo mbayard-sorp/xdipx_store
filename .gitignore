@@ -1,5 +1,4 @@
 node_modules
-.env
 .DS_Store
 build/
 .remotion-bundle/
@@ -9,9 +8,12 @@ build/
 .recovery/
 studio/npm run dev/
 .vercel
-.env*.local
-.env.preview
-.env.preview-*
+# Ignore every .env* variant by default (.env, .env.local, .env.preview,
+# .env.preview-ivr, .env.production, .env.vercel-preview-pulled, etc.)
+# and explicitly un-ignore template files that should be in the repo.
+# Catches future env variants without needing to maintain an allowlist.
+.env*
+!.env.example
 .claude/launch.json
 ivr_descriptors.csv
 scripts/.bg-removal-checkpoint.json
