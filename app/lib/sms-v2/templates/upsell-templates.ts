@@ -52,6 +52,26 @@ const SMS_TEMPLATES: ReadonlyArray<(slots: UpsellTemplateSlots) => string> = [
     `Honest pro tip: ${name} (${price}) turns a good experience into a great one. Most folks regret skipping it more than any toy choice.\n\n${pdpUrl}\n\n👍 to add it, 'no' to skip.`,
 ]
 
+// Web chat variants: the product card below the reply already renders the link,
+// so the URL has no place in the prose. Tap-friendly closers replace the SMS
+// "👍 / 'yes'" pattern — the stage emits pillOptions that render as tap chips.
+const WEB_TEMPLATES: ReadonlyArray<(slots: UpsellTemplateSlots) => string> = [
+  ({ name, price }) =>
+    `Real talk — skipping a good lube is the #1 regret folks tell me about. **${name}** (${price}) is the one I'd send a friend home with. Toss it in?`,
+
+  ({ name, price }) =>
+    `One thing I've learned testing a lot of these: the right pairing matters more than people think. **${name}** (${price}) is the move here. Add it?`,
+
+  ({ name, price }) =>
+    `If you're new to this, trust me on **${name}** (${price}). It's the difference between 'this is fine' and 'oh, that's why people love this'. Want it?`,
+
+  ({ name, price }) =>
+    `Worth knowing — **${name}** (${price}) lives on my nightstand. The folks who skip it always come back asking what they missed. Add it?`,
+
+  ({ name, price }) =>
+    `Honest pro tip: **${name}** (${price}) turns a good experience into a great one. Most folks regret skipping it more than any toy choice. Toss it in?`,
+]
+
 // Voice variants: TTS-friendly. No URLs (we never speak URLs aloud — the voice
 // adapter handles the link-permission flow via pendingPdpUrl on the NEXT turn).
 // No emoji, no "/" alternation, no quote marks. Natural spoken sentences.
@@ -89,7 +109,10 @@ export function pickUpsellTemplate(
   slots: UpsellTemplateSlots,
   channel: UpsellTemplateChannel = 'sms',
 ): string {
-  const bank = channel === 'voice' ? VOICE_TEMPLATES : SMS_TEMPLATES
+  const bank =
+    channel === 'voice' ? VOICE_TEMPLATES :
+    channel === 'web'   ? WEB_TEMPLATES :
+    SMS_TEMPLATES
   const idx = (Math.floor(Date.now() / 7000)) % bank.length
   const fn = bank[idx]!
   return fn(slots)

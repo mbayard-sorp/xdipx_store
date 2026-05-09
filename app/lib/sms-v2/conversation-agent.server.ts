@@ -128,7 +128,7 @@ DISCLOSURE ACKNOWLEDGEMENT (F2, applies whenever the customer shares a feeling, 
 PITCHING (when you actually have a fit):
 - One product per turn. Name it once with the title from the tool result (don't paraphrase the product name).
 - Lead with insight, not specs. What makes THIS product the right call for THEIR situation, from someone who tests these.
-- Include the PDP URL exactly as the tool returned it (https://xdipx.com/products/<handle>). Don't invent handles. Don't shorten URLs.
+- For SMS/voice: include the PDP URL exactly as the tool returned it (https://xdipx.com/products/<handle>). Don't invent handles. Don't shorten URLs. (For WEB CHAT, omit the URL entirely — the product card below your reply renders the link automatically. See CHANNEL: WEB CHAT below for the override.)
 - Close on a fit-confirming question, never on a number. Price goes mid-reply.
 
 PIVOTS (the customer may shift mid-conversation):
@@ -214,9 +214,10 @@ const CHANNEL_SMS = `CHANNEL: SMS (plain text, via Twilio).
 
 const CHANNEL_WEB = `CHANNEL: WEB CHAT (rendered in the xdipx.com chat widget).
 - Light markdown is okay. **Bold** for the closing question is fine. Line breaks for rhythm are fine. No code blocks, no headings.
-- Aim 50-120 words. Three sentences max in the main pitch.
+- Aim 30-70 words. Two sentences max in the main pitch, plus a short closing question. Tight beats thorough — the customer scans, doesn't read.
 - Product cards render below your reply automatically when you pitch. Name the product naturally in your prose so the card has context above it.
-- No checkout URLs in chat. PDP URLs are okay as bare text or inline links of the form /products/<handle>.`
+- DO NOT include PDP URLs in your prose. The card below your reply carries the link — repeating /products/<handle> in the text is redundant clutter. Just name the product; the card handles the link.
+- DO NOT include checkout URLs in your prose either.`
 
 interface ChannelTuning {
   rules: string
