@@ -12,8 +12,8 @@ import { ProductPicker, productToPickerProduct } from '~/components/admin/Produc
 import { ImageManager } from '~/components/admin/ImageManager'
 import { PricingPanel } from '~/components/admin/PricingPanel'
 import { db } from '~/lib/db.server'
-import { dealHistory, pipelineSettings } from '../../db/schema'
-import { eq, like } from 'drizzle-orm'
+import { dealHistory } from '../../db/schema'
+import { eq } from 'drizzle-orm'
 import { generateCopy, generateSEOTitle } from '~/lib/claude.server'
 import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
 import type { Product } from '~/types'
@@ -41,18 +41,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     .where(eq(dealHistory.dealDate, targetDate))
     .limit(1)
 
-  // Prompt settings for video generator
-  const promptRows = await db.select().from(pipelineSettings).where(like(pipelineSettings.key, 'video:%'))
-  const promptSettings: Record<string, string> = {}
-  for (const row of promptRows) promptSettings[row.key] = row.value
-
   if (!dbDeal?.shopifyProductId) {
     return {
       deal: null, shopifyCost: null, targetDate, todayEST,
       dealCategories: [] as string[],
       pinnedAccessories: [] as Product[], pinnedAccessoryIds: [] as string[],
       productImages: [] as AdminProductImage[],
-      promptSettings,
       pricingConfig: null as PricingConfig | null,
     }
   }
@@ -81,7 +75,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     deal, shopifyCost, targetDate, todayEST,
     dealCategories: dbDeal.categories ?? [],
     pinnedAccessories, pinnedAccessoryIds, productImages,
-    promptSettings,
     pricingConfig,
   }
 }
@@ -89,17 +82,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export async function action({ request }: ActionFunctionArgs) {
   const form   = await request.formData()
   const intent = form.get('intent')
-
-  if (intent === 'save-setting') {
-    const key   = form.get('key')   as string
-    const value = form.get('value') as string
-    if (!key || value === null) return { ok: false, error: 'Missing key or value' }
-    await db
-      .insert(pipelineSettings)
-      .values({ key, value, updatedAt: new Date() })
-      .onConflictDoUpdate({ target: pipelineSettings.key, set: { value, updatedAt: new Date() } })
-    return { ok: true }
-  }
 
   if (intent === 'save-field') {
     const productId = form.get('productId') as string
@@ -455,7 +437,7 @@ function CollapsibleSection({
 // ─── Draggable section wrapper ───────────────────────────────────────────
 
 const SECTION_ORDER_KEY = 'dealManagerSectionOrder'
-const DEFAULT_SECTION_ORDER = ['hero', 'tags', 'images', 'video', 'copy', 'pickers']
+const DEFAULT_SECTION_ORDER = ['hero', 'tags', 'images', 'copy', 'pickers']
 
 function DraggableSection({
   sectionKey,
@@ -697,530 +679,6 @@ function TagsEditor({ deal, targetDate }: {
   )
 }
 
-// ─── Prompt Setting Field ────────────────────────────────────────────────
-
-function PromptSettingField({ label, settingKey, defaultValue, rows = 3 }: {
-  label: string
-  settingKey: string
-  defaultValue: string
-  rows?: number
-}) {
-  const fetcher = useFetcher<{ ok: boolean }>()
-  const saved = fetcher.state === 'idle' && fetcher.data?.ok === true
-
-  return (
-    <div className="border border-cream-2 rounded-xl p-4">
-      <p className="font-semibold text-ink/60 uppercase tracking-wider mb-2">{label}</p>
-      <fetcher.Form method="post" className="space-y-2">
-        <input type="hidden" name="intent" value="save-setting" />
-        <input type="hidden" name="key" value={settingKey} />
-        <textarea
-          name="value"
-          defaultValue={defaultValue}
-          rows={rows}
-          className="w-full border border-cream-2 rounded-lg px-3 py-2 text-xs text-ink font-mono resize-y focus:outline-none focus:ring-2 focus:ring-sage/30 bg-white"
-        />
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={fetcher.state === 'submitting'}
-            className={
-              fetcher.state === 'submitting'
-                ? 'text-xs font-bold px-3 py-1 rounded-full bg-ink/10 text-ink/40 cursor-not-allowed'
-                : saved
-                  ? 'text-xs font-bold px-3 py-1 rounded-full bg-green-100 text-green-700'
-                  : 'text-xs font-bold px-3 py-1 rounded-full bg-cream-2 text-sage hover:bg-sage/10 transition-colors'
-            }
-          >
-            {fetcher.state === 'submitting' ? 'Saving…' : saved ? '✓ Saved!' : 'Save'}
-          </button>
-        </div>
-      </fetcher.Form>
-    </div>
-  )
-}
-
-// ─── Video Generator ─────────────────────────────────────────────────────
-
-interface GenerateVideoResponse {
-  ok?: boolean
-  token?: string
-  previewUrl?: string
-  narratorScript?: string
-  reactionText?: string[]
-  endTagline?: string
-  format?: string
-  formatRationale?: string
-  voiceName?: string
-  error?: string
-}
-
-interface PublishVideoResponse {
-  ok?: boolean
-  mediaId?: string
-  ready?: boolean
-  thumbnailSet?: { home_page: boolean; pdp: boolean }
-  error?: string
-}
-
-function VideoGeneratorSection({ deal, category, promptSettings }: {
-  deal: NonNullable<ReturnType<typeof useLoaderData<typeof loader>>['deal']>
-  category: string
-  promptSettings: Record<string, string>
-}) {
-  const [customPrompt, setCustomPrompt] = useState('')
-  const [durationSeconds, setDurationSeconds] = useState(10)
-  const [selectedFormat, setSelectedFormat] = useState<string>('auto')
-  const [customFormatText, setCustomFormatText] = useState('')
-  const [selectedVoice, setSelectedVoice] = useState<string>('Bella')
-  const [generating, setGenerating] = useState(false)
-  const [publishing, setPublishing] = useState(false)
-  const [result, setResult] = useState<GenerateVideoResponse | null>(null)
-  const [publishResult, setPublishResult] = useState<PublishVideoResponse | null>(null)
-  const [genError, setGenError] = useState<string | null>(null)
-  const [pubError, setPubError] = useState<string | null>(null)
-  const [videoSectionOpen, setVideoSectionOpen] = useState(false)
-  const [promptDetailsOpen, setPromptDetailsOpen] = useState(false)
-  const videoRef = useRef<HTMLVideoElement>(null)
-
-  // Reset publish result when a new video is generated
-  useEffect(() => {
-    setPublishResult(null)
-    setPubError(null)
-  }, [result?.token])
-
-  async function handleGenerate(e?: React.FormEvent) {
-    if (e) e.preventDefault()
-    setGenerating(true)
-    setResult(null)
-    setGenError(null)
-    setPublishResult(null)
-
-    try {
-      const fd = new FormData()
-      fd.set('productId',   deal.shopifyProductId)
-      fd.set('productName', deal.seoTitle)
-      fd.set('brand',       deal.brand)
-      fd.set('category',    category)
-      fd.set('tagline',     deal.tagline ?? '')
-      fd.set('dealPrice',   String(deal.dealPrice ?? ''))
-      fd.set('msrp',        String(deal.msrp ?? ''))
-      fd.set('imageUrls',   JSON.stringify(deal.images.map(i => i.url)))
-      fd.set('customPrompt', customPrompt)
-      fd.set('durationSeconds', String(durationSeconds))
-      if (selectedFormat === 'custom') {
-        fd.set('format', 'custom')
-        fd.set('customFormatText', customFormatText)
-      } else if (selectedFormat !== 'auto') {
-        fd.set('format', selectedFormat)
-      }
-      fd.set('voice', selectedVoice)
-      if (deal.fullStory)      fd.set('fullStory',      deal.fullStory)
-      if (deal.worksForHim)    fd.set('worksForHim',    deal.worksForHim)
-      if (deal.worksForHer)    fd.set('worksForHer',    deal.worksForHer)
-      if (deal.specifications?.length) fd.set('specifications', deal.specifications.join('\n'))
-      if (deal.boxContents?.length) fd.set('whatsInTheBox', deal.boxContents.join(', '))
-
-      const res = await fetch('/api/generate-video', { method: 'POST', body: fd })
-      const data = await res.json() as GenerateVideoResponse
-      if (!res.ok || data.error) {
-        setGenError(data.error ?? 'Generation failed')
-      } else {
-        setResult(data)
-      }
-    } catch (err) {
-      setGenError(String(err))
-    } finally {
-      setGenerating(false)
-    }
-  }
-
-  async function handlePublish() {
-    if (!result?.token) return
-    setPublishing(true)
-    setPubError(null)
-
-    try {
-      const fd = new FormData()
-      fd.set('token',       result.token)
-      fd.set('productId',   deal.shopifyProductId)
-      fd.set('productName', deal.seoTitle)
-
-      const res = await fetch('/api/publish-video', { method: 'POST', body: fd })
-      const data = await res.json() as PublishVideoResponse
-      if (!res.ok || data.error) {
-        setPubError(data.error ?? 'Upload failed')
-      } else {
-        setPublishResult(data)
-      }
-    } catch (err) {
-      setPubError(String(err))
-    } finally {
-      setPublishing(false)
-    }
-  }
-
-  const published = Boolean(publishResult?.ok)
-
-  return (
-    <section className="bg-white rounded-2xl shadow-sm overflow-hidden">
-      {/* Section header — clickable to toggle */}
-      <button
-        type="button"
-        onClick={() => setVideoSectionOpen(o => !o)}
-        className="w-full px-6 pt-6 pb-4 flex items-center justify-between text-left hover:bg-cream-2/40 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #FF4B1F, #FF6A3D)' }}
-          >
-            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
-            </svg>
-          </div>
-          <div>
-            <h2 className="text-base font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
-              Video Generator
-            </h2>
-            <p className="text-xs text-ink/50 mt-0.5">
-              Generate a product ad video for this deal
-            </p>
-          </div>
-        </div>
-        <span className={`text-ink/40 transition-transform duration-200 ${videoSectionOpen ? 'rotate-180' : ''}`}>
-          ▼
-        </span>
-      </button>
-
-      {videoSectionOpen && <div className="p-6 pt-0 space-y-6 border-t border-cream-2">
-        {/* Prompt customisation */}
-        <form onSubmit={handleGenerate} className="space-y-4">
-          <div>
-            <label
-              htmlFor="video-custom-prompt"
-              className="block text-sm font-semibold text-ink mb-1"
-            >
-              Custom direction
-              <span className="ml-2 text-xs font-normal text-ink/40">(optional)</span>
-            </label>
-            <p className="text-xs text-ink/50 mb-2">
-              Guide the tone, reference a specific feature, set a scene. Claude handles the rest.
-            </p>
-            <textarea
-              id="video-custom-prompt"
-              value={customPrompt}
-              onChange={e => setCustomPrompt(e.target.value)}
-              placeholder={'e.g. "Make the skeptic sound like a tired husband who secretly wants one" or "Focus on the air-pulse feature, reference blooming flowers"'}
-              rows={3}
-              disabled={generating}
-              className="w-full border border-cream-2 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-sage/30 placeholder:text-ink/30 disabled:opacity-50 disabled:cursor-not-allowed transition-shadow"
-            />
-          </div>
-
-          {/* Duration, Format + Voice selectors */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label htmlFor="video-duration" className="block text-xs font-semibold text-ink/60 mb-1 uppercase tracking-wider">
-                Duration
-              </label>
-              <div className="relative">
-                <input
-                  id="video-duration"
-                  type="number"
-                  value={durationSeconds}
-                  onChange={e => setDurationSeconds(Math.max(8, Math.min(60, Number(e.target.value))))}
-                  min={8}
-                  max={60}
-                  step={1}
-                  disabled={generating}
-                  className="w-full border border-cream-2 rounded-xl px-3 py-2.5 pr-10 text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-sage/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink/40 pointer-events-none">
-                  sec
-                </span>
-              </div>
-            </div>
-            <div>
-              <label htmlFor="video-format" className="block text-xs font-semibold text-ink/60 mb-1 uppercase tracking-wider">
-                Format
-              </label>
-              <select
-                id="video-format"
-                value={selectedFormat}
-                onChange={e => setSelectedFormat(e.target.value)}
-                disabled={generating}
-                className="w-full border border-cream-2 rounded-xl px-3 py-2.5 text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-sage/30 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="auto">Auto (category-based)</option>
-                <option value="sitcom_sketch">Sitcom Sketch</option>
-                <option value="fake_testimonial">Fake Testimonial</option>
-                <option value="educational">Educational (bad expert)</option>
-                <option value="breaking_news">Breaking News</option>
-                <option value="absurdist_narrator">Absurdist Narrator</option>
-                <option value="custom">Custom…</option>
-              </select>
-            </div>
-            <div>
-              <label htmlFor="video-voice" className="block text-xs font-semibold text-ink/60 mb-1 uppercase tracking-wider">
-                Voice
-              </label>
-              <select
-                id="video-voice"
-                value={selectedVoice}
-                onChange={e => setSelectedVoice(e.target.value)}
-                disabled={generating}
-                className="w-full border border-cream-2 rounded-xl px-3 py-2.5 text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-sage/30 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="Rachel">Rachel</option>
-                <option value="Bella">Bella</option>
-                <option value="Erin">Erin</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Custom format text input */}
-          {selectedFormat === 'custom' && (
-            <div>
-              <label htmlFor="video-custom-format" className="block text-sm font-semibold text-ink mb-1">
-                Custom narrator persona
-              </label>
-              <p className="text-xs text-ink/50 mb-2">
-                Describe the narrator character. e.g. "a nature documentary narrator who is clearly out of their depth"
-              </p>
-              <input
-                id="video-custom-format"
-                type="text"
-                value={customFormatText}
-                onChange={e => setCustomFormatText(e.target.value)}
-                placeholder="narrator is a..."
-                disabled={generating}
-                className="w-full border border-cream-2 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30 placeholder:text-ink/30 disabled:opacity-50 disabled:cursor-not-allowed"
-              />
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={generating}
-            className="relative flex items-center gap-2.5 px-6 py-2.5 rounded-full text-sm font-semibold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-coral/40 focus:ring-offset-2"
-            style={{ background: 'linear-gradient(to right, #FF4B1F, #FF6A3D)' }}
-          >
-            {generating ? (
-              <>
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                </svg>
-                Generating… (~45s)
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Generate Video
-              </>
-            )}
-          </button>
-        </form>
-
-        {/* Generation error */}
-        {genError && (
-          <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
-            <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span>{genError}</span>
-          </div>
-        )}
-
-        {/* Preview + dialogue */}
-        {result?.ok && result.previewUrl && (
-          <div className="space-y-5 pt-2">
-            {/* Divider */}
-            <div className="border-t border-cream-2" />
-
-            {/* Script metadata */}
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="rounded-lg bg-cream-2/60 px-3 py-2">
-                <span className="font-semibold text-ink/50 uppercase tracking-wider">Format</span>
-                <p className="text-ink font-medium mt-0.5 capitalize">{result.format?.replace(/_/g, ' ')}</p>
-              </div>
-              <div className="rounded-lg bg-cream-2/60 px-3 py-2">
-                <span className="font-semibold text-ink/50 uppercase tracking-wider">Voice</span>
-                <p className="text-ink font-medium mt-0.5">{result.voiceName ?? 'Bella'}</p>
-              </div>
-              <div className="rounded-lg bg-cream-2/60 px-3 py-2 col-span-2">
-                <span className="font-semibold text-ink/50 uppercase tracking-wider">Why this format</span>
-                <p className="text-ink mt-0.5 leading-relaxed">{result.formatRationale}</p>
-              </div>
-            </div>
-
-            {/* Narrator script + reactions */}
-            {result.narratorScript && (
-              <div className="space-y-3">
-                <p className="text-xs font-semibold text-ink/50 uppercase tracking-wider">Narrator script</p>
-                <div className="rounded-xl bg-ink/5 border border-cream-2 px-4 py-3">
-                  <p className="text-sm text-ink leading-relaxed italic">
-                    &ldquo;{result.narratorScript}&rdquo;
-                  </p>
-                </div>
-
-                {result.reactionText && result.reactionText.length > 0 && (
-                  <>
-                    <p className="text-xs font-semibold text-ink/50 uppercase tracking-wider pt-1">Reactions</p>
-                    <div className="flex flex-col gap-2">
-                      {result.reactionText.map((r, i) => (
-                        <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
-                          <span className="text-xs bg-cream border border-cream-2 rounded-full px-3 py-1.5 text-ink/70">
-                            {r}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-
-                {result.endTagline && (
-                  <p className="text-xs text-ink/40 text-center pt-1 italic">
-                    End card: &ldquo;{result.endTagline}&rdquo;
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Video player */}
-            <div className="rounded-2xl overflow-hidden bg-ink aspect-square relative">
-              <video
-                ref={videoRef}
-                src={result.previewUrl}
-                controls
-                playsInline
-                preload="metadata"
-                className="w-full h-full object-contain"
-              />
-            </div>
-
-            {/* Publish controls */}
-            {!published ? (
-              <div className="flex items-center gap-3 pt-1">
-                <button
-                  onClick={handlePublish}
-                  disabled={publishing}
-                  className="flex-1 flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-sage/40 focus:ring-offset-2"
-                  style={{ background: '#7C8F78' }}
-                >
-                  {publishing ? (
-                    <>
-                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                      </svg>
-                      Uploading to Shopify…
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                      </svg>
-                      Upload to Shopify
-                    </>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => handleGenerate()}
-                  disabled={generating}
-                  className="px-5 py-2.5 rounded-full text-sm font-semibold text-ink bg-cream-2 hover:bg-cream-2/70 transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-ink/20 focus:ring-offset-2"
-                >
-                  Regenerate
-                </button>
-              </div>
-            ) : (
-              <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 space-y-1">
-                <p className="text-sm font-semibold text-green-700 flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                  Video uploaded to Shopify
-                </p>
-                <p className="text-xs text-green-600">
-                  Media ID: <span className="font-mono">{publishResult?.mediaId}</span>
-                  {publishResult?.ready && ' · Status: Ready'}
-                </p>
-                {publishResult?.thumbnailSet?.home_page && (
-                  <p className="text-xs text-green-600">Set as primary thumbnail on PDP and home hero.</p>
-                )}
-                <button
-                  onClick={() => { setResult(null); setPublishResult(null) }}
-                  className="mt-2 text-xs font-semibold text-green-700 underline underline-offset-2"
-                >
-                  Generate another video
-                </button>
-              </div>
-            )}
-
-            {/* Publish error */}
-            {pubError && (
-              <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-                {pubError}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Prompt Details — expandable + editable */}
-        <div className="border-t border-cream-2 pt-4">
-          <button
-            type="button"
-            onClick={() => setPromptDetailsOpen(o => !o)}
-            className="flex items-center gap-2 text-xs font-semibold text-ink/50 hover:text-ink/70 transition-colors"
-          >
-            <span className={`transition-transform duration-200 ${promptDetailsOpen ? 'rotate-180' : ''}`}>&#x25BC;</span>
-            Prompt Details
-          </button>
-          {promptDetailsOpen && (
-            <div className="mt-4 space-y-4 text-xs">
-              <PromptSettingField
-                label="Brand Voice (System Prompt)"
-                settingKey="video:brandVoice"
-                defaultValue={promptSettings['video:brandVoice'] ?? 'This is for xdipx.com — a daily flash-sale site for sexual wellness products.\nBrand voice: playful, cheeky, warm. PG-13 strictly — suggest, never show. Innuendo welcome, explicit never.'}
-                rows={3}
-              />
-              <PromptSettingField
-                label="Format Personas"
-                settingKey="video:formatPersonas"
-                defaultValue={promptSettings['video:formatPersonas'] ?? 'Sitcom Sketch: narrator is a well-meaning friend who keeps accidentally describing couples activities in extremely innocent terms\nFake Testimonial: narrator is an EXTREMELY enthusiastic stranger who found this product and their life is now unrecognizable, in the best way\nEducational: narrator is a hilariously underqualified \'expert\' delivering \'facts\' that are not facts\nBreaking News: narrator is reporting BREAKING NEWS with escalating urgency about a very personal problem that this product solves\nAbsurdist Narrator: narrator keeps accidentally describing the product perfectly while appearing to talk about something else entirely'}
-                rows={6}
-              />
-              <PromptSettingField
-                label="Auto-Format (Category → Format)"
-                settingKey="video:categoryFormatMap"
-                defaultValue={promptSettings['video:categoryFormatMap'] ?? 'couples → Sitcom Sketch\nhim / strok → Breaking News\nher / vibrat → Fake Testimonial\nlube / lubricant → Educational\nother → random pick'}
-                rows={5}
-              />
-              <PromptSettingField
-                label="Music Prompt (Category-Based)"
-                settingKey="video:categoryMusicMap"
-                defaultValue={promptSettings['video:categoryMusicMap'] ?? 'couples → playful bedroom pop, warm synths, slow tempo\nhim / strok → confident lo-fi beat, deep bass, smooth\nher / vibrat → bright synth-pop, upbeat, empowering\nlube → smooth jazz parody, overly suave, comedic\nother → quirky upbeat indie pop, curious and warm'}
-                rows={5}
-              />
-              <PromptSettingField
-                label="ElevenLabs Voice Settings"
-                settingKey="video:voiceSettings"
-                defaultValue={promptSettings['video:voiceSettings'] ?? 'model: eleven_turbo_v2\nstability: 0.35 · similarity_boost: 0.75\nstyle: 0.40 · speaker_boost: true'}
-                rows={3}
-              />
-            </div>
-          )}
-        </div>
-      </div>}
-    </section>
-  )
-}
-
 // ─── Page ──────────────────────────────────────────────────────────────────
 
 export default function DealManagerRoute() {
@@ -1233,7 +691,6 @@ function DealManager() {
   const {
     deal, shopifyCost, targetDate, todayEST, dealCategories,
     pinnedAccessories, productImages,
-    promptSettings,
     pricingConfig,
   } = useLoaderData<typeof loader>()
   const approveFetcher  = useFetcher<{ ok: boolean }>()
@@ -1455,12 +912,6 @@ function DealManager() {
                 initialImages={productImages ?? []}
                 onImagesChange={revalidate}
               />
-            </DraggableSection>
-          ),
-
-          video: (
-            <DraggableSection key="video" sectionKey="video" {...dragProps}>
-              <VideoGeneratorSection deal={deal} category={dealCategories[0] ?? ''} promptSettings={promptSettings} />
             </DraggableSection>
           ),
 

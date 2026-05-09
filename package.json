@@ -27,8 +27,6 @@
     "@portabletext/to-html": "^5.0.2",
     "@react-router/express": "^7.5.0",
     "@react-router/node": "^7.5.0",
-    "@remotion/bundler": "^4.0.294",
-    "@remotion/renderer": "^4.0.294",
     "@sanity/client": "^7.20.0",
     "@sanity/visual-editing": "^5.3.3",
     "@sentry/node": "^10.48.0",
