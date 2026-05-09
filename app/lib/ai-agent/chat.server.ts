@@ -4,6 +4,7 @@ import { CHAT_SYSTEM_PROMPT, SMS_SYSTEM_PROMPT } from './prompt'
 import { QA_TOOL_DEFINITIONS, runQaTool, type AgentContext, type ToolResult } from './tools.server'
 import type { IvrProductCard } from '~/lib/ivr-search.server'
 import { getProductByHandle, getProductsByHandles } from '~/lib/shopify.server'
+import { getPreviewImagesByHandles } from '~/lib/sanity.server'
 import type { ChatTurn, ChatProductCard, ChatReply, QuickReplyPayload } from './chat-types'
 import { extractSlots } from '~/lib/sms-v2/slot-extractor.server'
 import {
@@ -913,11 +914,29 @@ function collectCards(result: ToolResult, sink: Map<string, IvrProductCard>) {
 async function hydrateCards(cards: IvrProductCard[]): Promise<ChatProductCard[]> {
   if (cards.length === 0) return []
   const handles = cards.map((c) => c.handle).filter(Boolean)
-  const products = await getProductsByHandles(handles)
+  // Fetch Shopify products and Sanity preview images in parallel. Sanity acts
+  // as a fallback for products that haven't yet had a featured image attached
+  // in Shopify (common for newly bulk-imported items).
+  const [products, sanityPreviews] = await Promise.all([
+    getProductsByHandles(handles),
+    getPreviewImagesByHandles(handles),
+  ])
   const imgByHandle = new Map<string, { url: string; alt: string }>()
   for (const p of products) {
     const img = p.images[0]
-    if (img?.url) imgByHandle.set(p.handle, { url: img.url, alt: img.altText || p.title })
+    if (img?.url) {
+      imgByHandle.set(p.handle, { url: img.url, alt: img.altText || p.title })
+      continue
+    }
+    const sanityUrl = sanityPreviews.get(p.handle)
+    if (sanityUrl) imgByHandle.set(p.handle, { url: sanityUrl, alt: p.title })
+  }
+  // Also cover handles that didn't come back from Shopify at all but exist in
+  // Sanity — better to render a Sanity-backed thumbnail than the placeholder.
+  for (const h of handles) {
+    if (imgByHandle.has(h)) continue
+    const sanityUrl = sanityPreviews.get(h)
+    if (sanityUrl) imgByHandle.set(h, { url: sanityUrl, alt: '' })
   }
   return cards.map((c) => {
     const img = imgByHandle.get(c.handle)
