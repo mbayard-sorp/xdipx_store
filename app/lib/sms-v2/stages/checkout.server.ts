@@ -16,7 +16,7 @@
  *
  * If currentPitchHandle is null/empty → DISCOVERY fallback + console.warn.
  */
-import { getProductByHandle, createCartWithLines } from '~/lib/shopify.server'
+import { getProductByHandle, createCartWithLines, addLinesToCart } from '~/lib/shopify.server'
 import { resolveTransition } from '../transitions.server'
 import { discoveryFallbackTemplate } from '../templates/checkout-templates'
 import { getSmsConfig, fillCheckoutClosing, SMS_DEFAULTS } from '../sms-config.server'
@@ -227,6 +227,12 @@ export async function executeCheckoutStage(
   let cartUrl: string
   let cartItems: Array<{ handle: string; quantity: number }>
   let fabricationNote: string | undefined
+  // Web channel UX differs from SMS: instead of minting a fresh checkout cart
+  // and pasting the URL into chat prose, we add to the SHOPPER'S existing
+  // cart cookie when one is present. The chat widget then dispatches the
+  // cart-drawer event and the cart slides open with the new line items.
+  const isWeb = ctx.channel === 'web'
+  const existingCartId = ctx.cart?.cartId
 
   try {
     const lines = await Promise.all(
@@ -235,8 +241,13 @@ export async function executeCheckoutStage(
         quantity: 1,
       })),
     )
-    const cart = await createCartWithLines(lines)
-    cartUrl = cart.checkoutUrl
+    if (isWeb && existingCartId) {
+      const cart = await addLinesToCart(existingCartId, lines)
+      cartUrl = cart.checkoutUrl
+    } else {
+      const cart = await createCartWithLines(lines)
+      cartUrl = cart.checkoutUrl
+    }
 
     // Fabrication safety check — if the URL doesn't look real, log loudly.
     // This should never fire in production if Shopify returns a real cart.
@@ -307,21 +318,29 @@ export async function executeCheckoutStage(
   }
 
   // --- Compose reply ---
-  // Trade-off: previously we picked a random variant from acceptTemplate /
-  // commitTemplate (cosmetic variety across orders). Now we honor a single
-  // admin-editable closing line (key `smsCheckoutClosing` on /admin/voice-and-sms)
-  // — admin control trumps variety because the closing line is a high-leverage
-  // brand moment. The {url} slot is substituted server-side. Falls back to
-  // SMS_DEFAULTS.checkoutClosing on DB timeout so a Neon hiccup can't strand
-  // a paying customer mid-cart.
-  let closing = SMS_DEFAULTS.checkoutClosing
-  try {
-    const smsCfg = await getSmsConfig()
-    closing = smsCfg.checkoutClosing
-  } catch (err) {
-    console.error('[checkout_stage] sms config load failed — using default checkout closing', err)
+  // Web: items are now in the existing cart cookie; the chat widget receives
+  // cartUpdated:true (driven by the segment's checkout cta below) and slides
+  // the cart drawer open. Don't paste the cart URL — it's redundant clutter
+  // and the user has the drawer.
+  // SMS/voice: honor the admin-editable closing line ({url} slot substituted
+  // server-side). Fallback to SMS_DEFAULTS on Neon hiccup so a paying customer
+  // can't get stranded mid-cart.
+  let prose: string
+  if (isWeb) {
+    prose =
+      handlesToAdd.length > 1
+        ? "Both in your cart — peek the drawer ♥"
+        : "Added to your cart ♥"
+  } else {
+    let closing = SMS_DEFAULTS.checkoutClosing
+    try {
+      const smsCfg = await getSmsConfig()
+      closing = smsCfg.checkoutClosing
+    } catch (err) {
+      console.error('[checkout_stage] sms config load failed — using default checkout closing', err)
+    }
+    prose = fillCheckoutClosing(closing, cartUrl)
   }
-  const prose = fillCheckoutClosing(closing, cartUrl)
 
   // --- State writes ---
   const stateWrites = {

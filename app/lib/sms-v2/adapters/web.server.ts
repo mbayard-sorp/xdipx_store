@@ -30,6 +30,7 @@ import { generateConversationSummary } from '../summary.server'
 import type { ChatReply, ChatProductCard } from '~/lib/ai-agent/chat-types'
 import type { StageResponse, ProductRef, ProductContext } from '../types.server'
 import type { BudgetReservation } from '~/lib/emma-budget.server'
+import { getPreviewImagesByHandles } from '~/lib/sanity.server'
 
 // ---------------------------------------------------------------------------
 // Input type
@@ -59,6 +60,30 @@ export interface ProcessWebInput {
  * ChatProductCard shape. We populate the fields we have; richer fields
  * (variants, pctOff, etc.) require a full Shopify fetch.
  */
+/**
+ * v2 stages emit absolute https://xdipx.com/products/{handle} URLs because SMS
+ * (iMessage link previews) needs them. Web chat needs relative paths so the
+ * link stays on the current origin — preview, localhost, or prod — and the
+ * _layout-mounted Emma widget keeps its state across navigation. Strip the
+ * canonical host (and any www/preview variant) down to the pathname.
+ */
+const ABSOLUTE_XDIPX_URL_RE = /https?:\/\/(?:www\.)?(?:xdipx\.com|[a-z0-9-]+\.vercel\.app)(\/[^\s)\]]*)/gi
+function relativizeXdipxLinks(text: string): string {
+  return text.replace(ABSOLUTE_XDIPX_URL_RE, '$1')
+}
+function relativizePdpUrl(url: string): string {
+  if (!url) return url
+  if (url.startsWith('/')) return url
+  try {
+    const u = new URL(url)
+    const host = u.hostname.toLowerCase()
+    if (host === 'xdipx.com' || host === 'www.xdipx.com' || host.endsWith('.vercel.app')) {
+      return u.pathname + u.search + u.hash
+    }
+  } catch { /* fall through */ }
+  return url
+}
+
 function productRefToCard(ref: ProductRef | ProductContext): ChatProductCard {
   // Parse price string like "$49.99" → number of dollars.
   // ChatProductCard.price is dollars (matches v1 productToCard, which uses
@@ -87,7 +112,7 @@ function productRefToCard(ref: ProductRef | ProductContext): ChatProductCard {
     phrasing: 'msrp_only',
     inStock: true,         // Assume in-stock; stage handler validated this
     variantId: '',         // Stage handler doesn't carry variantId in ProductRef
-    url: ref.pdpUrl,
+    url: relativizePdpUrl(ref.pdpUrl),
   }
   if (ref.imageUrl !== undefined) card.imageUrl = ref.imageUrl
   return card
@@ -103,11 +128,11 @@ function productRefToCard(ref: ProductRef | ProductContext): ChatProductCard {
  *   - stateWrites.lastQuoteUrl being set → cartUpdated: true (checkout was created)
  *   - segments[].cta.kind === 'checkout' → cartUpdated: true
  */
-function stageResponseToChatReply(
+async function stageResponseToChatReply(
   resp: StageResponse,
   existingHistory: Array<{ role: 'user' | 'assistant'; text: string }>,
   userText: string,
-): ChatReply {
+): Promise<ChatReply> {
   const replyParts: string[] = []
   const products: ChatProductCard[] = []
   let pillOptions: string[] | undefined
@@ -127,7 +152,24 @@ function stageResponseToChatReply(
     }
   }
 
-  const reply = replyParts.join('\n\n') || "I'm here — what can I help with?"
+  const reply = relativizeXdipxLinks(
+    replyParts.join('\n\n') || "I'm here — what can I help with?",
+  )
+
+  // Fall back to Sanity productPage.previewImageUrl for any card that didn't
+  // get a Shopify image — common for newly bulk-imported products that have
+  // no featured image attached yet. Single GROQ batch lookup.
+  const missing = products.filter((p) => !p.imageUrl).map((p) => p.handle)
+  if (missing.length > 0) {
+    const sanityPreviews = await getPreviewImagesByHandles(missing)
+    if (sanityPreviews.size > 0) {
+      for (const card of products) {
+        if (card.imageUrl) continue
+        const url = sanityPreviews.get(card.handle)
+        if (url) card.imageUrl = url
+      }
+    }
+  }
 
   // Determine if a cart/checkout was created this turn.
   const cartCreated =

@@ -202,15 +202,19 @@ export async function executeUpsellStage(
   )
 
   // Step 6: return with stageOut: 'UPSELL' — wait for accept/decline next turn
+  // Web chat surfaces pill options as tap chips below the reply. SMS/voice
+  // can't render pills, so pillOptions stay empty for those channels.
+  const segment: StageResponse['segments'][number] = {
+    prose,
+    productCard,
+  }
+  if (channel === 'web') {
+    segment.pillOptions = ['Add it', 'No thanks']
+  }
   return {
     stageOut: 'UPSELL',
     goalAchieved: false,
-    segments: [
-      {
-        prose,
-        productCard,
-      },
-    ],
+    segments: [segment],
     stateWrites: {
       currentUpsellHandle: accessory.handle,
     },
