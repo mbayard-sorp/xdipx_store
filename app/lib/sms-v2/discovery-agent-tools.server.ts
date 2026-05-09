@@ -176,8 +176,12 @@ export function isAnalTagged(card: IvrProductCard): boolean {
   for (const sub of ANAL_HANDLE_SUBSTRINGS) {
     if (handle.includes(sub)) return true
   }
-  const category = (card.category ?? '').toLowerCase().trim()
-  return category === 'anal' || category === 'plug'
+  const rawCategory = card.category ?? ''
+  const categories = Array.isArray(rawCategory) ? rawCategory : [rawCategory]
+  return categories.some((c) => {
+    const norm = String(c ?? '').toLowerCase().trim()
+    return norm === 'anal' || norm === 'plug'
+  })
 }
 
 /**
