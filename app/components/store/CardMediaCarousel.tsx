@@ -65,7 +65,7 @@ export function CardMediaCarousel({ cardId, title, heroVideo, images }: CardMedi
       {slides.length > 1 && (
         <div
           aria-hidden="true"
-          className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-2 py-1 rounded-full bg-black/30 backdrop-blur-sm pointer-events-none"
+          className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-2 py-1 rounded-full bg-black/30 backdrop-blur-sm pointer-events-none lg:hidden"
         >
           {slides.map((_, i) => (
             <span
