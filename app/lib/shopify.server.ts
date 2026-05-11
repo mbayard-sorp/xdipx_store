@@ -199,7 +199,7 @@ const CARD_METAFIELDS_FRAGMENT = `
 const PRODUCT_CARD_FRAGMENT = `
   id handle title vendor tags
   options { name values }
-  images(first: 1) {
+  images(first: 6) {
     edges { node { url altText } }
   }
   variants(first: 50) {

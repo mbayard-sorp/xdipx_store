@@ -2,9 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useFetcher } from 'react-router'
 import type { VaultDeal } from '~/types'
 import { HeartButton } from './HeartButton'
-import { CardVideo } from './CardVideo'
+import { CardMediaCarousel } from './CardMediaCarousel'
 import { abbreviate, buildPieGradient } from './CircleOptionSelector'
-import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
 interface VaultCardProps {
   deal: VaultDeal
@@ -77,21 +76,12 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
       />
       <Link to={`/products/${deal.handle}`} className="flex flex-col flex-1">
         <div className="aspect-[4/5] overflow-hidden bg-cream-2 relative">
-          {deal.heroVideo?.src ? (
-            <CardVideo cardId={deal.id} video={deal.heroVideo} title={deal.seoTitle} />
-          ) : deal.images[0] ? (
-            <img
-              src={shopifyImageUrl(deal.images[0].url, 480) || deal.images[0].url}
-              srcSet={shopifyImageSrcSet(deal.images[0].url, [240, 360, 480, 720])}
-              sizes="(min-width: 768px) 25vw, 50vw"
-              alt={deal.images[0].altText || deal.seoTitle}
-              className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-300"
-              loading="lazy"
-              decoding="async"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-ink/10 text-5xl">♥</div>
-          )}
+          <CardMediaCarousel
+            cardId={deal.id}
+            title={deal.seoTitle}
+            {...(deal.heroVideo ? { heroVideo: deal.heroVideo } : {})}
+            images={deal.images}
+          />
 
           {canAtc && (
             <button

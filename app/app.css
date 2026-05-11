@@ -133,13 +133,17 @@
   display: none;
 }
 
-/* Card hover lift */
+/* Card hover lift — only on devices with real hover (i.e. desktop). Touch
+   devices used to trigger this on tap, which fought with horizontal swipes
+   on the PLP card carousel. */
 .card-lift {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
-.card-lift:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 32px rgba(21, 18, 17, 0.12);
+@media (hover: hover) {
+  .card-lift:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(21, 18, 17, 0.12);
+  }
 }
 
 /* Drag-apart spacer animation for deal table */
