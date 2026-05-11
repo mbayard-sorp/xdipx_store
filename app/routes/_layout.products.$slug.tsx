@@ -848,10 +848,15 @@ function ProductPage() {
               max-w-md keeps this row aligned under the SensationDial above
               so the buy controls visually sit within the dial's width. */}
           <div className="flex items-stretch gap-2 max-w-md">
-            {multiVariant && options.map(opt => {
-              const lower = opt.name.toLowerCase()
-              const isColor = lower === 'color' || lower === 'colour'
-              const isSize  = lower === 'size'
+            {multiVariant && [...options].sort((a, b) => {
+              const rank = (n: string) =>
+                /^(size|volume|capacity|length|fl\.?\s*oz)$/i.test(n) ? 0
+                : /^colou?r$/i.test(n) ? 1
+                : 2
+              return rank(a.name) - rank(b.name)
+            }).map(opt => {
+              const isColor = /^colou?r$/i.test(opt.name)
+              const isSize  = /^(size|volume|capacity|length|fl\.?\s*oz)$/i.test(opt.name)
               if (!isColor && !isSize) return null
               return (
                 <CircleOptionSelector
@@ -921,16 +926,21 @@ function ProductPage() {
             )}
           </div>
 
-          {/* Non-color/size axis fallback (rare): render legacy selector */}
+          {/* Non-color/size axis fallback (rare): render legacy selector.
+              Skip color/size/volume/etc — those already render as circles above. */}
           {multiVariant && options.some(o => {
-            const l = o.name.toLowerCase()
-            return l !== 'color' && l !== 'colour' && l !== 'size'
+            const isCircleOpt =
+              /^colou?r$/i.test(o.name) ||
+              /^(size|volume|capacity|length|fl\.?\s*oz)$/i.test(o.name)
+            return !isCircleOpt
           }) && (
             <VariantSelector
               variants={variants}
               options={options.filter(o => {
-                const l = o.name.toLowerCase()
-                return l !== 'color' && l !== 'colour' && l !== 'size'
+                const isCircleOpt =
+                  /^colou?r$/i.test(o.name) ||
+                  /^(size|volume|capacity|length|fl\.?\s*oz)$/i.test(o.name)
+                return !isCircleOpt
               })}
               selectedOptions={selectedOptions}
               onSelectionChange={handleSelectionChange}

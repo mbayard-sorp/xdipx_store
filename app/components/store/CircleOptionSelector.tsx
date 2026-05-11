@@ -68,6 +68,14 @@ export function resolveColor(value: string, swatches?: Record<string, string>): 
 
 export function abbreviate(value: string): string {
   const v = value.trim()
+  // Volume/length values like "4 fl oz", "100ml", "8 in." — keep the number
+  // with a compact unit so the pill reads "4OZ" / "100ML" instead of "4 ".
+  const volumeMatch = v.match(/^(\d+(?:\.\d+)?)\s*(fl\.?\s*oz|oz|ml|l|cl|in\.?|cm|mm)\b/i)
+  if (volumeMatch) {
+    const [, n, rawUnit] = volumeMatch
+    const unit = rawUnit!.toLowerCase().replace(/[\s.]/g, '').replace(/^floz$/, 'oz')
+    return `${n} ${unit.toUpperCase()}`
+  }
   if (v.length <= 4) return v.toUpperCase()
   // Prefer well-known size abbreviations
   const map: Record<string, string> = {
@@ -185,6 +193,10 @@ export function CircleOptionSelector({
   // minus border + label half-height).
   const labelRadius = 16
   const labelPositions = values.map((_, i) => {
+    // 2 values → 9 o'clock + 3 o'clock so they sit side-by-side, not stacked
+    if (values.length === 2) {
+      return { x: i === 0 ? -labelRadius : labelRadius, y: 0 }
+    }
     const angle = (2 * Math.PI * i) / values.length
     const x = Math.sin(angle) * labelRadius
     const y = -Math.cos(angle) * labelRadius
