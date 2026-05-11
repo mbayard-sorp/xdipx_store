@@ -136,10 +136,15 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
           </h3>
 
           <div className="flex items-center gap-2 mt-auto pt-2">
-            <span className="text-coral font-bold">${deal.dealPrice.toFixed(2)}</span>
-            {deal.msrp > deal.dealPrice && (
-              <span className="text-ink/40 text-sm line-through">${deal.msrp.toFixed(2)}</span>
-            )}
+            <span className="text-coral font-bold">
+              {deal.priceMin != null && deal.priceMax != null && deal.priceMax > deal.priceMin
+                ? `$${deal.priceMin.toFixed(2)}–$${deal.priceMax.toFixed(2)}`
+                : `$${deal.dealPrice.toFixed(2)}`}
+            </span>
+            {(deal.priceMin == null || deal.priceMax == null || deal.priceMax === deal.priceMin) &&
+              deal.msrp > deal.dealPrice && (
+                <span className="text-ink/40 text-sm line-through">${deal.msrp.toFixed(2)}</span>
+              )}
           </div>
           {(() => {
             const sizes = deal.sizeValues && deal.sizeValues.length > 1 ? deal.sizeValues : null
@@ -149,12 +154,21 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
                 ? `${sizes.length} sizes`
                 : sizes.map(v => abbreviate(v)).join(' / ')
               : null
-            if (discount <= 0 && !sizes && !colors) return null
+            const hasPriceRange =
+              deal.priceMin != null && deal.priceMax != null && deal.priceMax > deal.priceMin
+            const showFlatSavings  = discount > 0 && !hasPriceRange
+            const showRangeSavings = hasPriceRange && (deal.maxSavingsAmount ?? 0) > 0
+            if (!showFlatSavings && !showRangeSavings && !sizes && !colors) return null
             return (
               <div className="flex items-center gap-2 mt-1">
-                {discount > 0 && (
+                {showFlatSavings && (
                   <span className="text-ink/70 text-xs whitespace-nowrap">
                     You save: ${(deal.msrp - deal.dealPrice).toFixed(2)} ({discount}%)
+                  </span>
+                )}
+                {showRangeSavings && (
+                  <span className="text-ink/70 text-xs whitespace-nowrap">
+                    Save up to ${deal.maxSavingsAmount!.toFixed(2)} ({deal.maxSavingsPercent}%)
                   </span>
                 )}
                 {(sizes || colors) && (
