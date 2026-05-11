@@ -94,6 +94,11 @@ export function ProductImageGallery({
   const isInitialMount = useRef(true)
   const touchStartX = useRef<number | null>(null)
   const touchStartY = useRef<number | null>(null)
+  // Slide direction for the base layer animation. Set on every locked-index
+  // change to mirror thumbnail order: moving forward (new index > old) slides
+  // the new image in from the right; moving back slides it in from the left.
+  const prevLockedIndex = useRef(activeIndex)
+  const [slideDir, setSlideDir] = useState<'left' | 'right' | null>(null)
 
   const displayIndex = previewIndex ?? lockedIndex
   const activeItem = items[displayIndex]
@@ -102,7 +107,13 @@ export function ProductImageGallery({
 
   // Sync locked index when parent changes it (e.g. variant selection)
   useEffect(() => {
-    setLockedIndex(activeIndex)
+    setLockedIndex(prev => {
+      if (activeIndex !== prev) {
+        setSlideDir(activeIndex > prev ? 'right' : 'left')
+        prevLockedIndex.current = activeIndex
+      }
+      return activeIndex
+    })
   }, [activeIndex])
 
   // Reset state when displayed item changes
@@ -277,7 +288,22 @@ export function ProductImageGallery({
             className="absolute inset-0 z-[5]"
             style={{ cursor: showZoomCursor ? (isZoomed ? ZOOM_OUT_CURSOR : ZOOM_IN_CURSOR) : undefined }}
           >
-            {/* Base layer: locked image */}
+            {/* Base layer: locked image. The outer div is keyed by URL so React
+                remounts on variant/color change and the slide animation replays;
+                the inner div carries the zoom transform so the two transforms
+                don't fight. */}
+            <div
+              key={
+                items[lockedIndex]?.kind === 'image'
+                  ? items[lockedIndex].url
+                  : items[lockedIndex]?.kind === 'video'
+                    ? items[lockedIndex].previewUrl
+                    : lockedIndex
+              }
+              className={`absolute inset-0 bg-white overflow-hidden ${
+                slideDir === 'right' ? 'slide-in-right' : slideDir === 'left' ? 'slide-in-left' : ''
+              }`}
+            >
             <div
               ref={previewIndex === null || previewIndex === lockedIndex ? imageRef : undefined}
               className="absolute inset-0"
@@ -344,6 +370,7 @@ export function ProductImageGallery({
                   &#9829;
                 </div>
               )}
+            </div>
             </div>
 
             {/* Preview overlay: shown instantly during thumbnail hover */}

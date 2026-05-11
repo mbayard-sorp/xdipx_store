@@ -91,6 +91,19 @@
   animation: fade-in 0.4s ease-out forwards;
 }
 
+/* Gallery slide transitions — direction mirrors thumbnail order on
+   variant/color change: forward slides in from the right, back from the left. */
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.slide-in-right { animation: slide-in-right 0.28s ease-out forwards; }
+.slide-in-left  { animation: slide-in-left  0.28s ease-out forwards; }
+
 /* TrustBar mobile marquee */
 @keyframes marquee {
   0%   { transform: translateX(0); }
@@ -120,13 +133,17 @@
   display: none;
 }
 
-/* Card hover lift */
+/* Card hover lift — only on devices with real hover (i.e. desktop). Touch
+   devices used to trigger this on tap, which fought with horizontal swipes
+   on the PLP card carousel. */
 .card-lift {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
-.card-lift:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 32px rgba(21, 18, 17, 0.12);
+@media (hover: hover) {
+  .card-lift:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(21, 18, 17, 0.12);
+  }
 }
 
 /* Drag-apart spacer animation for deal table */

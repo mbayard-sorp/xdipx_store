@@ -2,9 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useFetcher } from 'react-router'
 import type { VaultDeal } from '~/types'
 import { HeartButton } from './HeartButton'
-import { CardVideo } from './CardVideo'
+import { CardMediaCarousel } from './CardMediaCarousel'
 import { abbreviate, buildPieGradient } from './CircleOptionSelector'
-import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
 interface VaultCardProps {
   deal: VaultDeal
@@ -49,7 +48,7 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
   }
 
   return (
-    <article className="bg-white rounded-2xl overflow-hidden shadow-sm card-lift group relative">
+    <article className="bg-white rounded-2xl overflow-hidden shadow-sm card-lift group relative h-full flex flex-col">
       {starred && (
         <div className="absolute top-2 left-2 z-10 group/starred">
           <span
@@ -75,23 +74,14 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
         variant="overlay"
         size="sm"
       />
-      <Link to={`/products/${deal.handle}`} className="block">
+      <Link to={`/products/${deal.handle}`} className="flex flex-col flex-1">
         <div className="aspect-[4/5] overflow-hidden bg-cream-2 relative">
-          {deal.heroVideo?.src ? (
-            <CardVideo cardId={deal.id} video={deal.heroVideo} title={deal.seoTitle} />
-          ) : deal.images[0] ? (
-            <img
-              src={shopifyImageUrl(deal.images[0].url, 480) || deal.images[0].url}
-              srcSet={shopifyImageSrcSet(deal.images[0].url, [240, 360, 480, 720])}
-              sizes="(min-width: 768px) 25vw, 50vw"
-              alt={deal.images[0].altText || deal.seoTitle}
-              className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-300"
-              loading="lazy"
-              decoding="async"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-ink/10 text-5xl">♥</div>
-          )}
+          <CardMediaCarousel
+            cardId={deal.id}
+            title={deal.seoTitle}
+            {...(deal.heroVideo ? { heroVideo: deal.heroVideo } : {})}
+            images={deal.images}
+          />
 
           {canAtc && (
             <button
@@ -126,7 +116,7 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
 
         </div>
 
-        <div className="p-4">
+        <div className="p-4 flex flex-col flex-1">
           <p className="text-ink/50 text-xs uppercase tracking-wide mb-1">{deal.brand}</p>
           <h3
             className="font-semibold text-ink text-sm leading-snug line-clamp-2 group-hover:text-coral transition-colors"
@@ -135,40 +125,66 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
             {deal.seoTitle}
           </h3>
 
-          <div className="flex items-center gap-2 mt-2">
-            <span className="text-coral font-bold">${deal.dealPrice.toFixed(2)}</span>
-            {deal.msrp > deal.dealPrice && (
-              <span className="text-ink/40 text-sm line-through">${deal.msrp.toFixed(2)}</span>
-            )}
-            {discount > 0 && (
-              <span className="text-coral text-xs font-semibold">{discount}% off</span>
-            )}
-
-            {/* Scaled swatch — sits in the right side of the price row when
-                the product has multiple colors or sizes. Decorative; tap on
-                the card still goes to the PDP via the wrapping <Link>. */}
-            {(deal.colorValues || deal.sizeValues) && (
-              <span
-                aria-hidden="true"
-                className="ml-auto flex items-center gap-1.5"
-              >
-                {deal.colorValues && deal.colorValues.length > 1 && (
-                  <span
-                    className="block h-6 w-6 rounded-full border border-ink/80 shadow-sm"
-                    style={{ background: buildPieGradient(deal.colorValues) }}
-                  />
-                )}
-                {deal.sizeValues && deal.sizeValues.length > 1 && (
-                  <span
-                    className="inline-flex items-center justify-center h-6 px-1.5 rounded-full bg-paper border border-ink/80 shadow-sm text-[9px] font-bold tracking-wide text-ink"
-                    style={{ fontFamily: 'var(--font-display)' }}
-                  >
-                    {deal.sizeValues.slice(0, 3).map(v => abbreviate(v)).join(' / ')}
+          <div className="flex items-center gap-2 mt-auto pt-2">
+            <span className="text-coral font-bold">
+              {deal.priceMin != null && deal.priceMax != null && deal.priceMax > deal.priceMin
+                ? `$${deal.priceMin.toFixed(2)}–$${deal.priceMax.toFixed(2)}`
+                : `$${deal.dealPrice.toFixed(2)}`}
+            </span>
+            {(deal.priceMin == null || deal.priceMax == null || deal.priceMax === deal.priceMin) &&
+              deal.msrp > deal.dealPrice && (
+                <span className="text-ink/40 text-sm line-through">${deal.msrp.toFixed(2)}</span>
+              )}
+          </div>
+          {(() => {
+            const sizes = deal.sizeValues && deal.sizeValues.length > 1 ? deal.sizeValues : null
+            const colors = deal.colorValues && deal.colorValues.length > 1 ? deal.colorValues : null
+            const sizeLabel = sizes
+              ? sizes.length > 2
+                ? `${sizes.length} sizes`
+                : sizes.map(v => abbreviate(v)).join(' / ')
+              : null
+            const hasPriceRange =
+              deal.priceMin != null && deal.priceMax != null && deal.priceMax > deal.priceMin
+            const showFlatSavings  = discount > 0 && !hasPriceRange
+            const showRangeSavings = hasPriceRange && (deal.maxSavingsAmount ?? 0) > 0
+            if (!showFlatSavings && !showRangeSavings && !sizes && !colors) return null
+            return (
+              <div className="flex items-center gap-2 mt-1">
+                {showFlatSavings && (
+                  <span className="text-ink/70 text-xs whitespace-nowrap">
+                    You save: ${(deal.msrp - deal.dealPrice).toFixed(2)} ({discount}%)
                   </span>
                 )}
-              </span>
-            )}
-          </div>
+                {showRangeSavings && (
+                  <span className="text-ink/70 text-xs whitespace-nowrap">
+                    Save up to ${deal.maxSavingsAmount!.toFixed(2)} ({deal.maxSavingsPercent}%)
+                  </span>
+                )}
+                {(sizes || colors) && (
+                  <span
+                    aria-hidden="true"
+                    className="ml-auto flex items-center gap-1.5 shrink-0"
+                  >
+                    {colors && (
+                      <span
+                        className="block h-5 w-5 rounded-full border border-ink/80 shadow-sm"
+                        style={{ background: buildPieGradient(colors) }}
+                      />
+                    )}
+                    {sizeLabel && (
+                      <span
+                        className="inline-flex items-center justify-center h-5 px-2 rounded-full bg-paper border border-ink/80 shadow-sm text-[9px] font-bold tracking-wide text-ink whitespace-nowrap"
+                        style={{ fontFamily: 'var(--font-display)' }}
+                      >
+                        {sizeLabel}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </div>
+            )
+          })()}
         </div>
       </Link>
     </article>

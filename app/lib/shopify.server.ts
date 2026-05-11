@@ -199,10 +199,10 @@ const CARD_METAFIELDS_FRAGMENT = `
 const PRODUCT_CARD_FRAGMENT = `
   id handle title vendor tags
   options { name values }
-  images(first: 1) {
+  images(first: 6) {
     edges { node { url altText } }
   }
-  variants(first: 2) {
+  variants(first: 50) {
     edges {
       node {
         id
@@ -248,9 +248,28 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
   const mattersTags  = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
   const heroVideo    = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
   const colorOpt = (node.options ?? []).find(o => /^colou?r$/i.test(o.name))
-  const sizeOpt  = (node.options ?? []).find(o => /^size$/i.test(o.name))
+  const sizeOpt  = (node.options ?? []).find(o =>
+    /^(size|volume|capacity|length|fl\.?\s*oz)$/i.test(o.name)
+  )
   const colorValues = colorOpt && colorOpt.values.length > 1 ? colorOpt.values : undefined
   const sizeValues  = sizeOpt  && sizeOpt.values.length  > 1 ? sizeOpt.values  : undefined
+  const variantPrices = variantEdges
+    .map(e => parseFloat(e.node.price.amount))
+    .filter(n => Number.isFinite(n) && n > 0)
+  const priceMin = variantPrices.length > 0 ? Math.min(...variantPrices) : dealPrice
+  const priceMax = variantPrices.length > 0 ? Math.max(...variantPrices) : dealPrice
+  const hasPriceRange = priceMax > priceMin
+  const variantSavings = variantEdges
+    .map(e => {
+      const p  = parseFloat(e.node.price.amount)
+      const ca = parseFloat(e.node.compareAtPrice?.amount ?? '0')
+      return ca > p && p > 0
+        ? { amount: ca - p, percent: Math.round(((ca - p) / ca) * 100) }
+        : null
+    })
+    .filter((s): s is { amount: number; percent: number } => s !== null)
+  const maxSavingsAmount  = variantSavings.length > 0 ? Math.max(...variantSavings.map(s => s.amount))  : 0
+  const maxSavingsPercent = variantSavings.length > 0 ? Math.max(...variantSavings.map(s => s.percent)) : 0
   return {
     id: node.id,
     handle: node.handle,
@@ -267,6 +286,8 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
     hasMultipleVariants: variantEdges.length > 1,
     ...(colorValues ? { colorValues } : {}),
     ...(sizeValues  ? { sizeValues }  : {}),
+    ...(hasPriceRange ? { priceMin, priceMax } : {}),
+    ...(maxSavingsAmount > 0 ? { maxSavingsAmount, maxSavingsPercent } : {}),
     ...(moodTags.length     > 0 ? { moodTags }     : {}),
     ...(audienceTags.length > 0 ? { audienceTags } : {}),
     ...(mattersTags.length  > 0 ? { mattersTags }  : {}),

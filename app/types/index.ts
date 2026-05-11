@@ -358,6 +358,12 @@ export interface VaultDeal {
   /** Card-level option preview for the lower-right swatch on PLP cards. */
   colorValues?: string[]
   sizeValues?:  string[]
+  /** Set when variants span a price range; both equal `dealPrice` otherwise. */
+  priceMin?:    number
+  priceMax?:    number
+  /** Biggest (compareAtPrice - price) seen across variants, when any variant has a discount. */
+  maxSavingsAmount?:  number
+  maxSavingsPercent?: number
   // v2 redesign — tag facets for Ask Emma filtering
   moodTags?:     string[]
   audienceTags?: string[]
