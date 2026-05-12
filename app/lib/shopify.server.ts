@@ -6405,9 +6405,19 @@ interface ProductTypesResult {
   }
 }
 
-export async function getDistinctProductTypes(): Promise<Array<{ productType: string; count: number }>> {
+const PRODUCT_TYPES_CACHE_KEY = 'shopify:distinct-product-types'
+const PRODUCT_TYPES_CACHE_TTL = 60 * 60 // 1 hour
+
+export async function getDistinctProductTypes(opts?: { force?: boolean }): Promise<Array<{ productType: string; count: number }>> {
+  if (!opts?.force) {
+    const cached = await kvGet<Array<{ productType: string; count: number }>>(PRODUCT_TYPES_CACHE_KEY)
+    if (cached) return cached
+  }
+
   const counts = new Map<string, number>()
   let cursor: string | null = null
+  let pages = 0
+  const MAX_PAGES = 20 // hard ceiling to prevent runaway loops; 20 × 250 = 5000 products
 
   do {
     const data: ProductTypesResult = await adminGraphQL<ProductTypesResult>(PRODUCT_TYPES_QUERY, {
@@ -6423,9 +6433,13 @@ export async function getDistinctProductTypes(): Promise<Array<{ productType: st
     }
 
     cursor = data.products.pageInfo.hasNextPage ? (data.products.pageInfo.endCursor ?? null) : null
-  } while (cursor !== null)
+    pages++
+  } while (cursor !== null && pages < MAX_PAGES)
 
-  return Array.from(counts.entries())
+  const result = Array.from(counts.entries())
     .map(([productType, count]) => ({ productType, count }))
     .sort((a, b) => b.count - a.count)
+
+  await kvSet(PRODUCT_TYPES_CACHE_KEY, result, PRODUCT_TYPES_CACHE_TTL)
+  return result
 }

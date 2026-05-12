@@ -47,13 +47,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const approvalMode = await getApprovalMode()
 
-  const [webhookEnabledRaw, webhookThrottleRaw, webhookActivityToday, pricingRules, productTypes] = await Promise.all([
+  const [webhookEnabledRaw, webhookThrottleRaw, webhookActivityToday, pricingRules, productTypesResult] = await Promise.all([
     getPipelineSettingPublic('pricing_webhook_enabled'),
     getPipelineSettingPublic('pricing_webhook_throttle_secs'),
     getWebhookActivityToday(),
     getPricingRules(),
-    getDistinctProductTypes(),
+    getDistinctProductTypes().catch((err) => {
+      console.error('[admin.pricing] getDistinctProductTypes failed:', err)
+      return [] as Array<{ productType: string; count: number }>
+    }),
   ])
+  const productTypes = productTypesResult
 
   const webhookEnabled = webhookEnabledRaw === 'true'
   const webhookThrottleSecs = Math.max(5, Math.min(300, parseInt(webhookThrottleRaw ?? '30', 10) || 30))
