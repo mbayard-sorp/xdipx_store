@@ -8,6 +8,9 @@ export async function action({ request }: ActionFunctionArgs) {
   await requireAdmin(request)
 
   try {
+    const url = new URL(request.url)
+    const bypassCache = url.searchParams.get('fresh') === '1'
+
     const [cache, rules] = await Promise.all([
       getCachedProductTypes(),
       getPricingRules(),
@@ -24,11 +27,21 @@ export async function action({ request }: ActionFunctionArgs) {
     const globalHighDiscount = rules.highMarginDiscount ?? HIGH_MARGIN_DISCOUNT
     const globalMediumDiscount = rules.mediumMarginDiscount ?? MEDIUM_MARGIN_DISCOUNT
 
-    const suggestions = await suggestMarkupsByType({ types, globalHighDiscount, globalMediumDiscount })
+    const result = await suggestMarkupsByType({ types, globalHighDiscount, globalMediumDiscount, bypassCache })
 
-    return Response.json({ ok: true, suggestions, types })
+    if (result.suggestions.length === 0) {
+      return Response.json({
+        ok: false,
+        error: result.debug?.error ?? 'Claude returned no usable suggestions. See debug.',
+        debug: result.debug,
+        types,
+      }, { status: 502 })
+    }
+
+    return Response.json({ ok: true, suggestions: result.suggestions, debug: result.debug, types })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    console.error('[api.pricing.suggest-markups]', msg)
     return Response.json({ ok: false, error: msg }, { status: 500 })
   }
 }

@@ -448,6 +448,14 @@ interface SuggestResult {
   suggestions?: MarkupSuggestion[]
   types?: ProductTypesData
   error?: string
+  debug?: {
+    rawLength: number
+    parsedCount: number
+    rejectedCount: number
+    rejectedReasons: string[]
+    rawPreview: string
+    error?: string
+  }
 }
 
 function PricingRulesCard({
@@ -656,7 +664,7 @@ function PricingRulesCard({
             onClick={() => {
               suggestFetcher.submit(
                 {},
-                { method: 'post', action: '/api/pricing/suggest-markups' },
+                { method: 'post', action: '/api/pricing/suggest-markups?fresh=1' },
               )
             }}
             className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-full text-ink hover:border-coral hover:text-coral transition-colors disabled:opacity-50"
@@ -676,7 +684,23 @@ function PricingRulesCard({
         </div>
 
         {suggestFetcher.data?.ok === false && (
-          <p className="text-xs text-red-500 mb-3">{suggestFetcher.data.error ?? 'Suggestion failed.'}</p>
+          <div className="mb-3 text-xs space-y-1">
+            <p className="text-red-500">{suggestFetcher.data.error ?? 'Suggestion failed.'}</p>
+            {suggestFetcher.data.debug && (
+              <details className="text-ink/50">
+                <summary className="cursor-pointer hover:text-ink">Debug info</summary>
+                <div className="mt-1 p-2 bg-cream-2 rounded-lg space-y-0.5 font-mono">
+                  <div>parsed: {suggestFetcher.data.debug.parsedCount}, accepted: 0, rejected: {suggestFetcher.data.debug.rejectedCount}</div>
+                  {suggestFetcher.data.debug.rejectedReasons.length > 0 && (
+                    <div className="text-red-500">rejected: {suggestFetcher.data.debug.rejectedReasons.slice(0, 5).join('; ')}</div>
+                  )}
+                  {suggestFetcher.data.debug.rawPreview && (
+                    <div className="whitespace-pre-wrap break-all">raw: {suggestFetcher.data.debug.rawPreview}</div>
+                  )}
+                </div>
+              </details>
+            )}
+          </div>
         )}
 
         {suggestions.length > 0 && suggestFetcher.state === 'idle' && (

@@ -18,22 +18,45 @@ function cacheKey(types: Array<{ productType: string; count: number }>): string 
 }
 
 function clampDiscount(v: unknown): number | null {
-  if (typeof v !== 'number' || isNaN(v)) return null
-  return Math.min(0.6, Math.max(0, v))
+  let n: number
+  if (typeof v === 'number') n = v
+  else if (typeof v === 'string') {
+    const parsed = parseFloat(v.replace('%', '').trim())
+    if (isNaN(parsed)) return null
+    // Tolerate models that return whole-number percents like "35" instead of 0.35
+    n = parsed > 1 ? parsed / 100 : parsed
+  } else return null
+  if (isNaN(n)) return null
+  return Math.min(0.6, Math.max(0, n))
+}
+
+export interface SuggestResult {
+  suggestions: MarkupSuggestion[]
+  debug?: {
+    rawLength: number
+    parsedCount: number
+    rejectedCount: number
+    rejectedReasons: string[]
+    rawPreview: string
+    error?: string
+  }
 }
 
 export async function suggestMarkupsByType(opts: {
   types: Array<{ productType: string; count: number }>
   globalHighDiscount: number
   globalMediumDiscount: number
-}): Promise<MarkupSuggestion[]> {
-  const { types, globalHighDiscount, globalMediumDiscount } = opts
+  bypassCache?: boolean
+}): Promise<SuggestResult> {
+  const { types, globalHighDiscount, globalMediumDiscount, bypassCache } = opts
 
-  if (types.length === 0) return []
+  if (types.length === 0) return { suggestions: [] }
 
   const key = cacheKey(types)
-  const cached = await kvGet<MarkupSuggestion[]>(key)
-  if (cached) return cached
+  if (!bypassCache) {
+    const cached = await kvGet<MarkupSuggestion[]>(key)
+    if (cached && cached.length > 0) return { suggestions: cached }
+  }
 
   const typeList = types.map(t => `- ${t.productType} (${t.count} products)`).join('\n')
 
@@ -54,42 +77,83 @@ export async function suggestMarkupsByType(opts: {
     'Suggest discount settings for these product types:',
     typeList,
     '',
-    'Return a JSON array with one entry per product type.',
+    'Return a JSON array with one entry per product type. Every type listed above MUST appear in the output exactly as written, including punctuation and capitalization.',
   ].join('\n')
 
-  let raw: string
+  let raw = ''
   try {
-    raw = await generateWithSystem({ system, user, maxTokens: 1024, timeoutMs: 20000 })
-  } catch {
-    return []
+    raw = await generateWithSystem({ system, user, maxTokens: 2048, timeoutMs: 30000 })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[pricing-suggestions] Claude call failed:', msg)
+    return {
+      suggestions: [],
+      debug: { rawLength: 0, parsedCount: 0, rejectedCount: 0, rejectedReasons: [], rawPreview: '', error: `Claude call failed: ${msg}` },
+    }
   }
 
+  const rawPreview = raw.slice(0, 400)
   let parsed: unknown
   try {
     const match = raw.match(/\[[\s\S]*\]/)
-    if (!match) return []
+    if (!match) {
+      console.error('[pricing-suggestions] No JSON array found in response. Raw:', rawPreview)
+      return {
+        suggestions: [],
+        debug: { rawLength: raw.length, parsedCount: 0, rejectedCount: 0, rejectedReasons: [], rawPreview, error: 'No JSON array found in Claude response.' },
+      }
+    }
     parsed = JSON.parse(match[0])
-  } catch {
-    return []
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[pricing-suggestions] JSON parse failed:', msg, 'Raw:', rawPreview)
+    return {
+      suggestions: [],
+      debug: { rawLength: raw.length, parsedCount: 0, rejectedCount: 0, rejectedReasons: [], rawPreview, error: `JSON parse failed: ${msg}` },
+    }
   }
 
-  if (!Array.isArray(parsed)) return []
+  if (!Array.isArray(parsed)) {
+    return {
+      suggestions: [],
+      debug: { rawLength: raw.length, parsedCount: 0, rejectedCount: 0, rejectedReasons: [], rawPreview, error: 'Parsed payload was not an array.' },
+    }
+  }
 
   const suggestions: MarkupSuggestion[] = []
+  const rejectedReasons: string[] = []
   for (const item of parsed) {
-    if (!item || typeof item !== 'object') continue
+    if (!item || typeof item !== 'object') { rejectedReasons.push('non-object item'); continue }
     const pt = typeof item.productType === 'string' ? item.productType.trim() : null
-    if (!pt) continue
+    if (!pt) { rejectedReasons.push('missing productType'); continue }
     const high = clampDiscount(item.highMarginDiscount)
     const medium = clampDiscount(item.mediumMarginDiscount)
+    if (high === null) { rejectedReasons.push(`${pt}: bad highMarginDiscount (${JSON.stringify(item.highMarginDiscount)})`); continue }
+    if (medium === null) { rejectedReasons.push(`${pt}: bad mediumMarginDiscount (${JSON.stringify(item.mediumMarginDiscount)})`); continue }
     const rationale = typeof item.rationale === 'string' ? item.rationale.trim() : ''
-    if (high === null || medium === null || !rationale) continue
-    suggestions.push({ productType: pt, highMarginDiscount: high, mediumMarginDiscount: medium, rationale })
+    // Accept missing rationale rather than reject the whole row.
+    suggestions.push({
+      productType: pt,
+      highMarginDiscount: high,
+      mediumMarginDiscount: medium,
+      rationale: rationale || '(no rationale provided)',
+    })
   }
+
+  console.log(`[pricing-suggestions] parsed=${parsed.length} accepted=${suggestions.length} rejected=${rejectedReasons.length}`)
 
   if (suggestions.length > 0) {
     await kvSet(key, suggestions, SUGGESTION_TTL)
   }
 
-  return suggestions
+  return {
+    suggestions,
+    debug: {
+      rawLength: raw.length,
+      parsedCount: parsed.length,
+      rejectedCount: rejectedReasons.length,
+      rejectedReasons,
+      rawPreview,
+    },
+  }
 }
