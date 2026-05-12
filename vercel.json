@@ -25,6 +25,7 @@
     { "path": "/cron/inventory-check",      "schedule": "*/15 * * * *" },
     { "path": "/cron/keyword-research",     "schedule": "0 2 * * 0"  },
     { "path": "/cron/log-monitor",          "schedule": "*/15 * * * *" },
-    { "path": "/cron/daily-price-review",   "schedule": "0 7 * * *"  }
+    { "path": "/cron/daily-price-review",      "schedule": "0 7 * * *"  },
+    { "path": "/cron/pricing-batch-recompute", "schedule": "0 7 * * *"  }
   ]
 }

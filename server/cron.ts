@@ -1,5 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { timingSafeEqual } from 'node:crypto'
+import { handlePricingBatchRecompute } from './cron.pricing-batch-recompute.js'
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a)
@@ -218,6 +219,14 @@ export function createCronRoutes() {
       res.status(500).json({ error: String(err) })
     }
   })
+
+  /**
+   * POST /cron/pricing-batch-recompute
+   * Schedule: 07:00 UTC (02:00 ET) daily — recompute all variant prices using
+   * the v2 target-margin engine, write audit log rows, auto-apply within threshold.
+   * Query: ?dry=1 to inspect counts without applying (not yet implemented; returns counts).
+   */
+  router.post('/pricing-batch-recompute', guard, handlePricingBatchRecompute)
 
   /**
    * POST /cron/inventory-check

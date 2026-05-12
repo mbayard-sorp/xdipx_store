@@ -76,8 +76,9 @@ export async function processNalpacCostChanges(
     errors: [],
   }
 
+  // Default to enabled when no row exists (spec ss6 — webhook is on out of the box).
   const enabledVal = await getPipelineSetting('pricing_webhook_enabled')
-  if (enabledVal !== 'true') {
+  if (enabledVal === 'false') {
     result.errors.push({ sku: '*', message: 'webhook disabled' })
     return result
   }
