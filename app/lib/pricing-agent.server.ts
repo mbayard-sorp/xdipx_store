@@ -121,6 +121,33 @@ export async function setPricingRules(rules: PricingRules): Promise<void> {
   )
 }
 
+// Persistent product-types cache — stored as JSON in pipeline_settings so the
+// admin loader doesn't have to paginate Shopify on every page load.
+export interface CachedProductTypes {
+  types: Array<{ productType: string; count: number }>
+  refreshedAt: string // ISO
+}
+
+export async function getCachedProductTypes(): Promise<CachedProductTypes | null> {
+  const raw = await getPipelineSettingLocal('pricing_product_types_cache')
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as CachedProductTypes
+    if (!Array.isArray(parsed.types)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export async function setCachedProductTypes(types: Array<{ productType: string; count: number }>): Promise<void> {
+  const payload: CachedProductTypes = { types, refreshedAt: new Date().toISOString() }
+  const value = JSON.stringify(payload)
+  await db.insert(pipelineSettings)
+    .values({ key: 'pricing_product_types_cache', value })
+    .onConflictDoUpdate({ target: pipelineSettings.key, set: { value, updatedAt: new Date() } })
+}
+
 async function getPipelineSettingLocal(key: string): Promise<string | null> {
   try {
     const rows = await db

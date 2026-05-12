@@ -4,9 +4,8 @@ import { useState } from 'react'
 import { db } from '~/lib/db.server'
 import { pricingChanges } from '../../db/schema'
 import { requireAdmin, getAdminUser } from '~/lib/session.server'
-import { getApprovalMode, getPricingRules } from '~/lib/pricing-agent.server'
+import { getApprovalMode, getPricingRules, getCachedProductTypes } from '~/lib/pricing-agent.server'
 import { getPipelineSettingPublic, getWebhookActivityToday } from '~/lib/pricing-webhook.server'
-import { getDistinctProductTypes } from '~/lib/shopify.server'
 import { HIGH_MARGIN_DISCOUNT, MEDIUM_MARGIN_DISCOUNT, MARGIN_FLOOR } from '~/lib/pricing-engine.server'
 import type { MarkupSuggestion } from '~/lib/pricing-suggestions.server'
 import { and, desc, sql } from 'drizzle-orm'
@@ -47,17 +46,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const approvalMode = await getApprovalMode()
 
-  const [webhookEnabledRaw, webhookThrottleRaw, webhookActivityToday, pricingRules, productTypesResult] = await Promise.all([
+  const [webhookEnabledRaw, webhookThrottleRaw, webhookActivityToday, pricingRules, productTypesCache] = await Promise.all([
     getPipelineSettingPublic('pricing_webhook_enabled'),
     getPipelineSettingPublic('pricing_webhook_throttle_secs'),
     getWebhookActivityToday(),
     getPricingRules(),
-    getDistinctProductTypes().catch((err) => {
-      console.error('[admin.pricing] getDistinctProductTypes failed:', err)
-      return [] as Array<{ productType: string; count: number }>
-    }),
+    getCachedProductTypes(),
   ])
-  const productTypes = productTypesResult
+  const productTypes = productTypesCache?.types ?? []
+  const productTypesRefreshedAt = productTypesCache?.refreshedAt ?? null
 
   const webhookEnabled = webhookEnabledRaw === 'true'
   const webhookThrottleSecs = Math.max(5, Math.min(300, parseInt(webhookThrottleRaw ?? '30', 10) || 30))
@@ -109,6 +106,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
     pricingRules,
     productTypes,
+    productTypesRefreshedAt,
   }
 }
 
@@ -438,7 +436,7 @@ function WebhookCard({ webhook }: { webhook: NonNullable<ReturnType<typeof useLo
   )
 }
 
-type ProductTypesData = Awaited<ReturnType<typeof getDistinctProductTypes>>
+type ProductTypesData = Array<{ productType: string; count: number }>
 type PricingRulesData = Awaited<ReturnType<typeof getPricingRules>>
 
 interface SuggestResult {
@@ -451,13 +449,16 @@ interface SuggestResult {
 function PricingRulesCard({
   pricingRules,
   productTypes,
+  productTypesRefreshedAt,
 }: {
   pricingRules: PricingRulesData
   productTypes: ProductTypesData
+  productTypesRefreshedAt: string | null
 }) {
   const defaultsFetcher = useFetcher<{ ok: boolean; error?: string }>()
   const overridesFetcher = useFetcher<{ ok: boolean; error?: string }>()
   const suggestFetcher = useFetcher<SuggestResult>()
+  const refreshFetcher = useFetcher<{ ok: boolean; count?: number; refreshedAt?: string; error?: string }>()
 
   const [marginFloorInput, setMarginFloorInput] = useState(
     String(Math.round((pricingRules.marginFloor ?? MARGIN_FLOOR) * 100)),
@@ -646,8 +647,32 @@ function PricingRulesCard({
           </div>
         )}
 
+        <div className="mb-3 flex items-center gap-3 flex-wrap">
+          <button
+            type="button"
+            disabled={refreshFetcher.state !== 'idle'}
+            onClick={() => refreshFetcher.submit(null, { method: 'post', action: '/api/pricing/refresh-product-types', encType: 'application/json' })}
+            className="text-xs font-semibold px-3 py-1.5 bg-cream-2 border border-line rounded-full text-ink hover:bg-cream transition-colors disabled:opacity-50"
+          >
+            {refreshFetcher.state !== 'idle' ? 'Refreshing…' : 'Refresh types from Shopify'}
+          </button>
+          {productTypesRefreshedAt && (
+            <span className="text-xs text-ink/40">
+              Last refreshed: {new Date(productTypesRefreshedAt).toLocaleString()}
+            </span>
+          )}
+          {refreshFetcher.data?.ok === false && (
+            <span className="text-xs text-red-500">Refresh failed: {refreshFetcher.data.error}</span>
+          )}
+          {refreshFetcher.data?.ok && (
+            <span className="text-xs text-emerald-600">Refreshed {refreshFetcher.data.count} types — reload page to see</span>
+          )}
+        </div>
+
         {productTypes.length === 0 ? (
-          <p className="text-sm text-ink/40 italic">No product types found in Shopify.</p>
+          <p className="text-sm text-ink/60 italic py-4">
+            No product types loaded yet. Click <strong className="font-semibold">Refresh types from Shopify</strong> above to populate the table.
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -845,7 +870,11 @@ export default function AdminPricingPage() {
       )}
 
       {/* Pricing Rules card */}
-      <PricingRulesCard pricingRules={data.pricingRules} productTypes={data.productTypes} />
+      <PricingRulesCard
+        pricingRules={data.pricingRules}
+        productTypes={data.productTypes}
+        productTypesRefreshedAt={data.productTypesRefreshedAt}
+      />
 
       {/* Webhook card */}
       <WebhookCard webhook={data.webhook} />
