@@ -6142,16 +6142,18 @@ const PRICING_PRODUCTS_QUERY = `
             }
           }
         }
-        metafields(identifiers: [
-          { namespace: "xdipx", key: "nalpac_sku" }
-          { namespace: "xdipx", key: "wholesale_cost" }
-          { namespace: "xdipx", key: "map_price" }
-          { namespace: "xdipx", key: "original_price" }
-          { namespace: "xdipx", key: "map_restricted" }
-        ]) {
-          namespace
-          key
-          value
+        metafields(keys: [
+          "xdipx.nalpac_sku",
+          "xdipx.wholesale_cost",
+          "xdipx.map_price",
+          "xdipx.original_price",
+          "xdipx.map_restricted"
+        ], first: 10) {
+          nodes {
+            namespace
+            key
+            value
+          }
         }
       }
     }
@@ -6177,15 +6179,15 @@ interface PricingQueryResult {
           inventoryItem: { id: string } | null
         }>
       }
-      metafields: Array<{ namespace: string; key: string; value: string } | null>
+      metafields: { nodes: Array<{ namespace: string; key: string; value: string }> }
     }>
   }
 }
 
 function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'][number]): PricingProductSnapshot | null {
   const mfMap = new Map<string, string>()
-  for (const mf of raw.metafields) {
-    if (mf) mfMap.set(mf.key, mf.value)
+  for (const mf of raw.metafields.nodes) {
+    mfMap.set(mf.key, mf.value)
   }
 
   const variants = raw.variants.nodes.map(v => ({
@@ -6291,16 +6293,18 @@ const VARIANTS_BY_SKU_QUERY = `
           title
           vendor
           productType
-          metafields(identifiers: [
-            { namespace: "xdipx", key: "nalpac_sku" }
-            { namespace: "xdipx", key: "wholesale_cost" }
-            { namespace: "xdipx", key: "map_price" }
-            { namespace: "xdipx", key: "original_price" }
-            { namespace: "xdipx", key: "map_restricted" }
-          ]) {
-            namespace
-            key
-            value
+          metafields(keys: [
+            "xdipx.nalpac_sku",
+            "xdipx.wholesale_cost",
+            "xdipx.map_price",
+            "xdipx.original_price",
+            "xdipx.map_restricted"
+          ], first: 10) {
+            nodes {
+              namespace
+              key
+              value
+            }
           }
         }
       }
@@ -6323,7 +6327,7 @@ interface VariantsBySkuResult {
         title: string
         vendor: string | null
         productType: string | null
-        metafields: Array<{ namespace: string; key: string; value: string } | null>
+        metafields: { nodes: Array<{ namespace: string; key: string; value: string }> }
       }
     }>
   }
@@ -6346,8 +6350,8 @@ export async function findVariantsBySkus(skus: string[]): Promise<VariantSkuMatc
 
     for (const node of data.productVariants.nodes) {
       const mfMap = new Map<string, string>()
-      for (const mf of node.product.metafields) {
-        if (mf) mfMap.set(mf.key, mf.value)
+      for (const mf of node.product.metafields.nodes) {
+        mfMap.set(mf.key, mf.value)
       }
       const wholesaleRaw = mfMap.get('wholesale_cost')
       const mapRaw = mfMap.get('map_price')

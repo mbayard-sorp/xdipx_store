@@ -142,19 +142,19 @@ export async function recomputeVariant(
             title: string
             vendor: string | null
             productType: string | null
-            metafields: Array<{ namespace: string; key: string; value: string } | null>
+            metafields: { nodes: Array<{ namespace: string; key: string; value: string }> }
           }
         } | null
       }>(
         `query V($id:ID!){productVariant(id:$id){id sku title price compareAtPrice
           product{id handle title vendor productType
-            metafields(identifiers:[
-              {namespace:"xdipx",key:"nalpac_sku"}
-              {namespace:"xdipx",key:"wholesale_cost"}
-              {namespace:"xdipx",key:"map_price"}
-              {namespace:"xdipx",key:"original_price"}
-              {namespace:"xdipx",key:"map_restricted"}
-            ]){namespace key value}}}}`,
+            metafields(keys:[
+              "xdipx.nalpac_sku",
+              "xdipx.wholesale_cost",
+              "xdipx.map_price",
+              "xdipx.original_price",
+              "xdipx.map_restricted"
+            ], first:10){nodes{namespace key value}}}}}`,
         { id: variantId },
       )
       return result.productVariant
@@ -163,8 +163,8 @@ export async function recomputeVariant(
     if (!data) return { status: 'skipped_no_change', auditId: null, applied: false, error: 'variant not found' }
 
     const mfMap: Record<string, string> = {}
-    for (const mf of data.product.metafields) {
-      if (mf) mfMap[mf.key] = mf.value
+    for (const mf of data.product.metafields.nodes) {
+      mfMap[mf.key] = mf.value
     }
 
     matchData = {
