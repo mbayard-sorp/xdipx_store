@@ -134,7 +134,12 @@ __export(schema_exports, {
   pdpDialVotes: () => pdpDialVotes,
   pdpProductVotes: () => pdpProductVotes,
   pipelineSettings: () => pipelineSettings,
+  pricingAuditLog: () => pricingAuditLog,
   pricingChanges: () => pricingChanges,
+  pricingGroups: () => pricingGroups,
+  pricingProductTypeMap: () => pricingProductTypeMap,
+  pricingRules: () => pricingRules,
+  pricingSubGroups: () => pricingSubGroups,
   productCopurchase: () => productCopurchase,
   productEnrichmentCache: () => productEnrichmentCache,
   referrals: () => referrals,
@@ -169,7 +174,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingChanges;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, pricingChanges;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -688,6 +693,66 @@ var init_schema = __esm({
       createdAt: timestamp("created_at").notNull().defaultNow()
     }, (t) => ({
       threadIdx: index("emma_chat_messages_thread_idx").on(t.threadId, t.createdAt)
+    }));
+    pricingGroups = pgTable("pricing_groups", {
+      id: text("id").primaryKey(),
+      name: text("name").notNull(),
+      usesClearanceLadder: boolean("uses_clearance_ladder").notNull().default(false),
+      sortOrder: integer("sort_order").notNull().default(0)
+    });
+    pricingSubGroups = pgTable("pricing_sub_groups", {
+      id: text("id").primaryKey(),
+      groupId: text("group_id").notNull().references(() => pricingGroups.id, { onDelete: "cascade" }),
+      name: text("name").notNull(),
+      sortOrder: integer("sort_order").notNull().default(0)
+    }, (t) => ({
+      groupIdx: index("pricing_sub_groups_group_idx").on(t.groupId)
+    }));
+    pricingProductTypeMap = pgTable("pricing_product_type_map", {
+      productType: text("product_type").primaryKey(),
+      subGroupId: text("sub_group_id").notNull().references(() => pricingSubGroups.id, { onDelete: "cascade" })
+    }, (t) => ({
+      subGroupIdx: index("pricing_product_type_map_sub_group_idx").on(t.subGroupId)
+    }));
+    pricingRules = pgTable("pricing_rules", {
+      scopeLevel: text("scope_level").notNull(),
+      scopeId: text("scope_id").notNull(),
+      targetMarginPct: decimal("target_margin_pct", { precision: 5, scale: 4 }),
+      marginFloorPct: decimal("margin_floor_pct", { precision: 5, scale: 4 }),
+      mapBehavior: text("map_behavior"),
+      compareAtStrategy: text("compare_at_strategy"),
+      velocityModifierEnabled: boolean("velocity_modifier_enabled"),
+      updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+      updatedBy: text("updated_by")
+    }, (t) => ({
+      pk: uniqueIndex("pricing_rules_pk").on(t.scopeLevel, t.scopeId)
+    }));
+    pricingAuditLog = pgTable("pricing_audit_log", {
+      id: bigserial("id", { mode: "number" }).primaryKey(),
+      occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+      variantId: text("variant_id").notNull(),
+      sku: text("sku"),
+      productType: text("product_type"),
+      groupId: text("group_id"),
+      subGroupId: text("sub_group_id"),
+      trigger: text("trigger").notNull(),
+      oldCost: decimal("old_cost", { precision: 10, scale: 2 }),
+      newCost: decimal("new_cost", { precision: 10, scale: 2 }),
+      oldMap: decimal("old_map", { precision: 10, scale: 2 }),
+      newMap: decimal("new_map", { precision: 10, scale: 2 }),
+      oldMsrp: decimal("old_msrp", { precision: 10, scale: 2 }),
+      newMsrp: decimal("new_msrp", { precision: 10, scale: 2 }),
+      oldSell: decimal("old_sell", { precision: 10, scale: 2 }),
+      newSell: decimal("new_sell", { precision: 10, scale: 2 }),
+      oldCompareAt: decimal("old_compare_at", { precision: 10, scale: 2 }),
+      newCompareAt: decimal("new_compare_at", { precision: 10, scale: 2 }),
+      marginBefore: decimal("margin_before", { precision: 6, scale: 4 }),
+      marginAfter: decimal("margin_after", { precision: 6, scale: 4 }),
+      status: text("status").notNull(),
+      rationale: text("rationale")
+    }, (t) => ({
+      variantIdx: index("pricing_audit_log_variant_idx").on(t.variantId, t.occurredAt),
+      occurredIdx: index("pricing_audit_log_occurred_idx").on(t.occurredAt)
     }));
     pricingChanges = pgTable("pricing_changes", {
       id: bigserial("id", { mode: "number" }).primaryKey(),
