@@ -690,12 +690,15 @@ function PricingRulesCard({
               <details className="text-ink/50">
                 <summary className="cursor-pointer hover:text-ink">Debug info</summary>
                 <div className="mt-1 p-2 bg-cream-2 rounded-lg space-y-0.5 font-mono">
-                  <div>parsed: {suggestFetcher.data.debug.parsedCount}, accepted: 0, rejected: {suggestFetcher.data.debug.rejectedCount}</div>
+                  {suggestFetcher.data.debug.error && (
+                    <div className="text-red-500">error: {suggestFetcher.data.debug.error}</div>
+                  )}
+                  <div>raw length: {suggestFetcher.data.debug.rawLength}, parsed: {suggestFetcher.data.debug.parsedCount}, rejected: {suggestFetcher.data.debug.rejectedCount}</div>
                   {suggestFetcher.data.debug.rejectedReasons.length > 0 && (
-                    <div className="text-red-500">rejected: {suggestFetcher.data.debug.rejectedReasons.slice(0, 5).join('; ')}</div>
+                    <div className="text-red-500">rejected reasons: {suggestFetcher.data.debug.rejectedReasons.slice(0, 5).join('; ')}</div>
                   )}
                   {suggestFetcher.data.debug.rawPreview && (
-                    <div className="whitespace-pre-wrap break-all">raw: {suggestFetcher.data.debug.rawPreview}</div>
+                    <div className="whitespace-pre-wrap break-all">raw preview: {suggestFetcher.data.debug.rawPreview}</div>
                   )}
                 </div>
               </details>

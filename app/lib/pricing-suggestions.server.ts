@@ -78,11 +78,12 @@ export async function suggestMarkupsByType(opts: {
     typeList,
     '',
     'Return a JSON array with one entry per product type. Every type listed above MUST appear in the output exactly as written, including punctuation and capitalization.',
+    'Keep each rationale under 60 characters. Brevity is required so the whole array fits in the response.',
   ].join('\n')
 
   let raw = ''
   try {
-    raw = await generateWithSystem({ system, user, maxTokens: 2048, timeoutMs: 30000 })
+    raw = await generateWithSystem({ system, user, maxTokens: 4096, timeoutMs: 45000 })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[pricing-suggestions] Claude call failed:', msg)
@@ -92,25 +93,52 @@ export async function suggestMarkupsByType(opts: {
     }
   }
 
-  const rawPreview = raw.slice(0, 400)
-  let parsed: unknown
-  try {
-    const match = raw.match(/\[[\s\S]*\]/)
-    if (!match) {
-      console.error('[pricing-suggestions] No JSON array found in response. Raw:', rawPreview)
-      return {
-        suggestions: [],
-        debug: { rawLength: raw.length, parsedCount: 0, rejectedCount: 0, rejectedReasons: [], rawPreview, error: 'No JSON array found in Claude response.' },
-      }
-    }
-    parsed = JSON.parse(match[0])
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error('[pricing-suggestions] JSON parse failed:', msg, 'Raw:', rawPreview)
+  const rawPreview = raw.slice(0, 600)
+  // Strip markdown fences if present, find the array start, then either parse
+  // the whole array OR walk object-by-object recovering as much as we can if
+  // the response was truncated mid-array.
+  const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
+  const arrStart = stripped.indexOf('[')
+  if (arrStart < 0) {
     return {
       suggestions: [],
-      debug: { rawLength: raw.length, parsedCount: 0, rejectedCount: 0, rejectedReasons: [], rawPreview, error: `JSON parse failed: ${msg}` },
+      debug: { rawLength: raw.length, parsedCount: 0, rejectedCount: 0, rejectedReasons: [], rawPreview, error: 'No JSON array found in Claude response.' },
     }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stripped.slice(arrStart))
+  } catch {
+    // Fall back: scan for balanced `{...}` blocks and parse each independently.
+    const recovered: unknown[] = []
+    let depth = 0
+    let objStart = -1
+    let inString = false
+    let escape = false
+    for (let i = arrStart; i < stripped.length; i++) {
+      const ch = stripped[i]
+      if (escape) { escape = false; continue }
+      if (inString) {
+        if (ch === '\\') escape = true
+        else if (ch === '"') inString = false
+        continue
+      }
+      if (ch === '"') { inString = true; continue }
+      if (ch === '{') {
+        if (depth === 0) objStart = i
+        depth++
+      } else if (ch === '}') {
+        depth--
+        if (depth === 0 && objStart >= 0) {
+          const objText = stripped.slice(objStart, i + 1)
+          try {
+            recovered.push(JSON.parse(objText))
+          } catch { /* skip malformed */ }
+          objStart = -1
+        }
+      }
+    }
+    parsed = recovered
   }
 
   if (!Array.isArray(parsed)) {
