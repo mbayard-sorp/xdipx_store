@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher } from 'react-router'
-import { useState } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { db } from '~/lib/db.server'
 import { pricingChanges } from '../../db/schema'
 import { requireAdmin, getAdminUser } from '~/lib/session.server'
@@ -489,29 +489,23 @@ function PricingRulesCard({
     return init
   })
 
-  // When suggest result comes back, populate type inputs
+  // Suggestions from the AI fetcher (kept around even after state returns to idle).
   const suggestions = suggestFetcher.data?.ok ? (suggestFetcher.data.suggestions ?? []) : []
-  const prevSuggestState = suggestFetcher.state
 
-  // Apply AI suggestions to inputs when fetch completes
-  if (prevSuggestState === 'idle' && suggestions.length > 0) {
-    for (const s of suggestions) {
-      const current = typeInputs[s.productType]
-      if (current !== undefined) {
-        const newHigh = String(Math.round(s.highMarginDiscount * 100))
-        const newMedium = String(Math.round(s.mediumMarginDiscount * 100))
-        if (current.high !== newHigh || current.medium !== newMedium) {
-          // setTypeInputs inside render — use a ref guard in a real scenario,
-          // but here suggestion data only arrives once per click so this is safe.
-        }
-      }
-    }
-  }
-
-  function handleSuggestApply(newSuggestions: MarkupSuggestion[]) {
+  // Auto-apply suggestions as soon as a fresh response lands. Ref-guard so we
+  // only apply each suggestion payload once — never overwrite the user's edits
+  // on subsequent renders.
+  const lastAppliedRef = useRef<MarkupSuggestion[] | null>(null)
+  useEffect(() => {
+    if (suggestFetcher.state !== 'idle') return
+    if (!suggestFetcher.data?.ok) return
+    const fresh = suggestFetcher.data.suggestions ?? []
+    if (fresh.length === 0) return
+    if (lastAppliedRef.current === fresh) return
+    lastAppliedRef.current = fresh
     setTypeInputs(prev => {
       const next = { ...prev }
-      for (const s of newSuggestions) {
+      for (const s of fresh) {
         if (next[s.productType] !== undefined) {
           next[s.productType] = {
             high: String(Math.round(s.highMarginDiscount * 100)),
@@ -521,6 +515,51 @@ function PricingRulesCard({
       }
       return next
     })
+  }, [suggestFetcher.state, suggestFetcher.data])
+
+  // Filter + sort state for the per-type table.
+  const [filterText, setFilterText] = useState('')
+  const [sortKey, setSortKey] = useState<'type' | 'count' | 'high' | 'medium'>('count')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  const filteredSortedTypes = useMemo(() => {
+    const filter = filterText.trim().toLowerCase()
+    const filtered = filter
+      ? productTypes.filter(t => t.productType.toLowerCase().includes(filter))
+      : productTypes
+    const arr = [...filtered]
+    arr.sort((a, b) => {
+      let cmp = 0
+      if (sortKey === 'type') {
+        cmp = a.productType.localeCompare(b.productType)
+      } else if (sortKey === 'count') {
+        cmp = a.count - b.count
+      } else if (sortKey === 'high') {
+        const av = parseFloat(typeInputs[a.productType]?.high ?? '') || -1
+        const bv = parseFloat(typeInputs[b.productType]?.high ?? '') || -1
+        cmp = av - bv
+      } else if (sortKey === 'medium') {
+        const av = parseFloat(typeInputs[a.productType]?.medium ?? '') || -1
+        const bv = parseFloat(typeInputs[b.productType]?.medium ?? '') || -1
+        cmp = av - bv
+      }
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return arr
+  }, [productTypes, filterText, sortKey, sortDir, typeInputs])
+
+  function toggleSort(key: 'type' | 'count' | 'high' | 'medium') {
+    if (sortKey === key) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir(key === 'type' ? 'asc' : 'desc')
+    }
+  }
+
+  function sortArrow(key: 'type' | 'count' | 'high' | 'medium') {
+    if (sortKey !== key) return ''
+    return sortDir === 'asc' ? ' ↑' : ' ↓'
   }
 
   function saveDefaults() {
@@ -640,17 +679,10 @@ function PricingRulesCard({
           <p className="text-xs text-red-500 mb-3">{suggestFetcher.data.error ?? 'Suggestion failed.'}</p>
         )}
 
-        {/* Apply suggestions button — shown after suggestions arrive */}
         {suggestions.length > 0 && suggestFetcher.state === 'idle' && (
-          <div className="mb-3">
-            <button
-              type="button"
-              onClick={() => handleSuggestApply(suggestions)}
-              className="text-xs font-semibold px-3 py-1.5 bg-sun/20 border border-sun/40 rounded-full text-ink hover:bg-sun/30 transition-colors"
-            >
-              Apply {suggestions.length} suggestions to table
-            </button>
-          </div>
+          <p className="text-xs text-emerald-600 mb-3">
+            Applied {suggestions.length} AI suggestions. Edit any cell to adjust before saving.
+          </p>
         )}
 
         <div className="mb-3 flex items-center gap-3 flex-wrap">
@@ -680,19 +712,54 @@ function PricingRulesCard({
             No product types loaded yet. Click <strong className="font-semibold">Refresh types from Shopify</strong> above to populate the table.
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            <div className="mb-3 flex items-center gap-3 flex-wrap">
+              <input
+                type="text"
+                value={filterText}
+                onChange={e => setFilterText(e.target.value)}
+                placeholder="Filter types…"
+                className="w-56 text-sm border border-line rounded-lg px-3 py-1.5 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-coral/50"
+              />
+              {filterText && (
+                <span className="text-xs text-ink/50">
+                  {filteredSortedTypes.length} of {productTypes.length}
+                </span>
+              )}
+            </div>
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-cream-2 text-ink/50 text-xs uppercase tracking-wide">
-                  <th className="px-3 py-2 text-left">Type</th>
-                  <th className="px-3 py-2 text-right">Count</th>
-                  <th className="px-3 py-2 text-center">High disc. %</th>
-                  <th className="px-3 py-2 text-center">Medium disc. %</th>
+                  <th
+                    className="px-3 py-2 text-left cursor-pointer select-none hover:text-ink"
+                    onClick={() => toggleSort('type')}
+                  >
+                    Type{sortArrow('type')}
+                  </th>
+                  <th
+                    className="px-3 py-2 text-right cursor-pointer select-none hover:text-ink"
+                    onClick={() => toggleSort('count')}
+                  >
+                    Count{sortArrow('count')}
+                  </th>
+                  <th
+                    className="px-3 py-2 text-center cursor-pointer select-none hover:text-ink"
+                    onClick={() => toggleSort('high')}
+                  >
+                    High disc. %{sortArrow('high')}
+                  </th>
+                  <th
+                    className="px-3 py-2 text-center cursor-pointer select-none hover:text-ink"
+                    onClick={() => toggleSort('medium')}
+                  >
+                    Medium disc. %{sortArrow('medium')}
+                  </th>
                   <th className="px-3 py-2 text-left">AI rationale</th>
                 </tr>
               </thead>
               <tbody>
-                {productTypes.map(({ productType, count }) => {
+                {filteredSortedTypes.map(({ productType, count }) => {
                   const vals = typeInputs[productType] ?? { high: '', medium: '' }
                   const suggestion = suggestions.find(s => s.productType === productType)
                   return (
@@ -741,10 +808,11 @@ function PricingRulesCard({
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
 
-        <p className="text-xs text-ink/40 mt-2">Blank = inherits global default.</p>
+        <p className="text-xs text-ink/40 mt-2">Blank = inherits global default. Click column headers to sort.</p>
 
         <div className="mt-3 flex items-center gap-3">
           <button
