@@ -4,8 +4,11 @@ import { useState } from 'react'
 import { db } from '~/lib/db.server'
 import { pricingChanges } from '../../db/schema'
 import { requireAdmin, getAdminUser } from '~/lib/session.server'
-import { getApprovalMode } from '~/lib/pricing-agent.server'
+import { getApprovalMode, getPricingRules } from '~/lib/pricing-agent.server'
 import { getPipelineSettingPublic, getWebhookActivityToday } from '~/lib/pricing-webhook.server'
+import { getDistinctProductTypes } from '~/lib/shopify.server'
+import { HIGH_MARGIN_DISCOUNT, MEDIUM_MARGIN_DISCOUNT, MARGIN_FLOOR } from '~/lib/pricing-engine.server'
+import type { MarkupSuggestion } from '~/lib/pricing-suggestions.server'
 import { and, desc, sql } from 'drizzle-orm'
 
 export const meta: MetaFunction = () => [{ title: 'Pricing Agent — xdipx Admin' }]
@@ -44,10 +47,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const approvalMode = await getApprovalMode()
 
-  const [webhookEnabledRaw, webhookThrottleRaw, webhookActivityToday] = await Promise.all([
+  const [webhookEnabledRaw, webhookThrottleRaw, webhookActivityToday, pricingRules, productTypes] = await Promise.all([
     getPipelineSettingPublic('pricing_webhook_enabled'),
     getPipelineSettingPublic('pricing_webhook_throttle_secs'),
     getWebhookActivityToday(),
+    getPricingRules(),
+    getDistinctProductTypes(),
   ])
 
   const webhookEnabled = webhookEnabledRaw === 'true'
@@ -98,6 +103,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       endpoint: webhookEndpoint,
       activityToday: webhookActivityToday,
     },
+    pricingRules,
+    productTypes,
   }
 }
 
@@ -427,6 +434,304 @@ function WebhookCard({ webhook }: { webhook: NonNullable<ReturnType<typeof useLo
   )
 }
 
+type ProductTypesData = Awaited<ReturnType<typeof getDistinctProductTypes>>
+type PricingRulesData = Awaited<ReturnType<typeof getPricingRules>>
+
+interface SuggestResult {
+  ok: boolean
+  suggestions?: MarkupSuggestion[]
+  types?: ProductTypesData
+  error?: string
+}
+
+function PricingRulesCard({
+  pricingRules,
+  productTypes,
+}: {
+  pricingRules: PricingRulesData
+  productTypes: ProductTypesData
+}) {
+  const defaultsFetcher = useFetcher<{ ok: boolean; error?: string }>()
+  const overridesFetcher = useFetcher<{ ok: boolean; error?: string }>()
+  const suggestFetcher = useFetcher<SuggestResult>()
+
+  const [marginFloorInput, setMarginFloorInput] = useState(
+    String(Math.round((pricingRules.marginFloor ?? MARGIN_FLOOR) * 100)),
+  )
+  const [highInput, setHighInput] = useState(
+    String(Math.round((pricingRules.highMarginDiscount ?? HIGH_MARGIN_DISCOUNT) * 100)),
+  )
+  const [mediumInput, setMediumInput] = useState(
+    String(Math.round((pricingRules.mediumMarginDiscount ?? MEDIUM_MARGIN_DISCOUNT) * 100)),
+  )
+
+  // per-type overrides: productType -> { high: string, medium: string }
+  const [typeInputs, setTypeInputs] = useState<Record<string, { high: string; medium: string }>>(() => {
+    const init: Record<string, { high: string; medium: string }> = {}
+    for (const { productType } of productTypes) {
+      const override = pricingRules.perTypeOverrides?.[productType]
+      init[productType] = {
+        high: override?.highMarginDiscount != null ? String(Math.round(override.highMarginDiscount * 100)) : '',
+        medium: override?.mediumMarginDiscount != null ? String(Math.round(override.mediumMarginDiscount * 100)) : '',
+      }
+    }
+    return init
+  })
+
+  // When suggest result comes back, populate type inputs
+  const suggestions = suggestFetcher.data?.ok ? (suggestFetcher.data.suggestions ?? []) : []
+  const prevSuggestState = suggestFetcher.state
+
+  // Apply AI suggestions to inputs when fetch completes
+  if (prevSuggestState === 'idle' && suggestions.length > 0) {
+    for (const s of suggestions) {
+      const current = typeInputs[s.productType]
+      if (current !== undefined) {
+        const newHigh = String(Math.round(s.highMarginDiscount * 100))
+        const newMedium = String(Math.round(s.mediumMarginDiscount * 100))
+        if (current.high !== newHigh || current.medium !== newMedium) {
+          // setTypeInputs inside render — use a ref guard in a real scenario,
+          // but here suggestion data only arrives once per click so this is safe.
+        }
+      }
+    }
+  }
+
+  function handleSuggestApply(newSuggestions: MarkupSuggestion[]) {
+    setTypeInputs(prev => {
+      const next = { ...prev }
+      for (const s of newSuggestions) {
+        if (next[s.productType] !== undefined) {
+          next[s.productType] = {
+            high: String(Math.round(s.highMarginDiscount * 100)),
+            medium: String(Math.round(s.mediumMarginDiscount * 100)),
+          }
+        }
+      }
+      return next
+    })
+  }
+
+  function saveDefaults() {
+    defaultsFetcher.submit(
+      {
+        marginFloor: String(parseFloat(marginFloorInput) / 100),
+        highMarginDiscount: String(parseFloat(highInput) / 100),
+        mediumMarginDiscount: String(parseFloat(mediumInput) / 100),
+      },
+      { method: 'post', action: '/api/pricing/settings', encType: 'application/x-www-form-urlencoded' },
+    )
+  }
+
+  function saveOverrides() {
+    const overrides: Record<string, { highMarginDiscount?: number; mediumMarginDiscount?: number }> = {}
+    for (const [pt, vals] of Object.entries(typeInputs)) {
+      const entry: { highMarginDiscount?: number; mediumMarginDiscount?: number } = {}
+      if (vals.high !== '') {
+        const n = parseFloat(vals.high) / 100
+        if (!isNaN(n)) entry.highMarginDiscount = n
+      }
+      if (vals.medium !== '') {
+        const n = parseFloat(vals.medium) / 100
+        if (!isNaN(n)) entry.mediumMarginDiscount = n
+      }
+      overrides[pt] = entry
+    }
+    overridesFetcher.submit(
+      { perTypeOverrides: JSON.stringify(overrides) },
+      { method: 'post', action: '/api/pricing/settings', encType: 'application/x-www-form-urlencoded' },
+    )
+  }
+
+  const isSuggesting = suggestFetcher.state !== 'idle'
+
+  return (
+    <section className="bg-white rounded-2xl border border-line p-5 space-y-5">
+      <h2 className="text-base font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+        Pricing Rules
+      </h2>
+
+      {/* Global defaults */}
+      <div>
+        <p className="text-xs text-ink/40 uppercase tracking-wide mb-3">Global defaults</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[
+            { label: 'Margin floor', value: marginFloorInput, set: setMarginFloorInput, min: 5, max: 40 },
+            { label: 'High-margin disc.', value: highInput, set: setHighInput, min: 0, max: 60 },
+            { label: 'Medium-margin disc.', value: mediumInput, set: setMediumInput, min: 0, max: 60 },
+          ].map(({ label, value, set, min, max }) => (
+            <div key={label}>
+              <label className="text-xs text-ink/50 block mb-1">{label}</label>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={min}
+                  max={max}
+                  value={value}
+                  onChange={e => set(e.target.value)}
+                  className="w-20 text-sm border border-line rounded-lg px-2 py-1.5 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-coral/50"
+                />
+                <span className="text-xs text-ink/40">%</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={saveDefaults}
+            disabled={defaultsFetcher.state !== 'idle'}
+            className="text-xs font-semibold px-4 py-2 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {defaultsFetcher.state !== 'idle' ? 'Saving...' : 'Save defaults'}
+          </button>
+          {defaultsFetcher.data?.ok === true && defaultsFetcher.state === 'idle' && (
+            <span className="text-xs text-green-600">Saved.</span>
+          )}
+          {defaultsFetcher.data?.ok === false && (
+            <span className="text-xs text-red-500">{defaultsFetcher.data.error ?? 'Error'}</span>
+          )}
+        </div>
+      </div>
+
+      <hr className="border-line" />
+
+      {/* Per product type */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-ink/40 uppercase tracking-wide">Per product type</p>
+          <button
+            type="button"
+            disabled={isSuggesting}
+            onClick={() => {
+              suggestFetcher.submit(
+                {},
+                { method: 'post', action: '/api/pricing/suggest-markups' },
+              )
+            }}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-full text-ink hover:border-coral hover:text-coral transition-colors disabled:opacity-50"
+          >
+            {isSuggesting ? (
+              <>
+                <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Thinking...
+              </>
+            ) : (
+              <>✨ Suggest with AI</>
+            )}
+          </button>
+        </div>
+
+        {suggestFetcher.data?.ok === false && (
+          <p className="text-xs text-red-500 mb-3">{suggestFetcher.data.error ?? 'Suggestion failed.'}</p>
+        )}
+
+        {/* Apply suggestions button — shown after suggestions arrive */}
+        {suggestions.length > 0 && suggestFetcher.state === 'idle' && (
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={() => handleSuggestApply(suggestions)}
+              className="text-xs font-semibold px-3 py-1.5 bg-sun/20 border border-sun/40 rounded-full text-ink hover:bg-sun/30 transition-colors"
+            >
+              Apply {suggestions.length} suggestions to table
+            </button>
+          </div>
+        )}
+
+        {productTypes.length === 0 ? (
+          <p className="text-sm text-ink/40 italic">No product types found in Shopify.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-cream-2 text-ink/50 text-xs uppercase tracking-wide">
+                  <th className="px-3 py-2 text-left">Type</th>
+                  <th className="px-3 py-2 text-right">Count</th>
+                  <th className="px-3 py-2 text-center">High disc. %</th>
+                  <th className="px-3 py-2 text-center">Medium disc. %</th>
+                  <th className="px-3 py-2 text-left">AI rationale</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productTypes.map(({ productType, count }) => {
+                  const vals = typeInputs[productType] ?? { high: '', medium: '' }
+                  const suggestion = suggestions.find(s => s.productType === productType)
+                  return (
+                    <tr key={productType} className="border-t border-cream-2">
+                      <td className="px-3 py-2 font-medium text-ink">{productType}</td>
+                      <td className="px-3 py-2 text-right text-ink/50">{count}</td>
+                      <td className="px-3 py-2 text-center">
+                        <input
+                          type="number"
+                          min={0}
+                          max={60}
+                          placeholder={highInput}
+                          value={vals.high}
+                          onChange={e =>
+                            setTypeInputs(prev => ({
+                              ...prev,
+                              [productType]: { ...prev[productType]!, high: e.target.value },
+                            }))
+                          }
+                          className="w-16 text-sm text-center border border-line rounded-lg px-2 py-1 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-coral/50"
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <input
+                          type="number"
+                          min={0}
+                          max={60}
+                          placeholder={mediumInput}
+                          value={vals.medium}
+                          onChange={e =>
+                            setTypeInputs(prev => ({
+                              ...prev,
+                              [productType]: { ...prev[productType]!, medium: e.target.value },
+                            }))
+                          }
+                          className="w-16 text-sm text-center border border-line rounded-lg px-2 py-1 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-coral/50"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        {suggestion && (
+                          <span className="text-xs text-muted italic">{suggestion.rationale}</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <p className="text-xs text-ink/40 mt-2">Blank = inherits global default.</p>
+
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={saveOverrides}
+            disabled={overridesFetcher.state !== 'idle'}
+            className="text-xs font-semibold px-4 py-2 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {overridesFetcher.state !== 'idle' ? 'Saving...' : 'Save overrides'}
+          </button>
+          {overridesFetcher.data?.ok === true && overridesFetcher.state === 'idle' && (
+            <span className="text-xs text-green-600">Saved.</span>
+          )}
+          {overridesFetcher.data?.ok === false && (
+            <span className="text-xs text-red-500">{overridesFetcher.data.error ?? 'Error'}</span>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export default function AdminPricingPage() {
   const data = useLoaderData<typeof loader>()
   const runFetcher = useFetcher<{ ok: boolean; scanned?: number; applied?: number; error?: string }>()
@@ -534,6 +839,9 @@ export default function AdminPricingPage() {
           ))}
         </div>
       )}
+
+      {/* Pricing Rules card */}
+      <PricingRulesCard pricingRules={data.pricingRules} productTypes={data.productTypes} />
 
       {/* Webhook card */}
       <WebhookCard webhook={data.webhook} />

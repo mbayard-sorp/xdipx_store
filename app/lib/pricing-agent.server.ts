@@ -5,7 +5,7 @@ import { kvGet, kvSet } from './kv.server'
 import { fetchAllNalpacFeeds } from './nalpac-feeds.server'
 import { bulkFetchProductsForPricing, updateVariantPricing, updateProductMetafield } from './shopify.server'
 import { computeTargetPrice } from './pricing-engine.server'
-import type { PricingSnapshot } from './pricing-engine.server'
+import type { PricingSnapshot, PricingRules } from './pricing-engine.server'
 import { buildPricingReport, sendPricingReportEmail } from './pricing-report.server'
 import type { PricingChangeRecord } from './pricing-report.server'
 
@@ -70,6 +70,55 @@ export async function setApprovalMode(mode: ApprovalMode): Promise<void> {
       target: pipelineSettings.key,
       set: { value: mode, updatedAt: new Date() },
     })
+}
+
+export async function getPricingRules(): Promise<PricingRules> {
+  try {
+    const keys = [
+      'pricing_margin_floor',
+      'pricing_high_margin_discount',
+      'pricing_medium_margin_discount',
+      'pricing_per_type_overrides',
+    ]
+    // Fetch all four in parallel
+    const fetch1 = (k: string) =>
+      db.select({ value: pipelineSettings.value })
+        .from(pipelineSettings)
+        .where(eq(pipelineSettings.key, k))
+        .limit(1)
+        .then(r => r[0]?.value ?? null)
+    const [floor, high, medium, perType] = await Promise.all([
+      fetch1(keys[0]!),
+      fetch1(keys[1]!),
+      fetch1(keys[2]!),
+      fetch1(keys[3]!),
+    ])
+    const rules: PricingRules = {}
+    if (floor != null) rules.marginFloor = parseFloat(floor)
+    if (high != null) rules.highMarginDiscount = parseFloat(high)
+    if (medium != null) rules.mediumMarginDiscount = parseFloat(medium)
+    if (perType != null) {
+      try { rules.perTypeOverrides = JSON.parse(perType) } catch { /* ignore */ }
+    }
+    return rules
+  } catch {
+    return {}
+  }
+}
+
+export async function setPricingRules(rules: PricingRules): Promise<void> {
+  const pairs: Array<[string, string]> = []
+  if (rules.marginFloor !== undefined) pairs.push(['pricing_margin_floor', String(rules.marginFloor)])
+  if (rules.highMarginDiscount !== undefined) pairs.push(['pricing_high_margin_discount', String(rules.highMarginDiscount)])
+  if (rules.mediumMarginDiscount !== undefined) pairs.push(['pricing_medium_margin_discount', String(rules.mediumMarginDiscount)])
+  if (rules.perTypeOverrides !== undefined) pairs.push(['pricing_per_type_overrides', JSON.stringify(rules.perTypeOverrides)])
+  await Promise.all(
+    pairs.map(([k, v]) =>
+      db.insert(pipelineSettings)
+        .values({ key: k, value: v })
+        .onConflictDoUpdate({ target: pipelineSettings.key, set: { value: v, updatedAt: new Date() } })
+    )
+  )
 }
 
 async function getPipelineSettingLocal(key: string): Promise<string | null> {

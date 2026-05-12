@@ -6099,6 +6099,7 @@ export interface PricingProductSnapshot {
   handle: string
   title: string
   vendor: string | null
+  productType: string | null
   variants: Array<{
     variantId: string
     sku: string
@@ -6128,6 +6129,7 @@ const PRICING_PRODUCTS_QUERY = `
         handle
         title
         vendor
+        productType
         variants(first: 100) {
           nodes {
             id
@@ -6164,6 +6166,7 @@ interface PricingQueryResult {
       handle: string
       title: string
       vendor: string | null
+      productType: string | null
       variants: {
         nodes: Array<{
           id: string
@@ -6206,6 +6209,7 @@ function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'][numbe
     handle: raw.handle,
     title: raw.title,
     vendor: raw.vendor ?? null,
+    productType: raw.productType ?? null,
     variants,
     metafields: {
       nalpacSku: mfMap.get('nalpac_sku') ?? null,
@@ -6251,6 +6255,7 @@ export interface VariantSkuMatch {
   handle: string
   title: string
   vendor: string | null
+  productType: string | null
   variant: {
     variantId: string
     sku: string
@@ -6285,6 +6290,7 @@ const VARIANTS_BY_SKU_QUERY = `
           handle
           title
           vendor
+          productType
           metafields(identifiers: [
             { namespace: "xdipx", key: "nalpac_sku" }
             { namespace: "xdipx", key: "wholesale_cost" }
@@ -6316,6 +6322,7 @@ interface VariantsBySkuResult {
         handle: string
         title: string
         vendor: string | null
+        productType: string | null
         metafields: Array<{ namespace: string; key: string; value: string } | null>
       }
     }>
@@ -6352,6 +6359,7 @@ export async function findVariantsBySkus(skus: string[]): Promise<VariantSkuMatc
         handle: node.product.handle,
         title: node.product.title,
         vendor: node.product.vendor ?? null,
+        productType: node.product.productType ?? null,
         variant: {
           variantId: node.id,
           sku: node.sku ?? '',
@@ -6372,4 +6380,52 @@ export async function findVariantsBySkus(skus: string[]): Promise<VariantSkuMatc
   }
 
   return results
+}
+
+// ─── Product Type Catalog ─────────────────────────────────────────────────
+
+const PRODUCT_TYPES_QUERY = `
+  query ProductTypes($first: Int!, $after: String) {
+    products(first: $first, after: $after) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        productType
+      }
+    }
+  }
+`
+
+interface ProductTypesResult {
+  products: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null }
+    nodes: Array<{ productType: string | null }>
+  }
+}
+
+export async function getDistinctProductTypes(): Promise<Array<{ productType: string; count: number }>> {
+  const counts = new Map<string, number>()
+  let cursor: string | null = null
+
+  do {
+    const data: ProductTypesResult = await adminGraphQL<ProductTypesResult>(PRODUCT_TYPES_QUERY, {
+      first: 250,
+      after: cursor ?? null,
+    })
+
+    for (const node of data.products.nodes) {
+      const pt = node.productType?.trim()
+      if (pt) {
+        counts.set(pt, (counts.get(pt) ?? 0) + 1)
+      }
+    }
+
+    cursor = data.products.pageInfo.hasNextPage ? (data.products.pageInfo.endCursor ?? null) : null
+  } while (cursor !== null)
+
+  return Array.from(counts.entries())
+    .map(([productType, count]) => ({ productType, count }))
+    .sort((a, b) => b.count - a.count)
 }

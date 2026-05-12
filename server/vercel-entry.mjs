@@ -134,6 +134,7 @@ __export(schema_exports, {
   pdpDialVotes: () => pdpDialVotes,
   pdpProductVotes: () => pdpProductVotes,
   pipelineSettings: () => pipelineSettings,
+  pricingChanges: () => pricingChanges,
   productCopurchase: () => productCopurchase,
   productEnrichmentCache: () => productEnrichmentCache,
   referrals: () => referrals,
@@ -152,6 +153,7 @@ __export(schema_exports, {
   wishlists: () => wishlists
 });
 import {
+  bigserial,
   boolean,
   date,
   decimal,
@@ -167,7 +169,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingChanges;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -687,6 +689,38 @@ var init_schema = __esm({
     }, (t) => ({
       threadIdx: index("emma_chat_messages_thread_idx").on(t.threadId, t.createdAt)
     }));
+    pricingChanges = pgTable("pricing_changes", {
+      id: bigserial("id", { mode: "number" }).primaryKey(),
+      proposedAt: timestamp("proposed_at", { withTimezone: true }).notNull().defaultNow(),
+      runDate: date("run_date").notNull(),
+      sku: text("sku").notNull(),
+      productId: text("product_id").notNull(),
+      productHandle: text("product_handle"),
+      productTitle: text("product_title"),
+      variantId: text("variant_id").notNull(),
+      variantTitle: text("variant_title"),
+      vendor: text("vendor"),
+      tier: text("tier").notNull(),
+      oldPrice: decimal("old_price", { precision: 10, scale: 2 }),
+      newPrice: decimal("new_price", { precision: 10, scale: 2 }).notNull(),
+      oldCompareAt: decimal("old_compare_at", { precision: 10, scale: 2 }),
+      newCompareAt: decimal("new_compare_at", { precision: 10, scale: 2 }),
+      oldWholesale: decimal("old_wholesale", { precision: 10, scale: 2 }),
+      newWholesale: decimal("new_wholesale", { precision: 10, scale: 2 }),
+      mapPrice: decimal("map_price", { precision: 10, scale: 2 }),
+      marginPct: decimal("margin_pct", { precision: 6, scale: 4 }),
+      reason: text("reason").notNull(),
+      mapRespected: boolean("map_respected").notNull().default(true),
+      status: text("status").notNull().default("pending"),
+      appliedAt: timestamp("applied_at", { withTimezone: true }),
+      approvedBy: text("approved_by"),
+      applyError: text("apply_error")
+    }, (t) => ({
+      runDateIdx: index("pricing_changes_run_date_idx").on(t.runDate),
+      statusIdx: index("pricing_changes_status_idx").on(t.status),
+      variantIdx: index("pricing_changes_variant_idx").on(t.variantId, t.proposedAt),
+      skuIdx: index("pricing_changes_sku_idx").on(t.sku, t.proposedAt)
+    }));
   }
 });
 
@@ -709,17 +743,21 @@ __export(shopify_server_exports, {
   activateShopifyProduct: () => activateShopifyProduct,
   addLinesToCart: () => addLinesToCart,
   addToCart: () => addToCart,
+  addVariantsToProduct: () => addVariantsToProduct,
   adminCustomerDelete: () => adminCustomerDelete,
   adminGetCustomerSubscriptions: () => adminGetCustomerSubscriptions,
   adminGetSubscriptionContract: () => adminGetSubscriptionContract,
   adminGraphQL: () => adminGraphQL,
   appendProductTag: () => appendProductTag,
+  archiveProduct: () => archiveProduct,
   archiveShopifyProduct: () => archiveShopifyProduct,
   associateImageWithVariant: () => associateImageWithVariant,
   attachVideoToProduct: () => attachVideoToProduct,
   buildShopifyQuery: () => buildShopifyQuery,
+  bulkFetchProductsForPricing: () => bulkFetchProductsForPricing,
   cartBuyerIdentityUpdate: () => cartBuyerIdentityUpdate,
   closeReturn: () => closeReturn,
+  copyMediaToProduct: () => copyMediaToProduct,
   createCart: () => createCart,
   createCartWithLines: () => createCartWithLines,
   createCustomerAccessToken: () => createCustomerAccessToken,
@@ -730,6 +768,7 @@ __export(shopify_server_exports, {
   createShopifyProductFromFeed: () => createShopifyProductFromFeed,
   createShopifyProductWithVariants: () => createShopifyProductWithVariants,
   createStagedVideoUpload: () => createStagedVideoUpload,
+  createUrlRedirect: () => createUrlRedirect,
   customerActivate: () => customerActivate,
   customerActivateByUrl: () => customerActivateByUrl,
   customerAddressCreate: () => customerAddressCreate,
@@ -749,6 +788,7 @@ __export(shopify_server_exports, {
   findCustomerByPhone: () => findCustomerByPhone,
   findProductBySKU: () => findProductBySKU,
   findVariantBySKU: () => findVariantBySKU,
+  findVariantsBySkus: () => findVariantsBySkus,
   getAccessoryProducts: () => getAccessoryProducts,
   getAccessoryProductsAdmin: () => getAccessoryProductsAdmin,
   getAdminProductData: () => getAdminProductData,
@@ -782,6 +822,7 @@ __export(shopify_server_exports, {
   getProductsByHandles: () => getProductsByHandles,
   getProductsByIds: () => getProductsByIds,
   getProductsByTag: () => getProductsByTag,
+  getProductsForMerge: () => getProductsForMerge,
   getRecentVaultDeals: () => getRecentVaultDeals,
   getReturn: () => getReturn,
   getReturnableFulfillments: () => getReturnableFulfillments,
@@ -817,6 +858,7 @@ __export(shopify_server_exports, {
   updateProductDescriptionHtml: () => updateProductDescriptionHtml,
   updateProductMetafield: () => updateProductMetafield,
   updateProductTags: () => updateProductTags,
+  updateProductTitle: () => updateProductTitle,
   updateVariantPricing: () => updateVariantPricing,
   uploadMoodImageToShopifyFiles: () => uploadMoodImageToShopifyFiles,
   uploadThumbnailToProduct: () => uploadThumbnailToProduct
@@ -879,9 +921,22 @@ function nodeToVaultDeal(node) {
   const mattersTags = parseMetafieldJSON(mf, "matters_tags", []);
   const heroVideo = parseMetafieldJSON(mf, "hero_video", {});
   const colorOpt = (node.options ?? []).find((o) => /^colou?r$/i.test(o.name));
-  const sizeOpt = (node.options ?? []).find((o) => /^size$/i.test(o.name));
+  const sizeOpt = (node.options ?? []).find(
+    (o) => /^(size|volume|capacity|length|fl\.?\s*oz)$/i.test(o.name)
+  );
   const colorValues = colorOpt && colorOpt.values.length > 1 ? colorOpt.values : void 0;
   const sizeValues = sizeOpt && sizeOpt.values.length > 1 ? sizeOpt.values : void 0;
+  const variantPrices = variantEdges.map((e) => parseFloat(e.node.price.amount)).filter((n) => Number.isFinite(n) && n > 0);
+  const priceMin = variantPrices.length > 0 ? Math.min(...variantPrices) : dealPrice;
+  const priceMax = variantPrices.length > 0 ? Math.max(...variantPrices) : dealPrice;
+  const hasPriceRange = priceMax > priceMin;
+  const variantSavings = variantEdges.map((e) => {
+    const p = parseFloat(e.node.price.amount);
+    const ca = parseFloat(e.node.compareAtPrice?.amount ?? "0");
+    return ca > p && p > 0 ? { amount: ca - p, percent: Math.round((ca - p) / ca * 100) } : null;
+  }).filter((s) => s !== null);
+  const maxSavingsAmount = variantSavings.length > 0 ? Math.max(...variantSavings.map((s) => s.amount)) : 0;
+  const maxSavingsPercent = variantSavings.length > 0 ? Math.max(...variantSavings.map((s) => s.percent)) : 0;
   return {
     id: node.id,
     handle: node.handle,
@@ -898,6 +953,8 @@ function nodeToVaultDeal(node) {
     hasMultipleVariants: variantEdges.length > 1,
     ...colorValues ? { colorValues } : {},
     ...sizeValues ? { sizeValues } : {},
+    ...hasPriceRange ? { priceMin, priceMax } : {},
+    ...maxSavingsAmount > 0 ? { maxSavingsAmount, maxSavingsPercent } : {},
     ...moodTags.length > 0 ? { moodTags } : {},
     ...audienceTags.length > 0 ? { audienceTags } : {},
     ...mattersTags.length > 0 ? { mattersTags } : {},
@@ -4043,7 +4100,346 @@ async function getProductDetailForEmma(handle) {
     variants
   };
 }
-var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT;
+async function getProductsForMerge(productIds) {
+  const gids = productIds.map(
+    (id) => id.startsWith("gid://") ? id : `gid://shopify/Product/${id}`
+  );
+  const res = await adminGraphQL(`
+    query GetProductsForMerge($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        __typename
+        ... on Product {
+          id
+          title
+          handle
+          status
+          options { name values }
+          variants(first: 1) {
+            nodes { id price compareAtPrice sku barcode inventoryQuantity }
+          }
+          images(first: 20) {
+            nodes { url altText }
+          }
+        }
+      }
+    }
+  `, { ids: gids });
+  const result = {};
+  for (const node of res.nodes) {
+    if (!node || node.__typename !== "Product") continue;
+    const numericId = node.id.replace("gid://shopify/Product/", "");
+    result[numericId] = {
+      id: node.id,
+      title: node.title,
+      handle: node.handle,
+      status: node.status,
+      options: node.options,
+      firstVariant: node.variants.nodes[0] ?? null,
+      images: node.images.nodes
+    };
+  }
+  return result;
+}
+function toProductGid(productId) {
+  return productId.startsWith("gid://") ? productId : `gid://shopify/Product/${productId}`;
+}
+async function updateProductTitle(productId, newTitle) {
+  const gid = toProductGid(productId);
+  const res = await adminGraphQL(`
+    mutation MergeUpdateTitle($input: ProductInput!) {
+      productUpdate(input: $input) {
+        userErrors { field message }
+      }
+    }
+  `, { input: { id: gid, title: newTitle } });
+  if (res.productUpdate.userErrors.length > 0) {
+    const errs = res.productUpdate.userErrors.map((e) => `${e.field.join(".")}: ${e.message}`).join("; ");
+    throw new Error(`updateProductTitle: ${errs}`);
+  }
+}
+async function archiveProduct(productId) {
+  const gid = toProductGid(productId);
+  const res = await adminGraphQL(`
+    mutation MergeArchiveProduct($input: ProductInput!) {
+      productUpdate(input: $input) {
+        userErrors { field message }
+      }
+    }
+  `, { input: { id: gid, status: "ARCHIVED" } });
+  if (res.productUpdate.userErrors.length > 0) {
+    const errs = res.productUpdate.userErrors.map((e) => `${e.field.join(".")}: ${e.message}`).join("; ");
+    throw new Error(`archiveProduct: ${errs}`);
+  }
+}
+async function createUrlRedirect(fromPath, toPath) {
+  const path = fromPath.startsWith("/") ? fromPath : `/${fromPath}`;
+  const res = await adminGraphQL(`
+    mutation MergeCreateRedirect($urlRedirect: UrlRedirectInput!) {
+      urlRedirectCreate(urlRedirect: $urlRedirect) {
+        urlRedirect { id path target }
+        userErrors { field message }
+      }
+    }
+  `, { urlRedirect: { path, target: toPath } });
+  if (res.urlRedirectCreate.userErrors.length > 0) {
+    const msgs = res.urlRedirectCreate.userErrors.map((e) => e.message);
+    const isDuplicate = msgs.some((m) => /already exist|duplicate/i.test(m));
+    if (isDuplicate) {
+      console.warn(`[createUrlRedirect] redirect already exists for ${path}: ${msgs.join("; ")}`);
+      return { id: "" };
+    }
+    const errs = res.urlRedirectCreate.userErrors.map((e) => `${e.field.join(".")}: ${e.message}`).join("; ");
+    throw new Error(`createUrlRedirect: ${errs}`);
+  }
+  return { id: res.urlRedirectCreate.urlRedirect.id };
+}
+async function copyMediaToProduct(masterProductId, mediaSources) {
+  if (mediaSources.length === 0) return [];
+  const gid = toProductGid(masterProductId);
+  const res = await adminGraphQL(`
+    mutation MergeCopyMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+      productCreateMedia(productId: $productId, media: $media) {
+        media { id status mediaErrors { message } }
+        mediaUserErrors { field message }
+      }
+    }
+  `, {
+    productId: gid,
+    media: mediaSources.map((s) => ({
+      originalSource: s.originalSrc,
+      mediaContentType: "IMAGE",
+      alt: s.alt ?? ""
+    }))
+  });
+  if (res.productCreateMedia.mediaUserErrors.length > 0) {
+    const errs = res.productCreateMedia.mediaUserErrors.map((e) => `${e.field.join(".")}: ${e.message}`).join("; ");
+    throw new Error(`copyMediaToProduct: ${errs}`);
+  }
+  const created = res.productCreateMedia.media;
+  const results = [];
+  for (let i = 0; i < created.length; i++) {
+    const deadline = Date.now() + 3e4;
+    let item = created[i];
+    while (item.status !== "READY" && item.status !== "FAILED") {
+      if (Date.now() > deadline) throw new Error(`copyMediaToProduct: timeout polling media ${item.id}`);
+      await new Promise((r) => setTimeout(r, 1e3));
+      const poll = await adminGraphQL(`
+        query MergeMediaStatus($id: ID!) {
+          node(id: $id) {
+            ... on MediaImage { id status mediaErrors { message } }
+          }
+        }
+      `, { id: item.id });
+      if (poll.node) item = poll.node;
+    }
+    if (item.status === "FAILED") {
+      const errMsg = item.mediaErrors?.[0]?.message ?? "unknown";
+      throw new Error(`copyMediaToProduct: media ${item.id} failed \u2014 ${errMsg}`);
+    }
+    results.push({ mediaId: item.id, originalSrc: mediaSources[i].originalSrc });
+  }
+  return results;
+}
+async function getPrimaryLocationId() {
+  if (_primaryLocationId) return _primaryLocationId;
+  const res = await adminGraphQL(`
+    query MergePrimaryLocation {
+      locations(first: 1, query: "active:true") {
+        edges { node { id } }
+      }
+    }
+  `);
+  const id = res.locations.edges[0]?.node.id;
+  if (!id) throw new Error("addVariantsToProduct: no active Shopify location found");
+  _primaryLocationId = id;
+  return id;
+}
+async function addVariantsToProduct(masterProductId, optionName, variants) {
+  const gid = toProductGid(masterProductId);
+  const productRes = await adminGraphQL(`
+    query MergeProductOptions($id: ID!) {
+      product(id: $id) {
+        options { id name optionValues { id name } }
+      }
+    }
+  `, { id: gid });
+  const existingOptions = productRes.product?.options ?? [];
+  const isDefaultOnly = existingOptions.length === 1 && existingOptions[0].name === "Title" && existingOptions[0].optionValues.length === 1 && existingOptions[0].optionValues[0].name === "Default Title";
+  const existingOption = existingOptions.find((o) => o.name === optionName);
+  if (isDefaultOnly) {
+    const createRes = await adminGraphQL(`
+      mutation MergeOptionsCreate($productId: ID!, $options: [OptionCreateInput!]!, $variantStrategy: ProductOptionCreateVariantStrategy) {
+        productOptionsCreate(productId: $productId, options: $options, variantStrategy: $variantStrategy) {
+          userErrors { field message }
+        }
+      }
+    `, {
+      productId: gid,
+      options: [{ name: optionName, values: variants.map((v) => ({ name: v.optionValue })) }],
+      variantStrategy: "CREATE"
+    });
+    if (createRes.productOptionsCreate.userErrors.length > 0) {
+      const errs = createRes.productOptionsCreate.userErrors.map((e) => `${e.field.join(".")}: ${e.message}`).join("; ");
+      throw new Error(`addVariantsToProduct productOptionsCreate: ${errs}`);
+    }
+  } else if (existingOption) {
+    const existingNames = new Set(existingOption.optionValues.map((v) => v.name));
+    const newValues = variants.filter((v) => !existingNames.has(v.optionValue));
+    if (newValues.length > 0) {
+      const updateRes = await adminGraphQL(`
+        mutation MergeOptionUpdate($productId: ID!, $option: OptionUpdateInput!, $optionValuesToAdd: [OptionValueCreateInput!]) {
+          productOptionUpdate(productId: $productId, option: $option, optionValuesToAdd: $optionValuesToAdd) {
+            userErrors { field message }
+          }
+        }
+      `, {
+        productId: gid,
+        option: { id: existingOption.id },
+        optionValuesToAdd: newValues.map((v) => ({ name: v.optionValue }))
+      });
+      if (updateRes.productOptionUpdate.userErrors.length > 0) {
+        const errs = updateRes.productOptionUpdate.userErrors.map((e) => `${e.field.join(".")}: ${e.message}`).join("; ");
+        throw new Error(`addVariantsToProduct productOptionUpdate: ${errs}`);
+      }
+    }
+  }
+  const existingVariantsRes = await adminGraphQL(`
+    query MergeExistingVariants($id: ID!) {
+      product(id: $id) {
+        variants(first: 100) {
+          nodes { id selectedOptions { name value } }
+        }
+      }
+    }
+  `, { id: gid });
+  const existingOptionValues = new Set(
+    (existingVariantsRes.product?.variants.nodes ?? []).flatMap((v) => v.selectedOptions).filter((o) => o.name === optionName).map((o) => o.value)
+  );
+  const variantsToCreate = variants.filter((v) => !existingOptionValues.has(v.optionValue));
+  if (variantsToCreate.length === 0) return;
+  const locationId = await getPrimaryLocationId();
+  const bulkRes = await adminGraphQL(`
+    mutation MergeBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!, $strategy: ProductVariantsBulkCreateStrategy) {
+      productVariantsBulkCreate(productId: $productId, variants: $variants, strategy: $strategy) {
+        productVariants { id }
+        userErrors { field message }
+      }
+    }
+  `, {
+    productId: gid,
+    strategy: isDefaultOnly ? "REMOVE_STANDALONE_VARIANT" : "DEFAULT",
+    variants: variantsToCreate.map((v) => ({
+      price: v.price,
+      ...v.compareAtPrice != null ? { compareAtPrice: v.compareAtPrice } : {},
+      optionValues: [{ name: v.optionValue, optionName }],
+      inventoryItem: { sku: v.sku ?? null },
+      ...v.barcode != null ? { barcode: v.barcode } : {},
+      ...v.mediaId != null ? { mediaId: v.mediaId } : {},
+      ...(v.inventoryQuantity ?? 0) > 0 ? { inventoryQuantities: [{ availableQuantity: v.inventoryQuantity, locationId }] } : {}
+    }))
+  });
+  if (bulkRes.productVariantsBulkCreate.userErrors.length > 0) {
+    const errs = bulkRes.productVariantsBulkCreate.userErrors.map((e) => `${e.field.join(".")}: ${e.message}`).join("; ");
+    throw new Error(`addVariantsToProduct productVariantsBulkCreate: ${errs}`);
+  }
+}
+function parsePricingSnapshot(raw) {
+  const mfMap = /* @__PURE__ */ new Map();
+  for (const mf of raw.metafields) {
+    if (mf) mfMap.set(mf.key, mf.value);
+  }
+  const variants = raw.variants.nodes.map((v) => ({
+    variantId: v.id,
+    sku: v.sku ?? "",
+    title: v.title,
+    price: parseFloat(v.price),
+    compareAtPrice: v.compareAtPrice != null ? parseFloat(v.compareAtPrice) : null,
+    inventoryItemId: v.inventoryItem?.id ?? null
+  }));
+  if (variants.every((v) => v.sku === "")) return null;
+  const wholesaleCostRaw = mfMap.get("wholesale_cost");
+  const mapPriceRaw = mfMap.get("map_price");
+  const originalPriceRaw = mfMap.get("original_price");
+  return {
+    productId: raw.id,
+    productGid: raw.id,
+    handle: raw.handle,
+    title: raw.title,
+    vendor: raw.vendor ?? null,
+    variants,
+    metafields: {
+      nalpacSku: mfMap.get("nalpac_sku") ?? null,
+      wholesaleCost: wholesaleCostRaw != null ? parseFloat(wholesaleCostRaw) : null,
+      mapPrice: mapPriceRaw != null ? parseFloat(mapPriceRaw) : null,
+      originalPrice: originalPriceRaw != null ? parseFloat(originalPriceRaw) : null,
+      mapRestricted: mfMap.get("map_restricted") === "true"
+    }
+  };
+}
+async function bulkFetchProductsForPricing(opts) {
+  const pageSize = opts?.limit ?? 100;
+  let cursor = opts?.cursor ?? null;
+  const results = [];
+  do {
+    const data = await adminGraphQL(PRICING_PRODUCTS_QUERY, {
+      first: pageSize,
+      after: cursor ?? null,
+      query: "metafields.xdipx.nalpac_sku:*"
+    });
+    for (const node of data.products.nodes) {
+      const snapshot = parsePricingSnapshot(node);
+      if (snapshot) results.push(snapshot);
+    }
+    cursor = data.products.pageInfo.hasNextPage ? data.products.pageInfo.endCursor ?? null : null;
+  } while (cursor !== null);
+  return results;
+}
+async function findVariantsBySkus(skus) {
+  if (skus.length === 0) return [];
+  const results = [];
+  const BATCH = 50;
+  for (let i = 0; i < skus.length; i += BATCH) {
+    const batch = skus.slice(i, i + BATCH);
+    const queryStr = batch.map((s) => `sku:'${s.replace(/'/g, "\\'")}'`).join(" OR ");
+    const data = await adminGraphQL(VARIANTS_BY_SKU_QUERY, {
+      query: queryStr,
+      first: batch.length * 2
+    });
+    for (const node of data.productVariants.nodes) {
+      const mfMap = /* @__PURE__ */ new Map();
+      for (const mf of node.product.metafields) {
+        if (mf) mfMap.set(mf.key, mf.value);
+      }
+      const wholesaleRaw = mfMap.get("wholesale_cost");
+      const mapRaw = mfMap.get("map_price");
+      const origRaw = mfMap.get("original_price");
+      results.push({
+        productId: node.product.id,
+        productGid: node.product.id,
+        handle: node.product.handle,
+        title: node.product.title,
+        vendor: node.product.vendor ?? null,
+        variant: {
+          variantId: node.id,
+          sku: node.sku ?? "",
+          title: node.title,
+          price: parseFloat(node.price),
+          compareAtPrice: node.compareAtPrice != null ? parseFloat(node.compareAtPrice) : null,
+          inventoryItemId: node.inventoryItem?.id ?? null
+        },
+        metafields: {
+          nalpacSku: mfMap.get("nalpac_sku") ?? null,
+          wholesaleCost: wholesaleRaw != null ? parseFloat(wholesaleRaw) : null,
+          mapPrice: mapRaw != null ? parseFloat(mapRaw) : null,
+          originalPrice: origRaw != null ? parseFloat(origRaw) : null,
+          mapRestricted: mfMap.get("map_restricted") === "true"
+        }
+      });
+    }
+  }
+  return results;
+}
+var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, VARIANTS_BY_SKU_QUERY;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
     "use strict";
@@ -4177,10 +4573,10 @@ var init_shopify_server = __esm({
     PRODUCT_CARD_FRAGMENT = `
   id handle title vendor tags
   options { name values }
-  images(first: 1) {
+  images(first: 6) {
     edges { node { url altText } }
   }
-  variants(first: 2) {
+  variants(first: 50) {
     edges {
       node {
         id
@@ -4300,6 +4696,79 @@ var init_shopify_server = __esm({
   priceRange { minVariantPrice { amount currencyCode } }
   compareAtPriceRange { maxVariantPrice { amount currencyCode } }
 `;
+    _primaryLocationId = null;
+    PRICING_PRODUCTS_QUERY = `
+  query PricingProducts($first: Int!, $after: String, $query: String!) {
+    products(first: $first, after: $after, query: $query) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        id
+        handle
+        title
+        vendor
+        variants(first: 100) {
+          nodes {
+            id
+            sku
+            title
+            price
+            compareAtPrice
+            inventoryItem {
+              id
+            }
+          }
+        }
+        metafields(identifiers: [
+          { namespace: "xdipx", key: "nalpac_sku" }
+          { namespace: "xdipx", key: "wholesale_cost" }
+          { namespace: "xdipx", key: "map_price" }
+          { namespace: "xdipx", key: "original_price" }
+          { namespace: "xdipx", key: "map_restricted" }
+        ]) {
+          namespace
+          key
+          value
+        }
+      }
+    }
+  }
+`;
+    VARIANTS_BY_SKU_QUERY = `
+  query VariantsBySkus($query: String!, $first: Int!) {
+    productVariants(first: $first, query: $query) {
+      nodes {
+        id
+        sku
+        title
+        price
+        compareAtPrice
+        inventoryItem {
+          id
+        }
+        product {
+          id
+          handle
+          title
+          vendor
+          metafields(identifiers: [
+            { namespace: "xdipx", key: "nalpac_sku" }
+            { namespace: "xdipx", key: "wholesale_cost" }
+            { namespace: "xdipx", key: "map_price" }
+            { namespace: "xdipx", key: "original_price" }
+            { namespace: "xdipx", key: "map_restricted" }
+          ]) {
+            namespace
+            key
+            value
+          }
+        }
+      }
+    }
+  }
+`;
   }
 });
 
@@ -4361,6 +4830,7 @@ __export(sanity_server_exports, {
   getPage: () => getPage,
   getPageList: () => getPageList,
   getPdpTrustBar: () => getPdpTrustBar,
+  getPreviewImagesByHandles: () => getPreviewImagesByHandles,
   getProductFaqs: () => getProductFaqs,
   getProductHandlesForSitemap: () => getProductHandlesForSitemap,
   getProductPageBlocks: () => getProductPageBlocks,
@@ -4719,6 +5189,24 @@ async function getEmmaPersona() {
       return null;
     }
   });
+}
+async function getPreviewImagesByHandles(handles) {
+  const out = /* @__PURE__ */ new Map();
+  if (!projectId || handles.length === 0) return out;
+  try {
+    const client2 = getClient();
+    if (!client2) return out;
+    const rows = await client2.fetch(
+      `*[_type == "productPage" && shopifyHandle in $handles]{ shopifyHandle, previewImageUrl }`,
+      { handles }
+    );
+    for (const r of rows ?? []) {
+      if (r?.shopifyHandle && r.previewImageUrl) out.set(r.shopifyHandle, r.previewImageUrl);
+    }
+  } catch (err) {
+    console.error("[sanity] getPreviewImagesByHandles error:", err);
+  }
+  return out;
 }
 async function getProductPageBlocks(handle) {
   if (!projectId) return [];
@@ -8068,9 +8556,15 @@ Return ONLY this JSON shape (no markdown, no fences):
 
 Rules:
 - 5 or 6 items, no duplicates.
-- Each "value" is an integer 1\u20135.
+- Each "value" is an integer from the set {1, 2, 3, 4, 5}. No half-steps. No values outside 1\u20135.
 - Keep labels under 24 chars, sentence case, no trailing punctuation.
-- Honest scoring \u2014 don't max everything. Use the dimension scale docs above (when present) to anchor "what 3 vs 5 means" \u2014 consistency across products matters.`;
+- Honest scoring \u2014 don't max everything. Use the dimension scale docs above (when present) to anchor "what 3 vs 5 means" \u2014 consistency across products matters.
+
+Spread requirements (CRITICAL \u2014 dials look identical across products when these are ignored):
+- Use the full 1\u20135 range. Across the 5 or 6 dimensions, the values MUST span at least 3 distinct integers (e.g. {2, 3, 4, 5} is fine; {4, 4, 5, 5, 5} is not).
+- At MOST one dimension may be a 5. At MOST one dimension may be a 1.
+- The product's defining strength gets the 5; everything else is scored honestly relative to category peers. A "medium" wand is a 3 on intensity by default, not a 4. A "quiet" device is a 4 on quietness, not a 5 unless it's near-silent.
+- If you find yourself writing 4 or 5 on more than two dimensions, drop the weakest of those dimensions to a 3 or below before returning.`;
   const { text: text2 } = await callClaude({
     llmClient: opts.llmClient,
     model: MODEL_FAST,
@@ -8096,6 +8590,14 @@ Rules:
     if (items.length >= 6) break;
   }
   if (items.length < 5) throw new Error(`only ${items.length} valid dial items returned`);
+  const distinct = new Set(items.map((i) => i.value)).size;
+  const fives = items.filter((i) => i.value === 5).length;
+  const ones = items.filter((i) => i.value === 1).length;
+  if (distinct < 3 || fives > 1 || ones > 1) {
+    console.warn(
+      `[sensation-dial] spread violation: distinct=${distinct} fives=${fives} ones=${ones} values=[${items.map((i) => i.value).join(",")}] product="${opts.deal.seoTitle}"`
+    );
+  }
   return { items };
 }
 function mapLegacyDialBucket(legacy) {
