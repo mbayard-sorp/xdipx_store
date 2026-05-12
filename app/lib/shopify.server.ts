@@ -6090,3 +6090,286 @@ export async function addVariantsToProduct(
     throw new Error(`addVariantsToProduct productVariantsBulkCreate: ${errs}`)
   }
 }
+
+// ─── Pricing Agent Bulk Fetch ─────────────────────────────────────────────
+
+export interface PricingProductSnapshot {
+  productId: string
+  productGid: string
+  handle: string
+  title: string
+  vendor: string | null
+  variants: Array<{
+    variantId: string
+    sku: string
+    title: string
+    price: number
+    compareAtPrice: number | null
+    inventoryItemId: string | null
+  }>
+  metafields: {
+    nalpacSku: string | null
+    wholesaleCost: number | null
+    mapPrice: number | null
+    originalPrice: number | null
+    mapRestricted: boolean
+  }
+}
+
+const PRICING_PRODUCTS_QUERY = `
+  query PricingProducts($first: Int!, $after: String, $query: String!) {
+    products(first: $first, after: $after, query: $query) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        id
+        handle
+        title
+        vendor
+        variants(first: 100) {
+          nodes {
+            id
+            sku
+            title
+            price
+            compareAtPrice
+            inventoryItem {
+              id
+            }
+          }
+        }
+        metafields(identifiers: [
+          { namespace: "xdipx", key: "nalpac_sku" }
+          { namespace: "xdipx", key: "wholesale_cost" }
+          { namespace: "xdipx", key: "map_price" }
+          { namespace: "xdipx", key: "original_price" }
+          { namespace: "xdipx", key: "map_restricted" }
+        ]) {
+          namespace
+          key
+          value
+        }
+      }
+    }
+  }
+`
+
+interface PricingQueryResult {
+  products: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null }
+    nodes: Array<{
+      id: string
+      handle: string
+      title: string
+      vendor: string | null
+      variants: {
+        nodes: Array<{
+          id: string
+          sku: string | null
+          title: string
+          price: string
+          compareAtPrice: string | null
+          inventoryItem: { id: string } | null
+        }>
+      }
+      metafields: Array<{ namespace: string; key: string; value: string } | null>
+    }>
+  }
+}
+
+function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'][number]): PricingProductSnapshot | null {
+  const mfMap = new Map<string, string>()
+  for (const mf of raw.metafields) {
+    if (mf) mfMap.set(mf.key, mf.value)
+  }
+
+  const variants = raw.variants.nodes.map(v => ({
+    variantId: v.id,
+    sku: v.sku ?? '',
+    title: v.title,
+    price: parseFloat(v.price),
+    compareAtPrice: v.compareAtPrice != null ? parseFloat(v.compareAtPrice) : null,
+    inventoryItemId: v.inventoryItem?.id ?? null,
+  }))
+
+  if (variants.every(v => v.sku === '')) return null
+
+  const wholesaleCostRaw = mfMap.get('wholesale_cost')
+  const mapPriceRaw = mfMap.get('map_price')
+  const originalPriceRaw = mfMap.get('original_price')
+
+  return {
+    productId: raw.id,
+    productGid: raw.id,
+    handle: raw.handle,
+    title: raw.title,
+    vendor: raw.vendor ?? null,
+    variants,
+    metafields: {
+      nalpacSku: mfMap.get('nalpac_sku') ?? null,
+      wholesaleCost: wholesaleCostRaw != null ? parseFloat(wholesaleCostRaw) : null,
+      mapPrice: mapPriceRaw != null ? parseFloat(mapPriceRaw) : null,
+      originalPrice: originalPriceRaw != null ? parseFloat(originalPriceRaw) : null,
+      mapRestricted: mfMap.get('map_restricted') === 'true',
+    },
+  }
+}
+
+export async function bulkFetchProductsForPricing(opts?: {
+  cursor?: string | null
+  limit?: number
+}): Promise<PricingProductSnapshot[]> {
+  const pageSize = opts?.limit ?? 100
+  let cursor: string | null = opts?.cursor ?? null
+  const results: PricingProductSnapshot[] = []
+
+  do {
+    const data = await adminGraphQL<PricingQueryResult>(PRICING_PRODUCTS_QUERY, {
+      first: pageSize,
+      after: cursor ?? null,
+      query: 'metafields.xdipx.nalpac_sku:*',
+    })
+
+    for (const node of data.products.nodes) {
+      const snapshot = parsePricingSnapshot(node)
+      if (snapshot) results.push(snapshot)
+    }
+
+    cursor = data.products.pageInfo.hasNextPage ? (data.products.pageInfo.endCursor ?? null) : null
+  } while (cursor !== null)
+
+  return results
+}
+
+// ─── Webhook SKU Lookup ───────────────────────────────────────────────────
+
+export interface VariantSkuMatch {
+  productId: string
+  productGid: string
+  handle: string
+  title: string
+  vendor: string | null
+  variant: {
+    variantId: string
+    sku: string
+    title: string
+    price: number
+    compareAtPrice: number | null
+    inventoryItemId: string | null
+  }
+  metafields: {
+    nalpacSku: string | null
+    wholesaleCost: number | null
+    mapPrice: number | null
+    originalPrice: number | null
+    mapRestricted: boolean
+  }
+}
+
+const VARIANTS_BY_SKU_QUERY = `
+  query VariantsBySkus($query: String!, $first: Int!) {
+    productVariants(first: $first, query: $query) {
+      nodes {
+        id
+        sku
+        title
+        price
+        compareAtPrice
+        inventoryItem {
+          id
+        }
+        product {
+          id
+          handle
+          title
+          vendor
+          metafields(identifiers: [
+            { namespace: "xdipx", key: "nalpac_sku" }
+            { namespace: "xdipx", key: "wholesale_cost" }
+            { namespace: "xdipx", key: "map_price" }
+            { namespace: "xdipx", key: "original_price" }
+            { namespace: "xdipx", key: "map_restricted" }
+          ]) {
+            namespace
+            key
+            value
+          }
+        }
+      }
+    }
+  }
+`
+
+interface VariantsBySkuResult {
+  productVariants: {
+    nodes: Array<{
+      id: string
+      sku: string | null
+      title: string
+      price: string
+      compareAtPrice: string | null
+      inventoryItem: { id: string } | null
+      product: {
+        id: string
+        handle: string
+        title: string
+        vendor: string | null
+        metafields: Array<{ namespace: string; key: string; value: string } | null>
+      }
+    }>
+  }
+}
+
+export async function findVariantsBySkus(skus: string[]): Promise<VariantSkuMatch[]> {
+  if (skus.length === 0) return []
+
+  const results: VariantSkuMatch[] = []
+  const BATCH = 50
+
+  for (let i = 0; i < skus.length; i += BATCH) {
+    const batch = skus.slice(i, i + BATCH)
+    const queryStr = batch.map(s => `sku:'${s.replace(/'/g, "\\'")}'`).join(' OR ')
+
+    const data = await adminGraphQL<VariantsBySkuResult>(VARIANTS_BY_SKU_QUERY, {
+      query: queryStr,
+      first: batch.length * 2,
+    })
+
+    for (const node of data.productVariants.nodes) {
+      const mfMap = new Map<string, string>()
+      for (const mf of node.product.metafields) {
+        if (mf) mfMap.set(mf.key, mf.value)
+      }
+      const wholesaleRaw = mfMap.get('wholesale_cost')
+      const mapRaw = mfMap.get('map_price')
+      const origRaw = mfMap.get('original_price')
+
+      results.push({
+        productId: node.product.id,
+        productGid: node.product.id,
+        handle: node.product.handle,
+        title: node.product.title,
+        vendor: node.product.vendor ?? null,
+        variant: {
+          variantId: node.id,
+          sku: node.sku ?? '',
+          title: node.title,
+          price: parseFloat(node.price),
+          compareAtPrice: node.compareAtPrice != null ? parseFloat(node.compareAtPrice) : null,
+          inventoryItemId: node.inventoryItem?.id ?? null,
+        },
+        metafields: {
+          nalpacSku: mfMap.get('nalpac_sku') ?? null,
+          wholesaleCost: wholesaleRaw != null ? parseFloat(wholesaleRaw) : null,
+          mapPrice: mapRaw != null ? parseFloat(mapRaw) : null,
+          originalPrice: origRaw != null ? parseFloat(origRaw) : null,
+          mapRestricted: mfMap.get('map_restricted') === 'true',
+        },
+      })
+    }
+  }
+
+  return results
+}

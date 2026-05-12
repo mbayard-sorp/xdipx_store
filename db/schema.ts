@@ -1,4 +1,5 @@
 import {
+  bigserial,
   boolean,
   date,
   decimal,
@@ -631,3 +632,37 @@ export const emmaChatMessages = pgTable('emma_chat_messages', {
 }, t => ({
   threadIdx: index('emma_chat_messages_thread_idx').on(t.threadId, t.createdAt),
 }))
+
+export const pricingChanges = pgTable('pricing_changes', {
+  id:           bigserial('id', { mode: 'number' }).primaryKey(),
+  proposedAt:   timestamp('proposed_at', { withTimezone: true }).notNull().defaultNow(),
+  runDate:      date('run_date').notNull(),
+  sku:          text('sku').notNull(),
+  productId:    text('product_id').notNull(),
+  productHandle: text('product_handle'),
+  productTitle: text('product_title'),
+  variantId:    text('variant_id').notNull(),
+  variantTitle: text('variant_title'),
+  vendor:       text('vendor'),
+  tier:         text('tier').notNull(),
+  oldPrice:     decimal('old_price', { precision: 10, scale: 2 }),
+  newPrice:     decimal('new_price', { precision: 10, scale: 2 }).notNull(),
+  oldCompareAt: decimal('old_compare_at', { precision: 10, scale: 2 }),
+  newCompareAt: decimal('new_compare_at', { precision: 10, scale: 2 }),
+  oldWholesale: decimal('old_wholesale', { precision: 10, scale: 2 }),
+  newWholesale: decimal('new_wholesale', { precision: 10, scale: 2 }),
+  mapPrice:     decimal('map_price', { precision: 10, scale: 2 }),
+  marginPct:    decimal('margin_pct', { precision: 6, scale: 4 }),
+  reason:       text('reason').notNull(),
+  mapRespected: boolean('map_respected').notNull().default(true),
+  status:       text('status').notNull().default('pending'),
+  appliedAt:    timestamp('applied_at', { withTimezone: true }),
+  approvedBy:   text('approved_by'),
+  applyError:   text('apply_error'),
+}, t => ({
+  runDateIdx:  index('pricing_changes_run_date_idx').on(t.runDate),
+  statusIdx:   index('pricing_changes_status_idx').on(t.status),
+  variantIdx:  index('pricing_changes_variant_idx').on(t.variantId, t.proposedAt),
+  skuIdx:      index('pricing_changes_sku_idx').on(t.sku, t.proposedAt),
+}))
+
