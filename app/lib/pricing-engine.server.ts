@@ -3,6 +3,7 @@
 export interface PricingSnapshot {
   sku: string
   vendor: string | null
+  productType?: string | null
   msrp: number
   wholesale: number
   mapPrice: number | null
@@ -12,6 +13,17 @@ export interface PricingSnapshot {
   nalpacDiscountPct: number | null
   productTitle?: string
   variantTitle?: string
+}
+
+export interface PricingRules {
+  marginFloor?: number
+  highMarginDiscount?: number
+  mediumMarginDiscount?: number
+  saleSweetener?: number
+  perTypeOverrides?: Record<string, {
+    highMarginDiscount?: number
+    mediumMarginDiscount?: number
+  }>
 }
 
 export type PricingTier =
@@ -65,13 +77,14 @@ function buildResult(
   currentPrice: number,
   mapRespected: boolean,
   reason: string,
-  flags: PriceComputation['flags']
+  flags: PriceComputation['flags'],
+  effectiveMarginFloor: number
 ): PriceComputation {
   const finalPrice = round2(newPrice)
   const newCompareAt = round2(msrp)
   const margin = marginPct(finalPrice, wholesale)
   const flagsCopy = [...flags]
-  if (margin < MARGIN_FLOOR && !flagsCopy.includes('below-floor')) {
+  if (margin < effectiveMarginFloor && !flagsCopy.includes('below-floor')) {
     flagsCopy.push('below-floor')
   }
   const delta = round2(finalPrice - currentPrice)
@@ -79,9 +92,17 @@ function buildResult(
   return { tier, newPrice: finalPrice, newCompareAt, marginPct: margin, reason, mapRespected, flags: flagsCopy, delta, deltaPct }
 }
 
-export function computeTargetPrice(snapshot: PricingSnapshot): PriceComputation {
-  const { wholesale, msrp, mapPrice, currentPrice, inSaleFeed, nalpacDiscountPct, vendor } = snapshot
-  const floor = wholesale * FLOOR_MULTIPLIER
+export function computeTargetPrice(snapshot: PricingSnapshot, rules?: PricingRules): PriceComputation {
+  const { wholesale, msrp, mapPrice, currentPrice, inSaleFeed, nalpacDiscountPct, vendor, productType } = snapshot
+
+  const effectiveMarginFloor = rules?.marginFloor ?? MARGIN_FLOOR
+  const floorMultiplier = 1 / (1 - effectiveMarginFloor)
+  const floor = wholesale * floorMultiplier
+
+  const typeOverride = productType ? rules?.perTypeOverrides?.[productType] : undefined
+  const effectiveHighDiscount = typeOverride?.highMarginDiscount ?? rules?.highMarginDiscount ?? HIGH_MARGIN_DISCOUNT
+  const effectiveMediumDiscount = typeOverride?.mediumMarginDiscount ?? rules?.mediumMarginDiscount ?? MEDIUM_MARGIN_DISCOUNT
+  const effectiveSaleSweetener = rules?.saleSweetener ?? SALE_FLOW_SWEETENER
 
   // Rule 1: refuse missing data
   if (wholesale <= 0 || msrp <= 0) {
@@ -89,7 +110,7 @@ export function computeTargetPrice(snapshot: PricingSnapshot): PriceComputation 
     if (wholesale <= 0) flags.push('no-wholesale')
     if (msrp <= 0) flags.push('no-msrp')
     const reason = `Missing required data: ${flags.join(', ')}. No price change applied.`
-    return buildResult('refuse-missing-data', currentPrice, msrp > 0 ? msrp : currentPrice, wholesale, currentPrice, true, reason, flags)
+    return buildResult('refuse-missing-data', currentPrice, msrp > 0 ? msrp : currentPrice, wholesale, currentPrice, true, reason, flags, effectiveMarginFloor)
   }
 
   // Rule 2: MAP-locked vendors
@@ -103,17 +124,16 @@ export function computeTargetPrice(snapshot: PricingSnapshot): PriceComputation 
         currentPrice,
         false,
         `Vendor ${vendor} is MAP-restricted but no MAP price is set. No price change applied.`,
-        ['no-map-on-restricted']
+        ['no-map-on-restricted'],
+        effectiveMarginFloor
       )
     }
     const candidate = Math.max(mapPrice, floor)
-    // mapRespected means MAP was the binding constraint (floor did not override it)
     const mapRespected = mapPrice >= floor
     const flags: PriceComputation['flags'] = []
     const reason = `MAP-restricted vendor. newPrice = max(MAP $${mapPrice}, floor $${round2(floor)}) = $${round2(candidate)}.`
-    const result = buildResult('map-locked', candidate, msrp, wholesale, currentPrice, mapRespected, reason, flags)
+    const result = buildResult('map-locked', candidate, msrp, wholesale, currentPrice, mapRespected, reason, flags, effectiveMarginFloor)
 
-    // no-change-needed check
     if (Math.abs(result.newPrice - currentPrice) < 0.01) {
       return { ...result, tier: 'no-change-needed', reason: 'Already at target.' }
     }
@@ -127,34 +147,34 @@ export function computeTargetPrice(snapshot: PricingSnapshot): PriceComputation 
   // Rule 3: sale flow-through
   if (inSaleFeed && nalpacDiscountPct != null && nalpacDiscountPct > 0) {
     tier = 'sale-flow-through'
-    const target = msrp * (1 - nalpacDiscountPct - SALE_FLOW_SWEETENER)
+    const target = msrp * (1 - nalpacDiscountPct - effectiveSaleSweetener)
     candidate = Math.max(target, floor)
     if (candidate > target) flags.push('below-floor')
-    const reason = `Sale feed at ${Math.round(nalpacDiscountPct * 100)}% off + ${Math.round(SALE_FLOW_SWEETENER * 100)}pt sweetener. Target $${round2(target)}, floor $${round2(floor)}.`
-    const result = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason, flags)
-    return applyPostRules(result, currentPrice, wholesale, msrp)
+    const reason = `Sale feed at ${Math.round(nalpacDiscountPct * 100)}% off + ${Math.round(effectiveSaleSweetener * 100)}pt sweetener. Target $${round2(target)}, floor $${round2(floor)}.`
+    const result = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason, flags, effectiveMarginFloor)
+    return applyPostRules(result, currentPrice, wholesale, msrp, effectiveMarginFloor)
   }
 
   // Rule 4: high-margin
   if (msrp >= 2 * wholesale) {
     tier = 'high-margin'
-    const target = msrp * (1 - HIGH_MARGIN_DISCOUNT)
+    const target = msrp * (1 - effectiveHighDiscount)
     candidate = Math.max(target, floor)
     if (candidate > target) flags.push('below-floor')
-    const reason = `High margin (MSRP/wholesale ratio ${round2(msrp / wholesale)}x). ${Math.round(HIGH_MARGIN_DISCOUNT * 100)}% off MSRP = $${round2(target)}, floor $${round2(floor)}.`
-    const result = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason, flags)
-    return applyPostRules(result, currentPrice, wholesale, msrp)
+    const reason = `High margin (MSRP/wholesale ratio ${round2(msrp / wholesale)}x). ${Math.round(effectiveHighDiscount * 100)}% off MSRP = $${round2(target)}, floor $${round2(floor)}.`
+    const result = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason, flags, effectiveMarginFloor)
+    return applyPostRules(result, currentPrice, wholesale, msrp, effectiveMarginFloor)
   }
 
   // Rule 5: medium-margin
   if (msrp >= 1.5 * wholesale) {
     tier = 'medium-margin'
-    const target = msrp * (1 - MEDIUM_MARGIN_DISCOUNT)
+    const target = msrp * (1 - effectiveMediumDiscount)
     candidate = Math.max(target, floor)
     if (candidate > target) flags.push('below-floor')
-    const reason = `Medium margin (MSRP/wholesale ratio ${round2(msrp / wholesale)}x). ${Math.round(MEDIUM_MARGIN_DISCOUNT * 100)}% off MSRP = $${round2(target)}, floor $${round2(floor)}.`
-    const result = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason, flags)
-    return applyPostRules(result, currentPrice, wholesale, msrp)
+    const reason = `Medium margin (MSRP/wholesale ratio ${round2(msrp / wholesale)}x). ${Math.round(effectiveMediumDiscount * 100)}% off MSRP = $${round2(target)}, floor $${round2(floor)}.`
+    const result = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason, flags, effectiveMarginFloor)
+    return applyPostRules(result, currentPrice, wholesale, msrp, effectiveMarginFloor)
   }
 
   // Rule 6: thin-margin
@@ -162,15 +182,16 @@ export function computeTargetPrice(snapshot: PricingSnapshot): PriceComputation 
   candidate = floor
   flags.push('thin-margin')
   const reason = `Thin margin (MSRP/wholesale ratio ${round2(msrp / wholesale)}x). Pricing at floor $${round2(floor)}. Likely not worth carrying as a deal.`
-  const result = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason, flags)
-  return applyPostRules(result, currentPrice, wholesale, msrp)
+  const result = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason, flags, effectiveMarginFloor)
+  return applyPostRules(result, currentPrice, wholesale, msrp, effectiveMarginFloor)
 }
 
 function applyPostRules(
   result: PriceComputation,
   currentPrice: number,
   wholesale: number,
-  msrp: number
+  msrp: number,
+  effectiveMarginFloor: number
 ): PriceComputation {
   const { newPrice } = result
 
@@ -182,7 +203,7 @@ function applyPostRules(
   // increase-absorbed: computed price is a raise AND margin at currentPrice still >= floor
   if (newPrice > currentPrice && result.tier !== 'map-locked') {
     const currentMargin = marginPct(currentPrice, wholesale)
-    if (currentMargin >= MARGIN_FLOOR) {
+    if (currentMargin >= effectiveMarginFloor) {
       const revertedMargin = marginPct(currentPrice, wholesale)
       return {
         ...result,
@@ -190,7 +211,7 @@ function applyPostRules(
         newPrice: currentPrice,
         newCompareAt: round2(msrp),
         marginPct: revertedMargin,
-        reason: 'Wholesale rose, margin still above 20%, no change.',
+        reason: `Wholesale rose, margin still above ${Math.round(effectiveMarginFloor * 100)}%, no change.`,
         flags: [...result.flags, 'increase-absorbed'],
         delta: 0,
         deltaPct: 0,

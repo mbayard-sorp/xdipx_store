@@ -115,6 +115,14 @@ function UploadIcon() {
     </svg>
   )
 }
+function PricingIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="12" y1="1" x2="12" y2="23" />
+      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+    </svg>
+  )
+}
 function UsersIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -135,6 +143,7 @@ interface AdminUserInfo {
 const NAV_ITEMS = [
   { to: '/admin',                label: 'Dashboard',    Icon: DashboardIcon },
   { to: '/admin/deals',              label: 'Deals',            Icon: StarIcon       },
+  { to: '/admin/pricing',           label: 'Pricing',          Icon: PricingIcon    },
   { to: '/admin/checkout-upsells',  label: 'Checkout Upsells', Icon: CartUpsellIcon },
   { to: '/admin/bulk-import',       label: 'Bulk Import',      Icon: UploadIcon     },
   { to: '/admin/merge-variants',   label: 'Merge Variants',   Icon: VaultIcon      },

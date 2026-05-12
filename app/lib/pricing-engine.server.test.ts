@@ -198,6 +198,68 @@ describe('marginPct and delta', () => {
   })
 })
 
+describe('PricingRules overrides', () => {
+  it('per-type override applied for matching productType', () => {
+    // high-margin product, but with a per-type override of 50% off instead of default 35%
+    const r = computeTargetPrice(
+      base({ msrp: 100, wholesale: 40, currentPrice: 100, productType: 'Vibrator' }),
+      { perTypeOverrides: { Vibrator: { highMarginDiscount: 0.50 } } },
+    )
+    expect(r.tier).toBe('high-margin')
+    expect(r.newPrice).toBe(50)
+  })
+
+  it('global default falls through when override missing for productType', () => {
+    // productType Wand has no override, falls back to global highMarginDiscount 0.40
+    const r = computeTargetPrice(
+      base({ msrp: 100, wholesale: 40, currentPrice: 100, productType: 'Wand' }),
+      { highMarginDiscount: 0.40, perTypeOverrides: { Vibrator: { highMarginDiscount: 0.50 } } },
+    )
+    expect(r.tier).toBe('high-margin')
+    expect(r.newPrice).toBe(60)
+  })
+
+  it('floor multiplier scales with non-default marginFloor', () => {
+    // 25% margin floor: floor = wholesale / (1 - 0.25) = 40 / 0.75 = 53.33
+    // high-margin 35% off target = 65, which is > 53.33, so newPrice = 65
+    const r = computeTargetPrice(
+      base({ msrp: 100, wholesale: 40, currentPrice: 100 }),
+      { marginFloor: 0.25 },
+    )
+    expect(r.tier).toBe('high-margin')
+    expect(r.newPrice).toBe(65)
+    // with a tighter floor: wholesale $70, floor = 70/0.75 = 93.33, msrp $100
+    // 100 >= 2*70 is false, 100 >= 1.5*70=105 is false -> thin margin, newPrice = 93.33
+    const r2 = computeTargetPrice(
+      base({ msrp: 100, wholesale: 70, currentPrice: 100 }),
+      { marginFloor: 0.25 },
+    )
+    expect(r2.tier).toBe('thin-margin')
+    expect(r2.newPrice).toBeCloseTo(70 / 0.75, 2)
+  })
+
+  it('empty perTypeOverrides object falls back to global', () => {
+    const r = computeTargetPrice(
+      base({ msrp: 100, wholesale: 40, currentPrice: 100, productType: 'Lube' }),
+      { highMarginDiscount: 0.45, perTypeOverrides: {} },
+    )
+    expect(r.tier).toBe('high-margin')
+    expect(r.newPrice).toBe(55)
+  })
+
+  it('override with only mediumMarginDiscount leaves high discount as global', () => {
+    // productType Lube: override only medium to 0.10, high stays at global default 0.35
+    // msrp $100, wholesale $60 -> ratio 1.67x -> medium-margin tier
+    // target = 100 * (1 - 0.10) = $90, floor = 60 / 0.80 = $75 -> newPrice $90
+    const r = computeTargetPrice(
+      base({ msrp: 100, wholesale: 60, currentPrice: 100, productType: 'Lube' }),
+      { perTypeOverrides: { Lube: { mediumMarginDiscount: 0.10 } } },
+    )
+    expect(r.tier).toBe('medium-margin')
+    expect(r.newPrice).toBe(90)
+  })
+})
+
 describe('mapRespected flag on Playground floor override', () => {
   it('mapRespected is false when floor overrides MAP', () => {
     // MAP $50, wholesale $50, floor $62.50 -> floor > MAP, mapRespected false
