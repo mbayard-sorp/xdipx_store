@@ -6,7 +6,6 @@ import { pricingChanges } from '../../db/schema'
 import { requireAdmin, getAdminUser } from '~/lib/session.server'
 import { getApprovalMode, getPricingRules, getCachedProductTypes } from '~/lib/pricing-agent.server'
 import { getPipelineSettingPublic, getWebhookActivityToday } from '~/lib/pricing-webhook.server'
-import { HIGH_MARGIN_DISCOUNT, MEDIUM_MARGIN_DISCOUNT, MARGIN_FLOOR } from '~/lib/pricing-engine.server'
 import type { MarkupSuggestion } from '~/lib/pricing-suggestions.server'
 import { and, desc, sql } from 'drizzle-orm'
 
@@ -107,6 +106,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     pricingRules,
     productTypes,
     productTypesRefreshedAt,
+    pricingDefaults: {
+      marginFloor: 0.20,
+      highMarginDiscount: 0.35,
+      mediumMarginDiscount: 0.20,
+    },
   }
 }
 
@@ -450,10 +454,12 @@ function PricingRulesCard({
   pricingRules,
   productTypes,
   productTypesRefreshedAt,
+  pricingDefaults,
 }: {
   pricingRules: PricingRulesData
   productTypes: ProductTypesData
   productTypesRefreshedAt: string | null
+  pricingDefaults: { marginFloor: number; highMarginDiscount: number; mediumMarginDiscount: number }
 }) {
   const defaultsFetcher = useFetcher<{ ok: boolean; error?: string }>()
   const overridesFetcher = useFetcher<{ ok: boolean; error?: string }>()
@@ -461,13 +467,13 @@ function PricingRulesCard({
   const refreshFetcher = useFetcher<{ ok: boolean; count?: number; refreshedAt?: string; error?: string }>()
 
   const [marginFloorInput, setMarginFloorInput] = useState(
-    String(Math.round((pricingRules.marginFloor ?? MARGIN_FLOOR) * 100)),
+    String(Math.round((pricingRules.marginFloor ?? pricingDefaults.marginFloor) * 100)),
   )
   const [highInput, setHighInput] = useState(
-    String(Math.round((pricingRules.highMarginDiscount ?? HIGH_MARGIN_DISCOUNT) * 100)),
+    String(Math.round((pricingRules.highMarginDiscount ?? pricingDefaults.highMarginDiscount) * 100)),
   )
   const [mediumInput, setMediumInput] = useState(
-    String(Math.round((pricingRules.mediumMarginDiscount ?? MEDIUM_MARGIN_DISCOUNT) * 100)),
+    String(Math.round((pricingRules.mediumMarginDiscount ?? pricingDefaults.mediumMarginDiscount) * 100)),
   )
 
   // per-type overrides: productType -> { high: string, medium: string }
@@ -874,6 +880,7 @@ export default function AdminPricingPage() {
         pricingRules={data.pricingRules}
         productTypes={data.productTypes}
         productTypesRefreshedAt={data.productTypesRefreshedAt}
+        pricingDefaults={data.pricingDefaults}
       />
 
       {/* Webhook card */}

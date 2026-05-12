@@ -809,6 +809,7 @@ __export(shopify_server_exports, {
   getDailyDeal: () => getDailyDeal,
   getDealByHandle: () => getDealByHandle,
   getDealByShopifyId: () => getDealByShopifyId,
+  getDistinctProductTypes: () => getDistinctProductTypes,
   getHandleByProductId: () => getHandleByProductId,
   getLiveDealHandle: () => getLiveDealHandle,
   getMainMenu: () => getMainMenu,
@@ -4366,6 +4367,7 @@ function parsePricingSnapshot(raw) {
     handle: raw.handle,
     title: raw.title,
     vendor: raw.vendor ?? null,
+    productType: raw.productType ?? null,
     variants,
     metafields: {
       nalpacSku: mfMap.get("nalpac_sku") ?? null,
@@ -4419,6 +4421,7 @@ async function findVariantsBySkus(skus) {
         handle: node.product.handle,
         title: node.product.title,
         vendor: node.product.vendor ?? null,
+        productType: node.product.productType ?? null,
         variant: {
           variantId: node.id,
           sku: node.sku ?? "",
@@ -4439,7 +4442,34 @@ async function findVariantsBySkus(skus) {
   }
   return results;
 }
-var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, VARIANTS_BY_SKU_QUERY;
+async function getDistinctProductTypes(opts) {
+  if (!opts?.force) {
+    const cached2 = await kvGet(PRODUCT_TYPES_CACHE_KEY);
+    if (cached2) return cached2;
+  }
+  const counts = /* @__PURE__ */ new Map();
+  let cursor = null;
+  let pages = 0;
+  const MAX_PAGES = 20;
+  do {
+    const data = await adminGraphQL(PRODUCT_TYPES_QUERY, {
+      first: 250,
+      after: cursor ?? null
+    });
+    for (const node of data.products.nodes) {
+      const pt = node.productType?.trim();
+      if (pt) {
+        counts.set(pt, (counts.get(pt) ?? 0) + 1);
+      }
+    }
+    cursor = data.products.pageInfo.hasNextPage ? data.products.pageInfo.endCursor ?? null : null;
+    pages++;
+  } while (cursor !== null && pages < MAX_PAGES);
+  const result = Array.from(counts.entries()).map(([productType, count]) => ({ productType, count })).sort((a, b) => b.count - a.count);
+  await kvSet(PRODUCT_TYPES_CACHE_KEY, result, PRODUCT_TYPES_CACHE_TTL);
+  return result;
+}
+var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, VARIANTS_BY_SKU_QUERY, PRODUCT_TYPES_QUERY, PRODUCT_TYPES_CACHE_KEY, PRODUCT_TYPES_CACHE_TTL;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
     "use strict";
@@ -4709,6 +4739,7 @@ var init_shopify_server = __esm({
         handle
         title
         vendor
+        productType
         variants(first: 100) {
           nodes {
             id
@@ -4753,6 +4784,7 @@ var init_shopify_server = __esm({
           handle
           title
           vendor
+          productType
           metafields(identifiers: [
             { namespace: "xdipx", key: "nalpac_sku" }
             { namespace: "xdipx", key: "wholesale_cost" }
@@ -4769,6 +4801,21 @@ var init_shopify_server = __esm({
     }
   }
 `;
+    PRODUCT_TYPES_QUERY = `
+  query ProductTypes($first: Int!, $after: String) {
+    products(first: $first, after: $after) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        productType
+      }
+    }
+  }
+`;
+    PRODUCT_TYPES_CACHE_KEY = "shopify:distinct-product-types";
+    PRODUCT_TYPES_CACHE_TTL = 60 * 60;
   }
 });
 
