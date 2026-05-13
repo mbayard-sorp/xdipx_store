@@ -1245,7 +1245,15 @@ function WebhookCard({ webhook }: { webhook: LoaderData['webhook'] }) {
 export default function AdminPricingPage() {
   const data = useLoaderData<typeof loader>()
   const auditFetcher = useFetcher<{ ok: boolean; error?: string }>()
-  const runFetcher = useFetcher<{ ok: boolean; scanned?: number; applied?: number; error?: string }>()
+  const runFetcher = useFetcher<{
+    ok: boolean
+    scanned?: number
+    applied?: number
+    pending?: number
+    failed?: number
+    changesProposed?: number
+    error?: string
+  }>()
   const [autoExpanded, setAutoExpanded] = useState(false)
 
   const isRunning = runFetcher.state !== 'idle'
@@ -1298,7 +1306,17 @@ export default function AdminPricingPage() {
       {runFetcher.data && (
         <div className={`rounded-2xl px-5 py-3 text-sm border ${runFetcher.data.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-600'}`}>
           {runFetcher.data.ok
-            ? `Review complete. Scanned ${runFetcher.data.scanned ?? '?'}, applied ${runFetcher.data.applied ?? '?'}.`
+            ? (() => {
+                const d = runFetcher.data
+                const parts = [
+                  `scanned ${d.scanned ?? '?'}`,
+                  `proposed ${d.changesProposed ?? 0}`,
+                  `auto-applied ${d.applied ?? 0}`,
+                  `pending ${d.pending ?? 0}`,
+                ]
+                if ((d.failed ?? 0) > 0) parts.push(`failed ${d.failed}`)
+                return `Review complete: ${parts.join(', ')}.`
+              })()
             : `Error: ${runFetcher.data.error ?? 'Unknown error'}`}
         </div>
       )}
