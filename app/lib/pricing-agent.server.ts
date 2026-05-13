@@ -392,11 +392,16 @@ export async function runDailyPriceReview(opts: RunOptions): Promise<RunResult> 
       }
     }
 
-    // Bulk insert
+    // Bulk insert — chunk to stay under the Neon HTTP request size cap.
+    // 100 rows * ~20 cols of mostly-short values comfortably fits.
     let changeIds: number[] = []
     if (rows.length > 0) {
-      const inserted = await db.insert(pricingChanges).values(rows).returning({ id: pricingChanges.id })
-      changeIds = inserted.map((r) => r.id)
+      const CHUNK = 100
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const slice = rows.slice(i, i + CHUNK)
+        const inserted = await db.insert(pricingChanges).values(slice).returning({ id: pricingChanges.id })
+        changeIds.push(...inserted.map((r) => r.id))
+      }
     }
 
     // Build report

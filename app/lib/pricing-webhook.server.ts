@@ -218,7 +218,11 @@ export async function processNalpacCostChanges(
   }
 
   if (rows.length > 0) {
-    await db.insert(pricingChanges).values(rows)
+    // Chunk to stay under the Neon HTTP request size cap.
+    const CHUNK = 100
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      await db.insert(pricingChanges).values(rows.slice(i, i + CHUNK))
+    }
     result.changesCreated = rows.length
   }
 
