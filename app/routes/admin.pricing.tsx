@@ -824,14 +824,30 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
             const effectiveFloor = gVals.marginFloorPct ?? globalRule.marginFloorPct
             const effectiveMap = gVals.mapBehavior ?? globalRule.mapBehavior ?? 'at_map'
 
-            // Count descendant overrides
+            // Count descendant overrides — only fields that DIFFER from the
+            // resolved parent (sub_group->group->global) count.
+            const fieldKeys: (keyof GroupRuleValues)[] = [
+              'targetMarginPct', 'marginFloorPct', 'mapBehavior',
+              'compareAtStrategy', 'velocityModifierEnabled',
+            ]
+            const trulyOverrides = (
+              own: GroupRuleValues,
+              parents: GroupRuleValues[],
+            ): boolean => {
+              for (const f of fieldKeys) {
+                if (own[f] == null) continue
+                const inh = parents.find(p => p[f] != null)?.[f] ?? null
+                if (own[f] !== inh) return true
+              }
+              return false
+            }
             let descendantOverrideCount = 0
             for (const sg of group.subGroups) {
               const sgV = edits[getEditKey('sub_group', sg.id)] ?? sg.rule
-              if (Object.values(sgV).some(v => v != null)) descendantOverrideCount++
+              if (trulyOverrides(sgV, [gVals, globalRule])) descendantOverrideCount++
               for (const pt of sg.productTypes) {
                 const ptV = edits[getEditKey('product_type', pt.productType)] ?? pt.rule
-                if (Object.values(ptV).some(v => v != null)) descendantOverrideCount++
+                if (trulyOverrides(ptV, [sgV, gVals, globalRule])) descendantOverrideCount++
               }
             }
 
@@ -875,16 +891,21 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
                       <p className="font-semibold text-ink mb-2">Active overrides in {group.name}:</p>
                       {group.subGroups.map(sg => {
                         const sgV = edits[getEditKey('sub_group', sg.id)] ?? sg.rule
-                        const sgHas = Object.values(sgV).some(v => v != null)
+                        const sgHas = trulyOverrides(sgV, [gVals, globalRule])
+                        const sgDiff = (own: GroupRuleValues, parents: GroupRuleValues[]) =>
+                          fieldKeys.filter(f => {
+                            if (own[f] == null) return false
+                            const inh = parents.find(p => p[f] != null)?.[f] ?? null
+                            return own[f] !== inh
+                          }).map(f => `${f}=${own[f]}`).join(', ')
                         return (
                           <div key={sg.id}>
-                            {sgHas && <div className="text-muted">Sub-group <span className="text-ink font-medium">{sg.name}</span>: {Object.entries(sgV).filter(([,v]) => v != null).map(([k,v]) => `${k}=${v}`).join(', ')}</div>}
+                            {sgHas && <div className="text-muted">Sub-group <span className="text-ink font-medium">{sg.name}</span>: {sgDiff(sgV, [gVals, globalRule])}</div>}
                             {sg.productTypes.map(pt => {
                               const ptV = edits[getEditKey('product_type', pt.productType)] ?? pt.rule
-                              const ptHas = Object.values(ptV).some(v => v != null)
-                              if (!ptHas) return null
+                              if (!trulyOverrides(ptV, [sgV, gVals, globalRule])) return null
                               return (
-                                <div key={pt.productType} className="ml-3 text-muted">Type <span className="text-ink font-medium">{pt.productType}</span>: {Object.entries(ptV).filter(([,v]) => v != null).map(([k,v]) => `${k}=${v}`).join(', ')}</div>
+                                <div key={pt.productType} className="ml-3 text-muted">Type <span className="text-ink font-medium">{pt.productType}</span>: {sgDiff(ptV, [sgV, gVals, globalRule])}</div>
                               )
                             })}
                           </div>
@@ -958,7 +979,16 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
                             </svg>
                           </button>
                           <span className="text-sm text-ink">{sg.name}</span>
-                          {sg.hasOverrides && <span className="text-[10px] text-coral">overrides</span>}
+                          {(() => {
+                            const sgTrue = trulyOverrides(sgVals, [gVals, globalRule])
+                            const anyPtTrue = sg.productTypes.some(pt => {
+                              const ptV = edits[getEditKey('product_type', pt.productType)] ?? pt.rule
+                              return trulyOverrides(ptV, [sgVals, gVals, globalRule])
+                            })
+                            return (sgTrue || anyPtTrue)
+                              ? <span className="text-[10px] text-coral">overrides</span>
+                              : null
+                          })()}
                         </div>
 
                         {sgExpanded && (
