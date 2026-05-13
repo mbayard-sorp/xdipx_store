@@ -540,9 +540,16 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
   const dryRunFetcher = useFetcher<DryRunData & { ok: boolean }>()
   const saveFetcher = useFetcher<{ ok: boolean; patched?: number; error?: string }>()
   const suggestFetcher = useFetcher<SuggestResult>()
+  const importFetcher = useFetcher<{
+    ok: boolean
+    patches?: Array<Record<string, unknown>>
+    errors?: Array<{ line: number; reason: string }>
+    error?: string
+  }>()
 
   const [showConfirm, setShowConfirm] = useState(false)
   const pendingPatchesRef = useRef<unknown[]>([])
+  const importFileRef = useRef<HTMLInputElement | null>(null)
 
   function getEditKey(scopeLevel: string, scopeId: string) {
     return `${scopeLevel}:${scopeId}`
@@ -596,6 +603,28 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
     )
     setShowConfirm(true)
   }
+
+  function onImportFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const fd = new FormData()
+    fd.append('file', file)
+    importFetcher.submit(fd, { method: 'post', action: '/api/pricing/import-rules', encType: 'multipart/form-data' })
+    e.target.value = ''
+  }
+
+  // When import returns parsed patches, dry-run them and open the confirm modal.
+  useEffect(() => {
+    if (importFetcher.state !== 'idle') return
+    const data = importFetcher.data
+    if (!data?.ok || !data.patches || data.patches.length === 0) return
+    pendingPatchesRef.current = data.patches
+    dryRunFetcher.submit(
+      JSON.stringify({ overrides: data.patches }),
+      { method: 'post', action: '/api/pricing/dry-run', encType: 'application/json' },
+    )
+    setShowConfirm(true)
+  }, [importFetcher.state, importFetcher.data, dryRunFetcher])
 
   function confirmSave() {
     saveFetcher.submit(
@@ -675,6 +704,27 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
             Pricing Rules
           </h2>
           <div className="flex items-center gap-3">
+            <a
+              href="/api/pricing/export-rules"
+              className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-full text-ink hover:border-coral hover:text-coral transition-colors"
+            >
+              Export CSV
+            </a>
+            <input
+              ref={importFileRef}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={onImportFileChange}
+              className="hidden"
+            />
+            <button
+              type="button"
+              disabled={importFetcher.state !== 'idle'}
+              onClick={() => importFileRef.current?.click()}
+              className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-full text-ink hover:border-coral hover:text-coral transition-colors disabled:opacity-50"
+            >
+              {importFetcher.state !== 'idle' ? 'Importing...' : 'Import CSV'}
+            </button>
             <button
               type="button"
               disabled={isSuggesting}
@@ -703,6 +753,24 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
             )}
           </div>
         </div>
+
+        {importFetcher.data?.ok === false && (
+          <div className="px-5 py-3 text-xs space-y-1 border-b border-line">
+            <p className="text-red-500">
+              Import failed{importFetcher.data.error ? `: ${importFetcher.data.error}` : '.'}
+            </p>
+            {importFetcher.data.errors && importFetcher.data.errors.length > 0 && (
+              <ul className="text-muted list-disc pl-5">
+                {importFetcher.data.errors.slice(0, 10).map((e, i) => (
+                  <li key={i}>line {e.line}: {e.reason}</li>
+                ))}
+                {importFetcher.data.errors.length > 10 && (
+                  <li>...and {importFetcher.data.errors.length - 10} more</li>
+                )}
+              </ul>
+            )}
+          </div>
+        )}
 
         {/* AI debug panel */}
         {suggestFetcher.data?.ok === false && (
