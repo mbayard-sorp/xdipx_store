@@ -1250,8 +1250,12 @@ export default function AdminPricingPage() {
     scanned?: number
     applied?: number
     pending?: number
-    failed?: number
+    rejected?: number
+    skipped?: number
+    missingCost?: number
+    errors?: number
     changesProposed?: number
+    durationMs?: number
     error?: string
   }>()
   const [autoExpanded, setAutoExpanded] = useState(false)
@@ -1309,13 +1313,15 @@ export default function AdminPricingPage() {
             ? (() => {
                 const d = runFetcher.data
                 const parts = [
-                  `scanned ${d.scanned ?? '?'}`,
-                  `proposed ${d.changesProposed ?? 0}`,
+                  `scanned ${d.scanned ?? 0}`,
                   `auto-applied ${d.applied ?? 0}`,
                   `pending ${d.pending ?? 0}`,
                 ]
-                if ((d.failed ?? 0) > 0) parts.push(`failed ${d.failed}`)
-                return `Review complete: ${parts.join(', ')}.`
+                if ((d.rejected ?? 0) > 0) parts.push(`rejected ${d.rejected}`)
+                if ((d.missingCost ?? 0) > 0) parts.push(`no-cost ${d.missingCost}`)
+                if ((d.errors ?? 0) > 0) parts.push(`errors ${d.errors}`)
+                const secs = d.durationMs != null ? ` (${(d.durationMs / 1000).toFixed(1)}s)` : ''
+                return `Review complete: ${parts.join(', ')}${secs}.`
               })()
             : `Error: ${runFetcher.data.error ?? 'Unknown error'}`}
         </div>

@@ -530,12 +530,19 @@ export interface RecomputeCatalogResult {
   skipped:       number
   rejected:      number
   errors:        number
+  missingCost:   number
   durationMs:    number
 }
 
 /**
- * Iterate all Shopify variants (paginated via bulkFetchProductsForPricing)
- * and recompute each. Returns aggregate counts.
+ * Iterate all Shopify variants from a single bulk fetch (no per-variant
+ * round trips) and recompute each. Writes audit rows in chunks to clear the
+ * Neon HTTP request size cap. Applies Shopify price updates for
+ * status=auto_applied with bounded concurrency.
+ *
+ * Velocity is skipped in this bulk path: per-variant order queries would
+ * explode wall time. Groups with velocity_modifier_enabled compute against
+ * the unshifted target. Run a separate velocity warmup if that matters.
  */
 export async function recomputeCatalog(opts: {
   trigger: 'batch' | 'manual'
@@ -544,29 +551,150 @@ export async function recomputeCatalog(opts: {
   const startedAt = Date.now()
 
   const counts: RecomputeCatalogResult = {
-    total: 0, autoApplied: 0, pending: 0, skipped: 0, rejected: 0, errors: 0, durationMs: 0,
+    total: 0, autoApplied: 0, pending: 0, skipped: 0, rejected: 0, errors: 0, missingCost: 0, durationMs: 0,
   }
 
   const products = await bulkFetchProductsForPricing()
+  const mode = await getApprovalMode()
+
+  // Cache resolved configs and group info per product type to avoid repeated DB hits.
+  const cfgCache = new Map<string, Awaited<ReturnType<typeof resolvePricingConfig>>>()
+  const groupCache = new Map<string, Awaited<ReturnType<typeof getGroupForProductType>>>()
+
+  type AuditRow = typeof pricingAuditLog.$inferInsert
+  type ApplyJob = { variantId: string; newSell: number; newCompare: number | null; auditIndex: number }
+
+  const auditRows: AuditRow[] = []
+  const applyQueue: ApplyJob[] = []
 
   for (const product of products) {
+    const pt = (product as { productType?: string | null }).productType ?? null
+    const ptKey = pt ?? '__null__'
+
+    let cfg = cfgCache.get(ptKey)
+    if (!cfg) { cfg = await resolvePricingConfig(pt); cfgCache.set(ptKey, cfg) }
+    let group = groupCache.get(ptKey)
+    if (group === undefined) { group = await getGroupForProductType(pt); groupCache.set(ptKey, group) }
+
+    const isDiscontinued = group?.usesClearanceLadder === true || pt === 'Discontinued'
+
     for (const variant of product.variants) {
       counts.total++
+
+      const cost = product.metafields.wholesaleCost
+      const map = product.metafields.mapPrice
+      const msrp = product.metafields.originalPrice
+      const oldSell = variant.price
+      const oldCompare = variant.compareAtPrice
+
+      if (cost == null) { counts.missingCost++; counts.skipped++; continue }
+
+      let newSell: number | null = null
+      let newCompare: number | null = null
+
+      if (isDiscontinued) {
+        const r = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: 0, cfg })
+        if (r) { newSell = r.sell; newCompare = r.compare_at }
+      } else {
+        const r = computePrice({ cost, map, msrp, cfg })
+        if (r) { newSell = r.sell; newCompare = r.compare_at }
+      }
+
+      if (newSell == null) { counts.skipped++; continue }
+
+      const marginAfter = newSell > 0 ? (newSell - cost) / newSell : 0
+      const marginBefore = oldSell > 0 ? (oldSell - cost) / oldSell : 0
+
+      const status = decideStatus({
+        oldPrice: oldSell,
+        newPrice: newSell,
+        map,
+        mapBehavior: cfg.map_behavior,
+        marginFloor: cfg.margin_floor_pct,
+        marginAfter,
+        mode,
+      })
+
+      const deltaPct = oldSell > 0 ? (newSell - oldSell) / oldSell : null
+      const rationale = buildRationale({
+        oldCost: cost,
+        newCost: cost,
+        oldSell,
+        newSell,
+        status,
+        trigger: opts.trigger,
+        mapHeld: map != null && newSell <= map + 0.02,
+        marginAfter,
+        ...(map != null ? { map } : {}),
+        ...(deltaPct != null ? { deltaPct } : {}),
+        approvalThreshold: MODE_THRESHOLD[mode],
+      })
+
+      auditRows.push({
+        variantId: variant.variantId,
+        sku: variant.sku || null,
+        productType: pt,
+        groupId: group?.groupId ?? null,
+        subGroupId: group?.subGroupId ?? null,
+        trigger: opts.trigger,
+        oldCost: String(cost),
+        newCost: String(cost),
+        oldMap: map != null ? String(map) : null,
+        newMap: map != null ? String(map) : null,
+        oldMsrp: msrp != null ? String(msrp) : null,
+        newMsrp: msrp != null ? String(msrp) : null,
+        oldSell: String(oldSell),
+        newSell: String(newSell),
+        oldCompareAt: oldCompare != null ? String(oldCompare) : null,
+        newCompareAt: newCompare != null ? String(newCompare) : null,
+        marginBefore: String(Math.round(marginBefore * 10000) / 10000),
+        marginAfter: String(Math.round(marginAfter * 10000) / 10000),
+        status,
+        rationale,
+      })
+
+      if      (status === 'auto_applied')      { counts.autoApplied++; applyQueue.push({ variantId: variant.variantId, newSell, newCompare, auditIndex: auditRows.length - 1 }) }
+      else if (status === 'pending')           counts.pending++
+      else if (status === 'rejected')          counts.rejected++
+      else                                     counts.skipped++
+    }
+  }
+
+  // Chunked audit insert to clear the Neon HTTP request size cap.
+  if (auditRows.length > 0) {
+    const CHUNK = 100
+    for (let i = 0; i < auditRows.length; i += CHUNK) {
       try {
-        const result = await recomputeVariant({
-          variantId: variant.variantId,
-          trigger: opts.trigger,
-        })
-        if (result.error)                            counts.errors++
-        else if (result.status === 'auto_applied')   counts.autoApplied++
-        else if (result.status === 'pending')        counts.pending++
-        else if (result.status === 'rejected')       counts.rejected++
-        else                                         counts.skipped++
+        await db.insert(pricingAuditLog).values(auditRows.slice(i, i + CHUNK))
       } catch (err) {
-        counts.errors++
-        console.error('[pricing-batch] variant error', variant.variantId, err)
+        console.error('[pricing-batch] audit insert chunk failed:', err)
+        counts.errors += Math.min(CHUNK, auditRows.length - i)
       }
     }
+  }
+
+  // Push Shopify price updates for auto_applied with limited concurrency.
+  if (applyQueue.length > 0) {
+    const CONCURRENCY = 8
+    let i = 0
+    async function worker() {
+      while (i < applyQueue.length) {
+        const job = applyQueue[i++]
+        if (!job) return
+        try {
+          await updateVariantPricing(
+            job.variantId,
+            String(job.newSell),
+            job.newCompare != null ? String(job.newCompare) : String(job.newSell),
+          )
+        } catch (err) {
+          counts.errors++
+          counts.autoApplied--
+          console.error('[pricing-batch] shopify update failed', job.variantId, err)
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker))
   }
 
   counts.durationMs = Date.now() - startedAt
