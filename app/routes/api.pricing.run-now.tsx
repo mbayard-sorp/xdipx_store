@@ -7,7 +7,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
   try {
     const result = await runDailyPriceReview({ source: 'manual', dryRun: false })
-    return Response.json(result)
+    return Response.json({
+      ok: true,
+      scanned: result.variantsScanned,
+      applied: result.changesAutoApplied,
+      pending: result.changesPending,
+      failed: result.changesFailed,
+      ...result,
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.toLowerCase().includes('lock')) {
