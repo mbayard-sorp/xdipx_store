@@ -6,6 +6,7 @@ import { kvGet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import { orchestrateDealPipeline } from '~/lib/deal-pipeline.server'
 import { shopifyAdmin } from '~/lib/shopify.server'
 import { upsertProductPage } from '~/lib/sanity.server'
+import { resolveGa4, invalidateGa4Cache } from '~/lib/ga4-config.server'
 
 export const meta: MetaFunction = () => [{ title: 'Pipeline Settings — xdipx Admin' }]
 
@@ -37,10 +38,13 @@ export async function loader(_: LoaderFunctionArgs) {
   const feedTimestamp = await kvGet<string>(KV_KEYS.feedCacheTimestamp)
   const candidates    = await kvGet<unknown[]>('feed:top-candidates')
 
+  const ga4 = await resolveGa4()
+
   return {
     settings,
     feedTimestamp,
     candidateCount: candidates?.length ?? 0,
+    ga4,
   }
 }
 
@@ -66,7 +70,66 @@ export async function action({ request }: ActionFunctionArgs) {
       await kvDel(KV_KEYS.feedCacheTimestamp)
     }
 
+    // Changing the GA4 measurement ID invalidates the resolver cache so the
+    // new value is picked up on the next SSR render rather than waiting for
+    // the 5-min TTL.
+    if (key === 'ga4MeasurementId') {
+      await invalidateGa4Cache()
+    }
+
     return { ok: true, saved: key }
+  }
+
+  if (intent === 'ga4-ping') {
+    const ga4 = await resolveGa4()
+    if (!ga4.id) {
+      return { ok: false, ga4Ping: { ok: false, error: 'No GA4 measurement ID configured.' } }
+    }
+    // GA4 Measurement Protocol heartbeat. Requires an API Secret created in
+    // GA4 Admin → Data Streams → Web → Measurement Protocol API secrets.
+    // Without it we can still validate the gtag.js URL is reachable.
+    const apiSecret = process.env['GA4_API_SECRET']?.trim()
+    try {
+      // Always validate the gtag.js URL is reachable from this region.
+      const gtagRes = await fetch(`https://www.googletagmanager.com/gtag/js?id=${ga4.id}`, { method: 'HEAD' })
+      const gtagOk = gtagRes.ok
+
+      let mpOk: boolean | null = null
+      let mpStatus: number | null = null
+      if (apiSecret) {
+        const mpRes = await fetch(
+          `https://www.google-analytics.com/mp/collect?measurement_id=${ga4.id}&api_secret=${apiSecret}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              client_id: `admin-health-${Date.now()}`,
+              events: [{ name: 'admin_health_check', params: { source: 'admin_settings' } }],
+            }),
+          },
+        )
+        mpOk = mpRes.ok
+        mpStatus = mpRes.status
+      }
+
+      return {
+        ok: true,
+        ga4Ping: {
+          ok: gtagOk && (mpOk === null || mpOk === true),
+          measurementId: ga4.id,
+          source: ga4.source,
+          gtagOk,
+          gtagStatus: gtagRes.status,
+          mpOk,
+          mpStatus,
+          hasApiSecret: Boolean(apiSecret),
+          checkedAt: new Date().toISOString(),
+        },
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, ga4Ping: { ok: false, error: msg } }
+    }
   }
 
   if (intent === 'run-pipeline') {
@@ -126,9 +189,25 @@ export async function action({ request }: ActionFunctionArgs) {
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AdminSettingsPage() {
-  const { settings, feedTimestamp, candidateCount } = useLoaderData<typeof loader>()
+  const { settings, feedTimestamp, candidateCount, ga4 } = useLoaderData<typeof loader>()
   const fetcher         = useFetcher<typeof action>()
   const pipelineFetcher = useFetcher<typeof action>()
+  const ga4Fetcher      = useFetcher<typeof action>()
+
+  const ga4Ping = ga4Fetcher.data && 'ga4Ping' in ga4Fetcher.data
+    ? (ga4Fetcher.data as { ga4Ping: {
+        ok: boolean
+        error?: string
+        measurementId?: string
+        source?: string
+        gtagOk?: boolean
+        gtagStatus?: number
+        mpOk?: boolean | null
+        mpStatus?: number | null
+        hasApiSecret?: boolean
+        checkedAt?: string
+      } }).ga4Ping
+    : null
 
   const pipelineResult = pipelineFetcher.data && 'pipeline' in pipelineFetcher.data
     ? pipelineFetcher.data.pipeline
@@ -206,10 +285,85 @@ export default function AdminSettingsPage() {
           Analytics
         </h2>
 
+        {/* Health badge — shows where the active GA4 ID is being resolved from
+            so a misconfigured Vercel env var (the most recent outage cause)
+            is visible at a glance. */}
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-cream-2 px-4 py-3 text-sm">
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-block w-2 h-2 rounded-full ${
+                ga4.source === 'none' ? 'bg-coral' : 'bg-sage'
+              }`}
+            />
+            <span className="text-ink/70">
+              GA4 active:{' '}
+              <span className="font-mono text-ink">
+                {ga4.id || '(none)'}
+              </span>
+            </span>
+            <span className="text-ink/40">
+              ·{' '}
+              {ga4.source === 'env'
+                ? 'from GA4_MEASUREMENT_ID env var'
+                : ga4.source === 'db'
+                  ? 'from pipeline_settings (DB)'
+                  : 'not configured — analytics disabled'}
+            </span>
+          </div>
+          <ga4Fetcher.Form method="post">
+            <input type="hidden" name="intent" value="ga4-ping" />
+            <button
+              type="submit"
+              disabled={ga4Fetcher.state !== 'idle' || !ga4.id}
+              className="text-xs font-semibold px-3 py-1.5 bg-cream-2 text-sage rounded-full hover:bg-sage/10 transition-colors disabled:opacity-40"
+            >
+              {ga4Fetcher.state !== 'idle' ? 'Pinging…' : 'Run health check'}
+            </button>
+          </ga4Fetcher.Form>
+        </div>
+
+        {ga4Ping && (
+          <div
+            className={`rounded-xl px-4 py-3 text-xs space-y-1 ${
+              ga4Ping.ok ? 'bg-sage/10 text-ink' : 'bg-coral/10 text-ink'
+            }`}
+          >
+            {ga4Ping.error ? (
+              <div>Error: {ga4Ping.error}</div>
+            ) : (
+              <>
+                <div>
+                  gtag.js load:{' '}
+                  <span className="font-mono">
+                    {ga4Ping.gtagOk ? 'OK' : 'FAIL'} ({ga4Ping.gtagStatus})
+                  </span>
+                </div>
+                <div>
+                  Measurement Protocol:{' '}
+                  {ga4Ping.hasApiSecret ? (
+                    <span className="font-mono">
+                      {ga4Ping.mpOk ? 'OK' : 'FAIL'} ({ga4Ping.mpStatus})
+                    </span>
+                  ) : (
+                    <span className="text-ink/50">
+                      skipped — set GA4_API_SECRET env var to enable
+                    </span>
+                  )}
+                </div>
+                {ga4Ping.checkedAt && (
+                  <div className="text-ink/40">
+                    Checked {new Date(ga4Ping.checkedAt).toLocaleString()}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         <SaveForm
           label="GA4 Measurement ID"
           settingKey="ga4MeasurementId"
-          description="Google Analytics 4 measurement ID (e.g. G-XXXXXXXXXX). Used for the storefront data layer."
+          description="Google Analytics 4 measurement ID (e.g. G-XXXXXXXXXX). Used as a fallback when the GA4_MEASUREMENT_ID env var is empty."
         />
       </section>
 

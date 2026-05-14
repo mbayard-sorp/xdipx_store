@@ -8,6 +8,7 @@ import {
   ScrollRestoration,
   useLoaderData,
   useRouteError,
+  useRouteLoaderData,
 } from 'react-router'
 import type { LoaderFunctionArgs, LinksFunction } from 'react-router'
 
@@ -15,6 +16,7 @@ import * as Sentry from '@sentry/react'
 import { BotIdClient } from 'botid/client'
 import stylesheet from './app.css?url'
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
+import { resolveGa4 } from '~/lib/ga4-config.server'
 
 const BOTID_PROTECTED_ROUTES = [
   { path: '/api/waitlist',  method: 'POST' },
@@ -83,11 +85,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const refCode = url.searchParams.get('ref')
 
+  const ga4 = await resolveGa4()
+
   return {
     utm,
     refCode,
     ENV: {
-      GA4_ID:            process.env['GA4_MEASUREMENT_ID'] ?? '',
+      GA4_ID:            ga4.id,
+      GA4_SOURCE:        ga4.source,
       GTM_ID:            process.env['GTM_CONTAINER_ID']   ?? '',
       AGE_GATE_LEVEL:    process.env['AGE_GATE_LEVEL']     ?? 'click_through',
       SENTRY_DSN:        process.env['SENTRY_DSN']         ?? '',
@@ -97,14 +102,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export function Layout({ children }: { children: React.ReactNode }) {
-  // GA4_ID is injected via window.ENV in App() — read it here for the head scripts.
-  // During SSR we pull from the loader; on the client we read window.ENV.
+  // GA4_ID resolves via env var first, then `pipeline_settings.ga4MeasurementId`
+  // — see app/lib/ga4-config.server.ts. The root loader puts the resolved value
+  // on window.ENV.GA4_ID, which we read here so the gtag.js <script> renders
+  // during SSR. The process.env fallback covers the error-boundary path where
+  // loader data may be absent.
+  const rootData = useRouteLoaderData('root') as
+    | { ENV?: { GA4_ID?: string; GTM_ID?: string } }
+    | undefined
   const ga4Id = typeof document !== 'undefined'
     ? (window as unknown as { ENV?: { GA4_ID?: string } }).ENV?.GA4_ID ?? ''
-    : (process.env['GA4_MEASUREMENT_ID'] ?? '')
+    : rootData?.ENV?.GA4_ID ?? (process.env['GA4_MEASUREMENT_ID'] ?? '')
   const gtmId = typeof document !== 'undefined'
     ? (window as unknown as { ENV?: { GTM_ID?: string } }).ENV?.GTM_ID ?? ''
-    : (process.env['GTM_CONTAINER_ID'] ?? '')
+    : rootData?.ENV?.GTM_ID ?? (process.env['GTM_CONTAINER_ID'] ?? '')
 
   return (
     <html lang="en" className="bg-cream">
