@@ -112,17 +112,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const deal = await getDealByHandle(slug)
   if (!deal) throw new Response('Product not found', { status: 404 })
 
-  // Archived products return 410 Gone — a stronger crawl signal than 404
-  // that this URL was deliberately removed (vs. accidentally missing) so
-  // Google drops it from the index faster.
-  if (deal.dealStatus === 'archived') {
-    throw new Response(null, {
-      status: 410,
-      statusText: 'Gone',
-      headers: { 'Cache-Control': 'public, max-age=300' },
-    })
-  }
-
   const url          = new URL(request.url)
   const reviewPage   = parseInt(url.searchParams.get('reviewPage')   ?? '1', 10)
   const reviewSort   = url.searchParams.get('reviewSort')   ?? 'newest'
