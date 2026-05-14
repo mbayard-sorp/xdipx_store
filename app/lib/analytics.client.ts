@@ -13,6 +13,14 @@ declare global {
 
 function gtag(...args: [GtagCommand, ...unknown[]]) {
   if (typeof window === 'undefined') return
+  // Must call window.gtag (defined in root.tsx) which pushes `arguments`
+  // (an Arguments object, not an Array). GA4's consent API only recognizes
+  // commands pushed as Arguments — array-pushes are processed as plain
+  // dataLayer events and never flip the consent state on the wire.
+  if (typeof window.gtag === 'function') {
+    window.gtag(...args)
+    return
+  }
   window.dataLayer = window.dataLayer || []
   window.dataLayer.push(args)
 }
