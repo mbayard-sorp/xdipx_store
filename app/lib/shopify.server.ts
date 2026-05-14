@@ -2385,6 +2385,12 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
     metafields.push({ namespace: 'custom', key: 'original_description', value: doc.rawDescription, type: 'multi_line_text_field', ownerId: gid })
   }
 
+  // Google Merchant Center adult-content flag. xdipx is an adult-only catalog,
+  // so every product imported via this pipeline gets adult=yes. The Shopify
+  // Google & YouTube channel reads this from the mm-google-shopping namespace
+  // and forwards it as the `adult` attribute in the Merchant feed.
+  metafields.push({ namespace: 'mm-google-shopping', key: 'adult', value: 'yes', type: 'single_line_text_field', ownerId: gid })
+
   if (metafields.length > 0) {
     const mfResult = await adminGraphQL<{
       metafieldsSet: { userErrors: { field: string[]; message: string }[] }
