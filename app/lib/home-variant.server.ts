@@ -5,8 +5,9 @@
  *   1. `?variant=a|b` query string  → forces a value, no cookie write
  *      (preview/QA only — won't pin the user)
  *   2. `xdipx_home_variant=a|b`     → cookie pin (set explicitly via UI)
- *   3. `HOME_VARIANT` env var       → org-wide default (a, b, or unset)
- *   4. fallback `'a'`               → safe default
+ *   3. Sanity homeConfig.activeVariant ('a' or 'b' only — 'off' falls through)
+ *   4. `HOME_VARIANT` env var       → org-wide default (a, b, or unset)
+ *   5. fallback `'a'`               → safe default
  *
  * No cookie bucketing here — that's a follow-up if/when we want a
  * proper 50/50 split with sticky assignment + analytics tracking.
@@ -33,16 +34,35 @@ function readCookie(request: Request, name: string): string | null {
 
 export interface HomeVariantResolution {
   variant: HomeVariant
-  source:  'query' | 'cookie' | 'env' | 'default'
+  source:  'query' | 'cookie' | 'sanity' | 'env' | 'default'
 }
 
-export function resolveHomeVariant(request: Request): HomeVariantResolution {
+/**
+ * Resolve which home page variant to render.
+ *
+ * @param request       - Incoming request (for query string + cookie).
+ * @param sanityVariant - Value from Sanity homeConfig.activeVariant.
+ *                        Pass null/undefined when Sanity is unavailable.
+ *                        'off' is treated as "no Sanity opinion" and falls
+ *                        through to env/default — only 'a' or 'b' pin a variant.
+ */
+export function resolveHomeVariant(
+  request: Request,
+  sanityVariant?: 'a' | 'b' | 'off' | null,
+): HomeVariantResolution {
   const url = new URL(request.url)
   const q = url.searchParams.get('variant')
   if (isValid(q)) return { variant: q, source: 'query' }
 
   const c = readCookie(request, COOKIE_NAME)
   if (isValid(c)) return { variant: c, source: 'cookie' }
+
+  // Sanity wins only when the value is an explicit 'a' or 'b'.
+  // 'off' intentionally falls through so editors can revert to the env/default
+  // path without needing to coordinate a code deploy.
+  if (sanityVariant === 'a' || sanityVariant === 'b') {
+    return { variant: sanityVariant, source: 'sanity' }
+  }
 
   const env = process.env['HOME_VARIANT']?.trim().toLowerCase()
   if (isValid(env)) return { variant: env, source: 'env' }

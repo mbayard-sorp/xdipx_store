@@ -1,7 +1,7 @@
 import { createClient } from '@sanity/client'
 import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
-import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock } from '~/types/cms'
+import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig } from '~/types/cms'
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
@@ -1486,4 +1486,38 @@ export async function getProductHandlesForSitemap(): Promise<{ handle: string; _
     console.error('[sanity] getProductHandlesForSitemap error:', err)
     return []
   }
+}
+
+// ─── Home Config (discovery rebuild) ─────────────────────────────────────────
+// Singleton: singleton.homeConfig
+// 5-minute TTL so a variant flip propagates quickly without hammering Sanity.
+
+const HOME_CONFIG_GROQ = `
+  *[_id == "singleton.homeConfig"][0]{
+    activeVariant,
+    welcomeBackEnabled,
+    emmaCopyOverrides,
+    analyticsLabel
+  }
+`
+
+export async function getHomeConfig(): Promise<HomeConfig | null> {
+  if (!projectId) return null
+  return cached('sanity:home-config', 300, async () => {
+    try {
+      const client = getClient()
+      if (!client) return null
+      const raw = await client.fetch<Partial<HomeConfig> | null>(HOME_CONFIG_GROQ)
+      if (!raw) return null
+      return {
+        activeVariant:      raw.activeVariant      ?? 'a',
+        welcomeBackEnabled: raw.welcomeBackEnabled  ?? true,
+        emmaCopyOverrides:  raw.emmaCopyOverrides   ?? {},
+        analyticsLabel:     raw.analyticsLabel      ?? '',
+      }
+    } catch (err) {
+      console.error('[sanity] getHomeConfig error:', err)
+      return null
+    }
+  })
 }

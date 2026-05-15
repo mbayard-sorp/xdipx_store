@@ -47,6 +47,9 @@ import collectionsHub     from '../schemas/collectionsHub.js'
 // Phase 6d — Manufacturer specs data layer (additive; does not touch existing schemas).
 import mfgProductSpecs    from '../schemas/mfgProductSpecs.js'
 
+// Discovery home page rebuild — variant toggle + Emma copy overrides (additive).
+import homeConfig          from '../schemas/homeConfig.js'
+
 // Phase 6c — Knowledge-base doc types for SMS / IVR / chat kbLookup tool.
 // Additive — existing schemas untouched.
 import kbShippingPolicy    from '../schemas/kbShippingPolicy.js'
@@ -131,6 +134,8 @@ export const schemaTypes = [
   blogCta,
   blogVideoEmbed,
   richText,
+  // Discovery home page rebuild — variant toggle + Emma copy overrides. Singleton.
+  homeConfig,
   // Phase 6c — Knowledge-base doc types (additive; existing schemas untouched)
   kbShippingPolicy,
   kbReturnsPolicy,

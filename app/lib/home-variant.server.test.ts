@@ -51,6 +51,28 @@ describe('resolveHomeVariant', () => {
     const r = resolveHomeVariant(req('https://xdipx.com/'))
     expect(r).toEqual({ variant: 'a', source: 'default' })
   })
+
+  // Sanity precedence tests
+  it('sanity=a beats env=b', () => {
+    process.env['HOME_VARIANT'] = 'b'
+    const r = resolveHomeVariant(req('https://xdipx.com/'), 'a')
+    expect(r).toEqual({ variant: 'a', source: 'sanity' })
+  })
+
+  it('cookie=b beats sanity=a', () => {
+    delete process.env['HOME_VARIANT']
+    const r = resolveHomeVariant(
+      req('https://xdipx.com/', { cookie: `${HOME_VARIANT_COOKIE}=b` }),
+      'a',
+    )
+    expect(r).toEqual({ variant: 'b', source: 'cookie' })
+  })
+
+  it('sanity=off falls through to env', () => {
+    process.env['HOME_VARIANT'] = 'a'
+    const r = resolveHomeVariant(req('https://xdipx.com/'), 'off')
+    expect(r).toEqual({ variant: 'a', source: 'env' })
+  })
 })
 
 describe('pinHomeVariantCookie', () => {
