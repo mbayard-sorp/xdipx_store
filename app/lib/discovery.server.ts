@@ -1,0 +1,274 @@
+/**
+ * Server-side discovery infra for the home page "Find you in a product" surface.
+ *
+ * Builds a lean product index (mood/audience/matters/category) over the
+ * Shopify catalog via Admin GraphQL, caches it in KV, and exposes scoring
+ * + ranking helpers for the home loader and `/api/discovery`.
+ *
+ * Stays small (one record per product, no descriptions or HTML) so the full
+ * 3K-SKU index fits comfortably in KV and is fast to ship to the client.
+ */
+
+import { adminGraphQL } from '~/lib/shopify.server'
+import { kvGet, kvSet } from '~/lib/kv.server'
+import type { ProductTypeDial } from '~/types'
+import type {
+  Category,
+  DiscoveryProduct,
+  DiscoveryState,
+  Rail,
+  Audience,
+  Matters,
+  Mood,
+} from '~/types/discovery'
+import { AUDIENCES, MATTERS, MOODS } from '~/types/discovery'
+import { rankRails } from '~/lib/discovery-emma'
+
+/**
+ * Bump when the index shape changes so old cached entries are ignored.
+ * KV writes and reads are namespaced by version; old entries expire on TTL.
+ */
+const INDEX_VERSION = 'v1'
+const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
+const INDEX_TTL_SECONDS = 60 * 60 // 1h
+
+/**
+ * Map `xdipx.product_type_dial` to the home page's top-level Category +
+ * subcategory label. Returns null when the type doesn't fit the discovery
+ * surface (e.g. condom, novelty, book-media); those products are skipped.
+ *
+ * Subcategory labels match the prototype's nav copy exactly.
+ */
+function mapTypeToCategory(
+  dial: ProductTypeDial | '' | undefined,
+): { category: Category; subcategory: string } | null {
+  switch (dial) {
+    case 'vibrator':    return { category: 'Pleasure', subcategory: 'Vibrators' }
+    case 'dildo':       return { category: 'Pleasure', subcategory: 'Dildos' }
+    case 'anal':        return { category: 'Pleasure', subcategory: 'Anal' }
+    case 'cock-ring':
+    case 'stroker':
+    case 'extender':
+    case 'pump':
+    case 'sex-machine': return { category: 'Pleasure', subcategory: 'For Him' }
+    case 'bondage':     return { category: 'Play',     subcategory: 'Bondage & Kink' }
+    case 'couples':     return { category: 'Play',     subcategory: 'Couples' }
+    case 'lube':        return { category: 'Body',     subcategory: 'Lubricants' }
+    case 'massage':     return { category: 'Body',     subcategory: 'Massage' }
+    case 'enhancer':
+    case 'wellness':    return { category: 'Body',     subcategory: 'Wellness' }
+    case 'wear':        return { category: 'Wear',     subcategory: 'Lingerie' }
+    case 'harness':     return { category: 'Wear',     subcategory: 'Accessories' }
+    default:            return null
+  }
+}
+
+/** Whitelist tags against the closed enums so a stray Shopify tag can't poison the UI. */
+const MOOD_SET = new Set<string>(MOODS)
+const AUDIENCE_SET = new Set<string>(AUDIENCES)
+const MATTERS_SET = new Set<string>(MATTERS)
+
+function filterMoods(arr: string[]): Mood[] {
+  return arr.filter(v => MOOD_SET.has(v)) as Mood[]
+}
+function filterAudiences(arr: string[]): Audience[] {
+  return arr.filter(v => AUDIENCE_SET.has(v)) as Audience[]
+}
+function filterMatters(arr: string[]): Matters[] {
+  return arr.filter(v => MATTERS_SET.has(v)) as Matters[]
+}
+
+/* ─── Index builder (Admin GraphQL, paginated) ────────────────────────── */
+
+interface AdminProductNode {
+  id:           string
+  handle:       string
+  title:        string
+  status:       string
+  featuredImage: { url: string; altText: string | null } | null
+  priceRangeV2: { minVariantPrice: { amount: string } }
+  productTypeDial:  { value: string | null } | null
+  moodTagsRaw:      { value: string | null } | null
+  audienceTagsRaw:  { value: string | null } | null
+  mattersTagsRaw:   { value: string | null } | null
+}
+
+interface AdminProductsPage {
+  products: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null }
+    nodes:    AdminProductNode[]
+  }
+}
+
+const PRODUCTS_PAGE_QUERY = /* GraphQL */ `
+  query DiscoveryIndexPage($cursor: String) {
+    products(first: 100, after: $cursor, query: "status:active") {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        handle
+        title
+        status
+        featuredImage { url altText }
+        priceRangeV2 { minVariantPrice { amount } }
+        productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
+        moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
+        audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
+        mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
+      }
+    }
+  }
+`
+
+function parseListMetafield(value: string | null | undefined): string[] {
+  if (!value) return []
+  // Shopify list.text metafields serialize as JSON arrays.
+  if (value.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed.map(String) : []
+    } catch { return [] }
+  }
+  // Tolerate legacy single-value or comma-separated payloads.
+  return value.split(',').map(s => s.trim()).filter(Boolean)
+}
+
+function nodeToDiscoveryProduct(n: AdminProductNode): DiscoveryProduct | null {
+  const dial = (n.productTypeDial?.value as ProductTypeDial | null) ?? ''
+  const mapped = mapTypeToCategory(dial)
+  if (!mapped) return null
+
+  const price = Number(n.priceRangeV2.minVariantPrice.amount)
+  if (!Number.isFinite(price) || price <= 0) return null
+
+  const mood = filterMoods(parseListMetafield(n.moodTagsRaw?.value))
+  const audience = filterAudiences(parseListMetafield(n.audienceTagsRaw?.value))
+  const matters = filterMatters(parseListMetafield(n.mattersTagsRaw?.value))
+
+  return {
+    id:          n.id,
+    handle:      n.handle,
+    title:       n.title,
+    price,
+    imageUrl:    n.featuredImage?.url ?? null,
+    imageAlt:    n.featuredImage?.altText ?? null,
+    category:    mapped.category,
+    subcategory: mapped.subcategory,
+    mood,
+    audience,
+    matters,
+  }
+}
+
+/**
+ * Fetches every active product, projects to the discovery shape, and drops
+ * anything we can't categorize. Heavy call — only invoked on cache miss.
+ */
+export async function buildDiscoveryIndex(): Promise<DiscoveryProduct[]> {
+  const out: DiscoveryProduct[] = []
+  let cursor: string | null = null
+
+  while (true) {
+    const data: AdminProductsPage = await adminGraphQL<AdminProductsPage>(
+      PRODUCTS_PAGE_QUERY,
+      { cursor },
+    )
+    for (const node of data.products.nodes) {
+      const dp = nodeToDiscoveryProduct(node)
+      if (dp) out.push(dp)
+    }
+    if (!data.products.pageInfo.hasNextPage) break
+    cursor = data.products.pageInfo.endCursor
+    if (!cursor) break
+  }
+
+  return out
+}
+
+/**
+ * Cached read. KV miss triggers a full rebuild; concurrent misses each
+ * rebuild (acceptable — the call is rare and Shopify rate limits are well
+ * above our needs at home-page traffic). Returns `[]` on KV+Shopify failure
+ * so the loader can render the empty state instead of crashing.
+ */
+export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise<DiscoveryProduct[]> {
+  if (!opts.force) {
+    const cached = await kvGet<DiscoveryProduct[]>(INDEX_KEY)
+    if (cached && Array.isArray(cached) && cached.length > 0) return cached
+  }
+  try {
+    const fresh = await buildDiscoveryIndex()
+    if (fresh.length > 0) {
+      await kvSet(INDEX_KEY, fresh, INDEX_TTL_SECONDS)
+    }
+    return fresh
+  } catch {
+    return []
+  }
+}
+
+/** Manual bust — call from a Shopify product webhook or admin tool. */
+export async function invalidateDiscoveryIndex(): Promise<void> {
+  await kvSet(INDEX_KEY, null, 1)
+}
+
+/* ─── Public loader-facing API ────────────────────────────────────────── */
+
+export interface GetRailsOptions {
+  perRail?:   number
+  dropEmpty?: boolean
+  /** Inject products instead of pulling from the live index — used by tests. */
+  index?:     DiscoveryProduct[]
+}
+
+export async function getDiscoveryRails(
+  state: DiscoveryState,
+  opts: GetRailsOptions = {},
+): Promise<{ rails: Rail[]; total: number }> {
+  const products = opts.index ?? (await getDiscoveryIndex())
+  const rankOpts: { perRail?: number; dropEmpty?: boolean } = {}
+  if (opts.perRail   !== undefined) rankOpts.perRail   = opts.perRail
+  if (opts.dropEmpty !== undefined) rankOpts.dropEmpty = opts.dropEmpty
+  const rails = rankRails(products, state, rankOpts)
+  return { rails, total: products.length }
+}
+
+/* ─── Tag coverage report ─────────────────────────────────────────────── */
+
+export interface CoverageReport {
+  total:               number
+  withMood:            number
+  withAudience:        number
+  withMatters:         number
+  withAllThree:        number
+  withCategoryMapping: number
+  byCategory:          Record<Category, number>
+}
+
+/**
+ * Diagnostic — how many SKUs in the live catalog have the metafields the
+ * discovery surface needs. Print before launch to know whether rails will
+ * look populated or skeletal.
+ */
+export async function reportTagCoverage(): Promise<CoverageReport> {
+  const idx = await getDiscoveryIndex({ force: true })
+  const report: CoverageReport = {
+    total:               idx.length,
+    withMood:            0,
+    withAudience:        0,
+    withMatters:         0,
+    withAllThree:        0,
+    withCategoryMapping: idx.length, // index already requires a category mapping
+    byCategory:          { Pleasure: 0, Play: 0, Body: 0, Wear: 0 },
+  }
+  for (const p of idx) {
+    if (p.mood.length     > 0) report.withMood     += 1
+    if (p.audience.length > 0) report.withAudience += 1
+    if (p.matters.length  > 0) report.withMatters  += 1
+    if (p.mood.length > 0 && p.audience.length > 0 && p.matters.length > 0) {
+      report.withAllThree += 1
+    }
+    report.byCategory[p.category] += 1
+  }
+  return report
+}
