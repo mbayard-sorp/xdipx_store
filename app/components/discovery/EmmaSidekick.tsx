@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getEmmaLine } from '~/lib/discovery-emma'
 import { trackEmmaLineSurface } from '~/lib/analytics.client'
-import { saveDiscoveryPicks, useDiscovery } from '~/stores/discovery.client'
+import { saveDiscoveryPicks, useDiscovery } from '~/stores/discovery'
 import { SIDEKICK_CTAS as CTA_LABELS } from '~/lib/discovery-emma'
 import type { DiscoveryState } from '~/types/discovery'
 

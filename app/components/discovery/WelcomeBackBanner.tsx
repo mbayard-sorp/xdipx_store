@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from 'react'
 import { getWelcomeBackLine } from '~/lib/discovery-emma'
-import { useDiscovery } from '~/stores/discovery.client'
+import { useDiscovery } from '~/stores/discovery'
 
 const SESSION_KEY = 'xdipx.welcomeBack.dismissed'
 
