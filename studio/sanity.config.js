@@ -30,6 +30,11 @@ export default defineConfig({
               .icon(() => '✨')
               .child(S.document().schemaType('emmaHeroSettings').documentId('singleton.emmaHero')),
             S.listItem()
+              .title('Home Config')
+              .id('homeConfig')
+              .icon(() => '🧭')
+              .child(S.document().schemaType('homeConfig').documentId('singleton.homeConfig')),
+            S.listItem()
               .title('Sensation dial labels')
               .id('dialRegistry')
               .icon(() => '🎚️')

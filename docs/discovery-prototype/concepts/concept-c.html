@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>xdipx · Sentence Bar</title>
+<meta name="viewport" content="width=1320, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/shared.css">
+<style>
+  /* Daily deal — slim ribbon under topnav */
+  .deal-strip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 6px 24px;
+    background: var(--cream-2);
+    color: var(--ink);
+    font-size: 12px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .deal-strip .pulse {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--coral);
+    animation: pulse 1.8s ease-out infinite;
+  }
+  .deal-strip a { color: var(--plum); text-decoration: underline; text-underline-offset: 3px; }
+
+  /* Hero — large sentence builder */
+  .hero-c {
+    padding: 72px 40px 36px;
+    max-width: 1240px;
+    margin: 0 auto;
+    position: relative;
+  }
+  .hero-c .kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 24px;
+  }
+  .sentence {
+    font-family: var(--display);
+    font-size: 60px;
+    line-height: 1.32;
+    letter-spacing: -.02em;
+    color: var(--ink);
+    max-width: 1160px;
+  }
+  .sentence .static { font-style: italic; color: var(--ink-3); }
+  /* Slots stay inline so the sentence wraps cleanly on a fluid baseline.
+     A box-shadow underline avoids the descender-collision problem of
+     border-bottom on tall display type. */
+  .sentence .slot {
+    display: inline;
+    cursor: pointer;
+    padding: 0 4px;
+    margin: 0 2px;
+    color: var(--ink-3);
+    box-shadow: inset 0 -2px 0 0 var(--ink-3);
+    transition: color .15s, box-shadow .15s, background .15s;
+    border-radius: 3px;
+  }
+  .sentence .slot:hover { color: var(--plum); box-shadow: inset 0 -2px 0 0 var(--plum); background: rgba(122,43,184,.05); }
+  .sentence .slot.is-set { color: var(--ink); box-shadow: inset 0 -3px 0 0 var(--coral); }
+  .sentence .slot.is-set:hover { box-shadow: inset 0 -3px 0 0 var(--coral); background: rgba(255,107,71,.06); }
+  .sentence .slot .placeholder { color: var(--ink-3); font-style: italic; }
+  .sentence .slot.is-set .placeholder { display: none; }
+  .sentence .slot .clear {
+    background: transparent;
+    border: 0;
+    font: inherit;
+    color: var(--ink-3);
+    font-size: 20px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .15s;
+    padding: 0 2px 0 6px;
+    vertical-align: 4px;
+    line-height: 1;
+  }
+  .sentence .slot.is-set:hover .clear { opacity: 1; }
+  .sentence .slot .picked-list { display: inline; }
+  .sentence .slot .picked-list .sep { color: var(--ink-3); font-style: italic; }
+
+  /* Slot popover — chip picker */
+  .pop {
+    position: absolute;
+    top: calc(100% + 12px);
+    left: 0;
+    width: 540px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 18px;
+    box-shadow: var(--shadow-lg);
+    z-index: 30;
+    display: none;
+  }
+  .pop.is-open { display: block; }
+  .pop .pop-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 12px;
+  }
+  .pop .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pop .pop-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 14px;
+    margin-top: 14px;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+    color: var(--ink-3);
+  }
+  .pop .pop-foot button.done {
+    background: var(--ink);
+    color: var(--cream);
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 18px;
+    font: inherit;
+    font-size: 13px;
+  }
+
+  /* Sub-actions under sentence */
+  .hero-c .extras {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin-top: 36px;
+    flex-wrap: wrap;
+  }
+  .hero-c .extras .pill-btn {
+    background: var(--paper);
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    padding: 9px 16px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hero-c .extras .pill-btn .em {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background-image: url("../assets/emma.png");
+    background-size: cover; background-position: center;
+  }
+  .hero-c .extras .budget-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--paper);
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    padding: 6px 16px 6px 14px;
+    font-size: 13px;
+    color: var(--ink-3);
+  }
+  .hero-c .extras .budget-inline input { accent-color: var(--coral); width: 120px; }
+  .hero-c .extras .budget-inline b { font-family: var(--mono); color: var(--ink); font-weight: 500; }
+
+  /* Sticky compact sentence — once user scrolls down to rails */
+  .sticky-bar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(247, 241, 232, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+    padding: 14px 40px;
+    display: none;
+    align-items: center;
+    gap: 16px;
+  }
+  .sticky-bar.is-on { display: flex; }
+  .sticky-bar .compact-sentence {
+    flex: 1;
+    font-size: 16px;
+    color: var(--ink);
+    font-family: var(--body);
+  }
+  .sticky-bar .compact-sentence .pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--ink);
+    color: var(--cream);
+    font-size: 12px;
+    margin: 0 4px;
+    line-height: 1;
+  }
+  .sticky-bar .edit-link {
+    background: transparent;
+    border: 0;
+    color: var(--plum);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    font: inherit;
+    font-size: 13px;
+  }
+
+  /* Rails section */
+  .rails {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 40px 40px 80px;
+  }
+  .rails-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    border-top: 1px solid var(--line);
+    padding-top: 32px;
+  }
+  .rails-head .h {
+    font-family: var(--display);
+    font-size: 32px;
+    letter-spacing: -.01em;
+  }
+  .rails-head .h em { font-style: italic; color: var(--plum); }
+  .rails-head .meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  /* Emma inline suggestion card — appears between rails */
+  .emma-tip {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    background: linear-gradient(180deg, var(--paper), rgba(255,255,255,.5));
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 18px 22px;
+    margin: 0 0 44px;
+  }
+  .emma-tip .av { width: 48px; height: 48px; flex: 0 0 auto; }
+  .emma-tip .body { flex: 1; }
+  .emma-tip .body .who {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 4px;
+  }
+  .emma-tip .body .said {
+    font-family: var(--display);
+    font-style: italic;
+    font-size: 19px;
+    line-height: 1.3;
+    letter-spacing: -.005em;
+    color: var(--ink);
+  }
+  .emma-tip .body .said em { font-style: normal; color: var(--plum); border-bottom: 1px solid var(--plum); padding-bottom: 1px; }
+  .emma-tip .actions { display: flex; gap: 8px; }
+  .emma-tip .actions button {
+    background: var(--ink);
+    color: var(--cream);
+    border: 0;
+    border-radius: 999px;
+    padding: 9px 16px;
+    font: inherit;
+    font-size: 13px;
+  }
+  .emma-tip .actions button.ghost {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line-2);
+  }
+
+  .rail { animation: railSlide .35s ease both; margin-bottom: 44px; }
+  @keyframes railSlide {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  /* Browse-all empty state when nothing picked */
+  .empty-hint {
+    margin-top: 20px;
+    font-size: 14px;
+    color: var(--ink-3);
+    display: flex;
+    gap: 16px;
+    align-items: center;
+  }
+  .empty-hint .quick {
+    display: inline-flex;
+    gap: 6px;
+  }
+  .empty-hint .quick .chip { height: 28px; padding: 0 12px; font-size: 12px; }
+</style>
+</head>
+<body data-screen-label="Concept C — Sentence Bar">
+
+<template id="__bundler_thumbnail" data-bg-color="#f7f1e8">
+  <svg viewBox="0 0 400 280" xmlns="http://www.w3.org/2000/svg">
+    <rect width="400" height="280" fill="#f7f1e8"/>
+    <text x="40" y="110" font-family="Georgia, serif" font-size="36" fill="#6b5f68" font-style="italic">I'm chasing</text>
+    <text x="40" y="160" font-family="Georgia, serif" font-size="36" fill="#2a1f2a">sensual</text>
+    <line x1="40" y1="170" x2="160" y2="170" stroke="#ff6b47" stroke-width="3"/>
+    <text x="170" y="160" font-family="Georgia, serif" font-size="36" fill="#6b5f68" font-style="italic">for</text>
+    <text x="230" y="160" font-family="Georgia, serif" font-size="36" fill="#2a1f2a">us</text>
+    <line x1="230" y1="170" x2="270" y2="170" stroke="#ff6b47" stroke-width="3"/>
+    <text x="40" y="210" font-family="Georgia, serif" font-size="36" fill="#6b5f68" font-style="italic">that's</text>
+    <text x="125" y="210" font-family="Georgia, serif" font-size="36" fill="#6b5f68" font-style="italic">just right.</text>
+    <line x1="125" y1="220" x2="290" y2="220" stroke="#6b5f68" stroke-width="2" stroke-dasharray="4,4"/>
+  </svg>
+</template>
+
+<header class="topnav">
+  <div class="row">
+    <span class="xdipx-mark">xdipx<span class="heart"></span></span>
+  </div>
+  <nav class="nav-links">
+    <a href="#">Pleasure</a>
+    <a href="#">Play</a>
+    <a href="#">Body</a>
+    <a href="#">Wear</a>
+    <a href="#">Edit</a>
+  </nav>
+  <div class="actions">
+    <button class="icon-btn" aria-label="Search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    </button>
+    <button class="icon-btn" aria-label="Account">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"/></svg>
+    </button>
+    <button class="icon-btn" aria-label="Bag">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8a3 3 0 1 1 6 0"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="deal-strip">
+  <span class="pulse"></span>
+  <span><b>Today's pick</b> · Velvet Wand 30% off · ends in 11h 42m ·</span>
+  <a href="#">view the deal</a>
+</div>
+
+<!-- Sticky compact summary -->
+<div class="sticky-bar" id="sticky-bar">
+  <div class="emma-avatar" style="width:28px;height:28px;border-width:2px"></div>
+  <div class="compact-sentence" id="compact-sentence">You're chasing nothing in particular — that's fine too.</div>
+  <button class="edit-link" id="edit-link">Edit ↑</button>
+</div>
+
+<main class="hero-c">
+  <div class="kicker">Find you in a product</div>
+
+  <div class="sentence" id="sentence">
+    <span class="static">I'm chasing</span>
+    <span class="slot" data-slot="mood">
+      <span class="placeholder">a feeling</span>
+      <span class="picked-list" id="picked-mood"></span>
+      <button class="clear" data-clear="mood" aria-label="clear">×</button>
+    </span>
+    <span class="static">for</span>
+    <span class="slot" data-slot="aud">
+      <span class="placeholder">someone</span>
+      <span class="picked-list" id="picked-aud"></span>
+      <button class="clear" data-clear="aud" aria-label="clear">×</button>
+    </span>
+    <span class="static">that's</span>
+    <span class="slot" data-slot="matters">
+      <span class="placeholder">just right</span>
+      <span class="picked-list" id="picked-matters"></span>
+      <button class="clear" data-clear="matters" aria-label="clear">×</button>
+    </span><span class="static">.</span>
+  </div>
+
+  <!-- Popovers (positioned absolutely; one per slot, only one open) -->
+  <div class="pop" id="pop-mood">
+    <div class="pop-title">A feeling or sensation · pick any</div>
+    <div class="chips" id="chips-mood"></div>
+    <div class="pop-foot">
+      <span><span id="count-mood">0</span> selected</span>
+      <button class="done" data-done>Done</button>
+    </div>
+  </div>
+  <div class="pop" id="pop-aud">
+    <div class="pop-title">Who's it for · pick any</div>
+    <div class="chips" id="chips-aud"></div>
+    <div class="pop-foot">
+      <span><span id="count-aud">0</span> selected</span>
+      <button class="done" data-done>Done</button>
+    </div>
+  </div>
+  <div class="pop" id="pop-matters">
+    <div class="pop-title">What matters most · pick any · optional</div>
+    <div class="chips" id="chips-matters"></div>
+    <div class="pop-foot">
+      <span><span id="count-matters">0</span> selected · budget is the last thing we consider</span>
+      <button class="done" data-done>Done</button>
+    </div>
+  </div>
+
+  <div class="extras">
+    <button class="pill-btn" id="emma-open">
+      <span class="em"></span>
+      <span>Not sure? <b style="color:var(--ink);font-weight:500">Talk to Emma</b></span>
+    </button>
+    <div class="budget-inline">
+      <span>Budget</span>
+      <input type="range" id="budget-range" min="20" max="300" step="10" value="300">
+      <b>under $<span id="budget-val">300</span></b>
+    </div>
+    <button class="pill-btn" id="surprise-me">↺ Surprise me</button>
+  </div>
+
+  <div class="empty-hint" id="empty-hint">
+    <span>Or browse by feeling:</span>
+    <span class="quick" id="quick-moods"></span>
+  </div>
+</main>
+
+<section class="rails">
+  <div class="rails-head">
+    <div class="h" id="rails-title">Shaped <em>for everyone</em></div>
+    <div class="meta" id="rails-sub">Browse all categories</div>
+  </div>
+  <div id="rails-mount"></div>
+</section>
+
+<footer class="foot" style="padding:32px 40px;border-top:1px solid var(--line);color:var(--ink-3);font-size:13px;display:flex;justify-content:space-between">
+  <span>xdipx · A different path to discovery.</span>
+  <span class="tag-mono">Concept C — Sentence Bar</span>
+</footer>
+
+<script src="../assets/products.js"></script>
+<script>
+(function() {
+  const T = window.XDIPX_TAXONOMY;
+  const PRODUCTS = window.XDIPX_PRODUCTS;
+
+  const state = { mood: [], aud: [], matters: [], budget: 300 };
+
+  const MOOD_CHIPS = ['Sensual','Slow & Intimate','Playful','Adventurous','Bold','Romantic','Indulgent','Curious','Comforting','Energetic','Unhurried Solo'];
+  const AUD_CHIPS = ['Me','Us','A Partner','Date Night','Solo','Gift'];
+  const MATTERS_CHIPS = T.matters;
+
+  // ── Build chip pools in each popover ──
+  function buildPool(rootId, items, group) {
+    const root = document.getElementById(rootId);
+    root.innerHTML = '';
+    items.forEach(label => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip' + (state[group].includes(label) ? ' is-on' : '');
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        const arr = state[group];
+        const i = arr.indexOf(label);
+        if (i >= 0) arr.splice(i, 1); else arr.push(label);
+        b.classList.toggle('is-on');
+        document.getElementById('count-' + group).textContent = arr.length;
+        renderAll();
+      });
+      root.appendChild(b);
+    });
+  }
+  buildPool('chips-mood', MOOD_CHIPS, 'mood');
+  buildPool('chips-aud', AUD_CHIPS, 'aud');
+  buildPool('chips-matters', MATTERS_CHIPS, 'matters');
+
+  // Quick-pick row under sentence (when empty)
+  const quickRoot = document.getElementById('quick-moods');
+  ['Sensual','Playful','Adventurous','Comforting','Romantic'].forEach(label => {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      state.mood = [label];
+      buildPool('chips-mood', MOOD_CHIPS, 'mood');
+      renderAll();
+    });
+    quickRoot.appendChild(b);
+  });
+
+  // ── Popover open/close ──
+  function openPop(slot) {
+    document.querySelectorAll('.pop').forEach(p => p.classList.remove('is-open'));
+    const pop = document.getElementById('pop-' + slot);
+    pop.classList.add('is-open');
+    // Position popover under its slot
+    const slotEl = document.querySelector(`.slot[data-slot="${slot}"]`);
+    const rect = slotEl.getBoundingClientRect();
+    const heroRect = document.querySelector('.hero-c').getBoundingClientRect();
+    pop.style.left = (rect.left - heroRect.left) + 'px';
+    pop.style.top = (rect.bottom - heroRect.top + 12) + 'px';
+  }
+  document.querySelectorAll('.slot').forEach(s => {
+    s.addEventListener('click', (e) => {
+      if (e.target.closest('.clear')) return;
+      openPop(s.dataset.slot);
+    });
+  });
+  document.querySelectorAll('[data-done]').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.pop').forEach(p => p.classList.remove('is-open'));
+    });
+  });
+  document.querySelectorAll('[data-clear]').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const g = b.dataset.clear;
+      state[g] = [];
+      buildPool('chips-' + g, g === 'mood' ? MOOD_CHIPS : g === 'aud' ? AUD_CHIPS : MATTERS_CHIPS, g);
+      document.getElementById('count-' + g).textContent = 0;
+      renderAll();
+    });
+  });
+  // Close pop on outside click
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.pop') || e.target.closest('.slot')) return;
+    document.querySelectorAll('.pop').forEach(p => p.classList.remove('is-open'));
+  });
+
+  // ── Sentence slot text ──
+  function fmtList(arr, fallback) {
+    if (!arr.length) return '';
+    if (arr.length === 1) return arr[0];
+    if (arr.length === 2) return arr[0] + ' & ' + arr[1];
+    return arr.slice(0, -1).join(', ') + ' & ' + arr[arr.length-1];
+  }
+
+  function renderSlot(group, valueText) {
+    const slot = document.querySelector(`.slot[data-slot="${group}"]`);
+    const list = document.getElementById('picked-' + group);
+    if (state[group].length === 0) {
+      slot.classList.remove('is-set');
+      list.textContent = '';
+    } else {
+      slot.classList.add('is-set');
+      list.textContent = valueText;
+    }
+  }
+
+  function renderSentence() {
+    const audDisplay = {Me:'me', Us:'us', 'A Partner':'a partner', 'Date Night':'date night', Solo:'solo time', Gift:'a gift'};
+    renderSlot('mood', fmtList(state.mood.map(s => s.toLowerCase())));
+    renderSlot('aud', fmtList(state.aud.map(a => audDisplay[a] || a.toLowerCase())));
+    renderSlot('matters', fmtList(state.matters.map(s => s.toLowerCase())));
+
+    // Compact sentence in sticky bar
+    const parts = [];
+    if (state.mood.length) parts.push(`<span class="pill">${fmtList(state.mood)}</span>`);
+    if (state.aud.length) parts.push(`<span style="color:var(--ink-3);font-style:italic">for</span><span class="pill">${fmtList(state.aud)}</span>`);
+    if (state.matters.length) parts.push(`<span style="color:var(--ink-3);font-style:italic">·</span><span class="pill">${fmtList(state.matters)}</span>`);
+    const compact = parts.length ? parts.join(' ') : `<span style="color:var(--ink-3);font-style:italic">You're browsing everything. Tap a chip to narrow.</span>`;
+    document.getElementById('compact-sentence').innerHTML = compact;
+  }
+
+  // ── Rails ──
+  function productCard(p) {
+    const wrap = document.createElement('article');
+    wrap.className = 'card';
+    const media = document.createElement('div');
+    media.className = 'media ' + p.visual;
+    media.style.background = p.tone;
+    if (p.visual === 'photo') {
+      media.innerHTML = `<div class="photo-label">[ product photo · ${p.sub.toLowerCase()} ]</div>`;
+    } else if (p.visual === 'tile') {
+      media.innerHTML = `<span class="glyph">${p.name.charAt(0)}</span>`;
+    } else {
+      media.innerHTML = `
+        <div class="text-body">
+          <div class="blurb">"${(p.mood[0] || 'just right').toLowerCase()} —<br>made simple."</div>
+          <div class="tags">${(p.matters.slice(0,3)).map(m => `<span>${m}</span>`).join('')}</div>
+        </div>
+      `;
+    }
+    wrap.appendChild(media);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `
+      <div class="sub">${p.cat} · ${p.sub}</div>
+      <div class="name">${p.name}</div>
+      <div class="price">$${p.price}</div>
+    `;
+    wrap.appendChild(meta);
+    return wrap;
+  }
+
+  function decorateRailTitle(cat) {
+    const m = (state.mood || [])[0];
+    const a = (state.aud || [])[0];
+    if (!m && !a) return cat;
+    const audMap = {Me:'for Me', Us:'for Us', 'A Partner':'for Them', 'Date Night':'for Date Night', Solo:'Solo', Gift:'as a Gift'};
+    const parts = [];
+    if (m) parts.push(`<em>${m}</em>`);
+    parts.push(cat);
+    if (a) parts.push(`<em>${audMap[a] || a}</em>`);
+    return parts.join(' ');
+  }
+
+  function emmaSuggestion() {
+    // Smart suggestion: prompt user to add what they haven't picked yet
+    if (!state.mood.length) {
+      return {
+        line: `Want me to <em>narrow it down</em>? Pick a feeling first — that's where the magic happens.`,
+        cta: 'Pick a mood',
+        action: () => document.querySelector('.slot[data-slot="mood"]').click()
+      };
+    }
+    if (!state.aud.length) {
+      return {
+        line: `Is this for <em>you</em>, the <em>two of you</em>, or someone else? It changes what I'd recommend.`,
+        cta: 'Tell Emma',
+        action: () => document.querySelector('.slot[data-slot="aud"]').click()
+      };
+    }
+    if (!state.matters.length) {
+      return {
+        line: `Want quieter? Hands-free? <em>What has to be true</em>? Add a deal-breaker and I'll narrow further.`,
+        cta: 'Add a must-have',
+        action: () => document.querySelector('.slot[data-slot="matters"]').click()
+      };
+    }
+    return {
+      line: `Sharp brief. If you'd like a second opinion or want to talk it through, <em>I'm right here</em>.`,
+      cta: 'Chat with Emma',
+      action: () => alert('Open Emma chat')
+    };
+  }
+
+  function renderRails() {
+    const hasAny = state.mood.length || state.aud.length || state.matters.length;
+    const filtered = PRODUCTS.filter(p => p.price <= state.budget);
+    const catScores = {};
+    const catItems = {};
+    for (const cat of Object.keys(T.categories)) { catScores[cat] = 0; catItems[cat] = []; }
+    for (const p of filtered) {
+      const s = window.XDIPX_score(p, state);
+      catItems[p.cat].push({p, s});
+      catScores[p.cat] += s;
+    }
+    for (const cat of Object.keys(catItems)) catItems[cat].sort((a,b) => b.s - a.s);
+    const catOrder = Object.keys(T.categories).slice();
+    if (hasAny) catOrder.sort((a,b) => catScores[b] - catScores[a]);
+
+    const mount = document.getElementById('rails-mount');
+    mount.innerHTML = '';
+
+    catOrder.forEach((cat, idx) => {
+      const items = catItems[cat].slice(0, 4);
+      const rail = document.createElement('section');
+      rail.className = 'rail';
+      const decoratedTitle = decorateRailTitle(cat);
+      rail.innerHTML = `
+        <div class="rail-head">
+          <div class="title">${decoratedTitle}</div>
+          <div class="meta"><a href="#">See all in ${cat} →</a></div>
+        </div>
+        <div class="rail-grid"></div>
+      `;
+      const grid = rail.querySelector('.rail-grid');
+      if (items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'rail-empty';
+        empty.textContent = `Nothing in ${cat} fits — relax one filter and I'll find you more.`;
+        rail.querySelector('.rail-grid').replaceWith(empty);
+      } else {
+        items.forEach(it => grid.appendChild(productCard(it.p)));
+      }
+      mount.appendChild(rail);
+
+      // Inject Emma tip after the first rail
+      if (idx === 0) {
+        const sug = emmaSuggestion();
+        const tip = document.createElement('div');
+        tip.className = 'emma-tip';
+        tip.innerHTML = `
+          <div class="emma-avatar av"></div>
+          <div class="body">
+            <div class="who">Emma · suggestion</div>
+            <div class="said">${sug.line}</div>
+          </div>
+          <div class="actions">
+            <button class="ghost">Not now</button>
+            <button id="emma-act">${sug.cta} →</button>
+          </div>
+        `;
+        mount.appendChild(tip);
+        tip.querySelector('#emma-act').addEventListener('click', sug.action);
+        tip.querySelector('.ghost').addEventListener('click', () => tip.remove());
+      }
+    });
+
+    // Header
+    const headTitle = hasAny ? `Shaped <em>for you</em>` : `Shaped <em>for everyone</em>`;
+    const headSub = hasAny ? `Reordered by relevance ↓` : `Browse all categories`;
+    document.getElementById('rails-title').innerHTML = headTitle;
+    document.getElementById('rails-sub').innerHTML = headSub;
+    document.getElementById('empty-hint').style.display = hasAny ? 'none' : 'flex';
+  }
+
+  function renderAll() {
+    renderSentence();
+    renderRails();
+    save();
+  }
+
+  // Budget
+  const budgetInput = document.getElementById('budget-range');
+  const budgetVal = document.getElementById('budget-val');
+  budgetInput.addEventListener('input', () => {
+    state.budget = +budgetInput.value;
+    budgetVal.textContent = state.budget;
+    renderRails();
+  });
+
+  // Surprise me — pick 1 random mood, 1 audience
+  document.getElementById('surprise-me').addEventListener('click', () => {
+    state.mood = [MOOD_CHIPS[Math.floor(Math.random() * MOOD_CHIPS.length)]];
+    state.aud = [AUD_CHIPS[Math.floor(Math.random() * AUD_CHIPS.length)]];
+    buildPool('chips-mood', MOOD_CHIPS, 'mood');
+    buildPool('chips-aud', AUD_CHIPS, 'aud');
+    renderAll();
+  });
+
+  // Emma button — bounce to mood popover
+  document.getElementById('emma-open').addEventListener('click', () => {
+    document.querySelector('.slot[data-slot="mood"]').click();
+  });
+
+  // Sticky bar reveals after scrolling past the hero sentence
+  const sentenceEl = document.getElementById('sentence');
+  const stickyBar = document.getElementById('sticky-bar');
+  window.addEventListener('scroll', () => {
+    const r = sentenceEl.getBoundingClientRect();
+    stickyBar.classList.toggle('is-on', r.bottom < 20);
+  }, { passive: true });
+  document.getElementById('edit-link').addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  // Persist
+  function save() {
+    try { localStorage.setItem('xdipx_c', JSON.stringify({mood: state.mood, aud: state.aud, matters: state.matters})); } catch(e) {}
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem('xdipx_c') || 'null');
+    if (saved && (saved.mood?.length || saved.aud?.length || saved.matters?.length)) {
+      state.mood = saved.mood || []; state.aud = saved.aud || []; state.matters = saved.matters || [];
+      buildPool('chips-mood', MOOD_CHIPS, 'mood');
+      buildPool('chips-aud', AUD_CHIPS, 'aud');
+      buildPool('chips-matters', MATTERS_CHIPS, 'matters');
+      document.getElementById('count-mood').textContent = state.mood.length;
+      document.getElementById('count-aud').textContent = state.aud.length;
+      document.getElementById('count-matters').textContent = state.matters.length;
+    }
+  } catch(e) {}
+
+  renderAll();
+})();
+</script>
+</body>
+</html>

@@ -474,3 +474,24 @@ export interface BlogPost extends BlogPostCard {
   tags?: string[]
   relatedPosts?: BlogPostCard[]
 }
+
+// ─── Home Config (discovery rebuild) ─────────────────────────────────────────
+// Singleton: singleton.homeConfig
+// Controls which home page variant is active and lets editors override
+// Emma's AI-generated contextual copy per chip-combination state.
+
+export interface HomeConfig {
+  activeVariant: 'a' | 'b' | 'off'
+  welcomeBackEnabled: boolean
+  emmaCopyOverrides: {
+    intro?: string
+    moodOnly?: string
+    audOnly?: string
+    mattersOnly?: string
+    moodAud?: string
+    moodMatters?: string
+    audMatters?: string
+    full?: string
+  }
+  analyticsLabel: string
+}

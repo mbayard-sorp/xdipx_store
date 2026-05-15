@@ -169,3 +169,30 @@ export function trackVaultBrowse(tab: string, page: number) {
 export function trackCtaClick(name: string, location: string) {
   gtag('event', 'cta_click', { cta_name: name, cta_location: location })
 }
+
+// ─── Custom: Home discovery (variant A/B) ─────────────────────────────────────
+
+export function trackHomeVariantView(params: { variant: 'a' | 'b'; hadPriorSession: boolean }) {
+  gtag('event', 'home_variant_view', {
+    home_variant: params.variant,
+    had_prior_session: params.hadPriorSession,
+  })
+}
+
+export function trackChipToggle(params: {
+  group: 'mood' | 'audience' | 'matters' | 'category'
+  value: string
+  on: boolean
+}) {
+  gtag('event', 'discovery_chip_toggle', {
+    chip_group: params.group,
+    chip_value: params.value,
+    chip_on: params.on,
+  })
+}
+
+export function trackEmmaLineSurface(params: {
+  state: 'intro' | 'mood-only' | 'audience-only' | 'matters-only' | 'mood-audience' | 'mood-matters' | 'audience-matters' | 'full'
+}) {
+  gtag('event', 'emma_line_surface', { emma_state: params.state })
+}
