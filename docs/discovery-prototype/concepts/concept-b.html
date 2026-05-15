@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>xdipx · Emma Asks</title>
+<meta name="viewport" content="width=1320, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/shared.css">
+<style>
+  /* Persistent daily-deal ribbon — floating bottom-right toast */
+  .deal-pill {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 100;
+  }
+
+  .hero-b {
+    padding: 36px 40px 24px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .hero-b .meta {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .hero-b .meta .who-bar {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .hero-b .meta .who-bar .nm {
+    font-family: var(--display);
+    font-style: italic;
+    font-size: 18px;
+  }
+  .hero-b .meta .who-bar .role {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .hero-b .meta .progress {
+    margin-left: auto;
+    display: flex;
+    gap: 4px;
+  }
+  .hero-b .meta .progress .pip {
+    width: 28px; height: 4px; border-radius: 2px;
+    background: var(--line);
+  }
+  .hero-b .meta .progress .pip.is-on { background: var(--ink); }
+
+  /* Conversation thread — Emma's messages + answer chip groups */
+  .thread {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    margin-bottom: 24px;
+  }
+
+  /* Emma bubble — left aligned, no chrome, generous type */
+  .bubble {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .bubble .av {
+    width: 44px; height: 44px;
+    flex: 0 0 auto;
+  }
+  .bubble .msg {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-top-left-radius: 4px;
+    border-radius: 18px;
+    padding: 18px 22px;
+    max-width: 720px;
+    box-shadow: var(--shadow-sm);
+  }
+  .bubble .msg .q {
+    font-family: var(--display);
+    font-size: 30px;
+    line-height: 1.15;
+    letter-spacing: -.015em;
+    margin: 0 0 4px;
+  }
+  .bubble .msg .q em { font-style: italic; color: var(--plum); }
+  .bubble .msg .sub {
+    font-size: 14px;
+    color: var(--ink-2);
+    line-height: 1.45;
+  }
+
+  /* Hero opening — bigger first message */
+  .bubble.intro .msg .q { font-size: 48px; line-height: 1.05; }
+
+  /* User answer row — chips, right-aligned context */
+  .answer-row {
+    margin-left: 60px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .answer-row .skip {
+    background: transparent;
+    border: 0;
+    color: var(--ink-3);
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 8px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  /* User's "said" pill — what the shopper picked, echoed back */
+  .said-row {
+    margin-left: 60px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .said {
+    background: var(--ink);
+    color: var(--cream);
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .said .x { opacity: .55; cursor: pointer; }
+  .said .x:hover { opacity: 1; }
+
+  /* Edit-step inline */
+  .edit-step {
+    margin-left: 60px;
+    font-size: 13px;
+    color: var(--ink-3);
+  }
+  .edit-step button {
+    background: transparent;
+    border: 0;
+    color: var(--plum);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    font: inherit;
+  }
+
+  /* Rails appear below the conversation */
+  .results {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 40px 40px 80px;
+    border-top: 1px solid var(--line);
+  }
+  .results-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .results-head .h {
+    font-family: var(--display);
+    font-size: 30px;
+    letter-spacing: -.01em;
+  }
+  .results-head .h em { font-style: italic; color: var(--plum); }
+  .results-head .more {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+  }
+  .results-head .refine {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    padding: 8px 16px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  .rail { animation: railSlide .35s ease both; margin-bottom: 44px; }
+  @keyframes railSlide {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  /* When no answers yet, hide rails section */
+  .results.is-empty { display: none; }
+
+  /* Returning-user "warm reopen" — Emma's first message swaps to a different
+     line when prior selections exist */
+  .reopen {
+    display: none;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 16px;
+    font-size: 13px;
+    color: var(--ink-2);
+    margin-left: 60px;
+  }
+  .reopen.is-on { display: inline-flex; align-items: center; gap: 8px; }
+  .reopen em { font-family: var(--display); font-style: italic; color: var(--ink); }
+  .reopen button { background: transparent; border: 0; color: var(--plum); text-decoration: underline; text-underline-offset: 3px; font: inherit; }
+</style>
+</head>
+<body data-screen-label="Concept B — Emma Asks">
+
+<template id="__bundler_thumbnail" data-bg-color="#f7f1e8">
+  <svg viewBox="0 0 400 280" xmlns="http://www.w3.org/2000/svg">
+    <rect width="400" height="280" fill="#f7f1e8"/>
+    <circle cx="64" cy="80" r="24" fill="#d9a890"/>
+    <circle cx="64" cy="80" r="26" fill="none" stroke="#fbf6ec" stroke-width="3"/>
+    <circle cx="82" cy="98" r="5" fill="#4caf50" stroke="#fbf6ec" stroke-width="1.5"/>
+    <rect x="100" y="56" width="260" height="60" rx="18" fill="#fbf6ec" stroke="#2a1f2a" stroke-opacity=".10"/>
+    <text x="116" y="84" font-family="Georgia, serif" font-size="18" fill="#2a1f2a">Hi. Let's find</text>
+    <text x="116" y="106" font-family="Georgia, serif" font-size="18" font-style="italic" fill="#7a2bb8">you in a product.</text>
+    <g transform="translate(100, 140)">
+      <rect width="84" height="32" rx="16" fill="none" stroke="#2a1f2a" stroke-opacity=".18"/>
+      <text x="42" y="20" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#2a1f2a">Sensual</text>
+      <rect x="94" width="98" height="32" rx="16" fill="none" stroke="#2a1f2a" stroke-opacity=".18"/>
+      <text x="143" y="20" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2a1f2a">Slow &amp; Intimate</text>
+      <rect x="202" width="76" height="32" rx="16" fill="none" stroke="#2a1f2a" stroke-opacity=".18"/>
+      <text x="240" y="20" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#2a1f2a">Playful</text>
+    </g>
+    <g transform="translate(280, 200)">
+      <rect width="72" height="26" rx="13" fill="#2a1f2a"/>
+      <text x="36" y="17" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#fbf6ec">Bold ×</text>
+    </g>
+  </svg>
+</template>
+
+<header class="topnav">
+  <div class="row">
+    <span class="xdipx-mark">xdipx<span class="heart"></span></span>
+  </div>
+  <nav class="nav-links">
+    <a href="#">Pleasure</a>
+    <a href="#">Play</a>
+    <a href="#">Body</a>
+    <a href="#">Wear</a>
+    <a href="#">Edit</a>
+  </nav>
+  <div class="actions">
+    <button class="icon-btn" aria-label="Search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    </button>
+    <button class="icon-btn" aria-label="Bag">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8a3 3 0 1 1 6 0"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="deal-pill">
+  <div class="ribbon">
+    <span class="pulse"></span>
+    <span><b>Today only</b> · Velvet Wand 30% off · <a href="#">shop</a></span>
+  </div>
+</div>
+
+<main class="hero-b">
+  <div class="meta">
+    <div class="who-bar">
+      <div class="emma-avatar has-status" style="width:32px;height:32px;border-width:2px"></div>
+      <div>
+        <div class="nm">Emma</div>
+        <div class="role">Your guide · responds in real time</div>
+      </div>
+    </div>
+    <div class="progress" aria-label="3 questions">
+      <span class="pip is-on" id="pip-0"></span>
+      <span class="pip" id="pip-1"></span>
+      <span class="pip" id="pip-2"></span>
+    </div>
+  </div>
+
+  <div class="thread" id="thread">
+    <!-- Step 0: intro + mood question -->
+    <div class="bubble intro">
+      <div class="emma-avatar av"></div>
+      <div class="msg">
+        <h1 class="q">Hi. Let's find <em>you</em> in a product.</h1>
+        <p class="sub">Three quick taps. There are no wrong answers — and you can change anything later. Let's start with how you're feeling.</p>
+      </div>
+    </div>
+    <div class="reopen" id="reopen">
+      <span>Last time we were exploring <em id="reopen-tags">sensual, slow, for us</em>.</span>
+      <button id="reopen-go">Continue from there →</button>
+      <button id="reopen-fresh" style="color:var(--ink-3)">Start fresh</button>
+    </div>
+
+    <div class="bubble">
+      <div class="emma-avatar av"></div>
+      <div class="msg">
+        <p class="q" style="font-size:26px">What kind of <em>feeling</em> are you chasing?</p>
+        <p class="sub">Mood first — we'll get to the practicals after.</p>
+      </div>
+    </div>
+    <div class="answer-row" id="ans-mood"></div>
+    <div class="said-row" id="said-mood"></div>
+
+    <!-- Step 1: audience -->
+    <div class="bubble" id="step-aud-q" style="display:none">
+      <div class="emma-avatar av"></div>
+      <div class="msg">
+        <p class="q" id="step-aud-text" style="font-size:26px">And who's this <em>for</em>?</p>
+        <p class="sub">Just you, the two of you, or someone else.</p>
+      </div>
+    </div>
+    <div class="answer-row" id="ans-aud" style="display:none"></div>
+    <div class="said-row" id="said-aud"></div>
+
+    <!-- Step 2: matters -->
+    <div class="bubble" id="step-matters-q" style="display:none">
+      <div class="emma-avatar av"></div>
+      <div class="msg">
+        <p class="q" id="step-matters-text" style="font-size:26px">Anything that <em>has</em> to be true?</p>
+        <p class="sub">Optional. Pick a few if it helps me narrow.</p>
+      </div>
+    </div>
+    <div class="answer-row" id="ans-matters" style="display:none"></div>
+    <div class="said-row" id="said-matters"></div>
+
+    <!-- Final message + rails appear below -->
+    <div class="bubble" id="step-done" style="display:none">
+      <div class="emma-avatar av"></div>
+      <div class="msg">
+        <p class="q" id="done-text" style="font-size:26px">Here's what I'd reach for. <em>Take your time.</em></p>
+        <p class="sub">Each rail below is shaped by what you said. Tap any answer up here to change it — the rails will update instantly.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<section class="results is-empty" id="results">
+  <div class="results-head">
+    <div class="h" id="res-title">Shaped <em>for you</em></div>
+    <div class="more"><span id="res-count"></span></div>
+    <button class="refine" id="open-budget">Set a budget</button>
+  </div>
+  <div id="rails-mount"></div>
+</section>
+
+<footer class="foot" style="padding:32px 40px;border-top:1px solid var(--line);color:var(--ink-3);font-size:13px;display:flex;justify-content:space-between">
+  <span>xdipx · A different path to discovery.</span>
+  <span class="tag-mono">Concept B — Emma Asks</span>
+</footer>
+
+<script src="../assets/products.js"></script>
+<script>
+(function() {
+  const T = window.XDIPX_TAXONOMY;
+  const PRODUCTS = window.XDIPX_PRODUCTS;
+
+  const state = { mood: [], aud: [], matters: [], budget: 300, step: 0 };
+
+  // Curated short chip sets for each step (conversational tone — less is more)
+  const MOOD_CHIPS = ['Sensual','Slow & Intimate','Playful','Adventurous','Bold','Romantic','Indulgent','Curious','Comforting'];
+  const AUD_CHIPS  = T.audience;
+  const MATTERS_CHIPS = ['Beginner-Friendly','Body-Safe Silicone','Discreet Design','Hands-Free','Rechargeable','Whisper-Quiet','Plus-Size-Friendly','Travel-Size','App-Controlled'];
+
+  function chip(label, group, on, onclick) {
+    const b = document.createElement('button');
+    b.className = 'chip is-lg' + (on ? ' is-on' : '');
+    b.textContent = label;
+    b.type = 'button';
+    b.addEventListener('click', () => onclick(label));
+    return b;
+  }
+
+  function buildAnswers(rootId, items, group) {
+    const root = document.getElementById(rootId);
+    root.innerHTML = '';
+    items.forEach(label => {
+      root.appendChild(chip(label, group, state[group].includes(label), (l) => {
+        const arr = state[group];
+        const i = arr.indexOf(l);
+        if (i >= 0) arr.splice(i, 1); else arr.push(l);
+        advance(group);
+      }));
+    });
+    if (group !== 'mood') {
+      const skip = document.createElement('button');
+      skip.className = 'skip';
+      skip.textContent = group === 'matters' ? 'Skip — show me' : "I'm not sure yet";
+      skip.addEventListener('click', () => advance(group, true));
+      root.appendChild(skip);
+    }
+  }
+
+  function renderSaid(group) {
+    const root = document.getElementById('said-' + group);
+    root.innerHTML = '';
+    state[group].forEach(val => {
+      const s = document.createElement('span');
+      s.className = 'said';
+      s.innerHTML = `${val} <span class="x" data-v="${val}">×</span>`;
+      s.querySelector('.x').addEventListener('click', () => {
+        const i = state[group].indexOf(val);
+        if (i >= 0) state[group].splice(i, 1);
+        advance(group);
+      });
+      root.appendChild(s);
+    });
+  }
+
+  function advance(group, skipped) {
+    renderSaid(group);
+    // Re-render the answer row so chip on-states stay in sync
+    if (group === 'mood') buildAnswers('ans-mood', MOOD_CHIPS, 'mood');
+    if (group === 'aud') buildAnswers('ans-aud', AUD_CHIPS, 'aud');
+    if (group === 'matters') buildAnswers('ans-matters', MATTERS_CHIPS, 'matters');
+
+    // Step-gating: once mood has any answer, reveal aud; once aud has any (or skipped), reveal matters; etc.
+    const moodDone = state.mood.length > 0;
+    const audDone = state.aud.length > 0 || state.step > 1;
+    const mattersDone = state.matters.length > 0 || state.step > 2;
+
+    if (moodDone) revealStep(1);
+    if (moodDone && (audDone || group === 'aud')) revealStep(2);
+    if (moodDone && audDone) revealStep(3);
+
+    // adapt question copy after first answer
+    if (state.aud[0]) {
+      const audCopy = {
+        Me:'just for <em>you</em>?', Us:'for <em>the two of you</em>?', 'A Partner':'for <em>them</em>?',
+        'Date Night':'for <em>date night</em>?', Solo:'for <em>solo</em> time?', Gift:'a <em>gift</em>?'
+      };
+    }
+
+    // Adapt later question text to use prior answers
+    const moodEcho = state.mood[0]?.toLowerCase();
+    if (moodEcho && state.step >= 1) {
+      document.getElementById('step-aud-text').innerHTML = `Beautiful — <em>${moodEcho}</em>. Who's this for?`;
+    }
+    if (state.aud[0] && state.step >= 2) {
+      const a = state.aud[0];
+      const phrase = a === 'Me' ? 'for you' : a === 'Us' ? 'for the two of you' : `for ${a.toLowerCase()}`;
+      document.getElementById('step-matters-text').innerHTML = `Anything that <em>has</em> to be true ${phrase}?`;
+    }
+    if (state.step >= 3) {
+      const m = state.mood[0]?.toLowerCase();
+      const a = state.aud[0];
+      const aphrase = a === 'Me' ? 'for you' : a === 'Us' ? 'for both of you' : a ? `for ${a.toLowerCase()}` : '';
+      document.getElementById('done-text').innerHTML =
+        `Here's what I'd reach for${m ? ` — <em>${m}</em>` : ''}${aphrase ? `, ${aphrase}` : ''}. <em>Take your time.</em>`;
+    }
+
+    if (skipped && state.step === 2) state.step = 3;
+
+    renderRails();
+    save();
+  }
+
+  function revealStep(step) {
+    state.step = Math.max(state.step, step);
+    // pips
+    for (let i = 0; i < 3; i++) {
+      document.getElementById('pip-' + i).classList.toggle('is-on', i <= step);
+    }
+    if (step >= 1) {
+      document.getElementById('step-aud-q').style.display = '';
+      document.getElementById('ans-aud').style.display = '';
+    }
+    if (step >= 2) {
+      document.getElementById('step-matters-q').style.display = '';
+      document.getElementById('ans-matters').style.display = '';
+    }
+    if (step >= 3) {
+      document.getElementById('step-done').style.display = '';
+      document.getElementById('results').classList.remove('is-empty');
+    }
+  }
+
+  function productCard(p) {
+    const wrap = document.createElement('article');
+    wrap.className = 'card';
+    const media = document.createElement('div');
+    media.className = 'media ' + p.visual;
+    media.style.background = p.tone;
+    if (p.visual === 'photo') {
+      media.innerHTML = `<div class="photo-label">[ product photo · ${p.sub.toLowerCase()} ]</div>`;
+    } else if (p.visual === 'tile') {
+      media.innerHTML = `<span class="glyph">${p.name.charAt(0)}</span>`;
+    } else {
+      media.innerHTML = `
+        <div class="text-body">
+          <div class="blurb">"${(p.mood[0] || 'just right').toLowerCase()} —<br>made simple."</div>
+          <div class="tags">${(p.matters.slice(0,3)).map(m => `<span>${m}</span>`).join('')}</div>
+        </div>
+      `;
+    }
+    wrap.appendChild(media);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `
+      <div class="sub">${p.cat} · ${p.sub}</div>
+      <div class="name">${p.name}</div>
+      <div class="price">$${p.price}</div>
+    `;
+    wrap.appendChild(meta);
+    return wrap;
+  }
+
+  function renderRails() {
+    const hasAny = state.mood.length || state.aud.length || state.matters.length;
+    if (!hasAny) {
+      document.getElementById('results').classList.add('is-empty');
+      return;
+    }
+
+    const filtered = PRODUCTS.filter(p => p.price <= state.budget);
+    const catScores = {};
+    const catItems = {};
+    for (const cat of Object.keys(T.categories)) { catScores[cat] = 0; catItems[cat] = []; }
+    for (const p of filtered) {
+      const s = window.XDIPX_score(p, state);
+      catItems[p.cat].push({p, s});
+      catScores[p.cat] += s;
+    }
+    for (const cat of Object.keys(catItems)) catItems[cat].sort((a,b) => b.s - a.s);
+    const catOrder = Object.keys(T.categories).slice().sort((a,b) => catScores[b] - catScores[a]);
+
+    const mount = document.getElementById('rails-mount');
+    mount.innerHTML = '';
+    catOrder.forEach((cat, idx) => {
+      // Top rail gets 4 cards, others 3
+      const limit = idx === 0 ? 4 : 3;
+      const items = catItems[cat].slice(0, limit);
+      const rail = document.createElement('section');
+      rail.className = 'rail';
+      const decoratedTitle = decorateRailTitle(cat, state);
+      const matchPct = catScores[cat] > 0 ? `${Math.min(99, 50 + catScores[cat] * 6)}% match` : 'browse';
+      rail.innerHTML = `
+        <div class="rail-head">
+          <div class="title">${decoratedTitle}</div>
+          <div class="meta"><span class="tag-mono">${matchPct}</span> &nbsp;&nbsp; <a href="#">See all in ${cat} →</a></div>
+        </div>
+        <div class="rail-grid${limit === 3 ? ' is-3' : ''}"></div>
+      `;
+      const grid = rail.querySelector('.rail-grid');
+      if (items.length === 0 || catScores[cat] === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'rail-empty';
+        empty.textContent = `Nothing in ${cat} fits that brief — loosen one filter and I'll find more.`;
+        rail.querySelector('.rail-grid').replaceWith(empty);
+      } else {
+        items.forEach(it => grid.appendChild(productCard(it.p)));
+      }
+      mount.appendChild(rail);
+    });
+
+    document.getElementById('res-title').innerHTML = `Shaped <em>for you</em>`;
+    document.getElementById('res-count').textContent = `${PRODUCTS.length} products · top picks first`;
+  }
+
+  function decorateRailTitle(cat, sel) {
+    const m = (sel.mood || [])[0];
+    const a = (sel.aud || [])[0];
+    if (!m && !a) return cat;
+    const audMap = {Me:'for Me', Us:'for Us', 'A Partner':'for Them', 'Date Night':'for Date Night', Solo:'Solo', Gift:'as a Gift'};
+    const parts = [];
+    if (m) parts.push(`<em>${m}</em>`);
+    parts.push(cat);
+    if (a) parts.push(`<em>${audMap[a] || a}</em>`);
+    return parts.join(' ');
+  }
+
+  // Init
+  buildAnswers('ans-mood', MOOD_CHIPS, 'mood');
+  buildAnswers('ans-aud', AUD_CHIPS, 'aud');
+  buildAnswers('ans-matters', MATTERS_CHIPS, 'matters');
+
+  // Persistence — show reopen banner if prior session exists
+  function save() {
+    try { localStorage.setItem('xdipx_b', JSON.stringify({mood: state.mood, aud: state.aud, matters: state.matters})); } catch(e) {}
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem('xdipx_b') || 'null');
+    if (saved && (saved.mood?.length || saved.aud?.length || saved.matters?.length)) {
+      const tagSummary = [...(saved.mood||[]),...(saved.aud||[]),...(saved.matters||[])].slice(0,3).map(s=>s.toLowerCase()).join(', ');
+      document.getElementById('reopen-tags').textContent = tagSummary || 'where you left off';
+      document.getElementById('reopen').classList.add('is-on');
+      document.getElementById('reopen-go').addEventListener('click', () => {
+        state.mood = saved.mood || []; state.aud = saved.aud || []; state.matters = saved.matters || [];
+        document.getElementById('reopen').classList.remove('is-on');
+        if (state.mood.length) advance('mood');
+        if (state.aud.length) advance('aud');
+        if (state.matters.length) advance('matters');
+        if (!state.aud.length && state.mood.length) revealStep(2);
+        if (!state.matters.length && state.aud.length) revealStep(3);
+      });
+      document.getElementById('reopen-fresh').addEventListener('click', () => {
+        document.getElementById('reopen').classList.remove('is-on');
+        localStorage.removeItem('xdipx_b');
+      });
+    }
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

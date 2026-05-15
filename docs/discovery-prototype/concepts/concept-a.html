@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>xdipx · The Compass</title>
+<meta name="viewport" content="width=1320, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/shared.css">
+<style>
+  body { font-family: var(--body); }
+
+  /* Daily deal ribbon spans top */
+  .deal-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 8px 24px;
+    background: var(--ink);
+    color: var(--cream);
+    font-size: 12px;
+    letter-spacing: .02em;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .deal-bar > * { flex: 0 0 auto; }
+  .deal-bar .label { font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; opacity: .75; }
+  .deal-bar b { font-weight: 500; }
+  .deal-bar .cta { color: var(--coral-2); border-bottom: 1px solid var(--coral-2); padding-bottom: 1px; text-decoration: none; }
+  .deal-bar .dot { opacity: .35; }
+  .deal-bar .timer { font-family: var(--mono); font-size: 11px; opacity: .75; }
+
+  /* Welcome banner (returning user) */
+  .welcome {
+    background: linear-gradient(180deg, var(--paper), transparent);
+    border-bottom: 1px solid var(--line);
+    padding: 14px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+  .welcome em { font-family: var(--display); font-style: italic; color: var(--ink); }
+  .welcome .restore { color: var(--plum); text-decoration: underline; text-underline-offset: 3px; background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+  .welcome .dismiss { background: transparent; border: 0; color: var(--ink-3); font-size: 18px; line-height: 1; padding: 4px 8px; }
+
+  /* Hero — three labeled chip rows */
+  .hero {
+    padding: 56px 40px 40px;
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 56px;
+    align-items: start;
+    max-width: 1320px;
+    margin: 0 auto;
+  }
+  .hero h1 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 72px;
+    line-height: 1.02;
+    letter-spacing: -.025em;
+    margin: 0 0 12px;
+  }
+  .hero h1 em { font-style: italic; color: var(--plum); }
+  .hero .lede {
+    font-size: 17px;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 460px;
+    margin: 0 0 36px;
+  }
+
+  /* Emma sidekick (passive) */
+  .emma-side {
+    position: sticky;
+    top: 24px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    padding: 24px;
+    box-shadow: var(--shadow-md);
+  }
+  .emma-side .row-top {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+  .emma-side .row-top .who .name {
+    font-family: var(--display);
+    font-style: italic;
+    font-size: 22px;
+    line-height: 1;
+    color: var(--ink);
+  }
+  .emma-side .row-top .who .role {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-top: 6px;
+  }
+  .emma-side .line {
+    font-family: var(--display);
+    font-style: italic;
+    font-size: 19px;
+    line-height: 1.35;
+    letter-spacing: -.005em;
+    color: var(--ink);
+    margin-bottom: 16px;
+    min-height: 100px;
+  }
+  .emma-side .actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+  .emma-side .actions button {
+    flex: 1;
+    height: 38px;
+    border-radius: 10px;
+    border: 1px solid var(--line-2);
+    background: transparent;
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .emma-side .actions button.primary {
+    background: var(--ink);
+    color: var(--cream);
+    border-color: var(--ink);
+  }
+
+  /* Filter group */
+  .filter-group { margin-bottom: 28px; }
+  .filter-group .glabel {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .filter-group .glabel .num {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+  }
+  .filter-group .glabel .gtitle {
+    font-family: var(--display);
+    font-size: 22px;
+    letter-spacing: -.01em;
+  }
+  .filter-group .glabel .gtitle em { font-style: italic; }
+  .filter-group .glabel .ghint {
+    font-size: 12px;
+    color: var(--ink-3);
+    margin-left: auto;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  /* Inline budget slider */
+  .budget {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px 22px;
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    margin-bottom: 36px;
+  }
+  .budget .lab { display: flex; flex-direction: column; gap: 4px; min-width: 140px; }
+  .budget .lab .k { font-family: var(--display); font-size: 18px; }
+  .budget .lab .v { font-family: var(--mono); font-size: 12px; color: var(--ink-3); letter-spacing: .04em; }
+  .budget input[type=range] { flex: 1; accent-color: var(--coral); }
+  .budget .reset { background: transparent; border: 0; color: var(--ink-3); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+
+  /* Rails container */
+  .rails {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 32px 40px 80px;
+    border-top: 1px solid var(--line);
+  }
+  .rails-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 28px;
+  }
+  .rails-head .h {
+    font-family: var(--display);
+    font-size: 32px;
+    letter-spacing: -.01em;
+  }
+  .rails-head .h em { font-style: italic; color: var(--plum); }
+  .rails-head .h .count { color: var(--ink-3); font-size: 16px; margin-left: 8px; }
+
+  .rail { animation: railSlide .35s ease both; }
+  @keyframes railSlide {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  /* Footer */
+  .foot {
+    padding: 32px 40px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-3);
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body data-screen-label="Concept A — The Compass">
+
+<template id="__bundler_thumbnail" data-bg-color="#f7f1e8">
+  <svg viewBox="0 0 400 280" xmlns="http://www.w3.org/2000/svg">
+    <rect width="400" height="280" fill="#f7f1e8"/>
+    <text x="40" y="120" font-family="Georgia, serif" font-size="64" font-style="italic" fill="#7a2bb8" letter-spacing="-2">xdipx</text>
+    <text x="40" y="170" font-family="Georgia, serif" font-size="22" fill="#2a1f2a">Find <tspan font-style="italic" fill="#7a2bb8">you</tspan> in a product.</text>
+    <g transform="translate(40, 210)">
+      <rect width="78" height="28" rx="14" fill="#2a1f2a"/>
+      <circle cx="14" cy="14" r="4" fill="#ff6b47"/>
+      <text x="26" y="18" font-family="sans-serif" font-size="12" fill="#fbf6ec">Sensual</text>
+      <rect x="88" width="62" height="28" rx="14" fill="none" stroke="#2a1f2a" stroke-opacity=".18"/>
+      <text x="102" y="18" font-family="sans-serif" font-size="12" fill="#2a1f2a">Playful</text>
+      <rect x="160" width="74" height="28" rx="14" fill="none" stroke="#2a1f2a" stroke-opacity=".18"/>
+      <text x="174" y="18" font-family="sans-serif" font-size="12" fill="#2a1f2a">Romantic</text>
+    </g>
+  </svg>
+</template>
+
+<div class="deal-bar">
+  <span class="label">Today only</span>
+  <b>Velvet Wand · 30% off</b>
+  <span class="dot">·</span>
+  <span class="timer">11:42:08 left</span>
+  <span class="dot">·</span>
+  <a class="cta" href="#">Shop the deal →</a>
+</div>
+
+<header class="topnav">
+  <div class="row">
+    <span class="xdipx-mark">xdipx<span class="heart"></span></span>
+  </div>
+  <nav class="nav-links">
+    <a href="#" class="is-active">Pleasure</a>
+    <a href="#">Play</a>
+    <a href="#">Body</a>
+    <a href="#">Wear</a>
+    <a href="#">Edit</a>
+  </nav>
+  <div class="actions">
+    <button class="icon-btn" aria-label="Search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    </button>
+    <button class="icon-btn" aria-label="Account">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"/></svg>
+    </button>
+    <button class="icon-btn" aria-label="Bag">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8a3 3 0 1 1 6 0"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="welcome" id="welcome" style="display:none">
+  <div>Welcome back. Still in a <em id="welcome-mood">sensual</em> mood for <em id="welcome-aud">Us</em>?
+    <button class="restore" id="restore-yes">Pick up where you left off →</button>
+  </div>
+  <button class="dismiss" id="welcome-dismiss" aria-label="Dismiss">×</button>
+</div>
+
+<section class="hero">
+  <div>
+    <h1>Find <em>you</em> in a product.</h1>
+    <p class="lede">Skip color, size, and spec sheets. Start with what you're chasing — a feeling, a moment, a person — and we'll shape the catalog around it.</p>
+
+    <div class="filter-group" id="g-mood">
+      <div class="glabel">
+        <span class="num">01</span>
+        <span class="gtitle">A <em>mood</em> or sensation</span>
+        <span class="ghint">Tap any. Multiple is fine.</span>
+      </div>
+      <div class="chips" id="chips-mood"></div>
+    </div>
+
+    <div class="filter-group" id="g-aud">
+      <div class="glabel">
+        <span class="num">02</span>
+        <span class="gtitle">Who's it <em>for</em></span>
+        <span class="ghint">You, the two of you, someone else.</span>
+      </div>
+      <div class="chips" id="chips-aud"></div>
+    </div>
+
+    <div class="filter-group" id="g-matters">
+      <div class="glabel">
+        <span class="num">03</span>
+        <span class="gtitle">What <em>matters</em> most</span>
+        <span class="ghint">Optional. Narrows the catalog.</span>
+      </div>
+      <div class="chips" id="chips-matters"></div>
+    </div>
+
+    <div class="budget">
+      <div class="lab">
+        <span class="k">Budget <em style="font-style:italic;color:var(--ink-3);font-size:14px">(last)</em></span>
+        <span class="v">Under $<span id="budget-val">200</span></span>
+      </div>
+      <input type="range" id="budget-range" min="20" max="300" step="10" value="200">
+      <button class="reset" id="reset-all">Clear all</button>
+    </div>
+  </div>
+
+  <aside class="emma-side">
+    <div class="row-top">
+      <div class="emma-avatar has-status" style="width:64px;height:64px"></div>
+      <div class="who">
+        <div class="name">Emma</div>
+        <div class="role">Your guide · online</div>
+      </div>
+    </div>
+    <div class="line" id="emma-line"></div>
+    <div class="actions">
+      <button>Ask Emma</button>
+      <button class="primary">Save my picks</button>
+    </div>
+  </aside>
+</section>
+
+<section class="rails">
+  <div class="rails-head">
+    <div class="h" id="rails-title">Browse <em>everything</em><span class="count" id="rails-count"></span></div>
+    <div class="tag-mono">Reordered by relevance ↓</div>
+  </div>
+  <div id="rails-mount"></div>
+</section>
+
+<footer class="foot">
+  <span>xdipx · A different path to discovery.</span>
+  <span class="tag-mono">Concept A — The Compass</span>
+</footer>
+
+<script src="../assets/products.js"></script>
+<script>
+(function() {
+  const T = window.XDIPX_TAXONOMY;
+  const PRODUCTS = window.XDIPX_PRODUCTS;
+
+  const state = {
+    mood: [],
+    aud: [],
+    matters: [],
+    budget: 200,
+  };
+
+  // ─── Build chips ────────────────────────────────────────────
+  function makeChip(label, group) {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.type = 'button';
+    b.textContent = label;
+    b.dataset.group = group;
+    b.dataset.value = label;
+    b.addEventListener('click', () => {
+      const arr = state[group];
+      const i = arr.indexOf(label);
+      if (i >= 0) arr.splice(i, 1); else arr.push(label);
+      b.classList.toggle('is-on');
+      render();
+    });
+    return b;
+  }
+  function fillChipRow(elId, items, group) {
+    const root = document.getElementById(elId);
+    items.forEach(l => root.appendChild(makeChip(l, group)));
+  }
+  fillChipRow('chips-mood', T.moods, 'mood');
+  fillChipRow('chips-aud', T.audience, 'aud');
+  fillChipRow('chips-matters', T.matters, 'matters');
+
+  // ─── Rails render ───────────────────────────────────────────
+  function productCard(p) {
+    const wrap = document.createElement('article');
+    wrap.className = 'card';
+    const media = document.createElement('div');
+    media.className = 'media ' + p.visual;
+    media.style.background = p.tone;
+    if (p.visual === 'photo') {
+      media.innerHTML = `<div class="photo-label">[ product photo · ${p.sub.toLowerCase()} ]</div>`;
+    } else if (p.visual === 'tile') {
+      const letter = p.name.replace(/^(The |A )/,'').charAt(0);
+      media.innerHTML = `<span class="glyph">${letter}</span>`;
+    } else {
+      media.innerHTML = `
+        <div class="text-body">
+          <div class="blurb">"${p.mood[0]?.toLowerCase() || 'just right'} —<br>made simple."</div>
+          <div class="tags">${(p.matters.slice(0,3)).map(m => `<span>${m}</span>`).join('')}</div>
+        </div>
+      `;
+    }
+    wrap.appendChild(media);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `
+      <div class="sub">${p.cat} · ${p.sub}</div>
+      <div class="name">${p.name}</div>
+      <div class="price">$${p.price}</div>
+    `;
+    wrap.appendChild(meta);
+    return wrap;
+  }
+
+  function render() {
+    // Emma line
+    document.getElementById('emma-line').textContent =
+      window.XDIPX_emmaLine(state);
+
+    // Filter + score
+    const hasAny = state.mood.length || state.aud.length || state.matters.length;
+    const filtered = PRODUCTS.filter(p => p.price <= state.budget);
+
+    // For each top-level category, compute aggregate score + collect items.
+    const catScores = {};
+    const catItems = {};
+    for (const cat of Object.keys(T.categories)) {
+      catScores[cat] = 0;
+      catItems[cat] = [];
+    }
+    for (const p of filtered) {
+      const s = window.XDIPX_score(p, state);
+      const w = { p, s };
+      catItems[p.cat].push(w);
+      catScores[p.cat] += s;
+    }
+
+    // Sort items within each cat by score desc, take top 4.
+    for (const cat of Object.keys(catItems)) {
+      catItems[cat].sort((a,b) => b.s - a.s);
+    }
+
+    // Order categories by aggregate score desc (stable for ties).
+    const catOrder = Object.keys(T.categories).slice();
+    if (hasAny) {
+      catOrder.sort((a, b) => catScores[b] - catScores[a]);
+    }
+
+    // Header
+    const totalShown = catOrder.reduce((acc, c) => acc + Math.min(4, catItems[c].length), 0);
+    const title = hasAny ? `Shaped <em>for you</em>` : `Browse <em>everything</em>`;
+    document.getElementById('rails-title').innerHTML = `${title}<span class="count">${totalShown} of ${PRODUCTS.length}</span>`;
+
+    // Mount rails
+    const mount = document.getElementById('rails-mount');
+    mount.innerHTML = '';
+    for (const cat of catOrder) {
+      const items = catItems[cat].slice(0, 4);
+      const rail = document.createElement('section');
+      rail.className = 'rail';
+      const railTitle = window.XDIPX_railTitle(cat, state);
+      // Highlight the variable part of the title via italics on non-cat words.
+      const decoratedTitle = decorateRailTitle(cat, state);
+      rail.innerHTML = `
+        <div class="rail-head">
+          <div class="title">${decoratedTitle}</div>
+          <div class="meta"><a href="#">See all in ${cat} →</a></div>
+        </div>
+        <div class="rail-grid"></div>
+      `;
+      const grid = rail.querySelector('.rail-grid');
+      if (items.length === 0) {
+        rail.querySelector('.rail-grid').replaceWith(Object.assign(document.createElement('div'), {
+          className: 'rail-empty',
+          textContent: `Nothing in ${cat} matches that brief — try loosening one filter.`
+        }));
+      } else {
+        items.forEach(it => grid.appendChild(productCard(it.p)));
+      }
+      mount.appendChild(rail);
+    }
+  }
+
+  function decorateRailTitle(cat, sel) {
+    const m = (sel.mood || [])[0];
+    const a = (sel.aud || [])[0];
+    const k = (sel.matters || [])[0];
+    if (!m && !a && !k) return cat;
+    const audMap = {Me:'for Me', Us:'for Us', 'A Partner':'for Them', 'Date Night':'for Date Night', Solo:'Solo', Gift:'as a Gift'};
+    const parts = [];
+    if (m) parts.push(`<em>${m}</em>`);
+    parts.push(cat);
+    if (a) parts.push(`<em>${audMap[a] || a}</em>`);
+    if (k && !m) parts.push(`<em>(${k.toLowerCase()})</em>`);
+    return parts.join(' ');
+  }
+
+  // ─── Budget slider ──────────────────────────────────────────
+  const budgetInput = document.getElementById('budget-range');
+  const budgetVal = document.getElementById('budget-val');
+  budgetInput.addEventListener('input', () => {
+    state.budget = +budgetInput.value;
+    budgetVal.textContent = state.budget;
+    render();
+  });
+
+  document.getElementById('reset-all').addEventListener('click', () => {
+    state.mood = []; state.aud = []; state.matters = []; state.budget = 200;
+    budgetInput.value = 200; budgetVal.textContent = 200;
+    document.querySelectorAll('.chip.is-on').forEach(c => c.classList.remove('is-on'));
+    render();
+  });
+
+  // ─── Returning-user welcome ─────────────────────────────────
+  // For the demo, simulate returning state on first load.
+  try {
+    const saved = JSON.parse(localStorage.getItem('xdipx_a') || 'null');
+    if (saved && saved.mood && saved.mood.length) {
+      document.getElementById('welcome-mood').textContent = (saved.mood[0] || 'curious').toLowerCase();
+      document.getElementById('welcome-aud').textContent = saved.aud[0] || 'you';
+      const w = document.getElementById('welcome');
+      w.style.display = 'flex';
+      document.getElementById('restore-yes').addEventListener('click', () => {
+        state.mood = saved.mood || []; state.aud = saved.aud || []; state.matters = saved.matters || [];
+        document.querySelectorAll('.chip').forEach(c => {
+          if (state[c.dataset.group]?.includes(c.dataset.value)) c.classList.add('is-on');
+        });
+        w.style.display = 'none';
+        render();
+      });
+      document.getElementById('welcome-dismiss').addEventListener('click', () => w.style.display = 'none');
+    } else {
+      // Seed a demo "previous" state so the banner has reason to appear next time.
+    }
+  } catch(e) {}
+
+  // Save state on change
+  const saveDebounced = debounce(() => {
+    localStorage.setItem('xdipx_a', JSON.stringify(state));
+  }, 250);
+  function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+  ['mood','aud','matters'].forEach(g => {
+    document.getElementById('chips-' + g).addEventListener('click', saveDebounced);
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
