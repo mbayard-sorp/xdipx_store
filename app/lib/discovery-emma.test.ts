@@ -189,7 +189,7 @@ describe('getEmmaLine', () => {
   })
 
   it('asks who-it\'s-for when only mood is set', () => {
-    expect(getEmmaLine(state({ mood: ['Sensual'] }))).toMatch(/sensual\. Got it/)
+    expect(getEmmaLine(state({ mood: ['Sensual'] }))).toMatch(/sensual\. Good start/)
   })
 
   it('asks mood when only audience is set', () => {
@@ -206,7 +206,7 @@ describe('getEmmaLine', () => {
       audience: ['Us'],
       matters:  ['Body-Safe Silicone'] as Matters[],
     }))
-    expect(line).toMatch(/Beautiful brief/)
+    expect(line).toMatch(/That's a real brief/)
   })
 
   it('contains no em dashes (CLAUDE.md voice rule)', () => {
