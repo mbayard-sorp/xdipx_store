@@ -21,26 +21,25 @@ import type { LoaderFunctionArgs } from 'react-router'
 import { getDiscoveryRails } from '~/lib/discovery.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import {
-  AUDIENCES,
   BUDGET_MAX,
   BUDGET_MIN,
   DEFAULT_BUDGET,
-  MATTERS,
-  MOODS,
-  type Audience,
   type DiscoveryState,
-  type Matters,
-  type Mood,
 } from '~/types/discovery'
 
-const MOOD_SET = new Set<string>(MOODS)
-const AUDIENCE_SET = new Set<string>(AUDIENCES)
-const MATTERS_SET = new Set<string>(MATTERS)
+const MAX_CHIPS_PER_GROUP = 20  // hard cap to prevent abuse via crafted URLs
+
+function cleanIncoming(params: URLSearchParams, key: string): string[] {
+  return params.getAll(key)
+    .map(v => v.trim())
+    .filter(v => v.length > 0 && v.length <= 80)
+    .slice(0, MAX_CHIPS_PER_GROUP)
+}
 
 function parseStateFromSearch(params: URLSearchParams): DiscoveryState {
-  const mood = params.getAll('mood').filter(v => MOOD_SET.has(v)) as Mood[]
-  const audience = params.getAll('audience').filter(v => AUDIENCE_SET.has(v)) as Audience[]
-  const matters = params.getAll('matters').filter(v => MATTERS_SET.has(v)) as Matters[]
+  const mood = cleanIncoming(params, 'mood')
+  const audience = cleanIncoming(params, 'audience')
+  const matters = cleanIncoming(params, 'matters')
   const rawBudget = Number(params.get('budget'))
   const budget = Number.isFinite(rawBudget)
     ? Math.min(BUDGET_MAX, Math.max(BUDGET_MIN, rawBudget))

@@ -17,11 +17,7 @@ import type {
   DiscoveryProduct,
   DiscoveryState,
   Rail,
-  Audience,
-  Matters,
-  Mood,
 } from '~/types/discovery'
-import { AUDIENCES, MATTERS, MOODS } from '~/types/discovery'
 import { rankRails } from '~/lib/discovery-emma'
 
 /**
@@ -41,6 +37,15 @@ const INDEX_TTL_SECONDS = 60 * 60 // 1h
  */
 const BUILD_LOCK_KEY = `discovery:index:building:${INDEX_VERSION}`
 const BUILD_LOCK_TTL_SECONDS = 30
+
+/**
+ * Vocabulary cache: distinct mood/audience/matters tag values actually
+ * present on active products. Derived from the index, cached 24h so the
+ * UI picks up new tags Merchandisers add in Shopify within a day without
+ * a deploy. Refreshed as a side effect of any index rebuild.
+ */
+const VOCAB_KEY = `discovery:vocab:${INDEX_VERSION}`
+const VOCAB_TTL_SECONDS = 60 * 60 * 24 // 24h
 
 /**
  * Map `xdipx.product_type_dial` to the home page's top-level Category +
@@ -73,19 +78,17 @@ function mapTypeToCategory(
   }
 }
 
-/** Whitelist tags against the closed enums so a stray Shopify tag can't poison the UI. */
-const MOOD_SET = new Set<string>(MOODS)
-const AUDIENCE_SET = new Set<string>(AUDIENCES)
-const MATTERS_SET = new Set<string>(MATTERS)
-
-function filterMoods(arr: string[]): Mood[] {
-  return arr.filter(v => MOOD_SET.has(v)) as Mood[]
-}
-function filterAudiences(arr: string[]): Audience[] {
-  return arr.filter(v => AUDIENCE_SET.has(v)) as Audience[]
-}
-function filterMatters(arr: string[]): Matters[] {
-  return arr.filter(v => MATTERS_SET.has(v)) as Matters[]
+/**
+ * Trim and drop empties; tag values flow straight to the UI so editor
+ * casing on the Shopify side is the display casing on the page.
+ */
+function cleanTagList(arr: string[]): string[] {
+  const out: string[] = []
+  for (const raw of arr) {
+    const v = raw.trim()
+    if (v) out.push(v)
+  }
+  return out
 }
 
 /* ─── Index builder (Admin GraphQL, paginated) ────────────────────────── */
@@ -151,9 +154,9 @@ function nodeToDiscoveryProduct(n: AdminProductNode): DiscoveryProduct | null {
   const price = Number(n.priceRangeV2.minVariantPrice.amount)
   if (!Number.isFinite(price) || price <= 0) return null
 
-  const mood = filterMoods(parseListMetafield(n.moodTagsRaw?.value))
-  const audience = filterAudiences(parseListMetafield(n.audienceTagsRaw?.value))
-  const matters = filterMatters(parseListMetafield(n.mattersTagsRaw?.value))
+  const mood = cleanTagList(parseListMetafield(n.moodTagsRaw?.value))
+  const audience = cleanTagList(parseListMetafield(n.audienceTagsRaw?.value))
+  const matters = cleanTagList(parseListMetafield(n.mattersTagsRaw?.value))
 
   return {
     id:          n.id,
@@ -218,6 +221,8 @@ export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise
     const fresh = await buildDiscoveryIndex()
     if (fresh.length > 0) {
       await kvSet(INDEX_KEY, fresh, INDEX_TTL_SECONDS)
+      // Refresh vocab as a side effect — same data, no extra fetch.
+      await kvSet(VOCAB_KEY, computeVocab(fresh), VOCAB_TTL_SECONDS)
     }
     return fresh
   } catch {
@@ -230,6 +235,56 @@ export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise
 /** Manual bust — call from a Shopify product webhook or admin tool. */
 export async function invalidateDiscoveryIndex(): Promise<void> {
   await kvSet(INDEX_KEY, null, 1)
+  await kvSet(VOCAB_KEY, null, 1)
+}
+
+/* ─── Vocabulary (mood / audience / matters chip lists) ────────────────── */
+
+export interface DiscoveryVocab {
+  moods:     string[]
+  audiences: string[]
+  matters:   string[]
+}
+
+/**
+ * Frequency-sorted distinct values for each chip group. Most-used tag
+ * first so the chips a new visitor sees are the ones most likely to
+ * land. Stable secondary sort by alpha for tied counts.
+ */
+function computeVocab(index: DiscoveryProduct[]): DiscoveryVocab {
+  const tally = (key: 'mood' | 'audience' | 'matters') => {
+    const counts = new Map<string, number>()
+    for (const p of index) {
+      for (const v of p[key]) counts.set(v, (counts.get(v) ?? 0) + 1)
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([v]) => v)
+  }
+  return {
+    moods:     tally('mood'),
+    audiences: tally('audience'),
+    matters:   tally('matters'),
+  }
+}
+
+/**
+ * Cached read of the chip vocabularies. 24h TTL — a tag a merchandiser
+ * adds in Shopify appears as a chip within a day. KV miss falls through
+ * to a fresh derivation from the live index (which itself may rebuild
+ * from Shopify). Returns empty lists on total failure so the loader can
+ * render an empty-chip state instead of crashing.
+ */
+export async function getDiscoveryVocab(): Promise<DiscoveryVocab> {
+  const cached = await kvGet<DiscoveryVocab>(VOCAB_KEY)
+  if (cached && Array.isArray(cached.moods)) return cached
+
+  const idx = await getDiscoveryIndex()
+  if (idx.length === 0) return { moods: [], audiences: [], matters: [] }
+
+  const vocab = computeVocab(idx)
+  await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS)
+  return vocab
 }
 
 /* ─── Public loader-facing API ────────────────────────────────────────── */

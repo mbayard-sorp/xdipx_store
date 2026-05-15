@@ -26,13 +26,10 @@ import {
   type ReactNode,
 } from 'react'
 import {
-  AUDIENCES,
   BUDGET_MAX,
   BUDGET_MIN,
   DEFAULT_BUDGET,
   EMPTY_STATE,
-  MATTERS,
-  MOODS,
   type Audience,
   type DiscoveryState,
   type Matters,
@@ -84,9 +81,20 @@ export function saveDiscoveryPicks(state: DiscoveryState) {
 
 /* ─── URL helpers ────────────────────────────────────────────────────────── */
 
-const MOOD_SET = new Set<string>(MOODS)
-const AUDIENCE_SET = new Set<string>(AUDIENCES)
-const MATTERS_SET = new Set<string>(MATTERS)
+// Tag vocabularies are dynamic (sourced from Shopify metafields), so the
+// URL parser can't validate against a closed list. Trim + length-cap each
+// chip and hard-cap how many chips per group can come from the URL so a
+// crafted link can't blow up state size.
+const MAX_CHIPS_PER_GROUP = 20
+const MAX_CHIP_LEN = 80
+
+function cleanChipList(raw: string | null): string[] {
+  if (!raw) return []
+  return raw.split(',')
+    .map(v => v.trim())
+    .filter(v => v.length > 0 && v.length <= MAX_CHIP_LEN)
+    .slice(0, MAX_CHIPS_PER_GROUP)
+}
 
 function readURL(): DiscoveryState | null {
   if (typeof window === 'undefined') return null
@@ -96,9 +104,9 @@ function readURL(): DiscoveryState | null {
   const kRaw = p.get('k')
   const bRaw = p.get('b')
 
-  const mood = mRaw ? mRaw.split(',').filter(v => MOOD_SET.has(v)) as Mood[] : []
-  const audience = aRaw ? aRaw.split(',').filter(v => AUDIENCE_SET.has(v)) as Audience[] : []
-  const matters = kRaw ? kRaw.split(',').filter(v => MATTERS_SET.has(v)) as Matters[] : []
+  const mood = cleanChipList(mRaw)
+  const audience = cleanChipList(aRaw)
+  const matters = cleanChipList(kRaw)
   const bNum = bRaw ? Number(bRaw) : null
   const budget = bNum !== null && Number.isFinite(bNum)
     ? Math.min(BUDGET_MAX, Math.max(BUDGET_MIN, bNum))

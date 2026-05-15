@@ -1,52 +1,24 @@
 /**
  * "Find you in a product" — home page discovery types.
  *
- * The chip vocabulary mirrors the design prototype in
- * `docs/discovery-prototype/`. Tags are stored on Shopify products via
- * the `xdipx.mood_tags`, `xdipx.audience_tags`, `xdipx.matters_tags`
- * metafields. Category derives from `xdipx.category` (top-level nav).
+ * The chip vocabularies (mood, audience, matters) are dynamic — sourced
+ * from the live distinct values of these Shopify product metafields:
+ *   - xdipx.mood_tags
+ *   - xdipx.audience_tags
+ *   - xdipx.matters_tags
+ *
+ * The loader fetches them via `getDiscoveryVocab()` (24h KV-cached) and
+ * passes them down to the UI. Editors add a new chip by adding the tag
+ * to a product in Shopify — no deploy required.
+ *
+ * Category is still a closed enum (the top-level nav structure is a
+ * product decision, not a merchandiser one).
  */
 
-export const MOODS = [
-  'Sensual',
-  'Slow & Intimate',
-  'Playful',
-  'Adventurous',
-  'Bold',
-  'Indulgent',
-  'Romantic',
-  'Curious',
-  'Comforting',
-  'Energetic',
-  'Unhurried Solo',
-] as const
-export type Mood = (typeof MOODS)[number]
-
-export const AUDIENCES = [
-  'Me',
-  'Us',
-  'A Partner',
-  'Date Night',
-  'Solo',
-  'Gift',
-] as const
-export type Audience = (typeof AUDIENCES)[number]
-
-export const MATTERS = [
-  'Beginner-Friendly',
-  'Body-Safe Silicone',
-  'Discreet Design',
-  'First-Time',
-  'Hands-Free',
-  'Rechargeable',
-  'Soft-Touch',
-  'Travel-Size',
-  'Waterproof',
-  'App-Controlled',
-  'Whisper-Quiet',
-  'Plus-Size-Friendly',
-] as const
-export type Matters = (typeof MATTERS)[number]
+/** Free-form string aliases; vocabularies are sourced from Shopify at runtime. */
+export type Mood     = string
+export type Audience = string
+export type Matters  = string
 
 export const CATEGORIES = ['Pleasure', 'Play', 'Body', 'Wear'] as const
 export type Category = (typeof CATEGORIES)[number]

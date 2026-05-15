@@ -12,7 +12,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { kvGet, KV_KEYS } from '~/lib/kv.server'
 import { getHomepageSections, getEmmaHeroSettings, getHomeConfig } from '~/lib/sanity.server'
 import { resolveHomeVariant } from '~/lib/home-variant.server'
-import { getDiscoveryRails } from '~/lib/discovery.server'
+import { getDiscoveryRails, getDiscoveryVocab } from '~/lib/discovery.server'
 import { EMPTY_STATE } from '~/types/discovery'
 import { HomeA } from '~/components/discovery/HomeA'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
@@ -87,9 +87,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { variant } = resolveHomeVariant(request, homeConfig?.activeVariant ?? null)
 
   if (variant === 'a') {
-    const [dbDeal, { rails, total }] = await Promise.all([
+    const [dbDeal, { rails, total }, vocab] = await Promise.all([
       getLiveDealRow(),
       getDiscoveryRails(EMPTY_STATE),
+      getDiscoveryVocab(),
     ])
     const deal = dbDeal?.shopifyProductId
       ? await getDealByShopifyId(dbDeal.shopifyProductId).catch(() => null)
@@ -101,6 +102,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       total,
       deal: stripDeal,
       welcomeBackEnabled: homeConfig?.welcomeBackEnabled ?? true,
+      moods:     vocab.moods,
+      audiences: vocab.audiences,
+      matters:   vocab.matters,
     }
   }
 
@@ -317,6 +321,9 @@ export default function Homepage() {
         total={loaderData.total}
         deal={loaderData.deal}
         welcomeBackEnabled={loaderData.welcomeBackEnabled}
+        moods={loaderData.moods}
+        audiences={loaderData.audiences}
+        matters={loaderData.matters}
       />
     )
   }

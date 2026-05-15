@@ -17,7 +17,6 @@
 import { useEffect, useRef } from 'react'
 import { useFetcher } from 'react-router'
 import { trackHomeVariantView } from '~/lib/analytics.client'
-import { AUDIENCES, MATTERS, MOODS } from '~/types/discovery'
 import type { Rail as RailType } from '~/types/discovery'
 import { DiscoveryProvider, useDiscovery } from '~/stores/discovery'
 import { ChipGroup } from './ChipGroup'
@@ -33,6 +32,10 @@ interface HomeAProps {
   total: number
   deal: { title: string; handle: string } | null
   welcomeBackEnabled: boolean
+  /** Chip vocabularies sourced from Shopify metafields (24h cached). */
+  moods:     string[]
+  audiences: string[]
+  matters:   string[]
 }
 
 /* ── Inner component (needs DiscoveryProvider in scope) ─────────────────── */
@@ -41,9 +44,12 @@ interface InnerProps {
   initialRails: RailType[]
   deal: { title: string; handle: string } | null
   welcomeBackEnabled: boolean
+  moods:     string[]
+  audiences: string[]
+  matters:   string[]
 }
 
-function HomeAInner({ initialRails, deal, welcomeBackEnabled }: InnerProps) {
+function HomeAInner({ initialRails, deal, welcomeBackEnabled, moods, audiences, matters: mattersVocab }: InnerProps) {
   const { state, toggleMood, toggleAudience, toggleMatters, setBudget, clearAll, hasPriorSession } =
     useDiscovery()
 
@@ -112,27 +118,33 @@ function HomeAInner({ initialRails, deal, welcomeBackEnabled }: InnerProps) {
 
             {/* Chip groups */}
             <div className="flex flex-col gap-6 mb-6">
-              <ChipGroup
-                label="Mood"
-                group="mood"
-                values={MOODS}
-                selected={state.mood}
-                onToggle={v => toggleMood(v as typeof state.mood[number])}
-              />
-              <ChipGroup
-                label="For"
-                group="audience"
-                values={AUDIENCES}
-                selected={state.audience}
-                onToggle={v => toggleAudience(v as typeof state.audience[number])}
-              />
-              <ChipGroup
-                label="What matters"
-                group="matters"
-                values={MATTERS}
-                selected={state.matters}
-                onToggle={v => toggleMatters(v as typeof state.matters[number])}
-              />
+              {moods.length > 0 && (
+                <ChipGroup
+                  label="Mood"
+                  group="mood"
+                  values={moods}
+                  selected={state.mood}
+                  onToggle={v => toggleMood(v)}
+                />
+              )}
+              {audiences.length > 0 && (
+                <ChipGroup
+                  label="For"
+                  group="audience"
+                  values={audiences}
+                  selected={state.audience}
+                  onToggle={v => toggleAudience(v)}
+                />
+              )}
+              {mattersVocab.length > 0 && (
+                <ChipGroup
+                  label="What matters"
+                  group="matters"
+                  values={mattersVocab}
+                  selected={state.matters}
+                  onToggle={v => toggleMatters(v)}
+                />
+              )}
             </div>
 
             {/* Budget slider */}
@@ -180,13 +192,16 @@ function HomeAInner({ initialRails, deal, welcomeBackEnabled }: InnerProps) {
 
 /* ── Public export — wraps with DiscoveryProvider ───────────────────────── */
 
-export function HomeA({ rails, deal, welcomeBackEnabled }: HomeAProps) {
+export function HomeA({ rails, deal, welcomeBackEnabled, moods, audiences, matters }: HomeAProps) {
   return (
     <DiscoveryProvider>
       <HomeAInner
         initialRails={rails}
         deal={deal}
         welcomeBackEnabled={welcomeBackEnabled}
+        moods={moods}
+        audiences={audiences}
+        matters={matters}
       />
     </DiscoveryProvider>
   )

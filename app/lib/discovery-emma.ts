@@ -93,7 +93,10 @@ export function rankRails(
 
 /* ─── Audience phrase map ────────────────────────────────────────────── */
 
-const AUDIENCE_PHRASES: Record<Audience, string> = {
+// Hand-tuned phrasing for known audience labels. Anything outside this map
+// falls back to a lowercased pass-through (see audiencePhrase) — works for
+// any future merchandiser-added audience without a code change.
+const AUDIENCE_PHRASES: Record<string, string> = {
   Me:           'for Me',
   Us:           'for Us',
   'A Partner':  'for Them',
@@ -103,7 +106,10 @@ const AUDIENCE_PHRASES: Record<Audience, string> = {
 }
 
 export function audiencePhrase(a: Audience): string {
-  return AUDIENCE_PHRASES[a]
+  // Vocabulary is dynamic (sourced from Shopify), so fall back to a
+  // lowercased pass-through for any audience value we don't have a
+  // hand-tuned phrase for.
+  return AUDIENCE_PHRASES[a] ?? a.toLowerCase()
 }
 
 /* ─── Rail titles ────────────────────────────────────────────────────── */
@@ -142,7 +148,7 @@ export function railTitleSegments(cat: Category, s: DiscoveryState): RailTitleSe
   if (aud) {
     segments.push(
       { text: ' ', emphasized: false },
-      { text: AUDIENCE_PHRASES[aud], emphasized: true },
+      { text: audiencePhrase(aud), emphasized: true },
     )
   }
 
@@ -310,7 +316,7 @@ export function welcomeBackSegments(s: Pick<DiscoveryState, 'mood' | 'audience'>
       prefix:   'Welcome back. Still in a ',
       mood:     mood.toLowerCase(),
       middle:   ' mood ',
-      audience: AUDIENCE_PHRASES[aud].toLowerCase(),
+      audience: audiencePhrase(aud).toLowerCase(),
       suffix:   '?',
     }
   }
@@ -318,7 +324,7 @@ export function welcomeBackSegments(s: Pick<DiscoveryState, 'mood' | 'audience'>
     return { prefix: 'Welcome back. Still in a ', mood: mood.toLowerCase(), middle: ' mood', audience: null, suffix: '?' }
   }
   if (aud) {
-    return { prefix: 'Welcome back. Still shopping ', mood: null, middle: '', audience: AUDIENCE_PHRASES[aud].toLowerCase(), suffix: '?' }
+    return { prefix: 'Welcome back. Still shopping ', mood: null, middle: '', audience: audiencePhrase(aud).toLowerCase(), suffix: '?' }
   }
   return { prefix: 'Welcome back.', mood: null, middle: '', audience: null, suffix: '' }
 }
