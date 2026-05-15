@@ -19,12 +19,16 @@ import type {
   Rail,
 } from '~/types/discovery'
 import { rankRails } from '~/lib/discovery-emma'
+import { normalizeTag } from '~/lib/discovery-tags'
 
 /**
  * Bump when the index shape changes so old cached entries are ignored.
  * KV writes and reads are namespaced by version; old entries expire on TTL.
  */
-const INDEX_VERSION = 'v1'
+// v2: tag values are now normalized (Title-Case canonical form) before
+// hitting the index, so an old v1 cache with raw mixed-case duplicates
+// would render twice. Bumping invalidates any in-flight stale entry.
+const INDEX_VERSION = 'v2'
 const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 const INDEX_TTL_SECONDS = 60 * 60 // 1h
 
@@ -79,14 +83,20 @@ function mapTypeToCategory(
 }
 
 /**
- * Trim and drop empties; tag values flow straight to the UI so editor
- * casing on the Shopify side is the display casing on the page.
+ * Trim, normalize to canonical Title-Case storage form, and dedupe
+ * within a single product's tag list. Merchandisers sometimes tag the
+ * same product with `Sensual` AND `sensual`; this collapses them.
+ * Display-formatting (hyphen→space, small-word lowercasing) happens
+ * downstream in the Chip component via `displayLabel`.
  */
 function cleanTagList(arr: string[]): string[] {
+  const seen = new Set<string>()
   const out: string[] = []
   for (const raw of arr) {
-    const v = raw.trim()
-    if (v) out.push(v)
+    const v = normalizeTag(raw)
+    if (!v || seen.has(v)) continue
+    seen.add(v)
+    out.push(v)
   }
   return out
 }

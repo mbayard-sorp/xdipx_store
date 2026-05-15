@@ -26,14 +26,22 @@ import {
   DEFAULT_BUDGET,
   type DiscoveryState,
 } from '~/types/discovery'
+import { normalizeTag } from '~/lib/discovery-tags'
 
 const MAX_CHIPS_PER_GROUP = 20  // hard cap to prevent abuse via crafted URLs
 
 function cleanIncoming(params: URLSearchParams, key: string): string[] {
-  return params.getAll(key)
-    .map(v => v.trim())
-    .filter(v => v.length > 0 && v.length <= 80)
-    .slice(0, MAX_CHIPS_PER_GROUP)
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of params.getAll(key)) {
+    if (raw.length > 80) continue
+    const v = normalizeTag(raw)
+    if (!v || seen.has(v)) continue
+    seen.add(v)
+    out.push(v)
+    if (out.length >= MAX_CHIPS_PER_GROUP) break
+  }
+  return out
 }
 
 function parseStateFromSearch(params: URLSearchParams): DiscoveryState {

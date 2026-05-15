@@ -82,18 +82,28 @@ export function saveDiscoveryPicks(state: DiscoveryState) {
 /* ─── URL helpers ────────────────────────────────────────────────────────── */
 
 // Tag vocabularies are dynamic (sourced from Shopify metafields), so the
-// URL parser can't validate against a closed list. Trim + length-cap each
-// chip and hard-cap how many chips per group can come from the URL so a
-// crafted link can't blow up state size.
+// URL parser can't validate against a closed list. Normalize each value
+// to canonical Title-Case storage form (matches what the server emits),
+// length-cap each chip, and hard-cap chips per group so a crafted link
+// can't blow up state size.
+import { normalizeTag } from '~/lib/discovery-tags'
+
 const MAX_CHIPS_PER_GROUP = 20
 const MAX_CHIP_LEN = 80
 
 function cleanChipList(raw: string | null): string[] {
   if (!raw) return []
-  return raw.split(',')
-    .map(v => v.trim())
-    .filter(v => v.length > 0 && v.length <= MAX_CHIP_LEN)
-    .slice(0, MAX_CHIPS_PER_GROUP)
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const piece of raw.split(',')) {
+    if (piece.length > MAX_CHIP_LEN) continue
+    const v = normalizeTag(piece)
+    if (!v || seen.has(v)) continue
+    seen.add(v)
+    out.push(v)
+    if (out.length >= MAX_CHIPS_PER_GROUP) break
+  }
+  return out
 }
 
 function readURL(): DiscoveryState | null {

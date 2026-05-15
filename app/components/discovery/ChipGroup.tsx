@@ -4,6 +4,7 @@
  */
 
 import { trackChipToggle } from '~/lib/analytics.client'
+import { displayLabel } from '~/lib/discovery-tags'
 import { Chip } from './Chip'
 
 interface ChipGroupProps {
@@ -33,7 +34,7 @@ export function ChipGroup({ label, group, values, selected, onToggle }: ChipGrou
         {values.map(value => (
           <Chip
             key={value}
-            label={value}
+            label={displayLabel(value)}
             on={selected.includes(value)}
             onToggle={() => handleToggle(value)}
           />
