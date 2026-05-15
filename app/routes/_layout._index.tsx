@@ -87,7 +87,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { variant } = resolveHomeVariant(request, homeConfig?.activeVariant ?? null)
 
   if (variant === 'a') {
-    const [dbDeal, { rails, total }, vocab] = await Promise.all([
+    const [dbDeal, { rails, total, available }, vocab] = await Promise.all([
       getLiveDealRow(),
       getDiscoveryRails(EMPTY_STATE),
       getDiscoveryVocab(),
@@ -105,6 +105,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       moods:     vocab.moods,
       audiences: vocab.audiences,
       matters:   vocab.matters,
+      available,
     }
   }
 
@@ -324,6 +325,7 @@ export default function Homepage() {
         moods={loaderData.moods}
         audiences={loaderData.audiences}
         matters={loaderData.matters}
+        available={loaderData.available}
       />
     )
   }

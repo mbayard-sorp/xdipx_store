@@ -18,6 +18,7 @@ import { useEffect, useRef } from 'react'
 import { useFetcher } from 'react-router'
 import { trackHomeVariantView } from '~/lib/analytics.client'
 import type { Rail as RailType } from '~/types/discovery'
+import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
 import { DiscoveryProvider, useDiscovery } from '~/stores/discovery'
 import { ChipGroup } from './ChipGroup'
 import { BudgetSlider } from './BudgetSlider'
@@ -36,12 +37,15 @@ interface HomeAProps {
   moods:     string[]
   audiences: string[]
   matters:   string[]
+  /** Which chip values still yield ≥1 product under the SSR (empty) state. */
+  available: ChipAvailabilityArrays
 }
 
 /* ── Inner component (needs DiscoveryProvider in scope) ─────────────────── */
 
 interface InnerProps {
   initialRails: RailType[]
+  initialAvailable: ChipAvailabilityArrays
   deal: { title: string; handle: string } | null
   welcomeBackEnabled: boolean
   moods:     string[]
@@ -49,15 +53,16 @@ interface InnerProps {
   matters:   string[]
 }
 
-function HomeAInner({ initialRails, deal, welcomeBackEnabled, moods, audiences, matters: mattersVocab }: InnerProps) {
+function HomeAInner({ initialRails, initialAvailable, deal, welcomeBackEnabled, moods, audiences, matters: mattersVocab }: InnerProps) {
   const { state, toggleMood, toggleAudience, toggleMatters, setBudget, clearAll, hasPriorSession } =
     useDiscovery()
 
-  const fetcher = useFetcher<{ rails: RailType[]; total: number; hasAny: boolean }>()
+  const fetcher = useFetcher<{ rails: RailType[]; total: number; hasAny: boolean; available: ChipAvailabilityArrays }>()
   const trackedRef = useRef(false)
 
-  // Active rails: prefer fetcher data when fresh, else SSR initial
+  // Active rails + availability: prefer fetcher data when fresh, else SSR initial
   const activeRails: RailType[] = fetcher.data?.rails ?? initialRails
+  const activeAvailable: ChipAvailabilityArrays = fetcher.data?.available ?? initialAvailable
 
   // Track variant view on mount (once)
   useEffect(() => {
@@ -124,6 +129,7 @@ function HomeAInner({ initialRails, deal, welcomeBackEnabled, moods, audiences, 
                   group="mood"
                   values={moods}
                   selected={state.mood}
+                  available={activeAvailable.moods}
                   onToggle={v => toggleMood(v)}
                 />
               )}
@@ -133,6 +139,7 @@ function HomeAInner({ initialRails, deal, welcomeBackEnabled, moods, audiences, 
                   group="audience"
                   values={audiences}
                   selected={state.audience}
+                  available={activeAvailable.audiences}
                   onToggle={v => toggleAudience(v)}
                 />
               )}
@@ -142,6 +149,7 @@ function HomeAInner({ initialRails, deal, welcomeBackEnabled, moods, audiences, 
                   group="matters"
                   values={mattersVocab}
                   selected={state.matters}
+                  available={activeAvailable.matters}
                   onToggle={v => toggleMatters(v)}
                 />
               )}
@@ -192,11 +200,12 @@ function HomeAInner({ initialRails, deal, welcomeBackEnabled, moods, audiences, 
 
 /* ── Public export — wraps with DiscoveryProvider ───────────────────────── */
 
-export function HomeA({ rails, deal, welcomeBackEnabled, moods, audiences, matters }: HomeAProps) {
+export function HomeA({ rails, deal, welcomeBackEnabled, moods, audiences, matters, available }: HomeAProps) {
   return (
     <DiscoveryProvider>
       <HomeAInner
         initialRails={rails}
+        initialAvailable={available}
         deal={deal}
         welcomeBackEnabled={welcomeBackEnabled}
         moods={moods}

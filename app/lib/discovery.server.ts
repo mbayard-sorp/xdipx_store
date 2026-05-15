@@ -18,7 +18,8 @@ import type {
   DiscoveryState,
   Rail,
 } from '~/types/discovery'
-import { rankRails } from '~/lib/discovery-emma'
+import { availableToArrays, computeAvailable, rankRails } from '~/lib/discovery-emma'
+import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
 import { normalizeTag } from '~/lib/discovery-tags'
 
 /**
@@ -309,13 +310,14 @@ export interface GetRailsOptions {
 export async function getDiscoveryRails(
   state: DiscoveryState,
   opts: GetRailsOptions = {},
-): Promise<{ rails: Rail[]; total: number }> {
+): Promise<{ rails: Rail[]; total: number; available: ChipAvailabilityArrays }> {
   const products = opts.index ?? (await getDiscoveryIndex())
   const rankOpts: { perRail?: number; dropEmpty?: boolean } = {}
   if (opts.perRail   !== undefined) rankOpts.perRail   = opts.perRail
   if (opts.dropEmpty !== undefined) rankOpts.dropEmpty = opts.dropEmpty
   const rails = rankRails(products, state, rankOpts)
-  return { rails, total: products.length }
+  const available = availableToArrays(computeAvailable(products, state))
+  return { rails, total: products.length, available }
 }
 
 /* ─── Tag coverage report ─────────────────────────────────────────────── */

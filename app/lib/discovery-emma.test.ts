@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   audiencePhrase,
+  computeAvailable,
   emmaQuestions,
   getEmmaLine,
   railTitlePlain,
@@ -257,5 +258,64 @@ describe('welcomeBackSegments', () => {
     const w = welcomeBackSegments({ mood: [], audience: [] })
     expect(w.mood).toBeNull()
     expect(w.audience).toBeNull()
+  })
+})
+
+describe('computeAvailable', () => {
+  const idx: DiscoveryProduct[] = [
+    product({ id: '1', mood: ['Sensual'],  audience: ['Us'], matters: ['Body-Safe-Silicone'] }),
+    product({ id: '2', mood: ['Bold'],     audience: ['Me'], matters: ['Waterproof'] }),
+    product({ id: '3', mood: ['Sensual'],  audience: ['Me'], matters: ['Travel-Size'] }),
+    product({ id: '4', mood: ['Playful'],  audience: ['Us'], matters: ['Hands-Free'] }),
+  ]
+
+  it('returns all tags as available under the empty state', () => {
+    const a = computeAvailable(idx, EMPTY_STATE)
+    expect(Array.from(a.moods).sort()).toEqual(['Bold', 'Playful', 'Sensual'])
+    expect(Array.from(a.audiences).sort()).toEqual(['Me', 'Us'])
+    expect(Array.from(a.matters).sort()).toEqual(['Body-Safe-Silicone', 'Hands-Free', 'Travel-Size', 'Waterproof'])
+  })
+
+  it('narrows audiences when a mood is selected', () => {
+    const a = computeAvailable(idx, { ...EMPTY_STATE, mood: ['Sensual'] })
+    // Sensual products are 1 (Us) + 3 (Me) → both audiences
+    expect(Array.from(a.audiences).sort()).toEqual(['Me', 'Us'])
+    // And matters narrows to those carried by Sensual products
+    expect(Array.from(a.matters).sort()).toEqual(['Body-Safe-Silicone', 'Travel-Size'])
+  })
+
+  it('drops audiences with no co-occurring product', () => {
+    // Only Bold product is #2 with audience=Me. So Us drops out.
+    const a = computeAvailable(idx, { ...EMPTY_STATE, mood: ['Bold'] })
+    expect(Array.from(a.audiences)).toEqual(['Me'])
+    expect(Array.from(a.matters)).toEqual(['Waterproof'])
+  })
+
+  it('keeps within-group chips open even with a same-group selection', () => {
+    // Selecting Sensual (mood) shouldn't hide other mood chips — they expand
+    // the mood set OR-style. Bold is still available because it co-occurs
+    // with audiences/matters that satisfy the (empty) other-group filters.
+    const a = computeAvailable(idx, { ...EMPTY_STATE, mood: ['Sensual'] })
+    expect(Array.from(a.moods).sort()).toEqual(['Bold', 'Playful', 'Sensual'])
+  })
+
+  it('strands matters when cross-group filter has zero intersection', () => {
+    // mood=Bold (product 2 only) AND audience=Us (products 1, 4) → 0 products.
+    // Mood chips remain available because their own selection is ignored
+    // when evaluating mood chips — adding a mood is OR-within-group, so
+    // it could rescue results. Same for audience chips. But matters has
+    // no escape: every matters chip needs a product that satisfies BOTH
+    // the mood AND audience selection, which is empty.
+    const a = computeAvailable(idx, {
+      ...EMPTY_STATE,
+      mood:     ['Bold'],
+      audience: ['Us'],
+    })
+    // Audience=Us products are 1 (Sensual) and 4 (Playful) → those moods open
+    expect(Array.from(a.moods).sort()).toEqual(['Playful', 'Sensual'])
+    // Mood=Bold products are only #2 (audience=Me)
+    expect(Array.from(a.audiences)).toEqual(['Me'])
+    // matters has no co-occurring product
+    expect(a.matters.size).toBe(0)
   })
 })

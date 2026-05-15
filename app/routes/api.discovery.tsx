@@ -63,7 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const state = parseStateFromSearch(url.searchParams)
   const variant = url.searchParams.get('variant') === 'b' ? 'b' : 'a'
 
-  const { rails, total } = await getDiscoveryRails(state, {
+  const { rails, total, available } = await getDiscoveryRails(state, {
     perRail:   variant === 'b' ? 4 : 4,
     dropEmpty: variant === 'b',
   })
@@ -71,7 +71,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0
 
   return Response.json(
-    { rails, total, hasAny, variant },
+    { rails, total, hasAny, variant, available },
     {
       headers: {
         // Short edge cache for repeated identical filter combos. Vary on

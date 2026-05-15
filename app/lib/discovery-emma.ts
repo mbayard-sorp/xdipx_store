@@ -33,6 +33,70 @@ export function scoreProduct(p: DiscoveryProduct, s: DiscoveryState): number {
   return score
 }
 
+/**
+ * Per-chip availability under the user's current selection.
+ *
+ * A chip X in group G is "available" iff there is at least one product
+ * that (a) carries tag X in p[G] AND (b) matches the user's current
+ * selection in the OTHER two groups. Group G's own current selection
+ * is ignored because adding X to G is OR-within-group (it expands the
+ * group's match set, never narrows it).
+ *
+ * Returned as sets for O(1) lookup at render time.
+ */
+export interface ChipAvailability {
+  moods:     Set<string>
+  audiences: Set<string>
+  matters:   Set<string>
+}
+
+export function computeAvailable(
+  index: readonly DiscoveryProduct[],
+  s: Pick<DiscoveryState, 'mood' | 'audience' | 'matters'>,
+): ChipAvailability {
+  const moods     = new Set<string>()
+  const audiences = new Set<string>()
+  const matters   = new Set<string>()
+
+  const hasMood     = s.mood.length > 0
+  const hasAudience = s.audience.length > 0
+  const hasMatters  = s.matters.length > 0
+
+  for (const p of index) {
+    // Does this product satisfy each group's current selection? (OR within group,
+    // AND across groups.) An unselected group is trivially satisfied.
+    const okMood     = !hasMood     || s.mood.some(m => p.mood.includes(m))
+    const okAudience = !hasAudience || s.audience.some(a => p.audience.includes(a))
+    const okMatters  = !hasMatters  || s.matters.some(k => p.matters.includes(k))
+
+    // For each group G, list G's tags from this product when the OTHER
+    // two groups are satisfied — ignoring G's own current selection.
+    if (okAudience && okMatters) for (const m of p.mood)     moods.add(m)
+    if (okMood     && okMatters) for (const a of p.audience) audiences.add(a)
+    if (okMood     && okAudience) for (const k of p.matters)  matters.add(k)
+  }
+
+  return { moods, audiences, matters }
+}
+
+/**
+ * Wire-friendly form of ChipAvailability. Sets don't survive JSON, so the
+ * loader and api.discovery serialize arrays and the client reconstructs sets.
+ */
+export interface ChipAvailabilityArrays {
+  moods:     string[]
+  audiences: string[]
+  matters:   string[]
+}
+
+export function availableToArrays(a: ChipAvailability): ChipAvailabilityArrays {
+  return {
+    moods:     Array.from(a.moods),
+    audiences: Array.from(a.audiences),
+    matters:   Array.from(a.matters),
+  }
+}
+
 export interface RankOptions {
   /** Hard cap of items per rail. Variant A uses 4; variant B uses 4 for top, 3 for rest. */
   perRail?: number
