@@ -8,7 +8,10 @@
  * localStorage key: xdipx.discovery.v1  (14-day TTL via timestamp)
  * On mount: hydrate from URL → fall back to localStorage when URL is empty.
  *
- * .client.ts suffix keeps this out of the server bundle (RR7 tree-shaking).
+ * NOT named *.client.tsx: RR7 inherits Remix's filename convention that
+ * strips *.client modules from the server bundle. We need this module
+ * present on both sides so SSR can render <DiscoveryProvider>. Browser-
+ * only APIs (localStorage, window) are guarded with typeof checks.
  * No 'use client' directive -- this is React Router v7, not Next.js.
  * No external libs -- plain React hooks only.
  */
