@@ -10,7 +10,7 @@
  */
 
 import { adminGraphQL } from '~/lib/shopify.server'
-import { kvGet, kvSet } from '~/lib/kv.server'
+import { kvGet, kvSet, kvDel } from '~/lib/kv.server'
 import type { ProductTypeDial } from '~/types'
 import type {
   Category,
@@ -31,6 +31,16 @@ import { rankRails } from '~/lib/discovery-emma'
 const INDEX_VERSION = 'v1'
 const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 const INDEX_TTL_SECONDS = 60 * 60 // 1h
+
+/**
+ * Build-lock to avoid thundering-herd on cold-start traffic spikes.
+ * If N serverless instances simultaneously miss KV they would otherwise
+ * each chain 30+ Admin GraphQL calls and exhaust Shopify's point bucket.
+ * The first instance to acquire the lock builds; others see the lock,
+ * skip the build, and return [] so the loader renders the empty state.
+ */
+const BUILD_LOCK_KEY = `discovery:index:building:${INDEX_VERSION}`
+const BUILD_LOCK_TTL_SECONDS = 30
 
 /**
  * Map `xdipx.product_type_dial` to the home page's top-level Category +
@@ -196,6 +206,14 @@ export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise
     const cached = await kvGet<DiscoveryProduct[]>(INDEX_KEY)
     if (cached && Array.isArray(cached) && cached.length > 0) return cached
   }
+
+  // Best-effort cooperative lock. KV doesn't expose SETNX through the wrapper,
+  // so this is a read-then-write race-window — acceptable because losing the
+  // race only means one extra full build, not a correctness issue.
+  const locked = await kvGet<number>(BUILD_LOCK_KEY)
+  if (locked) return []
+  await kvSet(BUILD_LOCK_KEY, Date.now(), BUILD_LOCK_TTL_SECONDS)
+
   try {
     const fresh = await buildDiscoveryIndex()
     if (fresh.length > 0) {
@@ -204,6 +222,8 @@ export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise
     return fresh
   } catch {
     return []
+  } finally {
+    await kvDel(BUILD_LOCK_KEY)
   }
 }
 

@@ -80,7 +80,15 @@ export const EMPTY_STATE: DiscoveryState = {
   step: 0,
 }
 
-/** Lean shape used by the home page rails — never the full Shopify product. */
+/**
+ * Lean shape used by the home page rails — never the full Shopify product.
+ *
+ * IMPORTANT: When fields are added / removed / renamed here, bump
+ * `INDEX_VERSION` in `app/lib/discovery.server.ts`. KV entries are
+ * namespaced by that version; without a bump, a deploy with a new shape
+ * will read stale entries with the old shape and silently serve corrupt
+ * rail data for up to the TTL window.
+ */
 export interface DiscoveryProduct {
   id:          string
   handle:      string

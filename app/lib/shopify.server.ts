@@ -53,7 +53,7 @@ export async function shopifyAdmin<T>(path: string, method = 'GET', body?: unkno
 }
 
 export async function adminGraphQL<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
-  const res = await fetch(ADMIN_GQL_ENDPOINT, {
+  const doFetch = () => fetch(ADMIN_GQL_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -61,6 +61,19 @@ export async function adminGraphQL<T>(query: string, variables?: Record<string, 
     },
     body: JSON.stringify({ query, variables }),
   })
+
+  let res = await doFetch()
+
+  // Retry once on 429 if Shopify hands us a Retry-After. Discovery index
+  // builds chain 30+ calls; without this, a single throttle hit during a
+  // cold-start build empties the cache and renders the home with no rails.
+  if (res.status === 429) {
+    const retryAfter = Number(res.headers.get('retry-after')) || 1
+    const delayMs = Math.min(retryAfter * 1000, 5000)
+    await new Promise(r => setTimeout(r, delayMs))
+    res = await doFetch()
+  }
+
   if (!res.ok) throw new Error(`Shopify Admin GraphQL error: ${res.status}`)
   const { data, errors } = await res.json() as { data: T; errors?: { message: string }[] }
   if (errors?.length) throw new Error(errors[0]?.message ?? 'Shopify Admin GraphQL error')
