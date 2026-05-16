@@ -319,47 +319,65 @@ export function getRailEmptyLine(category: Category): string {
 }
 
 /**
- * Conversational question copy for variant B. Each later question
- * interpolates the prior answer so the thread reads as one back-and-forth.
+ * Variant B conversational copy. Reviewed by emma-copywriter +
+ * emma-empathy-reviewer 2026-05-15. Single source of truth — edits go
+ * through a fresh copy + review pass.
+ *
+ * Each later question interpolates the prior answer so the thread reads
+ * as one back-and-forth.
  */
 export const emmaQuestions = {
   intro: {
-    headline: 'Hi. Let\'s find you in a product.',
-    sub:      "Three quick taps. There are no wrong answers, and you can change anything later. Let's start with how you're feeling.",
+    headline: "Hi. There's something here for you.",
+    sub:      "Three quick questions, no wrong turns. Pick what rings true, skip what doesn't, and change any answer whenever you like.",
   },
   mood: {
-    headline: 'What kind of feeling are you chasing?',
-    sub:      "Mood first. We'll get to the practicals after.",
+    headline: 'What kind of feeling are you chasing right now?',
+    sub:      "Mood first, practicalities later. Pick as many as feel right, or just one if that's it.",
   },
   audience: (mood?: Mood) => ({
     headline: mood
-      ? `Beautiful, ${mood.toLowerCase()}. Who's this for?`
-      : "And who's this for?",
-    sub: 'Just you, the two of you, or someone else.',
+      ? `Nice. ${mood.toLowerCase()} it is. So who's this for?`
+      : "Who's this for?",
+    sub: "Just you, the two of you, a long-distance thing, a gift for someone. No wrong answer here.",
   }),
   matters: (audience?: Audience) => {
     const phrase =
       audience === 'Me' ? 'for you'
       : audience === 'Us' ? 'for the two of you'
-      : audience ? `for ${audience.toLowerCase()}`
+      : audience ? `for ${audiencePhrase(audience).toLowerCase()}`
       : ''
     return {
-      headline: `Anything that has to be true${phrase ? ' ' + phrase : ''}?`,
-      sub: 'Optional. Pick a few if it helps me narrow.',
+      headline: phrase
+        ? `Last one. Anything that has to be true ${phrase}?`
+        : 'Anything that absolutely has to be true?',
+      sub: "Totally optional. The more you tell me, the tighter the rails get. Skip it and I'll pull from the full range.",
     }
   },
   done: (mood?: Mood, audience?: Audience) => {
-    const m = mood ? `, ${mood.toLowerCase()}` : ''
+    const m = mood ? mood.toLowerCase() : ''
     const a =
-      audience === 'Me' ? ', for you'
-      : audience === 'Us' ? ', for both of you'
-      : audience ? `, for ${audience.toLowerCase()}`
+      audience === 'Me' ? 'for you'
+      : audience === 'Us' ? 'for both of you'
+      : audience ? `for ${audiencePhrase(audience).toLowerCase()}`
       : ''
+    let headline: string
+    if (m && a)      headline = `Got it. ${m}, ${a}. Here's what I'd actually reach for.`
+    else if (m)      headline = `Got it. ${m}. Here's what I'd reach for.`
+    else if (a)      headline = `Got it. ${a}. Here's what I'd reach for.`
+    else             headline = "Good enough for me. Here's where I'd start."
     return {
-      headline: `Here's what I'd reach for${m}${a}. Take your time.`,
-      sub: 'Each rail below is shaped by what you said. Tap any answer up here to change it and the rails update instantly.',
+      headline,
+      sub: 'Tap any answer above and the rails update on the spot. No need to start over.',
     }
   },
+  /**
+   * Returning-session banner copy for Variant B. `tags` is a short summary
+   * like "sensual / us / waterproof" composed by the renderer from the
+   * persisted state.
+   */
+  reopenBanner: (tags: string) =>
+    `Last time you were looking at ${tags}. Same direction, or something new?`,
 } as const
 
 /**

@@ -15,6 +15,7 @@ import { resolveHomeVariant } from '~/lib/home-variant.server'
 import { getDiscoveryRails, getDiscoveryVocab } from '~/lib/discovery.server'
 import { EMPTY_STATE } from '~/types/discovery'
 import { HomeA } from '~/components/discovery/HomeA'
+import { HomeB } from '~/components/discovery/HomeB'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getEmmaContextRows }    from '~/lib/emma-rails.server'
@@ -86,10 +87,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const homeConfig = await getHomeConfig().catch(() => null)
   const { variant } = resolveHomeVariant(request, homeConfig?.activeVariant ?? null)
 
-  if (variant === 'a') {
+  if (variant === 'a' || variant === 'b') {
     const [dbDeal, { rails, total, available }, vocab] = await Promise.all([
       getLiveDealRow(),
-      getDiscoveryRails(EMPTY_STATE),
+      getDiscoveryRails(EMPTY_STATE, { dropEmpty: variant === 'b' }),
       getDiscoveryVocab(),
     ])
     const deal = dbDeal?.shopifyProductId
@@ -97,7 +98,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : null
     const stripDeal = deal ? { title: deal.seoTitle, handle: deal.handle } : null
     return {
-      variant: 'a' as const,
+      variant,
       rails,
       total,
       deal: stripDeal,
@@ -282,8 +283,8 @@ function preloadHeroImageTag(imageUrl: string | undefined | null) {
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const canonical = 'https://xdipx.com/'
-  // Variant A uses generic brand meta -- no deal-specific fields available.
-  if (!data || data.variant === 'a' || !data.deal || !('seoTitle' in data.deal)) {
+  // Variants A and B use generic brand meta -- no deal-specific fields available.
+  if (!data || data.variant === 'a' || data.variant === 'b' || !data.deal || !('seoTitle' in data.deal)) {
     return [
       { title: BRAND_TITLE },
       { name: 'description', content: BRAND_DESCRIPTION },
@@ -330,13 +331,32 @@ export default function Homepage() {
     )
   }
 
+  // ── Variant B: "Emma Asks" conversational home page ───────────────────────
+  if (loaderData.variant === 'b') {
+    return (
+      <HomeB
+        rails={loaderData.rails}
+        total={loaderData.total}
+        deal={loaderData.deal}
+        welcomeBackEnabled={loaderData.welcomeBackEnabled}
+        moods={loaderData.moods}
+        audiences={loaderData.audiences}
+        matters={loaderData.matters}
+        available={loaderData.available}
+      />
+    )
+  }
+
   // ── Legacy path ───────────────────────────────────────────────────────────
+  // Both 'a' and 'b' variants are handled via early returns above; TypeScript
+  // can't follow that through the useLoaderData union, so cast here.
+  const legacyData = loaderData as Extract<typeof loaderData, { variant: 'legacy' }>
   const {
     deal, bundle, forHim, forHer, bonusDeal,
     cmsData, carouselProductMap,
     emmaHero, pairDeal, homepageSettings, pairBundleDeal,
     emmaContextRows, pairSwatches,
-  } = loaderData
+  } = legacyData
   const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
 
   // ── GA4: track deal view + item lists ───────────────────────────────────

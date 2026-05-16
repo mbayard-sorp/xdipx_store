@@ -147,6 +147,9 @@ type Action =
   | { type: 'SET_BUDGET';      value: number }
   | { type: 'CLEAR_ALL' }
   | { type: 'HYDRATE';         state: DiscoveryState }
+  // Variant B step gating — safe to add; Variant A never dispatches these.
+  | { type: 'ADVANCE_STEP' }
+  | { type: 'RESET_TO_STEP'; step: 0 | 1 | 2 | 3 }
 
 function toggle<T>(arr: T[], value: T): T[] {
   return arr.includes(value) ? arr.filter(v => v !== value) : [...arr, value]
@@ -166,6 +169,12 @@ function reducer(state: DiscoveryState, action: Action): DiscoveryState {
       return EMPTY_STATE
     case 'HYDRATE':
       return action.state
+    case 'ADVANCE_STEP': {
+      const next = Math.min(3, state.step + 1) as 0 | 1 | 2 | 3
+      return { ...state, step: next }
+    }
+    case 'RESET_TO_STEP':
+      return { ...state, step: action.step }
     default:
       return state
   }
@@ -181,6 +190,10 @@ export interface DiscoveryContextValue {
   toggleMatters:      (v: Matters) => void
   setBudget:          (v: number) => void
   clearAll:           () => void
+  /** Variant B: advance to the next conversation step (max 3). */
+  advanceStep:        () => void
+  /** Variant B: rewind to a specific step without clearing selections. */
+  resetToStep:        (step: 0 | 1 | 2 | 3) => void
 }
 
 const DiscoveryContext = createContext<DiscoveryContextValue | null>(null)
@@ -229,6 +242,8 @@ export function DiscoveryProvider({ children, initialState }: DiscoveryProviderP
   const toggleMatters  = useCallback((v: Matters)  => dispatch({ type: 'TOGGLE_MATTERS',  value: v }), [])
   const setBudget      = useCallback((v: number)   => dispatch({ type: 'SET_BUDGET',      value: v }), [])
   const clearAll       = useCallback(()            => dispatch({ type: 'CLEAR_ALL' }), [])
+  const advanceStep    = useCallback(()            => dispatch({ type: 'ADVANCE_STEP' }), [])
+  const resetToStep    = useCallback((s: 0 | 1 | 2 | 3) => dispatch({ type: 'RESET_TO_STEP', step: s }), [])
 
   return (
     <DiscoveryContext.Provider value={{
@@ -239,6 +254,8 @@ export function DiscoveryProvider({ children, initialState }: DiscoveryProviderP
       toggleMatters,
       setBudget,
       clearAll,
+      advanceStep,
+      resetToStep,
     }}>
       {children}
     </DiscoveryContext.Provider>
