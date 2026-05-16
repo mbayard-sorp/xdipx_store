@@ -10,72 +10,112 @@
  */
 
 import { adminGraphQL } from '~/lib/shopify.server'
-import { kvGet, kvSet } from '~/lib/kv.server'
+import { kvGet, kvSet, kvDel } from '~/lib/kv.server'
 import type { ProductTypeDial } from '~/types'
 import type {
   Category,
   DiscoveryProduct,
   DiscoveryState,
   Rail,
-  Audience,
-  Matters,
-  Mood,
 } from '~/types/discovery'
-import { AUDIENCES, MATTERS, MOODS } from '~/types/discovery'
-import { rankRails } from '~/lib/discovery-emma'
+import { availableToArrays, computeAvailable, rankRails } from '~/lib/discovery-emma'
+import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
+import { normalizeTag } from '~/lib/discovery-tags'
 
 /**
  * Bump when the index shape changes so old cached entries are ignored.
  * KV writes and reads are namespaced by version; old entries expire on TTL.
  */
-const INDEX_VERSION = 'v1'
+// v3: category source switched from xdipx.product_type_dial mapping to
+//     direct membership in the four top-level Shopify collections
+//     (Pleasure / Play / Body / Wear). v2 cached entries reference the
+//     old categorization. Bumping invalidates them.
+// v2: tag values normalized (Title-Case canonical form) before indexing.
+const INDEX_VERSION = 'v3'
 const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 const INDEX_TTL_SECONDS = 60 * 60 // 1h
 
 /**
- * Map `xdipx.product_type_dial` to the home page's top-level Category +
- * subcategory label. Returns null when the type doesn't fit the discovery
- * surface (e.g. condom, novelty, book-media); those products are skipped.
- *
- * Subcategory labels match the prototype's nav copy exactly.
+ * Build-lock to avoid thundering-herd on cold-start traffic spikes.
+ * If N serverless instances simultaneously miss KV they would otherwise
+ * each chain 30+ Admin GraphQL calls and exhaust Shopify's point bucket.
+ * The first instance to acquire the lock builds; others see the lock,
+ * skip the build, and return [] so the loader renders the empty state.
  */
-function mapTypeToCategory(
-  dial: ProductTypeDial | '' | undefined,
-): { category: Category; subcategory: string } | null {
+const BUILD_LOCK_KEY = `discovery:index:building:${INDEX_VERSION}`
+const BUILD_LOCK_TTL_SECONDS = 30
+
+/**
+ * Vocabulary cache: distinct mood/audience/matters tag values actually
+ * present on active products. Derived from the index, cached 24h so the
+ * UI picks up new tags Merchandisers add in Shopify within a day without
+ * a deploy. Refreshed as a side effect of any index rebuild.
+ */
+const VOCAB_KEY = `discovery:vocab:${INDEX_VERSION}`
+const VOCAB_TTL_SECONDS = 60 * 60 * 24 // 24h
+
+/**
+ * Top-level category source of truth: membership in these four Shopify
+ * collections. The home page's nav uses these same four buckets, so
+ * rail assignment matches what a merchandiser sees in Shopify Admin.
+ *
+ * If a product is in more than one of these collections, the priority
+ * below decides which rail it lands in (Pleasure first, Wear last).
+ */
+const CATEGORY_COLLECTION_IDS: Record<Category, string> = {
+  Pleasure: 'gid://shopify/Collection/330228727979',
+  Play:     'gid://shopify/Collection/330228695211',
+  Body:     'gid://shopify/Collection/330227581099',
+  Wear:     'gid://shopify/Collection/330229514411',
+}
+/** Tie-breaker order for products that live in multiple top-level collections. */
+const CATEGORY_PRIORITY: Category[] = ['Pleasure', 'Play', 'Body', 'Wear']
+
+/**
+ * Best-effort subcategory label for the product card caption, derived
+ * from `xdipx.product_type_dial`. Falls back to the category name when
+ * the dial is unset or doesn't have a mapping. Subcategory is display-
+ * only — it does NOT decide which rail a product appears in.
+ */
+function dialToSubcategory(dial: ProductTypeDial | '' | undefined): string | null {
   switch (dial) {
-    case 'vibrator':    return { category: 'Pleasure', subcategory: 'Vibrators' }
-    case 'dildo':       return { category: 'Pleasure', subcategory: 'Dildos' }
-    case 'anal':        return { category: 'Pleasure', subcategory: 'Anal' }
+    case 'vibrator':    return 'Vibrators'
+    case 'dildo':       return 'Dildos'
+    case 'anal':        return 'Anal'
     case 'cock-ring':
     case 'stroker':
     case 'extender':
     case 'pump':
-    case 'sex-machine': return { category: 'Pleasure', subcategory: 'For Him' }
-    case 'bondage':     return { category: 'Play',     subcategory: 'Bondage & Kink' }
-    case 'couples':     return { category: 'Play',     subcategory: 'Couples' }
-    case 'lube':        return { category: 'Body',     subcategory: 'Lubricants' }
-    case 'massage':     return { category: 'Body',     subcategory: 'Massage' }
+    case 'sex-machine': return 'For Him'
+    case 'bondage':     return 'Bondage & Kink'
+    case 'couples':     return 'Couples'
+    case 'lube':        return 'Lubricants'
+    case 'massage':     return 'Massage'
     case 'enhancer':
-    case 'wellness':    return { category: 'Body',     subcategory: 'Wellness' }
-    case 'wear':        return { category: 'Wear',     subcategory: 'Lingerie' }
-    case 'harness':     return { category: 'Wear',     subcategory: 'Accessories' }
+    case 'wellness':    return 'Wellness'
+    case 'wear':        return 'Lingerie'
+    case 'harness':     return 'Accessories'
     default:            return null
   }
 }
 
-/** Whitelist tags against the closed enums so a stray Shopify tag can't poison the UI. */
-const MOOD_SET = new Set<string>(MOODS)
-const AUDIENCE_SET = new Set<string>(AUDIENCES)
-const MATTERS_SET = new Set<string>(MATTERS)
-
-function filterMoods(arr: string[]): Mood[] {
-  return arr.filter(v => MOOD_SET.has(v)) as Mood[]
-}
-function filterAudiences(arr: string[]): Audience[] {
-  return arr.filter(v => AUDIENCE_SET.has(v)) as Audience[]
-}
-function filterMatters(arr: string[]): Matters[] {
-  return arr.filter(v => MATTERS_SET.has(v)) as Matters[]
+/**
+ * Trim, normalize to canonical Title-Case storage form, and dedupe
+ * within a single product's tag list. Merchandisers sometimes tag the
+ * same product with `Sensual` AND `sensual`; this collapses them.
+ * Display-formatting (hyphen→space, small-word lowercasing) happens
+ * downstream in the Chip component via `displayLabel`.
+ */
+function cleanTagList(arr: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of arr) {
+    const v = normalizeTag(raw)
+    if (!v || seen.has(v)) continue
+    seen.add(v)
+    out.push(v)
+  }
+  return out
 }
 
 /* ─── Index builder (Admin GraphQL, paginated) ────────────────────────── */
@@ -133,17 +173,27 @@ function parseListMetafield(value: string | null | undefined): string[] {
   return value.split(',').map(s => s.trim()).filter(Boolean)
 }
 
-function nodeToDiscoveryProduct(n: AdminProductNode): DiscoveryProduct | null {
-  const dial = (n.productTypeDial?.value as ProductTypeDial | null) ?? ''
-  const mapped = mapTypeToCategory(dial)
-  if (!mapped) return null
+function nodeToDiscoveryProduct(
+  n: AdminProductNode,
+  categoryMap: Map<string, Category>,
+): DiscoveryProduct | null {
+  // Source of truth: top-level collection membership. Products that aren't
+  // in any of the four nav collections are dropped from the discovery
+  // surface entirely (matches the merchandiser's mental model).
+  const category = categoryMap.get(n.id)
+  if (!category) return null
 
   const price = Number(n.priceRangeV2.minVariantPrice.amount)
   if (!Number.isFinite(price) || price <= 0) return null
 
-  const mood = filterMoods(parseListMetafield(n.moodTagsRaw?.value))
-  const audience = filterAudiences(parseListMetafield(n.audienceTagsRaw?.value))
-  const matters = filterMatters(parseListMetafield(n.mattersTagsRaw?.value))
+  // Subcategory is display-only (product card caption). Best-effort from
+  // the dial; falls back to the category name when the dial is unset.
+  const dial = (n.productTypeDial?.value as ProductTypeDial | null) ?? ''
+  const subcategory = dialToSubcategory(dial) ?? category
+
+  const mood = cleanTagList(parseListMetafield(n.moodTagsRaw?.value))
+  const audience = cleanTagList(parseListMetafield(n.audienceTagsRaw?.value))
+  const matters = cleanTagList(parseListMetafield(n.mattersTagsRaw?.value))
 
   return {
     id:          n.id,
@@ -152,19 +202,85 @@ function nodeToDiscoveryProduct(n: AdminProductNode): DiscoveryProduct | null {
     price,
     imageUrl:    n.featuredImage?.url ?? null,
     imageAlt:    n.featuredImage?.altText ?? null,
-    category:    mapped.category,
-    subcategory: mapped.subcategory,
+    category,
+    subcategory,
     mood,
     audience,
     matters,
   }
 }
 
+/* ─── Collection-membership lookup ────────────────────────────────────── */
+
+const COLLECTION_PRODUCTS_QUERY = /* GraphQL */ `
+  query DiscoveryCollectionProducts($id: ID!, $cursor: String) {
+    collection(id: $id) {
+      products(first: 250, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id }
+      }
+    }
+  }
+`
+
+interface CollectionProductsPage {
+  collection: {
+    products: {
+      pageInfo: { hasNextPage: boolean; endCursor: string | null }
+      nodes:    { id: string }[]
+    } | null
+  } | null
+}
+
+async function fetchCollectionProductIds(collectionGid: string): Promise<Set<string>> {
+  const ids = new Set<string>()
+  let cursor: string | null = null
+  while (true) {
+    const data: CollectionProductsPage = await adminGraphQL<CollectionProductsPage>(
+      COLLECTION_PRODUCTS_QUERY,
+      { id: collectionGid, cursor },
+    )
+    const page = data.collection?.products
+    if (!page) break
+    for (const n of page.nodes) ids.add(n.id)
+    if (!page.pageInfo.hasNextPage) break
+    cursor = page.pageInfo.endCursor
+    if (!cursor) break
+  }
+  return ids
+}
+
+/**
+ * Resolve every product's top-level Category from collection membership.
+ * Returns a Map<productId, Category>. Products not in any of the four
+ * nav collections are absent from the map (i.e. dropped downstream).
+ *
+ * Multi-membership: tie-broken by CATEGORY_PRIORITY (Pleasure first).
+ */
+async function buildCategoryMap(): Promise<Map<string, Category>> {
+  const sets = await Promise.all(
+    CATEGORY_PRIORITY.map(async cat => ({
+      cat,
+      ids: await fetchCollectionProductIds(CATEGORY_COLLECTION_IDS[cat]),
+    })),
+  )
+  const map = new Map<string, Category>()
+  for (const { cat, ids } of sets) {
+    for (const id of ids) {
+      // First-write wins → priority order honored
+      if (!map.has(id)) map.set(id, cat)
+    }
+  }
+  return map
+}
+
 /**
  * Fetches every active product, projects to the discovery shape, and drops
- * anything we can't categorize. Heavy call — only invoked on cache miss.
+ * anything that isn't in one of the four top-level nav collections. Heavy
+ * call — only invoked on cache miss.
  */
 export async function buildDiscoveryIndex(): Promise<DiscoveryProduct[]> {
+  const categoryMap = await buildCategoryMap()
   const out: DiscoveryProduct[] = []
   let cursor: string | null = null
 
@@ -174,7 +290,7 @@ export async function buildDiscoveryIndex(): Promise<DiscoveryProduct[]> {
       { cursor },
     )
     for (const node of data.products.nodes) {
-      const dp = nodeToDiscoveryProduct(node)
+      const dp = nodeToDiscoveryProduct(node, categoryMap)
       if (dp) out.push(dp)
     }
     if (!data.products.pageInfo.hasNextPage) break
@@ -196,20 +312,82 @@ export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise
     const cached = await kvGet<DiscoveryProduct[]>(INDEX_KEY)
     if (cached && Array.isArray(cached) && cached.length > 0) return cached
   }
+
+  // Best-effort cooperative lock. KV doesn't expose SETNX through the wrapper,
+  // so this is a read-then-write race-window — acceptable because losing the
+  // race only means one extra full build, not a correctness issue.
+  const locked = await kvGet<number>(BUILD_LOCK_KEY)
+  if (locked) return []
+  await kvSet(BUILD_LOCK_KEY, Date.now(), BUILD_LOCK_TTL_SECONDS)
+
   try {
     const fresh = await buildDiscoveryIndex()
     if (fresh.length > 0) {
       await kvSet(INDEX_KEY, fresh, INDEX_TTL_SECONDS)
+      // Refresh vocab as a side effect — same data, no extra fetch.
+      await kvSet(VOCAB_KEY, computeVocab(fresh), VOCAB_TTL_SECONDS)
     }
     return fresh
   } catch {
     return []
+  } finally {
+    await kvDel(BUILD_LOCK_KEY)
   }
 }
 
 /** Manual bust — call from a Shopify product webhook or admin tool. */
 export async function invalidateDiscoveryIndex(): Promise<void> {
   await kvSet(INDEX_KEY, null, 1)
+  await kvSet(VOCAB_KEY, null, 1)
+}
+
+/* ─── Vocabulary (mood / audience / matters chip lists) ────────────────── */
+
+export interface DiscoveryVocab {
+  moods:     string[]
+  audiences: string[]
+  matters:   string[]
+}
+
+/**
+ * Frequency-sorted distinct values for each chip group. Most-used tag
+ * first so the chips a new visitor sees are the ones most likely to
+ * land. Stable secondary sort by alpha for tied counts.
+ */
+function computeVocab(index: DiscoveryProduct[]): DiscoveryVocab {
+  const tally = (key: 'mood' | 'audience' | 'matters') => {
+    const counts = new Map<string, number>()
+    for (const p of index) {
+      for (const v of p[key]) counts.set(v, (counts.get(v) ?? 0) + 1)
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([v]) => v)
+  }
+  return {
+    moods:     tally('mood'),
+    audiences: tally('audience'),
+    matters:   tally('matters'),
+  }
+}
+
+/**
+ * Cached read of the chip vocabularies. 24h TTL — a tag a merchandiser
+ * adds in Shopify appears as a chip within a day. KV miss falls through
+ * to a fresh derivation from the live index (which itself may rebuild
+ * from Shopify). Returns empty lists on total failure so the loader can
+ * render an empty-chip state instead of crashing.
+ */
+export async function getDiscoveryVocab(): Promise<DiscoveryVocab> {
+  const cached = await kvGet<DiscoveryVocab>(VOCAB_KEY)
+  if (cached && Array.isArray(cached.moods)) return cached
+
+  const idx = await getDiscoveryIndex()
+  if (idx.length === 0) return { moods: [], audiences: [], matters: [] }
+
+  const vocab = computeVocab(idx)
+  await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS)
+  return vocab
 }
 
 /* ─── Public loader-facing API ────────────────────────────────────────── */
@@ -224,13 +402,14 @@ export interface GetRailsOptions {
 export async function getDiscoveryRails(
   state: DiscoveryState,
   opts: GetRailsOptions = {},
-): Promise<{ rails: Rail[]; total: number }> {
+): Promise<{ rails: Rail[]; total: number; available: ChipAvailabilityArrays }> {
   const products = opts.index ?? (await getDiscoveryIndex())
   const rankOpts: { perRail?: number; dropEmpty?: boolean } = {}
   if (opts.perRail   !== undefined) rankOpts.perRail   = opts.perRail
   if (opts.dropEmpty !== undefined) rankOpts.dropEmpty = opts.dropEmpty
   const rails = rankRails(products, state, rankOpts)
-  return { rails, total: products.length }
+  const available = availableToArrays(computeAvailable(products, state))
+  return { rails, total: products.length, available }
 }
 
 /* ─── Tag coverage report ─────────────────────────────────────────────── */

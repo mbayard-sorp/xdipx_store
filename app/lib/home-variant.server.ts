@@ -7,7 +7,10 @@
  *   2. `xdipx_home_variant=a|b`     → cookie pin (set explicitly via UI)
  *   3. Sanity homeConfig.activeVariant ('a' or 'b' only — 'off' falls through)
  *   4. `HOME_VARIANT` env var       → org-wide default (a, b, or unset)
- *   5. fallback `'a'`               → safe default
+ *   5. fallback `'legacy'`          → render the existing daily-deal home
+ *
+ * `'legacy'` is the safe default until Variant A has clean QA evidence.
+ * Flip to Variant A site-wide by setting `HOME_VARIANT=a` in Vercel.
  *
  * No cookie bucketing here — that's a follow-up if/when we want a
  * proper 50/50 split with sticky assignment + analytics tracking.
@@ -22,6 +25,9 @@ function isValid(v: unknown): v is HomeVariant {
   return typeof v === 'string' && VALID.has(v as HomeVariant)
 }
 
+/** The resolver can return 'legacy' in addition to the pinnable variants. */
+export type ResolvedVariant = HomeVariant | 'legacy'
+
 function readCookie(request: Request, name: string): string | null {
   const header = request.headers.get('cookie')
   if (!header) return null
@@ -33,7 +39,7 @@ function readCookie(request: Request, name: string): string | null {
 }
 
 export interface HomeVariantResolution {
-  variant: HomeVariant
+  variant: ResolvedVariant
   source:  'query' | 'cookie' | 'sanity' | 'env' | 'default'
 }
 
@@ -67,7 +73,7 @@ export function resolveHomeVariant(
   const env = process.env['HOME_VARIANT']?.trim().toLowerCase()
   if (isValid(env)) return { variant: env, source: 'env' }
 
-  return { variant: 'a', source: 'default' }
+  return { variant: 'legacy', source: 'default' }
 }
 
 /**
