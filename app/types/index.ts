@@ -370,6 +370,38 @@ export interface VaultDeal {
   mattersTags?:  string[]
   // v2 redesign — 9:16 card hero video
   heroVideo?:    HeroVideo
+  // GMC feed fields (all optional — absent on products not yet backfilled)
+  /** First variant barcode (UPC/GTIN) — null when not set. */
+  barcode?: string | null
+  /** xdipx.seo_meta_description */
+  seoDesc?: string | null
+  /** xdipx.mood_image_url */
+  moodImageUrl?: string | null
+  /** xdipx.feature_bullets — JSON array of strings */
+  featureBullets?: string[]
+  /** xdipx.specifications — JSON array of "Label: Value" strings */
+  specifications?: string[]
+  /** xdipx.product_type_dial */
+  productTypeDial?: string | null
+  /** xdipx.original_price (already mapped to msrp but kept raw for feed) */
+  originalPrice?: string | null
+  // mm-google-shopping metafields
+  gmcCategory?:  string | null
+  gmcAgeGroup?:  string | null
+  gmcGender?:    string | null
+  gmcMpn?:       string | null
+  gmcColor?:     string | null
+  gmcMaterial?:  string | null
+  gmcSize?:      string | null
+  gmcLabel0?:    string | null
+  gmcLabel1?:    string | null
+  gmcLabel2?:    string | null
+  gmcLabel3?:    string | null
+  gmcLabel4?:    string | null
+  /** xdipx.deal_score — numeric 0-100 score used for custom_label_2 tier derivation */
+  dealScore?: number | null
+  /** xdipx.is_daily_deal — true when this product is the active daily deal */
+  isDailyDeal?: boolean
 }
 
 // ─── Bundles ──────────────────────────────────────────────────────────────

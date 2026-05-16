@@ -1375,6 +1375,215 @@ export async function getVaultDeals(page = 1, limit = 20): Promise<{ deals: Vaul
   }
 }
 
+// ─── GMC Feed ─────────────────────────────────────────────────────────────
+//
+// Separate fragment + type + mapper so the feed can fetch extra metafields
+// without touching the lightweight PRODUCT_CARD_FRAGMENT used by vault/PLPs.
+
+const GMC_FEED_METAFIELDS_FRAGMENT = `
+  metafields(identifiers: [
+    { namespace: "xdipx", key: "deal_date" }
+    { namespace: "xdipx", key: "original_price" }
+    { namespace: "xdipx", key: "category" }
+    { namespace: "xdipx", key: "mood_tags" }
+    { namespace: "xdipx", key: "audience_tags" }
+    { namespace: "xdipx", key: "matters_tags" }
+    { namespace: "xdipx", key: "hero_video" }
+    { namespace: "xdipx", key: "seo_meta_description" }
+    { namespace: "xdipx", key: "mood_image_url" }
+    { namespace: "xdipx", key: "feature_bullets" }
+    { namespace: "xdipx", key: "specifications" }
+    { namespace: "xdipx", key: "product_type_dial" }
+    { namespace: "xdipx", key: "deal_score" }
+    { namespace: "xdipx", key: "is_daily_deal" }
+    { namespace: "mm-google-shopping", key: "google_product_category" }
+    { namespace: "mm-google-shopping", key: "age_group" }
+    { namespace: "mm-google-shopping", key: "gender" }
+    { namespace: "mm-google-shopping", key: "mpn" }
+    { namespace: "mm-google-shopping", key: "color" }
+    { namespace: "mm-google-shopping", key: "material" }
+    { namespace: "mm-google-shopping", key: "size" }
+    { namespace: "mm-google-shopping", key: "custom_label_0" }
+    { namespace: "mm-google-shopping", key: "custom_label_1" }
+    { namespace: "mm-google-shopping", key: "custom_label_2" }
+    { namespace: "mm-google-shopping", key: "custom_label_3" }
+    { namespace: "mm-google-shopping", key: "custom_label_4" }
+  ]) {
+    namespace key value
+  }
+`
+
+const GMC_FEED_CARD_FRAGMENT = `
+  id handle title vendor tags
+  options { name values }
+  images(first: 10) {
+    edges { node { url altText } }
+  }
+  variants(first: 1) {
+    edges {
+      node {
+        id
+        price { amount }
+        compareAtPrice { amount }
+        quantityAvailable
+        availableForSale
+        barcode
+      }
+    }
+  }
+  ${GMC_FEED_METAFIELDS_FRAGMENT}
+`
+
+interface ShopifyFeedProductNode {
+  id: string
+  handle: string
+  title: string
+  vendor: string
+  tags: string[]
+  options?: { name: string; values: string[] }[]
+  images: { edges: { node: { url: string; altText: string | null } }[] }
+  variants: {
+    edges: {
+      node: {
+        id: string
+        price: { amount: string }
+        compareAtPrice: { amount: string } | null
+        quantityAvailable: number
+        availableForSale: boolean
+        barcode: string | null
+      }
+    }[]
+  }
+  metafields: ({ namespace: string; key: string; value: string } | null)[]
+}
+
+function parseMetafieldByNsKey(
+  metafields: ({ namespace: string; key: string; value: string } | null)[],
+  namespace: string,
+  key: string,
+): string | null {
+  return metafields.find(m => m?.namespace === namespace && m?.key === key)?.value ?? null
+}
+
+function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
+  const mf = node.metafields
+  const variantEdges = node.variants.edges
+  const variant = variantEdges[0]?.node
+  const dealPrice = parseFloat(variant?.price.amount ?? '0')
+  const moodTags     = parseMetafieldJSON<string[]>(mf, 'mood_tags',     [])
+  const audienceTags = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
+  const mattersTags  = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
+  const heroVideo    = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
+
+  const featureBullets = parseMetafieldJSON<string[]>(mf, 'feature_bullets', [])
+  const specifications = parseMetafieldJSON<string[]>(mf, 'specifications', [])
+
+  const variantSavings = variantEdges
+    .map(e => {
+      const p  = parseFloat(e.node.price.amount)
+      const ca = parseFloat(e.node.compareAtPrice?.amount ?? '0')
+      return ca > p && p > 0
+        ? { amount: ca - p, percent: Math.round(((ca - p) / ca) * 100) }
+        : null
+    })
+    .filter((s): s is { amount: number; percent: number } => s !== null)
+  const maxSavingsAmount  = variantSavings.length > 0 ? Math.max(...variantSavings.map(s => s.amount))  : 0
+  const maxSavingsPercent = variantSavings.length > 0 ? Math.max(...variantSavings.map(s => s.percent)) : 0
+
+  // xdipx namespace
+  const seoDesc       = parseMetafieldByNsKey(mf, 'xdipx', 'seo_meta_description')
+  const moodImageUrl  = parseMetafieldByNsKey(mf, 'xdipx', 'mood_image_url')
+  const originalPrice = parseMetafieldByNsKey(mf, 'xdipx', 'original_price')
+  const productTypeDial = parseMetafieldByNsKey(mf, 'xdipx', 'product_type_dial')
+  const dealScoreRaw   = parseMetafieldByNsKey(mf, 'xdipx', 'deal_score')
+  const isDailyDealRaw = parseMetafieldByNsKey(mf, 'xdipx', 'is_daily_deal')
+  const dealScoreNum   = dealScoreRaw ? parseFloat(dealScoreRaw) : null
+  const isDailyDeal    = isDailyDealRaw === 'true'
+
+  // mm-google-shopping namespace
+  const gmcCategory = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'google_product_category')
+  const gmcAgeGroup = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'age_group')
+  const gmcGender   = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'gender')
+  const gmcMpn      = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'mpn')
+  const gmcColor    = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'color')
+  const gmcMaterial = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'material')
+  const gmcSize     = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'size')
+  const gmcLabel0   = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'custom_label_0')
+  const gmcLabel1   = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'custom_label_1')
+  const gmcLabel2   = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'custom_label_2')
+  const gmcLabel3   = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'custom_label_3')
+  const gmcLabel4   = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'custom_label_4')
+
+  return {
+    id: node.id,
+    handle: node.handle,
+    seoTitle: node.title,
+    dealDate: parseMetafield(mf, 'deal_date'),
+    dealPrice,
+    msrp: parseFloat(originalPrice || (variant?.compareAtPrice?.amount ?? '0')),
+    images: parseImages(node.images.edges),
+    brand: node.vendor,
+    category: parseCategory(parseMetafield(mf, 'category')),
+    dealStatus: 'archived' as const,
+    qty: variant?.quantityAvailable ?? 0,
+    defaultVariantId:    variant?.id ?? null,
+    hasMultipleVariants: variantEdges.length > 1,
+    ...(maxSavingsAmount > 0 ? { maxSavingsAmount, maxSavingsPercent } : {}),
+    ...(moodTags.length     > 0 ? { moodTags }     : {}),
+    ...(audienceTags.length > 0 ? { audienceTags } : {}),
+    ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
+    ...(heroVideo?.src && typeof heroVideo.duration === 'number'
+      ? { heroVideo: { src: heroVideo.src, duration: heroVideo.duration, ...(heroVideo.poster ? { poster: heroVideo.poster } : {}) } }
+      : {}),
+    // GMC fields
+    ...(variant?.barcode != null ? { barcode: variant.barcode } : {}),
+    ...(seoDesc       != null ? { seoDesc }       : {}),
+    ...(moodImageUrl  != null ? { moodImageUrl }  : {}),
+    ...(featureBullets.length > 0 ? { featureBullets } : {}),
+    ...(specifications.length > 0 ? { specifications } : {}),
+    ...(productTypeDial != null ? { productTypeDial } : {}),
+    ...(originalPrice   != null ? { originalPrice }   : {}),
+    ...(gmcCategory  != null ? { gmcCategory }  : {}),
+    ...(gmcAgeGroup  != null ? { gmcAgeGroup }  : {}),
+    ...(gmcGender    != null ? { gmcGender }    : {}),
+    ...(gmcMpn       != null ? { gmcMpn }       : {}),
+    ...(gmcColor     != null ? { gmcColor }     : {}),
+    ...(gmcMaterial  != null ? { gmcMaterial }  : {}),
+    ...(gmcSize      != null ? { gmcSize }      : {}),
+    ...(gmcLabel0    != null ? { gmcLabel0 }    : {}),
+    ...(gmcLabel1    != null ? { gmcLabel1 }    : {}),
+    ...(gmcLabel2    != null ? { gmcLabel2 }    : {}),
+    ...(gmcLabel3    != null ? { gmcLabel3 }    : {}),
+    ...(gmcLabel4    != null ? { gmcLabel4 }    : {}),
+    ...(dealScoreNum !== null && !isNaN(dealScoreNum) ? { dealScore: dealScoreNum } : {}),
+    isDailyDeal,
+  }
+}
+
+export async function getFeedDeals(page = 1, limit = 50): Promise<{ deals: VaultDeal[]; hasNextPage: boolean }> {
+  const data = await storefront<{
+    products: {
+      edges: { node: ShopifyFeedProductNode; cursor: string }[]
+      pageInfo: { hasNextPage: boolean }
+    }
+  }>(`
+    query GetFeedPage($first: Int!, $after: String) {
+      products(first: $first, after: $after, query: "tag:deal-status-archived", sortKey: UPDATED_AT, reverse: true) {
+        pageInfo { hasNextPage }
+        edges {
+          cursor
+          node { ${GMC_FEED_CARD_FRAGMENT} }
+        }
+      }
+    }
+  `, { first: limit, after: page > 1 ? btoa(`${(page - 1) * limit}`) : null })
+
+  return {
+    deals: data.products.edges.map(e => nodeToFeedDeal(e.node)),
+    hasNextPage: data.products.pageInfo.hasNextPage,
+  }
+}
+
 export type CollectionSort = 'manual' | 'newest' | 'price-asc' | 'price-desc'
 
 function sortToStorefront(sort: CollectionSort): { sortKey: string; reverse: boolean } {
