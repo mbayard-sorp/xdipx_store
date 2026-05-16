@@ -26,10 +26,12 @@ import { normalizeTag } from '~/lib/discovery-tags'
  * Bump when the index shape changes so old cached entries are ignored.
  * KV writes and reads are namespaced by version; old entries expire on TTL.
  */
-// v2: tag values are now normalized (Title-Case canonical form) before
-// hitting the index, so an old v1 cache with raw mixed-case duplicates
-// would render twice. Bumping invalidates any in-flight stale entry.
-const INDEX_VERSION = 'v2'
+// v3: category source switched from xdipx.product_type_dial mapping to
+//     direct membership in the four top-level Shopify collections
+//     (Pleasure / Play / Body / Wear). v2 cached entries reference the
+//     old categorization. Bumping invalidates them.
+// v2: tag values normalized (Title-Case canonical form) before indexing.
+const INDEX_VERSION = 'v3'
 const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 const INDEX_TTL_SECONDS = 60 * 60 // 1h
 
@@ -53,32 +55,46 @@ const VOCAB_KEY = `discovery:vocab:${INDEX_VERSION}`
 const VOCAB_TTL_SECONDS = 60 * 60 * 24 // 24h
 
 /**
- * Map `xdipx.product_type_dial` to the home page's top-level Category +
- * subcategory label. Returns null when the type doesn't fit the discovery
- * surface (e.g. condom, novelty, book-media); those products are skipped.
+ * Top-level category source of truth: membership in these four Shopify
+ * collections. The home page's nav uses these same four buckets, so
+ * rail assignment matches what a merchandiser sees in Shopify Admin.
  *
- * Subcategory labels match the prototype's nav copy exactly.
+ * If a product is in more than one of these collections, the priority
+ * below decides which rail it lands in (Pleasure first, Wear last).
  */
-function mapTypeToCategory(
-  dial: ProductTypeDial | '' | undefined,
-): { category: Category; subcategory: string } | null {
+const CATEGORY_COLLECTION_IDS: Record<Category, string> = {
+  Pleasure: 'gid://shopify/Collection/330228727979',
+  Play:     'gid://shopify/Collection/330228695211',
+  Body:     'gid://shopify/Collection/330227581099',
+  Wear:     'gid://shopify/Collection/330229514411',
+}
+/** Tie-breaker order for products that live in multiple top-level collections. */
+const CATEGORY_PRIORITY: Category[] = ['Pleasure', 'Play', 'Body', 'Wear']
+
+/**
+ * Best-effort subcategory label for the product card caption, derived
+ * from `xdipx.product_type_dial`. Falls back to the category name when
+ * the dial is unset or doesn't have a mapping. Subcategory is display-
+ * only — it does NOT decide which rail a product appears in.
+ */
+function dialToSubcategory(dial: ProductTypeDial | '' | undefined): string | null {
   switch (dial) {
-    case 'vibrator':    return { category: 'Pleasure', subcategory: 'Vibrators' }
-    case 'dildo':       return { category: 'Pleasure', subcategory: 'Dildos' }
-    case 'anal':        return { category: 'Pleasure', subcategory: 'Anal' }
+    case 'vibrator':    return 'Vibrators'
+    case 'dildo':       return 'Dildos'
+    case 'anal':        return 'Anal'
     case 'cock-ring':
     case 'stroker':
     case 'extender':
     case 'pump':
-    case 'sex-machine': return { category: 'Pleasure', subcategory: 'For Him' }
-    case 'bondage':     return { category: 'Play',     subcategory: 'Bondage & Kink' }
-    case 'couples':     return { category: 'Play',     subcategory: 'Couples' }
-    case 'lube':        return { category: 'Body',     subcategory: 'Lubricants' }
-    case 'massage':     return { category: 'Body',     subcategory: 'Massage' }
+    case 'sex-machine': return 'For Him'
+    case 'bondage':     return 'Bondage & Kink'
+    case 'couples':     return 'Couples'
+    case 'lube':        return 'Lubricants'
+    case 'massage':     return 'Massage'
     case 'enhancer':
-    case 'wellness':    return { category: 'Body',     subcategory: 'Wellness' }
-    case 'wear':        return { category: 'Wear',     subcategory: 'Lingerie' }
-    case 'harness':     return { category: 'Wear',     subcategory: 'Accessories' }
+    case 'wellness':    return 'Wellness'
+    case 'wear':        return 'Lingerie'
+    case 'harness':     return 'Accessories'
     default:            return null
   }
 }
@@ -157,13 +173,23 @@ function parseListMetafield(value: string | null | undefined): string[] {
   return value.split(',').map(s => s.trim()).filter(Boolean)
 }
 
-function nodeToDiscoveryProduct(n: AdminProductNode): DiscoveryProduct | null {
-  const dial = (n.productTypeDial?.value as ProductTypeDial | null) ?? ''
-  const mapped = mapTypeToCategory(dial)
-  if (!mapped) return null
+function nodeToDiscoveryProduct(
+  n: AdminProductNode,
+  categoryMap: Map<string, Category>,
+): DiscoveryProduct | null {
+  // Source of truth: top-level collection membership. Products that aren't
+  // in any of the four nav collections are dropped from the discovery
+  // surface entirely (matches the merchandiser's mental model).
+  const category = categoryMap.get(n.id)
+  if (!category) return null
 
   const price = Number(n.priceRangeV2.minVariantPrice.amount)
   if (!Number.isFinite(price) || price <= 0) return null
+
+  // Subcategory is display-only (product card caption). Best-effort from
+  // the dial; falls back to the category name when the dial is unset.
+  const dial = (n.productTypeDial?.value as ProductTypeDial | null) ?? ''
+  const subcategory = dialToSubcategory(dial) ?? category
 
   const mood = cleanTagList(parseListMetafield(n.moodTagsRaw?.value))
   const audience = cleanTagList(parseListMetafield(n.audienceTagsRaw?.value))
@@ -176,19 +202,85 @@ function nodeToDiscoveryProduct(n: AdminProductNode): DiscoveryProduct | null {
     price,
     imageUrl:    n.featuredImage?.url ?? null,
     imageAlt:    n.featuredImage?.altText ?? null,
-    category:    mapped.category,
-    subcategory: mapped.subcategory,
+    category,
+    subcategory,
     mood,
     audience,
     matters,
   }
 }
 
+/* ─── Collection-membership lookup ────────────────────────────────────── */
+
+const COLLECTION_PRODUCTS_QUERY = /* GraphQL */ `
+  query DiscoveryCollectionProducts($id: ID!, $cursor: String) {
+    collection(id: $id) {
+      products(first: 250, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id }
+      }
+    }
+  }
+`
+
+interface CollectionProductsPage {
+  collection: {
+    products: {
+      pageInfo: { hasNextPage: boolean; endCursor: string | null }
+      nodes:    { id: string }[]
+    } | null
+  } | null
+}
+
+async function fetchCollectionProductIds(collectionGid: string): Promise<Set<string>> {
+  const ids = new Set<string>()
+  let cursor: string | null = null
+  while (true) {
+    const data: CollectionProductsPage = await adminGraphQL<CollectionProductsPage>(
+      COLLECTION_PRODUCTS_QUERY,
+      { id: collectionGid, cursor },
+    )
+    const page = data.collection?.products
+    if (!page) break
+    for (const n of page.nodes) ids.add(n.id)
+    if (!page.pageInfo.hasNextPage) break
+    cursor = page.pageInfo.endCursor
+    if (!cursor) break
+  }
+  return ids
+}
+
+/**
+ * Resolve every product's top-level Category from collection membership.
+ * Returns a Map<productId, Category>. Products not in any of the four
+ * nav collections are absent from the map (i.e. dropped downstream).
+ *
+ * Multi-membership: tie-broken by CATEGORY_PRIORITY (Pleasure first).
+ */
+async function buildCategoryMap(): Promise<Map<string, Category>> {
+  const sets = await Promise.all(
+    CATEGORY_PRIORITY.map(async cat => ({
+      cat,
+      ids: await fetchCollectionProductIds(CATEGORY_COLLECTION_IDS[cat]),
+    })),
+  )
+  const map = new Map<string, Category>()
+  for (const { cat, ids } of sets) {
+    for (const id of ids) {
+      // First-write wins → priority order honored
+      if (!map.has(id)) map.set(id, cat)
+    }
+  }
+  return map
+}
+
 /**
  * Fetches every active product, projects to the discovery shape, and drops
- * anything we can't categorize. Heavy call — only invoked on cache miss.
+ * anything that isn't in one of the four top-level nav collections. Heavy
+ * call — only invoked on cache miss.
  */
 export async function buildDiscoveryIndex(): Promise<DiscoveryProduct[]> {
+  const categoryMap = await buildCategoryMap()
   const out: DiscoveryProduct[] = []
   let cursor: string | null = null
 
@@ -198,7 +290,7 @@ export async function buildDiscoveryIndex(): Promise<DiscoveryProduct[]> {
       { cursor },
     )
     for (const node of data.products.nodes) {
-      const dp = nodeToDiscoveryProduct(node)
+      const dp = nodeToDiscoveryProduct(node, categoryMap)
       if (dp) out.push(dp)
     }
     if (!data.products.pageInfo.hasNextPage) break
