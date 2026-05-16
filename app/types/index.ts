@@ -398,6 +398,10 @@ export interface VaultDeal {
   gmcLabel2?:    string | null
   gmcLabel3?:    string | null
   gmcLabel4?:    string | null
+  /** xdipx.deal_score — numeric 0-100 score used for custom_label_2 tier derivation */
+  dealScore?: number | null
+  /** xdipx.is_daily_deal — true when this product is the active daily deal */
+  isDailyDeal?: boolean
 }
 
 // ─── Bundles ──────────────────────────────────────────────────────────────

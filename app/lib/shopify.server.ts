@@ -1394,6 +1394,8 @@ const GMC_FEED_METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "feature_bullets" }
     { namespace: "xdipx", key: "specifications" }
     { namespace: "xdipx", key: "product_type_dial" }
+    { namespace: "xdipx", key: "deal_score" }
+    { namespace: "xdipx", key: "is_daily_deal" }
     { namespace: "mm-google-shopping", key: "google_product_category" }
     { namespace: "mm-google-shopping", key: "age_group" }
     { namespace: "mm-google-shopping", key: "gender" }
@@ -1493,6 +1495,10 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
   const moodImageUrl  = parseMetafieldByNsKey(mf, 'xdipx', 'mood_image_url')
   const originalPrice = parseMetafieldByNsKey(mf, 'xdipx', 'original_price')
   const productTypeDial = parseMetafieldByNsKey(mf, 'xdipx', 'product_type_dial')
+  const dealScoreRaw   = parseMetafieldByNsKey(mf, 'xdipx', 'deal_score')
+  const isDailyDealRaw = parseMetafieldByNsKey(mf, 'xdipx', 'is_daily_deal')
+  const dealScoreNum   = dealScoreRaw ? parseFloat(dealScoreRaw) : null
+  const isDailyDeal    = isDailyDealRaw === 'true'
 
   // mm-google-shopping namespace
   const gmcCategory = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'google_product_category')
@@ -1549,6 +1555,8 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
     ...(gmcLabel2    != null ? { gmcLabel2 }    : {}),
     ...(gmcLabel3    != null ? { gmcLabel3 }    : {}),
     ...(gmcLabel4    != null ? { gmcLabel4 }    : {}),
+    ...(dealScoreNum !== null && !isNaN(dealScoreNum) ? { dealScore: dealScoreNum } : {}),
+    isDailyDeal,
   }
 }
 

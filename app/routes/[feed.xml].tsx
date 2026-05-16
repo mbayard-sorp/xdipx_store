@@ -112,7 +112,10 @@ function toEntry(d: VaultDeal): string {
   const gtinRaw = opt(d.barcode)
   const mpnRaw  = opt(d.gmcMpn)
 
-  // Sale price
+  // GMC sale_price semantics: g:price = original/regular price (strikethrough),
+  // g:sale_price = current deal price. Only emit sale_price when we have a
+  // confirmed originalPrice metafield so the values are never inverted.
+  // Products without originalPrice metafield show only g:price at dealPrice.
   let salePriceTag = ''
   const msrp = d.msrp
   const originalPriceNum = d.originalPrice ? parseFloat(d.originalPrice) : msrp
@@ -138,8 +141,8 @@ function toEntry(d: VaultDeal): string {
   // Custom labels -- prefer metafields, fall back to derived
   const label0 = opt(d.gmcLabel0) || gmcCustomLabel0(opt(d.productTypeDial) || null)
   const label1 = opt(d.gmcLabel1) || gmcCustomLabel1(d.audienceTags ?? [])
-  const label2 = opt(d.gmcLabel2) || gmcCustomLabel2(null)
-  const label3 = opt(d.gmcLabel3) || gmcCustomLabel3(false)
+  const label2 = opt(d.gmcLabel2) || gmcCustomLabel2(d.dealScore ?? null)
+  const label3 = opt(d.gmcLabel3) || gmcCustomLabel3(d.isDailyDeal ?? false)
   const label4 = opt(d.gmcLabel4) || gmcCustomLabel4(d.dealPrice)
 
   const colorVal    = opt(d.gmcColor)    || parseSpecValue(d.specifications ?? [], 'color')    || ''
