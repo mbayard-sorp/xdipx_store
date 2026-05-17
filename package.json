@@ -19,7 +19,6 @@
     "postinstall": "[ \"$VERCEL\" = \"1\" ] && npm run build || true"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.143",
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/genai": "^1.48.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -54,6 +53,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.143",
     "@react-router/dev": "^7.5.0",
     "@react-router/fs-routes": "^7.5.0",
     "@tailwindcss/vite": "^4.1.3",
