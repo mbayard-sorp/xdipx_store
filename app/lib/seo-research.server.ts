@@ -15,6 +15,7 @@
 import { createClient } from '@sanity/client'
 import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'node:crypto'
+import { getAskEmmaVocabulary } from '~/lib/ask-emma-vocab.server'
 
 const projectId  = process.env['SANITY_PROJECT_ID']
 const dataset    = process.env['SANITY_DATASET'] ?? 'production'
@@ -227,17 +228,12 @@ async function fetchExistingTerms(): Promise<Set<string>> {
 }
 
 async function fetchVocabulary(): Promise<VocabSnapshot> {
-  const client = getWriteClient()
-  if (!client) return { mood: [], audience: [], matters: [] }
+  // Route through the gated helper so MATTERS_V2_ENABLED is honored — when the
+  // flag is on, the matters axis returns MATTERS_V2 even if the Sanity singleton
+  // still holds the v1 kebab-case set. Without this, SEO keyword research would
+  // mint clusters against the wrong vocab after the v2 flip.
   try {
-    const doc = await client.fetch<VocabSnapshot | null>(
-      `*[_id == "singleton.askEmmaVocabulary"][0]{ mood, audience, matters }`,
-    )
-    return {
-      mood:     doc?.mood     ?? [],
-      audience: doc?.audience ?? [],
-      matters:  doc?.matters  ?? [],
-    }
+    return await getAskEmmaVocabulary()
   } catch {
     return { mood: [], audience: [], matters: [] }
   }
