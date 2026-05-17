@@ -93,11 +93,11 @@ async function gql<T>(query: string, variables: Record<string, unknown>): Promis
 
 const CHECK_DEFS_QUERY = /* GraphQL */ `
   query CheckMetafieldDefs {
-    v2: metafieldDefinition(namespace: "xdipx", key: "matters_tags_v2", ownerType: PRODUCT) {
-      id key namespace type { name }
+    v2: metafieldDefinitions(ownerType: PRODUCT, namespace: "xdipx", key: "matters_tags_v2", first: 1) {
+      nodes { id key namespace type { name } }
     }
-    rationale: metafieldDefinition(namespace: "custom", key: "matters_rationale", ownerType: PRODUCT) {
-      id key namespace type { name }
+    rationale: metafieldDefinitions(ownerType: PRODUCT, namespace: "custom", key: "matters_rationale", first: 1) {
+      nodes { id key namespace type { name } }
     }
   }
 `
@@ -110,14 +110,17 @@ interface MetafieldDefNode {
 }
 
 async function assertMetafieldDefsExist(): Promise<void> {
-  const data = await gql<{ v2: MetafieldDefNode | null; rationale: MetafieldDefNode | null }>(
-    CHECK_DEFS_QUERY,
-    {},
-  )
+  const data = await gql<{
+    v2:        { nodes: MetafieldDefNode[] }
+    rationale: { nodes: MetafieldDefNode[] }
+  }>(CHECK_DEFS_QUERY, {})
+
+  const v2Def        = data.v2.nodes[0]        ?? null
+  const rationaleDef = data.rationale.nodes[0] ?? null
 
   const missing: string[] = []
-  if (!data.v2)        missing.push('xdipx.matters_tags_v2 (list.single_line_text_field)')
-  if (!data.rationale) missing.push('custom.matters_rationale (multi_line_text_field)')
+  if (!v2Def)        missing.push('xdipx.matters_tags_v2 (list.single_line_text_field)')
+  if (!rationaleDef) missing.push('custom.matters_rationale (multi_line_text_field)')
 
   if (missing.length > 0) {
     process.stderr.write('\nERROR: Required shadow metafield definitions are missing from Shopify Admin.\n')
