@@ -23,3 +23,20 @@ scripts/.bg-removal-checkpoint.json
 # Content-generation cache (local artifacts only)
 .cache/
 .worktrees
+
+# Discovery tagging pipeline artifacts (regenerable; large; local-only)
+audience-proposal-briefs*.json
+audience-proposals*.json
+audience-proposals-final.csv
+audience-distribution-audit.json
+matters-proposal-briefs*.json
+matters-proposals*.json
+matters-proposals-final.csv
+matters-distribution-audit.json
+mood-proposal-briefs*.json
+mood-proposals*.json
+mood-proposals*.csv
+mood-distribution-audit.json
+scripts/output/
+# Stray subagent helper artifacts that occasionally drop here
+classify-chunk-*.cjs
