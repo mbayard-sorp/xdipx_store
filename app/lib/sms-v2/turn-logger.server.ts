@@ -17,7 +17,7 @@
  */
 import { eq } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { smsTurns } from '../../../db/schema'
+import { smsTurns, type TurnMetadata } from '../../../db/schema'
 import type { ProcessSmsInput, ProcessSmsResult } from '~/lib/sms-processor.server'
 import type { StageResponse } from './types.server'
 import { getOrCreateConversation as _getOrCreateConversation } from './conversation.server'
@@ -113,6 +113,12 @@ export interface TurnObservabilityUpdate {
    * Surfaces the repeat-pitch failure mode in turn logs without parsing tool result codes.
    */
   searchRepeatedPitch?: boolean | undefined
+  /**
+   * Migration 036: free-form per-turn telemetry. Current usage carries the
+   * discovery-gate advance signal for SMS skip-rate analytics. Written to
+   * sms_turns.metadata. See db/schema.ts TurnMetadata for the shape.
+   */
+  metadata?: TurnMetadata | undefined
 }
 
 /**
@@ -152,6 +158,8 @@ export async function finaliseTurnRows(opts: {
       ...(observability?.toolBudgetExhausted !== undefined && { toolBudgetExhausted: observability.toolBudgetExhausted }),
       // Migration 033: dedup-exhaustion telemetry (all results previously pitched)
       ...(observability?.searchRepeatedPitch !== undefined && { searchRepeatedPitch: observability.searchRepeatedPitch }),
+      // Migration 036: free-form per-turn telemetry (gate-advance signal, etc.)
+      ...(observability?.metadata !== undefined            && { metadata: observability.metadata }),
     })
     .where(eq(smsTurns.id, sentinelId))
 
@@ -172,6 +180,7 @@ export async function finaliseTurnRows(opts: {
       softBeat: observability?.softBeat,
       toolBudgetExhausted: observability?.toolBudgetExhausted ?? false,
       searchRepeatedPitch: observability?.searchRepeatedPitch ?? false,
+      metadata: observability?.metadata,
       emmaMsg,
       latencyMs,
       pipelineVersion,

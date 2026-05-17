@@ -92,8 +92,9 @@ const MATTERS_OPTS: string[] = [
 // ─── Sentinel: skip-ahead mood value ─────────────────────────────────────────
 
 /** When the slot extractor sees "just show me" (or equivalent), it sets
- *  mood to this sentinel. advanceGate treats it as a skip-ahead signal. */
-const SKIP_SENTINEL = 'just-show-me'
+ *  mood to this sentinel. advanceGate treats it as a skip-ahead signal.
+ *  Exported so telemetry sites can detect the skip cleanly (Migration 036). */
+export const SKIP_SENTINEL = 'just-show-me'
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 

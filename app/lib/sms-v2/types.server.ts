@@ -166,5 +166,18 @@ export interface StageResponse {
      * so this failure mode is visible without parsing the tool result reason code.
      */
     searchRepeatedPitch?: boolean | undefined
+    /**
+     * Migration 036: discovery-gate transition signal for SMS skip-rate analytics.
+     * Populated by the discovery stage handler with the gate before/after this
+     * turn, whether the user hit the "Just show me" skip sentinel, and which
+     * slot (if any) was newly filled. Written to sms_turns.metadata.gateAdvance.
+     * See docs/what-matters-final-signoff.md.
+     */
+    gateAdvance?: {
+      from: 'MOOD' | 'WHO' | 'MATTERS' | 'READY' | 'EXPLAIN' | null
+      to:   'MOOD' | 'WHO' | 'MATTERS' | 'READY' | 'EXPLAIN'
+      skipped: boolean
+      slotFilled: 'mood' | 'who' | 'matters' | null
+    } | undefined
   }
 }

@@ -177,6 +177,11 @@ export async function processSmsMessageV2(
       fabricationCaught: stageResp.telemetry.fabricationCaught,
       softBeat: stageResp.telemetry.softBeat,
       toolBudgetExhausted: stageResp.telemetry.toolBudgetExhausted,
+      // Migration 036: forward the gate-advance signal as free-form metadata
+      // so SMS skip-rate analytics is queryable from sms_turns.metadata.
+      ...(stageResp.telemetry.gateAdvance !== undefined
+        ? { metadata: { gateAdvance: stageResp.telemetry.gateAdvance } }
+        : {}),
     })
   } else {
     // No v2 handler for this stage — fall through to v1 (existing Phase 1 behavior).

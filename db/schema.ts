@@ -502,6 +502,31 @@ export const smsConversations = pgTable('sms_conversations', {
 }))
 
 /**
+/**
+ * Free-form telemetry payload attached to an sms_turns row.
+ *
+ * Extensible by design: new telemetry keys land here without a schema change.
+ * Keep entries cheap and reversible — anything operationally critical earns
+ * its own column.
+ *
+ * Current keys:
+ *   - gateAdvance: discovery-gate transition signal for SMS skip-rate analytics
+ *     (see docs/what-matters-final-signoff.md). Migration 036.
+ */
+export interface TurnMetadata {
+  gateAdvance?: {
+    /** Gate before the user's message advanced the machine. Null on the very first turn. */
+    from: 'MOOD' | 'WHO' | 'MATTERS' | 'READY' | 'EXPLAIN' | null
+    /** Gate after extraction + advanceGate(). */
+    to:   'MOOD' | 'WHO' | 'MATTERS' | 'READY' | 'EXPLAIN'
+    /** True when the user hit the "Just show me" skip sentinel at any gate. */
+    skipped: boolean
+    /** Which slot, if any, was newly filled this turn (mood | who | matters). Null if no slot changed. */
+    slotFilled: 'mood' | 'who' | 'matters' | null
+  }
+}
+
+/**
  * One row per SMS turn (inbound + outbound) across both pipelines.
  * The unique index on twilio_message_sid enables idempotent dedup of Twilio
  * retries: the webhook inserts a sentinel inbound row before calling Claude
@@ -540,6 +565,11 @@ export const smsTurns = pgTable('sms_turns', {
   // (every search result was already in pitchedHandlesLog). Distinct from toolBudgetExhausted.
   // Powers the "repeat-pitch rate" dashboard query in Phase 3.
   searchRepeatedPitch: boolean('search_repeated_pitch').notNull().default(false),
+  // Migration 036: free-form telemetry payload. Initial usage carries the SMS
+  // discovery-gate advance signal (from, to, skipped, slotFilled) for skip-rate
+  // analytics. Extensible — future per-turn telemetry can land here without
+  // schema changes. See docs/what-matters-final-signoff.md.
+  metadata:         json('metadata').$type<TurnMetadata>(),
   createdAt:        timestamp('created_at').notNull().defaultNow(),
 }, t => ({
   twilioSidUniq:    uniqueIndex('sms_turns_twilio_sid_uniq').on(t.twilioMessageSid),
