@@ -48,6 +48,7 @@ const CHUNK_ARG     = argOf('--chunk')
 const ALL           = process.argv.includes('--all')
 const DRY_RUN       = process.argv.includes('--dry-run')
 const FORCE         = process.argv.includes('--force')
+const SALVAGE       = process.argv.includes('--salvage')  // parse existing .raw.txt instead of dispatching
 const CONCURRENCY   = Math.max(1, Number(argOf('--concurrency') ?? 1))
 const INPUT_DIR     = path.resolve(argOf('--input-dir') ?? process.cwd())
 const PROMPT_PREFIX = argOf('--briefs-prefix')    ?? 'matters-proposal-briefs'
@@ -152,13 +153,73 @@ Return a JSON array (no markdown code fence, no preamble, no explanation outside
 ]
 \`\`\`
 
-Return one entry per product in the input. Same order is fine. Use the shopifyProductId from each brief exactly as given.`
+Return one entry per product in the input. Same order is fine. Use the shopifyProductId from each brief exactly as given.
+
+STRICT JSON DISCIPLINE — VIOLATIONS BREAK THE PIPELINE:
+
+- The rationale field is a single line of prose. NEVER include a literal newline, tab, or carriage return inside it.
+- NEVER include backticks (\\\`) or code fences (\\\`\\\`\\\`) inside rationale. If you need to reference code or a spec line, quote it inline with regular quotes inside the string.
+- NEVER write a JSON example, partial JSON, or any structural JSON character (\`{\`, \`}\`, \`[\`, \`]\`) inside a rationale. The rationale is plain English only.
+- NEVER output prose explanation outside the JSON array (no "Here are the classifications:" preamble, no "Let me know if you want adjustments." postscript).
+- Output is one JSON array. Nothing before the opening \`[\`. Nothing after the closing \`]\`.`
 
 function buildUserPrompt(chunk: ChunkFile): string {
   return `Classify the following ${chunk.briefs.length} products. Return JSON array only.\n\n${JSON.stringify(chunk.briefs, null, 2)}`
 }
 
 // ─── JSON extraction ──────────────────────────────────────────────────────────
+
+/**
+ * Sanitize unescaped control characters inside string literals.
+ *
+ * The model sometimes emits a literal `\n` / `\t` / `\r` inside a rationale
+ * string — which is invalid JSON. Walk the text in a small state machine:
+ * track whether we're inside a string (and not escaped), and when we see a
+ * raw control char inside a string, replace it with the escaped form.
+ *
+ * Also handles literal backticks inside strings (which are valid JSON but
+ * sometimes paired with newlines that aren't).
+ */
+function sanitizeControlCharsInStrings(s: string): string {
+  let out = ''
+  let inString = false
+  let escaped  = false
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i] as string
+    if (!inString) {
+      if (ch === '"') inString = true
+      out += ch
+      continue
+    }
+    // We're inside a string literal
+    if (escaped) {
+      out += ch
+      escaped = false
+      continue
+    }
+    if (ch === '\\') {
+      out += ch
+      escaped = true
+      continue
+    }
+    if (ch === '"') {
+      inString = false
+      out += ch
+      continue
+    }
+    // Control chars inside string → escape them
+    if (ch === '\n') { out += '\\n'; continue }
+    if (ch === '\r') { out += '\\r'; continue }
+    if (ch === '\t') { out += '\\t'; continue }
+    const code = ch.charCodeAt(0)
+    if (code < 0x20) {
+      out += '\\u' + code.toString(16).padStart(4, '0')
+      continue
+    }
+    out += ch
+  }
+  return out
+}
 
 /** Strip optional ```json ... ``` fences. Be tolerant of leading prose. */
 function extractJsonArray(text: string): unknown[] {
@@ -173,9 +234,24 @@ function extractJsonArray(text: string): unknown[] {
     throw new Error(`no JSON array found in response (first 200 chars: ${trimmed.slice(0, 200)})`)
   }
   const jsonSlice = trimmed.slice(start, end + 1)
-  const parsed = JSON.parse(jsonSlice)
-  if (!Array.isArray(parsed)) throw new Error('parsed JSON is not an array')
-  return parsed
+  try {
+    const parsed = JSON.parse(jsonSlice)
+    if (!Array.isArray(parsed)) throw new Error('parsed JSON is not an array')
+    return parsed
+  } catch (firstErr) {
+    // Fallback: sanitize control chars inside string literals and retry.
+    // Models sometimes emit a literal newline inside a rationale; this
+    // recovers cleanly without losing the run.
+    const sanitized = sanitizeControlCharsInStrings(jsonSlice)
+    try {
+      const parsed = JSON.parse(sanitized)
+      if (!Array.isArray(parsed)) throw new Error('parsed JSON is not an array (after sanitize)')
+      return parsed
+    } catch {
+      // Re-throw the original error — sanitize didn't help.
+      throw firstErr
+    }
+  }
 }
 
 // ─── Dispatch + validation ────────────────────────────────────────────────────
@@ -220,24 +296,36 @@ async function dispatchChunk(chunkNumber: string): Promise<{ ok: boolean; produc
   }
 
   const t0 = Date.now()
-  console.log(`  chunk-${chunkNumber}: dispatching ${chunk.briefs.length} products …`)
-
   let text: string
   let inputTokens = 0
   let outputTokens = 0
-  try {
-    const resp = await runSingleClaudeCallViaSdk({
-      system: SYSTEM_PROMPT,
-      prompt: userPrompt,
-      // Cap generous enough for 75 products × ~80 output tokens + overhead.
-      maxTokens: 12000,
-    })
-    text = resp.text
-    inputTokens  = resp.inputTokens
-    outputTokens = resp.outputTokens
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return { ok: false, products: chunk.briefs.length, errors: [`SDK call failed: ${msg}`] }
+
+  if (SALVAGE) {
+    // Re-parse a previously-saved raw response instead of dispatching.
+    // Used when the JSON parse failed but the underlying text is recoverable
+    // with the newer sanitizer logic.
+    const rawPath = path.join(INPUT_DIR, `${OUT_PREFIX}.chunk-${chunkNumber}.raw.txt`)
+    if (!fs.existsSync(rawPath)) {
+      return { ok: false, products: chunk.briefs.length, errors: [`no raw response at ${rawPath} to salvage`] }
+    }
+    text = fs.readFileSync(rawPath, 'utf-8')
+    console.log(`  chunk-${chunkNumber}: salvaging from ${path.basename(rawPath)} (${text.length} chars)`)
+  } else {
+    console.log(`  chunk-${chunkNumber}: dispatching ${chunk.briefs.length} products …`)
+    try {
+      const resp = await runSingleClaudeCallViaSdk({
+        system: SYSTEM_PROMPT,
+        prompt: userPrompt,
+        // Cap generous enough for 75 products × ~80 output tokens + overhead.
+        maxTokens: 12000,
+      })
+      text = resp.text
+      inputTokens  = resp.inputTokens
+      outputTokens = resp.outputTokens
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, products: chunk.briefs.length, errors: [`SDK call failed: ${msg}`] }
+    }
   }
 
   let parsed: unknown[]
