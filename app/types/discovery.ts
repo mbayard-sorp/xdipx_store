@@ -32,7 +32,14 @@ export const AUDIENCES = [
 ] as const
 export type Audience = (typeof AUDIENCES)[number]
 
-export const MATTERS = [
+/**
+ * v1 chip set — the original 12-chip vocabulary that exists in Shopify
+ * metafields today (Title-Case-Hyphenated mix). Kept exported for the
+ * transition window so the allow-list can accept legacy values until step
+ * 5.5 backfill rewrites Shopify with v2 values. After backfill clears, this
+ * collapses into MATTERS_V2.
+ */
+export const MATTERS_V1 = [
   'Beginner-Friendly',
   'Body-Safe Silicone',
   'Discreet Design',
@@ -46,6 +53,39 @@ export const MATTERS = [
   'Whisper-Quiet',
   'Plus-Size-Friendly',
 ] as const
+
+/**
+ * v2 chip set — Co-Work final sign-off vocabulary, sentence-case.
+ * See docs/what-matters-final-signoff.md.
+ *
+ * Activated via the MATTERS_V2_ENABLED env flag (read by getActiveMatters()
+ * in app/lib/feature-flags.server.ts). Until then, this lives in code as the
+ * "post-launch" set and the v1 set drives the UI.
+ */
+export const MATTERS_V2 = [
+  'Beginner-friendly',
+  'Whisper-quiet',
+  'Waterproof',
+  'Travel-ready',
+  'Discreet',
+  'Hands-free',
+  'Remote-controlled',
+  'Plus-size friendly',
+  'Easy to clean',
+  'Rechargeable',
+  'Soft-touch',
+  'Latex-free',
+] as const
+
+/**
+ * Union of v1 + v2 chip values. Acts as the allow-list (whitelist) used in
+ * discovery.server.ts to filter Shopify metafield values — products tagged
+ * with EITHER vocabulary pass through during the migration window.
+ *
+ * After step 5.5 backfill rewrites Shopify with v2 values and the flag flips
+ * live, this can collapse to just MATTERS_V2.
+ */
+export const MATTERS = [...MATTERS_V1, ...MATTERS_V2] as const
 export type Matters = (typeof MATTERS)[number]
 
 export const CATEGORIES = ['Pleasure', 'Play', 'Body', 'Wear'] as const

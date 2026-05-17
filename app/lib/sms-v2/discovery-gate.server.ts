@@ -81,19 +81,25 @@ export interface GateAdvancement {
 
 const WHO_OPTS: string[] = ['For me', 'For a partner', 'For us', 'A gift']
 
+/**
+ * Quick-choice pills shown at the MATTERS gate. SMS subset of MATTERS_V2 —
+ * Co-Work final sign-off. Filter-test grounded; first-impression friendly.
+ * See docs/what-matters-final-signoff.md.
+ */
 const MATTERS_OPTS: string[] = [
   'Beginner-friendly',
-  'Quiet',
+  'Discreet',
   'Waterproof',
-  'Travel-ready',
+  'Hands-free',
   'Just show me',
 ]
 
 // ─── Sentinel: skip-ahead mood value ─────────────────────────────────────────
 
 /** When the slot extractor sees "just show me" (or equivalent), it sets
- *  mood to this sentinel. advanceGate treats it as a skip-ahead signal. */
-const SKIP_SENTINEL = 'just-show-me'
+ *  mood to this sentinel. advanceGate treats it as a skip-ahead signal.
+ *  Exported so telemetry sites can detect the skip cleanly (Migration 036). */
+export const SKIP_SENTINEL = 'just-show-me'
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 

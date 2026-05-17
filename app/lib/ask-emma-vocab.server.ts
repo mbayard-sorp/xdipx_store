@@ -1,4 +1,5 @@
 import { createClient } from '@sanity/client'
+import { MATTERS_V2 } from '~/types/discovery'
 
 const projectId  = process.env['SANITY_PROJECT_ID']
 const dataset    = process.env['SANITY_DATASET'] ?? 'production'
@@ -13,7 +14,7 @@ export type AskEmmaVocabulary = Record<AskEmmaAxis, string[]>
 const FALLBACK: AskEmmaVocabulary = {
   mood:     ['slow-and-intimate', 'playful', 'adventurous', 'romantic', 'indulgent', 'curious', 'comforting', 'energetic', 'bold', 'sensual', 'spontaneous', 'tender'],
   audience: ['solo', 'couples', 'long-distance', 'first-time', 'date-night', 'self-gift', 'gift-idea', 'anniversary', 'bachelorette', 'just-curious'],
-  matters:  ['whisper-quiet', 'waterproof', 'travel-size', 'rechargeable', 'app-controlled', 'hands-free', 'beginner-friendly', 'body-safe-silicone', 'discreet-design', 'long-battery', 'plus-size-friendly', 'latex-free'],
+  matters:  [...MATTERS_V2],
 }
 
 function client(write = false) {
@@ -28,9 +29,25 @@ function client(write = false) {
   })
 }
 
+/**
+ * Active matters vocabulary. The v2 12-chip sentence-case set (locked in
+ * app/types/discovery.ts) is the source the enricher cites to Claude when
+ * classifying new products. Sanity singleton value is ignored for the matters
+ * axis — the canonical list lives in code.
+ */
+function activeMattersVocab(): string[] {
+  return [...MATTERS_V2]
+}
+
 export async function getAskEmmaVocabulary(): Promise<AskEmmaVocabulary> {
   const c = client(false)
-  if (!c) return { ...FALLBACK }
+  if (!c) {
+    return {
+      mood:     FALLBACK.mood,
+      audience: FALLBACK.audience,
+      matters:  activeMattersVocab(),
+    }
+  }
   try {
     const doc = await c.fetch<Record<string, string[] | undefined>>(`*[_id == $id][0]{
       mood, audience, matters
@@ -38,11 +55,15 @@ export async function getAskEmmaVocabulary(): Promise<AskEmmaVocabulary> {
     return {
       mood:     doc?.['mood']?.length     ? doc['mood']     : FALLBACK.mood,
       audience: doc?.['audience']?.length ? doc['audience'] : FALLBACK.audience,
-      matters:  doc?.['matters']?.length  ? doc['matters']  : FALLBACK.matters,
+      matters:  activeMattersVocab(),
     }
   } catch (err) {
     console.error('[ask-emma-vocab] fetch failed, using fallback:', err)
-    return { ...FALLBACK }
+    return {
+      mood:     FALLBACK.mood,
+      audience: FALLBACK.audience,
+      matters:  activeMattersVocab(),
+    }
   }
 }
 

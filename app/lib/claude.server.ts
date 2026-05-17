@@ -2684,7 +2684,7 @@ export type AskEmmaAxis = 'mood' | 'audience' | 'matters'
 const ASK_EMMA_AXIS_GUIDANCE: Record<AskEmmaAxis, string> = {
   mood:     'How using this feels — the energy a shopper would gravitate to. Pick 1–3 that genuinely fit.',
   audience: 'Who this is for — solo, couples, or gifting. Pick 1–2.',
-  matters:  'Practical features a shopper might filter on — quietness, travel-friendliness, beginner-friendliness, waterproof, rechargeable, hands-free, soft-touch material. Pick 2–4 that are TRUE for this product.',
+  matters:  'Hard constraints a shopper might filter on — beginner-friendliness, whisper-quiet, waterproof, travel-readiness, discretion, hands-free, remote-controlled, plus-size inclusivity, easy to clean, rechargeable, soft-touch material, latex-free. Pick 0–4 that are TRUE for this product (empty is valid when no chip genuinely applies — lubes, cleaners, novelty items often have zero matches).',
 }
 
 /**

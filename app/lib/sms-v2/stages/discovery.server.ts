@@ -23,6 +23,7 @@ import {
   advanceGate,
   mergeSlots,
   suspendForExplain,
+  SKIP_SENTINEL,
   type DiscoveryState,
   type DiscoverySlots,
 } from '../discovery-gate.server'
@@ -396,6 +397,25 @@ async function executeDiscoveryGate(
   const adv = advanceGate(currentDiscoveryState, extractedSlots)
   const mergedSlots = mergeSlots(priorSlots, extractedSlots)
 
+  // ── Migration 036: gate-advance telemetry for SMS skip-rate analytics ───────
+  // Computed once here, then attached to every telemetry object returned from
+  // this function. Written to sms_turns.metadata.gateAdvance via the processor.
+  const gateAdvance = {
+    from: (currentDiscoveryState?.gate ?? null) as
+      'MOOD' | 'WHO' | 'MATTERS' | 'READY' | 'EXPLAIN' | null,
+    to: adv.nextState.gate,
+    // The skip sentinel only ever rides on `mood` per discovery-gate.server.ts.
+    skipped: (extractedSlots.mood?.includes(SKIP_SENTINEL) ?? false) ||
+             (mergedSlots.mood?.includes(SKIP_SENTINEL) ?? false),
+    // Which slot was newly filled this turn (priorSlots → extractedSlots diff).
+    slotFilled: (
+      extractedSlots.mood     !== undefined && extractedSlots.mood     !== priorSlots.mood     ? 'mood'    :
+      extractedSlots.audience !== undefined && extractedSlots.audience !== priorSlots.audience ? 'who'     :
+      extractedSlots.matters  !== undefined && extractedSlots.matters  !== priorSlots.matters  ? 'matters' :
+      null
+    ) as 'mood' | 'who' | 'matters' | null,
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Branch -1 — WARM WELCOME (FIRST TURN)
   // When the discovery state is null (this is the customer's first turn in
@@ -454,6 +474,7 @@ async function executeDiscoveryGate(
         intentConfidence: intent.confidence,
         inputTokens: welcome.inputTokens,
         outputTokens: welcome.outputTokens,
+        gateAdvance,
       },
     }
   }
@@ -483,6 +504,7 @@ async function executeDiscoveryGate(
         inputTokens: 0,
         outputTokens: 0,
         softBeat: true,
+        gateAdvance,
       },
     }
   }
@@ -522,6 +544,7 @@ async function executeDiscoveryGate(
             intentConfidence: intent.confidence,
             inputTokens: 0,
             outputTokens: 0,
+            gateAdvance,
           },
         }
       }
@@ -546,6 +569,7 @@ async function executeDiscoveryGate(
         intentConfidence: intent.confidence,
         inputTokens: 0,
         outputTokens: 0,
+        gateAdvance,
       },
     }
   }
@@ -629,6 +653,7 @@ async function executeDiscoveryGate(
       intentConfidence: intent.confidence,
       inputTokens: extractResult.haikuCalled ? undefined : 0,
       outputTokens: 0,
+      gateAdvance,
     },
   }
 }
