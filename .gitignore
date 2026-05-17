@@ -30,6 +30,8 @@ audience-proposals*.json
 audience-proposals-final.csv
 audience-distribution-audit.json
 matters-proposal-briefs*.json
+matters-proposal-proposals*.json
+matters-proposal-proposals.chunk-*.raw.txt
 matters-proposals*.json
 matters-proposals-final.csv
 matters-distribution-audit.json
@@ -40,3 +42,5 @@ mood-distribution-audit.json
 scripts/output/
 # Stray subagent helper artifacts that occasionally drop here
 classify-chunk-*.cjs
+dispatch-all.log
+apply-shadow.log

@@ -19,6 +19,7 @@
     "postinstall": "[ \"$VERCEL\" = \"1\" ] && npm run build || true"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.143",
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/genai": "^1.48.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
