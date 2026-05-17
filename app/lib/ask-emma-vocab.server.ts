@@ -1,4 +1,6 @@
 import { createClient } from '@sanity/client'
+import { MATTERS_V2 } from '~/types/discovery'
+import { mattersV2Enabled } from '~/lib/feature-flags.server'
 
 const projectId  = process.env['SANITY_PROJECT_ID']
 const dataset    = process.env['SANITY_DATASET'] ?? 'production'
@@ -10,6 +12,12 @@ export type AskEmmaAxis = 'mood' | 'audience' | 'matters'
 
 export type AskEmmaVocabulary = Record<AskEmmaAxis, string[]>
 
+/**
+ * Pre-v2 fallback vocab. The matters axis here is the legacy kebab-case set —
+ * preserved for the transition window. When MATTERS_V2_ENABLED is true,
+ * getAskEmmaVocabulary() returns MATTERS_V2 (sentence-case, 12 chips) for the
+ * matters axis regardless of what the Sanity singleton holds.
+ */
 const FALLBACK: AskEmmaVocabulary = {
   mood:     ['slow-and-intimate', 'playful', 'adventurous', 'romantic', 'indulgent', 'curious', 'comforting', 'energetic', 'bold', 'sensual', 'spontaneous', 'tender'],
   audience: ['solo', 'couples', 'long-distance', 'first-time', 'date-night', 'self-gift', 'gift-idea', 'anniversary', 'bachelorette', 'just-curious'],
@@ -28,9 +36,32 @@ function client(write = false) {
   })
 }
 
+/**
+ * Active matters vocabulary, honoring the MATTERS_V2_ENABLED flag.
+ *
+ * When the flag is true, the v2 12-chip sentence-case set (locked in
+ * app/types/discovery.ts) overrides whatever the Sanity singleton or FALLBACK
+ * holds. This is the source the enricher cites to Claude when classifying new
+ * products, so a flip on this flag means new enrichment writes v2 vocab to
+ * live xdipx.matters_tags.
+ *
+ * When the flag is false (default), the legacy v1 vocab from Sanity (or
+ * FALLBACK) is used. Mirrors the pattern getActiveMatters() uses for the UI.
+ */
+function activeMattersVocab(sanityValue: string[] | undefined): string[] {
+  if (mattersV2Enabled()) return [...MATTERS_V2]
+  return sanityValue?.length ? sanityValue : FALLBACK.matters
+}
+
 export async function getAskEmmaVocabulary(): Promise<AskEmmaVocabulary> {
   const c = client(false)
-  if (!c) return { ...FALLBACK }
+  if (!c) {
+    return {
+      mood:     FALLBACK.mood,
+      audience: FALLBACK.audience,
+      matters:  activeMattersVocab(undefined),
+    }
+  }
   try {
     const doc = await c.fetch<Record<string, string[] | undefined>>(`*[_id == $id][0]{
       mood, audience, matters
@@ -38,11 +69,15 @@ export async function getAskEmmaVocabulary(): Promise<AskEmmaVocabulary> {
     return {
       mood:     doc?.['mood']?.length     ? doc['mood']     : FALLBACK.mood,
       audience: doc?.['audience']?.length ? doc['audience'] : FALLBACK.audience,
-      matters:  doc?.['matters']?.length  ? doc['matters']  : FALLBACK.matters,
+      matters:  activeMattersVocab(doc?.['matters']),
     }
   } catch (err) {
     console.error('[ask-emma-vocab] fetch failed, using fallback:', err)
-    return { ...FALLBACK }
+    return {
+      mood:     FALLBACK.mood,
+      audience: FALLBACK.audience,
+      matters:  activeMattersVocab(undefined),
+    }
   }
 }
 
