@@ -299,22 +299,18 @@ export function applyMattersRules(input: RuleInput): RuleResult {
 
   // ── needsClaude threshold ─────────────────────────────────────────────────
   //
-  // A product is "ambiguous" when the engine had very little signal to work
-  // with. Concretely, flag needsClaude when ALL of:
-  //   1. No known materials (matsLc is empty or only generic 'metal')
-  //   2. All three spec booleans are null (waterproof, rechargeable, nonElectric)
-  //   3. The combined corpus is short or empty (< 120 chars usable signal)
+  // If the rules left finalMatters empty, the product is unclassified — it
+  // MUST go to Claude. The earlier "thin corpus" heuristic was wrong: a
+  // product can have a 500-char description and still hit zero rules (lubes,
+  // toy cleaners, edge-case materials, ambiguous descriptions) — those
+  // products were silently shipping with no tags. Empty rule output is the
+  // signal Claude needs to pick them up.
   //
-  // This should land ~70-85% of catalog in the rule-handled bucket. Products
-  // with a full Nalpac spec dump almost always have material + at least one
-  // boolean, so they pass rule-handled. Only skeletal catalog entries (no
-  // description, no metafields parsed yet) fall through to Claude.
-  const usefulMaterials = [...matsLc].filter(m => m !== 'metal')
-  const noMaterials     = usefulMaterials.length === 0
-  const noSpecBooleans  = input.waterproof === null && input.rechargeable === null && input.nonElectric === null
-  const thinCorpus      = (titleLc.length + bodyLc.length + nalpacLc.length) < 120
-
-  const needsClaude = noMaterials && noSpecBooleans && thinCorpus
+  // Coverage expectation per Co-Work: ~70-85% of catalog handled by rules.
+  // That comes from products with rich spec signal naturally clearing rules
+  // with multiple tags. The skeletal/edge-case tail (~15-30%) routes to
+  // Claude regardless of corpus length.
+  const needsClaude = matters.size === 0
 
   return {
     finalMatters: [...matters].sort(),
