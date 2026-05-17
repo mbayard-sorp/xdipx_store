@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import type { MetaFunction, MetaDescriptor, LoaderFunctionArgs } from 'react-router'
 import { useLoaderData, useSearchParams } from 'react-router'
-import { getProductsByTag } from '~/lib/shopify.server'
+import { getProductsByTypesOrTag } from '~/lib/shopify.server'
 import { getEmmaPresets, getCollectionPage } from '~/lib/sanity.server'
 import type { Product } from '~/types'
 import { trackViewItemList } from '~/lib/analytics.client'
@@ -21,6 +21,16 @@ const PAGE_URL             = 'https://xdipx.com/for-her'
 // Treat /for-her as a virtual collection — see /for-him for the full pattern.
 const FACET_PARAMS = ['mood', 'audience', 'matters', 'budgetMax'] as const
 
+// Phase 7a.2 (TAXONOMY_SPEC v2.2 §7) — union loader (see /for-him for context).
+const FOR_HER_TYPES = [
+  'G-Spot Vibrator',
+  'Clitoral Vibrator',
+  'Rabbit Vibrator',
+  'Suction Vibrator',
+  'Bullet Vibrator',
+  'Wand Massager',
+] as const
+
 export function headers() {
   return {
     'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
@@ -36,7 +46,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   })
 
   const [products, presets, sanity] = await Promise.all([
-    getProductsByTag('for-her', 24),
+    getProductsByTypesOrTag(FOR_HER_TYPES, 'for-her', 24),
     getEmmaPresets(),
     getCollectionPage('for-her'),
   ])

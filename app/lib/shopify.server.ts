@@ -1013,6 +1013,54 @@ export async function getProductsByTag(tag: string, limit = 6): Promise<Product[
   })
 }
 
+/**
+ * Union loader for body-routed pages (/for-him, /for-her). Implements the
+ * Phase 7a.2 union-logic contract from TAXONOMY_SPEC v2.2 §7: filter by
+ * product_type ∈ types OR tag:{tag}. Keeps the legacy tag branch live while
+ * the new type-driven mapping is applied; once 7c drops, the tag branch can
+ * be removed.
+ *
+ * Types are matched verbatim against Shopify's product_type field
+ * (e.g., "Stroker", "Cock Ring"). Use the spec §5 Type sets.
+ */
+export async function getProductsByTypesOrTag(
+  types: readonly string[],
+  tag: string,
+  limit = 6,
+): Promise<Product[]> {
+  const typesKey = [...types].sort().join('|')
+  return cached(`shopify:types-or-tag:${typesKey}:${tag}:${limit}`, READ_TTL, async () => {
+    const sanitize = (s: string) => s.replace(/[:()*"]/g, '').trim()
+    const typeClauses = types
+      .map(sanitize)
+      .filter(Boolean)
+      .map(t => `product_type:"${t}"`)
+    const tagClause = `tag:${sanitize(tag)}`
+    const query = `(${[...typeClauses, tagClause].join(' OR ')})`
+
+    const data = await storefront<{
+      products: { edges: { node: ShopifyProductNode }[] }
+    }>(`
+      query GetProductsForBodyRoute($query: String!, $first: Int!) {
+        products(first: $first, query: $query) {
+          edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+        }
+      }
+    `, { query, first: limit })
+
+    // De-dupe in case the same product matches both branches.
+    const seen = new Set<string>()
+    const products: Product[] = []
+    for (const edge of data.products.edges) {
+      const p = nodeToProduct(edge.node)
+      if (seen.has(p.id)) continue
+      seen.add(p.id)
+      products.push(p)
+    }
+    return products
+  })
+}
+
 export async function getCollectionProducts(handle: string, limit = 8): Promise<Product[]> {
   return cached(`shopify:col:${handle}:${limit}`, READ_TTL, async () => {
     const data = await storefront<{

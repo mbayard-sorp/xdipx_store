@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import type { MetaFunction, MetaDescriptor, LoaderFunctionArgs } from 'react-router'
 import { useLoaderData, useSearchParams } from 'react-router'
-import { getProductsByTag } from '~/lib/shopify.server'
+import { getProductsByTypesOrTag } from '~/lib/shopify.server'
 import { getEmmaPresets, getCollectionPage } from '~/lib/sanity.server'
 import type { Product } from '~/types'
 import { trackViewItemList } from '~/lib/analytics.client'
@@ -24,6 +24,21 @@ const PAGE_URL             = 'https://xdipx.com/for-him'
 // back to the hardcoded constants above.
 const FACET_PARAMS = ['mood', 'audience', 'matters', 'budgetMax'] as const
 
+// Phase 7a.2 (TAXONOMY_SPEC v2.2 §7) — union loader. While the audience
+// re-tag pass removes `him` from xdipx.audience_tags, this route serves
+// products that match either:
+//   - product_type ∈ male-anatomy Type set, or
+//   - the legacy Shopify product tag `for-him`
+// After Phase 7c the legacy tag branch can be dropped from
+// getProductsByTypesOrTag.
+const FOR_HIM_TYPES = [
+  'Stroker',
+  'Cock Ring',
+  'Prostate Massager',
+  'Penis Pump',
+  'Penis Sleeve',
+] as const
+
 export function headers() {
   return {
     'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
@@ -39,7 +54,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   })
 
   const [products, presets, sanity] = await Promise.all([
-    getProductsByTag('for-him', 24),
+    getProductsByTypesOrTag(FOR_HIM_TYPES, 'for-him', 24),
     getEmmaPresets(),
     getCollectionPage('for-him'),
   ])
