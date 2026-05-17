@@ -228,10 +228,9 @@ async function fetchExistingTerms(): Promise<Set<string>> {
 }
 
 async function fetchVocabulary(): Promise<VocabSnapshot> {
-  // Route through the gated helper so MATTERS_V2_ENABLED is honored — when the
-  // flag is on, the matters axis returns MATTERS_V2 even if the Sanity singleton
-  // still holds the v1 kebab-case set. Without this, SEO keyword research would
-  // mint clusters against the wrong vocab after the v2 flip.
+  // The matters axis is anchored to MATTERS_V2 in code via getAskEmmaVocabulary —
+  // SEO keyword research mints clusters against the canonical chip set, not the
+  // Sanity singleton (which may still hold a stale v1 list for audit).
   try {
     return await getAskEmmaVocabulary()
   } catch {

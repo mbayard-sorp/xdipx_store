@@ -82,35 +82,17 @@ export interface GateAdvancement {
 const WHO_OPTS: string[] = ['For me', 'For a partner', 'For us', 'A gift']
 
 /**
- * Quick-choice pills shown at the MATTERS gate.
- *
- * Two vocabularies coexist during the v2 "What Matters" migration. The active
- * set is picked at call time by mattersOpts() based on the MATTERS_V2_ENABLED
- * env flag, so a deploy-time flip changes both web and SMS surfaces in lock-
- * step. See docs/what-matters-final-signoff.md.
+ * Quick-choice pills shown at the MATTERS gate. SMS subset of MATTERS_V2 —
+ * Co-Work final sign-off. Filter-test grounded; first-impression friendly.
+ * See docs/what-matters-final-signoff.md.
  */
-const MATTERS_OPTS_V1: string[] = [
-  'Beginner-friendly',
-  'Quiet',
-  'Waterproof',
-  'Travel-ready',
-  'Just show me',
-]
-
-/** v2 SMS subset — Co-Work final sign-off. Filter-test grounded; first-
- *  impression friendly. Hands-free over Plus-size friendly per the review. */
-const MATTERS_OPTS_V2: string[] = [
+const MATTERS_OPTS: string[] = [
   'Beginner-friendly',
   'Discreet',
   'Waterproof',
   'Hands-free',
   'Just show me',
 ]
-
-/** Resolve the active MATTERS pill set. Server-only via env-var read. */
-function mattersOpts(): string[] {
-  return process.env['MATTERS_V2_ENABLED'] === 'true' ? MATTERS_OPTS_V2 : MATTERS_OPTS_V1
-}
 
 // ─── Sentinel: skip-ahead mood value ─────────────────────────────────────────
 
@@ -211,7 +193,7 @@ function whoQuestion(): GateQuestion {
 }
 
 function mattersQuestion(): GateQuestion {
-  return { prose: '<<MATTERS>>', quickChoiceOpts: mattersOpts(), allowSkip: true }
+  return { prose: '<<MATTERS>>', quickChoiceOpts: MATTERS_OPTS, allowSkip: true }
 }
 
 // ─── Core advancement logic ───────────────────────────────────────────────────

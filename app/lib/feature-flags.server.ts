@@ -18,24 +18,7 @@
  *     grep cleanly and removal is mechanical when the flag retires.
  */
 
-import { MATTERS_V1, MATTERS_V2, type Matters } from '~/types/discovery'
-
-/**
- * Gates the v2 "What Matters" chip set (12-chip vocabulary, sentence-case).
- *
- * When false (default): the discovery flow shows the v1 chip set and reads/writes
- * the legacy `xdipx.matters_tags` vocabulary.
- * When true: the discovery flow shows the v2 12-chip set and reads from the
- * normalized vocabulary post-backfill.
- *
- * Flip to `true` only after step 5.5 (full-catalog backfill) clears the launch
- * gate of >=80% catalog coverage on `xdipx.matters_tags`.
- *
- * See: docs/what-matters-final-signoff.md
- */
-export function mattersV2Enabled(): boolean {
-  return process.env['MATTERS_V2_ENABLED'] === 'true'
-}
+import { MATTERS_V2, type Matters } from '~/types/discovery'
 
 /**
  * Returns the chip set the discovery UI should *display*.
@@ -49,5 +32,5 @@ export function mattersV2Enabled(): boolean {
  * to the client as a prop.
  */
 export function getActiveMatters(): readonly Matters[] {
-  return mattersV2Enabled() ? MATTERS_V2 : MATTERS_V1
+  return MATTERS_V2
 }
