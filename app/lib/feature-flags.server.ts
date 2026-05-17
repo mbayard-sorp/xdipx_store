@@ -18,6 +18,8 @@
  *     grep cleanly and removal is mechanical when the flag retires.
  */
 
+import { MATTERS_V1, MATTERS_V2, type Matters } from '~/types/discovery'
+
 /**
  * Gates the v2 "What Matters" chip set (12-chip vocabulary, sentence-case).
  *
@@ -33,4 +35,19 @@
  */
 export function mattersV2Enabled(): boolean {
   return process.env['MATTERS_V2_ENABLED'] === 'true'
+}
+
+/**
+ * Returns the chip set the discovery UI should *display*.
+ *
+ * Not the same as the allow-list (`MATTERS` in app/types/discovery.ts), which
+ * stays as the union of v1 + v2 during the transition so legacy data isn't
+ * silently dropped from filter results. This helper picks the set the user
+ * sees and interacts with.
+ *
+ * Server-only — must be called from a loader and the result passed through
+ * to the client as a prop.
+ */
+export function getActiveMatters(): readonly Matters[] {
+  return mattersV2Enabled() ? MATTERS_V2 : MATTERS_V1
 }
