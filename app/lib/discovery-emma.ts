@@ -33,6 +33,70 @@ export function scoreProduct(p: DiscoveryProduct, s: DiscoveryState): number {
   return score
 }
 
+/**
+ * Per-chip availability under the user's current selection.
+ *
+ * A chip X in group G is "available" iff there is at least one product
+ * that (a) carries tag X in p[G] AND (b) matches the user's current
+ * selection in the OTHER two groups. Group G's own current selection
+ * is ignored because adding X to G is OR-within-group (it expands the
+ * group's match set, never narrows it).
+ *
+ * Returned as sets for O(1) lookup at render time.
+ */
+export interface ChipAvailability {
+  moods:     Set<string>
+  audiences: Set<string>
+  matters:   Set<string>
+}
+
+export function computeAvailable(
+  index: readonly DiscoveryProduct[],
+  s: Pick<DiscoveryState, 'mood' | 'audience' | 'matters'>,
+): ChipAvailability {
+  const moods     = new Set<string>()
+  const audiences = new Set<string>()
+  const matters   = new Set<string>()
+
+  const hasMood     = s.mood.length > 0
+  const hasAudience = s.audience.length > 0
+  const hasMatters  = s.matters.length > 0
+
+  for (const p of index) {
+    // Does this product satisfy each group's current selection? (OR within group,
+    // AND across groups.) An unselected group is trivially satisfied.
+    const okMood     = !hasMood     || s.mood.some(m => p.mood.includes(m))
+    const okAudience = !hasAudience || s.audience.some(a => p.audience.includes(a))
+    const okMatters  = !hasMatters  || s.matters.some(k => p.matters.includes(k))
+
+    // For each group G, list G's tags from this product when the OTHER
+    // two groups are satisfied — ignoring G's own current selection.
+    if (okAudience && okMatters) for (const m of p.mood)     moods.add(m)
+    if (okMood     && okMatters) for (const a of p.audience) audiences.add(a)
+    if (okMood     && okAudience) for (const k of p.matters)  matters.add(k)
+  }
+
+  return { moods, audiences, matters }
+}
+
+/**
+ * Wire-friendly form of ChipAvailability. Sets don't survive JSON, so the
+ * loader and api.discovery serialize arrays and the client reconstructs sets.
+ */
+export interface ChipAvailabilityArrays {
+  moods:     string[]
+  audiences: string[]
+  matters:   string[]
+}
+
+export function availableToArrays(a: ChipAvailability): ChipAvailabilityArrays {
+  return {
+    moods:     Array.from(a.moods),
+    audiences: Array.from(a.audiences),
+    matters:   Array.from(a.matters),
+  }
+}
+
 export interface RankOptions {
   /** Hard cap of items per rail. Variant A uses 4; variant B uses 4 for top, 3 for rest. */
   perRail?: number
@@ -93,7 +157,10 @@ export function rankRails(
 
 /* ─── Audience phrase map ────────────────────────────────────────────── */
 
-const AUDIENCE_PHRASES: Record<Audience, string> = {
+// Hand-tuned phrasing for known audience labels. Anything outside this map
+// falls back to a lowercased pass-through (see audiencePhrase) — works for
+// any future merchandiser-added audience without a code change.
+const AUDIENCE_PHRASES: Record<string, string> = {
   Me:           'for Me',
   Us:           'for Us',
   'A Partner':  'for Them',
@@ -103,7 +170,10 @@ const AUDIENCE_PHRASES: Record<Audience, string> = {
 }
 
 export function audiencePhrase(a: Audience): string {
-  return AUDIENCE_PHRASES[a]
+  // Vocabulary is dynamic (sourced from Shopify), so fall back to a
+  // lowercased pass-through for any audience value we don't have a
+  // hand-tuned phrase for.
+  return AUDIENCE_PHRASES[a] ?? a.toLowerCase()
 }
 
 /* ─── Rail titles ────────────────────────────────────────────────────── */
@@ -142,7 +212,7 @@ export function railTitleSegments(cat: Category, s: DiscoveryState): RailTitleSe
   if (aud) {
     segments.push(
       { text: ' ', emphasized: false },
-      { text: AUDIENCE_PHRASES[aud], emphasized: true },
+      { text: audiencePhrase(aud), emphasized: true },
     )
   }
 
@@ -162,38 +232,90 @@ export function railTitlePlain(cat: Category, s: DiscoveryState): string {
  *
  * No em dashes per house rule (CLAUDE.md). Periods/commas only.
  */
-export function getEmmaLine(s: DiscoveryState): string {
-  const m = s.mood[0]
-  const a = s.audience[0]
-  const k = s.matters[0]
-  const lower = (v: string) => v.toLowerCase()
+/**
+ * Variant A locked copy. Reviewed by emma-empathy-reviewer 2026-05-15.
+ * Single source of truth for the sidekick one-liner — only edit through
+ * a fresh copy + empathy review pass.
+ *
+ * Interpolation placeholders: {mood} {audience} {matters} {category}.
+ */
+export const EMMA_LINES = {
+  intro:       "Hi, I'm Emma. Tap anything that calls to you. No wrong answers, and I'll shift what you see as you go.",
+  moodOnly:    "{mood}. Good start. Is this for you, the two of you, or someone else?",
+  audOnly:     "For {audience}. Noted. What kind of feeling are you chasing?",
+  mattersOnly: "{matters} matters. Good to know. What mood are you in?",
+  moodAud:     "{mood} for {audience}. I like that brief. Tell me what matters most and I'll narrow it down.",
+  moodMatters: "{mood} and {matters}. Solid combo. Want to tell me who this is for?",
+  audMatters:  "{matters}, for {audience}. Got it. What feeling are you hoping to land on?",
+  full:        "{mood}, for {audience}, with {matters} in mind. That's a real brief. Everything below is shaped around it.",
+  welcomeBack: "Welcome back. Still in a {mood} mood for {audience}? No pressure to stick with it.",
+  railEmpty:   "Nothing in {category} quite fits that brief. Try loosening one filter and see what opens up.",
+} as const
 
-  if (!m && !a && !k) {
-    return "Hi, I'm Emma. Tap anything that resonates. There are no wrong answers, and I'll shape what you see."
-  }
-  if (m && a && k) {
-    return `${lower(m)}, ${lower(a)}, and ${lower(k)}. Beautiful brief. I've reshuffled everything below to match.`
-  }
-  if (m && a) {
-    const youOrThem = a === 'Me' ? 'you' : lower(a)
-    return `${lower(m)} for ${youOrThem}. Lovely. Tell me what matters most and I'll narrow further.`
-  }
-  if (m && k) {
-    return `${lower(m)} and ${lower(k)}. Good combo. Want to tell me who this is for?`
-  }
-  if (a && k) {
-    return `${lower(k)}, ${lower(a)}. Noted. What kind of feeling are you after?`
-  }
-  if (m) {
-    return `${lower(m)}. Got it. Is this for you, the two of you, or someone else?`
-  }
-  if (a) {
-    return `For ${lower(a)}. Noted. What kind of feeling are you after?`
-  }
-  if (k) {
-    return `${lower(k)} matters. Good to know. What mood are you in?`
-  }
+/** Sidekick CTA labels — locked copy. */
+export const SIDEKICK_CTAS = {
+  primary:   'Ask Emma',
+  secondary: 'Save my picks',
+} as const
+
+const lower = (v: string) => v.toLowerCase()
+const audienceWord = (a: Audience) =>
+  a === 'Me' ? 'you' : a === 'Us' ? 'us' : lower(a)
+
+function joinAudiences(arr: Audience[]): string {
+  return arr.map(audienceWord).join(' or ')
+}
+function joinMoods(arr: Mood[]): string {
+  return arr.map(lower).join(' or ')
+}
+function joinMatters(arr: string[]): string {
+  // Matters tags keep their original capitalization (proper-noun feel).
+  return arr.join(', ')
+}
+
+function fill(template: string, values: { mood?: string; audience?: string; matters?: string; category?: string }): string {
+  return template
+    .replace('{mood}', values.mood ?? '')
+    .replace('{audience}', values.audience ?? '')
+    .replace('{matters}', values.matters ?? '')
+    .replace('{category}', values.category ?? '')
+}
+
+export function getEmmaLine(s: DiscoveryState): string {
+  const hasM = s.mood.length > 0
+  const hasA = s.audience.length > 0
+  const hasK = s.matters.length > 0
+  const mood = hasM ? joinMoods(s.mood) : ''
+  const audience = hasA ? joinAudiences(s.audience) : ''
+  const matters = hasK ? joinMatters(s.matters) : ''
+
+  if (!hasM && !hasA && !hasK) return EMMA_LINES.intro
+  if (hasM && hasA && hasK) return fill(EMMA_LINES.full,        { mood, audience, matters })
+  if (hasM && hasA)         return fill(EMMA_LINES.moodAud,     { mood, audience })
+  if (hasM && hasK)         return fill(EMMA_LINES.moodMatters, { mood, matters })
+  if (hasA && hasK)         return fill(EMMA_LINES.audMatters,  { audience, matters })
+  if (hasM)                 return fill(EMMA_LINES.moodOnly,    { mood })
+  if (hasA)                 return fill(EMMA_LINES.audOnly,     { audience })
+  if (hasK)                 return fill(EMMA_LINES.mattersOnly, { matters })
   return ''
+}
+
+/**
+ * Welcome-back banner copy for returning sessions. Pulls the most-recent
+ * mood + audience from the persisted state so the line reads like a memory.
+ * Returns null when there isn't enough context to greet meaningfully.
+ */
+export function getWelcomeBackLine(s: DiscoveryState): string | null {
+  if (s.mood.length === 0 && s.audience.length === 0) return null
+  const mood = s.mood[0] ? lower(s.mood[0]) : ''
+  const audience = s.audience[0] ? audienceWord(s.audience[0]) : ''
+  if (!mood || !audience) return null
+  return fill(EMMA_LINES.welcomeBack, { mood, audience })
+}
+
+/** Rail empty-state copy. */
+export function getRailEmptyLine(category: Category): string {
+  return fill(EMMA_LINES.railEmpty, { category })
 }
 
 /**
@@ -258,7 +380,7 @@ export function welcomeBackSegments(s: Pick<DiscoveryState, 'mood' | 'audience'>
       prefix:   'Welcome back. Still in a ',
       mood:     mood.toLowerCase(),
       middle:   ' mood ',
-      audience: AUDIENCE_PHRASES[aud].toLowerCase(),
+      audience: audiencePhrase(aud).toLowerCase(),
       suffix:   '?',
     }
   }
@@ -266,7 +388,7 @@ export function welcomeBackSegments(s: Pick<DiscoveryState, 'mood' | 'audience'>
     return { prefix: 'Welcome back. Still in a ', mood: mood.toLowerCase(), middle: ' mood', audience: null, suffix: '?' }
   }
   if (aud) {
-    return { prefix: 'Welcome back. Still shopping ', mood: null, middle: '', audience: AUDIENCE_PHRASES[aud].toLowerCase(), suffix: '?' }
+    return { prefix: 'Welcome back. Still shopping ', mood: null, middle: '', audience: audiencePhrase(aud).toLowerCase(), suffix: '?' }
   }
   return { prefix: 'Welcome back.', mood: null, middle: '', audience: null, suffix: '' }
 }

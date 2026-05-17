@@ -1,43 +1,30 @@
 /**
  * "Find you in a product" — home page discovery types.
  *
- * The chip vocabulary mirrors the design prototype in
- * `docs/discovery-prototype/`. Tags are stored on Shopify products via
- * the `xdipx.mood_tags`, `xdipx.audience_tags`, `xdipx.matters_tags`
- * metafields. Category derives from `xdipx.category` (top-level nav).
+ * The chip vocabularies (mood, audience, matters) are dynamic — sourced
+ * from the live distinct values of these Shopify product metafields:
+ *   - xdipx.mood_tags
+ *   - xdipx.audience_tags
+ *   - xdipx.matters_tags
+ *
+ * The loader fetches them via `getDiscoveryVocab()` (24h KV-cached) and
+ * passes them down to the UI. Editors add a new chip by adding the tag
+ * to a product in Shopify — no deploy required.
+ *
+ * Category is still a closed enum (the top-level nav structure is a
+ * product decision, not a merchandiser one).
  */
 
-export const MOODS = [
-  'Sensual',
-  'Slow & Intimate',
-  'Playful',
-  'Adventurous',
-  'Bold',
-  'Indulgent',
-  'Romantic',
-  'Curious',
-  'Comforting',
-  'Energetic',
-  'Unhurried Solo',
-] as const
-export type Mood = (typeof MOODS)[number]
-
-export const AUDIENCES = [
-  'Me',
-  'Us',
-  'A Partner',
-  'Date Night',
-  'Solo',
-  'Gift',
-] as const
-export type Audience = (typeof AUDIENCES)[number]
+/** Free-form string aliases; vocabularies are sourced from Shopify at runtime. */
+export type Mood     = string
+export type Audience = string
+export type Matters  = string
 
 /**
- * v1 chip set — the original 12-chip vocabulary that exists in Shopify
- * metafields today (Title-Case-Hyphenated mix). Kept exported for the
- * transition window so the allow-list can accept legacy values until step
- * 5.5 backfill rewrites Shopify with v2 values. After backfill clears, this
- * collapses into MATTERS_V2.
+ * v1 matters chip set — the original Title-Case-Hyphenated vocabulary that
+ * lived in Shopify metafields before the v2 sentence-case migration. Kept
+ * exported during the transition window so straggler v1 values still pass
+ * any closed-vocab allow-list filtering on the enricher/SMS side.
  */
 export const MATTERS_V1 = [
   'Beginner-Friendly',
@@ -55,12 +42,10 @@ export const MATTERS_V1 = [
 ] as const
 
 /**
- * v2 chip set — Co-Work final sign-off vocabulary, sentence-case.
- * See docs/what-matters-final-signoff.md.
- *
- * Activated via the MATTERS_V2_ENABLED env flag (read by getActiveMatters()
- * in app/lib/feature-flags.server.ts). Until then, this lives in code as the
- * "post-launch" set and the v1 set drives the UI.
+ * v2 matters chip set — Co-Work final sign-off vocabulary, sentence-case.
+ * Canonical target for the enricher, rules engine, and SMS gate. The home
+ * page's runtime display chips are NOT constrained to this set — they're
+ * sourced from live Shopify metafield values. See docs/what-matters-final-signoff.md.
  */
 export const MATTERS_V2 = [
   'Beginner-friendly',
@@ -77,16 +62,8 @@ export const MATTERS_V2 = [
   'Latex-free',
 ] as const
 
-/**
- * Union of v1 + v2 chip values. Acts as the allow-list (whitelist) used in
- * discovery.server.ts to filter Shopify metafield values — products tagged
- * with EITHER vocabulary pass through during the migration window.
- *
- * After step 5.5 backfill rewrites Shopify with v2 values and the flag flips
- * live, this can collapse to just MATTERS_V2.
- */
+/** Union of v1 + v2 — allow-list accepting either vocabulary during the transition. */
 export const MATTERS = [...MATTERS_V1, ...MATTERS_V2] as const
-export type Matters = (typeof MATTERS)[number]
 
 export const CATEGORIES = ['Pleasure', 'Play', 'Body', 'Wear'] as const
 export type Category = (typeof CATEGORIES)[number]
@@ -120,7 +97,15 @@ export const EMPTY_STATE: DiscoveryState = {
   step: 0,
 }
 
-/** Lean shape used by the home page rails — never the full Shopify product. */
+/**
+ * Lean shape used by the home page rails — never the full Shopify product.
+ *
+ * IMPORTANT: When fields are added / removed / renamed here, bump
+ * `INDEX_VERSION` in `app/lib/discovery.server.ts`. KV entries are
+ * namespaced by that version; without a bump, a deploy with a new shape
+ * will read stale entries with the old shape and silently serve corrupt
+ * rail data for up to the TTL window.
+ */
 export interface DiscoveryProduct {
   id:          string
   handle:      string

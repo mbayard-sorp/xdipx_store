@@ -10,7 +10,11 @@ import { db } from '~/lib/db.server'
 import { dealHistory, pipelineSettings } from '../../db/schema'
 import { eq, inArray } from 'drizzle-orm'
 import { kvGet, KV_KEYS } from '~/lib/kv.server'
-import { getHomepageSections, getEmmaHeroSettings } from '~/lib/sanity.server'
+import { getHomepageSections, getEmmaHeroSettings, getHomeConfig } from '~/lib/sanity.server'
+import { resolveHomeVariant } from '~/lib/home-variant.server'
+import { getDiscoveryRails, getDiscoveryVocab } from '~/lib/discovery.server'
+import { EMPTY_STATE } from '~/types/discovery'
+import { HomeA } from '~/components/discovery/HomeA'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getEmmaContextRows }    from '~/lib/emma-rails.server'
@@ -75,6 +79,37 @@ const ADMIN_BYPASS_HEADERS = {
 } as const
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  // ── Variant A: "The Compass" discovery home page ─────────────────────────
+  // Resolve variant before the heavy legacy fan-out so variant A skips all
+  // Shopify/Sanity calls it doesn't need. Variant A has its own loader branch
+  // that runs a lightweight getDiscoveryRails() instead.
+  const homeConfig = await getHomeConfig().catch(() => null)
+  const { variant } = resolveHomeVariant(request, homeConfig?.activeVariant ?? null)
+
+  if (variant === 'a') {
+    const [dbDeal, { rails, total, available }, vocab] = await Promise.all([
+      getLiveDealRow(),
+      getDiscoveryRails(EMPTY_STATE),
+      getDiscoveryVocab(),
+    ])
+    const deal = dbDeal?.shopifyProductId
+      ? await getDealByShopifyId(dbDeal.shopifyProductId).catch(() => null)
+      : null
+    const stripDeal = deal ? { title: deal.seoTitle, handle: deal.handle } : null
+    return {
+      variant: 'a' as const,
+      rails,
+      total,
+      deal: stripDeal,
+      welcomeBackEnabled: homeConfig?.welcomeBackEnabled ?? true,
+      moods:     vocab.moods,
+      audiences: vocab.audiences,
+      matters:   vocab.matters,
+      available,
+    }
+  }
+
+  // ── Legacy path (unchanged) ───────────────────────────────────────────────
   // Read the live-deal row first (indexed, cheap); then fan out the Shopify
   // fetch alongside the other branches so it overlaps rather than chains.
   const [dbDeal, adminUser] = await Promise.all([
@@ -201,6 +236,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (!deal) {
     const value = {
+      variant: 'legacy' as const,
       deal: null, bundle: null, forHim, forHer, bonusDeal,
       viewers: 0, soldToday: 0, cmsData, carouselProductMap,
       emmaHero: null, pairDeal: null, homepageSettings, pairBundleDeal: null,
@@ -210,6 +246,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const value = {
+    variant: 'legacy' as const,
     deal, bundle, forHim, forHer, bonusDeal,
     viewers, soldToday: 0, cmsData, carouselProductMap,
     reviews: reviewData.reviews,
@@ -245,7 +282,8 @@ function preloadHeroImageTag(imageUrl: string | undefined | null) {
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const canonical = 'https://xdipx.com/'
-  if (!data?.deal) {
+  // Variant A uses generic brand meta -- no deal-specific fields available.
+  if (!data || data.variant === 'a' || !data.deal || !('seoTitle' in data.deal)) {
     return [
       { title: BRAND_TITLE },
       { name: 'description', content: BRAND_DESCRIPTION },
@@ -274,12 +312,31 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 }
 
 export default function Homepage() {
+  const loaderData = useLoaderData<typeof loader>()
+
+  // ── Variant A: "The Compass" discovery home page ─────────────────────────
+  if (loaderData.variant === 'a') {
+    return (
+      <HomeA
+        rails={loaderData.rails}
+        total={loaderData.total}
+        deal={loaderData.deal}
+        welcomeBackEnabled={loaderData.welcomeBackEnabled}
+        moods={loaderData.moods}
+        audiences={loaderData.audiences}
+        matters={loaderData.matters}
+        available={loaderData.available}
+      />
+    )
+  }
+
+  // ── Legacy path ───────────────────────────────────────────────────────────
   const {
     deal, bundle, forHim, forHer, bonusDeal,
     cmsData, carouselProductMap,
     emmaHero, pairDeal, homepageSettings, pairBundleDeal,
     emmaContextRows, pairSwatches,
-  } = useLoaderData<typeof loader>()
+  } = loaderData
   const { buyButtonText } = useOutletContext<{ buyButtonText: string }>()
 
   // ── GA4: track deal view + item lists ───────────────────────────────────

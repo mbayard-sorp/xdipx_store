@@ -21,26 +21,33 @@ import type { LoaderFunctionArgs } from 'react-router'
 import { getDiscoveryRails } from '~/lib/discovery.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import {
-  AUDIENCES,
   BUDGET_MAX,
   BUDGET_MIN,
   DEFAULT_BUDGET,
-  MATTERS,
-  MOODS,
-  type Audience,
   type DiscoveryState,
-  type Matters,
-  type Mood,
 } from '~/types/discovery'
+import { normalizeTag } from '~/lib/discovery-tags'
 
-const MOOD_SET = new Set<string>(MOODS)
-const AUDIENCE_SET = new Set<string>(AUDIENCES)
-const MATTERS_SET = new Set<string>(MATTERS)
+const MAX_CHIPS_PER_GROUP = 20  // hard cap to prevent abuse via crafted URLs
+
+function cleanIncoming(params: URLSearchParams, key: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of params.getAll(key)) {
+    if (raw.length > 80) continue
+    const v = normalizeTag(raw)
+    if (!v || seen.has(v)) continue
+    seen.add(v)
+    out.push(v)
+    if (out.length >= MAX_CHIPS_PER_GROUP) break
+  }
+  return out
+}
 
 function parseStateFromSearch(params: URLSearchParams): DiscoveryState {
-  const mood = params.getAll('mood').filter(v => MOOD_SET.has(v)) as Mood[]
-  const audience = params.getAll('audience').filter(v => AUDIENCE_SET.has(v)) as Audience[]
-  const matters = params.getAll('matters').filter(v => MATTERS_SET.has(v)) as Matters[]
+  const mood = cleanIncoming(params, 'mood')
+  const audience = cleanIncoming(params, 'audience')
+  const matters = cleanIncoming(params, 'matters')
   const rawBudget = Number(params.get('budget'))
   const budget = Number.isFinite(rawBudget)
     ? Math.min(BUDGET_MAX, Math.max(BUDGET_MIN, rawBudget))
@@ -56,7 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const state = parseStateFromSearch(url.searchParams)
   const variant = url.searchParams.get('variant') === 'b' ? 'b' : 'a'
 
-  const { rails, total } = await getDiscoveryRails(state, {
+  const { rails, total, available } = await getDiscoveryRails(state, {
     perRail:   variant === 'b' ? 4 : 4,
     dropEmpty: variant === 'b',
   })
@@ -64,7 +71,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0
 
   return Response.json(
-    { rails, total, hasAny, variant },
+    { rails, total, hasAny, variant, available },
     {
       headers: {
         // Short edge cache for repeated identical filter combos. Vary on
