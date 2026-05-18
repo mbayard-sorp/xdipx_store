@@ -136,6 +136,7 @@ export async function recomputeVariant(
           title: string
           price: string
           compareAtPrice: string | null
+          inventoryItem: { unitCost: { amount: string } | null } | null
           product: {
             id: string
             handle: string
@@ -147,6 +148,7 @@ export async function recomputeVariant(
         } | null
       }>(
         `query V($id:ID!){productVariant(id:$id){id sku title price compareAtPrice
+          inventoryItem{unitCost{amount}}
           product{id handle title vendor productType
             metafields(keys:["xdipx.nalpac_sku","xdipx.wholesale_cost","xdipx.map_price","xdipx.original_price","xdipx.map_restricted","xdipx.discontinued_at"],first:10){nodes{namespace key value}}}}}`,
         { id: variantId },
@@ -175,6 +177,7 @@ export async function recomputeVariant(
         price:          parseFloat(data.price),
         compareAtPrice: data.compareAtPrice != null ? parseFloat(data.compareAtPrice) : null,
         inventoryItemId: null,
+        unitCost:       data.inventoryItem?.unitCost?.amount != null ? parseFloat(data.inventoryItem.unitCost.amount) : null,
       },
       metafields: {
         nalpacSku:      mfMap['nalpac_sku']      ?? null,
@@ -192,7 +195,9 @@ export async function recomputeVariant(
     return { status: 'skipped_no_change', auditId: null, applied: false, error: `shopify fetch: ${msg}` }
   }
 
-  const cost       = matchData.metafields.wholesaleCost
+  // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
+  // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
+  const cost       = matchData.variant.unitCost ?? matchData.metafields.wholesaleCost
   const map        = matchData.metafields.mapPrice
   const msrp       = matchData.metafields.originalPrice
   const oldSell    = matchData.variant.price
@@ -439,7 +444,9 @@ export async function dryRunRuleChange(opts: {
           if (patch) cfg = { ...cfg, ...patch }
         }
 
-        const cost = product.metafields.wholesaleCost
+        // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
+        // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
+        const cost = variant.unitCost ?? product.metafields.wholesaleCost
         const map = product.metafields.mapPrice
         const msrp = product.metafields.originalPrice
         const oldSell = variant.price
