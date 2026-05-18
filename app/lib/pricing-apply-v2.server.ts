@@ -581,7 +581,10 @@ export async function recomputeCatalog(opts: {
     for (const variant of product.variants) {
       counts.total++
 
-      const cost = product.metafields.wholesaleCost
+      // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
+      // Fall back to the legacy xdipx.wholesale_cost product metafield only if
+      // the variant unit cost is unset.
+      const cost = variant.unitCost ?? product.metafields.wholesaleCost
       const map = product.metafields.mapPrice
       const msrp = product.metafields.originalPrice
       const oldSell = variant.price

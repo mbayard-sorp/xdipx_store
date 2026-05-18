@@ -6107,6 +6107,7 @@ export interface PricingProductSnapshot {
     price: number
     compareAtPrice: number | null
     inventoryItemId: string | null
+    unitCost: number | null
   }>
   metafields: {
     nalpacSku: string | null
@@ -6139,6 +6140,7 @@ const PRICING_PRODUCTS_QUERY = `
             compareAtPrice
             inventoryItem {
               id
+              unitCost { amount }
             }
           }
         }
@@ -6176,7 +6178,10 @@ interface PricingQueryResult {
           title: string
           price: string
           compareAtPrice: string | null
-          inventoryItem: { id: string } | null
+          inventoryItem: {
+            id: string
+            unitCost: { amount: string } | null
+          } | null
         }>
       }
       metafields: { nodes: Array<{ namespace: string; key: string; value: string }> }
@@ -6197,6 +6202,9 @@ function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'][numbe
     price: parseFloat(v.price),
     compareAtPrice: v.compareAtPrice != null ? parseFloat(v.compareAtPrice) : null,
     inventoryItemId: v.inventoryItem?.id ?? null,
+    unitCost: v.inventoryItem?.unitCost?.amount != null
+      ? parseFloat(v.inventoryItem.unitCost.amount)
+      : null,
   }))
 
   if (variants.every(v => v.sku === '')) return null
