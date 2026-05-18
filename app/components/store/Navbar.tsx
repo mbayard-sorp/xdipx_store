@@ -42,6 +42,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
   const cartZoneRef      = useRef<HTMLDivElement>(null)
   const cartDrawerRef    = useRef<HTMLDivElement>(null)
   const accountMenuRef   = useRef<HTMLDivElement>(null)
+  const accountTriggerRef = useRef<HTMLButtonElement>(null)
 
   // Open cart drawer whenever any part of the site signals an item was added,
   // then auto-close after 3 seconds if the user hasn't hovered into it.
@@ -71,9 +72,13 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
       const target = e.target as Node
       if (accountMenuRef.current?.contains(target)) return
       setAccountMenuOpen(false)
+      accountTriggerRef.current?.focus()
     }
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setAccountMenuOpen(false)
+      if (e.key === 'Escape') {
+        setAccountMenuOpen(false)
+        accountTriggerRef.current?.focus()
+      }
     }
     document.addEventListener('mousedown', handleClick)
     document.addEventListener('keydown', handleEscape)
@@ -138,7 +143,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
           {/* Logo */}
           <Link
             to="/"
-            className="flex items-center gap-1 group shrink-0"
+            className="flex items-center gap-1 group shrink-0 focus-ring"
             aria-label="xdipx home"
           >
             {logoUrl ? (
@@ -185,6 +190,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
             ) : isCustomerLoggedIn ? (
               <div ref={accountMenuRef} className="relative hidden md:block">
                 <button
+                  ref={accountTriggerRef}
                   onClick={() => setAccountMenuOpen(o => !o)}
                   className="relative flex items-center justify-center w-11 h-11 rounded-full hover:bg-cream-2 transition-colors"
                   aria-label="My account"

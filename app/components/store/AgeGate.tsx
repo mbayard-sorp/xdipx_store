@@ -30,7 +30,7 @@ function ClickThroughGate({ onConfirm }: { onConfirm: () => void }) {
         </button>
         <a
           href="https://google.com"
-          className="flex-1 bg-white/20 text-white font-semibold py-3 px-6 rounded-full text-lg text-center transition-all hover:bg-white/30"
+          className="flex-1 bg-white/40 hover:bg-white/55 border border-white/60 text-white font-semibold py-3 px-6 rounded-full text-lg text-center transition-all focus-ring"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Not yet
@@ -84,9 +84,10 @@ function DobEntryGate({ onConfirm }: { onConfirm: () => void }) {
             inputMode="numeric"
             maxLength={max}
             placeholder={placeholder}
+            aria-label={placeholder === 'MM' ? 'Month' : placeholder === 'DD' ? 'Day' : 'Year'}
             value={value}
             onChange={e => onChange(e.target.value.replace(/\D/g, ''))}
-            className="w-16 text-center bg-white/20 border border-white/30 text-white placeholder-white/50 rounded-xl py-3 text-xl font-bold focus:outline-none focus:border-white"
+            className="w-16 text-center bg-white/20 border border-white/30 text-white placeholder-white/50 rounded-xl py-3 text-xl font-bold focus-ring"
             style={{ fontFamily: 'var(--font-display)' }}
           />
         ))}
@@ -102,7 +103,7 @@ function DobEntryGate({ onConfirm }: { onConfirm: () => void }) {
         Enter ♥
       </button>
 
-      <a href="https://google.com" className="text-white/50 text-sm underline">
+      <a href="https://google.com" className="text-white/80 text-sm underline">
         Not old enough
       </a>
     </form>
