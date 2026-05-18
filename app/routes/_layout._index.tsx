@@ -551,22 +551,26 @@ export default function Homepage() {
       {/* ── Hardcoded sections (shown when no CMS carousel blocks replace them) */}
       {!contentBlocks.some(b => b._type === 'productCarousel') && (
         <>
-          <ProductCarousel
-            heading="Dialed in. Just for him. ♥"
-            eyebrow="For Him"
-            ctaLink="/for-him"
-            ctaLabel="See all →"
-            bgStyle="mist"
-            products={forHim}
-          />
-          <ProductCarousel
-            heading="Made for her. Obviously. ♥"
-            eyebrow="For Her"
-            ctaLink="/for-her"
-            ctaLabel="See all →"
-            bgStyle="cream"
-            products={forHer}
-          />
+          {forHim.length > 0 && (
+            <ProductCarousel
+              heading="Dialed in. Just for him. ♥"
+              eyebrow="For Him"
+              ctaLink="/for-him"
+              ctaLabel="See all →"
+              bgStyle="mist"
+              products={forHim}
+            />
+          )}
+          {forHer.length > 0 && (
+            <ProductCarousel
+              heading="Made for her. Obviously. ♥"
+              eyebrow="For Her"
+              ctaLink="/for-her"
+              ctaLabel="See all →"
+              bgStyle="cream"
+              products={forHer}
+            />
+          )}
         </>
       )}
 

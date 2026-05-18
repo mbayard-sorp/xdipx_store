@@ -145,13 +145,13 @@ export default function VaultPage() {
       </div>
 
       {/* Filter tabs — URL-driven, linkable */}
-      <div className="flex gap-2 overflow-x-auto scrollbar-hide mb-6 pb-1">
+      <div className="flex gap-2 overflow-x-auto scrollbar-hide mb-6 pb-1 scroll-smooth snap-x snap-mandatory">
         {tabs.map(tab => (
           <Link
             key={tab.id}
             to={tabHref(tab.slug)}
             className={[
-              'shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-all',
+              'shrink-0 snap-start px-4 py-1.5 rounded-full text-sm font-medium transition-all',
               activeTabId === tab.id
                 ? 'bg-coral text-white'
                 : 'bg-white border border-cream-2 text-ink/70 hover:border-sage/30',
@@ -163,7 +163,7 @@ export default function VaultPage() {
       </div>
 
       {deals.length > 0 ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4">
           {deals.map(deal => (
             <VaultCard key={deal.id} deal={deal} />
           ))}

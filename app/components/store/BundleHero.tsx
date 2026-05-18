@@ -102,7 +102,8 @@ export function BundleHero({ bundle, buyButtonText = 'Dip In ♥', compact = fal
           <button
             type="submit"
             disabled={isPending}
-            className="w-full py-4 rounded-full font-bold text-lg bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20 transition-all"
+            aria-busy={isPending}
+            className="w-full py-4 rounded-full font-bold text-lg bg-coral text-white hover:bg-coral-deep active:scale-[.98] shadow-md shadow-coral/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {isPending ? 'Adding...' : `${buyButtonText} — Add Bundle`}
