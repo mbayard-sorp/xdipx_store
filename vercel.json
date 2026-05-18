@@ -5,7 +5,7 @@
       "src": "server/vercel-entry.mjs",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["build/**"],
+        "includeFiles": ["build/**", "node_modules/@react-router/**"],
         "maxDuration": 60,
         "memory": 1024
       }
