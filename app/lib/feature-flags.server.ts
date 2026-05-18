@@ -34,3 +34,11 @@ import { MATTERS_V2, type Matters } from '~/types/discovery'
 export function getActiveMatters(): readonly Matters[] {
   return MATTERS_V2
 }
+
+/**
+ * HOME_EMMA_CHAT=1 — swap EmmaSidekick for the full EmmaChatPanel on Variant A.
+ * Off by default; flip per-environment in Vercel project settings.
+ */
+export function isEmmaChatEnabled(): boolean {
+  return process.env.HOME_EMMA_CHAT === '1'
+}

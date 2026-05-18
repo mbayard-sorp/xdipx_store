@@ -25,6 +25,7 @@ import { ChipGroup } from './ChipGroup'
 import { BudgetSlider } from './BudgetSlider'
 import { Rail } from './Rail'
 import { EmmaSidekick } from './EmmaSidekick'
+import { EmmaChatPanel } from './EmmaChatPanel'
 import { DailyDealStrip } from './DailyDealStrip'
 import { WelcomeBackBanner } from './WelcomeBackBanner'
 import { DEFAULT_BUDGET } from '~/types/discovery'
@@ -40,6 +41,8 @@ interface HomeAProps {
   matters:   string[]
   /** Which chip values still yield ≥1 product under the SSR (empty) state. */
   available: ChipAvailabilityArrays
+  /** When true, render EmmaChatPanel in place of EmmaSidekick. Sourced from HOME_EMMA_CHAT env flag via loader. */
+  emmaChatEnabled?: boolean
 }
 
 /* ── Inner component (needs DiscoveryProvider in scope) ─────────────────── */
@@ -52,9 +55,10 @@ interface InnerProps {
   moods:     string[]
   audiences: string[]
   matters:   string[]
+  emmaChatEnabled: boolean
 }
 
-function HomeAInner({ initialRails, initialAvailable, deal, welcomeBackEnabled, moods, audiences, matters: mattersVocab }: InnerProps) {
+function HomeAInner({ initialRails, initialAvailable, deal, welcomeBackEnabled, moods, audiences, matters: mattersVocab, emmaChatEnabled }: InnerProps) {
   const { state, toggleMood, toggleAudience, toggleMatters, setBudget, clearAll, hasPriorSession } =
     useDiscovery()
 
@@ -270,8 +274,10 @@ function HomeAInner({ initialRails, initialAvailable, deal, welcomeBackEnabled, 
             </div>
           </div>
 
-          {/* ── Right column: Emma sidekick (desktop only) ───────────────── */}
-          <EmmaSidekick />
+          {/* ── Right column: Emma sidekick or chat panel (desktop only) ── */}
+          {emmaChatEnabled
+            ? <EmmaChatPanel />
+            : <EmmaSidekick />}
         </div>
       </div>
     </>
@@ -319,7 +325,7 @@ function FilterBlock({ num, label, hint, children }: FilterBlockProps) {
 
 /* ── Public export — wraps with DiscoveryProvider ───────────────────────── */
 
-export function HomeA({ rails, deal, welcomeBackEnabled, moods, audiences, matters, available }: HomeAProps) {
+export function HomeA({ rails, deal, welcomeBackEnabled, moods, audiences, matters, available, emmaChatEnabled }: HomeAProps) {
   return (
     <DiscoveryProvider>
       <HomeAInner
@@ -330,6 +336,7 @@ export function HomeA({ rails, deal, welcomeBackEnabled, moods, audiences, matte
         moods={moods}
         audiences={audiences}
         matters={matters}
+        emmaChatEnabled={emmaChatEnabled ?? false}
       />
     </DiscoveryProvider>
   )

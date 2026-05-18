@@ -13,6 +13,7 @@ import { kvGet, KV_KEYS } from '~/lib/kv.server'
 import { getHomepageSections, getEmmaHeroSettings, getHomeConfig } from '~/lib/sanity.server'
 import { resolveHomeVariant } from '~/lib/home-variant.server'
 import { getDiscoveryRails, getDiscoveryVocab } from '~/lib/discovery.server'
+import { isEmmaChatEnabled } from '~/lib/feature-flags.server'
 import { EMPTY_STATE } from '~/types/discovery'
 import { HomeA } from '~/components/discovery/HomeA'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
@@ -106,6 +107,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       audiences: vocab.audiences,
       matters:   vocab.matters,
       available,
+      emmaChatEnabled: isEmmaChatEnabled(),
     }
   }
 
@@ -326,6 +328,7 @@ export default function Homepage() {
         audiences={loaderData.audiences}
         matters={loaderData.matters}
         available={loaderData.available}
+        emmaChatEnabled={loaderData.emmaChatEnabled}
       />
     )
   }

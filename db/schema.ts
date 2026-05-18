@@ -642,9 +642,11 @@ export const emmaChatThreads = pgTable('emma_chat_threads', {
   archived:          boolean('archived').notNull().default(false),
   createdAt:         timestamp('created_at').notNull().defaultNow(),
   updatedAt:         timestamp('updated_at').notNull().defaultNow(),
+  sessionId:         text('session_id'),
 }, t => ({
-  updatedIdx: index('emma_chat_threads_updated_idx').on(t.updatedAt),
-  activeIdx:  index('emma_chat_threads_active_idx').on(t.archived, t.updatedAt),
+  updatedIdx:  index('emma_chat_threads_updated_idx').on(t.updatedAt),
+  activeIdx:   index('emma_chat_threads_active_idx').on(t.archived, t.updatedAt),
+  sessionIdx:  index('emma_chat_threads_session_id_idx').on(t.sessionId),
 }))
 
 export const emmaChatMessages = pgTable('emma_chat_messages', {

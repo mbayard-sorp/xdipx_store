@@ -8,6 +8,7 @@ import {
   type EmmaChatToolResult,
 } from '../../db/schema'
 import { EMMA_CHAT_TOOLS, executeEmmaChatTool } from './emma-chat-tools.server'
+import type { DiscoveryVocab } from './discovery.server'
 
 const MODEL = 'claude-sonnet-4-20250514'
 const MAX_OUTPUT_TOKENS = 4096
@@ -236,12 +237,26 @@ function sseEvent(controller: ReadableStreamDefaultController<Uint8Array>, event
  *   - tool_result  { tool_use_id, content, is_error?, durationMs? }
  *   - done         { messageId }
  *   - error        { message }
+ *
+ * Optional parameters:
+ *   - tools       Override the Anthropic tool bundle. Defaults to EMMA_CHAT_TOOLS (admin bundle).
+ *   - systemPrompt Override the system prompt. Defaults to EMMA_SME_SYSTEM_PROMPT.
+ *   - vocab       DiscoveryVocab passed through to tool executors that need it (e.g. propose_chips).
  */
 export function streamEmmaReply(input: {
   threadId: number
   signal: AbortSignal
+  tools?: Anthropic.Tool[]
+  systemPrompt?: string
+  vocab?: DiscoveryVocab
 }): ReadableStream<Uint8Array> {
-  const { threadId, signal } = input
+  const {
+    threadId,
+    signal,
+    tools = EMMA_CHAT_TOOLS,
+    systemPrompt = EMMA_SME_SYSTEM_PROMPT,
+    vocab,
+  } = input
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       const turnStart = Date.now()
@@ -275,8 +290,8 @@ export function streamEmmaReply(input: {
             {
               model: MODEL,
               max_tokens: MAX_OUTPUT_TOKENS,
-              system: EMMA_SME_SYSTEM_PROMPT,
-              tools: EMMA_CHAT_TOOLS,
+              system: systemPrompt,
+              tools,
               messages: anthropicMessages,
             },
             { signal },
@@ -338,7 +353,11 @@ export function streamEmmaReply(input: {
           const toolResults: EmmaChatToolResult[] = []
           for (const tu of toolUses) {
             sseEvent(controller, 'tool_call', { id: tu.id, name: tu.name, input: tu.input })
-            const result = await executeEmmaChatTool(tu.name, (tu.input ?? {}) as Record<string, unknown>)
+            const result = await executeEmmaChatTool(
+              tu.name,
+              (tu.input ?? {}) as Record<string, unknown>,
+              vocab,
+            )
             const toolResult: EmmaChatToolResult = {
               tool_use_id: tu.id,
               content: result.content,

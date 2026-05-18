@@ -388,6 +388,63 @@ export const emmaQuestions = {
   },
 } as const
 
+// ---------------------------------------------------------------------------
+// Quick-reply seeds for the Emma Discovery Chat panel
+// ---------------------------------------------------------------------------
+
+/**
+ * Hand-authored Emma-voice quick-reply chips keyed by discovery state.
+ * Returns 2-3 strings. The client renders them as tappable suggestion pills.
+ *
+ * No em-dashes. No "Buy now". Fresh, product-agnostic language.
+ */
+export function getQuickReplies(s: DiscoveryState): string[] {
+  const hasM = s.mood.length > 0
+  const hasA = s.audience.length > 0
+  const hasK = s.matters.length > 0
+  const hasBudget = s.budget < 200 // non-default budget signals intent
+
+  // Full brief: mood + audience + matters
+  if (hasM && hasA && hasK) {
+    return ['Show top 3', 'Different budget', 'Start over']
+  }
+
+  // Mood + audience, missing matters
+  if (hasM && hasA) {
+    return ['Add what matters', 'Show top 3', 'Start over']
+  }
+
+  // Mood + matters, missing audience
+  if (hasM && hasK) {
+    return ['Show me for him', 'Show me for her', 'Surprise me']
+  }
+
+  // Audience + matters, missing mood
+  if (hasA && hasK) {
+    return ['Add a vibe', 'Show top 3', 'Start over']
+  }
+
+  // Mood only
+  if (hasM) {
+    return hasBudget
+      ? ['Add who this is for', 'Show top 3', 'Start over']
+      : ['Add a budget', 'Show me for him', 'Show me for her']
+  }
+
+  // Audience only
+  if (hasA) {
+    return ['Add a feeling', 'Add what matters', 'Start over']
+  }
+
+  // Matters only
+  if (hasK) {
+    return ['Add a mood', 'Who is this for?', 'Surprise me']
+  }
+
+  // Empty state
+  return ['Surprise me ♥', "I'm shopping for us", 'Something quiet']
+}
+
 /**
  * Returning-user welcome banner copy. Used by both variants.
  * Rendered as plain text; UI can italicize {mood} / {audience} segments.

@@ -5,8 +5,14 @@ import {
   type EmmaProductCard,
   type EmmaProductDetail,
 } from './shopify.server'
+import type { DiscoveryVocab } from './discovery.server'
+import { BUDGET_MIN, BUDGET_MAX } from '~/types/discovery'
 
-export const EMMA_CHAT_TOOLS: Anthropic.Tool[] = [
+// ---------------------------------------------------------------------------
+// Admin tool bundle (original two product-knowledge tools)
+// ---------------------------------------------------------------------------
+
+export const EMMA_ADMIN_TOOLS: Anthropic.Tool[] = [
   {
     name: 'search_products',
     description:
@@ -69,6 +75,93 @@ export const EMMA_CHAT_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ---------------------------------------------------------------------------
+// Discovery-specific tool definitions (propose_chips, set_budget)
+// ---------------------------------------------------------------------------
+
+const PROPOSE_CHIPS_TOOL: Anthropic.Tool = {
+  name: 'propose_chips',
+  description:
+    'Propose toggling one or more discovery filter chips. The client will surface them ' +
+    'as a small inline action card inside your message bubble. The shopper decides ' +
+    'whether to apply. Use this to suggest mood, audience, or "what matters" filters ' +
+    'that match what the shopper just told you. Only propose chip values from the ' +
+    'injected vocabulary list — never invent new values.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      reason: {
+        type: 'string',
+        description: '1 short sentence in Emma voice explaining why you are suggesting these chips.',
+      },
+      chips: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            group: {
+              type: 'string',
+              enum: ['mood', 'audience', 'matters'],
+            },
+            value: { type: 'string' },
+            action: {
+              type: 'string',
+              enum: ['add', 'remove'],
+            },
+          },
+          required: ['group', 'value', 'action'],
+        },
+        maxItems: 6,
+        description: 'Chips to propose. Maximum 6.',
+      },
+    },
+    required: ['reason', 'chips'],
+  },
+}
+
+const SET_BUDGET_TOOL: Anthropic.Tool = {
+  name: 'set_budget',
+  description:
+    `Propose a budget (in USD) for the shopper's discovery session. ` +
+    `Accepted range: ${BUDGET_MIN}–${BUDGET_MAX}. ` +
+    'Use this when the shopper mentions a price range or says something like "under $50" or "splurge".',
+  input_schema: {
+    type: 'object',
+    properties: {
+      budget: {
+        type: 'number',
+        description: `Budget in USD. Clamped to ${BUDGET_MIN}–${BUDGET_MAX}.`,
+        minimum: BUDGET_MIN,
+        maximum: BUDGET_MAX,
+      },
+    },
+    required: ['budget'],
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Tool bundles
+// ---------------------------------------------------------------------------
+
+/**
+ * Admin chat bundle: the original two product-knowledge tools.
+ * Alias kept so `emma-chat.server.ts` imports still work.
+ */
+export const EMMA_CHAT_TOOLS = EMMA_ADMIN_TOOLS
+
+/**
+ * Discovery chat bundle: product-knowledge tools + chip-proposal tools.
+ */
+export const EMMA_DISCOVERY_TOOLS: Anthropic.Tool[] = [
+  ...EMMA_ADMIN_TOOLS,
+  PROPOSE_CHIPS_TOOL,
+  SET_BUDGET_TOOL,
+]
+
+// ---------------------------------------------------------------------------
+// Execution result type
+// ---------------------------------------------------------------------------
+
 export type EmmaToolExecutionResult = {
   content: string
   is_error?: boolean
@@ -80,15 +173,87 @@ export type EmmaToolExecutionResult = {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Chip proposal validation
+// ---------------------------------------------------------------------------
+
+export interface ValidatedChip {
+  group: 'mood' | 'audience' | 'matters'
+  value: string
+  action: 'add' | 'remove'
+}
+
 /**
- * Execute a single tool by name. Returns a JSON-string `content` payload that
- * gets sent back to Claude as the `tool_result` block. Errors are caught and
- * returned with `is_error: true` so the model can recover (apologize, retry,
- * pivot) rather than the whole stream crashing.
+ * Validate a propose_chips input against the live vocabulary.
+ * Returns accepted chips only; rejects any chip whose value is not in the vocab.
+ * Pure — no side effects.
  */
+export function validateProposeChips(
+  input: Record<string, unknown>,
+  vocab: DiscoveryVocab,
+): { ok: true; validated: ValidatedChip[] } | { ok: false; reason: string } {
+  const reason = typeof input['reason'] === 'string' ? input['reason'].trim() : ''
+  if (!reason) return { ok: false, reason: 'reason is required' }
+
+  const rawChips = Array.isArray(input['chips']) ? input['chips'] : []
+  if (rawChips.length === 0) return { ok: false, reason: 'chips array is empty' }
+  if (rawChips.length > 6) return { ok: false, reason: 'chips array exceeds max of 6' }
+
+  const vocabMap: Record<string, Set<string>> = {
+    mood:     new Set(vocab.moods.map(v => v.toLowerCase())),
+    audience: new Set(vocab.audiences.map(v => v.toLowerCase())),
+    matters:  new Set(vocab.matters.map(v => v.toLowerCase())),
+  }
+
+  const validated: ValidatedChip[] = []
+  const rejected: string[] = []
+
+  for (const chip of rawChips) {
+    if (!chip || typeof chip !== 'object') {
+      rejected.push('non-object chip')
+      continue
+    }
+    const c = chip as Record<string, unknown>
+    const group = c['group']
+    const value = typeof c['value'] === 'string' ? c['value'].trim() : ''
+    const action = c['action']
+
+    if (group !== 'mood' && group !== 'audience' && group !== 'matters') {
+      rejected.push(`unknown group "${group}"`)
+      continue
+    }
+    if (action !== 'add' && action !== 'remove') {
+      rejected.push(`unknown action "${action}"`)
+      continue
+    }
+    if (!value) {
+      rejected.push('empty value')
+      continue
+    }
+    const allowed = vocabMap[group]
+    if (!allowed || !allowed.has(value.toLowerCase())) {
+      rejected.push(`"${value}" not in ${group} vocabulary`)
+      continue
+    }
+    validated.push({ group, value, action })
+  }
+
+  if (validated.length === 0) {
+    return { ok: false, reason: `All chips rejected: ${rejected.join('; ')}` }
+  }
+
+  return { ok: true, validated }
+}
+
+// ---------------------------------------------------------------------------
+// executeEmmaChatTool — handles all tool names (admin + discovery)
+// Vocab is optional; if omitted, discovery tools return an error (safe default).
+// ---------------------------------------------------------------------------
+
 export async function executeEmmaChatTool(
   name: string,
   input: Record<string, unknown>,
+  vocab?: DiscoveryVocab,
 ): Promise<EmmaToolExecutionResult> {
   const start = Date.now()
   try {
@@ -126,6 +291,37 @@ export async function executeEmmaChatTool(
       return {
         content: JSON.stringify(detail),
         diagnostics: { durationMs: Date.now() - start, handle },
+      }
+    }
+
+    if (name === 'propose_chips') {
+      if (!vocab) {
+        return {
+          content: JSON.stringify({ error: 'vocab_not_available' }),
+          is_error: true,
+          diagnostics: { durationMs: Date.now() - start },
+        }
+      }
+      const result = validateProposeChips(input, vocab)
+      return {
+        content: JSON.stringify(result),
+        diagnostics: { durationMs: Date.now() - start },
+      }
+    }
+
+    if (name === 'set_budget') {
+      const raw = input['budget']
+      if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+        return {
+          content: JSON.stringify({ error: 'budget_must_be_number' }),
+          is_error: true,
+          diagnostics: { durationMs: Date.now() - start },
+        }
+      }
+      const clamped = Math.max(BUDGET_MIN, Math.min(BUDGET_MAX, Math.round(raw)))
+      return {
+        content: JSON.stringify({ ok: true, budget: clamped }),
+        diagnostics: { durationMs: Date.now() - start },
       }
     }
 
