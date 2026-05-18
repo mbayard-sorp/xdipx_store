@@ -1510,7 +1510,7 @@ export async function getHomeConfig(): Promise<HomeConfig | null> {
       const raw = await client.fetch<Partial<HomeConfig> | null>(HOME_CONFIG_GROQ)
       if (!raw) return null
       return {
-        activeVariant:      raw.activeVariant      ?? 'a',
+        activeVariant:      raw.activeVariant      ?? 'off',
         welcomeBackEnabled: raw.welcomeBackEnabled  ?? true,
         emmaCopyOverrides:  raw.emmaCopyOverrides   ?? {},
         analyticsLabel:     raw.analyticsLabel      ?? '',
