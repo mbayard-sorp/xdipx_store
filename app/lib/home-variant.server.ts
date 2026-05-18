@@ -73,9 +73,7 @@ export function resolveHomeVariant(
   const env = process.env['HOME_VARIANT']?.trim().toLowerCase()
   if (isValid(env)) return { variant: env, source: 'env' }
 
-  // Style Guide Nº 01 cutover: Variant A "The Compass" is the new default
-  // home. Query string (?variant=legacy) and cookie still override for QA.
-  return { variant: 'a', source: 'default' }
+  return { variant: 'legacy', source: 'default' }
 }
 
 /**
