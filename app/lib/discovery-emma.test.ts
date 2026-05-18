@@ -22,17 +22,20 @@ import { EMPTY_STATE } from '~/types/discovery'
 
 function product(overrides: Partial<DiscoveryProduct> = {}): DiscoveryProduct {
   return {
-    id:          'gid://test/1',
-    handle:      'test-product',
-    title:       'Test Product',
-    price:       50,
-    imageUrl:    null,
-    imageAlt:    null,
-    category:    'Pleasure',
-    subcategory: 'Vibrators',
-    mood:        [],
-    audience:    [],
-    matters:     [],
+    id:             'gid://test/1',
+    handle:         'test-product',
+    title:          'Test Product',
+    price:          50,
+    imageUrl:       null,
+    imageAlt:       null,
+    category:       'Pleasure',
+    subcategory:    'Vibrators',
+    mood:           [],
+    audience:       [],
+    matters:        [],
+    totalInventory: null,
+    productType:    null,
+    productTypeDial: null,
     ...overrides,
   }
 }

@@ -119,6 +119,24 @@ export interface DiscoveryProduct {
   mood:        Mood[]
   audience:    Audience[]
   matters:     Matters[]
+  /**
+   * Shopify total inventory across all locations, or null when Shopify is not
+   * tracking inventory for this product. Null items are always allowed through
+   * the inventory-floor filter.
+   */
+  totalInventory: number | null
+  /**
+   * Shopify's native "Product organization → Type" field as set in the Shopify
+   * admin (e.g. "Discontinued", "Vibrator"). This is the curator-facing type
+   * that powers `exclude_product_type` rules. Null when unset.
+   */
+  productType: string | null
+  /**
+   * The xdipx.product_type_dial metafield value (e.g. "vibrator", "lube"). Used
+   * internally to derive the card subcategory caption — NOT the field that
+   * exclusion rules match against. Null when the dial is unset or empty.
+   */
+  productTypeDial: string | null
 }
 
 export interface ScoredProduct {
@@ -133,6 +151,49 @@ export interface Rail {
   /** Total products in this category before the per-rail slice. */
   total:    number
   items:    ScoredProduct[]
+  /**
+   * Set to true when the rail was populated by auto-loosening the user's brief
+   * because no products matched under the full filter set.
+   */
+  relaxed?: boolean
+  /** Human-readable note surfaced in the rail header when relaxed === true. */
+  relaxedReason?: string
+}
+
+// ---------------------------------------------------------------------------
+// Discovery rules
+// ---------------------------------------------------------------------------
+
+/**
+ * Curator-defined rule types for the home page discovery rails.
+ * The DB stores these as a VARCHAR(40); TypeScript owns the closed union.
+ */
+export type DiscoveryRuleType =
+  | 'exclude_product'
+  | 'exclude_product_type'
+  | 'exclude_keyword'
+  | 'exclude_price_min'
+  | 'exclude_price_max'
+  /** Single pinned product handle. Backfills the rail in sort_order before any
+      collection-based pin is considered. */
+  | 'pin_fallback'
+  /** Pinned Shopify collection handle. All products in that collection (which
+      also live in the discovery index and survive exclusions) are eligible
+      backfill, drawn in collection order after product-handle pins. */
+  | 'pin_collection_fallback'
+
+/** Mirrors the discovery_rules DB row shape in camelCase. */
+export interface DiscoveryRule {
+  id:         number
+  ruleType:   DiscoveryRuleType
+  ruleValue:  string
+  /** Null means the rule applies across all categories. */
+  category:   Category | null
+  sortOrder:  number
+  notes:      string | null
+  active:     boolean
+  createdAt:  Date
+  updatedAt:  Date
 }
 
 export type HomeVariant = 'a' | 'b'

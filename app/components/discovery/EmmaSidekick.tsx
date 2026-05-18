@@ -10,11 +10,13 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouteLoaderData } from 'react-router'
 import { getEmmaLine } from '~/lib/discovery-emma'
 import { trackEmmaLineSurface } from '~/lib/analytics.client'
 import { saveDiscoveryPicks, useDiscovery } from '~/stores/discovery'
 import { SIDEKICK_CTAS as CTA_LABELS } from '~/lib/discovery-emma'
 import type { DiscoveryState } from '~/types/discovery'
+import type { EmmaPersona } from '~/types/cms'
 
 // Derive analytics state label from DiscoveryState
 function analyticsState(s: DiscoveryState): Parameters<typeof trackEmmaLineSurface>[0]['state'] {
@@ -33,6 +35,11 @@ function analyticsState(s: DiscoveryState): Parameters<typeof trackEmmaLineSurfa
 
 export function EmmaSidekick() {
   const { state } = useDiscovery()
+  const layoutData = useRouteLoaderData('routes/_layout') as { emmaPersona?: EmmaPersona | null } | undefined
+  const emmaPersona = layoutData?.emmaPersona ?? null
+  const avatarSrc = emmaPersona?.avatarUrl ?? '/emma.png'
+  const avatarAlt = emmaPersona?.avatarAlt || emmaPersona?.displayName || 'Emma'
+  const displayName = emmaPersona?.displayName || 'Emma'
   const [mobileOpen, setMobileOpen] = useState(false)
   const [toastVisible, setToastVisible] = useState(false)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -59,50 +66,87 @@ export function EmmaSidekick() {
 
   const inner = (
     <>
-      {/* Avatar + name row */}
-      <div className="flex items-center gap-3 mb-4">
-        <img
-          src="/emma.png"
-          alt="Emma"
-          width={88}
-          height={88}
-          className="rounded-full object-cover flex-none"
-          style={{ width: 56, height: 56 }}
-        />
+      {/* Avatar + name row — Style Guide §07 emma-card head:
+          52px avatar with green status dot, italic serif name, mono micro role. */}
+      <div className="flex items-center gap-3.5 mb-4">
+        <div className="relative flex-none">
+          <img
+            src={avatarSrc}
+            alt={avatarAlt}
+            width={104}
+            height={104}
+            className="rounded-full object-cover block"
+            style={{ width: 52, height: 52, boxShadow: '0 4px 12px rgba(26,20,24,.12)' }}
+          />
+          <span
+            aria-hidden="true"
+            className="absolute right-0 bottom-0 rounded-full"
+            style={{
+              width: 11,
+              height: 11,
+              background: '#4caf50',
+              border: '2px solid var(--color-paper)',
+            }}
+          />
+        </div>
         <div>
-          <p className="font-bold text-ink text-base leading-tight" style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
-            Emma
+          <p
+            className="text-ink leading-none"
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontStyle: 'italic',
+              fontSize: '22px',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            {displayName}
           </p>
-          <p className="text-xs text-muted" style={{ fontFamily: 'var(--font-body)' }}>
-            Your editorial guide ♥
+          <p
+            className="text-ink-3 mt-1"
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '10px',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Your guide · online
           </p>
         </div>
       </div>
 
-      {/* Adaptive one-liner */}
+      {/* Adaptive one-liner — Style Guide §07: 19px italic serif, min-height
+          ~96px so the card doesn't jump as her line grows. */}
       <div
         aria-live="polite"
         aria-atomic="true"
-        className="text-sm text-ink/80 leading-relaxed mb-5"
-        style={{ fontFamily: 'var(--font-body)' }}
+        className="text-ink-2 mb-4"
+        style={{
+          fontFamily: 'var(--font-display)',
+          fontStyle: 'italic',
+          fontSize: '19px',
+          lineHeight: 1.4,
+          minHeight: 96,
+        }}
       >
         {line}
       </div>
 
-      {/* CTAs */}
-      <div className="flex flex-col gap-2">
+      {/* CTAs — Style Guide §06 buttons: primary = ink fill, ghost = paper +
+          ink border. Both are pills. "Save my picks" is the primary action. */}
+      <div className="flex gap-2 pt-3 border-t border-line">
         <button
           disabled
           title="Coming soon"
-          className="w-full px-4 py-2.5 rounded-full bg-cream-2 text-ink/40 text-sm font-semibold border border-line cursor-not-allowed"
-          style={{ fontFamily: 'var(--font-display)' }}
+          className="flex-1 px-4 py-2.5 rounded-full bg-paper text-ink-3 text-[13px] font-medium border border-line-2 cursor-not-allowed"
+          style={{ fontFamily: 'var(--font-body)' }}
         >
           {CTA_LABELS.primary}
         </button>
         <button
           onClick={handleSavePicks}
-          className="w-full px-4 py-2.5 rounded-full bg-coral text-paper text-sm font-semibold hover:bg-coral-2 transition-colors"
-          style={{ fontFamily: 'var(--font-display)' }}
+          className="flex-1 px-4 py-2.5 rounded-full bg-ink text-paper text-[13px] font-medium hover:bg-plum-2 transition-colors"
+          style={{ fontFamily: 'var(--font-body)' }}
         >
           {CTA_LABELS.secondary}
         </button>
@@ -124,12 +168,12 @@ export function EmmaSidekick() {
 
   return (
     <>
-      {/* Desktop sidebar */}
+      {/* Desktop sidebar — Style Guide §10: 340px column, 24px sticky top. */}
       <aside
         className="hidden md:block"
-        style={{ position: 'sticky', top: 24, width: 280, flexShrink: 0 }}
+        style={{ position: 'sticky', top: 24, width: 340, flexShrink: 0 }}
       >
-        <div className="bg-paper border border-line rounded-[var(--radius-lg)] p-6 shadow-sm">
+        <div className="bg-paper border border-line-2 rounded-[var(--radius-lg)] p-6">
           {inner}
         </div>
       </aside>
@@ -156,8 +200,8 @@ export function EmmaSidekick() {
             className="w-full flex items-center gap-3 bg-paper border border-line rounded-full px-4 py-3 shadow-md"
           >
             <img
-              src="/emma.png"
-              alt="Emma"
+              src={avatarSrc}
+              alt={avatarAlt}
               width={32}
               height={32}
               className="rounded-full object-cover"

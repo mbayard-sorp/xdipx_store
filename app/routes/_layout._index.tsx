@@ -89,7 +89,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (variant === 'a') {
     const [dbDeal, { rails, total, available }, vocab] = await Promise.all([
       getLiveDealRow(),
-      getDiscoveryRails(EMPTY_STATE),
+      getDiscoveryRails(EMPTY_STATE, { perRail: 12 }),
       getDiscoveryVocab(),
     ])
     const deal = dbDeal?.shopifyProductId
