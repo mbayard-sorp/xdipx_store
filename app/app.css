@@ -1,46 +1,92 @@
 @import "tailwindcss";
 
 /*
-  xdipx Design Tokens (v2 — Emma editorial system)
-  Fonts: Archivo (display) + Inter (body) loaded in app/root.tsx <Links>
+  xdipx Style Guide Nº 01 — Spring 2026
+  White paper. Coral for life. Plum for emphasis.
+  Fonts: Newsreader (display) + DM Sans (body) + JetBrains Mono loaded in app/root.tsx <Links>
+
+  Legacy v2 tokens (cream*, muted, sun, butter, coral-deep, font-script) are
+  kept as aliases mapped onto the new palette so existing utility classes
+  (bg-cream, text-muted, font-script, etc.) continue to compile while the
+  whole site picks up the new look. New code should prefer the v3 names
+  (paper, paper-2, paper-3, ink, ink-2, ink-3, ink-4, plum, plum-soft, etc.).
 */
 
 @theme {
-  /* Surface */
-  --color-cream:   #FAF4EA;
-  --color-cream-2: #F2EADD;
-  --color-paper:   #FFFFFF;
+  /* ─── Surface · pure white ─────────────────────── */
+  --color-paper:    #FFFFFF;
+  --color-paper-2:  #FAFAF9;
+  --color-paper-3:  #F4F3F1;
+  --color-line:     rgba(26, 20, 24, 0.08);
+  --color-line-2:   rgba(26, 20, 24, 0.16);
+  --color-line-3:   rgba(26, 20, 24, 0.32);
 
-  /* Ink */
-  --color-ink:   #151211;
-  --color-ink-2: #2A2421;
-  --color-muted: #5D5855;
-  --color-line:  #E5DBC9;
+  /* ─── Ink ──────────────────────────────────────── */
+  --color-ink:      #1A1418;
+  --color-ink-2:    #3D2F3A;
+  --color-ink-3:    #6B5F68;
+  --color-ink-4:    #9A8F97;
 
-  /* Accent */
-  --color-coral:       #FF4B1F;
-  --color-coral-2:     #FF6A3D;
-  --color-coral-deep:  #D93A15;
-  --color-coral-soft:  #FFE8DF;
-  --color-sage:        #7C8F78;
-  --color-sun:         #F5B841;
-  --color-butter:      #FFE28C;
-  --color-line-2:      #D8CCB5;
+  /* ─── Accent · use sparingly ───────────────────── */
+  --color-coral:        #FF5A36;
+  --color-coral-2:      #FF7A5A;
+  --color-coral-soft:   #FFE6DD;
+  --color-plum:         #7A2BB8;
+  --color-plum-2:       #5B1F8A;
+  --color-plum-soft:    #F3E8FB;
+  --color-sage:         #7C8F78;
 
-  /* Typography */
-  --font-display: 'Archivo', sans-serif;
-  --font-body:    'Inter',   sans-serif;
-  --font-script:  'Caveat',  cursive;
+  /* ─── Legacy v2 aliases — mapped onto the new palette so existing
+         utility classes continue to compile. Do not use in new code. */
+  --color-cream:        #FFFFFF;       /* was #FAF4EA */
+  --color-cream-2:      #FAFAF9;       /* was #F2EADD */
+  --color-muted:        #6B5F68;       /* was #6F645C → ink-3 */
+  --color-coral-deep:   #5B1F8A;       /* was #D93A15 → plum-2 (active CTA) */
+  --color-sun:          #F5B841;       /* unchanged — used in editorial accents */
+  --color-butter:       #FFE28C;       /* unchanged */
 
-  /* Radii — global flat 8px everywhere except rounded-full. */
+  /* ─── Type ─────────────────────────────────────── */
+  --font-display: 'Newsreader', 'Times New Roman', Georgia, serif;
+  --font-body:    'DM Sans', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+  --font-script:  'Caveat', cursive;   /* legacy, still loaded for EditorBioBlock */
+
+  /* ─── Radii ────────────────────────────────────── */
   --radius-sm:  8px;
-  --radius:     8px;
-  --radius-md:  8px;
-  --radius-lg:  8px;
-  --radius-xl:  8px;
-  --radius-2xl: 8px;
-  --radius-3xl: 8px;
-  --radius-4xl: 8px;
+  --radius:     14px;
+  --radius-md:  18px;
+  --radius-lg:  22px;
+  --radius-xl:  22px;
+  --radius-2xl: 22px;
+  --radius-3xl: 22px;
+  --radius-4xl: 22px;
+}
+
+/* ─── Brand primitives (per style guide §11) ───────────────────────── */
+
+/* Italic plum emphasis — Motif 01. Wrap the one word in a headline you
+   want the reader to hear. */
+.em,
+em.brand {
+  font-style: italic;
+  color: var(--color-plum);
+}
+
+/* Coral hairline link — Motif 02. "see all", "shop the deal", any anchor
+   that wants to be noticed without shouting. Never on body links. */
+.link-coral {
+  text-decoration: none;
+  border-bottom: 1px solid var(--color-coral);
+  padding-bottom: 1px;
+}
+
+/* Mono kicker — Motif 03. Section labels, progress, edition markers. */
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
 }
 
 /* Rich HTML content rendered from AI copy (full story, both ways, specs) */

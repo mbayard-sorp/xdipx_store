@@ -17,12 +17,22 @@ export function getClientIp(request: Request): string {
  * Fails open on KV errors — we prefer serving traffic over 500s on rate limit
  * infrastructure hiccups.
  */
+/**
+ * When KV isn't configured (local dev), bypass rate limiting entirely.
+ * The in-memory KV fallback now honors TTL, but rate limits create constant
+ * friction during local iteration with no upside since traffic is one
+ * developer. Production traffic always has real KV configured.
+ */
+const RATE_LIMIT_BYPASS =
+  !process.env['KV_REST_API_URL'] || !process.env['KV_REST_API_TOKEN']
+
 export async function checkRateLimit(
   request: Request,
   scope: string,
   limit: number,
   windowSeconds: number,
 ): Promise<{ ok: boolean; count: number }> {
+  if (RATE_LIMIT_BYPASS) return { ok: true, count: 0 }
   try {
     const ip = getClientIp(request)
     const key = `rl:${scope}:${ip}`

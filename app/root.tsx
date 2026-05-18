@@ -59,16 +59,16 @@ export const links: LinksFunction = () => [
   // cdn.shopify.com on every product/homepage view. crossOrigin saves a
   // round-trip on the cross-origin TCP+TLS handshake.
   { rel: 'preconnect', href: 'https://cdn.shopify.com', crossOrigin: 'anonymous' },
-  // Archivo (display) + Inter (body) — preload the stylesheet request so it
-  // starts alongside HTML parsing instead of waiting for the parser to reach it.
+  // Style Guide Nº 01 fonts: Newsreader (display, with italic) + DM Sans (body)
+  // + JetBrains Mono (kickers). Caveat kept for legacy EditorBioBlock signatures.
   {
     rel: 'preload',
     as: 'style',
-    href: 'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&family=Caveat:wght@500;700&display=swap',
+    href: 'https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..600&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;700&display=swap',
   },
   {
     rel: 'stylesheet',
-    href: 'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&family=Caveat:wght@500;700&display=swap',
+    href: 'https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..600&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;700&display=swap',
   },
   { rel: 'stylesheet', href: stylesheet },
 ]

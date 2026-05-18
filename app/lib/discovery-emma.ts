@@ -155,6 +155,29 @@ export function rankRails(
   return dropEmpty ? rails.filter(r => r.items.length > 0) : rails
 }
 
+/**
+ * Paginate a single category's rail. Reuses the same scoring & sort as
+ * `rankRails`, then slices `[offset, offset + limit)`. Used by the rail
+ * "View more" affordance which lazy-loads additional rows without refetching
+ * the other rails. Returns `{ items, total }` for the requested category.
+ */
+export function rankSingleRail(
+  products: DiscoveryProduct[],
+  state: DiscoveryState,
+  category: Category,
+  offset: number,
+  limit: number,
+): { items: ScoredProduct[]; total: number } {
+  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0
+  const filtered = products.filter(p => p.price <= state.budget && p.category === category)
+  const scored: ScoredProduct[] = filtered.map(p => ({
+    product: p,
+    score: hasAny ? scoreProduct(p, state) : 0,
+  }))
+  scored.sort((a, b) => b.score - a.score)
+  return { items: scored.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(0, limit)), total: scored.length }
+}
+
 /* ─── Audience phrase map ────────────────────────────────────────────── */
 
 // Hand-tuned phrasing for known audience labels. Anything outside this map
@@ -240,6 +263,9 @@ export function railTitlePlain(cat: Category, s: DiscoveryState): string {
  * Interpolation placeholders: {mood} {audience} {matters} {category}.
  */
 export const EMMA_LINES = {
+  /** Hero page lede — Emma's first-person framing of the discovery surface.
+      Sits under the H1 on Variant A. No em-dashes (project voice rule). */
+  heroLede:    "Skip color, size, and spec sheets. Start with what you're chasing. A feeling, a moment, a person. I'll shape the catalog around you.",
   intro:       "Hi, I'm Emma. Tap anything that calls to you. No wrong answers, and I'll shift what you see as you go.",
   moodOnly:    "{mood}. Good start. Is this for you, the two of you, or someone else?",
   audOnly:     "For {audience}. Noted. What kind of feeling are you chasing?",

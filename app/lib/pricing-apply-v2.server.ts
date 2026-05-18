@@ -136,25 +136,21 @@ export async function recomputeVariant(
           title: string
           price: string
           compareAtPrice: string | null
+          inventoryItem: { unitCost: { amount: string } | null } | null
           product: {
             id: string
             handle: string
             title: string
             vendor: string | null
             productType: string | null
-            metafields: Array<{ namespace: string; key: string; value: string } | null>
+            metafields: { nodes: Array<{ namespace: string; key: string; value: string }> }
           }
         } | null
       }>(
         `query V($id:ID!){productVariant(id:$id){id sku title price compareAtPrice
+          inventoryItem{unitCost{amount}}
           product{id handle title vendor productType
-            metafields(identifiers:[
-              {namespace:"xdipx",key:"nalpac_sku"}
-              {namespace:"xdipx",key:"wholesale_cost"}
-              {namespace:"xdipx",key:"map_price"}
-              {namespace:"xdipx",key:"original_price"}
-              {namespace:"xdipx",key:"map_restricted"}
-            ]){namespace key value}}}}`,
+            metafields(keys:["xdipx.nalpac_sku","xdipx.wholesale_cost","xdipx.map_price","xdipx.original_price","xdipx.map_restricted","xdipx.discontinued_at"],first:10){nodes{namespace key value}}}}}`,
         { id: variantId },
       )
       return result.productVariant
@@ -163,8 +159,8 @@ export async function recomputeVariant(
     if (!data) return { status: 'skipped_no_change', auditId: null, applied: false, error: 'variant not found' }
 
     const mfMap: Record<string, string> = {}
-    for (const mf of data.product.metafields) {
-      if (mf) mfMap[mf.key] = mf.value
+    for (const mf of data.product.metafields.nodes) {
+      mfMap[mf.key] = mf.value
     }
 
     matchData = {
@@ -181,13 +177,15 @@ export async function recomputeVariant(
         price:          parseFloat(data.price),
         compareAtPrice: data.compareAtPrice != null ? parseFloat(data.compareAtPrice) : null,
         inventoryItemId: null,
+        unitCost:       data.inventoryItem?.unitCost?.amount != null ? parseFloat(data.inventoryItem.unitCost.amount) : null,
       },
       metafields: {
-        nalpacSku:     mfMap['nalpac_sku']     ?? null,
-        wholesaleCost: mfMap['wholesale_cost'] ? parseFloat(mfMap['wholesale_cost']) : null,
-        mapPrice:      mfMap['map_price']      ? parseFloat(mfMap['map_price'])      : null,
-        originalPrice: mfMap['original_price'] ? parseFloat(mfMap['original_price']) : null,
-        mapRestricted: mfMap['map_restricted'] === 'true',
+        nalpacSku:      mfMap['nalpac_sku']      ?? null,
+        wholesaleCost:  mfMap['wholesale_cost']  ? parseFloat(mfMap['wholesale_cost'])  : null,
+        mapPrice:       mfMap['map_price']        ? parseFloat(mfMap['map_price'])       : null,
+        originalPrice:  mfMap['original_price']  ? parseFloat(mfMap['original_price'])  : null,
+        mapRestricted:  mfMap['map_restricted']  === 'true',
+        discontinuedAt: mfMap['discontinued_at'] ? new Date(mfMap['discontinued_at'])   : null,
       },
     }
     void matches // suppress unused warning
@@ -197,7 +195,9 @@ export async function recomputeVariant(
     return { status: 'skipped_no_change', auditId: null, applied: false, error: `shopify fetch: ${msg}` }
   }
 
-  const cost       = matchData.metafields.wholesaleCost
+  // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
+  // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
+  const cost       = matchData.variant.unitCost ?? matchData.metafields.wholesaleCost
   const map        = matchData.metafields.mapPrice
   const msrp       = matchData.metafields.originalPrice
   const oldSell    = matchData.variant.price
@@ -230,10 +230,10 @@ export async function recomputeVariant(
   let daysDisc:   number | undefined
 
   if (isDiscontinued) {
-    // Approximate days discontinued as 0 if we cannot determine actual date.
-    // TODO: read a metafield (e.g. xdipx.discontinued_at) for the real date
-    //       once that field is added to the Shopify metafield definitions.
-    daysDisc = 0
+    const discontinuedAt = matchData.metafields.discontinuedAt ?? null
+    daysDisc = discontinuedAt
+      ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 86_400_000))
+      : 0
     const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg })
     if (result) { newSell = result.sell; newCompare = result.compare_at }
   } else {
@@ -444,7 +444,9 @@ export async function dryRunRuleChange(opts: {
           if (patch) cfg = { ...cfg, ...patch }
         }
 
-        const cost = product.metafields.wholesaleCost
+        // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
+        // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
+        const cost = variant.unitCost ?? product.metafields.wholesaleCost
         const map = product.metafields.mapPrice
         const msrp = product.metafields.originalPrice
         const oldSell = variant.price
@@ -455,7 +457,11 @@ export async function dryRunRuleChange(opts: {
         let newSell: number | null = null
 
         if (isDiscontinued) {
-          const r = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: 0, cfg })
+          const discontinuedAt = product.metafields.discontinuedAt ?? null
+          const daysDiscontinued = discontinuedAt
+            ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 86_400_000))
+            : 0
+          const r = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued, cfg })
           if (r) newSell = r.sell
         } else {
           const r = computePrice({ cost, map, msrp, cfg })
