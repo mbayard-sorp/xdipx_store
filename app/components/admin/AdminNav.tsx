@@ -62,6 +62,18 @@ function SearchFilterIcon() {
     </svg>
   )
 }
+function SlidersIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="4" y1="6" x2="20" y2="6" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="18" x2="20" y2="18" />
+      <circle cx="9" cy="6" r="2" fill="white" />
+      <circle cx="15" cy="12" r="2" fill="white" />
+      <circle cx="9" cy="18" r="2" fill="white" />
+    </svg>
+  )
+}
 function LabsIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -155,7 +167,8 @@ const NAV_ITEMS = [
   { to: '/admin/phone-orders',   label: 'Phone Orders', Icon: CartUpsellIcon },
   { to: '/admin/emails',         label: 'Emails',       Icon: MailIcon      },
   { to: '/admin/socials',        label: 'Socials',      Icon: SocialsIcon   },
-  { to: '/admin/search-filters', label: 'Search Filters', Icon: SearchFilterIcon },
+  { to: '/admin/search-filters',    label: 'Search Filters',   Icon: SearchFilterIcon },
+  { to: '/admin/discovery-rules',   label: 'Discovery Rules',  Icon: SlidersIcon      },
   { to: '/admin/seo-regen',      label: 'SEO Regen',     Icon: LabsIcon      },
   { to: '/admin/labs',           label: 'Labs',          Icon: LabsIcon      },
   { to: '/admin/emma-chat',      label: 'Emma Chat',    Icon: ChatBubbleIcon },

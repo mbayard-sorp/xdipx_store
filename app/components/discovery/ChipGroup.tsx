@@ -19,11 +19,25 @@ interface ChipGroupProps {
    * Still clickable — toggling restores them when the conflict clears.
    */
   available?: readonly string[]
+  /**
+   * When true, suppress the built-in mono label — the parent renders its
+   * own header (e.g. HomeA's "01 / A *mood* or sensation / Tap any" row).
+   * Aria-label still falls back to `label` for screen readers.
+   */
+  hideLabel?: boolean
+  /**
+   * True when the user has selected at least one chip in ANY group. Drives
+   * whether to surface the unavailable strike-through. At the empty state
+   * the indicator is noise — the user hasn't built a brief yet — so we
+   * render every vocab chip as clickable until they start choosing.
+   */
+  showAvailability?: boolean
   onToggle: (value: string) => void
 }
 
-export function ChipGroup({ label, group, values, selected, available, onToggle }: ChipGroupProps) {
-  const availableSet = available ? new Set(available) : null
+export function ChipGroup({ label, group, values, selected, available, hideLabel, showAvailability, onToggle }: ChipGroupProps) {
+  const availabilityActive = showAvailability && available !== undefined
+  const availableSet = availabilityActive ? new Set(available) : null
 
   function handleToggle(value: string) {
     const on = !selected.includes(value)
@@ -32,14 +46,16 @@ export function ChipGroup({ label, group, values, selected, available, onToggle 
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <p
-        className="text-xs uppercase tracking-widest text-muted"
-        style={{ fontFamily: 'var(--font-body)', letterSpacing: '0.14em' }}
-      >
-        {label}
-      </p>
-      <div className="flex flex-wrap gap-2">
+    <div className="flex flex-col gap-3" role="group" aria-label={label}>
+      {!hideLabel && (
+        <p
+          className="text-[10px] uppercase tracking-[0.18em] text-ink-3"
+          style={{ fontFamily: 'var(--font-mono)' }}
+        >
+          {label}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2.5">
         {values.map(value => {
           const isSelected = selected.includes(value)
           // Selected chips never render as unavailable — the user already

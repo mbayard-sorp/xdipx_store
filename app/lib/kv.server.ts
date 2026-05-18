@@ -30,6 +30,12 @@ export async function kvGet<T>(key: string): Promise<T | null> {
   return (memStore.get(key) as T) ?? null
 }
 
+// Per-key TTL timers for the in-memory store. Tracked separately so we can
+// clear pending expirations when a key is overwritten or explicitly deleted.
+const _g3 = globalThis as unknown as { __kvMemTimers?: Map<string, ReturnType<typeof setTimeout>> }
+if (!_g3.__kvMemTimers) _g3.__kvMemTimers = new Map()
+const memTimers = _g3.__kvMemTimers
+
 export async function kvSet(key: string, value: unknown, _exSeconds?: number): Promise<void> {
   const kv = await getKV()
   if (kv) {
@@ -41,6 +47,24 @@ export async function kvSet(key: string, value: unknown, _exSeconds?: number): P
     return
   }
   memStore.set(key, value)
+  // Honor TTL on the in-memory fallback so dev behavior matches prod KV.
+  // Critical for rate-limit windows, cache invalidation, and lock keys —
+  // without this they'd accumulate forever and break local testing.
+  const existing = memTimers.get(key)
+  if (existing) clearTimeout(existing)
+  if (_exSeconds && _exSeconds > 0) {
+    const t = setTimeout(() => {
+      memStore.delete(key)
+      memTimers.delete(key)
+    }, _exSeconds * 1000)
+    // Don't keep the dev process alive just to clean memory.
+    if (typeof (t as { unref?: () => void }).unref === 'function') {
+      (t as { unref: () => void }).unref()
+    }
+    memTimers.set(key, t)
+  } else {
+    memTimers.delete(key)
+  }
 }
 
 export async function kvIncr(key: string): Promise<number> {
@@ -55,6 +79,8 @@ export async function kvDel(key: string): Promise<void> {
   const kv = await getKV()
   if (kv) { await kv.del(key); return }
   memStore.delete(key)
+  const t = memTimers.get(key)
+  if (t) { clearTimeout(t); memTimers.delete(key) }
 }
 
 // ─── Two-tier cache (in-memory L1 + KV L2) ────────────────────────────────

@@ -733,6 +733,36 @@ export const pricingAuditLog = pgTable('pricing_audit_log', {
   occurredIdx: index('pricing_audit_log_occurred_idx').on(t.occurredAt),
 }))
 
+// ---------------------------------------------------------------------------
+// Discovery rules — curator-controlled exclusions and fallback pins (migration 037)
+// ---------------------------------------------------------------------------
+
+/**
+ * One row per curator-defined rule. rule_type is a TS union, not a DB enum,
+ * to keep future rule additions migration-free.
+ *
+ * Valid rule_type values (enforced in app/types/discovery.ts):
+ *   exclude_product       -- rule_value = product handle
+ *   exclude_product_type  -- rule_value = ProductTypeDial value (e.g. "vibrator")
+ *   exclude_keyword       -- rule_value = case-insensitive title substring
+ *   exclude_price_min     -- rule_value = "25" (hide products priced BELOW this)
+ *   exclude_price_max     -- rule_value = "300" (hide products priced ABOVE this)
+ *   pin_fallback          -- rule_value = product handle; category is required
+ */
+export const discoveryRules = pgTable('discovery_rules', {
+  id:         serial('id').primaryKey(),
+  ruleType:   varchar('rule_type', { length: 40 }).notNull(),
+  ruleValue:  text('rule_value').notNull(),
+  category:   varchar('category', { length: 20 }),  // null = all categories
+  sortOrder:  integer('sort_order').default(0).notNull(),
+  notes:      text('notes'),
+  active:     boolean('active').default(true).notNull(),
+  createdAt:  timestamp('created_at').defaultNow().notNull(),
+  updatedAt:  timestamp('updated_at').defaultNow().notNull(),
+}, t => ({
+  activeTypeIdx: index('idx_discovery_rules_active_type').on(t.active, t.ruleType),
+}))
+
 export const pricingChanges = pgTable('pricing_changes', {
   id:           bigserial('id', { mode: 'number' }).primaryKey(),
   proposedAt:   timestamp('proposed_at', { withTimezone: true }).notNull().defaultNow(),
