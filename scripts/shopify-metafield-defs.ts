@@ -167,6 +167,13 @@ const DEFS: MetafieldDef[] = [
     description: 'JSON { eyebrow, subhead, body, bannerHeadline } — Haiku-generated Emma copy for the alt "quiet endorsement" homepage template.',
     type:        'json',
   },
+  // Clearance ladder: date the product was marked discontinued
+  {
+    key:         'discontinued_at',
+    name:        'Discontinued at (date)',
+    description: 'ISO date (YYYY-MM-DD) when the product was marked discontinued. Read by the v2 clearance-ladder pricing engine to compute days-discontinued and pick the correct markdown tier. Null means still active or untagged.',
+    type:        'date',
+  },
   // Alt-template "pair bundle" homepage — Haiku-generated per primary product
   {
     key:         'pair_bundle_copy',

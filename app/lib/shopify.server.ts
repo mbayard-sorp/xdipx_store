@@ -6390,6 +6390,7 @@ export interface PricingProductSnapshot {
     mapPrice: number | null
     originalPrice: number | null
     mapRestricted: boolean
+    discontinuedAt: Date | null
   }
 }
 
@@ -6418,16 +6419,12 @@ const PRICING_PRODUCTS_QUERY = `
             }
           }
         }
-        metafields(identifiers: [
-          { namespace: "xdipx", key: "nalpac_sku" }
-          { namespace: "xdipx", key: "wholesale_cost" }
-          { namespace: "xdipx", key: "map_price" }
-          { namespace: "xdipx", key: "original_price" }
-          { namespace: "xdipx", key: "map_restricted" }
-        ]) {
-          namespace
-          key
-          value
+        metafields(keys: ["xdipx.nalpac_sku", "xdipx.wholesale_cost", "xdipx.map_price", "xdipx.original_price", "xdipx.map_restricted", "xdipx.discontinued_at"], first: 10) {
+          nodes {
+            namespace
+            key
+            value
+          }
         }
       }
     }
@@ -6453,15 +6450,15 @@ interface PricingQueryResult {
           inventoryItem: { id: string } | null
         }>
       }
-      metafields: Array<{ namespace: string; key: string; value: string } | null>
+      metafields: { nodes: Array<{ namespace: string; key: string; value: string }> }
     }>
   }
 }
 
 function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'][number]): PricingProductSnapshot | null {
   const mfMap = new Map<string, string>()
-  for (const mf of raw.metafields) {
-    if (mf) mfMap.set(mf.key, mf.value)
+  for (const mf of raw.metafields.nodes) {
+    mfMap.set(mf.key, mf.value)
   }
 
   const variants = raw.variants.nodes.map(v => ({
@@ -6478,6 +6475,8 @@ function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'][numbe
   const wholesaleCostRaw = mfMap.get('wholesale_cost')
   const mapPriceRaw = mfMap.get('map_price')
   const originalPriceRaw = mfMap.get('original_price')
+  const discontinuedAtRaw = mfMap.get('discontinued_at')
+  const discontinuedAt = discontinuedAtRaw ? new Date(discontinuedAtRaw) : null
 
   return {
     productId: raw.id,
@@ -6493,6 +6492,7 @@ function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'][numbe
       mapPrice: mapPriceRaw != null ? parseFloat(mapPriceRaw) : null,
       originalPrice: originalPriceRaw != null ? parseFloat(originalPriceRaw) : null,
       mapRestricted: mfMap.get('map_restricted') === 'true',
+      discontinuedAt,
     },
   }
 }
@@ -6546,6 +6546,7 @@ export interface VariantSkuMatch {
     mapPrice: number | null
     originalPrice: number | null
     mapRestricted: boolean
+    discontinuedAt: Date | null
   }
 }
 
@@ -6650,6 +6651,9 @@ export async function findVariantsBySkus(skus: string[]): Promise<VariantSkuMatc
           mapPrice: mapRaw != null ? parseFloat(mapRaw) : null,
           originalPrice: origRaw != null ? parseFloat(origRaw) : null,
           mapRestricted: mfMap.get('map_restricted') === 'true',
+          // discontinued_at is not fetched by the SKU-lookup query; callers that
+          // need it (pricing-apply-v2) fetch it via their own inline query.
+          discontinuedAt: null,
         },
       })
     }
