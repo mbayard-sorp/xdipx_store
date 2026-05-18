@@ -205,6 +205,55 @@ describe('computeDiscontinuedPrice — clearance ladder', () => {
 })
 
 // ---------------------------------------------------------------------------
+// daysDiscontinued calc (mirrors pricing-apply-v2 logic; pure arithmetic)
+// ---------------------------------------------------------------------------
+
+describe('daysDiscontinued calculation', () => {
+  function calcDays(discontinuedAt: Date): number {
+    return Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 86_400_000))
+  }
+
+  it('returns 0 for a date set to right now', () => {
+    expect(calcDays(new Date())).toBe(0)
+  })
+
+  it('returns 0 for a future date (Math.max guard)', () => {
+    const future = new Date(Date.now() + 86_400_000 * 5)
+    expect(calcDays(future)).toBe(0)
+  })
+
+  it('returns 1 for a date exactly 1 day ago', () => {
+    const oneDayAgo = new Date(Date.now() - 86_400_000)
+    expect(calcDays(oneDayAgo)).toBe(1)
+  })
+
+  it('returns 30 for a date 30 days ago, lands in 15% tier', () => {
+    const thirtyDaysAgo = new Date(Date.now() - 86_400_000 * 30)
+    const days = calcDays(thirtyDaysAgo)
+    expect(days).toBe(30)
+    // Confirm the tier: day 30 -> 15% off (CLEARANCE_LADDER boundary inclusive)
+    const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: days, cfg: { margin_floor_pct: 0.15 } })
+    expect(r?.sell).toBe(84.99)
+  })
+
+  it('returns 31 for a date 31 days ago, escalates to 25% tier', () => {
+    const thirtyOneDaysAgo = new Date(Date.now() - 86_400_000 * 31)
+    const days = calcDays(thirtyOneDaysAgo)
+    expect(days).toBe(31)
+    const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: days, cfg: { margin_floor_pct: 0.15 } })
+    expect(r?.sell).toBe(74.99)
+  })
+
+  it('returns 91 for a date 91 days ago, escalates to 50% tier', () => {
+    const ninetyOneDaysAgo = new Date(Date.now() - 86_400_000 * 91)
+    const days = calcDays(ninetyOneDaysAgo)
+    expect(days).toBe(91)
+    const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: days, cfg: { margin_floor_pct: 0.15 } })
+    expect(r?.sell).toBe(49.99)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // applyVelocityModifier
 // ---------------------------------------------------------------------------
 
