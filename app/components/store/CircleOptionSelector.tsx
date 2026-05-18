@@ -210,11 +210,13 @@ export function CircleOptionSelector({
         onClick={() => setOpen(o => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`${optionName}: ${selected ?? 'choose'}`}
+        aria-label={selected
+          ? `${optionName}: ${selected}. Change selection.`
+          : `Select ${optionName}`}
         title={`${optionName}: ${selected ?? 'choose'}`}
         className={[
           'relative h-14 w-14 rounded-full border-2 transition-all flex items-center justify-center overflow-hidden',
-          'focus:outline-none focus:ring-2 focus:ring-coral/40 focus:ring-offset-2 focus:ring-offset-paper',
+          'focus-ring',
           selected
             ? 'border-coral shadow-md shadow-coral/20'
             : 'border-line hover:border-coral/60',

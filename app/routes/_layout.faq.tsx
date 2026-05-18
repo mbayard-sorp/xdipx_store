@@ -1,5 +1,4 @@
 import type { MetaFunction } from 'react-router'
-import { useState } from 'react'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 
 export const meta: MetaFunction = () => [
@@ -113,14 +112,9 @@ export default function FAQPage() {
 }
 
 function FAQItem({ q, a }: { q: string; a: string }) {
-  const [open, setOpen] = useState(false)
   return (
-    <div className="bg-white rounded-xl overflow-hidden shadow-sm">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-5 py-4 text-left"
-        aria-expanded={open}
-      >
+    <details className="bg-white rounded-xl overflow-hidden shadow-sm group">
+      <summary className="flex items-center justify-between px-5 py-4 cursor-pointer list-none focus-ring">
         <span
           className="font-semibold text-ink text-sm"
           style={{ fontFamily: 'var(--font-display)' }}
@@ -128,17 +122,15 @@ function FAQItem({ q, a }: { q: string; a: string }) {
           {q}
         </span>
         <span
-          className={`text-sage text-lg transition-transform ${open ? 'rotate-45' : ''}`}
+          className="text-sage text-lg transition-transform group-open:rotate-45"
           aria-hidden="true"
         >
           +
         </span>
-      </button>
-      {open && (
-        <div className="px-5 pb-4 text-sm text-ink/70 leading-relaxed border-t border-cream-2 pt-3">
-          {a}
-        </div>
-      )}
-    </div>
+      </summary>
+      <div className="px-5 pb-4 pt-3 text-sm text-ink/70 leading-relaxed border-t border-cream-2">
+        {a}
+      </div>
+    </details>
   )
 }
