@@ -23,7 +23,7 @@ function ClickThroughGate({ onConfirm }: { onConfirm: () => void }) {
       <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
         <button
           onClick={onConfirm}
-          className="flex-1 bg-white text-coral font-bold py-3 px-6 rounded-full text-lg transition-all hover:scale-105 hover:shadow-lg"
+          className="flex-1 bg-white text-coral font-bold py-3 px-6 rounded-full text-lg transition-colors hover:bg-cream"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Yes, let me in ♥
@@ -97,7 +97,7 @@ function DobEntryGate({ onConfirm }: { onConfirm: () => void }) {
 
       <button
         type="submit"
-        className="bg-white text-coral font-bold py-3 px-8 rounded-full text-lg transition-all hover:scale-105 hover:shadow-lg"
+        className="bg-white text-coral font-bold py-3 px-8 rounded-full text-lg transition-colors hover:bg-cream"
         style={{ fontFamily: 'var(--font-display)' }}
       >
         Enter ♥

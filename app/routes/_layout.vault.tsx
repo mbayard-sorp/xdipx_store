@@ -185,7 +185,7 @@ export default function VaultPage() {
         {hasNextPage && (
           <Link
             to={pageHref(page + 1)}
-            className="px-5 py-2 rounded-full bg-coral text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+            className="px-5 py-2 rounded-full bg-coral text-white text-sm font-semibold hover:bg-coral-deep transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             Next page →
