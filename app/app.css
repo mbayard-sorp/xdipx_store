@@ -14,7 +14,7 @@
   /* Ink */
   --color-ink:   #151211;
   --color-ink-2: #2A2421;
-  --color-muted: #6F645C;
+  --color-muted: #5D5855;
   --color-line:  #E5DBC9;
 
   /* Accent */
@@ -216,4 +216,15 @@
 
 .float-up-fade {
   animation: float-up-fade 2.4s ease-out forwards;
+}
+
+/* Standardized focus ring — opt in via `focus-ring` class on any
+   interactive element. Always coral, two-pixel offset on cream. */
+@utility focus-ring {
+  outline: none;
+  &:focus-visible {
+    outline: 2px solid var(--color-coral);
+    outline-offset: 2px;
+    border-radius: var(--radius);
+  }
 }
