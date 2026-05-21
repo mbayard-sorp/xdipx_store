@@ -4,6 +4,7 @@ import {
   computeDiscontinuedPrice,
   computePrice,
   roundPsychological,
+  ABSOLUTE_PRICE_FLOOR_DEFAULT,
   type PricingConfig,
 } from './pricing-engine-v2.server'
 
@@ -286,6 +287,137 @@ describe('applyVelocityModifier', () => {
   it('does not mutate the original cfg', () => {
     applyVelocityModifier(base, 'dead')
     expect(base.target_margin_pct).toBe(0.50)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// computePrice — belowAbsoluteFloor flag
+// ---------------------------------------------------------------------------
+
+describe('computePrice — absolute price floor', () => {
+  it('belowAbsoluteFloor=false when sell is above the default floor', () => {
+    // cost=10, target_margin=0.50 -> sell ~19.99, well above 2.99
+    const r = computePrice({ cost: 10, map: null, msrp: 50, cfg: cfg() })
+    expect(r).not.toBeNull()
+    expect(r!.belowAbsoluteFloor).toBe(false)
+  })
+
+  it('belowAbsoluteFloor=true when computed sell is below the default floor', () => {
+    // cost=0.10, target_margin=0.50 -> target=0.20, floor=0.10/(1-0.25)=0.133
+    // sell=roundPsychological(0.20)=0.20 (n<1 path) < 2.99
+    const r = computePrice({ cost: 0.10, map: null, msrp: 5, cfg: cfg() })
+    expect(r).not.toBeNull()
+    expect(r!.belowAbsoluteFloor).toBe(true)
+  })
+
+  it('belowAbsoluteFloor=false when sell equals the custom floor exactly', () => {
+    // sell ~4.99, custom floor=4.99
+    const r = computePrice({ cost: 2.50, map: null, msrp: 20, cfg: cfg(), absolutePriceFloor: 4.99 })
+    expect(r).not.toBeNull()
+    // sell = roundPsychological(2.50/(1-0.50)) = roundPsychological(5.00) = 4.99
+    expect(r!.sell).toBe(4.99)
+    expect(r!.belowAbsoluteFloor).toBe(false) // 4.99 is not < 4.99
+  })
+
+  it('belowAbsoluteFloor=true when sell is just below custom floor', () => {
+    // sell ~19.99, custom floor=25.00
+    const r = computePrice({ cost: 10, map: null, msrp: 50, cfg: cfg(), absolutePriceFloor: 25.00 })
+    expect(r).not.toBeNull()
+    expect(r!.sell).toBe(19.99)
+    expect(r!.belowAbsoluteFloor).toBe(true)
+  })
+
+  it('ABSOLUTE_PRICE_FLOOR_DEFAULT is 2.99', () => {
+    expect(ABSOLUTE_PRICE_FLOOR_DEFAULT).toBe(2.99)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// buildPatches snake_case conversion (mirrors admin.pricing.tsx buildPatches)
+// ---------------------------------------------------------------------------
+
+describe('buildPatches — camelCase GroupRuleValues -> snake_case patch shape', () => {
+  // Extracted pure function matching the exact logic in admin.pricing.tsx buildPatches
+  type GroupRuleValues = {
+    targetMarginPct: number | null
+    marginFloorPct: number | null
+    mapBehavior: string | null
+    compareAtStrategy: string | null
+    velocityModifierEnabled: boolean | null
+  }
+  type EditValues = Record<string, GroupRuleValues>
+
+  function buildPatches(edits: EditValues) {
+    const patches: unknown[] = []
+    for (const [key, vals] of Object.entries(edits)) {
+      const [level, ...rest] = key.split(':')
+      const id = rest.join(':')
+      patches.push({
+        scope_level: level,
+        scope_id: id,
+        target_margin_pct: vals.targetMarginPct,
+        margin_floor_pct: vals.marginFloorPct,
+        map_behavior: vals.mapBehavior,
+        compare_at_strategy: vals.compareAtStrategy,
+        velocity_modifier_enabled: vals.velocityModifierEnabled,
+      })
+    }
+    return patches
+  }
+
+  it('emits snake_case keys for a group-level edit', () => {
+    const edits: EditValues = {
+      'group:vibrators': {
+        targetMarginPct: 0.45,
+        marginFloorPct: 0.20,
+        mapBehavior: 'at_map',
+        compareAtStrategy: 'msrp',
+        velocityModifierEnabled: false,
+      },
+    }
+    const patches = buildPatches(edits) as Record<string, unknown>[]
+    expect(patches).toHaveLength(1)
+    const p = patches[0]!
+    expect(p['scope_level']).toBe('group')
+    expect(p['scope_id']).toBe('vibrators')
+    expect(p['target_margin_pct']).toBe(0.45)
+    expect(p['margin_floor_pct']).toBe(0.20)
+    expect(p['map_behavior']).toBe('at_map')
+    expect(p['compare_at_strategy']).toBe('msrp')
+    expect(p['velocity_modifier_enabled']).toBe(false)
+    // Must NOT contain camelCase keys
+    expect(Object.keys(p)).not.toContain('targetMarginPct')
+    expect(Object.keys(p)).not.toContain('marginFloorPct')
+    expect(Object.keys(p)).not.toContain('mapBehavior')
+    expect(Object.keys(p)).not.toContain('compareAtStrategy')
+    expect(Object.keys(p)).not.toContain('velocityModifierEnabled')
+  })
+
+  it('handles null values passthrough', () => {
+    const edits: EditValues = {
+      'product_type:Vibrators:Wand': {
+        targetMarginPct: null,
+        marginFloorPct: null,
+        mapBehavior: null,
+        compareAtStrategy: null,
+        velocityModifierEnabled: null,
+      },
+    }
+    const patches = buildPatches(edits) as Record<string, unknown>[]
+    const p = patches[0]!
+    expect(p['scope_level']).toBe('product_type')
+    // scope_id must re-join colons in the product type name
+    expect(p['scope_id']).toBe('Vibrators:Wand')
+    expect(p['target_margin_pct']).toBeNull()
+  })
+
+  it('emits one patch per edit entry', () => {
+    const edits: EditValues = {
+      'group:a': { targetMarginPct: 0.40, marginFloorPct: 0.20, mapBehavior: null, compareAtStrategy: null, velocityModifierEnabled: null },
+      'group:b': { targetMarginPct: 0.50, marginFloorPct: 0.25, mapBehavior: null, compareAtStrategy: null, velocityModifierEnabled: null },
+      'global:global': { targetMarginPct: 0.45, marginFloorPct: 0.20, mapBehavior: 'at_map', compareAtStrategy: 'msrp', velocityModifierEnabled: false },
+    }
+    expect(buildPatches(edits)).toHaveLength(3)
   })
 })
 

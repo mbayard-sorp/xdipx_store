@@ -19,6 +19,14 @@ export interface PriceResult {
   compare_at: number | null
 }
 
+/**
+ * Absolute minimum sell price — prevents margin math from producing
+ * nonsense prices like $0.35 on cheap accessories.
+ * Products priced below this floor are queued instead of auto-applied.
+ * Override via engine config; this constant is the fallback.
+ */
+export const ABSOLUTE_PRICE_FLOOR_DEFAULT = 2.99
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -70,14 +78,21 @@ export function applyVelocityModifier(cfg: PricingConfig, bucket: VelocityBucket
 /**
  * Compute sell and compare_at prices for a live SKU.
  * Returns null when cost is missing (cannot price without cost).
+ *
+ * @param absolutePriceFloor - Optional minimum sell price. When the computed
+ *   sell price would fall below this value the result is flagged so the caller
+ *   can queue the change instead of auto-applying it.
+ *   Defaults to ABSOLUTE_PRICE_FLOOR_DEFAULT when not supplied.
  */
 export function computePrice(params: {
-  cost:  number | null
-  map:   number | null
-  msrp:  number | null
-  cfg:   PricingConfig
-}): PriceResult | null {
+  cost:               number | null
+  map:                number | null
+  msrp:               number | null
+  cfg:                PricingConfig
+  absolutePriceFloor?: number
+}): PriceResult & { belowAbsoluteFloor: boolean } | null {
   const { cost, map, msrp, cfg } = params
+  const absolutePriceFloor = params.absolutePriceFloor ?? ABSOLUTE_PRICE_FLOOR_DEFAULT
 
   if (cost == null) return null
 
@@ -109,7 +124,7 @@ export function computePrice(params: {
       ? msrp
       : null
 
-  return { sell, compare_at }
+  return { sell, compare_at, belowAbsoluteFloor: sell < absolutePriceFloor }
 }
 
 // ---------------------------------------------------------------------------

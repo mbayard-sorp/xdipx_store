@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/* Self-hosted fonts (was a render-blocking Google Fonts <link>). Each ships
+   all subsets but the browser only downloads the latin subset it needs via
+   unicode-range. fontaine (vite.config.ts) reads these @font-face rules and
+   generates metric-matched "* Fallback" families referenced in --font-* below,
+   so swapping in the webfont causes no layout shift. */
+@import "@fontsource-variable/newsreader/index.css";
+@import "@fontsource-variable/dm-sans/index.css";
+@import "@fontsource-variable/jetbrains-mono/index.css";
+@import "@fontsource-variable/caveat/index.css";
+
 /*
   xdipx Style Guide Nº 01 — Spring 2026
   White paper. Coral for life. Plum for emphasis.
@@ -46,10 +56,13 @@
   --color-butter:       #FFE28C;       /* unchanged */
 
   /* ─── Type ─────────────────────────────────────── */
-  --font-display: 'Newsreader', 'Times New Roman', Georgia, serif;
-  --font-body:    'DM Sans', system-ui, sans-serif;
-  --font-mono:    'JetBrains Mono', ui-monospace, monospace;
-  --font-script:  'Caveat', cursive;   /* legacy, still loaded for EditorBioBlock */
+  /* '* Variable Fallback' families are generated at build time by fontaine
+     (vite.config.ts) with size-adjust/ascent/descent overrides matched to the
+     real webfont, so the fallback→webfont swap produces no CLS. */
+  --font-display: 'Newsreader Variable', 'Newsreader Variable Fallback', 'Times New Roman', Georgia, serif;
+  --font-body:    'DM Sans Variable', 'DM Sans Variable Fallback', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono Variable', 'JetBrains Mono Variable Fallback', ui-monospace, monospace;
+  --font-script:  'Caveat Variable', 'Caveat Variable Fallback', cursive;
 
   /* ─── Radii ────────────────────────────────────── */
   --radius-sm:  8px;

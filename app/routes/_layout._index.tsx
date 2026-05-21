@@ -264,16 +264,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
 function preloadHeroImageTag(imageUrl: string | undefined | null) {
   if (!imageUrl) return null
   const sep = imageUrl.includes('?') ? '&' : '?'
+  // AVIF-typed so the candidate matches what <OptimizedImage>'s <picture>
+  // selects (its AVIF source). Same widths + imagesizes as the hero's srcset
+  // + sizes → exact cache hit. Browsers without AVIF skip this preload and
+  // fall through to the picture's webp/jpg source — no wasted bytes.
   return {
     tagName: 'link',
     rel: 'preload',
     as: 'image',
-    href: `${imageUrl}${sep}width=1024`,
+    type: 'image/avif',
+    href: `${imageUrl}${sep}width=1024&format=avif`,
     imagesrcset: [
-      `${imageUrl}${sep}width=480 480w`,
-      `${imageUrl}${sep}width=768 768w`,
-      `${imageUrl}${sep}width=1024 1024w`,
-      `${imageUrl}${sep}width=1600 1600w`,
+      `${imageUrl}${sep}width=480&format=avif 480w`,
+      `${imageUrl}${sep}width=768&format=avif 768w`,
+      `${imageUrl}${sep}width=1024&format=avif 1024w`,
+      `${imageUrl}${sep}width=1600&format=avif 1600w`,
     ].join(', '),
     imagesizes: '(max-width: 768px) 100vw, 50vw',
     fetchpriority: 'high',

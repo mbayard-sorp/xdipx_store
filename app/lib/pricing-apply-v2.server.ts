@@ -87,7 +87,7 @@ async function getApprovalMode(): Promise<ApprovalMode> {
       .where(eq(pipelineSettings.key, 'pricing_approval_mode'))
       .limit(1)
     const val = rows[0]?.value
-    if (val === 'aggressive' || val === 'conservative' || val === 'review_all') return val
+    if (val === 'aggressive' || val === 'balanced' || val === 'conservative' || val === 'review_all') return val
   } catch {
     // fall through
   }
@@ -110,6 +110,8 @@ export interface RecomputeVariantResult {
   applied:   boolean
   error?:    string
 }
+
+const TEST_SKU_PREFIX = /^XDX-TEST-/i
 
 export async function recomputeVariant(
   params: RecomputeVariantParams,
@@ -157,6 +159,9 @@ export async function recomputeVariant(
     })()
 
     if (!data) return { status: 'skipped_no_change', auditId: null, applied: false, error: 'variant not found' }
+    if (TEST_SKU_PREFIX.test(data.sku ?? '')) {
+      return { status: 'skipped_no_change', auditId: null, applied: false, error: 'test SKU excluded' }
+    }
 
     const mfMap: Record<string, string> = {}
     for (const mf of data.product.metafields.nodes) {
@@ -238,7 +243,19 @@ export async function recomputeVariant(
     if (result) { newSell = result.sell; newCompare = result.compare_at }
   } else {
     const result = computePrice({ cost, map, msrp, cfg: effectiveCfg })
-    if (result) { newSell = result.sell; newCompare = result.compare_at }
+    if (result) {
+      newSell = result.sell
+      newCompare = result.compare_at
+      // Absolute price floor: queue instead of auto-applying prices below the floor
+      if (result.belowAbsoluteFloor) {
+        return {
+          status: 'pending',
+          auditId: null,
+          applied: false,
+          error: `sell price $${result.sell.toFixed(2)} is below absolute floor`,
+        }
+      }
+    }
   }
 
   if (newSell == null) {
@@ -420,6 +437,7 @@ export async function dryRunRuleChange(opts: {
   for (const product of products) {
     if (capped) break
     for (const variant of product.variants) {
+      if (TEST_SKU_PREFIX.test(variant.sku ?? '')) continue
       if (processed >= DRY_RUN_CAP) { capped = true; break }
       processed++
 
@@ -465,7 +483,11 @@ export async function dryRunRuleChange(opts: {
           if (r) newSell = r.sell
         } else {
           const r = computePrice({ cost, map, msrp, cfg })
-          if (r) newSell = r.sell
+          if (r) {
+            newSell = r.sell
+            // Treat below-floor results as "will queue" in dry-run
+            if (r.belowAbsoluteFloor) { newSell = null }
+          }
         }
 
         if (newSell == null) continue
@@ -557,6 +579,7 @@ export async function recomputeCatalog(opts: {
 
   for (const product of products) {
     for (const variant of product.variants) {
+      if (TEST_SKU_PREFIX.test(variant.sku ?? '')) continue
       counts.total++
       try {
         const result = await recomputeVariant({

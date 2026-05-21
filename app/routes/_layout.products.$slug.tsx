@@ -109,20 +109,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
-  const deal = await getDealByHandle(slug)
-  if (!deal) throw new Response('Product not found', { status: 404 })
-
   const url          = new URL(request.url)
   const reviewPage   = parseInt(url.searchParams.get('reviewPage')   ?? '1', 10)
   const reviewSort   = url.searchParams.get('reviewSort')   ?? 'newest'
   const reviewFilter = url.searchParams.get('reviewFilter') ?? 'all'
 
-  const hasDial = !!(deal.productTypeDial && (deal.sensationDialV2?.items?.length || (deal.sensationDial && Object.keys(deal.sensationDial).length > 0)))
-  const hasPairing = !!(deal.pairingWhy && Object.keys(deal.pairingWhy).length > 0 && deal.accessoryProductIds.length > 0)
+  // ── Batch A ─────────────────────────────────────────────────────────────────
+  // The deal fetch and every slug-only CMS fetch are mutually independent, so
+  // fire them together rather than blocking the CMS calls behind the deal
+  // round-trip. The customer token (cookie read) rides along too.
+  const [deal, pdpBlocks, fbtHandles, companionBundle, faqs, mainMenu, pdpTrustBar, customerToken] = await Promise.all([
+    getDealByHandle(slug),
+    getProductPageBlocks(slug),
+    getFrequentlyBoughtWith(slug, 4),
+    getBundleCompanionFor(slug),
+    getProductFaqs(slug),
+    getMainMenu(),
+    getPdpTrustBar(),
+    getCustomerToken(request),
+  ])
+  if (!deal) throw new Response('Product not found', { status: 404 })
 
   // Resolve current customer (for sticky vote state + gating). Failures here
   // are non-fatal — PDP still renders for anonymous users.
-  const customerToken = await getCustomerToken(request)
   let customerGid: string | null = null
   if (customerToken) {
     try {
@@ -132,21 +141,35 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
   const isLoggedIn = !!customerGid
 
+  const hasDial = !!(deal.productTypeDial && (deal.sensationDialV2?.items?.length || (deal.sensationDial && Object.keys(deal.sensationDial).length > 0)))
+  const hasPairing = !!(deal.pairingWhy && Object.keys(deal.pairingWhy).length > 0 && deal.accessoryProductIds.length > 0)
+
   const colorLabels = (deal.options ?? [])
     .filter(o => o.name.toLowerCase() === 'color' || o.name.toLowerCase() === 'colour')
     .flatMap(o => o.values)
 
+  // productCarousel + emmaCuratedRail blocks need Shopify product hydration.
+  // The block lists come from pdpBlocks (Batch A), so build them now and resolve
+  // their product fetches inside Batch B instead of in separate serial awaits.
+  const carouselBlocks = pdpBlocks.filter(
+    (b): b is ProductCarouselBlock => b._type === 'productCarousel',
+  )
+  const emmaRailBlocks = pdpBlocks.filter(
+    (b): b is import('~/types/cms').EmmaCuratedRailBlock => b._type === 'emmaCuratedRail',
+  )
+
+  // ── Batch B ─────────────────────────────────────────────────────────────────
+  // Everything that depends on the resolved deal (and customer), plus FBT
+  // hydration and carousel/rail product resolution — all independent of each
+  // other, so one parallel batch instead of three serial hops.
   // HIDDEN — Reviews UI: paused until we have orders. Restore the two
   // commented-out fetches and the JSX block at line ~707 when bringing the
   // user-review system back online.
-  const [pdpBlocks, reviewData, aggregate, fbtHandles, companionBundle, productVoteAggregate, customerProductVote, pairProducts, swatches, faqs, mainMenu, pdpTrustBar] = await Promise.all([
-    getProductPageBlocks(slug),
+  const [reviewData, aggregate, productVoteAggregate, customerProductVote, pairProducts, swatches, fbtResolved, carouselResults, railResults] = await Promise.all([
     // getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
     // getProductAggregate(deal.shopifyProductId),
     Promise.resolve({ reviews: [], total: 0 } as Awaited<ReturnType<typeof getProductReviews>>),
     Promise.resolve(null as Awaited<ReturnType<typeof getProductAggregate>>),
-    getFrequentlyBoughtWith(slug, 4),
-    getBundleCompanionFor(slug),
     hasDial
       ? getProductVoteAggregate(deal.shopifyProductId)
       : Promise.resolve({ agrees: 0, disagrees: 0, agreePct: 0 } as ProductVoteAggregate),
@@ -155,9 +178,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       : Promise.resolve(null as (1 | -1 | null)),
     hasPairing ? getProductsByIds(deal.accessoryProductIds) : Promise.resolve([]),
     colorLabels.length > 0 ? getSwatchMap(colorLabels) : Promise.resolve({} as Record<string, string>),
-    getProductFaqs(slug),
-    getMainMenu(),
-    getPdpTrustBar(),
+    fbtHandles.length > 0 ? getProductsByHandles(fbtHandles) : Promise.resolve([] as Awaited<ReturnType<typeof getProductsByHandles>>),
+    carouselBlocks.length > 0
+      ? Promise.all(carouselBlocks.map(b => {
+          const limit = b.productLimit ?? 8
+          const source = b.source ?? 'tag'
+          if (source === 'collection' && b.collectionHandle) {
+            return getCollectionProducts(b.collectionHandle, limit)
+          }
+          if (source === 'manual' && b.productHandles?.length) {
+            return getProductsByHandles(b.productHandles.map(p => p.handle))
+          }
+          return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([] as Product[])
+        }))
+      : Promise.resolve([] as Product[][]),
+    emmaRailBlocks.length > 0
+      ? Promise.all(emmaRailBlocks.map(b =>
+          b.productHandles?.length
+            ? getProductsByHandles(b.productHandles.map(p => p.handle))
+            : Promise.resolve([] as Product[]),
+        ))
+      : Promise.resolve([] as Product[][]),
   ])
 
   const breadcrumbs: BreadcrumbCrumb[] = resolveBreadcrumbs({
@@ -172,23 +213,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // without a usable first variant — they can't be checked out anyway.
   // Also defensively exclude self in case a recommendation source ever lets
   // the current product through.
-  const fbtProducts = fbtHandles.length > 0
-    ? (await getProductsByHandles(fbtHandles))
-        .map(p => {
-          const variantId = p.variants[0]?.id
-          if (!variantId) return null
-          if (variantId === deal.variantId) return null
-          return {
-            handle:         p.handle,
-            title:          p.title,
-            image:          p.images[0]?.url ?? null,
-            price:          p.price,
-            compareAtPrice: p.compareAtPrice ?? null,
-            variantId,
-          }
-        })
-        .filter((x): x is NonNullable<typeof x> => x !== null)
-    : []
+  const fbtProducts = fbtResolved
+    .map(p => {
+      const variantId = p.variants[0]?.id
+      if (!variantId) return null
+      if (variantId === deal.variantId) return null
+      return {
+        handle:         p.handle,
+        title:          p.title,
+        image:          p.images[0]?.url ?? null,
+        price:          p.price,
+        compareAtPrice: p.compareAtPrice ?? null,
+        variantId,
+      }
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
 
   const pairsWithItems: PairsWithItem[] = hasPairing
     ? pairProducts
@@ -264,42 +303,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       })()
     : null
 
-  // Resolve Shopify products for any productCarousel blocks
-  const carouselBlocks = pdpBlocks.filter(
-    (b): b is ProductCarouselBlock => b._type === 'productCarousel',
-  )
+  // Map the carousel/rail product results (resolved in Batch B) back onto their
+  // block keys. Both feed the same carouselProductMap the components read.
   const carouselProductMap: Record<string, Product[]> = {}
-  if (carouselBlocks.length > 0) {
-    const results = await Promise.all(
-      carouselBlocks.map(b => {
-        const limit = b.productLimit ?? 8
-        const source = b.source ?? 'tag'
-        if (source === 'collection' && b.collectionHandle) {
-          return getCollectionProducts(b.collectionHandle, limit)
-        }
-        if (source === 'manual' && b.productHandles?.length) {
-          return getProductsByHandles(b.productHandles.map(p => p.handle))
-        }
-        return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([])
-      }),
-    )
-    carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
-  }
-
-  // Resolve Shopify products for any emmaCuratedRail blocks (manual handles only)
-  const emmaRailBlocks = pdpBlocks.filter(
-    (b): b is import('~/types/cms').EmmaCuratedRailBlock => b._type === 'emmaCuratedRail',
-  )
-  if (emmaRailBlocks.length > 0) {
-    const results = await Promise.all(
-      emmaRailBlocks.map(b =>
-        b.productHandles?.length
-          ? getProductsByHandles(b.productHandles.map(p => p.handle))
-          : Promise.resolve([] as Product[]),
-      ),
-    )
-    emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = results[i] ?? [] })
-  }
+  carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = carouselResults[i] ?? [] })
+  emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = railResults[i] ?? [] })
 
   const browseCookieHeader = buildBrowseCookie(deal.shopifyProductId, previousBrowseIds)
 
@@ -342,16 +350,20 @@ function preloadHeroImageTag(imageUrl: string | undefined | null) {
   // a small srcset. `imagesrcset`/`imagesizes` are the lowercase HTML attrs
   // that the preload scanner reads during initial parse, before React boots.
   const sep = imageUrl.includes('?') ? '&' : '?'
+  // AVIF-typed to match the gallery's <picture> AVIF source (same widths +
+  // imagesizes → exact cache hit). Non-AVIF browsers skip it and use the
+  // picture's webp/jpg source, so there's never a wasted preload.
   return {
     tagName: 'link',
     rel: 'preload',
     as: 'image',
-    href: `${imageUrl}${sep}width=1024`,
+    type: 'image/avif',
+    href: `${imageUrl}${sep}width=1024&format=avif`,
     imagesrcset: [
-      `${imageUrl}${sep}width=480 480w`,
-      `${imageUrl}${sep}width=768 768w`,
-      `${imageUrl}${sep}width=1024 1024w`,
-      `${imageUrl}${sep}width=1600 1600w`,
+      `${imageUrl}${sep}width=480&format=avif 480w`,
+      `${imageUrl}${sep}width=768&format=avif 768w`,
+      `${imageUrl}${sep}width=1024&format=avif 1024w`,
+      `${imageUrl}${sep}width=1600&format=avif 1600w`,
     ].join(', '),
     imagesizes: '(max-width: 768px) 100vw, 50vw',
     fetchpriority: 'high',

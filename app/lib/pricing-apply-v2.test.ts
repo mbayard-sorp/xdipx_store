@@ -56,3 +56,27 @@ describe('decideStatus', () => {
     expect(decideStatus({ ...BASE, oldPrice: null, newPrice: 25, marginAfter: 0.50 })).toBe('pending')
   })
 })
+
+describe('TEST_SKU_PREFIX exclusion regex', () => {
+  // Validate the regex used in recomputeVariant/recomputeCatalog/dryRunRuleChange
+  // by testing the same pattern directly.
+  const re = /^XDX-TEST-/i
+  it('matches XDX-TEST- prefix (uppercase)', () => {
+    expect(re.test('XDX-TEST-001')).toBe(true)
+  })
+  it('matches XDX-TEST- prefix (lowercase)', () => {
+    expect(re.test('xdx-test-abc')).toBe(true)
+  })
+  it('matches XDX-TEST- prefix (mixed case)', () => {
+    expect(re.test('Xdx-Test-999')).toBe(true)
+  })
+  it('does NOT match a normal SKU', () => {
+    expect(re.test('NAL-12345')).toBe(false)
+  })
+  it('does NOT match SKU containing XDX-TEST- in the middle', () => {
+    expect(re.test('PREFIX-XDX-TEST-001')).toBe(false)
+  })
+  it('does NOT match empty string', () => {
+    expect(re.test('')).toBe(false)
+  })
+})
