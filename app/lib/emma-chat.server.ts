@@ -9,7 +9,7 @@ import {
 } from '../../db/schema'
 import { EMMA_CHAT_TOOLS, executeEmmaChatTool } from './emma-chat-tools.server'
 
-const MODEL = 'claude-sonnet-4-20250514'
+export const MODEL = 'claude-sonnet-4-20250514'
 const MAX_OUTPUT_TOKENS = 4096
 const MAX_TOOL_HOPS = 6
 
@@ -145,12 +145,13 @@ export async function archiveThread(threadId: number): Promise<void> {
 }
 
 /**
- * Single-chat helpers — the admin UI uses one "current" non-archived thread.
+ * Single-chat helpers — the admin UI uses one "current" non-archived thread per agentType.
  * "Clear" archives the current thread; the next visit creates a fresh one.
+ * agentType defaults to 'emma' so all existing Emma callers are unaffected.
  */
-export async function getOrCreateCurrentThread(): Promise<{ thread: EmmaChatThread; messages: EmmaChatMessage[] }> {
+export async function getOrCreateCurrentThread(agentType = 'emma'): Promise<{ thread: EmmaChatThread; messages: EmmaChatMessage[] }> {
   const [existing] = await db.select().from(emmaChatThreads)
-    .where(eq(emmaChatThreads.archived, false))
+    .where(and(eq(emmaChatThreads.archived, false), eq(emmaChatThreads.agentType, agentType)))
     .orderBy(desc(emmaChatThreads.updatedAt))
     .limit(1)
   if (existing) {
@@ -159,16 +160,18 @@ export async function getOrCreateCurrentThread(): Promise<{ thread: EmmaChatThre
       .orderBy(asc(emmaChatMessages.createdAt), asc(emmaChatMessages.id))
     return { thread: rowToThread(existing), messages: messageRows.map(rowToMessage) }
   }
+  const title = agentType === 'pm' ? 'PM chat' : 'Emma chat'
   const [created] = await db.insert(emmaChatThreads).values({
-    title: 'Emma chat',
+    title,
+    agentType,
   }).returning()
   if (!created) throw new Error('getOrCreateCurrentThread: insert returned no row')
   return { thread: rowToThread(created), messages: [] }
 }
 
-export async function clearCurrentThread(): Promise<{ thread: EmmaChatThread }> {
+export async function clearCurrentThread(agentType = 'emma'): Promise<{ thread: EmmaChatThread }> {
   const [existing] = await db.select().from(emmaChatThreads)
-    .where(eq(emmaChatThreads.archived, false))
+    .where(and(eq(emmaChatThreads.archived, false), eq(emmaChatThreads.agentType, agentType)))
     .orderBy(desc(emmaChatThreads.updatedAt))
     .limit(1)
   if (existing) {
@@ -176,8 +179,10 @@ export async function clearCurrentThread(): Promise<{ thread: EmmaChatThread }> 
       .set({ archived: true, updatedAt: new Date() })
       .where(eq(emmaChatThreads.id, existing.id))
   }
+  const title = agentType === 'pm' ? 'PM chat' : 'Emma chat'
   const [created] = await db.insert(emmaChatThreads).values({
-    title: 'Emma chat',
+    title,
+    agentType,
   }).returning()
   if (!created) throw new Error('clearCurrentThread: insert returned no row')
   return { thread: rowToThread(created) }
@@ -229,19 +234,36 @@ function sseEvent(controller: ReadableStreamDefaultController<Uint8Array>, event
 }
 
 /**
- * Stream Emma's reply for the most recent user message in a thread.
- * Returns a ReadableStream of SSE frames. Event types:
+ * Generic streaming agent orchestrator. Runs the MAX_TOOL_HOPS agentic loop,
+ * persists messages to the thread, and emits SSE frames. Both Emma and PM chat
+ * delegate here — the only differences are the systemPrompt, tools, and
+ * dispatchTool callback passed in.
+ *
+ * SSE event types:
  *   - token        { text }
  *   - tool_call    { id, name, input }
- *   - tool_result  { tool_use_id, content, is_error?, durationMs? }
- *   - done         { messageId }
+ *   - tool_result  { tool_use_id, content, is_error?, durationMs?, resultCount? }
+ *   - done         { messageId, inputTokens, outputTokens, aborted }
  *   - error        { message }
+ *
+ * Prompt-cache note: the Anthropic SDK automatically applies prompt-caching for
+ * the system prompt when the model supports it (claude-sonnet-4 does). No
+ * additional cache_control blocks are needed for a single ephemeral system
+ * prompt — the SDK handles it transparently.
  */
-export function streamEmmaReply(input: {
+export function streamAgentReply(input: {
   threadId: number
   signal: AbortSignal
+  systemPrompt: string
+  tools: Anthropic.Tool[]
+  dispatchTool: (name: string, input: Record<string, unknown>) => Promise<{
+    content: string
+    is_error?: boolean
+    diagnostics?: { durationMs: number; resultCount?: number; handle?: string }
+  }>
+  model?: string
 }): ReadableStream<Uint8Array> {
-  const { threadId, signal } = input
+  const { threadId, signal, systemPrompt, tools, dispatchTool, model = MODEL } = input
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       const turnStart = Date.now()
@@ -273,10 +295,10 @@ export function streamEmmaReply(input: {
           let accumulatedText = ''
           const stream = getAnthropicClient().messages.stream(
             {
-              model: MODEL,
+              model,
               max_tokens: MAX_OUTPUT_TOKENS,
-              system: EMMA_SME_SYSTEM_PROMPT,
-              tools: EMMA_CHAT_TOOLS,
+              system: systemPrompt,
+              tools,
               messages: anthropicMessages,
             },
             { signal },
@@ -338,7 +360,7 @@ export function streamEmmaReply(input: {
           const toolResults: EmmaChatToolResult[] = []
           for (const tu of toolUses) {
             sseEvent(controller, 'tool_call', { id: tu.id, name: tu.name, input: tu.input })
-            const result = await executeEmmaChatTool(tu.name, (tu.input ?? {}) as Record<string, unknown>)
+            const result = await dispatchTool(tu.name, (tu.input ?? {}) as Record<string, unknown>)
             const toolResult: EmmaChatToolResult = {
               tool_use_id: tu.id,
               content: result.content,
@@ -400,6 +422,25 @@ export function streamEmmaReply(input: {
     cancel() {
       // Caller closed the SSE connection; the AbortSignal is the source of truth.
     },
+  })
+}
+
+/**
+ * Stream Emma's reply for the most recent user message in a thread.
+ * Thin wrapper around streamAgentReply — behavior-preserving, zero changes to
+ * Emma's prompt, tools, or model.
+ */
+export function streamEmmaReply(input: {
+  threadId: number
+  signal: AbortSignal
+}): ReadableStream<Uint8Array> {
+  return streamAgentReply({
+    threadId: input.threadId,
+    signal: input.signal,
+    systemPrompt: EMMA_SME_SYSTEM_PROMPT,
+    tools: EMMA_CHAT_TOOLS,
+    dispatchTool: executeEmmaChatTool,
+    model: MODEL,
   })
 }
 

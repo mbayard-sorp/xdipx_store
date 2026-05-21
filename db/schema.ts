@@ -640,6 +640,9 @@ export const emmaChatThreads = pgTable('emma_chat_threads', {
   redditPostUrl:     text('reddit_post_url'),
   redditPostExcerpt: text('reddit_post_excerpt'),
   archived:          boolean('archived').notNull().default(false),
+  // Migration 038: discriminator so a second admin chat persona (product
+  // manager) can share this table. Existing rows default to 'emma'.
+  agentType:         varchar('agent_type', { length: 20 }).notNull().default('emma'),
   createdAt:         timestamp('created_at').notNull().defaultNow(),
   updatedAt:         timestamp('updated_at').notNull().defaultNow(),
 }, t => ({
@@ -794,5 +797,84 @@ export const pricingChanges = pgTable('pricing_changes', {
   statusIdx:   index('pricing_changes_status_idx').on(t.status),
   variantIdx:  index('pricing_changes_variant_idx').on(t.variantId, t.proposedAt),
   skuIdx:      index('pricing_changes_sku_idx').on(t.sku, t.proposedAt),
+}))
+
+// ---------------------------------------------------------------------------
+// Nalpac import automation — daily candidate queue + run audit (migration 038)
+// ---------------------------------------------------------------------------
+
+/**
+ * One LIVE row per Nalpac SKU we don't yet carry. The daily monitor upserts on
+ * sku; the /admin/imports dashboard works the pending/watching rows.
+ * status: pending | approved | rejected | watching | imported | skipped
+ * (TS union, not a DB enum — see app/types or call sites).
+ */
+export const importCandidates = pgTable('import_candidates', {
+  id:              serial('id').primaryKey(),
+  sku:             varchar('sku', { length: 20 }).notNull().unique(),
+  brand:           varchar('brand', { length: 100 }),
+  productTitle:    text('product_title'),
+  categories:      json('categories').$type<string[]>(),
+  tier:            varchar('tier', { length: 10 }).notNull(),  // 'A'|'B'|'C'|'D'
+  gapReason:       text('gap_reason'),
+  dealScore:       decimal('deal_score',      { precision: 5,  scale: 3 }),
+  msrp:            decimal('msrp',            { precision: 10, scale: 2 }),
+  wholesaleCost:   decimal('wholesale_cost',  { precision: 10, scale: 2 }),
+  mapPrice:        decimal('map_price',       { precision: 10, scale: 2 }),
+  proposedPrice:   decimal('proposed_price',  { precision: 10, scale: 2 }),
+  marginPct:       decimal('margin_pct',      { precision: 5,  scale: 2 }),
+  profitPerUnit:   decimal('profit_per_unit', { precision: 10, scale: 2 }),
+  qtyAvailable:    integer('qty_available'),
+  imageCount:      integer('image_count'),
+  inTop100Feed:    boolean('in_top100_feed').notNull().default(false),
+  inNewFeed:       boolean('in_new_feed').notNull().default(false),
+  inSaleFeed:      boolean('in_sale_feed').notNull().default(false),
+  status:          varchar('status', { length: 20 }).notNull().default('pending'),
+  rejectionReason: text('rejection_reason'),
+  watchScore:      decimal('watch_score', { precision: 5,  scale: 3 }),
+  watchPrice:      decimal('watch_price', { precision: 10, scale: 2 }),
+  dealHistoryId:   integer('deal_history_id'),
+  runDate:         date('run_date').notNull(),
+  firstSeenAt:     timestamp('first_seen_at').notNull().defaultNow(),
+  lastSeenAt:      timestamp('last_seen_at').notNull().defaultNow(),
+  reviewedAt:      timestamp('reviewed_at'),
+  reviewedBy:      varchar('reviewed_by', { length: 100 }),
+  createdAt:       timestamp('created_at').notNull().defaultNow(),
+  updatedAt:       timestamp('updated_at').notNull().defaultNow(),
+  // Migration 039: master-level columns (one row per brand+base_title group).
+  masterKey:       varchar('master_key', { length: 200 }),
+  baseTitle:       text('base_title'),
+  variantSkus:     json('variant_skus').$type<string[]>(),
+  variantCount:    integer('variant_count'),
+  inStockVariants: integer('in_stock_variants'),
+  colors:          json('colors').$type<string[]>(),
+  sizes:           json('sizes').$type<string[]>(),
+  volumes:         json('volumes').$type<string[]>(),
+  axes:            json('axes').$type<{ name: string; values: string[] }[]>(),
+  totalQty:        integer('total_qty'),
+  needsReview:     boolean('needs_review').notNull().default(false),
+  upc:             varchar('upc', { length: 40 }),
+  sampleImage:     text('sample_image'),
+}, t => ({
+  statusRunIdx:   index('idx_import_candidates_status_run').on(t.status, t.runDate),
+  tierScoreIdx:   index('idx_import_candidates_tier_score').on(t.tier, t.dealScore),
+  masterKeyIdx:   uniqueIndex('idx_import_candidates_master_key').on(t.masterKey),
+}))
+
+/** One row per monitor run (cron or manual) — audit trail for the dashboard header. */
+export const importMonitorRuns = pgTable('import_monitor_runs', {
+  id:                   serial('id').primaryKey(),
+  runDate:              date('run_date').notNull(),
+  startedAt:            timestamp('started_at').notNull().defaultNow(),
+  finishedAt:           timestamp('finished_at'),
+  source:               varchar('source', { length: 20 }).notNull().default('cron'),  // 'cron'|'manual'
+  feedsOk:              boolean('feeds_ok').notNull().default(false),
+  candidatesFound:      integer('candidates_found').notNull().default(0),
+  candidatesNew:        integer('candidates_new').notNull().default(0),
+  candidatesResurfaced: integer('candidates_resurfaced').notNull().default(0),
+  autoImported:         integer('auto_imported').notNull().default(0),
+  errorMessage:         text('error_message'),
+}, t => ({
+  runDateIdx: index('idx_import_monitor_runs_date').on(t.runDate),
 }))
 

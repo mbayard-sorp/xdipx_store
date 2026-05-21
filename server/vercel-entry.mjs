@@ -35,6 +35,20 @@ async function kvSet(key, value, _exSeconds) {
     return;
   }
   memStore.set(key, value);
+  const existing = memTimers.get(key);
+  if (existing) clearTimeout(existing);
+  if (_exSeconds && _exSeconds > 0) {
+    const t = setTimeout(() => {
+      memStore.delete(key);
+      memTimers.delete(key);
+    }, _exSeconds * 1e3);
+    if (typeof t.unref === "function") {
+      t.unref();
+    }
+    memTimers.set(key, t);
+  } else {
+    memTimers.delete(key);
+  }
 }
 async function kvDel(key) {
   const kv = await getKV();
@@ -43,6 +57,11 @@ async function kvDel(key) {
     return;
   }
   memStore.delete(key);
+  const t = memTimers.get(key);
+  if (t) {
+    clearTimeout(t);
+    memTimers.delete(key);
+  }
 }
 async function cached(key, ttlSeconds, fn) {
   const ttlMs = ttlSeconds * 1e3;
@@ -65,7 +84,7 @@ function invalidateCache(prefix) {
     if (k.startsWith(prefix)) readCache.delete(k);
   }
 }
-var _kv, _g, memStore, _g2, readCache, KV_KEYS;
+var _kv, _g, memStore, _g3, memTimers, _g2, readCache, KV_KEYS;
 var init_kv_server = __esm({
   "app/lib/kv.server.ts"() {
     "use strict";
@@ -73,6 +92,9 @@ var init_kv_server = __esm({
     _g = globalThis;
     if (!_g.__kvMemStore) _g.__kvMemStore = /* @__PURE__ */ new Map();
     memStore = _g.__kvMemStore;
+    _g3 = globalThis;
+    if (!_g3.__kvMemTimers) _g3.__kvMemTimers = /* @__PURE__ */ new Map();
+    memTimers = _g3.__kvMemTimers;
     _g2 = globalThis;
     if (!_g2.__readCache) _g2.__readCache = /* @__PURE__ */ new Map();
     readCache = _g2.__readCache;
@@ -123,12 +145,15 @@ __export(schema_exports, {
   customerProfileExtras: () => customerProfileExtras,
   dailyProfitSummary: () => dailyProfitSummary,
   dealHistory: () => dealHistory,
+  discoveryRules: () => discoveryRules,
   draftOrders: () => draftOrders,
   emmaChatEvents: () => emmaChatEvents,
   emmaChatMessages: () => emmaChatMessages,
   emmaChatSessions: () => emmaChatSessions,
   emmaChatThreads: () => emmaChatThreads,
   emmaChatTurns: () => emmaChatTurns,
+  importCandidates: () => importCandidates,
+  importMonitorRuns: () => importMonitorRuns,
   ivrVoices: () => ivrVoices,
   orderLineItems: () => orderLineItems,
   pdpDialVotes: () => pdpDialVotes,
@@ -174,7 +199,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, pricingChanges;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -629,6 +654,11 @@ var init_schema = __esm({
       // (every search result was already in pitchedHandlesLog). Distinct from toolBudgetExhausted.
       // Powers the "repeat-pitch rate" dashboard query in Phase 3.
       searchRepeatedPitch: boolean("search_repeated_pitch").notNull().default(false),
+      // Migration 036: free-form telemetry payload. Initial usage carries the SMS
+      // discovery-gate advance signal (from, to, skipped, slotFilled) for skip-rate
+      // analytics. Extensible — future per-turn telemetry can land here without
+      // schema changes. See docs/what-matters-final-signoff.md.
+      metadata: json("metadata").$type(),
       createdAt: timestamp("created_at").notNull().defaultNow()
     }, (t) => ({
       twilioSidUniq: uniqueIndex("sms_turns_twilio_sid_uniq").on(t.twilioMessageSid),
@@ -672,6 +702,9 @@ var init_schema = __esm({
       redditPostUrl: text("reddit_post_url"),
       redditPostExcerpt: text("reddit_post_excerpt"),
       archived: boolean("archived").notNull().default(false),
+      // Migration 038: discriminator so a second admin chat persona (product
+      // manager) can share this table. Existing rows default to 'emma'.
+      agentType: varchar("agent_type", { length: 20 }).notNull().default("emma"),
       createdAt: timestamp("created_at").notNull().defaultNow(),
       updatedAt: timestamp("updated_at").notNull().defaultNow()
     }, (t) => ({
@@ -754,6 +787,20 @@ var init_schema = __esm({
       variantIdx: index("pricing_audit_log_variant_idx").on(t.variantId, t.occurredAt),
       occurredIdx: index("pricing_audit_log_occurred_idx").on(t.occurredAt)
     }));
+    discoveryRules = pgTable("discovery_rules", {
+      id: serial("id").primaryKey(),
+      ruleType: varchar("rule_type", { length: 40 }).notNull(),
+      ruleValue: text("rule_value").notNull(),
+      category: varchar("category", { length: 20 }),
+      // null = all categories
+      sortOrder: integer("sort_order").default(0).notNull(),
+      notes: text("notes"),
+      active: boolean("active").default(true).notNull(),
+      createdAt: timestamp("created_at").defaultNow().notNull(),
+      updatedAt: timestamp("updated_at").defaultNow().notNull()
+    }, (t) => ({
+      activeTypeIdx: index("idx_discovery_rules_active_type").on(t.active, t.ruleType)
+    }));
     pricingChanges = pgTable("pricing_changes", {
       id: bigserial("id", { mode: "number" }).primaryKey(),
       proposedAt: timestamp("proposed_at", { withTimezone: true }).notNull().defaultNow(),
@@ -785,6 +832,74 @@ var init_schema = __esm({
       statusIdx: index("pricing_changes_status_idx").on(t.status),
       variantIdx: index("pricing_changes_variant_idx").on(t.variantId, t.proposedAt),
       skuIdx: index("pricing_changes_sku_idx").on(t.sku, t.proposedAt)
+    }));
+    importCandidates = pgTable("import_candidates", {
+      id: serial("id").primaryKey(),
+      sku: varchar("sku", { length: 20 }).notNull().unique(),
+      brand: varchar("brand", { length: 100 }),
+      productTitle: text("product_title"),
+      categories: json("categories").$type(),
+      tier: varchar("tier", { length: 10 }).notNull(),
+      // 'A'|'B'|'C'|'D'
+      gapReason: text("gap_reason"),
+      dealScore: decimal("deal_score", { precision: 5, scale: 3 }),
+      msrp: decimal("msrp", { precision: 10, scale: 2 }),
+      wholesaleCost: decimal("wholesale_cost", { precision: 10, scale: 2 }),
+      mapPrice: decimal("map_price", { precision: 10, scale: 2 }),
+      proposedPrice: decimal("proposed_price", { precision: 10, scale: 2 }),
+      marginPct: decimal("margin_pct", { precision: 5, scale: 2 }),
+      profitPerUnit: decimal("profit_per_unit", { precision: 10, scale: 2 }),
+      qtyAvailable: integer("qty_available"),
+      imageCount: integer("image_count"),
+      inTop100Feed: boolean("in_top100_feed").notNull().default(false),
+      inNewFeed: boolean("in_new_feed").notNull().default(false),
+      inSaleFeed: boolean("in_sale_feed").notNull().default(false),
+      status: varchar("status", { length: 20 }).notNull().default("pending"),
+      rejectionReason: text("rejection_reason"),
+      watchScore: decimal("watch_score", { precision: 5, scale: 3 }),
+      watchPrice: decimal("watch_price", { precision: 10, scale: 2 }),
+      dealHistoryId: integer("deal_history_id"),
+      runDate: date("run_date").notNull(),
+      firstSeenAt: timestamp("first_seen_at").notNull().defaultNow(),
+      lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
+      reviewedAt: timestamp("reviewed_at"),
+      reviewedBy: varchar("reviewed_by", { length: 100 }),
+      createdAt: timestamp("created_at").notNull().defaultNow(),
+      updatedAt: timestamp("updated_at").notNull().defaultNow(),
+      // Migration 039: master-level columns (one row per brand+base_title group).
+      masterKey: varchar("master_key", { length: 200 }),
+      baseTitle: text("base_title"),
+      variantSkus: json("variant_skus").$type(),
+      variantCount: integer("variant_count"),
+      inStockVariants: integer("in_stock_variants"),
+      colors: json("colors").$type(),
+      sizes: json("sizes").$type(),
+      volumes: json("volumes").$type(),
+      axes: json("axes").$type(),
+      totalQty: integer("total_qty"),
+      needsReview: boolean("needs_review").notNull().default(false),
+      upc: varchar("upc", { length: 40 }),
+      sampleImage: text("sample_image")
+    }, (t) => ({
+      statusRunIdx: index("idx_import_candidates_status_run").on(t.status, t.runDate),
+      tierScoreIdx: index("idx_import_candidates_tier_score").on(t.tier, t.dealScore),
+      masterKeyIdx: uniqueIndex("idx_import_candidates_master_key").on(t.masterKey)
+    }));
+    importMonitorRuns = pgTable("import_monitor_runs", {
+      id: serial("id").primaryKey(),
+      runDate: date("run_date").notNull(),
+      startedAt: timestamp("started_at").notNull().defaultNow(),
+      finishedAt: timestamp("finished_at"),
+      source: varchar("source", { length: 20 }).notNull().default("cron"),
+      // 'cron'|'manual'
+      feedsOk: boolean("feeds_ok").notNull().default(false),
+      candidatesFound: integer("candidates_found").notNull().default(0),
+      candidatesNew: integer("candidates_new").notNull().default(0),
+      candidatesResurfaced: integer("candidates_resurfaced").notNull().default(0),
+      autoImported: integer("auto_imported").notNull().default(0),
+      errorMessage: text("error_message")
+    }, (t) => ({
+      runDateIdx: index("idx_import_monitor_runs_date").on(t.runDate)
     }));
   }
 });
@@ -875,6 +990,7 @@ __export(shopify_server_exports, {
   getDealByHandle: () => getDealByHandle,
   getDealByShopifyId: () => getDealByShopifyId,
   getDistinctProductTypes: () => getDistinctProductTypes,
+  getFeedDeals: () => getFeedDeals,
   getHandleByProductId: () => getHandleByProductId,
   getLiveDealHandle: () => getLiveDealHandle,
   getMainMenu: () => getMainMenu,
@@ -888,6 +1004,7 @@ __export(shopify_server_exports, {
   getProductsByHandles: () => getProductsByHandles,
   getProductsByIds: () => getProductsByIds,
   getProductsByTag: () => getProductsByTag,
+  getProductsByTypesOrTag: () => getProductsByTypesOrTag,
   getProductsForMerge: () => getProductsForMerge,
   getRecentVaultDeals: () => getRecentVaultDeals,
   getReturn: () => getReturn,
@@ -964,7 +1081,7 @@ async function shopifyAdmin(path, method = "GET", body) {
   return res.json();
 }
 async function adminGraphQL(query, variables) {
-  const res = await fetch(ADMIN_GQL_ENDPOINT, {
+  const doFetch = () => fetch(ADMIN_GQL_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -972,6 +1089,13 @@ async function adminGraphQL(query, variables) {
     },
     body: JSON.stringify({ query, variables })
   });
+  let res = await doFetch();
+  if (res.status === 429) {
+    const retryAfter = Number(res.headers.get("retry-after")) || 1;
+    const delayMs = Math.min(retryAfter * 1e3, 5e3);
+    await new Promise((r) => setTimeout(r, delayMs));
+    res = await doFetch();
+  }
   if (!res.ok) throw new Error(`Shopify Admin GraphQL error: ${res.status}`);
   const { data, errors } = await res.json();
   if (errors?.length) throw new Error(errors[0]?.message ?? "Shopify Admin GraphQL error");
@@ -1522,6 +1646,31 @@ async function getProductsByTag(tag, limit = 6) {
     return data.products.edges.map((e) => nodeToProduct(e.node));
   });
 }
+async function getProductsByTypesOrTag(types, tag, limit = 6) {
+  const typesKey = [...types].sort().join("|");
+  return cached(`shopify:types-or-tag:${typesKey}:${tag}:${limit}`, READ_TTL, async () => {
+    const sanitize = (s) => s.replace(/[:()*"]/g, "").trim();
+    const typeClauses = types.map(sanitize).filter(Boolean).map((t) => `product_type:"${t}"`);
+    const tagClause = `tag:${sanitize(tag)}`;
+    const query = `(${[...typeClauses, tagClause].join(" OR ")})`;
+    const data = await storefront(`
+      query GetProductsForBodyRoute($query: String!, $first: Int!) {
+        products(first: $first, query: $query) {
+          edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+        }
+      }
+    `, { query, first: limit });
+    const seen = /* @__PURE__ */ new Set();
+    const products = [];
+    for (const edge of data.products.edges) {
+      const p = nodeToProduct(edge.node);
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+      products.push(p);
+    }
+    return products;
+  });
+}
 async function getCollectionProducts(handle, limit = 8) {
   return cached(`shopify:col:${handle}:${limit}`, READ_TTL, async () => {
     const data = await storefront(`
@@ -1737,6 +1886,107 @@ async function getVaultDeals(page = 1, limit = 20) {
   `, { first: limit, after: page > 1 ? btoa(`${(page - 1) * limit}`) : null });
   return {
     deals: data.products.edges.map((e) => nodeToVaultDeal(e.node)),
+    hasNextPage: data.products.pageInfo.hasNextPage
+  };
+}
+function parseMetafieldByNsKey(metafields, namespace, key) {
+  return metafields.find((m) => m?.namespace === namespace && m?.key === key)?.value ?? null;
+}
+function nodeToFeedDeal(node) {
+  const mf = node.metafields;
+  const variantEdges = node.variants.edges;
+  const variant = variantEdges[0]?.node;
+  const dealPrice = parseFloat(variant?.price.amount ?? "0");
+  const moodTags = parseMetafieldJSON(mf, "mood_tags", []);
+  const audienceTags = parseMetafieldJSON(mf, "audience_tags", []);
+  const mattersTags = parseMetafieldJSON(mf, "matters_tags", []);
+  const heroVideo = parseMetafieldJSON(mf, "hero_video", {});
+  const featureBullets = parseMetafieldJSON(mf, "feature_bullets", []);
+  const specifications = parseMetafieldJSON(mf, "specifications", []);
+  const variantSavings = variantEdges.map((e) => {
+    const p = parseFloat(e.node.price.amount);
+    const ca = parseFloat(e.node.compareAtPrice?.amount ?? "0");
+    return ca > p && p > 0 ? { amount: ca - p, percent: Math.round((ca - p) / ca * 100) } : null;
+  }).filter((s) => s !== null);
+  const maxSavingsAmount = variantSavings.length > 0 ? Math.max(...variantSavings.map((s) => s.amount)) : 0;
+  const maxSavingsPercent = variantSavings.length > 0 ? Math.max(...variantSavings.map((s) => s.percent)) : 0;
+  const seoDesc = parseMetafieldByNsKey(mf, "xdipx", "seo_meta_description");
+  const moodImageUrl = parseMetafieldByNsKey(mf, "xdipx", "mood_image_url");
+  const originalPrice = parseMetafieldByNsKey(mf, "xdipx", "original_price");
+  const productTypeDial = parseMetafieldByNsKey(mf, "xdipx", "product_type_dial");
+  const dealScoreRaw = parseMetafieldByNsKey(mf, "xdipx", "deal_score");
+  const isDailyDealRaw = parseMetafieldByNsKey(mf, "xdipx", "is_daily_deal");
+  const dealScoreNum = dealScoreRaw ? parseFloat(dealScoreRaw) : null;
+  const isDailyDeal = isDailyDealRaw === "true";
+  const gmcCategory = parseMetafieldByNsKey(mf, "mm-google-shopping", "google_product_category");
+  const gmcAgeGroup = parseMetafieldByNsKey(mf, "mm-google-shopping", "age_group");
+  const gmcGender = parseMetafieldByNsKey(mf, "mm-google-shopping", "gender");
+  const gmcMpn = parseMetafieldByNsKey(mf, "mm-google-shopping", "mpn");
+  const gmcColor = parseMetafieldByNsKey(mf, "mm-google-shopping", "color");
+  const gmcMaterial = parseMetafieldByNsKey(mf, "mm-google-shopping", "material");
+  const gmcSize = parseMetafieldByNsKey(mf, "mm-google-shopping", "size");
+  const gmcLabel0 = parseMetafieldByNsKey(mf, "mm-google-shopping", "custom_label_0");
+  const gmcLabel1 = parseMetafieldByNsKey(mf, "mm-google-shopping", "custom_label_1");
+  const gmcLabel2 = parseMetafieldByNsKey(mf, "mm-google-shopping", "custom_label_2");
+  const gmcLabel3 = parseMetafieldByNsKey(mf, "mm-google-shopping", "custom_label_3");
+  const gmcLabel4 = parseMetafieldByNsKey(mf, "mm-google-shopping", "custom_label_4");
+  return {
+    id: node.id,
+    handle: node.handle,
+    seoTitle: node.title,
+    dealDate: parseMetafield(mf, "deal_date"),
+    dealPrice,
+    msrp: parseFloat(originalPrice || (variant?.compareAtPrice?.amount ?? "0")),
+    images: parseImages(node.images.edges),
+    brand: node.vendor,
+    category: parseCategory(parseMetafield(mf, "category")),
+    dealStatus: "archived",
+    qty: variant?.quantityAvailable ?? 0,
+    defaultVariantId: variant?.id ?? null,
+    hasMultipleVariants: variantEdges.length > 1,
+    ...maxSavingsAmount > 0 ? { maxSavingsAmount, maxSavingsPercent } : {},
+    ...moodTags.length > 0 ? { moodTags } : {},
+    ...audienceTags.length > 0 ? { audienceTags } : {},
+    ...mattersTags.length > 0 ? { mattersTags } : {},
+    ...heroVideo?.src && typeof heroVideo.duration === "number" ? { heroVideo: { src: heroVideo.src, duration: heroVideo.duration, ...heroVideo.poster ? { poster: heroVideo.poster } : {} } } : {},
+    // GMC fields
+    ...variant?.barcode != null ? { barcode: variant.barcode } : {},
+    ...seoDesc != null ? { seoDesc } : {},
+    ...moodImageUrl != null ? { moodImageUrl } : {},
+    ...featureBullets.length > 0 ? { featureBullets } : {},
+    ...specifications.length > 0 ? { specifications } : {},
+    ...productTypeDial != null ? { productTypeDial } : {},
+    ...originalPrice != null ? { originalPrice } : {},
+    ...gmcCategory != null ? { gmcCategory } : {},
+    ...gmcAgeGroup != null ? { gmcAgeGroup } : {},
+    ...gmcGender != null ? { gmcGender } : {},
+    ...gmcMpn != null ? { gmcMpn } : {},
+    ...gmcColor != null ? { gmcColor } : {},
+    ...gmcMaterial != null ? { gmcMaterial } : {},
+    ...gmcSize != null ? { gmcSize } : {},
+    ...gmcLabel0 != null ? { gmcLabel0 } : {},
+    ...gmcLabel1 != null ? { gmcLabel1 } : {},
+    ...gmcLabel2 != null ? { gmcLabel2 } : {},
+    ...gmcLabel3 != null ? { gmcLabel3 } : {},
+    ...gmcLabel4 != null ? { gmcLabel4 } : {},
+    ...dealScoreNum !== null && !isNaN(dealScoreNum) ? { dealScore: dealScoreNum } : {},
+    isDailyDeal
+  };
+}
+async function getFeedDeals(page = 1, limit = 50) {
+  const data = await storefront(`
+    query GetFeedPage($first: Int!, $after: String) {
+      products(first: $first, after: $after, query: "tag:deal-status-archived", sortKey: UPDATED_AT, reverse: true) {
+        pageInfo { hasNextPage }
+        edges {
+          cursor
+          node { ${GMC_FEED_CARD_FRAGMENT} }
+        }
+      }
+    }
+  `, { first: limit, after: page > 1 ? btoa(`${(page - 1) * limit}`) : null });
+  return {
+    deals: data.products.edges.map((e) => nodeToFeedDeal(e.node)),
     hasNextPage: data.products.pageInfo.hasNextPage
   };
 }
@@ -2410,6 +2660,7 @@ async function pushProductToShopify(doc) {
   if (doc.rawDescription) {
     metafields.push({ namespace: "custom", key: "original_description", value: doc.rawDescription, type: "multi_line_text_field", ownerId: gid });
   }
+  metafields.push({ namespace: "mm-google-shopping", key: "adult", value: "yes", type: "single_line_text_field", ownerId: gid });
   if (metafields.length > 0) {
     const mfResult = await adminGraphQL(`
       mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
@@ -4411,8 +4662,8 @@ async function addVariantsToProduct(masterProductId, optionName, variants) {
 }
 function parsePricingSnapshot(raw) {
   const mfMap = /* @__PURE__ */ new Map();
-  for (const mf of raw.metafields) {
-    if (mf) mfMap.set(mf.key, mf.value);
+  for (const mf of raw.metafields.nodes) {
+    mfMap.set(mf.key, mf.value);
   }
   const variants = raw.variants.nodes.map((v) => ({
     variantId: v.id,
@@ -4420,12 +4671,15 @@ function parsePricingSnapshot(raw) {
     title: v.title,
     price: parseFloat(v.price),
     compareAtPrice: v.compareAtPrice != null ? parseFloat(v.compareAtPrice) : null,
-    inventoryItemId: v.inventoryItem?.id ?? null
+    inventoryItemId: v.inventoryItem?.id ?? null,
+    unitCost: v.inventoryItem?.unitCost?.amount != null ? parseFloat(v.inventoryItem.unitCost.amount) : null
   }));
   if (variants.every((v) => v.sku === "")) return null;
   const wholesaleCostRaw = mfMap.get("wholesale_cost");
   const mapPriceRaw = mfMap.get("map_price");
   const originalPriceRaw = mfMap.get("original_price");
+  const discontinuedAtRaw = mfMap.get("discontinued_at");
+  const discontinuedAt = discontinuedAtRaw ? new Date(discontinuedAtRaw) : null;
   return {
     productId: raw.id,
     productGid: raw.id,
@@ -4439,7 +4693,8 @@ function parsePricingSnapshot(raw) {
       wholesaleCost: wholesaleCostRaw != null ? parseFloat(wholesaleCostRaw) : null,
       mapPrice: mapPriceRaw != null ? parseFloat(mapPriceRaw) : null,
       originalPrice: originalPriceRaw != null ? parseFloat(originalPriceRaw) : null,
-      mapRestricted: mfMap.get("map_restricted") === "true"
+      mapRestricted: mfMap.get("map_restricted") === "true",
+      discontinuedAt
     }
   };
 }
@@ -4493,14 +4748,21 @@ async function findVariantsBySkus(skus) {
           title: node.title,
           price: parseFloat(node.price),
           compareAtPrice: node.compareAtPrice != null ? parseFloat(node.compareAtPrice) : null,
-          inventoryItemId: node.inventoryItem?.id ?? null
+          inventoryItemId: node.inventoryItem?.id ?? null,
+          // unitCost is not fetched by the SKU-lookup query; callers that need
+          // it (pricing-apply-v2 recomputeVariant) fetch it via their own
+          // inline query against productVariant(id).
+          unitCost: null
         },
         metafields: {
           nalpacSku: mfMap.get("nalpac_sku") ?? null,
           wholesaleCost: wholesaleRaw != null ? parseFloat(wholesaleRaw) : null,
           mapPrice: mapRaw != null ? parseFloat(mapRaw) : null,
           originalPrice: origRaw != null ? parseFloat(origRaw) : null,
-          mapRestricted: mfMap.get("map_restricted") === "true"
+          mapRestricted: mfMap.get("map_restricted") === "true",
+          // discontinued_at is not fetched by the SKU-lookup query; callers that
+          // need it (pricing-apply-v2) fetch it via their own inline query.
+          discontinuedAt: null
         }
       });
     }
@@ -4534,7 +4796,7 @@ async function getDistinctProductTypes(opts) {
   await kvSet(PRODUCT_TYPES_CACHE_KEY, result, PRODUCT_TYPES_CACHE_TTL);
   return result;
 }
-var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, VARIANTS_BY_SKU_QUERY, PRODUCT_TYPES_QUERY, PRODUCT_TYPES_CACHE_KEY, PRODUCT_TYPES_CACHE_TTL;
+var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, GMC_FEED_METAFIELDS_FRAGMENT, GMC_FEED_CARD_FRAGMENT, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, VARIANTS_BY_SKU_QUERY, PRODUCT_TYPES_QUERY, PRODUCT_TYPES_CACHE_KEY, PRODUCT_TYPES_CACHE_TTL;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
     "use strict";
@@ -4697,6 +4959,58 @@ var init_shopify_server = __esm({
       longevity: "Longevity",
       fit: "Fit"
     };
+    GMC_FEED_METAFIELDS_FRAGMENT = `
+  metafields(identifiers: [
+    { namespace: "xdipx", key: "deal_date" }
+    { namespace: "xdipx", key: "original_price" }
+    { namespace: "xdipx", key: "category" }
+    { namespace: "xdipx", key: "mood_tags" }
+    { namespace: "xdipx", key: "audience_tags" }
+    { namespace: "xdipx", key: "matters_tags" }
+    { namespace: "xdipx", key: "hero_video" }
+    { namespace: "xdipx", key: "seo_meta_description" }
+    { namespace: "xdipx", key: "mood_image_url" }
+    { namespace: "xdipx", key: "feature_bullets" }
+    { namespace: "xdipx", key: "specifications" }
+    { namespace: "xdipx", key: "product_type_dial" }
+    { namespace: "xdipx", key: "deal_score" }
+    { namespace: "xdipx", key: "is_daily_deal" }
+    { namespace: "mm-google-shopping", key: "google_product_category" }
+    { namespace: "mm-google-shopping", key: "age_group" }
+    { namespace: "mm-google-shopping", key: "gender" }
+    { namespace: "mm-google-shopping", key: "mpn" }
+    { namespace: "mm-google-shopping", key: "color" }
+    { namespace: "mm-google-shopping", key: "material" }
+    { namespace: "mm-google-shopping", key: "size" }
+    { namespace: "mm-google-shopping", key: "custom_label_0" }
+    { namespace: "mm-google-shopping", key: "custom_label_1" }
+    { namespace: "mm-google-shopping", key: "custom_label_2" }
+    { namespace: "mm-google-shopping", key: "custom_label_3" }
+    { namespace: "mm-google-shopping", key: "custom_label_4" }
+  ]) {
+    namespace key value
+  }
+`;
+    GMC_FEED_CARD_FRAGMENT = `
+  id handle title vendor tags
+  options { name values }
+  images(first: 10) {
+    edges { node { url altText } }
+  }
+  variants(first: 1) {
+    edges {
+      node {
+        id
+        price { amount }
+        compareAtPrice { amount }
+        quantityAvailable
+        availableForSale
+        barcode
+      }
+    }
+  }
+  ${GMC_FEED_METAFIELDS_FRAGMENT}
+`;
     CART_FRAGMENT = `
   id checkoutUrl totalQuantity
   lines(first: 50) {
@@ -4814,19 +5128,16 @@ var init_shopify_server = __esm({
             compareAtPrice
             inventoryItem {
               id
+              unitCost { amount }
             }
           }
         }
-        metafields(identifiers: [
-          { namespace: "xdipx", key: "nalpac_sku" }
-          { namespace: "xdipx", key: "wholesale_cost" }
-          { namespace: "xdipx", key: "map_price" }
-          { namespace: "xdipx", key: "original_price" }
-          { namespace: "xdipx", key: "map_restricted" }
-        ]) {
-          namespace
-          key
-          value
+        metafields(keys: ["xdipx.nalpac_sku", "xdipx.wholesale_cost", "xdipx.map_price", "xdipx.original_price", "xdipx.map_restricted", "xdipx.discontinued_at"], first: 10) {
+          nodes {
+            namespace
+            key
+            value
+          }
         }
       }
     }
@@ -4938,6 +5249,7 @@ __export(sanity_server_exports, {
   getEmmaHeroSettings: () => getEmmaHeroSettings,
   getEmmaPersona: () => getEmmaPersona,
   getEmmaPresets: () => getEmmaPresets,
+  getHomeConfig: () => getHomeConfig,
   getHomepageSections: () => getHomepageSections,
   getPage: () => getPage,
   getPageList: () => getPageList,
@@ -5854,7 +6166,27 @@ async function getProductHandlesForSitemap() {
     return [];
   }
 }
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION;
+async function getHomeConfig() {
+  if (!projectId) return null;
+  return cached("sanity:home-config", 300, async () => {
+    try {
+      const client2 = getClient();
+      if (!client2) return null;
+      const raw = await client2.fetch(HOME_CONFIG_GROQ);
+      if (!raw) return null;
+      return {
+        activeVariant: raw.activeVariant ?? "off",
+        welcomeBackEnabled: raw.welcomeBackEnabled ?? true,
+        emmaCopyOverrides: raw.emmaCopyOverrides ?? {},
+        analyticsLabel: raw.analyticsLabel ?? ""
+      };
+    } catch (err) {
+      console.error("[sanity] getHomeConfig error:", err);
+      return null;
+    }
+  });
+}
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, HOME_CONFIG_GROQ;
 var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
@@ -5967,6 +6299,14 @@ var init_sanity_server = __esm({
   "heroImageUrl": heroImage.asset->url, heroImageAlt,
   "author": author->{ name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role },
   "category": category->{ name, "slug": slug.current, color }
+`;
+    HOME_CONFIG_GROQ = `
+  *[_id == "singleton.homeConfig"][0]{
+    activeVariant,
+    welcomeBackEnabled,
+    emmaCopyOverrides,
+    analyticsLabel
+  }
 `;
   }
 });
@@ -9531,7 +9871,7 @@ Visual style: premium, warm, a little edgy \u2014 push boundaries while staying 
     ASK_EMMA_AXIS_GUIDANCE = {
       mood: "How using this feels \u2014 the energy a shopper would gravitate to. Pick 1\u20133 that genuinely fit.",
       audience: "Who this is for \u2014 solo, couples, or gifting. Pick 1\u20132.",
-      matters: "Practical features a shopper might filter on \u2014 quietness, travel-friendliness, beginner-friendliness, waterproof, rechargeable, hands-free, soft-touch material. Pick 2\u20134 that are TRUE for this product."
+      matters: "Hard constraints a shopper might filter on \u2014 beginner-friendliness, whisper-quiet, waterproof, travel-readiness, discretion, hands-free, remote-controlled, plus-size inclusivity, easy to clean, rechargeable, soft-touch material, latex-free. Pick 0\u20134 that are TRUE for this product (empty is valid when no chip genuinely applies \u2014 lubes, cleaners, novelty items often have zero matches)."
     };
     IVR_EXPERIENCE_LEVELS = ["first-time", "curious", "experienced", "advanced"];
     IVR_USE_CASES = [
