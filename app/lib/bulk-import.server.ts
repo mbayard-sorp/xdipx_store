@@ -20,6 +20,8 @@ import {
   getProductHandleById,
   getPairingCandidates,
   pushProductToShopify,
+  activateProductInventoryAtLocations,
+  publishProductToXdipxChannels,
 } from '~/lib/shopify.server'
 import { upsertProductPage } from '~/lib/sanity.server'
 import type { BulkImportRow, BulkVariantRow, MasterProductGroup } from '~/types'
@@ -598,9 +600,24 @@ export async function importProductGroupRaw(group: MasterProductGroup): Promise<
       shopifyProductId: numericId,
     }).onConflictDoNothing()
 
+    const warnings: { stage: string; message: string }[] = []
+
+    // Stock the product at both fulfillment locations (quantities come from the
+    // daily Nalpac/Entrenue feeds, not from import) and publish to the xdipx
+    // sales channels. Both are non-fatal: a failure warns and the import succeeds.
+    try {
+      await activateProductInventoryAtLocations(numericId)
+    } catch (err) {
+      warnings.push({ stage: 'inventory-locations', message: err instanceof Error ? err.message : String(err) })
+    }
+    try {
+      await publishProductToXdipxChannels(numericId)
+    } catch (err) {
+      warnings.push({ stage: 'publish-channels', message: err instanceof Error ? err.message : String(err) })
+    }
+
     // Stub Sanity productPage — title/handle/vendor/raw description only.
     // Enrichment pass will fill tagline, seoTitle, dial, tags, IVR, FAQs.
-    const warnings: { stage: string; message: string }[] = []
     try {
       const handle = await getProductHandleById(numericId)
       if (!handle) {

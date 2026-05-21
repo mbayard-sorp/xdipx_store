@@ -2778,43 +2778,138 @@ export async function ensureMetafieldDefinition(input: {
 // ─── Pipeline helpers ─────────────────────────────────────────────────────
 
 /**
- * Set a Shopify product's status to 'active' and publish to all sales channels.
- * Required before the Storefront API can return the product.
+ * Set a Shopify product's status to 'active' and publish it to the xdipx sales
+ * channels (excluding Point of Sale). Required before the Storefront API can
+ * return the product.
  */
 export async function activateShopifyProduct(numericId: string): Promise<void> {
   const id = numericId.replace('gid://shopify/Product/', '')
-  const gid = `gid://shopify/Product/${id}`
 
-  // 1. Set product status to active
+  // 1. Set product status to active.
   await shopifyAdmin(`/products/${id}.json`, 'PUT', {
     product: { id, status: 'active' },
   })
 
-  // 2. Fetch all available publications (sales channels)
-  const { publications } = await adminGraphQL<{
-    publications: { edges: { node: { id: string } }[] }
+  // 2. Publish to the curated xdipx channels; unpublish from excluded ones.
+  await publishProductToXdipxChannels(id)
+}
+
+// ─── xdipx fulfillment locations + sales channels ─────────────────────────
+
+/**
+ * Shopify Location GIDs that every imported product is stocked at. Quantities
+ * are NOT set at import time; the daily Nalpac/Entrenue feeds populate them.
+ */
+export const XDIPX_LOCATION_IDS = [
+  'gid://shopify/Location/85557510315', // Entrenue
+  'gid://shopify/Location/85557477547', // Nalpac
+] as const
+
+/**
+ * Sales-channel publication names imported products are published to. Matched
+ * by name because publication GIDs are not stable across stores/environments.
+ */
+const XDIPX_PUBLICATION_NAMES = [
+  'Online Store',
+  'Shop',
+  'Storefront Admin',
+  'Shopify GraphiQL App',
+  'Google & YouTube',
+  'ChatGPT',
+]
+
+/**
+ * Channels we never want products on. Point of Sale auto-attaches new products
+ * at the store level, so we explicitly unpublish from it.
+ */
+const XDIPX_EXCLUDED_PUBLICATION_NAMES = [
+  'Point of Sale',
+]
+
+/**
+ * Activate every variant's inventory item at both xdipx fulfillment locations
+ * so the daily feeds can set quantities. No quantity is set here (left blank).
+ * Idempotent: activating an already-active location is a no-op.
+ */
+export async function activateProductInventoryAtLocations(numericId: string): Promise<void> {
+  const id = numericId.replace('gid://shopify/Product/', '')
+  const data = await adminGraphQL<{
+    product: { variants: { edges: { node: { inventoryItem: { id: string } } }[] } } | null
   }>(`
-    query GetPublications {
-      publications(first: 20) {
-        edges { node { id } }
+    query ProductInventoryItems($id: ID!) {
+      product(id: $id) {
+        variants(first: 100) { edges { node { inventoryItem { id } } } }
       }
     }
-  `)
+  `, { id: `gid://shopify/Product/${id}` })
 
-  const publicationIds = publications.edges.map(e => e.node.id)
-  if (publicationIds.length === 0) return
-
-  // 3. Publish product to all channels
-  await adminGraphQL<unknown>(`
-    mutation PublishProduct($id: ID!, $input: [PublicationInput!]!) {
-      publishablePublish(id: $id, input: $input) {
-        userErrors { field message }
+  const itemIds = (data.product?.variants.edges ?? []).map(e => e.node.inventoryItem.id)
+  for (const inventoryItemId of itemIds) {
+    for (const locationId of XDIPX_LOCATION_IDS) {
+      const res = await adminGraphQL<{
+        inventoryActivate: { userErrors: { field: string[]; message: string }[] }
+      }>(`
+        mutation ActivateInventory($inventoryItemId: ID!, $locationId: ID!) {
+          inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
+            userErrors { field message }
+          }
+        }
+      `, { inventoryItemId, locationId })
+      const errs = res.inventoryActivate?.userErrors ?? []
+      if (errs.length) {
+        console.warn(`[shopify] inventoryActivate ${inventoryItemId} @ ${locationId}:`, errs.map(e => e.message).join('; '))
       }
+      await new Promise(r => setTimeout(r, 200))
     }
-  `, {
-    id: gid,
-    input: publicationIds.map(pubId => ({ publicationId: pubId })),
-  })
+  }
+}
+
+/**
+ * Publish a product to the xdipx sales channels (XDIPX_PUBLICATION_NAMES) and
+ * unpublish it from any excluded channel (XDIPX_EXCLUDED_PUBLICATION_NAMES, e.g.
+ * Point of Sale, which auto-attaches new products). Safe to call on draft
+ * products; they surface on each channel once active.
+ */
+export async function publishProductToXdipxChannels(numericId: string): Promise<void> {
+  const id = numericId.replace('gid://shopify/Product/', '')
+  const gid = `gid://shopify/Product/${id}`
+
+  const { publications } = await adminGraphQL<{
+    publications: { edges: { node: { id: string; name: string } }[] }
+  }>(`query GetPublications { publications(first: 30) { edges { node { id name } } } }`)
+
+  const wanted   = new Set(XDIPX_PUBLICATION_NAMES)
+  const excluded = new Set(XDIPX_EXCLUDED_PUBLICATION_NAMES)
+  const toPublish   = publications.edges.filter(e => wanted.has(e.node.name)).map(e => e.node.id)
+  const toUnpublish = publications.edges.filter(e => excluded.has(e.node.name)).map(e => e.node.id)
+
+  if (toPublish.length > 0) {
+    const res = await adminGraphQL<{
+      publishablePublish: { userErrors: { field: string[]; message: string }[] }
+    }>(`
+      mutation PublishProduct($id: ID!, $input: [PublicationInput!]!) {
+        publishablePublish(id: $id, input: $input) {
+          userErrors { field message }
+        }
+      }
+    `, { id: gid, input: toPublish.map(pid => ({ publicationId: pid })) })
+    const errs = res.publishablePublish?.userErrors ?? []
+    if (errs.length) console.warn('[shopify] publishablePublish:', errs.map(e => e.message).join('; '))
+  }
+
+  if (toUnpublish.length > 0) {
+    const res = await adminGraphQL<{
+      publishableUnpublish: { userErrors: { field: string[]; message: string }[] }
+    }>(`
+      mutation UnpublishProduct($id: ID!, $input: [PublicationInput!]!) {
+        publishableUnpublish(id: $id, input: $input) {
+          userErrors { field message }
+        }
+      }
+    `, { id: gid, input: toUnpublish.map(pid => ({ publicationId: pid })) })
+    const errs = res.publishableUnpublish?.userErrors ?? []
+    if (errs.length) console.warn('[shopify] publishableUnpublish:', errs.map(e => e.message).join('; '))
+  }
 }
 
 /**
