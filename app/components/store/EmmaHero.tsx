@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import type { Deal } from '~/types'
 import { OptimizedImage } from './OptimizedImage'
+import { Reveal } from '~/components/motion/Reveal'
 
 export type EmmaHeroVariant = 'loving' | 'bundle' | 'quote'
 
@@ -79,7 +80,7 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
         </Link>
 
         <div className="flex flex-col justify-center gap-4 md:py-6">
-          <div className="flex items-center gap-2">
+          <Reveal disabled variant="up" delay={0.05} className="flex items-center gap-2">
             <span className="text-coral text-xl leading-none" aria-hidden="true">♥</span>
             <span
               className="text-coral text-[11px] tracking-[0.18em] uppercase font-semibold"
@@ -87,22 +88,23 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
             >
               {copy?.eyebrow ?? 'Currently loving'}
             </span>
-          </div>
+          </Reveal>
 
-          <h1
+          <Reveal disabled variant="up" delay={0.12} as="h1"
             className="font-black text-ink leading-[1.05] text-3xl md:text-5xl"
-            style={{ fontFamily: 'var(--font-display)' }}
           >
-            <Link to={productHref} className="hover:text-coral transition-colors">
+            <Link to={productHref} className="hover:text-coral transition-colors" style={{ fontFamily: 'var(--font-display)' }}>
               {copy?.headline ?? deal.seoTitle}
             </Link>
-          </h1>
+          </Reveal>
 
-          <p className="text-ink/75 text-base md:text-lg leading-relaxed max-w-prose">
+          <Reveal disabled variant="up" delay={0.20} as="p"
+            className="text-ink/75 text-base md:text-lg leading-relaxed max-w-prose"
+          >
             {copy?.body ?? deal.tagline}
-          </p>
+          </Reveal>
 
-          <div className="flex items-baseline gap-3 mt-2">
+          <Reveal disabled variant="fade" delay={0.28} className="flex items-baseline gap-3 mt-2">
             {showDiscount ? (
               <>
                 <span className="text-3xl font-black text-coral" style={{ fontFamily: 'var(--font-display)' }}>
@@ -115,21 +117,23 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
                 ${deal.dealPrice.toFixed(0)}
               </span>
             )}
-          </div>
+          </Reveal>
 
-          <div className="flex flex-wrap gap-2 mt-1">
+          <Reveal disabled variant="scale" delay={0.34} className="flex flex-wrap gap-2 mt-1">
             <Link
               to={`/products/${deal.handle}`}
-              className="inline-flex items-center gap-2 bg-coral hover:bg-coral-deep text-white font-semibold px-6 py-3 rounded-full transition-colors"
+              className="press inline-flex items-center gap-2 bg-coral hover:bg-coral-deep text-white font-semibold px-6 py-3 rounded-full transition-colors"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Take a peek →
             </Link>
-          </div>
+          </Reveal>
 
-          <p className="text-muted text-xs mt-3 font-mono">
+          <Reveal disabled variant="fade" delay={0.42} as="p"
+            className="text-muted text-xs mt-3 font-mono"
+          >
             {copy?.aside ?? "— Emma · changes when I find something new worth telling you about"}
-          </p>
+          </Reveal>
         </div>
       </div>
     </section>
@@ -154,7 +158,7 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
   return (
     <section className="bg-cream-2">
       <div className="max-w-6xl mx-auto px-4 py-8 md:py-14 flex flex-col gap-6">
-        <div className="flex items-center gap-3 flex-wrap">
+        <Reveal disabled variant="up" delay={0.05} className="flex items-center gap-3 flex-wrap">
           <span className="text-coral text-xl leading-none" aria-hidden="true">♥</span>
           <span
             className="text-coral text-[11px] tracking-[0.18em] uppercase font-semibold"
@@ -163,14 +167,14 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
             {copy?.eyebrow ?? 'Emma recommends · a pair'}
           </span>
           <span className="text-muted text-xs font-mono md:ml-auto">better together · save when you grab both</span>
-        </div>
+        </Reveal>
 
-        <h1
+        <Reveal disabled variant="up" delay={0.12} as="h1"
           className="font-black text-ink leading-[1.05] text-3xl md:text-5xl"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {copy?.headline ?? 'These two were made for each other.'}
-        </h1>
+        </Reveal>
 
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 md:gap-6">
           <Link
@@ -230,7 +234,7 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
           )}
           <Link
             to={`/products/${combinedSlug}`}
-            className="md:ml-auto inline-flex items-center gap-2 bg-coral hover:bg-coral-deep text-white font-semibold px-6 py-3 rounded-full transition-colors"
+            className="press md:ml-auto inline-flex items-center gap-2 bg-coral hover:bg-coral-deep text-white font-semibold px-6 py-3 rounded-full transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             I'll take both ♥
@@ -272,29 +276,29 @@ function HeroQuote({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: b
             </div>
           </div>
 
-          <blockquote
+          <Reveal disabled variant="up" delay={0.14} as="blockquote"
             className="font-black text-ink leading-[1.1] text-2xl md:text-3xl"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             “{copy?.pullQuote ?? defaultQuote}”
-          </blockquote>
+          </Reveal>
 
-          <div className="flex flex-wrap gap-2 mt-1">
+          <Reveal disabled variant="scale" delay={0.24} className="flex flex-wrap gap-2 mt-1">
             <Link
               to={`/products/${deal.handle}`}
-              className="inline-flex items-center gap-2 bg-coral hover:bg-coral-deep text-white font-semibold px-6 py-3 rounded-full transition-colors"
+              className="press inline-flex items-center gap-2 bg-coral hover:bg-coral-deep text-white font-semibold px-6 py-3 rounded-full transition-colors"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Show me →
             </Link>
             <Link
               to="/collections/pleasure"
-              className="inline-flex items-center gap-2 border border-ink/20 hover:border-ink/60 text-ink font-medium px-6 py-3 rounded-full transition-colors"
+              className="press inline-flex items-center gap-2 border border-ink/20 hover:border-ink/60 text-ink font-medium px-6 py-3 rounded-full transition-colors"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               What else she's into
             </Link>
-          </div>
+          </Reveal>
         </div>
 
         <Link

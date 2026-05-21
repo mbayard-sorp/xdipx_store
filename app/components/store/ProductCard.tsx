@@ -42,7 +42,7 @@ export function ProductCard({
         variant="overlay"
         size="sm"
       />
-      <Link to={`/products/${handle}`} className="block">
+      <Link to={`/products/${handle}`} className="press block">
         <div className="aspect-[4/5] bg-cream-2 overflow-hidden relative">
           {heroVideo?.src ? (
             <CardVideo cardId={id} video={heroVideo} title={title} />

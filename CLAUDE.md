@@ -69,34 +69,50 @@ Build and test at 375px first. Most traffic will be mobile. Use responsive class
 | KV Cache | Vercel KV |
 | Analytics | Google Analytics 4 |
 
-## Brand Design Tokens (v2 — Emma editorial)
+## Brand Design Tokens (v3 — Style Guide Nº 01, Spring 2026)
 
-Colors live in `app/app.css` as `@theme` variables. Tailwind utilities use the token name directly (`bg-cream`, `text-ink`, `bg-coral`).
+> **White paper. Coral for life. Plum for emphasis.** Colors live in `app/app.css` as `@theme` variables. Tailwind utilities use the token name directly (`bg-paper`, `text-ink`, `bg-coral`). Prefer the v3 names below. The v2 names (`cream`, `cream-2`, `muted`, `coral-deep`, `sun`, `butter`, `font-script`) are kept as **legacy aliases** mapped onto the v3 palette so old utility classes still compile — do not use them in new code.
 
 | Token | Value | Use |
 |---|---|---|
-| `cream` | `#FAF4EA` | Page background |
-| `cream-2` | `#F2EADD` | Secondary surface, card backs |
-| `paper` | `#FFFFFF` | Paper surface, modals |
-| `ink` | `#151211` | Primary text, dark surfaces |
-| `ink-2` | `#2A2421` | Secondary dark surface |
-| `muted` | `#6F645C` | Secondary text, metadata |
-| `line` | `#E5DBC9` | Dividers, borders |
-| `coral` | `#FF4B1F` | Primary CTA, hero accent |
-| `coral-2` | `#FF6A3D` | Hover / secondary coral |
-| `coral-deep` | `#D93A15` | Active state / pressed |
+| `paper` | `#FFFFFF` | Page background, primary surface |
+| `paper-2` | `#FAFAF9` | Secondary surface, card backs |
+| `paper-3` | `#F4F3F1` | Tertiary surface |
+| `ink` | `#1A1418` | Primary text, dark surfaces |
+| `ink-2` | `#3D2F3A` | Secondary dark surface |
+| `ink-3` | `#6B5F68` | Secondary text, metadata |
+| `ink-4` | `#9A8F97` | Tertiary / fine print |
+| `line` | `rgba(26,20,24,0.08)` | Dividers, borders (also `line-2`, `line-3`) |
+| `coral` | `#FF5A36` | Primary CTA, hero accent — use sparingly |
+| `coral-2` | `#FF7A5A` | Hover / secondary coral |
+| `coral-soft` | `#FFE6DD` | Coral tint backgrounds |
+| `plum` | `#7A2BB8` | Emphasis (italic word in headlines), active CTA |
+| `plum-2` | `#5B1F8A` | Pressed / deep plum |
+| `plum-soft` | `#F3E8FB` | Plum tint backgrounds |
 | `sage` | `#7C8F78` | Accent — hearts, tags, quiet states |
-| `sun` | `#F5B841` | Editor's pick / warm callouts |
 
-Radii: `--radius-sm 6`, `--radius 12`, `--radius-lg 20`, `--radius-xl 28`.
+Radii: `--radius-sm 8`, `--radius 14`, `--radius-md 18`, `--radius-lg`..`--radius-4xl 22` (everything ≥ lg is 22px).
+
+Motion tokens (`app/app.css`): `--ease-entrance` (weighted ease-out), `--ease-standard`, `--ease-exit`; `--duration-fast 150ms`, `--duration-base 240ms`, `--duration-slow 420ms`; `--reveal-distance 16px`. JS motion presets mirror these in `app/components/motion/variants.ts`.
 
 Fonts:
-- `font-display` → `Archivo` (headlines, CTAs, nav — use 700–900 for display)
-- `font-body` → `Inter` (body copy, 400–600)
+- `font-display` → `Newsreader` (serif headlines, editorial display)
+- `font-body` → `DM Sans` (body copy, nav, labels)
+- `font-mono` → `JetBrains Mono` (kickers / section labels via the `.kicker` class)
+- `font-script` → `Caveat` (legacy accent, sparing use)
 
-Brand motif: `♥` — use in CTA labels ("I'll take it ♥"), Emma asides, section dividers.
+Brand motifs (`app/app.css` §11): `♥` in CTA labels ("I'll take it ♥"), Emma asides, dividers. `.em` / `em.brand` = italic plum emphasis word. `.link-coral` = coral hairline link. `.kicker` = mono uppercase section label.
 
-**Coral is the hero color.** No brand gradient anymore — flat coral or coral-on-cream. Do not reintroduce purple or orange.
+**Coral is the accent, plum is for emphasis.** No brand gradient — flat coral on white paper. Do not reintroduce orange or the old cream backgrounds.
+
+## Motion System (editorial reveal)
+
+Storefront entrance/scroll motion uses one reusable, SSR-safe primitive — do not hand-roll IntersectionObserver or `whileInView` per component:
+- `app/lib/use-reveal.ts` — `useReveal()` hook (mount-gated + reduced-motion-aware).
+- `app/components/motion/Reveal.tsx` — `<Reveal variant delay index once disabled as>` wrapper. Variants: `fade | up | scale`.
+- `app/components/motion/variants.ts` — shared springs, stagger, and the one-shot `heartbeat`.
+
+Rules: render the **visible/final state on the server** (the primitive handles this — never produces hidden SSR markup); transform/opacity only (zero CLS); **never wrap the LCP hero image**; `motion`'s `layout` prop only on filter grids. Reduced-motion always renders the final state.
 
 ## File Structure (Key Files)
 

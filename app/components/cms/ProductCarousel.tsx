@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import type { Product } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
 import ProductTileMedia from '~/components/store/ProductTileMedia'
+import { Reveal } from '~/components/motion/Reveal'
 
 interface ProductCarouselProps {
   block?: ProductCarouselBlock
@@ -65,16 +66,19 @@ export function ProductCarousel({
         <div className="flex items-end justify-between mb-6">
           <div>
             {eyebrow && (
-              <p className={`text-xs font-semibold uppercase tracking-widest mb-1 ${dark ? 'text-white/60' : 'text-sage'}`}>
+              <Reveal as="p" variant="up" index={0} className={`text-xs font-semibold uppercase tracking-widest mb-1 ${dark ? 'text-white/60' : 'text-sage'}`}>
                 {eyebrow}
-              </p>
+              </Reveal>
             )}
-            <h2
+            <Reveal
+              as="h2"
+              variant="up"
+              index={1}
               className={`text-2xl font-bold ${dark ? 'text-white' : 'text-ink'}`}
               style={{ fontFamily: 'var(--font-display)' }}
             >
               {heading}
-            </h2>
+            </Reveal>
           </div>
           <div className="flex items-center gap-2">
             {/* Arrow buttons — carousel only, desktop only */}
@@ -122,14 +126,18 @@ export function ProductCarousel({
 
         {/* Product grid or carousel */}
         {layout === 'carousel' ? (
-          <div
-            ref={scrollRef}
-            className="flex gap-4 overflow-x-auto scrollbar-hide snap-x snap-mandatory pb-2"
-          >
-            {products.map(product => (
-              <ProductCard key={product.id} product={product} className="shrink-0 w-52 sm:w-60 snap-start" />
-            ))}
-          </div>
+          // Reveal the rail as one unit — per-item scroll reveal fights the
+          // horizontal scroll-snap, so the container fades/slides in once.
+          <Reveal variant="up">
+            <div
+              ref={scrollRef}
+              className="flex gap-4 overflow-x-auto scrollbar-hide snap-x snap-mandatory pb-2"
+            >
+              {products.map(product => (
+                <ProductCard key={product.id} product={product} className="shrink-0 w-52 sm:w-60 snap-start" />
+              ))}
+            </div>
+          </Reveal>
         ) : (
           <div
             className={
@@ -138,8 +146,10 @@ export function ProductCarousel({
                 : 'grid grid-cols-2 md:grid-cols-4 gap-4'
             }
           >
-            {products.map(product => (
-              <ProductCard key={product.id} product={product} />
+            {products.map((product, i) => (
+              <Reveal key={product.id} variant="up" index={i}>
+                <ProductCard product={product} />
+              </Reveal>
             ))}
           </div>
         )}

@@ -3,6 +3,7 @@ import { Link, useFetcher } from 'react-router'
 import type { Deal, PairBundleCopy, ProductVariant } from '~/types'
 import { PairBundleHeroCarousel } from './PairBundleHeroCarousel'
 import { splitUnderscores, renderWithHighlight } from './pairBundleText'
+import { Reveal } from '~/components/motion/Reveal'
 
 interface PairBundleHeroProps {
   primary:     Deal
@@ -487,6 +488,7 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
         {/* ================= MOBILE ================= */}
         <div className="md:hidden">
           <div className="relative bg-paper rounded-[var(--radius-xl)] border border-line p-6 overflow-hidden">
+            <Reveal disabled variant="up" delay={0.05}>
             <div className="flex flex-wrap items-start justify-between gap-4 mb-2.5">
               <span
                 className="inline-flex items-center gap-1.5 px-[13px] py-1.5 rounded-full text-[11.5px] font-extrabold uppercase tracking-[0.12em]"
@@ -522,6 +524,7 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
             >
               {renderWithHighlight(copy.body ?? '')}
             </p>
+            </Reveal>
 
             <div className="relative mb-6 overflow-visible bg-transparent">
               <div className="grid grid-cols-1 relative">
@@ -618,7 +621,7 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
           >
             <div aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-1.5 bg-coral" />
 
-            <div>
+            <Reveal disabled variant="up" delay={0.05}>
               <div className="flex items-center gap-3.5 mb-4">
                 <span
                   className="w-[42px] h-[42px] rounded-full bg-coral text-cream inline-flex items-center justify-center shrink-0"
@@ -675,7 +678,7 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
               >
                 {renderDekWithPill(copy.body ?? '')}
               </p>
-            </div>
+            </Reveal>
 
             <div
               className="text-right italic text-muted self-start max-w-[260px]"

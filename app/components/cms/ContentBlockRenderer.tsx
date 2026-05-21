@@ -1,5 +1,7 @@
 import type { ContentBlock } from '~/types/cms'
 import type { Product } from '~/types'
+import { Reveal } from '~/components/motion/Reveal'
+import type { RevealVariant } from '~/components/motion/variants'
 import { AnnouncementBar }    from './AnnouncementBar'
 import { PromoBanner }        from './PromoBanner'
 import { EditorialTiles }     from './EditorialTiles'
@@ -20,7 +22,22 @@ interface ContentBlockRendererProps {
   bonusDealProduct?: Product | null
 }
 
-export function ContentBlockRenderer({ block, carouselProductMap, bonusDealProduct }: ContentBlockRendererProps) {
+/** Pinned chrome that must paint immediately — never wrapped in a reveal. */
+const NO_REVEAL: ReadonlySet<ContentBlock['_type']> = new Set([
+  'announcementBar',
+  'trustBar',
+])
+
+/** Banner-ish blocks read better with a plain fade than an upward slide. */
+const FADE_BLOCKS: ReadonlySet<ContentBlock['_type']> = new Set([
+  'promoBanner',
+])
+
+function renderBlock(
+  block: ContentBlock,
+  carouselProductMap: Record<string, Product[]>,
+  bonusDealProduct?: Product | null,
+) {
   switch (block._type) {
     case 'announcementBar':
       return <AnnouncementBar block={block} />
@@ -61,4 +78,12 @@ export function ContentBlockRenderer({ block, carouselProductMap, bonusDealProdu
     default:
       return null
   }
+}
+
+export function ContentBlockRenderer({ block, carouselProductMap, bonusDealProduct }: ContentBlockRendererProps) {
+  const inner = renderBlock(block, carouselProductMap, bonusDealProduct)
+  if (inner === null || NO_REVEAL.has(block._type)) return inner
+
+  const variant: RevealVariant = FADE_BLOCKS.has(block._type) ? 'fade' : 'up'
+  return <Reveal variant={variant}>{inner}</Reveal>
 }
