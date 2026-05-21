@@ -96,9 +96,11 @@ function buildMasterUpsertPayload(
   } else if (carriedBrands.has(brand) && master.marginMsrpPct >= 0.45) {
     tier = 'B'
     gapReason = `Brand "${master.brand}" already carried; margin ${(master.marginMsrpPct * 100).toFixed(0)}%, ${master.inStockVariants} variant(s) in stock`
-  } else if (master.inNewFeed && master.marginMsrpPct >= 0.50) {
+  } else if (master.inNewFeed) {
+    // New-products feed = "new item". Surfaced regardless of margin (all new
+    // items belong on the site); margin is shown for the approval decision.
     tier = 'C'
-    gapReason = `New feed product; margin ${(master.marginMsrpPct * 100).toFixed(0)}%, ${master.inStockVariants} variant(s) in stock`
+    gapReason = `In Nalpac new-products feed; margin ${(master.marginMsrpPct * 100).toFixed(0)}%, ${master.inStockVariants} variant(s) in stock`
   } else {
     tier = 'D'
     gapReason = `Brand opportunity: "${master.brand}" has ${master.variantCount} qualifying variant(s) not in catalog; margin ${(master.marginMsrpPct * 100).toFixed(0)}%`
@@ -269,18 +271,19 @@ export async function runImportMonitor(
       return { master, tier, gapReason, score, upsertPayload }
     })
 
-    // 9. Rank + cap. Tier A (Nalpac top-100) must ALWAYS surface — proven
-    //    sellers we don't carry yet belong on the site — so they bypass the
-    //    gap_score cap. Remaining slots go to the highest-gap_score non-A masters.
+    // 9. Rank + cap. Nalpac top-100 AND new-products masters must ALWAYS
+    //    surface — proven sellers and new items both belong on the site — so
+    //    they bypass the gap_score cap. Remaining slots go to the highest
+    //    gap_score of the rest (carried-brand depth + brand opportunities).
     const sorted = enriched.sort((a, b) => b.score - a.score)
-    const tierA  = sorted.filter(e => e.tier === 'A')
-    const rest   = sorted.filter(e => e.tier !== 'A')
-    const restSlots = Math.max(0, maxCandidates - tierA.length)
-    const capped = [...tierA, ...rest.slice(0, restSlots)]
+    const guaranteed = sorted.filter(e => e.master.inTop100Feed || e.master.inNewFeed)
+    const rest       = sorted.filter(e => !(e.master.inTop100Feed || e.master.inNewFeed))
+    const restSlots  = Math.max(0, maxCandidates - guaranteed.length)
+    const capped = [...guaranteed, ...rest.slice(0, restSlots)]
 
     console.info(
       `[import-monitor] collapsed=${allMasters.length} eligible=${eligibleMasters.length} ` +
-      `tierA=${tierA.length} capped=${capped.length} (max=${maxCandidates})`,
+      `guaranteed=${guaranteed.length} capped=${capped.length} (max=${maxCandidates})`,
     )
 
     // 10. Load existing candidate rows keyed by masterKey for the capped set.
