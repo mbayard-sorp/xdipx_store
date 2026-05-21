@@ -35,12 +35,20 @@ function BotIdMount() {
   return <BotIdClient protect={BOTID_PROTECTED_ROUTES} />
 }
 
-if (typeof window !== 'undefined') {
-  const dsn = (window as unknown as { ENV?: { SENTRY_DSN?: string } }).ENV?.SENTRY_DSN
-  if (dsn && !(window as unknown as { __sentryInit?: boolean }).__sentryInit) {
-    Sentry.init({ dsn, environment: import.meta.env.MODE, tracesSampleRate: 0.1 })
-    ;(window as unknown as { __sentryInit: boolean }).__sentryInit = true
-  }
+// Initialize Sentry after hydration rather than at module-eval time. Running
+// Sentry.init() synchronously while the client bundle evaluates competes with
+// React hydration for the main thread and hurts INP; deferring to a mount
+// effect keeps the critical path clear. window.ENV is set by the inline script
+// in <App>, which has run by the time this effect fires.
+function SentryInit() {
+  useEffect(() => {
+    const dsn = (window as unknown as { ENV?: { SENTRY_DSN?: string } }).ENV?.SENTRY_DSN
+    if (dsn && !(window as unknown as { __sentryInit?: boolean }).__sentryInit) {
+      Sentry.init({ dsn, environment: import.meta.env.MODE, tracesSampleRate: 0.1 })
+      ;(window as unknown as { __sentryInit: boolean }).__sentryInit = true
+    }
+  }, [])
+  return null
 }
 
 export const links: LinksFunction = () => [
@@ -50,26 +58,15 @@ export const links: LinksFunction = () => [
   { rel: 'icon', type: 'image/png', href: '/favicon-32x32.png', sizes: '32x32' },
   { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
   { rel: 'manifest', href: '/site.webmanifest' },
-  // Preconnect for Google Fonts
-  { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
-  { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
   // Preconnect for Google Analytics
   { rel: 'preconnect', href: 'https://www.googletagmanager.com' },
   // Preconnect for Shopify CDN — the LCP hero image and gallery come from
   // cdn.shopify.com on every product/homepage view. crossOrigin saves a
   // round-trip on the cross-origin TCP+TLS handshake.
   { rel: 'preconnect', href: 'https://cdn.shopify.com', crossOrigin: 'anonymous' },
-  // Style Guide Nº 01 fonts: Newsreader (display, with italic) + DM Sans (body)
-  // + JetBrains Mono (kickers). Caveat kept for legacy EditorBioBlock signatures.
-  {
-    rel: 'preload',
-    as: 'style',
-    href: 'https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..600&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;700&display=swap',
-  },
-  {
-    rel: 'stylesheet',
-    href: 'https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..600&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;700&display=swap',
-  },
+  // Fonts (Newsreader / DM Sans / JetBrains Mono / Caveat) are now self-hosted
+  // via @fontsource and bundled into app.css — no cross-origin Google Fonts
+  // request, no render-blocking external stylesheet. See app/app.css.
   { rel: 'stylesheet', href: stylesheet },
 ]
 
@@ -139,7 +136,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
             }}
           />
         )}
-        {ga4Id && (
+        {/* Load GA4 directly only when GTM is NOT present. When gtmId is set the
+            GTM container owns the GA4 config tag, so loading gtag/js here too
+            would pull GA4 twice and double-fire events. The consent-default
+            script above still defines window.gtag (→ dataLayer.push), so
+            analytics.client events flow through GTM either way. */}
+        {ga4Id && !gtmId && (
           <>
             <script async src={`https://www.googletagmanager.com/gtag/js?id=${ga4Id}`} />
             <script
@@ -204,6 +206,7 @@ export default function App() {
           __html: `window.ENV = ${JSON.stringify(ENV)}`,
         }}
       />
+      <SentryInit />
     </>
   )
 }
