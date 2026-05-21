@@ -73,6 +73,19 @@
   --radius-2xl: 22px;
   --radius-3xl: 22px;
   --radius-4xl: 22px;
+
+  /* ─── Motion ───────────────────────────────────── */
+  /* Single source of truth for CSS-driven motion (hover/press, gallery
+     slides, .card-lift). JS-driven motion (motion/react) mirrors these
+     numerics in app/components/motion/variants.ts — springs can't read
+     CSS vars, so the parity is maintained by hand. */
+  --ease-entrance: cubic-bezier(0.22, 1, 0.36, 1);   /* weighted ease-out */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-exit:     cubic-bezier(0.4, 0, 1, 1);
+  --duration-fast: 150ms;
+  --duration-base: 240ms;
+  --duration-slow: 420ms;
+  --reveal-distance: 16px;
 }
 
 /* ─── Brand primitives (per style guide §11) ───────────────────────── */
@@ -160,8 +173,8 @@ em.brand {
   from { opacity: 0; transform: translateX(-100%); }
   to   { opacity: 1; transform: translateX(0); }
 }
-.slide-in-right { animation: slide-in-right 0.28s ease-out forwards; }
-.slide-in-left  { animation: slide-in-left  0.28s ease-out forwards; }
+.slide-in-right { animation: slide-in-right 0.28s var(--ease-entrance) forwards; }
+.slide-in-left  { animation: slide-in-left  0.28s var(--ease-entrance) forwards; }
 
 /* TrustBar mobile marquee */
 @keyframes marquee {
@@ -196,13 +209,24 @@ em.brand {
    devices used to trigger this on tap, which fought with horizontal swipes
    on the PLP card carousel. */
 .card-lift {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: transform var(--duration-base) var(--ease-standard),
+              box-shadow var(--duration-base) var(--ease-standard);
 }
 @media (hover: hover) {
   .card-lift:hover {
     transform: translateY(-4px);
     box-shadow: 0 12px 32px rgba(21, 18, 17, 0.12);
   }
+}
+
+/* Tactile press — compress slightly on active/tap. Pairs with .card-lift on
+   cards and stands alone on buttons/links that want physical press feedback.
+   Transform-only so it never affects layout. */
+.press {
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+.press:active {
+  transform: scale(0.97);
 }
 
 /* Drag-apart spacer animation for deal table */
