@@ -920,6 +920,8 @@ var init_db_server = __esm({
 // app/lib/shopify.server.ts
 var shopify_server_exports = {};
 __export(shopify_server_exports, {
+  XDIPX_LOCATION_IDS: () => XDIPX_LOCATION_IDS,
+  activateProductInventoryAtLocations: () => activateProductInventoryAtLocations,
   activateShopifyProduct: () => activateShopifyProduct,
   addLinesToCart: () => addLinesToCart,
   addToCart: () => addToCart,
@@ -1020,6 +1022,7 @@ __export(shopify_server_exports, {
   parseMetafieldJSON: () => parseMetafieldJSON,
   pollMediaReady: () => pollMediaReady,
   predictiveSearch: () => predictiveSearch,
+  publishProductToXdipxChannels: () => publishProductToXdipxChannels,
   pushProductToShopify: () => pushProductToShopify,
   registerReverseDelivery: () => registerReverseDelivery,
   removeFromCart: () => removeFromCart,
@@ -2731,29 +2734,68 @@ async function ensureMetafieldDefinition(input) {
 }
 async function activateShopifyProduct(numericId) {
   const id = numericId.replace("gid://shopify/Product/", "");
-  const gid = `gid://shopify/Product/${id}`;
   await shopifyAdmin(`/products/${id}.json`, "PUT", {
     product: { id, status: "active" }
   });
-  const { publications } = await adminGraphQL(`
-    query GetPublications {
-      publications(first: 20) {
-        edges { node { id } }
+  await publishProductToXdipxChannels(id);
+}
+async function activateProductInventoryAtLocations(numericId) {
+  const id = numericId.replace("gid://shopify/Product/", "");
+  const data = await adminGraphQL(`
+    query ProductInventoryItems($id: ID!) {
+      product(id: $id) {
+        variants(first: 100) { edges { node { inventoryItem { id } } } }
       }
     }
-  `);
-  const publicationIds = publications.edges.map((e) => e.node.id);
-  if (publicationIds.length === 0) return;
-  await adminGraphQL(`
-    mutation PublishProduct($id: ID!, $input: [PublicationInput!]!) {
-      publishablePublish(id: $id, input: $input) {
-        userErrors { field message }
+  `, { id: `gid://shopify/Product/${id}` });
+  const itemIds = (data.product?.variants.edges ?? []).map((e) => e.node.inventoryItem.id);
+  for (const inventoryItemId of itemIds) {
+    for (const locationId of XDIPX_LOCATION_IDS) {
+      const res = await adminGraphQL(`
+        mutation ActivateInventory($inventoryItemId: ID!, $locationId: ID!) {
+          inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
+            userErrors { field message }
+          }
+        }
+      `, { inventoryItemId, locationId });
+      const errs = res.inventoryActivate?.userErrors ?? [];
+      if (errs.length) {
+        console.warn(`[shopify] inventoryActivate ${inventoryItemId} @ ${locationId}:`, errs.map((e) => e.message).join("; "));
       }
+      await new Promise((r) => setTimeout(r, 200));
     }
-  `, {
-    id: gid,
-    input: publicationIds.map((pubId) => ({ publicationId: pubId }))
-  });
+  }
+}
+async function publishProductToXdipxChannels(numericId) {
+  const id = numericId.replace("gid://shopify/Product/", "");
+  const gid = `gid://shopify/Product/${id}`;
+  const { publications } = await adminGraphQL(`query GetPublications { publications(first: 30) { edges { node { id name } } } }`);
+  const wanted = new Set(XDIPX_PUBLICATION_NAMES);
+  const excluded = new Set(XDIPX_EXCLUDED_PUBLICATION_NAMES);
+  const toPublish = publications.edges.filter((e) => wanted.has(e.node.name)).map((e) => e.node.id);
+  const toUnpublish = publications.edges.filter((e) => excluded.has(e.node.name)).map((e) => e.node.id);
+  if (toPublish.length > 0) {
+    const res = await adminGraphQL(`
+      mutation PublishProduct($id: ID!, $input: [PublicationInput!]!) {
+        publishablePublish(id: $id, input: $input) {
+          userErrors { field message }
+        }
+      }
+    `, { id: gid, input: toPublish.map((pid) => ({ publicationId: pid })) });
+    const errs = res.publishablePublish?.userErrors ?? [];
+    if (errs.length) console.warn("[shopify] publishablePublish:", errs.map((e) => e.message).join("; "));
+  }
+  if (toUnpublish.length > 0) {
+    const res = await adminGraphQL(`
+      mutation UnpublishProduct($id: ID!, $input: [PublicationInput!]!) {
+        publishableUnpublish(id: $id, input: $input) {
+          userErrors { field message }
+        }
+      }
+    `, { id: gid, input: toUnpublish.map((pid) => ({ publicationId: pid })) });
+    const errs = res.publishableUnpublish?.userErrors ?? [];
+    if (errs.length) console.warn("[shopify] publishableUnpublish:", errs.map((e) => e.message).join("; "));
+  }
 }
 async function findProductBySKU(sku) {
   const data = await adminGraphQL(`
@@ -4796,7 +4838,7 @@ async function getDistinctProductTypes(opts) {
   await kvSet(PRODUCT_TYPES_CACHE_KEY, result, PRODUCT_TYPES_CACHE_TTL);
   return result;
 }
-var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, GMC_FEED_METAFIELDS_FRAGMENT, GMC_FEED_CARD_FRAGMENT, CART_FRAGMENT, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, VARIANTS_BY_SKU_QUERY, PRODUCT_TYPES_QUERY, PRODUCT_TYPES_CACHE_KEY, PRODUCT_TYPES_CACHE_TTL;
+var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, GMC_FEED_METAFIELDS_FRAGMENT, GMC_FEED_CARD_FRAGMENT, CART_FRAGMENT, XDIPX_LOCATION_IDS, XDIPX_PUBLICATION_NAMES, XDIPX_EXCLUDED_PUBLICATION_NAMES, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, VARIANTS_BY_SKU_QUERY, PRODUCT_TYPES_QUERY, PRODUCT_TYPES_CACHE_KEY, PRODUCT_TYPES_CACHE_TTL;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
     "use strict";
@@ -5039,6 +5081,23 @@ var init_shopify_server = __esm({
     totalAmount    { amount currencyCode }
   }
 `;
+    XDIPX_LOCATION_IDS = [
+      "gid://shopify/Location/85557510315",
+      // Entrenue
+      "gid://shopify/Location/85557477547"
+      // Nalpac
+    ];
+    XDIPX_PUBLICATION_NAMES = [
+      "Online Store",
+      "Shop",
+      "Storefront Admin",
+      "Shopify GraphiQL App",
+      "Google & YouTube",
+      "ChatGPT"
+    ];
+    XDIPX_EXCLUDED_PUBLICATION_NAMES = [
+      "Point of Sale"
+    ];
     CUSTOMER_ADDRESS_FRAGMENT = `
   id
   firstName
