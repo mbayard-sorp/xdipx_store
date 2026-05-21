@@ -269,13 +269,18 @@ export async function runImportMonitor(
       return { master, tier, gapReason, score, upsertPayload }
     })
 
-    // 9. Sort by gapScore DESC; cap to maxCandidates.
-    const capped = enriched
-      .sort((a, b) => b.score - a.score)
-      .slice(0, maxCandidates)
+    // 9. Rank + cap. Tier A (Nalpac top-100) must ALWAYS surface — proven
+    //    sellers we don't carry yet belong on the site — so they bypass the
+    //    gap_score cap. Remaining slots go to the highest-gap_score non-A masters.
+    const sorted = enriched.sort((a, b) => b.score - a.score)
+    const tierA  = sorted.filter(e => e.tier === 'A')
+    const rest   = sorted.filter(e => e.tier !== 'A')
+    const restSlots = Math.max(0, maxCandidates - tierA.length)
+    const capped = [...tierA, ...rest.slice(0, restSlots)]
 
     console.info(
-      `[import-monitor] collapsed=${allMasters.length} eligible=${eligibleMasters.length} capped=${capped.length} (max=${maxCandidates})`,
+      `[import-monitor] collapsed=${allMasters.length} eligible=${eligibleMasters.length} ` +
+      `tierA=${tierA.length} capped=${capped.length} (max=${maxCandidates})`,
     )
 
     // 10. Load existing candidate rows keyed by masterKey for the capped set.
