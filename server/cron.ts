@@ -229,6 +229,44 @@ export function createCronRoutes() {
   router.post('/pricing-batch-recompute', guard, handlePricingBatchRecompute)
 
   /**
+   * POST /cron/import-monitor
+   * Schedule: 08:00 UTC daily — diff 4 Nalpac feeds against carried-SKU set,
+   * tier + score + price-preview candidates, upsert import_candidates.
+   * Gated by import_monitor_enabled kill-switch and import_monitor_run_days CSV.
+   */
+  router.post('/import-monitor', guard, async (_req, res) => {
+    try {
+      const { getPipelineSetting } = await import('../app/lib/feed-processor.server.js')
+
+      // Kill-switch gate.
+      const enabled = await getPipelineSetting('import_monitor_enabled')
+      if (enabled === 'false') {
+        res.json({ ok: true, skipped: true, reason: 'monitor_disabled' })
+        return
+      }
+
+      // Day-of-week gate. import_monitor_run_days is a CSV of UTC day numbers (0=Sun).
+      const runDaysSetting = await getPipelineSetting('import_monitor_run_days')
+      const runDays = (runDaysSetting ?? '0,1,2,3,4,5,6')
+        .split(',')
+        .map(s => parseInt(s.trim(), 10))
+        .filter(n => !isNaN(n))
+      const todayUtcDay = new Date().getUTCDay()
+      if (!runDays.includes(todayUtcDay)) {
+        res.json({ ok: true, skipped: true, reason: `not_scheduled_today (day=${todayUtcDay})` })
+        return
+      }
+
+      const { runImportMonitor } = await import('../app/lib/import-monitor.server.js')
+      const result = await runImportMonitor({ source: 'cron' })
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:import-monitor]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/inventory-check
    * Schedule: every 5 min — check if live deal is sold out, rotate if so
    */
