@@ -4,8 +4,10 @@ import { kvGet, kvSet } from './kv.server'
 
 export interface MarkupSuggestion {
   productType: string
-  highMarginDiscount: number
-  mediumMarginDiscount: number
+  /** V2: target margin as a decimal fraction, e.g. 0.45 = 45% margin */
+  targetMarginPct: number
+  /** V2: margin floor as a decimal fraction, e.g. 0.20 = 20% margin */
+  marginFloorPct: number
   rationale: string
 }
 
@@ -23,11 +25,11 @@ const TOOL_INPUT_SCHEMA = {
         type: 'object',
         properties: {
           productType: { type: 'string' },
-          highMarginDiscount: { type: 'number', minimum: 0, maximum: 0.6 },
-          mediumMarginDiscount: { type: 'number', minimum: 0, maximum: 0.6 },
+          targetMarginPct: { type: 'number', minimum: 0.10, maximum: 0.75 },
+          marginFloorPct: { type: 'number', minimum: 0.10, maximum: 0.60 },
           rationale: { type: 'string' },
         },
-        required: ['productType', 'highMarginDiscount', 'mediumMarginDiscount', 'rationale'],
+        required: ['productType', 'targetMarginPct', 'marginFloorPct', 'rationale'],
       },
     },
   },
@@ -40,17 +42,17 @@ function cacheKey(types: Array<{ productType: string; count: number }>): string 
   return `pricing:markup-suggestions:${hash}`
 }
 
-function clampDiscount(v: unknown): number | null {
+function clampMargin(v: unknown, lo = 0.10, hi = 0.75): number | null {
   let n: number
   if (typeof v === 'number') n = v
   else if (typeof v === 'string') {
     const parsed = parseFloat((v as string).replace('%', '').trim())
     if (isNaN(parsed)) return null
-    // Tolerate models that return whole-number percents like "35" instead of 0.35
+    // Tolerate models that return whole-number percents like "45" instead of 0.45
     n = parsed > 1 ? parsed / 100 : parsed
   } else return null
   if (isNaN(n)) return null
-  return Math.min(0.6, Math.max(0, n))
+  return Math.min(hi, Math.max(lo, n))
 }
 
 interface ValidatedSuggestions {
@@ -79,15 +81,15 @@ function validateToolInput(input: unknown): ValidatedSuggestions {
     const obj = item as Record<string, unknown>
     const pt = typeof obj['productType'] === 'string' ? (obj['productType'] as string).trim() : null
     if (!pt) { rejectedReasons.push('missing productType'); continue }
-    const high = clampDiscount(obj['highMarginDiscount'])
-    const medium = clampDiscount(obj['mediumMarginDiscount'])
-    if (high === null) { rejectedReasons.push(`${pt}: bad highMarginDiscount (${JSON.stringify(obj['highMarginDiscount'])})`); continue }
-    if (medium === null) { rejectedReasons.push(`${pt}: bad mediumMarginDiscount (${JSON.stringify(obj['mediumMarginDiscount'])})`); continue }
+    const target = clampMargin(obj['targetMarginPct'], 0.10, 0.75)
+    const floor = clampMargin(obj['marginFloorPct'], 0.10, 0.60)
+    if (target === null) { rejectedReasons.push(`${pt}: bad targetMarginPct (${JSON.stringify(obj['targetMarginPct'])})`); continue }
+    if (floor === null) { rejectedReasons.push(`${pt}: bad marginFloorPct (${JSON.stringify(obj['marginFloorPct'])})`); continue }
     const rationale = typeof obj['rationale'] === 'string' ? (obj['rationale'] as string).trim() : ''
     suggestions.push({
       productType: pt,
-      highMarginDiscount: high,
-      mediumMarginDiscount: medium,
+      targetMarginPct: target,
+      marginFloorPct: floor,
       rationale: rationale || '(no rationale provided)',
     })
   }
@@ -144,11 +146,11 @@ async function callClaude(
 
 export async function suggestMarkupsByType(opts: {
   types: Array<{ productType: string; count: number }>
-  globalHighDiscount: number
-  globalMediumDiscount: number
+  globalTargetMarginPct: number
+  globalMarginFloorPct: number
   bypassCache?: boolean
 }): Promise<SuggestResult> {
-  const { types, globalHighDiscount, globalMediumDiscount, bypassCache } = opts
+  const { types, globalTargetMarginPct, globalMarginFloorPct, bypassCache } = opts
 
   if (types.length === 0) return { suggestions: [] }
 
@@ -162,18 +164,19 @@ export async function suggestMarkupsByType(opts: {
 
   const system = [
     'You are a pricing strategist for xdipx.com, an editorially-curated sexual-wellness storefront.',
-    'Context: 20% margin floor. Building brand share. Generous pricing is OK. Not a luxury brand.',
-    `Current global discounts: high-margin products ${Math.round(globalHighDiscount * 100)}% off MSRP, medium-margin products ${Math.round(globalMediumDiscount * 100)}% off MSRP.`,
-    'Your job: suggest per product-type discount percentages that maximise deal appeal while respecting the margin floor.',
+    'Context: target-margin pricing model. Not a luxury brand. Building brand share.',
+    `Current global settings: target margin ${Math.round(globalTargetMarginPct * 100)}%, margin floor ${Math.round(globalMarginFloorPct * 100)}%.`,
+    'Your job: suggest per product-type target margin and margin floor percentages.',
     'Rules:',
-    '- highMarginDiscount and mediumMarginDiscount are decimal fractions (e.g. 0.35 = 35%).',
-    '- Values must be between 0.0 and 0.6.',
+    '- targetMarginPct is the desired gross margin (e.g. 0.45 = 45%). Range: 0.10 to 0.75.',
+    '- marginFloorPct is the minimum acceptable gross margin. Range: 0.10 to 0.60. Must be <= targetMarginPct.',
+    '- Values are decimal fractions, not whole numbers.',
     '- Rationale must be a single sentence, plain English, no em-dashes.',
     '- You MUST call the emit_markup_suggestions tool. Do not output prose or JSON outside the tool call.',
   ].join('\n')
 
   const userMessage = [
-    'Suggest discount settings for these product types:',
+    'Suggest target margin settings for these product types:',
     typeList,
     '',
     'Call the emit_markup_suggestions tool with one entry per product type listed above.',

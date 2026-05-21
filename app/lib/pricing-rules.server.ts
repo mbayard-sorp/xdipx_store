@@ -136,9 +136,8 @@ export async function getGroupForProductType(
 
   const rows = await db
     .select({
-      subGroupId:          pricingProductTypeMap.subGroupId,
-      groupId:             pricingSubGroups.groupId,
-      usesClearanceLadder: pricingSubGroups.sortOrder, // joined below via groupId
+      subGroupId: pricingProductTypeMap.subGroupId,
+      groupId:    pricingSubGroups.groupId,
     })
     .from(pricingProductTypeMap)
     .innerJoin(
