@@ -204,23 +204,6 @@ export function createCronRoutes() {
   })
 
   /**
-   * POST /cron/daily-price-review
-   * Schedule: 7:00 AM UTC — fetch Nalpac feeds, compute target prices, apply or queue changes
-   * Query: ?dry=1 to force dry-run mode
-   */
-  router.post('/daily-price-review', guard, async (req, res) => {
-    try {
-      const { runDailyPriceReview } = await import('../app/lib/pricing-agent.server.js')
-      const forceDry = req.query['dry'] === '1' || req.query['dry'] === 'true'
-      const result = await runDailyPriceReview(forceDry ? { source: 'cron', dryRun: true } : { source: 'cron' })
-      res.json({ ok: true, ...result })
-    } catch (err) {
-      console.error('[cron:daily-price-review]', err)
-      res.status(500).json({ error: String(err) })
-    }
-  })
-
-  /**
    * POST /cron/pricing-batch-recompute
    * Schedule: 07:00 UTC (02:00 ET) daily — recompute all variant prices using
    * the v2 target-margin engine, write audit log rows, auto-apply within threshold.

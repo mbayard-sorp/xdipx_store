@@ -1,8 +1,12 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
-import { getCachedProductTypes, getPricingRules } from '~/lib/pricing-agent.server'
+import { getCachedProductTypes } from '~/lib/pricing-agent.server'
 import { suggestMarkupsByType } from '~/lib/pricing-suggestions.server'
-import { HIGH_MARGIN_DISCOUNT, MEDIUM_MARGIN_DISCOUNT } from '~/lib/pricing-engine.server'
+import { getGlobalRule } from '~/lib/pricing-admin.server'
+
+// Global defaults when no DB row exists yet
+const DEFAULT_TARGET_MARGIN = 0.45
+const DEFAULT_MARGIN_FLOOR = 0.20
 
 export async function action({ request }: ActionFunctionArgs) {
   await requireAdmin(request)
@@ -11,9 +15,9 @@ export async function action({ request }: ActionFunctionArgs) {
     const url = new URL(request.url)
     const bypassCache = url.searchParams.get('fresh') === '1'
 
-    const [cache, rules] = await Promise.all([
+    const [cache, globalRule] = await Promise.all([
       getCachedProductTypes(),
-      getPricingRules(),
+      getGlobalRule(),
     ])
 
     const types = cache?.types ?? []
@@ -24,10 +28,15 @@ export async function action({ request }: ActionFunctionArgs) {
       )
     }
 
-    const globalHighDiscount = rules.highMarginDiscount ?? HIGH_MARGIN_DISCOUNT
-    const globalMediumDiscount = rules.mediumMarginDiscount ?? MEDIUM_MARGIN_DISCOUNT
+    const globalTargetMarginPct = globalRule.targetMarginPct ?? DEFAULT_TARGET_MARGIN
+    const globalMarginFloorPct = globalRule.marginFloorPct ?? DEFAULT_MARGIN_FLOOR
 
-    const result = await suggestMarkupsByType({ types, globalHighDiscount, globalMediumDiscount, bypassCache })
+    const result = await suggestMarkupsByType({
+      types,
+      globalTargetMarginPct,
+      globalMarginFloorPct,
+      bypassCache,
+    })
 
     if (result.suggestions.length === 0) {
       return Response.json({

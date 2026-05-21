@@ -12,6 +12,7 @@ import {
   getAutoAppliedToday,
   getLast7DaysSummary,
   getApprovalModeV2,
+  getGlobalRule,
 } from '~/lib/pricing-admin.server'
 import type {
   GroupRuleValues,
@@ -37,6 +38,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     webhookEnabledRaw,
     webhookThrottleRaw,
     webhookActivityToday,
+    globalRule,
   ] = await Promise.all([
     loadGroupTree(),
     countVariantsByGroup(),
@@ -48,6 +50,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     getPipelineSettingPublic('pricing_webhook_enabled'),
     getPipelineSettingPublic('pricing_webhook_throttle_secs'),
     getWebhookActivityToday(),
+    getGlobalRule(),
   ])
 
   // Merge coverage counts and last rationale into the tree
@@ -65,6 +68,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     groups,
+    globalRule,
     pendingRows,
     autoAppliedRows,
     last7Days,
@@ -443,9 +447,10 @@ interface ConfirmModalProps {
   onCancel: () => void
   onConfirm: () => void
   saving: boolean
+  saveError?: string | null
 }
 
-function ConfirmModal({ dryRun, onCancel, onConfirm, saving }: ConfirmModalProps) {
+function ConfirmModal({ dryRun, onCancel, onConfirm, saving, saveError }: ConfirmModalProps) {
   return (
     <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 px-4">
       <div className="bg-white rounded-2xl border border-line p-6 max-w-md w-full space-y-4 shadow-lg">
@@ -486,6 +491,12 @@ function ConfirmModal({ dryRun, onCancel, onConfirm, saving }: ConfirmModalProps
           <p className="text-sm text-red-500">{dryRun.error ?? 'Dry-run failed.'}</p>
         )}
 
+        {saveError && (
+          <p className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            Save failed: {saveError}
+          </p>
+        )}
+
         <div className="flex gap-3 justify-end pt-2">
           <button
             onClick={onCancel}
@@ -514,6 +525,7 @@ function ConfirmModal({ dryRun, onCancel, onConfirm, saving }: ConfirmModalProps
 
 interface PricingRulesCardProps {
   groups: LoaderData['groups']
+  globalRule: LoaderData['globalRule']
 }
 
 type SuggestResult = {
@@ -530,7 +542,7 @@ type SuggestResult = {
   }
 }
 
-function PricingRulesCard({ groups }: PricingRulesCardProps) {
+function PricingRulesCard({ groups, globalRule }: PricingRulesCardProps) {
   // Local edits keyed by "scopeLevel:scopeId"
   const [edits, setEdits] = useState<EditValues>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -540,9 +552,13 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
   const dryRunFetcher = useFetcher<DryRunData & { ok: boolean }>()
   const saveFetcher = useFetcher<{ ok: boolean; patched?: number; error?: string }>()
   const suggestFetcher = useFetcher<SuggestResult>()
+  const refreshTypesFetcher = useFetcher<{ ok: boolean; count?: number; error?: string }>()
+  const importFetcher = useFetcher<{ ok: boolean; patched?: number; errors?: string[] }>()
 
   const [showConfirm, setShowConfirm] = useState(false)
   const pendingPatchesRef = useRef<unknown[]>([])
+  const importFileRef = useRef<HTMLInputElement>(null)
+  const [pendingImport, setPendingImport] = useState<{ csv: string; rowCount: number } | null>(null)
 
   function getEditKey(scopeLevel: string, scopeId: string) {
     return `${scopeLevel}:${scopeId}`
@@ -572,13 +588,21 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
     })
   }
 
-  // Build patches from edits
+  // Build patches from edits — emits snake_case to match api.pricing.rules
   function buildPatches() {
     const patches: unknown[] = []
     for (const [key, vals] of Object.entries(edits)) {
       const [level, ...rest] = key.split(':')
       const id = rest.join(':')
-      patches.push({ scope_level: level, scope_id: id, ...vals })
+      patches.push({
+        scope_level: level,
+        scope_id: id,
+        target_margin_pct: vals.targetMarginPct,
+        margin_floor_pct: vals.marginFloorPct,
+        map_behavior: vals.mapBehavior,
+        compare_at_strategy: vals.compareAtStrategy,
+        velocity_modifier_enabled: vals.velocityModifierEnabled,
+      })
     }
     return patches
   }
@@ -614,6 +638,30 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
 
   const hasEdits = Object.keys(edits).length > 0
   const isSuggesting = suggestFetcher.state !== 'idle'
+
+  function handleImportFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const csv = String(reader.result ?? '')
+      const rowCount = Math.max(0, (csv.match(/\n/g)?.length ?? 1) - 1)
+      setPendingImport({ csv, rowCount })
+    }
+    reader.readAsText(file)
+  }
+
+  function confirmImportRules() {
+    if (!pendingImport) return
+    const formData = new FormData()
+    formData.set('intent', 'import-rules-csv')
+    formData.set('csv', pendingImport.csv)
+    importFetcher.submit(formData, { method: 'post', action: '/api/pricing/rules' })
+    setPendingImport(null)
+  }
+
+  const importResult = importFetcher.data
   const suggestions = suggestFetcher.data?.ok ? (suggestFetcher.data.suggestions ?? []) : []
 
   // Auto-apply AI suggestions to group-level edits
@@ -638,8 +686,8 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
               const existing = next[key] ?? pt.rule
               next[key] = {
                 ...existing,
-                targetMarginPct: s.highMarginDiscount ?? existing.targetMarginPct,
-                marginFloorPct: s.mediumMarginDiscount ?? existing.marginFloorPct,
+                targetMarginPct: s.targetMarginPct ?? existing.targetMarginPct,
+                marginFloorPct: s.marginFloorPct ?? existing.marginFloorPct,
               }
             }
           }
@@ -649,13 +697,21 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
     })
   }, [suggestFetcher.state, suggestFetcher.data, groups])
 
-  // Global defaults row (from first group's inherited values as starting point)
-  const globalRule: GroupRuleValues = {
-    targetMarginPct: 0.50,
-    marginFloorPct: 0.25,
+  // Global fallback values used when the DB global row has nulls
+  const GLOBAL_FALLBACK: GroupRuleValues = {
+    targetMarginPct: 0.45,
+    marginFloorPct: 0.20,
     mapBehavior: 'at_map',
     compareAtStrategy: 'msrp',
     velocityModifierEnabled: false,
+  }
+  const effectiveGlobal = getValues('global', 'global', globalRule)
+  const globalDisplay: GroupRuleValues = {
+    targetMarginPct:         effectiveGlobal.targetMarginPct         ?? GLOBAL_FALLBACK.targetMarginPct,
+    marginFloorPct:          effectiveGlobal.marginFloorPct          ?? GLOBAL_FALLBACK.marginFloorPct,
+    mapBehavior:             effectiveGlobal.mapBehavior             ?? GLOBAL_FALLBACK.mapBehavior,
+    compareAtStrategy:       effectiveGlobal.compareAtStrategy       ?? GLOBAL_FALLBACK.compareAtStrategy,
+    velocityModifierEnabled: effectiveGlobal.velocityModifierEnabled ?? GLOBAL_FALLBACK.velocityModifierEnabled,
   }
 
   return (
@@ -666,15 +722,96 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
           onCancel={() => setShowConfirm(false)}
           onConfirm={confirmSave}
           saving={saveFetcher.state !== 'idle'}
+          saveError={saveFetcher.data?.ok === false ? (saveFetcher.data.error ?? 'Unknown error') : null}
         />
       )}
 
+      {/* CSV import confirm modal */}
+      {pendingImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+            <h3 className="text-base font-semibold text-ink mb-2" style={{ fontFamily: 'var(--font-display)' }}>
+              Import pricing rules
+            </h3>
+            <p className="text-sm text-muted mb-4">
+              Apply <strong>{pendingImport.rowCount}</strong> rule row{pendingImport.rowCount !== 1 ? 's' : ''} from CSV? This will overwrite existing rules for the included scopes.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingImport(null)}
+                className="text-xs font-semibold px-4 py-2 border border-line rounded-full text-ink hover:border-ink transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmImportRules}
+                disabled={importFetcher.state !== 'idle'}
+                className="text-xs font-semibold px-4 py-2 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {importFetcher.state !== 'idle' ? 'Importing...' : 'Apply import'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <section className="bg-white rounded-2xl border border-line overflow-hidden">
+        {/* Import result banners */}
+        {importResult && importResult.ok === false && importResult.errors && importResult.errors.length > 0 && (
+          <div className="px-5 py-3 text-sm bg-red-50 border-b border-red-200 text-red-700">
+            <p className="font-semibold mb-1">CSV import failed</p>
+            <ul className="list-disc pl-5 space-y-0.5">
+              {importResult.errors.slice(0, 10).map((err, i) => <li key={i}>{err}</li>)}
+              {importResult.errors.length > 10 && <li>...and {importResult.errors.length - 10} more</li>}
+            </ul>
+          </div>
+        )}
+        {importResult?.ok && (
+          <div className="px-5 py-3 text-sm bg-green-50 border-b border-green-200 text-green-700">
+            Imported <strong>{importResult.patched}</strong> rule{importResult.patched !== 1 ? 's' : ''} from CSV.
+          </div>
+        )}
+
+        {/* Hidden file input for CSV import */}
+        <input
+          ref={importFileRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={handleImportFilePick}
+        />
+
         <div className="flex items-center justify-between px-5 py-4 border-b border-line">
           <h2 className="text-base font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
             Pricing Rules
           </h2>
           <div className="flex items-center gap-3">
+            <a
+              href="/admin/pricing/rules/export"
+              download
+              className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-full text-ink hover:border-ink hover:text-ink transition-colors"
+            >
+              Export CSV
+            </a>
+            <button
+              type="button"
+              disabled={importFetcher.state !== 'idle'}
+              onClick={() => importFileRef.current?.click()}
+              className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-full text-ink hover:border-ink hover:text-ink transition-colors disabled:opacity-50"
+            >
+              {importFetcher.state !== 'idle' ? 'Importing...' : 'Import CSV'}
+            </button>
+            <button
+              type="button"
+              disabled={refreshTypesFetcher.state !== 'idle'}
+              onClick={() => refreshTypesFetcher.submit({}, { method: 'post', action: '/api/pricing/refresh-product-types' })}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-full text-ink hover:border-ink hover:text-ink transition-colors disabled:opacity-50"
+              title={refreshTypesFetcher.data?.ok ? `${refreshTypesFetcher.data.count} types loaded` : 'Refresh product types from Shopify'}
+            >
+              {refreshTypesFetcher.state !== 'idle' ? 'Refreshing...' : 'Refresh types'}
+            </button>
             <button
               type="button"
               disabled={isSuggesting}
@@ -732,12 +869,6 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
           </div>
         )}
 
-        {saveFetcher.data?.ok === false && (
-          <div className="px-5 py-2 text-xs text-red-500 border-b border-line">
-            Save failed: {saveFetcher.data.error}
-          </div>
-        )}
-
         {/* Table header */}
         <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1fr_1fr_2fr] gap-2 px-4 py-2 bg-cream-2 text-xs text-muted uppercase tracking-wide font-medium">
           <div>Group</div>
@@ -749,12 +880,25 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
         </div>
 
         <div className="divide-y divide-cream-2">
+          {/* Editable Global row — sets the baseline all groups inherit from */}
+          <div className="px-4 py-3 bg-cream-2/60">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="font-semibold text-sm text-ink">Global (all groups)</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-ink/10 text-muted font-semibold">baseline</span>
+            </div>
+            <RuleFieldsEditor
+              inherited={GLOBAL_FALLBACK}
+              values={effectiveGlobal}
+              onChange={vals => setValues('global', 'global', vals)}
+            />
+          </div>
+
           {groups.map(group => {
             const gVals = getValues('group', group.id, group.rule)
             const isExpanded = expanded.has(group.id)
-            const effectiveTarget = gVals.targetMarginPct ?? globalRule.targetMarginPct
-            const effectiveFloor = gVals.marginFloorPct ?? globalRule.marginFloorPct
-            const effectiveMap = gVals.mapBehavior ?? globalRule.mapBehavior ?? 'at_map'
+            const effectiveTarget = gVals.targetMarginPct ?? globalDisplay.targetMarginPct
+            const effectiveFloor = gVals.marginFloorPct ?? globalDisplay.marginFloorPct
+            const effectiveMap = gVals.mapBehavior ?? globalDisplay.mapBehavior ?? 'at_map'
 
             // Count descendant overrides
             let descendantOverrideCount = 0
@@ -852,7 +996,7 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
                       <div className="mt-3 p-3 bg-cream rounded-xl border border-line">
                         <p className="text-xs text-muted mb-2 uppercase tracking-wide">Group defaults</p>
                         <RuleFieldsEditor
-                          inherited={globalRule}
+                          inherited={globalDisplay}
                           values={gVals}
                           onChange={vals => setValues('group', group.id, vals)}
                         />
@@ -867,11 +1011,11 @@ function PricingRulesCard({ groups }: PricingRulesCardProps) {
                   const sgExpanded = expandedSub.has(sg.id)
                   // Effective inherited = group's effective values
                   const sgInherited: GroupRuleValues = {
-                    targetMarginPct: gVals.targetMarginPct ?? globalRule.targetMarginPct,
-                    marginFloorPct: gVals.marginFloorPct ?? globalRule.marginFloorPct,
-                    mapBehavior: gVals.mapBehavior ?? globalRule.mapBehavior,
-                    compareAtStrategy: gVals.compareAtStrategy ?? globalRule.compareAtStrategy,
-                    velocityModifierEnabled: gVals.velocityModifierEnabled ?? globalRule.velocityModifierEnabled,
+                    targetMarginPct: gVals.targetMarginPct ?? globalDisplay.targetMarginPct,
+                    marginFloorPct: gVals.marginFloorPct ?? globalDisplay.marginFloorPct,
+                    mapBehavior: gVals.mapBehavior ?? globalDisplay.mapBehavior,
+                    compareAtStrategy: gVals.compareAtStrategy ?? globalDisplay.compareAtStrategy,
+                    velocityModifierEnabled: gVals.velocityModifierEnabled ?? globalDisplay.velocityModifierEnabled,
                   }
 
                   return (
@@ -1147,7 +1291,7 @@ function WebhookCard({ webhook }: { webhook: LoaderData['webhook'] }) {
 export default function AdminPricingPage() {
   const data = useLoaderData<typeof loader>()
   const auditFetcher = useFetcher<{ ok: boolean; error?: string }>()
-  const runFetcher = useFetcher<{ ok: boolean; scanned?: number; applied?: number; error?: string }>()
+  const runFetcher = useFetcher<{ ok: boolean; total?: number; autoApplied?: number; pending?: number; skipped?: number; rejected?: number; errors?: number; durationMs?: number; error?: string }>()
   const [autoExpanded, setAutoExpanded] = useState(false)
 
   const isRunning = runFetcher.state !== 'idle'
@@ -1200,13 +1344,13 @@ export default function AdminPricingPage() {
       {runFetcher.data && (
         <div className={`rounded-2xl px-5 py-3 text-sm border ${runFetcher.data.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-600'}`}>
           {runFetcher.data.ok
-            ? `Review complete. Scanned ${runFetcher.data.scanned ?? '?'}, applied ${runFetcher.data.applied ?? '?'}.`
+            ? `Review complete. Scanned ${runFetcher.data.total ?? '?'}, auto-applied ${runFetcher.data.autoApplied ?? '?'}, queued ${runFetcher.data.pending ?? '?'}.`
             : `Error: ${runFetcher.data.error ?? 'Unknown error'}`}
         </div>
       )}
 
       {/* Pricing Rules tree */}
-      <PricingRulesCard groups={data.groups} />
+      <PricingRulesCard groups={data.groups} globalRule={data.globalRule} />
 
       {/* Approval Mode */}
       <ApprovalModePanel current={data.approvalMode} />
