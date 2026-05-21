@@ -1,5 +1,6 @@
 import { Link, useFetcher } from 'react-router'
 import type { Bundle } from '~/types'
+import { OptimizedImage } from './OptimizedImage'
 
 interface BundleHeroProps {
   bundle: Bundle
@@ -66,12 +67,13 @@ export function BundleHero({ bundle, buyButtonText = 'Dip In ♥', compact = fal
               <li key={c.product.handle} className="flex items-center gap-3">
                 <div className="w-14 h-14 rounded-lg overflow-hidden bg-cream-2 shrink-0">
                   {img ? (
-                    <img
+                    <OptimizedImage
                       src={img.url}
                       alt={img.altText || c.product.title}
-                      loading="lazy"
-                      decoding="async"
                       className="w-full h-full object-cover"
+                      sizes="56px"
+                      widths={[56, 112, 168]}
+                      fallbackWidth={112}
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-ink/20 text-xl">♥</div>
@@ -119,12 +121,14 @@ export function BundleHero({ bundle, buyButtonText = 'Dip In ♥', compact = fal
                 bundle.images.length === 1 ? 'col-span-2 aspect-video' : 'aspect-square'
               }`}
             >
-              <img
+              <OptimizedImage
                 src={img.url}
                 alt={img.altText || bundle.title}
-                loading="eager"
-                decoding="async"
+                priority={i === 0}
                 className="w-full h-full object-cover"
+                sizes="(max-width: 768px) 50vw, 280px"
+                widths={[280, 480, 560]}
+                fallbackWidth={560}
               />
             </div>
           ))}

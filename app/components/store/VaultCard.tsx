@@ -74,7 +74,7 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
         variant="overlay"
         size="sm"
       />
-      <Link to={`/products/${deal.handle}`} className="flex flex-col flex-1">
+      <Link to={`/products/${deal.handle}`} prefetch="intent" className="flex flex-col flex-1">
         <div className="aspect-[4/5] overflow-hidden bg-cream-2 relative">
           <CardMediaCarousel
             cardId={deal.id}

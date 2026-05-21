@@ -6,6 +6,7 @@
 
 import { Link } from 'react-router'
 import { trackSelectItem } from '~/lib/analytics.client'
+import { OptimizedImage } from '~/components/store/OptimizedImage'
 import type { DiscoveryProduct } from '~/types/discovery'
 
 interface ProductCardProps {
@@ -37,11 +38,13 @@ export function ProductCard({ product, index, listId, listName }: ProductCardPro
       {/* Image / fallback */}
       <div className="aspect-square bg-cream-2 relative overflow-hidden">
         {product.imageUrl ? (
-          <img
+          <OptimizedImage
             src={product.imageUrl}
             alt={product.imageAlt ?? product.title}
             className="w-full h-full object-cover"
-            loading="lazy"
+            sizes="(min-width: 768px) 20vw, 45vw"
+            widths={[240, 360, 480]}
+            fallbackWidth={480}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">

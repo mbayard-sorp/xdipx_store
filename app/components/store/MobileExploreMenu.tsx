@@ -189,6 +189,7 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
                 {/* "Browse all" link to the current node's collection */}
                 <Link
                   to={toRelativePath(currentNode.url)}
+                  prefetch="intent"
                   className="flex min-h-[52px] items-center justify-center rounded-full border-[1.5px] border-ink bg-ink px-5 text-base font-semibold text-cream transition-all active:scale-[0.98]"
                   style={{ fontFamily: 'var(--font-display)' }}
                 >
@@ -231,6 +232,7 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
                     <Link
                       key={child.url || child.title}
                       to={toRelativePath(child.url)}
+                      prefetch="intent"
                       className={`${baseClass} justify-center`}
                       style={{ fontFamily: 'var(--font-display)' }}
                     >

@@ -150,6 +150,7 @@ export default function VaultPage() {
           <Link
             key={tab.id}
             to={tabHref(tab.slug)}
+            prefetch="intent"
             className={[
               'shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-all',
               activeTabId === tab.id
@@ -177,6 +178,7 @@ export default function VaultPage() {
         {page > 1 && (
           <Link
             to={pageHref(page - 1)}
+            prefetch="render"
             className="px-5 py-2 rounded-full border border-cream-2 text-ink/70 hover:bg-cream-2 transition-colors text-sm"
           >
             ← Previous
@@ -185,6 +187,7 @@ export default function VaultPage() {
         {hasNextPage && (
           <Link
             to={pageHref(page + 1)}
+            prefetch="render"
             className="px-5 py-2 rounded-full bg-coral text-white text-sm font-semibold hover:opacity-90 transition-opacity"
             style={{ fontFamily: 'var(--font-display)' }}
           >

@@ -3,6 +3,7 @@ import { Link, useFetcher, useRouteLoaderData } from 'react-router'
 import type { loader as layoutLoader } from '~/routes/_layout'
 import type { Deal, EndorsementCopy } from '~/types'
 import { CircleOptionSelector } from './CircleOptionSelector'
+import { OptimizedImage } from './OptimizedImage'
 
 interface EndorsementHeroProps {
   deal:             Deal
@@ -208,12 +209,12 @@ export function EndorsementHero({ deal, copy, showFreeShipping, swatches = {} }:
               past the card edge instead of getting clipped. */}
           <Link to={pdpHref} className="relative flex-1 block bg-cream-2 overflow-hidden rounded-t-[var(--radius-lg)]">
             {image ? (
-              <img
+              <OptimizedImage
                 src={image.url}
                 alt={image.altText ?? deal.seoTitle}
                 className="absolute inset-0 w-full h-full object-cover"
-                loading="eager"
-                fetchPriority="high"
+                priority
+                sizes="(max-width: 768px) 100vw, 50vw"
               />
             ) : null}
           </Link>

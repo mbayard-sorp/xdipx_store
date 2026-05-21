@@ -87,6 +87,7 @@ export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuIte
             ) : (
               <Link
                 to={toRelativePath(item.url)}
+                prefetch="intent"
                 className={[
                   'px-3 py-1.5 rounded-full text-sm font-medium transition-all',
                   isAccent
@@ -179,6 +180,7 @@ function MegaMenuColumns({
                     <Link
                       to={toRelativePath(item.url)}
                       onClick={onNavigate}
+                      prefetch="intent"
                       className="text-sm text-ink/70 hover:text-sage transition-colors block py-0.5"
                     >
                       {item.title}
