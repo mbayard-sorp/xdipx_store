@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import type { HeroVideo, ProductImage } from '~/types'
 import { CardVideo } from './CardVideo'
-import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
+import { OptimizedImage } from './OptimizedImage'
 
 interface CardMediaCarouselProps {
   cardId:    string
@@ -47,14 +47,14 @@ export function CardMediaCarousel({ cardId, title, heroVideo, images }: CardMedi
             {slide.kind === 'video' ? (
               <CardVideo cardId={cardId} video={slide.video} title={title} />
             ) : (
-              <img
-                src={shopifyImageUrl(slide.image.url, 480) || slide.image.url}
-                srcSet={shopifyImageSrcSet(slide.image.url, [240, 360, 480, 720])}
-                sizes="(min-width: 768px) 25vw, 50vw"
+              <OptimizedImage
+                src={slide.image.url}
                 alt={slide.image.altText || title}
                 className="w-full h-full object-cover"
-                loading={i === 0 ? 'eager' : 'lazy'}
-                decoding="async"
+                priority={i === 0}
+                sizes="(min-width: 768px) 25vw, 50vw"
+                widths={[240, 360, 480, 720]}
+                fallbackWidth={480}
                 draggable={false}
               />
             )}

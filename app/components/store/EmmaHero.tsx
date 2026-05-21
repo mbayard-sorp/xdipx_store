@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import type { Deal } from '~/types'
+import { OptimizedImage } from './OptimizedImage'
 
 export type EmmaHeroVariant = 'loving' | 'bundle' | 'quote'
 
@@ -59,12 +60,12 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
           className="relative rounded-[var(--radius-lg)] overflow-hidden bg-cream-2 aspect-[4/5] md:aspect-auto md:min-h-[480px] block"
         >
           {image ? (
-            <img
+            <OptimizedImage
               src={image.url}
               alt={image.altText ?? deal.seoTitle}
               className="absolute inset-0 w-full h-full object-cover"
-              loading="eager"
-              fetchPriority="high"
+              priority
+              sizes="(max-width: 768px) 100vw, 50vw"
             />
           ) : null}
           {showDiscount && discountPct > 0 && (
@@ -178,11 +179,12 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
             className="relative rounded-[var(--radius)] overflow-hidden bg-paper aspect-square block"
           >
             {image1 && (
-              <img
+              <OptimizedImage
                 src={image1.url}
                 alt={image1.altText ?? deal.seoTitle}
                 className="absolute inset-0 w-full h-full object-cover"
-                loading="eager"
+                priority
+                sizes="(max-width: 768px) 45vw, 480px"
               />
             )}
           </Link>
@@ -199,11 +201,12 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
             className="relative rounded-[var(--radius)] overflow-hidden bg-paper aspect-square block"
           >
             {image2 && (
-              <img
+              <OptimizedImage
                 src={image2.url}
                 alt={image2.altText ?? pair.seoTitle}
                 className="absolute inset-0 w-full h-full object-cover"
-                loading="eager"
+                priority
+                sizes="(max-width: 768px) 45vw, 480px"
               />
             )}
           </Link>
@@ -300,12 +303,12 @@ function HeroQuote({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: b
           className="relative rounded-[var(--radius-lg)] overflow-hidden bg-cream-2 aspect-[4/5] md:aspect-auto md:min-h-[420px] block"
         >
           {image && (
-            <img
+            <OptimizedImage
               src={image.url}
               alt={image.altText ?? deal.seoTitle}
               className="absolute inset-0 w-full h-full object-cover"
-              loading="eager"
-              fetchPriority="high"
+              priority
+              sizes="(max-width: 768px) 100vw, 50vw"
             />
           )}
           {showDiscount && discountPct > 0 && (
