@@ -6,11 +6,12 @@
  * tier + gap-score each master, and upsert into import_candidates.
  * Fully deterministic, LLM-free.
  *
- * Phase 1 only: all candidates stay 'pending'; no auto-import.
- * Phases 2-3 are designed but deferred — see the TODO block below.
+ * Phase 1: all candidates stay 'pending'; no auto-import.
+ * Phase 2 (implemented): strict-gate auto-import via autoImportPhase2().
+ * Phase 3: deferred. See the phase note below.
  */
 
-import { eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { importCandidates, importMonitorRuns, dealHistory } from '../../db/schema'
 import { kvGet, kvSet } from '~/lib/kv.server'
@@ -50,19 +51,15 @@ export interface ImportMonitorResult {
 
 const KV_FEED_SKUS = 'monitor:feed-skus'
 
-// ─── Phase 2/3 TODO ───────────────────────────────────────────────────────────
-// Phase 2: after `import_monitor_phase` = '2' is set in pipelineSettings, add
-// an auto-approve gate inside runImportMonitor():
-//   - For candidates that pass strict thresholds (tier A or B, dealScore >= 0.75,
-//     margin >= 0.45, qty >= 100, proposedPrice >= mapPrice), call approveAndImport()
-//     directly, up to `monitor_p2_max_auto_imports_per_day` (default 3) per run.
-//   - All others remain 'pending' for manual approval.
+// ─── Phase 2 (implemented) / Phase 3 (deferred) ───────────────────────────────
+// Phase 2 (`import_monitor_phase` = '2'): autoImportPhase2() below auto-imports
+// masters that clear ALL strict gates (tier A/B, margin/qty/gapScore floors,
+// carried-brand, hard MAP gate, not needsReview), up to a per-day cap. Gated by
+// the import_monitor_enabled kill-switch. Everything else stays 'pending'.
+// NOTE: dealScore is gap_score (~1-6 scale), NOT the old 0-1 per-SKU score.
 //
-// Phase 3: relax thresholds to tier A/B/C, increase cap to 5, add per-day
-//   revenue cap guard. Agent (product-manager.md) provides rationale per import.
-//
-// Both phases require the enabled kill-switch and a per-day import cap as
-// safeguards. Do not implement until Phase 1 proves out in production.
+// Phase 3 (`= '3'`, NOT YET BUILT): relax to tier A/B/C, higher cap, per-day
+// volume guard, exception-only review. Do not enable until Phase 2 proves out.
 
 // ─── Shared per-master compute helper ─────────────────────────────────────────
 
@@ -357,11 +354,13 @@ export async function runImportMonitor(
       }
     }
 
-    // 12. Phase gating.
-    if (monitorPhase !== '1') {
+    // 12. Phase gating: auto-import.
+    let autoImported = 0
+    if (monitorPhase === '2') {
+      autoImported = await autoImportPhase2(cappedKeys, carriedBrands, todayStr)
+    } else if (monitorPhase !== '1') {
       console.log(`[import-monitor] phase ${monitorPhase} auto-approve not yet implemented; treating as phase 1`)
     }
-    const autoImported = 0
 
     // 13. Finalize run row.
     await db
@@ -407,6 +406,123 @@ export async function runImportMonitor(
       error:                errorMessage,
     }
   }
+}
+
+// ─── Phase 2 auto-import ───────────────────────────────────────────────────────
+
+/**
+ * Phase 2 partial automation. Auto-imports masters from the just-upserted capped
+ * set that clear ALL strict gates, up to a per-day cap. Returns the number of
+ * masters auto-imported this run.
+ *
+ * Gates (thresholds in pipeline_settings, defaults in code):
+ *   - tier A or B only (C/D stay manual in Phase 2)
+ *   - marginPct >= monitor_p2_min_margin_pct (default 0.45)
+ *   - totalQty >= monitor_p2_min_qty (default 100)
+ *   - dealScore (gap_score, ~1-6 scale) >= monitor_p2_min_gap_score (default 3.0)
+ *   - brand already carried (monitor_p2_require_carried_brand, default true)
+ *   - hard MAP gate: skip if mapPrice > 0 && proposedPrice < mapPrice
+ *   - not needsReview (>30-variant masters never auto-import)
+ *   - daily cap: monitor_p2_max_auto_imports_per_day (default 3), counted against
+ *     import_candidates where status='imported' AND run_date=today
+ *
+ * The import_monitor_enabled kill-switch short-circuits before any auto-import.
+ * Each import is wrapped in try/catch: a per-master failure is logged and skipped,
+ * never thrown (the cron must always return 200).
+ */
+async function autoImportPhase2(
+  cappedKeys: string[],
+  carriedBrands: Set<string>,
+  todayStr: string,
+): Promise<number> {
+  // Kill-switch: defense-in-depth (the cron also gates this; manual runs do not).
+  const enabled = await getPipelineSetting('import_monitor_enabled')
+  if (enabled === 'false') {
+    console.info('[import-monitor] phase 2 auto-import skipped: monitor disabled')
+    return 0
+  }
+
+  if (cappedKeys.length === 0) return 0
+
+  const [minMarginStr, minQtyStr, minGapStr, requireCarriedStr, maxPerDayStr] = await Promise.all([
+    getPipelineSetting('monitor_p2_min_margin_pct'),
+    getPipelineSetting('monitor_p2_min_qty'),
+    getPipelineSetting('monitor_p2_min_gap_score'),
+    getPipelineSetting('monitor_p2_require_carried_brand'),
+    getPipelineSetting('monitor_p2_max_auto_imports_per_day'),
+  ])
+  const minMarginPct      = parseFloat(minMarginStr ?? '0.45')
+  const minQty            = parseInt(minQtyStr ?? '100', 10) || 100
+  const minGapScore       = parseFloat(minGapStr ?? '3.0')
+  const requireCarried    = (requireCarriedStr ?? 'true') !== 'false'
+  const maxPerDay         = Math.max(0, parseInt(maxPerDayStr ?? '3', 10) || 0)
+
+  if (maxPerDay <= 0) return 0
+
+  // Daily cap: how many have already been imported today (auto or manual).
+  const importedTodayRows = await db
+    .select({ cnt: sql<number>`count(*)::int` })
+    .from(importCandidates)
+    .where(and(eq(importCandidates.status, 'imported'), eq(importCandidates.runDate, todayStr)))
+  const importedToday = importedTodayRows[0]?.cnt ?? 0
+  const remaining = maxPerDay - importedToday
+  if (remaining <= 0) {
+    console.info(`[import-monitor] phase 2 daily cap reached (${importedToday}/${maxPerDay})`)
+    return 0
+  }
+
+  // Pull just-upserted pending candidates in the capped set, best tier/score first.
+  const pending = await db
+    .select({
+      id:            importCandidates.id,
+      tier:          importCandidates.tier,
+      brand:         importCandidates.brand,
+      marginPct:     importCandidates.marginPct,
+      totalQty:      importCandidates.totalQty,
+      dealScore:     importCandidates.dealScore,
+      mapPrice:      importCandidates.mapPrice,
+      proposedPrice: importCandidates.proposedPrice,
+      needsReview:   importCandidates.needsReview,
+    })
+    .from(importCandidates)
+    .where(and(
+      eq(importCandidates.status, 'pending'),
+      inArray(importCandidates.masterKey, cappedKeys),
+    ))
+    .orderBy(importCandidates.tier, sql`${importCandidates.dealScore} DESC NULLS LAST`)
+
+  const gated = pending.filter(c => {
+    const tierOk    = c.tier === 'A' || c.tier === 'B'
+    if (!tierOk || c.needsReview) return false
+    const carriedOk = requireCarried ? carriedBrands.has((c.brand ?? '').toLowerCase().trim()) : true
+    if (!carriedOk) return false
+    const margin = parseFloat(c.marginPct ?? '0') / 100 // stored as percent (e.g. "45.00")
+    const gap    = parseFloat(c.dealScore ?? '0')
+    const qty    = c.totalQty ?? 0
+    const map    = parseFloat(c.mapPrice ?? '0')
+    const price  = parseFloat(c.proposedPrice ?? '0')
+    const mapOk  = !(map > 0 && price < map)
+    return margin >= minMarginPct && qty >= minQty && gap >= minGapScore && mapOk
+  })
+
+  let imported = 0
+  for (const c of gated) {
+    if (imported >= remaining) break
+    try {
+      const r = await approveAndImport(c.id)
+      if (r.ok && !r.skipped) {
+        imported++
+        console.info(`[import-monitor] phase 2 auto-imported candidate ${c.id} (tier ${c.tier})`)
+      } else if (!r.ok) {
+        console.warn(`[import-monitor] phase 2 auto-import failed for candidate ${c.id}: ${r.error}`)
+      }
+    } catch (err) {
+      console.error(`[import-monitor] phase 2 auto-import threw for candidate ${c.id}:`, err)
+    }
+  }
+
+  console.info(`[import-monitor] phase 2 auto-imported ${imported} (cap ${maxPerDay}, ${importedToday} prior today)`)
+  return imported
 }
 
 // ─── Staging helper (used by PM agent + cron) ─────────────────────────────────
