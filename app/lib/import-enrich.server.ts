@@ -112,6 +112,18 @@ async function applyFullEnrichmentWrites(numericProductId: string, writes: Produ
 
   const category = inferCategoryFallback(snap.metafields['xdipx.category'])
 
+  // Editorial sub-category tags from the Nalpac feed. The raw auto-import path
+  // does not write these to Sanity, so propagate them here. "(uncategorized)" is
+  // the master-collapse sentinel for a blank Sub-Category — never a real tag.
+  const histRows = await db
+    .select({ categories: dealHistory.categories })
+    .from(dealHistory)
+    .where(eq(dealHistory.shopifyProductId, numericProductId))
+    .limit(1)
+  const editorialTags = (histRows[0]?.categories ?? []).filter(
+    (c): c is string => !!c && c !== '(uncategorized)',
+  )
+
   // Em-dash-sanitized copy (house rule) — computed once, used for Shopify + Sanity.
   const sTagline = ed(writes.tagline)
   const sSeo     = ed(writes.seoMetaDescription)
@@ -174,6 +186,7 @@ async function applyFullEnrichmentWrites(numericProductId: string, writes: Produ
       audienceTags:   writes.audienceTags,
       mattersTags:    writes.mattersTags,
     }
+    if (editorialTags.length)               upsertParams.tags              = editorialTags
     if (doc.seoTitle)                       upsertParams.seoTitle          = doc.seoTitle
     if (writes.productSubtypeDial != null)  upsertParams.productSubtypeDial = writes.productSubtypeDial
     if (writes.sensationDialV2)             upsertParams.sensationDialV2   = writes.sensationDialV2
