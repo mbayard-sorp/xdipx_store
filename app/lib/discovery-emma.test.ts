@@ -3,6 +3,7 @@ import {
   audiencePhrase,
   computeAvailable,
   emmaQuestions,
+  getAskEmmaSeedPrompt,
   getEmmaLine,
   railTitlePlain,
   railTitleSegments,
@@ -241,6 +242,57 @@ describe('emmaQuestions', () => {
     const d = emmaQuestions.done('Sensual', 'Us')
     expect(d.headline).toMatch(/sensual/)
     expect(d.headline).toMatch(/for both of you/)
+  })
+})
+
+describe('getAskEmmaSeedPrompt', () => {
+  it('returns a generic opener when nothing is selected', () => {
+    expect(getAskEmmaSeedPrompt(state())).toBe('Help me find something good. Where do I start?')
+  })
+
+  it('builds from mood alone', () => {
+    expect(getAskEmmaSeedPrompt(state({ mood: ['Sensual'] })))
+      .toBe("I'm after something sensual. What would you suggest?")
+  })
+
+  it('builds from audience alone (no leading mood)', () => {
+    expect(getAskEmmaSeedPrompt(state({ audience: ['Us'] })))
+      .toBe("I'm looking for something for us. What would you suggest?")
+  })
+
+  it('combines mood + audience', () => {
+    expect(getAskEmmaSeedPrompt(state({ mood: ['Sensual'], audience: ['Us'] })))
+      .toBe("I'm after something sensual for us. What would you suggest?")
+  })
+
+  it('includes matters as a lowercased sentence', () => {
+    const p = getAskEmmaSeedPrompt(state({ matters: ['Body-Safe Silicone'] as Matters[] }))
+    expect(p).toContain('It should be body-safe silicone.')
+  })
+
+  it('includes budget only when moved off the default', () => {
+    expect(getAskEmmaSeedPrompt(state({ budget: 80 }))).toContain('Budget is around $80.')
+    expect(getAskEmmaSeedPrompt(state({ mood: ['Sensual'] }))).not.toContain('Budget')
+  })
+
+  it('composes the full brief from all inputs', () => {
+    const p = getAskEmmaSeedPrompt(state({
+      mood: ['Sensual'],
+      audience: ['Us'],
+      matters: ['Body-Safe Silicone'] as Matters[],
+      budget: 80,
+    }))
+    expect(p).toBe(
+      "I'm after something sensual for us. It should be body-safe silicone. Budget is around $80. What would you suggest?",
+    )
+  })
+
+  it('contains no em dashes (CLAUDE.md voice rule)', () => {
+    const prompts = [
+      getAskEmmaSeedPrompt(state()),
+      getAskEmmaSeedPrompt(state({ mood: ['Sensual'], audience: ['Us'], matters: ['Hands-Free'] as Matters[], budget: 80 })),
+    ]
+    for (const p of prompts) expect(p).not.toContain('—')
   })
 })
 

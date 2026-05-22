@@ -14,7 +14,7 @@ import { useRouteLoaderData } from 'react-router'
 import { getEmmaLine } from '~/lib/discovery-emma'
 import { trackEmmaLineSurface } from '~/lib/analytics.client'
 import { saveDiscoveryPicks, useDiscovery } from '~/stores/discovery'
-import { SIDEKICK_CTAS as CTA_LABELS } from '~/lib/discovery-emma'
+import { SIDEKICK_CTAS as CTA_LABELS, getAskEmmaSeedPrompt } from '~/lib/discovery-emma'
 import type { DiscoveryState } from '~/types/discovery'
 import type { EmmaPersona } from '~/types/cms'
 
@@ -62,6 +62,18 @@ export function EmmaSidekick() {
     if (toastTimer.current) clearTimeout(toastTimer.current)
     setToastVisible(true)
     toastTimer.current = setTimeout(() => setToastVisible(false), 2500)
+  }
+
+  // Open the globally-mounted AskEmmaWidget (in _layout.tsx) seeded with a
+  // first-person prompt built from the current selections. The widget listens
+  // for this event and auto-sends the prompt once it's open and idle. Close the
+  // mobile pill first so it doesn't sit on top of the chat panel.
+  function handleAskEmma() {
+    if (typeof window === 'undefined') return
+    setMobileOpen(false)
+    window.dispatchEvent(
+      new CustomEvent('xdipx:emma:openWith', { detail: { prompt: getAskEmmaSeedPrompt(state) } }),
+    )
   }
 
   const inner = (
@@ -136,9 +148,8 @@ export function EmmaSidekick() {
           ink border. Both are pills. "Save my picks" is the primary action. */}
       <div className="flex gap-2 pt-3 border-t border-line">
         <button
-          disabled
-          title="Coming soon"
-          className="flex-1 px-4 py-2.5 rounded-full bg-paper text-ink-3 text-[13px] font-medium border border-line-2 cursor-not-allowed"
+          onClick={handleAskEmma}
+          className="flex-1 px-4 py-2.5 rounded-full bg-paper text-ink text-[13px] font-medium border border-line-2 hover:border-ink/30 hover:bg-paper-2 transition-colors"
           style={{ fontFamily: 'var(--font-body)' }}
         >
           {CTA_LABELS.primary}
