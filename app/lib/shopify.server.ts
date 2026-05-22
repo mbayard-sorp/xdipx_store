@@ -64,22 +64,50 @@ export async function adminGraphQL<T>(query: string, variables?: Record<string, 
     body: JSON.stringify({ query, variables }),
   })
 
-  let res = await doFetch()
+  // Discovery index builds chain 30+ calls. Shopify throttles two different
+  // ways and we have to handle BOTH: a transport-level HTTP 429 (rare), and —
+  // far more common for the GraphQL Admin API — an HTTP 200 whose body carries
+  // `errors: [{ extensions: { code: "THROTTLED" } }]` plus a cost block with
+  // the leaky-bucket restore rate. Retrying only on 429 (the old behavior)
+  // missed every GraphQL throttle, so a cold-start build would throw
+  // "Throttled" on the first cost-limit hit and cascade into a 500.
+  const MAX_ATTEMPTS = 4
+  for (let attempt = 1; ; attempt++) {
+    const res = await doFetch()
 
-  // Retry once on 429 if Shopify hands us a Retry-After. Discovery index
-  // builds chain 30+ calls; without this, a single throttle hit during a
-  // cold-start build empties the cache and renders the home with no rails.
-  if (res.status === 429) {
-    const retryAfter = Number(res.headers.get('retry-after')) || 1
-    const delayMs = Math.min(retryAfter * 1000, 5000)
-    await new Promise(r => setTimeout(r, delayMs))
-    res = await doFetch()
+    if (res.status === 429) {
+      if (attempt >= MAX_ATTEMPTS) throw new Error('Shopify Admin GraphQL error: 429')
+      const retryAfter = Number(res.headers.get('retry-after')) || 1
+      await new Promise(r => setTimeout(r, Math.min(retryAfter * 1000, 5000)))
+      continue
+    }
+
+    if (!res.ok) throw new Error(`Shopify Admin GraphQL error: ${res.status}`)
+
+    const body = await res.json() as {
+      data: T
+      errors?: { message: string; extensions?: { code?: string } }[]
+      extensions?: { cost?: { requestedQueryCost?: number; throttleStatus?: { currentlyAvailable?: number; restoreRate?: number } } }
+    }
+
+    const throttled = body.errors?.some(
+      e => e.extensions?.code === 'THROTTLED' || /throttled/i.test(e.message),
+    )
+    if (throttled && attempt < MAX_ATTEMPTS) {
+      // Wait long enough for the leaky bucket to refill to the requested cost,
+      // when Shopify tells us the rates; otherwise fall back to exponential.
+      const cost = body.extensions?.cost
+      const needed = (cost?.requestedQueryCost ?? 0) - (cost?.throttleStatus?.currentlyAvailable ?? 0)
+      const restoreRate = cost?.throttleStatus?.restoreRate ?? 0
+      const refillMs = needed > 0 && restoreRate > 0 ? (needed / restoreRate) * 1000 : 0
+      const backoffMs = refillMs || 2 ** (attempt - 1) * 500
+      await new Promise(r => setTimeout(r, Math.min(backoffMs, 5000)))
+      continue
+    }
+
+    if (body.errors?.length) throw new Error(body.errors[0]?.message ?? 'Shopify Admin GraphQL error')
+    return body.data
   }
-
-  if (!res.ok) throw new Error(`Shopify Admin GraphQL error: ${res.status}`)
-  const { data, errors } = await res.json() as { data: T; errors?: { message: string }[] }
-  if (errors?.length) throw new Error(errors[0]?.message ?? 'Shopify Admin GraphQL error')
-  return data
 }
 
 // ─── GraphQL Fragments ────────────────────────────────────────────────────
