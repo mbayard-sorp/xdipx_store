@@ -35,15 +35,18 @@ import {
  * Bump when the index shape changes so old cached entries are ignored.
  * KV writes and reads are namespaced by version; old entries expire on TTL.
  */
-// v4: DiscoveryProduct gained totalInventory + productType fields.
-//     v3 cached entries lack these; without a bump the rules engine would
+// v6: DiscoveryProduct gained priceMax + compareAtPrice + colorValues +
+//     sizeValues for the home-page card savings line and color/size indicators.
+//     v5 entries lack these; the card would render no savings/indicators.
+// v5: DiscoveryProduct gained totalInventory + productType fields.
+//     v4 cached entries lack these; without a bump the rules engine would
 //     see undefined for both and the inventory-floor filter would be a no-op.
 // v3: category source switched from xdipx.product_type_dial mapping to
 //     direct membership in the four top-level Shopify collections
 //     (Pleasure / Play / Body / Wear). v2 cached entries reference the
 //     old categorization. Bumping invalidates them.
 // v2: tag values normalized (Title-Case canonical form) before indexing.
-const INDEX_VERSION = 'v5'
+const INDEX_VERSION = 'v6'
 const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 const INDEX_TTL_SECONDS = 60 * 60 // 1h
 
@@ -139,12 +142,69 @@ interface AdminProductNode {
   status:       string
   productType:  string | null   // Shopify's native "Product organization → Type"
   featuredImage: { url: string; altText: string | null } | null
-  priceRangeV2: { minVariantPrice: { amount: string } }
+  priceRangeV2: {
+    minVariantPrice: { amount: string }
+    maxVariantPrice: { amount: string } | null
+  }
+  compareAtPriceRange: {
+    minVariantCompareAtPrice: { amount: string } | null
+  } | null
+  options: Array<{ name: string; optionValues: Array<{ name: string }> }>
   totalInventory:   number | null
+  originalPriceRaw: { value: string | null } | null
   productTypeDial:  { value: string | null } | null
   moodTagsRaw:      { value: string | null } | null
   audienceTagsRaw:  { value: string | null } | null
   mattersTagsRaw:   { value: string | null } | null
+}
+
+/**
+ * Derive Color and Size/Length indicator values from a product's own Shopify
+ * options. Per-product only (the discovery index is flat — it does NOT run the
+ * vault's cross-product master-collapse). Shopify's default single-variant
+ * "Title / Default Title" option is ignored because it matches neither axis.
+ */
+function classifyOptionValues(
+  options: Array<{ name: string; optionValues: Array<{ name: string }> }>,
+): { colorValues: string[]; sizeValues: string[] } {
+  let colorValues: string[] = []
+  let sizeValues: string[] = []
+  for (const o of options) {
+    const name = o.name.toLowerCase()
+    const values = o.optionValues.map(v => v.name.trim()).filter(Boolean)
+    if (/colou?r/.test(name)) colorValues = values
+    else if (/size|length/.test(name)) sizeValues = values
+  }
+  return { colorValues, sizeValues }
+}
+
+/**
+ * Derive the card's pricing + variant-indicator fields from an Admin node.
+ * `priceMax` is null when it equals (or is below) the min, so the card knows
+ * to show a single price rather than a "$min–$max" range. `compareAtPrice` is
+ * null unless it sits strictly above the min price (i.e. there's real savings).
+ */
+function derivePricingAndOptions(n: AdminProductNode, price: number): {
+  priceMax: number | null
+  compareAtPrice: number | null
+  colorValues: string[]
+  sizeValues: string[]
+} {
+  const maxRaw = Number(n.priceRangeV2.maxVariantPrice?.amount)
+  const priceMax = Number.isFinite(maxRaw) && maxRaw > price ? maxRaw : null
+
+  // MSRP source mirrors the PLP/VaultCard: prefer the curated
+  // `xdipx.original_price` metafield, fall back to Shopify's native
+  // compare-at. Only counts as savings when it sits above the live price.
+  const originalRaw = Number(n.originalPriceRaw?.value)
+  const compareRaw = Number(n.compareAtPriceRange?.minVariantCompareAtPrice?.amount)
+  const msrp = Number.isFinite(originalRaw) && originalRaw > 0
+    ? originalRaw
+    : Number.isFinite(compareRaw) ? compareRaw : NaN
+  const compareAtPrice = Number.isFinite(msrp) && msrp > price ? msrp : null
+
+  const { colorValues, sizeValues } = classifyOptionValues(n.options ?? [])
+  return { priceMax, compareAtPrice, colorValues, sizeValues }
 }
 
 interface AdminProductsPage {
@@ -165,8 +225,11 @@ const PRODUCTS_PAGE_QUERY = /* GraphQL */ `
         status
         productType
         featuredImage { url altText }
-        priceRangeV2 { minVariantPrice { amount } }
+        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
+        compareAtPriceRange { minVariantCompareAtPrice { amount } }
+        options(first: 3) { name optionValues { name } }
         totalInventory
+        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
         productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
         moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
         audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
@@ -217,11 +280,17 @@ function nodeToDiscoveryProduct(
   const productType = (n.productType ?? '').trim() || null
   const productTypeDial = dial || null
 
+  const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(n, price)
+
   return {
     id:          n.id,
     handle:      n.handle,
     title:       n.title,
     price,
+    priceMax,
+    compareAtPrice,
+    colorValues,
+    sizeValues,
     imageUrl:    n.featuredImage?.url ?? null,
     imageAlt:    n.featuredImage?.altText ?? null,
     category,
@@ -338,8 +407,11 @@ const NODES_BY_IDS_QUERY = /* GraphQL */ `
         status
         productType
         featuredImage { url altText }
-        priceRangeV2 { minVariantPrice { amount } }
+        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
+        compareAtPriceRange { minVariantCompareAtPrice { amount } }
+        options(first: 3) { name optionValues { name } }
         totalInventory
+        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
         productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
         moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
         audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
@@ -384,11 +456,16 @@ export async function fetchHonoraryProducts(
       const dial = (node.productTypeDial?.value as ProductTypeDial | null) ?? ''
       const subcategory = dialToSubcategory(dial) ?? category
       const productType = (node.productType ?? '').trim() || null
+      const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(node, price)
       out.push({
         id:             node.id,
         handle:         node.handle,
         title:          node.title,
         price,
+        priceMax,
+        compareAtPrice,
+        colorValues,
+        sizeValues,
         imageUrl:       node.featuredImage?.url ?? null,
         imageAlt:       node.featuredImage?.altText ?? null,
         category, // honorary — forced to the pinned rail's category

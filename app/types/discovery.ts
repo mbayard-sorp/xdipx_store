@@ -110,8 +110,20 @@ export interface DiscoveryProduct {
   id:          string
   handle:      string
   title:       string
+  /** Lowest variant price — the "from" price shown on the card. */
   price:       number
-  /** Storefront image URL or null if no media — UI falls back to a tile. */
+  /** Highest variant price; used to show a "$min–$max" range when it differs. */
+  priceMax:    number | null
+  /**
+   * Lowest variant compare-at (MSRP) when on sale, else null. Drives the
+   * struck price + "You save $X (Y%)" line, mirroring the PLP VaultCard.
+   */
+  compareAtPrice: number | null
+  /** Distinct Color option values (only meaningful when length > 1). */
+  colorValues: string[]
+  /** Distinct Size/Length option values (only meaningful when length > 1). */
+  sizeValues:  string[]
+  /** Featured image URL or null if no media — UI falls back to a tile. */
   imageUrl:    string | null
   imageAlt:    string | null
   category:    Category
