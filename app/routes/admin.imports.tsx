@@ -121,10 +121,12 @@ function fmt(v: string | number | null | undefined): string {
   return isNaN(n) ? '—' : `$${n.toFixed(2)}`
 }
 
+// margin_pct is stored already as a percent (e.g. "45.00"), not a fraction —
+// see import-monitor.server.ts where priceResult.marginPct is *100 before write.
 function fmtPct(v: string | number | null | undefined): string {
   if (v == null) return '—'
   const n = parseFloat(String(v))
-  return isNaN(n) ? '—' : `${(n * 100).toFixed(1)}%`
+  return isNaN(n) ? '—' : `${n.toFixed(1)}%`
 }
 
 function fmtDate(iso: string | null | undefined): string {
