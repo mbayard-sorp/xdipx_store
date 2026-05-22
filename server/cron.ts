@@ -250,6 +250,24 @@ export function createCronRoutes() {
   })
 
   /**
+   * POST /cron/import-enrich
+   * Schedule: every 30 min — self-draining post-import lifecycle tick.
+   * Collects finished enrichment batches, publishes enriched drafts, then
+   * submits a new batch if none is in flight. Gated by import_enrich_enabled
+   * (checked inside runImportEnrichTick).
+   */
+  router.post('/import-enrich', guard, async (_req, res) => {
+    try {
+      const { runImportEnrichTick } = await import('../app/lib/import-enrich.server.js')
+      const result = await runImportEnrichTick({ source: 'cron' })
+      res.json(result)
+    } catch (err) {
+      console.error('[cron:import-enrich]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/inventory-check
    * Schedule: every 5 min — check if live deal is sold out, rotate if so
    */

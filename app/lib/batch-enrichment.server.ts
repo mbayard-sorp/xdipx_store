@@ -374,14 +374,32 @@ Return ONLY the ProductWrites JSON object per your <output_schema>. No markdown 
  * tokens + ~1K per-product user tokens + ~2K output tokens (Sonnet-priced,
  * 50% batch discount), expect roughly $20–30 total spend.
  */
-export async function runBatchFullEnrichment(
+const FULL_ENRICHMENT_SUFFIX = '_fullEnrichment'
+
+interface UsageDelta {
+  inputTokens:         number
+  outputTokens:        number
+  cacheCreationTokens: number
+  cacheReadTokens:     number
+}
+
+function addUsage(acc: UsageDelta, delta: UsageDelta): void {
+  acc.inputTokens         += delta.inputTokens
+  acc.outputTokens        += delta.outputTokens
+  acc.cacheCreationTokens += delta.cacheCreationTokens
+  acc.cacheReadTokens     += delta.cacheReadTokens
+}
+
+/**
+ * Build the per-product batch requests for a full-enrichment run. Shared by the
+ * sync poll path (`runBatchFullEnrichment`) and the submit/collect split
+ * (`submitFullEnrichmentBatch`) so the prompt assembly stays identical.
+ */
+async function buildFullEnrichmentRequests(
   inputs:  BatchFullEnrichmentInput[],
   context: SharedEnrichmentContext,
-  opts:    { brandVoice?: string; pollIntervalMs?: number; timeoutMs?: number; maxTokens?: number } = {},
-): Promise<BatchFullEnrichmentResult> {
-  if (inputs.length === 0) throw new Error('runBatchFullEnrichment: no inputs')
-
-  const t0 = Date.now()
+  opts:    { brandVoice?: string; maxTokens?: number } = {},
+): Promise<BatchRequest[]> {
   const emmaBlocks   = await buildEmmaSystemBlocks(opts.brandVoice)
   const agentPrompt  = await loadEnricherAgentPrompt()
   const contextBlock = buildSharedContextBlock(context)
@@ -396,8 +414,8 @@ export async function runBatchFullEnrichment(
     { type: 'text', text: contextBlock, cache_control: { type: 'ephemeral' } },
   ]
 
-  const requests: BatchRequest[] = inputs.map(({ productId, brief }) => ({
-    custom_id: `${productId}_fullEnrichment`,
+  return inputs.map(({ productId, brief }) => ({
+    custom_id: `${productId}${FULL_ENRICHMENT_SUFFIX}`,
     params: {
       model:      MODEL_SONNET,
       max_tokens: opts.maxTokens ?? 4096,
@@ -405,6 +423,114 @@ export async function runBatchFullEnrichment(
       messages: [{ role: 'user', content: buildPerProductUserPrompt(brief) }],
     },
   }))
+}
+
+/**
+ * Parse a single batch result entry into either parsed ProductWrites or an
+ * error string. Usage is returned whenever the model produced a message (even
+ * if its body failed to parse), so token accounting stays accurate.
+ */
+function parseFullEnrichmentEntry(
+  entry: Anthropic.Messages.Batches.MessageBatchIndividualResponse | undefined,
+): { writes: ProductWrites; usage: UsageDelta } | { writes?: undefined; error: string; usage?: UsageDelta } {
+  if (!entry) return { error: 'no result for custom_id' }
+  if (entry.result.type !== 'succeeded') {
+    const reason = entry.result.type === 'errored'
+      ? entry.result.error.error.message
+      : entry.result.type
+    return { error: `batch ${entry.result.type}: ${reason}` }
+  }
+
+  const msg = entry.result.message
+  // Token accounting — Anthropic returns separate cache fields when prompt
+  // caching is in use. Defensive: read with optional chaining and treat as
+  // 0 if a field is absent (older SDK versions).
+  const u = msg.usage as {
+    input_tokens?:                 number
+    output_tokens?:                number
+    cache_creation_input_tokens?:  number
+    cache_read_input_tokens?:      number
+  }
+  const usage: UsageDelta = {
+    inputTokens:         u?.input_tokens                ?? 0,
+    outputTokens:        u?.output_tokens               ?? 0,
+    cacheCreationTokens: u?.cache_creation_input_tokens ?? 0,
+    cacheReadTokens:     u?.cache_read_input_tokens     ?? 0,
+  }
+
+  const block = msg.content[0]
+  if (block?.type !== 'text') return { error: 'unexpected non-text response block', usage }
+  const cleaned = stripFences(block.text).trim()
+  if (!cleaned) return { error: 'empty response', usage }
+  try {
+    return { writes: JSON.parse(cleaned) as ProductWrites, usage }
+  } catch (err) {
+    const preview = cleaned.slice(0, 200).replace(/\n/g, ' ')
+    return { error: `JSON parse failed: ${err instanceof Error ? err.message : String(err)} | preview: ${preview}`, usage }
+  }
+}
+
+/**
+ * Submit a full-enrichment batch and return immediately — does NOT poll.
+ *
+ * For request/cron contexts (Vercel functions cap at 60s) where blocking on the
+ * batch is impossible. The caller persists the returned batchId and collects on
+ * a later tick via `collectFullEnrichmentBatch`.
+ */
+export async function submitFullEnrichmentBatch(
+  inputs:  BatchFullEnrichmentInput[],
+  context: SharedEnrichmentContext,
+  opts:    { brandVoice?: string; maxTokens?: number } = {},
+): Promise<{ batchId: string; productIds: string[]; submittedCount: number }> {
+  if (inputs.length === 0) throw new Error('submitFullEnrichmentBatch: no inputs')
+  const requests = await buildFullEnrichmentRequests(inputs, context, opts)
+  const batch = await client.messages.batches.create({ requests })
+  console.log(`[batch] submitted full-enrichment batch ${batch.id} with ${requests.length} requests (no poll)`)
+  return { batchId: batch.id, productIds: inputs.map(i => i.productId), submittedCount: requests.length }
+}
+
+/**
+ * Collect a previously-submitted full-enrichment batch. Returns `ended:false`
+ * (with progress) when the batch is still processing — the caller should leave
+ * it pending and retry on the next tick. When ended, returns parsed
+ * ProductWrites keyed by productId (derived from each entry's custom_id) plus
+ * per-product failures and aggregate usage.
+ */
+export async function collectFullEnrichmentBatch(batchId: string): Promise<
+  | { ended: false; status: string; succeeded: number }
+  | { ended: true; results: Map<string, ProductWrites>; failures: Array<{ productId: string; error: string }>; usage: UsageDelta }
+> {
+  const current = await client.messages.batches.retrieve(batchId)
+  if (current.processing_status !== 'ended') {
+    return { ended: false, status: current.processing_status, succeeded: current.request_counts.succeeded }
+  }
+
+  const results = new Map<string, ProductWrites>()
+  const failures: Array<{ productId: string; error: string }> = []
+  const usage: UsageDelta = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 }
+
+  const stream = await client.messages.batches.results(batchId)
+  for await (const entry of stream) {
+    if (!entry.custom_id.endsWith(FULL_ENRICHMENT_SUFFIX)) continue
+    const productId = entry.custom_id.slice(0, -FULL_ENRICHMENT_SUFFIX.length)
+    const parsed = parseFullEnrichmentEntry(entry)
+    if (parsed.usage) addUsage(usage, parsed.usage)
+    if (parsed.writes) results.set(productId, parsed.writes)
+    else failures.push({ productId, error: parsed.error })
+  }
+
+  return { ended: true, results, failures, usage }
+}
+
+export async function runBatchFullEnrichment(
+  inputs:  BatchFullEnrichmentInput[],
+  context: SharedEnrichmentContext,
+  opts:    { brandVoice?: string; pollIntervalMs?: number; timeoutMs?: number; maxTokens?: number } = {},
+): Promise<BatchFullEnrichmentResult> {
+  if (inputs.length === 0) throw new Error('runBatchFullEnrichment: no inputs')
+
+  const t0 = Date.now()
+  const requests = await buildFullEnrichmentRequests(inputs, context, opts)
 
   const { batchId, responses } = await submitAndPollBatch(requests, {
     ...(opts.pollIntervalMs !== undefined ? { pollIntervalMs: opts.pollIntervalMs } : {}),
@@ -416,55 +542,11 @@ export async function runBatchFullEnrichment(
   const usage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 }
 
   for (const input of inputs) {
-    const customId = `${input.productId}_fullEnrichment`
-    const entry    = responses.get(customId)
-    if (!entry) {
-      failures.push({ productId: input.productId, error: 'no result for custom_id' })
-      continue
-    }
-    if (entry.result.type !== 'succeeded') {
-      const reason = entry.result.type === 'errored'
-        ? entry.result.error.error.message
-        : entry.result.type
-      failures.push({ productId: input.productId, error: `batch ${entry.result.type}: ${reason}` })
-      continue
-    }
-
-    const msg = entry.result.message
-    // Token accounting — Anthropic returns separate cache fields when prompt
-    // caching is in use. Defensive: read with optional chaining and treat as
-    // 0 if a field is absent (older SDK versions).
-    const u = msg.usage as {
-      input_tokens?:                 number
-      output_tokens?:                number
-      cache_creation_input_tokens?:  number
-      cache_read_input_tokens?:      number
-    }
-    usage.inputTokens         += u?.input_tokens                 ?? 0
-    usage.outputTokens        += u?.output_tokens                ?? 0
-    usage.cacheCreationTokens += u?.cache_creation_input_tokens  ?? 0
-    usage.cacheReadTokens     += u?.cache_read_input_tokens      ?? 0
-
-    const block = msg.content[0]
-    if (block?.type !== 'text') {
-      failures.push({ productId: input.productId, error: 'unexpected non-text response block' })
-      continue
-    }
-    const cleaned = stripFences(block.text).trim()
-    if (!cleaned) {
-      failures.push({ productId: input.productId, error: 'empty response' })
-      continue
-    }
-    let parsed: ProductWrites
-    try {
-      parsed = JSON.parse(cleaned) as ProductWrites
-    } catch (err) {
-      const preview = cleaned.slice(0, 200).replace(/\n/g, ' ')
-      failures.push({ productId: input.productId, error: `JSON parse failed: ${err instanceof Error ? err.message : String(err)} | preview: ${preview}` })
-      continue
-    }
-
-    results.set(input.productId, parsed)
+    const entry = responses.get(`${input.productId}${FULL_ENRICHMENT_SUFFIX}`)
+    const parsed = parseFullEnrichmentEntry(entry)
+    if (parsed.usage) addUsage(usage, parsed.usage)
+    if (parsed.writes) results.set(input.productId, parsed.writes)
+    else failures.push({ productId: input.productId, error: parsed.error })
   }
 
   return {

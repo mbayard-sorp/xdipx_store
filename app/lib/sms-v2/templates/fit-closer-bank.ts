@@ -5,7 +5,7 @@
  * Each closer is a pure function of FitCloserSlots that returns a ready-to-send string.
  *
  * Voice rules (from CLAUDE.md + Emma persona):
- *   - Emma is a trusted friend who tests everything she recommends.
+ *   - Emma is an AI guide and editorial curator: she advises how a product works and could work for the reader, and never claims to have used, tried, tested, or owned it.
  *   - Suggestive is fine, explicit is not.
  *   - Never "sex" as adjective. Use "intimate", "pleasure", "wellness", "satisfaction".
  *   - No em-dashes. Use commas, periods, or hyphens in compounds.

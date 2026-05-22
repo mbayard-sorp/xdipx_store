@@ -11,7 +11,7 @@ import { db } from '~/lib/db.server'
 import { dealHistory } from '../../db/schema'
 import { generateSEOTitle } from '~/lib/claude.server'
 import { generateProductContent } from '~/lib/emma-orchestrator.server'
-import { cleanDescription, isDiscontinued } from '~/lib/feed-processor.server'
+import { cleanDescription, isDiscontinued, deriveSection } from '~/lib/feed-processor.server'
 import {
   findProductBySKU,
   createShopifyProductFromFeed,
@@ -225,8 +225,9 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
     const map       = parseFloat(masterRow.MAP ?? '0') || 0
     const qty       = parseInt(masterRow['Total qty available']) || 0
     const images    = getImages(masterRow)
-    const rawDesc   = masterRow['Product Description'] ?? ''
-    const description = cleanDescription(rawDesc) || `${masterRow.Brand} ${masterRow['Product Title']}`
+    const rawDesc     = masterRow['Product Description'] ?? ''
+    const cleanedDesc = cleanDescription(rawDesc)
+    const description = cleanedDesc || `${masterRow.Brand} ${masterRow['Product Title']}`
     const categories  = masterRow['Sub-Category']
       ? masterRow['Sub-Category'].split(',').map(c => c.trim()).filter(Boolean)
       : []
@@ -360,13 +361,14 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       ...(writes.accessoryProductIds !== undefined ? { accessoryProductIds: writes.accessoryProductIds } : {}),
       ...(writes.pairingWhy       !== undefined ? { pairingWhy:       writes.pairingWhy }       : {}),
       category,
+      sectionTags:        [deriveSection({ productTypeDial: writes.productTypeDial, categories, title: masterRow['Product Title'] })],
       dealStatus:         'pending_approval',
       dealDate:           '2099-12-31',
       originalPrice:      msrp,
       wholesaleCost:      wholesale,
       mapPrice:           map,
       nalpacSku:          masterSku,
-      rawDescription:     rawDesc,
+      rawDescription:     cleanedDesc || undefined,
     })
 
     // 7. Insert DB row — lands at the bottom of the queue (max sortOrder + 1).
@@ -510,8 +512,9 @@ export async function importProductGroupRaw(group: MasterProductGroup): Promise<
     const map       = parseFloat(masterRow.MAP ?? '0') || 0
     const qty       = parseInt(masterRow['Total qty available']) || 0
     const images    = getImages(masterRow)
-    const rawDesc   = masterRow['Product Description'] ?? ''
-    const description = cleanDescription(rawDesc) || `${masterRow.Brand} ${masterRow['Product Title']}`
+    const rawDesc     = masterRow['Product Description'] ?? ''
+    const cleanedDesc = cleanDescription(rawDesc)
+    const description = cleanedDesc || `${masterRow.Brand} ${masterRow['Product Title']}`
     const categories  = masterRow['Sub-Category']
       ? masterRow['Sub-Category'].split(',').map(c => c.trim()).filter(Boolean)
       : []
@@ -568,13 +571,14 @@ export async function importProductGroupRaw(group: MasterProductGroup): Promise<
     await pushProductToShopify({
       shopifyProductId: numericId,
       category,
+      sectionTags:      [deriveSection({ categories, title: masterRow['Product Title'] })],
       dealStatus:       'pending_approval',
       dealDate:         '2099-12-31',
       originalPrice:    msrp,
       wholesaleCost:    wholesale,
       mapPrice:         map,
       nalpacSku:        masterSku,
-      rawDescription:   rawDesc,
+      rawDescription:   cleanedDesc || undefined,
       requireTagline:   false,
     })
 

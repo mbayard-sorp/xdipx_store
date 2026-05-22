@@ -855,10 +855,16 @@ export const importCandidates = pgTable('import_candidates', {
   needsReview:     boolean('needs_review').notNull().default(false),
   upc:             varchar('upc', { length: 40 }),
   sampleImage:     text('sample_image'),
+  // Migration 040: post-import lifecycle (enrich -> publish). `status='imported'`
+  // stays terminal; these timestamps track the stages after import.
+  enrichedAt:      timestamp('enriched_at'),
+  publishedAt:     timestamp('published_at'),
+  enrichBatchId:   varchar('enrich_batch_id', { length: 100 }),
 }, t => ({
   statusRunIdx:   index('idx_import_candidates_status_run').on(t.status, t.runDate),
   tierScoreIdx:   index('idx_import_candidates_tier_score').on(t.tier, t.dealScore),
   masterKeyIdx:   uniqueIndex('idx_import_candidates_master_key').on(t.masterKey),
+  enrichIdx:      index('idx_import_candidates_enrich').on(t.status, t.enrichedAt),
 }))
 
 /** One row per monitor run (cron or manual) — audit trail for the dashboard header. */
@@ -876,5 +882,25 @@ export const importMonitorRuns = pgTable('import_monitor_runs', {
   errorMessage:         text('error_message'),
 }, t => ({
   runDateIdx: index('idx_import_monitor_runs_date').on(t.runDate),
+}))
+
+/**
+ * One row per submitted Anthropic Message Batch for post-import enrichment.
+ * Vercel functions cap at 60s, so the enrich cron submits a batch on one tick
+ * and collects it on a later tick — this table is the durable handoff.
+ */
+export const enrichmentBatches = pgTable('enrichment_batches', {
+  id:           serial('id').primaryKey(),
+  batchId:      varchar('batch_id', { length: 100 }).notNull().unique(),
+  status:       varchar('status', { length: 20 }).notNull().default('pending'),  // 'pending'|'collected'|'failed'
+  candidateIds: json('candidate_ids').$type<number[]>().notNull(),
+  productIds:   json('product_ids').$type<string[]>().notNull(),
+  succeeded:    integer('succeeded').notNull().default(0),
+  failed:       integer('failed').notNull().default(0),
+  error:        text('error'),
+  submittedAt:  timestamp('submitted_at').notNull().defaultNow(),
+  collectedAt:  timestamp('collected_at'),
+}, t => ({
+  statusIdx: index('idx_enrichment_batches_status').on(t.status, t.submittedAt),
 }))
 

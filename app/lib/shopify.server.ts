@@ -2468,6 +2468,9 @@ export interface ProductPageDoc {
   moodTags?: string[] | undefined                 // xdipx.mood_tags (list.text)
   audienceTags?: string[] | undefined             // xdipx.audience_tags (list.text)
   mattersTags?: string[] | undefined              // xdipx.matters_tags (list.text)
+  /** Top-level menu section — exactly one of pleasure|play|body|wear.
+   *  Written to custom.section_tags (list.single_line_text_field, one value). */
+  sectionTags?: string[] | undefined
   emmaHero?: EmmaHeroCopy | undefined             // xdipx.emma_hero (json)
   // Brand-aware title augmentation
   originalTitle?: string | undefined              // xdipx.original_title (single_line_text_field) — manufacturer's pre-augmented title
@@ -2632,6 +2635,15 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
     metafields.push({
       namespace: 'xdipx', key: 'matters_tags', ownerId: gid,
       value: JSON.stringify(doc.mattersTags),
+      type: 'list.single_line_text_field',
+    })
+  }
+  // Top-level menu section — custom namespace, exactly one value (stored as a
+  // single-element list for schema parity with the other taxonomy metafields).
+  if (doc.sectionTags?.length) {
+    metafields.push({
+      namespace: 'custom', key: 'section_tags', ownerId: gid,
+      value: JSON.stringify(doc.sectionTags),
       type: 'list.single_line_text_field',
     })
   }

@@ -94,6 +94,51 @@ export function parseCategories(raw: string): string[] {
   return raw.split(',').map(c => c.trim()).filter(Boolean)
 }
 
+/** The four top-level menu sections. Exactly one applies per product. */
+export type Section = 'pleasure' | 'play' | 'body' | 'wear'
+export const SECTION_VALUES: readonly Section[] = ['pleasure', 'play', 'body', 'wear'] as const
+
+// Keyword groups, checked in order: play -> wear -> body -> (default) pleasure.
+// Distinct/compound terms first so e.g. "strap-on" lands in play before "dildo"
+// would pull it to pleasure. Lowercase, matched as substrings.
+const SECTION_KEYWORDS: ReadonlyArray<{ section: Section; words: readonly string[] }> = [
+  { section: 'play', words: ['bondage', 'bdsm', 'restraint', 'handcuff', 'cuff', 'paddle', 'flogger', 'whip', 'crop', 'gag', 'blindfold', 'collar', 'leash', 'chastity', 'cage', 'harness', 'strap-on', 'strapon', 'rope', 'shibari', 'spank', 'kink', 'fetish play', 'role-play', 'roleplay', 'role play', 'furniture', 'sling', 'swing', 'wartenberg', 'nipple clamp', 'clamp', 'electrostim', 'e-stim', 'game'] },
+  { section: 'wear', words: ['lingerie', 'babydoll', 'chemise', 'bodysuit', 'bodystocking', 'teddy', 'corset', 'bustier', 'garter', 'stocking', 'hosiery', 'fishnet', 'pasties', 'pasty', 'panty', 'pantie', 'thong', 'g-string', 'bra ', 'bra-', 'bra set', 'underwear', 'boxer', 'brief', 'jock', 'apparel', 'dress', 'robe', 'kimono', 'fetishwear', 'leatherwear', 'costume'] },
+  { section: 'body', words: ['lubricant', 'lube', 'massage oil', 'massage candle', 'candle', 'arousal', 'desensitiz', 'enhancer', 'oral enhancer', 'cleaner', 'toy cleaner', 'pheromone', 'wipe', 'hygiene', 'douche', 'enema', 'kegel', 'extender', 'cbd', 'supplement', ' pill', 'gummies', 'gummy', 'gel', 'cream', 'lotion', 'balm', 'spray', 'oil', 'powder', 'edible body'] },
+]
+
+/**
+ * Deterministically map a product to exactly one top-level menu section.
+ *
+ * Section is a function of the Shopify product Type (when set), with a fallback
+ * to keyword matching across type + categories + title, and a productTypeDial
+ * nudge. Never returns empty — the homepage menu requires one section per
+ * product. Default bucket is `pleasure` (the largest catalog segment).
+ */
+export function deriveSection(input: {
+  productType?:     string | null | undefined
+  categories?:      readonly string[] | null | undefined
+  productTypeDial?: string | null | undefined
+  title:            string
+}): Section {
+  const hay = [
+    input.productType ?? '',
+    (input.categories ?? []).join(' '),
+    input.title ?? '',
+  ].join(' ').toLowerCase()
+
+  for (const { section, words } of SECTION_KEYWORDS) {
+    if (words.some(w => hay.includes(w))) return section
+  }
+
+  // productTypeDial nudge for body/wear when keywords missed (dial has no 'play').
+  const dial = (input.productTypeDial ?? '').toLowerCase()
+  if (dial === 'lube' || dial === 'massage' || dial === 'enhancer' || dial === 'wellness' || dial === 'condom') return 'body'
+  if (dial === 'wear') return 'wear'
+
+  return 'pleasure'
+}
+
 function getImages(product: NalpacProduct): string[] {
   return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     .map(i => product[`Image ${i}` as keyof NalpacProduct] as string)

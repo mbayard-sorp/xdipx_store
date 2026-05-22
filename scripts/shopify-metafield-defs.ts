@@ -67,6 +67,15 @@ const DEFS: MetafieldDef[] = [
     description: 'Surface-level concerns (quiet, soft-touch, travel-size, first-time, waterproof, rechargeable, hands-free, etc).',
     type:        'list.single_line_text_field',
   },
+  // Top-level menu section — deterministic 1:1 (exactly one value per product).
+  // Stored as a list for schema consistency with the other taxonomy metafields.
+  {
+    namespace:   'custom',
+    key:         'section_tags',
+    name:        'Section',
+    description: 'Top-level menu section — exactly ONE of: pleasure (toys on/in a body for sensation) | play (bondage/kink/role-play/games) | body (lubes/oils/gels/hygiene/supplements) | wear (lingerie/apparel/fetishwear). Derived deterministically from product type. "Sale" is never a section.',
+    type:        'list.single_line_text_field',
+  },
   // Phase 2 — sensation dial + voting (Phase 1 rebuild — expanded enum)
   {
     key:         'product_type_dial',

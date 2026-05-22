@@ -8,132 +8,6 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// app/lib/kv.server.ts
-async function getKV() {
-  if (_kv) return _kv;
-  if (!process.env["KV_REST_API_URL"] || !process.env["KV_REST_API_TOKEN"]) return null;
-  const { createClient: createClient6 } = await import("@vercel/kv");
-  _kv = createClient6({
-    url: process.env["KV_REST_API_URL"],
-    token: process.env["KV_REST_API_TOKEN"]
-  });
-  return _kv;
-}
-async function kvGet(key) {
-  const kv = await getKV();
-  if (kv) return kv.get(key);
-  return memStore.get(key) ?? null;
-}
-async function kvSet(key, value, _exSeconds) {
-  const kv = await getKV();
-  if (kv) {
-    if (_exSeconds) {
-      await kv.set(key, value, { ex: _exSeconds });
-    } else {
-      await kv.set(key, value);
-    }
-    return;
-  }
-  memStore.set(key, value);
-  const existing = memTimers.get(key);
-  if (existing) clearTimeout(existing);
-  if (_exSeconds && _exSeconds > 0) {
-    const t = setTimeout(() => {
-      memStore.delete(key);
-      memTimers.delete(key);
-    }, _exSeconds * 1e3);
-    if (typeof t.unref === "function") {
-      t.unref();
-    }
-    memTimers.set(key, t);
-  } else {
-    memTimers.delete(key);
-  }
-}
-async function kvDel(key) {
-  const kv = await getKV();
-  if (kv) {
-    await kv.del(key);
-    return;
-  }
-  memStore.delete(key);
-  const t = memTimers.get(key);
-  if (t) {
-    clearTimeout(t);
-    memTimers.delete(key);
-  }
-}
-async function cached(key, ttlSeconds, fn) {
-  const ttlMs = ttlSeconds * 1e3;
-  const now = Date.now();
-  const l1 = readCache.get(key);
-  if (l1 && now - l1.ts < ttlMs) return l1.data;
-  const l2 = await kvGet(key);
-  if (l2 && now - l2.ts < ttlMs) {
-    readCache.set(key, l2);
-    return l2.data;
-  }
-  const data = await fn();
-  const entry = { data, ts: now };
-  readCache.set(key, entry);
-  await kvSet(key, entry, ttlSeconds + 60);
-  return data;
-}
-function invalidateCache(prefix) {
-  for (const k of readCache.keys()) {
-    if (k.startsWith(prefix)) readCache.delete(k);
-  }
-}
-var _kv, _g, memStore, _g3, memTimers, _g2, readCache, KV_KEYS;
-var init_kv_server = __esm({
-  "app/lib/kv.server.ts"() {
-    "use strict";
-    _kv = null;
-    _g = globalThis;
-    if (!_g.__kvMemStore) _g.__kvMemStore = /* @__PURE__ */ new Map();
-    memStore = _g.__kvMemStore;
-    _g3 = globalThis;
-    if (!_g3.__kvMemTimers) _g3.__kvMemTimers = /* @__PURE__ */ new Map();
-    memTimers = _g3.__kvMemTimers;
-    _g2 = globalThis;
-    if (!_g2.__readCache) _g2.__readCache = /* @__PURE__ */ new Map();
-    readCache = _g2.__readCache;
-    KV_KEYS = {
-      feedCache: "nalpac:feed:cache",
-      feedCacheTimestamp: "nalpac:feed:timestamp",
-      socialProof: (handle) => `social:proof:${handle}`,
-      dealOfDay: "deal:today",
-      viewerCount: (handle) => `viewers:${handle}`,
-      pinnedAccessoryIds: "pinned:accessory_ids",
-      vaultFilterTabs: "vault:filter_tabs",
-      bulkImportJob: "bulk-import:job",
-      veoOperation: (token) => `veo:op:${token}`,
-      ltxOperation: (token) => `ltx:op:${token}`,
-      liveDealHandle: "live-deal:handle",
-      fbt: (handle) => `fbt:${handle}`,
-      collectionCursor: (handle, page, sort = "manual") => `vault:cursor:${handle}:${sort}:p${page}`,
-      // v2 redesign — dial vote aggregates (5-min TTL)
-      dialAggregate: (shopifyProductId) => `dial:agg:${shopifyProductId}`,
-      // PDP product-level aggregate vote (thumbs up/down on the whole dial)
-      productVoteAggregate: (shopifyProductId) => `dial:product-agg:${shopifyProductId}`,
-      // PDP contextual Emma aside (24h TTL; guest/empty inputs collapse to one key per product)
-      emmaAside: (productId, userBucket, cartHash, browseHash) => `emmaAside:${productId}:${userBucket}:${cartHash}:${browseHash}`,
-      emmaAsideLock: (productId) => `emmaAside:lock:${productId}`,
-      emmaAsideDailyCount: (utcDate) => `emmaAside:dailyCount:${utcDate}`,
-      // Cart drawer Emma aside (24h TTL; cart+profile+subtotal-band collapse to one key)
-      emmaCartAside: (variant, userBucket, cartHash, searchHash, subtotalBand) => `emmaCartAside:${variant}:${userBucket}:${cartHash}:${searchHash}:${subtotalBand}`,
-      emmaCartAsideLock: (cartHash) => `emmaCartAside:lock:${cartHash}`,
-      emmaCartAsideDailyCount: (utcDate) => `emmaCartAside:dailyCount:${utcDate}`,
-      // Discovery rail on /search + /collections (10-min TTL per query+filter+recentView hash)
-      emmaDiscovery: (hash) => `emmaDiscovery:v1:${hash}`,
-      emmaDiscoveryDailyCount: (utcDate) => `emmaDiscovery:dailyCount:${utcDate}`,
-      // Encouragement strip above discovery grid (30-min TTL per filter combination)
-      emmaEncouragement: (hash) => `emmaEncouragement:v2:${hash}`,
-      emmaEncouragementDailyCount: (utcDate) => `emmaEncouragement:dailyCount:${utcDate}`
-    };
-  }
-});
-
 // db/schema.ts
 var schema_exports = {};
 __export(schema_exports, {
@@ -152,6 +26,7 @@ __export(schema_exports, {
   emmaChatSessions: () => emmaChatSessions,
   emmaChatThreads: () => emmaChatThreads,
   emmaChatTurns: () => emmaChatTurns,
+  enrichmentBatches: () => enrichmentBatches,
   importCandidates: () => importCandidates,
   importMonitorRuns: () => importMonitorRuns,
   ivrVoices: () => ivrVoices,
@@ -199,7 +74,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -879,11 +754,17 @@ var init_schema = __esm({
       totalQty: integer("total_qty"),
       needsReview: boolean("needs_review").notNull().default(false),
       upc: varchar("upc", { length: 40 }),
-      sampleImage: text("sample_image")
+      sampleImage: text("sample_image"),
+      // Migration 040: post-import lifecycle (enrich -> publish). `status='imported'`
+      // stays terminal; these timestamps track the stages after import.
+      enrichedAt: timestamp("enriched_at"),
+      publishedAt: timestamp("published_at"),
+      enrichBatchId: varchar("enrich_batch_id", { length: 100 })
     }, (t) => ({
       statusRunIdx: index("idx_import_candidates_status_run").on(t.status, t.runDate),
       tierScoreIdx: index("idx_import_candidates_tier_score").on(t.tier, t.dealScore),
-      masterKeyIdx: uniqueIndex("idx_import_candidates_master_key").on(t.masterKey)
+      masterKeyIdx: uniqueIndex("idx_import_candidates_master_key").on(t.masterKey),
+      enrichIdx: index("idx_import_candidates_enrich").on(t.status, t.enrichedAt)
     }));
     importMonitorRuns = pgTable("import_monitor_runs", {
       id: serial("id").primaryKey(),
@@ -901,6 +782,21 @@ var init_schema = __esm({
     }, (t) => ({
       runDateIdx: index("idx_import_monitor_runs_date").on(t.runDate)
     }));
+    enrichmentBatches = pgTable("enrichment_batches", {
+      id: serial("id").primaryKey(),
+      batchId: varchar("batch_id", { length: 100 }).notNull().unique(),
+      status: varchar("status", { length: 20 }).notNull().default("pending"),
+      // 'pending'|'collected'|'failed'
+      candidateIds: json("candidate_ids").$type().notNull(),
+      productIds: json("product_ids").$type().notNull(),
+      succeeded: integer("succeeded").notNull().default(0),
+      failed: integer("failed").notNull().default(0),
+      error: text("error"),
+      submittedAt: timestamp("submitted_at").notNull().defaultNow(),
+      collectedAt: timestamp("collected_at")
+    }, (t) => ({
+      statusIdx: index("idx_enrichment_batches_status").on(t.status, t.submittedAt)
+    }));
   }
 });
 
@@ -914,6 +810,358 @@ var init_db_server = __esm({
     init_schema();
     sql = neon(process.env["DATABASE_URL"]);
     db = drizzle(sql, { schema: schema_exports });
+  }
+});
+
+// app/lib/pricing-engine-v2.server.ts
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+function roundPsychological(n, ending = ".99") {
+  if (n < 1) return round2(n);
+  const suffix = parseFloat(ending);
+  const floored = Math.floor(n);
+  const candidate = floored - (1 - suffix);
+  return candidate > 0 ? round2(candidate) : round2(n);
+}
+function applyVelocityModifier(cfg, bucket) {
+  const shift = VELOCITY_SHIFT[bucket];
+  return {
+    ...cfg,
+    target_margin_pct: cfg.target_margin_pct + shift
+  };
+}
+function computePrice(params) {
+  const { cost, map, msrp, cfg } = params;
+  const absolutePriceFloor = params.absolutePriceFloor ?? ABSOLUTE_PRICE_FLOOR_DEFAULT;
+  if (cost == null) return null;
+  const target = cost / (1 - cfg.target_margin_pct);
+  const floor = cost / (1 - cfg.margin_floor_pct);
+  let sell = target;
+  if (cfg.map_behavior !== "ignore_map" && map != null) {
+    sell = Math.max(sell, map);
+    if (cfg.map_behavior === "above_map_only" && sell === map) {
+      sell += 0.01;
+    }
+  }
+  sell = Math.max(sell, floor);
+  if (msrp != null) {
+    sell = Math.min(sell, msrp);
+  }
+  sell = roundPsychological(sell);
+  const compare_at = cfg.compare_at_strategy === "msrp" && msrp != null && sell < msrp ? msrp : null;
+  return { sell, compare_at, belowAbsoluteFloor: sell < absolutePriceFloor };
+}
+function computeDiscontinuedPrice(params) {
+  const { cost, msrp, daysDiscontinued, cfg } = params;
+  if (msrp == null || cost == null) return null;
+  const entry = CLEARANCE_LADDER.find(([maxDays]) => daysDiscontinued <= maxDays);
+  const discountPct = entry ? entry[1] : 0.5;
+  let sell = msrp * (1 - discountPct);
+  const floor = cost / (1 - cfg.margin_floor_pct);
+  sell = Math.max(sell, floor);
+  return { sell: roundPsychological(sell), compare_at: msrp };
+}
+var ABSOLUTE_PRICE_FLOOR_DEFAULT, VELOCITY_SHIFT, CLEARANCE_LADDER;
+var init_pricing_engine_v2_server = __esm({
+  "app/lib/pricing-engine-v2.server.ts"() {
+    "use strict";
+    ABSOLUTE_PRICE_FLOOR_DEFAULT = 2.99;
+    VELOCITY_SHIFT = {
+      top: 0.05,
+      normal: 0,
+      slow: -0.05,
+      dead: -0.1
+    };
+    CLEARANCE_LADDER = [
+      [30, 0.15],
+      [60, 0.25],
+      [90, 0.35],
+      [1e4, 0.5]
+    ];
+  }
+});
+
+// app/lib/pricing-rules.server.ts
+import { eq, inArray } from "drizzle-orm";
+function cacheGet(map, key) {
+  const entry = map.get(key);
+  if (!entry) return void 0;
+  if (Date.now() > entry.expiresAt) {
+    map.delete(key);
+    return void 0;
+  }
+  return entry.value;
+}
+function cacheSet(map, key, value) {
+  map.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+function toPartial(raw) {
+  const out = {};
+  if (raw.targetMarginPct != null) out.target_margin_pct = parseFloat(raw.targetMarginPct);
+  if (raw.marginFloorPct != null) out.margin_floor_pct = parseFloat(raw.marginFloorPct);
+  if (raw.mapBehavior != null) out.map_behavior = raw.mapBehavior;
+  if (raw.compareAtStrategy != null) out.compare_at_strategy = raw.compareAtStrategy;
+  if (raw.velocityModifierEnabled != null) out.velocity_modifier_enabled = raw.velocityModifierEnabled;
+  return out;
+}
+async function fetchRules(scopePairs) {
+  if (scopePairs.length === 0) return /* @__PURE__ */ new Map();
+  const ids = scopePairs.map(([, id]) => id);
+  const rows = await db.select().from(pricingRules).where(inArray(pricingRules.scopeId, ids));
+  const map = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    const key = `${row.scopeLevel}:${row.scopeId}`;
+    map.set(key, {
+      targetMarginPct: row.targetMarginPct ?? null,
+      marginFloorPct: row.marginFloorPct ?? null,
+      mapBehavior: row.mapBehavior ?? null,
+      compareAtStrategy: row.compareAtStrategy ?? null,
+      velocityModifierEnabled: row.velocityModifierEnabled ?? null
+    });
+  }
+  return map;
+}
+async function getGroupForProductType(productType) {
+  const cacheKey3 = productType ?? "__null__";
+  const cached2 = cacheGet(GROUP_CACHE, cacheKey3);
+  if (cached2 !== void 0) return cached2;
+  if (!productType) {
+    cacheSet(GROUP_CACHE, cacheKey3, null);
+    return null;
+  }
+  const rows = await db.select({
+    subGroupId: pricingProductTypeMap.subGroupId,
+    groupId: pricingSubGroups.groupId
+  }).from(pricingProductTypeMap).innerJoin(
+    pricingSubGroups,
+    eq(pricingProductTypeMap.subGroupId, pricingSubGroups.id)
+  ).where(eq(pricingProductTypeMap.productType, productType)).limit(1);
+  if (rows.length === 0) {
+    cacheSet(GROUP_CACHE, cacheKey3, null);
+    return null;
+  }
+  const { pricingGroups: pricingGroups2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+  const groupRows = await db.select({ usesClearanceLadder: pricingGroups2.usesClearanceLadder }).from(pricingGroups2).where(eq(pricingGroups2.id, rows[0].groupId)).limit(1);
+  const result = {
+    groupId: rows[0].groupId,
+    subGroupId: rows[0].subGroupId,
+    usesClearanceLadder: groupRows[0]?.usesClearanceLadder ?? false
+  };
+  cacheSet(GROUP_CACHE, cacheKey3, result);
+  return result;
+}
+async function resolvePricingConfig(productType) {
+  const cacheKey3 = productType ?? "__null__";
+  const cached2 = cacheGet(CONFIG_CACHE, cacheKey3);
+  if (cached2 !== void 0) return cached2;
+  const group = await getGroupForProductType(productType);
+  const groupId = group?.groupId ?? "unknown";
+  const subGroupId = group?.subGroupId ?? "unknown";
+  const scopePairs = [["global", "global"]];
+  if (groupId !== "unknown") {
+    scopePairs.push(["group", groupId]);
+  }
+  if (subGroupId !== "unknown" && subGroupId !== groupId) {
+    scopePairs.push(["sub_group", subGroupId]);
+  }
+  if (productType) {
+    scopePairs.push(["product_type", productType]);
+  }
+  const ruleMap = await fetchRules(scopePairs);
+  let merged = { ...GLOBAL_DEFAULTS };
+  for (const [level, id] of scopePairs) {
+    const raw = ruleMap.get(`${level}:${id}`);
+    if (raw) {
+      merged = { ...merged, ...toPartial(raw) };
+    }
+  }
+  const result = { ...merged, groupId, subGroupId };
+  cacheSet(CONFIG_CACHE, cacheKey3, result);
+  return result;
+}
+function buildRationale(p) {
+  const margin = p.marginAfter != null ? `${Math.round(p.marginAfter * 100)}%` : "?%";
+  if (p.status === "skipped_no_change") {
+    return "Cost unchanged; recompute matched current price; no action.";
+  }
+  if (p.daysDisc != null) {
+    const tier = p.daysDisc <= 30 ? "15%" : p.daysDisc <= 60 ? "25%" : p.daysDisc <= 90 ? "35%" : "50%";
+    const sell = p.newSell != null ? `$${p.newSell.toFixed(2)}` : "?";
+    return `Discontinued day ${p.daysDisc} -> clearance tier ${tier} off MSRP -> ${sell}.`;
+  }
+  if (p.velocityBucket && p.velocityBucket !== "normal") {
+    const dir = p.velocityBucket === "top" ? "+5pp" : p.velocityBucket === "slow" ? "-5pp" : "-10pp";
+    const label = p.velocityBucket === "top" ? "fast" : p.velocityBucket === "slow" ? "slow" : "dead";
+    const oldFmt = p.oldSell != null ? `$${p.oldSell.toFixed(2)}` : "?";
+    const newFmt = p.newSell != null ? `$${p.newSell.toFixed(2)}` : "?";
+    return `Velocity: ${label} -> target margin ${dir}; new sell ${newFmt} (was ${oldFmt}).`;
+  }
+  if (p.status === "pending" && p.deltaPct != null && p.approvalThreshold != null) {
+    const pct = Math.round(Math.abs(p.deltaPct) * 100);
+    const thr = Math.round(p.approvalThreshold * 100);
+    return `Queued: ${pct}% price drop exceeds ${thr}% auto-approve threshold.`;
+  }
+  if (p.mapHeld && p.map != null) {
+    const delta = p.oldCost != null && p.newCost != null ? p.newCost - p.oldCost : null;
+    const deltaPct = delta != null && p.oldCost ? Math.round(delta / p.oldCost * 100) : null;
+    if (delta != null && deltaPct != null) {
+      const sign = delta >= 0 ? "+" : "";
+      return `Cost ${sign}$${delta.toFixed(2)} (${sign}${deltaPct}%) -> held sell at MAP $${p.map.toFixed(2)}; margin now ${margin}.`;
+    }
+  }
+  if (p.status === "auto_applied") {
+    const oldFmt = p.oldSell != null ? `$${p.oldSell.toFixed(2)}` : "?";
+    const newFmt = p.newSell != null ? `$${p.newSell.toFixed(2)}` : "?";
+    return `Auto-applied: sell ${oldFmt} -> ${newFmt}; margin now ${margin}.`;
+  }
+  if (p.status === "rejected") {
+    return `Rejected: margin ${margin} below floor or MAP not satisfied.`;
+  }
+  return `Recomputed via ${p.trigger}; margin ${margin}.`;
+}
+var CONFIG_CACHE, GROUP_CACHE, CACHE_TTL_MS, GLOBAL_DEFAULTS;
+var init_pricing_rules_server = __esm({
+  "app/lib/pricing-rules.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    CONFIG_CACHE = /* @__PURE__ */ new Map();
+    GROUP_CACHE = /* @__PURE__ */ new Map();
+    CACHE_TTL_MS = 5 * 60 * 1e3;
+    GLOBAL_DEFAULTS = {
+      target_margin_pct: 0.5,
+      margin_floor_pct: 0.25,
+      map_behavior: "at_map",
+      compare_at_strategy: "msrp",
+      velocity_modifier_enabled: false
+    };
+  }
+});
+
+// app/lib/kv.server.ts
+async function getKV() {
+  if (_kv) return _kv;
+  if (!process.env["KV_REST_API_URL"] || !process.env["KV_REST_API_TOKEN"]) return null;
+  const { createClient: createClient9 } = await import("@vercel/kv");
+  _kv = createClient9({
+    url: process.env["KV_REST_API_URL"],
+    token: process.env["KV_REST_API_TOKEN"]
+  });
+  return _kv;
+}
+async function kvGet(key) {
+  const kv = await getKV();
+  if (kv) return kv.get(key);
+  return memStore.get(key) ?? null;
+}
+async function kvSet(key, value, _exSeconds) {
+  const kv = await getKV();
+  if (kv) {
+    if (_exSeconds) {
+      await kv.set(key, value, { ex: _exSeconds });
+    } else {
+      await kv.set(key, value);
+    }
+    return;
+  }
+  memStore.set(key, value);
+  const existing = memTimers.get(key);
+  if (existing) clearTimeout(existing);
+  if (_exSeconds && _exSeconds > 0) {
+    const t = setTimeout(() => {
+      memStore.delete(key);
+      memTimers.delete(key);
+    }, _exSeconds * 1e3);
+    if (typeof t.unref === "function") {
+      t.unref();
+    }
+    memTimers.set(key, t);
+  } else {
+    memTimers.delete(key);
+  }
+}
+async function kvDel(key) {
+  const kv = await getKV();
+  if (kv) {
+    await kv.del(key);
+    return;
+  }
+  memStore.delete(key);
+  const t = memTimers.get(key);
+  if (t) {
+    clearTimeout(t);
+    memTimers.delete(key);
+  }
+}
+async function cached(key, ttlSeconds, fn) {
+  const ttlMs = ttlSeconds * 1e3;
+  const now = Date.now();
+  const l1 = readCache.get(key);
+  if (l1 && now - l1.ts < ttlMs) return l1.data;
+  const l2 = await kvGet(key);
+  if (l2 && now - l2.ts < ttlMs) {
+    readCache.set(key, l2);
+    return l2.data;
+  }
+  const data = await fn();
+  const entry = { data, ts: now };
+  readCache.set(key, entry);
+  await kvSet(key, entry, ttlSeconds + 60);
+  return data;
+}
+function invalidateCache(prefix) {
+  for (const k of readCache.keys()) {
+    if (k.startsWith(prefix)) readCache.delete(k);
+  }
+}
+var _kv, _g, memStore, _g3, memTimers, _g2, readCache, KV_KEYS;
+var init_kv_server = __esm({
+  "app/lib/kv.server.ts"() {
+    "use strict";
+    _kv = null;
+    _g = globalThis;
+    if (!_g.__kvMemStore) _g.__kvMemStore = /* @__PURE__ */ new Map();
+    memStore = _g.__kvMemStore;
+    _g3 = globalThis;
+    if (!_g3.__kvMemTimers) _g3.__kvMemTimers = /* @__PURE__ */ new Map();
+    memTimers = _g3.__kvMemTimers;
+    _g2 = globalThis;
+    if (!_g2.__readCache) _g2.__readCache = /* @__PURE__ */ new Map();
+    readCache = _g2.__readCache;
+    KV_KEYS = {
+      feedCache: "nalpac:feed:cache",
+      feedCacheTimestamp: "nalpac:feed:timestamp",
+      socialProof: (handle) => `social:proof:${handle}`,
+      dealOfDay: "deal:today",
+      viewerCount: (handle) => `viewers:${handle}`,
+      pinnedAccessoryIds: "pinned:accessory_ids",
+      vaultFilterTabs: "vault:filter_tabs",
+      bulkImportJob: "bulk-import:job",
+      veoOperation: (token) => `veo:op:${token}`,
+      ltxOperation: (token) => `ltx:op:${token}`,
+      liveDealHandle: "live-deal:handle",
+      fbt: (handle) => `fbt:${handle}`,
+      collectionCursor: (handle, page, sort = "manual") => `vault:cursor:${handle}:${sort}:p${page}`,
+      // v2 redesign — dial vote aggregates (5-min TTL)
+      dialAggregate: (shopifyProductId) => `dial:agg:${shopifyProductId}`,
+      // PDP product-level aggregate vote (thumbs up/down on the whole dial)
+      productVoteAggregate: (shopifyProductId) => `dial:product-agg:${shopifyProductId}`,
+      // PDP contextual Emma aside (24h TTL; guest/empty inputs collapse to one key per product)
+      emmaAside: (productId, userBucket, cartHash, browseHash) => `emmaAside:${productId}:${userBucket}:${cartHash}:${browseHash}`,
+      emmaAsideLock: (productId) => `emmaAside:lock:${productId}`,
+      emmaAsideDailyCount: (utcDate) => `emmaAside:dailyCount:${utcDate}`,
+      // Cart drawer Emma aside (24h TTL; cart+profile+subtotal-band collapse to one key)
+      emmaCartAside: (variant, userBucket, cartHash, searchHash, subtotalBand) => `emmaCartAside:${variant}:${userBucket}:${cartHash}:${searchHash}:${subtotalBand}`,
+      emmaCartAsideLock: (cartHash) => `emmaCartAside:lock:${cartHash}`,
+      emmaCartAsideDailyCount: (utcDate) => `emmaCartAside:dailyCount:${utcDate}`,
+      // Discovery rail on /search + /collections (10-min TTL per query+filter+recentView hash)
+      emmaDiscovery: (hash) => `emmaDiscovery:v1:${hash}`,
+      emmaDiscoveryDailyCount: (utcDate) => `emmaDiscovery:dailyCount:${utcDate}`,
+      // Encouragement strip above discovery grid (30-min TTL per filter combination)
+      emmaEncouragement: (hash) => `emmaEncouragement:v2:${hash}`,
+      emmaEncouragementDailyCount: (utcDate) => `emmaEncouragement:dailyCount:${utcDate}`
+    };
   }
 });
 
@@ -2639,6 +2887,15 @@ async function pushProductToShopify(doc) {
       key: "matters_tags",
       ownerId: gid,
       value: JSON.stringify(doc.mattersTags),
+      type: "list.single_line_text_field"
+    });
+  }
+  if (doc.sectionTags?.length) {
+    metafields.push({
+      namespace: "custom",
+      key: "section_tags",
+      ownerId: gid,
+      value: JSON.stringify(doc.sectionTags),
       type: "list.single_line_text_field"
     });
   }
@@ -4387,8 +4644,8 @@ function productNodeToEmmaCard(node) {
 }
 async function searchCatalogForEmma(input) {
   const limit = Math.min(Math.max(input.limit ?? 12, 1), 20);
-  const cacheKey2 = `emma-search:${hashSearchInput({ ...input, limit })}`;
-  return cached(cacheKey2, READ_TTL, async () => {
+  const cacheKey3 = `emma-search:${hashSearchInput({ ...input, limit })}`;
+  return cached(cacheKey3, READ_TTL, async () => {
     const queryInput = {};
     if (input.keyword !== void 0) queryInput.keyword = input.keyword;
     if (input.productType !== void 0) queryInput.productType = input.productType;
@@ -5254,6 +5511,520 @@ var init_shopify_server = __esm({
   }
 });
 
+// app/lib/pricing-velocity.server.ts
+import { eq as eq2 } from "drizzle-orm";
+async function fetchUnits60d(variantGid) {
+  const since = new Date(Date.now() - DEAD_WINDOW_DAYS * 24 * 60 * 60 * 1e3);
+  const sinceStr = since.toISOString().slice(0, 10);
+  const queryStr = `created_at:>='${sinceStr}' status:any`;
+  let totalUnits = 0;
+  let cursor = null;
+  const PAGE = 50;
+  do {
+    const data = await adminGraphQL(ORDERS_QUERY, {
+      query: queryStr,
+      first: PAGE,
+      after: cursor ?? null
+    });
+    for (const order of data.orders.nodes) {
+      for (const item of order.lineItems.nodes) {
+        if (item.variant?.id === variantGid) {
+          totalUnits += item.quantity;
+        }
+      }
+    }
+    cursor = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor ?? null : null;
+  } while (cursor !== null);
+  return totalUnits;
+}
+async function fetchInventory(variantGid) {
+  try {
+    const data = await adminGraphQL(INVENTORY_QUERY, { id: variantGid });
+    return data.productVariant?.inventoryQuantity ?? 0;
+  } catch {
+    return 0;
+  }
+}
+function cacheKey(variantId) {
+  return `velocity:${variantId}`;
+}
+async function readCache2(variantId) {
+  try {
+    const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq2(pipelineSettings.key, cacheKey(variantId))).limit(1);
+    if (!rows[0]?.value) return null;
+    const payload = JSON.parse(rows[0].value);
+    const ageMs = Date.now() - new Date(payload.computedAt).getTime();
+    if (ageMs > CACHE_TTL_SECS * 1e3) return null;
+    return payload.bucket;
+  } catch {
+    return null;
+  }
+}
+async function writeCache(variantId, bucket, units60d) {
+  const payload = {
+    bucket,
+    units60d,
+    computedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  try {
+    await db.insert(pipelineSettings).values({ key: cacheKey(variantId), value: JSON.stringify(payload) }).onConflictDoUpdate({
+      target: pipelineSettings.key,
+      set: { value: JSON.stringify(payload), updatedAt: /* @__PURE__ */ new Date() }
+    });
+  } catch (err) {
+    console.warn("[pricing-velocity] cache write failed:", err);
+  }
+}
+async function computeVelocityBucket(variantGid) {
+  const cached2 = await readCache2(variantGid);
+  if (cached2 !== null) return cached2;
+  try {
+    const [units60d, stock] = await Promise.all([
+      fetchUnits60d(variantGid),
+      fetchInventory(variantGid)
+    ]);
+    const weeksInWindow = DEAD_WINDOW_DAYS / 7;
+    const unitsPerWeek = units60d / weeksInWindow;
+    let bucket;
+    if (unitsPerWeek > FAST_UNITS_PER_WEEK) {
+      bucket = "top";
+    } else if (unitsPerWeek >= SLOW_UNITS_PER_WEEK) {
+      bucket = "normal";
+    } else if (units60d === 0 && stock >= MIN_STOCK_FOR_SLOW) {
+      bucket = "dead";
+    } else if (stock >= MIN_STOCK_FOR_SLOW) {
+      bucket = "slow";
+    } else {
+      bucket = "normal";
+    }
+    await writeCache(variantGid, bucket, units60d);
+    return bucket;
+  } catch (err) {
+    console.warn("[pricing-velocity] Shopify query failed, defaulting to normal:", err);
+    return "normal";
+  }
+}
+var FAST_UNITS_PER_WEEK, SLOW_UNITS_PER_WEEK, DEAD_WINDOW_DAYS, MIN_STOCK_FOR_SLOW, CACHE_TTL_SECS, ORDERS_QUERY, INVENTORY_QUERY;
+var init_pricing_velocity_server = __esm({
+  "app/lib/pricing-velocity.server.ts"() {
+    "use strict";
+    init_shopify_server();
+    init_db_server();
+    init_schema();
+    FAST_UNITS_PER_WEEK = 2;
+    SLOW_UNITS_PER_WEEK = 0.25;
+    DEAD_WINDOW_DAYS = 60;
+    MIN_STOCK_FOR_SLOW = 5;
+    CACHE_TTL_SECS = 24 * 60 * 60;
+    ORDERS_QUERY = `
+  query OrdersForVariant($query: String!, $first: Int!, $after: String) {
+    orders(first: $first, after: $after, query: $query) {
+      nodes {
+        lineItems(first: 50) {
+          nodes {
+            quantity
+            currentQuantity
+            variant { id }
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+    INVENTORY_QUERY = `
+  query VariantInventory($id: ID!) {
+    productVariant(id: $id) {
+      inventoryQuantity
+    }
+  }
+`;
+  }
+});
+
+// app/lib/pricing-apply-v2.server.ts
+var pricing_apply_v2_server_exports = {};
+__export(pricing_apply_v2_server_exports, {
+  decideStatus: () => decideStatus,
+  dryRunRuleChange: () => dryRunRuleChange,
+  recomputeCatalog: () => recomputeCatalog,
+  recomputeVariant: () => recomputeVariant
+});
+import { eq as eq3 } from "drizzle-orm";
+function decideStatus(p) {
+  const { oldPrice, newPrice, map, mapBehavior, marginFloor, marginAfter, mode } = p;
+  if (oldPrice != null && Math.abs(newPrice - oldPrice) < 5e-3) {
+    return "skipped_no_change";
+  }
+  if (marginAfter < marginFloor) return "rejected";
+  const mapApplies = mapBehavior !== "ignore_map" && map != null;
+  if (mapApplies && newPrice < map) return "rejected";
+  if (mode === "review_all") return "pending";
+  const threshold = MODE_THRESHOLD[mode];
+  const deltaPct = oldPrice != null && oldPrice > 0 ? Math.abs(newPrice - oldPrice) / oldPrice : 1;
+  if (deltaPct > threshold) return "pending";
+  return "auto_applied";
+}
+async function getApprovalMode() {
+  try {
+    const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq3(pipelineSettings.key, "pricing_approval_mode")).limit(1);
+    const val = rows[0]?.value;
+    if (val === "aggressive" || val === "balanced" || val === "conservative" || val === "review_all") return val;
+  } catch {
+  }
+  return "balanced";
+}
+async function recomputeVariant(params) {
+  const { variantId, trigger } = params;
+  let matchData = null;
+  try {
+    const gidNum = variantId.replace(/[^0-9]/g, "");
+    const matches = await findVariantsBySkus([]);
+    const data = await (async () => {
+      const { adminGraphQL: adminGraphQL2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+      const result = await adminGraphQL2(
+        `query V($id:ID!){productVariant(id:$id){id sku title price compareAtPrice
+          inventoryItem{unitCost{amount}}
+          product{id handle title vendor productType
+            metafields(keys:["xdipx.nalpac_sku","xdipx.wholesale_cost","xdipx.map_price","xdipx.original_price","xdipx.map_restricted","xdipx.discontinued_at"],first:10){nodes{namespace key value}}}}}`,
+        { id: variantId }
+      );
+      return result.productVariant;
+    })();
+    if (!data) return { status: "skipped_no_change", auditId: null, applied: false, error: "variant not found" };
+    if (TEST_SKU_PREFIX.test(data.sku ?? "")) {
+      return { status: "skipped_no_change", auditId: null, applied: false, error: "test SKU excluded" };
+    }
+    const mfMap = {};
+    for (const mf of data.product.metafields.nodes) {
+      mfMap[mf.key] = mf.value;
+    }
+    matchData = {
+      productId: data.product.id.replace("gid://shopify/Product/", ""),
+      productGid: data.product.id,
+      handle: data.product.handle,
+      title: data.product.title,
+      vendor: data.product.vendor,
+      productType: data.product.productType,
+      variant: {
+        variantId,
+        sku: data.sku ?? "",
+        title: data.title,
+        price: parseFloat(data.price),
+        compareAtPrice: data.compareAtPrice != null ? parseFloat(data.compareAtPrice) : null,
+        inventoryItemId: null,
+        unitCost: data.inventoryItem?.unitCost?.amount != null ? parseFloat(data.inventoryItem.unitCost.amount) : null
+      },
+      metafields: {
+        nalpacSku: mfMap["nalpac_sku"] ?? null,
+        wholesaleCost: mfMap["wholesale_cost"] ? parseFloat(mfMap["wholesale_cost"]) : null,
+        mapPrice: mfMap["map_price"] ? parseFloat(mfMap["map_price"]) : null,
+        originalPrice: mfMap["original_price"] ? parseFloat(mfMap["original_price"]) : null,
+        mapRestricted: mfMap["map_restricted"] === "true",
+        discontinuedAt: mfMap["discontinued_at"] ? new Date(mfMap["discontinued_at"]) : null
+      }
+    };
+    void matches;
+    void gidNum;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { status: "skipped_no_change", auditId: null, applied: false, error: `shopify fetch: ${msg}` };
+  }
+  const cost = matchData.variant.unitCost ?? matchData.metafields.wholesaleCost;
+  const map = matchData.metafields.mapPrice;
+  const msrp = matchData.metafields.originalPrice;
+  const oldSell = matchData.variant.price;
+  const oldCompare = matchData.variant.compareAtPrice;
+  const productType = matchData.productType ?? null;
+  const sku = matchData.variant.sku;
+  const cfg = await resolvePricingConfig(productType);
+  const group = await getGroupForProductType(productType);
+  const mode = await getApprovalMode();
+  let velocityBucket;
+  let effectiveCfg = cfg;
+  if (cfg.velocity_modifier_enabled) {
+    velocityBucket = await computeVelocityBucket(variantId);
+    const shifted = applyVelocityModifier(cfg, velocityBucket);
+    effectiveCfg = { ...shifted, groupId: cfg.groupId, subGroupId: cfg.subGroupId };
+  }
+  const isDiscontinued2 = group?.usesClearanceLadder === true || productType === "Discontinued";
+  let newSell = null;
+  let newCompare = null;
+  let daysDisc;
+  if (isDiscontinued2) {
+    const discontinuedAt = matchData.metafields.discontinuedAt ?? null;
+    daysDisc = discontinuedAt ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 864e5)) : 0;
+    const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg });
+    if (result) {
+      newSell = result.sell;
+      newCompare = result.compare_at;
+    }
+  } else {
+    const result = computePrice({ cost, map, msrp, cfg: effectiveCfg });
+    if (result) {
+      newSell = result.sell;
+      newCompare = result.compare_at;
+      if (result.belowAbsoluteFloor) {
+        return {
+          status: "pending",
+          auditId: null,
+          applied: false,
+          error: `sell price $${result.sell.toFixed(2)} is below absolute floor`
+        };
+      }
+    }
+  }
+  if (newSell == null) {
+    return { status: "skipped_no_change", auditId: null, applied: false, error: "cannot compute price: missing cost" };
+  }
+  const marginAfter = cost != null && newSell > 0 ? (newSell - cost) / newSell : 0;
+  const marginBefore = cost != null && oldSell > 0 ? (oldSell - cost) / oldSell : 0;
+  const status = decideStatus({
+    oldPrice: oldSell,
+    newPrice: newSell,
+    map,
+    mapBehavior: cfg.map_behavior,
+    marginFloor: cfg.margin_floor_pct,
+    marginAfter,
+    mode
+  });
+  const deltaPct = oldSell > 0 ? (newSell - oldSell) / oldSell : null;
+  const rationale = buildRationale({
+    oldCost: cost,
+    newCost: cost,
+    oldSell,
+    newSell,
+    status,
+    trigger,
+    mapHeld: map != null && newSell <= map + 0.02,
+    marginAfter,
+    ...velocityBucket !== void 0 ? { velocityBucket } : {},
+    ...daysDisc !== void 0 ? { daysDisc } : {},
+    ...map != null ? { map } : {},
+    ...deltaPct != null ? { deltaPct } : {},
+    approvalThreshold: MODE_THRESHOLD[mode]
+  });
+  let auditId = null;
+  try {
+    const rows = await db.insert(pricingAuditLog).values({
+      variantId,
+      sku: sku || null,
+      productType,
+      groupId: group?.groupId ?? null,
+      subGroupId: group?.subGroupId ?? null,
+      trigger,
+      oldCost: cost != null ? String(cost) : null,
+      newCost: cost != null ? String(cost) : null,
+      oldMap: map != null ? String(map) : null,
+      newMap: map != null ? String(map) : null,
+      oldMsrp: msrp != null ? String(msrp) : null,
+      newMsrp: msrp != null ? String(msrp) : null,
+      oldSell: String(oldSell),
+      newSell: String(newSell),
+      oldCompareAt: oldCompare != null ? String(oldCompare) : null,
+      newCompareAt: newCompare != null ? String(newCompare) : null,
+      marginBefore: String(Math.round(marginBefore * 1e4) / 1e4),
+      marginAfter: String(Math.round(marginAfter * 1e4) / 1e4),
+      status,
+      rationale
+    }).returning({ id: pricingAuditLog.id });
+    auditId = rows[0]?.id ?? null;
+  } catch (err) {
+    console.error("[pricing-apply-v2] audit log write failed:", err);
+  }
+  let applied = false;
+  let applyError;
+  if (status === "auto_applied") {
+    try {
+      await updateVariantPricing(
+        variantId,
+        String(newSell),
+        newCompare != null ? String(newCompare) : String(newSell)
+      );
+      applied = true;
+    } catch (err) {
+      applyError = err instanceof Error ? err.message : String(err);
+      console.error("[pricing-apply-v2] Shopify price update failed:", applyError);
+      if (auditId != null) {
+        try {
+          await db.update(pricingAuditLog).set({ status: "pending", rationale: `${rationale} [apply error: ${applyError}]` }).where(eq3(pricingAuditLog.id, auditId));
+        } catch {
+        }
+      }
+    }
+  }
+  return { status, auditId, applied, ...applyError ? { error: applyError } : {} };
+}
+async function dryRunRuleChange(opts) {
+  const { overrides } = opts;
+  const overrideMap = /* @__PURE__ */ new Map();
+  for (const o of overrides) {
+    const key = `${o.scope_level}:${o.scope_id}`;
+    overrideMap.set(key, {
+      ...o.target_margin_pct != null ? { target_margin_pct: o.target_margin_pct } : {},
+      ...o.margin_floor_pct != null ? { margin_floor_pct: o.margin_floor_pct } : {},
+      ...o.map_behavior != null ? { map_behavior: o.map_behavior } : {},
+      ...o.compare_at_strategy != null ? { compare_at_strategy: o.compare_at_strategy } : {},
+      ...o.velocity_modifier_enabled != null ? { velocity_modifier_enabled: o.velocity_modifier_enabled } : {}
+    });
+  }
+  const { bulkFetchProductsForPricing: bulkFetchProductsForPricing2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+  const mode = await getApprovalMode();
+  const result = {
+    totalAffected: 0,
+    withinThreshold: 0,
+    willQueue: 0,
+    breachMap: 0,
+    breachFloor: 0,
+    cappedAt: null,
+    samples: []
+  };
+  let processed = 0;
+  let capped = false;
+  const products = await bulkFetchProductsForPricing2();
+  for (const product of products) {
+    if (capped) break;
+    for (const variant of product.variants) {
+      if (TEST_SKU_PREFIX.test(variant.sku ?? "")) continue;
+      if (processed >= DRY_RUN_CAP) {
+        capped = true;
+        break;
+      }
+      processed++;
+      try {
+        const productType = product.productType ?? null;
+        const group = await getGroupForProductType(productType);
+        const base = await resolvePricingConfig(productType);
+        let cfg = { ...base };
+        const scopeKeys = [
+          "global:global",
+          group?.groupId ? `group:${group.groupId}` : null,
+          group?.subGroupId ? `sub_group:${group.subGroupId}` : null,
+          productType ? `product_type:${productType}` : null
+        ].filter(Boolean);
+        for (const key of scopeKeys) {
+          const patch = overrideMap.get(key);
+          if (patch) cfg = { ...cfg, ...patch };
+        }
+        const cost = variant.unitCost ?? product.metafields.wholesaleCost;
+        const map = product.metafields.mapPrice;
+        const msrp = product.metafields.originalPrice;
+        const oldSell = variant.price;
+        if (cost == null) continue;
+        const isDiscontinued2 = group?.usesClearanceLadder === true || productType === "Discontinued";
+        let newSell = null;
+        if (isDiscontinued2) {
+          const discontinuedAt = product.metafields.discontinuedAt ?? null;
+          const daysDiscontinued = discontinuedAt ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 864e5)) : 0;
+          const r = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued, cfg });
+          if (r) newSell = r.sell;
+        } else {
+          const r = computePrice({ cost, map, msrp, cfg });
+          if (r) {
+            newSell = r.sell;
+            if (r.belowAbsoluteFloor) {
+              newSell = null;
+            }
+          }
+        }
+        if (newSell == null) continue;
+        if (Math.abs(newSell - oldSell) < 5e-3) continue;
+        result.totalAffected++;
+        const marginAfter = newSell > 0 ? (newSell - cost) / newSell : 0;
+        const mapApplies = cfg.map_behavior !== "ignore_map" && map != null;
+        const breachesMap = mapApplies && newSell < map;
+        const breachesFloor = marginAfter < cfg.margin_floor_pct;
+        if (breachesMap) {
+          result.breachMap++;
+        } else if (breachesFloor) {
+          result.breachFloor++;
+        } else {
+          const threshold = MODE_THRESHOLD[mode];
+          const deltaPct = oldSell > 0 ? Math.abs(newSell - oldSell) / oldSell : 1;
+          if (mode === "review_all" || deltaPct > threshold) {
+            result.willQueue++;
+          } else {
+            result.withinThreshold++;
+          }
+        }
+        if (result.samples.length < DRY_RUN_SAMPLES) {
+          const status = breachesMap || breachesFloor ? "rejected" : mode === "review_all" || oldSell > 0 && Math.abs(newSell - oldSell) / oldSell > MODE_THRESHOLD[mode] ? "pending" : "auto_applied";
+          result.samples.push({
+            variantId: variant.variantId,
+            sku: variant.sku || null,
+            productType,
+            oldSell,
+            newSell,
+            status,
+            rationale: breachesMap ? `Would breach MAP $${map.toFixed(2)}` : breachesFloor ? `Would breach margin floor ${Math.round(cfg.margin_floor_pct * 100)}%` : `${oldSell.toFixed(2)} -> ${newSell.toFixed(2)}`
+          });
+        }
+      } catch {
+      }
+    }
+  }
+  if (capped) result.cappedAt = DRY_RUN_CAP;
+  return result;
+}
+async function recomputeCatalog(opts) {
+  const { bulkFetchProductsForPricing: bulkFetchProductsForPricing2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+  const startedAt = Date.now();
+  const counts = {
+    total: 0,
+    autoApplied: 0,
+    pending: 0,
+    skipped: 0,
+    rejected: 0,
+    errors: 0,
+    durationMs: 0
+  };
+  const products = await bulkFetchProductsForPricing2();
+  for (const product of products) {
+    for (const variant of product.variants) {
+      if (TEST_SKU_PREFIX.test(variant.sku ?? "")) continue;
+      counts.total++;
+      try {
+        const result = await recomputeVariant({
+          variantId: variant.variantId,
+          trigger: opts.trigger
+        });
+        if (result.error) counts.errors++;
+        else if (result.status === "auto_applied") counts.autoApplied++;
+        else if (result.status === "pending") counts.pending++;
+        else if (result.status === "rejected") counts.rejected++;
+        else counts.skipped++;
+      } catch (err) {
+        counts.errors++;
+        console.error("[pricing-batch] variant error", variant.variantId, err);
+      }
+    }
+  }
+  counts.durationMs = Date.now() - startedAt;
+  return counts;
+}
+var MODE_THRESHOLD, TEST_SKU_PREFIX, DRY_RUN_CAP, DRY_RUN_SAMPLES;
+var init_pricing_apply_v2_server = __esm({
+  "app/lib/pricing-apply-v2.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_pricing_engine_v2_server();
+    init_pricing_rules_server();
+    init_pricing_rules_server();
+    init_pricing_velocity_server();
+    init_shopify_server();
+    MODE_THRESHOLD = {
+      aggressive: 0.1,
+      balanced: 0.05,
+      conservative: 0.02,
+      review_all: 0
+    };
+    TEST_SKU_PREFIX = /^XDX-TEST-/i;
+    DRY_RUN_CAP = 5e3;
+    DRY_RUN_SAMPLES = 10;
+  }
+});
+
 // app/lib/tag-normalize.ts
 function normalizeTag(input) {
   let s = input.trim().toLowerCase();
@@ -5359,9 +6130,9 @@ async function getEmmaHeroSettings(preview = false) {
   if (!projectId) return null;
   const fetcher = async () => {
     try {
-      const client2 = getClient(false, preview);
-      if (!client2) return null;
-      return await client2.fetch(EMMA_HERO_GROQ) ?? null;
+      const client5 = getClient(false, preview);
+      if (!client5) return null;
+      return await client5.fetch(EMMA_HERO_GROQ) ?? null;
     } catch (err) {
       console.error("[sanity] getEmmaHeroSettings error:", err);
       return null;
@@ -5374,9 +6145,9 @@ async function getEditor(preview = false) {
   if (!projectId) return null;
   const fetcher = async () => {
     try {
-      const client2 = getClient(false, preview);
-      if (!client2) return null;
-      const raw = await client2.fetch(EDITOR_GROQ);
+      const client5 = getClient(false, preview);
+      if (!client5) return null;
+      const raw = await client5.fetch(EDITOR_GROQ);
       if (!raw?.name) return null;
       return {
         name: raw.name,
@@ -5401,9 +6172,9 @@ async function getEmmaPresets(preview = false) {
   if (!projectId) return [];
   const fetcher = async () => {
     try {
-      const client2 = getClient(false, preview);
-      if (!client2) return [];
-      return await client2.fetch(EMMA_PRESETS_GROQ) ?? [];
+      const client5 = getClient(false, preview);
+      if (!client5) return [];
+      return await client5.fetch(EMMA_PRESETS_GROQ) ?? [];
     } catch (err) {
       console.error("[sanity] getEmmaPresets error:", err);
       return [];
@@ -5416,9 +6187,9 @@ async function getHomepageSections(preview = false) {
   if (!projectId) return null;
   const fetcher = async () => {
     try {
-      const client2 = getClient(false, preview);
-      if (!client2) return null;
-      return await client2.fetch(HOMEPAGE_GROQ) ?? null;
+      const client5 = getClient(false, preview);
+      if (!client5) return null;
+      return await client5.fetch(HOMEPAGE_GROQ) ?? null;
     } catch (err) {
       console.error("[sanity] getHomepageSections error:", err);
       return null;
@@ -5428,26 +6199,26 @@ async function getHomepageSections(preview = false) {
   return cached("sanity:homepage", 60, fetcher);
 }
 async function upsertAnnouncementBar(messages) {
-  const client2 = getClient(true);
-  if (!client2) throw new Error("Sanity not configured");
-  await client2.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
-  await client2.patch("singleton.homepage").setIfMissing({ sections: [] }).set({
+  const client5 = getClient(true);
+  if (!client5) throw new Error("Sanity not configured");
+  await client5.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
+  await client5.patch("singleton.homepage").setIfMissing({ sections: [] }).set({
     'sections[_type=="announcementBar"].messages': messages
   }).commit();
   invalidateCache("sanity:homepage");
 }
 async function addCmsBlock(block) {
-  const client2 = getClient(true);
-  if (!client2) throw new Error("Sanity not configured");
+  const client5 = getClient(true);
+  if (!client5) throw new Error("Sanity not configured");
   const key = `${block._type}-${Date.now()}`;
-  await client2.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
-  await client2.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{ ...block, _key: key }]).commit();
+  await client5.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
+  await client5.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{ ...block, _key: key }]).commit();
   invalidateCache("sanity:homepage");
 }
 async function updateCmsBlock(key, patch) {
-  const client2 = getClient(true);
-  if (!client2) throw new Error("Sanity not configured");
-  await client2.patch("singleton.homepage").set(
+  const client5 = getClient(true);
+  if (!client5) throw new Error("Sanity not configured");
+  await client5.patch("singleton.homepage").set(
     Object.fromEntries(
       Object.entries(patch).map(([field, value]) => [`sections[_key=="${key}"].${field}`, value])
     )
@@ -5455,9 +6226,9 @@ async function updateCmsBlock(key, patch) {
   invalidateCache("sanity:homepage");
 }
 async function removeCmsBlock(key) {
-  const client2 = getClient(true);
-  if (!client2) throw new Error("Sanity not configured");
-  await client2.patch("singleton.homepage").unset([`sections[_key=="${key}"]`]).commit();
+  const client5 = getClient(true);
+  if (!client5) throw new Error("Sanity not configured");
+  await client5.patch("singleton.homepage").unset([`sections[_key=="${key}"]`]).commit();
   invalidateCache("sanity:homepage");
 }
 function invalidateCmsCache() {
@@ -5608,9 +6379,9 @@ async function getPdpTrustBar() {
   if (!projectId) return null;
   return cached("sanity:pdp-trust-bar", 300, async () => {
     try {
-      const client2 = getClient();
-      if (!client2) return null;
-      const data = await client2.fetch(
+      const client5 = getClient();
+      if (!client5) return null;
+      const data = await client5.fetch(
         `*[_type == "pdpDefaults"] | order(_updatedAt desc)[0].trustBar{
           _type, _key, active, order, bgStyle,
           "trustItems": items[]->{ icon, headline, subheadline, active }
@@ -5631,9 +6402,9 @@ async function getSiteSettings() {
   if (!projectId) return null;
   return cached("sanity:site-settings", 300, async () => {
     try {
-      const client2 = getClient();
-      if (!client2) return null;
-      const data = await client2.fetch(
+      const client5 = getClient();
+      if (!client5) return null;
+      const data = await client5.fetch(
         `*[_id == "singleton.siteSettings"][0]{
           _id,
           "logoUrl": logo.asset->url,
@@ -5657,9 +6428,9 @@ async function getEmmaPersona() {
   if (!projectId) return null;
   return cached("sanity:emma-persona", 300, async () => {
     try {
-      const client2 = getClient();
-      if (!client2) return null;
-      const data = await client2.fetch(
+      const client5 = getClient();
+      if (!client5) return null;
+      const data = await client5.fetch(
         `*[_id == "singleton.editor"][0]{
           "avatarUrl":   photo.asset->url,
           "avatarAlt":   coalesce(photo.alt, name, "Emma"),
@@ -5677,9 +6448,9 @@ async function getPreviewImagesByHandles(handles) {
   const out = /* @__PURE__ */ new Map();
   if (!projectId || handles.length === 0) return out;
   try {
-    const client2 = getClient();
-    if (!client2) return out;
-    const rows = await client2.fetch(
+    const client5 = getClient();
+    if (!client5) return out;
+    const rows = await client5.fetch(
       `*[_type == "productPage" && shopifyHandle in $handles]{ shopifyHandle, previewImageUrl }`,
       { handles }
     );
@@ -5694,9 +6465,9 @@ async function getPreviewImagesByHandles(handles) {
 async function getProductPageBlocks(handle) {
   if (!projectId) return [];
   try {
-    const client2 = getClient();
-    if (!client2) return [];
-    const data = await client2.fetch(
+    const client5 = getClient();
+    if (!client5) return [];
+    const data = await client5.fetch(
       `*[_type == "productPage" && shopifyHandle == $handle][0]{
         "sections": contentBlocks[]{
           _key,
@@ -5721,9 +6492,9 @@ async function getProductPageBlocks(handle) {
 async function getProductFaqs(handle) {
   if (!projectId) return [];
   try {
-    const client2 = getClient();
-    if (!client2) return [];
-    const data = await client2.fetch(
+    const client5 = getClient();
+    if (!client5) return [];
+    const data = await client5.fetch(
       `*[_type == "productPage" && shopifyHandle == $handle][0]{
         "faqs": productFaqs[]{ question, answer, category }
       }`,
@@ -5738,9 +6509,9 @@ async function getProductFaqs(handle) {
 async function getCollectionPage(handle, preview = false) {
   if (!projectId) return null;
   try {
-    const client2 = getClient(false, preview);
-    if (!client2) return null;
-    const data = await client2.fetch(
+    const client5 = getClient(false, preview);
+    if (!client5) return null;
+    const data = await client5.fetch(
       `*[_type == "collectionPage" && shopifyHandle == $handle][0]{
         shopifyHandle,
         collectionType,
@@ -5777,9 +6548,9 @@ async function getCollectionTypeMap() {
   const out = /* @__PURE__ */ new Map();
   if (!projectId) return out;
   try {
-    const client2 = getClient();
-    if (!client2) return out;
-    const data = await client2.fetch(
+    const client5 = getClient();
+    if (!client5) return out;
+    const data = await client5.fetch(
       `*[_type == "collectionPage"]{ shopifyHandle, collectionType }`
     );
     for (const row of data ?? []) {
@@ -5796,9 +6567,9 @@ async function getCollectionTypeMap() {
 async function getCollectionsHub(preview = false) {
   if (!projectId) return null;
   try {
-    const client2 = getClient(false, preview);
-    if (!client2) return null;
-    const data = await client2.fetch(
+    const client5 = getClient(false, preview);
+    if (!client5) return null;
+    const data = await client5.fetch(
       `*[_type == "collectionsHub"][0]{
         seoTitle,
         seoDescription,
@@ -5829,13 +6600,13 @@ async function getPage(slug, preview = false) {
     return null;
   }
   try {
-    const client2 = getClient(false, preview);
-    if (!client2) {
+    const client5 = getClient(false, preview);
+    if (!client5) {
       console.warn("[sanity] getPage: no client");
       return null;
     }
     console.log("[sanity] getPage fetching slug:", slug);
-    const result = await client2.fetch(
+    const result = await client5.fetch(
       `*[_type == "page" && slug.current == $slug][0]{
         _id,
         title,
@@ -5856,9 +6627,9 @@ async function getPage(slug, preview = false) {
 async function getPageList() {
   if (!projectId) return [];
   try {
-    const client2 = getClient();
-    if (!client2) return [];
-    return await client2.fetch(
+    const client5 = getClient();
+    if (!client5) return [];
+    return await client5.fetch(
       `*[_type == "page"] | order(title asc) { title, "slug": slug.current }`
     );
   } catch (err) {
@@ -5869,9 +6640,9 @@ async function getPageList() {
 async function getBlogHomepage(preview = false) {
   if (!projectId) return null;
   try {
-    const client2 = getClient(false, preview);
-    if (!client2) return null;
-    return await client2.fetch(
+    const client5 = getClient(false, preview);
+    if (!client5) return null;
+    return await client5.fetch(
       `*[_id == "singleton.blogHomepage"][0]{
         heading, subtext,
         "heroImageUrl": heroImage.asset->url,
@@ -5904,12 +6675,12 @@ async function getBlogPosts(opts = {}) {
   const perPage = opts.perPage ?? 12;
   const start = (page - 1) * perPage;
   const end = start + perPage;
-  const cacheKey2 = `posts:${page}:${perPage}:${opts.category ?? ""}:${opts.featured ?? ""}:${opts.authorSlug ?? ""}`;
-  const cached2 = getCachedBlog(cacheKey2, BLOG_CACHE_TTL);
+  const cacheKey3 = `posts:${page}:${perPage}:${opts.category ?? ""}:${opts.featured ?? ""}:${opts.authorSlug ?? ""}`;
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
   if (cached2) return cached2;
   try {
-    const client2 = getClient();
-    if (!client2) return { posts: [], total: 0 };
+    const client5 = getClient();
+    if (!client5) return { posts: [], total: 0 };
     let filter = `_type == "blogPost" && status == "published"`;
     const params = {};
     if (opts.category) {
@@ -5924,11 +6695,11 @@ async function getBlogPosts(opts = {}) {
       params.authorSlug = opts.authorSlug;
     }
     const [rawPosts, total] = await Promise.all([
-      client2.fetch(
+      client5.fetch(
         `*[${filter}] | order(publishedAt desc) [${start}...${end}] { ${BLOG_POST_CARD_PROJECTION}, "bodyText": body[_type == "block"]{ "text": children[].text } }`,
         params
       ),
-      client2.fetch(`count(*[${filter}])`, params)
+      client5.fetch(`count(*[${filter}])`, params)
     ]);
     const posts = (rawPosts ?? []).map((p) => {
       const words = (p.bodyText ?? []).flatMap((b) => (b.text ?? []).join("")).join(" ");
@@ -5937,7 +6708,7 @@ async function getBlogPosts(opts = {}) {
       return { ...rest, readingTime };
     });
     const result = { posts, total };
-    setCachedBlog(cacheKey2, result);
+    setCachedBlog(cacheKey3, result);
     return result;
   } catch (err) {
     console.error("[sanity] getBlogPosts error:", err);
@@ -5946,16 +6717,16 @@ async function getBlogPosts(opts = {}) {
 }
 async function getBlogPost(slug, preview = false) {
   if (!projectId) return null;
-  const cacheKey2 = `post:${slug}`;
+  const cacheKey3 = `post:${slug}`;
   if (!preview) {
-    const cached2 = getCachedBlog(cacheKey2, BLOG_CACHE_TTL);
+    const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
     if (cached2) return cached2;
   }
   try {
-    const client2 = getClient(false, preview);
-    if (!client2) return null;
+    const client5 = getClient(false, preview);
+    if (!client5) return null;
     const filter = preview ? `_type == "blogPost" && slug.current == $slug` : `_type == "blogPost" && slug.current == $slug && status == "published"`;
-    const raw = await client2.fetch(
+    const raw = await client5.fetch(
       `*[${filter}][0]{
         ${BLOG_POST_CARD_PROJECTION},
         _updatedAt,
@@ -5984,7 +6755,7 @@ async function getBlogPost(slug, preview = false) {
       // don't fetch body for related posts
     }));
     const post = { ...raw, readingTime, relatedPosts };
-    if (!preview) setCachedBlog(cacheKey2, post);
+    if (!preview) setCachedBlog(cacheKey3, post);
     return post;
   } catch (err) {
     console.error("[sanity] getBlogPost error:", err);
@@ -5994,9 +6765,9 @@ async function getBlogPost(slug, preview = false) {
 async function getBlogAuthor(slug) {
   if (!projectId) return null;
   try {
-    const client2 = getClient();
-    if (!client2) return null;
-    const data = await client2.fetch(
+    const client5 = getClient();
+    if (!client5) return null;
+    const data = await client5.fetch(
       `*[_type == "blogAuthor" && slug.current == $slug][0] {
         name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role,
         "joinedAt": coalesce(joinedAt, _createdAt),
@@ -6012,18 +6783,18 @@ async function getBlogAuthor(slug) {
 }
 async function getBlogCategories() {
   if (!projectId) return [];
-  const cacheKey2 = "blogCategories";
-  const cached2 = getCachedBlog(cacheKey2, BLOG_CAT_CACHE_TTL);
+  const cacheKey3 = "blogCategories";
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
   if (cached2) return cached2;
   try {
-    const client2 = getClient();
-    if (!client2) return [];
-    const data = await client2.fetch(
+    const client5 = getClient();
+    if (!client5) return [];
+    const data = await client5.fetch(
       `*[_type == "blogCategory"] | order(name asc) {
         name, "slug": slug.current, description, color, seoTitle, seoDescription
       }`
     );
-    if (data) setCachedBlog(cacheKey2, data);
+    if (data) setCachedBlog(cacheKey3, data);
     return data ?? [];
   } catch (err) {
     console.error("[sanity] getBlogCategories error:", err);
@@ -6033,9 +6804,9 @@ async function getBlogCategories() {
 async function getBlogPostsForSitemap() {
   if (!projectId) return [];
   try {
-    const client2 = getClient();
-    if (!client2) return [];
-    return await client2.fetch(
+    const client5 = getClient();
+    if (!client5) return [];
+    return await client5.fetch(
       `*[_type == "blogPost" && status == "published" && noIndex != true] | order(publishedAt desc) {
         "slug": slug.current, publishedAt, _updatedAt
       }`
@@ -6213,9 +6984,9 @@ async function getRailDraftsForDeal(dealId) {
 async function getProductHandlesForSitemap() {
   if (!projectId) return [];
   try {
-    const client2 = getClient();
-    if (!client2) return [];
-    return await client2.fetch(
+    const client5 = getClient();
+    if (!client5) return [];
+    return await client5.fetch(
       `*[_type == "productPage" && defined(shopifyHandle)] | order(title asc) {
         "handle": shopifyHandle, _updatedAt
       }`
@@ -6229,9 +7000,9 @@ async function getHomeConfig() {
   if (!projectId) return null;
   return cached("sanity:home-config", 300, async () => {
     try {
-      const client2 = getClient();
-      if (!client2) return null;
-      const raw = await client2.fetch(HOME_CONFIG_GROQ);
+      const client5 = getClient();
+      if (!client5) return null;
+      const raw = await client5.fetch(HOME_CONFIG_GROQ);
       if (!raw) return null;
       return {
         activeVariant: raw.activeVariant ?? "off",
@@ -6371,11 +7142,26 @@ var init_sanity_server = __esm({
 });
 
 // app/lib/feed-processor.server.ts
+var feed_processor_server_exports = {};
+__export(feed_processor_server_exports, {
+  SECTION_VALUES: () => SECTION_VALUES,
+  archiveDiscontinuedProducts: () => archiveDiscontinuedProducts,
+  buildTags: () => buildTags,
+  cleanDescription: () => cleanDescription,
+  dailyFeedProcessor: () => dailyFeedProcessor,
+  deriveSection: () => deriveSection,
+  fetchNalpacFeed: () => fetchNalpacFeed,
+  getPipelineSetting: () => getPipelineSetting,
+  getSKUsNeedingImagen: () => getSKUsNeedingImagen,
+  isDiscontinued: () => isDiscontinued,
+  parseCategories: () => parseCategories,
+  scoreProduct: () => scoreProduct
+});
 import { parse } from "csv-parse/sync";
-import { sql as sql2, eq } from "drizzle-orm";
+import { sql as sql2, eq as eq4 } from "drizzle-orm";
 async function getPipelineSetting(key) {
   try {
-    const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq(pipelineSettings.key, key)).limit(1);
+    const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq4(pipelineSettings.key, key)).limit(1);
     return rows[0]?.value ?? null;
   } catch {
     return null;
@@ -6389,9 +7175,9 @@ function cleanDescription(raw) {
 async function fetchNalpacFeed() {
   const cached2 = await kvGet(KV_KEYS.feedCache);
   if (cached2) return cached2;
-  const feedUrl = await getPipelineSetting("feedUrl") || process.env["NALPAC_FEED_URL"] || "";
-  if (!feedUrl) throw new Error("No feed URL configured. Set NALPAC_FEED_URL env var or configure in Admin \u2192 Settings.");
-  const res = await fetch(feedUrl);
+  const feedUrl2 = await getPipelineSetting("feedUrl") || process.env["NALPAC_FEED_URL"] || "";
+  if (!feedUrl2) throw new Error("No feed URL configured. Set NALPAC_FEED_URL env var or configure in Admin \u2192 Settings.");
+  const res = await fetch(feedUrl2);
   if (!res.ok) throw new Error(`Feed fetch failed: ${res.status}`);
   const csv = await res.text();
   const records = parse(csv, {
@@ -6419,6 +7205,20 @@ function isDiscontinued(product) {
 }
 function parseCategories(raw) {
   return raw.split(",").map((c) => c.trim()).filter(Boolean);
+}
+function deriveSection(input) {
+  const hay = [
+    input.productType ?? "",
+    (input.categories ?? []).join(" "),
+    input.title ?? ""
+  ].join(" ").toLowerCase();
+  for (const { section, words } of SECTION_KEYWORDS) {
+    if (words.some((w) => hay.includes(w))) return section;
+  }
+  const dial = (input.productTypeDial ?? "").toLowerCase();
+  if (dial === "lube" || dial === "massage" || dial === "enhancer" || dial === "wellness" || dial === "condom") return "body";
+  if (dial === "wear") return "wear";
+  return "pleasure";
 }
 function getImages(product) {
   return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => product[`Image ${i}`]).filter(Boolean);
@@ -6544,7 +7344,7 @@ async function archiveDiscontinuedProducts(skus) {
       const rows = await db.select({
         shopifyProductId: dealHistory.shopifyProductId,
         status: dealHistory.status
-      }).from(dealHistory).where(eq(dealHistory.sku, sku)).limit(1);
+      }).from(dealHistory).where(eq4(dealHistory.sku, sku)).limit(1);
       const row = rows[0];
       if (!row) {
         result.notImported++;
@@ -6559,7 +7359,7 @@ async function archiveDiscontinuedProducts(skus) {
         continue;
       }
       const archived = await archiveShopifyProduct2(row.shopifyProductId, "discontinued by manufacturer");
-      await db.update(dealHistory).set({ status: "archived" }).where(eq(dealHistory.sku, sku));
+      await db.update(dealHistory).set({ status: "archived" }).where(eq4(dealHistory.sku, sku));
       if (upsertProductPage2 && archived?.handle) {
         try {
           await upsertProductPage2({
@@ -6578,7 +7378,24 @@ async function archiveDiscontinuedProducts(skus) {
   }
   return result;
 }
-var FEED_TTL, SKU_NEEDS_IMAGEN;
+function buildTags(product) {
+  const cats = parseCategories(product["Sub-Category"]);
+  const tags = cats.map((c) => `cat:${c.toLowerCase().replace(/\s+/g, "-")}`);
+  const forHimCats = ["Vagina Strokers", "Body Molds", "Prostate Toys", "Masturbators", "Hands-Free Masturbators"];
+  const forHerCats = ["Dual Action and Rabbits", "Finger and Clit", "Air Pulse and Suction", "Bullets and Eggs"];
+  const coupleCats = ["Couples and Wearable", "Remote", "Top Couples Toys", "Restraints"];
+  if (cats.some((c) => forHimCats.includes(c))) tags.push("for-him");
+  if (cats.some((c) => forHerCats.includes(c))) tags.push("for-her");
+  if (cats.some((c) => coupleCats.includes(c))) tags.push("for-couples");
+  tags.push(`brand:${product.Brand.toLowerCase().replace(/\s+/g, "-")}`);
+  tags.push(`nalpac-sku-${product.SKU}`);
+  const price = parseFloat(product["MSRP"]);
+  tags.push(
+    price < 25 ? "price:under-25" : price < 50 ? "price:25-50" : price < 100 ? "price:50-100" : "price:100-plus"
+  );
+  return tags;
+}
+var FEED_TTL, SECTION_VALUES, SECTION_KEYWORDS, SKU_NEEDS_IMAGEN;
 var init_feed_processor_server = __esm({
   "app/lib/feed-processor.server.ts"() {
     "use strict";
@@ -6586,6 +7403,12 @@ var init_feed_processor_server = __esm({
     init_db_server();
     init_schema();
     FEED_TTL = 23 * 60 * 60;
+    SECTION_VALUES = ["pleasure", "play", "body", "wear"];
+    SECTION_KEYWORDS = [
+      { section: "play", words: ["bondage", "bdsm", "restraint", "handcuff", "cuff", "paddle", "flogger", "whip", "crop", "gag", "blindfold", "collar", "leash", "chastity", "cage", "harness", "strap-on", "strapon", "rope", "shibari", "spank", "kink", "fetish play", "role-play", "roleplay", "role play", "furniture", "sling", "swing", "wartenberg", "nipple clamp", "clamp", "electrostim", "e-stim", "game"] },
+      { section: "wear", words: ["lingerie", "babydoll", "chemise", "bodysuit", "bodystocking", "teddy", "corset", "bustier", "garter", "stocking", "hosiery", "fishnet", "pasties", "pasty", "panty", "pantie", "thong", "g-string", "bra ", "bra-", "bra set", "underwear", "boxer", "brief", "jock", "apparel", "dress", "robe", "kimono", "fetishwear", "leatherwear", "costume"] },
+      { section: "body", words: ["lubricant", "lube", "massage oil", "massage candle", "candle", "arousal", "desensitiz", "enhancer", "oral enhancer", "cleaner", "toy cleaner", "pheromone", "wipe", "hygiene", "douche", "enema", "kegel", "extender", "cbd", "supplement", " pill", "gummies", "gummy", "gel", "cream", "lotion", "balm", "spray", "oil", "powder", "edible body"] }
+    ];
     SKU_NEEDS_IMAGEN = /* @__PURE__ */ new Set();
   }
 });
@@ -6919,8 +7742,8 @@ function score(k) {
   return rel * Math.log(vol + 1) / (1 + diff / 100);
 }
 async function fetchCandidates(input) {
-  const client2 = getReadClient();
-  if (!client2) return [];
+  const client5 = getReadClient();
+  if (!client5) return [];
   const productType = input.productType ?? null;
   const moods = input.moods ?? [];
   const audiences = input.audiences ?? [];
@@ -6950,7 +7773,7 @@ async function fetchCandidates(input) {
     )]{ ${KEYWORD_PROJECTION} }
   `;
   try {
-    return await client2.fetch(groq, {
+    return await client5.fetch(groq, {
       contentType,
       productType,
       moods,
@@ -6963,10 +7786,10 @@ async function fetchCandidates(input) {
   }
 }
 async function fetchAvoidList() {
-  const client2 = getReadClient();
-  if (!client2) return [];
+  const client5 = getReadClient();
+  if (!client5) return [];
   try {
-    const rows = await client2.fetch(
+    const rows = await client5.fetch(
       `*[_type == "seoKeyword" && (status == "rejected" || flagged == true)]{ term }`
     );
     return (rows ?? []).map((r) => r.term).filter(Boolean);
@@ -6974,7 +7797,7 @@ async function fetchAvoidList() {
     return [];
   }
 }
-function cacheKey(input) {
+function cacheKey2(input) {
   const sortedMoods = [...input.moods ?? []].sort();
   const sortedAudiences = [...input.audiences ?? []].sort();
   const sortedMatters = [...input.matters ?? []].sort();
@@ -7019,7 +7842,7 @@ async function buildKeywordContext(input) {
     longTail: input.count?.longTail ?? 8,
     questions: input.count?.questions ?? 3
   };
-  const key = cacheKey(input);
+  const key = cacheKey2(input);
   return cached(key, 7 * 24 * 60 * 60, async () => {
     const [candidates, avoid] = await Promise.all([
       fetchCandidates(input),
@@ -7102,10 +7925,10 @@ function getReadClient2() {
 async function getEditorialAuthor(slug) {
   if (!slug) return null;
   return cached(`editorial-author:${slug}`, 300, async () => {
-    const client2 = getReadClient2();
-    if (!client2) return null;
+    const client5 = getReadClient2();
+    if (!client5) return null;
     try {
-      const doc = await client2.fetch(
+      const doc = await client5.fetch(
         `*[_type == "editorialAuthor" && slug.current == $slug][0]{
           slug, name, personaSummary, voiceRules, keywordContentTypes, seoMode, active
         }`,
@@ -9734,10 +10557,10 @@ ${dealContext}${partnerContext}${accessoryContext}
 
 Start by inspecting list_candidate_pool, then propose 2 PDP rails + 1 homepage rail using propose_rail.${accessories.length ? " Then propose one pairing_why blurb per accessory." : ""}`;
   const messages = [{ role: "user", content: userPrompt }];
-  const MAX_TURNS = 8;
+  const MAX_TURNS2 = 8;
   let turn = 0;
   console.log(`[generateRails] starting. pool=${pool.length} deal=${deal.handle}${partner ? ` partner=${partner.handle}` : ""}`);
-  while (turn < MAX_TURNS) {
+  while (turn < MAX_TURNS2) {
     turn++;
     const response = await client.messages.create({
       model: MODEL,
@@ -9875,8 +10698,8 @@ Template skeleton: [product action] + [camera instruction] + [lighting/atmospher
 
 Brand context: xdipx.com \u2014 daily flash-sale site for sexual wellness products.
 Visual style: premium, warm, a little edgy \u2014 push boundaries while staying tasteful. Suggestive and playful, never outright explicit. Think high-end fragrance ad that makes you look twice.`;
-    DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful \u2014 suggestive is fine, explicit is not. Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait. Never "Buy now" \u2014 use "Take a peek \u2192" or "I'll take it \u2665". Never surface a countdown or "until midnight." Always include a short first-person aside ("been living on my desk," "telling everyone about this combo"). Never assume the reader's experience level. If any keyword targets, vocabulary lists, or input fields in the prompt do not fit the actual product, silently ignore them \u2014 write from the product details only. Never narrate a mismatch, never preface output with explanation, never write meta-commentary about the prompt. Output only the requested copy.`;
-    EMMA_SYSTEM_PROMPT = `You are Emma \u2014 the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You test everything you recommend. You write in first person, warm and specific, like a note to a friend.`;
+    DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful \u2014 suggestive is fine, explicit is not. Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait. Never "Buy now" \u2014 use "Take a peek \u2192" or "I'll take it \u2665". Never surface a countdown or "until midnight." Always include a short first-person advisory aside ("the one I'd point you to for slow nights," "an easy yes if quiet matters"). Emma advises from product knowledge only. Never imply she has used, tried, tested, or owned the product (no "been living on my desk", "I reach for this", "my go-to"). Never assume the reader's experience level. If any keyword targets, vocabulary lists, or input fields in the prompt do not fit the actual product, silently ignore them \u2014 write from the product details only. Never narrate a mismatch, never preface output with explanation, never write meta-commentary about the prompt. Output only the requested copy.`;
+    EMMA_SYSTEM_PROMPT = `You are Emma, the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You write in first person, warm and specific, like a note to a friend. You are a curator, not a customer: recommend from product knowledge and what a product is known or designed for. Never claim you personally own, use, tried, or tested a product.`;
     EMMA_TAGLINE_FALLBACKS = [
       "here to help you find what you\u2019re into \u2665",
       "your no-judgment guide to pleasure \u2665",
@@ -10127,7 +10950,7 @@ __export(twitter_server_exports, {
 });
 import OAuth from "oauth-1.0a";
 import crypto2 from "node:crypto";
-import { eq as eq2 } from "drizzle-orm";
+import { eq as eq5 } from "drizzle-orm";
 function getOAuth() {
   return new OAuth({
     consumer: {
@@ -10370,7 +11193,7 @@ async function postManualTweet(text2, imageUrl, dealHistoryId) {
 async function deleteAndLogTweet(postId, externalPostId) {
   try {
     await deleteTweet(externalPostId);
-    await db.update(socialPosts).set({ status: "deleted" }).where(eq2(socialPosts.id, postId));
+    await db.update(socialPosts).set({ status: "deleted" }).where(eq5(socialPosts.id, postId));
     return { ok: true };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -10378,7 +11201,7 @@ async function deleteAndLogTweet(postId, externalPostId) {
   }
 }
 async function retryFailedPost(postId) {
-  const [post] = await db.select().from(socialPosts).where(eq2(socialPosts.id, postId)).limit(1);
+  const [post] = await db.select().from(socialPosts).where(eq5(socialPosts.id, postId)).limit(1);
   if (!post || post.status !== "failed") {
     return { ok: false, error: "Post not found or not in failed state" };
   }
@@ -10389,11 +11212,11 @@ async function retryFailedPost(postId) {
       status: "posted",
       postedAt: /* @__PURE__ */ new Date(),
       errorMessage: null
-    }).where(eq2(socialPosts.id, postId));
+    }).where(eq5(socialPosts.id, postId));
     return { ok: true, tweetId: tweet.id, tweetText: post.tweetText };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    await db.update(socialPosts).set({ errorMessage }).where(eq2(socialPosts.id, postId));
+    await db.update(socialPosts).set({ errorMessage }).where(eq5(socialPosts.id, postId));
     return { ok: false, error: errorMessage };
   }
 }
@@ -10506,10 +11329,10 @@ function toPickCandidate(p, heroHandle) {
   };
 }
 async function listActiveRails() {
-  const client2 = getReadClient3();
-  if (!client2) return [];
+  const client5 = getReadClient3();
+  if (!client5) return [];
   try {
-    const rows = await client2.fetch(RAILS_GROQ);
+    const rows = await client5.fetch(RAILS_GROQ);
     return rows ?? [];
   } catch (err) {
     console.error("[emma-rails] listActiveRails error:", err);
@@ -10517,10 +11340,10 @@ async function listActiveRails() {
   }
 }
 async function getRailById(id) {
-  const client2 = getReadClient3();
-  if (!client2) return null;
+  const client5 = getReadClient3();
+  if (!client5) return null;
   try {
-    return await client2.fetch(
+    return await client5.fetch(
       `*[_type == "emmaContextRail" && _id == $id][0]${RAIL_FIELDS_GROQ}`,
       { id }
     );
@@ -10530,21 +11353,21 @@ async function getRailById(id) {
   }
 }
 async function patchCurrent(railId, current) {
-  const client2 = getWriteClient();
-  if (!client2) throw new Error("sanity_not_configured");
-  await client2.patch(railId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
+  const client5 = getWriteClient();
+  if (!client5) throw new Error("sanity_not_configured");
+  await client5.patch(railId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
   const draftId = railId.startsWith("drafts.") ? railId : `drafts.${railId}`;
   try {
-    await client2.patch(draftId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
+    await client5.patch(draftId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
   } catch {
   }
 }
 async function patchLastError(railId, reason, message) {
-  const client2 = getWriteClient();
-  if (!client2) return;
+  const client5 = getWriteClient();
+  if (!client5) return;
   const lastError = { reason, message, at: (/* @__PURE__ */ new Date()).toISOString() };
   try {
-    await client2.patch(railId).set({ lastError }).commit();
+    await client5.patch(railId).set({ lastError }).commit();
   } catch (err) {
     console.error("[emma-rails] patchLastError error:", err);
   }
@@ -10642,14 +11465,14 @@ async function acquireLock(key, ttlSeconds = 60) {
   return true;
 }
 async function hydrateProducts(dealHandle, ids) {
-  const cacheKey2 = `emma:rails:hydrated:${dealHandle}`;
-  const cached2 = await kvGet(cacheKey2);
+  const cacheKey3 = `emma:rails:hydrated:${dealHandle}`;
+  const cached2 = await kvGet(cacheKey3);
   if (cached2 && cached2.length) {
     const map = new Map(cached2.map((p) => [p.id, p]));
     if (ids.every((id) => map.has(id))) return map;
   }
   const fresh = await getProductsByIds(ids);
-  await kvSet(cacheKey2, fresh, 24 * 60 * 60);
+  await kvSet(cacheKey3, fresh, 24 * 60 * 60);
   return new Map(fresh.map((p) => [p.id, p]));
 }
 async function getEmmaContextRows(opts) {
@@ -10735,7 +11558,7 @@ __export(deal_rotator_server_exports, {
   rotateDeal: () => rotateDeal,
   transitionToVaultPricing: () => transitionToVaultPricing
 });
-import { eq as eq3, and, isNull, asc } from "drizzle-orm";
+import { eq as eq6, and, isNull, asc } from "drizzle-orm";
 function estDate(offsetDays = 0) {
   const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1e3);
   return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -10748,7 +11571,7 @@ function pastDealTag(dealDate) {
   return `past-daily-deal-${mm}-${yyyy.slice(2)}`;
 }
 async function getVaultDiscountPct() {
-  const [row] = await db.select().from(pipelineSettings).where(eq3(pipelineSettings.key, "vaultDiscountPct")).limit(1);
+  const [row] = await db.select().from(pipelineSettings).where(eq6(pipelineSettings.key, "vaultDiscountPct")).limit(1);
   const pct = parseFloat(row?.value ?? "25");
   return isNaN(pct) ? 25 : Math.max(5, Math.min(60, pct));
 }
@@ -10790,7 +11613,7 @@ async function transitionToVaultPricing(deal) {
     status: "queued",
     completedAt: /* @__PURE__ */ new Date(),
     vaultPrice: vaultPrice > 0 ? vaultPrice.toFixed(2) : null
-  }).where(and(eq3(dealHistory.id, deal.id), eq3(dealHistory.status, "live")));
+  }).where(and(eq6(dealHistory.id, deal.id), eq6(dealHistory.status, "live")));
   try {
     const { archiveHomepageRailsForDeal: archiveHomepageRailsForDeal2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
     const { archived } = await archiveHomepageRailsForDeal2(deal.shopifyProductId);
@@ -10888,7 +11711,7 @@ async function activateDeal(deal) {
     status: "live",
     activatedAt: /* @__PURE__ */ new Date(),
     dealDate: estDate(0)
-  }).where(eq3(dealHistory.id, deal.id));
+  }).where(eq6(dealHistory.id, deal.id));
   await kvSet(KV_KEYS.dealOfDay, {
     sku: deal.sku,
     title: deal.seoTitle,
@@ -10925,13 +11748,13 @@ async function activateDeal(deal) {
   }
 }
 async function rotateDeal() {
-  const [liveDeal] = await db.select().from(dealHistory).where(eq3(dealHistory.status, "live")).limit(1);
+  const [liveDeal] = await db.select().from(dealHistory).where(eq6(dealHistory.status, "live")).limit(1);
   if (liveDeal) {
     await transitionToVaultPricing(liveDeal);
   }
   const [nextDeal] = await db.select().from(dealHistory).where(
     and(
-      eq3(dealHistory.status, "queued"),
+      eq6(dealHistory.status, "queued"),
       isNull(dealHistory.completedAt)
     )
   ).orderBy(asc(dealHistory.sortOrder)).limit(1);
@@ -10955,7 +11778,7 @@ async function rotateDeal() {
   };
 }
 async function isLiveDealSoldOut() {
-  const [liveDeal] = await db.select().from(dealHistory).where(eq3(dealHistory.status, "live")).limit(1);
+  const [liveDeal] = await db.select().from(dealHistory).where(eq6(dealHistory.status, "live")).limit(1);
   if (!liveDeal?.shopifyProductId) return { soldOut: false, dealId: null };
   const numericId = liveDeal.shopifyProductId.replace("gid://shopify/Product/", "");
   const { product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`);
@@ -10974,6 +11797,88 @@ var init_deal_rotator_server = __esm({
     init_shopify_server();
     init_klaviyo_server();
     init_kv_server();
+  }
+});
+
+// app/lib/deal-activator.server.ts
+var deal_activator_server_exports = {};
+__export(deal_activator_server_exports, {
+  dealActivator: () => dealActivator
+});
+async function dealActivator() {
+  return rotateDeal();
+}
+var init_deal_activator_server = __esm({
+  "app/lib/deal-activator.server.ts"() {
+    "use strict";
+    init_deal_rotator_server();
+  }
+});
+
+// app/lib/profit.server.ts
+var profit_server_exports = {};
+__export(profit_server_exports, {
+  getDashboardStats: () => getDashboardStats,
+  writeProfitSummary: () => writeProfitSummary
+});
+import { eq as eq7, sql as sql3 } from "drizzle-orm";
+async function writeProfitSummary() {
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const [todayDeal] = await db.select().from(dealHistory).where(eq7(dealHistory.dealDate, today)).limit(1);
+  if (!todayDeal) return;
+  const { shopifyAdmin: shopifyAdmin2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+  const ordersData = await shopifyAdmin2(`/orders.json?status=paid&created_at_min=${today}T00:00:00-00:00`);
+  let totalOrders = 0;
+  let totalRevenue = 0;
+  let totalCogs = 0;
+  for (const order of ordersData.orders) {
+    totalOrders++;
+    totalRevenue += parseFloat(order.total_price);
+    for (const item of order.line_items) {
+      const cost = parseFloat(todayDeal.wholesaleCost ?? "0");
+      totalCogs += cost * item.quantity;
+    }
+  }
+  const totalProfit = totalRevenue - totalCogs;
+  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+  await db.insert(dailyProfitSummary).values({
+    summaryDate: today,
+    totalOrders,
+    totalRevenue: totalRevenue.toFixed(2),
+    totalCogs: totalCogs.toFixed(2),
+    totalProfit: totalProfit.toFixed(2),
+    avgOrderValue: avgOrderValue.toFixed(2),
+    featuredSku: todayDeal.sku
+  }).onConflictDoUpdate({
+    target: dailyProfitSummary.summaryDate,
+    set: {
+      totalOrders: sql3`excluded.total_orders`,
+      totalRevenue: sql3`excluded.total_revenue`,
+      totalCogs: sql3`excluded.total_cogs`,
+      totalProfit: sql3`excluded.total_profit`,
+      avgOrderValue: sql3`excluded.avg_order_value`
+    }
+  });
+  await db.update(dealHistory).set({
+    unitsSold: totalOrders,
+    totalRevenue: totalRevenue.toFixed(2),
+    totalProfit: totalProfit.toFixed(2)
+  }).where(eq7(dealHistory.dealDate, today));
+}
+async function getDashboardStats(days = 30) {
+  const rows = await db.select().from(dailyProfitSummary).orderBy(sql3`${dailyProfitSummary.summaryDate} DESC`).limit(days);
+  const total = rows.reduce((acc, r) => ({
+    revenue: acc.revenue + parseFloat(r.totalRevenue ?? "0"),
+    profit: acc.profit + parseFloat(r.totalProfit ?? "0"),
+    orders: acc.orders + (r.totalOrders ?? 0)
+  }), { revenue: 0, profit: 0, orders: 0 });
+  return { rows, total };
+}
+var init_profit_server = __esm({
+  "app/lib/profit.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
   }
 });
 
@@ -11551,6 +12456,4191 @@ var init_reviews_server = __esm({
   }
 });
 
+// app/types/discovery.ts
+var MATTERS_V1, MATTERS_V2, MATTERS;
+var init_discovery = __esm({
+  "app/types/discovery.ts"() {
+    "use strict";
+    MATTERS_V1 = [
+      "Beginner-Friendly",
+      "Body-Safe Silicone",
+      "Discreet Design",
+      "First-Time",
+      "Hands-Free",
+      "Rechargeable",
+      "Soft-Touch",
+      "Travel-Size",
+      "Waterproof",
+      "App-Controlled",
+      "Whisper-Quiet",
+      "Plus-Size-Friendly"
+    ];
+    MATTERS_V2 = [
+      "Beginner-friendly",
+      "Whisper-quiet",
+      "Waterproof",
+      "Travel-ready",
+      "Discreet",
+      "Hands-free",
+      "Remote-controlled",
+      "Plus-size friendly",
+      "Easy to clean",
+      "Rechargeable",
+      "Soft-touch",
+      "Latex-free"
+    ];
+    MATTERS = [...MATTERS_V1, ...MATTERS_V2];
+  }
+});
+
+// app/lib/ask-emma-vocab.server.ts
+import { createClient as createClient5 } from "@sanity/client";
+function client2(write = false) {
+  if (!projectId5) return null;
+  const token = process.env["SANITY_API_TOKEN"];
+  return createClient5({
+    projectId: projectId5,
+    dataset: dataset5,
+    apiVersion: apiVersion5,
+    useCdn: !write,
+    ...token ? { token } : {}
+  });
+}
+function activeMattersVocab() {
+  return [...MATTERS_V2];
+}
+async function getAskEmmaVocabulary() {
+  const c = client2(false);
+  if (!c) {
+    return {
+      mood: FALLBACK.mood,
+      audience: FALLBACK.audience,
+      matters: activeMattersVocab()
+    };
+  }
+  try {
+    const doc = await c.fetch(`*[_id == $id][0]{
+      mood, audience, matters
+    }`, { id: SINGLETON_ID });
+    return {
+      mood: doc?.["mood"]?.length ? doc["mood"] : FALLBACK.mood,
+      audience: doc?.["audience"]?.length ? doc["audience"] : FALLBACK.audience,
+      matters: activeMattersVocab()
+    };
+  } catch (err) {
+    console.error("[ask-emma-vocab] fetch failed, using fallback:", err);
+    return {
+      mood: FALLBACK.mood,
+      audience: FALLBACK.audience,
+      matters: activeMattersVocab()
+    };
+  }
+}
+var projectId5, dataset5, apiVersion5, SINGLETON_ID, FALLBACK;
+var init_ask_emma_vocab_server = __esm({
+  "app/lib/ask-emma-vocab.server.ts"() {
+    "use strict";
+    init_discovery();
+    projectId5 = process.env["SANITY_PROJECT_ID"];
+    dataset5 = process.env["SANITY_DATASET"] ?? "production";
+    apiVersion5 = "2024-10-01";
+    SINGLETON_ID = "singleton.askEmmaVocabulary";
+    FALLBACK = {
+      mood: ["slow-and-intimate", "playful", "adventurous", "romantic", "indulgent", "curious", "comforting", "energetic", "bold", "sensual", "spontaneous", "tender"],
+      audience: ["solo", "couples", "long-distance", "first-time", "date-night", "self-gift", "gift-idea", "anniversary", "bachelorette", "just-curious"],
+      matters: [...MATTERS_V2]
+    };
+  }
+});
+
+// app/lib/seo-research.server.ts
+var seo_research_server_exports = {};
+__export(seo_research_server_exports, {
+  runKeywordResearch: () => runKeywordResearch
+});
+import { createClient as createClient6 } from "@sanity/client";
+import Anthropic2 from "@anthropic-ai/sdk";
+import { createHash as createHash4 } from "node:crypto";
+function getWriteClient2() {
+  if (!projectId6) return null;
+  return createClient6({
+    projectId: projectId6,
+    dataset: dataset6,
+    apiVersion: apiVersion6,
+    useCdn: false,
+    token: process.env["SANITY_API_TOKEN"],
+    perspective: "raw"
+  });
+}
+function slugify(s) {
+  return s.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-").slice(0, 80);
+}
+function termToDocId(term) {
+  const slug = slugify(term);
+  if (slug && slug.length <= 50) return `seoKeyword.${slug}`;
+  const h = createHash4("sha1").update(term.toLowerCase()).digest("hex").slice(0, 16);
+  return `seoKeyword.${h}`;
+}
+function dfsAuthHeader() {
+  if (DFS_AUTH_B64) return `Basic ${DFS_AUTH_B64.trim()}`;
+  if (DFS_LOGIN && DFS_PASSWORD) {
+    return "Basic " + Buffer.from(`${DFS_LOGIN}:${DFS_PASSWORD}`).toString("base64");
+  }
+  return null;
+}
+async function dfsRelatedKeywords(seed) {
+  const auth = dfsAuthHeader();
+  if (!auth) return [];
+  try {
+    const res = await fetch(`${DFS_BASE}/dataforseo_labs/google/related_keywords/live`, {
+      method: "POST",
+      headers: { "Authorization": auth, "Content-Type": "application/json" },
+      body: JSON.stringify([{
+        keyword: seed,
+        language_code: "en",
+        location_code: 2840,
+        // United States
+        depth: 2,
+        limit: 40,
+        include_serp_info: false
+      }])
+    });
+    if (!res.ok) {
+      console.warn(`[seo-research] DataForSEO related ${res.status} for "${seed}"`);
+      return [];
+    }
+    const json2 = await res.json();
+    const items = json2.tasks?.[0]?.result?.[0]?.items ?? [];
+    const out = [];
+    for (const it of items) {
+      const kd = it.keyword_data;
+      const term = kd?.keyword?.trim();
+      if (!term) continue;
+      const info = kd?.keyword_info ?? kd;
+      const r = {
+        term,
+        source: `dataforseo:related:${seed}`
+      };
+      if (info && typeof info.search_volume === "number") r.volume = info.search_volume;
+      if (info && typeof info.cpc === "number") r.cpc = info.cpc;
+      if (info && typeof info.keyword_difficulty === "number") r.difficulty = info.keyword_difficulty;
+      out.push(r);
+    }
+    return out;
+  } catch (err) {
+    console.error(`[seo-research] DataForSEO related error for "${seed}":`, err);
+    return [];
+  }
+}
+async function llmSeedExpansion(seed) {
+  if (!ANTHROPIC_KEY) return [];
+  const client5 = new Anthropic2({ apiKey: ANTHROPIC_KEY });
+  try {
+    const msg = await client5.messages.create({
+      model: MODEL_FAST2,
+      max_tokens: 800,
+      system: `You expand SEO seed keywords for an editorially-curated sexual-wellness storefront. Return likely real search queries, including long-tail and question forms. Tasteful, never clinical, never sleazy.`,
+      messages: [{
+        role: "user",
+        content: `Seed: "${seed}"
+
+Return 12 related queries as a JSON array of strings. Mix head terms, long-tail (4+ words), and "how/what/best" question forms. No volume \u2014 we only need the strings. JSON only.`
+      }]
+    });
+    const block = msg.content[0];
+    if (block?.type !== "text") return [];
+    const raw = block.text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((t) => typeof t === "string" && t.trim().length > 1).map((t) => ({ term: t.trim(), source: `llm-expansion:${seed}` }));
+  } catch (err) {
+    console.error(`[seo-research] llmSeedExpansion error for "${seed}":`, err);
+    return [];
+  }
+}
+async function gatherSeeds() {
+  const client5 = getWriteClient2();
+  if (!client5) return { approvedHeads: [], pillarTerms: [], productTitles: [] };
+  try {
+    const [approvedHeads, pillarTerms, productTitles] = await Promise.all([
+      client5.fetch(
+        `*[_type == "seoKeyword" && status == "approved" && kind == "head"][].term`
+      ).catch(() => []),
+      client5.fetch(
+        `*[_type == "seoCluster" && status != "archived"][].pillarTerm`
+      ).catch(() => []),
+      client5.fetch(
+        `*[_type == "productPage" && defined(title)] | order(_updatedAt desc)[0...50][].title`
+      ).catch(() => [])
+    ]);
+    return {
+      approvedHeads: (approvedHeads ?? []).filter(Boolean),
+      pillarTerms: (pillarTerms ?? []).filter(Boolean),
+      productTitles: (productTitles ?? []).filter(Boolean)
+    };
+  } catch (err) {
+    console.error("[seo-research] gatherSeeds error:", err);
+    return { approvedHeads: [], pillarTerms: [], productTitles: [] };
+  }
+}
+async function fetchExistingTerms() {
+  const client5 = getWriteClient2();
+  if (!client5) return /* @__PURE__ */ new Set();
+  try {
+    const rows = await client5.fetch(`*[_type == "seoKeyword"][].term`);
+    return new Set((rows ?? []).map((t) => t.toLowerCase()));
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
+async function fetchVocabulary() {
+  try {
+    return await getAskEmmaVocabulary();
+  } catch {
+    return { mood: [], audience: [], matters: [] };
+  }
+}
+async function fetchClusterCatalog() {
+  const client5 = getWriteClient2();
+  if (!client5) return [];
+  try {
+    return await client5.fetch(
+      `*[_type == "seoCluster" && status != "archived"]{ "slug": slug.current, pillarTerm, title }`
+    ) ?? [];
+  } catch {
+    return [];
+  }
+}
+async function classifyBatch(batch, vocab, clusters) {
+  if (!ANTHROPIC_KEY) {
+    return batch.map((b) => ({
+      term: b.term,
+      kind: b.term.split(/\s+/).length >= 4 ? "long-tail" : "head",
+      intent: "informational",
+      productTypeDials: [],
+      moodTags: [],
+      audienceTags: [],
+      mattersTags: [],
+      relevanceScore: 0.5,
+      clusterSlug: null,
+      flagged: false
+    }));
+  }
+  const client5 = new Anthropic2({ apiKey: ANTHROPIC_KEY });
+  const clustersList = clusters.map((c) => `${c.slug} (${c.pillarTerm})`).join(", ");
+  const sys = `You classify SEO keyword candidates for an editorially-curated sexual-wellness storefront. Use only the controlled vocabularies provided. Flag conservatively but accurately \u2014 only the three valid policy categories below, never adjacent worries.`;
+  const user = `Catalog: ${CATALOG_SUMMARY}
+
+Existing clusters: ${clustersList || "(none yet \u2014 propose new ones with kebab-case slugs)"}
+Mood vocabulary: ${vocab.mood.join(", ") || "(empty)"}
+Audience vocabulary: ${vocab.audience.join(", ") || "(empty)"}
+Matters vocabulary: ${vocab.matters.join(", ") || "(empty)"}
+Product type dials (closed list): air-pulsation, vibrator, wand, lube, wear
+
+CLUSTER ASSIGNMENT RULES (strict \u2014 prevents cluster proliferation):
+- ALWAYS try to match an existing cluster first. Use clusterSlug from the list above.
+- ONLY propose a new cluster when no existing cluster is even loosely related. Aim for 5+ keywords per cluster.
+- Use proposedClusterTitle ONLY when clusterSlug is null AND you're confident the term opens a genuinely new topic.
+- Single-keyword clusters are forbidden. If you can't find 4+ likely siblings for a proposed cluster, leave clusterSlug null with no proposal.
+
+FLAGGING RULES (strict \u2014 only these three categories warrant flagged=true):
+1. Off-brand COMPETITOR NAME \u2014 a real competing product/brand/retailer is named: KY, Womanizer, We-Vibe, Lelo, Magic Wand, Hitachi, Lovense, Whisper, Petal Pull, Velvet Noir, Lovehoney, Adam & Eve, Babeland, Fifty Shades, Target, Walmart, Amazon, CVS, etc. ALSO flag generic-sounding model names like "Wand 2" if they read as competitor SKUs.
+2. Regulated MEDICAL/EFFICACY CLAIM \u2014 terms framing products as treating a condition: "for dryness", "for menopause", "doctor recommended", "therapeutic", "health benefits", "treats X", "cures X", "prescription". Frequency-of-use ("how often should you use X") and product-education ("what does X do") are NOT medical claims.
+3. EXPLICITLY GRAPHIC term outside the tasteful catalog \u2014 explicit anatomical slang or fetish-specific terms the catalog doesn't carry.
+
+DO NOT FLAG these (common false positives):
+- Category descriptors: "best wand vibrator", "luxury prostate massager", "best vibrator brands for beginners", "body-safe silicone dildo brands". The word "brands" by itself is not a competitor name. xdipx WANTS to rank for these.
+- Comparison-shaped terms ("X vs Y") UNLESS they actually name a competitor brand.
+- DIY/curiosity questions ("how to make personal lubricant") \u2014 those users are still in-market.
+- Functional questions ("how does X work", "what is X used for") \u2014 informational intent, not medical claims.
+- Generic relationship/benefit language ("improve relationships") \u2014 that's marketing copy, not a health claim.
+- Out-of-catalog product types (e.g. "thrusting stroker" if you don't carry strokers). Set status to rejected via low relevanceScore (< 0.3) \u2014 DO NOT flag.
+
+For each candidate, return one JSON object with:
+- term: string (echo exactly)
+- kind: "head" | "long-tail" | "question" | "branded"
+- intent: "informational" | "transactional" | "navigational" | "commercial"
+- productTypeDials: array of closed-list values (empty if not specific)
+- moodTags / audienceTags / mattersTags: arrays of slugs from the provided vocabulary (empty if none fit)
+- relevanceScore: 0\u20131 (how well this fits the xdipx catalog and audience). Use < 0.3 for terms outside the catalog (e.g. wrong product category) \u2014 those will be filtered out without needing a flag.
+- clusterSlug: existing slug from the list above, or null if a new cluster fits better
+- proposedClusterTitle: short Title Case label IF clusterSlug is null AND you can name 4+ likely siblings
+- flagged: true ONLY for the three valid categories above; false otherwise
+- flagReason: one-line explanation when flagged=true, naming which of the three categories applies
+
+Candidates:
+${batch.map((b, i) => `${i + 1}. ${b.term}`).join("\n")}
+
+Return a JSON array of objects. JSON only \u2014 no prose, no fences.`;
+  try {
+    const msg = await client5.messages.create({
+      model: MODEL_FAST2,
+      max_tokens: 4096,
+      system: sys,
+      messages: [{ role: "user", content: user }]
+    });
+    const block = msg.content[0];
+    if (block?.type !== "text") return [];
+    const raw = block.text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((x) => !!x && typeof x === "object" && typeof x.term === "string");
+  } catch (err) {
+    console.error("[seo-research] classifyBatch error:", err);
+    return [];
+  }
+}
+async function ensureCluster(slug, pillarTerm, title) {
+  const client5 = getWriteClient2();
+  if (!client5) return null;
+  try {
+    const id = `seoCluster.${slugify(slug)}`;
+    await client5.createIfNotExists({
+      _id: id,
+      _type: "seoCluster",
+      slug: { _type: "slug", current: slugify(slug) },
+      title,
+      pillarTerm,
+      status: "active"
+    });
+    return id;
+  } catch (err) {
+    console.error(`[seo-research] ensureCluster failed for ${slug}:`, err);
+    return null;
+  }
+}
+async function writeCandidates(items) {
+  const client5 = getWriteClient2();
+  if (!client5) return { attempted: 0, written: 0, approved: 0, pending: 0, rejected: 0, errors: 0 };
+  const summary = { attempted: items.length, written: 0, approved: 0, pending: 0, rejected: 0, errors: 0 };
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  for (const it of items) {
+    let status;
+    if (it.relevanceScore < AUTO_REJECT_THRESHOLD) {
+      status = "rejected";
+    } else if (!it.flagged && it.relevanceScore >= AUTO_APPROVE_THRESHOLD && (it.volume ?? 0) >= AUTO_APPROVE_MIN_VOLUME) {
+      status = "approved";
+    } else {
+      status = "pending";
+    }
+    let clusterRef;
+    if (it.clusterSlug) {
+      clusterRef = { _type: "reference", _ref: `seoCluster.${slugify(it.clusterSlug)}` };
+    } else if (it.proposedClusterTitle) {
+      const newSlug = slugify(it.proposedClusterTitle);
+      const id = await ensureCluster(newSlug, it.term, it.proposedClusterTitle);
+      if (id) clusterRef = { _type: "reference", _ref: id };
+    }
+    const docId = termToDocId(it.term);
+    const doc = {
+      _id: docId,
+      _type: "seoKeyword",
+      term: it.term,
+      kind: it.kind,
+      intent: it.intent,
+      productTypeDials: it.productTypeDials,
+      moodTags: it.moodTags,
+      audienceTags: it.audienceTags,
+      mattersTags: it.mattersTags,
+      relevanceScore: it.relevanceScore,
+      status,
+      flagged: it.flagged,
+      firstSeenAt: now,
+      lastResearchedAt: now,
+      sources: [it.source]
+    };
+    if (typeof it.volume === "number") doc.volume = it.volume;
+    if (typeof it.difficulty === "number") doc.difficulty = it.difficulty;
+    if (typeof it.cpc === "number") doc.cpc = it.cpc;
+    if (it.flagReason) doc.flagReason = it.flagReason;
+    if (clusterRef) doc.cluster = clusterRef;
+    try {
+      await client5.createIfNotExists(doc);
+      summary.written++;
+      if (status === "approved") summary.approved++;
+      else if (status === "rejected") summary.rejected++;
+      else summary.pending++;
+    } catch (err) {
+      summary.errors++;
+      console.error(`[seo-research] write failed for "${it.term}":`, err);
+    }
+  }
+  return summary;
+}
+async function runKeywordResearch(opts) {
+  const start = Date.now();
+  const useDFS = !!dfsAuthHeader();
+  console.log(`[seo-research] starting run \xB7 source=${useDFS ? "dataforseo" : "llm-only"}`);
+  const sources = await gatherSeeds();
+  const baseSeeds = [
+    ...opts?.manualSeeds ?? [],
+    ...sources.pillarTerms,
+    ...sources.approvedHeads,
+    ...sources.productTitles
+  ];
+  const seeds = Array.from(new Set(baseSeeds.map((s) => s.trim()).filter(Boolean))).slice(0, opts?.maxSeeds ?? RESEARCH_LIMIT);
+  console.log(`[seo-research] seeds=${seeds.length}: ${seeds.slice(0, 5).join(", ")}${seeds.length > 5 ? "\u2026" : ""}`);
+  const rawByTerm = /* @__PURE__ */ new Map();
+  for (let s = 0; s < seeds.length; s++) {
+    const seed = seeds[s];
+    console.log(`[seo-research] expanding seed ${s + 1}/${seeds.length}: "${seed}"`);
+    const fromDFS = useDFS ? await dfsRelatedKeywords(seed) : [];
+    const merged = fromDFS.length > 0 ? fromDFS : await llmSeedExpansion(seed);
+    console.log(`[seo-research]   \u2192 ${merged.length} candidates from ${fromDFS.length > 0 ? "dfs" : "llm"}`);
+    for (const c of merged) {
+      const key = c.term.toLowerCase();
+      const prev = rawByTerm.get(key);
+      if (!prev) {
+        rawByTerm.set(key, c);
+        continue;
+      }
+      const prevHasData = typeof prev.volume === "number";
+      const cHasData = typeof c.volume === "number";
+      if (cHasData && !prevHasData) rawByTerm.set(key, c);
+    }
+  }
+  console.log(`[seo-research] total unique candidates: ${rawByTerm.size}`);
+  const existing = await fetchExistingTerms();
+  const fresh = [];
+  for (const c of rawByTerm.values()) {
+    if (!existing.has(c.term.toLowerCase())) fresh.push(c);
+  }
+  console.log(`[seo-research] new (after dedupe): ${fresh.length} (existing bank size: ${existing.size})`);
+  const [vocab, clusters] = await Promise.all([fetchVocabulary(), fetchClusterCatalog()]);
+  console.log(`[seo-research] classifying ${fresh.length} candidates in batches of 12 (vocab: mood=${vocab.mood.length} audience=${vocab.audience.length} matters=${vocab.matters.length})`);
+  const scored = [];
+  for (let i = 0; i < fresh.length; i += 12) {
+    const batch = fresh.slice(i, i + 12);
+    const batchNum = Math.floor(i / 12) + 1;
+    const totalBatches = Math.ceil(fresh.length / 12);
+    console.log(`[seo-research] classify batch ${batchNum}/${totalBatches} (${batch.length} items)`);
+    const classified = await classifyBatch(
+      batch.map((b) => {
+        const out = { term: b.term };
+        if (typeof b.volume === "number") out.volume = b.volume;
+        if (typeof b.difficulty === "number") out.difficulty = b.difficulty;
+        return out;
+      }),
+      vocab,
+      clusters
+    );
+    const byTerm = new Map(classified.map((c) => [c.term.toLowerCase(), c]));
+    for (const raw of batch) {
+      const c = byTerm.get(raw.term.toLowerCase());
+      if (!c) continue;
+      const merged = {
+        term: c.term,
+        source: raw.source,
+        kind: c.kind,
+        intent: c.intent,
+        productTypeDials: c.productTypeDials ?? [],
+        moodTags: c.moodTags ?? [],
+        audienceTags: c.audienceTags ?? [],
+        mattersTags: c.mattersTags ?? [],
+        relevanceScore: typeof c.relevanceScore === "number" ? c.relevanceScore : 0.5,
+        clusterSlug: c.clusterSlug,
+        flagged: !!c.flagged
+      };
+      if (typeof raw.volume === "number") merged.volume = raw.volume;
+      if (typeof raw.difficulty === "number") merged.difficulty = raw.difficulty;
+      if (typeof raw.cpc === "number") merged.cpc = raw.cpc;
+      if (c.proposedClusterTitle) merged.proposedClusterTitle = c.proposedClusterTitle;
+      if (c.flagReason) merged.flagReason = c.flagReason;
+      scored.push(merged);
+    }
+  }
+  console.log(`[seo-research] writing ${scored.length} scored candidates to Sanity`);
+  const writeSummary = await writeCandidates(scored);
+  console.log(`[seo-research] write complete: written=${writeSummary.written} approved=${writeSummary.approved} pending=${writeSummary.pending} rejected=${writeSummary.rejected} errors=${writeSummary.errors}`);
+  return {
+    seedsUsed: seeds.length,
+    candidatesFound: rawByTerm.size,
+    newCandidates: fresh.length,
+    written: writeSummary.written,
+    approved: writeSummary.approved,
+    pending: writeSummary.pending,
+    rejected: writeSummary.rejected,
+    errors: writeSummary.errors,
+    source: useDFS ? "dataforseo" : "llm-only",
+    durationMs: Date.now() - start
+  };
+}
+var projectId6, dataset6, apiVersion6, MODEL_FAST2, RESEARCH_LIMIT, ANTHROPIC_KEY, DFS_LOGIN, DFS_PASSWORD, DFS_AUTH_B64, DFS_BASE, CATALOG_SUMMARY, AUTO_REJECT_THRESHOLD, AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_MIN_VOLUME;
+var init_seo_research_server = __esm({
+  "app/lib/seo-research.server.ts"() {
+    "use strict";
+    init_ask_emma_vocab_server();
+    projectId6 = process.env["SANITY_PROJECT_ID"];
+    dataset6 = process.env["SANITY_DATASET"] ?? "production";
+    apiVersion6 = "2024-10-01";
+    MODEL_FAST2 = "claude-haiku-4-5-20251001";
+    RESEARCH_LIMIT = 80;
+    ANTHROPIC_KEY = process.env["ANTHROPIC_API_KEY"]?.trim();
+    DFS_LOGIN = process.env["DATAFORSEO_LOGIN"];
+    DFS_PASSWORD = process.env["DATAFORSEO_PASSWORD"];
+    DFS_AUTH_B64 = process.env["DATAFORSEO_AUTH"];
+    DFS_BASE = "https://api.dataforseo.com/v3";
+    CATALOG_SUMMARY = `xdipx.com is an editorially-curated sexual-wellness storefront. Categories include personal lubricants, intimate-massage devices (wand, vibrator, air-pulsation), wear, and accessories. Tasteful, never clinical, never sleazy. Audience is curious adults \u2014 first-time buyers and experienced users. Editorial voice (Emma) is playful, warm, and discreet.`;
+    AUTO_REJECT_THRESHOLD = 0.3;
+    AUTO_APPROVE_THRESHOLD = 0.85;
+    AUTO_APPROVE_MIN_VOLUME = 50;
+  }
+});
+
+// app/lib/log-monitor.server.ts
+var log_monitor_server_exports = {};
+__export(log_monitor_server_exports, {
+  runLogMonitor: () => runLogMonitor
+});
+import Anthropic3 from "@anthropic-ai/sdk";
+async function fetchRecentLogs({ windowMinutes }) {
+  const token = process.env["VERCEL_TOKEN"];
+  const projectId9 = process.env["VERCEL_PROJECT_ID"];
+  const teamId = process.env["VERCEL_TEAM_ID"];
+  if (!token || !projectId9) {
+    throw new Error("VERCEL_TOKEN and VERCEL_PROJECT_ID must be set");
+  }
+  const teamQs = teamId ? `&teamId=${encodeURIComponent(teamId)}` : "";
+  const since = Date.now() - windowMinutes * 6e4;
+  const deploymentsUrl = `https://api.vercel.com/v6/deployments?projectId=${encodeURIComponent(projectId9)}&target=production&limit=1${teamQs}`;
+  const depRes = await fetch(deploymentsUrl, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!depRes.ok) {
+    throw new Error(`Vercel deployments fetch ${depRes.status}: ${await depRes.text()}`);
+  }
+  const depJson = await depRes.json();
+  const deployment = depJson.deployments?.[0];
+  if (!deployment) return [];
+  const eventsUrl = `https://api.vercel.com/v3/deployments/${deployment.uid}/events?since=${since}&limit=500&direction=backward${teamQs}`;
+  const evRes = await fetch(eventsUrl, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!evRes.ok) {
+    throw new Error(`Vercel events fetch ${evRes.status}: ${await evRes.text()}`);
+  }
+  const events = await evRes.json();
+  return events.filter((e) => typeof (e.text ?? e.payload?.text) === "string").map((e) => ({
+    timestamp: new Date(e.created ?? e.date ?? Date.now()).toISOString(),
+    level: e.payload?.level ?? e.type ?? "info",
+    message: (e.text ?? e.payload?.text ?? "").slice(0, 2e3),
+    source: e.payload?.source ?? "function",
+    deployment: e.deploymentId ?? deployment.uid
+  }));
+}
+async function classifyLogs(logs) {
+  if (logs.length === 0) return { groups: [], suppressedNoiseCount: 0 };
+  const userPayload = `Window: ${logs[0]?.timestamp} to ${logs[logs.length - 1]?.timestamp}
+Total lines: ${logs.length}
+
+` + logs.map((l) => `[${l.timestamp}] ${l.level} ${l.source}: ${l.message}`).join("\n");
+  const msg = await anthropic.messages.create({
+    model: MODEL2,
+    max_tokens: 4096,
+    system: SYSTEM_PROMPT2,
+    tools: [REPORT_TOOL],
+    tool_choice: { type: "tool", name: "report_groups" },
+    messages: [{ role: "user", content: userPayload }]
+  });
+  const block = msg.content.find((b) => b.type === "tool_use");
+  if (!block || block.type !== "tool_use") {
+    throw new Error("log-monitor: Claude did not return tool_use block");
+  }
+  return block.input;
+}
+async function openIssuesForP0(groups, windowMinutes) {
+  const p0 = groups.filter((g) => g.priority === "P0");
+  if (p0.length === 0) return [];
+  const token = process.env["GITHUB_TOKEN"];
+  const owner = process.env["GITHUB_OWNER"];
+  const repo = process.env["GITHUB_REPO"];
+  if (!token || !owner || !repo) {
+    console.warn("[log-monitor] GITHUB_TOKEN/OWNER/REPO not set, skipping issue creation");
+    return [];
+  }
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json"
+  };
+  const opened = [];
+  for (const group of p0) {
+    const title = `[P0] ${group.title}`;
+    const searchQs = encodeURIComponent(`repo:${owner}/${repo} is:issue is:open in:title "${title}"`);
+    const search = await fetch(`https://api.github.com/search/issues?q=${searchQs}`, { headers });
+    if (!search.ok) {
+      console.error(`[log-monitor] GitHub search ${search.status}: ${await search.text()}`);
+      continue;
+    }
+    const searchJson = await search.json();
+    const existing = searchJson.items?.[0];
+    const body = `**Occurrences:** ${group.occurrences} in the last ${windowMinutes} min
+**First seen:** ${group.firstSeen}
+**Likely cause:** ${group.likelyCause}
+**Owner:** \`${group.owner}\`
+
+\`\`\`
+` + group.excerpt + "\n```\n\n_Opened by `/cron/log-monitor` autonomous sweep._";
+    if (existing) {
+      const comment = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/issues/${existing.number}/comments`,
+        { method: "POST", headers, body: JSON.stringify({ body: `Recurrence:
+
+${body}` }) }
+      );
+      if (comment.ok) opened.push(existing.html_url);
+      else console.error(`[log-monitor] GitHub comment ${comment.status}: ${await comment.text()}`);
+      continue;
+    }
+    const create = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ title, body, labels: ["log-monitor", "P0"] })
+    });
+    if (create.ok) {
+      const json2 = await create.json();
+      opened.push(json2.html_url);
+    } else {
+      console.error(`[log-monitor] GitHub create ${create.status}: ${await create.text()}`);
+    }
+  }
+  return opened;
+}
+async function runLogMonitor({ windowMinutes = 15 } = {}) {
+  const logs = await fetchRecentLogs({ windowMinutes });
+  const report = await classifyLogs(logs);
+  const issuesOpened = await openIssuesForP0(report.groups, windowMinutes);
+  return {
+    windowMinutes,
+    logCount: logs.length,
+    p0: report.groups.filter((g) => g.priority === "P0").length,
+    p1: report.groups.filter((g) => g.priority === "P1").length,
+    p2: report.groups.filter((g) => g.priority === "P2").length,
+    suppressed: report.suppressedNoiseCount,
+    issuesOpened
+  };
+}
+var MODEL2, anthropic, SYSTEM_PROMPT2, REPORT_TOOL;
+var init_log_monitor_server = __esm({
+  "app/lib/log-monitor.server.ts"() {
+    "use strict";
+    MODEL2 = "claude-haiku-4-5-20251001";
+    anthropic = new Anthropic3({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
+    SYSTEM_PROMPT2 = `You read Vercel function logs and find issues worth fixing. You are a classifier \u2014 fast, ruthless about ignoring noise. You do not fix issues; you rank them.
+
+Real signal (always investigate):
+- FUNCTION_INVOCATION_FAILED \u2014 Vercel function crashed. Almost always env-var drift, missing build artifact, or uncaught exception at module load.
+- 500 from any /api/* or webhook route.
+- Unhandled promise rejection, TypeError, ReferenceError in server logs.
+- Cannot find module \u2014 missing import or broken build.
+- Repeated identical errors (3+ in a 5-minute window).
+- ETIMEDOUT / ECONNRESET to Shopify, Klaviyo, Anthropic, or Twilio sustained over multiple requests.
+- IVR 403 Forbidden on /twilio/* endpoints.
+- Voice webhook returns 500 \u2014 voicemail fallback may be masking real failure.
+
+Noise (suppress unless overwhelming):
+- 404s to /wp-admin, /.env, /.git, /phpmyadmin (script kiddies).
+- 404s to /favicon.ico from old user-agents.
+- OPTIONS preflight 204s.
+- Healthcheck pings (/api/health, Vercel internal).
+- Expected validation rejects (4xx on /api/waitlist from missing fields).
+- One-off 504s during a known cold-start window.
+
+Past incidents to pattern-match:
+- Missing build/server/index.js artifact after Vercel build.
+- Production env missing vars that preview had.
+- DATABASE_URL set to empty string on a preview branch overriding the correct value.
+- Trust bar Sanity query returning null due to GROQ select() breaking dereferencing.
+
+Ranking:
+- P0 \u2014 site-wide outage, payment/checkout broken, IVR down, customer-facing 500s in critical paths.
+- P1 \u2014 single feature broken, high-volume but non-critical errors, webhook failures.
+- P2 \u2014 low-volume errors, edge cases, deprecation warnings.
+
+Group identical stack traces into one entry with occurrence count. Do not over-report. If everything is quiet, return zero groups. Owners: rr7-engineer (RR7/Express/general), ivr-ops (Twilio/voice), shopify-ops (Shopify/webhooks), sanity-content-builder (Sanity/GROQ).`;
+    REPORT_TOOL = {
+      name: "report_groups",
+      description: "Return classified log groups ranked by impact.",
+      input_schema: {
+        type: "object",
+        properties: {
+          groups: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                priority: { type: "string", enum: ["P0", "P1", "P2"] },
+                title: { type: "string" },
+                occurrences: { type: "number" },
+                firstSeen: { type: "string", description: "ISO-8601 timestamp of first occurrence in window" },
+                owner: { type: "string", description: "Subagent owner: rr7-engineer | ivr-ops | shopify-ops | sanity-content-builder" },
+                excerpt: { type: "string", description: "One representative log line or stack trace, max 800 chars" },
+                likelyCause: { type: "string" }
+              },
+              required: ["priority", "title", "occurrences", "firstSeen", "owner", "excerpt", "likelyCause"]
+            }
+          },
+          suppressedNoiseCount: { type: "number" }
+        },
+        required: ["groups", "suppressedNoiseCount"]
+      }
+    };
+  }
+});
+
+// app/lib/nalpac-feeds.server.ts
+import { parse as parse2 } from "csv-parse/sync";
+function feedUrl(name) {
+  const envKey = `NALPAC_FEED_${name.toUpperCase()}_URL`;
+  const override = process.env[envKey];
+  if (override) return override;
+  const fileMap = {
+    main: "nal-product-attributes-main",
+    sale: "nal-on-sale",
+    new: "nal-new-products",
+    top100: "nal-top-100"
+  };
+  return `${BASE_URL}/${fileMap[name]}.csv`;
+}
+async function fetchAndParse(name, force) {
+  const cacheKey3 = `pricing:nalpac:feed:${name}`;
+  if (!force) {
+    const cached2 = await kvGet(cacheKey3);
+    if (cached2) return cached2;
+  }
+  const res = await fetch(feedUrl(name));
+  if (!res.ok) throw new Error(`Nalpac ${name} feed HTTP ${res.status}`);
+  const csv = await res.text();
+  const rows = parse2(csv, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true
+  });
+  await kvSet(cacheKey3, rows, FEED_TTL2);
+  return rows;
+}
+function parseNum(val) {
+  if (!val) return 0;
+  const n = parseFloat(val.replace(/[^0-9.\-]/g, ""));
+  return isNaN(n) ? 0 : n;
+}
+function safeText(val) {
+  if (!val) return null;
+  const cleaned = cleanDescription(val);
+  return cleaned || null;
+}
+function findSalePrice(row, msrp) {
+  const candidates = ["Sale Price", "Promo Price", "On Sale Price"];
+  for (const col of candidates) {
+    if (col in row) {
+      const sp = parseNum(row[col]);
+      if (sp > 0 && sp < msrp) return sp;
+    }
+  }
+  return null;
+}
+function skuOf(row) {
+  return (row["SKU"] ?? row["Sku"] ?? "").trim();
+}
+function snapshotFromMain(row) {
+  const msrp = parseNum(row["MSRP"]);
+  const wholesale = parseNum(row["Wholesale"] ?? row["Cost"]);
+  const rawMap = parseNum(row["MAP"]);
+  const qtyRaw = row["Total qty available"] ?? row["Qty"] ?? row["Quantity"];
+  const qty = qtyRaw !== void 0 ? parseInt(qtyRaw, 10) : null;
+  return {
+    sku: skuOf(row),
+    vendor: safeText(row["Vendor"] ?? row["Brand"]),
+    productTitle: safeText(row["Product Title"]),
+    msrp,
+    wholesale,
+    mapPrice: rawMap > 0 ? rawMap : null,
+    qty: qty !== null && !isNaN(qty) ? qty : null,
+    inSaleFeed: false,
+    inNewFeed: false,
+    inTop100Feed: false,
+    nalpacDiscountPct: null,
+    raw: { mainRow: row }
+  };
+}
+function snapshotFromSale(row) {
+  const msrp = parseNum(row["MSRP"]);
+  const wholesale = parseNum(row["Wholesale"] ?? row["Cost"]);
+  const rawMap = parseNum(row["MAP"]);
+  const salePrice = findSalePrice(row, msrp);
+  return {
+    sku: skuOf(row),
+    vendor: safeText(row["Vendor"] ?? row["Brand"]),
+    productTitle: safeText(row["Product Title"]),
+    msrp,
+    wholesale,
+    mapPrice: rawMap > 0 ? rawMap : null,
+    qty: null,
+    inSaleFeed: true,
+    inNewFeed: false,
+    inTop100Feed: false,
+    nalpacDiscountPct: salePrice !== null && msrp > 0 ? (msrp - salePrice) / msrp : null,
+    raw: { saleRow: row }
+  };
+}
+async function fetchAllNalpacFeeds(opts = {}) {
+  const force = opts.force ?? false;
+  const errors = [];
+  const [mainResult, saleResult, newResult, top100Result] = await Promise.allSettled([
+    fetchAndParse("main", force),
+    fetchAndParse("sale", force),
+    fetchAndParse("new", force),
+    fetchAndParse("top100", force)
+  ]);
+  if (mainResult.status === "rejected") {
+    throw new Error(`Nalpac main feed unavailable: ${mainResult.reason instanceof Error ? mainResult.reason.message : String(mainResult.reason)}`);
+  }
+  const mainRows = mainResult.value;
+  const saleRows = saleResult.status === "fulfilled" ? saleResult.value : (errors.push(`sale feed: ${saleResult.reason instanceof Error ? saleResult.reason.message : String(saleResult.reason)}`), []);
+  const newRows = newResult.status === "fulfilled" ? newResult.value : (errors.push(`new feed: ${newResult.reason instanceof Error ? newResult.reason.message : String(newResult.reason)}`), []);
+  const top100Rows = top100Result.status === "fulfilled" ? top100Result.value : (errors.push(`top100 feed: ${top100Result.reason instanceof Error ? top100Result.reason.message : String(top100Result.reason)}`), []);
+  const snapshots = /* @__PURE__ */ new Map();
+  for (const row of mainRows) {
+    const sku = skuOf(row);
+    if (!sku) continue;
+    snapshots.set(sku, snapshotFromMain(row));
+  }
+  const saleIndex = /* @__PURE__ */ new Map();
+  for (const row of saleRows) {
+    const sku = skuOf(row);
+    if (!sku) continue;
+    saleIndex.set(sku, row);
+  }
+  const newSkus = new Set(newRows.map(skuOf).filter(Boolean));
+  const top100Skus = new Set(top100Rows.map(skuOf).filter(Boolean));
+  for (const [sku, snap] of snapshots) {
+    const saleRow = saleIndex.get(sku);
+    if (saleRow) {
+      const salePrice = findSalePrice(saleRow, snap.msrp);
+      snap.inSaleFeed = true;
+      snap.nalpacDiscountPct = salePrice !== null && snap.msrp > 0 ? (snap.msrp - salePrice) / snap.msrp : null;
+      snap.raw.saleRow = saleRow;
+      saleIndex.delete(sku);
+    }
+    if (newSkus.has(sku)) snap.inNewFeed = true;
+    if (top100Skus.has(sku)) snap.inTop100Feed = true;
+  }
+  for (const [sku, row] of saleIndex) {
+    if (!sku) continue;
+    const snap = snapshotFromSale(row);
+    if (newSkus.has(sku)) snap.inNewFeed = true;
+    if (top100Skus.has(sku)) snap.inTop100Feed = true;
+    snapshots.set(sku, snap);
+  }
+  return {
+    fetchedAt: /* @__PURE__ */ new Date(),
+    snapshots,
+    counts: {
+      main: mainRows.length,
+      sale: saleRows.length,
+      new: newRows.length,
+      top100: top100Rows.length,
+      merged: snapshots.size
+    },
+    errors
+  };
+}
+var BASE_URL, FEED_TTL2;
+var init_nalpac_feeds_server = __esm({
+  "app/lib/nalpac-feeds.server.ts"() {
+    "use strict";
+    init_feed_processor_server();
+    init_kv_server();
+    BASE_URL = "https://productfeeds.wyomind.com/feeds/1s6o37vbh23";
+    FEED_TTL2 = 6 * 60 * 60;
+  }
+});
+
+// app/lib/pricing-engine.server.ts
+function round22(n) {
+  return Math.round(n * 100) / 100;
+}
+function isMapRestricted(vendor) {
+  if (!vendor) return false;
+  const trimmed = vendor.trim().toLowerCase();
+  return MAP_RESTRICTED_VENDORS.some((v) => v.toLowerCase() === trimmed);
+}
+function marginPct(price, wholesale) {
+  if (price <= 0) return 0;
+  return (price - wholesale) / price;
+}
+function buildResult(tier, newPrice, msrp, wholesale, currentPrice, mapRespected, reason, flags, effectiveMarginFloor) {
+  const finalPrice = round22(newPrice);
+  const newCompareAt = round22(msrp);
+  const margin = marginPct(finalPrice, wholesale);
+  const flagsCopy = [...flags];
+  if (margin < effectiveMarginFloor && !flagsCopy.includes("below-floor")) {
+    flagsCopy.push("below-floor");
+  }
+  const delta = round22(finalPrice - currentPrice);
+  const deltaPct = currentPrice > 0 ? round22(delta / currentPrice) : 0;
+  return { tier, newPrice: finalPrice, newCompareAt, marginPct: margin, reason, mapRespected, flags: flagsCopy, delta, deltaPct };
+}
+function computeTargetPrice(snapshot, rules) {
+  const { wholesale, msrp, mapPrice, currentPrice, inSaleFeed, nalpacDiscountPct, vendor, productType } = snapshot;
+  const effectiveMarginFloor = rules?.marginFloor ?? MARGIN_FLOOR;
+  const floorMultiplier = 1 / (1 - effectiveMarginFloor);
+  const floor = wholesale * floorMultiplier;
+  const typeOverride = productType ? rules?.perTypeOverrides?.[productType] : void 0;
+  const effectiveHighDiscount = typeOverride?.highMarginDiscount ?? rules?.highMarginDiscount ?? HIGH_MARGIN_DISCOUNT;
+  const effectiveMediumDiscount = typeOverride?.mediumMarginDiscount ?? rules?.mediumMarginDiscount ?? MEDIUM_MARGIN_DISCOUNT;
+  const effectiveSaleSweetener = rules?.saleSweetener ?? SALE_FLOW_SWEETENER;
+  if (wholesale <= 0 || msrp <= 0) {
+    const flags2 = [];
+    if (wholesale <= 0) flags2.push("no-wholesale");
+    if (msrp <= 0) flags2.push("no-msrp");
+    const reason2 = `Missing required data: ${flags2.join(", ")}. No price change applied.`;
+    return buildResult("refuse-missing-data", currentPrice, msrp > 0 ? msrp : currentPrice, wholesale, currentPrice, true, reason2, flags2, effectiveMarginFloor);
+  }
+  if (isMapRestricted(vendor)) {
+    if (mapPrice == null || mapPrice <= 0) {
+      return buildResult(
+        "refuse-missing-data",
+        currentPrice,
+        msrp,
+        wholesale,
+        currentPrice,
+        false,
+        `Vendor ${vendor} is MAP-restricted but no MAP price is set. No price change applied.`,
+        ["no-map-on-restricted"],
+        effectiveMarginFloor
+      );
+    }
+    const candidate2 = Math.max(mapPrice, floor);
+    const mapRespected = mapPrice >= floor;
+    const flags2 = [];
+    const reason2 = `MAP-restricted vendor. newPrice = max(MAP $${mapPrice}, floor $${round22(floor)}) = $${round22(candidate2)}.`;
+    const result2 = buildResult("map-locked", candidate2, msrp, wholesale, currentPrice, mapRespected, reason2, flags2, effectiveMarginFloor);
+    if (Math.abs(result2.newPrice - currentPrice) < 0.01) {
+      return { ...result2, tier: "no-change-needed", reason: "Already at target." };
+    }
+    return result2;
+  }
+  let tier;
+  let candidate;
+  const flags = [];
+  if (inSaleFeed && nalpacDiscountPct != null && nalpacDiscountPct > 0) {
+    tier = "sale-flow-through";
+    const target = msrp * (1 - nalpacDiscountPct - effectiveSaleSweetener);
+    candidate = Math.max(target, floor);
+    if (candidate > target) flags.push("below-floor");
+    const reason2 = `Sale feed at ${Math.round(nalpacDiscountPct * 100)}% off + ${Math.round(effectiveSaleSweetener * 100)}pt sweetener. Target $${round22(target)}, floor $${round22(floor)}.`;
+    const result2 = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason2, flags, effectiveMarginFloor);
+    return applyPostRules(result2, currentPrice, wholesale, msrp, effectiveMarginFloor);
+  }
+  if (msrp >= 2 * wholesale) {
+    tier = "high-margin";
+    const target = msrp * (1 - effectiveHighDiscount);
+    candidate = Math.max(target, floor);
+    if (candidate > target) flags.push("below-floor");
+    const reason2 = `High margin (MSRP/wholesale ratio ${round22(msrp / wholesale)}x). ${Math.round(effectiveHighDiscount * 100)}% off MSRP = $${round22(target)}, floor $${round22(floor)}.`;
+    const result2 = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason2, flags, effectiveMarginFloor);
+    return applyPostRules(result2, currentPrice, wholesale, msrp, effectiveMarginFloor);
+  }
+  if (msrp >= 1.5 * wholesale) {
+    tier = "medium-margin";
+    const target = msrp * (1 - effectiveMediumDiscount);
+    candidate = Math.max(target, floor);
+    if (candidate > target) flags.push("below-floor");
+    const reason2 = `Medium margin (MSRP/wholesale ratio ${round22(msrp / wholesale)}x). ${Math.round(effectiveMediumDiscount * 100)}% off MSRP = $${round22(target)}, floor $${round22(floor)}.`;
+    const result2 = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason2, flags, effectiveMarginFloor);
+    return applyPostRules(result2, currentPrice, wholesale, msrp, effectiveMarginFloor);
+  }
+  tier = "thin-margin";
+  candidate = floor;
+  flags.push("thin-margin");
+  const reason = `Thin margin (MSRP/wholesale ratio ${round22(msrp / wholesale)}x). Pricing at floor $${round22(floor)}. Likely not worth carrying as a deal.`;
+  const result = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason, flags, effectiveMarginFloor);
+  return applyPostRules(result, currentPrice, wholesale, msrp, effectiveMarginFloor);
+}
+function applyPostRules(result, currentPrice, wholesale, msrp, effectiveMarginFloor) {
+  const { newPrice } = result;
+  if (Math.abs(newPrice - currentPrice) < 0.01) {
+    return { ...result, tier: "no-change-needed", reason: "Already at target." };
+  }
+  if (newPrice > currentPrice && result.tier !== "map-locked") {
+    const currentMargin = marginPct(currentPrice, wholesale);
+    if (currentMargin >= effectiveMarginFloor) {
+      const revertedMargin = marginPct(currentPrice, wholesale);
+      return {
+        ...result,
+        tier: "no-change-needed",
+        newPrice: currentPrice,
+        newCompareAt: round22(msrp),
+        marginPct: revertedMargin,
+        reason: `Wholesale rose, margin still above ${Math.round(effectiveMarginFloor * 100)}%, no change.`,
+        flags: [...result.flags, "increase-absorbed"],
+        delta: 0,
+        deltaPct: 0
+      };
+    }
+  }
+  return result;
+}
+var MAP_RESTRICTED_VENDORS, MARGIN_FLOOR, HIGH_MARGIN_DISCOUNT, MEDIUM_MARGIN_DISCOUNT, SALE_FLOW_SWEETENER;
+var init_pricing_engine_server = __esm({
+  "app/lib/pricing-engine.server.ts"() {
+    "use strict";
+    MAP_RESTRICTED_VENDORS = ["Lovense", "Playground"];
+    MARGIN_FLOOR = 0.2;
+    HIGH_MARGIN_DISCOUNT = 0.35;
+    MEDIUM_MARGIN_DISCOUNT = 0.2;
+    SALE_FLOW_SWEETENER = 0.05;
+  }
+});
+
+// app/lib/pricing-report.server.ts
+var init_pricing_report_server = __esm({
+  "app/lib/pricing-report.server.ts"() {
+    "use strict";
+    init_claude_server();
+  }
+});
+
+// app/lib/pricing-agent.server.ts
+import { eq as eq8 } from "drizzle-orm";
+var init_pricing_agent_server = __esm({
+  "app/lib/pricing-agent.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_kv_server();
+    init_nalpac_feeds_server();
+    init_shopify_server();
+    init_pricing_engine_server();
+    init_pricing_report_server();
+  }
+});
+
+// app/lib/pricing-apply.server.ts
+var init_pricing_apply_server = __esm({
+  "app/lib/pricing-apply.server.ts"() {
+    "use strict";
+    init_shopify_server();
+  }
+});
+
+// app/lib/pricing-webhook.server.ts
+import { eq as eq9, sql as sql5 } from "drizzle-orm";
+async function setPipelineSetting(key, value) {
+  await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
+    target: pipelineSettings.key,
+    set: { value, updatedAt: /* @__PURE__ */ new Date() }
+  });
+}
+var init_pricing_webhook_server = __esm({
+  "app/lib/pricing-webhook.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_kv_server();
+    init_shopify_server();
+    init_pricing_engine_server();
+    init_pricing_agent_server();
+    init_pricing_apply_server();
+  }
+});
+
+// app/lib/dial-registry.server.ts
+import { createClient as createClient7 } from "@sanity/client";
+function client3(write = false) {
+  if (!projectId7) return null;
+  const token = process.env["SANITY_API_TOKEN"];
+  return createClient7({
+    projectId: projectId7,
+    dataset: dataset7,
+    apiVersion: apiVersion7,
+    useCdn: !write,
+    ...token ? { token } : {}
+  });
+}
+async function getDialRegistry() {
+  const c = client3(false);
+  if (!c) return { ...FALLBACK2 };
+  try {
+    const projection = REGISTRY_FIELD_NAMES.join(", ");
+    const doc = await c.fetch(
+      `*[_id == $id][0]{ ${projection} }`,
+      { id: SINGLETON_ID2 }
+    );
+    const out = {};
+    for (const type of Object.keys(TYPE_TO_FIELD)) {
+      const field = TYPE_TO_FIELD[type];
+      let labels = doc?.[field] ?? [];
+      if (type === "vibrator") {
+        labels = [
+          ...labels,
+          ...doc?.["airPulsation"] ?? [],
+          ...doc?.["wand"] ?? []
+        ];
+        labels = Array.from(new Set(labels));
+      }
+      if (labels.length > 0) {
+        out[type] = labels;
+      } else if (FALLBACK2[type]) {
+        out[type] = FALLBACK2[type];
+      }
+    }
+    return out;
+  } catch (err) {
+    console.error("[dial-registry] fetch failed, using fallback:", err);
+    return { ...FALLBACK2 };
+  }
+}
+async function getDialLabelsForType(type) {
+  const reg = await getDialRegistry();
+  return reg[type] ?? [];
+}
+async function getDialTaxonomy() {
+  const empty = {};
+  const c = client3(false);
+  if (!c) return empty;
+  try {
+    const projection = REGISTRY_FIELD_NAMES.join(", ");
+    const doc = await c.fetch(
+      `*[_id == $id][0]{ ${projection} }`,
+      { id: TAXONOMY_SINGLETON_ID }
+    );
+    if (!doc) return empty;
+    const out = {};
+    for (const type of Object.keys(TYPE_TO_FIELD)) {
+      const field = TYPE_TO_FIELD[type];
+      let entries = Array.isArray(doc[field]) ? doc[field] : [];
+      if (type === "vibrator") {
+        const merged = [
+          ...entries,
+          ...Array.isArray(doc["airPulsation"]) ? doc["airPulsation"] : [],
+          ...Array.isArray(doc["wand"]) ? doc["wand"] : []
+        ];
+        const seen = /* @__PURE__ */ new Set();
+        entries = [];
+        for (const entry of merged) {
+          if (!entry?.label || seen.has(entry.label)) continue;
+          seen.add(entry.label);
+          entries.push(entry);
+        }
+      }
+      if (entries.length > 0) out[type] = entries;
+    }
+    return out;
+  } catch (err) {
+    console.error("[dial-registry] taxonomy fetch failed, returning empty:", err);
+    return empty;
+  }
+}
+async function appendDialLabel(type, label) {
+  const trimmed = label.trim();
+  if (!trimmed) throw new Error("label cannot be empty");
+  const c = client3(true);
+  if (!c) throw new Error("Sanity client unavailable \u2014 set SANITY_PROJECT_ID and SANITY_API_TOKEN");
+  const current = await getDialLabelsForType(type);
+  const exists = current.some((x) => x.toLowerCase() === trimmed.toLowerCase());
+  if (exists) return current;
+  const field = TYPE_TO_FIELD[type];
+  if (!field) {
+    throw new Error(`No Sanity dialRegistry field mapped for product type "${type}". Run the Sanity dialRegistry migration before appending labels for this type.`);
+  }
+  const next = [...current, trimmed];
+  await c.patch(SINGLETON_ID2).set({ [field]: next }).commit();
+  return next;
+}
+var projectId7, dataset7, apiVersion7, SINGLETON_ID2, TAXONOMY_SINGLETON_ID, TYPE_TO_FIELD, REGISTRY_FIELD_NAMES, FALLBACK2;
+var init_dial_registry_server = __esm({
+  "app/lib/dial-registry.server.ts"() {
+    "use strict";
+    projectId7 = process.env["SANITY_PROJECT_ID"];
+    dataset7 = process.env["SANITY_DATASET"] ?? "production";
+    apiVersion7 = "2024-10-01";
+    SINGLETON_ID2 = "singleton.dialRegistry";
+    TAXONOMY_SINGLETON_ID = "singleton.dialTaxonomy";
+    TYPE_TO_FIELD = {
+      vibrator: "vibrator",
+      dildo: "dildo",
+      anal: "anal",
+      bondage: "bondage",
+      "cock-ring": "cockRing",
+      stroker: "stroker",
+      couples: "couples",
+      harness: "harness",
+      extender: "extender",
+      pump: "pump",
+      lube: "lube",
+      massage: "massage",
+      enhancer: "enhancer",
+      wear: "wear",
+      condom: "condom",
+      wellness: "wellness",
+      novelty: "novelty",
+      "book-media": "bookMedia",
+      "sex-machine": "sexMachine"
+    };
+    REGISTRY_FIELD_NAMES = [
+      ...Object.values(TYPE_TO_FIELD),
+      "airPulsation",
+      "wand"
+    ];
+    FALLBACK2 = {
+      vibrator: ["Intensity", "Quietness", "Pattern variety", "Buildup speed", "Battery life", "Learning curve"],
+      lube: ["Slipperiness", "Longevity", "Taste-safe", "Body-safe", "Tidy-up", "Skin feel"],
+      wear: ["Fit", "Softness", "Washability", "Discretion", "Adjustability", "Occasion"]
+    };
+  }
+});
+
+// app/lib/imagen.server.ts
+import { GoogleGenAI } from "@google/genai";
+function getMoodDescription(categories) {
+  for (const cat of categories) {
+    const mood = MOOD_MAP[cat];
+    if (mood) return mood;
+  }
+  return "warm abstract lifestyle, soft lighting, premium wellness aesthetic";
+}
+function buildClient() {
+  const project = process.env["GOOGLE_CLOUD_PROJECT_ID"] ?? "";
+  const location = process.env["GOOGLE_CLOUD_LOCATION"] ?? "us-central1";
+  const raw = process.env["GOOGLE_SERVICE_ACCOUNT_JSON"];
+  if (raw) {
+    const key = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
+    return new GoogleGenAI({
+      vertexai: true,
+      project,
+      location,
+      googleAuthOptions: {
+        credentials: {
+          client_email: key.client_email,
+          private_key: key.private_key
+        },
+        scopes: ["https://www.googleapis.com/auth/cloud-platform"]
+      }
+    });
+  }
+  return new GoogleGenAI({ vertexai: true, project, location });
+}
+async function generateOne(ai, parts) {
+  const response = await ai.models.generateContent({
+    model: MODEL3,
+    contents: [{ role: "user", parts }],
+    config: { responseModalities: ["IMAGE"] }
+  });
+  const candidate = response.candidates?.[0];
+  if (!candidate) throw new Error("No candidates returned from Gemini image API");
+  if (candidate.finishReason === "SAFETY") {
+    throw new Error("Image blocked by safety filters");
+  }
+  for (const part of candidate.content?.parts ?? []) {
+    if (part.inlineData?.data) {
+      return Buffer.from(part.inlineData.data, "base64");
+    }
+  }
+  throw new Error(
+    `Gemini returned no image data (finishReason: ${candidate.finishReason ?? "unknown"}). Prompt may have been filtered.`
+  );
+}
+async function generateMoodImage(opts) {
+  const project = process.env["GOOGLE_CLOUD_PROJECT_ID"];
+  if (!project) throw new Error("GOOGLE_CLOUD_PROJECT_ID not set");
+  const ai = buildClient();
+  const mood = getMoodDescription(opts.categories);
+  const count = Math.min(Math.max(1, opts.count ?? 2), 4);
+  const basePrompt = opts.prompt ?? `Abstract lifestyle photography for a premium wellness product.
+Mood: warm, curious, inviting. Soft golden-hour lighting.
+Colors: coral red, warm orange, purple accents, cream background.
+No faces. No people. No product shown directly.
+Suggest the feeling of: ${mood}.
+Style: editorial, tasteful, evocative but not explicit.`;
+  const parts = [];
+  if (opts.originalImageBuffer) {
+    parts.push({ inlineData: { mimeType: "image/jpeg", data: opts.originalImageBuffer.toString("base64") } });
+    parts.push({ text: `${basePrompt} Keep the product identical. Only change the environment, lighting, or background as described.` });
+  } else {
+    const refs = opts.referenceImageBuffers;
+    if (refs && refs.length > 0) {
+      for (const ref of refs) {
+        parts.push({ inlineData: { mimeType: "image/jpeg", data: ref.toString("base64") } });
+      }
+      const plural = refs.length > 1 ? "reference images" : "reference image";
+      parts.push({
+        text: `${basePrompt} Reproduce the exact same physical product${refs.length > 1 ? "s" : ""} shown in the ${plural} \u2014 same shape, color, finish, and details. Place ${refs.length > 1 ? "them" : "it"} faithfully in the new scene without altering the product${refs.length > 1 ? "s themselves" : " itself"}.`
+      });
+    } else {
+      parts.push({ text: basePrompt });
+    }
+  }
+  const results = await Promise.allSettled(
+    Array.from({ length: count }, () => generateOne(ai, parts))
+  );
+  const buffers = [];
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      buffers.push(result.value);
+    } else {
+      console.warn("[imagen] One generation failed:", result.reason instanceof Error ? result.reason.message : result.reason);
+    }
+  }
+  if (buffers.length === 0) {
+    const firstError = results.find((r) => r.status === "rejected");
+    const reason = firstError?.reason instanceof Error ? firstError.reason.message : String(firstError?.reason);
+    throw new Error(`All image generations failed: ${reason}`);
+  }
+  return buffers;
+}
+var MOOD_MAP, MODEL3;
+var init_imagen_server = __esm({
+  "app/lib/imagen.server.ts"() {
+    "use strict";
+    MOOD_MAP = {
+      "Water-Based": "silky smooth liquid over smooth stones, clean and natural",
+      "Silicone-Based": "gleaming geometric shapes, premium and sleek",
+      "Wands": "sleek modern sculpture in warm light, powerful and elegant",
+      "Dual Action and Rabbits": "two flowers blooming simultaneously, movement and softness",
+      "Plugs and Probes": "smooth geometric form, subtle curves in purple shadow",
+      "Restraints": "soft ribbons loosely draped, playful not threatening",
+      "Toy Cleaners": "fresh botanical ingredients, clean spa aesthetic",
+      "Bullets and Eggs": "small smooth river pebbles, delicate and curious",
+      "Vagina Strokers": "soft fabric texture, modern minimal studio",
+      "Couples and Wearable": "two intertwined abstract forms, warm connection",
+      "Air Pulse and Suction": "gentle wind through tall grass, soft and airy",
+      "Remote": "wireless signal ripples in water, playful and techy",
+      "Finger and Clit": "rose petal curves in warm light, soft and inviting"
+    };
+    MODEL3 = process.env["GEMINI_IMAGE_MODEL"] ?? "gemini-2.5-flash-image";
+  }
+});
+
+// app/lib/llm-client.server.ts
+import Anthropic4 from "@anthropic-ai/sdk";
+async function loadAgentSdk() {
+  const dynImport = new Function("m", "return import(m)");
+  const sdk = await dynImport("@anthropic-ai/claude-agent-sdk").catch(() => null);
+  if (!sdk) throw new Error("install @anthropic-ai/claude-agent-sdk to use --via=claude-code");
+  if (typeof sdk.query !== "function") throw new Error("@anthropic-ai/claude-agent-sdk has no `query` export \u2014 SDK shape changed");
+  if (typeof sdk.tool !== "function") throw new Error("@anthropic-ai/claude-agent-sdk has no `tool` export \u2014 SDK shape changed");
+  if (typeof sdk.createSdkMcpServer !== "function") throw new Error("@anthropic-ai/claude-agent-sdk has no `createSdkMcpServer` export \u2014 SDK shape changed");
+  return { query: sdk.query, tool: sdk.tool, createSdkMcpServer: sdk.createSdkMcpServer };
+}
+function getDefaultClient() {
+  if (!_default) _default = new AnthropicSdkClient();
+  return _default;
+}
+var AnthropicSdkClient, _default;
+var init_llm_client_server = __esm({
+  "app/lib/llm-client.server.ts"() {
+    "use strict";
+    AnthropicSdkClient = class {
+      via = "api";
+      client;
+      constructor(opts) {
+        this.client = new Anthropic4({
+          ...opts?.apiKey ? { apiKey: opts.apiKey } : { apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() }
+        });
+      }
+      async create(req) {
+        const res = await this.client.messages.create({
+          model: req.model,
+          max_tokens: req.max_tokens,
+          system: req.system,
+          tools: req.tools,
+          messages: req.messages
+        });
+        return {
+          content: res.content,
+          stop_reason: res.stop_reason ?? null,
+          usage: {
+            input_tokens: res.usage.input_tokens,
+            output_tokens: res.usage.output_tokens
+          }
+        };
+      }
+    };
+    _default = null;
+  }
+});
+
+// app/lib/emma-orchestrator.server.ts
+function makeDealContext(state) {
+  return {
+    // Use the augmented title once generateProductTitle has run; fall back
+    // to the caller-supplied seoTitle until then. This way Emma's Take and
+    // friends speak in terms of the final shopper-facing title.
+    seoTitle: state.writes.productTitle ?? state.input.seoTitle,
+    tagline: state.writes.tagline ?? "",
+    fullStory: state.writes.descriptionHtml ?? "",
+    ...state.writes.descriptionHtml ? { descriptionHtml: state.writes.descriptionHtml } : {},
+    ...state.writes.careInstructions ? { careInstructions: state.writes.careInstructions } : {},
+    brand: state.input.product.brand,
+    category: state.input.category,
+    ...state.writes.productTypeDial ? { productTypeDial: state.writes.productTypeDial } : {},
+    specifications: state.writes.specifications ?? [],
+    dealPrice: state.input.product.dealPrice,
+    msrp: state.input.product.msrp,
+    mapRestricted: false
+  };
+}
+function enrichProduct(state, product) {
+  const enriched = {
+    title: state.writes.productTitle ?? product.title,
+    brand: product.brand,
+    description: product.description,
+    categories: product.categories,
+    dealPrice: product.dealPrice,
+    msrp: product.msrp
+  };
+  if (state.writes.productTypeDial) enriched.productTypeDial = state.writes.productTypeDial;
+  if (state.writes.moodTags?.length) enriched.moodTags = state.writes.moodTags;
+  if (state.writes.audienceTags?.length) enriched.audienceTags = state.writes.audienceTags;
+  if (state.writes.mattersTags?.length) enriched.mattersTags = state.writes.mattersTags;
+  return enriched;
+}
+async function executeTool(name, state) {
+  const { product } = state.input;
+  const dealCtx = makeDealContext(state);
+  switch (name) {
+    case "classifyProductTypeDial": {
+      const taxonomy = await inferProductTaxonomy({
+        title: product.title,
+        brand: product.brand,
+        description: product.description,
+        categories: product.categories,
+        ...state.input.llmClient ? { llmClient: state.input.llmClient } : {}
+      });
+      state.writes.productTypeDial = taxonomy.type;
+      state.writes.productSubtypeDial = taxonomy.subtype;
+      const summary = taxonomy.subtype ? `productTypeDial=${taxonomy.type}/${taxonomy.subtype}` : `productTypeDial=${taxonomy.type}`;
+      return { ok: true, summary };
+    }
+    case "generateProductTitle": {
+      const dial = state.writes.productTypeDial ?? "vibrator";
+      const titleResult = await generateProductTitle({
+        rawTitle: product.title,
+        brand: product.brand,
+        rawDescription: product.description,
+        productTypeDial: dial,
+        ...state.input.llmClient ? { llmClient: state.input.llmClient } : {}
+      });
+      state.writes.productTitle = titleResult.title;
+      state.writes.productTitleAugmented = titleResult.augmented;
+      state.writes.originalTitle = titleResult.originalTitle;
+      return {
+        ok: true,
+        summary: titleResult.augmented ? `title augmented: "${titleResult.originalTitle}" \u2192 "${titleResult.title}" (${titleResult.reason})` : `title preserved: "${titleResult.title}" (${titleResult.reason})`
+      };
+    }
+    case "proposePairingWhy": {
+      const candidates = state.input.pairingCandidates ?? [];
+      if (candidates.length === 0) {
+        return { ok: true, summary: "no pairing candidates \u2014 skipped" };
+      }
+      try {
+        const dial = state.writes.productTypeDial ?? "vibrator";
+        const result = await generatePairingWhy({
+          primary: {
+            title: product.title,
+            brand: product.brand,
+            productTypeDial: dial,
+            ...state.writes.tagline ? { tagline: state.writes.tagline } : {},
+            description: product.description
+          },
+          candidates: candidates.map((c) => {
+            const ci = {
+              productId: c.productId,
+              title: c.title,
+              price: c.price
+            };
+            if (c.brand) ci.brand = c.brand;
+            if (c.productTypeDial) ci.productTypeDial = c.productTypeDial;
+            return ci;
+          }),
+          ...state.input.llmClient ? { llmClient: state.input.llmClient } : {}
+        });
+        if (result.accessoryProductIds.length > 0) {
+          state.writes.accessoryProductIds = result.accessoryProductIds;
+          state.writes.pairingWhy = result.pairingWhy;
+          return { ok: true, summary: `pairings=${result.accessoryProductIds.length}` };
+        }
+        return { ok: true, summary: "no pairings strong enough \u2014 skipped" };
+      } catch (err) {
+        return { ok: false, summary: `pairings skipped: ${err instanceof Error ? err.message : "error"}` };
+      }
+    }
+    case "generateProductCopyBundle": {
+      const bundle = await generateProductCopyBundle({
+        product: enrichProduct(state, product),
+        ...state.input.llmClient ? { llmClient: state.input.llmClient } : {}
+      });
+      state.writes.tagline = bundle.tagline;
+      state.writes.seoMetaDescription = bundle.seoMeta;
+      state.writes.specifications = bundle.specifications;
+      return {
+        ok: !!bundle.tagline && !!bundle.seoMeta,
+        summary: `bundle tagline=${bundle.tagline.length} seoMeta=${bundle.seoMeta.length} specs=${bundle.specifications.length}`
+      };
+    }
+    case "generateEmmaTake": {
+      const html = await generateEmmaTake({ deal: dealCtx, ...state.input.llmClient ? { llmClient: state.input.llmClient } : {} });
+      state.writes.descriptionHtml = html;
+      return { ok: !!html, summary: `emmaTake len=${html.length}` };
+    }
+    case "generateCareInstructions": {
+      try {
+        const bullets = await generateCareInstructions({ deal: dealCtx, ...state.input.llmClient ? { llmClient: state.input.llmClient } : {} });
+        state.writes.careInstructions = bullets;
+        return { ok: true, summary: `care=${bullets.length}` };
+      } catch (err) {
+        return { ok: false, summary: `care skipped: ${err instanceof Error ? err.message : "error"}` };
+      }
+    }
+    case "generateSensationDialV2": {
+      const type = state.writes.productTypeDial ?? "vibrator";
+      const preferredLabels = state.dialRegistry[type] ?? [];
+      const taxonomy = state.dialTaxonomy[type] ?? [];
+      const dial = await generateSensationDialV2({
+        deal: { ...dealCtx, productTypeDial: type },
+        preferredLabels,
+        ...taxonomy.length > 0 ? { taxonomy } : {},
+        ...state.input.llmClient ? { llmClient: state.input.llmClient } : {}
+      });
+      state.writes.sensationDialV2 = dial;
+      const proposed = dial.items.filter((i) => i.proposed && typeof i.label === "string");
+      let appended = 0;
+      for (const item of proposed) {
+        try {
+          const next = await appendDialLabel(type, item.label);
+          if (next.length !== (state.dialRegistry[type]?.length ?? 0)) {
+            state.dialRegistry[type] = next;
+            appended++;
+          }
+        } catch (err) {
+          console.warn(`[emma-orchestrator] appendDialLabel(${type}, "${item.label}") failed:`, err instanceof Error ? err.message : err);
+        }
+      }
+      return { ok: true, summary: `dial items=${dial.items.length}${appended > 0 ? ` appended=${appended}` : ""}` };
+    }
+    case "generateBoxContents": {
+      const r = await generateCopy({ type: "box_contents", product: enrichProduct(state, product) }, state.input.llmClient);
+      const bc = r.content ?? [];
+      if (bc.length > 0) state.writes.boxContents = bc;
+      return { ok: true, summary: `boxContents=${bc.length}` };
+    }
+    case "generateAskEmmaTagsAll": {
+      const result = await generateAskEmmaTagsAll({
+        deal: dealCtx,
+        vocabularies: {
+          mood: state.vocab.mood,
+          audience: state.vocab.audience,
+          matters: state.vocab.matters
+        },
+        ...state.input.llmClient ? { llmClient: state.input.llmClient } : {}
+      });
+      state.writes.moodTags = result.moodTags;
+      state.writes.audienceTags = result.audienceTags;
+      state.writes.mattersTags = result.mattersTags;
+      return {
+        ok: true,
+        summary: `mood=${result.moodTags.length} audience=${result.audienceTags.length} matters=${result.mattersTags.length}`
+      };
+    }
+    case "generateEmmaHero": {
+      const hero = await generateEmmaHero({
+        deal: {
+          seoTitle: dealCtx.seoTitle,
+          tagline: dealCtx.tagline,
+          fullStory: dealCtx.fullStory,
+          brand: dealCtx.brand,
+          category: dealCtx.category,
+          dealPrice: dealCtx.dealPrice,
+          msrp: dealCtx.msrp,
+          mapRestricted: dealCtx.mapRestricted
+        },
+        ...state.input.llmClient ? { llmClient: state.input.llmClient } : {}
+      });
+      state.writes.emmaHero = hero;
+      return { ok: true, summary: `emmaHero variant=${hero.variant}` };
+    }
+    case "generateMoodImage": {
+      if (process.env.EMMA_SKIP_IMAGE === "1") {
+        return { ok: true, summary: "moodImage skipped (EMMA_SKIP_IMAGE=1)" };
+      }
+      try {
+        const buffers = await generateMoodImage({
+          categories: product.categories,
+          count: 1
+        });
+        const buf = buffers[0];
+        if (!buf) return { ok: false, summary: "no image buffer returned" };
+        const slug = product.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
+        const url = await uploadMoodImageToShopifyFiles(buf, `mood-${slug}-${Date.now()}.jpg`);
+        state.writes.moodImageUrl = url;
+        return { ok: true, summary: `moodImage url=${url.slice(0, 80)}` };
+      } catch (err) {
+        return { ok: false, summary: `moodImage skipped: ${err instanceof Error ? err.message : "error"}` };
+      }
+    }
+    case "generateIvrAll": {
+      const ivr = await generateIvrAll({ deal: dealCtx, ...state.input.llmClient ? { llmClient: state.input.llmClient } : {} });
+      state.writes.ivrExperience = ivr.experience;
+      state.writes.ivrUseCase = ivr.useCases;
+      state.writes.ivrFeatures = ivr.features;
+      return {
+        ok: true,
+        summary: `ivr exp=[${ivr.experience.join(",")}] uc=${ivr.useCases.length} feat=${ivr.features.length}`
+      };
+    }
+    case "generateProductFaqs": {
+      const faqs = await generateProductFaqs({ deal: dealCtx, ...state.input.llmClient ? { llmClient: state.input.llmClient } : {} });
+      state.writes.productFaqs = faqs;
+      return { ok: faqs.length > 0, summary: `productFaqs=${faqs.length}` };
+    }
+    case "finish": {
+      state.finished = true;
+      return { ok: true, summary: "orchestrator complete" };
+    }
+    default:
+      return { ok: false, summary: `unknown tool: ${name}` };
+  }
+}
+async function runOrchestrationViaSdk(state, userPrompt) {
+  const { query, tool, createSdkMcpServer } = await loadAgentSdk();
+  const calledTools = /* @__PURE__ */ new Set();
+  const mcpTools = TOOLS.map(
+    (t) => tool(
+      t.name,
+      t.description,
+      // Empty Zod raw shape — orchestrator tools take no model-supplied input;
+      // they read from `state.input` and write to `state.writes`.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      {},
+      async (_args, _extra) => {
+        if (calledTools.has(t.name)) {
+          return { content: [{ type: "text", text: JSON.stringify({ ok: false, summary: `${t.name} already called \u2014 skipping duplicate` }) }] };
+        }
+        calledTools.add(t.name);
+        const start = Date.now();
+        let ok = false;
+        let summary = "";
+        let errorMsg;
+        drainToolTokens();
+        try {
+          const r = await executeTool(t.name, state);
+          ok = r.ok;
+          summary = r.summary;
+        } catch (err) {
+          errorMsg = err instanceof Error ? err.message : String(err);
+          summary = `tool error: ${errorMsg}`;
+        }
+        const toolTokens = drainToolTokens();
+        state.telemetry.totalInputTokens += toolTokens.input;
+        state.telemetry.totalOutputTokens += toolTokens.output;
+        state.telemetry.totalCacheCreationTokens += toolTokens.cacheCreation;
+        state.telemetry.totalCacheReadTokens += toolTokens.cacheRead;
+        state.telemetry.toolCalls.push({
+          name: t.name,
+          durationMs: Date.now() - start,
+          inputTokens: toolTokens.input,
+          outputTokens: toolTokens.output,
+          ok,
+          ...errorMsg ? { error: errorMsg } : {}
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify({ ok, summary }) }],
+          ...errorMsg ? { isError: true } : {}
+        };
+      }
+    )
+  );
+  const mcpServer = createSdkMcpServer({
+    name: "emma-orchestrator",
+    version: "1.0.0",
+    tools: mcpTools
+  });
+  const allowedTools = TOOLS.map((t) => `mcp__emma-orchestrator__${t.name}`);
+  const stream = query({
+    prompt: userPrompt,
+    options: {
+      systemPrompt: SYSTEM,
+      mcpServers: { "emma-orchestrator": mcpServer },
+      // Disable all built-in Claude Code tools (Bash/Read/Edit/etc.). Only
+      // our MCP tools should be available to the model.
+      tools: [],
+      allowedTools,
+      maxTurns: MAX_TURNS
+    }
+  });
+  for await (const event of stream) {
+    if (!event || typeof event !== "object") continue;
+    const ev = event;
+    if (ev.type === "assistant" && ev.message?.usage) {
+      state.telemetry.totalInputTokens += Number(ev.message.usage.input_tokens ?? 0);
+      state.telemetry.totalOutputTokens += Number(ev.message.usage.output_tokens ?? 0);
+      state.telemetry.turns++;
+    } else if (ev.type === "result") {
+      break;
+    }
+    if (state.finished) break;
+  }
+}
+async function generateProductContent(input) {
+  const t0 = Date.now();
+  const [dialRegistry, dialTaxonomy, vocab] = await Promise.all([
+    getDialRegistry(),
+    getDialTaxonomy(),
+    getAskEmmaVocabulary()
+  ]);
+  const state = {
+    input,
+    dialRegistry,
+    dialTaxonomy,
+    vocab,
+    writes: {},
+    telemetry: {
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalTokens: 0,
+      totalCacheCreationTokens: 0,
+      totalCacheReadTokens: 0,
+      durationMs: 0,
+      turns: 0,
+      toolCalls: []
+    },
+    finished: false
+  };
+  const userPrompt = `Generate the full PDP content for this product:
+
+Title: ${input.product.title}
+Brand: ${input.product.brand}
+Categories: ${input.product.categories.join(", ") || "(none)"}
+Description (truncated): ${input.product.description.slice(0, 800)}
+
+SEO title (already set, for context): ${input.seoTitle}
+Pricing context (do not echo): deal $${input.product.dealPrice} / msrp $${input.product.msrp}
+
+Start with classifyProductTypeDial, then run every other applicable tool exactly once, then call finish.`;
+  const llm = input.llmClient ?? getDefaultClient();
+  if (llm.via === "claude-code") {
+    await runOrchestrationViaSdk(state, userPrompt);
+  } else {
+    const messages = [{ role: "user", content: userPrompt }];
+    const calledTools = /* @__PURE__ */ new Set();
+    while (state.telemetry.turns < MAX_TURNS && !state.finished) {
+      state.telemetry.turns++;
+      const response = await llm.create({
+        model: MODEL4,
+        max_tokens: 4096,
+        system: SYSTEM,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tools: TOOLS,
+        messages
+      });
+      state.telemetry.totalInputTokens += response.usage.input_tokens;
+      state.telemetry.totalOutputTokens += response.usage.output_tokens;
+      messages.push({ role: "assistant", content: response.content });
+      const toolUses = response.content.filter((b) => b.type === "tool_use");
+      if (toolUses.length === 0) {
+        break;
+      }
+      const toolResults = await Promise.all(
+        toolUses.map(async (tu) => {
+          if (calledTools.has(tu.name)) {
+            return {
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: JSON.stringify({ ok: false, summary: `${tu.name} already called \u2014 skipping duplicate` })
+            };
+          }
+          calledTools.add(tu.name);
+          const start = Date.now();
+          let ok = false;
+          let summary = "";
+          let errorMsg;
+          drainToolTokens();
+          try {
+            const r = await executeTool(tu.name, state);
+            ok = r.ok;
+            summary = r.summary;
+          } catch (err) {
+            errorMsg = err instanceof Error ? err.message : String(err);
+            summary = `tool error: ${errorMsg}`;
+          }
+          const toolTokens = drainToolTokens();
+          state.telemetry.totalInputTokens += toolTokens.input;
+          state.telemetry.totalOutputTokens += toolTokens.output;
+          state.telemetry.totalCacheCreationTokens += toolTokens.cacheCreation;
+          state.telemetry.totalCacheReadTokens += toolTokens.cacheRead;
+          state.telemetry.toolCalls.push({
+            name: tu.name,
+            durationMs: Date.now() - start,
+            inputTokens: toolTokens.input,
+            outputTokens: toolTokens.output,
+            ok,
+            ...errorMsg ? { error: errorMsg } : {}
+          });
+          return {
+            type: "tool_result",
+            tool_use_id: tu.id,
+            content: JSON.stringify({ ok, summary }),
+            ...errorMsg ? { is_error: true } : {}
+          };
+        })
+      );
+      messages.push({ role: "user", content: toolResults });
+      if (state.finished) break;
+      if (response.stop_reason === "end_turn") break;
+    }
+  }
+  state.telemetry.totalTokens = state.telemetry.totalInputTokens + state.telemetry.totalOutputTokens;
+  state.telemetry.durationMs = Date.now() - t0;
+  if (state.telemetry.toolCalls.length === 0) {
+    throw new Error("orchestrator: 0 tool calls \u2014 LLM client returned empty content (check llm-client adapter)");
+  }
+  if (!state.writes.tagline?.trim()) {
+    throw new Error("orchestrator: tagline tool did not run or returned empty \u2014 refusing to ship a fallback");
+  }
+  const writes = {
+    productTypeDial: state.writes.productTypeDial ?? "vibrator",
+    tagline: state.writes.tagline,
+    seoMetaDescription: state.writes.seoMetaDescription ?? "",
+    descriptionHtml: state.writes.descriptionHtml ?? "",
+    moodTags: state.writes.moodTags ?? [],
+    audienceTags: state.writes.audienceTags ?? [],
+    mattersTags: state.writes.mattersTags ?? [],
+    ...state.writes.productSubtypeDial !== void 0 ? { productSubtypeDial: state.writes.productSubtypeDial } : {},
+    ...state.writes.productTitle !== void 0 ? { productTitle: state.writes.productTitle } : {},
+    ...state.writes.productTitleAugmented !== void 0 ? { productTitleAugmented: state.writes.productTitleAugmented } : {},
+    ...state.writes.originalTitle !== void 0 ? { originalTitle: state.writes.originalTitle } : {},
+    ...state.writes.boxContents !== void 0 ? { boxContents: state.writes.boxContents } : {},
+    ...state.writes.specifications !== void 0 ? { specifications: state.writes.specifications } : {},
+    ...state.writes.careInstructions !== void 0 ? { careInstructions: state.writes.careInstructions } : {},
+    ...state.writes.sensationDialV2 !== void 0 ? { sensationDialV2: state.writes.sensationDialV2 } : {},
+    ...state.writes.emmaHero !== void 0 ? { emmaHero: state.writes.emmaHero } : {},
+    ...state.writes.moodImageUrl !== void 0 ? { moodImageUrl: state.writes.moodImageUrl } : {},
+    ...state.writes.accessoryProductIds !== void 0 ? { accessoryProductIds: state.writes.accessoryProductIds } : {},
+    ...state.writes.pairingWhy !== void 0 ? { pairingWhy: state.writes.pairingWhy } : {},
+    ...state.writes.ivrExperience !== void 0 ? { ivrExperience: state.writes.ivrExperience } : {},
+    ...state.writes.ivrUseCase !== void 0 ? { ivrUseCase: state.writes.ivrUseCase } : {},
+    ...state.writes.ivrFeatures !== void 0 ? { ivrFeatures: state.writes.ivrFeatures } : {},
+    ...state.writes.productFaqs !== void 0 ? { productFaqs: state.writes.productFaqs } : {}
+  };
+  return { writes, telemetry: state.telemetry };
+}
+var MODEL4, MAX_TURNS, TOOLS, SYSTEM;
+var init_emma_orchestrator_server = __esm({
+  "app/lib/emma-orchestrator.server.ts"() {
+    "use strict";
+    init_claude_server();
+    init_dial_registry_server();
+    init_ask_emma_vocab_server();
+    init_imagen_server();
+    init_shopify_server();
+    init_llm_client_server();
+    MODEL4 = "claude-sonnet-4-20250514";
+    MAX_TURNS = 24;
+    TOOLS = [
+      {
+        name: "classifyProductTypeDial",
+        description: "Classify the product into a hierarchical taxonomy \u2014 top-level type AND per-parent subtype in one call. Top-level types: vibrator, dildo, anal, bondage, cock-ring, stroker, couples, harness, extender, pump, lube, massage, enhancer, wear, condom, wellness, novelty, book-media, sex-machine. Always call this FIRST so other tools have the right type.",
+        input_schema: { type: "object", properties: {}, required: [] }
+      },
+      {
+        name: "generateAskEmmaTagsAll",
+        description: "Generate Title Case Ask Emma tags for ALL THREE axes (mood / audience / matters) in one combined Haiku call. Replaces the three single-axis tools. Always call this. Run BEFORE copy tools so keyword targeting can filter on these tags. Backfill will not invent new vocab; tags are restricted to the curated lists.",
+        input_schema: { type: "object", properties: {}, required: [] }
+      },
+      {
+        name: "generateProductTitle",
+        description: 'Decide whether to augment the manufacturer title with one SEO descriptor (e.g. "Eclipse 7" \u2192 "Eclipse 7 Wand Vibrator"), or leave it alone if it already names the category. Run AFTER classifyProductTypeDial + tag tools so the descriptor matches keyword bank targets. Always call this.',
+        input_schema: { type: "object", properties: {}, required: [] }
+      },
+      {
+        name: "generateProductCopyBundle",
+        description: 'Generate the product tagline, SEO meta description, AND "Label: Value" specifications bullets in a SINGLE Haiku call. Replaces the three legacy tools (generateTagline + generateSeoMeta + generateSpecifications) \u2014 they shared the same product context and keyword block. Always call this.',
+        input_schema: { type: "object", properties: {}, required: [] }
+      },
+      {
+        name: "generateEmmaTake",
+        description: "Generate Emma's first-person take (becomes Shopify body_html / Emma's take tab). Always call this.",
+        input_schema: { type: "object", properties: {}, required: [] }
+      },
+      {
+        name: "generateCareInstructions",
+        description: "Generate 3\u20135 short care bullets. Call this for product types where care matters: vibrator, wand, air-pulsation, wear. SKIP for lube unless the lube has a real care/storage note.",
+        input_schema: { type: "object", properties: {}, required: [] }
+      },
+      {
+        name: "generateSensationDialV2",
+        description: "Generate the 5\u20136 dimension sensation dial scored 1\u20135. Always call this AFTER classifyProductTypeDial.",
+        input_schema: { type: "object", properties: {}, required: [] }
+      },
+      {
+        name: "generateBoxContents",
+        description: 'Generate "what is in the box" bullets. Call this for hardware (vibrator, wand, air-pulsation). SKIP for lube. SKIP for wear unless the wear product has packaging contents worth listing.',
+        input_schema: { type: "object", properties: {}, required: [] }
+      },
+      // Phase 1 rebuild — these tools were removed from the import orchestrator's
+      // tool list:
+      //   - generateEmmaHero (E1/E2): deal-cycle artifact, regenerated per
+      //     deal slot rotation. Out of import scope.
+      //   - generateMoodImage: image generation is Phase 2+ scope.
+      //   - proposePairingWhy (F1/F2): pairings are deal-cycle, curated when
+      //     a product enters the homepage deal slot against the freshest
+      //     catalog state.
+      // The corresponding case branches and underlying generator functions are
+      // preserved so the deal-cycle pipeline can call them directly. Import path
+      // never schedules them.
+      {
+        name: "generateIvrAll",
+        description: "Pick experience levels, use-case slugs, AND feature slugs in a SINGLE Haiku call \u2014 replaces the three legacy IVR tools (generateIvrExperience + generateIvrUseCase + generateIvrFeatures). Used by Emma chat/IVR/SMS to match buyer intent and speak features aloud. Always call this AFTER classifyProductTypeDial and generateEmmaTake so context is rich.",
+        input_schema: { type: "object", properties: {}, required: [] }
+      },
+      {
+        name: "generateProductFaqs",
+        description: "Generate 4\u20136 FAQ pairs (general / care / usage / compatibility) for the PDP and FAQPage JSON-LD. Always call this AFTER generateEmmaTake \u2014 answers benefit from the product story being set. Sanity-only field; no Shopify metafield.",
+        input_schema: { type: "object", properties: {}, required: [] }
+      },
+      {
+        name: "finish",
+        description: "Call this last \u2014 when every applicable tool above has been called. Takes no arguments; orchestrator returns the consolidated writes.",
+        input_schema: { type: "object", properties: {}, required: [] }
+      }
+    ];
+    SYSTEM = `You are Emma's content brain for xdipx.com \u2014 an editorially-curated sexual-wellness storefront. Given one product, you decide which content generators to run to fully populate its PDP and Emma's voice surfaces (chat / IVR / SMS), then call them via tools.
+
+Required for every product (run in this exact phase order):
+
+Phase 1 \u2014 classify (must complete BEFORE anything else):
+  1. classifyProductTypeDial
+
+Phase 2 \u2014 tag the product (must complete BEFORE copy generators so the SEO keyword bank can filter approved terms by these tags \u2014 without this, copy is generic):
+  2. generateAskEmmaTagsAll  (single Haiku call, all three axes \u2014 mood / audience / matters)
+
+Phase 3 \u2014 title decision (uses dial + tags to pick a descriptor when needed):
+  3. generateProductTitle
+
+Phase 4 \u2014 copy generators (these benefit from keyword targeting via the tags above):
+  4. generateProductCopyBundle  (single Haiku call: tagline + seoMeta + specifications together)
+  5. generateEmmaTake
+
+Phase 5 \u2014 dial + hero + image (independent, run after copy is set):
+  6. generateSensationDialV2 (must be AFTER classifyProductTypeDial)
+  7. generateEmmaHero
+  8. generateMoodImage
+
+Phase 6 \u2014 pairings (run AFTER copy bundle + emmaTake exist so the pairing-why blurbs have richer context):
+  9. proposePairingWhy (SKIP if no pairing candidates were provided)
+
+Phase 7 \u2014 IVR / voice surfaces (run AFTER generateEmmaTake \u2014 they need rich context):
+  10. generateIvrAll  (single Haiku call: experience + useCases + features together)
+
+Phase 8 \u2014 PDP FAQs (run LAST \u2014 must be AFTER generateEmmaTake AND generateCareInstructions so the differentiation context is populated; H1 answers must NOT restate descriptionHtml or careInstructions):
+  11. generateProductFaqs
+
+Conditional:
+- generateCareInstructions: call for every product type. The underlying generator branches on productTypeDial \u2014 hardware gets 3\u20135 maintenance bullets, consumables (lube, edible wear) get 2\u20133 playful storage/usage bullets.
+- generateBoxContents: skip for lube; usually skip for wear.
+
+When every applicable tool above has been called, call \`finish\` with no arguments. Do NOT re-emit content \u2014 the orchestrator already has it.
+
+Be efficient. Each tool is a single call. Do NOT call the same tool twice.`;
+  }
+});
+
+// app/lib/bulk-import.server.ts
+var bulk_import_server_exports = {};
+__export(bulk_import_server_exports, {
+  importNewProduct: () => importNewProduct,
+  importProductGroup: () => importProductGroup,
+  importProductGroupRaw: () => importProductGroupRaw,
+  isSkuAlreadyImported: () => isSkuAlreadyImported,
+  parseBulkImportCSV: () => parseBulkImportCSV
+});
+import { parse as parse3 } from "csv-parse/sync";
+import { eq as eq10, max } from "drizzle-orm";
+function inferCategory(categories) {
+  const forHimCats = ["Vagina Strokers", "Body Molds", "Prostate Toys", "Masturbators", "Hands-Free Masturbators"];
+  const forHerCats = ["Dual Action and Rabbits", "Finger and Clit", "Air Pulse and Suction", "Bullets and Eggs"];
+  const coupleCats = ["Couples and Wearable", "Remote", "Top Couples Toys", "Restraints"];
+  const out = [];
+  if (categories.some((c) => forHimCats.includes(c))) out.push("for-him");
+  if (categories.some((c) => forHerCats.includes(c))) out.push("for-her");
+  if (categories.some((c) => coupleCats.includes(c))) out.push("couples");
+  return out.length > 0 ? out : ["for-him", "for-her"];
+}
+function computeDealPrice(wholesale, msrp, map) {
+  if (map === 0) return Math.round(Math.max(wholesale * 1.4, msrp * 0.55) * 100) / 100;
+  if (map < msrp) return Math.round(map * 100) / 100;
+  return Math.round(msrp * 100) / 100;
+}
+function getImages2(row) {
+  const imgs = [];
+  for (let i = 1; i <= 10; i++) {
+    const url = row[`Image ${i}`];
+    if (url?.trim()) imgs.push(url.trim());
+  }
+  return imgs;
+}
+function parseBulkImportCSV(csvText) {
+  const rows = parse3(csvText, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true
+  });
+  const parseErrors = [];
+  for (const row of rows) {
+    if (row["Master SKU"]) {
+      row["Master SKU"] = row["Master SKU"].replace(/\.0$/, "");
+    }
+  }
+  const masterRows = rows.filter((r) => !r["Master SKU"]);
+  const childRows = rows.filter((r) => !!r["Master SKU"]);
+  const groups = [];
+  for (const master of masterRows) {
+    const masterSku = master.SKU;
+    const children = childRows.filter((r) => r["Master SKU"] === masterSku);
+    if (children.length === 0 && !master["Variant Option Value"] && !master["Variant Option Value 2"]) {
+      groups.push({ masterRow: master, variants: [], isSingleVariant: true });
+      continue;
+    }
+    const allVariantRows = master["Variant Option Value"] ? [master, ...children] : children;
+    const optionNames1 = new Set(allVariantRows.map((r) => r["Variant Option Name"]).filter(Boolean));
+    if (optionNames1.size > 1) {
+      parseErrors.push({
+        sku: masterSku,
+        message: `Inconsistent Variant Option Name: ${[...optionNames1].join(", ")}`
+      });
+      continue;
+    }
+    const optionNames2 = new Set(allVariantRows.map((r) => r["Variant Option Name 2"]).filter(Boolean));
+    if (optionNames2.size > 1) {
+      parseErrors.push({
+        sku: masterSku,
+        message: `Inconsistent Variant Option Name 2: ${[...optionNames2].join(", ")}`
+      });
+      continue;
+    }
+    const hasAxis2Name = optionNames2.size === 1;
+    if (hasAxis2Name) {
+      for (const r of allVariantRows) {
+        if (!r["Variant Option Value 2"]) {
+          parseErrors.push({
+            sku: masterSku,
+            message: `Row SKU ${r.SKU} is missing Variant Option Value 2 but other rows in this group supply one`
+          });
+        }
+      }
+      if (parseErrors.some((e) => e.sku === masterSku)) continue;
+    } else {
+      for (const r of allVariantRows) {
+        if (r["Variant Option Value 2"]) {
+          parseErrors.push({
+            sku: masterSku,
+            message: `Row SKU ${r.SKU} supplies Variant Option Value 2 but Variant Option Name 2 is missing or inconsistent`
+          });
+        }
+      }
+      if (parseErrors.some((e) => e.sku === masterSku)) continue;
+    }
+    const variants = allVariantRows.map((r) => {
+      const wholesale = parseFloat(r.Wholesale) || 0;
+      const msrp = parseFloat(r.MSRP) || 0;
+      const map = parseFloat(r.MAP ?? "0") || 0;
+      const qty = parseInt(r["Total qty available"]) || 0;
+      const value1 = r["Variant Option Value"] || r.SKU;
+      const optionValues = hasAxis2Name ? [value1, r["Variant Option Value 2"]] : [value1];
+      return {
+        sku: r.SKU,
+        optionValues,
+        price: computeDealPrice(wholesale, msrp, map),
+        compareAtPrice: msrp,
+        qty,
+        wholesale,
+        images: getImages2(r)
+      };
+    });
+    groups.push({ masterRow: master, variants, isSingleVariant: false });
+  }
+  return { groups, parseErrors };
+}
+async function isSkuAlreadyImported(sku) {
+  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq10(dealHistory.sku, sku)).limit(1);
+  return rows.length > 0;
+}
+async function importProductGroup(group) {
+  const { masterRow, variants, isSingleVariant } = group;
+  const masterSku = masterRow.SKU;
+  try {
+    if (isDiscontinued({
+      "Sub-Category": masterRow["Sub-Category"] ?? "",
+      "Product Title": masterRow["Product Title"] ?? "",
+      "Product Description": masterRow["Product Description"] ?? ""
+    })) {
+      console.info(`[bulk-import] ${masterSku} skipped: discontinued`);
+      return { success: false, sku: masterSku, skipped: true, error: "discontinued by manufacturer" };
+    }
+    if (await isSkuAlreadyImported(masterSku)) {
+      return { success: false, sku: masterSku, skipped: true };
+    }
+    const wholesale = parseFloat(masterRow.Wholesale) || 0;
+    const msrp = parseFloat(masterRow.MSRP) || 0;
+    const map = parseFloat(masterRow.MAP ?? "0") || 0;
+    const qty = parseInt(masterRow["Total qty available"]) || 0;
+    const images = getImages2(masterRow);
+    const rawDesc = masterRow["Product Description"] ?? "";
+    const cleanedDesc = cleanDescription(rawDesc);
+    const description = cleanedDesc || `${masterRow.Brand} ${masterRow["Product Title"]}`;
+    const categories = masterRow["Sub-Category"] ? masterRow["Sub-Category"].split(",").map((c) => c.trim()).filter(Boolean) : [];
+    const dealPrice = computeDealPrice(wholesale, msrp, map);
+    const category = inferCategory(categories);
+    let numericId;
+    const existingGid = await findProductBySKU(masterSku);
+    if (existingGid) {
+      numericId = existingGid.replace("gid://shopify/Product/", "");
+    } else if (isSingleVariant) {
+      const productScore = {
+        sku: masterSku,
+        title: masterRow["Product Title"],
+        brand: masterRow.Brand,
+        description,
+        score: 0,
+        msrp,
+        wholesaleCost: wholesale,
+        mapPrice: map,
+        dealPrice,
+        discountPct: msrp > 0 ? (msrp - dealPrice) / msrp * 100 : 0,
+        profitPerUnit: dealPrice - wholesale,
+        qty,
+        mapType: map === 0 ? "no-map" : map < msrp ? "below-msrp" : "equals-msrp",
+        images,
+        categories
+      };
+      const handle = slugifyHandle(masterRow["Product Title"]);
+      numericId = await createShopifyProductFromFeed(productScore, handle);
+    } else {
+      const name1 = group.masterRow["Variant Option Name"] || "Option";
+      const name2 = group.masterRow["Variant Option Name 2"];
+      const optionNames = name2 ? [name1, name2] : [name1];
+      const handle = slugifyHandle(masterRow["Product Title"]);
+      numericId = await createShopifyProductWithVariants(
+        {
+          title: masterRow["Product Title"],
+          brand: masterRow.Brand,
+          sku: masterSku,
+          images,
+          msrp,
+          categories
+        },
+        variants,
+        optionNames,
+        handle
+      );
+    }
+    const seoTitle = await generateSEOTitle(masterRow["Product Title"], masterRow.Brand);
+    const pairingCandidates = await getPairingCandidates({
+      shopifyProductId: numericId,
+      category,
+      subCategories: categories
+    }).catch((err) => {
+      console.warn(`[bulk-import] ${masterSku} pairing-candidates lookup failed:`, err instanceof Error ? err.message : err);
+      return [];
+    });
+    const { writes, telemetry } = await generateProductContent({
+      product: {
+        title: masterRow["Product Title"],
+        brand: masterRow.Brand,
+        description,
+        categories,
+        dealPrice,
+        msrp
+      },
+      seoTitle,
+      category,
+      pairingCandidates
+    });
+    const finalTitle = writes.productTitle ?? seoTitle;
+    console.info(
+      `[bulk-import] ${masterSku} orchestrator: tokens=${telemetry.totalTokens} duration=${telemetry.durationMs}ms turns=${telemetry.turns} pairings=${writes.accessoryProductIds?.length ?? 0} titleAugmented=${writes.productTitleAugmented ? "yes" : "no"} tools=[${telemetry.toolCalls.map((c) => `${c.name}${c.ok ? "" : "!"}`).join(",")}]`
+    );
+    await pushProductToShopify({
+      shopifyProductId: numericId,
+      // Update product.title when augmented; leave alone otherwise.
+      ...writes.productTitleAugmented ? { title: finalTitle } : {},
+      seoTitle: finalTitle,
+      tagline: writes.tagline,
+      ...writes.worksForHim !== void 0 ? { worksForHim: writes.worksForHim } : {},
+      ...writes.worksForHer !== void 0 ? { worksForHer: writes.worksForHer } : {},
+      ...writes.boxContents !== void 0 ? { boxContents: writes.boxContents } : {},
+      ...writes.specifications !== void 0 ? { specifications: writes.specifications } : {},
+      seoMetaDescription: writes.seoMetaDescription,
+      descriptionHtml: writes.descriptionHtml,
+      ...writes.careInstructions !== void 0 ? { careInstructions: writes.careInstructions } : {},
+      ...writes.sensationDialV2 !== void 0 ? { sensationDialV2: writes.sensationDialV2 } : {},
+      productTypeDial: writes.productTypeDial,
+      ...writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {},
+      moodTags: writes.moodTags,
+      audienceTags: writes.audienceTags,
+      mattersTags: writes.mattersTags,
+      ...writes.emmaHero !== void 0 ? { emmaHero: writes.emmaHero } : {},
+      ...writes.moodImageUrl !== void 0 ? { moodImageUrl: writes.moodImageUrl } : {},
+      ...writes.originalTitle !== void 0 ? { originalTitle: writes.originalTitle } : {},
+      ...writes.accessoryProductIds !== void 0 ? { accessoryProductIds: writes.accessoryProductIds } : {},
+      ...writes.pairingWhy !== void 0 ? { pairingWhy: writes.pairingWhy } : {},
+      category,
+      sectionTags: [deriveSection({ productTypeDial: writes.productTypeDial, categories, title: masterRow["Product Title"] })],
+      dealStatus: "pending_approval",
+      dealDate: "2099-12-31",
+      originalPrice: msrp,
+      wholesaleCost: wholesale,
+      mapPrice: map,
+      nalpacSku: masterSku,
+      rawDescription: cleanedDesc || void 0
+    });
+    const [{ maxSort = 0 } = {}] = await db.select({ maxSort: max(dealHistory.sortOrder) }).from(dealHistory);
+    const nextSortOrder = (maxSort ?? 0) + 1;
+    await db.insert(dealHistory).values({
+      sku: masterSku,
+      seoTitle,
+      brand: masterRow.Brand,
+      categories,
+      dealDate: "2099-12-31",
+      wholesaleCost: wholesale.toFixed(2),
+      dealPrice: dealPrice.toFixed(2),
+      msrp: msrp.toFixed(2),
+      mapPrice: map.toFixed(2),
+      unitsAvailable: qty,
+      dealScore: null,
+      status: "queued",
+      sortOrder: nextSortOrder,
+      shopifyProductId: numericId
+    }).onConflictDoNothing();
+    const warnings = [];
+    try {
+      const handle = await getProductHandleById(numericId);
+      if (!handle) {
+        const msg = "could not resolve Shopify handle \u2014 skipping Sanity sync";
+        console.warn(`[bulk-import] ${masterSku} ${msg}`);
+        warnings.push({ stage: "sanity", message: msg });
+      } else {
+        const gid = `gid://shopify/Product/${numericId}`;
+        const upsertParams = {
+          handle,
+          shopifyProductId: gid,
+          title: masterRow["Product Title"],
+          vendor: masterRow.Brand,
+          tags: categories,
+          // Mirror sub-categories so Studio editors can filter
+          tagline: writes.tagline,
+          description,
+          seoTitle,
+          seoDescription: writes.seoMetaDescription,
+          category,
+          // Pricing fields removed from Sanity productPage schema — pricing
+          // lives solely on Shopify metafields where the deal pipeline reads.
+          productTypeDial: writes.productTypeDial,
+          ...writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {},
+          moodTags: writes.moodTags,
+          audienceTags: writes.audienceTags,
+          mattersTags: writes.mattersTags,
+          // IVR / voice surfaces — populated by the orchestrator's IVR tools.
+          ...writes.ivrExperience !== void 0 ? { ivrExperience: writes.ivrExperience } : {},
+          ...writes.ivrUseCase !== void 0 ? { ivrUseCase: writes.ivrUseCase } : {},
+          ...writes.ivrFeatures !== void 0 ? { ivrFeatures: writes.ivrFeatures } : {},
+          ...writes.productFaqs !== void 0 ? { productFaqs: writes.productFaqs } : {}
+        };
+        if (images[0]) upsertParams.imageUrl = images[0];
+        if (writes.moodImageUrl) upsertParams.moodImageUrl = writes.moodImageUrl;
+        let lastErr;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            const { created } = await upsertProductPage(upsertParams);
+            console.info(`[bulk-import] ${masterSku} sanity: ${created ? "created" : "updated"} productPage-${handle}`);
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+            if (attempt === 1) {
+              console.warn(`[bulk-import] ${masterSku} sanity sync attempt 1 failed, retrying in 500ms:`, err instanceof Error ? err.message : err);
+              await new Promise((r) => setTimeout(r, 500));
+            }
+          }
+        }
+        if (lastErr) {
+          const msg = `sanity sync failed after retry: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`;
+          console.error(`[bulk-import] ${masterSku} ${msg}`);
+          warnings.push({ stage: "sanity", message: msg });
+        }
+      }
+    } catch (err) {
+      const msg = `sanity sync threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`;
+      console.error(`[bulk-import] ${masterSku} ${msg}`);
+      warnings.push({ stage: "sanity", message: msg });
+    }
+    return {
+      success: true,
+      sku: masterSku,
+      shopifyProductId: numericId,
+      ...warnings.length > 0 ? { warnings } : {}
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[bulk-import] Failed SKU ${masterSku}:`, message);
+    return { success: false, sku: masterSku, error: message };
+  }
+}
+async function importProductGroupRaw(group) {
+  const { masterRow, variants, isSingleVariant } = group;
+  const masterSku = masterRow.SKU;
+  try {
+    if (isDiscontinued({
+      "Sub-Category": masterRow["Sub-Category"] ?? "",
+      "Product Title": masterRow["Product Title"] ?? "",
+      "Product Description": masterRow["Product Description"] ?? ""
+    })) {
+      return { success: false, sku: masterSku, skipped: true, error: "discontinued by manufacturer" };
+    }
+    if (await isSkuAlreadyImported(masterSku)) {
+      return { success: false, sku: masterSku, skipped: true };
+    }
+    const wholesale = parseFloat(masterRow.Wholesale) || 0;
+    const msrp = parseFloat(masterRow.MSRP) || 0;
+    const map = parseFloat(masterRow.MAP ?? "0") || 0;
+    const qty = parseInt(masterRow["Total qty available"]) || 0;
+    const images = getImages2(masterRow);
+    const rawDesc = masterRow["Product Description"] ?? "";
+    const cleanedDesc = cleanDescription(rawDesc);
+    const description = cleanedDesc || `${masterRow.Brand} ${masterRow["Product Title"]}`;
+    const categories = masterRow["Sub-Category"] ? masterRow["Sub-Category"].split(",").map((c) => c.trim()).filter(Boolean) : [];
+    const dealPrice = computeDealPrice(wholesale, msrp, map);
+    const category = inferCategory(categories);
+    let numericId;
+    const existingGid = await findProductBySKU(masterSku);
+    if (existingGid) {
+      numericId = existingGid.replace("gid://shopify/Product/", "");
+    } else if (isSingleVariant) {
+      const productScore = {
+        sku: masterSku,
+        title: masterRow["Product Title"],
+        brand: masterRow.Brand,
+        description,
+        score: 0,
+        msrp,
+        wholesaleCost: wholesale,
+        mapPrice: map,
+        dealPrice,
+        discountPct: msrp > 0 ? (msrp - dealPrice) / msrp * 100 : 0,
+        profitPerUnit: dealPrice - wholesale,
+        qty,
+        mapType: map === 0 ? "no-map" : map < msrp ? "below-msrp" : "equals-msrp",
+        images,
+        categories
+      };
+      const handle = slugifyHandle(masterRow["Product Title"]);
+      numericId = await createShopifyProductFromFeed(productScore, handle);
+    } else {
+      const name1 = group.masterRow["Variant Option Name"] || "Option";
+      const name2 = group.masterRow["Variant Option Name 2"];
+      const optionNames = name2 ? [name1, name2] : [name1];
+      const handle = slugifyHandle(masterRow["Product Title"]);
+      numericId = await createShopifyProductWithVariants(
+        {
+          title: masterRow["Product Title"],
+          brand: masterRow.Brand,
+          sku: masterSku,
+          images,
+          msrp,
+          categories
+        },
+        variants,
+        optionNames,
+        handle
+      );
+    }
+    await pushProductToShopify({
+      shopifyProductId: numericId,
+      category,
+      sectionTags: [deriveSection({ categories, title: masterRow["Product Title"] })],
+      dealStatus: "pending_approval",
+      dealDate: "2099-12-31",
+      originalPrice: msrp,
+      wholesaleCost: wholesale,
+      mapPrice: map,
+      nalpacSku: masterSku,
+      rawDescription: cleanedDesc || void 0,
+      requireTagline: false
+    });
+    const [{ maxSort = 0 } = {}] = await db.select({ maxSort: max(dealHistory.sortOrder) }).from(dealHistory);
+    const nextSortOrder = (maxSort ?? 0) + 1;
+    await db.insert(dealHistory).values({
+      sku: masterSku,
+      seoTitle: masterRow["Product Title"],
+      // raw title until enrichment runs
+      brand: masterRow.Brand,
+      categories,
+      dealDate: "2099-12-31",
+      wholesaleCost: wholesale.toFixed(2),
+      dealPrice: dealPrice.toFixed(2),
+      msrp: msrp.toFixed(2),
+      mapPrice: map.toFixed(2),
+      unitsAvailable: qty,
+      dealScore: null,
+      status: "queued",
+      sortOrder: nextSortOrder,
+      shopifyProductId: numericId
+    }).onConflictDoNothing();
+    const warnings = [];
+    try {
+      await activateProductInventoryAtLocations(numericId);
+    } catch (err) {
+      warnings.push({ stage: "inventory-locations", message: err instanceof Error ? err.message : String(err) });
+    }
+    try {
+      await publishProductToXdipxChannels(numericId);
+    } catch (err) {
+      warnings.push({ stage: "publish-channels", message: err instanceof Error ? err.message : String(err) });
+    }
+    try {
+      const handle = await getProductHandleById(numericId);
+      if (!handle) {
+        warnings.push({ stage: "sanity", message: "could not resolve Shopify handle \u2014 skipping Sanity sync" });
+      } else {
+        const gid = `gid://shopify/Product/${numericId}`;
+        const upsertParams = {
+          handle,
+          shopifyProductId: gid,
+          title: masterRow["Product Title"],
+          vendor: masterRow.Brand,
+          tags: categories,
+          description,
+          category
+        };
+        if (images[0]) upsertParams.imageUrl = images[0];
+        let lastErr;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            await upsertProductPage(upsertParams);
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+            if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
+          }
+        }
+        if (lastErr) {
+          warnings.push({ stage: "sanity", message: `sanity sync failed after retry: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}` });
+        }
+      }
+    } catch (err) {
+      warnings.push({ stage: "sanity", message: err instanceof Error ? err.message : String(err) });
+    }
+    return {
+      success: true,
+      sku: masterSku,
+      shopifyProductId: numericId,
+      ...warnings.length > 0 ? { warnings } : {}
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[bulk-import-raw] Failed SKU ${masterSku}:`, message);
+    return { success: false, sku: masterSku, error: message };
+  }
+}
+async function importNewProduct(input) {
+  const { source, handle, rawProduct, voiceProfile } = input;
+  const sku = rawProduct.sku;
+  const warnings = [];
+  if (isDiscontinued({
+    "Sub-Category": rawProduct.categories.join(", "),
+    "Product Title": rawProduct.title,
+    "Product Description": rawProduct.rawDescription ?? rawProduct.description
+  })) {
+    throw new Error(`importNewProduct: ${sku} is flagged discontinued by manufacturer`);
+  }
+  const existingGid = await findProductBySKU(sku);
+  if (existingGid) {
+    const existingId = existingGid.replace("gid://shopify/Product/", "");
+    return {
+      shopifyProductId: existingId,
+      gid: existingGid,
+      handle,
+      // caller's input handle — may differ from the actual Shopify handle, intentional
+      warnings: [{ stage: "duplicate", message: `SKU ${sku} already imported as ${existingGid}; not re-creating` }]
+    };
+  }
+  const productScore = {
+    sku,
+    title: rawProduct.title,
+    brand: rawProduct.brand,
+    description: rawProduct.description,
+    score: 0,
+    msrp: rawProduct.msrp,
+    wholesaleCost: rawProduct.wholesaleCost,
+    mapPrice: rawProduct.mapPrice ?? 0,
+    dealPrice: rawProduct.dealPrice,
+    discountPct: rawProduct.msrp > 0 ? (rawProduct.msrp - rawProduct.dealPrice) / rawProduct.msrp * 100 : 0,
+    profitPerUnit: rawProduct.dealPrice - rawProduct.wholesaleCost,
+    qty: rawProduct.qty ?? 0,
+    mapType: (rawProduct.mapPrice ?? 0) === 0 ? "no-map" : (rawProduct.mapPrice ?? 0) < rawProduct.msrp ? "below-msrp" : "equals-msrp",
+    images: rawProduct.images ?? [],
+    categories: rawProduct.categories
+  };
+  const numericId = await createShopifyProductFromFeed(productScore, handle);
+  const gid = `gid://shopify/Product/${numericId}`;
+  const seoTitle = await generateSEOTitle(rawProduct.title, rawProduct.brand);
+  const category = inferCategory(rawProduct.categories);
+  const pairingCandidates = await getPairingCandidates({
+    shopifyProductId: numericId,
+    category,
+    subCategories: rawProduct.categories
+  }).catch((err) => {
+    console.warn(`[importNewProduct] ${sku} pairing-candidates lookup failed:`, err instanceof Error ? err.message : err);
+    return [];
+  });
+  const { writes, telemetry } = await generateProductContent({
+    product: {
+      title: rawProduct.title,
+      brand: rawProduct.brand,
+      description: rawProduct.description,
+      categories: rawProduct.categories,
+      dealPrice: rawProduct.dealPrice,
+      msrp: rawProduct.msrp
+    },
+    seoTitle,
+    category,
+    pairingCandidates
+  });
+  const finalTitle = writes.productTitle ?? seoTitle;
+  console.info(
+    `[importNewProduct] ${sku} (source=${source}) orchestrator: tokens=${telemetry.totalTokens} duration=${telemetry.durationMs}ms turns=${telemetry.turns} voiceHash=${voiceProfile?.hash ?? "default"} tools=[${telemetry.toolCalls.map((c) => `${c.name}${c.ok ? "" : "!"}`).join(",")}]`
+  );
+  await pushProductToShopify({
+    shopifyProductId: numericId,
+    ...writes.productTitleAugmented ? { title: finalTitle } : {},
+    seoTitle: finalTitle,
+    tagline: writes.tagline,
+    ...writes.boxContents !== void 0 ? { boxContents: writes.boxContents } : {},
+    ...writes.specifications !== void 0 ? { specifications: writes.specifications } : {},
+    seoMetaDescription: writes.seoMetaDescription,
+    descriptionHtml: writes.descriptionHtml,
+    ...writes.careInstructions !== void 0 ? { careInstructions: writes.careInstructions } : {},
+    ...writes.sensationDialV2 !== void 0 ? { sensationDialV2: writes.sensationDialV2 } : {},
+    productTypeDial: writes.productTypeDial,
+    ...writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {},
+    moodTags: writes.moodTags,
+    audienceTags: writes.audienceTags,
+    mattersTags: writes.mattersTags,
+    ...writes.originalTitle !== void 0 ? { originalTitle: writes.originalTitle } : {},
+    category,
+    dealStatus: "pending_approval",
+    dealDate: "2099-12-31",
+    originalPrice: rawProduct.msrp,
+    wholesaleCost: rawProduct.wholesaleCost,
+    mapPrice: rawProduct.mapPrice ?? 0,
+    nalpacSku: sku,
+    rawDescription: rawProduct.rawDescription ?? rawProduct.description
+  });
+  const [{ maxSort = 0 } = {}] = await db.select({ maxSort: max(dealHistory.sortOrder) }).from(dealHistory);
+  const nextSortOrder = (maxSort ?? 0) + 1;
+  await db.insert(dealHistory).values({
+    sku,
+    seoTitle,
+    brand: rawProduct.brand,
+    categories: rawProduct.categories,
+    dealDate: "2099-12-31",
+    wholesaleCost: rawProduct.wholesaleCost.toFixed(2),
+    dealPrice: rawProduct.dealPrice.toFixed(2),
+    msrp: rawProduct.msrp.toFixed(2),
+    mapPrice: (rawProduct.mapPrice ?? 0).toFixed(2),
+    unitsAvailable: rawProduct.qty ?? 0,
+    dealScore: null,
+    status: "queued",
+    sortOrder: nextSortOrder,
+    shopifyProductId: numericId
+  }).onConflictDoNothing();
+  try {
+    const upsertParams = {
+      handle,
+      shopifyProductId: gid,
+      title: rawProduct.title,
+      vendor: rawProduct.brand,
+      tags: rawProduct.categories,
+      tagline: writes.tagline,
+      description: rawProduct.description,
+      seoTitle,
+      seoDescription: writes.seoMetaDescription,
+      category,
+      // Pricing fields removed from Sanity productPage schema (Shopify-only).
+      productTypeDial: writes.productTypeDial,
+      ...writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {},
+      moodTags: writes.moodTags,
+      audienceTags: writes.audienceTags,
+      mattersTags: writes.mattersTags,
+      ...writes.ivrExperience !== void 0 ? { ivrExperience: writes.ivrExperience } : {},
+      ...writes.ivrUseCase !== void 0 ? { ivrUseCase: writes.ivrUseCase } : {},
+      ...writes.ivrFeatures !== void 0 ? { ivrFeatures: writes.ivrFeatures } : {},
+      ...writes.productFaqs !== void 0 ? { productFaqs: writes.productFaqs } : {}
+    };
+    if (rawProduct.images?.[0]) upsertParams.imageUrl = rawProduct.images[0];
+    let lastErr;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await upsertProductPage(upsertParams);
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    if (lastErr) {
+      const msg = `sanity sync failed after retry: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`;
+      warnings.push({ stage: "sanity", message: msg });
+    }
+  } catch (err) {
+    warnings.push({ stage: "sanity", message: err instanceof Error ? err.message : String(err) });
+  }
+  return { shopifyProductId: numericId, gid, handle, warnings };
+}
+var init_bulk_import_server = __esm({
+  "app/lib/bulk-import.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_claude_server();
+    init_emma_orchestrator_server();
+    init_feed_processor_server();
+    init_shopify_server();
+    init_sanity_server();
+  }
+});
+
+// app/lib/master-collapse.server.ts
+function isEligible2(master) {
+  if (DISPLAY_TESTER_PATTERNS.test(master.category) || DISPLAY_TESTER_PATTERNS.test(master.displayTitle)) {
+    return { ok: false, reason: "display_or_tester" };
+  }
+  if (master.totalQty < QTY_FLOOR) {
+    return { ok: false, reason: "qty_below_20" };
+  }
+  if (!master.sampleImage) {
+    return { ok: false, reason: "no_image" };
+  }
+  if (master.wholesale <= 0 || master.msrp <= 0) {
+    return { ok: false, reason: "missing_pricing" };
+  }
+  return { ok: true };
+}
+function gapScore(master) {
+  const marginPct2 = master.marginMsrpPct * 100;
+  return marginPct2 / 50 * (1 + Math.log(1 + master.variantCount)) * (1 + 0.2 * Math.log(1 + master.totalQty));
+}
+function splitCell(val) {
+  return val.split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+}
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function buildBaseTitle(productTitle, colorCell, sizeCell) {
+  let t = productTitle;
+  t = t.replace(VOLUME_PACKAGING_PATTERN, " ");
+  for (const token of splitCell(colorCell)) {
+    if (!token) continue;
+    const pattern = /\s/.test(token) ? new RegExp(`(?<![a-z0-9])${escapeRegex(token)}(?![a-z0-9])`, "gi") : new RegExp(`\\b${escapeRegex(token)}\\b`, "gi");
+    t = t.replace(pattern, " ");
+  }
+  for (const token of splitCell(sizeCell)) {
+    if (!token) continue;
+    const pattern = /\s/.test(token) ? new RegExp(`(?<![a-z0-9])${escapeRegex(token)}(?![a-z0-9])`, "gi") : new RegExp(`\\b${escapeRegex(token)}\\b`, "gi");
+    t = t.replace(pattern, " ");
+  }
+  for (const sz of [...SIZE_WORD_TOKENS].sort((a, b) => b.length - a.length)) {
+    const pattern = /\s/.test(sz) ? new RegExp(`(?<![a-z0-9])${escapeRegex(sz)}(?![a-z0-9])`, "gi") : new RegExp(`\\b${escapeRegex(sz)}\\b`, "gi");
+    t = t.replace(pattern, " ");
+  }
+  for (const color of COMMON_COLOR_WORDS) {
+    t = t.replace(new RegExp(`\\b${escapeRegex(color)}\\b`, "gi"), " ");
+  }
+  for (const word of STRUCTURAL_RESIDUE_WORDS) {
+    t = t.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, "gi"), " ");
+  }
+  t = t.replace(/\s+/g, " ").trim().replace(/^[-_/.,\s]+|[-_/.,\s]+$/g, "").trim();
+  return t.toLowerCase();
+}
+function median(values) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+function collapseMasters(snapshots) {
+  const buckets = /* @__PURE__ */ new Map();
+  for (const snap of snapshots.values()) {
+    const brand = (snap.vendor ?? "").trim();
+    const title = (snap.productTitle ?? "").trim();
+    if (!brand || !title) continue;
+    const row = snap.raw.mainRow ?? snap.raw.saleRow;
+    const colorCell = row?.["Color"] ?? "";
+    const sizeCell = row?.["Size"] ?? "";
+    const base = buildBaseTitle(title, colorCell, sizeCell);
+    const effectiveBase = base || title.toLowerCase().replace(/\s+/g, " ").trim();
+    const key = `${brand.toLowerCase()}|${effectiveBase}`;
+    if (!buckets.has(key)) buckets.set(key, { snaps: [] });
+    buckets.get(key).snaps.push(snap);
+  }
+  const records = [];
+  for (const [masterKey, { snaps }] of buckets) {
+    const [brandPart] = masterKey.split("|");
+    const baseTitle = masterKey.slice(brandPart.length + 1);
+    let totalQty = 0;
+    let inStockCount = 0;
+    const wholesales = [];
+    const msrps = [];
+    const maps = [];
+    const colors = /* @__PURE__ */ new Set();
+    const sizes = /* @__PURE__ */ new Set();
+    const fluidOzSet = /* @__PURE__ */ new Set();
+    const skus = [];
+    const upcs = [];
+    const subCatCount = /* @__PURE__ */ new Map();
+    let sampleImage = "";
+    let displayTitle = "";
+    let inTop100Feed = false;
+    let inNewFeed = false;
+    let inSaleFeed = false;
+    for (const snap of snaps) {
+      skus.push(snap.sku);
+      const row = snap.raw.mainRow ?? snap.raw.saleRow;
+      const upc = row?.["UPC/barcode"] ?? "";
+      if (upc) upcs.push(upc);
+      if (snap.wholesale > 0) wholesales.push(snap.wholesale);
+      if (snap.msrp > 0) msrps.push(snap.msrp);
+      if (snap.mapPrice != null && snap.mapPrice > 0) maps.push(snap.mapPrice);
+      const qty = snap.qty ?? 0;
+      totalQty += qty;
+      if (qty > 0) inStockCount++;
+      const colorCell = row?.["Color"] ?? "";
+      for (const c of splitCell(colorCell)) {
+        if (c) colors.add(c);
+      }
+      const sizeCell = row?.["Size"] ?? "";
+      for (const s of splitCell(sizeCell)) {
+        if (s) sizes.add(s);
+      }
+      const oz = row?.["Fluid Oz"] ?? "";
+      if (oz.trim()) fluidOzSet.add(oz.trim());
+      const title = snap.productTitle ?? "";
+      if (title.length > displayTitle.length) displayTitle = title;
+      if (!sampleImage) {
+        const img = row?.["Image 1"] ?? "";
+        if (img) sampleImage = img;
+      }
+      const subCat = row?.["Sub-Category"] ?? "";
+      if (subCat) {
+        subCatCount.set(subCat, (subCatCount.get(subCat) ?? 0) + 1);
+      }
+      if (snap.inTop100Feed) inTop100Feed = true;
+      if (snap.inNewFeed) inNewFeed = true;
+      if (snap.inSaleFeed) inSaleFeed = true;
+    }
+    const medWholesale = median(wholesales);
+    const medMsrp = median(msrps);
+    const medMap = median(maps.length > 0 ? maps : [0]);
+    const marginMsrpPct = medMsrp > 0 ? (medMsrp - medWholesale) / medMsrp : 0;
+    const marginMapPct = medMap > 0 ? (medMap - medWholesale) / medMap : 0;
+    let category = "(uncategorized)";
+    let maxCount = 0;
+    for (const [cat, count] of subCatCount) {
+      if (count > maxCount) {
+        maxCount = count;
+        category = cat;
+      }
+    }
+    const brandDisplay = snaps[0]?.vendor ?? brandPart;
+    records.push({
+      masterKey,
+      brand: brandDisplay,
+      displayTitle,
+      baseTitle,
+      category,
+      variantCount: snaps.length,
+      inStockVariants: inStockCount,
+      colors: [...colors],
+      sizes: [...sizes],
+      fluidOz: [...fluidOzSet],
+      totalQty,
+      wholesale: medWholesale,
+      msrp: medMsrp,
+      map: medMap,
+      marginMsrpPct,
+      marginMapPct,
+      profitPerUnit: (medMsrp > 0 ? medMsrp : medMap) - medWholesale,
+      skus,
+      sampleImage,
+      upcs,
+      inTop100Feed,
+      inNewFeed,
+      inSaleFeed,
+      snapshots: snaps
+    });
+  }
+  return records;
+}
+function sizeRank(s) {
+  const idx = SIZE_SORT_ORDER.indexOf(s);
+  return idx === -1 ? SIZE_SORT_ORDER.length : idx;
+}
+function detectAxes(master) {
+  const snaps = master.snapshots;
+  const perSku = snaps.map((snap) => {
+    const row = snap.raw.mainRow ?? snap.raw.saleRow;
+    return {
+      sku: snap.sku,
+      snap,
+      colors: splitCell(row?.["Color"] ?? "").filter((c) => c !== ""),
+      sizes: splitCell(row?.["Size"] ?? "").filter((s) => s !== ""),
+      fluidOz: (row?.["Fluid Oz"] ?? "").trim(),
+      title: snap.productTitle ?? "",
+      upc: row?.["UPC/barcode"] ?? ""
+    };
+  });
+  const primaryColors = perSku.map((s) => s.colors[0] ?? "");
+  const distinctColors = new Set(primaryColors.filter((c) => c !== ""));
+  const hasRealColor = distinctColors.size > 1 && [...distinctColors].some((c) => !UNINFORMATIVE_COLORS.has(c.toLowerCase()));
+  const primarySizes = perSku.map((s) => s.sizes[0] ?? "");
+  const hasSomeSize = primarySizes.some((s) => s !== "");
+  const hasSomeBlank = primarySizes.some((s) => s === "");
+  let effectiveSizes = primarySizes;
+  if (hasSomeSize && hasSomeBlank) {
+    effectiveSizes = primarySizes.map((s) => s === "" ? "Regular" : s);
+  }
+  const distinctSizes = new Set(effectiveSizes.filter((s) => s !== ""));
+  const hasSizeAxis = distinctSizes.size > 1;
+  const distinctFlOz = new Set(perSku.map((s) => s.fluidOz).filter((oz) => oz !== ""));
+  const hasVolumeAxis = distinctFlOz.size > 1;
+  function buildOptionTuple(idx) {
+    const tuple = [];
+    if (hasRealColor) tuple.push(primaryColors[idx] ?? "");
+    if (hasSizeAxis) tuple.push(effectiveSizes[idx] ?? "");
+    if (hasVolumeAxis) tuple.push(perSku[idx]?.fluidOz ?? "");
+    return tuple;
+  }
+  const initialTuples = perSku.map((_, i) => buildOptionTuple(i));
+  const tupleStrings = initialTuples.map((t) => t.join("|"));
+  const hasCollision = tupleStrings.length !== new Set(tupleStrings).size;
+  let usesTwistB = false;
+  let derivedColors = [];
+  if (hasCollision && !hasRealColor) {
+    derivedColors = perSku.map((sv) => {
+      let t = sv.title;
+      const baseWords = master.baseTitle.split(/\s+/);
+      for (const word of baseWords) {
+        if (!word) continue;
+        t = t.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, "gi"), " ");
+      }
+      if (hasSizeAxis) {
+        for (const sz of [...distinctSizes]) {
+          t = t.replace(new RegExp(`\\b${escapeRegex(sz)}\\b`, "gi"), " ");
+        }
+      }
+      if (hasVolumeAxis) {
+        for (const oz of [...distinctFlOz]) {
+          t = t.replace(new RegExp(`\\b${escapeRegex(oz)}\\b`, "gi"), " ");
+        }
+      }
+      t = t.replace(VOLUME_PACKAGING_PATTERN, " ");
+      t = t.replace(/\s+/g, " ").trim().replace(/^[-_/.,\s]+|[-_/.,\s]+$/g, "").trim();
+      return t || "Default";
+    });
+    const distinctDerived = new Set(derivedColors);
+    const coverCount = derivedColors.filter((c) => c !== "Default").length;
+    if (distinctDerived.size >= 2 && coverCount >= Math.floor(perSku.length / 2)) {
+      const newTuples = perSku.map((sv, i) => {
+        const t = [derivedColors[i] ?? "Default"];
+        if (hasSizeAxis) t.push(effectiveSizes[i] ?? "");
+        if (hasVolumeAxis) t.push(sv.fluidOz);
+        return t.join("|");
+      });
+      if (new Set(newTuples).size === perSku.length) {
+        usesTwistB = true;
+      }
+    }
+  }
+  const axes = [];
+  if (hasRealColor || usesTwistB) {
+    const vals = usesTwistB ? derivedColors : perSku.map((s) => s.colors[0] ?? "");
+    const dedupedColors = [...new Set(vals.filter((c) => c !== ""))].sort((a, b) => a.localeCompare(b));
+    axes.push({ name: "Color", values: dedupedColors });
+  }
+  if (hasSizeAxis && axes.length < 2) {
+    const dedupedSizes = [...new Set([...effectiveSizes].filter((s) => s !== ""))].sort((a, b) => sizeRank(a) - sizeRank(b) || a.localeCompare(b));
+    axes.push({ name: "Size", values: dedupedSizes });
+  }
+  if (hasVolumeAxis && axes.length < 2) {
+    const dedupedVols = [.../* @__PURE__ */ new Set([...distinctFlOz])].sort((a, b) => parseFloat(a) - parseFloat(b) || a.localeCompare(b));
+    axes.push({ name: "Volume", values: dedupedVols });
+  }
+  const variantRows = perSku.map((sv, i) => {
+    const optionValues = [];
+    for (const axis of axes) {
+      if (axis.name === "Color") {
+        optionValues.push(
+          usesTwistB ? derivedColors[i] ?? "Default" : sv.colors[0] ?? ""
+        );
+      } else if (axis.name === "Size") {
+        optionValues.push(effectiveSizes[i] ?? "");
+      } else if (axis.name === "Volume") {
+        optionValues.push(sv.fluidOz);
+      }
+    }
+    const wholesale = sv.snap.wholesale;
+    const msrp = sv.snap.msrp;
+    const map = sv.snap.mapPrice ?? 0;
+    const qty = sv.snap.qty ?? 0;
+    const row = sv.snap.raw.mainRow ?? sv.snap.raw.saleRow;
+    const price = map === 0 ? Math.round(Math.max(wholesale * 1.4, msrp * 0.55) * 100) / 100 : map < msrp ? Math.round(map * 100) / 100 : Math.round(msrp * 100) / 100;
+    const images = [];
+    for (let n = 1; n <= 10; n++) {
+      const url = row?.[`Image ${n}`] ?? "";
+      if (url.trim()) images.push(url.trim());
+    }
+    return {
+      sku: sv.sku,
+      optionValues,
+      price,
+      compareAtPrice: msrp,
+      qty,
+      wholesale,
+      images,
+      upc: sv.upc
+    };
+  });
+  return { axes, variantRows };
+}
+function needsReview(master) {
+  return master.variantCount > NEEDS_REVIEW_THRESHOLD;
+}
+var VOLUME_PACKAGING_PATTERN, SIZE_WORD_TOKENS, COMMON_COLOR_WORDS, UNINFORMATIVE_COLORS, STRUCTURAL_RESIDUE_WORDS, SIZE_SORT_ORDER, QTY_FLOOR, DISPLAY_TESTER_PATTERNS, NEEDS_REVIEW_THRESHOLD;
+var init_master_collapse_server = __esm({
+  "app/lib/master-collapse.server.ts"() {
+    "use strict";
+    VOLUME_PACKAGING_PATTERN = /\b(\d+(?:\.\d+)?\s*(?:fl\s*oz|oz|ml|gm|gram(?:s)?)|(?:\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s*(?:oz|ml)))\b|\b(?:bottle|tube|pump|pillow\s*pack|sachet|packet|jar|can)\b/gi;
+    SIZE_WORD_TOKENS = [
+      "XXXS",
+      "XXS",
+      "XS",
+      "Small",
+      "Medium",
+      "Large",
+      "XLarge",
+      "XXLarge",
+      "XXXLarge",
+      "XL",
+      "XXL",
+      "2XL",
+      "3XL",
+      "4XL",
+      "5XL",
+      "OneSize",
+      "One Size"
+    ];
+    COMMON_COLOR_WORDS = [
+      "black",
+      "white",
+      "red",
+      "pink",
+      "purple",
+      "blue",
+      "green",
+      "gold",
+      "silver",
+      "teal",
+      "aqua",
+      "nude",
+      "tan",
+      "clear",
+      "natural",
+      "navy",
+      "orange",
+      "yellow",
+      "brown",
+      "gray",
+      "grey",
+      "magenta",
+      "coral",
+      "burgundy",
+      "rose",
+      "ivory",
+      "lavender",
+      "cream"
+    ];
+    UNINFORMATIVE_COLORS = /* @__PURE__ */ new Set([
+      "multi-color",
+      "multicolor",
+      "multi color",
+      "assorted",
+      "various",
+      "varies"
+    ]);
+    STRUCTURAL_RESIDUE_WORDS = ["size", "style", "color", "assorted"];
+    SIZE_SORT_ORDER = [
+      "XXXS",
+      "XXS",
+      "XS",
+      "S",
+      "S/M",
+      "Regular",
+      "Standard",
+      "M",
+      "M/L",
+      "L",
+      "L/XL",
+      "XL",
+      "XL/2XL",
+      "XXL/2XL",
+      "2XL/3XL",
+      "XXXL/3XL",
+      "3XL/4XL",
+      "4XL",
+      "4XL/5XL",
+      "5XL",
+      "OneSize"
+    ];
+    QTY_FLOOR = parseInt(process.env["NALPAC_QTY_FLOOR"] ?? "20", 10);
+    DISPLAY_TESTER_PATTERNS = /\b(?:display|tester|testers|displays|merchandising|planogram|pos\s*kit)\b/i;
+    NEEDS_REVIEW_THRESHOLD = 30;
+  }
+});
+
+// app/lib/import-monitor.server.ts
+var import_monitor_server_exports = {};
+__export(import_monitor_server_exports, {
+  approveAndImport: () => approveAndImport,
+  getCatalogOpportunities: () => getCatalogOpportunities,
+  getImportCandidatesByStatus: () => getImportCandidatesByStatus,
+  getRecentImportRuns: () => getRecentImportRuns,
+  runImportMonitor: () => runImportMonitor,
+  stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
+  updateCandidateStatus: () => updateCandidateStatus
+});
+import { and as and2, eq as eq11, inArray as inArray2, sql as sql6 } from "drizzle-orm";
+function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
+  const brand = master.brand.toLowerCase().trim();
+  let tier = "D";
+  let gapReason = "";
+  if (master.inTop100Feed) {
+    tier = "A";
+    gapReason = "In Nalpac top-100 feed, not yet in catalog";
+  } else if (carriedBrands.has(brand) && master.marginMsrpPct >= 0.45) {
+    tier = "B";
+    gapReason = `Brand "${master.brand}" already carried; margin ${(master.marginMsrpPct * 100).toFixed(0)}%, ${master.inStockVariants} variant(s) in stock`;
+  } else if (master.inNewFeed) {
+    tier = "C";
+    gapReason = `In Nalpac new-products feed; margin ${(master.marginMsrpPct * 100).toFixed(0)}%, ${master.inStockVariants} variant(s) in stock`;
+  } else {
+    tier = "D";
+    gapReason = `Brand opportunity: "${master.brand}" has ${master.variantCount} qualifying variant(s) not in catalog; margin ${(master.marginMsrpPct * 100).toFixed(0)}%`;
+  }
+  if (overrides?.gapReason) gapReason = overrides.gapReason;
+  const score2 = gapScore(master);
+  const repSku = master.skus[0] ?? "";
+  const pricingSnap = {
+    sku: repSku,
+    vendor: master.brand,
+    msrp: master.msrp,
+    wholesale: master.wholesale,
+    mapPrice: master.map > 0 ? master.map : null,
+    currentPrice: master.msrp,
+    currentCompareAt: null,
+    inSaleFeed: master.inSaleFeed,
+    nalpacDiscountPct: null
+  };
+  const priceResult = computeTargetPrice(pricingSnap);
+  const proposedPrice = priceResult.newPrice;
+  const marginPct2 = priceResult.marginPct * 100;
+  const profitPerUnit = proposedPrice - master.wholesale;
+  const imageCount = master.sampleImage ? 1 : 0;
+  const { axes } = detectAxes(master);
+  const upsertPayload = {
+    sku: repSku,
+    brand: master.brand,
+    productTitle: master.displayTitle,
+    baseTitle: master.baseTitle,
+    categories: [master.category],
+    tier,
+    gapReason,
+    dealScore: score2.toFixed(3),
+    msrp: master.msrp.toFixed(2),
+    wholesaleCost: master.wholesale.toFixed(2),
+    mapPrice: master.map > 0 ? master.map.toFixed(2) : null,
+    proposedPrice: proposedPrice.toFixed(2),
+    marginPct: marginPct2.toFixed(2),
+    profitPerUnit: profitPerUnit.toFixed(2),
+    qtyAvailable: master.totalQty,
+    totalQty: master.totalQty,
+    imageCount,
+    inTop100Feed: master.inTop100Feed,
+    inNewFeed: master.inNewFeed,
+    inSaleFeed: master.inSaleFeed,
+    masterKey: master.masterKey,
+    variantSkus: master.skus,
+    variantCount: master.variantCount,
+    inStockVariants: master.inStockVariants,
+    colors: master.colors,
+    sizes: master.sizes,
+    volumes: master.fluidOz,
+    axes,
+    needsReview: needsReview(master),
+    upc: master.upcs[0] ?? null,
+    sampleImage: master.sampleImage || null,
+    runDate: todayStr,
+    lastSeenAt: /* @__PURE__ */ new Date(),
+    updatedAt: /* @__PURE__ */ new Date()
+  };
+  return { tier, gapReason, score: score2, upsertPayload };
+}
+async function runImportMonitor(opts = {}) {
+  const source = opts.source ?? "cron";
+  const todayStr = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const insertedRuns = await db.insert(importMonitorRuns).values({
+    runDate: todayStr,
+    source,
+    feedsOk: false
+  }).returning({ id: importMonitorRuns.id });
+  const runId = insertedRuns[0]?.id;
+  if (runId == null) {
+    return {
+      feedsOk: false,
+      candidatesFound: 0,
+      candidatesNew: 0,
+      candidatesResurfaced: 0,
+      autoImported: 0,
+      error: "failed to insert importMonitorRuns row"
+    };
+  }
+  try {
+    const feedResult = await fetchAllNalpacFeeds();
+    const feedsOk = feedResult.errors.length === 0;
+    if (!feedsOk) {
+      console.warn("[import-monitor] feed errors:", feedResult.errors);
+    }
+    const carriedRows = await db.selectDistinct({ sku: dealHistory.sku, brand: dealHistory.brand }).from(dealHistory);
+    const carriedSkus = new Set(carriedRows.map((r) => r.sku));
+    const carriedBrands = new Set(
+      carriedRows.map((r) => r.brand?.toLowerCase().trim()).filter(Boolean)
+    );
+    const currentFeedSkus = [...feedResult.snapshots.keys()];
+    const priorFeedSkus = await kvGet(KV_FEED_SKUS);
+    const priorSet = new Set(priorFeedSkus ?? []);
+    const _addedSkus = new Set(currentFeedSkus.filter((s) => !priorSet.has(s)));
+    void _addedSkus;
+    await kvSet(KV_FEED_SKUS, currentFeedSkus, 25 * 60 * 60);
+    const allMasters = collapseMasters(feedResult.snapshots);
+    const eligibleMasters = allMasters.filter((master) => {
+      const anyCarried = master.skus.some((s) => carriedSkus.has(s));
+      if (anyCarried) return false;
+      const { ok } = isEligible2(master);
+      return ok;
+    });
+    const [watchScoreDeltaStr, watchPriceDropPctStr, phase, maxCandidatesStr] = await Promise.all([
+      getPipelineSetting("import_monitor_watch_score_delta"),
+      getPipelineSetting("import_monitor_watch_price_drop_pct"),
+      getPipelineSetting("import_monitor_phase"),
+      getPipelineSetting("import_monitor_max_candidates")
+    ]);
+    const watchScoreDelta = parseFloat(watchScoreDeltaStr ?? "0.10");
+    const watchPriceDropPct = parseFloat(watchPriceDropPctStr ?? "0.10");
+    const monitorPhase = phase ?? "1";
+    const maxCandidates = Math.max(1, parseInt(maxCandidatesStr ?? "300", 10) || 300);
+    const enriched = eligibleMasters.map((master) => {
+      const { tier, gapReason, score: score2, upsertPayload } = buildMasterUpsertPayload(
+        master,
+        carriedBrands,
+        todayStr
+      );
+      return { master, tier, gapReason, score: score2, upsertPayload };
+    });
+    const sorted = enriched.sort((a, b) => b.score - a.score);
+    const guaranteed = sorted.filter((e) => e.master.inTop100Feed || e.master.inNewFeed);
+    const rest = sorted.filter((e) => !(e.master.inTop100Feed || e.master.inNewFeed));
+    const restSlots = Math.max(0, maxCandidates - guaranteed.length);
+    const capped = [...guaranteed, ...rest.slice(0, restSlots)];
+    console.info(
+      `[import-monitor] collapsed=${allMasters.length} eligible=${eligibleMasters.length} guaranteed=${guaranteed.length} capped=${capped.length} (max=${maxCandidates})`
+    );
+    const cappedKeys = capped.map((c) => c.master.masterKey).filter(Boolean);
+    const existingRows = cappedKeys.length > 0 ? await db.select({
+      masterKey: importCandidates.masterKey,
+      status: importCandidates.status,
+      watchScore: importCandidates.watchScore,
+      watchPrice: importCandidates.watchPrice
+    }).from(importCandidates).where(inArray2(importCandidates.masterKey, cappedKeys)) : [];
+    const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r]));
+    let candidatesNew = 0;
+    let candidatesResurfaced = 0;
+    let candidatesFound = 0;
+    for (const { master, score: score2, upsertPayload } of capped) {
+      const masterKey = master.masterKey;
+      const proposedPrice = parseFloat(upsertPayload.proposedPrice);
+      const existing = existingByKey.get(masterKey);
+      if (!existing) {
+        await db.insert(importCandidates).values({
+          ...upsertPayload,
+          status: "pending",
+          firstSeenAt: /* @__PURE__ */ new Date()
+        }).onConflictDoNothing();
+        candidatesNew++;
+        candidatesFound++;
+      } else if (existing.status === "rejected" || existing.status === "imported") {
+        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.masterKey, masterKey));
+      } else if (existing.status === "watching") {
+        const priorScore = parseFloat(existing.watchScore ?? "0");
+        const priorPrice = parseFloat(existing.watchPrice ?? "0");
+        const scoreImproved = score2 >= priorScore + watchScoreDelta;
+        const priceDropped = priorPrice > 0 && proposedPrice <= priorPrice * (1 - watchPriceDropPct);
+        if (scoreImproved || priceDropped) {
+          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq11(importCandidates.masterKey, masterKey));
+          candidatesResurfaced++;
+          candidatesFound++;
+        } else {
+          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.masterKey, masterKey));
+        }
+      } else {
+        await db.update(importCandidates).set(upsertPayload).where(eq11(importCandidates.masterKey, masterKey));
+        candidatesFound++;
+      }
+    }
+    let autoImported = 0;
+    if (monitorPhase === "2") {
+      autoImported = await autoImportPhase2(cappedKeys, carriedBrands, todayStr);
+    } else if (monitorPhase !== "1") {
+      console.log(`[import-monitor] phase ${monitorPhase} auto-approve not yet implemented; treating as phase 1`);
+    }
+    await db.update(importMonitorRuns).set({
+      finishedAt: /* @__PURE__ */ new Date(),
+      feedsOk,
+      candidatesFound,
+      candidatesNew,
+      candidatesResurfaced,
+      autoImported
+    }).where(eq11(importMonitorRuns.id, runId));
+    await setPipelineSetting("import_monitor_last_run_at", (/* @__PURE__ */ new Date()).toISOString());
+    console.info(
+      `[import-monitor] done: feedsOk=${feedsOk} found=${candidatesFound} new=${candidatesNew} resurfaced=${candidatesResurfaced}`
+    );
+    return { feedsOk, candidatesFound, candidatesNew, candidatesResurfaced, autoImported };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error("[import-monitor] run failed:", errorMessage);
+    await db.update(importMonitorRuns).set({
+      finishedAt: /* @__PURE__ */ new Date(),
+      feedsOk: false,
+      errorMessage
+    }).where(eq11(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
+    return {
+      feedsOk: false,
+      candidatesFound: 0,
+      candidatesNew: 0,
+      candidatesResurfaced: 0,
+      autoImported: 0,
+      error: errorMessage
+    };
+  }
+}
+async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
+  const enabled = await getPipelineSetting("import_monitor_enabled");
+  if (enabled === "false") {
+    console.info("[import-monitor] phase 2 auto-import skipped: monitor disabled");
+    return 0;
+  }
+  if (cappedKeys.length === 0) return 0;
+  const [minMarginStr, minQtyStr, minGapStr, requireCarriedStr, maxPerDayStr] = await Promise.all([
+    getPipelineSetting("monitor_p2_min_margin_pct"),
+    getPipelineSetting("monitor_p2_min_qty"),
+    getPipelineSetting("monitor_p2_min_gap_score"),
+    getPipelineSetting("monitor_p2_require_carried_brand"),
+    getPipelineSetting("monitor_p2_max_auto_imports_per_day")
+  ]);
+  const minMarginPct = parseFloat(minMarginStr ?? "0.45");
+  const minQty = parseInt(minQtyStr ?? "100", 10) || 100;
+  const minGapScore = parseFloat(minGapStr ?? "3.0");
+  const requireCarried = (requireCarriedStr ?? "true") !== "false";
+  const maxPerDay = Math.max(0, parseInt(maxPerDayStr ?? "3", 10) || 0);
+  if (maxPerDay <= 0) return 0;
+  const importedTodayRows = await db.select({ cnt: sql6`count(*)::int` }).from(importCandidates).where(and2(eq11(importCandidates.status, "imported"), eq11(importCandidates.runDate, todayStr)));
+  const importedToday = importedTodayRows[0]?.cnt ?? 0;
+  const remaining = maxPerDay - importedToday;
+  if (remaining <= 0) {
+    console.info(`[import-monitor] phase 2 daily cap reached (${importedToday}/${maxPerDay})`);
+    return 0;
+  }
+  const pending = await db.select({
+    id: importCandidates.id,
+    tier: importCandidates.tier,
+    brand: importCandidates.brand,
+    marginPct: importCandidates.marginPct,
+    totalQty: importCandidates.totalQty,
+    dealScore: importCandidates.dealScore,
+    mapPrice: importCandidates.mapPrice,
+    proposedPrice: importCandidates.proposedPrice,
+    needsReview: importCandidates.needsReview
+  }).from(importCandidates).where(and2(
+    eq11(importCandidates.status, "pending"),
+    inArray2(importCandidates.masterKey, cappedKeys)
+  )).orderBy(importCandidates.tier, sql6`${importCandidates.dealScore} DESC NULLS LAST`);
+  const gated = pending.filter((c) => {
+    const tierOk = c.tier === "A" || c.tier === "B";
+    if (!tierOk || c.needsReview) return false;
+    const carriedOk = requireCarried ? carriedBrands.has((c.brand ?? "").toLowerCase().trim()) : true;
+    if (!carriedOk) return false;
+    const margin = parseFloat(c.marginPct ?? "0") / 100;
+    const gap = parseFloat(c.dealScore ?? "0");
+    const qty = c.totalQty ?? 0;
+    const map = parseFloat(c.mapPrice ?? "0");
+    const price = parseFloat(c.proposedPrice ?? "0");
+    const mapOk = !(map > 0 && price < map);
+    return margin >= minMarginPct && qty >= minQty && gap >= minGapScore && mapOk;
+  });
+  let imported = 0;
+  for (const c of gated) {
+    if (imported >= remaining) break;
+    try {
+      const r = await approveAndImport(c.id);
+      if (r.ok && !r.skipped) {
+        imported++;
+        console.info(`[import-monitor] phase 2 auto-imported candidate ${c.id} (tier ${c.tier})`);
+      } else if (!r.ok) {
+        console.warn(`[import-monitor] phase 2 auto-import failed for candidate ${c.id}: ${r.error}`);
+      }
+    } catch (err) {
+      console.error(`[import-monitor] phase 2 auto-import threw for candidate ${c.id}:`, err);
+    }
+  }
+  console.info(`[import-monitor] phase 2 auto-imported ${imported} (cap ${maxPerDay}, ${importedToday} prior today)`);
+  return imported;
+}
+async function stageMasterCandidatesBySkus(skus, opts) {
+  const todayStr = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const gapReason = opts?.reason ?? "Staged by PM agent";
+  const feedResult = await fetchAllNalpacFeeds();
+  const allMasters = collapseMasters(feedResult.snapshots);
+  const carriedRows = await db.selectDistinct({ sku: dealHistory.sku, brand: dealHistory.brand }).from(dealHistory);
+  const carriedSkus = new Set(carriedRows.map((r) => r.sku));
+  const carriedBrands = new Set(
+    carriedRows.map((r) => r.brand?.toLowerCase().trim()).filter(Boolean)
+  );
+  const skuToMaster = /* @__PURE__ */ new Map();
+  for (const master of allMasters) {
+    for (const sku of master.skus) {
+      skuToMaster.set(sku, master);
+    }
+  }
+  const notFound = [];
+  const mastersToDo = /* @__PURE__ */ new Set();
+  const masterByKey = /* @__PURE__ */ new Map();
+  for (const sku of skus) {
+    const master = skuToMaster.get(sku);
+    if (!master) {
+      notFound.push(sku);
+    } else {
+      mastersToDo.add(master.masterKey);
+      masterByKey.set(master.masterKey, master);
+    }
+  }
+  const masterKeys = [...mastersToDo];
+  const existingRows = masterKeys.length > 0 ? await db.select({ masterKey: importCandidates.masterKey, status: importCandidates.status }).from(importCandidates).where(inArray2(importCandidates.masterKey, masterKeys)) : [];
+  const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r.status]));
+  let staged = 0;
+  let skippedCarried = 0;
+  for (const masterKey of mastersToDo) {
+    const master = masterByKey.get(masterKey);
+    if (master.skus.some((s) => carriedSkus.has(s))) {
+      skippedCarried++;
+      continue;
+    }
+    const existingStatus = existingByKey.get(masterKey);
+    if (existingStatus === "rejected" || existingStatus === "imported") {
+      continue;
+    }
+    const { upsertPayload } = buildMasterUpsertPayload(
+      master,
+      carriedBrands,
+      todayStr,
+      { gapReason }
+    );
+    if (!existingStatus) {
+      await db.insert(importCandidates).values({
+        ...upsertPayload,
+        status: "pending",
+        firstSeenAt: /* @__PURE__ */ new Date()
+      }).onConflictDoNothing();
+      staged++;
+    } else if (existingStatus === "watching") {
+      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq11(importCandidates.masterKey, masterKey));
+      staged++;
+    } else {
+      await db.update(importCandidates).set(upsertPayload).where(eq11(importCandidates.masterKey, masterKey));
+      staged++;
+    }
+  }
+  return { staged, skippedCarried, notFound };
+}
+async function getImportCandidatesByStatus(statuses, limit) {
+  if (statuses.length === 0) return [];
+  const query = db.select().from(importCandidates).where(inArray2(importCandidates.status, statuses)).orderBy(
+    importCandidates.tier,
+    sql6`${importCandidates.dealScore} DESC NULLS LAST`
+  );
+  if (limit != null) return query.limit(limit);
+  return query;
+}
+async function getCatalogOpportunities() {
+  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql6`${dealHistory.brand} IS NOT NULL`);
+  const brandCount = /* @__PURE__ */ new Map();
+  for (const r of brandRows) {
+    if (!r.brand) continue;
+    brandCount.set(r.brand, (brandCount.get(r.brand) ?? 0) + 1);
+  }
+  const brandCoverage = [...brandCount.entries()].map(([brand, carried]) => ({ brand, carried })).sort((a, b) => b.carried - a.carried);
+  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql6`${dealHistory.categories} IS NOT NULL`);
+  const catCount = /* @__PURE__ */ new Map();
+  for (const r of catRows) {
+    for (const cat of r.categories ?? []) {
+      catCount.set(cat, (catCount.get(cat) ?? 0) + 1);
+    }
+  }
+  const categoryCoverage = [...catCount.entries()].map(([category, carried]) => ({ category, carried })).sort((a, b) => b.carried - a.carried);
+  const pendingRows = await db.select({
+    brand: importCandidates.brand,
+    tier: importCandidates.tier,
+    dealScore: importCandidates.dealScore
+  }).from(importCandidates).where(inArray2(importCandidates.status, ["pending", "watching"]));
+  const oppMap = /* @__PURE__ */ new Map();
+  for (const r of pendingRows) {
+    if (!r.brand) continue;
+    if (!oppMap.has(r.brand)) oppMap.set(r.brand, { tier: r.tier ?? "D", scores: [] });
+    const entry = oppMap.get(r.brand);
+    if ((r.tier ?? "D") < entry.tier) entry.tier = r.tier ?? "D";
+    if (r.dealScore != null) entry.scores.push(parseFloat(r.dealScore));
+  }
+  const brandOpportunities = [...oppMap.entries()].map(([brand, { tier, scores }]) => ({
+    brand,
+    tier,
+    count: scores.length,
+    avgScore: scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0
+  })).sort((a, b) => a.tier.localeCompare(b.tier) || b.avgScore - a.avgScore);
+  return { brandCoverage, categoryCoverage, brandOpportunities };
+}
+async function getRecentImportRuns(limit) {
+  return db.select().from(importMonitorRuns).orderBy(sql6`${importMonitorRuns.startedAt} DESC`).limit(limit);
+}
+async function updateCandidateStatus(id, status, opts = {}) {
+  const now = /* @__PURE__ */ new Date();
+  const base = {
+    status,
+    reviewedAt: now,
+    reviewedBy: opts.reviewedBy,
+    rejectionReason: opts.rejectionReason,
+    updatedAt: now
+  };
+  if (status === "watching") {
+    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq11(importCandidates.id, id)).limit(1);
+    if (rows[0]) {
+      base.watchScore = rows[0].dealScore;
+      base.watchPrice = rows[0].proposedPrice;
+    }
+  }
+  await db.update(importCandidates).set(base).where(eq11(importCandidates.id, id));
+}
+async function approveAndImport(id) {
+  const rows = await db.select().from(importCandidates).where(eq11(importCandidates.id, id)).limit(1);
+  const candidate = rows[0];
+  if (!candidate) {
+    return { ok: false, error: `candidate ${id} not found` };
+  }
+  const repSku = candidate.sku;
+  if (await isSkuAlreadyImported(repSku)) {
+    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.id, id));
+    return { ok: true, skipped: true };
+  }
+  const feedResult = await fetchAllNalpacFeeds();
+  const masters = collapseMasters(feedResult.snapshots);
+  const master = masters.find((m) => m.masterKey === candidate.masterKey);
+  if (!master) {
+    return { ok: false, error: "master no longer in feed" };
+  }
+  const { axes, variantRows } = detectAxes(master);
+  const { importProductGroupRaw: importProductGroupRaw2 } = await Promise.resolve().then(() => (init_bulk_import_server(), bulk_import_server_exports));
+  const repSnap = master.snapshots[0];
+  const repRow = repSnap.raw.mainRow ?? repSnap.raw.saleRow ?? {};
+  const masterRowBase = {
+    SKU: repSku,
+    "UPC/barcode": master.upcs[0] ?? "",
+    "Product Title": master.displayTitle,
+    "Product Description": repRow["Product Description"] ?? "",
+    Wholesale: String(master.wholesale),
+    MSRP: String(master.msrp),
+    MAP: master.map > 0 ? String(master.map) : "0",
+    "Nalpac qty available": String(master.totalQty),
+    "Entrenue qty available": "0",
+    "Total qty available": String(master.totalQty),
+    "Fluid Oz": master.fluidOz[0] ?? "",
+    Brand: master.brand,
+    Material: repRow["Material"] ?? "",
+    Color: master.colors[0] ?? "",
+    "Main Category": repRow["Main Category"] ?? "",
+    "Sub-Category": master.category,
+    Size: master.sizes[0] ?? "",
+    "Image 1": repRow["Image 1"] ?? master.sampleImage ?? "",
+    "Image 2": repRow["Image 2"] ?? "",
+    "Image 3": repRow["Image 3"] ?? "",
+    "Image 4": repRow["Image 4"] ?? "",
+    "Image 5": repRow["Image 5"] ?? "",
+    "Image 6": repRow["Image 6"] ?? "",
+    "Image 7": repRow["Image 7"] ?? "",
+    "Image 8": repRow["Image 8"] ?? "",
+    "Image 9": repRow["Image 9"] ?? "",
+    "Image 10": repRow["Image 10"] ?? "",
+    "Master SKU": "",
+    "Variant Option Name": axes[0]?.name ?? "",
+    "Variant Option Value": variantRows[0]?.optionValues[0] ?? "",
+    "Variant Option Name 2": axes[1]?.name ?? "",
+    "Variant Option Value 2": variantRows[0]?.optionValues[1] ?? "",
+    "Nav Category": "",
+    "Nav Path": "",
+    Collections: "",
+    MPN: ""
+  };
+  let group;
+  if (variantRows.length <= 1 || axes.length === 0) {
+    group = { masterRow: masterRowBase, variants: [], isSingleVariant: true };
+  } else {
+    const variants = variantRows.map((vr) => ({
+      sku: vr.sku,
+      optionValues: vr.optionValues,
+      price: vr.price,
+      compareAtPrice: vr.compareAtPrice,
+      qty: vr.qty,
+      wholesale: vr.wholesale,
+      images: vr.images
+    }));
+    group = { masterRow: masterRowBase, variants, isSingleVariant: false };
+  }
+  const result = await importProductGroupRaw2(group);
+  if (!result.success && !result.skipped) {
+    return { ok: false, error: result.error ?? "importProductGroupRaw failed" };
+  }
+  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq11(dealHistory.sku, repSku)).limit(1);
+  const dealHistoryId = dhRows[0]?.id;
+  await db.update(importCandidates).set({
+    status: "imported",
+    dealHistoryId: dealHistoryId ?? null,
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(eq11(importCandidates.id, id));
+  return {
+    ok: true,
+    ...result.shopifyProductId !== void 0 ? { shopifyProductId: result.shopifyProductId } : {},
+    ...dealHistoryId !== void 0 ? { dealHistoryId } : {}
+  };
+}
+var KV_FEED_SKUS;
+var init_import_monitor_server = __esm({
+  "app/lib/import-monitor.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_kv_server();
+    init_nalpac_feeds_server();
+    init_feed_processor_server();
+    init_pricing_webhook_server();
+    init_pricing_engine_server();
+    init_bulk_import_server();
+    init_master_collapse_server();
+    KV_FEED_SKUS = "monitor:feed-skus";
+  }
+});
+
+// app/lib/enricher-brief.server.ts
+import { eq as eq12 } from "drizzle-orm";
+async function adminGraphQLWithRetry(query, variables, attempt = 0) {
+  try {
+    return await adminGraphQL(query, variables);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isRateLimit = msg.includes("429") || msg.toLowerCase().includes("throttled");
+    if (!isRateLimit || attempt >= 4) throw err;
+    const delayMs = 1500 * Math.pow(2, attempt);
+    console.warn(`[enricher-brief] rate-limited; backing off ${delayMs}ms (attempt ${attempt + 1}/5)`);
+    await new Promise((r) => setTimeout(r, delayMs));
+    return adminGraphQLWithRetry(query, variables, attempt + 1);
+  }
+}
+async function fetchProductSnapshot(numericId) {
+  try {
+    const data = await adminGraphQLWithRetry(`
+      query EnricherSnapshot($id: ID!) {
+        product(id: $id) {
+          id
+          title
+          handle
+          vendor
+          descriptionHtml
+          status
+          productType
+          updatedAt
+          media(first: 5) {
+            edges {
+              node {
+                ... on MediaImage {
+                  preview { image { url } }
+                }
+              }
+            }
+          }
+          metafields(first: 100) {
+            edges { node { namespace key value } }
+          }
+          variants(first: 100) {
+            edges {
+              node {
+                id
+                title
+                metafield(namespace: "custom", key: "original_description") {
+                  value
+                }
+              }
+            }
+          }
+        }
+      }
+    `, { id: `gid://shopify/Product/${numericId}` });
+    const product = data.product;
+    if (!product) return null;
+    const metafields = {};
+    for (const e of product.metafields.edges) {
+      metafields[`${e.node.namespace}.${e.node.key}`] = e.node.value;
+    }
+    const aggregated = aggregateVariantDescriptions(product.variants.edges.map((e) => e.node));
+    const snap = {
+      id: String(product.id.split("/").pop()),
+      title: product.title,
+      handle: product.handle,
+      vendor: product.vendor,
+      body_html: product.descriptionHtml,
+      status: product.status.toLowerCase(),
+      // GraphQL returns 'DRAFT' uppercase; normalise
+      product_type: product.productType,
+      updated_at: product.updatedAt,
+      metafields,
+      images: product.media.edges.map((e) => e.node.preview?.image?.url).filter((u) => !!u).map((src) => ({ src }))
+    };
+    const aggregatedDescription = aggregated ?? metafields["custom.original_description"] ?? void 0;
+    if (aggregatedDescription) snap.aggregatedDescription = aggregatedDescription;
+    return snap;
+  } catch (err) {
+    console.warn(`[enricher-brief] fetchProductSnapshot ${numericId} failed:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+function aggregateVariantDescriptions(variants) {
+  if (variants.length === 0) return void 0;
+  const seen = /* @__PURE__ */ new Set();
+  const pieces = [];
+  for (const v of variants) {
+    const value = v.metafield?.value?.trim();
+    if (!value) continue;
+    const norm = value.toLowerCase().replace(/\s+/g, " ").slice(0, 200);
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    const piece = v.title && v.title !== "Default Title" ? `[${v.title}] ${value}` : value;
+    pieces.push(piece);
+  }
+  if (pieces.length === 0) return void 0;
+  let aggregated = pieces.join("\n\n");
+  if (aggregated.length > VARIANT_DESC_AGGREGATE_CAP) {
+    aggregated = aggregated.slice(0, VARIANT_DESC_AGGREGATE_CAP) + "\n\u2026[truncated]";
+  }
+  return aggregated;
+}
+async function gatherProductBrief(numericProductId) {
+  const snap = await fetchProductSnapshot(numericProductId);
+  if (!snap) return null;
+  const histRows = await db.select({
+    sku: dealHistory.sku,
+    brand: dealHistory.brand,
+    categories: dealHistory.categories
+  }).from(dealHistory).where(eq12(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  const hist = histRows[0];
+  const sku = hist?.sku;
+  const brand = hist?.brand ?? snap.vendor ?? "";
+  const categories = hist?.categories ?? [];
+  const msrp = Number(snap.metafields["xdipx.original_price"]) || 0;
+  const dealPrice = Number(snap.metafields["xdipx.map_price"]) || msrp;
+  const pairingCandidates = await getPairingCandidates({
+    shopifyProductId: numericProductId,
+    subCategories: categories
+  }).catch(() => []);
+  const rawDescription = snap.aggregatedDescription ?? (snap.body_html ?? "").replace(/<[^>]+>/g, " ").slice(0, 2e3);
+  const brief = {
+    shopifyProductId: numericProductId,
+    rawTitle: snap.title,
+    brand,
+    vendor: snap.vendor,
+    rawDescription,
+    categories,
+    dealPrice,
+    msrp,
+    existingMetafields: snap.metafields,
+    pairingCandidates: pairingCandidates.map((c) => {
+      const pc = {
+        productId: c.productId,
+        title: c.title
+      };
+      if (c.brand) pc.brand = c.brand;
+      if (c.productTypeDial) pc.productTypeDial = c.productTypeDial;
+      if (typeof c.price === "number") pc.price = c.price;
+      return pc;
+    })
+  };
+  if (sku) brief.sku = sku;
+  return brief;
+}
+async function loadSharedEnrichmentContext() {
+  const [dialRegistry, dialTaxonomy, vocab] = await Promise.all([
+    getDialRegistry(),
+    getDialTaxonomy(),
+    getAskEmmaVocabulary()
+  ]);
+  return {
+    moodVocab: vocab.mood,
+    audienceVocab: vocab.audience,
+    mattersVocab: vocab.matters,
+    dialRegistryByType: dialRegistry,
+    dialTaxonomy
+  };
+}
+var VARIANT_DESC_AGGREGATE_CAP;
+var init_enricher_brief_server = __esm({
+  "app/lib/enricher-brief.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_shopify_server();
+    init_dial_registry_server();
+    init_ask_emma_vocab_server();
+    VARIANT_DESC_AGGREGATE_CAP = 6e3;
+  }
+});
+
+// app/lib/batch-enrichment.server.ts
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import Anthropic5 from "@anthropic-ai/sdk";
+function stripFences2(raw) {
+  return raw.replace(/^```(?:html|json)?\n?/i, "").replace(/\n?```$/i, "").trim();
+}
+async function loadEnricherAgentPrompt() {
+  if (_cachedAgentPrompt !== null) return _cachedAgentPrompt;
+  const here = dirname(fileURLToPath(import.meta.url));
+  const path = resolve(here, "..", "..", ".claude", "agents", "emma-product-enricher.md");
+  const raw = await readFile(path, "utf8");
+  const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+  if (!body) throw new Error(`empty agent prompt at ${path}`);
+  _cachedAgentPrompt = body;
+  return body;
+}
+function buildSharedContextBlock(ctx) {
+  const dialReg = Object.entries(ctx.dialRegistryByType).map(([t, labels]) => `  ${t}: ${labels.join(", ")}`).join("\n");
+  const dialTax = Object.entries(ctx.dialTaxonomy).map(([t, items]) => {
+    const lines = items.map((i) => {
+      const scaleParts = [];
+      if (i.scaleLow) scaleParts.push(`1=${i.scaleLow}`);
+      if (i.scaleMid) scaleParts.push(`3=${i.scaleMid}`);
+      if (i.scaleHigh) scaleParts.push(`5=${i.scaleHigh}`);
+      const scaleSuffix = scaleParts.length > 0 ? `  (${scaleParts.join(" | ")})` : "";
+      const def = i.definition ? `: ${i.definition}` : "";
+      return `    - ${i.label}${def}${scaleSuffix}`;
+    }).join("\n");
+    return `  ${t}:
+${lines}`;
+  }).join("\n");
+  return `Shared editorial context for this batch (vocabularies, dial registry, dial taxonomy). Apply per the <inputs> section of your agent prompt.
+
+moodVocab: ${ctx.moodVocab.join(", ")}
+audienceVocab: ${ctx.audienceVocab.join(", ")}
+mattersVocab: ${ctx.mattersVocab.join(", ")}
+
+dialRegistryByType:
+${dialReg}
+
+dialTaxonomy:
+${dialTax}`;
+}
+function buildPerProductUserPrompt(brief) {
+  return `Product brief:
+\`\`\`json
+${JSON.stringify(brief, null, 2)}
+\`\`\`
+
+Return ONLY the ProductWrites JSON object per your <output_schema>. No markdown fences. No commentary. No preamble.`;
+}
+function addUsage(acc, delta) {
+  acc.inputTokens += delta.inputTokens;
+  acc.outputTokens += delta.outputTokens;
+  acc.cacheCreationTokens += delta.cacheCreationTokens;
+  acc.cacheReadTokens += delta.cacheReadTokens;
+}
+async function buildFullEnrichmentRequests(inputs, context, opts = {}) {
+  const emmaBlocks = await buildEmmaSystemBlocks(opts.brandVoice);
+  const agentPrompt = await loadEnricherAgentPrompt();
+  const contextBlock = buildSharedContextBlock(context);
+  const systemParam = [
+    ...emmaBlocks.map((b) => ({
+      type: "text",
+      text: b.text,
+      ...b.cache ? { cache_control: { type: "ephemeral" } } : {}
+    })),
+    { type: "text", text: agentPrompt, cache_control: { type: "ephemeral" } },
+    { type: "text", text: contextBlock, cache_control: { type: "ephemeral" } }
+  ];
+  return inputs.map(({ productId, brief }) => ({
+    custom_id: `${productId}${FULL_ENRICHMENT_SUFFIX}`,
+    params: {
+      model: MODEL_SONNET,
+      max_tokens: opts.maxTokens ?? 4096,
+      system: systemParam,
+      messages: [{ role: "user", content: buildPerProductUserPrompt(brief) }]
+    }
+  }));
+}
+function parseFullEnrichmentEntry(entry) {
+  if (!entry) return { error: "no result for custom_id" };
+  if (entry.result.type !== "succeeded") {
+    const reason = entry.result.type === "errored" ? entry.result.error.error.message : entry.result.type;
+    return { error: `batch ${entry.result.type}: ${reason}` };
+  }
+  const msg = entry.result.message;
+  const u = msg.usage;
+  const usage = {
+    inputTokens: u?.input_tokens ?? 0,
+    outputTokens: u?.output_tokens ?? 0,
+    cacheCreationTokens: u?.cache_creation_input_tokens ?? 0,
+    cacheReadTokens: u?.cache_read_input_tokens ?? 0
+  };
+  const block = msg.content[0];
+  if (block?.type !== "text") return { error: "unexpected non-text response block", usage };
+  const cleaned = stripFences2(block.text).trim();
+  if (!cleaned) return { error: "empty response", usage };
+  try {
+    return { writes: JSON.parse(cleaned), usage };
+  } catch (err) {
+    const preview = cleaned.slice(0, 200).replace(/\n/g, " ");
+    return { error: `JSON parse failed: ${err instanceof Error ? err.message : String(err)} | preview: ${preview}`, usage };
+  }
+}
+async function submitFullEnrichmentBatch(inputs, context, opts = {}) {
+  if (inputs.length === 0) throw new Error("submitFullEnrichmentBatch: no inputs");
+  const requests = await buildFullEnrichmentRequests(inputs, context, opts);
+  const batch = await client4.messages.batches.create({ requests });
+  console.log(`[batch] submitted full-enrichment batch ${batch.id} with ${requests.length} requests (no poll)`);
+  return { batchId: batch.id, productIds: inputs.map((i) => i.productId), submittedCount: requests.length };
+}
+async function collectFullEnrichmentBatch(batchId) {
+  const current = await client4.messages.batches.retrieve(batchId);
+  if (current.processing_status !== "ended") {
+    return { ended: false, status: current.processing_status, succeeded: current.request_counts.succeeded };
+  }
+  const results = /* @__PURE__ */ new Map();
+  const failures = [];
+  const usage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+  const stream = await client4.messages.batches.results(batchId);
+  for await (const entry of stream) {
+    if (!entry.custom_id.endsWith(FULL_ENRICHMENT_SUFFIX)) continue;
+    const productId = entry.custom_id.slice(0, -FULL_ENRICHMENT_SUFFIX.length);
+    const parsed = parseFullEnrichmentEntry(entry);
+    if (parsed.usage) addUsage(usage, parsed.usage);
+    if (parsed.writes) results.set(productId, parsed.writes);
+    else failures.push({ productId, error: parsed.error });
+  }
+  return { ended: true, results, failures, usage };
+}
+var client4, MODEL_SONNET, POLL_TIMEOUT_DEFAULT_MS, _cachedAgentPrompt, FULL_ENRICHMENT_SUFFIX;
+var init_batch_enrichment_server = __esm({
+  "app/lib/batch-enrichment.server.ts"() {
+    "use strict";
+    init_claude_server();
+    client4 = new Anthropic5({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
+    MODEL_SONNET = "claude-sonnet-4-20250514";
+    POLL_TIMEOUT_DEFAULT_MS = 24 * 60 * 60 * 1e3;
+    _cachedAgentPrompt = null;
+    FULL_ENRICHMENT_SUFFIX = "_fullEnrichment";
+  }
+});
+
+// app/lib/import-enrich.server.ts
+var import_enrich_server_exports = {};
+__export(import_enrich_server_exports, {
+  collectEnrichmentBatch: () => collectEnrichmentBatch,
+  publishEnrichedProducts: () => publishEnrichedProducts,
+  runImportEnrichTick: () => runImportEnrichTick,
+  submitEnrichmentBatch: () => submitEnrichmentBatch
+});
+import { and as and3, asc as asc2, eq as eq13, inArray as inArray3, isNull as isNull2, sql as sql7 } from "drizzle-orm";
+async function isEnrichEnabled() {
+  return await getPipelineSetting("import_enrich_enabled") === "true";
+}
+async function getBatchCap() {
+  const raw = await getPipelineSetting("import_enrich_batch_cap");
+  const n = raw ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_BATCH_CAP;
+}
+function inferCategoryFallback(stored) {
+  if (!stored) return ["for-him", "for-her"];
+  if (stored.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        const valid = /* @__PURE__ */ new Set(["for-him", "for-her", "couples"]);
+        return parsed.filter((s) => typeof s === "string" && valid.has(s));
+      }
+    } catch {
+    }
+  }
+  if (stored === "both") return ["for-him", "for-her"];
+  if (stored === "for-him" || stored === "for-her" || stored === "couples") return [stored];
+  return ["for-him", "for-her"];
+}
+function stripDashes(s) {
+  return s.replace(/\s*—\s*/g, ", ").replace(/\s*–\s*/g, "-");
+}
+async function applyFullEnrichmentWrites(numericProductId, writes) {
+  const snap = await fetchProductSnapshot(numericProductId);
+  if (!snap) throw new Error(`fetchProductSnapshot returned null for ${numericProductId}`);
+  const category = inferCategoryFallback(snap.metafields["xdipx.category"]);
+  const sTagline = ed(writes.tagline);
+  const sSeo = ed(writes.seoMetaDescription);
+  const sDesc = ed(writes.descriptionHtml);
+  const sSpecs = edA(writes.specifications);
+  const sCare = edA(writes.careInstructions);
+  const sBox = edA(writes.boxContents);
+  const section = deriveSection({
+    productType: snap.product_type,
+    title: snap.title,
+    productTypeDial: writes.productTypeDial
+  });
+  const doc = {
+    shopifyProductId: numericProductId,
+    category,
+    sectionTags: [section],
+    tagline: sTagline,
+    seoMetaDescription: sSeo,
+    descriptionHtml: sDesc,
+    moodTags: writes.moodTags,
+    audienceTags: writes.audienceTags,
+    mattersTags: writes.mattersTags,
+    productTypeDial: writes.productTypeDial
+  };
+  if (writes.productTitleAugmented && writes.productTitle) {
+    doc.title = ed(writes.productTitle);
+    doc.seoTitle = ed(writes.productTitle);
+  }
+  if (writes.originalTitle) doc.originalTitle = ed(writes.originalTitle);
+  if (writes.productSubtypeDial != null) doc.productSubtypeDial = writes.productSubtypeDial;
+  if (writes.sensationDialV2) doc.sensationDialV2 = writes.sensationDialV2;
+  if (sSpecs?.length) doc.specifications = sSpecs;
+  if (sCare?.length) doc.careInstructions = sCare;
+  if (sBox?.length) doc.boxContents = sBox;
+  if (writes.emmaHero) doc.emmaHero = writes.emmaHero;
+  if (writes.moodImageUrl) doc.moodImageUrl = writes.moodImageUrl;
+  await pushProductToShopify(doc);
+  try {
+    const gid = `gid://shopify/Product/${numericProductId}`;
+    const upsertParams = {
+      handle: snap.handle,
+      shopifyProductId: gid,
+      title: doc.title ?? snap.title,
+      vendor: snap.vendor,
+      category,
+      tagline: sTagline,
+      description: sDesc,
+      seoDescription: sSeo,
+      productTypeDial: writes.productTypeDial,
+      moodTags: writes.moodTags,
+      audienceTags: writes.audienceTags,
+      mattersTags: writes.mattersTags
+    };
+    if (doc.seoTitle) upsertParams.seoTitle = doc.seoTitle;
+    if (writes.productSubtypeDial != null) upsertParams.productSubtypeDial = writes.productSubtypeDial;
+    if (writes.sensationDialV2) upsertParams.sensationDialV2 = writes.sensationDialV2;
+    if (sSpecs?.length) upsertParams.specifications = sSpecs;
+    if (sCare?.length) upsertParams.careInstructions = sCare;
+    if (sBox?.length) upsertParams.boxContents = sBox;
+    if (writes.ivrExperience) upsertParams.ivrExperience = writes.ivrExperience;
+    if (writes.ivrUseCase?.length) upsertParams.ivrUseCase = writes.ivrUseCase;
+    if (writes.ivrFeatures?.length) upsertParams.ivrFeatures = writes.ivrFeatures;
+    if (writes.productFaqs?.length) upsertParams.productFaqs = writes.productFaqs;
+    if (writes.originalTitle) upsertParams.originalTitle = writes.originalTitle;
+    if (writes.moodImageUrl) upsertParams.moodImageUrl = writes.moodImageUrl;
+    const firstImage = snap.images[0]?.src;
+    if (firstImage) upsertParams.imageUrl = firstImage;
+    let lastErr;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await upsertProductPage(upsertParams);
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    if (lastErr) {
+      console.error(`[import-enrich] sanity upsert failed for ${numericProductId}:`, lastErr);
+    }
+  } catch (err) {
+    console.error(`[import-enrich] sanity mirror error for ${numericProductId}:`, err);
+  }
+}
+async function submitEnrichmentBatch(cap) {
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq13(importCandidates.dealHistoryId, dealHistory.id)).where(and3(
+    eq13(importCandidates.status, "imported"),
+    isNull2(importCandidates.enrichedAt),
+    isNull2(importCandidates.enrichBatchId)
+  )).orderBy(asc2(importCandidates.id)).limit(cap);
+  const valid = rows.filter((r) => Boolean(r.productId));
+  if (valid.length === 0) return { submitted: 0, reason: "no_unenriched" };
+  const context = await loadSharedEnrichmentContext();
+  const inputs = [];
+  const candidateIds = [];
+  for (const r of valid) {
+    const brief = await gatherProductBrief(r.productId);
+    if (!brief) {
+      console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) \u2014 skipping`);
+      continue;
+    }
+    inputs.push({ productId: r.productId, brief });
+    candidateIds.push(r.id);
+  }
+  if (inputs.length === 0) return { submitted: 0, reason: "no_briefs" };
+  const brandVoice = await getPipelineSetting("brandVoice").catch(() => null) ?? void 0;
+  const { batchId, productIds } = await submitFullEnrichmentBatch(
+    inputs,
+    context,
+    brandVoice ? { brandVoice } : {}
+  );
+  await db.insert(enrichmentBatches).values({ batchId, status: "pending", candidateIds, productIds });
+  await db.update(importCandidates).set({ enrichBatchId: batchId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray3(importCandidates.id, candidateIds));
+  console.log(`[import-enrich] submitted batch ${batchId} for ${inputs.length} product(s)`);
+  return { submitted: inputs.length, batchId };
+}
+async function collectEnrichmentBatch() {
+  const pendingBatches = await db.select().from(enrichmentBatches).where(eq13(enrichmentBatches.status, "pending")).orderBy(asc2(enrichmentBatches.submittedAt));
+  let enrichedTotal = 0;
+  let failedTotal = 0;
+  let stillPending = 0;
+  for (const batch of pendingBatches) {
+    let res;
+    try {
+      res = await collectFullEnrichmentBatch(batch.batchId);
+    } catch (err) {
+      console.error(`[import-enrich] collect retrieve failed for batch ${batch.batchId}:`, err);
+      stillPending++;
+      continue;
+    }
+    if (!res.ended) {
+      stillPending++;
+      continue;
+    }
+    const idByProduct = /* @__PURE__ */ new Map();
+    batch.productIds.forEach((p, i) => {
+      const cid = batch.candidateIds[i];
+      if (cid !== void 0) idByProduct.set(p, cid);
+    });
+    const failures = [...res.failures];
+    let enriched = 0;
+    for (const [productId, writes] of res.results) {
+      try {
+        await applyFullEnrichmentWrites(productId, writes);
+        const candidateId = idByProduct.get(productId);
+        if (candidateId !== void 0) {
+          await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq13(importCandidates.id, candidateId));
+        }
+        enriched++;
+      } catch (err) {
+        failures.push({ productId, error: `apply: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+    await db.update(enrichmentBatches).set({
+      status: "collected",
+      collectedAt: /* @__PURE__ */ new Date(),
+      succeeded: enriched,
+      failed: failures.length,
+      error: failures.length ? JSON.stringify(failures).slice(0, 4e3) : null
+    }).where(eq13(enrichmentBatches.id, batch.id));
+    if (failures.length) {
+      console.error(`[import-enrich] batch ${batch.batchId} collected with ${failures.length} failure(s):`, failures);
+    }
+    console.log(`[import-enrich] batch ${batch.batchId} collected: enriched=${enriched} failed=${failures.length}`);
+    enrichedTotal += enriched;
+    failedTotal += failures.length;
+  }
+  return { enriched: enrichedTotal, failed: failedTotal, stillPending };
+}
+async function publishEnrichedProducts() {
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq13(importCandidates.dealHistoryId, dealHistory.id)).where(and3(
+    eq13(importCandidates.status, "imported"),
+    sql7`${importCandidates.enrichedAt} IS NOT NULL`,
+    isNull2(importCandidates.publishedAt)
+  ));
+  let published = 0;
+  let failed = 0;
+  for (const r of rows) {
+    if (!r.productId) continue;
+    try {
+      await activateShopifyProduct(r.productId);
+      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq13(importCandidates.id, r.id));
+      published++;
+    } catch (err) {
+      console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err);
+      failed++;
+    }
+  }
+  return { published, failed };
+}
+async function runImportEnrichTick(opts = {}) {
+  if (!await isEnrichEnabled()) {
+    return { ok: true, skipped: true, reason: "disabled" };
+  }
+  void opts;
+  const collect = await collectEnrichmentBatch();
+  const publish = await publishEnrichedProducts();
+  let submit = { submitted: 0, reason: "batch_in_flight" };
+  const pendingRow = await db.select({ c: sql7`count(*)::int` }).from(enrichmentBatches).where(eq13(enrichmentBatches.status, "pending"));
+  const pendingCount = Number(pendingRow[0]?.c ?? 0);
+  if (pendingCount === 0) {
+    submit = await submitEnrichmentBatch(await getBatchCap());
+  }
+  return { ok: true, collect, publish, submit };
+}
+var DEFAULT_BATCH_CAP, ed, edA;
+var init_import_enrich_server = __esm({
+  "app/lib/import-enrich.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_enricher_brief_server();
+    init_batch_enrichment_server();
+    init_shopify_server();
+    init_sanity_server();
+    init_feed_processor_server();
+    DEFAULT_BATCH_CAP = 10;
+    ed = (s) => s == null ? s : stripDashes(s);
+    edA = (a) => a?.map(stripDashes);
+  }
+});
+
 // app/lib/attribution.server.ts
 import { parse as parseCookie, serialize as serializeCookie } from "cookie";
 function getClientIP(request) {
@@ -11630,71 +16720,38 @@ import express from "express";
 import compression from "compression";
 import { createRequestHandler } from "@react-router/express";
 
-// server/cron.js
-init_feed_processor_server();
+// server/cron.ts
 import { Router } from "express";
+import { timingSafeEqual } from "node:crypto";
 
-// app/lib/deal-activator.server.ts
-init_deal_rotator_server();
-async function dealActivator() {
-  return rotateDeal();
-}
-
-// app/lib/profit.server.ts
-init_db_server();
-init_schema();
-import { eq as eq4, sql as sql3 } from "drizzle-orm";
-async function writeProfitSummary() {
-  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-  const [todayDeal] = await db.select().from(dealHistory).where(eq4(dealHistory.dealDate, today)).limit(1);
-  if (!todayDeal) return;
-  const { shopifyAdmin: shopifyAdmin2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
-  const ordersData = await shopifyAdmin2(`/orders.json?status=paid&created_at_min=${today}T00:00:00-00:00`);
-  let totalOrders = 0;
-  let totalRevenue = 0;
-  let totalCogs = 0;
-  for (const order of ordersData.orders) {
-    totalOrders++;
-    totalRevenue += parseFloat(order.total_price);
-    for (const item of order.line_items) {
-      const cost = parseFloat(todayDeal.wholesaleCost ?? "0");
-      totalCogs += cost * item.quantity;
-    }
+// server/cron.pricing-batch-recompute.ts
+async function handlePricingBatchRecompute(_req, res) {
+  try {
+    const { recomputeCatalog: recomputeCatalog2 } = await Promise.resolve().then(() => (init_pricing_apply_v2_server(), pricing_apply_v2_server_exports));
+    const result = await recomputeCatalog2({ trigger: "batch" });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[cron:pricing-batch-recompute]", err);
+    res.status(500).json({ error: String(err) });
   }
-  const totalProfit = totalRevenue - totalCogs;
-  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-  await db.insert(dailyProfitSummary).values({
-    summaryDate: today,
-    totalOrders,
-    totalRevenue: totalRevenue.toFixed(2),
-    totalCogs: totalCogs.toFixed(2),
-    totalProfit: totalProfit.toFixed(2),
-    avgOrderValue: avgOrderValue.toFixed(2),
-    featuredSku: todayDeal.sku
-  }).onConflictDoUpdate({
-    target: dailyProfitSummary.summaryDate,
-    set: {
-      totalOrders: sql3`excluded.total_orders`,
-      totalRevenue: sql3`excluded.total_revenue`,
-      totalCogs: sql3`excluded.total_cogs`,
-      totalProfit: sql3`excluded.total_profit`,
-      avgOrderValue: sql3`excluded.avg_order_value`
-    }
-  });
-  await db.update(dealHistory).set({
-    unitsSold: totalOrders,
-    totalRevenue: totalRevenue.toFixed(2),
-    totalProfit: totalProfit.toFixed(2)
-  }).where(eq4(dealHistory.dealDate, today));
 }
 
-// server/cron.js
-init_reviews_server();
+// server/cron.ts
+function safeEqual(a, b) {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
 function createCronRoutes() {
   const router = Router();
   const guard = (req, res, next) => {
-    const secret = req.headers["x-cron-secret"];
-    if (!process.env["CRON_SECRET"] || secret !== process.env["CRON_SECRET"]) {
+    const expected = process.env["CRON_SECRET"];
+    const headerSecret = req.headers["x-cron-secret"];
+    const authHeader = req.headers["authorization"];
+    const bearer = typeof authHeader === "string" && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : void 0;
+    const provided = typeof headerSecret === "string" ? headerSecret : bearer;
+    if (typeof expected !== "string" || expected.length === 0 || typeof provided !== "string" || !safeEqual(provided, expected)) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
@@ -11702,7 +16759,8 @@ function createCronRoutes() {
   };
   router.post("/daily-feed-processor", guard, async (_req, res) => {
     try {
-      const result = await dailyFeedProcessor();
+      const { dailyFeedProcessor: dailyFeedProcessor2 } = await Promise.resolve().then(() => (init_feed_processor_server(), feed_processor_server_exports));
+      const result = await dailyFeedProcessor2();
       res.json({ ok: true, topCandidates: result.topCandidates.length, needsImagen: result.needsImagen.length });
     } catch (err) {
       console.error("[cron:daily-feed-processor]", err);
@@ -11711,7 +16769,8 @@ function createCronRoutes() {
   });
   router.post("/deal-activator", guard, async (_req, res) => {
     try {
-      const result = await dealActivator();
+      const { dealActivator: dealActivator2 } = await Promise.resolve().then(() => (init_deal_activator_server(), deal_activator_server_exports));
+      const result = await dealActivator2();
       res.json({ ok: true, ...result });
     } catch (err) {
       console.error("[cron:deal-activator]", err);
@@ -11720,7 +16779,8 @@ function createCronRoutes() {
   });
   router.post("/profit-summary", guard, async (_req, res) => {
     try {
-      await writeProfitSummary();
+      const { writeProfitSummary: writeProfitSummary2 } = await Promise.resolve().then(() => (init_profit_server(), profit_server_exports));
+      await writeProfitSummary2();
       res.json({ ok: true });
     } catch (err) {
       console.error("[cron:profit-summary]", err);
@@ -11729,12 +16789,13 @@ function createCronRoutes() {
   });
   router.post("/review-reminders", guard, async (_req, res) => {
     try {
-      const settings = await getReviewSettings();
+      const { getReviewSettings: getReviewSettings2, getPendingReminderInvites: getPendingReminderInvites2, markReminderSent: markReminderSent2 } = await Promise.resolve().then(() => (init_reviews_server(), reviews_server_exports));
+      const settings = await getReviewSettings2();
       if (!settings.remindersEnabled) {
         res.json({ ok: true, skipped: true, reason: "reminders disabled" });
         return;
       }
-      const invites = await getPendingReminderInvites();
+      const invites = await getPendingReminderInvites2();
       let sent = 0;
       for (const invite of invites) {
         try {
@@ -11746,7 +16807,7 @@ function createCronRoutes() {
             reviewerName: invite.reviewerName,
             reminderDate: (/* @__PURE__ */ new Date()).toISOString()
           });
-          await markReminderSent(invite.id);
+          await markReminderSent2(invite.id);
           sent++;
         } catch (err) {
           console.error("[cron:review-reminders] Failed for invite", invite.id, err);
@@ -11755,6 +16816,92 @@ function createCronRoutes() {
       res.json({ ok: true, total: invites.length, sent });
     } catch (err) {
       console.error("[cron:review-reminders]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  router.post("/regenerate-emma-rail", guard, async (req, res) => {
+    try {
+      const railId = typeof req.body?.railId === "string" ? req.body.railId : null;
+      if (!railId) {
+        res.status(400).json({ error: "railId required" });
+        return;
+      }
+      const trigger = req.body?.trigger === "brief_change" || req.body?.trigger === "agent" ? req.body.trigger : "admin";
+      let dealHandle = typeof req.body?.dealHandle === "string" ? req.body.dealHandle : null;
+      if (!dealHandle) {
+        const { getDailyDeal: getDailyDeal2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+        const live = await getDailyDeal2().catch(() => null);
+        dealHandle = live?.handle ?? null;
+      }
+      if (!dealHandle) {
+        res.status(400).json({ error: "no_live_deal" });
+        return;
+      }
+      const { regenerateRailById: regenerateRailById2 } = await Promise.resolve().then(() => (init_emma_rails_server(), emma_rails_server_exports));
+      const result = await regenerateRailById2(railId, dealHandle, trigger);
+      res.json({ ok: result.ok, ...result });
+    } catch (err) {
+      console.error("[cron:regenerate-emma-rail]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  router.post("/keyword-research", guard, async (req, res) => {
+    try {
+      const { runKeywordResearch: runKeywordResearch2 } = await Promise.resolve().then(() => (init_seo_research_server(), seo_research_server_exports));
+      const opts = {};
+      if (typeof req.body?.maxSeeds === "number") opts.maxSeeds = req.body.maxSeeds;
+      if (Array.isArray(req.body?.manualSeeds)) {
+        opts.manualSeeds = req.body.manualSeeds.filter((s) => typeof s === "string");
+      }
+      const result = await runKeywordResearch2(opts);
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error("[cron:keyword-research]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  router.post("/log-monitor", guard, async (req, res) => {
+    try {
+      const { runLogMonitor: runLogMonitor2 } = await Promise.resolve().then(() => (init_log_monitor_server(), log_monitor_server_exports));
+      const windowMinutes = typeof req.body?.windowMinutes === "number" ? req.body.windowMinutes : 15;
+      const result = await runLogMonitor2({ windowMinutes });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error("[cron:log-monitor]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  router.post("/pricing-batch-recompute", guard, handlePricingBatchRecompute);
+  router.post("/import-monitor", guard, async (_req, res) => {
+    try {
+      const { getPipelineSetting: getPipelineSetting2 } = await Promise.resolve().then(() => (init_feed_processor_server(), feed_processor_server_exports));
+      const enabled = await getPipelineSetting2("import_monitor_enabled");
+      if (enabled === "false") {
+        res.json({ ok: true, skipped: true, reason: "monitor_disabled" });
+        return;
+      }
+      const runDaysSetting = await getPipelineSetting2("import_monitor_run_days");
+      const runDays = (runDaysSetting ?? "0,1,2,3,4,5,6").split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
+      const todayUtcDay = (/* @__PURE__ */ new Date()).getUTCDay();
+      if (!runDays.includes(todayUtcDay)) {
+        res.json({ ok: true, skipped: true, reason: `not_scheduled_today (day=${todayUtcDay})` });
+        return;
+      }
+      const { runImportMonitor: runImportMonitor2 } = await Promise.resolve().then(() => (init_import_monitor_server(), import_monitor_server_exports));
+      const result = await runImportMonitor2({ source: "cron" });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error("[cron:import-monitor]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  router.post("/import-enrich", guard, async (_req, res) => {
+    try {
+      const { runImportEnrichTick: runImportEnrichTick2 } = await Promise.resolve().then(() => (init_import_enrich_server(), import_enrich_server_exports));
+      const result = await runImportEnrichTick2({ source: "cron" });
+      res.json(result);
+    } catch (err) {
+      console.error("[cron:import-enrich]", err);
       res.status(500).json({ error: String(err) });
     }
   });
@@ -11783,7 +16930,7 @@ init_schema();
 init_shopify_server();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq5 } from "drizzle-orm";
+import { eq as eq14 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret)
@@ -11814,11 +16961,11 @@ async function handleOrderCreated(order) {
     }).catch((err) => console.error("[webhook] metafield write failed:", err));
     const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
     await db.update(dealHistory).set({
-      unitsSold: db.$count(dealHistory, eq5(dealHistory.sku, lineItem.sku)),
+      unitsSold: db.$count(dealHistory, eq14(dealHistory.sku, lineItem.sku)),
       // increment handled via raw SQL
       totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
       totalProfit: String(profit * lineItem.quantity)
-    }).where(eq5(dealHistory.sku, lineItem.sku)).catch(() => {
+    }).where(eq14(dealHistory.sku, lineItem.sku)).catch(() => {
     });
   }
   const refCode = order.note_attributes?.find((a) => a.name === "ref_source")?.value;
@@ -11947,22 +17094,22 @@ function createWebhookRoutes() {
 
 // server/mcp-route.ts
 import { Router as Router3 } from "express";
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 // app/lib/mcp-seo-bank.server.ts
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { createClient as createClient5 } from "@sanity/client";
-var projectId5 = process.env["SANITY_PROJECT_ID"];
-var dataset5 = process.env["SANITY_DATASET"] ?? "production";
-var apiVersion5 = "2024-10-01";
-function getWriteClient2() {
-  if (!projectId5) return null;
-  return createClient5({
-    projectId: projectId5,
-    dataset: dataset5,
-    apiVersion: apiVersion5,
+import { createClient as createClient8 } from "@sanity/client";
+var projectId8 = process.env["SANITY_PROJECT_ID"];
+var dataset8 = process.env["SANITY_DATASET"] ?? "production";
+var apiVersion8 = "2024-10-01";
+function getWriteClient3() {
+  if (!projectId8) return null;
+  return createClient8({
+    projectId: projectId8,
+    dataset: dataset8,
+    apiVersion: apiVersion8,
     useCdn: false,
     token: process.env["SANITY_API_TOKEN"],
     perspective: "raw"
@@ -11975,10 +17122,10 @@ function jsonResult(value) {
   return textResult(JSON.stringify(value, null, 2));
 }
 async function resolveKeywordId(idOrTerm) {
-  const client2 = getWriteClient2();
-  if (!client2) return null;
+  const client5 = getWriteClient3();
+  if (!client5) return null;
   if (idOrTerm.startsWith("seoKeyword.")) return idOrTerm;
-  const row = await client2.fetch(
+  const row = await client5.fetch(
     `*[_type == "seoKeyword" && lower(term) == lower($term)][0]{ _id }`,
     { term: idOrTerm }
   );
@@ -12005,8 +17152,8 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client2 = getWriteClient2();
-      if (!client2) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const status = args.status ?? "pending";
       const limit = args.limit ?? 50;
       const offset = args.offset ?? 0;
@@ -12046,8 +17193,8 @@ function buildMcpServer() {
         status, flagged, flagReason,
         "cluster": cluster->{ "slug": slug.current, title, pillarTerm }
       }`;
-      const rows = await client2.fetch(groq, params);
-      const total = await client2.fetch(`count(*[${filters.join(" && ")}])`, params);
+      const rows = await client5.fetch(groq, params);
+      const total = await client5.fetch(`count(*[${filters.join(" && ")}])`, params);
       return jsonResult({ total, returned: Array.isArray(rows) ? rows.length : 0, offset, limit, keywords: rows });
     }
   );
@@ -12062,13 +17209,13 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client2 = getWriteClient2();
-      if (!client2) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
       const patch = { status: "approved", flagged: false };
       if (args.reason) patch.notes = args.reason;
-      await client2.patch(id).set(patch).commit();
+      await client5.patch(id).set(patch).commit();
       return textResult(`\u2713 approved (unflagged) \xB7 ${id}`);
     }
   );
@@ -12083,13 +17230,13 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client2 = getWriteClient2();
-      if (!client2) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
       const patch = { status: "rejected" };
       if (args.reason) patch.notes = args.reason;
-      await client2.patch(id).set(patch).commit();
+      await client5.patch(id).set(patch).commit();
       return textResult(`\u2717 rejected \xB7 ${id}`);
     }
   );
@@ -12104,11 +17251,11 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client2 = getWriteClient2();
-      if (!client2) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
-      await client2.patch(id).set({ flagged: true, flagReason: args.reason }).commit();
+      await client5.patch(id).set({ flagged: true, flagReason: args.reason }).commit();
       return textResult(`\u2691 flagged \xB7 ${id} \xB7 ${args.reason}`);
     }
   );
@@ -12123,13 +17270,13 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client2 = getWriteClient2();
-      if (!client2) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
       const patch = { flagged: false };
       patch.flagReason = args.reason ?? null;
-      await client2.patch(id).set(patch).commit();
+      await client5.patch(id).set(patch).commit();
       return textResult(`\u2713 unflagged \xB7 ${id}`);
     }
   );
@@ -12147,8 +17294,8 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client2 = getWriteClient2();
-      if (!client2) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const results = [];
       for (const u of args.updates) {
         try {
@@ -12160,7 +17307,7 @@ function buildMcpServer() {
           const patch = { status: u.status };
           if (u.status === "approved") patch.flagged = false;
           if (u.reason) patch.notes = u.reason;
-          await client2.patch(id).set(patch).commit();
+          await client5.patch(id).set(patch).commit();
           results.push({ idOrTerm: u.idOrTerm, status: u.status, resolvedId: id, ok: true });
         } catch (err) {
           results.push({
@@ -12193,9 +17340,9 @@ function buildMcpServer() {
       inputSchema: {}
     },
     async () => {
-      const client2 = getWriteClient2();
-      if (!client2) return textResult("Sanity not configured.");
-      const stats = await client2.fetch(`{
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
+      const stats = await client5.fetch(`{
         "total":    count(*[_type == "seoKeyword"]),
         "approved": count(*[_type == "seoKeyword" && status == "approved"]),
         "pending":  count(*[_type == "seoKeyword" && status == "pending"]),
@@ -12250,7 +17397,7 @@ function safeBearerCheck(req) {
   if (typeof auth !== "string" || !auth.startsWith("Bearer ")) return false;
   const provided = auth.slice("Bearer ".length).trim();
   if (provided.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+  return timingSafeEqual2(Buffer.from(provided), Buffer.from(expected));
 }
 function createMcpRoutes() {
   const router = Router3();
