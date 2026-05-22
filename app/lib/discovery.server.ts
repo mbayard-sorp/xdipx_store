@@ -48,7 +48,7 @@ import {
 // v2: tag values normalized (Title-Case canonical form) before indexing.
 const INDEX_VERSION = 'v6'
 const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
-const INDEX_TTL_SECONDS = 60 * 60 // 1h
+const INDEX_TTL_SECONDS = 60 * 60 * 24 // 24h — matches vocab TTL; bust explicitly via invalidateDiscoveryIndex() on tag/catalog changes
 
 /**
  * Build-lock to avoid thundering-herd on cold-start traffic spikes.

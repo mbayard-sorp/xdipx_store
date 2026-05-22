@@ -7,14 +7,42 @@
 
 let _kv: Awaited<ReturnType<typeof import('@vercel/kv').createClient>> | null = null
 
+/**
+ * Resolve KV credentials from env. Prod (Vercel marketplace integration)
+ * injects the unprefixed `KV_REST_API_URL` / `KV_REST_API_TOKEN`; a
+ * `vercel env pull` of a named store, by contrast, writes them under the
+ * store-name prefix (e.g. `xdipx_splash_KV_REST_API_URL`). Accept either so
+ * local dev and prod read the same store instead of local silently dropping
+ * to the in-memory fallback. Prefer the unprefixed pair; otherwise take the
+ * first matching prefixed pair.
+ */
+function resolveKvCreds(): { url: string; token: string } | null {
+  const env = process.env
+  // Explicit local opt-out. Set `KV_DISABLE=1` in `.env.local` to force the
+  // in-memory fallback even when KV creds are present, so dev keeps an
+  // isolated cache that rebuilds from live Shopify on every restart and never
+  // reads or writes the shared prod KV. Intentional, unlike the old silent
+  // fallback that only triggered because the var name didn't match.
+  if (env['KV_DISABLE'] === '1' || env['KV_DISABLE'] === 'true') return null
+  if (env['KV_REST_API_URL'] && env['KV_REST_API_TOKEN']) {
+    return { url: env['KV_REST_API_URL'], token: env['KV_REST_API_TOKEN'] }
+  }
+  for (const key of Object.keys(env)) {
+    if (!key.endsWith('_KV_REST_API_URL')) continue
+    const prefix = key.slice(0, -'_KV_REST_API_URL'.length)
+    const url = env[key]
+    const token = env[`${prefix}_KV_REST_API_TOKEN`]
+    if (url && token) return { url, token }
+  }
+  return null
+}
+
 async function getKV() {
   if (_kv) return _kv
-  if (!process.env['KV_REST_API_URL'] || !process.env['KV_REST_API_TOKEN']) return null
+  const creds = resolveKvCreds()
+  if (!creds) return null
   const { createClient } = await import('@vercel/kv')
-  _kv = createClient({
-    url:   process.env['KV_REST_API_URL']!,
-    token: process.env['KV_REST_API_TOKEN']!,
-  })
+  _kv = createClient(creds)
   return _kv
 }
 
