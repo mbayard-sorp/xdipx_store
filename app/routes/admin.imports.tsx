@@ -819,6 +819,14 @@ function LifecycleSection({
 
 export default function AdminImportsPage() {
   const data = useLoaderData<typeof loader>()
+  const [brandFilter, setBrandFilter] = useState('')
+
+  const pendingBrands = Array.from(
+    new Set(data.pending.map(r => r.brand).filter((b): b is string => !!b)),
+  ).sort((a, b) => a.localeCompare(b))
+
+  const visiblePending =
+    brandFilter === '' ? data.pending : data.pending.filter(r => r.brand === brandFilter)
 
   return (
     <div className="space-y-6">
@@ -858,15 +866,33 @@ export default function AdminImportsPage() {
 
       {/* Pending candidates */}
       <section className="bg-white rounded-2xl border border-line overflow-hidden">
-        <div className="px-5 py-4 border-b border-line flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-line flex flex-wrap items-center justify-between gap-3">
           <h2
             className="text-base font-semibold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            Pending Review ({data.counts.pending})
+            Pending Review ({brandFilter === '' ? data.counts.pending : visiblePending.length}
+            {brandFilter === '' ? '' : ` of ${data.counts.pending}`})
           </h2>
+          {pendingBrands.length > 1 && (
+            <label className="flex items-center gap-2 text-xs text-muted">
+              Brand
+              <select
+                value={brandFilter}
+                onChange={e => setBrandFilter(e.target.value)}
+                className="text-xs text-ink border border-line rounded-lg px-2 py-1.5 bg-cream focus:outline-none focus:ring-2 focus:ring-coral/40"
+              >
+                <option value="">All brands ({data.counts.pending})</option>
+                {pendingBrands.map(b => (
+                  <option key={b} value={b}>
+                    {b} ({data.pending.filter(r => r.brand === b).length})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
-        <CandidatesTable rows={data.pending} showActions={true} />
+        <CandidatesTable rows={visiblePending} showActions={true} />
       </section>
 
       {/* Watching */}
