@@ -40,3 +40,23 @@ export function normalizeTagList(input: readonly string[] | null | undefined): s
   }
   return Array.from(seen)
 }
+
+// Operational tags carried on Shopify products that are NOT editorial
+// sub-category labels. They drive storefront/search queries and the deal
+// lifecycle, and are intentionally excluded from the Sanity productPage `tags`
+// view (see studio/schemas/productPage.js). Used both at write time (merge in
+// pushProductToShopify) and at sync time (sync-products-to-sanity.ts).
+const OPERATIONAL_TAG_PREFIXES = ['cat:', 'brand:', 'price:', 'nalpac-sku-', 'deal-status-']
+const OPERATIONAL_TAG_EXACT = new Set(['for-him', 'for-her', 'for-couples'])
+
+export function isOperationalTag(tag: string): boolean {
+  const t = tag.trim().toLowerCase()
+  if (OPERATIONAL_TAG_EXACT.has(t)) return true
+  return OPERATIONAL_TAG_PREFIXES.some(p => t.startsWith(p))
+}
+
+/** Keep only editorial sub-category labels, dropping operational tags. */
+export function editorialTagsOnly(input: readonly string[] | null | undefined): string[] {
+  if (!input) return []
+  return input.filter(t => t.trim() !== '' && !isOperationalTag(t))
+}

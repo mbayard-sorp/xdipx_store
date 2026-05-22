@@ -15,6 +15,11 @@ import type { NalpacPriceSnapshot } from './nalpac-feeds.server'
 
 // ─── Exported strip-list constants ────────────────────────────────────────────
 
+/** Placeholder category assigned when no Sub-Category can be inferred for a
+ *  master. Never a real editorial label, so it must be filtered before tags are
+ *  written to Shopify or Sanity. */
+export const UNCATEGORIZED_SENTINEL = '(uncategorized)'
+
 /** Ounce / mL / gram packaging strings removed from titles before grouping. */
 export const VOLUME_PACKAGING_PATTERN =
   /\b(\d+(?:\.\d+)?\s*(?:fl\s*oz|oz|ml|gm|gram(?:s)?)|(?:\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s*(?:oz|ml)))\b|\b(?:bottle|tube|pump|pillow\s*pack|sachet|packet|jar|can)\b/gi
@@ -371,7 +376,7 @@ export function collapseMasters(
     const marginMapPct  = medMap  > 0 ? (medMap  - medWholesale) / medMap   : 0
 
     // Most common Sub-Category (simplified §2 inference — DEFER co-occurrence)
-    let category = '(uncategorized)'
+    let category = UNCATEGORIZED_SENTINEL
     let maxCount = 0
     for (const [cat, count] of subCatCount) {
       if (count > maxCount) { maxCount = count; category = cat }
