@@ -94,12 +94,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     )
   }
 
+  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0
+
+  // Empty state only: pass a 60s time-bucket seed so the no-selection rails
+  // reshuffle each edge-cache window, matching the SSR home page. Once chips
+  // are selected, relevance ordering wins and the seed is ignored downstream.
+  const railSeed = hasAny ? undefined : Math.floor(Date.now() / 60_000)
+
   const { rails, total, available } = await getDiscoveryRails(state, {
     perRail:   variant === 'b' ? 4 : 12,
     dropEmpty: variant === 'b',
+    ...(railSeed !== undefined ? { seed: railSeed } : {}),
   })
-
-  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0
 
   return Response.json(
     { rails, total, hasAny, variant, available },

@@ -87,8 +87,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { variant } = resolveHomeVariant(request, homeConfig?.activeVariant ?? null)
 
   if (variant === 'a') {
+    // Reshuffle the empty-state rails on each 60s edge-cache revalidation so
+    // the home page doesn't always lead with the same products. The homepage
+    // HTML is edge-cached (and shared across anon visitors), so a time bucket
+    // — not a per-visitor cookie — is what actually varies the cached output.
+    const railSeed = Math.floor(Date.now() / 60_000)
     const [{ rails, total, available }, vocab] = await Promise.all([
-      getDiscoveryRails(EMPTY_STATE, { perRail: 12 }),
+      getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
       getDiscoveryVocab(),
     ])
     return {

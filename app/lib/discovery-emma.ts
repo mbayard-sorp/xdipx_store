@@ -97,24 +97,57 @@ export function availableToArrays(a: ChipAvailability): ChipAvailabilityArrays {
   }
 }
 
+/** Seeded PRNG (mulberry32) — deterministic for a given numeric seed. */
+function mulberry32(seed: number): () => number {
+  let t = seed >>> 0
+  return () => {
+    t = (t + 0x6d2b79f5) >>> 0
+    let r = t
+    r = Math.imul(r ^ (r >>> 15), r | 1)
+    r ^= r + Math.imul(r ^ (r >>> 7), r | 61)
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** In-place Fisher-Yates shuffle driven by a seeded PRNG. */
+function seededShuffle<T>(arr: T[], seed: number): void {
+  const rand = mulberry32(seed)
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1))
+    const tmp = arr[i]!
+    arr[i] = arr[j]!
+    arr[j] = tmp
+  }
+}
+
 export interface RankOptions {
   /** Hard cap of items per rail. Variant A uses 4; variant B uses 4 for top, 3 for rest. */
   perRail?: number
   /** Skip empty categories. Variant A keeps them (renders empty state); B drops them. */
   dropEmpty?: boolean
+  /**
+   * Per-visitor shuffle seed. When set AND there are no chip selections, each
+   * rail's products are shuffled deterministically from this seed instead of
+   * left in index order — so the empty-state home page doesn't always lead
+   * with the same products. Ignored once any chip is selected (relevance order
+   * wins). Omitting it preserves stable index order (used by tests / callers
+   * that want determinism).
+   */
+  seed?: number
 }
 
 /**
  * Bucket products by top-level category, score each, sort within rails by
  * score desc, then order rails by aggregate score desc. With no selections,
- * categories stay in canonical order (Pleasure / Play / Body / Wear).
+ * categories stay in canonical order (Pleasure / Play / Body / Wear) and, when
+ * a `seed` is supplied, products within each rail are shuffled per-visitor.
  */
 export function rankRails(
   products: DiscoveryProduct[],
   state: DiscoveryState,
   opts: RankOptions = {},
 ): Rail[] {
-  const { perRail = 4, dropEmpty = false } = opts
+  const { perRail = 4, dropEmpty = false, seed } = opts
   const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0
   const filtered = products.filter(p => p.price <= state.budget)
 
@@ -131,8 +164,16 @@ export function rankRails(
     aggScore[p.category] += score
   }
 
-  for (const cat of CATEGORIES) {
-    buckets[cat].sort((a, b) => b.score - a.score)
+  for (let ci = 0; ci < CATEGORIES.length; ci++) {
+    const cat = CATEGORIES[ci]!
+    if (!hasAny && seed !== undefined) {
+      // Empty state: scores all tie at 0, so a plain sort leaves index order
+      // (identical for every visitor). Shuffle per rail with a derived seed so
+      // each category reshuffles independently.
+      seededShuffle(buckets[cat], (seed ^ ((ci + 1) * 0x9e3779b1)) >>> 0)
+    } else {
+      buckets[cat].sort((a, b) => b.score - a.score)
+    }
   }
 
   const order: Category[] = [...CATEGORIES]
