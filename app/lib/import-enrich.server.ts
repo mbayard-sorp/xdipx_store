@@ -41,7 +41,20 @@ import {
 } from '~/lib/shopify.server'
 import { upsertProductPage } from '~/lib/sanity.server'
 import { getPipelineSetting, deriveSection } from '~/lib/feed-processor.server'
+import { IVR_EXPERIENCE_LEVELS } from '~/lib/claude.server'
 import type { ProductWrites } from '~/lib/emma-orchestrator.server'
+
+const VALID_IVR_EXPERIENCE = new Set<string>(IVR_EXPERIENCE_LEVELS as readonly string[])
+
+/**
+ * The batch enricher sometimes emits ivrExperience as a bare string (e.g. "any")
+ * rather than the schema-required array of enum values. Coerce to an array and
+ * drop anything outside the allowed set so Sanity does not get an invalid value.
+ */
+function normalizeIvrExperience(raw: unknown): string[] {
+  const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw]
+  return arr.filter((v): v is string => typeof v === 'string' && VALID_IVR_EXPERIENCE.has(v))
+}
 
 const DEFAULT_BATCH_CAP = 10
 
@@ -167,7 +180,8 @@ async function applyFullEnrichmentWrites(numericProductId: string, writes: Produ
     if (sSpecs?.length)                     upsertParams.specifications    = sSpecs
     if (sCare?.length)                      upsertParams.careInstructions  = sCare
     if (sBox?.length)                       upsertParams.boxContents       = sBox
-    if (writes.ivrExperience)               upsertParams.ivrExperience     = writes.ivrExperience
+    const ivrExperience = normalizeIvrExperience(writes.ivrExperience)
+    if (ivrExperience.length)               upsertParams.ivrExperience     = ivrExperience
     if (writes.ivrUseCase?.length)          upsertParams.ivrUseCase        = writes.ivrUseCase
     if (writes.ivrFeatures?.length)         upsertParams.ivrFeatures       = writes.ivrFeatures
     if (writes.productFaqs?.length)         upsertParams.productFaqs       = writes.productFaqs
