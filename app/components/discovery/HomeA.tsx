@@ -1,12 +1,10 @@
 /**
  * Variant A "The Compass" home page composition.
  *
- * Layout:
- *   DailyDealStrip (full width)
+ * Layout (single column):
  *   WelcomeBackBanner (full width)
- *   Grid:
- *     Left col: H1 + ChipGroups + BudgetSlider + Rails
- *     Right col (>= md): EmmaSidekick (sticky)
+ *   H1 + EmmaHeroIntro (avatar + combined message + Ask Emma)
+ *   ChipGroups + BudgetSlider + Rails
  *
  * Uses useFetcher to POST DiscoveryState to /api/discovery and swap rails
  * without a full navigation. Falls back to SSR rails on first render.
@@ -19,20 +17,17 @@ import { useFetcher } from 'react-router'
 import { trackHomeVariantView } from '~/lib/analytics.client'
 import type { Rail as RailType } from '~/types/discovery'
 import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
-import { EMMA_LINES } from '~/lib/discovery-emma'
 import { DiscoveryProvider, useDiscovery } from '~/stores/discovery'
 import { ChipGroup } from './ChipGroup'
 import { BudgetSlider } from './BudgetSlider'
 import { Rail } from './Rail'
-import { EmmaSidekick } from './EmmaSidekick'
-import { DailyDealStrip } from './DailyDealStrip'
+import { EmmaHeroIntro } from './EmmaHeroIntro'
 import { WelcomeBackBanner } from './WelcomeBackBanner'
 import { DEFAULT_BUDGET } from '~/types/discovery'
 
 interface HomeAProps {
   rails: RailType[]
   total: number
-  deal: { title: string; handle: string } | null
   welcomeBackEnabled: boolean
   /** Chip vocabularies sourced from Shopify metafields (24h cached). */
   moods:     string[]
@@ -47,14 +42,13 @@ interface HomeAProps {
 interface InnerProps {
   initialRails: RailType[]
   initialAvailable: ChipAvailabilityArrays
-  deal: { title: string; handle: string } | null
   welcomeBackEnabled: boolean
   moods:     string[]
   audiences: string[]
   matters:   string[]
 }
 
-function HomeAInner({ initialRails, initialAvailable, deal, welcomeBackEnabled, moods, audiences, matters: mattersVocab }: InnerProps) {
+function HomeAInner({ initialRails, initialAvailable, welcomeBackEnabled, moods, audiences, matters: mattersVocab }: InnerProps) {
   const { state, toggleMood, toggleAudience, toggleMatters, setBudget, clearAll, hasPriorSession } =
     useDiscovery()
 
@@ -94,14 +88,11 @@ function HomeAInner({ initialRails, initialAvailable, deal, welcomeBackEnabled, 
 
   return (
     <>
-      <DailyDealStrip deal={deal} />
       <WelcomeBackBanner welcomeBackEnabled={welcomeBackEnabled} />
 
       <div className="max-w-[1320px] mx-auto px-6 md:px-10 py-8 md:py-14">
-        {/* Hero grid: left = headline + filters, right = sticky Emma (340px). */}
-        <div className="flex gap-8 md:gap-14 items-start">
-          {/* ── Left column ─────────────────────────────────────────────── */}
-          <div className="flex-1 min-w-0">
+        {/* Single column — Emma now lives inline in the hero, no right sidebar. */}
+        <div className="min-w-0">
 
             {/* Hero headline — Style Guide Nº 01 §03: "Find you in a product."
                 Mono "Discovery, Vol. I" kicker above; H1 wraps "Find you in /
@@ -141,12 +132,9 @@ function HomeAInner({ initialRails, initialAvailable, deal, welcomeBackEnabled, 
                 <br />
                 a product.
               </h1>
-              <p
-                className="text-base text-ink-2 leading-relaxed max-w-[460px]"
-                style={{ fontFamily: 'var(--font-body)' }}
-              >
-                {EMMA_LINES.heroLede}
-              </p>
+              {/* Emma's presence lives here now (avatar + combined greeting/
+                  lede + Ask Emma), replacing the old right-side sidebar. */}
+              <EmmaHeroIntro />
             </div>
 
             {/* Chip groups — each gets a rich header row per Style Guide §06:
@@ -222,6 +210,7 @@ function HomeAInner({ initialRails, initialAvailable, deal, welcomeBackEnabled, 
                 </p>
                 <div className="flex-1">
                   <BudgetSlider
+                    compact
                     value={state.budget === DEFAULT_BUDGET ? null : state.budget}
                     onChange={v => setBudget(v ?? DEFAULT_BUDGET)}
                   />
@@ -268,10 +257,6 @@ function HomeAInner({ initialRails, initialAvailable, deal, welcomeBackEnabled, 
                 ))}
               </div>
             </div>
-          </div>
-
-          {/* ── Right column: Emma sidekick (desktop only) ───────────────── */}
-          <EmmaSidekick />
         </div>
       </div>
     </>
@@ -319,13 +304,12 @@ function FilterBlock({ num, label, hint, children }: FilterBlockProps) {
 
 /* ── Public export — wraps with DiscoveryProvider ───────────────────────── */
 
-export function HomeA({ rails, deal, welcomeBackEnabled, moods, audiences, matters, available }: HomeAProps) {
+export function HomeA({ rails, welcomeBackEnabled, moods, audiences, matters, available }: HomeAProps) {
   return (
     <DiscoveryProvider>
       <HomeAInner
         initialRails={rails}
         initialAvailable={available}
-        deal={deal}
         welcomeBackEnabled={welcomeBackEnabled}
         moods={moods}
         audiences={audiences}

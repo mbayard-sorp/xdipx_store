@@ -87,20 +87,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { variant } = resolveHomeVariant(request, homeConfig?.activeVariant ?? null)
 
   if (variant === 'a') {
-    const [dbDeal, { rails, total, available }, vocab] = await Promise.all([
-      getLiveDealRow(),
+    const [{ rails, total, available }, vocab] = await Promise.all([
       getDiscoveryRails(EMPTY_STATE, { perRail: 12 }),
       getDiscoveryVocab(),
     ])
-    const deal = dbDeal?.shopifyProductId
-      ? await getDealByShopifyId(dbDeal.shopifyProductId).catch(() => null)
-      : null
-    const stripDeal = deal ? { title: deal.seoTitle, handle: deal.handle } : null
     return {
       variant: 'a' as const,
       rails,
       total,
-      deal: stripDeal,
       welcomeBackEnabled: homeConfig?.welcomeBackEnabled ?? true,
       moods:     vocab.moods,
       audiences: vocab.audiences,
@@ -325,7 +319,6 @@ export default function Homepage() {
       <HomeA
         rails={loaderData.rails}
         total={loaderData.total}
-        deal={loaderData.deal}
         welcomeBackEnabled={loaderData.welcomeBackEnabled}
         moods={loaderData.moods}
         audiences={loaderData.audiences}

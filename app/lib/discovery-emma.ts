@@ -267,6 +267,9 @@ export const EMMA_LINES = {
       Sits under the H1 on Variant A. No em-dashes (project voice rule). */
   heroLede:    "Skip color, size, and spec sheets. Start with what you're chasing. A feeling, a moment, a person. I'll shape the catalog around you.",
   intro:       "Hi, I'm Emma. Tap anything that calls to you. No wrong answers, and I'll shift what you see as you go.",
+  /** Combined greeting + lede shown beside Emma's avatar in the hero (Variant
+      A). Merges intro + heroLede into one first-person message. No em-dashes. */
+  heroIntro:   "Hi, I'm Emma. Skip color, size, and spec sheets and start with what you're chasing. A feeling, a moment, a person. Tap anything that calls to you, no wrong answers, and I'll shape the catalog around you as you go.",
   moodOnly:    "{mood}. Good start. Is this for you, the two of you, or someone else?",
   audOnly:     "For {audience}. Noted. What kind of feeling are you chasing?",
   mattersOnly: "{matters} matters. Good to know. What mood are you in?",

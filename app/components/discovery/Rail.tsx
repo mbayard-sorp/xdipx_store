@@ -52,6 +52,12 @@ export function Rail({ rail, state = EMPTY_STATE, cards = 4 }: RailProps) {
   const shown = rail.items.length + extra.length
   const canLoadMore = shown < rail.total
   const loading = fetcher.state !== 'idle'
+  const hasItems = rail.items.length > 0
+
+  // Mobile horizontal lazy-load: observe a sentinel at the end of the scroll
+  // track and fetch the next page as it nears the right edge.
+  const mobileTrackRef = useRef<HTMLDivElement>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
 
   // Merge fetcher payloads into `extra` exactly once per response, keyed by
   // the returned offset so re-renders don't re-append.
@@ -79,6 +85,31 @@ export function Rail({ rail, state = EMPTY_STATE, cards = 4 }: RailProps) {
     params.set('limit', String(RAIL_PAGE))
     fetcher.load(`/api/discovery?${params.toString()}`)
   }
+
+  // Latest-closure trampoline so the observer never needs re-creating per
+  // render. Guards keep us from stacking requests or paging past the end.
+  const autoLoadRef = useRef<() => void>(() => {})
+  autoLoadRef.current = () => {
+    if (canLoadMore && fetcher.state === 'idle') loadMore()
+  }
+
+  // Attach an IntersectionObserver to the mobile scroll track. Re-run only
+  // when the track appears/disappears (hasItems); `extra` growth keeps the
+  // same observer + sentinel node.
+  useEffect(() => {
+    const root = mobileTrackRef.current
+    const target = sentinelRef.current
+    if (!root || !target || typeof IntersectionObserver === 'undefined') return
+    const io = new IntersectionObserver(
+      entries => {
+        for (const e of entries) if (e.isIntersecting) autoLoadRef.current()
+      },
+      // Prefetch ~240px before the sentinel reaches the right edge.
+      { root, rootMargin: '0px 240px 0px 0px', threshold: 0 },
+    )
+    io.observe(target)
+    return () => io.disconnect()
+  }, [hasItems])
 
   return (
     <section aria-label={listName}>
@@ -124,8 +155,10 @@ export function Rail({ rail, state = EMPTY_STATE, cards = 4 }: RailProps) {
         </div>
       ) : rail.items.length > 0 ? (
         <>
-          {/* Mobile: snap scroll — also the relaxed path when items > 0 */}
+          {/* Mobile: snap scroll — also the relaxed path when items > 0.
+              Lazy-loads more via the end sentinel + IntersectionObserver. */}
           <div
+            ref={mobileTrackRef}
             className={`
               md:hidden
               flex gap-3 overflow-x-auto snap-x snap-mandatory
@@ -144,6 +177,19 @@ export function Rail({ rail, state = EMPTY_STATE, cards = 4 }: RailProps) {
                 />
               </div>
             ))}
+            {/* End sentinel — triggers the next page as it nears the edge.
+                Only present while more remain, so reaching the true end stops. */}
+            {canLoadMore && (
+              <div
+                ref={sentinelRef}
+                aria-hidden="true"
+                className="snap-none flex-none w-12 flex items-center justify-center self-stretch"
+              >
+                <span
+                  className={`block w-2 h-2 rounded-full bg-ink-4 ${loading ? 'animate-pulse' : 'opacity-40'}`}
+                />
+              </div>
+            )}
           </div>
 
           {/* Desktop: grid */}
@@ -164,10 +210,10 @@ export function Rail({ rail, state = EMPTY_STATE, cards = 4 }: RailProps) {
             ))}
           </div>
 
-          {/* View more — inline pagination. Loads the next page of THIS
-              rail without refetching siblings. Hides when nothing left. */}
+          {/* View more — desktop grid only; mobile lazy-loads on scroll.
+              Loads the next page of THIS rail without refetching siblings. */}
           {canLoadMore && (
-            <div className="mt-8 flex justify-center">
+            <div className="mt-8 hidden md:flex justify-center">
               <button
                 type="button"
                 onClick={loadMore}
