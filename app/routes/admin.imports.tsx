@@ -22,6 +22,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const [
     pending,
     watching,
+    imported,
     recentRuns,
     runDaysRaw,
     enabledRaw,
@@ -30,6 +31,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ] = await Promise.all([
     getImportCandidatesByStatus(['pending']),
     getImportCandidatesByStatus(['watching']),
+    getImportCandidatesByStatus(['imported'], 100),
     getRecentImportRuns(7),
     getPipelineSetting('import_monitor_run_days'),
     getPipelineSetting('import_monitor_enabled'),
@@ -47,9 +49,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const latest = recentRuns[0] ?? null
 
+  const live = imported.filter(r => r.publishedAt != null).length
+  const enrichedNotLive = imported.filter(r => r.enrichedAt != null && r.publishedAt == null).length
+  const awaitingEnrich = imported.length - live - enrichedNotLive
+
   return {
     pending,
     watching,
+    imported,
     recentRuns,
     settings: {
       runDays,
@@ -60,6 +67,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     counts: {
       pending: pending.length,
       watching: watching.length,
+      imported: imported.length,
+      awaitingEnrich,
+      enrichedNotLive,
+      live,
       lastRunFound: latest?.candidatesFound ?? 0,
       lastRunImported: latest?.autoImported ?? 0,
     },
@@ -128,6 +139,18 @@ function fmtDate(iso: string | null | undefined): string {
   } catch {
     return iso
   }
+}
+
+/**
+ * Post-import lifecycle stage for an imported candidate, derived from the
+ * enrich/publish timestamps (migration 040). Mirrors the cron tick order:
+ * imported -> enriching -> enriched -> live.
+ */
+function lifecycleStage(row: ImportCandidateRow): { label: string; cls: string } {
+  if (row.publishedAt != null) return { label: 'Live', cls: 'bg-green-100 text-green-700' }
+  if (row.enrichedAt != null) return { label: 'Enriched', cls: 'bg-blue-100 text-blue-700' }
+  if (row.enrichBatchId != null) return { label: 'Enriching', cls: 'bg-plum-soft text-plum' }
+  return { label: 'Queued', cls: 'bg-line text-muted' }
 }
 
 const TIER_COLORS: Record<string, string> = {
@@ -693,6 +716,102 @@ function RecentRunsSection({ runs }: { runs: ImportMonitorRunRow[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// Imported lifecycle table (read-only — tracks enrich -> publish stages)
+// ---------------------------------------------------------------------------
+
+function LifecycleSection({
+  rows,
+  counts,
+}: {
+  rows: ImportCandidateRow[]
+  counts: LoaderData['counts']
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <section className="bg-white rounded-2xl border border-line overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between px-5 py-4 border-b border-line hover:bg-cream/40 transition-colors"
+      >
+        <div className="flex items-center gap-3 flex-wrap">
+          <h2
+            className="text-base font-semibold text-ink"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Imported ({counts.imported})
+          </h2>
+          <span className="text-xs text-muted">
+            {counts.awaitingEnrich} queued · {counts.enrichedNotLive} enriched · {counts.live} live
+          </span>
+        </div>
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`text-muted transition-transform shrink-0 ${expanded ? 'rotate-180' : ''}`}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {expanded &&
+        (rows.length === 0 ? (
+          <p className="text-sm text-muted px-5 py-8 text-center">No imported products yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line text-left">
+                  <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Title</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Tier</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Stage</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide hidden sm:table-cell">Enriched</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide hidden sm:table-cell">Published</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {rows.map(row => {
+                  const stage = lifecycleStage(row)
+                  return (
+                    <tr key={row.id} className="hover:bg-cream/50 transition-colors">
+                      <td className="px-4 py-3 max-w-[220px]">
+                        <span className="block truncate font-medium text-ink text-xs" title={row.productTitle ?? ''}>
+                          {row.productTitle ?? '—'}
+                        </span>
+                        <span className="block text-[10px] text-muted font-mono">{row.sku}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <TierBadge tier={row.tier} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${stage.cls}`}>
+                          {stage.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted hidden sm:table-cell">
+                        {row.enrichedAt ? fmtDate(row.enrichedAt.toString()) : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted hidden sm:table-cell">
+                        {row.publishedAt ? fmtDate(row.publishedAt.toString()) : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        ))}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -750,6 +869,9 @@ export default function AdminImportsPage() {
 
       {/* Watching */}
       <WatchingSection rows={data.watching} />
+
+      {/* Imported lifecycle */}
+      <LifecycleSection rows={data.imported} counts={data.counts} />
 
       {/* Recent runs */}
       <RecentRunsSection runs={data.recentRuns} />
