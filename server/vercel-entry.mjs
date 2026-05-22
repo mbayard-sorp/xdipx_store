@@ -1165,6 +1165,447 @@ var init_kv_server = __esm({
   }
 });
 
+// app/lib/tag-normalize.ts
+function normalizeTag(input) {
+  let s = input.trim().toLowerCase();
+  for (const p of PREFIXES) {
+    if (s.startsWith(p)) {
+      s = s.slice(p.length);
+      break;
+    }
+  }
+  s = s.replace(/'+/g, "");
+  s = s.replace(/&/g, " and ");
+  s = s.replace(/[^a-z0-9]+/g, "-");
+  s = s.replace(/^-+|-+$/g, "");
+  return s;
+}
+function normalizeTagList(input) {
+  if (!input) return [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of input) {
+    const n = normalizeTag(raw);
+    if (n) seen.add(n);
+  }
+  return Array.from(seen);
+}
+function isOperationalTag(tag) {
+  const t = tag.trim().toLowerCase();
+  if (OPERATIONAL_TAG_EXACT.has(t)) return true;
+  return OPERATIONAL_TAG_PREFIXES.some((p) => t.startsWith(p));
+}
+function editorialTagsOnly(input) {
+  if (!input) return [];
+  return input.filter((t) => t.trim() !== "" && !isOperationalTag(t));
+}
+var PREFIXES, OPERATIONAL_TAG_PREFIXES, OPERATIONAL_TAG_EXACT;
+var init_tag_normalize = __esm({
+  "app/lib/tag-normalize.ts"() {
+    "use strict";
+    PREFIXES = ["cat:", "brand:"];
+    OPERATIONAL_TAG_PREFIXES = ["cat:", "brand:", "price:", "nalpac-sku-", "deal-status-"];
+    OPERATIONAL_TAG_EXACT = /* @__PURE__ */ new Set(["for-him", "for-her", "for-couples"]);
+  }
+});
+
+// app/lib/master-collapse.server.ts
+function isEligible(master) {
+  if (DISPLAY_TESTER_PATTERNS.test(master.category) || DISPLAY_TESTER_PATTERNS.test(master.displayTitle)) {
+    return { ok: false, reason: "display_or_tester" };
+  }
+  if (master.totalQty < QTY_FLOOR) {
+    return { ok: false, reason: "qty_below_20" };
+  }
+  if (!master.sampleImage) {
+    return { ok: false, reason: "no_image" };
+  }
+  if (master.wholesale <= 0 || master.msrp <= 0) {
+    return { ok: false, reason: "missing_pricing" };
+  }
+  return { ok: true };
+}
+function gapScore(master) {
+  const marginPct2 = master.marginMsrpPct * 100;
+  return marginPct2 / 50 * (1 + Math.log(1 + master.variantCount)) * (1 + 0.2 * Math.log(1 + master.totalQty));
+}
+function splitCell(val) {
+  return val.split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+}
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function buildBaseTitle(productTitle, colorCell, sizeCell) {
+  let t = productTitle;
+  t = t.replace(VOLUME_PACKAGING_PATTERN, " ");
+  for (const token of splitCell(colorCell)) {
+    if (!token) continue;
+    const pattern = /\s/.test(token) ? new RegExp(`(?<![a-z0-9])${escapeRegex(token)}(?![a-z0-9])`, "gi") : new RegExp(`\\b${escapeRegex(token)}\\b`, "gi");
+    t = t.replace(pattern, " ");
+  }
+  for (const token of splitCell(sizeCell)) {
+    if (!token) continue;
+    const pattern = /\s/.test(token) ? new RegExp(`(?<![a-z0-9])${escapeRegex(token)}(?![a-z0-9])`, "gi") : new RegExp(`\\b${escapeRegex(token)}\\b`, "gi");
+    t = t.replace(pattern, " ");
+  }
+  for (const sz of [...SIZE_WORD_TOKENS].sort((a, b) => b.length - a.length)) {
+    const pattern = /\s/.test(sz) ? new RegExp(`(?<![a-z0-9])${escapeRegex(sz)}(?![a-z0-9])`, "gi") : new RegExp(`\\b${escapeRegex(sz)}\\b`, "gi");
+    t = t.replace(pattern, " ");
+  }
+  for (const color of COMMON_COLOR_WORDS) {
+    t = t.replace(new RegExp(`\\b${escapeRegex(color)}\\b`, "gi"), " ");
+  }
+  for (const word of STRUCTURAL_RESIDUE_WORDS) {
+    t = t.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, "gi"), " ");
+  }
+  t = t.replace(/\s+/g, " ").trim().replace(/^[-_/.,\s]+|[-_/.,\s]+$/g, "").trim();
+  return t.toLowerCase();
+}
+function median(values) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+function collapseMasters(snapshots) {
+  const buckets = /* @__PURE__ */ new Map();
+  for (const snap of snapshots.values()) {
+    const brand = (snap.vendor ?? "").trim();
+    const title = (snap.productTitle ?? "").trim();
+    if (!brand || !title) continue;
+    const row = snap.raw.mainRow ?? snap.raw.saleRow;
+    const colorCell = row?.["Color"] ?? "";
+    const sizeCell = row?.["Size"] ?? "";
+    const base = buildBaseTitle(title, colorCell, sizeCell);
+    const effectiveBase = base || title.toLowerCase().replace(/\s+/g, " ").trim();
+    const key = `${brand.toLowerCase()}|${effectiveBase}`;
+    if (!buckets.has(key)) buckets.set(key, { snaps: [] });
+    buckets.get(key).snaps.push(snap);
+  }
+  const records = [];
+  for (const [masterKey, { snaps }] of buckets) {
+    const [brandPart] = masterKey.split("|");
+    const baseTitle = masterKey.slice(brandPart.length + 1);
+    let totalQty = 0;
+    let inStockCount = 0;
+    const wholesales = [];
+    const msrps = [];
+    const maps = [];
+    const colors = /* @__PURE__ */ new Set();
+    const sizes = /* @__PURE__ */ new Set();
+    const fluidOzSet = /* @__PURE__ */ new Set();
+    const skus = [];
+    const upcs = [];
+    const subCatCount = /* @__PURE__ */ new Map();
+    let sampleImage = "";
+    let displayTitle = "";
+    let inTop100Feed = false;
+    let inNewFeed = false;
+    let inSaleFeed = false;
+    for (const snap of snaps) {
+      skus.push(snap.sku);
+      const row = snap.raw.mainRow ?? snap.raw.saleRow;
+      const upc = row?.["UPC/barcode"] ?? "";
+      if (upc) upcs.push(upc);
+      if (snap.wholesale > 0) wholesales.push(snap.wholesale);
+      if (snap.msrp > 0) msrps.push(snap.msrp);
+      if (snap.mapPrice != null && snap.mapPrice > 0) maps.push(snap.mapPrice);
+      const qty = snap.qty ?? 0;
+      totalQty += qty;
+      if (qty > 0) inStockCount++;
+      const colorCell = row?.["Color"] ?? "";
+      for (const c of splitCell(colorCell)) {
+        if (c) colors.add(c);
+      }
+      const sizeCell = row?.["Size"] ?? "";
+      for (const s of splitCell(sizeCell)) {
+        if (s) sizes.add(s);
+      }
+      const oz = row?.["Fluid Oz"] ?? "";
+      if (oz.trim()) fluidOzSet.add(oz.trim());
+      const title = snap.productTitle ?? "";
+      if (title.length > displayTitle.length) displayTitle = title;
+      if (!sampleImage) {
+        const img = row?.["Image 1"] ?? "";
+        if (img) sampleImage = img;
+      }
+      const subCat = row?.["Sub-Category"] ?? "";
+      if (subCat) {
+        subCatCount.set(subCat, (subCatCount.get(subCat) ?? 0) + 1);
+      }
+      if (snap.inTop100Feed) inTop100Feed = true;
+      if (snap.inNewFeed) inNewFeed = true;
+      if (snap.inSaleFeed) inSaleFeed = true;
+    }
+    const medWholesale = median(wholesales);
+    const medMsrp = median(msrps);
+    const medMap = median(maps.length > 0 ? maps : [0]);
+    const marginMsrpPct = medMsrp > 0 ? (medMsrp - medWholesale) / medMsrp : 0;
+    const marginMapPct = medMap > 0 ? (medMap - medWholesale) / medMap : 0;
+    let category = UNCATEGORIZED_SENTINEL;
+    let maxCount = 0;
+    for (const [cat, count] of subCatCount) {
+      if (count > maxCount) {
+        maxCount = count;
+        category = cat;
+      }
+    }
+    const brandDisplay = snaps[0]?.vendor ?? brandPart;
+    records.push({
+      masterKey,
+      brand: brandDisplay,
+      displayTitle,
+      baseTitle,
+      category,
+      variantCount: snaps.length,
+      inStockVariants: inStockCount,
+      colors: [...colors],
+      sizes: [...sizes],
+      fluidOz: [...fluidOzSet],
+      totalQty,
+      wholesale: medWholesale,
+      msrp: medMsrp,
+      map: medMap,
+      marginMsrpPct,
+      marginMapPct,
+      profitPerUnit: (medMsrp > 0 ? medMsrp : medMap) - medWholesale,
+      skus,
+      sampleImage,
+      upcs,
+      inTop100Feed,
+      inNewFeed,
+      inSaleFeed,
+      snapshots: snaps
+    });
+  }
+  return records;
+}
+function sizeRank(s) {
+  const idx = SIZE_SORT_ORDER.indexOf(s);
+  return idx === -1 ? SIZE_SORT_ORDER.length : idx;
+}
+function detectAxes(master) {
+  const snaps = master.snapshots;
+  const perSku = snaps.map((snap) => {
+    const row = snap.raw.mainRow ?? snap.raw.saleRow;
+    return {
+      sku: snap.sku,
+      snap,
+      colors: splitCell(row?.["Color"] ?? "").filter((c) => c !== ""),
+      sizes: splitCell(row?.["Size"] ?? "").filter((s) => s !== ""),
+      fluidOz: (row?.["Fluid Oz"] ?? "").trim(),
+      title: snap.productTitle ?? "",
+      upc: row?.["UPC/barcode"] ?? ""
+    };
+  });
+  const primaryColors = perSku.map((s) => s.colors[0] ?? "");
+  const distinctColors = new Set(primaryColors.filter((c) => c !== ""));
+  const hasRealColor = distinctColors.size > 1 && [...distinctColors].some((c) => !UNINFORMATIVE_COLORS.has(c.toLowerCase()));
+  const primarySizes = perSku.map((s) => s.sizes[0] ?? "");
+  const hasSomeSize = primarySizes.some((s) => s !== "");
+  const hasSomeBlank = primarySizes.some((s) => s === "");
+  let effectiveSizes = primarySizes;
+  if (hasSomeSize && hasSomeBlank) {
+    effectiveSizes = primarySizes.map((s) => s === "" ? "Regular" : s);
+  }
+  const distinctSizes = new Set(effectiveSizes.filter((s) => s !== ""));
+  const hasSizeAxis = distinctSizes.size > 1;
+  const distinctFlOz = new Set(perSku.map((s) => s.fluidOz).filter((oz) => oz !== ""));
+  const hasVolumeAxis = distinctFlOz.size > 1;
+  function buildOptionTuple(idx) {
+    const tuple = [];
+    if (hasRealColor) tuple.push(primaryColors[idx] ?? "");
+    if (hasSizeAxis) tuple.push(effectiveSizes[idx] ?? "");
+    if (hasVolumeAxis) tuple.push(perSku[idx]?.fluidOz ?? "");
+    return tuple;
+  }
+  const initialTuples = perSku.map((_, i) => buildOptionTuple(i));
+  const tupleStrings = initialTuples.map((t) => t.join("|"));
+  const hasCollision = tupleStrings.length !== new Set(tupleStrings).size;
+  let usesTwistB = false;
+  let derivedColors = [];
+  if (hasCollision && !hasRealColor) {
+    derivedColors = perSku.map((sv) => {
+      let t = sv.title;
+      const baseWords = master.baseTitle.split(/\s+/);
+      for (const word of baseWords) {
+        if (!word) continue;
+        t = t.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, "gi"), " ");
+      }
+      if (hasSizeAxis) {
+        for (const sz of [...distinctSizes]) {
+          t = t.replace(new RegExp(`\\b${escapeRegex(sz)}\\b`, "gi"), " ");
+        }
+      }
+      if (hasVolumeAxis) {
+        for (const oz of [...distinctFlOz]) {
+          t = t.replace(new RegExp(`\\b${escapeRegex(oz)}\\b`, "gi"), " ");
+        }
+      }
+      t = t.replace(VOLUME_PACKAGING_PATTERN, " ");
+      t = t.replace(/\s+/g, " ").trim().replace(/^[-_/.,\s]+|[-_/.,\s]+$/g, "").trim();
+      return t || "Default";
+    });
+    const distinctDerived = new Set(derivedColors);
+    const coverCount = derivedColors.filter((c) => c !== "Default").length;
+    if (distinctDerived.size >= 2 && coverCount >= Math.floor(perSku.length / 2)) {
+      const newTuples = perSku.map((sv, i) => {
+        const t = [derivedColors[i] ?? "Default"];
+        if (hasSizeAxis) t.push(effectiveSizes[i] ?? "");
+        if (hasVolumeAxis) t.push(sv.fluidOz);
+        return t.join("|");
+      });
+      if (new Set(newTuples).size === perSku.length) {
+        usesTwistB = true;
+      }
+    }
+  }
+  const axes = [];
+  if (hasRealColor || usesTwistB) {
+    const vals = usesTwistB ? derivedColors : perSku.map((s) => s.colors[0] ?? "");
+    const dedupedColors = [...new Set(vals.filter((c) => c !== ""))].sort((a, b) => a.localeCompare(b));
+    axes.push({ name: "Color", values: dedupedColors });
+  }
+  if (hasSizeAxis && axes.length < 2) {
+    const dedupedSizes = [...new Set([...effectiveSizes].filter((s) => s !== ""))].sort((a, b) => sizeRank(a) - sizeRank(b) || a.localeCompare(b));
+    axes.push({ name: "Size", values: dedupedSizes });
+  }
+  if (hasVolumeAxis && axes.length < 2) {
+    const dedupedVols = [.../* @__PURE__ */ new Set([...distinctFlOz])].sort((a, b) => parseFloat(a) - parseFloat(b) || a.localeCompare(b));
+    axes.push({ name: "Volume", values: dedupedVols });
+  }
+  const variantRows = perSku.map((sv, i) => {
+    const optionValues = [];
+    for (const axis of axes) {
+      if (axis.name === "Color") {
+        optionValues.push(
+          usesTwistB ? derivedColors[i] ?? "Default" : sv.colors[0] ?? ""
+        );
+      } else if (axis.name === "Size") {
+        optionValues.push(effectiveSizes[i] ?? "");
+      } else if (axis.name === "Volume") {
+        optionValues.push(sv.fluidOz);
+      }
+    }
+    const wholesale = sv.snap.wholesale;
+    const msrp = sv.snap.msrp;
+    const map = sv.snap.mapPrice ?? 0;
+    const qty = sv.snap.qty ?? 0;
+    const row = sv.snap.raw.mainRow ?? sv.snap.raw.saleRow;
+    const price = map === 0 ? Math.round(Math.max(wholesale * 1.4, msrp * 0.55) * 100) / 100 : map < msrp ? Math.round(map * 100) / 100 : Math.round(msrp * 100) / 100;
+    const images = [];
+    for (let n = 1; n <= 10; n++) {
+      const url = row?.[`Image ${n}`] ?? "";
+      if (url.trim()) images.push(url.trim());
+    }
+    return {
+      sku: sv.sku,
+      optionValues,
+      price,
+      compareAtPrice: msrp,
+      qty,
+      wholesale,
+      images,
+      upc: sv.upc
+    };
+  });
+  return { axes, variantRows };
+}
+function needsReview(master) {
+  return master.variantCount > NEEDS_REVIEW_THRESHOLD;
+}
+var UNCATEGORIZED_SENTINEL, VOLUME_PACKAGING_PATTERN, SIZE_WORD_TOKENS, COMMON_COLOR_WORDS, UNINFORMATIVE_COLORS, STRUCTURAL_RESIDUE_WORDS, SIZE_SORT_ORDER, QTY_FLOOR, DISPLAY_TESTER_PATTERNS, NEEDS_REVIEW_THRESHOLD;
+var init_master_collapse_server = __esm({
+  "app/lib/master-collapse.server.ts"() {
+    "use strict";
+    UNCATEGORIZED_SENTINEL = "(uncategorized)";
+    VOLUME_PACKAGING_PATTERN = /\b(\d+(?:\.\d+)?\s*(?:fl\s*oz|oz|ml|gm|gram(?:s)?)|(?:\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s*(?:oz|ml)))\b|\b(?:bottle|tube|pump|pillow\s*pack|sachet|packet|jar|can)\b/gi;
+    SIZE_WORD_TOKENS = [
+      "XXXS",
+      "XXS",
+      "XS",
+      "Small",
+      "Medium",
+      "Large",
+      "XLarge",
+      "XXLarge",
+      "XXXLarge",
+      "XL",
+      "XXL",
+      "2XL",
+      "3XL",
+      "4XL",
+      "5XL",
+      "OneSize",
+      "One Size"
+    ];
+    COMMON_COLOR_WORDS = [
+      "black",
+      "white",
+      "red",
+      "pink",
+      "purple",
+      "blue",
+      "green",
+      "gold",
+      "silver",
+      "teal",
+      "aqua",
+      "nude",
+      "tan",
+      "clear",
+      "natural",
+      "navy",
+      "orange",
+      "yellow",
+      "brown",
+      "gray",
+      "grey",
+      "magenta",
+      "coral",
+      "burgundy",
+      "rose",
+      "ivory",
+      "lavender",
+      "cream"
+    ];
+    UNINFORMATIVE_COLORS = /* @__PURE__ */ new Set([
+      "multi-color",
+      "multicolor",
+      "multi color",
+      "assorted",
+      "various",
+      "varies"
+    ]);
+    STRUCTURAL_RESIDUE_WORDS = ["size", "style", "color", "assorted"];
+    SIZE_SORT_ORDER = [
+      "XXXS",
+      "XXS",
+      "XS",
+      "S",
+      "S/M",
+      "Regular",
+      "Standard",
+      "M",
+      "M/L",
+      "L",
+      "L/XL",
+      "XL",
+      "XL/2XL",
+      "XXL/2XL",
+      "2XL/3XL",
+      "XXXL/3XL",
+      "3XL/4XL",
+      "4XL",
+      "4XL/5XL",
+      "5XL",
+      "OneSize"
+    ];
+    QTY_FLOOR = parseInt(process.env["NALPAC_QTY_FLOOR"] ?? "20", 10);
+    DISPLAY_TESTER_PATTERNS = /\b(?:display|tester|testers|displays|merchandising|planogram|pos\s*kit)\b/i;
+    NEEDS_REVIEW_THRESHOLD = 30;
+  }
+});
+
 // app/lib/shopify.server.ts
 var shopify_server_exports = {};
 __export(shopify_server_exports, {
@@ -2751,6 +3192,15 @@ async function getWholesaleCostBySKU(sku) {
 }
 async function pushProductToShopify(doc) {
   const gid = `gid://shopify/Product/${doc.shopifyProductId}`;
+  let mergedTags;
+  if (doc.tags !== void 0) {
+    const numericId = doc.shopifyProductId.replace("gid://shopify/Product/", "");
+    const { product } = await shopifyAdmin(`/products/${numericId}.json?fields=tags`);
+    const currentTags = product?.tags ? product.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+    const operational = currentTags.filter(isOperationalTag);
+    const editorial = editorialTagsOnly(doc.tags).filter((t) => t !== UNCATEGORIZED_SENTINEL);
+    mergedTags = Array.from(/* @__PURE__ */ new Set([...operational, ...editorial]));
+  }
   const updateResult = await adminGraphQL(`
     mutation ProductUpdate($input: ProductInput!) {
       productUpdate(input: $input) {
@@ -2762,7 +3212,7 @@ async function pushProductToShopify(doc) {
       id: gid,
       ...doc.title !== void 0 ? { title: doc.title } : {},
       ...doc.vendor !== void 0 ? { vendor: doc.vendor } : {},
-      ...doc.tags !== void 0 ? { tags: doc.tags } : {},
+      ...mergedTags !== void 0 ? { tags: mergedTags } : {},
       ...doc.descriptionHtml !== void 0 ? { descriptionHtml: doc.descriptionHtml } : doc.description !== void 0 ? { descriptionHtml: ptToHtml(doc.description) } : {},
       ...doc.seoTitle || doc.seoDescription ? {
         seo: {
@@ -5100,6 +5550,8 @@ var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
     "use strict";
     init_kv_server();
+    init_tag_normalize();
+    init_master_collapse_server();
     READ_TTL = 60;
     COLLECTION_CURSOR_TTL = 300;
     STOREFRONT_ENDPOINT = `https://${process.env["SHOPIFY_STORE_DOMAIN"]}/api/2024-10/graphql.json`;
@@ -6022,38 +6474,6 @@ var init_pricing_apply_v2_server = __esm({
     TEST_SKU_PREFIX = /^XDX-TEST-/i;
     DRY_RUN_CAP = 5e3;
     DRY_RUN_SAMPLES = 10;
-  }
-});
-
-// app/lib/tag-normalize.ts
-function normalizeTag(input) {
-  let s = input.trim().toLowerCase();
-  for (const p of PREFIXES) {
-    if (s.startsWith(p)) {
-      s = s.slice(p.length);
-      break;
-    }
-  }
-  s = s.replace(/'+/g, "");
-  s = s.replace(/&/g, " and ");
-  s = s.replace(/[^a-z0-9]+/g, "-");
-  s = s.replace(/^-+|-+$/g, "");
-  return s;
-}
-function normalizeTagList(input) {
-  if (!input) return [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const raw of input) {
-    const n = normalizeTag(raw);
-    if (n) seen.add(n);
-  }
-  return Array.from(seen);
-}
-var PREFIXES;
-var init_tag_normalize = __esm({
-  "app/lib/tag-normalize.ts"() {
-    "use strict";
-    PREFIXES = ["cat:", "brand:"];
   }
 });
 
@@ -7229,7 +7649,7 @@ function flagForImagenGeneration(sku) {
 function getSKUsNeedingImagen() {
   return [...SKU_NEEDS_IMAGEN];
 }
-function isEligible(product, recentSkus, blockedBrands) {
+function isEligible2(product, recentSkus, blockedBrands) {
   const qty = parseInt(product["Total qty available"] ?? "0");
   const wholesale = parseFloat(product["Wholesale"] ?? "0");
   const msrp = parseFloat(product["MSRP"] ?? "0");
@@ -7237,7 +7657,7 @@ function isEligible(product, recentSkus, blockedBrands) {
   return qty >= 20 && wholesale > 0 && msrp > 0 && !recentSkus.has(product.SKU) && !brandBlocked;
 }
 function scoreProduct(product, recentSkus, recentCategories, blockedBrands = /* @__PURE__ */ new Set()) {
-  if (!isEligible(product, recentSkus, blockedBrands)) return null;
+  if (!isEligible2(product, recentSkus, blockedBrands)) return null;
   const wholesale = parseFloat(product["Wholesale"]);
   const msrp = parseFloat(product["MSRP"]);
   const map = parseFloat(product["MAP"] ?? "0") || 0;
@@ -14470,6 +14890,9 @@ function inferCategory(categories) {
   if (categories.some((c) => coupleCats.includes(c))) out.push("couples");
   return out.length > 0 ? out : ["for-him", "for-her"];
 }
+function editorialTagsFrom(categories) {
+  return categories.filter((c) => c && c !== UNCATEGORIZED_SENTINEL);
+}
 function computeDealPrice(wholesale, msrp, map) {
   if (map === 0) return Math.round(Math.max(wholesale * 1.4, msrp * 0.55) * 100) / 100;
   if (map < msrp) return Math.round(map * 100) / 100;
@@ -14688,6 +15111,7 @@ async function importProductGroup(group) {
       ...writes.originalTitle !== void 0 ? { originalTitle: writes.originalTitle } : {},
       ...writes.accessoryProductIds !== void 0 ? { accessoryProductIds: writes.accessoryProductIds } : {},
       ...writes.pairingWhy !== void 0 ? { pairingWhy: writes.pairingWhy } : {},
+      tags: editorialTagsFrom(categories),
       category,
       sectionTags: [deriveSection({ productTypeDial: writes.productTypeDial, categories, title: masterRow["Product Title"] })],
       dealStatus: "pending_approval",
@@ -14730,7 +15154,7 @@ async function importProductGroup(group) {
           shopifyProductId: gid,
           title: masterRow["Product Title"],
           vendor: masterRow.Brand,
-          tags: categories,
+          tags: editorialTagsFrom(categories),
           // Mirror sub-categories so Studio editors can filter
           tagline: writes.tagline,
           description,
@@ -14860,6 +15284,7 @@ async function importProductGroupRaw(group) {
     }
     await pushProductToShopify({
       shopifyProductId: numericId,
+      tags: editorialTagsFrom(categories),
       category,
       sectionTags: [deriveSection({ categories, title: masterRow["Product Title"] })],
       dealStatus: "pending_approval",
@@ -14912,7 +15337,7 @@ async function importProductGroupRaw(group) {
           shopifyProductId: gid,
           title: masterRow["Product Title"],
           vendor: masterRow.Brand,
-          tags: categories,
+          tags: editorialTagsFrom(categories),
           description,
           category
         };
@@ -15032,6 +15457,7 @@ async function importNewProduct(input) {
     audienceTags: writes.audienceTags,
     mattersTags: writes.mattersTags,
     ...writes.originalTitle !== void 0 ? { originalTitle: writes.originalTitle } : {},
+    tags: editorialTagsFrom(rawProduct.categories),
     category,
     dealStatus: "pending_approval",
     dealDate: "2099-12-31",
@@ -15065,7 +15491,7 @@ async function importNewProduct(input) {
       shopifyProductId: gid,
       title: rawProduct.title,
       vendor: rawProduct.brand,
-      tags: rawProduct.categories,
+      tags: editorialTagsFrom(rawProduct.categories),
       tagline: writes.tagline,
       description: rawProduct.description,
       seoTitle,
@@ -15111,405 +15537,9 @@ var init_bulk_import_server = __esm({
     init_claude_server();
     init_emma_orchestrator_server();
     init_feed_processor_server();
+    init_master_collapse_server();
     init_shopify_server();
     init_sanity_server();
-  }
-});
-
-// app/lib/master-collapse.server.ts
-function isEligible2(master) {
-  if (DISPLAY_TESTER_PATTERNS.test(master.category) || DISPLAY_TESTER_PATTERNS.test(master.displayTitle)) {
-    return { ok: false, reason: "display_or_tester" };
-  }
-  if (master.totalQty < QTY_FLOOR) {
-    return { ok: false, reason: "qty_below_20" };
-  }
-  if (!master.sampleImage) {
-    return { ok: false, reason: "no_image" };
-  }
-  if (master.wholesale <= 0 || master.msrp <= 0) {
-    return { ok: false, reason: "missing_pricing" };
-  }
-  return { ok: true };
-}
-function gapScore(master) {
-  const marginPct2 = master.marginMsrpPct * 100;
-  return marginPct2 / 50 * (1 + Math.log(1 + master.variantCount)) * (1 + 0.2 * Math.log(1 + master.totalQty));
-}
-function splitCell(val) {
-  return val.split(/[,/]/).map((s) => s.trim()).filter(Boolean);
-}
-function escapeRegex(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function buildBaseTitle(productTitle, colorCell, sizeCell) {
-  let t = productTitle;
-  t = t.replace(VOLUME_PACKAGING_PATTERN, " ");
-  for (const token of splitCell(colorCell)) {
-    if (!token) continue;
-    const pattern = /\s/.test(token) ? new RegExp(`(?<![a-z0-9])${escapeRegex(token)}(?![a-z0-9])`, "gi") : new RegExp(`\\b${escapeRegex(token)}\\b`, "gi");
-    t = t.replace(pattern, " ");
-  }
-  for (const token of splitCell(sizeCell)) {
-    if (!token) continue;
-    const pattern = /\s/.test(token) ? new RegExp(`(?<![a-z0-9])${escapeRegex(token)}(?![a-z0-9])`, "gi") : new RegExp(`\\b${escapeRegex(token)}\\b`, "gi");
-    t = t.replace(pattern, " ");
-  }
-  for (const sz of [...SIZE_WORD_TOKENS].sort((a, b) => b.length - a.length)) {
-    const pattern = /\s/.test(sz) ? new RegExp(`(?<![a-z0-9])${escapeRegex(sz)}(?![a-z0-9])`, "gi") : new RegExp(`\\b${escapeRegex(sz)}\\b`, "gi");
-    t = t.replace(pattern, " ");
-  }
-  for (const color of COMMON_COLOR_WORDS) {
-    t = t.replace(new RegExp(`\\b${escapeRegex(color)}\\b`, "gi"), " ");
-  }
-  for (const word of STRUCTURAL_RESIDUE_WORDS) {
-    t = t.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, "gi"), " ");
-  }
-  t = t.replace(/\s+/g, " ").trim().replace(/^[-_/.,\s]+|[-_/.,\s]+$/g, "").trim();
-  return t.toLowerCase();
-}
-function median(values) {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-function collapseMasters(snapshots) {
-  const buckets = /* @__PURE__ */ new Map();
-  for (const snap of snapshots.values()) {
-    const brand = (snap.vendor ?? "").trim();
-    const title = (snap.productTitle ?? "").trim();
-    if (!brand || !title) continue;
-    const row = snap.raw.mainRow ?? snap.raw.saleRow;
-    const colorCell = row?.["Color"] ?? "";
-    const sizeCell = row?.["Size"] ?? "";
-    const base = buildBaseTitle(title, colorCell, sizeCell);
-    const effectiveBase = base || title.toLowerCase().replace(/\s+/g, " ").trim();
-    const key = `${brand.toLowerCase()}|${effectiveBase}`;
-    if (!buckets.has(key)) buckets.set(key, { snaps: [] });
-    buckets.get(key).snaps.push(snap);
-  }
-  const records = [];
-  for (const [masterKey, { snaps }] of buckets) {
-    const [brandPart] = masterKey.split("|");
-    const baseTitle = masterKey.slice(brandPart.length + 1);
-    let totalQty = 0;
-    let inStockCount = 0;
-    const wholesales = [];
-    const msrps = [];
-    const maps = [];
-    const colors = /* @__PURE__ */ new Set();
-    const sizes = /* @__PURE__ */ new Set();
-    const fluidOzSet = /* @__PURE__ */ new Set();
-    const skus = [];
-    const upcs = [];
-    const subCatCount = /* @__PURE__ */ new Map();
-    let sampleImage = "";
-    let displayTitle = "";
-    let inTop100Feed = false;
-    let inNewFeed = false;
-    let inSaleFeed = false;
-    for (const snap of snaps) {
-      skus.push(snap.sku);
-      const row = snap.raw.mainRow ?? snap.raw.saleRow;
-      const upc = row?.["UPC/barcode"] ?? "";
-      if (upc) upcs.push(upc);
-      if (snap.wholesale > 0) wholesales.push(snap.wholesale);
-      if (snap.msrp > 0) msrps.push(snap.msrp);
-      if (snap.mapPrice != null && snap.mapPrice > 0) maps.push(snap.mapPrice);
-      const qty = snap.qty ?? 0;
-      totalQty += qty;
-      if (qty > 0) inStockCount++;
-      const colorCell = row?.["Color"] ?? "";
-      for (const c of splitCell(colorCell)) {
-        if (c) colors.add(c);
-      }
-      const sizeCell = row?.["Size"] ?? "";
-      for (const s of splitCell(sizeCell)) {
-        if (s) sizes.add(s);
-      }
-      const oz = row?.["Fluid Oz"] ?? "";
-      if (oz.trim()) fluidOzSet.add(oz.trim());
-      const title = snap.productTitle ?? "";
-      if (title.length > displayTitle.length) displayTitle = title;
-      if (!sampleImage) {
-        const img = row?.["Image 1"] ?? "";
-        if (img) sampleImage = img;
-      }
-      const subCat = row?.["Sub-Category"] ?? "";
-      if (subCat) {
-        subCatCount.set(subCat, (subCatCount.get(subCat) ?? 0) + 1);
-      }
-      if (snap.inTop100Feed) inTop100Feed = true;
-      if (snap.inNewFeed) inNewFeed = true;
-      if (snap.inSaleFeed) inSaleFeed = true;
-    }
-    const medWholesale = median(wholesales);
-    const medMsrp = median(msrps);
-    const medMap = median(maps.length > 0 ? maps : [0]);
-    const marginMsrpPct = medMsrp > 0 ? (medMsrp - medWholesale) / medMsrp : 0;
-    const marginMapPct = medMap > 0 ? (medMap - medWholesale) / medMap : 0;
-    let category = "(uncategorized)";
-    let maxCount = 0;
-    for (const [cat, count] of subCatCount) {
-      if (count > maxCount) {
-        maxCount = count;
-        category = cat;
-      }
-    }
-    const brandDisplay = snaps[0]?.vendor ?? brandPart;
-    records.push({
-      masterKey,
-      brand: brandDisplay,
-      displayTitle,
-      baseTitle,
-      category,
-      variantCount: snaps.length,
-      inStockVariants: inStockCount,
-      colors: [...colors],
-      sizes: [...sizes],
-      fluidOz: [...fluidOzSet],
-      totalQty,
-      wholesale: medWholesale,
-      msrp: medMsrp,
-      map: medMap,
-      marginMsrpPct,
-      marginMapPct,
-      profitPerUnit: (medMsrp > 0 ? medMsrp : medMap) - medWholesale,
-      skus,
-      sampleImage,
-      upcs,
-      inTop100Feed,
-      inNewFeed,
-      inSaleFeed,
-      snapshots: snaps
-    });
-  }
-  return records;
-}
-function sizeRank(s) {
-  const idx = SIZE_SORT_ORDER.indexOf(s);
-  return idx === -1 ? SIZE_SORT_ORDER.length : idx;
-}
-function detectAxes(master) {
-  const snaps = master.snapshots;
-  const perSku = snaps.map((snap) => {
-    const row = snap.raw.mainRow ?? snap.raw.saleRow;
-    return {
-      sku: snap.sku,
-      snap,
-      colors: splitCell(row?.["Color"] ?? "").filter((c) => c !== ""),
-      sizes: splitCell(row?.["Size"] ?? "").filter((s) => s !== ""),
-      fluidOz: (row?.["Fluid Oz"] ?? "").trim(),
-      title: snap.productTitle ?? "",
-      upc: row?.["UPC/barcode"] ?? ""
-    };
-  });
-  const primaryColors = perSku.map((s) => s.colors[0] ?? "");
-  const distinctColors = new Set(primaryColors.filter((c) => c !== ""));
-  const hasRealColor = distinctColors.size > 1 && [...distinctColors].some((c) => !UNINFORMATIVE_COLORS.has(c.toLowerCase()));
-  const primarySizes = perSku.map((s) => s.sizes[0] ?? "");
-  const hasSomeSize = primarySizes.some((s) => s !== "");
-  const hasSomeBlank = primarySizes.some((s) => s === "");
-  let effectiveSizes = primarySizes;
-  if (hasSomeSize && hasSomeBlank) {
-    effectiveSizes = primarySizes.map((s) => s === "" ? "Regular" : s);
-  }
-  const distinctSizes = new Set(effectiveSizes.filter((s) => s !== ""));
-  const hasSizeAxis = distinctSizes.size > 1;
-  const distinctFlOz = new Set(perSku.map((s) => s.fluidOz).filter((oz) => oz !== ""));
-  const hasVolumeAxis = distinctFlOz.size > 1;
-  function buildOptionTuple(idx) {
-    const tuple = [];
-    if (hasRealColor) tuple.push(primaryColors[idx] ?? "");
-    if (hasSizeAxis) tuple.push(effectiveSizes[idx] ?? "");
-    if (hasVolumeAxis) tuple.push(perSku[idx]?.fluidOz ?? "");
-    return tuple;
-  }
-  const initialTuples = perSku.map((_, i) => buildOptionTuple(i));
-  const tupleStrings = initialTuples.map((t) => t.join("|"));
-  const hasCollision = tupleStrings.length !== new Set(tupleStrings).size;
-  let usesTwistB = false;
-  let derivedColors = [];
-  if (hasCollision && !hasRealColor) {
-    derivedColors = perSku.map((sv) => {
-      let t = sv.title;
-      const baseWords = master.baseTitle.split(/\s+/);
-      for (const word of baseWords) {
-        if (!word) continue;
-        t = t.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, "gi"), " ");
-      }
-      if (hasSizeAxis) {
-        for (const sz of [...distinctSizes]) {
-          t = t.replace(new RegExp(`\\b${escapeRegex(sz)}\\b`, "gi"), " ");
-        }
-      }
-      if (hasVolumeAxis) {
-        for (const oz of [...distinctFlOz]) {
-          t = t.replace(new RegExp(`\\b${escapeRegex(oz)}\\b`, "gi"), " ");
-        }
-      }
-      t = t.replace(VOLUME_PACKAGING_PATTERN, " ");
-      t = t.replace(/\s+/g, " ").trim().replace(/^[-_/.,\s]+|[-_/.,\s]+$/g, "").trim();
-      return t || "Default";
-    });
-    const distinctDerived = new Set(derivedColors);
-    const coverCount = derivedColors.filter((c) => c !== "Default").length;
-    if (distinctDerived.size >= 2 && coverCount >= Math.floor(perSku.length / 2)) {
-      const newTuples = perSku.map((sv, i) => {
-        const t = [derivedColors[i] ?? "Default"];
-        if (hasSizeAxis) t.push(effectiveSizes[i] ?? "");
-        if (hasVolumeAxis) t.push(sv.fluidOz);
-        return t.join("|");
-      });
-      if (new Set(newTuples).size === perSku.length) {
-        usesTwistB = true;
-      }
-    }
-  }
-  const axes = [];
-  if (hasRealColor || usesTwistB) {
-    const vals = usesTwistB ? derivedColors : perSku.map((s) => s.colors[0] ?? "");
-    const dedupedColors = [...new Set(vals.filter((c) => c !== ""))].sort((a, b) => a.localeCompare(b));
-    axes.push({ name: "Color", values: dedupedColors });
-  }
-  if (hasSizeAxis && axes.length < 2) {
-    const dedupedSizes = [...new Set([...effectiveSizes].filter((s) => s !== ""))].sort((a, b) => sizeRank(a) - sizeRank(b) || a.localeCompare(b));
-    axes.push({ name: "Size", values: dedupedSizes });
-  }
-  if (hasVolumeAxis && axes.length < 2) {
-    const dedupedVols = [.../* @__PURE__ */ new Set([...distinctFlOz])].sort((a, b) => parseFloat(a) - parseFloat(b) || a.localeCompare(b));
-    axes.push({ name: "Volume", values: dedupedVols });
-  }
-  const variantRows = perSku.map((sv, i) => {
-    const optionValues = [];
-    for (const axis of axes) {
-      if (axis.name === "Color") {
-        optionValues.push(
-          usesTwistB ? derivedColors[i] ?? "Default" : sv.colors[0] ?? ""
-        );
-      } else if (axis.name === "Size") {
-        optionValues.push(effectiveSizes[i] ?? "");
-      } else if (axis.name === "Volume") {
-        optionValues.push(sv.fluidOz);
-      }
-    }
-    const wholesale = sv.snap.wholesale;
-    const msrp = sv.snap.msrp;
-    const map = sv.snap.mapPrice ?? 0;
-    const qty = sv.snap.qty ?? 0;
-    const row = sv.snap.raw.mainRow ?? sv.snap.raw.saleRow;
-    const price = map === 0 ? Math.round(Math.max(wholesale * 1.4, msrp * 0.55) * 100) / 100 : map < msrp ? Math.round(map * 100) / 100 : Math.round(msrp * 100) / 100;
-    const images = [];
-    for (let n = 1; n <= 10; n++) {
-      const url = row?.[`Image ${n}`] ?? "";
-      if (url.trim()) images.push(url.trim());
-    }
-    return {
-      sku: sv.sku,
-      optionValues,
-      price,
-      compareAtPrice: msrp,
-      qty,
-      wholesale,
-      images,
-      upc: sv.upc
-    };
-  });
-  return { axes, variantRows };
-}
-function needsReview(master) {
-  return master.variantCount > NEEDS_REVIEW_THRESHOLD;
-}
-var VOLUME_PACKAGING_PATTERN, SIZE_WORD_TOKENS, COMMON_COLOR_WORDS, UNINFORMATIVE_COLORS, STRUCTURAL_RESIDUE_WORDS, SIZE_SORT_ORDER, QTY_FLOOR, DISPLAY_TESTER_PATTERNS, NEEDS_REVIEW_THRESHOLD;
-var init_master_collapse_server = __esm({
-  "app/lib/master-collapse.server.ts"() {
-    "use strict";
-    VOLUME_PACKAGING_PATTERN = /\b(\d+(?:\.\d+)?\s*(?:fl\s*oz|oz|ml|gm|gram(?:s)?)|(?:\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s*(?:oz|ml)))\b|\b(?:bottle|tube|pump|pillow\s*pack|sachet|packet|jar|can)\b/gi;
-    SIZE_WORD_TOKENS = [
-      "XXXS",
-      "XXS",
-      "XS",
-      "Small",
-      "Medium",
-      "Large",
-      "XLarge",
-      "XXLarge",
-      "XXXLarge",
-      "XL",
-      "XXL",
-      "2XL",
-      "3XL",
-      "4XL",
-      "5XL",
-      "OneSize",
-      "One Size"
-    ];
-    COMMON_COLOR_WORDS = [
-      "black",
-      "white",
-      "red",
-      "pink",
-      "purple",
-      "blue",
-      "green",
-      "gold",
-      "silver",
-      "teal",
-      "aqua",
-      "nude",
-      "tan",
-      "clear",
-      "natural",
-      "navy",
-      "orange",
-      "yellow",
-      "brown",
-      "gray",
-      "grey",
-      "magenta",
-      "coral",
-      "burgundy",
-      "rose",
-      "ivory",
-      "lavender",
-      "cream"
-    ];
-    UNINFORMATIVE_COLORS = /* @__PURE__ */ new Set([
-      "multi-color",
-      "multicolor",
-      "multi color",
-      "assorted",
-      "various",
-      "varies"
-    ]);
-    STRUCTURAL_RESIDUE_WORDS = ["size", "style", "color", "assorted"];
-    SIZE_SORT_ORDER = [
-      "XXXS",
-      "XXS",
-      "XS",
-      "S",
-      "S/M",
-      "Regular",
-      "Standard",
-      "M",
-      "M/L",
-      "L",
-      "L/XL",
-      "XL",
-      "XL/2XL",
-      "XXL/2XL",
-      "2XL/3XL",
-      "XXXL/3XL",
-      "3XL/4XL",
-      "4XL",
-      "4XL/5XL",
-      "5XL",
-      "OneSize"
-    ];
-    QTY_FLOOR = parseInt(process.env["NALPAC_QTY_FLOOR"] ?? "20", 10);
-    DISPLAY_TESTER_PATTERNS = /\b(?:display|tester|testers|displays|merchandising|planogram|pos\s*kit)\b/i;
-    NEEDS_REVIEW_THRESHOLD = 30;
   }
 });
 
@@ -15640,7 +15670,7 @@ async function runImportMonitor(opts = {}) {
     const eligibleMasters = allMasters.filter((master) => {
       const anyCarried = master.skus.some((s) => carriedSkus.has(s));
       if (anyCarried) return false;
-      const { ok } = isEligible2(master);
+      const { ok } = isEligible(master);
       return ok;
     });
     const [watchScoreDeltaStr, watchPriceDropPctStr, phase, maxCandidatesStr] = await Promise.all([

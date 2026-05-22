@@ -2,6 +2,8 @@ import crypto from 'node:crypto'
 import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore, ProductTypeDial, SellingPlan, SellingPlanGroup, SensationDial, SensationDialV2, SensationDialItem, DialValue, CareInstructions, EmmaHeroCopy } from '~/types'
 import { toHTML } from '@portabletext/to-html'
 import { cached, invalidateCache, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+import { isOperationalTag, editorialTagsOnly } from '~/lib/tag-normalize'
+import { UNCATEGORIZED_SENTINEL } from '~/lib/master-collapse.server'
 
 // Short TTL for read-through product caches — long enough to dedupe burst
 // traffic, short enough for admin edits to appear on the next page load.
@@ -2433,6 +2435,10 @@ export interface ProductPageDoc {
   shopifyProductId: string
   title?: string | undefined
   vendor?: string | undefined
+  /** Editorial sub-category labels only (e.g. "Restraints"). Merged into the
+   *  product's existing tags by pushProductToShopify, which preserves operational
+   *  tags (cat:*, brand:*, price:*, nalpac-sku-*, deal-status-*, for-*). Do NOT
+   *  pass operational tags here. */
   tags?: string[] | undefined
   description?: unknown        // string (legacy) or portable text blocks
   seoTitle?: string | undefined
@@ -2484,6 +2490,22 @@ export interface ProductPageDoc {
 export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   const gid = `gid://shopify/Product/${doc.shopifyProductId}`
 
+  // doc.tags carries EDITORIAL sub-category labels only. Shopify product tags
+  // also carry operational tags (cat:*, brand:*, price:*, nalpac-sku-*,
+  // deal-status-*, for-him/for-her/for-couples) that drive search and the deal
+  // lifecycle. A naive replace would clobber them, so merge: keep the current
+  // operational tags, replace the editorial set with the supplied labels, and
+  // drop the "(uncategorized)" sentinel.
+  let mergedTags: string[] | undefined
+  if (doc.tags !== undefined) {
+    const numericId = doc.shopifyProductId.replace('gid://shopify/Product/', '')
+    const { product } = await shopifyAdmin<{ product: { tags: string } | null }>(`/products/${numericId}.json?fields=tags`)
+    const currentTags = product?.tags ? product.tags.split(',').map(t => t.trim()).filter(Boolean) : []
+    const operational = currentTags.filter(isOperationalTag)
+    const editorial = editorialTagsOnly(doc.tags).filter(t => t !== UNCATEGORIZED_SENTINEL)
+    mergedTags = Array.from(new Set([...operational, ...editorial]))
+  }
+
   // 1. Update standard product fields
   const updateResult = await adminGraphQL<{
     productUpdate: { userErrors: { field: string[]; message: string }[] }
@@ -2498,7 +2520,7 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
       id: gid,
       ...(doc.title      !== undefined ? { title:    doc.title                } : {}),
       ...(doc.vendor     !== undefined ? { vendor:   doc.vendor               } : {}),
-      ...(doc.tags       !== undefined ? { tags:     doc.tags                 } : {}),
+      ...(mergedTags     !== undefined ? { tags:     mergedTags               } : {}),
       ...(doc.descriptionHtml !== undefined
         ? { descriptionHtml: doc.descriptionHtml }
         : doc.description !== undefined ? { descriptionHtml: ptToHtml(doc.description) } : {}),

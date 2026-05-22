@@ -12,6 +12,7 @@ import { dealHistory } from '../../db/schema'
 import { generateSEOTitle } from '~/lib/claude.server'
 import { generateProductContent } from '~/lib/emma-orchestrator.server'
 import { cleanDescription, isDiscontinued, deriveSection } from '~/lib/feed-processor.server'
+import { UNCATEGORIZED_SENTINEL } from '~/lib/master-collapse.server'
 import {
   findProductBySKU,
   createShopifyProductFromFeed,
@@ -41,6 +42,13 @@ function inferCategory(categories: string[]): Array<'for-him' | 'for-her' | 'cou
   // Default to ['for-him', 'for-her'] — the legacy 'both' equivalent — when no
   // category signals match.
   return out.length > 0 ? out : ['for-him', 'for-her']
+}
+
+/** Editorial sub-category labels for Shopify/Sanity tags — drops the
+ *  "(uncategorized)" placeholder the master-collapse pipeline emits when no
+ *  Sub-Category can be inferred. */
+function editorialTagsFrom(categories: string[]): string[] {
+  return categories.filter(c => c && c !== UNCATEGORIZED_SENTINEL)
 }
 
 // ─── Deal price computation (mirrors feed-processor.server.ts) ────────────────
@@ -360,6 +368,7 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       ...(writes.originalTitle    !== undefined ? { originalTitle:    writes.originalTitle }    : {}),
       ...(writes.accessoryProductIds !== undefined ? { accessoryProductIds: writes.accessoryProductIds } : {}),
       ...(writes.pairingWhy       !== undefined ? { pairingWhy:       writes.pairingWhy }       : {}),
+      tags:               editorialTagsFrom(categories),
       category,
       sectionTags:        [deriveSection({ productTypeDial: writes.productTypeDial, categories, title: masterRow['Product Title'] })],
       dealStatus:         'pending_approval',
@@ -415,7 +424,7 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
           shopifyProductId: gid,
           title:            masterRow['Product Title'],
           vendor:           masterRow.Brand,
-          tags:             categories,                  // Mirror sub-categories so Studio editors can filter
+          tags:             editorialTagsFrom(categories), // Mirror sub-categories so Studio editors can filter
           tagline:          writes.tagline,
           description,
           seoTitle,
@@ -570,6 +579,7 @@ export async function importProductGroupRaw(group: MasterProductGroup): Promise<
     // matters tags, IVR, FAQs. Those are filled by the batched enrichment pass.
     await pushProductToShopify({
       shopifyProductId: numericId,
+      tags:             editorialTagsFrom(categories),
       category,
       sectionTags:      [deriveSection({ categories, title: masterRow['Product Title'] })],
       dealStatus:       'pending_approval',
@@ -633,7 +643,7 @@ export async function importProductGroupRaw(group: MasterProductGroup): Promise<
           shopifyProductId: gid,
           title:            masterRow['Product Title'],
           vendor:           masterRow.Brand,
-          tags:             categories,
+          tags:             editorialTagsFrom(categories),
           description,
           category,
         }
@@ -835,6 +845,7 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
     audienceTags:       writes.audienceTags,
     mattersTags:        writes.mattersTags,
     ...(writes.originalTitle    !== undefined ? { originalTitle:    writes.originalTitle }    : {}),
+    tags:               editorialTagsFrom(rawProduct.categories),
     category,
     dealStatus:         'pending_approval',
     dealDate:           '2099-12-31',
@@ -874,7 +885,7 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
       shopifyProductId: gid,
       title:            rawProduct.title,
       vendor:           rawProduct.brand,
-      tags:             rawProduct.categories,
+      tags:             editorialTagsFrom(rawProduct.categories),
       tagline:          writes.tagline,
       description:      rawProduct.description,
       seoTitle,

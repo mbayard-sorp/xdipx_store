@@ -11,7 +11,7 @@
 import 'dotenv/config'
 import { createClient } from '@sanity/client'
 import { JSDOM } from 'jsdom'
-import { normalizeTagList } from '../app/lib/tag-normalize'
+import { normalizeTagList, editorialTagsOnly } from '../app/lib/tag-normalize'
 
 // ─── HTML → Portable Text converter ──────────────────────────────────────────
 
@@ -251,7 +251,12 @@ async function main() {
       previewImageUrl:  p.images.edges[0]?.node.url || undefined,
       title:            p.title,
       vendor:           p.vendor,
-      tags:             p.tags,
+      // Editorial sub-category labels only — operational tags (cat:*, brand:*,
+      // price:*, nalpac-sku-*, deal-status-*, for-*) are intentionally excluded
+      // from the Studio `tags` view (see studio/schemas/productPage.js).
+      // normalizedTags still derives from ALL Shopify tags so cat:* operational
+      // values continue to match editorial slugs for /search faceting.
+      tags:             editorialTagsOnly(p.tags),
       normalizedTags:   normalizeTagList(p.tags),
       description:      htmlToPT(p.bodyHtml),
       seoTitle:         p.seo.title        || undefined,
