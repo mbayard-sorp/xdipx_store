@@ -28,6 +28,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     enabledRaw,
     phaseRaw,
     lastRunAtRaw,
+    enrichEnabledRaw,
   ] = await Promise.all([
     getImportCandidatesByStatus(['pending']),
     getImportCandidatesByStatus(['watching']),
@@ -37,6 +38,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     getPipelineSetting('import_monitor_enabled'),
     getPipelineSetting('import_monitor_phase'),
     getPipelineSetting('import_monitor_last_run_at'),
+    getPipelineSetting('import_enrich_enabled'),
   ])
 
   const runDays = (runDaysRaw ?? '0,1,2,3,4,5,6')
@@ -45,6 +47,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     .filter(n => !isNaN(n) && n >= 0 && n <= 6)
 
   const enabled = enabledRaw !== 'false'
+  // Enrich/publish loop defaults OFF (opposite of the monitor) — only on when
+  // explicitly set to 'true'.
+  const enrichEnabled = enrichEnabledRaw === 'true'
   const phase = parseInt(phaseRaw ?? '1', 10) as 1 | 2 | 3
 
   const latest = recentRuns[0] ?? null
@@ -61,6 +66,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     settings: {
       runDays,
       enabled,
+      enrichEnabled,
       phase,
       lastRunAt: lastRunAtRaw,
     },
@@ -106,6 +112,13 @@ export async function action({ request }: ActionFunctionArgs) {
     const next = current === 'true' ? 'false' : 'true'
     await setPipelineSetting('import_monitor_enabled', next)
     return { ok: true, saved: 'enabled' }
+  }
+
+  if (intent === 'toggle-enrich-enabled') {
+    const current = form.get('current') as string
+    const next = current === 'true' ? 'false' : 'true'
+    await setPipelineSetting('import_enrich_enabled', next)
+    return { ok: true, saved: 'enrich-enabled' }
   }
 
   return { ok: false, error: `Unknown intent: ${intent}` }
@@ -284,6 +297,7 @@ function SettingsPanel({ settings }: { settings: LoaderData['settings'] }) {
   const daysFetcher = useFetcher<{ ok: boolean }>()
   const phaseFetcher = useFetcher<{ ok: boolean }>()
   const toggleFetcher = useFetcher<{ ok: boolean }>()
+  const enrichToggleFetcher = useFetcher<{ ok: boolean }>()
 
   // Optimistic state for run days checkboxes
   const optimisticDays: number[] =
@@ -306,6 +320,12 @@ function SettingsPanel({ settings }: { settings: LoaderData['settings'] }) {
       ? toggleFetcher.formData.get('current') !== 'true'
       : settings.enabled
 
+  // Optimistic enrich-enabled
+  const optimisticEnrichEnabled: boolean =
+    enrichToggleFetcher.state !== 'idle' && enrichToggleFetcher.formData?.get('current') != null
+      ? enrichToggleFetcher.formData.get('current') !== 'true'
+      : settings.enrichEnabled
+
   function toggleDay(day: number) {
     const next = optimisticDays.includes(day)
       ? optimisticDays.filter(d => d !== day)
@@ -326,6 +346,13 @@ function SettingsPanel({ settings }: { settings: LoaderData['settings'] }) {
   function toggleEnabled() {
     toggleFetcher.submit(
       { intent: 'toggle-enabled', current: String(optimisticEnabled) },
+      { method: 'post' },
+    )
+  }
+
+  function toggleEnrichEnabled() {
+    enrichToggleFetcher.submit(
+      { intent: 'toggle-enrich-enabled', current: String(optimisticEnrichEnabled) },
       { method: 'post' },
     )
   }
@@ -362,6 +389,31 @@ function SettingsPanel({ settings }: { settings: LoaderData['settings'] }) {
           <span
             className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
               optimisticEnabled ? 'translate-x-6' : 'translate-x-1'
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* Auto enrich & publish toggle */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-ink">Auto enrich &amp; publish</p>
+          <p className="text-xs text-muted">
+            When on, the cron enriches imported drafts with AI and publishes them live.
+            Costs AI spend and pushes products to the storefront.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={toggleEnrichEnabled}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-coral/40 ${
+            optimisticEnrichEnabled ? 'bg-coral' : 'bg-line'
+          }`}
+          aria-label={optimisticEnrichEnabled ? 'Disable auto enrich and publish' : 'Enable auto enrich and publish'}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+              optimisticEnrichEnabled ? 'translate-x-6' : 'translate-x-1'
             }`}
           />
         </button>
