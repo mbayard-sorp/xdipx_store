@@ -41,7 +41,20 @@ import {
 } from '~/lib/shopify.server'
 import { upsertProductPage } from '~/lib/sanity.server'
 import { getPipelineSetting, deriveSection } from '~/lib/feed-processor.server'
+import { IVR_EXPERIENCE_LEVELS } from '~/lib/claude.server'
 import type { ProductWrites } from '~/lib/emma-orchestrator.server'
+
+const VALID_IVR_EXPERIENCE = new Set<string>(IVR_EXPERIENCE_LEVELS as readonly string[])
+
+/**
+ * The batch enricher sometimes emits ivrExperience as a bare string (e.g. "any")
+ * rather than the schema-required array of enum values. Coerce to an array and
+ * drop anything outside the allowed set so Sanity does not get an invalid value.
+ */
+function normalizeIvrExperience(raw: unknown): string[] {
+  const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw]
+  return arr.filter((v): v is string => typeof v === 'string' && VALID_IVR_EXPERIENCE.has(v))
+}
 
 const DEFAULT_BATCH_CAP = 10
 
@@ -98,6 +111,18 @@ async function applyFullEnrichmentWrites(numericProductId: string, writes: Produ
   if (!snap) throw new Error(`fetchProductSnapshot returned null for ${numericProductId}`)
 
   const category = inferCategoryFallback(snap.metafields['xdipx.category'])
+
+  // Editorial sub-category tags from the Nalpac feed. The raw auto-import path
+  // does not write these to Sanity, so propagate them here. "(uncategorized)" is
+  // the master-collapse sentinel for a blank Sub-Category — never a real tag.
+  const histRows = await db
+    .select({ categories: dealHistory.categories })
+    .from(dealHistory)
+    .where(eq(dealHistory.shopifyProductId, numericProductId))
+    .limit(1)
+  const editorialTags = (histRows[0]?.categories ?? []).filter(
+    (c): c is string => !!c && c !== '(uncategorized)',
+  )
 
   // Em-dash-sanitized copy (house rule) — computed once, used for Shopify + Sanity.
   const sTagline = ed(writes.tagline)
@@ -161,13 +186,15 @@ async function applyFullEnrichmentWrites(numericProductId: string, writes: Produ
       audienceTags:   writes.audienceTags,
       mattersTags:    writes.mattersTags,
     }
+    if (editorialTags.length)               upsertParams.tags              = editorialTags
     if (doc.seoTitle)                       upsertParams.seoTitle          = doc.seoTitle
     if (writes.productSubtypeDial != null)  upsertParams.productSubtypeDial = writes.productSubtypeDial
     if (writes.sensationDialV2)             upsertParams.sensationDialV2   = writes.sensationDialV2
     if (sSpecs?.length)                     upsertParams.specifications    = sSpecs
     if (sCare?.length)                      upsertParams.careInstructions  = sCare
     if (sBox?.length)                       upsertParams.boxContents       = sBox
-    if (writes.ivrExperience)               upsertParams.ivrExperience     = writes.ivrExperience
+    const ivrExperience = normalizeIvrExperience(writes.ivrExperience)
+    if (ivrExperience.length)               upsertParams.ivrExperience     = ivrExperience
     if (writes.ivrUseCase?.length)          upsertParams.ivrUseCase        = writes.ivrUseCase
     if (writes.ivrFeatures?.length)         upsertParams.ivrFeatures       = writes.ivrFeatures
     if (writes.productFaqs?.length)         upsertParams.productFaqs       = writes.productFaqs

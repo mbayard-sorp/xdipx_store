@@ -134,7 +134,7 @@ Return a single JSON object with these fields. Every field is required unless ma
   "moodImageUrl": "<OPTIONAL — leave undefined; image generation handled separately>",
   // OMIT THIS FIELD entirely. The orchestrator's mood image generator runs separately.
 
-  "ivrExperience": "first-time" | "curious" | "experienced" | "advanced" | "any",
+  "ivrExperience": ["first-time", "curious", "experienced", "advanced"],  // ARRAY, 1–4 from this fixed vocab. Every level the product genuinely fits. Never "any" or any other value.
   "ivrUseCase":   ["date-night", "travel", "everyday", "discovery", "gift", "celebration"],  // 1–3 from this fixed vocab
   "ivrFeatures":  ["app-controlled", "waterproof", "rechargeable", "quiet", "travel-size", "hands-free", "soft-touch", "pinpoint", "full-coverage"],  // 2–4 that are TRUE
 
