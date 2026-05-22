@@ -37,8 +37,15 @@ async function fetchFromDb(): Promise<string> {
 export async function resolveGa4(): Promise<Ga4Resolution> {
   const envId = (process.env['GA4_MEASUREMENT_ID'] ?? '').trim()
   if (envId) return { id: envId, source: 'env' }
-  const dbId = await cached(KV_KEY, TTL_SECONDS, fetchFromDb)
-  if (dbId) return { id: dbId, source: 'db' }
+  // This runs in the root loader, so a thrown error here 500s every page.
+  // An analytics ID is never worth taking the whole site down: on any
+  // KV/DB failure, degrade to "GA4 disabled" instead of propagating.
+  try {
+    const dbId = await cached(KV_KEY, TTL_SECONDS, fetchFromDb)
+    if (dbId) return { id: dbId, source: 'db' }
+  } catch (err) {
+    console.warn('[ga4] resolution failed, disabling GA4 for this render:', err instanceof Error ? err.message : err)
+  }
   return { id: '', source: 'none' }
 }
 

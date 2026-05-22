@@ -52,39 +52,40 @@ const _g = globalThis as unknown as { __kvMemStore?: Map<string, unknown> }
 if (!_g.__kvMemStore) _g.__kvMemStore = new Map()
 const memStore = _g.__kvMemStore
 
-export async function kvGet<T>(key: string): Promise<T | null> {
-  const kv = await getKV()
-  if (kv) return kv.get<T>(key)
-  return (memStore.get(key) as T) ?? null
-}
-
 // Per-key TTL timers for the in-memory store. Tracked separately so we can
 // clear pending expirations when a key is overwritten or explicitly deleted.
 const _g3 = globalThis as unknown as { __kvMemTimers?: Map<string, ReturnType<typeof setTimeout>> }
 if (!_g3.__kvMemTimers) _g3.__kvMemTimers = new Map()
 const memTimers = _g3.__kvMemTimers
 
-export async function kvSet(key: string, value: unknown, _exSeconds?: number): Promise<void> {
-  const kv = await getKV()
-  if (kv) {
-    if (_exSeconds) {
-      await kv.set(key, value, { ex: _exSeconds })
-    } else {
-      await kv.set(key, value)
-    }
-    return
-  }
+// Throttled warning when a real KV op fails and we degrade to in-memory, so a
+// flaky/unreachable KV degrades gracefully instead of throwing and 500ing the
+// loader that called us. Throttled to avoid flooding logs on a hot path.
+let _lastKvWarn = 0
+function warnKvFallback(op: string, err: unknown): void {
+  const now = Date.now()
+  if (now - _lastKvWarn < 60_000) return
+  _lastKvWarn = now
+  console.warn(`[kv] ${op} failed, falling back to in-memory:`, err instanceof Error ? err.message : err)
+}
+
+// ─── In-memory primitives (also the fallback when real KV throws) ─────────
+function memGet<T>(key: string): T | null {
+  return (memStore.get(key) as T) ?? null
+}
+
+function memSet(key: string, value: unknown, exSeconds?: number): void {
   memStore.set(key, value)
   // Honor TTL on the in-memory fallback so dev behavior matches prod KV.
   // Critical for rate-limit windows, cache invalidation, and lock keys —
   // without this they'd accumulate forever and break local testing.
   const existing = memTimers.get(key)
   if (existing) clearTimeout(existing)
-  if (_exSeconds && _exSeconds > 0) {
+  if (exSeconds && exSeconds > 0) {
     const t = setTimeout(() => {
       memStore.delete(key)
       memTimers.delete(key)
-    }, _exSeconds * 1000)
+    }, exSeconds * 1000)
     // Don't keep the dev process alive just to clean memory.
     if (typeof (t as { unref?: () => void }).unref === 'function') {
       (t as { unref: () => void }).unref()
@@ -95,9 +96,39 @@ export async function kvSet(key: string, value: unknown, _exSeconds?: number): P
   }
 }
 
+function memDel(key: string): void {
+  memStore.delete(key)
+  const t = memTimers.get(key)
+  if (t) { clearTimeout(t); memTimers.delete(key) }
+}
+
+export async function kvGet<T>(key: string): Promise<T | null> {
+  const kv = await getKV()
+  if (kv) {
+    try { return await kv.get<T>(key) }
+    catch (err) { warnKvFallback('get', err) }
+  }
+  return memGet<T>(key)
+}
+
+export async function kvSet(key: string, value: unknown, _exSeconds?: number): Promise<void> {
+  const kv = await getKV()
+  if (kv) {
+    try {
+      if (_exSeconds) await kv.set(key, value, { ex: _exSeconds })
+      else await kv.set(key, value)
+      return
+    } catch (err) { warnKvFallback('set', err) }
+  }
+  memSet(key, value, _exSeconds)
+}
+
 export async function kvIncr(key: string): Promise<number> {
   const kv = await getKV()
-  if (kv) return kv.incr(key)
+  if (kv) {
+    try { return await kv.incr(key) }
+    catch (err) { warnKvFallback('incr', err) }
+  }
   const current = (memStore.get(key) as number) ?? 0
   memStore.set(key, current + 1)
   return current + 1
@@ -105,10 +136,11 @@ export async function kvIncr(key: string): Promise<number> {
 
 export async function kvDel(key: string): Promise<void> {
   const kv = await getKV()
-  if (kv) { await kv.del(key); return }
-  memStore.delete(key)
-  const t = memTimers.get(key)
-  if (t) { clearTimeout(t); memTimers.delete(key) }
+  if (kv) {
+    try { await kv.del(key); return }
+    catch (err) { warnKvFallback('del', err) }
+  }
+  memDel(key)
 }
 
 // ─── Two-tier cache (in-memory L1 + KV L2) ────────────────────────────────
