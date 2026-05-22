@@ -570,13 +570,21 @@ function computeVocab(index: DiscoveryProduct[]): DiscoveryVocab {
  */
 export async function getDiscoveryVocab(): Promise<DiscoveryVocab> {
   const cached = await kvGet<DiscoveryVocab>(VOCAB_KEY)
-  if (cached && Array.isArray(cached.moods)) return cached
+  // Treat an empty cached vocab as a miss: a transient cold-start where
+  // getDiscoveryIndex() briefly returned [] could otherwise poison the cache
+  // with empty arrays for the full 24h TTL, hiding every chip filter even
+  // after the index recovers.
+  if (cached && Array.isArray(cached.moods) && cached.moods.length > 0) return cached
 
   const idx = await getDiscoveryIndex()
   if (idx.length === 0) return { moods: [], audiences: [], matters: [] }
 
   const vocab = computeVocab(idx)
-  await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS)
+  // Never cache an empty vocab — leave the key unset so the next request
+  // rebuilds from a (hopefully populated) index instead of serving emptiness.
+  if (vocab.moods.length > 0 || vocab.audiences.length > 0 || vocab.matters.length > 0) {
+    await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS)
+  }
   return vocab
 }
 
