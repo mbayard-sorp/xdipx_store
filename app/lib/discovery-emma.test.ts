@@ -135,6 +135,48 @@ describe('rankRails', () => {
     const wearIdx = rails.findIndex(r => r.category === 'Wear')
     expect(bodyIdx).toBeLessThan(wearIdx)
   })
+
+  describe('empty-state seed shuffle', () => {
+    // 12 Pleasure products in index order; a single rail with no selections.
+    const many: DiscoveryProduct[] = Array.from({ length: 12 }, (_, i) =>
+      product({ id: String(i), category: 'Pleasure', price: 50 }),
+    )
+    const order = (seed?: number) =>
+      rankRails(many, state(), seed === undefined ? { perRail: 12 } : { perRail: 12, seed })
+        .find(r => r.category === 'Pleasure')!
+        .items.map(sp => sp.product.id)
+
+    it('preserves index order when no seed is given', () => {
+      expect(order()).toEqual(many.map(p => p.id))
+    })
+
+    it('reorders the empty-state rail when a seed is given', () => {
+      expect(order(12345)).not.toEqual(many.map(p => p.id))
+    })
+
+    it('is deterministic for the same seed', () => {
+      expect(order(12345)).toEqual(order(12345))
+    })
+
+    it('produces different orders for different seeds', () => {
+      expect(order(1)).not.toEqual(order(2))
+    })
+
+    it('keeps the same product set, just reordered', () => {
+      expect([...order(999)].sort()).toEqual([...many.map(p => p.id)].sort())
+    })
+
+    it('ignores the seed once a selection is present (relevance wins)', () => {
+      const augmented = [
+        ...many,
+        product({ id: 'hit', category: 'Pleasure', mood: ['Sensual'], price: 50 }),
+      ]
+      const items = rankRails(augmented, state({ mood: ['Sensual'] }), { seed: 12345 })
+        .find(r => r.category === 'Pleasure')!.items
+      // The only Sensual match must sort to the top regardless of seed.
+      expect(items[0]?.product.id).toBe('hit')
+    })
+  })
 })
 
 describe('railTitleSegments', () => {

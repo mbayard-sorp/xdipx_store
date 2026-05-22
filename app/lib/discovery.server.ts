@@ -672,6 +672,12 @@ export interface GetRailsOptions {
   dropEmpty?: boolean
   /** Inject products instead of pulling from the live index — used by tests. */
   index?:     DiscoveryProduct[]
+  /**
+   * Per-visitor shuffle seed forwarded to rankRails. Only takes effect in the
+   * empty (no-selection) state, where it reshuffles each rail so the home page
+   * doesn't always lead with the same products. See rankRails for semantics.
+   */
+  seed?:      number
 }
 
 export async function getDiscoveryRails(
@@ -697,8 +703,9 @@ export async function getDiscoveryRails(
     getProductIdsByCollectionHandle,
   )
 
-  const rankOpts: { perRail?: number; dropEmpty?: boolean } = { perRail }
+  const rankOpts: { perRail?: number; dropEmpty?: boolean; seed?: number } = { perRail }
   if (opts.dropEmpty !== undefined) rankOpts.dropEmpty = opts.dropEmpty
+  if (opts.seed !== undefined) rankOpts.seed = opts.seed
 
   const rails = rankRails(filtered, state, rankOpts)
 
