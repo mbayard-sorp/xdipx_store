@@ -40,13 +40,13 @@ const SMS_TEMPLATES: ReadonlyArray<(slots: UpsellTemplateSlots) => string> = [
     `Real talk — skipping a good lube is the #1 regret folks tell me about. ${name} (${price}) is the one I'd send a friend home with.\n\n${pdpUrl}\n\n👍 to toss it in, 'no' to skip.`,
 
   ({ name, price, pdpUrl }) =>
-    `One thing I've learned testing a lot of these: the right pairing matters more than people think. ${name} (${price}) is the move here.\n\n${pdpUrl}\n\n👍 / 'yes' to add it, 'no' to skip.`,
+    `One thing the catalog makes obvious: the right pairing matters more than people think. ${name} (${price}) is the move here.\n\n${pdpUrl}\n\n👍 / 'yes' to add it, 'no' to skip.`,
 
   ({ name, price, pdpUrl }) =>
     `If you're new to this, trust me on ${name} (${price}). It's the difference between 'this is fine' and 'oh, that's why people love this'.\n\n${pdpUrl}\n\n👍 to add it, 'no thanks' to skip.`,
 
   ({ name, price, pdpUrl }) =>
-    `Worth knowing — ${name} (${price}) lives on my nightstand. The folks who skip it always come back asking what they missed.\n\n${pdpUrl}\n\n👍 / 'yes' to toss it in, 'no' to skip.`,
+    `Worth knowing: ${name} (${price}) is the one folks keep coming back for. The ones who skip it always ask what they missed.\n\n${pdpUrl}\n\n👍 / 'yes' to toss it in, 'no' to skip.`,
 
   ({ name, price, pdpUrl }) =>
     `Honest pro tip: ${name} (${price}) turns a good experience into a great one. Most folks regret skipping it more than any toy choice.\n\n${pdpUrl}\n\n👍 to add it, 'no' to skip.`,
@@ -60,13 +60,13 @@ const WEB_TEMPLATES: ReadonlyArray<(slots: UpsellTemplateSlots) => string> = [
     `Real talk — skipping a good lube is the #1 regret folks tell me about. **${name}** (${price}) is the one I'd send a friend home with. Toss it in?`,
 
   ({ name, price }) =>
-    `One thing I've learned testing a lot of these: the right pairing matters more than people think. **${name}** (${price}) is the move here. Add it?`,
+    `One thing the catalog makes obvious: the right pairing matters more than people think. **${name}** (${price}) is the move here. Add it?`,
 
   ({ name, price }) =>
     `If you're new to this, trust me on **${name}** (${price}). It's the difference between 'this is fine' and 'oh, that's why people love this'. Want it?`,
 
   ({ name, price }) =>
-    `Worth knowing — **${name}** (${price}) lives on my nightstand. The folks who skip it always come back asking what they missed. Add it?`,
+    `Worth knowing: **${name}** (${price}) is the one folks keep coming back for. The ones who skip it always ask what they missed. Add it?`,
 
   ({ name, price }) =>
     `Honest pro tip: **${name}** (${price}) turns a good experience into a great one. Most folks regret skipping it more than any toy choice. Toss it in?`,
@@ -83,13 +83,13 @@ const VOICE_TEMPLATES: ReadonlyArray<(slots: UpsellTemplateSlots) => string> = [
     `Real talk, skipping a good lube is the number one regret folks tell me about. ${name} runs about ${price}. Want me to add it?`,
 
   ({ name, price }) =>
-    `One thing I've learned testing a lot of these, the right pairing matters more than people think. ${name} at ${price} is the move here. Should I include it?`,
+    `One thing the catalog makes obvious, the right pairing matters more than people think. ${name} at ${price} is the move here. Should I include it?`,
 
   ({ name, price }) =>
     `If you're new to this, trust me on ${name}, runs about ${price}. It's the difference between this is fine and oh, that's why people love this. Add it for you?`,
 
   ({ name, price }) =>
-    `Worth knowing, ${name} at ${price} lives on my nightstand. The folks who skip it always come back asking what they missed. Want me to toss it in?`,
+    `Worth knowing, ${name} at ${price} is the one folks keep coming back for. The ones who skip it always ask what they missed. Want me to toss it in?`,
 
   ({ name, price }) =>
     `Honest pro tip, ${name} at ${price} turns a good experience into a great one. Most folks regret skipping it more than any toy choice. Should I add it?`,
