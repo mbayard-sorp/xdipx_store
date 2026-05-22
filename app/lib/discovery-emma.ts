@@ -15,7 +15,7 @@ import type {
   Rail,
   ScoredProduct,
 } from '~/types/discovery'
-import { CATEGORIES } from '~/types/discovery'
+import { CATEGORIES, DEFAULT_BUDGET } from '~/types/discovery'
 
 const SCORE_MOOD = 3
 const SCORE_AUDIENCE = 2
@@ -324,6 +324,35 @@ export function getEmmaLine(s: DiscoveryState): string {
   if (hasA)                 return fill(EMMA_LINES.audOnly,     { audience })
   if (hasK)                 return fill(EMMA_LINES.mattersOnly, { matters })
   return ''
+}
+
+/**
+ * Compose the first-person message we hand to the Ask Emma chat when the
+ * sidekick "Ask Emma" CTA is tapped. Reads like the shopper talking, built
+ * from their current discovery selections so Emma opens already knowing the
+ * brief. Auto-sent by the AskEmmaWidget via the `xdipx:emma:openWith` bridge.
+ *
+ * No em-dashes (project voice rule). Matters tags lowercase cleanly inside
+ * the sentence; budget only appears when moved off the default.
+ */
+export function getAskEmmaSeedPrompt(s: DiscoveryState): string {
+  const hasM = s.mood.length > 0
+  const hasA = s.audience.length > 0
+  const hasK = s.matters.length > 0
+  const hasBudget = s.budget !== DEFAULT_BUDGET
+
+  if (!hasM && !hasA && !hasK && !hasBudget) {
+    return "Help me find something good. Where do I start?"
+  }
+
+  let lead = hasM ? `I'm after something ${joinMoods(s.mood)}` : "I'm looking for something"
+  if (hasA) lead += ` for ${joinAudiences(s.audience)}`
+
+  const sentences = [`${lead}.`]
+  if (hasK) sentences.push(`It should be ${joinMatters(s.matters).toLowerCase()}.`)
+  if (hasBudget) sentences.push(`Budget is around $${s.budget}.`)
+  sentences.push('What would you suggest?')
+  return sentences.join(' ')
 }
 
 /**
