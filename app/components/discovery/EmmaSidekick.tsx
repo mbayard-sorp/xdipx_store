@@ -1,19 +1,18 @@
 /**
- * Emma sidekick — adaptive one-liner + CTAs.
+ * Emma sidekick — adaptive one-liner + Ask Emma CTA.
  *
  * Desktop (>= md): sticky right sidebar, 280px wide.
  * Mobile (< md): sticky bottom pill that expands on tap.
  *
- * "Ask Emma" links to /emma-chat if the route exists; otherwise disabled
- * with title="Coming soon".
- * "Save my picks" writes state to localStorage and shows an ephemeral toast.
+ * "Ask Emma" opens the globally-mounted AskEmmaWidget seeded with a
+ * first-person prompt built from the current selections.
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouteLoaderData } from 'react-router'
 import { getEmmaLine } from '~/lib/discovery-emma'
 import { trackEmmaLineSurface } from '~/lib/analytics.client'
-import { saveDiscoveryPicks, useDiscovery } from '~/stores/discovery'
+import { useDiscovery } from '~/stores/discovery'
 import { SIDEKICK_CTAS as CTA_LABELS, getAskEmmaSeedPrompt } from '~/lib/discovery-emma'
 import type { DiscoveryState } from '~/types/discovery'
 import type { EmmaPersona } from '~/types/cms'
@@ -41,8 +40,6 @@ export function EmmaSidekick() {
   const avatarAlt = emmaPersona?.avatarAlt || emmaPersona?.displayName || 'Emma'
   const displayName = emmaPersona?.displayName || 'Emma'
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [toastVisible, setToastVisible] = useState(false)
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const line = getEmmaLine(state)
   const prevStateRef = useRef<typeof state>(state)
 
@@ -56,13 +53,6 @@ export function EmmaSidekick() {
     }
     prevStateRef.current = state
   }, [state.mood.length, state.audience.length, state.matters.length])
-
-  function handleSavePicks() {
-    saveDiscoveryPicks(state)
-    if (toastTimer.current) clearTimeout(toastTimer.current)
-    setToastVisible(true)
-    toastTimer.current = setTimeout(() => setToastVisible(false), 2500)
-  }
 
   // Open the globally-mounted AskEmmaWidget (in _layout.tsx) seeded with a
   // first-person prompt built from the current selections. The widget listens
@@ -144,36 +134,16 @@ export function EmmaSidekick() {
         {line}
       </div>
 
-      {/* CTAs — Style Guide §06 buttons: primary = ink fill, ghost = paper +
-          ink border. Both are pills. "Save my picks" is the primary action. */}
-      <div className="flex gap-2 pt-3 border-t border-line">
+      {/* CTA — Style Guide §06 button: ink-fill pill, the card's sole action. */}
+      <div className="flex pt-3 border-t border-line">
         <button
           onClick={handleAskEmma}
-          className="flex-1 px-4 py-2.5 rounded-full bg-paper text-ink text-[13px] font-medium border border-line-2 hover:border-ink/30 hover:bg-paper-2 transition-colors"
+          className="flex-1 px-4 py-2.5 rounded-full bg-ink text-paper text-[13px] font-medium hover:bg-plum-2 transition-colors"
           style={{ fontFamily: 'var(--font-body)' }}
         >
           {CTA_LABELS.primary}
         </button>
-        <button
-          onClick={handleSavePicks}
-          className="flex-1 px-4 py-2.5 rounded-full bg-ink text-paper text-[13px] font-medium hover:bg-plum-2 transition-colors"
-          style={{ fontFamily: 'var(--font-body)' }}
-        >
-          {CTA_LABELS.secondary}
-        </button>
       </div>
-
-      {/* Save toast */}
-      {toastVisible && (
-        <p
-          role="status"
-          aria-live="polite"
-          className="mt-3 text-xs text-sage text-center"
-          style={{ fontFamily: 'var(--font-body)' }}
-        >
-          Picks saved. ♥
-        </p>
-      )}
     </>
   )
 
@@ -198,7 +168,7 @@ export function EmmaSidekick() {
           <div className="bg-paper border border-line rounded-[var(--radius-lg)] p-5 shadow-lg">
             <button
               onClick={() => setMobileOpen(false)}
-              className="float-right text-muted text-xl leading-none mb-2"
+              className="float-right text-ink-3 text-xl leading-none mb-2"
               aria-label="Collapse Emma"
             >
               ×
@@ -224,7 +194,7 @@ export function EmmaSidekick() {
             >
               {line}
             </p>
-            <span className="text-muted text-xs">tap ♥</span>
+            <span className="text-ink-4 text-xs">tap ♥</span>
           </button>
         )}
       </div>

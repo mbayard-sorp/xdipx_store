@@ -41,7 +41,7 @@ export function WelcomeBackBanner({ welcomeBackEnabled }: WelcomeBackBannerProps
   }
 
   return (
-    <div className="bg-cream-2 border-b border-line px-4 py-3 flex items-center justify-between gap-3">
+    <div className="bg-paper-2 border-b border-line px-4 py-3 flex items-center justify-between gap-3">
       <p
         className="text-sm text-ink/80 leading-snug"
         style={{ fontFamily: 'var(--font-body)' }}
@@ -51,7 +51,7 @@ export function WelcomeBackBanner({ welcomeBackEnabled }: WelcomeBackBannerProps
       <button
         onClick={handleDismiss}
         aria-label="Dismiss welcome back message"
-        className="text-muted hover:text-ink text-xl leading-none flex-none px-1"
+        className="text-ink-3 hover:text-ink text-xl leading-none flex-none px-1"
       >
         ×
       </button>

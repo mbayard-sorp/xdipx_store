@@ -25,9 +25,16 @@ function stepLabel(v: number | null): string {
 interface BudgetSliderProps {
   value: number | null
   onChange: (v: number | null) => void
+  /**
+   * When true, suppress the built-in mono "Budget" caption — the parent
+   * renders its own label (e.g. HomeA's serif "Budget (last)"). The current
+   * value still shows, right-aligned above the track. Avoids a duplicate
+   * "Budget" word stacking under the parent label.
+   */
+  compact?: boolean
 }
 
-export function BudgetSlider({ value, onChange }: BudgetSliderProps) {
+export function BudgetSlider({ value, onChange, compact = false }: BudgetSliderProps) {
   const idx = stepToIndex(value)
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -37,13 +44,15 @@ export function BudgetSlider({ value, onChange }: BudgetSliderProps) {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <p
-          className="text-xs uppercase tracking-widest text-muted"
-          style={{ fontFamily: 'var(--font-body)', letterSpacing: '0.14em' }}
-        >
-          Budget
-        </p>
+      <div className={compact ? 'flex items-center justify-end' : 'flex items-center justify-between'}>
+        {!compact && (
+          <p
+            className="text-xs uppercase tracking-widest text-ink-3"
+            style={{ fontFamily: 'var(--font-body)', letterSpacing: '0.14em' }}
+          >
+            Budget
+          </p>
+        )}
         <span
           className="text-sm font-semibold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
@@ -62,7 +71,7 @@ export function BudgetSlider({ value, onChange }: BudgetSliderProps) {
         aria-label="Budget filter"
         aria-valuetext={stepLabel(value)}
       />
-      <div className="flex justify-between text-xs text-muted" style={{ fontFamily: 'var(--font-body)' }}>
+      <div className="flex justify-between text-xs text-ink-4" style={{ fontFamily: 'var(--font-body)' }}>
         {STEPS.map((s, i) => (
           <span key={i}>{stepLabel(s)}</span>
         ))}
