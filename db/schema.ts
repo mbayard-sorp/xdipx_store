@@ -6,6 +6,7 @@ import {
   index,
   integer,
   json,
+  jsonb,
   pgTable,
   real,
   serial,
@@ -902,5 +903,25 @@ export const enrichmentBatches = pgTable('enrichment_batches', {
   collectedAt:  timestamp('collected_at'),
 }, t => ({
   statusIdx: index('idx_enrichment_batches_status').on(t.status, t.submittedAt),
+}))
+
+/**
+ * Durable retry queue for Meta Conversions API (CAPI) Purchase events.
+ * Purchase is the revenue-critical conversion signal; a failed CAPI POST must
+ * not be silently dropped. The order-created webhook inserts on failure and the
+ * profit-summary cron drains unresolved rows (bounded attempts). One row per
+ * order (unique order_id) keeps drains and webhook retries idempotent.
+ */
+export const metaCapiFailures = pgTable('meta_capi_failures', {
+  id:         serial('id').primaryKey(),
+  orderId:    varchar('order_id', { length: 64 }).notNull().unique(),
+  eventId:    varchar('event_id', { length: 128 }).notNull(),
+  payload:    jsonb('payload').notNull(),
+  attempts:   integer('attempts').notNull().default(0),
+  lastError:  text('last_error'),
+  createdAt:  timestamp('created_at').notNull().defaultNow(),
+  resolvedAt: timestamp('resolved_at'),
+}, t => ({
+  unresolvedIdx: index('idx_meta_capi_failures_unresolved').on(t.createdAt),
 }))
 

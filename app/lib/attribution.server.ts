@@ -62,6 +62,20 @@ export function getStoredRefCode(request: Request): string | null {
   return cookies[REF_COOKIE] ?? null
 }
 
+/**
+ * Read the browser-set Meta click/browser cookies from an incoming request.
+ * Read-only. Returns null for each cookie when absent.
+ * The values flow into CAPI user_data and are written as Shopify cart
+ * attributes by the api.cart action so they survive to the order webhook.
+ */
+export function getFbCookies(request: Request): { fbp: string | null; fbc: string | null } {
+  const cookies = parseCookie(request.headers.get('Cookie') ?? '')
+  return {
+    fbp: cookies['_fbp'] ?? null,
+    fbc: cookies['_fbc'] ?? null,
+  }
+}
+
 export function getClientIP(request: Request): string {
   return (
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??

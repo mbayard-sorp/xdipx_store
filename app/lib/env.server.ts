@@ -45,6 +45,8 @@ const REQUIRED_IN_PRODUCTION = [
   'IVR_WS_SECRET',
   'ELEVENLABS_VOICE_ID_IVR',
   'INTERNAL_API_SECRET',
+  'META_PIXEL_ID',
+  'META_CAPI_TOKEN',
 ]
 
 export function validateStartupEnv(): void {

@@ -6,6 +6,9 @@ import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import { getCustomerToken } from '~/lib/customer-session.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { deriveEmmaCartContext } from '~/lib/emma-cart.server'
+import { getMarketingConsent } from '~/lib/consent.server'
+import { getFbCookies, getClientIP } from '~/lib/attribution.server'
+import { generateEventId, sendCapiEvent } from '~/lib/meta-capi.server'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const cartId = getCartIdFromCookie(request)
@@ -42,6 +45,8 @@ export async function action({ request }: ActionFunctionArgs) {
     const variantId     = form.get('variantId') as string
     const quantity      = parseInt((form.get('quantity') as string) ?? '1', 10)
     const sellingPlanId = (form.get('sellingPlanId') as string) || undefined
+    const productId     = (form.get('productId') as string) || variantId
+    const price         = parseFloat((form.get('price') as string) ?? '0')
     if (!variantId) return { ok: false, error: 'Missing variantId' }
     const headers = new Headers()
     if (!cartId) {
@@ -62,7 +67,41 @@ export async function action({ request }: ActionFunctionArgs) {
         return Response.json({ ok: false, error: 'Could not add item' }, { status: 400, headers })
       }
     }
-    return Response.json({ ok: true }, { headers })
+    // Write _fbp/_fbc as cart attributes so they flow to order.note_attributes
+    // and the Purchase webhook can include them in the CAPI event.
+    const { fbp, fbc } = getFbCookies(request)
+    const fbAttrs: { key: string; value: string }[] = []
+    if (fbp) fbAttrs.push({ key: '_fbp', value: fbp })
+    if (fbc) fbAttrs.push({ key: '_fbc', value: fbc })
+    if (fbAttrs.length > 0) {
+      try { await setCartAttributes(cartId, fbAttrs) } catch { /* non-fatal */ }
+    }
+    // Generate dedup id and fire AddToCart CAPI fire-and-forget.
+    const addToCartEventId = generateEventId()
+    const consentGranted = getMarketingConsent(request)
+    void sendCapiEvent(
+      {
+        event_name:    'AddToCart',
+        event_id:      addToCartEventId,
+        event_time:    Math.floor(Date.now() / 1000),
+        action_source: 'website',
+        user_data: {
+          client_ip_address: getClientIP(request),
+          client_user_agent: request.headers.get('user-agent') ?? undefined,
+          fbp,
+          fbc,
+        },
+        custom_data: {
+          content_ids:  [productId],
+          content_type: 'product',
+          value:        price * quantity,
+          currency:     'USD',
+          num_items:    quantity,
+        },
+      },
+      { consentGranted },
+    )
+    return Response.json({ ok: true, addToCartEventId }, { headers })
   }
 
   if (intent === 'addMany') {
@@ -96,12 +135,49 @@ export async function action({ request }: ActionFunctionArgs) {
     // Optional: tag the cart with a custom attribute so a pre-configured
     // Shopify Automatic Discount rule can target it (e.g. pair_bundle=live).
     const cartTag = (form.get('cartTag') as string | null)?.trim()
-    if (cartTag && cartId) {
+    // Write _fbp/_fbc as cart attributes alongside any cartTag so they reach
+    // order.note_attributes for the Purchase CAPI event.
+    const { fbp, fbc } = getFbCookies(request)
+    const extraAttrs: { key: string; value: string }[] = []
+    if (cartTag) extraAttrs.push({ key: cartTag, value: 'live' })
+    if (fbp) extraAttrs.push({ key: '_fbp', value: fbp })
+    if (fbc) extraAttrs.push({ key: '_fbc', value: fbc })
+    if (extraAttrs.length > 0 && cartId) {
       try {
-        await setCartAttributes(cartId, [{ key: cartTag, value: 'live' }])
+        await setCartAttributes(cartId, extraAttrs)
       } catch { /* attribute is a nice-to-have — don't fail the add */ }
     }
-    return Response.json({ ok: true, added: lines.length }, { headers })
+    // Generate dedup id and fire AddToCart CAPI fire-and-forget.
+    const addToCartEventId = generateEventId()
+    const consentGranted = getMarketingConsent(request)
+    const totalValue = lines.reduce((sum, l) => {
+      const p = parseFloat((form.get(`price_${lines.indexOf(l)}`) as string) ?? '0')
+      return sum + p * l.quantity
+    }, 0)
+    const allProductIds = lines.map((_, i) => (form.get(`productId_${i}`) as string | null) ?? '').filter(Boolean)
+    void sendCapiEvent(
+      {
+        event_name:    'AddToCart',
+        event_id:      addToCartEventId,
+        event_time:    Math.floor(Date.now() / 1000),
+        action_source: 'website',
+        user_data: {
+          client_ip_address: getClientIP(request),
+          client_user_agent: request.headers.get('user-agent') ?? undefined,
+          fbp,
+          fbc,
+        },
+        custom_data: {
+          content_ids:  allProductIds.length > 0 ? allProductIds : lines.map((_, i) => String(i)),
+          content_type: 'product',
+          value:        totalValue,
+          currency:     'USD',
+          num_items:    lines.length,
+        },
+      },
+      { consentGranted },
+    )
+    return Response.json({ ok: true, added: lines.length, addToCartEventId }, { headers })
   }
 
   if (intent === 'add-bundle') {

@@ -22,6 +22,9 @@ import {
 import { getCustomerToken } from '~/lib/customer-session.server'
 import { customerAPI } from '~/lib/customer-api.server'
 import { getCartIdFromCookie } from '~/lib/cart.server'
+import { getMarketingConsent } from '~/lib/consent.server'
+import { getFbCookies, getClientIP } from '~/lib/attribution.server'
+import { generateEventId, sendCapiEvent } from '~/lib/meta-capi.server'
 import { getCart } from '~/lib/shopify.server'
 import { getEmmaAside, type EmmaAsideResult } from '~/lib/emma-aside.server'
 import { parseBrowseCookie, buildBrowseCookie } from '~/lib/browse-history.server'
@@ -57,6 +60,7 @@ import type { Product } from '~/types'
 import { categoryToLegacyString } from '~/types'
 import type { ProductCarouselBlock, ProductFaq, TrustBarBlock as TrustBarBlockType } from '~/types/cms'
 import { trackViewItem, trackAddToCart } from '~/lib/analytics.client'
+import { trackFbViewContent, trackFbAddToCart } from '~/lib/meta-pixel.client'
 import { ShareButtons } from '~/components/common/ShareButtons'
 import { HeartButton } from '~/components/store/HeartButton'
 import { Toast } from '~/components/account/Toast'
@@ -311,6 +315,33 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const browseCookieHeader = buildBrowseCookie(deal.shopifyProductId, previousBrowseIds)
 
+  // Generate dedup id shared with the browser pixel. Fire CAPI fire-and-forget
+  // (void) -- ViewContent failure is non-fatal.
+  const viewContentEventId = generateEventId()
+  const consentGranted = getMarketingConsent(request)
+  const { fbp, fbc } = getFbCookies(request)
+  void sendCapiEvent(
+    {
+      event_name:    'ViewContent',
+      event_id:      viewContentEventId,
+      event_time:    Math.floor(Date.now() / 1000),
+      action_source: 'website',
+      user_data: {
+        client_ip_address: getClientIP(request),
+        client_user_agent: request.headers.get('user-agent') ?? undefined,
+        fbp,
+        fbc,
+      },
+      custom_data: {
+        content_ids:  [deal.shopifyProductId],
+        content_type: 'product',
+        value:        deal.dealPrice,
+        currency:     'USD',
+      },
+    },
+    { consentGranted },
+  )
+
   return data(
     {
       type: 'product' as const,
@@ -336,6 +367,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       emmaAsidePromise,
       breadcrumbs,
       pdpTrustBar,
+      viewContentEventId,
     },
     { headers: { 'Set-Cookie': browseCookieHeader } },
   )
@@ -678,6 +710,19 @@ function ProductPage() {
     }, price)
   }, [deal.handle])
 
+  // ── Meta Pixel: ViewContent (fire-once side-effect, not data fetching) ───
+  // viewContentEventId was generated server-side so the browser pixel and
+  // server CAPI share the same id for Meta-side deduplication.
+  const viewContentEventId = loaderData.type === 'product' ? loaderData.viewContentEventId : null
+  useEffect(() => {
+    if (!viewContentEventId) return
+    trackFbViewContent(
+      { content_ids: [deal.shopifyProductId], value: price, currency: 'USD' },
+      viewContentEventId,
+    )
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deal.handle])
+
   // ── GA4: add_to_cart on fetcher success ────────────────────────────────
   const wasSubmittingPDP = useRef(false)
   useEffect(() => {
@@ -685,7 +730,7 @@ function ProductPage() {
       wasSubmittingPDP.current = true
     } else if (fetcher.state === 'idle' && wasSubmittingPDP.current) {
       wasSubmittingPDP.current = false
-      const data = fetcher.data as { ok?: boolean } | undefined
+      const data = fetcher.data as { ok?: boolean; addToCartEventId?: string } | undefined
       if (data?.ok) {
         trackAddToCart({
           item_id: deal.shopifyProductId,
@@ -696,6 +741,15 @@ function ProductPage() {
           quantity,
           ...(selectedVariant?.title ? { item_variant: selectedVariant.title } : {}),
         })
+        // ── Meta Pixel: AddToCart (fire-once side-effect, not data fetching) ─
+        // addToCartEventId comes from the api.cart action so browser + CAPI
+        // share the same id for deduplication.
+        if (data.addToCartEventId) {
+          trackFbAddToCart(
+            { content_ids: [deal.shopifyProductId], value: price, currency: 'USD' },
+            data.addToCartEventId,
+          )
+        }
       }
     }
   }, [fetcher.state, fetcher.data])

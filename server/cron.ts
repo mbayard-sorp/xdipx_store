@@ -9,6 +9,46 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb)
 }
 
+/**
+ * Drain unresolved Meta CAPI Purchase failures (bounded attempts). Re-sends each
+ * queued event; marks resolved on success, otherwise increments attempts and
+ * records the error. Runs piggybacked on the nightly profit-summary cron.
+ * Returns the number of rows that resolved this pass.
+ */
+async function drainMetaCapiFailures(): Promise<number> {
+  const MAX_ATTEMPTS = 5
+  try {
+    const { db } = await import('../app/lib/db.server.js')
+    const { metaCapiFailures } = await import('../db/schema.js')
+    const { sendCapiEvent } = await import('../app/lib/meta-capi.server.js')
+    const { and, eq, isNull, lt } = await import('drizzle-orm')
+
+    const rows = await db.select().from(metaCapiFailures)
+      .where(and(isNull(metaCapiFailures.resolvedAt), lt(metaCapiFailures.attempts, MAX_ATTEMPTS)))
+      .limit(100)
+
+    let resolved = 0
+    for (const row of rows) {
+      // PII-free path matches the original webhook send.
+      const result = await sendCapiEvent(row.payload as Parameters<typeof sendCapiEvent>[0], { consentGranted: false })
+      if (result.ok) {
+        await db.update(metaCapiFailures)
+          .set({ resolvedAt: new Date(), attempts: row.attempts + 1 })
+          .where(eq(metaCapiFailures.id, row.id))
+        resolved++
+      } else {
+        await db.update(metaCapiFailures)
+          .set({ attempts: row.attempts + 1, lastError: result.error ?? 'unknown' })
+          .where(eq(metaCapiFailures.id, row.id))
+      }
+    }
+    return resolved
+  } catch (err) {
+    console.error('[cron:profit-summary] CAPI drain error:', err)
+    return 0
+  }
+}
+
 export function createCronRoutes() {
   const router = Router()
 
@@ -74,7 +114,8 @@ export function createCronRoutes() {
     try {
       const { writeProfitSummary } = await import('../app/lib/profit.server.js')
       await writeProfitSummary()
-      res.json({ ok: true })
+      const capiRetried = await drainMetaCapiFailures()
+      res.json({ ok: true, capiRetried })
     } catch (err) {
       console.error('[cron:profit-summary]', err)
       res.status(500).json({ error: String(err) })
