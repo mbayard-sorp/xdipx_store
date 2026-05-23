@@ -70,7 +70,10 @@ export class AnthropicSdkClient implements LLMClient {
     const res = await this.client.messages.create({
       model:      req.model,
       max_tokens: req.max_tokens,
-      system:     req.system,
+      // Cache the static prefix (tools + system) so repeated turns re-read it
+      // instead of re-billing at full input rate. Canonical cache order is
+      // tools → system → messages, so this single breakpoint covers both.
+      system:     [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } }],
       tools:      req.tools,
       messages:   req.messages,
     })
