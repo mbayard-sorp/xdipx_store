@@ -245,10 +245,12 @@ function sseEvent(controller: ReadableStreamDefaultController<Uint8Array>, event
  *   - done         { messageId, inputTokens, outputTokens, aborted }
  *   - error        { message }
  *
- * Prompt-cache note: the Anthropic SDK automatically applies prompt-caching for
- * the system prompt when the model supports it (claude-sonnet-4 does). No
- * additional cache_control blocks are needed for a single ephemeral system
- * prompt — the SDK handles it transparently.
+ * Prompt-cache note: the SDK does NOT cache automatically. We pass the system
+ * prompt as a structured block tagged with cache_control: ephemeral. Anthropic
+ * caches in canonical order (tools, system, messages), so this single breakpoint
+ * at the end of the system block caches the tool definitions AND the system
+ * prompt together. The static prefix is re-read (not re-billed at full input
+ * rate) on every hop of the agentic loop and across turns within the 5-min TTL.
  */
 export function streamAgentReply(input: {
   threadId: number
@@ -296,7 +298,7 @@ export function streamAgentReply(input: {
             {
               model,
               max_tokens: MAX_OUTPUT_TOKENS,
-              system: systemPrompt,
+              system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
               tools,
               messages: anthropicMessages,
             },
