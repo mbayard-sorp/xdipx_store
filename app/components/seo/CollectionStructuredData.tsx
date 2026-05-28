@@ -1,6 +1,8 @@
 interface CollectionItem {
   handle: string
   title:  string
+  /** Absolute item URL. Defaults to the product page for this handle. */
+  url?: string | null
   /** Product image URL (raw — caller should pass a reasonable size). */
   image?: string | null
   /** Numeric or string price. Required to emit Offer schema. */
@@ -54,19 +56,20 @@ export function CollectionStructuredData({
       name,
       numberOfItems: numberOfItems ?? items.length,
       itemListElement: items.map((item, i) => {
-        // If the caller provided enriched product data, emit a nested
-        // Product so Google can render rich category SERP cards. Otherwise
+        const itemUrl = item.url ?? `${PRODUCT_BASE}/${item.handle}`
+        // Only emit a nested Product when we have a real Offer. Google
+        // rejects Product snippets lacking offers/aggregateRating/review,
+        // so image-only items (e.g. the collections hub listing shelves)
         // fall back to a plain ListItem (name + url) — still valid schema.
         const offer = toOffer(item)
-        const enriched = item.image || offer
-        const productNode = enriched
+        const productNode = offer
           ? {
               '@type': 'Product',
               name:    item.title,
-              url:     `${PRODUCT_BASE}/${item.handle}`,
+              url:     itemUrl,
               ...(item.image ? { image: item.image } : {}),
               ...(item.brand ? { brand: { '@type': 'Brand', name: item.brand } } : {}),
-              ...(offer ? { offers: offer } : {}),
+              offers:  offer,
             }
           : null
 
@@ -76,7 +79,7 @@ export function CollectionStructuredData({
               '@type':  'ListItem',
               position: i + 1,
               name:     item.title,
-              url:      `${PRODUCT_BASE}/${item.handle}`,
+              url:      itemUrl,
             }
       }),
     },
