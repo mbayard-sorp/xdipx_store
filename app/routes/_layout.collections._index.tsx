@@ -133,6 +133,7 @@ export default function CollectionsHub() {
           items={collections.map(c => ({
             handle: c.handle,
             title:  c.title,
+            url:    `${SITE_ORIGIN}/collections/${c.handle}`,
             image:  c.image?.url ?? null,
           }))}
         />
