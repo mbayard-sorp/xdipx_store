@@ -8,6 +8,12 @@ declare global {
   interface Window {
     dataLayer: unknown[]
     gtag: (...args: [GtagCommand, ...unknown[]]) => void
+    fbq: (
+      command: string,
+      eventOrAction: string,
+      params?: Record<string, unknown>,
+      opts?: { eventID?: string },
+    ) => void
   }
 }
 
@@ -57,6 +63,21 @@ export function updateConsent(granted: boolean) {
     ad_user_data: state,
     ad_personalization: state,
   })
+
+  // Mirror consent state to the Meta Pixel (fbq is declared in meta-pixel.client.ts
+  // but also available on window globally via the inline snippet in root.tsx).
+  if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
+    window.fbq('consent', granted ? 'grant' : 'revoke')
+  }
+
+  // Write the server-readable consent cookie so getMarketingConsent() in
+  // consent.server.ts can gate CAPI calls on subsequent requests.
+  // The cookie name matches MARKETING_CONSENT_COOKIE in consent.server.ts.
+  if (typeof document !== 'undefined') {
+    const maxAge = 60 * 60 * 24 * 365 // 1 year
+    const value  = encodeURIComponent(JSON.stringify({ marketing: granted }))
+    document.cookie = `__xdipx_consent=${value}; path=/; max-age=${maxAge}; samesite=lax`
+  }
 }
 
 // ─── Page views ───────────────────────────────────────────────────────────────

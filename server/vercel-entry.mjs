@@ -30,6 +30,7 @@ __export(schema_exports, {
   importCandidates: () => importCandidates,
   importMonitorRuns: () => importMonitorRuns,
   ivrVoices: () => ivrVoices,
+  metaCapiFailures: () => metaCapiFailures,
   orderLineItems: () => orderLineItems,
   pdpDialVotes: () => pdpDialVotes,
   pdpProductVotes: () => pdpProductVotes,
@@ -65,6 +66,7 @@ import {
   index,
   integer,
   json,
+  jsonb,
   pgTable,
   real,
   serial,
@@ -74,7 +76,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches, metaCapiFailures;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -797,10 +799,26 @@ var init_schema = __esm({
     }, (t) => ({
       statusIdx: index("idx_enrichment_batches_status").on(t.status, t.submittedAt)
     }));
+    metaCapiFailures = pgTable("meta_capi_failures", {
+      id: serial("id").primaryKey(),
+      orderId: varchar("order_id", { length: 64 }).notNull().unique(),
+      eventId: varchar("event_id", { length: 128 }).notNull(),
+      payload: jsonb("payload").notNull(),
+      attempts: integer("attempts").notNull().default(0),
+      lastError: text("last_error"),
+      createdAt: timestamp("created_at").notNull().defaultNow(),
+      resolvedAt: timestamp("resolved_at")
+    }, (t) => ({
+      unresolvedIdx: index("idx_meta_capi_failures_unresolved").on(t.createdAt)
+    }));
   }
 });
 
 // app/lib/db.server.ts
+var db_server_exports = {};
+__export(db_server_exports, {
+  db: () => db
+});
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 var sql, db;
@@ -1040,39 +1058,47 @@ var init_pricing_rules_server = __esm({
 });
 
 // app/lib/kv.server.ts
+function resolveKvCreds() {
+  const env = process.env;
+  if (env["KV_DISABLE"] === "1" || env["KV_DISABLE"] === "true") return null;
+  if (env["KV_REST_API_URL"] && env["KV_REST_API_TOKEN"]) {
+    return { url: env["KV_REST_API_URL"], token: env["KV_REST_API_TOKEN"] };
+  }
+  for (const key of Object.keys(env)) {
+    if (!key.endsWith("_KV_REST_API_URL")) continue;
+    const prefix = key.slice(0, -"_KV_REST_API_URL".length);
+    const url = env[key];
+    const token = env[`${prefix}_KV_REST_API_TOKEN`];
+    if (url && token) return { url, token };
+  }
+  return null;
+}
 async function getKV() {
   if (_kv) return _kv;
-  if (!process.env["KV_REST_API_URL"] || !process.env["KV_REST_API_TOKEN"]) return null;
+  const creds = resolveKvCreds();
+  if (!creds) return null;
   const { createClient: createClient9 } = await import("@vercel/kv");
-  _kv = createClient9({
-    url: process.env["KV_REST_API_URL"],
-    token: process.env["KV_REST_API_TOKEN"]
-  });
+  _kv = createClient9(creds);
   return _kv;
 }
-async function kvGet(key) {
-  const kv = await getKV();
-  if (kv) return kv.get(key);
+function warnKvFallback(op, err) {
+  const now = Date.now();
+  if (now - _lastKvWarn < 6e4) return;
+  _lastKvWarn = now;
+  console.warn(`[kv] ${op} failed, falling back to in-memory:`, err instanceof Error ? err.message : err);
+}
+function memGet(key) {
   return memStore.get(key) ?? null;
 }
-async function kvSet(key, value, _exSeconds) {
-  const kv = await getKV();
-  if (kv) {
-    if (_exSeconds) {
-      await kv.set(key, value, { ex: _exSeconds });
-    } else {
-      await kv.set(key, value);
-    }
-    return;
-  }
+function memSet(key, value, exSeconds) {
   memStore.set(key, value);
   const existing = memTimers.get(key);
   if (existing) clearTimeout(existing);
-  if (_exSeconds && _exSeconds > 0) {
+  if (exSeconds && exSeconds > 0) {
     const t = setTimeout(() => {
       memStore.delete(key);
       memTimers.delete(key);
-    }, _exSeconds * 1e3);
+    }, exSeconds * 1e3);
     if (typeof t.unref === "function") {
       t.unref();
     }
@@ -1081,18 +1107,49 @@ async function kvSet(key, value, _exSeconds) {
     memTimers.delete(key);
   }
 }
-async function kvDel(key) {
-  const kv = await getKV();
-  if (kv) {
-    await kv.del(key);
-    return;
-  }
+function memDel(key) {
   memStore.delete(key);
   const t = memTimers.get(key);
   if (t) {
     clearTimeout(t);
     memTimers.delete(key);
   }
+}
+async function kvGet(key) {
+  const kv = await getKV();
+  if (kv) {
+    try {
+      return await kv.get(key);
+    } catch (err) {
+      warnKvFallback("get", err);
+    }
+  }
+  return memGet(key);
+}
+async function kvSet(key, value, _exSeconds) {
+  const kv = await getKV();
+  if (kv) {
+    try {
+      if (_exSeconds) await kv.set(key, value, { ex: _exSeconds });
+      else await kv.set(key, value);
+      return;
+    } catch (err) {
+      warnKvFallback("set", err);
+    }
+  }
+  memSet(key, value, _exSeconds);
+}
+async function kvDel(key) {
+  const kv = await getKV();
+  if (kv) {
+    try {
+      await kv.del(key);
+      return;
+    } catch (err) {
+      warnKvFallback("del", err);
+    }
+  }
+  memDel(key);
 }
 async function cached(key, ttlSeconds, fn) {
   const ttlMs = ttlSeconds * 1e3;
@@ -1115,7 +1172,7 @@ function invalidateCache(prefix) {
     if (k.startsWith(prefix)) readCache.delete(k);
   }
 }
-var _kv, _g, memStore, _g3, memTimers, _g2, readCache, KV_KEYS;
+var _kv, _g, memStore, _g3, memTimers, _lastKvWarn, _g2, readCache, KV_KEYS;
 var init_kv_server = __esm({
   "app/lib/kv.server.ts"() {
     "use strict";
@@ -1126,6 +1183,7 @@ var init_kv_server = __esm({
     _g3 = globalThis;
     if (!_g3.__kvMemTimers) _g3.__kvMemTimers = /* @__PURE__ */ new Map();
     memTimers = _g3.__kvMemTimers;
+    _lastKvWarn = 0;
     _g2 = globalThis;
     if (!_g2.__readCache) _g2.__readCache = /* @__PURE__ */ new Map();
     readCache = _g2.__readCache;
@@ -1781,17 +1839,32 @@ async function adminGraphQL(query, variables) {
     },
     body: JSON.stringify({ query, variables })
   });
-  let res = await doFetch();
-  if (res.status === 429) {
-    const retryAfter = Number(res.headers.get("retry-after")) || 1;
-    const delayMs = Math.min(retryAfter * 1e3, 5e3);
-    await new Promise((r) => setTimeout(r, delayMs));
-    res = await doFetch();
+  const MAX_ATTEMPTS = 4;
+  for (let attempt = 1; ; attempt++) {
+    const res = await doFetch();
+    if (res.status === 429) {
+      if (attempt >= MAX_ATTEMPTS) throw new Error("Shopify Admin GraphQL error: 429");
+      const retryAfter = Number(res.headers.get("retry-after")) || 1;
+      await new Promise((r) => setTimeout(r, Math.min(retryAfter * 1e3, 5e3)));
+      continue;
+    }
+    if (!res.ok) throw new Error(`Shopify Admin GraphQL error: ${res.status}`);
+    const body = await res.json();
+    const throttled = body.errors?.some(
+      (e) => e.extensions?.code === "THROTTLED" || /throttled/i.test(e.message)
+    );
+    if (throttled && attempt < MAX_ATTEMPTS) {
+      const cost = body.extensions?.cost;
+      const needed = (cost?.requestedQueryCost ?? 0) - (cost?.throttleStatus?.currentlyAvailable ?? 0);
+      const restoreRate = cost?.throttleStatus?.restoreRate ?? 0;
+      const refillMs = needed > 0 && restoreRate > 0 ? needed / restoreRate * 1e3 : 0;
+      const backoffMs = refillMs || 2 ** (attempt - 1) * 500;
+      await new Promise((r) => setTimeout(r, Math.min(backoffMs, 5e3)));
+      continue;
+    }
+    if (body.errors?.length) throw new Error(body.errors[0]?.message ?? "Shopify Admin GraphQL error");
+    return body.data;
   }
-  if (!res.ok) throw new Error(`Shopify Admin GraphQL error: ${res.status}`);
-  const { data, errors } = await res.json();
-  if (errors?.length) throw new Error(errors[0]?.message ?? "Shopify Admin GraphQL error");
-  return data;
 }
 function nodeToVaultDeal(node) {
   const mf = node.metafields;
@@ -6477,6 +6550,67 @@ var init_pricing_apply_v2_server = __esm({
   }
 });
 
+// app/lib/meta-capi.server.ts
+var meta_capi_server_exports = {};
+__export(meta_capi_server_exports, {
+  generateEventId: () => generateEventId,
+  hashPII: () => hashPII,
+  sendCapiEvent: () => sendCapiEvent
+});
+import { createHash, randomUUID } from "node:crypto";
+function generateEventId() {
+  return randomUUID();
+}
+function hashPII(value) {
+  return createHash("sha256").update(value.trim().toLowerCase()).digest("hex");
+}
+async function sendCapiEvent(event, opts) {
+  const pixelId = process.env["META_PIXEL_ID"];
+  const token = process.env["META_CAPI_TOKEN"];
+  if (!pixelId || !token) return { ok: true };
+  const user_data = { ...event.user_data };
+  if (!opts.consentGranted) {
+    delete user_data.em;
+  }
+  const payload = {
+    data: [
+      {
+        event_name: event.event_name,
+        event_id: event.event_id,
+        event_time: event.event_time,
+        action_source: event.action_source,
+        user_data,
+        custom_data: event.custom_data
+      }
+    ],
+    access_token: token
+  };
+  const testCode = process.env["META_TEST_EVENT_CODE"];
+  if (testCode) payload["test_event_code"] = testCode;
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/${pixelId}/events`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }
+    );
+    if (!res.ok) {
+      const text2 = await res.text().catch(() => "");
+      return { ok: false, error: `Meta CAPI ${res.status}: ${text2}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+var init_meta_capi_server = __esm({
+  "app/lib/meta-capi.server.ts"() {
+    "use strict";
+  }
+});
+
 // app/lib/sanity.server.ts
 var sanity_server_exports = {};
 __export(sanity_server_exports, {
@@ -6525,12 +6659,12 @@ __export(sanity_server_exports, {
   upsertProductPage: () => upsertProductPage
 });
 import { createClient } from "@sanity/client";
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { toHTML as toHTML2 } from "@portabletext/to-html";
 function withSanityKey(items, hashOf) {
   const seen = /* @__PURE__ */ new Set();
   return items.map((item, i) => {
-    const base = createHash("sha1").update(hashOf(item)).digest("hex").slice(0, 12);
+    const base = createHash2("sha1").update(hashOf(item)).digest("hex").slice(0, 12);
     let key = base;
     if (seen.has(key)) key = `${base}${i.toString(36)}`;
     seen.add(key);
@@ -8621,7 +8755,7 @@ __export(claude_server_exports, {
   selectAccessories: () => selectAccessories
 });
 import Anthropic from "@anthropic-ai/sdk";
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 async function callClaude(opts) {
   void opts.llmClient;
   const systemParam = opts.systemBlocks ? opts.systemBlocks.map((b) => ({
@@ -9887,7 +10021,7 @@ function emmaHeroFallback(deal, variant, voiceHash) {
 async function generateEmmaHero(opts) {
   const variant = opts.variant ?? (opts.deal.mapRestricted ? "quote" : "loving");
   const brandVoice = opts.brandVoice ?? await getPipelineSetting("brandVoice") ?? DEFAULT_BRAND_VOICE;
-  const voiceHash = createHash2("sha1").update(brandVoice).digest("hex").slice(0, 12);
+  const voiceHash = createHash3("sha1").update(brandVoice).digest("hex").slice(0, 12);
   const discountPct = opts.deal.msrp > 0 && opts.deal.dealPrice > 0 ? Math.round((opts.deal.msrp - opts.deal.dealPrice) / opts.deal.msrp * 100) : 0;
   const mapLine = opts.deal.mapRestricted ? "MAP-restricted \u2014 no discount claims, no percent-off language, no struck prices." : discountPct > 0 ? `Currently ${discountPct}% off MSRP \u2014 you may allude to value, but never in "buy now" or countdown language.` : "";
   const systemBlocksForHero = await buildEmmaSystemBlocks(opts.brandVoice);
@@ -11661,7 +11795,7 @@ __export(emma_rails_server_exports, {
   regenerateRail: () => regenerateRail,
   regenerateRailById: () => regenerateRailById
 });
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 import { createClient as createClient4 } from "@sanity/client";
 function getReadClient3() {
   if (!projectId4) return null;
@@ -11680,7 +11814,7 @@ function computeBriefHash(rail) {
     sv: sv.trim(),
     m: rail.maxPicks
   });
-  return createHash3("sha256").update(payload).digest("hex").slice(0, 32);
+  return createHash4("sha256").update(payload).digest("hex").slice(0, 32);
 }
 function mulberry32(seed) {
   let t = seed >>> 0;
@@ -11693,7 +11827,7 @@ function mulberry32(seed) {
   };
 }
 function seedFromString(s) {
-  const hex = createHash3("sha256").update(s).digest("hex").slice(0, 8);
+  const hex = createHash4("sha256").update(s).digest("hex").slice(0, 8);
   return parseInt(hex, 16) >>> 0;
 }
 function seededShuffle(items, seed) {
@@ -12980,7 +13114,7 @@ __export(seo_research_server_exports, {
 });
 import { createClient as createClient6 } from "@sanity/client";
 import Anthropic2 from "@anthropic-ai/sdk";
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 function getWriteClient2() {
   if (!projectId6) return null;
   return createClient6({
@@ -12998,7 +13132,7 @@ function slugify(s) {
 function termToDocId(term) {
   const slug = slugify(term);
   if (slug && slug.length <= 50) return `seoKeyword.${slug}`;
-  const h = createHash4("sha1").update(term.toLowerCase()).digest("hex").slice(0, 16);
+  const h = createHash5("sha1").update(term.toLowerCase()).digest("hex").slice(0, 16);
   return `seoKeyword.${h}`;
 }
 function dfsAuthHeader() {
@@ -16418,6 +16552,10 @@ __export(import_enrich_server_exports, {
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
 import { and as and3, asc as asc2, eq as eq13, inArray as inArray3, isNull as isNull2, sql as sql7 } from "drizzle-orm";
+function normalizeIvrExperience(raw) {
+  const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
+  return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
+}
 async function isEnrichEnabled() {
   return await getPipelineSetting("import_enrich_enabled") === "true";
 }
@@ -16449,6 +16587,10 @@ async function applyFullEnrichmentWrites(numericProductId, writes) {
   const snap = await fetchProductSnapshot(numericProductId);
   if (!snap) throw new Error(`fetchProductSnapshot returned null for ${numericProductId}`);
   const category = inferCategoryFallback(snap.metafields["xdipx.category"]);
+  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq13(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  const editorialTags = (histRows[0]?.categories ?? []).filter(
+    (c) => !!c && c !== "(uncategorized)"
+  );
   const sTagline = ed(writes.tagline);
   const sSeo = ed(writes.seoMetaDescription);
   const sDesc = ed(writes.descriptionHtml);
@@ -16501,13 +16643,15 @@ async function applyFullEnrichmentWrites(numericProductId, writes) {
       audienceTags: writes.audienceTags,
       mattersTags: writes.mattersTags
     };
+    if (editorialTags.length) upsertParams.tags = editorialTags;
     if (doc.seoTitle) upsertParams.seoTitle = doc.seoTitle;
     if (writes.productSubtypeDial != null) upsertParams.productSubtypeDial = writes.productSubtypeDial;
     if (writes.sensationDialV2) upsertParams.sensationDialV2 = writes.sensationDialV2;
     if (sSpecs?.length) upsertParams.specifications = sSpecs;
     if (sCare?.length) upsertParams.careInstructions = sCare;
     if (sBox?.length) upsertParams.boxContents = sBox;
-    if (writes.ivrExperience) upsertParams.ivrExperience = writes.ivrExperience;
+    const ivrExperience = normalizeIvrExperience(writes.ivrExperience);
+    if (ivrExperience.length) upsertParams.ivrExperience = ivrExperience;
     if (writes.ivrUseCase?.length) upsertParams.ivrUseCase = writes.ivrUseCase;
     if (writes.ivrFeatures?.length) upsertParams.ivrFeatures = writes.ivrFeatures;
     if (writes.productFaqs?.length) upsertParams.productFaqs = writes.productFaqs;
@@ -16654,7 +16798,7 @@ async function runImportEnrichTick(opts = {}) {
   }
   return { ok: true, collect, publish, submit };
 }
-var DEFAULT_BATCH_CAP, ed, edA;
+var VALID_IVR_EXPERIENCE, DEFAULT_BATCH_CAP, ed, edA;
 var init_import_enrich_server = __esm({
   "app/lib/import-enrich.server.ts"() {
     "use strict";
@@ -16665,6 +16809,8 @@ var init_import_enrich_server = __esm({
     init_shopify_server();
     init_sanity_server();
     init_feed_processor_server();
+    init_claude_server();
+    VALID_IVR_EXPERIENCE = new Set(IVR_EXPERIENCE_LEVELS);
     DEFAULT_BATCH_CAP = 10;
     ed = (s) => s == null ? s : stripDashes(s);
     edA = (a) => a?.map(stripDashes);
@@ -16695,9 +16841,23 @@ var init_attribution_server = __esm({
 // app/lib/consent.server.ts
 var consent_server_exports = {};
 __export(consent_server_exports, {
+  MARKETING_CONSENT_COOKIE: () => MARKETING_CONSENT_COOKIE,
+  getMarketingConsent: () => getMarketingConsent,
   logConsent: () => logConsent,
   logTosAcceptance: () => logTosAcceptance
 });
+import { parse as parseCookie2 } from "cookie";
+function getMarketingConsent(request) {
+  const cookies = parseCookie2(request.headers.get("Cookie") ?? "");
+  const raw = cookies[MARKETING_CONSENT_COOKIE];
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed.marketing === true;
+  } catch {
+    return false;
+  }
+}
 async function logConsent(request, opts) {
   await db.insert(consentLog).values({
     sessionId: opts.sessionId,
@@ -16717,12 +16877,14 @@ async function logTosAcceptance(request, opts) {
     acceptanceMethod: opts.method
   });
 }
+var MARKETING_CONSENT_COOKIE;
 var init_consent_server = __esm({
   "app/lib/consent.server.ts"() {
     "use strict";
     init_db_server();
     init_schema();
     init_attribution_server();
+    MARKETING_CONSENT_COOKIE = "__xdipx_consent";
   }
 });
 
@@ -16773,6 +16935,30 @@ function safeEqual(a, b) {
   if (ab.length !== bb.length) return false;
   return timingSafeEqual(ab, bb);
 }
+async function drainMetaCapiFailures() {
+  const MAX_ATTEMPTS = 5;
+  try {
+    const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
+    const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+    const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
+    const { and: and4, eq: eq15, isNull: isNull3, lt } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and4(isNull3(metaCapiFailures2.resolvedAt), lt(metaCapiFailures2.attempts, MAX_ATTEMPTS))).limit(100);
+    let resolved = 0;
+    for (const row of rows) {
+      const result = await sendCapiEvent2(row.payload, { consentGranted: false });
+      if (result.ok) {
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq15(metaCapiFailures2.id, row.id));
+        resolved++;
+      } else {
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq15(metaCapiFailures2.id, row.id));
+      }
+    }
+    return resolved;
+  } catch (err) {
+    console.error("[cron:profit-summary] CAPI drain error:", err);
+    return 0;
+  }
+}
 function createCronRoutes() {
   const router = Router();
   const guard = (req, res, next) => {
@@ -16811,7 +16997,8 @@ function createCronRoutes() {
     try {
       const { writeProfitSummary: writeProfitSummary2 } = await Promise.resolve().then(() => (init_profit_server(), profit_server_exports));
       await writeProfitSummary2();
-      res.json({ ok: true });
+      const capiRetried = await drainMetaCapiFailures();
+      res.json({ ok: true, capiRetried });
     } catch (err) {
       console.error("[cron:profit-summary]", err);
       res.status(500).json({ error: String(err) });
@@ -17476,7 +17663,9 @@ var REQUIRED_IN_PRODUCTION = [
   "IVR_WS_URL",
   "IVR_WS_SECRET",
   "ELEVENLABS_VOICE_ID_IVR",
-  "INTERNAL_API_SECRET"
+  "INTERNAL_API_SECRET",
+  "META_PIXEL_ID",
+  "META_CAPI_TOKEN"
 ];
 function validateStartupEnv() {
   if (!isProd) return;

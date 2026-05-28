@@ -94,6 +94,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       AGE_GATE_LEVEL:    process.env['AGE_GATE_LEVEL']     ?? 'click_through',
       SENTRY_DSN:        process.env['SENTRY_DSN']         ?? '',
       EMMA_TEXT_NUMBER:  process.env['EMMA_TEXT_NUMBER']   ?? '',
+      // META_PIXEL_ID is public (the id appears in browser JS anyway).
+      // META_CAPI_TOKEN must NEVER be included here.
+      META_PIXEL_ID:     process.env['META_PIXEL_ID']      ?? '',
     },
   }
 }
@@ -105,7 +108,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // during SSR. The process.env fallback covers the error-boundary path where
   // loader data may be absent.
   const rootData = useRouteLoaderData('root') as
-    | { ENV?: { GA4_ID?: string; GTM_ID?: string } }
+    | { ENV?: { GA4_ID?: string; GTM_ID?: string; META_PIXEL_ID?: string } }
     | undefined
   const ga4Id = typeof document !== 'undefined'
     ? (window as unknown as { ENV?: { GA4_ID?: string } }).ENV?.GA4_ID ?? ''
@@ -113,6 +116,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const gtmId = typeof document !== 'undefined'
     ? (window as unknown as { ENV?: { GTM_ID?: string } }).ENV?.GTM_ID ?? ''
     : rootData?.ENV?.GTM_ID ?? (process.env['GTM_CONTAINER_ID'] ?? '')
+  const pixelId = typeof document !== 'undefined'
+    ? (window as unknown as { ENV?: { META_PIXEL_ID?: string } }).ENV?.META_PIXEL_ID ?? ''
+    : rootData?.ENV?.META_PIXEL_ID ?? (process.env['META_PIXEL_ID'] ?? '')
 
   return (
     <html lang="en" className="bg-cream">
@@ -150,6 +156,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
               }}
             />
           </>
+        )}
+        {/* Meta Pixel — consent-revoke-by-default mirrors the GA4 pattern above.
+            fbq('consent','revoke') fires BEFORE fbq('init') so no events are
+            sent until the visitor grants consent via the cookie banner. The
+            pixel id is public (visible in browser JS regardless); the CAPI
+            token is server-only and never appears here or in window.ENV. */}
+        {pixelId && (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('consent','revoke');fbq('init','${pixelId}');`,
+            }}
+          />
         )}
       </head>
       <body

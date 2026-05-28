@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
-import { dealHistory, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
+import { dealHistory, metaCapiFailures, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
 import { eq, sql } from 'drizzle-orm'
 
 // ─── HMAC verification ────────────────────────────────────────────────────
@@ -36,6 +36,7 @@ interface ShopifyOrder {
   order_number: number
   email: string
   total_price: string
+  currency?: string
   line_items: ShopifyLineItem[]
   note_attributes?: ShopifyNoteAttribute[]
   customer?: { id: number }
@@ -157,6 +158,55 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
       tosVersion,
       method:     'checkout',
     }).catch(() => {})
+  }
+
+  // ─── Meta CAPI Purchase event ─────────────────────────────────────────────
+  // Revenue-critical conversion signal. No browser pixel counterpart here (the
+  // shopper has left the storefront), so dedup is by a stable event_id derived
+  // from the order id (idempotent on Shopify webhook retries). The webhook has
+  // no browser consent state, so we send the PII-free path (no hashed email);
+  // value/currency/content_ids only. On failure we enqueue for the cron drain.
+  try {
+    const { sendCapiEvent } = await import('../app/lib/meta-capi.server.js')
+    const fbp = order.note_attributes?.find(a => a.name === '_fbp')?.value || null
+    const fbc = order.note_attributes?.find(a => a.name === '_fbc')?.value || null
+    const eventId  = `purchase_${order.id}`
+    const numItems = order.line_items.reduce((n, li) => n + (li.quantity || 0), 0)
+    const contentIds = order.line_items
+      .map(li => (li.product_id ? String(li.product_id) : ''))
+      .filter(Boolean)
+
+    const event = {
+      event_name:    'Purchase' as const,
+      event_id:      eventId,
+      event_time:    Math.floor(Date.now() / 1000),
+      action_source: 'website' as const,
+      user_data:     { fbp, fbc },
+      custom_data:   {
+        content_ids:  contentIds,
+        content_type: 'product' as const,
+        value:        parseFloat(order.total_price) || 0,
+        currency:     order.currency || 'USD',
+        num_items:    numItems,
+      },
+    }
+
+    // consentGranted: false → PII-free (no email) per the launch consent policy.
+    const result = await sendCapiEvent(event, { consentGranted: false })
+    if (!result.ok) {
+      await db.insert(metaCapiFailures)
+        .values({
+          orderId:   String(order.id),
+          eventId,
+          payload:   event,
+          attempts:  1,
+          lastError: result.error ?? 'unknown',
+        })
+        .onConflictDoNothing({ target: metaCapiFailures.orderId })
+      console.error('[webhook:order-created] Meta CAPI Purchase failed, queued for retry:', result.error)
+    }
+  } catch (err) {
+    console.error('[webhook:order-created] Meta CAPI Purchase block error:', err)
   }
 }
 
