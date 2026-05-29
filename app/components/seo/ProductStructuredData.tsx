@@ -141,8 +141,6 @@ export function ProductStructuredData({
     category:      deal.category,
     image:         deal.images.map(img => img.url),
     url,
-    ...(deal.createdAt ? { datePublished: deal.createdAt } : (deal.dealDate ? { datePublished: deal.dealDate } : {})),
-    ...(deal.updatedAt ? { dateModified: deal.updatedAt } : {}),
     offers,
     ...(deal.rating && deal.rating.count > 0 ? {
       aggregateRating: {
