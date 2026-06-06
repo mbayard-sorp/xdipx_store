@@ -10,6 +10,8 @@ const GENERIC_BLOCKS = [
   'Disallow: /admin',
   'Disallow: /account',
   'Disallow: /api/',
+  'Disallow: /cron/',
+  'Disallow: /mcp/',
   '',
 ]
 
@@ -41,6 +43,8 @@ export async function loader() {
     'Disallow: /admin',
     'Disallow: /account',
     'Disallow: /api/',
+    'Disallow: /cron/',
+    'Disallow: /mcp/',
     '',
   ])
 

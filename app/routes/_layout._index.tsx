@@ -42,6 +42,15 @@ import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~
 import { trackFbViewContent } from '~/lib/meta-pixel.client'
 import { buildSocialMeta } from '~/lib/social-meta'
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
+import { withTimeout } from '~/lib/with-timeout.server'
+
+// Per-fetch wall-clock budgets. Any single upstream that exceeds its budget
+// resolves to a safe fallback so the homepage always returns 200 SSR HTML well
+// under the serverless maxDuration. Cold-instance Googlebot crawls were tipping
+// past the 60s function limit and returning 499s when a dependency hung; these
+// bound each leg so the slowest upstream can't sink the whole render.
+const LOADER_TIMEOUT_MS = 8000
+const LOADER_DEAL_TIMEOUT_MS = 9000
 
 async function getLiveDealRow() {
   const [dbDeal] = await db
@@ -121,12 +130,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ])
   const isAdmin = !!adminUser
   const [deal, forHim, forHer, bonusDeal, cmsData, emmaHero, templateRows] = await Promise.all([
-    dbDeal?.shopifyProductId ? getDealByShopifyId(dbDeal.shopifyProductId) : Promise.resolve(null),
-    getProductsByTag('for-him', 8),
-    getProductsByTag('for-her', 8),
-    getBonusDeal(),
-    getHomepageSections(),
-    getEmmaHeroSettings(),
+    withTimeout(
+      dbDeal?.shopifyProductId ? getDealByShopifyId(dbDeal.shopifyProductId) : Promise.resolve(null),
+      LOADER_DEAL_TIMEOUT_MS, null, 'getDealByShopifyId',
+    ),
+    withTimeout(getProductsByTag('for-him', 8), LOADER_TIMEOUT_MS, [] as Product[], 'getProductsByTag(for-him)'),
+    withTimeout(getProductsByTag('for-her', 8), LOADER_TIMEOUT_MS, [] as Product[], 'getProductsByTag(for-her)'),
+    withTimeout(getBonusDeal(), LOADER_TIMEOUT_MS, null, 'getBonusDeal'),
+    withTimeout(getHomepageSections(), LOADER_TIMEOUT_MS, null, 'getHomepageSections'),
+    withTimeout(getEmmaHeroSettings(), LOADER_TIMEOUT_MS, null, 'getEmmaHeroSettings'),
     db.select().from(pipelineSettings).where(inArray(pipelineSettings.key, [
       'homepage_template',
       'homepage_show_free_shipping',
@@ -163,31 +175,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
   )
 
   const pairBundleDealP = (homepageSettings.template === 'pair_bundle' || homepageSettings.template === 'pair_bundle_fullbleed') && homepageSettings.pairProductHandle
-    ? getDealByHandle(homepageSettings.pairProductHandle)
+    ? withTimeout(getDealByHandle(homepageSettings.pairProductHandle), LOADER_TIMEOUT_MS, null, 'getDealByHandle(pairBundle)')
     : Promise.resolve(null)
 
   // Swatches depend on pairBundleDeal — chain rather than serialize the whole
   // loader. The chained .then keeps it parallel with the rest of Promise.all.
-  const pairSwatchesP: Promise<Record<string, string>> = pairBundleDealP.then(pbd => {
-    const labels = homepageSettings.template === 'pair_bundle_fullbleed' && deal && pbd
-      ? [
-          ...((deal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
-          ...((pbd.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
-        ]
-      : homepageSettings.template === 'endorsement' && deal
-        ? (deal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)
-        : []
-    return labels.length > 0 ? getSwatchMap(labels) : Promise.resolve({})
-  })
+  const pairSwatchesP: Promise<Record<string, string>> = withTimeout(
+    pairBundleDealP.then(pbd => {
+      const labels = homepageSettings.template === 'pair_bundle_fullbleed' && deal && pbd
+        ? [
+            ...((deal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
+            ...((pbd.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)),
+          ]
+        : homepageSettings.template === 'endorsement' && deal
+          ? (deal.options ?? []).filter(o => /colou?r/i.test(o.name)).flatMap(o => o.values)
+          : []
+      return labels.length > 0 ? getSwatchMap(labels) : Promise.resolve({})
+    }),
+    LOADER_TIMEOUT_MS, {} as Record<string, string>, 'pairSwatches',
+  )
 
   const pairDealP = emmaHero?.heroVariant === 'bundle' && emmaHero.pairProductHandle
-    ? getDealByHandle(emmaHero.pairProductHandle)
+    ? withTimeout(getDealByHandle(emmaHero.pairProductHandle), LOADER_TIMEOUT_MS, null, 'getDealByHandle(pairDeal)')
     : Promise.resolve(null)
 
-  const bundleP = deal?.handle ? getBundleByHandle(deal.handle) : Promise.resolve(null)
+  const bundleP = deal?.handle
+    ? withTimeout(getBundleByHandle(deal.handle), LOADER_TIMEOUT_MS, null, 'getBundleByHandle')
+    : Promise.resolve(null)
 
   const carouselResultsP = carouselBlocks.length > 0
-    ? Promise.all(carouselBlocks.map(b => {
+    ? withTimeout(Promise.all(carouselBlocks.map(b => {
         const limit = b.productLimit ?? 8
         const source = b.source ?? 'tag'
         if (source === 'collection' && b.collectionHandle) {
@@ -197,27 +214,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
           return getProductsByHandles(b.productHandles.map(p => p.handle))
         }
         return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([] as Product[])
-      }))
+      })), LOADER_TIMEOUT_MS, [] as Product[][], 'carouselResults')
     : Promise.resolve([] as Product[][])
 
   const emmaRailResultsP = emmaRailBlocks.length > 0
-    ? Promise.all(emmaRailBlocks.map(b =>
+    ? withTimeout(Promise.all(emmaRailBlocks.map(b =>
         b.productHandles?.length
           ? getProductsByHandles(b.productHandles.map(p => p.handle))
           : Promise.resolve([] as Product[]),
-      ))
+      )), LOADER_TIMEOUT_MS, [] as Product[][], 'emmaRailResults')
     : Promise.resolve([] as Product[][])
 
   // Deal-dependent calls — only meaningful when there's a live deal. When
   // there isn't, short-circuit with empty defaults so the Promise.all stays
   // shape-stable.
   const viewersP = deal
-    ? kvGet<number>(KV_KEYS.viewerCount(deal.handle)).then(n => n ?? 0)
+    ? withTimeout(kvGet<number>(KV_KEYS.viewerCount(deal.handle)).then(n => n ?? 0), LOADER_TIMEOUT_MS, 0, 'viewerCount')
     : Promise.resolve(0)
   const reviewDataP = deal
-    ? getProductReviews(deal.shopifyProductId, { sort: 'newest', page: 1, perPage: 10 })
+    ? withTimeout(
+        getProductReviews(deal.shopifyProductId, { sort: 'newest', page: 1, perPage: 10 }),
+        LOADER_TIMEOUT_MS,
+        { reviews: [] as Awaited<ReturnType<typeof getProductReviews>>['reviews'], total: 0 },
+        'getProductReviews',
+      )
     : Promise.resolve({ reviews: [] as Awaited<ReturnType<typeof getProductReviews>>['reviews'], total: 0 })
-  const aggregateP = deal ? getProductAggregate(deal.shopifyProductId) : Promise.resolve(null)
+  const aggregateP = deal
+    ? withTimeout(getProductAggregate(deal.shopifyProductId), LOADER_TIMEOUT_MS, null, 'getProductAggregate')
+    : Promise.resolve(null)
   const emmaContextRowsP = deal
     ? getEmmaContextRows({ dealHandle: deal.handle, sessionSeed }).catch(err => {
         console.error('[homepage] emma context rows failed:', err)

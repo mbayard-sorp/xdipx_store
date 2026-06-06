@@ -200,7 +200,9 @@ export async function loader() {
   return new Response(xml, {
     headers: {
       'Content-Type': 'application/xml',
-      'Cache-Control': 'public, max-age=3600',
+      // 10 min so a midnight deal rotation's new `lastmod` surfaces to crawlers
+      // promptly (was 1h, which could delay discovery of the rotated deal).
+      'Cache-Control': 'public, max-age=600',
     },
   })
 }
