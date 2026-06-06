@@ -3,6 +3,7 @@ import { useLoaderData, Link } from 'react-router'
 import { getBlogPosts, getBlogCategories, getBlogHomepage, isPreviewRequest } from '~/lib/sanity.server'
 import { BlogPostCard } from '~/components/blog/BlogPostCard'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
+import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
 import { canonicalUrl, robotsContent } from '~/lib/seo'
 import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
 import type { BlogPostCard as BlogPostCardType, BlogCategory } from '~/types/cms'
@@ -105,9 +106,27 @@ export default function NotebookIndex() {
     { name: 'Notebook', url: `${SITE_ORIGIN}/notebook` },
   ]
 
+  // ItemList of the visible posts (display order) strengthens the hub as an
+  // AEO surface. Skip on faceted category views — those are noindex,follow and
+  // duplicate the dedicated /notebook/category/{slug} route.
+  const listPosts = [featuredPost, ...secondaryPosts, ...posts].filter(
+    (p): p is BlogPostCardType => Boolean(p),
+  )
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:py-10">
       <BreadcrumbStructuredData items={breadcrumbSchema} />
+      {!selectedCategory && listPosts.length > 0 && (
+        <ItemListStructuredData
+          name="The Notebook"
+          url={`${SITE_ORIGIN}/notebook`}
+          items={listPosts.map(p => ({
+            name:  p.title,
+            url:   `${SITE_ORIGIN}/notebook/${p.slug}`,
+            image: p.heroImageUrl ?? null,
+          }))}
+        />
+      )}
       {/* Masthead */}
       <div className="text-center py-6 border-b-2 border-ink">
         <h1

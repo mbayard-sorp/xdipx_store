@@ -348,16 +348,28 @@ export async function rotateDeal(): Promise<{
     //    newly-live deal. Non-blocking — a failure here must not leave the
     //    site without a live deal. Lazy-on-miss in the homepage loader is
     //    the safety net if this call fails.
+    let liveHandle: string | null = null
     try {
       const { getDailyDeal } = await import('./shopify.server')
       const live = await getDailyDeal().catch(() => null)
-      if (live?.handle) {
+      liveHandle = live?.handle ?? null
+      if (liveHandle) {
         const { regenerateActiveRails } = await import('./emma-rails.server')
-        const res = await regenerateActiveRails(live.handle, 'midnight')
+        const res = await regenerateActiveRails(liveHandle, 'midnight')
         console.log('[deal-rotator] emma rails precomputed:', res)
       }
     } catch (err) {
       console.error('[deal-rotator] emma rails precompute failed (non-blocking):', err)
+    }
+
+    // 6. Ping search engines for the new homepage + product URL. Inert unless
+    //    SEARCH_PING_ENABLED. Non-blocking — discovery pings must never fail
+    //    the rotation.
+    try {
+      const { pingSearchEngines } = await import('./search-ping.server')
+      await pingSearchEngines(['/', ...(liveHandle ? [`/products/${liveHandle}`] : [])])
+    } catch (err) {
+      console.error('[deal-rotator] search ping failed (non-blocking):', err)
     }
   }
 

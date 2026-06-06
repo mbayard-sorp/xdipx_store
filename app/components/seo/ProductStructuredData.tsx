@@ -13,10 +13,18 @@ const SELLER = {
   '@id':   'https://xdipx.com/#organization',
 } as const
 
+// Matches the stated FAQ policy: unopened items in original packaging within
+// 14 days. returnFees is set to customer-responsibility (the conservative,
+// non-overpromising default); change to FreeReturn only if we actually cover
+// return shipping. Finite-window category requires merchantReturnDays +
+// returnMethod + returnFees to validate in Google Rich Results.
 const MERCHANT_RETURN_POLICY = {
   '@type':              'MerchantReturnPolicy',
   applicableCountry:    'US',
-  returnPolicyCategory: 'https://schema.org/MerchantReturnNotPermitted',
+  returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
+  merchantReturnDays:   14,
+  returnMethod:         'https://schema.org/ReturnByMail',
+  returnFees:           'https://schema.org/ReturnFeesCustomerResponsibility',
   merchantReturnLink:   'https://xdipx.com/faq',
 } as const
 

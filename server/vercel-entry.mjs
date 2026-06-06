@@ -12104,6 +12104,45 @@ var init_emma_rails_server = __esm({
   }
 });
 
+// app/lib/search-ping.server.ts
+var search_ping_server_exports = {};
+__export(search_ping_server_exports, {
+  pingSearchEngines: () => pingSearchEngines
+});
+async function pingSearchEngines(paths) {
+  if (process.env["SEARCH_PING_ENABLED"] !== "true") return;
+  const urlList = [...new Set(paths)].filter(Boolean).map((p) => p.startsWith("http") ? p : `${SITE_ORIGIN}${p.startsWith("/") ? p : `/${p}`}`);
+  if (urlList.length === 0) return;
+  const key = process.env["INDEXNOW_API_KEY"];
+  if (!key) {
+    console.warn("[search-ping] SEARCH_PING_ENABLED set but INDEXNOW_API_KEY missing \u2014 skipping");
+    return;
+  }
+  try {
+    const host = new URL(SITE_ORIGIN).host;
+    const res = await fetch("https://api.indexnow.org/IndexNow", {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({
+        host,
+        key,
+        keyLocation: `${SITE_ORIGIN}/${key}.txt`,
+        urlList
+      })
+    });
+    console.log(`[search-ping] IndexNow ${res.status} for ${urlList.length} url(s)`);
+  } catch (err) {
+    console.error("[search-ping] IndexNow ping failed (non-blocking):", err);
+  }
+}
+var SITE_ORIGIN;
+var init_search_ping_server = __esm({
+  "app/lib/search-ping.server.ts"() {
+    "use strict";
+    SITE_ORIGIN = "https://xdipx.com";
+  }
+});
+
 // app/lib/deal-rotator.server.ts
 var deal_rotator_server_exports = {};
 __export(deal_rotator_server_exports, {
@@ -12314,16 +12353,24 @@ async function rotateDeal() {
   ).orderBy(asc(dealHistory.sortOrder)).limit(1);
   if (nextDeal) {
     await activateDeal(nextDeal);
+    let liveHandle = null;
     try {
       const { getDailyDeal: getDailyDeal2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
       const live = await getDailyDeal2().catch(() => null);
-      if (live?.handle) {
+      liveHandle = live?.handle ?? null;
+      if (liveHandle) {
         const { regenerateActiveRails: regenerateActiveRails2 } = await Promise.resolve().then(() => (init_emma_rails_server(), emma_rails_server_exports));
-        const res = await regenerateActiveRails2(live.handle, "midnight");
+        const res = await regenerateActiveRails2(liveHandle, "midnight");
         console.log("[deal-rotator] emma rails precomputed:", res);
       }
     } catch (err) {
       console.error("[deal-rotator] emma rails precompute failed (non-blocking):", err);
+    }
+    try {
+      const { pingSearchEngines: pingSearchEngines2 } = await Promise.resolve().then(() => (init_search_ping_server(), search_ping_server_exports));
+      await pingSearchEngines2(["/", ...liveHandle ? [`/products/${liveHandle}`] : []]);
+    } catch (err) {
+      console.error("[deal-rotator] search ping failed (non-blocking):", err);
     }
   }
   return {
@@ -14399,7 +14446,10 @@ var init_llm_client_server = __esm({
         const res = await this.client.messages.create({
           model: req.model,
           max_tokens: req.max_tokens,
-          system: req.system,
+          // Cache the static prefix (tools + system) so repeated turns re-read it
+          // instead of re-billing at full input rate. Canonical cache order is
+          // tools → system → messages, so this single breakpoint covers both.
+          system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
           tools: req.tools,
           messages: req.messages
         });

@@ -12,6 +12,7 @@ import { buildSocialMeta } from '~/lib/social-meta'
 import { RelatedPosts } from '~/components/blog/RelatedPosts'
 import { BlogStructuredData } from '~/components/seo/BlogStructuredData'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
+import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
 import type { Product } from '~/types'
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
@@ -72,10 +73,34 @@ export default function NotebookPostPage() {
     { name: post.title, url: `https://xdipx.com/notebook/${post.slug}` },
   ]
 
+  // Guide-category posts that embed products are "best X for Y" listicles —
+  // emit ItemList JSON-LD (in body order) so AI engines and Google can extract
+  // the ranked picks. Built from the same blogProductEmbed blocks the reader
+  // sees, so the structured list stays 1:1 with visible content.
+  const isGuide = post.category?.slug === 'guides'
+  const guideItems = isGuide
+    ? (post.body ?? [])
+        .filter((b: any) => b._type === 'blogProductEmbed' && b.productHandle)
+        .map((b: any) => productMap[b.productHandle as string])
+        .filter((p): p is Product => Boolean(p))
+        .map(p => ({
+          name:  p.title,
+          url:   `https://xdipx.com/products/${p.handle}`,
+          image: p.images?.[0]?.url ?? null,
+        }))
+    : []
+
   return (
     <article className="max-w-6xl mx-auto px-4 py-6 sm:py-10">
       <BlogStructuredData post={post} readingTime={post.readingTime} />
       <BreadcrumbStructuredData items={breadcrumbSchema} />
+      {guideItems.length > 0 && (
+        <ItemListStructuredData
+          name={post.seoTitle ?? post.title}
+          url={`https://xdipx.com/notebook/${post.slug}`}
+          items={guideItems}
+        />
+      )}
 
       <BreadcrumbNav items={breadcrumbs} />
 
