@@ -179,6 +179,8 @@ const NAV_ITEMS = [
   { to: '/admin/search-filters',    label: 'Search Filters',   Icon: SearchFilterIcon },
   { to: '/admin/discovery-rules',   label: 'Discovery Rules',  Icon: SlidersIcon      },
   { to: '/admin/imports',           label: 'Imports',          Icon: ImportsIcon      },
+  { to: '/admin/async-jobs',     label: 'Async Jobs',    Icon: LabsIcon      },
+  { to: '/admin/usage',          label: 'API Usage',     Icon: PricingIcon   },
   { to: '/admin/seo-regen',      label: 'SEO Regen',     Icon: LabsIcon      },
   { to: '/admin/labs',           label: 'Labs',          Icon: LabsIcon      },
   { to: '/admin/emma-chat',      label: 'Emma Chat',    Icon: ChatBubbleIcon },

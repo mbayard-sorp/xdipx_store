@@ -170,6 +170,19 @@ async function llmSeedExpansion(seed: string): Promise<RawCandidate[]> {
     })
     const block = msg.content[0]
     if (block?.type !== 'text') return []
+    // B3.6 — best-effort token log
+    const uSeed = msg.usage as typeof msg.usage & {
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?:     number
+    }
+    void import('./token-log.server').then(({ logApiTokens }) =>
+      logApiTokens({
+        feature: 'seo-research', model: MODEL_FAST, source: 'sync', caller: 'seo-research/llmSeedExpansion',
+        inputTokens: uSeed.input_tokens, outputTokens: uSeed.output_tokens,
+        cacheCreationTokens: uSeed.cache_creation_input_tokens ?? 0,
+        cacheReadTokens:     uSeed.cache_read_input_tokens     ?? 0,
+      })
+    ).catch((err) => console.error('[seo-research] llmSeedExpansion token-log failed (ignored):', err))
     const raw = block.text.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim()
     const arr = JSON.parse(raw) as unknown
     if (!Array.isArray(arr)) return []
@@ -348,6 +361,19 @@ Return a JSON array of objects. JSON only — no prose, no fences.`
     })
     const block = msg.content[0]
     if (block?.type !== 'text') return []
+    // B3.6 — best-effort token log
+    const uClass = msg.usage as typeof msg.usage & {
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?:     number
+    }
+    void import('./token-log.server').then(({ logApiTokens }) =>
+      logApiTokens({
+        feature: 'seo-research', model: MODEL_FAST, source: 'sync', caller: 'seo-research/classifyBatch',
+        inputTokens: uClass.input_tokens, outputTokens: uClass.output_tokens,
+        cacheCreationTokens: uClass.cache_creation_input_tokens ?? 0,
+        cacheReadTokens:     uClass.cache_read_input_tokens     ?? 0,
+      })
+    ).catch((err) => console.error('[seo-research] classifyBatch token-log failed (ignored):', err))
     const raw = block.text.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim()
     const arr = JSON.parse(raw) as unknown
     if (!Array.isArray(arr)) return []

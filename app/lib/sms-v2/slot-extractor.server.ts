@@ -25,6 +25,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { ProductTypeDial, ProductSubtypeDial } from '../../types/index'
 import { type DiscoverySlots, isHighStakesCategory } from './discovery-gate.server'
+import { logApiTokens } from '../token-log.server'
 
 export type { ProductTypeDial, ProductSubtypeDial, DiscoverySlots }
 
@@ -487,6 +488,23 @@ async function classifyAudienceWithHaiku(
       max_tokens: 100,
       system: HAIKU_AUDIENCE_SYSTEM,
       messages: [{ role: 'user', content: text }],
+    })
+
+    const _u = res.usage as {
+      input_tokens: number
+      output_tokens: number
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?: number
+    }
+    void logApiTokens({
+      feature: 'sms',
+      model: HAIKU_MODEL,
+      source: 'sync',
+      inputTokens: _u.input_tokens,
+      outputTokens: _u.output_tokens,
+      cacheCreationTokens: _u.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: _u.cache_read_input_tokens ?? 0,
+      caller: 'classifyAudienceWithHaiku',
     })
 
     const textBlock = res.content.find(

@@ -28,6 +28,19 @@ async function generate(prompt: string, systemPrompt?: string, maxTokens = 512):
   })
   const block = msg.content[0]
   if (block?.type !== 'text') throw new Error('Unexpected Claude response type')
+  // B3.6 — best-effort token log
+  const u = msg.usage as typeof msg.usage & {
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?:     number
+  }
+  void import('./token-log.server').then(({ logApiTokens }) =>
+    logApiTokens({
+      feature: 'reviews', model: MODEL, source: 'sync', caller: 'reviews-ai/generate',
+      inputTokens: u.input_tokens, outputTokens: u.output_tokens,
+      cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+      cacheReadTokens:     u.cache_read_input_tokens     ?? 0,
+    })
+  ).catch((err) => console.error('[reviews-ai] token-log failed (ignored):', err))
   return block.text
 }
 

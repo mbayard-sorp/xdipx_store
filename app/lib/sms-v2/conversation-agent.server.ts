@@ -37,6 +37,7 @@
  * commits have already been routed away to UPSELL/CHECKOUT.
  */
 import Anthropic from '@anthropic-ai/sdk'
+import { logApiTokens } from '../token-log.server'
 import { loadConversationHistory, type HistoryTurn } from './conversation-history.server'
 import {
   DISCOVERY_AGENT_TOOLS,
@@ -666,11 +667,15 @@ export async function executeConversationAgent(
   const toolCalls: NonNullable<StageResponse['telemetry']['toolCalls']> = []
   let totalInputTokens = 0
   let totalOutputTokens = 0
+  let totalCacheCreationTokens = 0
+  let totalCacheReadTokens = 0
 
-  const tally = (u: { input_tokens?: number; output_tokens?: number } | undefined) => {
+  const tally = (u: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null } | undefined) => {
     if (!u) return
     totalInputTokens += u.input_tokens ?? 0
     totalOutputTokens += u.output_tokens ?? 0
+    totalCacheCreationTokens += u.cache_creation_input_tokens ?? 0
+    totalCacheReadTokens += u.cache_read_input_tokens ?? 0
   }
 
   const toolCtxBase: Omit<DiscoveryAgentToolContext, 'toolUseId'> = {
@@ -901,6 +906,17 @@ export async function executeConversationAgent(
   // not just the executeConversationAgent path. The processor fires it after
   // applyStateWrites returns — per architect condition #3.
   // Do not re-fire here; the processor is the single authoritative location.
+
+  void logApiTokens({
+    feature: 'sms',
+    model: SONNET_MODEL,
+    source: 'sync',
+    inputTokens: totalInputTokens,
+    outputTokens: totalOutputTokens,
+    cacheCreationTokens: totalCacheCreationTokens,
+    cacheReadTokens: totalCacheReadTokens,
+    caller: 'executeConversationAgent',
+  })
 
   return {
     stageOut,

@@ -25,6 +25,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk'
 import { getSmsConfig, fillReturningGreeting, SMS_DEFAULTS } from './sms-config.server'
+import { logApiTokens } from '../token-log.server'
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001'
 
@@ -113,6 +114,23 @@ export async function generateDiscoveryWelcome(
       messages: [{ role: 'user', content: userMsg }],
     })
 
+    const _u = resp.usage as {
+      input_tokens: number
+      output_tokens: number
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?: number
+    }
+    void logApiTokens({
+      feature: 'sms',
+      model: HAIKU_MODEL,
+      source: 'sync',
+      inputTokens: _u.input_tokens,
+      outputTokens: _u.output_tokens,
+      cacheCreationTokens: _u.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: _u.cache_read_input_tokens ?? 0,
+      caller: 'generateDiscoveryWelcome',
+    })
+
     const text = resp.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
       .map((b) => b.text)
@@ -123,8 +141,8 @@ export async function generateDiscoveryWelcome(
 
     return {
       prose: text,
-      inputTokens: resp.usage.input_tokens,
-      outputTokens: resp.usage.output_tokens,
+      inputTokens: _u.input_tokens,
+      outputTokens: _u.output_tokens,
     }
   } catch (err) {
     console.error('[discovery-welcome] Haiku call failed — falling back', err)

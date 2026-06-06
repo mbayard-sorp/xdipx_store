@@ -194,6 +194,16 @@ async function executePresentationStageGate(
     }
     inputTokens  += usage.input_tokens
     outputTokens += usage.output_tokens
+    // B3.5 — per-hop best-effort token log
+    void import('../../token-log.server').then(({ logApiTokens }) =>
+      logApiTokens({
+        feature: 'sms', model: SMS_MODEL, source: 'sync', caller: 'sms/presentation',
+        inputTokens:         usage.input_tokens,
+        outputTokens:        usage.output_tokens,
+        cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+        cacheReadTokens:     usage.cache_read_input_tokens     ?? 0,
+      })
+    ).catch((err) => console.error('[sms/presentation] token-log failed (ignored):', err))
 
     if (response.stop_reason === 'tool_use') {
       // Process tool calls

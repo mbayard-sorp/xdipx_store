@@ -503,14 +503,28 @@ export default function AdminSettingsPage() {
         </div>
 
         {pipelineResult && (
-          <div className={`rounded-xl p-4 text-sm ${pipelineResult.staged ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
+          <div className={`rounded-xl p-4 text-sm space-y-1 ${pipelineResult.staged ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
             {pipelineResult.staged ? (
               <>
-                ✓ Staged <strong>{pipelineResult.sku}</strong> for{' '}
-                <strong>{pipelineResult.dealDate}</strong> — ready for review in the Deal Queue.
+                <p>
+                  ✓ Staged <strong>{pipelineResult.sku}</strong> for{' '}
+                  <strong>{pipelineResult.dealDate}</strong> — ready for review in the Deal Queue.
+                </p>
+                {pipelineResult.copyJobId && (
+                  <p className="text-xs text-green-600">
+                    Copy generation queued.{' '}
+                    <a
+                      href={`/admin/async-jobs?jobId=${pipelineResult.copyJobId}`}
+                      className="underline font-semibold"
+                    >
+                      Track batch job
+                    </a>
+                    {' '}— fields apply automatically when the batch completes.
+                  </p>
+                )}
               </>
             ) : (
-              <>⚠ Pipeline did not stage a deal: {pipelineResult.reason}</>
+              <p>⚠ Pipeline did not stage a deal: {pipelineResult.reason}</p>
             )}
           </div>
         )}

@@ -19,7 +19,7 @@ import { kvGet } from './kv.server'
 import { db } from './db.server'
 import { dealHistory } from '../../db/schema'
 import { getPipelineSetting, dailyFeedProcessor } from './feed-processor.server'
-import { selectAccessories, generateCopy, generateSEOTitle } from './claude.server'
+import { selectAccessories, generateSEOTitle } from './claude.server'
 import {
   findProductBySKU,
   createShopifyProductFromFeed,
@@ -27,6 +27,7 @@ import {
   pushProductToShopify,
   setDealStatus,
 } from './shopify.server'
+import { enqueueFieldRegenJob } from './field-regen-runner.server'
 import { eq, or } from 'drizzle-orm'
 import type { ProductScore } from '~/types'
 
@@ -38,6 +39,8 @@ export interface PipelineResult {
   shopifyProductId?: string
   dealDate?: string
   reason?: string
+  /** jobId of the enqueued field-regen batch job for copy generation. */
+  copyJobId?: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -79,21 +82,6 @@ function inferCategory(categories: string[]): Array<'for-him' | 'for-her' | 'cou
   if (categories.some(c => forHerCats.includes(c)))  out.push('for-her')
   if (categories.some(c => coupleCats.includes(c))) out.push('couples')
   return out.length > 0 ? out : ['for-him', 'for-her']
-}
-
-// ─── Copy validation ───────────────────────────────────────────────────────
-
-function validateCopyFields(fields: {
-  tagline: string; fullStory: string; forHim: string; forHer: string
-  specs: string[]; boxContents: string[]; seoMeta: string
-}) {
-  if (!fields.tagline?.trim())               throw new Error('Copy generation failed: tagline is empty')
-  if (!fields.fullStory?.includes('<p'))      throw new Error('Copy generation failed: fullStory missing HTML')
-  if (!fields.forHim?.trim())                throw new Error('Copy generation failed: forHim is empty')
-  if (!fields.forHer?.trim())                throw new Error('Copy generation failed: forHer is empty')
-  if (!fields.specs?.length)                 throw new Error('Copy generation failed: specifications is empty')
-  if (!fields.boxContents.length)            throw new Error('Copy generation failed: boxContents is empty')
-  if (!fields.seoMeta || fields.seoMeta.length < 50) throw new Error('Copy generation failed: seoMeta too short')
 }
 
 // ─── Main orchestrator ─────────────────────────────────────────────────────
@@ -168,55 +156,16 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
       if (gid) accessoryGids.push(gid)
     }
 
-    // 7. Generate AI copy
-    //    Step A: extract specs from raw description FIRST so nothing is lost in the rewrite
+    // 7. Generate SEO title synchronously (fast, single call, needed for DB row).
     const seoTitle = await generateSEOTitle(chosen.title, chosen.brand)
 
-    const productContext = {
-      title: seoTitle,
-      brand: chosen.brand,
-      description: chosen.description,
-      categories: chosen.categories,
-      dealPrice: chosen.dealPrice,
-      msrp: chosen.msrp,
-    }
-
-    const specsResult = await generateCopy({ type: 'specifications', product: productContext })
-
-    //    Step B: remaining copy in parallel (full_story knows specs are in a separate tab)
-    const [taglineResult, storyResult, bothWaysResult, seoMetaResult, boxContentsResult] =
-      await Promise.all([
-        generateCopy({ type: 'tagline',      product: productContext }),
-        generateCopy({ type: 'full_story',   product: productContext }),
-        generateCopy({ type: 'both_ways',    product: productContext }),
-        generateCopy({ type: 'seo_meta',     product: productContext }),
-        generateCopy({ type: 'box_contents', product: productContext }),
-      ])
-
-    const tagline  = Array.isArray(taglineResult.content)
-      ? (taglineResult.content[0] ?? '')
-      : taglineResult.content as string
-    const fullStory  = storyResult.content as string
-    const bothWays   = bothWaysResult.content as { forHim: string; forHer: string }
-    const forHim     = bothWays.forHim
-    const forHer     = bothWays.forHer
-    const seoMeta    = seoMetaResult.content as string
-    const specs      = (Array.isArray(specsResult.content) ? specsResult.content : []) as string[]
-    const boxContents = boxContentsResult.content as string[]
-
-    // Validate required fields before touching Shopify
-    validateCopyFields({ tagline, fullStory, forHim, forHer, specs, boxContents, seoMeta })
-
-    // 8. Push all fields to Shopify
+    // 8. Push non-copy product fields to Shopify (status, dates, pricing,
+    //    accessories, raw description). Copy fields (tagline, full_story, etc.)
+    //    are enqueued below and applied asynchronously by the batch runner.
     await pushProductToShopify({
       shopifyProductId: numericId,
       title:            seoTitle,
       vendor:           chosen.brand,
-      description:      fullStory,   // sets Shopify bodyHtml
-      tagline,
-      fullStory,
-      worksForHim:      forHim,
-      worksForHer:      forHer,
       category:         inferCategory(chosen.categories),
       dealStatus:       'draft',
       dealDate,
@@ -226,9 +175,6 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
       nalpacSku:        chosen.sku,
       dealScore:        chosen.score,
       accessoryProductIds: accessoryGids,
-      seoMetaDescription:  seoMeta,
-      specifications:      specs,
-      boxContents,
       rawDescription:      chosen.description,
     })
 
@@ -252,11 +198,30 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
       shopifyProductId: numericId,
     }).onConflictDoNothing()
 
+    // 10. Enqueue copy generation via Batch API (async — cron poller applies
+    //     results when the batch completes; does not block the pipeline).
+    const { jobId: copyJobId } = await enqueueFieldRegenJob({
+      kind:      'copy-fields',
+      productId: shopifyGid,
+      sku:       chosen.sku,
+      product: {
+        title:       seoTitle,
+        brand:       chosen.brand,
+        description: chosen.description,
+        categories:  chosen.categories,
+        dealPrice:   chosen.dealPrice,
+        msrp:        chosen.msrp,
+      },
+      fields: ['specifications', 'tagline', 'full_story', 'both_ways', 'seo_meta', 'box_contents'],
+    })
+    console.log(`[deal-pipeline] copy job enqueued: ${copyJobId} for SKU ${chosen.sku}`)
+
     return {
       staged: true,
-      sku:             chosen.sku,
+      sku:              chosen.sku,
       shopifyProductId: numericId,
       dealDate,
+      copyJobId,
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

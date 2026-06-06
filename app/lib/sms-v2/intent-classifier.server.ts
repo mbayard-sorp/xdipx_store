@@ -16,6 +16,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import type { Intent, IntentResult, Stage } from './types.server'
 import type { EmmaContext } from './types.server'
+import { logApiTokens } from '../token-log.server'
 
 const client = new Anthropic({ apiKey: (process.env['ANTHROPIC_API_KEY'] ?? '').trim() })
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001'
@@ -229,6 +230,23 @@ async function classifyWithHaiku(
           content: `Current conversation stage: ${stage}\nCustomer message: ${text}`,
         },
       ],
+    })
+
+    const _u = res.usage as {
+      input_tokens: number
+      output_tokens: number
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?: number
+    }
+    void logApiTokens({
+      feature: 'sms',
+      model: HAIKU_MODEL,
+      source: 'sync',
+      inputTokens: _u.input_tokens,
+      outputTokens: _u.output_tokens,
+      cacheCreationTokens: _u.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: _u.cache_read_input_tokens ?? 0,
+      caller: 'classifyWithHaiku',
     })
 
     const textBlock = res.content.find((b): b is Anthropic.TextBlock => b.type === 'text')

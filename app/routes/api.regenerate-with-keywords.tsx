@@ -1,16 +1,16 @@
 import type { ActionFunctionArgs } from 'react-router'
-import { generateCopy } from '~/lib/claude.server'
 import { getDealByHandle } from '~/lib/shopify.server'
 import { requireAdmin } from '~/lib/session.server'
-import type { GenerateCopyRequest, GenerateCopyResult } from '~/types'
+import { enqueueFieldRegenJob } from '~/lib/field-regen-runner.server'
+import type { GenerateCopyRequest } from '~/types'
 
 /**
  * POST /api/regenerate-with-keywords
  *
- * Regenerates SEO-targeted copy for a single product. Pulls productTypeDial +
- * mood/audience/matters tags from Shopify metafields so generateCopy can match
- * the keyword bank by tag overlap (the broader keyword pool, not just the
- * "general / no-tag" subset).
+ * Regenerates SEO-targeted copy for a single product. Enqueues an async
+ * field-regen batch job and returns immediately with { jobId, status: 'queued' }.
+ * The cron poller at /cron/enrichment-batch-poller drives the job to completion.
+ * Track progress at /admin/async-jobs?jobId=<jobId>.
  *
  * Body (JSON or formData):
  *   - handle:  string (required)        — Shopify product handle
@@ -19,10 +19,12 @@ import type { GenerateCopyRequest, GenerateCopyResult } from '~/types'
  *   - authorSlug: string (optional)     — editorialAuthor slug for voice
  *   - seoMode: 'aggressive' | 'natural' | 'off' (optional)
  *
- * Response: { ok, handle, types: { [type]: { ok, content?, error? } } }
+ * Response: { ok, jobId, status: 'queued', handle, fields }
  *
- * Does NOT write anything. Admin reviews the regenerated copy in the response
- * and saves with existing per-field save endpoints (or a future "apply" UI).
+ * NOTE: keyword targeting (buildKeywordBlock / Sanity round-trip) is skipped
+ * in the batch path. The batch runner uses the same prompt templates but
+ * without the <keyword_targets> block. For full SEO-targeted copy, re-run
+ * after the job completes with a fresh sync call if needed.
  */
 
 const DEFAULT_TYPES: GenerateCopyRequest['type'][] = [
@@ -37,6 +39,11 @@ const VALID_TYPES = new Set<GenerateCopyRequest['type']>([
   'tagline', 'full_story', 'both_ways', 'box_contents', 'bullets',
   'email_subjects', 'seo_meta', 'specifications', 'quiet_endorsement',
   'pair_bundle', 'blog_article',
+])
+
+// Only these types have apply handlers in the field-regen runner.
+const BATCHABLE_TYPES = new Set<GenerateCopyRequest['type']>([
+  'tagline', 'full_story', 'both_ways', 'seo_meta', 'specifications', 'box_contents', 'bullets',
 ])
 
 interface RegenInput {
@@ -93,10 +100,12 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ ok: false, error: `No deal/product found for handle "${handle}"` }, { status: 404 })
   }
 
-  // Build the GenerateCopyRequest's product context once. Keyword targeting
-  // pulls from productTypeDial + mood/audience/matters tags so the gen-time
-  // helper can match the keyword bank by tag overlap (not just the no-tag
-  // general pool).
+  // Filter to only types that have batch apply handlers.
+  const batchableFields = types.filter(t => BATCHABLE_TYPES.has(t))
+  if (batchableFields.length === 0) {
+    return Response.json({ ok: false, error: 'None of the requested types support async batch regeneration.' }, { status: 400 })
+  }
+
   const productCtx: GenerateCopyRequest['product'] = {
     title:       deal.seoTitle || `${deal.brand} ${deal.handle}`.trim(),
     brand:       deal.brand,
@@ -111,22 +120,23 @@ export async function action({ request }: ActionFunctionArgs) {
   if (deal.audienceTags?.length) productCtx.audienceTags = deal.audienceTags
   if (deal.mattersTags?.length)  productCtx.mattersTags  = deal.mattersTags
 
-  // Sequential generation — each call hits Anthropic, KV cache reuses the
-  // keyword block across types so only the first call pays the Sanity round-trip.
-  const out: Record<string, { ok: true; content: GenerateCopyResult['content'] } | { ok: false; error: string }> = {}
-  for (const type of types) {
-    try {
-      const req: GenerateCopyRequest = { type, product: productCtx }
-      if (authorSlug) req.authorSlug = authorSlug
-      if (seoMode)    req.seoMode    = seoMode
-      const result = await generateCopy(req)
-      out[type] = { ok: true, content: result.content }
-    } catch (err) {
-      console.error(`[regen-with-keywords] ${handle}/${type} failed:`, err)
-      out[type] = { ok: false, error: err instanceof Error ? err.message : String(err) }
-    }
-  }
+  const sku = deal.sku ?? deal.handle
+  const { jobId } = await enqueueFieldRegenJob({
+    kind:      'copy-fields',
+    productId: deal.shopifyProductId,
+    sku,
+    product:   productCtx,
+    fields:    batchableFields,
+    ...(authorSlug ? { authorSlug } : {}),
+    ...(seoMode    ? { seoMode    } : {}),
+  })
 
-  const allOk = Object.values(out).every(r => r.ok)
-  return Response.json({ ok: allOk, handle, types: out })
+  return Response.json({
+    ok:     true,
+    jobId,
+    status: 'queued',
+    handle,
+    fields: batchableFields,
+    message: `Regeneration queued as job ${jobId}. Track at /admin/async-jobs?jobId=${jobId}`,
+  })
 }

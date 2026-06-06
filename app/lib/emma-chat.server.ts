@@ -282,6 +282,9 @@ export function streamAgentReply(input: {
         const history: EmmaChatMessage[] = [...loaded.messages]
         let totalInputTokens = 0
         let totalOutputTokens = 0
+        // B3.4 — cache token accumulators (cache_control: ephemeral on system prompt)
+        let totalCacheCreationTokens = 0
+        let totalCacheReadTokens = 0
         let finalAssistantId: number | null = null
 
         for (let hop = 0; hop < MAX_TOOL_HOPS && !aborted; hop++) {
@@ -311,8 +314,15 @@ export function streamAgentReply(input: {
           })
 
           const finalMessage = await stream.finalMessage()
-          totalInputTokens  += finalMessage.usage?.input_tokens  ?? 0
-          totalOutputTokens += finalMessage.usage?.output_tokens ?? 0
+          // B3.4 — cast for cache fields; accumulate across hops
+          const hopUsage = finalMessage.usage as typeof finalMessage.usage & {
+            cache_creation_input_tokens?: number
+            cache_read_input_tokens?:     number
+          }
+          totalInputTokens         += hopUsage?.input_tokens                   ?? 0
+          totalOutputTokens        += hopUsage?.output_tokens                  ?? 0
+          totalCacheCreationTokens += hopUsage?.cache_creation_input_tokens    ?? 0
+          totalCacheReadTokens     += hopUsage?.cache_read_input_tokens        ?? 0
 
           // Extract any tool_use blocks
           const toolUses = finalMessage.content.filter(
@@ -405,6 +415,17 @@ export function streamAgentReply(input: {
         await db.update(emmaChatThreads)
           .set({ updatedAt: new Date() })
           .where(eq(emmaChatThreads.id, threadId))
+
+        // B3.4 — fire token log once per turn (aggregated across hops). Best-effort.
+        void import('~/lib/token-log.server').then(({ logApiTokens }) =>
+          logApiTokens({
+            feature: 'emma-chat', model, source: 'sync', caller: 'emma-chat',
+            inputTokens:         totalInputTokens,
+            outputTokens:        totalOutputTokens,
+            cacheCreationTokens: totalCacheCreationTokens,
+            cacheReadTokens:     totalCacheReadTokens,
+          })
+        ).catch((err) => console.error('[emma-chat] token-log failed (ignored):', err))
 
         sseEvent(controller, 'done', {
           messageId: finalAssistantId,

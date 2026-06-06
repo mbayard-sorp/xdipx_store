@@ -317,6 +317,16 @@ export async function executeResearchStage(
   }
   inputTokens  += usage.input_tokens
   outputTokens += usage.output_tokens
+  // B3.5 — best-effort token log
+  void import('../../token-log.server').then(({ logApiTokens }) =>
+    logApiTokens({
+      feature: 'sms', model: SMS_MODEL, source: 'sync', caller: 'sms/research',
+      inputTokens:         usage.input_tokens,
+      outputTokens:        usage.output_tokens,
+      cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+      cacheReadTokens:     usage.cache_read_input_tokens     ?? 0,
+    })
+  ).catch((err) => console.error('[sms/research] token-log failed (ignored):', err))
 
   const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text')
   rawProse = textBlock?.text?.trim() ?? ''

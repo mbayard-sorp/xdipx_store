@@ -905,6 +905,128 @@ export const enrichmentBatches = pgTable('enrichment_batches', {
   statusIdx: index('idx_enrichment_batches_status').on(t.status, t.submittedAt),
 }))
 
+// ---------------------------------------------------------------------------
+// Enrichment batch jobs + API token spend logging (migrations 042/043)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-product runner state stored in batch_jobs.runner_state[productId].
+ * The messages array mirrors the turn loop in emma-orchestrator.server.ts.
+ * llmClient is NEVER serialized here (it is a class instance; strip before insert).
+ */
+export interface ProductRunnerState {
+  productId:            string           // Shopify GID
+  sku:                  string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  messages:             Array<{ role: 'user' | 'assistant'; content: any }>
+  calledTools:          string[]         // dedupe set
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  writes:               Record<string, any>  // Partial<ProductWrites> — typed at call site
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  telemetry:            Record<string, any>  // OrchestratorTelemetry — typed at call site
+  finished:             boolean
+  turns:                number           // requests submitted (pre-increment, mirrors real loop)
+  status:               'running' | 'done' | 'error'
+  error?:               string
+  lastBatchCustomId?:   string           // `${jobId}__${productId}` — crash-recovery skip guard
+  lastProcessedBatchId?: string          // matches current_batch_id on a completed product
+  requestRetries:       number           // per-request batch error retry counter (cap 2)
+  applyRetries:         number           // Shopify-push failure counter in 'applying' (cap 3)
+}
+
+/**
+ * Brief stored in batch_jobs.products[]. Does NOT include llmClient (stripped
+ * before insert in enqueueBatchJob — llmClient is a class instance, not JSON-serializable).
+ */
+export interface BatchJobProduct {
+  productId:  string    // Shopify GID
+  sku:        string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  input:      Record<string, any>  // OrchestratorInput minus llmClient; typed at call site
+  via:        'batch'              // always 'batch' for runner jobs
+}
+
+/** Terminal per-product result stored in batch_jobs.results[]. */
+export interface BatchJobProductResult {
+  productId:      string
+  sku:            string
+  ok:             boolean
+  writesApplied?: boolean
+  applyRetries?:  number
+  error?:         string
+}
+
+/**
+ * Registry of async enrichment jobs. One row per enqueued enrichment request
+ * (single product or bulk). The lockstep batched runner advances each job
+ * one Anthropic batch per poller tick.
+ */
+export const batchJobs = pgTable('batch_jobs', {
+  id:              serial('id').primaryKey(),
+  jobId:           varchar('job_id', { length: 64 }).notNull(),
+  jobType:         varchar('job_type', { length: 32 }).notNull(),   // 'full-enrichment' | 'emma-take' | 'emma-hero' | 'regenerate'
+  status:          varchar('status', { length: 20 }).default('queued').notNull(), // queued | submitted | processing | applying | done | failed
+  source:          varchar('source', { length: 32 }).notNull(),     // entry point: 'bulk-import' | 'import-product' | 'deal-manager' | 'backfill' | ...
+  skuList:         json('sku_list').$type<string[]>().notNull(),
+  products:        json('products').$type<BatchJobProduct[]>().notNull(),
+  turn:            integer('turn').default(0).notNull(),
+  maxTurns:        integer('max_turns').default(24).notNull(),
+  batchIds:        json('batch_ids').$type<string[]>().default([]).notNull(),
+  currentBatchId:  varchar('current_batch_id', { length: 64 }),
+  // Keyed by productId (Shopify GID). The runner persists each product
+  // incrementally for crash-recovery within a turn (see C3a in spec).
+  runnerState:     json('runner_state').$type<Record<string, ProductRunnerState>>().default({}).notNull(),
+  results:         json('results').$type<BatchJobProductResult[]>(),
+  error:           text('error'),
+  gatesDealId:     integer('gates_deal_id'),    // dealHistory.id this job gates (nullable)
+  appliedSkus:     json('applied_skus').$type<string[]>().default([]).notNull(),
+  createdAt:       timestamp('created_at').defaultNow().notNull(),
+  submittedAt:     timestamp('submitted_at'),
+  updatedAt:       timestamp('updated_at').defaultNow().notNull(),
+  completedAt:     timestamp('completed_at'),
+  failedAt:        timestamp('failed_at'),
+}, t => ({
+  jobIdIdx:      uniqueIndex('uq_batch_jobs_job_id').on(t.jobId),
+  statusIdx:     index('idx_batch_jobs_status').on(t.status, t.createdAt),
+  // Partial index mirrors the SQL migration for the poller drain query.
+  // Drizzle does not support partial indexes via the builder; the SQL migration
+  // creates idx_batch_jobs_inflight directly. Listed here for documentation only.
+  gatesDealIdx:  index('idx_batch_jobs_gates_deal').on(t.gatesDealId),
+}))
+
+/**
+ * Central per-call token-spend log for every Anthropic API-key call.
+ * Written best-effort from logApiTokens(); a write failure must never
+ * throw into or unwind a real API call.
+ *
+ * The view api_token_daily (created in migration 043) is queried with raw SQL
+ * via getDailyTokenRollup() in token-log.server.ts -- Drizzle has no view model.
+ */
+export const apiTokenLog = pgTable('api_token_log', {
+  id:                   serial('id').primaryKey(),
+  ts:                   timestamp('ts').defaultNow().notNull(),
+  feature:              varchar('feature', { length: 48 }).notNull(),   // 'enrichment' | 'emma-chat' | 'sms' | 'ivr' | 'copy-gen' | ...
+  model:                varchar('model', { length: 64 }).notNull(),
+  source:               varchar('source', { length: 16 }).notNull(),    // 'batch' | 'sync' | 'agent-sdk'
+  batchId:              varchar('batch_id', { length: 64 }),
+  productId:            varchar('product_id', { length: 64 }),
+  sku:                  varchar('sku', { length: 32 }),
+  caller:               varchar('caller', { length: 96 }),
+  inputTokens:          integer('input_tokens').default(0).notNull(),
+  outputTokens:         integer('output_tokens').default(0).notNull(),
+  cacheCreationTokens:  integer('cache_creation_tokens').default(0).notNull(),
+  cacheReadTokens:      integer('cache_read_tokens').default(0).notNull(),
+  requestCount:         integer('request_count').default(1).notNull(),  // >1 when one row aggregates a batch turn
+  estCostUsd:           decimal('est_cost_usd', { precision: 10, scale: 5 }).default('0').notNull(),
+  requestId:            varchar('request_id', { length: 64 }),          // IVR idempotency key (option B); null otherwise
+}, t => ({
+  tsIdx:        index('idx_api_token_log_ts').on(t.ts),
+  featureTsIdx: index('idx_api_token_log_feature_ts').on(t.feature, t.ts),
+  // Partial unique index for IVR idempotency (uq_api_token_log_request_id) and
+  // the batch_id index are created in the SQL migration (Drizzle partial index
+  // limitation). Listed here for documentation.
+}))
+
 /**
  * Durable retry queue for Meta Conversions API (CAPI) Purchase events.
  * Purchase is the revenue-critical conversion signal; a failed CAPI POST must

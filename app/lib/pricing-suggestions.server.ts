@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import Anthropic from '@anthropic-ai/sdk'
 import { kvGet, kvSet } from './kv.server'
+import { logApiTokens } from './token-log.server'
 
 export interface MarkupSuggestion {
   productType: string
@@ -129,6 +130,23 @@ async function callClaude(
       },
     ],
     tool_choice: { type: 'tool', name: TOOL_NAME },
+  })
+
+  const u = response.usage as {
+    input_tokens: number
+    output_tokens: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
+  }
+  void logApiTokens({
+    feature: 'pricing-suggestions',
+    model: 'claude-sonnet-4-20250514',
+    source: 'sync',
+    inputTokens: u.input_tokens,
+    outputTokens: u.output_tokens,
+    cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+    cacheReadTokens: u.cache_read_input_tokens ?? 0,
+    caller: 'callClaude',
   })
 
   const rawPreview = JSON.stringify(response.content).slice(0, 600)

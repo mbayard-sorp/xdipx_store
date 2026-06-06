@@ -27,6 +27,7 @@
     { "path": "/cron/log-monitor",          "schedule": "*/15 * * * *" },
     { "path": "/cron/pricing-batch-recompute", "schedule": "0 7 * * *"  },
     { "path": "/cron/import-monitor",          "schedule": "0 8 * * *"  },
-    { "path": "/cron/import-enrich",           "schedule": "*/30 * * * *" }
+    { "path": "/cron/import-enrich",           "schedule": "*/30 * * * *" },
+    { "path": "/cron/enrichment-batch-poller", "schedule": "*/2 * * * *"  }
   ]
 }

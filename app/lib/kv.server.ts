@@ -221,6 +221,8 @@ export const KV_KEYS = {
   // Encouragement strip above discovery grid (30-min TTL per filter combination)
   emmaEncouragement:           (hash: string) => `emmaEncouragement:v2:${hash}`,
   emmaEncouragementDailyCount: (utcDate: string) => `emmaEncouragement:dailyCount:${utcDate}`,
+  // Batch enrichment job summary mirrored from DB for fast admin poll surface (24h TTL)
+  enrichmentJob:               (jobId: string) => `batch-job:${jobId}`,
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────

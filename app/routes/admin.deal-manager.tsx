@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   getDealByShopifyId, updateProductMetafield, setDealStatus,
   activateShopifyProduct, getVariantCost,
-  pushProductToShopify, getAccessoryProductsAdmin, getProductAdminImages,
+  getAccessoryProductsAdmin, getProductAdminImages,
   updateProductTags,
 } from '~/lib/shopify.server'
 import type { AdminProductImage } from '~/lib/shopify.server'
@@ -14,7 +14,7 @@ import { PricingPanel } from '~/components/admin/PricingPanel'
 import { db } from '~/lib/db.server'
 import { dealHistory } from '../../db/schema'
 import { eq } from 'drizzle-orm'
-import { generateCopy, generateSEOTitle } from '~/lib/claude.server'
+import { enqueueFieldRegenJob } from '~/lib/field-regen-runner.server'
 import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
 import type { Product } from '~/types'
 
@@ -158,62 +158,45 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'generate-all') {
-    try {
-      const productId  = form.get('productId') as string
-      const rawDesc    = form.get('rawDescription') as string
-      const title      = form.get('title') as string
-      const brand      = form.get('brand') as string
-      // categories from DB (real Nalpac category names, not the slugified single value)
-      const categories = (form.get('categories') as string).split(',').filter(Boolean)
-      const dealPrice  = parseFloat((form.get('dealPrice') as string) || '0')
-      const msrp       = parseFloat((form.get('msrp') as string) || '0')
+    const productId  = form.get('productId') as string
+    const rawDesc    = form.get('rawDescription') as string
+    const title      = form.get('title') as string
+    const brand      = form.get('brand') as string
+    const categories = (form.get('categories') as string).split(',').filter(Boolean)
+    const dealPrice  = parseFloat((form.get('dealPrice') as string) || '0')
+    const msrp       = parseFloat((form.get('msrp') as string) || '0')
 
-      if (!rawDesc?.trim()) return { ok: false, error: 'No original description — paste the raw product description and Save it first.' }
+    if (!rawDesc?.trim()) {
+      return { ok: false, error: 'No original description — paste the raw product description and Save it first.' }
+    }
+    if (!productId) {
+      return { ok: false, error: 'Missing productId.' }
+    }
 
-      const seoTitle = await generateSEOTitle(title, brand)
+    // Look up the deal to get its SKU.
+    const deal = await getDealByShopifyId(productId)
+    const sku = deal?.sku ?? productId
 
-      const productContext = { title: seoTitle, brand, description: rawDesc, categories, dealPrice, msrp }
+    const { jobId } = await enqueueFieldRegenJob({
+      kind:      'copy-fields',
+      productId,
+      sku,
+      product: {
+        title:       title || brand,
+        brand,
+        description: rawDesc,
+        categories,
+        dealPrice,
+        msrp,
+      },
+      fields: ['specifications', 'tagline', 'full_story', 'both_ways', 'seo_meta', 'box_contents'],
+    })
 
-      // Extract specs first (sequential) so full_story can omit them
-      const specsResult = await generateCopy({ type: 'specifications', product: productContext })
-
-      const [taglineResult, storyResult, bothWaysResult, seoMetaResult, boxContentsResult] =
-        await Promise.all([
-          generateCopy({ type: 'tagline',      product: productContext }),
-          generateCopy({ type: 'full_story',   product: productContext }),
-          generateCopy({ type: 'both_ways',    product: productContext }),
-          generateCopy({ type: 'seo_meta',     product: productContext }),
-          generateCopy({ type: 'box_contents', product: productContext }),
-        ])
-
-      const tagline     = Array.isArray(taglineResult.content)
-        ? (taglineResult.content[0] ?? '')
-        : taglineResult.content as string
-      const fullStory   = storyResult.content as string
-      const bothWays    = bothWaysResult.content as { forHim: string; forHer: string }
-      const seoMeta     = seoMetaResult.content as string
-      const specs       = (Array.isArray(specsResult.content) ? specsResult.content : []) as string[]
-      const boxContents = boxContentsResult.content as string[]
-
-      const numericId = productId.replace('gid://shopify/Product/', '')
-      await pushProductToShopify({
-        shopifyProductId: numericId,
-        tagline,
-        fullStory,
-        description:    fullStory,
-        worksForHim:    bothWays.forHim,
-        worksForHer:    bothWays.forHer,
-        seoMetaDescription: seoMeta,
-        specifications: specs,
-        boxContents,
-      })
-
-      const currentDate = form.get('currentDate') as string | null
-      return redirect(currentDate ? `/admin/deal-manager?date=${currentDate}` : '/admin/deal-manager')
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      console.error('[generate-all] failed:', message)
-      return { ok: false, error: message }
+    return {
+      ok:      true,
+      queued:  true,
+      jobId,
+      message: `Copy regeneration queued. Track progress at /admin/async-jobs?jobId=${jobId}`,
     }
   }
 
@@ -292,18 +275,22 @@ function SaveableField({
 
 // ─── Raw Description + Generate All ────────────────────────────────────────
 
+type GenerateAllData = { ok: boolean; queued?: boolean; jobId?: string; message?: string; error?: string }
+
 function RawDescriptionPanel({ deal, categories, targetDate }: {
   deal: NonNullable<ReturnType<typeof useLoaderData<typeof loader>>['deal']>
   categories: string[]
   targetDate: string
 }) {
   const saveFetcher     = useFetcher<{ ok: boolean }>()
-  const generateFetcher = useFetcher<{ ok: boolean; error?: string }>()
+  const generateFetcher = useFetcher<GenerateAllData>()
   const textareaRef     = useRef<HTMLTextAreaElement>(null)
 
   const isSaving     = saveFetcher.state === 'submitting'
   const saved        = saveFetcher.state === 'idle' && saveFetcher.data?.ok === true
-  const isGenerating = generateFetcher.state === 'submitting'
+  const isSubmitting = generateFetcher.state === 'submitting'
+  const isQueued     = generateFetcher.state === 'idle' && generateFetcher.data?.queued === true
+  const jobId        = generateFetcher.data?.jobId
 
   const placeholder = '(No original description stored — re-run the pipeline to import it, or paste the raw product description here and click Save)'
 
@@ -315,7 +302,7 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
           <span className="ml-2 text-xs font-normal text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">custom.original_description</span>
         </h3>
         <p className="text-xs text-ink/50 mt-1">
-          Raw text from Nalpac feed. Edit if needed, then click "Generate All Fields" to regenerate all copy from this source.
+          Raw text from Nalpac feed. Edit if needed, then click "Generate All Fields" to queue async regeneration via the Batch API.
         </p>
       </div>
 
@@ -346,7 +333,7 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
         </button>
       </saveFetcher.Form>
 
-      {/* Generate All button — reads from the textarea at submit time */}
+      {/* Generate All — enqueues a field-regen batch job, returns immediately */}
       <generateFetcher.Form
         method="post"
         onSubmit={e => {
@@ -366,25 +353,41 @@ function RawDescriptionPanel({ deal, categories, targetDate }: {
         <input type="hidden" name="msrp"           value={deal.msrp} />
         <button
           type="submit"
-          disabled={isGenerating}
+          disabled={isSubmitting || isQueued}
           className={
-            isGenerating
+            isSubmitting
               ? 'w-full py-3 rounded-xl text-sm font-bold bg-ink/10 text-ink/40 cursor-not-allowed'
-              : 'w-full py-3 rounded-xl text-sm font-bold bg-gradient-to-r from-coral to-coral-2 text-white hover:opacity-90 transition-opacity'
+              : isQueued
+                ? 'w-full py-3 rounded-xl text-sm font-bold bg-green-100 text-green-700 cursor-default'
+                : 'w-full py-3 rounded-xl text-sm font-bold bg-coral text-white hover:bg-coral-2 transition-colors'
           }
         >
-          {isGenerating
-            ? '✨ Generating all fields… (~30 seconds)'
-            : '✨ Generate All Fields from Original Description'}
+          {isSubmitting
+            ? 'Queuing…'
+            : isQueued
+              ? '✓ Regeneration queued'
+              : 'Generate All Fields from Original Description'}
         </button>
-        {isGenerating && (
+        {isSubmitting && (
           <p className="text-xs text-ink/50 text-center mt-2">
-            Tagline · Full Story · Works For Him · Works For Her · Specs · Box Contents · Bullets · SEO Meta
+            Submitting to Batch API — returns instantly, results ready in minutes.
+          </p>
+        )}
+        {isQueued && jobId && (
+          <p className="text-xs text-ink/60 text-center mt-2">
+            Job queued.{' '}
+            <a
+              href={`/admin/async-jobs?jobId=${jobId}`}
+              className="underline text-coral hover:text-coral-2"
+            >
+              Track progress
+            </a>
+            {' '}— fields apply automatically when the batch completes.
           </p>
         )}
         {generateFetcher.data?.error && (
           <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2">
-            ⚠ {generateFetcher.data.error}
+            Error: {generateFetcher.data.error}
           </p>
         )}
       </generateFetcher.Form>
