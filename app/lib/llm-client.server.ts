@@ -36,14 +36,24 @@ export interface LLMRequest {
   system:     string
   tools:      AnthropicTool[]
   messages:   LLMMessage[]
+  /** Optional call-site metadata forwarded to logApiTokens. Not sent to the API. */
+  meta?: {
+    feature:   string
+    source?:   'sync' | 'batch'
+    caller?:   string
+    productId?: string
+    sku?:      string
+  }
 }
 
 export interface LLMResponse {
   content:     AnthropicContent[]
   stop_reason: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | string | null
   usage: {
-    input_tokens:  number
-    output_tokens: number
+    input_tokens:                number
+    output_tokens:               number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?:     number
   }
 }
 
@@ -77,12 +87,43 @@ export class AnthropicSdkClient implements LLMClient {
       tools:      req.tools,
       messages:   req.messages,
     })
+    // Extend usage cast to include cache fields (B3.0).
+    const u = res.usage as {
+      input_tokens:                number
+      output_tokens:               number
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?:     number
+    }
+    // B3.1 — best-effort token log. `void` ensures a logging failure never
+    // unwinds the real API call. The `meta` field is stripped before the API
+    // request above; it is only used here for attribution.
+    void import('./token-log.server').then(({ logApiTokens }) => {
+      const entry: import('./token-log.server').TokenLogEntry = {
+        feature:             req.meta?.feature  ?? 'enrichment',
+        model:               req.model,
+        source:              req.meta?.source   ?? 'sync',
+        inputTokens:         u.input_tokens,
+        outputTokens:        u.output_tokens,
+        cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+        cacheReadTokens:     u.cache_read_input_tokens     ?? 0,
+      }
+      if (req.meta?.caller)    entry.caller    = req.meta.caller
+      if (req.meta?.productId) entry.productId = req.meta.productId
+      if (req.meta?.sku)       entry.sku       = req.meta.sku
+      return logApiTokens(entry)
+    }).catch((err) => console.error('[llm-client] token-log import failed (ignored):', err))
     return {
       content:     res.content as AnthropicContent[],
       stop_reason: (res as { stop_reason?: string | null }).stop_reason ?? null,
       usage: {
-        input_tokens:  res.usage.input_tokens,
-        output_tokens: res.usage.output_tokens,
+        input_tokens:                u.input_tokens,
+        output_tokens:               u.output_tokens,
+        ...(u.cache_creation_input_tokens !== undefined
+          ? { cache_creation_input_tokens: u.cache_creation_input_tokens }
+          : {}),
+        ...(u.cache_read_input_tokens !== undefined
+          ? { cache_read_input_tokens: u.cache_read_input_tokens }
+          : {}),
       },
     }
   }

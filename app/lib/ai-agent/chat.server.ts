@@ -360,10 +360,14 @@ export async function generateChatReply(
   let cartUpdated = false
   let totalInputTokens = 0
   let totalOutputTokens = 0
-  const tally = (u: { input_tokens?: number; output_tokens?: number } | undefined) => {
+  let totalCacheCreationTokens = 0
+  let totalCacheReadTokens = 0
+  const tally = (u: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null } | undefined) => {
     if (!u) return
     totalInputTokens += u.input_tokens ?? 0
     totalOutputTokens += u.output_tokens ?? 0
+    totalCacheCreationTokens += u.cache_creation_input_tokens ?? 0
+    totalCacheReadTokens += u.cache_read_input_tokens ?? 0
   }
   // Wrap any caller-provided callbacks so we still propagate their side-effects
   // (cookie setting, etc.) AND record that the cart changed for the reply payload.
@@ -527,6 +531,14 @@ export async function generateChatReply(
       : quickReply
         ? "Pick one and I'll take it from there ♥"
         : "Hmm — my brain blanked for a second. Say that again?"
+    // B3.7 — best-effort token log (aggregated across all hops; includes cache tokens)
+    void import('../token-log.server').then(({ logApiTokens }) =>
+      logApiTokens({
+        feature: 'emma-chat', model: tuning.model, source: 'sync', caller: 'ai-agent/chat',
+        inputTokens: totalInputTokens, outputTokens: totalOutputTokens,
+        cacheCreationTokens: totalCacheCreationTokens, cacheReadTokens: totalCacheReadTokens,
+      })
+    ).catch((err) => console.error('[ai-agent/chat] token-log failed (ignored):', err))
     return {
       reply: replyText || fallback,
       products,
@@ -569,6 +581,14 @@ export async function generateChatReply(
   const products = isSms
     ? []
     : await hydrateCards([...collected.values()].slice(0, MAX_CARDS_PER_REPLY))
+  // B3.7 — best-effort token log (out-of-hops wrap-up path; includes cache tokens)
+  void import('../token-log.server').then(({ logApiTokens }) =>
+    logApiTokens({
+      feature: 'emma-chat', model: tuning.model, source: 'sync', caller: 'ai-agent/chat',
+      inputTokens: totalInputTokens, outputTokens: totalOutputTokens,
+      cacheCreationTokens: totalCacheCreationTokens, cacheReadTokens: totalCacheReadTokens,
+    })
+  ).catch((err) => console.error('[ai-agent/chat] token-log failed (ignored):', err))
   return {
     reply: replyText || "Let me know if you want me to keep digging.",
     products,

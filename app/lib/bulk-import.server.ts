@@ -10,7 +10,7 @@ import { eq, max } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { dealHistory } from '../../db/schema'
 import { generateSEOTitle } from '~/lib/claude.server'
-import { generateProductContent } from '~/lib/emma-orchestrator.server'
+import { enqueueBatchJob } from '~/lib/batch-orchestrator.server'
 import { cleanDescription, isDiscontinued, deriveSection } from '~/lib/feed-processor.server'
 import { UNCATEGORIZED_SENTINEL } from '~/lib/master-collapse.server'
 import {
@@ -200,6 +200,8 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
   success: boolean
   sku: string
   shopifyProductId?: string
+  /** Batch job id for the background full-enrichment run (present on success). */
+  jobId?: string
   skipped?: boolean
   error?: string
   /** Non-fatal issues — Shopify row succeeded but something downstream (e.g. Sanity sync) didn't. */
@@ -312,84 +314,17 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       return []
     })
 
-    // 6. Run the Emma orchestrator — Sonnet tool-use loop that decides which
-    //    content generators to call (Emma's take, dial v2, care, mood/audience/
-    //    matters tags, pairing-why, mood image, etc.) and returns a consolidated
-    //    payload. Note: full_story is no longer generated — the PDP reads
-    //    descriptionHtml.
-    const { writes, telemetry } = await generateProductContent({
-      product: {
-        title:       masterRow['Product Title'],
-        brand:       masterRow.Brand,
-        description,
-        categories,
-        dealPrice,
-        msrp,
-      },
-      seoTitle,
-      category,
-      pairingCandidates,
-    })
-
-    // Final shopper-facing title (augmented when Emma decided the raw title
-    // needed an SEO descriptor; otherwise unchanged).
-    const finalTitle = writes.productTitle ?? seoTitle
-
-    console.info(
-      `[bulk-import] ${masterSku} orchestrator: tokens=${telemetry.totalTokens} ` +
-      `duration=${telemetry.durationMs}ms turns=${telemetry.turns} ` +
-      `pairings=${writes.accessoryProductIds?.length ?? 0} ` +
-      `titleAugmented=${writes.productTitleAugmented ? 'yes' : 'no'} ` +
-      `tools=[${telemetry.toolCalls.map(c => `${c.name}${c.ok ? '' : '!'}`).join(',')}]`,
-    )
-
-    // 7. Push all metafields to Shopify (full_story deliberately omitted)
-    await pushProductToShopify({
-      shopifyProductId:   numericId,
-      // Update product.title when augmented; leave alone otherwise.
-      ...(writes.productTitleAugmented ? { title: finalTitle } : {}),
-      seoTitle:           finalTitle,
-      tagline:            writes.tagline,
-      ...(writes.worksForHim      !== undefined ? { worksForHim:      writes.worksForHim }      : {}),
-      ...(writes.worksForHer      !== undefined ? { worksForHer:      writes.worksForHer }      : {}),
-      ...(writes.boxContents      !== undefined ? { boxContents:      writes.boxContents }      : {}),
-      ...(writes.specifications   !== undefined ? { specifications:   writes.specifications }   : {}),
-      seoMetaDescription: writes.seoMetaDescription,
-      descriptionHtml:    writes.descriptionHtml,
-      ...(writes.careInstructions !== undefined ? { careInstructions: writes.careInstructions } : {}),
-      ...(writes.sensationDialV2  !== undefined ? { sensationDialV2:  writes.sensationDialV2 }  : {}),
-      productTypeDial:    writes.productTypeDial,
-      ...(writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {}),
-      moodTags:           writes.moodTags,
-      audienceTags:       writes.audienceTags,
-      mattersTags:        writes.mattersTags,
-      ...(writes.emmaHero         !== undefined ? { emmaHero:         writes.emmaHero }         : {}),
-      ...(writes.moodImageUrl     !== undefined ? { moodImageUrl:     writes.moodImageUrl }     : {}),
-      ...(writes.originalTitle    !== undefined ? { originalTitle:    writes.originalTitle }    : {}),
-      ...(writes.accessoryProductIds !== undefined ? { accessoryProductIds: writes.accessoryProductIds } : {}),
-      ...(writes.pairingWhy       !== undefined ? { pairingWhy:       writes.pairingWhy }       : {}),
-      tags:               editorialTagsFrom(categories),
-      category,
-      sectionTags:        [deriveSection({ productTypeDial: writes.productTypeDial, categories, title: masterRow['Product Title'] })],
-      dealStatus:         'pending_approval',
-      dealDate:           '2099-12-31',
-      originalPrice:      msrp,
-      wholesaleCost:      wholesale,
-      mapPrice:           map,
-      nalpacSku:          masterSku,
-      rawDescription:     cleanedDesc || undefined,
-    })
-
-    // 7. Insert DB row — lands at the bottom of the queue (max sortOrder + 1).
-    //    dealDate is still NOT NULL on the schema, so a sentinel is required;
-    //    queue activation now reads status='queued' ORDER BY sortOrder ASC
-    //    (see deal-rotator.server.ts).
+    // 6. Insert DB row FIRST so we have a deal id to pass as gatesDealId when
+    //    enqueuing the enrichment job (spec E1: the gate only works if the job row
+    //    carries the deal id). dealDate is still NOT NULL on the schema, so a
+    //    sentinel is required; queue activation reads status='queued' ORDER BY
+    //    sortOrder ASC (see deal-rotator.server.ts).
     const [{ maxSort = 0 } = {}] = await db
       .select({ maxSort: max(dealHistory.sortOrder) })
       .from(dealHistory)
     const nextSortOrder = (maxSort ?? 0) + 1
 
-    await db.insert(dealHistory).values({
+    const [insertedDeal] = await db.insert(dealHistory).values({
       sku:              masterSku,
       seoTitle,
       brand:            masterRow.Brand,
@@ -404,12 +339,63 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       status:           'queued',
       sortOrder:        nextSortOrder,
       shopifyProductId: numericId,
-    }).onConflictDoNothing()
+    }).onConflictDoNothing().returning({ id: dealHistory.id })
 
-    // 8. Create the Sanity productPage doc so search, content blocks, IVR,
-    //    and sitemap surfaces pick up the new product. Best-effort — a Sanity
-    //    hiccup should not kill a successful Shopify import, but we surface
-    //    it as a warning so the admin UI can show it instead of swallowing.
+    // 7. Enqueue a full-enrichment batch job (spec Part E), now with gatesDealId
+    //    so the deal-activation gate is wired. The Shopify product already exists
+    //    (step 3) and the deal row exists (step 6), so the gate is complete.
+    //    The poller cron (every 2 min) drives the Anthropic Batch API turn loop
+    //    and applies ProductWrites to Shopify when done — 50% cheaper than blocking here.
+    const gid = `gid://shopify/Product/${numericId}`
+    // insertedDeal may be undefined if onConflictDoNothing() silently skipped (duplicate
+    // SKU that slipped past the earlier check). In that case we enqueue without a
+    // gatesDealId rather than throwing — degraded but safe.
+    const stagedDealId = insertedDeal?.id
+    const { jobId } = await enqueueBatchJob({
+      jobType:     'full-enrichment',
+      source:      'bulk-import',
+      products:    [{
+        productId: gid,
+        sku:       masterSku,
+        input: {
+          product: {
+            title:       masterRow['Product Title'],
+            brand:       masterRow.Brand,
+            description,
+            categories,
+            dealPrice,
+            msrp,
+          },
+          seoTitle,
+          category,
+          pairingCandidates,
+        },
+      }],
+      ...(stagedDealId !== undefined ? { gatesDealId: stagedDealId } : {}),
+    })
+    console.info(`[bulk-import] ${masterSku} enrichment enqueued jobId=${jobId} gatesDealId=${stagedDealId ?? 'none'} (async via batch poller)`)
+
+    // 8. Push minimal Shopify metafields now (without enriched copy —
+    //    the poller will overwrite these once enrichment completes).
+    await pushProductToShopify({
+      shopifyProductId:   numericId,
+      seoTitle,
+      tags:               editorialTagsFrom(categories),
+      category,
+      sectionTags:        [deriveSection({ productTypeDial: undefined, categories, title: masterRow['Product Title'] })],
+      dealStatus:         'pending_approval',
+      dealDate:           '2099-12-31',
+      originalPrice:      msrp,
+      wholesaleCost:      wholesale,
+      mapPrice:           map,
+      nalpacSku:          masterSku,
+      rawDescription:     cleanedDesc || undefined,
+    })
+
+    // 8. Create a minimal Sanity productPage doc so search and sitemap surfaces
+    //    pick up the product immediately. Enriched fields (tagline, moodTags,
+    //    productTypeDial, etc.) are written by the batch poller once the
+    //    full-enrichment job completes. Best-effort.
     const warnings: { stage: string; message: string }[] = []
     try {
       const handle = await getProductHandleById(numericId)
@@ -418,35 +404,21 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
         console.warn(`[bulk-import] ${masterSku} ${msg}`)
         warnings.push({ stage: 'sanity', message: msg })
       } else {
-        const gid = `gid://shopify/Product/${numericId}`
         const upsertParams: Parameters<typeof upsertProductPage>[0] = {
           handle,
           shopifyProductId: gid,
           title:            masterRow['Product Title'],
           vendor:           masterRow.Brand,
-          tags:             editorialTagsFrom(categories), // Mirror sub-categories so Studio editors can filter
-          tagline:          writes.tagline,
+          tags:             editorialTagsFrom(categories),
           description,
           seoTitle,
-          seoDescription:   writes.seoMetaDescription,
           category,
-          // Pricing fields removed from Sanity productPage schema — pricing
-          // lives solely on Shopify metafields where the deal pipeline reads.
-          productTypeDial:  writes.productTypeDial,
-          ...(writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {}),
-          moodTags:         writes.moodTags,
-          audienceTags:     writes.audienceTags,
-          mattersTags:      writes.mattersTags,
-          // IVR / voice surfaces — populated by the orchestrator's IVR tools.
-          ...(writes.ivrExperience    !== undefined ? { ivrExperience:    writes.ivrExperience    } : {}),
-          ...(writes.ivrUseCase       !== undefined ? { ivrUseCase:       writes.ivrUseCase       } : {}),
-          ...(writes.ivrFeatures      !== undefined ? { ivrFeatures:      writes.ivrFeatures      } : {}),
-          ...(writes.productFaqs      !== undefined ? { productFaqs:      writes.productFaqs      } : {}),
+          // Enriched fields (tagline, moodTags, productTypeDial, IVR, FAQs)
+          // are written by applyFullEnrichmentWrites once the batch job completes.
         }
-        if (images[0])              upsertParams.imageUrl     = images[0]
-        if (writes.moodImageUrl)    upsertParams.moodImageUrl = writes.moodImageUrl
+        if (images[0]) upsertParams.imageUrl = images[0]
 
-        // One retry on transient failure (network, short-lived auth hiccup).
+        // One retry on transient failure.
         let lastErr: unknown
         for (let attempt = 1; attempt <= 2; attempt++) {
           try {
@@ -478,6 +450,7 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       success:          true,
       sku:              masterSku,
       shopifyProductId: numericId,
+      jobId,
       ...(warnings.length > 0 ? { warnings } : {}),
     }
   } catch (err) {
@@ -721,6 +694,10 @@ export interface ImportNewProductResult {
   shopifyProductId: string  // numeric, e.g. "1234567890"
   gid:              string  // gid://shopify/Product/<id>
   handle:           string
+  /** Background enrichment job id. Poll GET /api/admin/async-jobs?jobId=<id> for completion. */
+  jobId?:           string
+  /** 'enriching' when enrichment was enqueued; undefined for duplicate-skip path. */
+  status?:          'enriching'
   warnings:         { stage: string; message: string }[]
 }
 
@@ -791,9 +768,8 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
   const numericId = await createShopifyProductFromFeed(productScore, handle)
   const gid       = `gid://shopify/Product/${numericId}`
 
-  // 4. Run the import orchestrator. Source-neutral input — uses rawProduct
-  //    fields directly. Voice profile flows through to the per-tool
-  //    generators (default when omitted).
+  // 4. Generate SEO title and resolve pairing candidates (needed for both the
+  //    DB row and the enrichment job brief).
   const seoTitle = await generateSEOTitle(rawProduct.title, rawProduct.brand)
   const category = inferCategory(rawProduct.categories)
   const pairingCandidates = await getPairingCandidates({
@@ -804,47 +780,12 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
     console.warn(`[importNewProduct] ${sku} pairing-candidates lookup failed:`, err instanceof Error ? err.message : err)
     return []
   })
-  const { writes, telemetry } = await generateProductContent({
-    product: {
-      title:       rawProduct.title,
-      brand:       rawProduct.brand,
-      description: rawProduct.description,
-      categories:  rawProduct.categories,
-      dealPrice:   rawProduct.dealPrice,
-      msrp:        rawProduct.msrp,
-    },
-    seoTitle,
-    category,
-    pairingCandidates,
-  })
-  const finalTitle = writes.productTitle ?? seoTitle
-  console.info(
-    `[importNewProduct] ${sku} (source=${source}) orchestrator: tokens=${telemetry.totalTokens} ` +
-    `duration=${telemetry.durationMs}ms turns=${telemetry.turns} ` +
-    `voiceHash=${voiceProfile?.hash ?? 'default'} ` +
-    `tools=[${telemetry.toolCalls.map(c => `${c.name}${c.ok ? '' : '!'}`).join(',')}]`,
-  )
 
-  // 5. Push enrichment to Shopify (parallel structure to importProductGroup
-  //    step 7 above — drift between the two should be reconciled in a
-  //    future refactor).
+  // 5. Push minimal Shopify metafields now (without enriched copy —
+  //    the poller will apply full ProductWrites once enrichment completes).
   await pushProductToShopify({
     shopifyProductId:   numericId,
-    ...(writes.productTitleAugmented ? { title: finalTitle } : {}),
-    seoTitle:           finalTitle,
-    tagline:            writes.tagline,
-    ...(writes.boxContents      !== undefined ? { boxContents:      writes.boxContents }      : {}),
-    ...(writes.specifications   !== undefined ? { specifications:   writes.specifications }   : {}),
-    seoMetaDescription: writes.seoMetaDescription,
-    descriptionHtml:    writes.descriptionHtml,
-    ...(writes.careInstructions !== undefined ? { careInstructions: writes.careInstructions } : {}),
-    ...(writes.sensationDialV2  !== undefined ? { sensationDialV2:  writes.sensationDialV2 }  : {}),
-    productTypeDial:    writes.productTypeDial,
-    ...(writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {}),
-    moodTags:           writes.moodTags,
-    audienceTags:       writes.audienceTags,
-    mattersTags:        writes.mattersTags,
-    ...(writes.originalTitle    !== undefined ? { originalTitle:    writes.originalTitle }    : {}),
+    seoTitle,
     tags:               editorialTagsFrom(rawProduct.categories),
     category,
     dealStatus:         'pending_approval',
@@ -856,12 +797,14 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
     rawDescription:     rawProduct.rawDescription ?? rawProduct.description,
   })
 
-  // 6. Insert dealHistory queue row — lands at bottom of queue.
+  // 6. Insert dealHistory queue row FIRST so we have a deal id to pass as
+  //    gatesDealId when enqueuing the enrichment job (spec E1: the gate only
+  //    works if the batch_jobs row carries the deal id). Lands at bottom of queue.
   const [{ maxSort = 0 } = {}] = await db
     .select({ maxSort: max(dealHistory.sortOrder) })
     .from(dealHistory)
   const nextSortOrder = (maxSort ?? 0) + 1
-  await db.insert(dealHistory).values({
+  const [insertedDeal] = await db.insert(dealHistory).values({
     sku,
     seoTitle,
     brand:            rawProduct.brand,
@@ -876,9 +819,42 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
     status:           'queued',
     sortOrder:        nextSortOrder,
     shopifyProductId: numericId,
-  }).onConflictDoNothing()
+  }).onConflictDoNothing().returning({ id: dealHistory.id })
 
-  // 7. Upsert Sanity productPage — best-effort with one retry.
+  // 7. Enqueue a full-enrichment batch job (spec Part E), now with gatesDealId
+  //    so the deal-activation gate is wired. The poller cron drives the
+  //    Anthropic Batch API turn loop and applies ProductWrites once done —
+  //    50% cheaper than blocking here.
+  // insertedDeal may be undefined if onConflictDoNothing() silently skipped (duplicate
+  // SKU that slipped past the earlier check). In that case we enqueue without a
+  // gatesDealId rather than throwing — degraded but safe.
+  const stagedDealId = insertedDeal?.id
+  const { jobId } = await enqueueBatchJob({
+    jobType:  'full-enrichment',
+    source:   'import-product',
+    products: [{
+      productId: gid,
+      sku,
+      input: {
+        product: {
+          title:       rawProduct.title,
+          brand:       rawProduct.brand,
+          description: rawProduct.description,
+          categories:  rawProduct.categories,
+          dealPrice:   rawProduct.dealPrice,
+          msrp:        rawProduct.msrp,
+        },
+        seoTitle,
+        category,
+        pairingCandidates,
+      },
+    }],
+    ...(stagedDealId !== undefined ? { gatesDealId: stagedDealId } : {}),
+  })
+  console.info(`[importNewProduct] ${sku} (source=${source}) enrichment enqueued jobId=${jobId} gatesDealId=${stagedDealId ?? 'none'} voiceHash=${voiceProfile?.hash ?? 'default'}`)
+
+  // 7. Upsert minimal Sanity productPage — best-effort with one retry.
+  //    Enriched fields are written by applyFullEnrichmentWrites once the job completes.
   try {
     const upsertParams: Parameters<typeof upsertProductPage>[0] = {
       handle,
@@ -886,21 +862,9 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
       title:            rawProduct.title,
       vendor:           rawProduct.brand,
       tags:             editorialTagsFrom(rawProduct.categories),
-      tagline:          writes.tagline,
       description:      rawProduct.description,
       seoTitle,
-      seoDescription:   writes.seoMetaDescription,
       category,
-      // Pricing fields removed from Sanity productPage schema (Shopify-only).
-      productTypeDial:  writes.productTypeDial,
-      ...(writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {}),
-      moodTags:         writes.moodTags,
-      audienceTags:     writes.audienceTags,
-      mattersTags:      writes.mattersTags,
-      ...(writes.ivrExperience !== undefined ? { ivrExperience: writes.ivrExperience } : {}),
-      ...(writes.ivrUseCase    !== undefined ? { ivrUseCase:    writes.ivrUseCase    } : {}),
-      ...(writes.ivrFeatures   !== undefined ? { ivrFeatures:   writes.ivrFeatures   } : {}),
-      ...(writes.productFaqs   !== undefined ? { productFaqs:   writes.productFaqs   } : {}),
     }
     if (rawProduct.images?.[0]) upsertParams.imageUrl = rawProduct.images[0]
     let lastErr: unknown
@@ -922,5 +886,5 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
     warnings.push({ stage: 'sanity', message: err instanceof Error ? err.message : String(err) })
   }
 
-  return { shopifyProductId: numericId, gid, handle, warnings }
+  return { shopifyProductId: numericId, gid, handle, jobId, status: 'enriching' as const, warnings }
 }

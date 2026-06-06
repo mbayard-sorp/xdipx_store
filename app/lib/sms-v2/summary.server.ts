@@ -27,6 +27,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import type { HistoryTurn } from './conversation-history.server'
+import { logApiTokens } from '../token-log.server'
 
 // ---------------------------------------------------------------------------
 // Model constant — copy from slot-extractor.server.ts, never guess the string
@@ -126,6 +127,23 @@ export async function generateConversationSummary(
       max_tokens: 120,
       system: SUMMARY_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
+    })
+
+    const _u = res.usage as {
+      input_tokens: number
+      output_tokens: number
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?: number
+    }
+    void logApiTokens({
+      feature: 'sms',
+      model: HAIKU_MODEL,
+      source: 'sync',
+      inputTokens: _u.input_tokens,
+      outputTokens: _u.output_tokens,
+      cacheCreationTokens: _u.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: _u.cache_read_input_tokens ?? 0,
+      caller: 'generateConversationSummary',
     })
 
     const textBlock = res.content.find(

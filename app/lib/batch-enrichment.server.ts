@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
 import { buildEmmaSystemBlocks } from '~/lib/claude.server'
+import { logApiTokens } from '~/lib/token-log.server'
 import type { ProductWrites } from '~/lib/emma-orchestrator.server'
 import type { Deal } from '~/types'
 
@@ -519,6 +520,20 @@ export async function collectFullEnrichmentBatch(batchId: string): Promise<
     else failures.push({ productId, error: parsed.error })
   }
 
+  // Best-effort token logging (spec B3 -- no silent bypasses on live batch paths).
+  void logApiTokens({
+    feature:             'enrichment',
+    model:               MODEL_SONNET,
+    source:              'batch',
+    batchId,
+    requestCount:        results.size + failures.length,
+    inputTokens:         usage.inputTokens,
+    outputTokens:        usage.outputTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    cacheReadTokens:     usage.cacheReadTokens,
+    caller:              'collectFullEnrichmentBatch',
+  })
+
   return { ended: true, results, failures, usage }
 }
 
@@ -548,6 +563,20 @@ export async function runBatchFullEnrichment(
     if (parsed.writes) results.set(input.productId, parsed.writes)
     else failures.push({ productId: input.productId, error: parsed.error })
   }
+
+  // Best-effort token logging (spec B3 -- no silent bypasses on live batch paths).
+  void logApiTokens({
+    feature:             'enrichment',
+    model:               MODEL_SONNET,
+    source:              'batch',
+    batchId,
+    requestCount:        inputs.length,
+    inputTokens:         usage.inputTokens,
+    outputTokens:        usage.outputTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    cacheReadTokens:     usage.cacheReadTokens,
+    caller:              'runBatchFullEnrichment',
+  })
 
   return {
     results,

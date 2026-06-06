@@ -139,7 +139,7 @@ export interface OrchestratorResult {
 
 // ─── Internal state ──────────────────────────────────────────────────────────
 
-interface OrchestratorState {
+export interface OrchestratorState {
   input:        OrchestratorInput
   dialRegistry: DialRegistry
   dialTaxonomy: DialTaxonomy
@@ -219,7 +219,7 @@ function enrichProduct(
 
 // ─── Tool definitions (sent to the model) ────────────────────────────────────
 
-const TOOLS = [
+export const TOOLS = [
   {
     name: 'classifyProductTypeDial',
     description: 'Classify the product into a hierarchical taxonomy — top-level type AND per-parent subtype in one call. Top-level types: vibrator, dildo, anal, bondage, cock-ring, stroker, couples, harness, extender, pump, lube, massage, enhancer, wear, condom, wellness, novelty, book-media, sex-machine. Always call this FIRST so other tools have the right type.',
@@ -290,7 +290,7 @@ const TOOLS = [
 
 // ─── Tool execution ──────────────────────────────────────────────────────────
 
-async function executeTool(
+export async function executeTool(
   name: string,
   state: OrchestratorState,
 ): Promise<{ ok: boolean; summary: string }> {
@@ -646,9 +646,57 @@ async function runOrchestrationViaSdk(
   }
 }
 
+// ─── Shared write assembly (used by sync path + batch runner) ────────────────
+
+/**
+ * Assemble a validated ProductWrites from a partial writes accumulator and
+ * telemetry. Throws with a clear message when the coverage gates fail so the
+ * caller (sync path or batch runner) can surface the error without shipping
+ * template strings to Shopify.
+ *
+ * Extracted from `generateProductContent` so the batch runner (Part C of spec)
+ * can reuse the same coverage gates and assembly logic without duplication.
+ */
+export function assembleWrites(
+  partial: Partial<ProductWrites>,
+  telemetry: OrchestratorTelemetry,
+): ProductWrites {
+  if (telemetry.toolCalls.length === 0) {
+    throw new Error('orchestrator: 0 tool calls — LLM client returned empty content (check llm-client adapter)')
+  }
+  if (!partial.tagline?.trim()) {
+    throw new Error('orchestrator: tagline tool did not run or returned empty — refusing to ship a fallback')
+  }
+  return {
+    productTypeDial:    partial.productTypeDial    ?? 'vibrator',
+    tagline:            partial.tagline,
+    seoMetaDescription: partial.seoMetaDescription ?? '',
+    descriptionHtml:    partial.descriptionHtml    ?? '',
+    moodTags:           partial.moodTags           ?? [],
+    audienceTags:       partial.audienceTags       ?? [],
+    mattersTags:        partial.mattersTags        ?? [],
+    ...(partial.productSubtypeDial !== undefined ? { productSubtypeDial: partial.productSubtypeDial } : {}),
+    ...(partial.productTitle    !== undefined ? { productTitle:        partial.productTitle    } : {}),
+    ...(partial.productTitleAugmented !== undefined ? { productTitleAugmented: partial.productTitleAugmented } : {}),
+    ...(partial.originalTitle   !== undefined ? { originalTitle:       partial.originalTitle   } : {}),
+    ...(partial.boxContents     !== undefined ? { boxContents:      partial.boxContents }     : {}),
+    ...(partial.specifications  !== undefined ? { specifications:   partial.specifications }  : {}),
+    ...(partial.careInstructions!== undefined ? { careInstructions: partial.careInstructions } : {}),
+    ...(partial.sensationDialV2 !== undefined ? { sensationDialV2:  partial.sensationDialV2 } : {}),
+    ...(partial.emmaHero        !== undefined ? { emmaHero:         partial.emmaHero }        : {}),
+    ...(partial.moodImageUrl    !== undefined ? { moodImageUrl:     partial.moodImageUrl }    : {}),
+    ...(partial.accessoryProductIds !== undefined ? { accessoryProductIds: partial.accessoryProductIds } : {}),
+    ...(partial.pairingWhy      !== undefined ? { pairingWhy:       partial.pairingWhy      } : {}),
+    ...(partial.ivrExperience   !== undefined ? { ivrExperience:    partial.ivrExperience   } : {}),
+    ...(partial.ivrUseCase      !== undefined ? { ivrUseCase:       partial.ivrUseCase      } : {}),
+    ...(partial.ivrFeatures     !== undefined ? { ivrFeatures:      partial.ivrFeatures     } : {}),
+    ...(partial.productFaqs     !== undefined ? { productFaqs:      partial.productFaqs     } : {}),
+  }
+}
+
 // ─── Public entry point ──────────────────────────────────────────────────────
 
-const SYSTEM = `You are Emma's content brain for xdipx.com — an editorially-curated sexual-wellness storefront. Given one product, you decide which content generators to run to fully populate its PDP and Emma's voice surfaces (chat / IVR / SMS), then call them via tools.
+export const SYSTEM = `You are Emma's content brain for xdipx.com — an editorially-curated sexual-wellness storefront. Given one product, you decide which content generators to run to fully populate its PDP and Emma's voice surfaces (chat / IVR / SMS), then call them via tools.
 
 Required for every product (run in this exact phase order):
 
@@ -687,6 +735,25 @@ When every applicable tool above has been called, call \`finish\` with no argume
 
 Be efficient. Each tool is a single call. Do NOT call the same tool twice.`
 
+/**
+ * Build the initial user message for the orchestrator. Extracted so the batch
+ * runner can seed freshRunnerState with the same prompt without duplicating the
+ * template. Pure function -- no side effects.
+ */
+export function buildUserPrompt(input: OrchestratorInput): string {
+  return `Generate the full PDP content for this product:
+
+Title: ${input.product.title}
+Brand: ${input.product.brand}
+Categories: ${input.product.categories.join(', ') || '(none)'}
+Description (truncated): ${input.product.description.slice(0, 800)}
+
+SEO title (already set, for context): ${input.seoTitle}
+Pricing context (do not echo): deal $${input.product.dealPrice} / msrp $${input.product.msrp}
+
+Start with classifyProductTypeDial, then run every other applicable tool exactly once, then call finish.`
+}
+
 export async function generateProductContent(input: OrchestratorInput): Promise<OrchestratorResult> {
   const t0 = Date.now()
   const [dialRegistry, dialTaxonomy, vocab] = await Promise.all([
@@ -714,17 +781,7 @@ export async function generateProductContent(input: OrchestratorInput): Promise<
     finished: false,
   }
 
-  const userPrompt = `Generate the full PDP content for this product:
-
-Title: ${input.product.title}
-Brand: ${input.product.brand}
-Categories: ${input.product.categories.join(', ') || '(none)'}
-Description (truncated): ${input.product.description.slice(0, 800)}
-
-SEO title (already set, for context): ${input.seoTitle}
-Pricing context (do not echo): deal $${input.product.dealPrice} / msrp $${input.product.msrp}
-
-Start with classifyProductTypeDial, then run every other applicable tool exactly once, then call finish.`
+  const userPrompt = buildUserPrompt(input)
 
   const llm: LLMClient = input.llmClient ?? getDefaultClient()
 
@@ -820,42 +877,7 @@ Start with classifyProductTypeDial, then run every other applicable tool exactly
   state.telemetry.totalTokens = state.telemetry.totalInputTokens + state.telemetry.totalOutputTokens
   state.telemetry.durationMs  = Date.now() - t0
 
-  // Coverage check — if no tools fired, the LLM client returned empty content
-  // (e.g., broken adapter) and silently letting the writes payload assemble
-  // with `?? defaults` would ship template strings to Shopify. Fail loudly
-  // here instead so the upstream caller can decide what to do.
-  if (state.telemetry.toolCalls.length === 0) {
-    throw new Error('orchestrator: 0 tool calls — LLM client returned empty content (check llm-client adapter)')
-  }
-  if (!state.writes.tagline?.trim()) {
-    throw new Error('orchestrator: tagline tool did not run or returned empty — refusing to ship a fallback')
-  }
-
-  const writes: ProductWrites = {
-    productTypeDial:    state.writes.productTypeDial    ?? 'vibrator',
-    tagline:            state.writes.tagline,
-    seoMetaDescription: state.writes.seoMetaDescription ?? '',
-    descriptionHtml:    state.writes.descriptionHtml    ?? '',
-    moodTags:           state.writes.moodTags           ?? [],
-    audienceTags:       state.writes.audienceTags       ?? [],
-    mattersTags:        state.writes.mattersTags        ?? [],
-    ...(state.writes.productSubtypeDial !== undefined ? { productSubtypeDial: state.writes.productSubtypeDial } : {}),
-    ...(state.writes.productTitle    !== undefined ? { productTitle:        state.writes.productTitle    } : {}),
-    ...(state.writes.productTitleAugmented !== undefined ? { productTitleAugmented: state.writes.productTitleAugmented } : {}),
-    ...(state.writes.originalTitle   !== undefined ? { originalTitle:       state.writes.originalTitle   } : {}),
-    ...(state.writes.boxContents     !== undefined ? { boxContents:      state.writes.boxContents }     : {}),
-    ...(state.writes.specifications  !== undefined ? { specifications:   state.writes.specifications }  : {}),
-    ...(state.writes.careInstructions!== undefined ? { careInstructions: state.writes.careInstructions } : {}),
-    ...(state.writes.sensationDialV2 !== undefined ? { sensationDialV2:  state.writes.sensationDialV2 } : {}),
-    ...(state.writes.emmaHero        !== undefined ? { emmaHero:         state.writes.emmaHero }        : {}),
-    ...(state.writes.moodImageUrl    !== undefined ? { moodImageUrl:     state.writes.moodImageUrl }    : {}),
-    ...(state.writes.accessoryProductIds !== undefined ? { accessoryProductIds: state.writes.accessoryProductIds } : {}),
-    ...(state.writes.pairingWhy      !== undefined ? { pairingWhy:       state.writes.pairingWhy      } : {}),
-    ...(state.writes.ivrExperience   !== undefined ? { ivrExperience:    state.writes.ivrExperience   } : {}),
-    ...(state.writes.ivrUseCase      !== undefined ? { ivrUseCase:       state.writes.ivrUseCase      } : {}),
-    ...(state.writes.ivrFeatures     !== undefined ? { ivrFeatures:      state.writes.ivrFeatures     } : {}),
-    ...(state.writes.productFaqs     !== undefined ? { productFaqs:      state.writes.productFaqs     } : {}),
-  }
+  const writes = assembleWrites(state.writes, state.telemetry)
 
   return { writes, telemetry: state.telemetry }
 }

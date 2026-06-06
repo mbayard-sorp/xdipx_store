@@ -58,6 +58,9 @@ async function callClaude(opts: {
    */
   systemBlocks?: ReadonlyArray<{ text: string; cache?: boolean }>
   userPrompt: string
+  /** Token-log attribution. feature defaults to 'copy-gen'. */
+  feature?:  string
+  caller?:   string
 }): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   // SDK branch DISABLED — see header comment.
   void opts.llmClient
@@ -95,6 +98,20 @@ async function callClaude(opts: {
   _toolTokenAccumulator.output        += result.outputTokens
   _toolTokenAccumulator.cacheCreation += usage.cache_creation_input_tokens ?? 0
   _toolTokenAccumulator.cacheRead     += usage.cache_read_input_tokens     ?? 0
+  // B3.2 — best-effort per-call token log. void = fire-and-forget.
+  void import('./token-log.server').then(({ logApiTokens }) => {
+    const entry: import('./token-log.server').TokenLogEntry = {
+      feature:             opts.feature ?? 'copy-gen',
+      model:               opts.model,
+      source:              'sync',
+      inputTokens:         usage.input_tokens,
+      outputTokens:        usage.output_tokens,
+      cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+      cacheReadTokens:     usage.cache_read_input_tokens     ?? 0,
+    }
+    if (opts.caller) entry.caller = opts.caller
+    return logApiTokens(entry)
+  }).catch((err) => console.error('[claude] callClaude token-log failed (ignored):', err))
   return result
 }
 
@@ -213,6 +230,19 @@ export async function generateWithSystem(opts: {
     : await call
   const block = msg.content[0]
   if (block?.type !== 'text') throw new Error('Unexpected Claude response type')
+  // B3.3 bypass: feature 'copy-gen', caller 'generateWithSystem'
+  const u = msg.usage as typeof msg.usage & {
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?:     number
+  }
+  void import('./token-log.server').then(({ logApiTokens }) =>
+    logApiTokens({
+      feature: 'copy-gen', model, source: 'sync', caller: 'generateWithSystem',
+      inputTokens: u.input_tokens, outputTokens: u.output_tokens,
+      cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+      cacheReadTokens:     u.cache_read_input_tokens     ?? 0,
+    })
+  ).catch((err) => console.error('[claude] generateWithSystem token-log failed (ignored):', err))
   return block.text
 }
 
@@ -1625,6 +1655,19 @@ Return ONLY the enhanced prompt as one flowing paragraph. No labels, no markdown
   })
   const block = msg.content[0]
   if (block?.type !== 'text') throw new Error('Unexpected Claude response type for Veo prompt')
+  // B3.3 bypass: feature 'video-prompt', caller 'enhanceVeoPrompt'
+  const uVeo = msg.usage as typeof msg.usage & {
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?:     number
+  }
+  void import('./token-log.server').then(({ logApiTokens }) =>
+    logApiTokens({
+      feature: 'video-prompt', model: MODEL, source: 'sync', caller: 'enhanceVeoPrompt',
+      inputTokens: uVeo.input_tokens, outputTokens: uVeo.output_tokens,
+      cacheCreationTokens: uVeo.cache_creation_input_tokens ?? 0,
+      cacheReadTokens:     uVeo.cache_read_input_tokens     ?? 0,
+    })
+  ).catch((err) => console.error('[claude] enhanceVeoPrompt token-log failed (ignored):', err))
   return block.text.trim()
 }
 
@@ -1696,6 +1739,19 @@ Return ONLY the enhanced prompt as one flowing paragraph. No labels, no markdown
   })
   const block = msg.content[0]
   if (block?.type !== 'text') throw new Error('Unexpected Claude response type for LTX prompt')
+  // B3.3 bypass: feature 'video-prompt', caller 'enhanceLtxPrompt'
+  const uLtx = msg.usage as typeof msg.usage & {
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?:     number
+  }
+  void import('./token-log.server').then(({ logApiTokens }) =>
+    logApiTokens({
+      feature: 'video-prompt', model: MODEL, source: 'sync', caller: 'enhanceLtxPrompt',
+      inputTokens: uLtx.input_tokens, outputTokens: uLtx.output_tokens,
+      cacheCreationTokens: uLtx.cache_creation_input_tokens ?? 0,
+      cacheReadTokens:     uLtx.cache_read_input_tokens     ?? 0,
+    })
+  ).catch((err) => console.error('[claude] enhanceLtxPrompt token-log failed (ignored):', err))
   return block.text.trim()
 }
 
@@ -1946,6 +2002,19 @@ Return ONLY the tagline text, nothing else.`
     })
     const block = msg.content[0]
     if (block?.type !== 'text') throw new Error('non-text response')
+    // B3.3 bypass: feature 'contextual-tagline', caller 'generateEmmaTagline'
+    const uTagline = msg.usage as typeof msg.usage & {
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?:     number
+    }
+    void import('./token-log.server').then(({ logApiTokens }) =>
+      logApiTokens({
+        feature: 'contextual-tagline', model: MODEL_FAST, source: 'sync', caller: 'generateEmmaTagline',
+        inputTokens: uTagline.input_tokens, outputTokens: uTagline.output_tokens,
+        cacheCreationTokens: uTagline.cache_creation_input_tokens ?? 0,
+        cacheReadTokens:     uTagline.cache_read_input_tokens     ?? 0,
+      })
+    ).catch((err) => console.error('[claude] generateEmmaTagline token-log failed (ignored):', err))
     const line = block.text
       .trim()
       .replace(/^["'`]|["'`]$/g, '')
@@ -3404,6 +3473,15 @@ Return exactly ${input.maxPicks} picks, ordered best\u2192worst. Use only ids fr
     cache_creation_input_tokens?: number
     cache_read_input_tokens?:     number
   }
+  // B3.3 bypass: feature 'discovery-rank', caller 'pickForContextGroup'
+  void import('./token-log.server').then(({ logApiTokens }) =>
+    logApiTokens({
+      feature: 'discovery-rank', model: MODEL_FAST, source: 'sync', caller: 'pickForContextGroup',
+      inputTokens: usage?.input_tokens ?? 0, outputTokens: usage?.output_tokens ?? 0,
+      cacheCreationTokens: usage?.cache_creation_input_tokens ?? 0,
+      cacheReadTokens:     usage?.cache_read_input_tokens     ?? 0,
+    })
+  ).catch((err) => console.error('[claude] pickForContextGroup token-log failed (ignored):', err))
 
   return {
     picks,
@@ -3490,6 +3568,22 @@ Rules:
     })
 
     messages.push({ role: 'assistant', content: response.content })
+
+    // B3.3 bypass: feature 'rail-gen', caller 'generateRails' (per-turn, best-effort)
+    {
+      const uRail = response.usage as typeof response.usage & {
+        cache_creation_input_tokens?: number
+        cache_read_input_tokens?:     number
+      }
+      void import('./token-log.server').then(({ logApiTokens }) =>
+        logApiTokens({
+          feature: 'rail-gen', model: MODEL, source: 'sync', caller: 'generateRails',
+          inputTokens: uRail.input_tokens, outputTokens: uRail.output_tokens,
+          cacheCreationTokens: uRail.cache_creation_input_tokens ?? 0,
+          cacheReadTokens:     uRail.cache_read_input_tokens     ?? 0,
+        })
+      ).catch((err) => console.error('[claude] generateRails token-log failed (ignored):', err))
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const textParts = response.content.filter((b: any) => b.type === 'text') as { text: string }[]

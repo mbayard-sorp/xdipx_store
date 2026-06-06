@@ -236,6 +236,16 @@ async function runOneHop(
     (usage.cache_read_input_tokens ?? 0) +
     (usage.cache_creation_input_tokens ?? 0)
   session.tokensUsed += hopTokens
+  // B3.8 — best-effort token log via direct Neon insert (option A: no HTTP surface)
+  void import('./token-log.ts').then(({ logIvrTokens }) =>
+    logIvrTokens({
+      inputTokens:         usage.input_tokens         ?? 0,
+      outputTokens:        usage.output_tokens        ?? 0,
+      cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+      cacheReadTokens:     usage.cache_read_input_tokens     ?? 0,
+      caller:              'ivr/claude',
+    })
+  ).catch((err) => console.error('[ivr/claude] token-log failed (ignored):', err))
   if (!session.wrapUpMode && session.tokensUsed > session.limits.softTokenBudget) {
     console.warn(`[ivr] soft token budget exceeded callSid=${session.callSid} tokens=${session.tokensUsed}`)
     session.wrapUpMode = true

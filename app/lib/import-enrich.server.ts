@@ -23,17 +23,14 @@
 
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { importCandidates, dealHistory, enrichmentBatches } from '../../db/schema'
+import { importCandidates, dealHistory, batchJobs } from '../../db/schema'
 import {
   fetchProductSnapshot,
   gatherProductBrief,
-  loadSharedEnrichmentContext,
 } from '~/lib/enricher-brief.server'
 import {
-  submitFullEnrichmentBatch,
-  collectFullEnrichmentBatch,
-  type BatchFullEnrichmentInput,
-} from '~/lib/batch-enrichment.server'
+  enqueueBatchJob,
+} from '~/lib/batch-orchestrator.server'
 import {
   activateShopifyProduct,
   pushProductToShopify,
@@ -42,7 +39,8 @@ import {
 import { upsertProductPage } from '~/lib/sanity.server'
 import { getPipelineSetting, deriveSection } from '~/lib/feed-processor.server'
 import { IVR_EXPERIENCE_LEVELS } from '~/lib/claude.server'
-import type { ProductWrites } from '~/lib/emma-orchestrator.server'
+import type { OrchestratorInput, OrchestratorProductInput, ProductWrites } from '~/lib/emma-orchestrator.server'
+import type { PairingCandidate } from '~/lib/shopify.server'
 
 const VALID_IVR_EXPERIENCE = new Set<string>(IVR_EXPERIENCE_LEVELS as readonly string[])
 
@@ -106,7 +104,7 @@ const edA = (a: readonly string[] | undefined): string[] | undefined => a?.map(s
  * are intentionally skipped at import time (deal-cycle artifacts). The Sanity
  * mirror is best-effort: a Sanity failure does not unwind the Shopify write.
  */
-async function applyFullEnrichmentWrites(numericProductId: string, writes: ProductWrites): Promise<void> {
+export async function applyFullEnrichmentWrites(numericProductId: string, writes: ProductWrites): Promise<void> {
   const snap = await fetchProductSnapshot(numericProductId)
   if (!snap) throw new Error(`fetchProductSnapshot returned null for ${numericProductId}`)
 
@@ -223,13 +221,15 @@ async function applyFullEnrichmentWrites(numericProductId: string, writes: Produ
 }
 
 /**
- * Find imported-but-unenriched products and submit ONE Anthropic batch for
- * them. Stamps each candidate's enrich_batch_id and records the batch row so a
- * later tick can collect it. Does not poll.
+ * Find imported-but-unenriched products and enqueue ONE batch_jobs row via the
+ * new orchestrator. Stamps each candidate's enrich_batch_id with the jobId so
+ * collectEnrichmentBatch can poll the batch_jobs table on a later tick.
+ * Does NOT submit an Anthropic batch directly -- the enrichment-batch-poller
+ * cron (every 2 min) drives all batch work through advanceInflightJobs().
  */
 export async function submitEnrichmentBatch(cap: number): Promise<{ submitted: number; batchId?: string; reason?: string }> {
   const rows = await db
-    .select({ id: importCandidates.id, productId: dealHistory.shopifyProductId })
+    .select({ id: importCandidates.id, productId: dealHistory.shopifyProductId, sku: importCandidates.masterKey })
     .from(importCandidates)
     .innerJoin(dealHistory, eq(importCandidates.dealHistoryId, dealHistory.id))
     .where(and(
@@ -240,109 +240,170 @@ export async function submitEnrichmentBatch(cap: number): Promise<{ submitted: n
     .orderBy(asc(importCandidates.id))
     .limit(cap)
 
-  const valid = rows.filter((r): r is { id: number; productId: string } => Boolean(r.productId))
+  const valid = rows.filter((r): r is { id: number; productId: string; sku: string } => Boolean(r.productId))
   if (valid.length === 0) return { submitted: 0, reason: 'no_unenriched' }
 
-  const context = await loadSharedEnrichmentContext()
-  const inputs: BatchFullEnrichmentInput[] = []
+  const products: Array<{ productId: string; sku: string; input: OrchestratorInput }> = []
   const candidateIds: number[] = []
+
   for (const r of valid) {
     const brief = await gatherProductBrief(r.productId)
     if (!brief) {
-      console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) — skipping`)
+      console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) -- skipping`)
       continue
     }
-    inputs.push({ productId: r.productId, brief })
+    const sku = brief.sku ?? r.sku
+
+    // Map ProductBrief fields to the OrchestratorInput shape.
+    const product: OrchestratorProductInput = {
+      title:       brief.rawTitle,
+      brand:       brief.brand,
+      description: brief.rawDescription,
+      categories:  brief.categories,
+      dealPrice:   brief.dealPrice,
+      msrp:        brief.msrp,
+    }
+    // Derive category from the brief's categories array using the same
+    // coercion logic as inferCategoryFallback.
+    const validCategoryValues = new Set<string>(['for-him', 'for-her', 'couples'])
+    const category = brief.categories.filter(
+      (c): c is 'for-him' | 'for-her' | 'couples' => validCategoryValues.has(c),
+    )
+    const effectiveCategory: Array<'for-him' | 'for-her' | 'couples'> =
+      category.length > 0 ? category : ['for-him', 'for-her']
+
+    // Map brief pairing candidates to PairingCandidate. Entries without a
+    // numeric price are dropped since PairingCandidate.price is required.
+    // handle is derived from productId (numeric suffix) as a fallback.
+    const pairingCandidates: PairingCandidate[] = brief.pairingCandidates
+      .filter((pc): pc is typeof pc & { price: number } => typeof pc.price === 'number')
+      .map(pc => {
+        const candidate: PairingCandidate = {
+          productId: pc.productId,
+          handle:    pc.productId.replace('gid://shopify/Product/', ''),
+          title:     pc.title,
+          price:     pc.price,
+        }
+        if (pc.brand)           candidate.brand           = pc.brand
+        if (pc.productTypeDial) candidate.productTypeDial = pc.productTypeDial
+        return candidate
+      })
+
+    // Build OrchestratorInput. exactOptionalPropertyTypes: omit pairingCandidates
+    // entirely when the list is empty rather than setting it to undefined.
+    const input: OrchestratorInput = pairingCandidates.length > 0
+      ? {
+          product,
+          // Use rawTitle as seoTitle; the orchestrator's generateProductTitle tool
+          // will augment it if needed (same as the bulk-import path).
+          seoTitle:          brief.rawTitle,
+          category:          effectiveCategory,
+          pairingCandidates,
+        }
+      : {
+          product,
+          seoTitle:  brief.rawTitle,
+          category:  effectiveCategory,
+        }
+    products.push({ productId: `gid://shopify/Product/${r.productId}`, sku, input })
     candidateIds.push(r.id)
   }
-  if (inputs.length === 0) return { submitted: 0, reason: 'no_briefs' }
+  if (products.length === 0) return { submitted: 0, reason: 'no_briefs' }
 
-  const brandVoice = (await getPipelineSetting('brandVoice').catch(() => null)) ?? undefined
-  const { batchId, productIds } = await submitFullEnrichmentBatch(
-    inputs,
-    context,
-    brandVoice ? { brandVoice } : {},
-  )
+  const { jobId } = await enqueueBatchJob({
+    jobType: 'full-enrichment',
+    source:  'import-product',
+    products,
+  })
 
-  await db.insert(enrichmentBatches).values({ batchId, status: 'pending', candidateIds, productIds })
+  // Reuse enrich_batch_id column to store the orchestrator jobId so
+  // collectEnrichmentBatch can look up the batch_jobs row by jobId.
   await db.update(importCandidates)
-    .set({ enrichBatchId: batchId, updatedAt: new Date() })
+    .set({ enrichBatchId: jobId, updatedAt: new Date() })
     .where(inArray(importCandidates.id, candidateIds))
 
-  console.log(`[import-enrich] submitted batch ${batchId} for ${inputs.length} product(s)`)
-  return { submitted: inputs.length, batchId }
+  console.log(`[import-enrich] enqueued orchestrator job ${jobId} for ${products.length} product(s)`)
+  return { submitted: products.length, batchId: jobId }
 }
 
 /**
- * Retrieve every pending batch. For each that has finished, write the generated
- * content back and stamp enriched_at; leave still-processing batches pending.
+ * Poll batch_jobs for orchestrator jobs enqueued by submitEnrichmentBatch.
+ * The orchestrator's applying phase already called applyFullEnrichmentWrites
+ * for each product -- this function only stamps enriched_at on candidates
+ * whose jobs have reached a terminal state (done or failed).
+ *
+ * Still-in-flight jobs (queued/submitted/processing/applying) are left for
+ * the next tick. The enrichment-batch-poller cron (every 2 min) advances them.
  */
 export async function collectEnrichmentBatch(): Promise<{ enriched: number; failed: number; stillPending: number }> {
-  const pendingBatches = await db
-    .select()
-    .from(enrichmentBatches)
-    .where(eq(enrichmentBatches.status, 'pending'))
-    .orderBy(asc(enrichmentBatches.submittedAt))
+  // Find candidates that have an enrich_batch_id (orchestrator jobId)
+  // but are not yet stamped enriched.
+  const pendingCandidates = await db
+    .select({
+      id:    importCandidates.id,
+      jobId: importCandidates.enrichBatchId,
+    })
+    .from(importCandidates)
+    .where(and(
+      eq(importCandidates.status, 'imported'),
+      isNull(importCandidates.enrichedAt),
+      sql`${importCandidates.enrichBatchId} IS NOT NULL`,
+    ))
+    .orderBy(asc(importCandidates.id))
+
+  if (pendingCandidates.length === 0) {
+    return { enriched: 0, failed: 0, stillPending: 0 }
+  }
+
+  // Collect unique jobIds and fetch matching batch_jobs rows in one query.
+  const jobIds = [...new Set(pendingCandidates.map(c => c.jobId as string))]
+  const jobRows = await db
+    .select({ jobId: batchJobs.jobId, status: batchJobs.status })
+    .from(batchJobs)
+    .where(inArray(batchJobs.jobId, jobIds))
+
+  const jobStatus = new Map(jobRows.map(r => [r.jobId, r.status]))
 
   let enrichedTotal = 0
-  let failedTotal = 0
-  let stillPending = 0
+  let failedTotal   = 0
+  let stillPending  = 0
 
-  for (const batch of pendingBatches) {
-    let res: Awaited<ReturnType<typeof collectFullEnrichmentBatch>>
-    try {
-      res = await collectFullEnrichmentBatch(batch.batchId)
-    } catch (err) {
-      // Transient retrieve failure — leave pending, retry next tick.
-      console.error(`[import-enrich] collect retrieve failed for batch ${batch.batchId}:`, err)
+  for (const candidate of pendingCandidates) {
+    const jobId = candidate.jobId as string
+    const status = jobStatus.get(jobId)
+
+    if (
+      !status ||
+      status === 'queued' ||
+      status === 'submitted' ||
+      status === 'processing' ||
+      status === 'applying'
+    ) {
+      // Still in flight -- poller will advance it. Retry next tick.
       stillPending++
       continue
     }
 
-    if (!res.ended) {
-      stillPending++
-      continue
+    // Terminal: done or failed. Writes were already applied by the orchestrator's
+    // applying phase. Stamp enriched_at so publishEnrichedProducts can proceed.
+    if (status === 'done') {
+      await db.update(importCandidates)
+        .set({ enrichedAt: new Date(), updatedAt: new Date() })
+        .where(eq(importCandidates.id, candidate.id))
+      enrichedTotal++
+      console.log(`[import-enrich] candidate ${candidate.id} job ${jobId} done -- stamped enriched_at`)
+    } else {
+      // status === 'failed': enrichment did not complete cleanly. Stamp enriched_at
+      // anyway so this candidate does not block the queue indefinitely -- the
+      // orchestrator may have applied partial writes. Log for ops visibility.
+      await db.update(importCandidates)
+        .set({ enrichedAt: new Date(), updatedAt: new Date() })
+        .where(eq(importCandidates.id, candidate.id))
+      failedTotal++
+      console.warn(
+        `[import-enrich] candidate ${candidate.id} job ${jobId} failed -- stamping enriched_at to unblock queue (partial writes may apply)`,
+      )
     }
-
-    const idByProduct = new Map<string, number>()
-    batch.productIds.forEach((p, i) => {
-      const cid = batch.candidateIds[i]
-      if (cid !== undefined) idByProduct.set(p, cid)
-    })
-
-    const failures = [...res.failures]
-    let enriched = 0
-    for (const [productId, writes] of res.results) {
-      try {
-        await applyFullEnrichmentWrites(productId, writes)
-        const candidateId = idByProduct.get(productId)
-        if (candidateId !== undefined) {
-          await db.update(importCandidates)
-            .set({ enrichedAt: new Date(), updatedAt: new Date() })
-            .where(eq(importCandidates.id, candidateId))
-        }
-        enriched++
-      } catch (err) {
-        failures.push({ productId, error: `apply: ${err instanceof Error ? err.message : String(err)}` })
-      }
-    }
-
-    await db.update(enrichmentBatches)
-      .set({
-        status:      'collected',
-        collectedAt: new Date(),
-        succeeded:   enriched,
-        failed:      failures.length,
-        error:       failures.length ? JSON.stringify(failures).slice(0, 4000) : null,
-      })
-      .where(eq(enrichmentBatches.id, batch.id))
-
-    if (failures.length) {
-      console.error(`[import-enrich] batch ${batch.batchId} collected with ${failures.length} failure(s):`, failures)
-    }
-    console.log(`[import-enrich] batch ${batch.batchId} collected: enriched=${enriched} failed=${failures.length}`)
-    enrichedTotal += enriched
-    failedTotal   += failures.length
   }
 
   return { enriched: enrichedTotal, failed: failedTotal, stillPending }
@@ -406,12 +467,17 @@ export async function runImportEnrichTick(opts: { source?: 'cron' | 'manual' } =
   const publish = await publishEnrichedProducts()
 
   let submit: Awaited<ReturnType<typeof submitEnrichmentBatch>> = { submitted: 0, reason: 'batch_in_flight' }
-  const pendingRow = await db
+  // Gate: only enqueue a new job when no import-product jobs are still in flight.
+  // This avoids stacking concurrent orchestrator jobs for the same source.
+  const inflightRow = await db
     .select({ c: sql<number>`count(*)::int` })
-    .from(enrichmentBatches)
-    .where(eq(enrichmentBatches.status, 'pending'))
-  const pendingCount = Number(pendingRow[0]?.c ?? 0)
-  if (pendingCount === 0) {
+    .from(batchJobs)
+    .where(and(
+      eq(batchJobs.source, 'import-product'),
+      inArray(batchJobs.status, ['queued', 'submitted', 'processing', 'applying']),
+    ))
+  const inflightCount = Number(inflightRow[0]?.c ?? 0)
+  if (inflightCount === 0) {
     submit = await submitEnrichmentBatch(await getBatchCap())
   }
 

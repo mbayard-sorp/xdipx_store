@@ -102,6 +102,17 @@ async function generatePostPurchaseProse(opts: {
   const block = msg.content[0]
   const text  = block?.type === 'text' ? block.text.trim() : ''
 
+  // B3.5 — best-effort token log
+  void import('../../token-log.server').then(({ logApiTokens }) =>
+    logApiTokens({
+      feature: 'sms', model: MODEL, source: 'sync', caller: 'sms/post-purchase',
+      inputTokens:         usage.input_tokens,
+      outputTokens:        usage.output_tokens,
+      cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+      cacheReadTokens:     usage.cache_read_input_tokens     ?? 0,
+    })
+  ).catch((err) => console.error('[sms/post-purchase] token-log failed (ignored):', err))
+
   return {
     text,
     inputTokens:  usage.input_tokens,

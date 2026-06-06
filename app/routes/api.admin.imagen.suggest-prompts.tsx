@@ -1,8 +1,10 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import Anthropic from '@anthropic-ai/sdk'
+import { logApiTokens } from '~/lib/token-log.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
+const MODEL = 'claude-sonnet-4-20250514'
 
 export async function action({ request }: ActionFunctionArgs) {
   await requireAdmin(request)
@@ -24,7 +26,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const plainDesc = description.replace(/<[^>]*>/g, '').slice(0, 500)
 
   const msg = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: MODEL,
     max_tokens: 512,
     system: `You are a creative director for an adult sexual wellness eCommerce brand called xdipx.
 Generate 5 short, evocative image generation prompts for product photography.
@@ -35,6 +37,23 @@ Return ONLY a JSON array of 5 strings. No preamble, no markdown, no explanation.
       role: 'user',
       content: `Product: ${title}\nBrand: ${vendor}\nDescription: ${plainDesc}\nTags: ${tags}`,
     }],
+  })
+
+  const _u = msg.usage as {
+    input_tokens: number
+    output_tokens: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
+  }
+  void logApiTokens({
+    feature: 'imagen-prompt',
+    model: MODEL,
+    source: 'sync',
+    inputTokens: _u.input_tokens,
+    outputTokens: _u.output_tokens,
+    cacheCreationTokens: _u.cache_creation_input_tokens ?? 0,
+    cacheReadTokens: _u.cache_read_input_tokens ?? 0,
+    caller: 'action/suggest-prompts',
   })
 
   const block = msg.content[0]

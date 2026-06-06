@@ -192,6 +192,19 @@ async function classifyLogs(logs: LogLine[]): Promise<LogMonitorReport> {
   if (!block || block.type !== 'tool_use') {
     throw new Error('log-monitor: Claude did not return tool_use block')
   }
+  // B3.6 — best-effort token log
+  const uMon = msg.usage as typeof msg.usage & {
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?:     number
+  }
+  void import('./token-log.server').then(({ logApiTokens }) =>
+    logApiTokens({
+      feature: 'log-monitor', model: MODEL, source: 'sync', caller: 'log-monitor/analyzeLogWindow',
+      inputTokens: uMon.input_tokens, outputTokens: uMon.output_tokens,
+      cacheCreationTokens: uMon.cache_creation_input_tokens ?? 0,
+      cacheReadTokens:     uMon.cache_read_input_tokens     ?? 0,
+    })
+  ).catch((err) => console.error('[log-monitor] token-log failed (ignored):', err))
   return block.input as LogMonitorReport
 }
 

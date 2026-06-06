@@ -309,6 +309,23 @@ export function createCronRoutes() {
   })
 
   /**
+   * POST /cron/enrichment-batch-poller
+   * Schedule: every 2 minutes. Advances every in-flight batch_job by one pass
+   * (retrieve current turn's batch; if ended, distribute + run tools + submit
+   * next turn or apply). Bounded work per invocation to fit the 60s budget.
+   */
+  router.post('/enrichment-batch-poller', guard, async (_req, res) => {
+    try {
+      const { advanceInflightJobs } = await import('../app/lib/batch-orchestrator.server.js')
+      const result = await advanceInflightJobs({ maxJobs: 10, perJobBudgetMs: 8000 })
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:enrichment-batch-poller]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/inventory-check
    * Schedule: every 5 min — check if live deal is sold out, rotate if so
    */

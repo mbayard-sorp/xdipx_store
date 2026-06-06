@@ -8,13 +8,13 @@ import { eq, like, asc, min, max, count, sql, inArray, and, isNull } from 'drizz
 import {
   getAdminProductData,
   getDealByShopifyId, getDealByHandle, updateProductMetafield,
-  getVariantCost, pushProductToShopify, getAccessoryProductsAdmin,
+  getVariantCost, getAccessoryProductsAdmin,
   getProductAdminImages, updateProductTags, fetchAllDealProducts,
   updateVariantPricing, getProductVariantGids,
 } from '~/lib/shopify.server'
 import type { AdminProductImage } from '~/lib/shopify.server'
-import { generateCopy, generateSEOTitle } from '~/lib/claude.server'
 import { getRailDraftsForDeal } from '~/lib/sanity.server'
+import { enqueueFieldRegenJob } from '~/lib/field-regen-runner.server'
 import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
 import { ImageManager } from '~/components/admin/ImageManager'
 import { PricingPanel } from '~/components/admin/PricingPanel'
@@ -508,52 +508,41 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'generate-all') {
-    try {
-      const productId  = form.get('productId') as string
-      const rawDesc    = form.get('rawDescription') as string
-      const title      = form.get('title') as string
-      const brand      = form.get('brand') as string
-      const categories = ((form.get('categories') as string | null) ?? '').split(',').filter(Boolean)
-      const dealPrice  = parseFloat((form.get('dealPrice') as string) || '0')
-      const msrp       = parseFloat((form.get('msrp') as string) || '0')
-      const editId     = form.get('editId') as string | null
+    const productId  = form.get('productId') as string
+    const rawDesc    = form.get('rawDescription') as string
+    const title      = form.get('title') as string
+    const brand      = form.get('brand') as string
+    const categories = ((form.get('categories') as string | null) ?? '').split(',').filter(Boolean)
+    const dealPrice  = parseFloat((form.get('dealPrice') as string) || '0')
+    const msrp       = parseFloat((form.get('msrp') as string) || '0')
 
-      if (!rawDesc?.trim()) return { ok: false, error: 'No original description — paste the raw product description and Save it first.' }
+    if (!rawDesc?.trim()) return { ok: false, error: 'No original description — paste the raw product description and Save it first.' }
+    if (!productId)        return { ok: false, error: 'Missing productId.' }
 
-      const seoTitle = await generateSEOTitle(title, brand)
-      const productContext = { title: seoTitle, brand, description: rawDesc, categories, dealPrice, msrp }
+    // Look up the SKU for use as a human-readable job label.
+    const deal = await getDealByShopifyId(productId).catch(() => null)
+    const sku  = deal?.sku ?? productId
 
-      const specsResult = await generateCopy({ type: 'specifications', product: productContext })
-      const [taglineResult, storyResult, bothWaysResult, seoMetaResult, boxContentsResult] =
-        await Promise.all([
-          generateCopy({ type: 'tagline',      product: productContext }),
-          generateCopy({ type: 'full_story',   product: productContext }),
-          generateCopy({ type: 'both_ways',    product: productContext }),
-          generateCopy({ type: 'seo_meta',     product: productContext }),
-          generateCopy({ type: 'box_contents', product: productContext }),
-        ])
+    const { jobId } = await enqueueFieldRegenJob({
+      kind:      'copy-fields',
+      productId,
+      sku,
+      product: {
+        title: title || brand,
+        brand,
+        description: rawDesc,
+        categories,
+        dealPrice,
+        msrp,
+      },
+      fields: ['specifications', 'tagline', 'full_story', 'both_ways', 'seo_meta', 'box_contents'],
+    })
 
-      const tagline     = Array.isArray(taglineResult.content) ? (taglineResult.content[0] ?? '') : taglineResult.content as string
-      const fullStory   = storyResult.content as string
-      const bothWays    = bothWaysResult.content as { forHim: string; forHer: string }
-      const seoMeta     = seoMetaResult.content as string
-      const specs       = (Array.isArray(specsResult.content) ? specsResult.content : []) as string[]
-      const boxContents = boxContentsResult.content as string[]
-
-      const numericId = productId.replace('gid://shopify/Product/', '')
-      await pushProductToShopify({
-        shopifyProductId: numericId,
-        tagline, fullStory, description: fullStory,
-        worksForHim: bothWays.forHim, worksForHer: bothWays.forHer,
-        seoMetaDescription: seoMeta,
-        specifications: specs, boxContents,
-      })
-
-      return redirect(editId ? `/admin/deals?edit=${editId}` : '/admin/deals')
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      console.error('[generate-all] failed:', message)
-      return { ok: false, error: message }
+    return {
+      ok:      true,
+      queued:  true,
+      jobId,
+      message: `Copy regeneration queued. Track progress at /admin/async-jobs?jobId=${jobId}`,
     }
   }
 

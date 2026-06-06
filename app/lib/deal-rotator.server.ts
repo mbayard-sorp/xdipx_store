@@ -8,8 +8,8 @@
  *   rotateDeal               — full rotation: vault current → activate next
  */
 import { db } from './db.server'
-import { dealHistory, pipelineSettings } from '../../db/schema'
-import { eq, and, isNull, asc } from 'drizzle-orm'
+import { dealHistory, pipelineSettings, batchJobs } from '../../db/schema'
+import { eq, and, isNull, asc, inArray } from 'drizzle-orm'
 import {
   setDealStatus,
   activateShopifyProduct,
@@ -138,6 +138,14 @@ export async function transitionToVaultPricing(
 
 /**
  * Activate a deal — publish product, set live status, update KV, trigger email.
+ *
+ * Spec E1 gates:
+ *  1. If a batch_job with status in ('queued','submitted','processing','applying')
+ *     gates this deal, defer activation (cron/poller retries). This lets the
+ *     enrichment job finish before the deal goes live with partial copy.
+ *  2. Double-activation guard: if deal_status is already 'live', return early
+ *     to prevent duplicate Klaviyo emails when both the midnight cron and the
+ *     poller's maybeActivateGatedDeal race to activate.
  */
 export async function activateDeal(
   deal: {
@@ -151,6 +159,50 @@ export async function activateDeal(
   },
 ): Promise<void> {
   if (!deal.shopifyProductId) return
+
+  // E1 — gate check: defer if a batch job is still running for this deal.
+  const blockingJobs = await db
+    .select({ id: batchJobs.id })
+    .from(batchJobs)
+    .where(and(
+      eq(batchJobs.gatesDealId, deal.id),
+      inArray(batchJobs.status, ['queued', 'submitted', 'processing', 'applying']),
+    ))
+  if (blockingJobs.length > 0) {
+    console.log(`[deal-rotator] enrichment in flight for deal ${deal.id} — deferring activation (${blockingJobs.length} blocking job(s))`)
+    return
+  }
+
+  // Log if there's a failed gating job (degraded-enrichment path — proceed anyway).
+  const failedJobs = await db
+    .select({ id: batchJobs.id })
+    .from(batchJobs)
+    .where(and(eq(batchJobs.gatesDealId, deal.id), eq(batchJobs.status, 'failed')))
+  if (failedJobs.length > 0) {
+    console.warn(`[deal-rotator] WARN gated enrichment failed for deal ${deal.id}; activating with stale/partial copy (degraded-enrichment path)`)
+  }
+
+  // E1 — double-activation guard: atomic claim via UPDATE...WHERE deal_status <> 'live'.
+  // If this returns 0 rows, another path already activated — return without firing Klaviyo.
+  const claimed = await db
+    .update(dealHistory)
+    .set({ status: 'live' })
+    .where(and(eq(dealHistory.id, deal.id), inArray(dealHistory.status, ['queued', 'pending_approval'])))
+    .returning({ id: dealHistory.id })
+  if (claimed.length === 0) {
+    console.log(`[deal-rotator] deal ${deal.id} already live — skipping duplicate activation`)
+    return
+  }
+
+  // E1 — check if a gated full-enrichment job exists (even completed/failed).
+  //  When one exists, skip the inline Emma hero generation to avoid overwriting
+  //  orchestrator-written metafields.
+  const anyGatingJob = await db
+    .select({ id: batchJobs.id, status: batchJobs.status })
+    .from(batchJobs)
+    .where(eq(batchJobs.gatesDealId, deal.id))
+    .limit(1)
+  const skipInlineHero = anyGatingJob.length > 0
 
   // Ensure product is published (not draft)
   const numericId = deal.shopifyProductId.replace('gid://shopify/Product/', '')
@@ -189,75 +241,80 @@ export async function activateDeal(
   }
 
   // Emma hero copy — generated from pipelineSettings.brandVoice (non-blocking).
-  // Fetched via getDailyDeal() since we just flipped this product to live status.
-  try {
-    const { getDailyDeal } = await import('./shopify.server')
-    const { generateEmmaHero } = await import('./claude.server')
-    const fullDeal = await getDailyDeal().catch(() => null)
-    const seedDeal = fullDeal ?? {
-      seoTitle: deal.seoTitle ?? '',
-      tagline: '',
-      fullStory: '',
-      brand: '',
-      category: ['for-him', 'for-her'] as const,
-      dealPrice,
-      msrp,
-      mapRestricted: false,
-    }
-    const variant = seedDeal.mapRestricted ? 'quote' : 'loving'
-    const copy = await generateEmmaHero({ deal: seedDeal, variant })
-    await updateProductMetafield(
-      deal.shopifyProductId,
-      'emma_hero',
-      JSON.stringify(copy),
-      'json',
-    )
-    // Mirror the Emma signature into xdipx.tagline so any surface that still
-    // reads the tagline metafield picks up Emma's voice on activation.
-    if (copy.aside) {
+  // E1: skip if a gated full-enrichment job exists (it already wrote emmaHero via
+  // applyFullEnrichmentWrites — regenerating would overwrite orchestrator copy).
+  if (!skipInlineHero) {
+    try {
+      const { getDailyDeal } = await import('./shopify.server')
+      const { generateEmmaHero } = await import('./claude.server')
+      const fullDeal = await getDailyDeal().catch(() => null)
+      const seedDeal = fullDeal ?? {
+        seoTitle: deal.seoTitle ?? '',
+        tagline: '',
+        fullStory: '',
+        brand: '',
+        category: ['for-him', 'for-her'] as const,
+        dealPrice,
+        msrp,
+        mapRestricted: false,
+      }
+      const variant = seedDeal.mapRestricted ? 'quote' : 'loving'
+      const copy = await generateEmmaHero({ deal: seedDeal, variant })
       await updateProductMetafield(
         deal.shopifyProductId,
-        'tagline',
-        copy.aside,
-        'single_line_text_field',
+        'emma_hero',
+        JSON.stringify(copy),
+        'json',
       )
-    }
-
-    // Index the pick into Sanity so Emma gets smarter as deals flow.
-    // Non-blocking inside the same try — we've already written the source of
-    // truth (Shopify metafield); Sanity is the searchable replica.
-    if (fullDeal?.handle) {
-      try {
-        const { upsertEmmaPick } = await import('./sanity.server')
-        await upsertEmmaPick({
-          productId:     deal.shopifyProductId,
-          productHandle: fullDeal.handle,
-          productTitle:  fullDeal.seoTitle ?? deal.seoTitle ?? undefined,
-          brand:         fullDeal.brand ?? undefined,
-          category:      (fullDeal.category && fullDeal.category.length > 0) ? fullDeal.category[0] : undefined,
-          dealDate:      estDate(0),
-          variant:       copy.variant,
-          eyebrow:       copy.eyebrow,
-          headline:      copy.headline,
-          body:          copy.body,
-          aside:         copy.aside,
-          pullQuote:     copy.pullQuote,
-          voiceHash:     copy.voiceHash,
-          generatedAt:   copy.generatedAt,
-        })
-      } catch (sanityErr) {
-        console.error('[deal-rotator] Emma pick Sanity index failed (non-blocking):', sanityErr)
+      // Mirror the Emma signature into xdipx.tagline so any surface that still
+      // reads the tagline metafield picks up Emma's voice on activation.
+      if (copy.aside) {
+        await updateProductMetafield(
+          deal.shopifyProductId,
+          'tagline',
+          copy.aside,
+          'single_line_text_field',
+        )
       }
+
+      // Index the pick into Sanity so Emma gets smarter as deals flow.
+      // Non-blocking inside the same try — we've already written the source of
+      // truth (Shopify metafield); Sanity is the searchable replica.
+      if (fullDeal?.handle) {
+        try {
+          const { upsertEmmaPick } = await import('./sanity.server')
+          await upsertEmmaPick({
+            productId:     deal.shopifyProductId,
+            productHandle: fullDeal.handle,
+            productTitle:  fullDeal.seoTitle ?? deal.seoTitle ?? undefined,
+            brand:         fullDeal.brand ?? undefined,
+            category:      (fullDeal.category && fullDeal.category.length > 0) ? fullDeal.category[0] : undefined,
+            dealDate:      estDate(0),
+            variant:       copy.variant,
+            eyebrow:       copy.eyebrow,
+            headline:      copy.headline,
+            body:          copy.body,
+            aside:         copy.aside,
+            pullQuote:     copy.pullQuote,
+            voiceHash:     copy.voiceHash,
+            generatedAt:   copy.generatedAt,
+          })
+        } catch (sanityErr) {
+          console.error('[deal-rotator] Emma pick Sanity index failed (non-blocking):', sanityErr)
+        }
+      }
+    } catch (err) {
+      console.error('[deal-rotator] Emma hero generation failed (non-blocking):', err)
     }
-  } catch (err) {
-    console.error('[deal-rotator] Emma hero generation failed (non-blocking):', err)
+  } else {
+    console.log(`[deal-rotator] Skipping inline Emma hero for deal ${deal.id} — gated enrichment job already wrote copy`)
   }
 
-  // Update DB
+  // Update DB: set activatedAt and dealDate (status was already set to 'live' in the
+  // atomic claim above; this second update keeps activatedAt + dealDate current).
   await db
     .update(dealHistory)
     .set({
-      status: 'live',
       activatedAt: new Date(),
       dealDate: estDate(0),
     })

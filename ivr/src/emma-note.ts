@@ -55,6 +55,19 @@ export async function generateEmmaOrderNote(session: Session): Promise<string | 
       },
       { signal: controller.signal },
     )
+    const usage = res.usage as typeof res.usage & {
+      cache_read_input_tokens?: number
+      cache_creation_input_tokens?: number
+    }
+    void import('./token-log.ts').then(({ logIvrTokens }) =>
+      logIvrTokens({
+        inputTokens:         usage.input_tokens          ?? 0,
+        outputTokens:        usage.output_tokens         ?? 0,
+        cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+        cacheReadTokens:     usage.cache_read_input_tokens     ?? 0,
+        caller:              'generateEmmaOrderNote',
+      }),
+    ).catch(() => {})
     const text = res.content
       .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
