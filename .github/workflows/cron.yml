@@ -1,0 +1,116 @@
+name: Scheduled crons
+
+# External scheduler for the xdipx /cron/* endpoints.
+#
+# Why this exists: Vercel's native cron scheduler is not invoking this
+# project's jobs (verified June 2026 — config correct on Pro, endpoints
+# return 200 with the Bearer secret, but no invocations ever fire). Until
+# that is resolved with Vercel, GitHub Actions drives the same endpoints on
+# the same UTC schedules defined in vercel.json.
+#
+# Each endpoint validates `Authorization: Bearer $CRON_SECRET` (see the
+# guard in server/cron.ts). Set CRON_SECRET as a repo Actions secret:
+#   gh secret set CRON_SECRET --body "<the production CRON_SECRET>"
+#
+# Caveats vs Vercel cron:
+#   - GitHub Actions minimum granularity is 5 min, so the */2 poller runs */5.
+#   - Scheduled runs can be delayed several minutes under GitHub load and are
+#     best-effort (not guaranteed). Acceptable for these jobs.
+#   - Scheduled workflows only run from the default branch, and GitHub
+#     auto-disables them after 60 days of no repo activity.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'    # enrichment-batch-poller (Vercel was */2)
+    - cron: '*/15 * * * *'   # inventory-check, log-monitor
+    - cron: '*/30 * * * *'   # import-enrich
+    - cron: '0 7 * * *'      # pricing-batch-recompute
+    - cron: '0 8 * * *'      # import-monitor
+    - cron: '0 9 * * *'      # review-reminders
+    - cron: '45 23 * * *'    # daily-feed-processor
+    - cron: '59 23 * * *'    # deal-activator
+    - cron: '5 0 * * *'      # profit-summary
+    - cron: '0 2 * * 0'      # keyword-research (Sun)
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Endpoint to trigger manually
+        required: true
+        default: import-monitor
+        type: choice
+        options:
+          - all
+          - daily-feed-processor
+          - deal-activator
+          - profit-summary
+          - review-reminders
+          - inventory-check
+          - keyword-research
+          - log-monitor
+          - pricing-batch-recompute
+          - import-monitor
+          - import-enrich
+          - enrichment-batch-poller
+
+concurrency:
+  group: cron-${{ github.event.schedule || github.event.inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_URL: https://xdipx.com
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Resolve endpoints for this trigger
+        id: resolve
+        run: |
+          case "${{ github.event.schedule }}" in
+            '*/5 * * * *')   paths='enrichment-batch-poller' ;;
+            '*/15 * * * *')  paths='inventory-check log-monitor' ;;
+            '*/30 * * * *')  paths='import-enrich' ;;
+            '0 7 * * *')     paths='pricing-batch-recompute' ;;
+            '0 8 * * *')     paths='import-monitor' ;;
+            '0 9 * * *')     paths='review-reminders' ;;
+            '45 23 * * *')   paths='daily-feed-processor' ;;
+            '59 23 * * *')   paths='deal-activator' ;;
+            '5 0 * * *')     paths='profit-summary' ;;
+            '0 2 * * 0')     paths='keyword-research' ;;
+            *)
+              # Manual workflow_dispatch
+              t='${{ github.event.inputs.target }}'
+              if [ "$t" = "all" ]; then
+                paths='daily-feed-processor deal-activator profit-summary review-reminders inventory-check keyword-research log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller'
+              else
+                paths="$t"
+              fi
+              ;;
+          esac
+          echo "paths=$paths" >> "$GITHUB_OUTPUT"
+          echo "Triggering: $paths"
+
+      - name: POST /cron endpoints
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repo secret is not set"
+            exit 1
+          fi
+          fail=0
+          for p in ${{ steps.resolve.outputs.paths }}; do
+            url="$BASE_URL/cron/$p"
+            echo "→ POST $url"
+            body=$(mktemp)
+            code=$(curl -sS -o "$body" -w '%{http_code}' \
+              --max-time 300 --retry 2 --retry-delay 5 \
+              -X POST "$url" \
+              -H "Authorization: Bearer $CRON_SECRET")
+            echo "  HTTP $code"
+            echo "  $(head -c 600 "$body")"
+            case "$code" in
+              2*) ;;
+              *) echo "::error::$p returned HTTP $code"; fail=1 ;;
+            esac
+          done
+          exit $fail
