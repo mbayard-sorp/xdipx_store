@@ -14,6 +14,7 @@ import {
   getApprovalModeV2,
   getGlobalRule,
 } from '~/lib/pricing-admin.server'
+import { getModeThresholds } from '~/lib/pricing-apply-v2.server'
 import type {
   GroupRuleValues,
   AuditPendingRow,
@@ -39,6 +40,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     webhookThrottleRaw,
     webhookActivityToday,
     globalRule,
+    modeThresholds,
   ] = await Promise.all([
     loadGroupTree(),
     countVariantsByGroup(),
@@ -51,6 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     getPipelineSettingPublic('pricing_webhook_throttle_secs'),
     getWebhookActivityToday(),
     getGlobalRule(),
+    getModeThresholds(),
   ])
 
   // Merge coverage counts and last rationale into the tree
@@ -73,6 +76,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     autoAppliedRows,
     last7Days,
     approvalMode,
+    modeThresholds,
     adminEmail: adminUser?.email ?? '',
     webhook: {
       enabled: webhookEnabled,
@@ -1101,15 +1105,41 @@ function PricingRulesCard({ groups, globalRule }: PricingRulesCardProps) {
 // Approval mode panel
 // ---------------------------------------------------------------------------
 
-const MODE_DESCRIPTIONS: Record<ApprovalModeV2, string> = {
-  aggressive: 'Auto-approve price changes up to 10%',
-  balanced: 'Auto-approve price changes up to 5% (default)',
-  conservative: 'Auto-approve price changes up to 2%',
-  review_all: 'Queue every change for manual review',
+// Modes whose auto-approve threshold is admin-editable (review_all has none).
+type ThresholdMode = 'aggressive' | 'balanced' | 'conservative'
+const THRESHOLD_MODES: ThresholdMode[] = ['aggressive', 'balanced', 'conservative']
+
+function modeBlurb(mode: ApprovalModeV2, thresholds: Record<string, number>): string {
+  if (mode === 'review_all') return 'Queue every change for manual review'
+  const pct = Math.round((thresholds[mode] ?? 0) * 100)
+  return `Auto-approve price changes up to ${pct}%`
 }
 
-function ApprovalModePanel({ current }: { current: ApprovalModeV2 }) {
+function ApprovalModePanel({
+  current,
+  thresholds,
+}: {
+  current: ApprovalModeV2
+  thresholds: Record<ThresholdMode, number>
+}) {
   const fetcher = useFetcher<{ ok: boolean; error?: string }>()
+  const saveFetcher = useFetcher<{ ok: boolean; error?: string }>()
+
+  // Local editable percentage values (whole numbers, e.g. 10 = 10%).
+  const [pctInputs, setPctInputs] = useState<Record<ThresholdMode, string>>(() => ({
+    aggressive: String(Math.round((thresholds.aggressive ?? 0) * 100)),
+    balanced: String(Math.round((thresholds.balanced ?? 0) * 100)),
+    conservative: String(Math.round((thresholds.conservative ?? 0) * 100)),
+  }))
+
+  // Re-sync local inputs after a successful save (loader thresholds change).
+  useEffect(() => {
+    setPctInputs({
+      aggressive: String(Math.round((thresholds.aggressive ?? 0) * 100)),
+      balanced: String(Math.round((thresholds.balanced ?? 0) * 100)),
+      conservative: String(Math.round((thresholds.conservative ?? 0) * 100)),
+    })
+  }, [thresholds.aggressive, thresholds.balanced, thresholds.conservative])
 
   const optimisticMode =
     fetcher.state !== 'idle' && fetcher.formData?.get('approvalMode')
@@ -1123,34 +1153,102 @@ function ApprovalModePanel({ current }: { current: ApprovalModeV2 }) {
     )
   }
 
+  // Live thresholds for blurbs: reflect the in-progress edits.
+  const liveThresholds: Record<string, number> = {
+    aggressive: (parseFloat(pctInputs.aggressive) || 0) / 100,
+    balanced: (parseFloat(pctInputs.balanced) || 0) / 100,
+    conservative: (parseFloat(pctInputs.conservative) || 0) / 100,
+  }
+
+  const dirty = THRESHOLD_MODES.some(
+    m => Math.round((thresholds[m] ?? 0) * 100) !== (parseInt(pctInputs[m], 10) || 0),
+  )
+
+  function saveThresholds() {
+    const payload: Record<ThresholdMode, number> = {
+      aggressive: (parseFloat(pctInputs.aggressive) || 0) / 100,
+      balanced: (parseFloat(pctInputs.balanced) || 0) / 100,
+      conservative: (parseFloat(pctInputs.conservative) || 0) / 100,
+    }
+    saveFetcher.submit(
+      JSON.stringify({ modeThresholds: payload }),
+      { method: 'post', action: '/api/pricing/settings', encType: 'application/json' },
+    )
+  }
+
   const modes: ApprovalModeV2[] = ['aggressive', 'balanced', 'conservative', 'review_all']
 
   return (
     <section className="bg-white rounded-2xl border border-line p-5 space-y-4">
-      <h2 className="text-base font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
-        Approval Mode
-      </h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {modes.map(mode => (
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+          Approval Mode
+        </h2>
+        {dirty && (
           <button
-            key={mode}
-            onClick={() => setMode(mode)}
-            className={`text-left px-4 py-3 rounded-xl border transition-colors ${
-              optimisticMode === mode
-                ? 'border-coral bg-coral/5 text-ink'
-                : 'border-line bg-cream text-ink hover:border-coral/50'
-            }`}
+            type="button"
+            onClick={saveThresholds}
+            disabled={saveFetcher.state !== 'idle'}
+            className="text-xs font-semibold px-4 py-2 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
           >
-            <div className="text-sm font-semibold capitalize mb-0.5">
-              {mode.replace('_', ' ')}
-              {optimisticMode === mode && <span className="ml-2 text-xs text-coral">active</span>}
-            </div>
-            <div className="text-xs text-muted">{MODE_DESCRIPTIONS[mode]}</div>
+            {saveFetcher.state !== 'idle' ? 'Saving...' : 'Save thresholds'}
           </button>
-        ))}
+        )}
       </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {modes.map(mode => {
+          const isActive = optimisticMode === mode
+          const editable = mode !== 'review_all'
+          return (
+            <div
+              key={mode}
+              className={`px-4 py-3 rounded-xl border transition-colors ${
+                isActive ? 'border-coral bg-coral/5' : 'border-line bg-cream'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setMode(mode)}
+                className="text-left w-full"
+              >
+                <div className="text-sm font-semibold capitalize mb-0.5 text-ink">
+                  {mode.replace('_', ' ')}
+                  {isActive && <span className="ml-2 text-xs text-coral">active</span>}
+                </div>
+                <div className="text-xs text-muted">{modeBlurb(mode, liveThresholds)}</div>
+              </button>
+
+              {editable && (
+                <div className="flex items-center gap-1.5 mt-2">
+                  <label className="text-[11px] text-muted">Auto-approve up to</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={pctInputs[mode as ThresholdMode]}
+                    onChange={e =>
+                      setPctInputs(prev => ({ ...prev, [mode]: e.target.value }))
+                    }
+                    className="w-16 text-sm border border-line rounded-lg px-2 py-1 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-coral/50"
+                  />
+                  <span className="text-xs text-muted">%</span>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
       {fetcher.data?.ok === false && (
         <p className="text-xs text-red-500">{fetcher.data.error}</p>
+      )}
+      {saveFetcher.data?.ok === false && (
+        <p className="text-xs text-red-500">{saveFetcher.data.error}</p>
+      )}
+      {saveFetcher.state === 'idle' && saveFetcher.data?.ok && (
+        <p className="text-xs text-green-600">Thresholds saved.</p>
       )}
     </section>
   )
@@ -1291,10 +1389,20 @@ function WebhookCard({ webhook }: { webhook: LoaderData['webhook'] }) {
 export default function AdminPricingPage() {
   const data = useLoaderData<typeof loader>()
   const auditFetcher = useFetcher<{ ok: boolean; error?: string }>()
+  const approveAllFetcher = useFetcher<{ ok: boolean; approved?: number; failed?: number; total?: number; errors?: string[]; error?: string }>()
   const runFetcher = useFetcher<{ ok: boolean; total?: number; autoApplied?: number; pending?: number; skipped?: number; rejected?: number; errors?: number; durationMs?: number; error?: string }>()
   const [autoExpanded, setAutoExpanded] = useState(false)
+  const [confirmApproveAll, setConfirmApproveAll] = useState(false)
 
   const isRunning = runFetcher.state !== 'idle'
+  const isApprovingAll = approveAllFetcher.state !== 'idle'
+
+  // Close the confirm dialog once a bulk approve completes.
+  useEffect(() => {
+    if (approveAllFetcher.state === 'idle' && approveAllFetcher.data) {
+      setConfirmApproveAll(false)
+    }
+  }, [approveAllFetcher.state, approveAllFetcher.data])
 
   return (
     <div className="space-y-6">
@@ -1353,10 +1461,40 @@ export default function AdminPricingPage() {
       <PricingRulesCard groups={data.groups} globalRule={data.globalRule} />
 
       {/* Approval Mode */}
-      <ApprovalModePanel current={data.approvalMode} />
+      <ApprovalModePanel current={data.approvalMode} thresholds={data.modeThresholds} />
 
       {/* Webhook */}
       <WebhookCard webhook={data.webhook} />
+
+      {/* Approve-all confirm modal */}
+      {confirmApproveAll && (
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-2xl border border-line p-6 max-w-md w-full space-y-4 shadow-lg">
+            <h3 className="text-base font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+              Approve all pending changes?
+            </h3>
+            <p className="text-sm text-ink">
+              This will apply <strong>{data.pendingRows.length}</strong> price change{data.pendingRows.length !== 1 ? 's' : ''} to Shopify and mark each as approved. This cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                onClick={() => setConfirmApproveAll(false)}
+                disabled={isApprovingAll}
+                className="text-sm font-semibold px-4 py-2 rounded-full bg-cream-2 text-ink hover:bg-line transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => approveAllFetcher.submit({}, { method: 'post', action: '/api/pricing/approve-all' })}
+                disabled={isApprovingAll}
+                className="text-sm font-semibold px-4 py-2 rounded-full bg-coral text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {isApprovingAll ? 'Approving...' : `Approve all ${data.pendingRows.length}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Pending Approval */}
       <section className="bg-white rounded-2xl border border-line overflow-hidden">
@@ -1369,7 +1507,31 @@ export default function AdminPricingPage() {
               </span>
             )}
           </h2>
+          {data.pendingRows.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirmApproveAll(true)}
+              disabled={isApprovingAll}
+              className="text-xs font-semibold px-4 py-2 rounded-full bg-green-600 text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {isApprovingAll ? 'Approving...' : 'Approve all'}
+            </button>
+          )}
         </div>
+
+        {approveAllFetcher.data && (
+          <div className={`px-5 py-3 text-sm border-b ${approveAllFetcher.data.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-600'}`}>
+            {approveAllFetcher.data.ok
+              ? `Approved ${approveAllFetcher.data.approved ?? 0} of ${approveAllFetcher.data.total ?? 0}.${(approveAllFetcher.data.failed ?? 0) > 0 ? ` ${approveAllFetcher.data.failed} failed.` : ''}`
+              : `Error: ${approveAllFetcher.data.error ?? 'Unknown error'}`}
+            {approveAllFetcher.data.ok && approveAllFetcher.data.errors && approveAllFetcher.data.errors.length > 0 && (
+              <ul className="mt-1 list-disc pl-5 text-xs text-red-600">
+                {approveAllFetcher.data.errors.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+
         {data.pendingRows.length === 0 ? (
           <p className="px-5 py-6 text-sm text-muted italic">No pending items.</p>
         ) : (

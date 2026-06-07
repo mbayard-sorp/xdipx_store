@@ -28,11 +28,44 @@ import type { VelocityBucket } from './pricing-engine-v2.server'
 
 export type ApprovalMode = 'aggressive' | 'balanced' | 'conservative' | 'review_all'
 
-const MODE_THRESHOLD: Record<ApprovalMode, number> = {
+export const DEFAULT_MODE_THRESHOLD: Record<ApprovalMode, number> = {
   aggressive:   0.10,
   balanced:     0.05,
   conservative: 0.02,
   review_all:   0,
+}
+
+// Back-compat alias used by the pure decideStatus default + dry-run fallback.
+const MODE_THRESHOLD = DEFAULT_MODE_THRESHOLD
+
+/**
+ * Read admin-configured per-mode thresholds from pipeline_settings, merged over
+ * the defaults. Stored as JSON under `pricing_mode_thresholds`. review_all is
+ * always 0 (every change queues) regardless of stored value.
+ */
+export async function getModeThresholds(): Promise<Record<ApprovalMode, number>> {
+  const merged: Record<ApprovalMode, number> = { ...DEFAULT_MODE_THRESHOLD }
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, 'pricing_mode_thresholds'))
+      .limit(1)
+    const raw = rows[0]?.value
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<Record<ApprovalMode, unknown>>
+      for (const mode of ['aggressive', 'balanced', 'conservative'] as const) {
+        const v = parsed[mode]
+        if (typeof v === 'number' && isFinite(v) && v >= 0 && v <= 1) {
+          merged[mode] = v
+        }
+      }
+    }
+  } catch {
+    // fall through to defaults
+  }
+  merged.review_all = 0
+  return merged
 }
 
 export type AuditStatus = 'auto_applied' | 'pending' | 'skipped_no_change' | 'rejected'
@@ -45,6 +78,8 @@ export interface DecideStatusParams {
   marginFloor:  number
   marginAfter:  number
   mode:         ApprovalMode
+  /** Optional per-mode threshold override; defaults to DEFAULT_MODE_THRESHOLD[mode]. */
+  threshold?:   number
 }
 
 /**
@@ -65,7 +100,7 @@ export function decideStatus(p: DecideStatusParams): AuditStatus {
 
   if (mode === 'review_all') return 'pending'
 
-  const threshold = MODE_THRESHOLD[mode]
+  const threshold = p.threshold ?? MODE_THRESHOLD[mode]
   const deltaPct  = oldPrice != null && oldPrice > 0
     ? Math.abs(newPrice - oldPrice) / oldPrice
     : 1 // no old price -> treat as large change
@@ -211,9 +246,10 @@ export async function recomputeVariant(
   const sku        = matchData.variant.sku
 
   // 2. Resolve config.
-  const cfg   = await resolvePricingConfig(productType)
-  const group = await getGroupForProductType(productType)
-  const mode  = await getApprovalMode()
+  const cfg        = await resolvePricingConfig(productType)
+  const group      = await getGroupForProductType(productType)
+  const mode       = await getApprovalMode()
+  const thresholds = await getModeThresholds()
 
   // 3. Velocity modifier.
   let velocityBucket: VelocityBucket | undefined
@@ -275,6 +311,7 @@ export async function recomputeVariant(
     marginFloor: cfg.margin_floor_pct,
     marginAfter,
     mode,
+    threshold: thresholds[mode],
   })
 
   // 7. Build rationale.
@@ -292,7 +329,7 @@ export async function recomputeVariant(
     ...(daysDisc       !== undefined ? { daysDisc }                  : {}),
     ...(map            != null       ? { map }                       : {}),
     ...(deltaPct       != null       ? { deltaPct }                  : {}),
-    approvalThreshold: MODE_THRESHOLD[mode],
+    approvalThreshold: thresholds[mode],
   })
 
   // 8. Write audit log row.
@@ -418,6 +455,7 @@ export async function dryRunRuleChange(opts: {
 
   const { bulkFetchProductsForPricing } = await import('./shopify.server')
   const mode = await getApprovalMode()
+  const thresholds = await getModeThresholds()
 
   const result: DryRunResult = {
     totalAffected: 0,
@@ -507,7 +545,7 @@ export async function dryRunRuleChange(opts: {
         } else if (breachesFloor) {
           result.breachFloor++
         } else {
-          const threshold = MODE_THRESHOLD[mode]
+          const threshold = thresholds[mode]
           const deltaPct = oldSell > 0 ? Math.abs(newSell - oldSell) / oldSell : 1
           if (mode === 'review_all' || deltaPct > threshold) {
             result.willQueue++
@@ -520,7 +558,7 @@ export async function dryRunRuleChange(opts: {
           const status: AuditStatus =
             breachesMap || breachesFloor
               ? 'rejected'
-              : (mode === 'review_all' || (oldSell > 0 && Math.abs(newSell - oldSell) / oldSell > MODE_THRESHOLD[mode]))
+              : (mode === 'review_all' || (oldSell > 0 && Math.abs(newSell - oldSell) / oldSell > thresholds[mode]))
                 ? 'pending'
                 : 'auto_applied'
 
