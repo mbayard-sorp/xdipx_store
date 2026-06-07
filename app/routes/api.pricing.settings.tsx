@@ -14,6 +14,7 @@ export async function action({ request }: ActionFunctionArgs) {
   let mode: string | undefined
   let webhookEnabled: string | undefined
   let webhookThrottleSecs: string | undefined
+  let modeThresholds: string | undefined
 
   const ct = request.headers.get('content-type') ?? ''
   if (ct.includes('application/json')) {
@@ -25,6 +26,9 @@ export async function action({ request }: ActionFunctionArgs) {
     webhookThrottleSecs = body['pricingWebhookThrottleSecs'] !== undefined
       ? String(body['pricingWebhookThrottleSecs'])
       : undefined
+    modeThresholds = body['modeThresholds'] !== undefined
+      ? JSON.stringify(body['modeThresholds'])
+      : undefined
   } else {
     const fd = await request.formData()
     mode = fd.get('approvalMode') as string | undefined
@@ -32,6 +36,8 @@ export async function action({ request }: ActionFunctionArgs) {
     webhookEnabled = whe != null ? String(whe) : undefined
     const wht = fd.get('pricingWebhookThrottleSecs')
     webhookThrottleSecs = wht != null ? String(wht) : undefined
+    const mt = fd.get('modeThresholds')
+    modeThresholds = mt != null ? String(mt) : undefined
   }
 
   const updates: Record<string, unknown> = {}
@@ -46,6 +52,28 @@ export async function action({ request }: ActionFunctionArgs) {
       .values({ key: 'pricing_approval_mode', value: mode })
       .onConflictDoUpdate({ target: pipelineSettings.key, set: { value: mode, updatedAt: new Date() } })
     updates['approvalMode'] = mode
+  }
+
+  if (modeThresholds !== undefined) {
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(modeThresholds) as Record<string, unknown>
+    } catch {
+      return Response.json({ ok: false, error: 'Invalid modeThresholds JSON' }, { status: 400 })
+    }
+    // Validate + normalize: only aggressive/balanced/conservative, fractions in [0, 1].
+    const clean: Record<string, number> = {}
+    for (const m of ['aggressive', 'balanced', 'conservative']) {
+      const v = parsed[m]
+      if (v == null) continue
+      const n = typeof v === 'number' ? v : parseFloat(String(v))
+      if (!isFinite(n) || n < 0 || n > 1) {
+        return Response.json({ ok: false, error: `Invalid threshold for ${m}` }, { status: 400 })
+      }
+      clean[m] = n
+    }
+    await setPipelineSetting('pricing_mode_thresholds', JSON.stringify(clean))
+    updates['modeThresholds'] = clean
   }
 
   if (webhookEnabled !== undefined) {
