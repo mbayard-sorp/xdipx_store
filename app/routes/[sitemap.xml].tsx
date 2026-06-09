@@ -5,28 +5,30 @@ import { dealHistory } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 
 export async function loader() {
+  // Every source is individually guarded: a sitemap that degrades to fewer
+  // entries is always better for crawlers than a 500. Each failure logs with
+  // a [sitemap] prefix so the broken source is identifiable in runtime logs.
+  const guard = <T,>(p: Promise<T>, fallback: T, name: string): Promise<T> =>
+    p.catch(err => {
+      console.error(`[sitemap] ${name} failed:`, err)
+      return fallback
+    })
+
   const [blogPosts, categories, pages, products, productImages, collections, liveDealRows, mainMenu] = await Promise.all([
-    getBlogPostsForSitemap(),
-    getBlogCategories(),
-    getPageList(),
-    getProductHandlesForSitemap(),
-    getProductImagesForSitemap().catch((err): Map<string, SitemapProductImages> => {
-      // Image enrichment failure must not break the sitemap — fall back to
-      // bare URL entries so crawlers still see updated lastmods.
-      console.error('[sitemap] product image fetch failed:', err)
-      return new Map()
-    }),
-    getCollectionsForSitemap().catch((err): SitemapCollection[] => {
-      console.error('[sitemap] collections fetch failed:', err)
-      return []
-    }),
-    db.select().from(dealHistory).where(eq(dealHistory.status, 'live')).limit(1),
-    getMainMenu().catch((): [] => []),
+    guard(getBlogPostsForSitemap(), [], 'getBlogPostsForSitemap'),
+    guard(getBlogCategories(), [], 'getBlogCategories'),
+    guard(getPageList(), [], 'getPageList'),
+    guard(getProductHandlesForSitemap(), [], 'getProductHandlesForSitemap'),
+    guard(getProductImagesForSitemap(), new Map<string, SitemapProductImages>(), 'getProductImagesForSitemap'),
+    guard(getCollectionsForSitemap(), [] as SitemapCollection[], 'getCollectionsForSitemap'),
+    guard(db.select().from(dealHistory).where(eq(dealHistory.status, 'live')).limit(1), [], 'liveDeal query'),
+    guard(getMainMenu(), [], 'getMainMenu'),
   ])
 
   const base = 'https://xdipx.com'
-  const homepageLastmod = liveDealRows[0]?.dealDate
-    ? new Date(liveDealRows[0]!.dealDate).toISOString().split('T')[0]
+  const liveDealDate = liveDealRows[0]?.dealDate ? new Date(liveDealRows[0]!.dealDate) : null
+  const homepageLastmod = liveDealDate && !Number.isNaN(liveDealDate.getTime())
+    ? liveDealDate.toISOString().split('T')[0]
     : undefined
   const today = new Date().toISOString().split('T')[0]
 
@@ -79,7 +81,7 @@ export async function loader() {
 
   // Top-level nav destinations (skip the homepage `/` — it's listed separately).
   const navItems = mainMenu
-    .map(item => relativize(item.url))
+    .map(item => (typeof item.url === 'string' ? relativize(item.url) : ''))
     .filter(path => path.startsWith('/') && path !== '/')
 
   // Track which collection handles are nav-promoted so the general
@@ -207,6 +209,6 @@ export async function loader() {
   })
 }
 
-function escapeXml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+function escapeXml(s: string | null | undefined): string {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
