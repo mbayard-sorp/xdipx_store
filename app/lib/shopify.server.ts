@@ -1243,7 +1243,10 @@ export interface SitemapProductImages {
  * Cached for 1 hour, matching the sitemap response cache.
  */
 export async function getProductImagesForSitemap(): Promise<Map<string, SitemapProductImages>> {
-  return cached('shopify:sitemap:product-images', 3600, async () => {
+  // cached() round-trips through KV as JSON, where a Map serializes to {}.
+  // Cache a plain entries array and rebuild the Map on the way out. Key is
+  // versioned (:v2) so instances skip the old poisoned {} entry in KV.
+  const entries = await cached('shopify:sitemap:product-images:v2', 3600, async (): Promise<Array<[string, SitemapProductImages]>> => {
     const map = new Map<string, SitemapProductImages>()
     let cursor: string | null = null
     // Storefront API hard-caps `first` at 250 per page. Two pages = up to 500
@@ -1287,8 +1290,9 @@ export async function getProductImagesForSitemap(): Promise<Map<string, SitemapP
       cursor = data.products.pageInfo.endCursor
       if (!cursor) break
     }
-    return map
+    return Array.from(map.entries())
   })
+  return new Map(entries)
 }
 
 export interface SitemapCollection {
