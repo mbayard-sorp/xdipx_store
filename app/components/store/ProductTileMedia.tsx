@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { shopifyImageUrl } from '~/lib/shopify-image'
 
 interface ProductTileMediaProps {
   imageUrl: string
@@ -40,7 +41,7 @@ export default function ProductTileMedia({ imageUrl, imageAlt, video }: ProductT
       onMouseLeave={() => setHovered(false)}
     >
       <img
-        src={imageUrl}
+        src={shopifyImageUrl(imageUrl, 480)}
         alt={imageAlt}
         width={800}
         height={800}

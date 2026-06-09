@@ -6895,3 +6895,74 @@ export async function getDistinctProductTypes(opts?: { force?: boolean }): Promi
   await kvSet(PRODUCT_TYPES_CACHE_KEY, result, PRODUCT_TYPES_CACHE_TTL)
   return result
 }
+
+// ---------------------------------------------------------------------------
+// Sanity sync: paginate all Shopify products via REST Admin API
+// ---------------------------------------------------------------------------
+
+export interface SanitySyncProduct {
+  id: number
+  handle: string
+  title: string
+  images: Array<{ src: string }>
+}
+
+/**
+ * Paginate all products from Shopify REST Admin API for Sanity sync.
+ * Iterates active, draft, and archived statuses. Calls `onBatch` for each
+ * page so the caller can process incrementally without buffering the full set.
+ */
+export async function paginateAllProductsForSanity(
+  onBatch: (products: SanitySyncProduct[]) => Promise<void>,
+): Promise<{ created: number; skipped: number }> {
+  let created = 0
+  let skipped = 0
+
+  for (const status of ['active', 'draft', 'archived'] as const) {
+    let sinceId = 0
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { products } = await shopifyAdmin<{ products: SanitySyncProduct[] }>(
+        `/products.json?limit=250&since_id=${sinceId}&status=${status}&fields=id,handle,title,images`,
+      )
+      console.log(`[sync-sanity] status=${status} page sinceId=${sinceId} count:`, products?.length ?? 0)
+      if (!products?.length) break
+
+      await onBatch(products)
+
+      if (products.length < 250) break
+      sinceId = products[products.length - 1]!.id
+    }
+  }
+
+  return { created, skipped }
+}
+
+// ---------------------------------------------------------------------------
+// Debug: fetch xdipx metafields for a product (admin route helper)
+// ---------------------------------------------------------------------------
+
+export interface ProductMetafieldDebug {
+  allKeys: string[]
+  emmaHero: { namespace: string; key: string; value: string; type: string } | null
+}
+
+/**
+ * Fetches all xdipx-namespace metafields for a product by numeric Shopify ID.
+ * Returns a structured debug payload for the emma-hero debug route.
+ */
+export async function getProductMetafieldDebug(numericProductId: string): Promise<ProductMetafieldDebug> {
+  type MfRes = { metafields: Array<{ namespace: string; key: string; value: string; type: string }> }
+  const result = await shopifyAdmin<MfRes>(
+    `/products/${numericProductId}/metafields.json?namespace=xdipx`,
+  ).catch((err: Error) => ({ error: err.message }))
+
+  if ('error' in result) {
+    return { allKeys: [], emmaHero: null }
+  }
+
+  return {
+    allKeys: result.metafields.map(m => `${m.namespace}.${m.key}`),
+    emmaHero: result.metafields.find(m => m.key === 'emma_hero') ?? null,
+  }
+}

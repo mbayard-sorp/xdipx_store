@@ -16,40 +16,40 @@ type Pool = readonly string[]
 
 const WAND: Pool = [
   "Wands hit different once you stop being polite about the intensity.",
-  "Put the rumble through a pillow the first time — future you will say thanks ♥",
-  "I'd say start low. Loud wands deserve a gentle intro.",
+  "Put the rumble through a pillow the first time. Future you will say thanks ♥",
+  "Start low. Loud wands deserve a gentle intro.",
   "Built for the nights you want zero subtlety.",
-  "If it's your first wand, keep a free hand — the lowest setting is louder than it looks.",
-  "The kind of thing you reach for when nothing else is cutting it ♥",
+  "If it's your first wand, keep a free hand. The lowest setting is louder than it looks.",
+  "The one to point you to when nothing else is cutting it ♥",
   "Neighbors will know. Worth it.",
 ]
 
 const VIBRATOR: Pool = [
   "Small, mighty, and weirdly easy to recommend to anyone.",
-  "I tested this on a lazy Sunday and then tested it again Monday morning for science ♥",
+  "Reviewers keep coming back to this one on slow Sunday mornings. The repeat-buy rate says it all ♥",
   "Quiet enough for a roommate situation, loud enough where it counts.",
-  "The kind of thing that lives in the top drawer, not the back one.",
+  "Known for landing in the top drawer, not the forgotten back one.",
   "Honestly the ratio of fuss to payoff here is very in your favor.",
-  "If you're new to this category, this is the one I'd hand a friend first.",
+  "If you're new to this category, this is the one I'd point a friend toward first.",
   "Discreet shape, not-so-discreet reputation ♥",
 ]
 
 const AIR_PULSATION: Pool = [
-  "Air pulse feels nothing like a regular vibe — ease in, don't grip it like a drill.",
-  "Less pressure, not more. I promise.",
-  "The first time, I thought it was broken. Then I got the angle right ♥",
-  "If you've never tried suction-style, prepare to be confused and then very much not.",
+  "Air pulse feels nothing like a regular vibe. Ease in, don't grip it like a drill.",
+  "Less pressure, not more. The specs back that up.",
+  "Air pulse has a learning curve. First pass, find the angle. Second pass, everything clicks ♥",
+  "If you've never tried suction-style, reviewers say the first session is confusing and the second is very much not.",
   "Works best when you stop trying to make it work.",
   "A weird little device that ends up being the most-used thing in the drawer.",
 ]
 
 const LUBE: Pool = [
-  "A little goes further than you think — start small, re-apply if needed.",
-  "I keep one of these on every nightstand in the house. No shame ♥",
+  "A little goes further than you think. Start small, re-apply if needed.",
+  "The kind of thing worth keeping on every nightstand. No shame ♥",
   "Non-negotiable tool, honestly. Don't be a hero about skipping it.",
   "Pairs with literally everything in your drawer.",
   "The quiet MVP of the entire category.",
-  "Better sessions, fewer regrets — that's the whole pitch.",
+  "Better sessions, fewer regrets. That's the whole pitch.",
 ]
 
 const WEAR: Pool = [
@@ -61,12 +61,12 @@ const WEAR: Pool = [
 ]
 
 const DEFAULT: Pool = [
-  "One of the ones I quietly recommend over coffee ♥",
+  "One of the ones worth quietly recommending over coffee ♥",
   "Not flashy, just genuinely good at what it does.",
   "The kind of thing you buy once and stop overthinking.",
-  "I've been telling people about this combo for a while now.",
-  "Weirdly hard to make a bad choice here — it all lands.",
-  "Tested, approved, still in rotation ♥",
+  "Catalog consensus points here for good reason.",
+  "Weirdly hard to make a bad choice here. It all lands.",
+  "Strong reviewer track record. Stays in people's regular rotation ♥",
 ]
 
 // Phase 1 rebuild — ProductTypeDial expanded to 19 values. Legacy `wand` and

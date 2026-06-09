@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import type { Deal } from '~/types'
+import { shopifyImageUrl } from '~/lib/shopify-image'
 
 interface QuietEndorsementHeroProps {
   deal:             Deal
@@ -90,7 +91,7 @@ export function QuietEndorsementHero({ deal, showFreeShipping }: QuietEndorsemen
           <Link to={href} className="relative flex-1 block">
             {image ? (
               <img
-                src={image.url}
+                src={shopifyImageUrl(image.url, 1024)}
                 alt={image.altText ?? deal.seoTitle}
                 className="absolute inset-0 w-full h-full object-cover"
                 loading="eager"

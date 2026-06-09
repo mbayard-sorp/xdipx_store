@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
+import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
 const STORAGE_KEY = 'xdipx:recently-browsed'
 const MAX_ITEMS = 10
@@ -60,7 +61,9 @@ export default function RecentlyBrowsed({ currentHandle }: RecentlyBrowsedProps)
               <div className="aspect-square rounded-xl overflow-hidden bg-cream-2">
                 {p.image ? (
                   <img
-                    src={p.image}
+                    src={shopifyImageUrl(p.image, 240)}
+                    srcSet={shopifyImageSrcSet(p.image, [160, 240, 320]) ?? undefined}
+                    sizes="160px"
                     alt={p.title}
                     loading="lazy"
                     decoding="async"

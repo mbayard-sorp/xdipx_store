@@ -19,9 +19,7 @@ import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getEmmaContextRows }    from '~/lib/emma-rails.server'
 import { getCartIdFromCookie }   from '~/lib/cart.server'
-import { getMarketingConsent }   from '~/lib/consent.server'
-import { getFbCookies, getClientIP } from '~/lib/attribution.server'
-import { generateEventId, sendCapiEvent } from '~/lib/meta-capi.server'
+import { fireCapiEvent } from '~/lib/meta-capi.server'
 import { getSwatchMap }          from '~/lib/swatches.server'
 import { EmmaHero }              from '~/components/store/EmmaHero'
 import { BundleHero }            from '~/components/store/BundleHero'
@@ -283,32 +281,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return isAdmin ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
   }
 
-  // Generate a dedup id shared with the browser pixel. Fire server CAPI
-  // fire-and-forget (void) -- ViewContent failure is non-fatal.
-  const viewContentEventId = generateEventId()
-  const consentGranted = getMarketingConsent(request)
-  const { fbp, fbc } = getFbCookies(request)
-  void sendCapiEvent(
-    {
-      event_name:    'ViewContent',
-      event_id:      viewContentEventId,
-      event_time:    Math.floor(Date.now() / 1000),
-      action_source: 'website',
-      user_data: {
-        client_ip_address: getClientIP(request),
-        client_user_agent: request.headers.get('user-agent') ?? undefined,
-        fbp,
-        fbc,
-      },
-      custom_data: {
-        content_ids:  [deal.shopifyProductId],
-        content_type: 'product',
-        value:        deal.dealPrice,
-        currency:     'USD',
-      },
-    },
-    { consentGranted },
-  )
+  // Generate a dedup id shared with the browser pixel. ViewContent failure is non-fatal.
+  const viewContentEventId = fireCapiEvent(request, 'ViewContent', {
+    contentIds: [deal.shopifyProductId],
+    value:      deal.dealPrice,
+  })
 
   const value = {
     variant: 'legacy' as const,

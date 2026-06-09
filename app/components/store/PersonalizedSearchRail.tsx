@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
+import { shopifyImageUrl } from '~/lib/shopify-image'
 
 interface RailProduct {
   handle: string
@@ -121,7 +122,7 @@ export function PersonalizedSearchRail({
                 <Link to={`/products/${p.handle}`} className="flex gap-2.5 items-center group">
                   <div className="w-12 h-12 rounded-md bg-cream-2 overflow-hidden shrink-0">
                     {p.image ? (
-                      <img src={p.image} alt="" className="w-full h-full object-cover" loading="lazy" />
+                      <img src={shopifyImageUrl(p.image, 120)} alt="" className="w-full h-full object-cover" loading="lazy" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-ink/20">♥</div>
                     )}
@@ -145,7 +146,7 @@ export function PersonalizedSearchRail({
                 <Link to={`/products/${p.handle}`} className="flex gap-2.5 items-center group">
                   <div className="w-12 h-12 rounded-md bg-cream-2 overflow-hidden shrink-0">
                     {p.image ? (
-                      <img src={p.image} alt="" className="w-full h-full object-cover" loading="lazy" />
+                      <img src={shopifyImageUrl(p.image, 120)} alt="" className="w-full h-full object-cover" loading="lazy" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-ink/20">♥</div>
                     )}

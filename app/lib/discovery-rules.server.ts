@@ -13,7 +13,7 @@
 import { eq, and, asc } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { discoveryRules, pipelineSettings } from '../../db/schema'
-import { kvGet, kvSet, kvDel } from '~/lib/kv.server'
+import { kvGet, kvSet, kvDel, cached, invalidateCache } from '~/lib/kv.server'
 import { rankSingleRail } from '~/lib/discovery-emma'
 import { invalidateDiscoveryIndex } from '~/lib/discovery.server'
 import type {
@@ -93,6 +93,41 @@ export async function getInventoryMin(): Promise<number> {
 export async function invalidateDiscoveryRulesCache(): Promise<void> {
   await kvDel(RULES_CACHE_KEY)
   await kvDel(INVENTORY_MIN_CACHE_KEY)
+}
+
+// ---------------------------------------------------------------------------
+// Async: search taxonomy cache
+// ---------------------------------------------------------------------------
+
+import type { TaxonomyGroup } from '~/lib/search-filter-csv'
+
+const SEARCH_TAXONOMY_CACHE_KEY = 'pipeline:searchTaxonomy'
+const SEARCH_TAXONOMY_TTL = 300 // 5 minutes
+
+/**
+ * Returns the parsed searchFilterTaxonomy pipeline setting, KV-cached for 5 min.
+ * Returns null on parse failure or missing row so callers can safely fall back
+ * to an empty taxonomy without crashing.
+ */
+export async function getSearchTaxonomy(): Promise<TaxonomyGroup[] | null> {
+  return cached<TaxonomyGroup[] | null>(SEARCH_TAXONOMY_CACHE_KEY, SEARCH_TAXONOMY_TTL, async () => {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, 'searchFilterTaxonomy'))
+      .limit(1)
+    if (!rows.length || !rows[0]) return null
+    try {
+      return JSON.parse(rows[0].value) as TaxonomyGroup[]
+    } catch {
+      return null
+    }
+  })
+}
+
+/** Call after any write to searchFilterTaxonomy to clear the cached value. */
+export function invalidateSearchTaxonomyCache(): void {
+  invalidateCache(SEARCH_TAXONOMY_CACHE_KEY)
 }
 
 // ---------------------------------------------------------------------------

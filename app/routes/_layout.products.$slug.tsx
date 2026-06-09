@@ -12,7 +12,7 @@ import {
 import { resolveBreadcrumbs, type BreadcrumbCrumb } from '~/lib/breadcrumbs.server'
 import { getProductPageBlocks, getProductFaqs, getPdpTrustBar } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
-import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
+// Reviews imports removed while UI is paused. Restore behind a feature flag when review system goes live.
 import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
 import {
   getProductVoteAggregate,
@@ -22,20 +22,21 @@ import {
 import { getCustomerToken } from '~/lib/customer-session.server'
 import { customerAPI } from '~/lib/customer-api.server'
 import { getCartIdFromCookie } from '~/lib/cart.server'
-import { getMarketingConsent } from '~/lib/consent.server'
-import { getFbCookies, getClientIP } from '~/lib/attribution.server'
-import { generateEventId, sendCapiEvent } from '~/lib/meta-capi.server'
+import { fireCapiEvent } from '~/lib/meta-capi.server'
 import { getCart } from '~/lib/shopify.server'
 import { getEmmaAside, type EmmaAsideResult } from '~/lib/emma-aside.server'
 import { parseBrowseCookie, buildBrowseCookie } from '~/lib/browse-history.server'
 // EmmaContextualAside / Skeleton no longer used — Emma's take now lives inside
 // the SEO summary grid via EmmaTakeBody (defined below).
 import { getFallbackAside } from '~/lib/emma-aside-templates'
+import { STOREFRONT_CACHE_HEADERS } from '~/lib/cache-headers'
+import { shopifyImageUrl } from '~/lib/shopify-image'
 import BundleHero from '~/components/store/BundleHero'
 import BundleSaveCard from '~/components/store/BundleSaveCard'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 import { FAQStructuredData }      from '~/components/seo/FAQStructuredData'
+import { HowToStructuredData }    from '~/components/seo/HowToStructuredData'
 import { VideoStructuredData }    from '~/components/seo/VideoStructuredData'
 import { ProductFaqList }         from '~/components/store/ProductFaqList'
 import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
@@ -69,10 +70,7 @@ import { buildSocialMeta } from '~/lib/social-meta'
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
 export function headers() {
-  return {
-    'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
-    'Vercel-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=600',
-  }
+  return STOREFRONT_CACHE_HEADERS
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -96,12 +94,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       customerProductVote: null as (1 | -1 | null),
       isLoggedIn: false,
       companionBundle: null,
-      reviews: [],
-      reviewTotal: 0,
-      reviewPage: 1,
-      reviewSort: 'newest',
-      reviewFilter: 'all',
-      aggregate: null,
       faqs: [] as ProductFaq[],
       emmaAsideStatic: '',
       emmaAsidePromise: null as Promise<EmmaAsideResult> | null,
@@ -112,11 +104,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       pdpTrustBar: null as TrustBarBlockType | null,
     }
   }
-
-  const url          = new URL(request.url)
-  const reviewPage   = parseInt(url.searchParams.get('reviewPage')   ?? '1', 10)
-  const reviewSort   = url.searchParams.get('reviewSort')   ?? 'newest'
-  const reviewFilter = url.searchParams.get('reviewFilter') ?? 'all'
 
   // ── Batch A ─────────────────────────────────────────────────────────────────
   // The deal fetch and every slug-only CMS fetch are mutually independent, so
@@ -133,6 +120,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     getCustomerToken(request),
   ])
   if (!deal) throw new Response('Product not found', { status: 404 })
+  if (deal.dealStatus === 'archived') throw new Response('This product is no longer available', { status: 410 })
 
   // Resolve current customer (for sticky vote state + gating). Failures here
   // are non-fatal — PDP still renders for anonymous users.
@@ -166,14 +154,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Everything that depends on the resolved deal (and customer), plus FBT
   // hydration and carousel/rail product resolution — all independent of each
   // other, so one parallel batch instead of three serial hops.
-  // HIDDEN — Reviews UI: paused until we have orders. Restore the two
-  // commented-out fetches and the JSX block at line ~707 when bringing the
-  // user-review system back online.
-  const [reviewData, aggregate, productVoteAggregate, customerProductVote, pairProducts, swatches, fbtResolved, carouselResults, railResults] = await Promise.all([
-    // getProductReviews(deal.shopifyProductId, { sort: reviewSort, filter: reviewFilter, page: reviewPage, perPage: 10 }),
-    // getProductAggregate(deal.shopifyProductId),
-    Promise.resolve({ reviews: [], total: 0 } as Awaited<ReturnType<typeof getProductReviews>>),
-    Promise.resolve(null as Awaited<ReturnType<typeof getProductAggregate>>),
+  // Reviews data removed while UI is paused. Restore getProductReviews /
+  // getProductAggregate here behind a feature flag when the review system goes live.
+  const [productVoteAggregate, customerProductVote, pairProducts, swatches, fbtResolved, carouselResults, railResults] = await Promise.all([
     hasDial
       ? getProductVoteAggregate(deal.shopifyProductId)
       : Promise.resolve({ agrees: 0, disagrees: 0, agreePct: 0 } as ProductVoteAggregate),
@@ -315,32 +298,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const browseCookieHeader = buildBrowseCookie(deal.shopifyProductId, previousBrowseIds)
 
-  // Generate dedup id shared with the browser pixel. Fire CAPI fire-and-forget
-  // (void) -- ViewContent failure is non-fatal.
-  const viewContentEventId = generateEventId()
-  const consentGranted = getMarketingConsent(request)
-  const { fbp, fbc } = getFbCookies(request)
-  void sendCapiEvent(
-    {
-      event_name:    'ViewContent',
-      event_id:      viewContentEventId,
-      event_time:    Math.floor(Date.now() / 1000),
-      action_source: 'website',
-      user_data: {
-        client_ip_address: getClientIP(request),
-        client_user_agent: request.headers.get('user-agent') ?? undefined,
-        fbp,
-        fbc,
-      },
-      custom_data: {
-        content_ids:  [deal.shopifyProductId],
-        content_type: 'product',
-        value:        deal.dealPrice,
-        currency:     'USD',
-      },
-    },
-    { consentGranted },
-  )
+  // Generate dedup id shared with the browser pixel. ViewContent failure is non-fatal.
+  const viewContentEventId = fireCapiEvent(request, 'ViewContent', {
+    contentIds: [deal.shopifyProductId],
+    value:      deal.dealPrice,
+  })
 
   return data(
     {
@@ -355,12 +317,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       customerProductVote,
       isLoggedIn,
       companionBundle,
-      reviews:       reviewData.reviews,
-      reviewTotal:   reviewData.total,
-      reviewPage,
-      reviewSort,
-      reviewFilter,
-      aggregate:     aggregate ?? null,
       faqs,
       bundle: null,
       emmaAsideStatic,
@@ -488,13 +444,6 @@ function ProductPage() {
   const customerProductVoteLoaded  = loaderData.customerProductVote
   const isLoggedIn                 = loaderData.isLoggedIn
   const companionBundle = loaderData.companionBundle
-  // Review fields kept on loader for SEO JSON-LD / future restore of Reviews UI.
-  void loaderData.reviews
-  void loaderData.reviewTotal
-  void loaderData.reviewPage
-  void loaderData.reviewSort
-  void loaderData.reviewFilter
-  void loaderData.aggregate
   const swatches  = loaderData.swatches ?? {}
   const faqs        = loaderData.faqs ?? []
   const careFaqs    = faqs.filter(f => f.category === 'care')
@@ -1112,7 +1061,7 @@ function ProductPage() {
         <div className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 z-50 md:hidden bg-white border-t border-cream-2 px-4 py-3 flex items-center gap-3 shadow-lg shadow-ink/10">
           {deal.images[0] && (
             <img
-              src={deal.images[0].url}
+              src={shopifyImageUrl(deal.images[0].url, 120)}
               alt=""
               aria-hidden="true"
               className="w-12 h-12 rounded-xl object-cover bg-cream-2 shrink-0"
@@ -1158,6 +1107,14 @@ function ProductPage() {
       />
       {faqs.length > 0 && (
         <FAQStructuredData faqs={faqs.map(f => ({ question: f.question, answer: f.answer }))} />
+      )}
+      {careFaqs.length > 0 && (
+        <HowToStructuredData
+          name={`How to care for your ${deal.seoTitle}`}
+          description={`Care instructions for the ${deal.seoTitle} by ${deal.brand}.`}
+          url={`https://xdipx.com/products/${deal.handle}`}
+          steps={careFaqs.map(f => ({ name: f.question, text: f.answer }))}
+        />
       )}
 
       {voteToast && (

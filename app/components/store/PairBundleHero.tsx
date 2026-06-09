@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useFetcher } from 'react-router'
+import { shopifyImageUrl } from '~/lib/shopify-image'
 import type { Deal, PairBundleCopy, ProductVariant } from '~/types'
 import { PairBundleHeroCarousel } from './PairBundleHeroCarousel'
 import { splitUnderscores, renderWithHighlight } from './pairBundleText'
@@ -250,7 +251,7 @@ function MobilePairItem({
       >
         {img ? (
           <img
-            src={img.url}
+            src={shopifyImageUrl(img.url, 320)}
             alt={img.altText ?? deal.seoTitle}
             className="max-h-[160px] w-auto"
             style={{ filter: 'drop-shadow(0 10px 20px rgba(21,18,17,0.12))' }}
@@ -368,7 +369,7 @@ function DesktopPairItem({
         {img ? (
           <>
             <img
-              src={img.url}
+              src={shopifyImageUrl(img.url, 800)}
               alt={img.altText ?? deal.seoTitle}
               className="w-full h-auto max-h-[440px] object-contain transition-transform duration-300 hover:scale-[1.03]"
               style={{ filter: 'drop-shadow(0 18px 30px rgba(21,18,17,0.16))' }}

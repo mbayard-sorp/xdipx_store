@@ -6,10 +6,8 @@ import { getLiveDealHandle } from '~/lib/shopify.server'
 import { EmmaEncouragementStrip } from '~/components/store/EmmaEncouragementStrip'
 import { InfiniteProductGrid } from '~/components/store/SearchProductGrid'
 import { FilterSection, DrawerPill, FilterIcon, SortIcon } from '~/components/store/SearchFilterControls'
-import { db } from '~/lib/db.server'
-import { pipelineSettings } from '../../db/schema'
-import { eq } from 'drizzle-orm'
-import type { TaxonomyGroup } from './admin.search-filters'
+import { getSearchTaxonomy } from '~/lib/discovery-rules.server'
+import type { TaxonomyGroup } from '~/lib/search-filter-csv'
 import { normalizeTag } from '~/lib/tag-normalize'
 
 const SORT_OPTIONS = [
@@ -43,11 +41,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const priceMin   = url.searchParams.get('price_min')
   const priceMax   = url.searchParams.get('price_max')
 
-  const taxonomyRow = await db.select().from(pipelineSettings).where(eq(pipelineSettings.key, 'searchFilterTaxonomy'))
-  let taxonomy: TaxonomyGroup[] = []
-  if (taxonomyRow.length > 0) {
-    try { taxonomy = JSON.parse(taxonomyRow[0]!.value) } catch { /* ignore */ }
-  }
+  const taxonomy: TaxonomyGroup[] = (await getSearchTaxonomy()) ?? []
   const compoundTags = taxonomy
     .flatMap(g => g.tags.map(t => t.tag))
     .filter(t => t.includes(','))

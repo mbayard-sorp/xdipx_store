@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, MetaFunction, MetaDescriptor } from 'react-rou
 import { useLoaderData, Link } from 'react-router'
 import { getVaultDeals, getCollectionDeals } from '~/lib/shopify.server'
 import { getVaultFilterTabs } from '~/lib/kv.server'
+import { STOREFRONT_CACHE_HEADERS } from '~/lib/cache-headers'
 import { VaultCard } from '~/components/store/VaultCard'
 import { trackVaultBrowse, trackViewItemList } from '~/lib/analytics.client'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
@@ -10,10 +11,7 @@ import { canonicalUrl, robotsContent } from '~/lib/seo'
 import { buildSocialMeta } from '~/lib/social-meta'
 
 export function headers() {
-  return {
-    'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
-    'Vercel-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=600',
-  }
+  return STOREFRONT_CACHE_HEADERS
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {

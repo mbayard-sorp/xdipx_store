@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm'
 import { getTagCounts } from '~/lib/search.server'
 import { taxonomyToCSV } from '~/lib/search-filter-csv'
 import { taxonomyFromCSV } from '~/lib/search-filter-csv.server'
+import { invalidateSearchTaxonomyCache } from '~/lib/discovery-rules.server'
 
 export const meta: MetaFunction = () => [{ title: 'Search Filters — xdipx Admin' }]
 
@@ -60,6 +61,7 @@ export async function action({ request }: ActionFunctionArgs) {
       .values({ key: SETTINGS_KEY, value: JSON.stringify(parsed), updatedAt: new Date() })
       .onConflictDoUpdate({ target: pipelineSettings.key, set: { value: JSON.stringify(parsed), updatedAt: new Date() } })
 
+    invalidateSearchTaxonomyCache()
     return { ok: true }
   }
 
@@ -84,6 +86,7 @@ export async function action({ request }: ActionFunctionArgs) {
       .values({ key: SETTINGS_KEY, value: JSON.stringify(groups), updatedAt: new Date() })
       .onConflictDoUpdate({ target: pipelineSettings.key, set: { value: JSON.stringify(groups), updatedAt: new Date() } })
 
+    invalidateSearchTaxonomyCache()
     const tagCount = groups.reduce((n, g) => n + g.tags.length, 0)
     return { ok: true, imported: { groups, groupCount: groups.length, tagCount } }
   }

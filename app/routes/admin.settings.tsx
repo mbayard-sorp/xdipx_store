@@ -4,7 +4,7 @@ import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
 import { kvGet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import { orchestrateDealPipeline } from '~/lib/deal-pipeline.server'
-import { shopifyAdmin } from '~/lib/shopify.server'
+import { paginateAllProductsForSanity } from '~/lib/shopify.server'
 import { upsertProductPage } from '~/lib/sanity.server'
 import { resolveGa4, invalidateGa4Cache } from '~/lib/ga4-config.server'
 
@@ -140,40 +140,25 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'sync-sanity') {
     try {
-      interface RestProduct { id: number; handle: string; title: string; images: { src: string }[] }
       let created = 0
       let skipped = 0
-      let sinceId = 0
 
-      for (const status of ['active', 'draft', 'archived'] as const) {
-        sinceId = 0
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-          const { products } = await shopifyAdmin<{ products: RestProduct[] }>(
-            `/products.json?limit=250&since_id=${sinceId}&status=${status}&fields=id,handle,title,images`
-          )
-          console.log(`[sync-sanity] status=${status} page sinceId=${sinceId} count:`, products?.length ?? 0)
-          if (!products?.length) break
-
-          await Promise.all(products.map(async p => {
-            const gid = `gid://shopify/Product/${p.id}`
-            const result = await upsertProductPage({
-              handle: p.handle,
-              shopifyProductId: gid,
-              title: p.title,
-              imageUrl: p.images[0]?.src,
-            }).catch(err => {
-              console.error(`[sync-sanity] failed for ${p.handle}:`, err)
-              return { created: false }
-            })
-            if (result.created) created++
-            else skipped++
-          }))
-
-          if (products.length < 250) break
-          sinceId = products[products.length - 1]!.id
-        }
-      }
+      await paginateAllProductsForSanity(async products => {
+        await Promise.all(products.map(async p => {
+          const gid = `gid://shopify/Product/${p.id}`
+          const result = await upsertProductPage({
+            handle: p.handle,
+            shopifyProductId: gid,
+            title: p.title,
+            imageUrl: p.images[0]?.src,
+          }).catch(err => {
+            console.error(`[sync-sanity] failed for ${p.handle}:`, err)
+            return { created: false }
+          })
+          if (result.created) created++
+          else skipped++
+        }))
+      })
 
       return { ok: true, syncSanity: { created, skipped } }
     } catch (err) {
