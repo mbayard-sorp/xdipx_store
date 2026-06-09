@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { Link, useFetcher, useLoaderData } from 'react-router'
 import { data } from 'react-router'
 import { getPublicList } from '~/lib/wishlist.server'
+import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data) return [{ title: 'Wishlist not found — xdipx' }]
@@ -140,7 +141,9 @@ export default function PublicWishlistPage() {
                   <div className="aspect-[4/5] bg-cream-2 overflow-hidden">
                     {image ? (
                       <img
-                        src={image.url}
+                        src={shopifyImageUrl(image.url, 480)}
+                        srcSet={shopifyImageSrcSet(image.url, [240, 480, 720]) ?? undefined}
+                        sizes="(min-width: 768px) 25vw, 50vw"
                         alt={image.altText || p.title}
                         className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500"
                         loading="lazy"

@@ -1,4 +1,5 @@
 import { Link, useFetcher } from 'react-router'
+import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
 export interface PairsWithItem {
   shopifyProductId: string
@@ -105,7 +106,9 @@ function PairCard({ item }: { item: PairsWithItem }) {
         <div className="aspect-[4/5] bg-cream-2 overflow-hidden">
           {item.image ? (
             <img
-              src={item.image}
+              src={shopifyImageUrl(item.image, 480)}
+              srcSet={shopifyImageSrcSet(item.image, [240, 480, 720]) ?? undefined}
+              sizes="(min-width: 768px) 25vw, 50vw"
               alt={item.title}
               loading="lazy"
               decoding="async"

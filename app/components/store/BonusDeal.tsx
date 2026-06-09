@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import type { Product } from '~/types'
+import { shopifyImageUrl } from '~/lib/shopify-image'
 
 interface BonusDealProps {
   product: Product
@@ -30,7 +31,7 @@ export function BonusDeal({ product }: BonusDealProps) {
           {/* Image */}
           {product.images[0] && (
             <img
-              src={product.images[0].url}
+              src={shopifyImageUrl(product.images[0].url, 240)}
               alt={product.images[0].altText || product.title}
               className="w-28 h-28 object-cover rounded-xl shrink-0"
               loading="lazy"

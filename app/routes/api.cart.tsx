@@ -6,9 +6,8 @@ import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import { getCustomerToken } from '~/lib/customer-session.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { deriveEmmaCartContext } from '~/lib/emma-cart.server'
-import { getMarketingConsent } from '~/lib/consent.server'
-import { getFbCookies, getClientIP } from '~/lib/attribution.server'
-import { generateEventId, sendCapiEvent } from '~/lib/meta-capi.server'
+import { getFbCookies } from '~/lib/attribution.server'
+import { fireCapiEvent } from '~/lib/meta-capi.server'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const cartId = getCartIdFromCookie(request)
@@ -77,30 +76,11 @@ export async function action({ request }: ActionFunctionArgs) {
       try { await setCartAttributes(cartId, fbAttrs) } catch { /* non-fatal */ }
     }
     // Generate dedup id and fire AddToCart CAPI fire-and-forget.
-    const addToCartEventId = generateEventId()
-    const consentGranted = getMarketingConsent(request)
-    void sendCapiEvent(
-      {
-        event_name:    'AddToCart',
-        event_id:      addToCartEventId,
-        event_time:    Math.floor(Date.now() / 1000),
-        action_source: 'website',
-        user_data: {
-          client_ip_address: getClientIP(request),
-          client_user_agent: request.headers.get('user-agent') ?? undefined,
-          fbp,
-          fbc,
-        },
-        custom_data: {
-          content_ids:  [productId],
-          content_type: 'product',
-          value:        price * quantity,
-          currency:     'USD',
-          num_items:    quantity,
-        },
-      },
-      { consentGranted },
-    )
+    const addToCartEventId = fireCapiEvent(request, 'AddToCart', {
+      contentIds: [productId],
+      value:      price * quantity,
+      numItems:   quantity,
+    })
     return Response.json({ ok: true, addToCartEventId }, { headers })
   }
 
@@ -148,35 +128,16 @@ export async function action({ request }: ActionFunctionArgs) {
       } catch { /* attribute is a nice-to-have — don't fail the add */ }
     }
     // Generate dedup id and fire AddToCart CAPI fire-and-forget.
-    const addToCartEventId = generateEventId()
-    const consentGranted = getMarketingConsent(request)
     const totalValue = lines.reduce((sum, l) => {
       const p = parseFloat((form.get(`price_${lines.indexOf(l)}`) as string) ?? '0')
       return sum + p * l.quantity
     }, 0)
     const allProductIds = lines.map((_, i) => (form.get(`productId_${i}`) as string | null) ?? '').filter(Boolean)
-    void sendCapiEvent(
-      {
-        event_name:    'AddToCart',
-        event_id:      addToCartEventId,
-        event_time:    Math.floor(Date.now() / 1000),
-        action_source: 'website',
-        user_data: {
-          client_ip_address: getClientIP(request),
-          client_user_agent: request.headers.get('user-agent') ?? undefined,
-          fbp,
-          fbc,
-        },
-        custom_data: {
-          content_ids:  allProductIds.length > 0 ? allProductIds : lines.map((_, i) => String(i)),
-          content_type: 'product',
-          value:        totalValue,
-          currency:     'USD',
-          num_items:    lines.length,
-        },
-      },
-      { consentGranted },
-    )
+    const addToCartEventId = fireCapiEvent(request, 'AddToCart', {
+      contentIds: allProductIds.length > 0 ? allProductIds : lines.map((_, i) => String(i)),
+      value:      totalValue,
+      numItems:   lines.length,
+    })
     return Response.json({ ok: true, added: lines.length, addToCartEventId }, { headers })
   }
 

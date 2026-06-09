@@ -8,14 +8,12 @@ import { getProductReviews, createReview, getInviteByToken, markInviteClicked, g
 import { analyzeReview } from '~/lib/reviews-ai.server'
 import { kvSet, kvIncr } from '~/lib/kv.server'
 import { rejectIfBot } from '~/lib/botid.server'
+import { STOREFRONT_CACHE_HEADERS } from '~/lib/cache-headers'
 
 // ─── Loader: GET /api/reviews?productId=X ────────────────────────────────
 
 export function headers() {
-  return {
-    'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
-    'Vercel-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=600',
-  }
+  return STOREFRONT_CACHE_HEADERS
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {

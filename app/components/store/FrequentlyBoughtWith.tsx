@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
 type FbtProduct = {
   handle: string
@@ -25,7 +26,9 @@ export default function FrequentlyBoughtWith({ products }: FrequentlyBoughtWithP
               <div className="aspect-square rounded-xl overflow-hidden bg-cream-2">
                 {p.image ? (
                   <img
-                    src={p.image}
+                    src={shopifyImageUrl(p.image, 480)}
+                    srcSet={shopifyImageSrcSet(p.image, [240, 480, 720]) ?? undefined}
+                    sizes="(min-width: 768px) 25vw, 50vw"
                     alt={p.title}
                     loading="lazy"
                     decoding="async"

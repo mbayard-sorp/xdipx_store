@@ -12,6 +12,8 @@ var __export = (target, all) => {
 var schema_exports = {};
 __export(schema_exports, {
   adminRoles: () => adminRoles,
+  apiTokenLog: () => apiTokenLog,
+  batchJobs: () => batchJobs,
   callLog: () => callLog,
   colorSwatchCache: () => colorSwatchCache,
   consentLog: () => consentLog,
@@ -76,7 +78,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches, metaCapiFailures;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -799,6 +801,70 @@ var init_schema = __esm({
     }, (t) => ({
       statusIdx: index("idx_enrichment_batches_status").on(t.status, t.submittedAt)
     }));
+    batchJobs = pgTable("batch_jobs", {
+      id: serial("id").primaryKey(),
+      jobId: varchar("job_id", { length: 64 }).notNull(),
+      jobType: varchar("job_type", { length: 32 }).notNull(),
+      // 'full-enrichment' | 'emma-take' | 'emma-hero' | 'regenerate'
+      status: varchar("status", { length: 20 }).default("queued").notNull(),
+      // queued | submitted | processing | applying | done | failed
+      source: varchar("source", { length: 32 }).notNull(),
+      // entry point: 'bulk-import' | 'import-product' | 'deal-manager' | 'backfill' | ...
+      skuList: json("sku_list").$type().notNull(),
+      products: json("products").$type().notNull(),
+      turn: integer("turn").default(0).notNull(),
+      maxTurns: integer("max_turns").default(24).notNull(),
+      batchIds: json("batch_ids").$type().default([]).notNull(),
+      currentBatchId: varchar("current_batch_id", { length: 64 }),
+      // Keyed by productId (Shopify GID). The runner persists each product
+      // incrementally for crash-recovery within a turn (see C3a in spec).
+      runnerState: json("runner_state").$type().default({}).notNull(),
+      results: json("results").$type(),
+      error: text("error"),
+      gatesDealId: integer("gates_deal_id"),
+      // dealHistory.id this job gates (nullable)
+      appliedSkus: json("applied_skus").$type().default([]).notNull(),
+      createdAt: timestamp("created_at").defaultNow().notNull(),
+      submittedAt: timestamp("submitted_at"),
+      updatedAt: timestamp("updated_at").defaultNow().notNull(),
+      completedAt: timestamp("completed_at"),
+      failedAt: timestamp("failed_at")
+    }, (t) => ({
+      jobIdIdx: uniqueIndex("uq_batch_jobs_job_id").on(t.jobId),
+      statusIdx: index("idx_batch_jobs_status").on(t.status, t.createdAt),
+      // Partial index mirrors the SQL migration for the poller drain query.
+      // Drizzle does not support partial indexes via the builder; the SQL migration
+      // creates idx_batch_jobs_inflight directly. Listed here for documentation only.
+      gatesDealIdx: index("idx_batch_jobs_gates_deal").on(t.gatesDealId)
+    }));
+    apiTokenLog = pgTable("api_token_log", {
+      id: serial("id").primaryKey(),
+      ts: timestamp("ts").defaultNow().notNull(),
+      feature: varchar("feature", { length: 48 }).notNull(),
+      // 'enrichment' | 'emma-chat' | 'sms' | 'ivr' | 'copy-gen' | ...
+      model: varchar("model", { length: 64 }).notNull(),
+      source: varchar("source", { length: 16 }).notNull(),
+      // 'batch' | 'sync' | 'agent-sdk'
+      batchId: varchar("batch_id", { length: 64 }),
+      productId: varchar("product_id", { length: 64 }),
+      sku: varchar("sku", { length: 32 }),
+      caller: varchar("caller", { length: 96 }),
+      inputTokens: integer("input_tokens").default(0).notNull(),
+      outputTokens: integer("output_tokens").default(0).notNull(),
+      cacheCreationTokens: integer("cache_creation_tokens").default(0).notNull(),
+      cacheReadTokens: integer("cache_read_tokens").default(0).notNull(),
+      requestCount: integer("request_count").default(1).notNull(),
+      // >1 when one row aggregates a batch turn
+      estCostUsd: decimal("est_cost_usd", { precision: 10, scale: 5 }).default("0").notNull(),
+      requestId: varchar("request_id", { length: 64 })
+      // IVR idempotency key (option B); null otherwise
+    }, (t) => ({
+      tsIdx: index("idx_api_token_log_ts").on(t.ts),
+      featureTsIdx: index("idx_api_token_log_feature_ts").on(t.feature, t.ts)
+      // Partial unique index for IVR idempotency (uq_api_token_log_request_id) and
+      // the batch_id index are created in the SQL migration (Drizzle partial index
+      // limitation). Listed here for documentation.
+    }));
     metaCapiFailures = pgTable("meta_capi_failures", {
       id: serial("id").primaryKey(),
       orderId: varchar("order_id", { length: 64 }).notNull().unique(),
@@ -1058,6 +1124,20 @@ var init_pricing_rules_server = __esm({
 });
 
 // app/lib/kv.server.ts
+var kv_server_exports = {};
+__export(kv_server_exports, {
+  DEFAULT_VAULT_TABS: () => DEFAULT_VAULT_TABS,
+  KV_KEYS: () => KV_KEYS,
+  cached: () => cached,
+  getPinnedAccessoryIds: () => getPinnedAccessoryIds,
+  getVaultFilterTabs: () => getVaultFilterTabs,
+  invalidateCache: () => invalidateCache,
+  kvDel: () => kvDel,
+  kvGet: () => kvGet,
+  kvIncr: () => kvIncr,
+  kvSet: () => kvSet,
+  setPinnedAccessoryIds: () => setPinnedAccessoryIds
+});
 function resolveKvCreds() {
   const env = process.env;
   if (env["KV_DISABLE"] === "1" || env["KV_DISABLE"] === "true") return null;
@@ -1139,6 +1219,19 @@ async function kvSet(key, value, _exSeconds) {
   }
   memSet(key, value, _exSeconds);
 }
+async function kvIncr(key) {
+  const kv = await getKV();
+  if (kv) {
+    try {
+      return await kv.incr(key);
+    } catch (err) {
+      warnKvFallback("incr", err);
+    }
+  }
+  const current = memStore.get(key) ?? 0;
+  memStore.set(key, current + 1);
+  return current + 1;
+}
 async function kvDel(key) {
   const kv = await getKV();
   if (kv) {
@@ -1172,7 +1265,18 @@ function invalidateCache(prefix) {
     if (k.startsWith(prefix)) readCache.delete(k);
   }
 }
-var _kv, _g, memStore, _g3, memTimers, _lastKvWarn, _g2, readCache, KV_KEYS;
+async function getVaultFilterTabs() {
+  const stored = await kvGet(KV_KEYS.vaultFilterTabs);
+  return stored ?? DEFAULT_VAULT_TABS;
+}
+async function getPinnedAccessoryIds() {
+  const ids = await kvGet(KV_KEYS.pinnedAccessoryIds);
+  return Array.isArray(ids) ? ids : [];
+}
+async function setPinnedAccessoryIds(ids) {
+  await kvSet(KV_KEYS.pinnedAccessoryIds, ids);
+}
+var _kv, _g, memStore, _g3, memTimers, _lastKvWarn, _g2, readCache, KV_KEYS, DEFAULT_VAULT_TABS;
 var init_kv_server = __esm({
   "app/lib/kv.server.ts"() {
     "use strict";
@@ -1218,8 +1322,18 @@ var init_kv_server = __esm({
       emmaDiscoveryDailyCount: (utcDate) => `emmaDiscovery:dailyCount:${utcDate}`,
       // Encouragement strip above discovery grid (30-min TTL per filter combination)
       emmaEncouragement: (hash) => `emmaEncouragement:v2:${hash}`,
-      emmaEncouragementDailyCount: (utcDate) => `emmaEncouragement:dailyCount:${utcDate}`
+      emmaEncouragementDailyCount: (utcDate) => `emmaEncouragement:dailyCount:${utcDate}`,
+      // Batch enrichment job summary mirrored from DB for fast admin poll surface (24h TTL)
+      enrichmentJob: (jobId) => `batch-job:${jobId}`
     };
+    DEFAULT_VAULT_TABS = [
+      { id: "all", label: "All", slug: "all", filter: { type: "all" } },
+      { id: "for-him", label: "For Him", slug: "for-him", filter: { type: "collection", handle: "for-him" } },
+      { id: "for-her", label: "For Her", slug: "for-her", filter: { type: "collection", handle: "for-her" } },
+      { id: "couples", label: "Couples", slug: "couples", filter: { type: "collection", handle: "couples" } },
+      { id: "under-25", label: "Under $25", slug: "under-25", filter: { type: "price", max: 25 } },
+      { id: "under-50", label: "Under $50", slug: "under-50", filter: { type: "price", max: 50 } }
+    ];
   }
 });
 
@@ -1749,6 +1863,7 @@ __export(shopify_server_exports, {
   getProductDetailForEmma: () => getProductDetailForEmma,
   getProductHandleById: () => getProductHandleById,
   getProductImagesForSitemap: () => getProductImagesForSitemap,
+  getProductMetafieldDebug: () => getProductMetafieldDebug,
   getProductVariantGids: () => getProductVariantGids,
   getProductsByHandles: () => getProductsByHandles,
   getProductsByIds: () => getProductsByIds,
@@ -1765,6 +1880,7 @@ __export(shopify_server_exports, {
   getVaultDeals: () => getVaultDeals,
   getWholesaleCostBySKU: () => getWholesaleCostBySKU,
   loginWithSocialIdentity: () => loginWithSocialIdentity,
+  paginateAllProductsForSanity: () => paginateAllProductsForSanity,
   parseMetafield: () => parseMetafield,
   parseMetafieldJSON: () => parseMetafieldJSON,
   pollMediaReady: () => pollMediaReady,
@@ -2378,13 +2494,17 @@ async function getDealByShopifyIdUncached(id) {
 }
 async function getDealByHandle(handle) {
   return cached(`shopify:deal:byhandle:${handle}`, READ_TTL, async () => {
-    const data = await storefront(`
+    const timeout = new Promise(
+      (resolve) => setTimeout(() => resolve(null), 5e3)
+    );
+    const fetch2 = storefront(`
       query GetDealByHandle($handle: String!) {
         product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
       }
     `, { handle });
-    if (!data.product) return null;
-    return nodeToDeal(data.product);
+    const result = await Promise.race([fetch2, timeout]);
+    if (!result || !result.product) return null;
+    return nodeToDeal(result.product);
   });
 }
 async function getProductsByIds(ids) {
@@ -5618,6 +5738,36 @@ async function getDistinctProductTypes(opts) {
   await kvSet(PRODUCT_TYPES_CACHE_KEY, result, PRODUCT_TYPES_CACHE_TTL);
   return result;
 }
+async function paginateAllProductsForSanity(onBatch) {
+  let created = 0;
+  let skipped = 0;
+  for (const status of ["active", "draft", "archived"]) {
+    let sinceId = 0;
+    while (true) {
+      const { products } = await shopifyAdmin(
+        `/products.json?limit=250&since_id=${sinceId}&status=${status}&fields=id,handle,title,images`
+      );
+      console.log(`[sync-sanity] status=${status} page sinceId=${sinceId} count:`, products?.length ?? 0);
+      if (!products?.length) break;
+      await onBatch(products);
+      if (products.length < 250) break;
+      sinceId = products[products.length - 1].id;
+    }
+  }
+  return { created, skipped };
+}
+async function getProductMetafieldDebug(numericProductId) {
+  const result = await shopifyAdmin(
+    `/products/${numericProductId}/metafields.json?namespace=xdipx`
+  ).catch((err) => ({ error: err.message }));
+  if ("error" in result) {
+    return { allKeys: [], emmaHero: null };
+  }
+  return {
+    allKeys: result.metafields.map((m) => `${m.namespace}.${m.key}`),
+    emmaHero: result.metafields.find((m) => m.key === "emma_hero") ?? null
+  };
+}
 var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, GMC_FEED_METAFIELDS_FRAGMENT, GMC_FEED_CARD_FRAGMENT, CART_FRAGMENT, XDIPX_LOCATION_IDS, XDIPX_PUBLICATION_NAMES, XDIPX_EXCLUDED_PUBLICATION_NAMES, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, VARIANTS_BY_SKU_QUERY, PRODUCT_TYPES_QUERY, PRODUCT_TYPES_CACHE_KEY, PRODUCT_TYPES_CACHE_TTL;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
@@ -6170,12 +6320,33 @@ var init_pricing_velocity_server = __esm({
 // app/lib/pricing-apply-v2.server.ts
 var pricing_apply_v2_server_exports = {};
 __export(pricing_apply_v2_server_exports, {
+  DEFAULT_MODE_THRESHOLD: () => DEFAULT_MODE_THRESHOLD,
   decideStatus: () => decideStatus,
   dryRunRuleChange: () => dryRunRuleChange,
+  getModeThresholds: () => getModeThresholds,
   recomputeCatalog: () => recomputeCatalog,
   recomputeVariant: () => recomputeVariant
 });
 import { eq as eq3 } from "drizzle-orm";
+async function getModeThresholds() {
+  const merged = { ...DEFAULT_MODE_THRESHOLD };
+  try {
+    const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq3(pipelineSettings.key, "pricing_mode_thresholds")).limit(1);
+    const raw = rows[0]?.value;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      for (const mode of ["aggressive", "balanced", "conservative"]) {
+        const v = parsed[mode];
+        if (typeof v === "number" && isFinite(v) && v >= 0 && v <= 1) {
+          merged[mode] = v;
+        }
+      }
+    }
+  } catch {
+  }
+  merged.review_all = 0;
+  return merged;
+}
 function decideStatus(p) {
   const { oldPrice, newPrice, map, mapBehavior, marginFloor, marginAfter, mode } = p;
   if (oldPrice != null && Math.abs(newPrice - oldPrice) < 5e-3) {
@@ -6185,7 +6356,7 @@ function decideStatus(p) {
   const mapApplies = mapBehavior !== "ignore_map" && map != null;
   if (mapApplies && newPrice < map) return "rejected";
   if (mode === "review_all") return "pending";
-  const threshold = MODE_THRESHOLD[mode];
+  const threshold = p.threshold ?? MODE_THRESHOLD[mode];
   const deltaPct = oldPrice != null && oldPrice > 0 ? Math.abs(newPrice - oldPrice) / oldPrice : 1;
   if (deltaPct > threshold) return "pending";
   return "auto_applied";
@@ -6265,6 +6436,7 @@ async function recomputeVariant(params) {
   const cfg = await resolvePricingConfig(productType);
   const group = await getGroupForProductType(productType);
   const mode = await getApprovalMode();
+  const thresholds = await getModeThresholds();
   let velocityBucket;
   let effectiveCfg = cfg;
   if (cfg.velocity_modifier_enabled) {
@@ -6311,7 +6483,8 @@ async function recomputeVariant(params) {
     mapBehavior: cfg.map_behavior,
     marginFloor: cfg.margin_floor_pct,
     marginAfter,
-    mode
+    mode,
+    threshold: thresholds[mode]
   });
   const deltaPct = oldSell > 0 ? (newSell - oldSell) / oldSell : null;
   const rationale = buildRationale({
@@ -6327,7 +6500,7 @@ async function recomputeVariant(params) {
     ...daysDisc !== void 0 ? { daysDisc } : {},
     ...map != null ? { map } : {},
     ...deltaPct != null ? { deltaPct } : {},
-    approvalThreshold: MODE_THRESHOLD[mode]
+    approvalThreshold: thresholds[mode]
   });
   let auditId = null;
   try {
@@ -6395,6 +6568,7 @@ async function dryRunRuleChange(opts) {
   }
   const { bulkFetchProductsForPricing: bulkFetchProductsForPricing2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
   const mode = await getApprovalMode();
+  const thresholds = await getModeThresholds();
   const result = {
     totalAffected: 0,
     withinThreshold: 0,
@@ -6464,7 +6638,7 @@ async function dryRunRuleChange(opts) {
         } else if (breachesFloor) {
           result.breachFloor++;
         } else {
-          const threshold = MODE_THRESHOLD[mode];
+          const threshold = thresholds[mode];
           const deltaPct = oldSell > 0 ? Math.abs(newSell - oldSell) / oldSell : 1;
           if (mode === "review_all" || deltaPct > threshold) {
             result.willQueue++;
@@ -6473,7 +6647,7 @@ async function dryRunRuleChange(opts) {
           }
         }
         if (result.samples.length < DRY_RUN_SAMPLES) {
-          const status = breachesMap || breachesFloor ? "rejected" : mode === "review_all" || oldSell > 0 && Math.abs(newSell - oldSell) / oldSell > MODE_THRESHOLD[mode] ? "pending" : "auto_applied";
+          const status = breachesMap || breachesFloor ? "rejected" : mode === "review_all" || oldSell > 0 && Math.abs(newSell - oldSell) / oldSell > thresholds[mode] ? "pending" : "auto_applied";
           result.samples.push({
             variantId: variant.variantId,
             sku: variant.sku || null,
@@ -6527,7 +6701,7 @@ async function recomputeCatalog(opts) {
   counts.durationMs = Date.now() - startedAt;
   return counts;
 }
-var MODE_THRESHOLD, TEST_SKU_PREFIX, DRY_RUN_CAP, DRY_RUN_SAMPLES;
+var DEFAULT_MODE_THRESHOLD, MODE_THRESHOLD, TEST_SKU_PREFIX, DRY_RUN_CAP, DRY_RUN_SAMPLES;
 var init_pricing_apply_v2_server = __esm({
   "app/lib/pricing-apply-v2.server.ts"() {
     "use strict";
@@ -6538,21 +6712,101 @@ var init_pricing_apply_v2_server = __esm({
     init_pricing_rules_server();
     init_pricing_velocity_server();
     init_shopify_server();
-    MODE_THRESHOLD = {
+    DEFAULT_MODE_THRESHOLD = {
       aggressive: 0.1,
       balanced: 0.05,
       conservative: 0.02,
       review_all: 0
     };
+    MODE_THRESHOLD = DEFAULT_MODE_THRESHOLD;
     TEST_SKU_PREFIX = /^XDX-TEST-/i;
     DRY_RUN_CAP = 5e3;
     DRY_RUN_SAMPLES = 10;
   }
 });
 
+// app/lib/attribution.server.ts
+import { parse as parseCookie, serialize as serializeCookie } from "cookie";
+function getFbCookies(request) {
+  const cookies = parseCookie(request.headers.get("Cookie") ?? "");
+  return {
+    fbp: cookies["_fbp"] ?? null,
+    fbc: cookies["_fbc"] ?? null
+  };
+}
+function getClientIP(request) {
+  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? request.headers.get("x-real-ip") ?? "0.0.0.0";
+}
+function hashIP(ip) {
+  let hash = 0;
+  for (let i = 0; i < ip.length; i++) {
+    hash = (hash << 5) - hash + ip.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(16).padStart(8, "0");
+}
+var THIRTY_DAYS;
+var init_attribution_server = __esm({
+  "app/lib/attribution.server.ts"() {
+    "use strict";
+    THIRTY_DAYS = 60 * 60 * 24 * 30;
+  }
+});
+
+// app/lib/consent.server.ts
+var consent_server_exports = {};
+__export(consent_server_exports, {
+  MARKETING_CONSENT_COOKIE: () => MARKETING_CONSENT_COOKIE,
+  getMarketingConsent: () => getMarketingConsent,
+  logConsent: () => logConsent,
+  logTosAcceptance: () => logTosAcceptance
+});
+import { parse as parseCookie2 } from "cookie";
+function getMarketingConsent(request) {
+  const cookies = parseCookie2(request.headers.get("Cookie") ?? "");
+  const raw = cookies[MARKETING_CONSENT_COOKIE];
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed.marketing === true;
+  } catch {
+    return false;
+  }
+}
+async function logConsent(request, opts) {
+  await db.insert(consentLog).values({
+    sessionId: opts.sessionId,
+    customerId: opts.customerId ?? null,
+    ipHash: hashIP(getClientIP(request)),
+    consentGiven: true,
+    consentType: opts.consentType,
+    policyVersion: opts.policyVersion
+  });
+}
+async function logTosAcceptance(request, opts) {
+  await db.insert(tosAcceptance).values({
+    customerId: opts.customerId,
+    email: opts.email ?? null,
+    tosVersion: opts.tosVersion,
+    ipHash: hashIP(getClientIP(request)),
+    acceptanceMethod: opts.method
+  });
+}
+var MARKETING_CONSENT_COOKIE;
+var init_consent_server = __esm({
+  "app/lib/consent.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_attribution_server();
+    MARKETING_CONSENT_COOKIE = "__xdipx_consent";
+  }
+});
+
 // app/lib/meta-capi.server.ts
 var meta_capi_server_exports = {};
 __export(meta_capi_server_exports, {
+  fireCapiEvent: () => fireCapiEvent,
   generateEventId: () => generateEventId,
   hashPII: () => hashPII,
   sendCapiEvent: () => sendCapiEvent
@@ -6563,6 +6817,34 @@ function generateEventId() {
 }
 function hashPII(value) {
   return createHash("sha256").update(value.trim().toLowerCase()).digest("hex");
+}
+function fireCapiEvent(request, eventName, opts) {
+  const eventId = generateEventId();
+  const consentGranted = getMarketingConsent(request);
+  const { fbp, fbc } = getFbCookies(request);
+  void sendCapiEvent(
+    {
+      event_name: eventName,
+      event_id: eventId,
+      event_time: Math.floor(Date.now() / 1e3),
+      action_source: "website",
+      user_data: {
+        client_ip_address: getClientIP(request),
+        client_user_agent: request.headers.get("user-agent") ?? void 0,
+        fbp,
+        fbc
+      },
+      custom_data: {
+        content_ids: opts.contentIds,
+        content_type: "product",
+        value: opts.value,
+        currency: opts.currency ?? "USD",
+        ...opts.numItems !== void 0 ? { num_items: opts.numItems } : {}
+      }
+    },
+    { consentGranted }
+  );
+  return eventId;
 }
 async function sendCapiEvent(event, opts) {
   const pixelId = process.env["META_PIXEL_ID"];
@@ -6608,6 +6890,8 @@ async function sendCapiEvent(event, opts) {
 var init_meta_capi_server = __esm({
   "app/lib/meta-capi.server.ts"() {
     "use strict";
+    init_consent_server();
+    init_attribution_server();
   }
 });
 
@@ -6684,9 +6968,9 @@ async function getEmmaHeroSettings(preview = false) {
   if (!projectId) return null;
   const fetcher = async () => {
     try {
-      const client5 = getClient(false, preview);
-      if (!client5) return null;
-      return await client5.fetch(EMMA_HERO_GROQ) ?? null;
+      const client4 = getClient(false, preview);
+      if (!client4) return null;
+      return await client4.fetch(EMMA_HERO_GROQ) ?? null;
     } catch (err) {
       console.error("[sanity] getEmmaHeroSettings error:", err);
       return null;
@@ -6699,9 +6983,9 @@ async function getEditor(preview = false) {
   if (!projectId) return null;
   const fetcher = async () => {
     try {
-      const client5 = getClient(false, preview);
-      if (!client5) return null;
-      const raw = await client5.fetch(EDITOR_GROQ);
+      const client4 = getClient(false, preview);
+      if (!client4) return null;
+      const raw = await client4.fetch(EDITOR_GROQ);
       if (!raw?.name) return null;
       return {
         name: raw.name,
@@ -6726,9 +7010,9 @@ async function getEmmaPresets(preview = false) {
   if (!projectId) return [];
   const fetcher = async () => {
     try {
-      const client5 = getClient(false, preview);
-      if (!client5) return [];
-      return await client5.fetch(EMMA_PRESETS_GROQ) ?? [];
+      const client4 = getClient(false, preview);
+      if (!client4) return [];
+      return await client4.fetch(EMMA_PRESETS_GROQ) ?? [];
     } catch (err) {
       console.error("[sanity] getEmmaPresets error:", err);
       return [];
@@ -6741,9 +7025,9 @@ async function getHomepageSections(preview = false) {
   if (!projectId) return null;
   const fetcher = async () => {
     try {
-      const client5 = getClient(false, preview);
-      if (!client5) return null;
-      return await client5.fetch(HOMEPAGE_GROQ) ?? null;
+      const client4 = getClient(false, preview);
+      if (!client4) return null;
+      return await client4.fetch(HOMEPAGE_GROQ) ?? null;
     } catch (err) {
       console.error("[sanity] getHomepageSections error:", err);
       return null;
@@ -6753,26 +7037,26 @@ async function getHomepageSections(preview = false) {
   return cached("sanity:homepage", 60, fetcher);
 }
 async function upsertAnnouncementBar(messages) {
-  const client5 = getClient(true);
-  if (!client5) throw new Error("Sanity not configured");
-  await client5.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
-  await client5.patch("singleton.homepage").setIfMissing({ sections: [] }).set({
+  const client4 = getClient(true);
+  if (!client4) throw new Error("Sanity not configured");
+  await client4.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
+  await client4.patch("singleton.homepage").setIfMissing({ sections: [] }).set({
     'sections[_type=="announcementBar"].messages': messages
   }).commit();
   invalidateCache("sanity:homepage");
 }
 async function addCmsBlock(block) {
-  const client5 = getClient(true);
-  if (!client5) throw new Error("Sanity not configured");
+  const client4 = getClient(true);
+  if (!client4) throw new Error("Sanity not configured");
   const key = `${block._type}-${Date.now()}`;
-  await client5.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
-  await client5.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{ ...block, _key: key }]).commit();
+  await client4.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
+  await client4.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{ ...block, _key: key }]).commit();
   invalidateCache("sanity:homepage");
 }
 async function updateCmsBlock(key, patch) {
-  const client5 = getClient(true);
-  if (!client5) throw new Error("Sanity not configured");
-  await client5.patch("singleton.homepage").set(
+  const client4 = getClient(true);
+  if (!client4) throw new Error("Sanity not configured");
+  await client4.patch("singleton.homepage").set(
     Object.fromEntries(
       Object.entries(patch).map(([field, value]) => [`sections[_key=="${key}"].${field}`, value])
     )
@@ -6780,9 +7064,9 @@ async function updateCmsBlock(key, patch) {
   invalidateCache("sanity:homepage");
 }
 async function removeCmsBlock(key) {
-  const client5 = getClient(true);
-  if (!client5) throw new Error("Sanity not configured");
-  await client5.patch("singleton.homepage").unset([`sections[_key=="${key}"]`]).commit();
+  const client4 = getClient(true);
+  if (!client4) throw new Error("Sanity not configured");
+  await client4.patch("singleton.homepage").unset([`sections[_key=="${key}"]`]).commit();
   invalidateCache("sanity:homepage");
 }
 function invalidateCmsCache() {
@@ -6933,9 +7217,9 @@ async function getPdpTrustBar() {
   if (!projectId) return null;
   return cached("sanity:pdp-trust-bar", 300, async () => {
     try {
-      const client5 = getClient();
-      if (!client5) return null;
-      const data = await client5.fetch(
+      const client4 = getClient();
+      if (!client4) return null;
+      const data = await client4.fetch(
         `*[_type == "pdpDefaults"] | order(_updatedAt desc)[0].trustBar{
           _type, _key, active, order, bgStyle,
           "trustItems": items[]->{ icon, headline, subheadline, active }
@@ -6956,9 +7240,9 @@ async function getSiteSettings() {
   if (!projectId) return null;
   return cached("sanity:site-settings", 300, async () => {
     try {
-      const client5 = getClient();
-      if (!client5) return null;
-      const data = await client5.fetch(
+      const client4 = getClient();
+      if (!client4) return null;
+      const data = await client4.fetch(
         `*[_id == "singleton.siteSettings"][0]{
           _id,
           "logoUrl": logo.asset->url,
@@ -6982,9 +7266,9 @@ async function getEmmaPersona() {
   if (!projectId) return null;
   return cached("sanity:emma-persona", 300, async () => {
     try {
-      const client5 = getClient();
-      if (!client5) return null;
-      const data = await client5.fetch(
+      const client4 = getClient();
+      if (!client4) return null;
+      const data = await client4.fetch(
         `*[_id == "singleton.editor"][0]{
           "avatarUrl":   photo.asset->url,
           "avatarAlt":   coalesce(photo.alt, name, "Emma"),
@@ -7002,9 +7286,9 @@ async function getPreviewImagesByHandles(handles) {
   const out = /* @__PURE__ */ new Map();
   if (!projectId || handles.length === 0) return out;
   try {
-    const client5 = getClient();
-    if (!client5) return out;
-    const rows = await client5.fetch(
+    const client4 = getClient();
+    if (!client4) return out;
+    const rows = await client4.fetch(
       `*[_type == "productPage" && shopifyHandle in $handles]{ shopifyHandle, previewImageUrl }`,
       { handles }
     );
@@ -7019,9 +7303,9 @@ async function getPreviewImagesByHandles(handles) {
 async function getProductPageBlocks(handle) {
   if (!projectId) return [];
   try {
-    const client5 = getClient();
-    if (!client5) return [];
-    const data = await client5.fetch(
+    const client4 = getClient();
+    if (!client4) return [];
+    const data = await client4.fetch(
       `*[_type == "productPage" && shopifyHandle == $handle][0]{
         "sections": contentBlocks[]{
           _key,
@@ -7046,9 +7330,9 @@ async function getProductPageBlocks(handle) {
 async function getProductFaqs(handle) {
   if (!projectId) return [];
   try {
-    const client5 = getClient();
-    if (!client5) return [];
-    const data = await client5.fetch(
+    const client4 = getClient();
+    if (!client4) return [];
+    const data = await client4.fetch(
       `*[_type == "productPage" && shopifyHandle == $handle][0]{
         "faqs": productFaqs[]{ question, answer, category }
       }`,
@@ -7063,9 +7347,9 @@ async function getProductFaqs(handle) {
 async function getCollectionPage(handle, preview = false) {
   if (!projectId) return null;
   try {
-    const client5 = getClient(false, preview);
-    if (!client5) return null;
-    const data = await client5.fetch(
+    const client4 = getClient(false, preview);
+    if (!client4) return null;
+    const data = await client4.fetch(
       `*[_type == "collectionPage" && shopifyHandle == $handle][0]{
         shopifyHandle,
         collectionType,
@@ -7102,9 +7386,9 @@ async function getCollectionTypeMap() {
   const out = /* @__PURE__ */ new Map();
   if (!projectId) return out;
   try {
-    const client5 = getClient();
-    if (!client5) return out;
-    const data = await client5.fetch(
+    const client4 = getClient();
+    if (!client4) return out;
+    const data = await client4.fetch(
       `*[_type == "collectionPage"]{ shopifyHandle, collectionType }`
     );
     for (const row of data ?? []) {
@@ -7121,9 +7405,9 @@ async function getCollectionTypeMap() {
 async function getCollectionsHub(preview = false) {
   if (!projectId) return null;
   try {
-    const client5 = getClient(false, preview);
-    if (!client5) return null;
-    const data = await client5.fetch(
+    const client4 = getClient(false, preview);
+    if (!client4) return null;
+    const data = await client4.fetch(
       `*[_type == "collectionsHub"][0]{
         seoTitle,
         seoDescription,
@@ -7154,13 +7438,13 @@ async function getPage(slug, preview = false) {
     return null;
   }
   try {
-    const client5 = getClient(false, preview);
-    if (!client5) {
+    const client4 = getClient(false, preview);
+    if (!client4) {
       console.warn("[sanity] getPage: no client");
       return null;
     }
     console.log("[sanity] getPage fetching slug:", slug);
-    const result = await client5.fetch(
+    const result = await client4.fetch(
       `*[_type == "page" && slug.current == $slug][0]{
         _id,
         title,
@@ -7181,9 +7465,9 @@ async function getPage(slug, preview = false) {
 async function getPageList() {
   if (!projectId) return [];
   try {
-    const client5 = getClient();
-    if (!client5) return [];
-    return await client5.fetch(
+    const client4 = getClient();
+    if (!client4) return [];
+    return await client4.fetch(
       `*[_type == "page"] | order(title asc) { title, "slug": slug.current }`
     );
   } catch (err) {
@@ -7194,9 +7478,9 @@ async function getPageList() {
 async function getBlogHomepage(preview = false) {
   if (!projectId) return null;
   try {
-    const client5 = getClient(false, preview);
-    if (!client5) return null;
-    return await client5.fetch(
+    const client4 = getClient(false, preview);
+    if (!client4) return null;
+    return await client4.fetch(
       `*[_id == "singleton.blogHomepage"][0]{
         heading, subtext,
         "heroImageUrl": heroImage.asset->url,
@@ -7233,8 +7517,8 @@ async function getBlogPosts(opts = {}) {
   const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
   if (cached2) return cached2;
   try {
-    const client5 = getClient();
-    if (!client5) return { posts: [], total: 0 };
+    const client4 = getClient();
+    if (!client4) return { posts: [], total: 0 };
     let filter = `_type == "blogPost" && status == "published"`;
     const params = {};
     if (opts.category) {
@@ -7249,11 +7533,11 @@ async function getBlogPosts(opts = {}) {
       params.authorSlug = opts.authorSlug;
     }
     const [rawPosts, total] = await Promise.all([
-      client5.fetch(
+      client4.fetch(
         `*[${filter}] | order(publishedAt desc) [${start}...${end}] { ${BLOG_POST_CARD_PROJECTION}, "bodyText": body[_type == "block"]{ "text": children[].text } }`,
         params
       ),
-      client5.fetch(`count(*[${filter}])`, params)
+      client4.fetch(`count(*[${filter}])`, params)
     ]);
     const posts = (rawPosts ?? []).map((p) => {
       const words = (p.bodyText ?? []).flatMap((b) => (b.text ?? []).join("")).join(" ");
@@ -7277,10 +7561,10 @@ async function getBlogPost(slug, preview = false) {
     if (cached2) return cached2;
   }
   try {
-    const client5 = getClient(false, preview);
-    if (!client5) return null;
+    const client4 = getClient(false, preview);
+    if (!client4) return null;
     const filter = preview ? `_type == "blogPost" && slug.current == $slug` : `_type == "blogPost" && slug.current == $slug && status == "published"`;
-    const raw = await client5.fetch(
+    const raw = await client4.fetch(
       `*[${filter}][0]{
         ${BLOG_POST_CARD_PROJECTION},
         _updatedAt,
@@ -7319,9 +7603,9 @@ async function getBlogPost(slug, preview = false) {
 async function getBlogAuthor(slug) {
   if (!projectId) return null;
   try {
-    const client5 = getClient();
-    if (!client5) return null;
-    const data = await client5.fetch(
+    const client4 = getClient();
+    if (!client4) return null;
+    const data = await client4.fetch(
       `*[_type == "blogAuthor" && slug.current == $slug][0] {
         name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role,
         "joinedAt": coalesce(joinedAt, _createdAt),
@@ -7341,9 +7625,9 @@ async function getBlogCategories() {
   const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
   if (cached2) return cached2;
   try {
-    const client5 = getClient();
-    if (!client5) return [];
-    const data = await client5.fetch(
+    const client4 = getClient();
+    if (!client4) return [];
+    const data = await client4.fetch(
       `*[_type == "blogCategory"] | order(name asc) {
         name, "slug": slug.current, description, color, seoTitle, seoDescription
       }`
@@ -7358,9 +7642,9 @@ async function getBlogCategories() {
 async function getBlogPostsForSitemap() {
   if (!projectId) return [];
   try {
-    const client5 = getClient();
-    if (!client5) return [];
-    return await client5.fetch(
+    const client4 = getClient();
+    if (!client4) return [];
+    return await client4.fetch(
       `*[_type == "blogPost" && status == "published" && noIndex != true] | order(publishedAt desc) {
         "slug": slug.current, publishedAt, _updatedAt
       }`
@@ -7538,9 +7822,9 @@ async function getRailDraftsForDeal(dealId) {
 async function getProductHandlesForSitemap() {
   if (!projectId) return [];
   try {
-    const client5 = getClient();
-    if (!client5) return [];
-    return await client5.fetch(
+    const client4 = getClient();
+    if (!client4) return [];
+    return await client4.fetch(
       `*[_type == "productPage" && defined(shopifyHandle)] | order(title asc) {
         "handle": shopifyHandle, _updatedAt
       }`
@@ -7554,9 +7838,9 @@ async function getHomeConfig() {
   if (!projectId) return null;
   return cached("sanity:home-config", 300, async () => {
     try {
-      const client5 = getClient();
-      if (!client5) return null;
-      const raw = await client5.fetch(HOME_CONFIG_GROQ);
+      const client4 = getClient();
+      if (!client4) return null;
+      const raw = await client4.fetch(HOME_CONFIG_GROQ);
       if (!raw) return null;
       return {
         activeVariant: raw.activeVariant ?? "off",
@@ -8296,8 +8580,8 @@ function score(k) {
   return rel * Math.log(vol + 1) / (1 + diff / 100);
 }
 async function fetchCandidates(input) {
-  const client5 = getReadClient();
-  if (!client5) return [];
+  const client4 = getReadClient();
+  if (!client4) return [];
   const productType = input.productType ?? null;
   const moods = input.moods ?? [];
   const audiences = input.audiences ?? [];
@@ -8327,7 +8611,7 @@ async function fetchCandidates(input) {
     )]{ ${KEYWORD_PROJECTION} }
   `;
   try {
-    return await client5.fetch(groq, {
+    return await client4.fetch(groq, {
       contentType,
       productType,
       moods,
@@ -8340,10 +8624,10 @@ async function fetchCandidates(input) {
   }
 }
 async function fetchAvoidList() {
-  const client5 = getReadClient();
-  if (!client5) return [];
+  const client4 = getReadClient();
+  if (!client4) return [];
   try {
-    const rows = await client5.fetch(
+    const rows = await client4.fetch(
       `*[_type == "seoKeyword" && (status == "rejected" || flagged == true)]{ term }`
     );
     return (rows ?? []).map((r) => r.term).filter(Boolean);
@@ -8479,10 +8763,10 @@ function getReadClient2() {
 async function getEditorialAuthor(slug) {
   if (!slug) return null;
   return cached(`editorial-author:${slug}`, 300, async () => {
-    const client5 = getReadClient2();
-    if (!client5) return null;
+    const client4 = getReadClient2();
+    if (!client4) return null;
     try {
-      const doc = await client5.fetch(
+      const doc = await client4.fetch(
         `*[_type == "editorialAuthor" && slug.current == $slug][0]{
           slug, name, personaSummary, voiceRules, keywordContentTypes, seoMode, active
         }`,
@@ -8711,6 +8995,90 @@ var init_emma_rail_tools_server = __esm({
   }
 });
 
+// app/lib/model-pricing.server.ts
+var model_pricing_server_exports = {};
+__export(model_pricing_server_exports, {
+  estimateCostUsd: () => estimateCostUsd
+});
+function estimateCostUsd(args) {
+  if (args.source === "agent-sdk") return 0;
+  const r = RATES[args.model] ?? DEFAULT_RATE;
+  const mult = args.source === "batch" ? 0.5 : 1;
+  const perTok = (rate) => rate * mult / 1e6;
+  const cost = args.inputTokens * perTok(r.input) + args.outputTokens * perTok(r.output) + args.cacheCreationTokens * perTok(r.input * 1.25) + args.cacheReadTokens * perTok(r.input * 0.1);
+  return Math.round(cost * 1e5) / 1e5;
+}
+var RATES, DEFAULT_RATE;
+var init_model_pricing_server = __esm({
+  "app/lib/model-pricing.server.ts"() {
+    "use strict";
+    RATES = {
+      "claude-sonnet-4-20250514": { input: 3, output: 15 },
+      "claude-sonnet-4-6": { input: 3, output: 15 },
+      // legacy alias used by ai-agent/chat
+      "claude-haiku-4-5-20251001": { input: 1, output: 5 }
+    };
+    DEFAULT_RATE = { input: 3, output: 15 };
+  }
+});
+
+// app/lib/token-log.server.ts
+var token_log_server_exports = {};
+__export(token_log_server_exports, {
+  getDailyTokenRollup: () => getDailyTokenRollup,
+  logApiTokens: () => logApiTokens
+});
+async function logApiTokens(entry) {
+  try {
+    const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
+    const { apiTokenLog: apiTokenLog2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+    const { estimateCostUsd: estimateCostUsd2 } = await Promise.resolve().then(() => (init_model_pricing_server(), model_pricing_server_exports));
+    const cacheCreation = entry.cacheCreationTokens ?? 0;
+    const cacheRead = entry.cacheReadTokens ?? 0;
+    const cost = estimateCostUsd2({
+      model: entry.model,
+      source: entry.source,
+      inputTokens: entry.inputTokens,
+      outputTokens: entry.outputTokens,
+      cacheCreationTokens: cacheCreation,
+      cacheReadTokens: cacheRead
+    });
+    await db2.insert(apiTokenLog2).values({
+      feature: entry.feature,
+      model: entry.model,
+      source: entry.source,
+      batchId: entry.batchId ?? null,
+      productId: entry.productId ?? null,
+      sku: entry.sku ?? null,
+      caller: entry.caller ?? null,
+      inputTokens: entry.inputTokens,
+      outputTokens: entry.outputTokens,
+      cacheCreationTokens: cacheCreation,
+      cacheReadTokens: cacheRead,
+      requestCount: entry.requestCount ?? 1,
+      estCostUsd: String(cost)
+    });
+  } catch (err) {
+    console.error("[token-log] best-effort write failed (ignored):", err);
+  }
+}
+async function getDailyTokenRollup(opts = {}) {
+  const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
+  const { sql: sql8 } = await import("drizzle-orm");
+  const days = opts.days ?? 30;
+  const result = await db2.execute(
+    sql8`SELECT * FROM api_token_daily
+        WHERE day >= current_date - ${days}::int
+        ORDER BY day DESC, est_cost_usd DESC`
+  );
+  return result.rows;
+}
+var init_token_log_server = __esm({
+  "app/lib/token-log.server.ts"() {
+    "use strict";
+  }
+});
+
 // app/lib/claude.server.ts
 var claude_server_exports = {};
 __export(claude_server_exports, {
@@ -8784,6 +9152,19 @@ async function callClaude(opts) {
   _toolTokenAccumulator.output += result.outputTokens;
   _toolTokenAccumulator.cacheCreation += usage.cache_creation_input_tokens ?? 0;
   _toolTokenAccumulator.cacheRead += usage.cache_read_input_tokens ?? 0;
+  void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(({ logApiTokens: logApiTokens2 }) => {
+    const entry = {
+      feature: opts.feature ?? "copy-gen",
+      model: opts.model,
+      source: "sync",
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: usage.cache_read_input_tokens ?? 0
+    };
+    if (opts.caller) entry.caller = opts.caller;
+    return logApiTokens2(entry);
+  }).catch((err) => console.error("[claude] callClaude token-log failed (ignored):", err));
   return result;
 }
 async function buildEmmaSystemBlocks(brandVoiceOverride) {
@@ -8827,6 +9208,19 @@ async function generateWithSystem(opts) {
   ]) : await call;
   const block = msg.content[0];
   if (block?.type !== "text") throw new Error("Unexpected Claude response type");
+  const u = msg.usage;
+  void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
+    ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
+      feature: "copy-gen",
+      model,
+      source: "sync",
+      caller: "generateWithSystem",
+      inputTokens: u.input_tokens,
+      outputTokens: u.output_tokens,
+      cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: u.cache_read_input_tokens ?? 0
+    })
+  ).catch((err) => console.error("[claude] generateWithSystem token-log failed (ignored):", err));
   return block.text;
 }
 function stripFences(raw) {
@@ -9888,6 +10282,19 @@ Return ONLY the enhanced prompt as one flowing paragraph. No labels, no markdown
   });
   const block = msg.content[0];
   if (block?.type !== "text") throw new Error("Unexpected Claude response type for Veo prompt");
+  const uVeo = msg.usage;
+  void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
+    ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
+      feature: "video-prompt",
+      model: MODEL,
+      source: "sync",
+      caller: "enhanceVeoPrompt",
+      inputTokens: uVeo.input_tokens,
+      outputTokens: uVeo.output_tokens,
+      cacheCreationTokens: uVeo.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: uVeo.cache_read_input_tokens ?? 0
+    })
+  ).catch((err) => console.error("[claude] enhanceVeoPrompt token-log failed (ignored):", err));
   return block.text.trim();
 }
 async function enhanceLtxPrompt(opts) {
@@ -9919,6 +10326,19 @@ Return ONLY the enhanced prompt as one flowing paragraph. No labels, no markdown
   });
   const block = msg.content[0];
   if (block?.type !== "text") throw new Error("Unexpected Claude response type for LTX prompt");
+  const uLtx = msg.usage;
+  void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
+    ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
+      feature: "video-prompt",
+      model: MODEL,
+      source: "sync",
+      caller: "enhanceLtxPrompt",
+      inputTokens: uLtx.input_tokens,
+      outputTokens: uLtx.output_tokens,
+      cacheCreationTokens: uLtx.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: uLtx.cache_read_input_tokens ?? 0
+    })
+  ).catch((err) => console.error("[claude] enhanceLtxPrompt token-log failed (ignored):", err));
   return block.text.trim();
 }
 async function selectAccessories(mainProduct, candidates, count = 3) {
@@ -10102,6 +10522,19 @@ Return ONLY the tagline text, nothing else.`;
     });
     const block = msg.content[0];
     if (block?.type !== "text") throw new Error("non-text response");
+    const uTagline = msg.usage;
+    void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
+      ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
+        feature: "contextual-tagline",
+        model: MODEL_FAST,
+        source: "sync",
+        caller: "generateEmmaTagline",
+        inputTokens: uTagline.input_tokens,
+        outputTokens: uTagline.output_tokens,
+        cacheCreationTokens: uTagline.cache_creation_input_tokens ?? 0,
+        cacheReadTokens: uTagline.cache_read_input_tokens ?? 0
+      })
+    ).catch((err) => console.error("[claude] generateEmmaTagline token-log failed (ignored):", err));
     const line = block.text.trim().replace(/^["'`]|["'`]$/g, "").replace(/\s+/g, " ").split("\n")[0]?.trim();
     if (line && line.length > 4 && line.length <= 80 && line.includes("\u2665")) return line;
     if (line && line.length > 4 && line.length <= 80) return `${line} \u2665`;
@@ -11059,6 +11492,18 @@ Return exactly ${input.maxPicks} picks, ordered best\u2192worst. Use only ids fr
   const validIds = new Set(input.candidates.map((c) => c.id));
   const picks = (parsed.picks ?? []).filter((p) => p && typeof p.id === "string" && typeof p.pairingWhy === "string" && validIds.has(p.id)).slice(0, input.maxPicks);
   const usage = msg.usage;
+  void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
+    ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
+      feature: "discovery-rank",
+      model: MODEL_FAST,
+      source: "sync",
+      caller: "pickForContextGroup",
+      inputTokens: usage?.input_tokens ?? 0,
+      outputTokens: usage?.output_tokens ?? 0,
+      cacheCreationTokens: usage?.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: usage?.cache_read_input_tokens ?? 0
+    })
+  ).catch((err) => console.error("[claude] pickForContextGroup token-log failed (ignored):", err));
   return {
     picks,
     tokens: {
@@ -11111,10 +11556,10 @@ ${dealContext}${partnerContext}${accessoryContext}
 
 Start by inspecting list_candidate_pool, then propose 2 PDP rails + 1 homepage rail using propose_rail.${accessories.length ? " Then propose one pairing_why blurb per accessory." : ""}`;
   const messages = [{ role: "user", content: userPrompt }];
-  const MAX_TURNS2 = 8;
+  const MAX_TURNS = 8;
   let turn = 0;
   console.log(`[generateRails] starting. pool=${pool.length} deal=${deal.handle}${partner ? ` partner=${partner.handle}` : ""}`);
-  while (turn < MAX_TURNS2) {
+  while (turn < MAX_TURNS) {
     turn++;
     const response = await client.messages.create({
       model: MODEL,
@@ -11125,6 +11570,21 @@ Start by inspecting list_candidate_pool, then propose 2 PDP rails + 1 homepage r
       messages
     });
     messages.push({ role: "assistant", content: response.content });
+    {
+      const uRail = response.usage;
+      void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
+        ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
+          feature: "rail-gen",
+          model: MODEL,
+          source: "sync",
+          caller: "generateRails",
+          inputTokens: uRail.input_tokens,
+          outputTokens: uRail.output_tokens,
+          cacheCreationTokens: uRail.cache_creation_input_tokens ?? 0,
+          cacheReadTokens: uRail.cache_read_input_tokens ?? 0
+        })
+      ).catch((err) => console.error("[claude] generateRails token-log failed (ignored):", err));
+    }
     const textParts = response.content.filter((b) => b.type === "text");
     const toolUses = response.content.filter((b) => b.type === "tool_use");
     console.log(
@@ -11883,21 +12343,23 @@ function toPickCandidate(p, heroHandle) {
   };
 }
 async function listActiveRails() {
-  const client5 = getReadClient3();
-  if (!client5) return [];
-  try {
-    const rows = await client5.fetch(RAILS_GROQ);
-    return rows ?? [];
-  } catch (err) {
-    console.error("[emma-rails] listActiveRails error:", err);
-    return [];
-  }
+  return cached("emma:active-rails", 300, async () => {
+    const client4 = getReadClient3();
+    if (!client4) return [];
+    try {
+      const rows = await client4.fetch(RAILS_GROQ);
+      return rows ?? [];
+    } catch (err) {
+      console.error("[emma-rails] listActiveRails error:", err);
+      return [];
+    }
+  });
 }
 async function getRailById(id) {
-  const client5 = getReadClient3();
-  if (!client5) return null;
+  const client4 = getReadClient3();
+  if (!client4) return null;
   try {
-    return await client5.fetch(
+    return await client4.fetch(
       `*[_type == "emmaContextRail" && _id == $id][0]${RAIL_FIELDS_GROQ}`,
       { id }
     );
@@ -11907,21 +12369,21 @@ async function getRailById(id) {
   }
 }
 async function patchCurrent(railId, current) {
-  const client5 = getWriteClient();
-  if (!client5) throw new Error("sanity_not_configured");
-  await client5.patch(railId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
+  const client4 = getWriteClient();
+  if (!client4) throw new Error("sanity_not_configured");
+  await client4.patch(railId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
   const draftId = railId.startsWith("drafts.") ? railId : `drafts.${railId}`;
   try {
-    await client5.patch(draftId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
+    await client4.patch(draftId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
   } catch {
   }
 }
 async function patchLastError(railId, reason, message) {
-  const client5 = getWriteClient();
-  if (!client5) return;
+  const client4 = getWriteClient();
+  if (!client4) return;
   const lastError = { reason, message, at: (/* @__PURE__ */ new Date()).toISOString() };
   try {
-    await client5.patch(railId).set({ lastError }).commit();
+    await client4.patch(railId).set({ lastError }).commit();
   } catch (err) {
     console.error("[emma-rails] patchLastError error:", err);
   }
@@ -11984,6 +12446,7 @@ async function regenerateRail(rail, dealHandle, trigger) {
     };
     await patchCurrent(rail._id, current);
     await kvDel(`emma:rails:hydrated:${dealHandle}`);
+    invalidateCache("emma:active-rails");
     return { ok: true, count: picks.length };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "internal_error";
@@ -12151,7 +12614,7 @@ __export(deal_rotator_server_exports, {
   rotateDeal: () => rotateDeal,
   transitionToVaultPricing: () => transitionToVaultPricing
 });
-import { eq as eq6, and, isNull, asc } from "drizzle-orm";
+import { eq as eq6, and, isNull, asc, inArray as inArray2 } from "drizzle-orm";
 function estDate(offsetDays = 0) {
   const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1e3);
   return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -12219,6 +12682,25 @@ async function transitionToVaultPricing(deal) {
 }
 async function activateDeal(deal) {
   if (!deal.shopifyProductId) return;
+  const blockingJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and(
+    eq6(batchJobs.gatesDealId, deal.id),
+    inArray2(batchJobs.status, ["queued", "submitted", "processing", "applying"])
+  ));
+  if (blockingJobs.length > 0) {
+    console.log(`[deal-rotator] enrichment in flight for deal ${deal.id} \u2014 deferring activation (${blockingJobs.length} blocking job(s))`);
+    return;
+  }
+  const failedJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and(eq6(batchJobs.gatesDealId, deal.id), eq6(batchJobs.status, "failed")));
+  if (failedJobs.length > 0) {
+    console.warn(`[deal-rotator] WARN gated enrichment failed for deal ${deal.id}; activating with stale/partial copy (degraded-enrichment path)`);
+  }
+  const claimed = await db.update(dealHistory).set({ status: "live" }).where(and(eq6(dealHistory.id, deal.id), inArray2(dealHistory.status, ["queued", "pending_approval"]))).returning({ id: dealHistory.id });
+  if (claimed.length === 0) {
+    console.log(`[deal-rotator] deal ${deal.id} already live \u2014 skipping duplicate activation`);
+    return;
+  }
+  const anyGatingJob = await db.select({ id: batchJobs.id, status: batchJobs.status }).from(batchJobs).where(eq6(batchJobs.gatesDealId, deal.id)).limit(1);
+  const skipInlineHero = anyGatingJob.length > 0;
   const numericId = deal.shopifyProductId.replace("gid://shopify/Product/", "");
   await activateShopifyProduct(numericId);
   const dealPrice = parseFloat(deal.dealPrice ?? "0");
@@ -12244,64 +12726,67 @@ async function activateDeal(deal) {
   } catch (err) {
     console.error("[deal-rotator] Rail un-archive failed (non-blocking):", err);
   }
-  try {
-    const { getDailyDeal: getDailyDeal2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
-    const { generateEmmaHero: generateEmmaHero2 } = await Promise.resolve().then(() => (init_claude_server(), claude_server_exports));
-    const fullDeal = await getDailyDeal2().catch(() => null);
-    const seedDeal = fullDeal ?? {
-      seoTitle: deal.seoTitle ?? "",
-      tagline: "",
-      fullStory: "",
-      brand: "",
-      category: ["for-him", "for-her"],
-      dealPrice,
-      msrp,
-      mapRestricted: false
-    };
-    const variant = seedDeal.mapRestricted ? "quote" : "loving";
-    const copy = await generateEmmaHero2({ deal: seedDeal, variant });
-    await updateProductMetafield(
-      deal.shopifyProductId,
-      "emma_hero",
-      JSON.stringify(copy),
-      "json"
-    );
-    if (copy.aside) {
+  if (!skipInlineHero) {
+    try {
+      const { getDailyDeal: getDailyDeal2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+      const { generateEmmaHero: generateEmmaHero2 } = await Promise.resolve().then(() => (init_claude_server(), claude_server_exports));
+      const fullDeal = await getDailyDeal2().catch(() => null);
+      const seedDeal = fullDeal ?? {
+        seoTitle: deal.seoTitle ?? "",
+        tagline: "",
+        fullStory: "",
+        brand: "",
+        category: ["for-him", "for-her"],
+        dealPrice,
+        msrp,
+        mapRestricted: false
+      };
+      const variant = seedDeal.mapRestricted ? "quote" : "loving";
+      const copy = await generateEmmaHero2({ deal: seedDeal, variant });
       await updateProductMetafield(
         deal.shopifyProductId,
-        "tagline",
-        copy.aside,
-        "single_line_text_field"
+        "emma_hero",
+        JSON.stringify(copy),
+        "json"
       );
-    }
-    if (fullDeal?.handle) {
-      try {
-        const { upsertEmmaPick: upsertEmmaPick2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
-        await upsertEmmaPick2({
-          productId: deal.shopifyProductId,
-          productHandle: fullDeal.handle,
-          productTitle: fullDeal.seoTitle ?? deal.seoTitle ?? void 0,
-          brand: fullDeal.brand ?? void 0,
-          category: fullDeal.category && fullDeal.category.length > 0 ? fullDeal.category[0] : void 0,
-          dealDate: estDate(0),
-          variant: copy.variant,
-          eyebrow: copy.eyebrow,
-          headline: copy.headline,
-          body: copy.body,
-          aside: copy.aside,
-          pullQuote: copy.pullQuote,
-          voiceHash: copy.voiceHash,
-          generatedAt: copy.generatedAt
-        });
-      } catch (sanityErr) {
-        console.error("[deal-rotator] Emma pick Sanity index failed (non-blocking):", sanityErr);
+      if (copy.aside) {
+        await updateProductMetafield(
+          deal.shopifyProductId,
+          "tagline",
+          copy.aside,
+          "single_line_text_field"
+        );
       }
+      if (fullDeal?.handle) {
+        try {
+          const { upsertEmmaPick: upsertEmmaPick2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
+          await upsertEmmaPick2({
+            productId: deal.shopifyProductId,
+            productHandle: fullDeal.handle,
+            productTitle: fullDeal.seoTitle ?? deal.seoTitle ?? void 0,
+            brand: fullDeal.brand ?? void 0,
+            category: fullDeal.category && fullDeal.category.length > 0 ? fullDeal.category[0] : void 0,
+            dealDate: estDate(0),
+            variant: copy.variant,
+            eyebrow: copy.eyebrow,
+            headline: copy.headline,
+            body: copy.body,
+            aside: copy.aside,
+            pullQuote: copy.pullQuote,
+            voiceHash: copy.voiceHash,
+            generatedAt: copy.generatedAt
+          });
+        } catch (sanityErr) {
+          console.error("[deal-rotator] Emma pick Sanity index failed (non-blocking):", sanityErr);
+        }
+      }
+    } catch (err) {
+      console.error("[deal-rotator] Emma hero generation failed (non-blocking):", err);
     }
-  } catch (err) {
-    console.error("[deal-rotator] Emma hero generation failed (non-blocking):", err);
+  } else {
+    console.log(`[deal-rotator] Skipping inline Emma hero for deal ${deal.id} \u2014 gated enrichment job already wrote copy`);
   }
   await db.update(dealHistory).set({
-    status: "live",
     activatedAt: /* @__PURE__ */ new Date(),
     dealDate: estDate(0)
   }).where(eq6(dealHistory.id, deal.id));
@@ -12398,21 +12883,6 @@ var init_deal_rotator_server = __esm({
     init_shopify_server();
     init_klaviyo_server();
     init_kv_server();
-  }
-});
-
-// app/lib/deal-activator.server.ts
-var deal_activator_server_exports = {};
-__export(deal_activator_server_exports, {
-  dealActivator: () => dealActivator
-});
-async function dealActivator() {
-  return rotateDeal();
-}
-var init_deal_activator_server = __esm({
-  "app/lib/deal-activator.server.ts"() {
-    "use strict";
-    init_deal_rotator_server();
   }
 });
 
@@ -12607,6 +13077,11 @@ async function getProductReviews(shopifyProductId, opts = {}) {
     page = 1,
     perPage = 10
   } = opts;
+  if (status === "approved") {
+    const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`;
+    const hit = await kvGet(ck);
+    if (hit) return hit;
+  }
   const offset = (page - 1) * perPage;
   let orderBy = "r.created_at DESC";
   if (sort === "oldest") orderBy = "r.created_at ASC";
@@ -12652,14 +13127,26 @@ async function getProductReviews(shopifyProductId, opts = {}) {
     return review;
   });
   const total = parseInt(countRows[0]?.["total"] ?? "0", 10);
-  return { reviews, total };
+  const result = { reviews, total };
+  if (status === "approved") {
+    const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`;
+    kvSet(ck, result, 300).catch(() => {
+    });
+  }
+  return result;
 }
 async function getProductAggregate(shopifyProductId) {
+  const ck = `aggregate:v1:${shopifyProductId}`;
+  const hit = await kvGet(ck);
+  if (hit) return hit;
   const rows = await sql4`
     SELECT * FROM review_aggregates WHERE shopify_product_id = ${shopifyProductId}
   `;
   if (!rows[0]) return null;
-  return rowToAggregate(rows[0]);
+  const agg = rowToAggregate(rows[0]);
+  kvSet(ck, agg, 300).catch(() => {
+  });
+  return agg;
 }
 async function getAdminReviewQueue(filters = {}) {
   const {
@@ -13053,12 +13540,13 @@ var sql4;
 var init_reviews_server = __esm({
   "app/lib/reviews.server.ts"() {
     "use strict";
+    init_kv_server();
     sql4 = neon2(process.env["DATABASE_URL"]);
   }
 });
 
 // app/types/discovery.ts
-var MATTERS_V1, MATTERS_V2, MATTERS;
+var MATTERS_V1, MATTERS_V2, MATTERS, CATEGORIES;
 var init_discovery = __esm({
   "app/types/discovery.ts"() {
     "use strict";
@@ -13091,6 +13579,7 @@ var init_discovery = __esm({
       "Latex-free"
     ];
     MATTERS = [...MATTERS_V1, ...MATTERS_V2];
+    CATEGORIES = ["Pleasure", "Play", "Body", "Wear"];
   }
 });
 
@@ -13235,9 +13724,9 @@ async function dfsRelatedKeywords(seed) {
 }
 async function llmSeedExpansion(seed) {
   if (!ANTHROPIC_KEY) return [];
-  const client5 = new Anthropic2({ apiKey: ANTHROPIC_KEY });
+  const client4 = new Anthropic2({ apiKey: ANTHROPIC_KEY });
   try {
-    const msg = await client5.messages.create({
+    const msg = await client4.messages.create({
       model: MODEL_FAST2,
       max_tokens: 800,
       system: `You expand SEO seed keywords for an editorially-curated sexual-wellness storefront. Return likely real search queries, including long-tail and question forms. Tasteful, never clinical, never sleazy.`,
@@ -13250,6 +13739,19 @@ Return 12 related queries as a JSON array of strings. Mix head terms, long-tail 
     });
     const block = msg.content[0];
     if (block?.type !== "text") return [];
+    const uSeed = msg.usage;
+    void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
+      ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
+        feature: "seo-research",
+        model: MODEL_FAST2,
+        source: "sync",
+        caller: "seo-research/llmSeedExpansion",
+        inputTokens: uSeed.input_tokens,
+        outputTokens: uSeed.output_tokens,
+        cacheCreationTokens: uSeed.cache_creation_input_tokens ?? 0,
+        cacheReadTokens: uSeed.cache_read_input_tokens ?? 0
+      })
+    ).catch((err) => console.error("[seo-research] llmSeedExpansion token-log failed (ignored):", err));
     const raw = block.text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return [];
@@ -13260,17 +13762,17 @@ Return 12 related queries as a JSON array of strings. Mix head terms, long-tail 
   }
 }
 async function gatherSeeds() {
-  const client5 = getWriteClient2();
-  if (!client5) return { approvedHeads: [], pillarTerms: [], productTitles: [] };
+  const client4 = getWriteClient2();
+  if (!client4) return { approvedHeads: [], pillarTerms: [], productTitles: [] };
   try {
     const [approvedHeads, pillarTerms, productTitles] = await Promise.all([
-      client5.fetch(
+      client4.fetch(
         `*[_type == "seoKeyword" && status == "approved" && kind == "head"][].term`
       ).catch(() => []),
-      client5.fetch(
+      client4.fetch(
         `*[_type == "seoCluster" && status != "archived"][].pillarTerm`
       ).catch(() => []),
-      client5.fetch(
+      client4.fetch(
         `*[_type == "productPage" && defined(title)] | order(_updatedAt desc)[0...50][].title`
       ).catch(() => [])
     ]);
@@ -13285,10 +13787,10 @@ async function gatherSeeds() {
   }
 }
 async function fetchExistingTerms() {
-  const client5 = getWriteClient2();
-  if (!client5) return /* @__PURE__ */ new Set();
+  const client4 = getWriteClient2();
+  if (!client4) return /* @__PURE__ */ new Set();
   try {
-    const rows = await client5.fetch(`*[_type == "seoKeyword"][].term`);
+    const rows = await client4.fetch(`*[_type == "seoKeyword"][].term`);
     return new Set((rows ?? []).map((t) => t.toLowerCase()));
   } catch {
     return /* @__PURE__ */ new Set();
@@ -13302,10 +13804,10 @@ async function fetchVocabulary() {
   }
 }
 async function fetchClusterCatalog() {
-  const client5 = getWriteClient2();
-  if (!client5) return [];
+  const client4 = getWriteClient2();
+  if (!client4) return [];
   try {
-    return await client5.fetch(
+    return await client4.fetch(
       `*[_type == "seoCluster" && status != "archived"]{ "slug": slug.current, pillarTerm, title }`
     ) ?? [];
   } catch {
@@ -13327,7 +13829,7 @@ async function classifyBatch(batch, vocab, clusters) {
       flagged: false
     }));
   }
-  const client5 = new Anthropic2({ apiKey: ANTHROPIC_KEY });
+  const client4 = new Anthropic2({ apiKey: ANTHROPIC_KEY });
   const clustersList = clusters.map((c) => `${c.slug} (${c.pillarTerm})`).join(", ");
   const sys = `You classify SEO keyword candidates for an editorially-curated sexual-wellness storefront. Use only the controlled vocabularies provided. Flag conservatively but accurately \u2014 only the three valid policy categories below, never adjacent worries.`;
   const user = `Catalog: ${CATALOG_SUMMARY}
@@ -13374,7 +13876,7 @@ ${batch.map((b, i) => `${i + 1}. ${b.term}`).join("\n")}
 
 Return a JSON array of objects. JSON only \u2014 no prose, no fences.`;
   try {
-    const msg = await client5.messages.create({
+    const msg = await client4.messages.create({
       model: MODEL_FAST2,
       max_tokens: 4096,
       system: sys,
@@ -13382,6 +13884,19 @@ Return a JSON array of objects. JSON only \u2014 no prose, no fences.`;
     });
     const block = msg.content[0];
     if (block?.type !== "text") return [];
+    const uClass = msg.usage;
+    void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
+      ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
+        feature: "seo-research",
+        model: MODEL_FAST2,
+        source: "sync",
+        caller: "seo-research/classifyBatch",
+        inputTokens: uClass.input_tokens,
+        outputTokens: uClass.output_tokens,
+        cacheCreationTokens: uClass.cache_creation_input_tokens ?? 0,
+        cacheReadTokens: uClass.cache_read_input_tokens ?? 0
+      })
+    ).catch((err) => console.error("[seo-research] classifyBatch token-log failed (ignored):", err));
     const raw = block.text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return [];
@@ -13392,11 +13907,11 @@ Return a JSON array of objects. JSON only \u2014 no prose, no fences.`;
   }
 }
 async function ensureCluster(slug, pillarTerm, title) {
-  const client5 = getWriteClient2();
-  if (!client5) return null;
+  const client4 = getWriteClient2();
+  if (!client4) return null;
   try {
     const id = `seoCluster.${slugify(slug)}`;
-    await client5.createIfNotExists({
+    await client4.createIfNotExists({
       _id: id,
       _type: "seoCluster",
       slug: { _type: "slug", current: slugify(slug) },
@@ -13411,8 +13926,8 @@ async function ensureCluster(slug, pillarTerm, title) {
   }
 }
 async function writeCandidates(items) {
-  const client5 = getWriteClient2();
-  if (!client5) return { attempted: 0, written: 0, approved: 0, pending: 0, rejected: 0, errors: 0 };
+  const client4 = getWriteClient2();
+  if (!client4) return { attempted: 0, written: 0, approved: 0, pending: 0, rejected: 0, errors: 0 };
   const summary = { attempted: items.length, written: 0, approved: 0, pending: 0, rejected: 0, errors: 0 };
   const now = (/* @__PURE__ */ new Date()).toISOString();
   for (const it of items) {
@@ -13456,7 +13971,7 @@ async function writeCandidates(items) {
     if (it.flagReason) doc.flagReason = it.flagReason;
     if (clusterRef) doc.cluster = clusterRef;
     try {
-      await client5.createIfNotExists(doc);
+      await client4.createIfNotExists(doc);
       summary.written++;
       if (status === "approved") summary.approved++;
       else if (status === "rejected") summary.rejected++;
@@ -13647,6 +14162,19 @@ Total lines: ${logs.length}
   if (!block || block.type !== "tool_use") {
     throw new Error("log-monitor: Claude did not return tool_use block");
   }
+  const uMon = msg.usage;
+  void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
+    ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
+      feature: "log-monitor",
+      model: MODEL2,
+      source: "sync",
+      caller: "log-monitor/analyzeLogWindow",
+      inputTokens: uMon.input_tokens,
+      outputTokens: uMon.output_tokens,
+      cacheCreationTokens: uMon.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: uMon.cache_read_input_tokens ?? 0
+    })
+  ).catch((err) => console.error("[log-monitor] token-log failed (ignored):", err));
   return block.input;
 }
 async function openIssuesForP0(groups, windowMinutes) {
@@ -14417,53 +14945,9 @@ var init_imagen_server = __esm({
 
 // app/lib/llm-client.server.ts
 import Anthropic4 from "@anthropic-ai/sdk";
-async function loadAgentSdk() {
-  const dynImport = new Function("m", "return import(m)");
-  const sdk = await dynImport("@anthropic-ai/claude-agent-sdk").catch(() => null);
-  if (!sdk) throw new Error("install @anthropic-ai/claude-agent-sdk to use --via=claude-code");
-  if (typeof sdk.query !== "function") throw new Error("@anthropic-ai/claude-agent-sdk has no `query` export \u2014 SDK shape changed");
-  if (typeof sdk.tool !== "function") throw new Error("@anthropic-ai/claude-agent-sdk has no `tool` export \u2014 SDK shape changed");
-  if (typeof sdk.createSdkMcpServer !== "function") throw new Error("@anthropic-ai/claude-agent-sdk has no `createSdkMcpServer` export \u2014 SDK shape changed");
-  return { query: sdk.query, tool: sdk.tool, createSdkMcpServer: sdk.createSdkMcpServer };
-}
-function getDefaultClient() {
-  if (!_default) _default = new AnthropicSdkClient();
-  return _default;
-}
-var AnthropicSdkClient, _default;
 var init_llm_client_server = __esm({
   "app/lib/llm-client.server.ts"() {
     "use strict";
-    AnthropicSdkClient = class {
-      via = "api";
-      client;
-      constructor(opts) {
-        this.client = new Anthropic4({
-          ...opts?.apiKey ? { apiKey: opts.apiKey } : { apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() }
-        });
-      }
-      async create(req) {
-        const res = await this.client.messages.create({
-          model: req.model,
-          max_tokens: req.max_tokens,
-          // Cache the static prefix (tools + system) so repeated turns re-read it
-          // instead of re-billing at full input rate. Canonical cache order is
-          // tools → system → messages, so this single breakpoint covers both.
-          system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
-          tools: req.tools,
-          messages: req.messages
-        });
-        return {
-          content: res.content,
-          stop_reason: res.stop_reason ?? null,
-          usage: {
-            input_tokens: res.usage.input_tokens,
-            output_tokens: res.usage.output_tokens
-          }
-        };
-      }
-    };
-    _default = null;
   }
 });
 
@@ -14709,112 +15193,41 @@ async function executeTool(name, state) {
       return { ok: false, summary: `unknown tool: ${name}` };
   }
 }
-async function runOrchestrationViaSdk(state, userPrompt) {
-  const { query, tool, createSdkMcpServer } = await loadAgentSdk();
-  const calledTools = /* @__PURE__ */ new Set();
-  const mcpTools = TOOLS.map(
-    (t) => tool(
-      t.name,
-      t.description,
-      // Empty Zod raw shape — orchestrator tools take no model-supplied input;
-      // they read from `state.input` and write to `state.writes`.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      {},
-      async (_args, _extra) => {
-        if (calledTools.has(t.name)) {
-          return { content: [{ type: "text", text: JSON.stringify({ ok: false, summary: `${t.name} already called \u2014 skipping duplicate` }) }] };
-        }
-        calledTools.add(t.name);
-        const start = Date.now();
-        let ok = false;
-        let summary = "";
-        let errorMsg;
-        drainToolTokens();
-        try {
-          const r = await executeTool(t.name, state);
-          ok = r.ok;
-          summary = r.summary;
-        } catch (err) {
-          errorMsg = err instanceof Error ? err.message : String(err);
-          summary = `tool error: ${errorMsg}`;
-        }
-        const toolTokens = drainToolTokens();
-        state.telemetry.totalInputTokens += toolTokens.input;
-        state.telemetry.totalOutputTokens += toolTokens.output;
-        state.telemetry.totalCacheCreationTokens += toolTokens.cacheCreation;
-        state.telemetry.totalCacheReadTokens += toolTokens.cacheRead;
-        state.telemetry.toolCalls.push({
-          name: t.name,
-          durationMs: Date.now() - start,
-          inputTokens: toolTokens.input,
-          outputTokens: toolTokens.output,
-          ok,
-          ...errorMsg ? { error: errorMsg } : {}
-        });
-        return {
-          content: [{ type: "text", text: JSON.stringify({ ok, summary }) }],
-          ...errorMsg ? { isError: true } : {}
-        };
-      }
-    )
-  );
-  const mcpServer = createSdkMcpServer({
-    name: "emma-orchestrator",
-    version: "1.0.0",
-    tools: mcpTools
-  });
-  const allowedTools = TOOLS.map((t) => `mcp__emma-orchestrator__${t.name}`);
-  const stream = query({
-    prompt: userPrompt,
-    options: {
-      systemPrompt: SYSTEM,
-      mcpServers: { "emma-orchestrator": mcpServer },
-      // Disable all built-in Claude Code tools (Bash/Read/Edit/etc.). Only
-      // our MCP tools should be available to the model.
-      tools: [],
-      allowedTools,
-      maxTurns: MAX_TURNS
-    }
-  });
-  for await (const event of stream) {
-    if (!event || typeof event !== "object") continue;
-    const ev = event;
-    if (ev.type === "assistant" && ev.message?.usage) {
-      state.telemetry.totalInputTokens += Number(ev.message.usage.input_tokens ?? 0);
-      state.telemetry.totalOutputTokens += Number(ev.message.usage.output_tokens ?? 0);
-      state.telemetry.turns++;
-    } else if (ev.type === "result") {
-      break;
-    }
-    if (state.finished) break;
+function assembleWrites(partial, telemetry) {
+  if (telemetry.toolCalls.length === 0) {
+    throw new Error("orchestrator: 0 tool calls \u2014 LLM client returned empty content (check llm-client adapter)");
   }
-}
-async function generateProductContent(input) {
-  const t0 = Date.now();
-  const [dialRegistry, dialTaxonomy, vocab] = await Promise.all([
-    getDialRegistry(),
-    getDialTaxonomy(),
-    getAskEmmaVocabulary()
-  ]);
-  const state = {
-    input,
-    dialRegistry,
-    dialTaxonomy,
-    vocab,
-    writes: {},
-    telemetry: {
-      totalInputTokens: 0,
-      totalOutputTokens: 0,
-      totalTokens: 0,
-      totalCacheCreationTokens: 0,
-      totalCacheReadTokens: 0,
-      durationMs: 0,
-      turns: 0,
-      toolCalls: []
-    },
-    finished: false
+  if (!partial.tagline?.trim()) {
+    throw new Error("orchestrator: tagline tool did not run or returned empty \u2014 refusing to ship a fallback");
+  }
+  return {
+    productTypeDial: partial.productTypeDial ?? "vibrator",
+    tagline: partial.tagline,
+    seoMetaDescription: partial.seoMetaDescription ?? "",
+    descriptionHtml: partial.descriptionHtml ?? "",
+    moodTags: partial.moodTags ?? [],
+    audienceTags: partial.audienceTags ?? [],
+    mattersTags: partial.mattersTags ?? [],
+    ...partial.productSubtypeDial !== void 0 ? { productSubtypeDial: partial.productSubtypeDial } : {},
+    ...partial.productTitle !== void 0 ? { productTitle: partial.productTitle } : {},
+    ...partial.productTitleAugmented !== void 0 ? { productTitleAugmented: partial.productTitleAugmented } : {},
+    ...partial.originalTitle !== void 0 ? { originalTitle: partial.originalTitle } : {},
+    ...partial.boxContents !== void 0 ? { boxContents: partial.boxContents } : {},
+    ...partial.specifications !== void 0 ? { specifications: partial.specifications } : {},
+    ...partial.careInstructions !== void 0 ? { careInstructions: partial.careInstructions } : {},
+    ...partial.sensationDialV2 !== void 0 ? { sensationDialV2: partial.sensationDialV2 } : {},
+    ...partial.emmaHero !== void 0 ? { emmaHero: partial.emmaHero } : {},
+    ...partial.moodImageUrl !== void 0 ? { moodImageUrl: partial.moodImageUrl } : {},
+    ...partial.accessoryProductIds !== void 0 ? { accessoryProductIds: partial.accessoryProductIds } : {},
+    ...partial.pairingWhy !== void 0 ? { pairingWhy: partial.pairingWhy } : {},
+    ...partial.ivrExperience !== void 0 ? { ivrExperience: partial.ivrExperience } : {},
+    ...partial.ivrUseCase !== void 0 ? { ivrUseCase: partial.ivrUseCase } : {},
+    ...partial.ivrFeatures !== void 0 ? { ivrFeatures: partial.ivrFeatures } : {},
+    ...partial.productFaqs !== void 0 ? { productFaqs: partial.productFaqs } : {}
   };
-  const userPrompt = `Generate the full PDP content for this product:
+}
+function buildUserPrompt(input) {
+  return `Generate the full PDP content for this product:
 
 Title: ${input.product.title}
 Brand: ${input.product.brand}
@@ -14825,114 +15238,8 @@ SEO title (already set, for context): ${input.seoTitle}
 Pricing context (do not echo): deal $${input.product.dealPrice} / msrp $${input.product.msrp}
 
 Start with classifyProductTypeDial, then run every other applicable tool exactly once, then call finish.`;
-  const llm = input.llmClient ?? getDefaultClient();
-  if (llm.via === "claude-code") {
-    await runOrchestrationViaSdk(state, userPrompt);
-  } else {
-    const messages = [{ role: "user", content: userPrompt }];
-    const calledTools = /* @__PURE__ */ new Set();
-    while (state.telemetry.turns < MAX_TURNS && !state.finished) {
-      state.telemetry.turns++;
-      const response = await llm.create({
-        model: MODEL4,
-        max_tokens: 4096,
-        system: SYSTEM,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        tools: TOOLS,
-        messages
-      });
-      state.telemetry.totalInputTokens += response.usage.input_tokens;
-      state.telemetry.totalOutputTokens += response.usage.output_tokens;
-      messages.push({ role: "assistant", content: response.content });
-      const toolUses = response.content.filter((b) => b.type === "tool_use");
-      if (toolUses.length === 0) {
-        break;
-      }
-      const toolResults = await Promise.all(
-        toolUses.map(async (tu) => {
-          if (calledTools.has(tu.name)) {
-            return {
-              type: "tool_result",
-              tool_use_id: tu.id,
-              content: JSON.stringify({ ok: false, summary: `${tu.name} already called \u2014 skipping duplicate` })
-            };
-          }
-          calledTools.add(tu.name);
-          const start = Date.now();
-          let ok = false;
-          let summary = "";
-          let errorMsg;
-          drainToolTokens();
-          try {
-            const r = await executeTool(tu.name, state);
-            ok = r.ok;
-            summary = r.summary;
-          } catch (err) {
-            errorMsg = err instanceof Error ? err.message : String(err);
-            summary = `tool error: ${errorMsg}`;
-          }
-          const toolTokens = drainToolTokens();
-          state.telemetry.totalInputTokens += toolTokens.input;
-          state.telemetry.totalOutputTokens += toolTokens.output;
-          state.telemetry.totalCacheCreationTokens += toolTokens.cacheCreation;
-          state.telemetry.totalCacheReadTokens += toolTokens.cacheRead;
-          state.telemetry.toolCalls.push({
-            name: tu.name,
-            durationMs: Date.now() - start,
-            inputTokens: toolTokens.input,
-            outputTokens: toolTokens.output,
-            ok,
-            ...errorMsg ? { error: errorMsg } : {}
-          });
-          return {
-            type: "tool_result",
-            tool_use_id: tu.id,
-            content: JSON.stringify({ ok, summary }),
-            ...errorMsg ? { is_error: true } : {}
-          };
-        })
-      );
-      messages.push({ role: "user", content: toolResults });
-      if (state.finished) break;
-      if (response.stop_reason === "end_turn") break;
-    }
-  }
-  state.telemetry.totalTokens = state.telemetry.totalInputTokens + state.telemetry.totalOutputTokens;
-  state.telemetry.durationMs = Date.now() - t0;
-  if (state.telemetry.toolCalls.length === 0) {
-    throw new Error("orchestrator: 0 tool calls \u2014 LLM client returned empty content (check llm-client adapter)");
-  }
-  if (!state.writes.tagline?.trim()) {
-    throw new Error("orchestrator: tagline tool did not run or returned empty \u2014 refusing to ship a fallback");
-  }
-  const writes = {
-    productTypeDial: state.writes.productTypeDial ?? "vibrator",
-    tagline: state.writes.tagline,
-    seoMetaDescription: state.writes.seoMetaDescription ?? "",
-    descriptionHtml: state.writes.descriptionHtml ?? "",
-    moodTags: state.writes.moodTags ?? [],
-    audienceTags: state.writes.audienceTags ?? [],
-    mattersTags: state.writes.mattersTags ?? [],
-    ...state.writes.productSubtypeDial !== void 0 ? { productSubtypeDial: state.writes.productSubtypeDial } : {},
-    ...state.writes.productTitle !== void 0 ? { productTitle: state.writes.productTitle } : {},
-    ...state.writes.productTitleAugmented !== void 0 ? { productTitleAugmented: state.writes.productTitleAugmented } : {},
-    ...state.writes.originalTitle !== void 0 ? { originalTitle: state.writes.originalTitle } : {},
-    ...state.writes.boxContents !== void 0 ? { boxContents: state.writes.boxContents } : {},
-    ...state.writes.specifications !== void 0 ? { specifications: state.writes.specifications } : {},
-    ...state.writes.careInstructions !== void 0 ? { careInstructions: state.writes.careInstructions } : {},
-    ...state.writes.sensationDialV2 !== void 0 ? { sensationDialV2: state.writes.sensationDialV2 } : {},
-    ...state.writes.emmaHero !== void 0 ? { emmaHero: state.writes.emmaHero } : {},
-    ...state.writes.moodImageUrl !== void 0 ? { moodImageUrl: state.writes.moodImageUrl } : {},
-    ...state.writes.accessoryProductIds !== void 0 ? { accessoryProductIds: state.writes.accessoryProductIds } : {},
-    ...state.writes.pairingWhy !== void 0 ? { pairingWhy: state.writes.pairingWhy } : {},
-    ...state.writes.ivrExperience !== void 0 ? { ivrExperience: state.writes.ivrExperience } : {},
-    ...state.writes.ivrUseCase !== void 0 ? { ivrUseCase: state.writes.ivrUseCase } : {},
-    ...state.writes.ivrFeatures !== void 0 ? { ivrFeatures: state.writes.ivrFeatures } : {},
-    ...state.writes.productFaqs !== void 0 ? { productFaqs: state.writes.productFaqs } : {}
-  };
-  return { writes, telemetry: state.telemetry };
 }
-var MODEL4, MAX_TURNS, TOOLS, SYSTEM;
+var TOOLS, SYSTEM;
 var init_emma_orchestrator_server = __esm({
   "app/lib/emma-orchestrator.server.ts"() {
     "use strict";
@@ -14942,8 +15249,6 @@ var init_emma_orchestrator_server = __esm({
     init_imagen_server();
     init_shopify_server();
     init_llm_client_server();
-    MODEL4 = "claude-sonnet-4-20250514";
-    MAX_TURNS = 24;
     TOOLS = [
       {
         name: "classifyProductTypeDial",
@@ -15053,6 +15358,1541 @@ Be efficient. Each tool is a single call. Do NOT call the same tool twice.`;
   }
 });
 
+// app/lib/enricher-brief.server.ts
+import { eq as eq10 } from "drizzle-orm";
+async function adminGraphQLWithRetry(query, variables, attempt = 0) {
+  try {
+    return await adminGraphQL(query, variables);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isRateLimit = msg.includes("429") || msg.toLowerCase().includes("throttled");
+    if (!isRateLimit || attempt >= 4) throw err;
+    const delayMs = 1500 * Math.pow(2, attempt);
+    console.warn(`[enricher-brief] rate-limited; backing off ${delayMs}ms (attempt ${attempt + 1}/5)`);
+    await new Promise((r) => setTimeout(r, delayMs));
+    return adminGraphQLWithRetry(query, variables, attempt + 1);
+  }
+}
+async function fetchProductSnapshot(numericId) {
+  try {
+    const data = await adminGraphQLWithRetry(`
+      query EnricherSnapshot($id: ID!) {
+        product(id: $id) {
+          id
+          title
+          handle
+          vendor
+          descriptionHtml
+          status
+          productType
+          updatedAt
+          media(first: 5) {
+            edges {
+              node {
+                ... on MediaImage {
+                  preview { image { url } }
+                }
+              }
+            }
+          }
+          metafields(first: 100) {
+            edges { node { namespace key value } }
+          }
+          variants(first: 100) {
+            edges {
+              node {
+                id
+                title
+                metafield(namespace: "custom", key: "original_description") {
+                  value
+                }
+              }
+            }
+          }
+        }
+      }
+    `, { id: `gid://shopify/Product/${numericId}` });
+    const product = data.product;
+    if (!product) return null;
+    const metafields = {};
+    for (const e of product.metafields.edges) {
+      metafields[`${e.node.namespace}.${e.node.key}`] = e.node.value;
+    }
+    const aggregated = aggregateVariantDescriptions(product.variants.edges.map((e) => e.node));
+    const snap = {
+      id: String(product.id.split("/").pop()),
+      title: product.title,
+      handle: product.handle,
+      vendor: product.vendor,
+      body_html: product.descriptionHtml,
+      status: product.status.toLowerCase(),
+      // GraphQL returns 'DRAFT' uppercase; normalise
+      product_type: product.productType,
+      updated_at: product.updatedAt,
+      metafields,
+      images: product.media.edges.map((e) => e.node.preview?.image?.url).filter((u) => !!u).map((src) => ({ src }))
+    };
+    const aggregatedDescription = aggregated ?? metafields["custom.original_description"] ?? void 0;
+    if (aggregatedDescription) snap.aggregatedDescription = aggregatedDescription;
+    return snap;
+  } catch (err) {
+    console.warn(`[enricher-brief] fetchProductSnapshot ${numericId} failed:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+function aggregateVariantDescriptions(variants) {
+  if (variants.length === 0) return void 0;
+  const seen = /* @__PURE__ */ new Set();
+  const pieces = [];
+  for (const v of variants) {
+    const value = v.metafield?.value?.trim();
+    if (!value) continue;
+    const norm = value.toLowerCase().replace(/\s+/g, " ").slice(0, 200);
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    const piece = v.title && v.title !== "Default Title" ? `[${v.title}] ${value}` : value;
+    pieces.push(piece);
+  }
+  if (pieces.length === 0) return void 0;
+  let aggregated = pieces.join("\n\n");
+  if (aggregated.length > VARIANT_DESC_AGGREGATE_CAP) {
+    aggregated = aggregated.slice(0, VARIANT_DESC_AGGREGATE_CAP) + "\n\u2026[truncated]";
+  }
+  return aggregated;
+}
+async function gatherProductBrief(numericProductId) {
+  const snap = await fetchProductSnapshot(numericProductId);
+  if (!snap) return null;
+  const histRows = await db.select({
+    sku: dealHistory.sku,
+    brand: dealHistory.brand,
+    categories: dealHistory.categories
+  }).from(dealHistory).where(eq10(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  const hist = histRows[0];
+  const sku = hist?.sku;
+  const brand = hist?.brand ?? snap.vendor ?? "";
+  const categories = hist?.categories ?? [];
+  const msrp = Number(snap.metafields["xdipx.original_price"]) || 0;
+  const dealPrice = Number(snap.metafields["xdipx.map_price"]) || msrp;
+  const pairingCandidates = await getPairingCandidates({
+    shopifyProductId: numericProductId,
+    subCategories: categories
+  }).catch(() => []);
+  const rawDescription = snap.aggregatedDescription ?? (snap.body_html ?? "").replace(/<[^>]+>/g, " ").slice(0, 2e3);
+  const brief = {
+    shopifyProductId: numericProductId,
+    rawTitle: snap.title,
+    brand,
+    vendor: snap.vendor,
+    rawDescription,
+    categories,
+    dealPrice,
+    msrp,
+    existingMetafields: snap.metafields,
+    pairingCandidates: pairingCandidates.map((c) => {
+      const pc = {
+        productId: c.productId,
+        title: c.title
+      };
+      if (c.brand) pc.brand = c.brand;
+      if (c.productTypeDial) pc.productTypeDial = c.productTypeDial;
+      if (typeof c.price === "number") pc.price = c.price;
+      return pc;
+    })
+  };
+  if (sku) brief.sku = sku;
+  return brief;
+}
+var VARIANT_DESC_AGGREGATE_CAP;
+var init_enricher_brief_server = __esm({
+  "app/lib/enricher-brief.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_shopify_server();
+    init_dial_registry_server();
+    init_ask_emma_vocab_server();
+    VARIANT_DESC_AGGREGATE_CAP = 6e3;
+  }
+});
+
+// app/lib/import-enrich.server.ts
+var import_enrich_server_exports = {};
+__export(import_enrich_server_exports, {
+  applyFullEnrichmentWrites: () => applyFullEnrichmentWrites,
+  collectEnrichmentBatch: () => collectEnrichmentBatch,
+  publishEnrichedProducts: () => publishEnrichedProducts,
+  runImportEnrichTick: () => runImportEnrichTick,
+  submitEnrichmentBatch: () => submitEnrichmentBatch
+});
+import { and as and2, asc as asc2, eq as eq11, inArray as inArray3, isNull as isNull2, sql as sql6 } from "drizzle-orm";
+function normalizeIvrExperience(raw) {
+  const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
+  return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
+}
+async function isEnrichEnabled() {
+  return await getPipelineSetting("import_enrich_enabled") === "true";
+}
+async function getBatchCap() {
+  const raw = await getPipelineSetting("import_enrich_batch_cap");
+  const n = raw ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_BATCH_CAP;
+}
+function inferCategoryFallback(stored) {
+  if (!stored) return ["for-him", "for-her"];
+  if (stored.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        const valid = /* @__PURE__ */ new Set(["for-him", "for-her", "couples"]);
+        return parsed.filter((s) => typeof s === "string" && valid.has(s));
+      }
+    } catch {
+    }
+  }
+  if (stored === "both") return ["for-him", "for-her"];
+  if (stored === "for-him" || stored === "for-her" || stored === "couples") return [stored];
+  return ["for-him", "for-her"];
+}
+function stripDashes(s) {
+  return s.replace(/\s*—\s*/g, ", ").replace(/\s*–\s*/g, "-");
+}
+async function applyFullEnrichmentWrites(numericProductId, writes) {
+  const snap = await fetchProductSnapshot(numericProductId);
+  if (!snap) throw new Error(`fetchProductSnapshot returned null for ${numericProductId}`);
+  const category = inferCategoryFallback(snap.metafields["xdipx.category"]);
+  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq11(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  const editorialTags = (histRows[0]?.categories ?? []).filter(
+    (c) => !!c && c !== "(uncategorized)"
+  );
+  const sTagline = ed(writes.tagline);
+  const sSeo = ed(writes.seoMetaDescription);
+  const sDesc = ed(writes.descriptionHtml);
+  const sSpecs = edA(writes.specifications);
+  const sCare = edA(writes.careInstructions);
+  const sBox = edA(writes.boxContents);
+  const section = deriveSection({
+    productType: snap.product_type,
+    title: snap.title,
+    productTypeDial: writes.productTypeDial
+  });
+  const doc = {
+    shopifyProductId: numericProductId,
+    category,
+    sectionTags: [section],
+    tagline: sTagline,
+    seoMetaDescription: sSeo,
+    descriptionHtml: sDesc,
+    moodTags: writes.moodTags,
+    audienceTags: writes.audienceTags,
+    mattersTags: writes.mattersTags,
+    productTypeDial: writes.productTypeDial
+  };
+  if (writes.productTitleAugmented && writes.productTitle) {
+    doc.title = ed(writes.productTitle);
+    doc.seoTitle = ed(writes.productTitle);
+  }
+  if (writes.originalTitle) doc.originalTitle = ed(writes.originalTitle);
+  if (writes.productSubtypeDial != null) doc.productSubtypeDial = writes.productSubtypeDial;
+  if (writes.sensationDialV2) doc.sensationDialV2 = writes.sensationDialV2;
+  if (sSpecs?.length) doc.specifications = sSpecs;
+  if (sCare?.length) doc.careInstructions = sCare;
+  if (sBox?.length) doc.boxContents = sBox;
+  if (writes.emmaHero) doc.emmaHero = writes.emmaHero;
+  if (writes.moodImageUrl) doc.moodImageUrl = writes.moodImageUrl;
+  await pushProductToShopify(doc);
+  try {
+    const gid = `gid://shopify/Product/${numericProductId}`;
+    const upsertParams = {
+      handle: snap.handle,
+      shopifyProductId: gid,
+      title: doc.title ?? snap.title,
+      vendor: snap.vendor,
+      category,
+      tagline: sTagline,
+      description: sDesc,
+      seoDescription: sSeo,
+      productTypeDial: writes.productTypeDial,
+      moodTags: writes.moodTags,
+      audienceTags: writes.audienceTags,
+      mattersTags: writes.mattersTags
+    };
+    if (editorialTags.length) upsertParams.tags = editorialTags;
+    if (doc.seoTitle) upsertParams.seoTitle = doc.seoTitle;
+    if (writes.productSubtypeDial != null) upsertParams.productSubtypeDial = writes.productSubtypeDial;
+    if (writes.sensationDialV2) upsertParams.sensationDialV2 = writes.sensationDialV2;
+    if (sSpecs?.length) upsertParams.specifications = sSpecs;
+    if (sCare?.length) upsertParams.careInstructions = sCare;
+    if (sBox?.length) upsertParams.boxContents = sBox;
+    const ivrExperience = normalizeIvrExperience(writes.ivrExperience);
+    if (ivrExperience.length) upsertParams.ivrExperience = ivrExperience;
+    if (writes.ivrUseCase?.length) upsertParams.ivrUseCase = writes.ivrUseCase;
+    if (writes.ivrFeatures?.length) upsertParams.ivrFeatures = writes.ivrFeatures;
+    if (writes.productFaqs?.length) upsertParams.productFaqs = writes.productFaqs;
+    if (writes.originalTitle) upsertParams.originalTitle = writes.originalTitle;
+    if (writes.moodImageUrl) upsertParams.moodImageUrl = writes.moodImageUrl;
+    const firstImage = snap.images[0]?.src;
+    if (firstImage) upsertParams.imageUrl = firstImage;
+    let lastErr;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await upsertProductPage(upsertParams);
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    if (lastErr) {
+      console.error(`[import-enrich] sanity upsert failed for ${numericProductId}:`, lastErr);
+    }
+  } catch (err) {
+    console.error(`[import-enrich] sanity mirror error for ${numericProductId}:`, err);
+  }
+}
+async function submitEnrichmentBatch(cap) {
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId, sku: importCandidates.masterKey }).from(importCandidates).innerJoin(dealHistory, eq11(importCandidates.dealHistoryId, dealHistory.id)).where(and2(
+    eq11(importCandidates.status, "imported"),
+    isNull2(importCandidates.enrichedAt),
+    isNull2(importCandidates.enrichBatchId)
+  )).orderBy(asc2(importCandidates.id)).limit(cap);
+  const valid = rows.filter((r) => Boolean(r.productId));
+  if (valid.length === 0) return { submitted: 0, reason: "no_unenriched" };
+  const products = [];
+  const candidateIds = [];
+  for (const r of valid) {
+    const brief = await gatherProductBrief(r.productId);
+    if (!brief) {
+      console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) -- skipping`);
+      continue;
+    }
+    const sku = brief.sku ?? r.sku;
+    const product = {
+      title: brief.rawTitle,
+      brand: brief.brand,
+      description: brief.rawDescription,
+      categories: brief.categories,
+      dealPrice: brief.dealPrice,
+      msrp: brief.msrp
+    };
+    const validCategoryValues = /* @__PURE__ */ new Set(["for-him", "for-her", "couples"]);
+    const category = brief.categories.filter(
+      (c) => validCategoryValues.has(c)
+    );
+    const effectiveCategory = category.length > 0 ? category : ["for-him", "for-her"];
+    const pairingCandidates = brief.pairingCandidates.filter((pc) => typeof pc.price === "number").map((pc) => {
+      const candidate = {
+        productId: pc.productId,
+        handle: pc.productId.replace("gid://shopify/Product/", ""),
+        title: pc.title,
+        price: pc.price
+      };
+      if (pc.brand) candidate.brand = pc.brand;
+      if (pc.productTypeDial) candidate.productTypeDial = pc.productTypeDial;
+      return candidate;
+    });
+    const input = pairingCandidates.length > 0 ? {
+      product,
+      // Use rawTitle as seoTitle; the orchestrator's generateProductTitle tool
+      // will augment it if needed (same as the bulk-import path).
+      seoTitle: brief.rawTitle,
+      category: effectiveCategory,
+      pairingCandidates
+    } : {
+      product,
+      seoTitle: brief.rawTitle,
+      category: effectiveCategory
+    };
+    products.push({ productId: `gid://shopify/Product/${r.productId}`, sku, input });
+    candidateIds.push(r.id);
+  }
+  if (products.length === 0) return { submitted: 0, reason: "no_briefs" };
+  const { jobId } = await enqueueBatchJob({
+    jobType: "full-enrichment",
+    source: "import-product",
+    products
+  });
+  await db.update(importCandidates).set({ enrichBatchId: jobId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray3(importCandidates.id, candidateIds));
+  console.log(`[import-enrich] enqueued orchestrator job ${jobId} for ${products.length} product(s)`);
+  return { submitted: products.length, batchId: jobId };
+}
+async function collectEnrichmentBatch() {
+  const pendingCandidates = await db.select({
+    id: importCandidates.id,
+    jobId: importCandidates.enrichBatchId
+  }).from(importCandidates).where(and2(
+    eq11(importCandidates.status, "imported"),
+    isNull2(importCandidates.enrichedAt),
+    sql6`${importCandidates.enrichBatchId} IS NOT NULL`
+  )).orderBy(asc2(importCandidates.id));
+  if (pendingCandidates.length === 0) {
+    return { enriched: 0, failed: 0, stillPending: 0 };
+  }
+  const jobIds = [...new Set(pendingCandidates.map((c) => c.jobId))];
+  const jobRows = await db.select({ jobId: batchJobs.jobId, status: batchJobs.status }).from(batchJobs).where(inArray3(batchJobs.jobId, jobIds));
+  const jobStatus = new Map(jobRows.map((r) => [r.jobId, r.status]));
+  let enrichedTotal = 0;
+  let failedTotal = 0;
+  let stillPending = 0;
+  for (const candidate of pendingCandidates) {
+    const jobId = candidate.jobId;
+    const status = jobStatus.get(jobId);
+    if (!status || status === "queued" || status === "submitted" || status === "processing" || status === "applying") {
+      stillPending++;
+      continue;
+    }
+    if (status === "done") {
+      await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.id, candidate.id));
+      enrichedTotal++;
+      console.log(`[import-enrich] candidate ${candidate.id} job ${jobId} done -- stamped enriched_at`);
+    } else {
+      await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.id, candidate.id));
+      failedTotal++;
+      console.warn(
+        `[import-enrich] candidate ${candidate.id} job ${jobId} failed -- stamping enriched_at to unblock queue (partial writes may apply)`
+      );
+    }
+  }
+  return { enriched: enrichedTotal, failed: failedTotal, stillPending };
+}
+async function publishEnrichedProducts() {
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq11(importCandidates.dealHistoryId, dealHistory.id)).where(and2(
+    eq11(importCandidates.status, "imported"),
+    sql6`${importCandidates.enrichedAt} IS NOT NULL`,
+    isNull2(importCandidates.publishedAt)
+  ));
+  let published = 0;
+  let failed = 0;
+  for (const r of rows) {
+    if (!r.productId) continue;
+    try {
+      await activateShopifyProduct(r.productId);
+      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.id, r.id));
+      published++;
+    } catch (err) {
+      console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err);
+      failed++;
+    }
+  }
+  return { published, failed };
+}
+async function runImportEnrichTick(opts = {}) {
+  if (!await isEnrichEnabled()) {
+    return { ok: true, skipped: true, reason: "disabled" };
+  }
+  void opts;
+  const collect = await collectEnrichmentBatch();
+  const publish = await publishEnrichedProducts();
+  let submit = { submitted: 0, reason: "batch_in_flight" };
+  const inflightRow = await db.select({ c: sql6`count(*)::int` }).from(batchJobs).where(and2(
+    eq11(batchJobs.source, "import-product"),
+    inArray3(batchJobs.status, ["queued", "submitted", "processing", "applying"])
+  ));
+  const inflightCount = Number(inflightRow[0]?.c ?? 0);
+  if (inflightCount === 0) {
+    submit = await submitEnrichmentBatch(await getBatchCap());
+  }
+  return { ok: true, collect, publish, submit };
+}
+var VALID_IVR_EXPERIENCE, DEFAULT_BATCH_CAP, ed, edA;
+var init_import_enrich_server = __esm({
+  "app/lib/import-enrich.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_enricher_brief_server();
+    init_batch_orchestrator_server();
+    init_shopify_server();
+    init_sanity_server();
+    init_feed_processor_server();
+    init_claude_server();
+    VALID_IVR_EXPERIENCE = new Set(IVR_EXPERIENCE_LEVELS);
+    DEFAULT_BATCH_CAP = 10;
+    ed = (s) => s == null ? s : stripDashes(s);
+    edA = (a) => a?.map(stripDashes);
+  }
+});
+
+// app/lib/field-regen-runner.server.ts
+var field_regen_runner_server_exports = {};
+__export(field_regen_runner_server_exports, {
+  advanceFieldRegenJob: () => advanceFieldRegenJob,
+  enqueueFieldRegenJob: () => enqueueFieldRegenJob
+});
+import Anthropic5 from "@anthropic-ai/sdk";
+import { eq as eq12 } from "drizzle-orm";
+function toDbRunnerState(rs) {
+  return rs;
+}
+function getClient2() {
+  return new Anthropic5({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
+}
+function buildCustomId(jobId, fieldKey) {
+  return `${jobId}::${fieldKey}`;
+}
+function stripFences2(raw) {
+  return raw.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
+}
+function buildCopyFieldUserPrompt(type, product, keywordBlock) {
+  const productContextBase = `Product: ${product.title}
+Brand: ${product.brand}
+Description: ${product.description}
+Categories: ${product.categories.join(", ")}`;
+  const productContext = keywordBlock ? `${productContextBase}
+
+${keywordBlock}` : productContextBase;
+  switch (type) {
+    case "tagline":
+      return {
+        model: MODEL_FAST3,
+        maxTokens: 512,
+        prompt: `Write 3 one-sentence taglines for the following product. Emma voice \u2014 observational, casual, lightly witty. Think: a trusted friend who's recommending it, not a stand-up comedian. Avoid punchline-shaped puns and ad-copy zingers. Fragments are welcome ("the one I keep recommending", "earns its spot daily", "quietly indispensable"). First person OK. Max 12 words each. NO em-dashes. NO \u2665 glyph (reserve it for CTAs and asides). If any keyword targets in the prompt do not fit this product, IGNORE them silently \u2014 write from product details only. Never narrate a mismatch, never preface, never explain. Return as a JSON array of strings (no markdown).
+
+${productContext}`
+      };
+    case "full_story":
+      return {
+        model: MODEL4,
+        maxTokens: 1024,
+        prompt: `Write a short, punchy product description in xdipx brand voice. Return valid HTML only \u2014 use <p> tags for paragraphs, <strong> for emphasis, <em> for playful asides, <ul>/<li> for bullets. No <html>, <head>, <body> tags. No headings.
+
+Format: EXACTLY 2 short paragraphs (3\u20134 sentences each) followed by a <ul> with 6\u201310 benefit bullets.
+
+Tone: funny, cheeky, a little raunchy \u2014 innuendo is welcome, tasteful dirty jokes are great, but nothing gross or clinical. Think: your funniest friend who sells pleasure products and has zero shame. Make the reader smile AND want to buy.
+
+Do NOT include: price, shipping, dimensions, materials, or any technical specs (those live in a separate Specs tab).
+Do NOT start with the product name.
+
+${productContext}`
+      };
+    case "both_ways":
+      return {
+        model: MODEL4,
+        maxTokens: 1024,
+        prompt: `Write two sections for the xdipx "Both Ways \u2665" tab (60\u201390 words each). Return valid HTML \u2014 use <p> tags, <strong> for emphasis, <em> for playful asides. No headings. Return as JSON with keys "forHim" and "forHer", each containing an HTML string.
+
+STRATEGY \u2014 read the product categories carefully:
+
+If the product is primarily FOR HER (vibrators, rabbits, clit stimulators, air pulse, etc.):
+- "forHer": Genuine, warm, compelling sell written directly TO women. Speak to her pleasure, her curiosity, her experience. Make her feel seen and excited. This is the hero section.
+- "forHim": Humorous angle \u2014 he can't use it directly but here's why he should buy it anyway.
+
+If the product is primarily FOR HIM (strokers, masturbators, prostate toys, etc.):
+- "forHim": Genuine, warm, compelling sell written directly TO men.
+- "forHer": Humorous angle \u2014 she can't use it directly but here's why she should be excited about it.
+
+If the product works for both or is a couples toy: write genuine, enthusiastic content for each.
+
+${productContext}`
+      };
+    case "seo_meta":
+      return {
+        model: MODEL_FAST3,
+        maxTokens: 512,
+        prompt: `Write a 140\u2013155 character SEO meta description for this product. This shows in Google SERP and link previews \u2014 drives click-through.
+
+Two anchors to include (Emma voice within these constraints):
+  (a) Trust beat: "Ships discreetly" \u2014 keeps the discretion signal in SERP
+  (b) Benefit beat in light Emma voice \u2014 fragment OK, first-person OK, no marketing fluff
+
+NEVER mention price, discount, or any dollar amount. Prices change; this copy is durable.
+
+If any keyword targets in this prompt don't actually fit the product, IGNORE them silently and write the description from the product details only \u2014 never narrate the mismatch, never preface, never explain. Output exactly the description and nothing else.
+
+Voice: light Emma \u2014 observational, warm, specific. Not a generic SEO template. Brand mentions written as "XDIPX" (uppercase). NO em-dashes ("\u2014" or "\u2013"). Return ONLY the meta description text \u2014 no quotes, no labels.
+
+${productContext}`
+      };
+    case "specifications":
+      return {
+        model: MODEL_FAST3,
+        maxTokens: 1024,
+        prompt: `Extract the technical specifications from this product description as a JSON array of "Label: Value" bullet pairs. Each entry is a single short string with the label, a colon, and the value (e.g. "Color: Black", "Material: Body-safe silicone", "Battery life: 90 minutes per charge").
+
+Include only objective facts surfaced in the description: dimensions, materials, power source, charge time, run time, waterproofing, colors, weight, controls, country of origin. Skip categories the source doesn't mention \u2014 better fewer accurate specs than padded ones. NEVER include price, discount, or dollar amounts.
+
+Voice: factual and concise. No fluff, no marketing copy, no Emma asides. Each value 4\u201380 chars.
+
+Return ONLY a JSON array of strings, max 12 entries. No markdown, no prose, no wrapper.
+
+Example: ["Color: Black", "Material: Nylon straps with padded cuffs", "Includes: 4 cuffs and restraint straps", "Fit: Universal mattress sizes"]
+
+${productContext}`
+      };
+    case "box_contents":
+      return {
+        model: MODEL_FAST3,
+        maxTokens: 512,
+        prompt: `Extract what is physically included in the box for this product from the description below. Return a JSON array of short strings (one item per element), e.g. ["1x vibrator", "1x USB charging cable", "1x storage pouch"]. If the description doesn't mention box contents, infer the most likely inclusions based on the product type. Return only the JSON array, no markdown.
+
+${productContext}`
+      };
+    case "bullets":
+      return {
+        model: MODEL_FAST3,
+        maxTokens: 512,
+        prompt: `Write 4\u20136 feature bullet points for this product. Short, specific, benefit-first. No fluff. Return as a JSON array of strings.
+
+${productContext}`
+      };
+    default:
+      return {
+        model: MODEL_FAST3,
+        maxTokens: 512,
+        prompt: `Write copy for copy type "${type}" for this product in xdipx brand voice. Return JSON.
+
+${productContext}`
+      };
+  }
+}
+function buildEmmaHeroUserPrompt(ctx) {
+  const { deal, variant } = ctx;
+  const discountPct = deal.msrp > 0 && deal.dealPrice > 0 ? Math.round((deal.msrp - deal.dealPrice) / deal.msrp * 100) : 0;
+  const mapLine = deal.mapRestricted ? "MAP-restricted \u2014 no discount claims, no percent-off language, no struck prices." : discountPct > 0 ? `Currently ${discountPct}% off MSRP \u2014 you may allude to value, but never in "buy now" or countdown language.` : "";
+  const prompt = `Write the Emma hero block for the homepage of xdipx.com. Variant: "${variant}".
+
+Product context (do NOT echo \u2014 rewrite in Emma's voice):
+- Title: ${deal.seoTitle}
+- Brand: ${deal.brand}
+- Category: ${deal.category.join(", ")}
+${deal.tagline ? `- Existing tagline (for context only): ${deal.tagline}` : ""}
+${deal.fullStory ? `- Full story (context only, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, " ").slice(0, 400)}` : ""}
+${mapLine}
+
+Return ONLY this JSON (no markdown):
+{
+  "eyebrow":   "A DYNAMIC FEELING in Emma's own voice \u2014 2\u20134 words, first-person, informal. Examples: 'Kinda obsessed', 'Low-key amazed', 'Still thinking about this', 'Quietly sold', 'Actually impressed'. No period. Do NOT use 'Currently loving' or generic editorial phrases like 'This week's pick'. Must feel like a quick reaction, not a label.",
+  "headline":  "ONE sentence (8\u201314 words) that explains WHY Emma is featuring this pick right now \u2014 the reason it earned the slot. First-person, specific, warm. Never starts with the product name. Never 'buy now'. Example shape: 'Something about how quiet this one is just broke my brain.'",
+  "body":      "1\u20132 short sentences (25\u201345 words total) \u2014 the highlights a shopper should know. What it feels like, what stands out, what surprised her. Tight and specific. No marketing bloat. No clinical language.",
+  "aside":     "'\u2014 Emma \xB7 <3\u20136 word aside>', e.g. '\u2014 Emma \xB7 still on my desk'"${variant === "quote" ? `,
+  "pullQuote": "one short pull-quote (6\u201312 words) \u2014 in quotes \u2014 a friend-to-friend endorsement. No price or discount language."` : ""}
+}`;
+  return { prompt, model: MODEL4, maxTokens: 800 };
+}
+function buildEmmaTakeUserPrompt(ctx) {
+  const { deal } = ctx;
+  const prompt = `Write Emma's "take" on this product. It appears at the top of the PDP \u2014 a friend-to-friend honest read. This is THE customer-facing voice surface; treat it accordingly.
+
+Product:
+- Title: ${deal.seoTitle}
+- Brand: ${deal.brand}
+- Category: ${deal.category.join(", ")}
+${deal.productTypeDial ? `- Type: ${deal.productTypeDial}` : ""}
+${deal.tagline ? `- Tagline (context only \u2014 DO NOT echo in first sentence): ${deal.tagline}` : ""}
+${deal.fullStory ? `- Existing story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, " ").slice(0, 600)}` : ""}
+
+Cover, in this order, in your own voice (no headings, just flowing paragraphs):
+1. Who this clicks for \u2014 what they're after, what they'll like.
+2. Why it's worth exploring \u2014 what makes it intriguing, approachable, or fun to try. POSITIVE INVITATION. NEVER tell anyone to skip this product. NEVER gatekeep.
+3. How to get the most out of it \u2014 a tip Emma would whisper to a friend.
+
+Constraints:
+- Under 100 words total. One paragraph (or two very short ones, max). The PDP shows this above a "...more" expand fold; staying tight means readers see all three beats without clicking.
+- Return clean HTML \u2014 only <p>, <em>, <strong> tags. No headings, no <ul>, no inline styles, no class attrs.
+- First-person Emma voice throughout. Present tense. No "Buy now". No countdowns. No clinical language.
+- Do NOT mention price, MAP, or discounts.
+- Do NOT echo the product title OR tagline in the first sentence.
+- "sex" and "sexy" are allowed where contextually relevant to the product and customer discovery (e.g. "sex toy", "safer sex", "sexy gift"). Default to "intimate"/"pleasure"/"wellness" for general voice.
+- NO em-dashes ("\u2014" or "\u2013"). Use periods, commas, or parentheses.
+
+Return ONLY the HTML \u2014 no markdown, no fences, no preamble.`;
+  return { prompt, model: MODEL4, maxTokens: 800 };
+}
+async function advanceFieldRegenJob(job) {
+  const outcome = {};
+  const rs = job.runnerState;
+  const meta = rs["__meta"];
+  switch (job.status) {
+    case "queued": {
+      const context = meta?.context ?? job.products[0]?.input;
+      if (!context) {
+        throw new Error(`[field-regen] job ${job.jobId}: no context in runnerState['__meta'] or products[0].input`);
+      }
+      let systemBlocks;
+      if (context.kind === "copy-fields") {
+        systemBlocks = [{ text: BRAND_VOICE_SYSTEM_PROMPT, cache: true }];
+      } else {
+        const brandVoice = await getPipelineSetting("brandVoice") ?? void 0;
+        systemBlocks = [...await buildEmmaSystemBlocks(brandVoice)];
+      }
+      const fieldPrompts = [];
+      if (context.kind === "copy-fields") {
+        for (const type of context.fields) {
+          const { prompt, model, maxTokens } = buildCopyFieldUserPrompt(type, context.product, "");
+          fieldPrompts.push({ fieldKey: type, prompt, model, maxTokens });
+        }
+      } else if (context.kind === "emma-hero") {
+        const { prompt, model, maxTokens } = buildEmmaHeroUserPrompt(context);
+        fieldPrompts.push({ fieldKey: "emma-hero", prompt, model, maxTokens });
+      } else {
+        const { prompt, model, maxTokens } = buildEmmaTakeUserPrompt(context);
+        fieldPrompts.push({ fieldKey: "emma-take", prompt, model, maxTokens });
+      }
+      const newRunnerState = {
+        "__meta": {
+          jobKind: "field-regen",
+          context,
+          systemBlocks,
+          fields: fieldPrompts.map((f) => f.fieldKey)
+        }
+      };
+      for (const f of fieldPrompts) {
+        newRunnerState[f.fieldKey] = {
+          prompt: f.prompt,
+          model: f.model,
+          maxTokens: f.maxTokens
+        };
+      }
+      await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq12(batchJobs.jobId, job.jobId));
+      const client4 = getClient2();
+      const requests = [];
+      const systemParam = systemBlocks.map((b) => ({
+        type: "text",
+        text: b.text,
+        ...b.cache ? { cache_control: { type: "ephemeral" } } : {}
+      }));
+      for (const f of fieldPrompts) {
+        requests.push({
+          custom_id: buildCustomId(job.jobId, f.fieldKey),
+          params: {
+            model: f.model,
+            max_tokens: f.maxTokens,
+            system: systemParam,
+            messages: [{ role: "user", content: f.prompt }]
+          }
+        });
+      }
+      const batch = await client4.messages.batches.create({ requests });
+      const batchIds = [batch.id];
+      await db.update(batchJobs).set({
+        status: "submitted",
+        currentBatchId: batch.id,
+        batchIds,
+        runnerState: toDbRunnerState(newRunnerState),
+        submittedAt: /* @__PURE__ */ new Date(),
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq12(batchJobs.jobId, job.jobId));
+      outcome.submitted = true;
+      console.log(`[field-regen] job ${job.jobId} submitted batch ${batch.id} (${requests.length} requests)`);
+      break;
+    }
+    case "submitted":
+    case "processing": {
+      if (!job.currentBatchId) {
+        console.error(`[field-regen] job ${job.jobId} in ${job.status} with no currentBatchId`);
+        break;
+      }
+      const client4 = getClient2();
+      const batch = await client4.messages.batches.retrieve(job.currentBatchId);
+      if (batch.processing_status !== "ended") {
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq12(batchJobs.jobId, job.jobId));
+        break;
+      }
+      const responses = /* @__PURE__ */ new Map();
+      const stream = await client4.messages.batches.results(job.currentBatchId);
+      for await (const entry of stream) {
+        responses.set(entry.custom_id, entry);
+      }
+      const updatedRs = { ...rs };
+      const metaState = updatedRs["__meta"];
+      let inputTokens = 0, outputTokens = 0, cacheCreation = 0, cacheRead = 0;
+      for (const fieldKey of metaState.fields) {
+        const customId = buildCustomId(job.jobId, fieldKey);
+        const entry = responses.get(customId);
+        const fs = updatedRs[fieldKey];
+        if (!fs) continue;
+        if (!entry || entry.result.type !== "succeeded") {
+          const errMsg = entry ? `batch result type: ${entry.result.type}` : "no result for custom_id";
+          updatedRs[fieldKey] = { ...fs, error: errMsg };
+          continue;
+        }
+        const msg = entry.result.message;
+        const block = msg.content[0];
+        const rawText = block?.type === "text" ? block.text : "";
+        const u = msg.usage;
+        inputTokens += u.input_tokens;
+        outputTokens += u.output_tokens;
+        cacheCreation += u.cache_creation_input_tokens ?? 0;
+        cacheRead += u.cache_read_input_tokens ?? 0;
+        const result = parseFieldResult(fieldKey, rawText, metaState.context);
+        updatedRs[fieldKey] = { ...fs, rawText, result };
+      }
+      if (inputTokens > 0) {
+        void logApiTokens({
+          feature: "copy-gen",
+          model: MODEL4,
+          source: "batch",
+          batchId: job.currentBatchId,
+          requestCount: metaState.fields.length,
+          inputTokens,
+          outputTokens,
+          cacheCreationTokens: cacheCreation,
+          cacheReadTokens: cacheRead,
+          caller: "field-regen"
+        });
+      }
+      await db.update(batchJobs).set({
+        status: "applying",
+        currentBatchId: null,
+        runnerState: toDbRunnerState(updatedRs),
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq12(batchJobs.jobId, job.jobId));
+      break;
+    }
+    case "applying": {
+      const metaState = rs["__meta"];
+      if (!metaState) {
+        throw new Error(`[field-regen] job ${job.jobId}: missing __meta in runnerState during applying`);
+      }
+      const ctx = metaState.context;
+      const updatedRs = { ...rs };
+      let appliedCount = 0;
+      let anyError = false;
+      for (const fieldKey of metaState.fields) {
+        const fs = updatedRs[fieldKey];
+        if (!fs || fs.applied) continue;
+        if (fs.error) {
+          anyError = true;
+          continue;
+        }
+        try {
+          await applyFieldResult(fieldKey, fs.result, ctx);
+          updatedRs[fieldKey] = { ...fs, applied: true };
+          appliedCount++;
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          updatedRs[fieldKey] = { ...fs, error: `apply failed: ${errMsg}` };
+          anyError = true;
+        }
+      }
+      outcome.applied = appliedCount;
+      const allDone = metaState.fields.every((k) => {
+        const fs = updatedRs[k];
+        return fs?.applied || fs?.error;
+      });
+      if (allDone) {
+        const finalStatus = anyError ? "failed" : "done";
+        await db.update(batchJobs).set({
+          status: finalStatus,
+          runnerState: toDbRunnerState(updatedRs),
+          completedAt: /* @__PURE__ */ new Date(),
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where(eq12(batchJobs.jobId, job.jobId));
+        if (finalStatus === "done") outcome.done = true;
+        else outcome.failed = true;
+      } else {
+        await db.update(batchJobs).set({ runnerState: toDbRunnerState(updatedRs), updatedAt: /* @__PURE__ */ new Date() }).where(eq12(batchJobs.jobId, job.jobId));
+      }
+      break;
+    }
+    case "done":
+    case "failed":
+      break;
+  }
+  return outcome;
+}
+function parseFieldResult(fieldKey, rawText, ctx) {
+  const stripped = stripFences2(rawText);
+  if (ctx.kind === "emma-hero" && fieldKey === "emma-hero") {
+    try {
+      return JSON.parse(stripped);
+    } catch {
+      return { rawText };
+    }
+  }
+  if (ctx.kind === "emma-take" && fieldKey === "emma-take") {
+    return stripped;
+  }
+  switch (fieldKey) {
+    case "tagline":
+    case "bullets":
+    case "box_contents":
+    case "specifications": {
+      try {
+        const parsed = JSON.parse(stripped);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+      }
+      return [stripped];
+    }
+    case "both_ways": {
+      try {
+        const parsed = JSON.parse(stripped);
+        if (parsed.forHim && parsed.forHer) return parsed;
+      } catch {
+      }
+      return { forHim: "<p>Content unavailable.</p>", forHer: "<p>Content unavailable.</p>" };
+    }
+    case "seo_meta":
+    case "full_story":
+    default:
+      return stripped;
+  }
+}
+async function applyFieldResult(fieldKey, result, ctx) {
+  const productId = ctx.productId;
+  if (ctx.kind === "emma-hero" && fieldKey === "emma-hero") {
+    const copy = result;
+    if (!copy.eyebrow || !copy.headline || !copy.body || !copy.aside) {
+      throw new Error("emma-hero: incomplete parsed fields");
+    }
+    await updateProductMetafield(productId, "emma_hero", JSON.stringify({ ...copy, generatedAt: (/* @__PURE__ */ new Date()).toISOString() }), "json");
+    if (copy.aside) {
+      await updateProductMetafield(productId, "tagline", copy.aside, "single_line_text_field");
+    }
+    return;
+  }
+  if (ctx.kind === "emma-take" && fieldKey === "emma-take") {
+    if (ctx.dryRun) return;
+    await updateProductDescriptionHtml(productId, result);
+    return;
+  }
+  const type = fieldKey;
+  switch (type) {
+    case "tagline": {
+      const arr = Array.isArray(result) ? result : [result];
+      const val = arr[0]?.trim() ?? "";
+      if (val) await updateProductMetafield(productId, "tagline", val, "single_line_text_field");
+      break;
+    }
+    case "full_story": {
+      const html = result;
+      if (html) await updateProductMetafield(productId, "full_story", html, "multi_line_text_field");
+      break;
+    }
+    case "both_ways": {
+      const bw = result;
+      if (bw.forHim) await updateProductMetafield(productId, "works_for_him", bw.forHim, "multi_line_text_field");
+      if (bw.forHer) await updateProductMetafield(productId, "works_for_her", bw.forHer, "multi_line_text_field");
+      break;
+    }
+    case "seo_meta": {
+      const meta = result;
+      if (meta) await updateProductMetafield(productId, "seo_meta_description", meta, "multi_line_text_field");
+      break;
+    }
+    case "specifications": {
+      const specs = Array.isArray(result) ? result : [];
+      await updateProductMetafield(productId, "specifications", JSON.stringify(specs), "json");
+      break;
+    }
+    case "box_contents": {
+      const items = Array.isArray(result) ? result : [];
+      await updateProductMetafield(productId, "box_contents", JSON.stringify(items), "json");
+      break;
+    }
+    case "bullets": {
+      break;
+    }
+    default:
+      console.warn(`[field-regen] no apply handler for field type "${type}" \u2014 skipping`);
+  }
+}
+async function enqueueFieldRegenJob(context) {
+  const { enqueueBatchJob: enqueueBatchJob2 } = await Promise.resolve().then(() => (init_batch_orchestrator_server(), batch_orchestrator_server_exports));
+  const sku = context.sku;
+  const productId = context.productId;
+  const sourceMap = {
+    "copy-fields": "regen-fields",
+    "emma-hero": "regen-emma-hero",
+    "emma-take": "regen-emma-take"
+  };
+  const result = await enqueueBatchJob2({
+    jobType: "field-regen",
+    source: sourceMap[context.kind],
+    products: [{ productId, sku, input: context }],
+    maxTurns: 1
+    // field-regen is always a single-shot; maxTurns=1 satisfies the schema, not used by runner
+  });
+  const brandVoice = context.kind !== "copy-fields" ? await getPipelineSetting("brandVoice") ?? void 0 : void 0;
+  const systemBlocks = context.kind === "copy-fields" ? [{ text: BRAND_VOICE_SYSTEM_PROMPT, cache: true }] : [...await buildEmmaSystemBlocks(brandVoice)];
+  const fields = context.kind === "copy-fields" ? context.fields.map((f) => f) : context.kind === "emma-hero" ? ["emma-hero"] : ["emma-take"];
+  const meta = { jobKind: "field-regen", context, systemBlocks, fields };
+  const runnerState = { "__meta": meta };
+  await db.update(batchJobs).set({ runnerState: toDbRunnerState(runnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq12(batchJobs.jobId, result.jobId));
+  return result;
+}
+var MODEL4, MODEL_FAST3;
+var init_field_regen_runner_server = __esm({
+  "app/lib/field-regen-runner.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_token_log_server();
+    init_shopify_server();
+    init_claude_server();
+    init_feed_processor_server();
+    MODEL4 = "claude-sonnet-4-20250514";
+    MODEL_FAST3 = "claude-haiku-4-5-20251001";
+  }
+});
+
+// app/lib/batch-orchestrator.server.ts
+var batch_orchestrator_server_exports = {};
+__export(batch_orchestrator_server_exports, {
+  advanceInflightJobs: () => advanceInflightJobs,
+  enqueueBatchJob: () => enqueueBatchJob,
+  getBatchJobById: () => getBatchJobById,
+  listRecentBatchJobs: () => listRecentBatchJobs
+});
+import { randomUUID as randomUUID2 } from "node:crypto";
+import Anthropic6 from "@anthropic-ai/sdk";
+import { eq as eq13, inArray as inArray4 } from "drizzle-orm";
+function getClient3() {
+  return new Anthropic6({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
+}
+async function enqueueBatchJob(args) {
+  const jobId = randomUUID2();
+  const products = args.products.map((p) => {
+    const { llmClient: _omit, ...inputWithoutClient } = p.input;
+    return {
+      productId: p.productId,
+      sku: p.sku,
+      input: inputWithoutClient,
+      via: "batch"
+    };
+  });
+  const skuList = products.map((p) => p.sku);
+  await db.insert(batchJobs).values({
+    jobId,
+    jobType: args.jobType,
+    status: "queued",
+    source: args.source,
+    skuList,
+    products,
+    turn: 0,
+    maxTurns: args.maxTurns ?? 24,
+    batchIds: [],
+    runnerState: {},
+    appliedSkus: [],
+    ...args.gatesDealId !== void 0 ? { gatesDealId: args.gatesDealId } : {}
+  });
+  try {
+    const summary = {
+      jobId,
+      jobType: args.jobType,
+      status: "queued",
+      source: args.source,
+      skuList,
+      turn: 0,
+      maxTurns: args.maxTurns ?? 24,
+      currentBatchId: null,
+      gatesDealId: args.gatesDealId ?? null,
+      appliedSkus: [],
+      productStatuses: Object.fromEntries(products.map((p) => [p.sku, "running"]))
+    };
+    await kvSet(KV_KEYS.enrichmentJob(jobId), summary, KV_TTL_SECONDS);
+  } catch (err) {
+    console.warn("[batch-orchestrator] KV mirror failed (non-fatal):", err);
+  }
+  console.log(`[batch-orchestrator] enqueued job ${jobId} type=${args.jobType} skus=[${skuList.join(",")}]`);
+  return { jobId };
+}
+async function advanceInflightJobs(opts = {}) {
+  const maxJobs = opts.maxJobs ?? 10;
+  const rows = await db.select().from(batchJobs).where(inArray4(batchJobs.status, ["queued", "submitted", "processing", "applying"])).orderBy(batchJobs.updatedAt).limit(maxJobs);
+  const result = { advanced: 0, submitted: 0, applied: 0, done: 0, failed: 0 };
+  for (const job of rows) {
+    try {
+      const outcome = await advanceJob(job);
+      result.advanced++;
+      if (outcome.submitted) result.submitted++;
+      if (outcome.applied) result.applied += outcome.applied;
+      if (outcome.done) result.done++;
+      if (outcome.failed) result.failed++;
+    } catch (err) {
+      console.error(`[batch-orchestrator] advanceJob ${job.jobId} threw:`, err);
+      await db.update(batchJobs).set({ status: "failed", error: String(err), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+      result.failed++;
+    }
+  }
+  return result;
+}
+async function advanceJob(job) {
+  if (job.jobType === "field-regen") {
+    const { advanceFieldRegenJob: advanceFieldRegenJob2 } = await Promise.resolve().then(() => (init_field_regen_runner_server(), field_regen_runner_server_exports));
+    const r = await advanceFieldRegenJob2(job);
+    const out = {};
+    if (r.submitted !== void 0) out.submitted = r.submitted;
+    if (r.applied !== void 0) out.applied = r.applied;
+    if (r.done !== void 0) out.done = r.done;
+    if (r.failed !== void 0) out.failed = r.failed;
+    return out;
+  }
+  const outcome = {};
+  switch (job.status) {
+    case "queued": {
+      const runnerState = {};
+      for (const p of job.products) {
+        runnerState[p.productId] = freshRunnerState(p, job.jobId);
+      }
+      await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+      const updatedJob = { ...job, runnerState };
+      await submitTurnBatch(updatedJob);
+      outcome.submitted = true;
+      break;
+    }
+    case "submitted":
+    case "processing": {
+      if (!job.currentBatchId) {
+        console.error(`[batch-orchestrator] job ${job.jobId} in ${job.status} with no currentBatchId`);
+        break;
+      }
+      const client4 = getClient3();
+      const batch = await client4.messages.batches.retrieve(job.currentBatchId);
+      if (batch.processing_status !== "ended") {
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+        break;
+      }
+      const responses = /* @__PURE__ */ new Map();
+      const stream = await client4.messages.batches.results(job.currentBatchId);
+      for await (const entry of stream) {
+        responses.set(entry.custom_id, entry);
+      }
+      const [sharedDialRegistry, sharedDialTaxonomy, sharedVocab] = await Promise.all([
+        getDialRegistry(),
+        getDialTaxonomy(),
+        getAskEmmaVocabulary()
+      ]);
+      const runnerState = { ...job.runnerState };
+      let turnInputTokens = 0;
+      let turnOutputTokens = 0;
+      let turnCacheCreation = 0;
+      let turnCacheRead = 0;
+      let turnCount = 0;
+      for (const p of job.products) {
+        const ps = runnerState[p.productId];
+        if (!ps || ps.finished) continue;
+        if (ps.lastProcessedBatchId === job.currentBatchId) continue;
+        const cid = buildCustomId2(job.jobId, p.productId);
+        const entry = responses.get(cid);
+        if (!entry || entry.result.type !== "succeeded") {
+          if (entry?.result.type === "expired") {
+            if (ps.requestRetries < 2) {
+              runnerState[p.productId] = {
+                ...ps,
+                requestRetries: ps.requestRetries + 1,
+                messages: [{ role: "user", content: buildUserPrompt(p.input) }],
+                turns: 0,
+                lastProcessedBatchId: job.currentBatchId
+              };
+            } else {
+              runnerState[p.productId] = {
+                ...ps,
+                status: "error",
+                error: `expired x${ps.requestRetries + 1}`,
+                finished: true,
+                lastProcessedBatchId: job.currentBatchId
+              };
+            }
+          } else if ((entry?.result.type === "errored" || entry?.result.type === "canceled") && ps.requestRetries < 2) {
+            runnerState[p.productId] = {
+              ...ps,
+              requestRetries: ps.requestRetries + 1,
+              lastProcessedBatchId: job.currentBatchId
+            };
+          } else {
+            const errDesc = entry ? `batch ${entry.result.type}: ${entry.result.type === "errored" ? entry.result.error.error.message : entry.result.type}` : "no result for custom_id";
+            runnerState[p.productId] = {
+              ...ps,
+              status: "error",
+              error: errDesc,
+              finished: true,
+              lastProcessedBatchId: job.currentBatchId
+            };
+          }
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+          continue;
+        }
+        const msg = entry.result.message;
+        const u = msg.usage;
+        turnInputTokens += u.input_tokens;
+        turnOutputTokens += u.output_tokens;
+        turnCacheCreation += u.cache_creation_input_tokens ?? 0;
+        turnCacheRead += u.cache_read_input_tokens ?? 0;
+        turnCount++;
+        const updatedMessages = [...ps.messages, { role: "assistant", content: msg.content }];
+        const toolUses = msg.content.filter((b) => b.type === "tool_use");
+        if (toolUses.length === 0) {
+          runnerState[p.productId] = {
+            ...ps,
+            messages: updatedMessages,
+            finished: true,
+            status: "done",
+            lastProcessedBatchId: job.currentBatchId
+          };
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+          continue;
+        }
+        const state = stateFor(ps, p, {
+          dialRegistry: structuredClone(sharedDialRegistry),
+          dialTaxonomy: structuredClone(sharedDialTaxonomy),
+          vocab: structuredClone(sharedVocab)
+        });
+        const toolResults = [];
+        for (const tu of toolUses) {
+          if (ps.calledTools.includes(tu.name)) {
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: JSON.stringify({ ok: false, summary: `${tu.name} already called -- skipping duplicate` })
+            });
+            continue;
+          }
+          ps.calledTools.push(tu.name);
+          const start = Date.now();
+          let ok = false;
+          let summary = "";
+          let errorMsg;
+          drainToolTokens();
+          try {
+            const r = await executeTool(tu.name, state);
+            ok = r.ok;
+            summary = r.summary;
+          } catch (err) {
+            errorMsg = err instanceof Error ? err.message : String(err);
+            summary = `tool error: ${errorMsg}`;
+          } finally {
+            const tt = drainToolTokens();
+            ps.telemetry = ps.telemetry;
+            const tel = ps.telemetry;
+            tel.totalInputTokens = (tel.totalInputTokens ?? 0) + tt.input;
+            tel.totalOutputTokens = (tel.totalOutputTokens ?? 0) + tt.output;
+            tel.totalCacheCreationTokens = (tel.totalCacheCreationTokens ?? 0) + tt.cacheCreation;
+            tel.totalCacheReadTokens = (tel.totalCacheReadTokens ?? 0) + tt.cacheRead;
+            const toolCalls = Array.isArray(tel.toolCalls) ? tel.toolCalls : [];
+            toolCalls.push({
+              name: tu.name,
+              durationMs: Date.now() - start,
+              inputTokens: tt.input,
+              outputTokens: tt.output,
+              ok,
+              ...errorMsg ? { error: errorMsg } : {}
+            });
+            tel.toolCalls = toolCalls;
+          }
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: tu.id,
+            content: JSON.stringify({ ok, summary }),
+            ...errorMsg ? { is_error: true } : {}
+          });
+          if (state.finished) ps.finished = true;
+        }
+        if (state.dialRegistry) {
+          Object.assign(sharedDialRegistry, state.dialRegistry);
+        }
+        ps.writes = state.writes;
+        const finalMessages = [
+          ...updatedMessages,
+          { role: "user", content: toolResults }
+        ];
+        if (msg.stop_reason === "end_turn") ps.finished = true;
+        if (ps.finished) ps.status = "done";
+        runnerState[p.productId] = {
+          ...ps,
+          messages: finalMessages,
+          lastProcessedBatchId: job.currentBatchId
+        };
+        await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+      }
+      if (turnCount > 0) {
+        void logApiTokens({
+          feature: "enrichment",
+          model: MODEL5,
+          source: "batch",
+          batchId: job.currentBatchId,
+          requestCount: turnCount,
+          inputTokens: turnInputTokens,
+          outputTokens: turnOutputTokens,
+          cacheCreationTokens: turnCacheCreation,
+          cacheReadTokens: turnCacheRead
+        });
+      }
+      const nowTurn = job.turn + 1;
+      for (const p of job.products) {
+        const ps = runnerState[p.productId];
+        if (ps && !ps.finished && ps.status === "running" && ps.turns >= job.maxTurns) {
+          runnerState[p.productId] = { ...ps, finished: true, status: "done" };
+        }
+      }
+      const stillRunning = job.products.filter((p) => {
+        const ps = runnerState[p.productId];
+        return ps && !ps.finished && ps.status === "running" && ps.turns < job.maxTurns;
+      });
+      if (stillRunning.length === 0) {
+        await db.update(batchJobs).set({
+          status: "applying",
+          currentBatchId: null,
+          turn: nowTurn,
+          runnerState,
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where(eq13(batchJobs.jobId, job.jobId));
+      } else {
+        const updatedJob = {
+          ...job,
+          turn: nowTurn,
+          runnerState,
+          currentBatchId: null
+        };
+        await submitTurnBatch(updatedJob);
+        outcome.submitted = true;
+      }
+      break;
+    }
+    case "applying": {
+      const runnerState = { ...job.runnerState };
+      const appliedSkus = [...job.appliedSkus ?? []];
+      const results = [...job.results ?? []];
+      let appliedThisTick = 0;
+      for (const p of job.products) {
+        const ps = runnerState[p.productId];
+        if (!ps || !ps.finished) continue;
+        if (ps.status === "error" && !ps.writes) continue;
+        if (appliedSkus.includes(p.sku)) continue;
+        try {
+          const numericId = p.productId.replace("gid://shopify/Product/", "");
+          const writes = assembleWrites(
+            ps.writes,
+            ps.telemetry
+          );
+          await applyFullEnrichmentWrites(numericId, writes);
+          appliedSkus.push(p.sku);
+          appliedThisTick++;
+          const idx = results.findIndex((r) => r.productId === p.productId);
+          const resultEntry = { productId: p.productId, sku: p.sku, ok: true, writesApplied: true };
+          if (idx >= 0) results[idx] = resultEntry;
+          else results.push(resultEntry);
+          runnerState[p.productId] = { ...ps, applyRetries: 0 };
+          await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+        } catch (err) {
+          const applyRetries = (ps.applyRetries ?? 0) + 1;
+          const errMsg = err instanceof Error ? err.message : String(err);
+          runnerState[p.productId] = { ...ps, applyRetries };
+          const idx = results.findIndex((r) => r.productId === p.productId);
+          const resultEntry = {
+            productId: p.productId,
+            sku: p.sku,
+            ok: false,
+            applyRetries,
+            error: errMsg
+          };
+          if (idx >= 0) results[idx] = resultEntry;
+          else results.push(resultEntry);
+          if (applyRetries >= 3) {
+            runnerState[p.productId] = {
+              ...ps,
+              applyRetries,
+              status: "error",
+              error: `apply-permafail: ${errMsg}`
+            };
+          }
+          await db.update(batchJobs).set({ results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+        }
+      }
+      outcome.applied = appliedThisTick;
+      const pending = job.products.filter((p) => {
+        const ps = runnerState[p.productId];
+        if (!ps) return false;
+        if (ps.status === "error") return false;
+        return !appliedSkus.includes(p.sku);
+      });
+      if (pending.length === 0) {
+        if (job.gatesDealId) {
+          await maybeActivateGatedDeal(job.jobId, job.gatesDealId);
+        }
+        const anyHardError = Object.values(runnerState).some((ps) => ps.status === "error");
+        const finalStatus = anyHardError ? "failed" : "done";
+        await db.update(batchJobs).set({
+          status: finalStatus,
+          results,
+          runnerState,
+          appliedSkus,
+          completedAt: /* @__PURE__ */ new Date(),
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where(eq13(batchJobs.jobId, job.jobId));
+        if (finalStatus === "done") outcome.done = true;
+        else outcome.failed = true;
+      }
+      break;
+    }
+    case "done":
+    case "failed":
+      break;
+  }
+  try {
+    const fresh = await db.select().from(batchJobs).where(eq13(batchJobs.jobId, job.jobId)).limit(1);
+    const row = fresh[0];
+    if (row) {
+      const productStatuses = {};
+      for (const p of row.products) {
+        const ps = row.runnerState[p.productId];
+        productStatuses[p.sku] = ps?.status ?? "running";
+      }
+      const summary = {
+        jobId: row.jobId,
+        jobType: row.jobType,
+        status: row.status,
+        source: row.source,
+        skuList: row.skuList,
+        turn: row.turn,
+        maxTurns: row.maxTurns,
+        currentBatchId: row.currentBatchId ?? null,
+        gatesDealId: row.gatesDealId ?? null,
+        appliedSkus: row.appliedSkus ?? [],
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        completedAt: row.completedAt ?? null,
+        failedAt: row.failedAt ?? null,
+        results: row.results ?? null,
+        error: row.error ?? null,
+        productStatuses
+      };
+      await kvSet(KV_KEYS.enrichmentJob(job.jobId), summary, KV_TTL_SECONDS);
+    }
+  } catch (err) {
+    console.warn("[batch-orchestrator] KV mirror update failed (non-fatal):", err);
+  }
+  return outcome;
+}
+async function submitTurnBatch(job) {
+  const runnerState = { ...job.runnerState };
+  const toSubmit = job.products.filter((p) => {
+    const ps = runnerState[p.productId];
+    return ps && !ps.finished && ps.status === "running" && ps.turns < job.maxTurns;
+  });
+  if (toSubmit.length === 0) return;
+  const requests = [];
+  for (const p of toSubmit) {
+    const ps = runnerState[p.productId];
+    if (!ps) continue;
+    const newTurns = ps.turns + 1;
+    runnerState[p.productId] = { ...ps, turns: newTurns };
+    requests.push({
+      custom_id: buildCustomId2(job.jobId, p.productId),
+      params: {
+        model: MODEL5,
+        max_tokens: 4096,
+        // Ephemeral cache on tools + system: cache write on first request,
+        // reads on subsequent requests within TTL across parallel batch requests.
+        system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tools: TOOLS,
+        messages: ps.messages
+      }
+    });
+  }
+  if (requests.length === 0) return;
+  const client4 = getClient3();
+  const batch = await client4.messages.batches.create({ requests });
+  const isFirstSubmit = !job.submittedAt;
+  const batchIds = [...Array.isArray(job.batchIds) ? job.batchIds : [], batch.id];
+  await db.update(batchJobs).set({
+    status: "submitted",
+    currentBatchId: batch.id,
+    batchIds,
+    runnerState,
+    updatedAt: /* @__PURE__ */ new Date(),
+    ...isFirstSubmit ? { submittedAt: /* @__PURE__ */ new Date() } : {}
+  }).where(eq13(batchJobs.jobId, job.jobId));
+  console.log(`[batch-orchestrator] job ${job.jobId} turn ${job.turn + 1}: submitted batch ${batch.id} (${requests.length} requests)`);
+}
+function buildCustomId2(jobId, productId) {
+  return `${jobId}__${productId}`;
+}
+function freshRunnerState(p, jobId) {
+  const input = p.input;
+  return {
+    productId: p.productId,
+    sku: p.sku,
+    messages: [{ role: "user", content: buildUserPrompt(input) }],
+    calledTools: [],
+    writes: {},
+    telemetry: {
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalTokens: 0,
+      totalCacheCreationTokens: 0,
+      totalCacheReadTokens: 0,
+      durationMs: 0,
+      turns: 0,
+      toolCalls: []
+    },
+    finished: false,
+    turns: 0,
+    status: "running",
+    lastBatchCustomId: buildCustomId2(jobId, p.productId),
+    requestRetries: 0,
+    applyRetries: 0
+  };
+}
+function stateFor(ps, p, taxonomy) {
+  const { llmClient: _omit, ...inputWithoutClient } = p.input;
+  const input = inputWithoutClient;
+  return {
+    input,
+    dialRegistry: taxonomy.dialRegistry,
+    dialTaxonomy: taxonomy.dialTaxonomy,
+    vocab: taxonomy.vocab,
+    writes: ps.writes,
+    telemetry: ps.telemetry,
+    finished: ps.finished
+  };
+}
+async function maybeActivateGatedDeal(jobId, gatesDealId) {
+  try {
+    const { dealHistory: dealHistory2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+    const { eq: eq18 } = await import("drizzle-orm");
+    const rows = await db.select().from(dealHistory2).where(eq18(dealHistory2.id, gatesDealId)).limit(1);
+    const deal = rows[0];
+    if (!deal) {
+      console.warn(`[batch-orchestrator] maybeActivateGatedDeal: deal ${gatesDealId} not found`);
+      return;
+    }
+    if (deal.status === "live") {
+      return;
+    }
+    const { activateDeal: activateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
+    await activateDeal2({
+      id: deal.id,
+      shopifyProductId: deal.shopifyProductId,
+      sku: deal.sku,
+      seoTitle: deal.seoTitle,
+      dealPrice: deal.dealPrice ?? null,
+      msrp: deal.msrp ?? null,
+      wholesaleCost: deal.wholesaleCost ?? null
+    });
+    console.log(`[batch-orchestrator] job ${jobId} gated deal ${gatesDealId} activated`);
+  } catch (err) {
+    console.error(`[batch-orchestrator] maybeActivateGatedDeal for job ${jobId} deal ${gatesDealId} failed:`, err);
+  }
+}
+async function getBatchJobById(jobId) {
+  const rows = await db.select().from(batchJobs).where(eq13(batchJobs.jobId, jobId)).limit(1);
+  return rows[0] ?? null;
+}
+async function listRecentBatchJobs(limit = 50) {
+  return db.select().from(batchJobs).orderBy(batchJobs.createdAt).limit(limit);
+}
+var MODEL5, KV_TTL_SECONDS;
+var init_batch_orchestrator_server = __esm({
+  "app/lib/batch-orchestrator.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_emma_orchestrator_server();
+    init_dial_registry_server();
+    init_ask_emma_vocab_server();
+    init_import_enrich_server();
+    init_token_log_server();
+    init_kv_server();
+    init_claude_server();
+    MODEL5 = "claude-sonnet-4-20250514";
+    KV_TTL_SECONDS = 24 * 60 * 60;
+  }
+});
+
 // app/lib/bulk-import.server.ts
 var bulk_import_server_exports = {};
 __export(bulk_import_server_exports, {
@@ -15063,7 +16903,7 @@ __export(bulk_import_server_exports, {
   parseBulkImportCSV: () => parseBulkImportCSV
 });
 import { parse as parse3 } from "csv-parse/sync";
-import { eq as eq10, max } from "drizzle-orm";
+import { eq as eq14, max } from "drizzle-orm";
 function inferCategory(categories) {
   const forHimCats = ["Vagina Strokers", "Body Molds", "Prostate Toys", "Masturbators", "Hands-Free Masturbators"];
   const forHerCats = ["Dual Action and Rabbits", "Finger and Clit", "Air Pulse and Suction", "Bullets and Eggs"];
@@ -15173,7 +17013,7 @@ function parseBulkImportCSV(csvText) {
   return { groups, parseErrors };
 }
 async function isSkuAlreadyImported(sku) {
-  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq10(dealHistory.sku, sku)).limit(1);
+  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq14(dealHistory.sku, sku)).limit(1);
   return rows.length > 0;
 }
 async function importProductGroup(group) {
@@ -15254,61 +17094,9 @@ async function importProductGroup(group) {
       console.warn(`[bulk-import] ${masterSku} pairing-candidates lookup failed:`, err instanceof Error ? err.message : err);
       return [];
     });
-    const { writes, telemetry } = await generateProductContent({
-      product: {
-        title: masterRow["Product Title"],
-        brand: masterRow.Brand,
-        description,
-        categories,
-        dealPrice,
-        msrp
-      },
-      seoTitle,
-      category,
-      pairingCandidates
-    });
-    const finalTitle = writes.productTitle ?? seoTitle;
-    console.info(
-      `[bulk-import] ${masterSku} orchestrator: tokens=${telemetry.totalTokens} duration=${telemetry.durationMs}ms turns=${telemetry.turns} pairings=${writes.accessoryProductIds?.length ?? 0} titleAugmented=${writes.productTitleAugmented ? "yes" : "no"} tools=[${telemetry.toolCalls.map((c) => `${c.name}${c.ok ? "" : "!"}`).join(",")}]`
-    );
-    await pushProductToShopify({
-      shopifyProductId: numericId,
-      // Update product.title when augmented; leave alone otherwise.
-      ...writes.productTitleAugmented ? { title: finalTitle } : {},
-      seoTitle: finalTitle,
-      tagline: writes.tagline,
-      ...writes.worksForHim !== void 0 ? { worksForHim: writes.worksForHim } : {},
-      ...writes.worksForHer !== void 0 ? { worksForHer: writes.worksForHer } : {},
-      ...writes.boxContents !== void 0 ? { boxContents: writes.boxContents } : {},
-      ...writes.specifications !== void 0 ? { specifications: writes.specifications } : {},
-      seoMetaDescription: writes.seoMetaDescription,
-      descriptionHtml: writes.descriptionHtml,
-      ...writes.careInstructions !== void 0 ? { careInstructions: writes.careInstructions } : {},
-      ...writes.sensationDialV2 !== void 0 ? { sensationDialV2: writes.sensationDialV2 } : {},
-      productTypeDial: writes.productTypeDial,
-      ...writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {},
-      moodTags: writes.moodTags,
-      audienceTags: writes.audienceTags,
-      mattersTags: writes.mattersTags,
-      ...writes.emmaHero !== void 0 ? { emmaHero: writes.emmaHero } : {},
-      ...writes.moodImageUrl !== void 0 ? { moodImageUrl: writes.moodImageUrl } : {},
-      ...writes.originalTitle !== void 0 ? { originalTitle: writes.originalTitle } : {},
-      ...writes.accessoryProductIds !== void 0 ? { accessoryProductIds: writes.accessoryProductIds } : {},
-      ...writes.pairingWhy !== void 0 ? { pairingWhy: writes.pairingWhy } : {},
-      tags: editorialTagsFrom(categories),
-      category,
-      sectionTags: [deriveSection({ productTypeDial: writes.productTypeDial, categories, title: masterRow["Product Title"] })],
-      dealStatus: "pending_approval",
-      dealDate: "2099-12-31",
-      originalPrice: msrp,
-      wholesaleCost: wholesale,
-      mapPrice: map,
-      nalpacSku: masterSku,
-      rawDescription: cleanedDesc || void 0
-    });
     const [{ maxSort = 0 } = {}] = await db.select({ maxSort: max(dealHistory.sortOrder) }).from(dealHistory);
     const nextSortOrder = (maxSort ?? 0) + 1;
-    await db.insert(dealHistory).values({
+    const [insertedDeal] = await db.insert(dealHistory).values({
       sku: masterSku,
       seoTitle,
       brand: masterRow.Brand,
@@ -15323,7 +17111,46 @@ async function importProductGroup(group) {
       status: "queued",
       sortOrder: nextSortOrder,
       shopifyProductId: numericId
-    }).onConflictDoNothing();
+    }).onConflictDoNothing().returning({ id: dealHistory.id });
+    const gid = `gid://shopify/Product/${numericId}`;
+    const stagedDealId = insertedDeal?.id;
+    const { jobId } = await enqueueBatchJob({
+      jobType: "full-enrichment",
+      source: "bulk-import",
+      products: [{
+        productId: gid,
+        sku: masterSku,
+        input: {
+          product: {
+            title: masterRow["Product Title"],
+            brand: masterRow.Brand,
+            description,
+            categories,
+            dealPrice,
+            msrp
+          },
+          seoTitle,
+          category,
+          pairingCandidates
+        }
+      }],
+      ...stagedDealId !== void 0 ? { gatesDealId: stagedDealId } : {}
+    });
+    console.info(`[bulk-import] ${masterSku} enrichment enqueued jobId=${jobId} gatesDealId=${stagedDealId ?? "none"} (async via batch poller)`);
+    await pushProductToShopify({
+      shopifyProductId: numericId,
+      seoTitle,
+      tags: editorialTagsFrom(categories),
+      category,
+      sectionTags: [deriveSection({ productTypeDial: void 0, categories, title: masterRow["Product Title"] })],
+      dealStatus: "pending_approval",
+      dealDate: "2099-12-31",
+      originalPrice: msrp,
+      wholesaleCost: wholesale,
+      mapPrice: map,
+      nalpacSku: masterSku,
+      rawDescription: cleanedDesc || void 0
+    });
     const warnings = [];
     try {
       const handle = await getProductHandleById(numericId);
@@ -15332,34 +17159,19 @@ async function importProductGroup(group) {
         console.warn(`[bulk-import] ${masterSku} ${msg}`);
         warnings.push({ stage: "sanity", message: msg });
       } else {
-        const gid = `gid://shopify/Product/${numericId}`;
         const upsertParams = {
           handle,
           shopifyProductId: gid,
           title: masterRow["Product Title"],
           vendor: masterRow.Brand,
           tags: editorialTagsFrom(categories),
-          // Mirror sub-categories so Studio editors can filter
-          tagline: writes.tagline,
           description,
           seoTitle,
-          seoDescription: writes.seoMetaDescription,
-          category,
-          // Pricing fields removed from Sanity productPage schema — pricing
-          // lives solely on Shopify metafields where the deal pipeline reads.
-          productTypeDial: writes.productTypeDial,
-          ...writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {},
-          moodTags: writes.moodTags,
-          audienceTags: writes.audienceTags,
-          mattersTags: writes.mattersTags,
-          // IVR / voice surfaces — populated by the orchestrator's IVR tools.
-          ...writes.ivrExperience !== void 0 ? { ivrExperience: writes.ivrExperience } : {},
-          ...writes.ivrUseCase !== void 0 ? { ivrUseCase: writes.ivrUseCase } : {},
-          ...writes.ivrFeatures !== void 0 ? { ivrFeatures: writes.ivrFeatures } : {},
-          ...writes.productFaqs !== void 0 ? { productFaqs: writes.productFaqs } : {}
+          category
+          // Enriched fields (tagline, moodTags, productTypeDial, IVR, FAQs)
+          // are written by applyFullEnrichmentWrites once the batch job completes.
         };
         if (images[0]) upsertParams.imageUrl = images[0];
-        if (writes.moodImageUrl) upsertParams.moodImageUrl = writes.moodImageUrl;
         let lastErr;
         for (let attempt = 1; attempt <= 2; attempt++) {
           try {
@@ -15390,6 +17202,7 @@ async function importProductGroup(group) {
       success: true,
       sku: masterSku,
       shopifyProductId: numericId,
+      jobId,
       ...warnings.length > 0 ? { warnings } : {}
     };
   } catch (err) {
@@ -15607,40 +17420,9 @@ async function importNewProduct(input) {
     console.warn(`[importNewProduct] ${sku} pairing-candidates lookup failed:`, err instanceof Error ? err.message : err);
     return [];
   });
-  const { writes, telemetry } = await generateProductContent({
-    product: {
-      title: rawProduct.title,
-      brand: rawProduct.brand,
-      description: rawProduct.description,
-      categories: rawProduct.categories,
-      dealPrice: rawProduct.dealPrice,
-      msrp: rawProduct.msrp
-    },
-    seoTitle,
-    category,
-    pairingCandidates
-  });
-  const finalTitle = writes.productTitle ?? seoTitle;
-  console.info(
-    `[importNewProduct] ${sku} (source=${source}) orchestrator: tokens=${telemetry.totalTokens} duration=${telemetry.durationMs}ms turns=${telemetry.turns} voiceHash=${voiceProfile?.hash ?? "default"} tools=[${telemetry.toolCalls.map((c) => `${c.name}${c.ok ? "" : "!"}`).join(",")}]`
-  );
   await pushProductToShopify({
     shopifyProductId: numericId,
-    ...writes.productTitleAugmented ? { title: finalTitle } : {},
-    seoTitle: finalTitle,
-    tagline: writes.tagline,
-    ...writes.boxContents !== void 0 ? { boxContents: writes.boxContents } : {},
-    ...writes.specifications !== void 0 ? { specifications: writes.specifications } : {},
-    seoMetaDescription: writes.seoMetaDescription,
-    descriptionHtml: writes.descriptionHtml,
-    ...writes.careInstructions !== void 0 ? { careInstructions: writes.careInstructions } : {},
-    ...writes.sensationDialV2 !== void 0 ? { sensationDialV2: writes.sensationDialV2 } : {},
-    productTypeDial: writes.productTypeDial,
-    ...writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {},
-    moodTags: writes.moodTags,
-    audienceTags: writes.audienceTags,
-    mattersTags: writes.mattersTags,
-    ...writes.originalTitle !== void 0 ? { originalTitle: writes.originalTitle } : {},
+    seoTitle,
     tags: editorialTagsFrom(rawProduct.categories),
     category,
     dealStatus: "pending_approval",
@@ -15653,7 +17435,7 @@ async function importNewProduct(input) {
   });
   const [{ maxSort = 0 } = {}] = await db.select({ maxSort: max(dealHistory.sortOrder) }).from(dealHistory);
   const nextSortOrder = (maxSort ?? 0) + 1;
-  await db.insert(dealHistory).values({
+  const [insertedDeal] = await db.insert(dealHistory).values({
     sku,
     seoTitle,
     brand: rawProduct.brand,
@@ -15668,7 +17450,31 @@ async function importNewProduct(input) {
     status: "queued",
     sortOrder: nextSortOrder,
     shopifyProductId: numericId
-  }).onConflictDoNothing();
+  }).onConflictDoNothing().returning({ id: dealHistory.id });
+  const stagedDealId = insertedDeal?.id;
+  const { jobId } = await enqueueBatchJob({
+    jobType: "full-enrichment",
+    source: "import-product",
+    products: [{
+      productId: gid,
+      sku,
+      input: {
+        product: {
+          title: rawProduct.title,
+          brand: rawProduct.brand,
+          description: rawProduct.description,
+          categories: rawProduct.categories,
+          dealPrice: rawProduct.dealPrice,
+          msrp: rawProduct.msrp
+        },
+        seoTitle,
+        category,
+        pairingCandidates
+      }
+    }],
+    ...stagedDealId !== void 0 ? { gatesDealId: stagedDealId } : {}
+  });
+  console.info(`[importNewProduct] ${sku} (source=${source}) enrichment enqueued jobId=${jobId} gatesDealId=${stagedDealId ?? "none"} voiceHash=${voiceProfile?.hash ?? "default"}`);
   try {
     const upsertParams = {
       handle,
@@ -15676,21 +17482,9 @@ async function importNewProduct(input) {
       title: rawProduct.title,
       vendor: rawProduct.brand,
       tags: editorialTagsFrom(rawProduct.categories),
-      tagline: writes.tagline,
       description: rawProduct.description,
       seoTitle,
-      seoDescription: writes.seoMetaDescription,
-      category,
-      // Pricing fields removed from Sanity productPage schema (Shopify-only).
-      productTypeDial: writes.productTypeDial,
-      ...writes.productSubtypeDial != null ? { productSubtypeDial: writes.productSubtypeDial } : {},
-      moodTags: writes.moodTags,
-      audienceTags: writes.audienceTags,
-      mattersTags: writes.mattersTags,
-      ...writes.ivrExperience !== void 0 ? { ivrExperience: writes.ivrExperience } : {},
-      ...writes.ivrUseCase !== void 0 ? { ivrUseCase: writes.ivrUseCase } : {},
-      ...writes.ivrFeatures !== void 0 ? { ivrFeatures: writes.ivrFeatures } : {},
-      ...writes.productFaqs !== void 0 ? { productFaqs: writes.productFaqs } : {}
+      category
     };
     if (rawProduct.images?.[0]) upsertParams.imageUrl = rawProduct.images[0];
     let lastErr;
@@ -15711,7 +17505,7 @@ async function importNewProduct(input) {
   } catch (err) {
     warnings.push({ stage: "sanity", message: err instanceof Error ? err.message : String(err) });
   }
-  return { shopifyProductId: numericId, gid, handle, warnings };
+  return { shopifyProductId: numericId, gid, handle, jobId, status: "enriching", warnings };
 }
 var init_bulk_import_server = __esm({
   "app/lib/bulk-import.server.ts"() {
@@ -15719,7 +17513,7 @@ var init_bulk_import_server = __esm({
     init_db_server();
     init_schema();
     init_claude_server();
-    init_emma_orchestrator_server();
+    init_batch_orchestrator_server();
     init_feed_processor_server();
     init_master_collapse_server();
     init_shopify_server();
@@ -15738,7 +17532,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and2, eq as eq11, inArray as inArray2, sql as sql6 } from "drizzle-orm";
+import { and as and3, eq as eq15, inArray as inArray5, sql as sql7 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -15889,7 +17683,7 @@ async function runImportMonitor(opts = {}) {
       status: importCandidates.status,
       watchScore: importCandidates.watchScore,
       watchPrice: importCandidates.watchPrice
-    }).from(importCandidates).where(inArray2(importCandidates.masterKey, cappedKeys)) : [];
+    }).from(importCandidates).where(inArray5(importCandidates.masterKey, cappedKeys)) : [];
     const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r]));
     let candidatesNew = 0;
     let candidatesResurfaced = 0;
@@ -15907,21 +17701,21 @@ async function runImportMonitor(opts = {}) {
         candidatesNew++;
         candidatesFound++;
       } else if (existing.status === "rejected" || existing.status === "imported") {
-        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.masterKey, masterKey));
       } else if (existing.status === "watching") {
         const priorScore = parseFloat(existing.watchScore ?? "0");
         const priorPrice = parseFloat(existing.watchPrice ?? "0");
         const scoreImproved = score2 >= priorScore + watchScoreDelta;
         const priceDropped = priorPrice > 0 && proposedPrice <= priorPrice * (1 - watchPriceDropPct);
         if (scoreImproved || priceDropped) {
-          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq11(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq15(importCandidates.masterKey, masterKey));
           candidatesResurfaced++;
           candidatesFound++;
         } else {
-          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.masterKey, masterKey));
         }
       } else {
-        await db.update(importCandidates).set(upsertPayload).where(eq11(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set(upsertPayload).where(eq15(importCandidates.masterKey, masterKey));
         candidatesFound++;
       }
     }
@@ -15938,7 +17732,7 @@ async function runImportMonitor(opts = {}) {
       candidatesNew,
       candidatesResurfaced,
       autoImported
-    }).where(eq11(importMonitorRuns.id, runId));
+    }).where(eq15(importMonitorRuns.id, runId));
     await setPipelineSetting("import_monitor_last_run_at", (/* @__PURE__ */ new Date()).toISOString());
     console.info(
       `[import-monitor] done: feedsOk=${feedsOk} found=${candidatesFound} new=${candidatesNew} resurfaced=${candidatesResurfaced}`
@@ -15951,7 +17745,7 @@ async function runImportMonitor(opts = {}) {
       finishedAt: /* @__PURE__ */ new Date(),
       feedsOk: false,
       errorMessage
-    }).where(eq11(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
+    }).where(eq15(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
     return {
       feedsOk: false,
       candidatesFound: 0,
@@ -15982,7 +17776,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
   const requireCarried = (requireCarriedStr ?? "true") !== "false";
   const maxPerDay = Math.max(0, parseInt(maxPerDayStr ?? "3", 10) || 0);
   if (maxPerDay <= 0) return 0;
-  const importedTodayRows = await db.select({ cnt: sql6`count(*)::int` }).from(importCandidates).where(and2(eq11(importCandidates.status, "imported"), eq11(importCandidates.runDate, todayStr)));
+  const importedTodayRows = await db.select({ cnt: sql7`count(*)::int` }).from(importCandidates).where(and3(eq15(importCandidates.status, "imported"), eq15(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -15999,10 +17793,10 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
     mapPrice: importCandidates.mapPrice,
     proposedPrice: importCandidates.proposedPrice,
     needsReview: importCandidates.needsReview
-  }).from(importCandidates).where(and2(
-    eq11(importCandidates.status, "pending"),
-    inArray2(importCandidates.masterKey, cappedKeys)
-  )).orderBy(importCandidates.tier, sql6`${importCandidates.dealScore} DESC NULLS LAST`);
+  }).from(importCandidates).where(and3(
+    eq15(importCandidates.status, "pending"),
+    inArray5(importCandidates.masterKey, cappedKeys)
+  )).orderBy(importCandidates.tier, sql7`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
     const tierOk = c.tier === "A" || c.tier === "B";
     if (!tierOk || c.needsReview) return false;
@@ -16063,7 +17857,7 @@ async function stageMasterCandidatesBySkus(skus, opts) {
     }
   }
   const masterKeys = [...mastersToDo];
-  const existingRows = masterKeys.length > 0 ? await db.select({ masterKey: importCandidates.masterKey, status: importCandidates.status }).from(importCandidates).where(inArray2(importCandidates.masterKey, masterKeys)) : [];
+  const existingRows = masterKeys.length > 0 ? await db.select({ masterKey: importCandidates.masterKey, status: importCandidates.status }).from(importCandidates).where(inArray5(importCandidates.masterKey, masterKeys)) : [];
   const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r.status]));
   let staged = 0;
   let skippedCarried = 0;
@@ -16091,10 +17885,10 @@ async function stageMasterCandidatesBySkus(skus, opts) {
       }).onConflictDoNothing();
       staged++;
     } else if (existingStatus === "watching") {
-      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq11(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq15(importCandidates.masterKey, masterKey));
       staged++;
     } else {
-      await db.update(importCandidates).set(upsertPayload).where(eq11(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set(upsertPayload).where(eq15(importCandidates.masterKey, masterKey));
       staged++;
     }
   }
@@ -16102,22 +17896,22 @@ async function stageMasterCandidatesBySkus(skus, opts) {
 }
 async function getImportCandidatesByStatus(statuses, limit) {
   if (statuses.length === 0) return [];
-  const query = db.select().from(importCandidates).where(inArray2(importCandidates.status, statuses)).orderBy(
+  const query = db.select().from(importCandidates).where(inArray5(importCandidates.status, statuses)).orderBy(
     importCandidates.tier,
-    sql6`${importCandidates.dealScore} DESC NULLS LAST`
+    sql7`${importCandidates.dealScore} DESC NULLS LAST`
   );
   if (limit != null) return query.limit(limit);
   return query;
 }
 async function getCatalogOpportunities() {
-  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql6`${dealHistory.brand} IS NOT NULL`);
+  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql7`${dealHistory.brand} IS NOT NULL`);
   const brandCount = /* @__PURE__ */ new Map();
   for (const r of brandRows) {
     if (!r.brand) continue;
     brandCount.set(r.brand, (brandCount.get(r.brand) ?? 0) + 1);
   }
   const brandCoverage = [...brandCount.entries()].map(([brand, carried]) => ({ brand, carried })).sort((a, b) => b.carried - a.carried);
-  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql6`${dealHistory.categories} IS NOT NULL`);
+  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql7`${dealHistory.categories} IS NOT NULL`);
   const catCount = /* @__PURE__ */ new Map();
   for (const r of catRows) {
     for (const cat of r.categories ?? []) {
@@ -16129,7 +17923,7 @@ async function getCatalogOpportunities() {
     brand: importCandidates.brand,
     tier: importCandidates.tier,
     dealScore: importCandidates.dealScore
-  }).from(importCandidates).where(inArray2(importCandidates.status, ["pending", "watching"]));
+  }).from(importCandidates).where(inArray5(importCandidates.status, ["pending", "watching"]));
   const oppMap = /* @__PURE__ */ new Map();
   for (const r of pendingRows) {
     if (!r.brand) continue;
@@ -16147,7 +17941,7 @@ async function getCatalogOpportunities() {
   return { brandCoverage, categoryCoverage, brandOpportunities };
 }
 async function getRecentImportRuns(limit) {
-  return db.select().from(importMonitorRuns).orderBy(sql6`${importMonitorRuns.startedAt} DESC`).limit(limit);
+  return db.select().from(importMonitorRuns).orderBy(sql7`${importMonitorRuns.startedAt} DESC`).limit(limit);
 }
 async function updateCandidateStatus(id, status, opts = {}) {
   const now = /* @__PURE__ */ new Date();
@@ -16159,23 +17953,23 @@ async function updateCandidateStatus(id, status, opts = {}) {
     updatedAt: now
   };
   if (status === "watching") {
-    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq11(importCandidates.id, id)).limit(1);
+    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq15(importCandidates.id, id)).limit(1);
     if (rows[0]) {
       base.watchScore = rows[0].dealScore;
       base.watchPrice = rows[0].proposedPrice;
     }
   }
-  await db.update(importCandidates).set(base).where(eq11(importCandidates.id, id));
+  await db.update(importCandidates).set(base).where(eq15(importCandidates.id, id));
 }
 async function approveAndImport(id) {
-  const rows = await db.select().from(importCandidates).where(eq11(importCandidates.id, id)).limit(1);
+  const rows = await db.select().from(importCandidates).where(eq15(importCandidates.id, id)).limit(1);
   const candidate = rows[0];
   if (!candidate) {
     return { ok: false, error: `candidate ${id} not found` };
   }
   const repSku = candidate.sku;
   if (await isSkuAlreadyImported(repSku)) {
-    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.id, id));
+    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, id));
     return { ok: true, skipped: true };
   }
   const feedResult = await fetchAllNalpacFeeds();
@@ -16245,13 +18039,13 @@ async function approveAndImport(id) {
   if (!result.success && !result.skipped) {
     return { ok: false, error: result.error ?? "importProductGroupRaw failed" };
   }
-  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq11(dealHistory.sku, repSku)).limit(1);
+  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq15(dealHistory.sku, repSku)).limit(1);
   const dealHistoryId = dhRows[0]?.id;
   await db.update(importCandidates).set({
     status: "imported",
     dealHistoryId: dealHistoryId ?? null,
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq11(importCandidates.id, id));
+  }).where(eq15(importCandidates.id, id));
   return {
     ok: true,
     ...result.shopifyProductId !== void 0 ? { shopifyProductId: result.shopifyProductId } : {},
@@ -16275,666 +18069,848 @@ var init_import_monitor_server = __esm({
   }
 });
 
-// app/lib/enricher-brief.server.ts
-import { eq as eq12 } from "drizzle-orm";
-async function adminGraphQLWithRetry(query, variables, attempt = 0) {
-  try {
-    return await adminGraphQL(query, variables);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const isRateLimit = msg.includes("429") || msg.toLowerCase().includes("throttled");
-    if (!isRateLimit || attempt >= 4) throw err;
-    const delayMs = 1500 * Math.pow(2, attempt);
-    console.warn(`[enricher-brief] rate-limited; backing off ${delayMs}ms (attempt ${attempt + 1}/5)`);
-    await new Promise((r) => setTimeout(r, delayMs));
-    return adminGraphQLWithRetry(query, variables, attempt + 1);
-  }
+// app/lib/discovery-emma.ts
+function scoreProduct2(p, s) {
+  let score2 = 0;
+  for (const m of s.mood) if (p.mood.includes(m)) score2 += SCORE_MOOD;
+  for (const a of s.audience) if (p.audience.includes(a)) score2 += SCORE_AUDIENCE;
+  for (const k of s.matters) if (p.matters.includes(k)) score2 += SCORE_MATTERS;
+  return score2;
 }
-async function fetchProductSnapshot(numericId) {
-  try {
-    const data = await adminGraphQLWithRetry(`
-      query EnricherSnapshot($id: ID!) {
-        product(id: $id) {
-          id
-          title
-          handle
-          vendor
-          descriptionHtml
-          status
-          productType
-          updatedAt
-          media(first: 5) {
-            edges {
-              node {
-                ... on MediaImage {
-                  preview { image { url } }
-                }
-              }
-            }
-          }
-          metafields(first: 100) {
-            edges { node { namespace key value } }
-          }
-          variants(first: 100) {
-            edges {
-              node {
-                id
-                title
-                metafield(namespace: "custom", key: "original_description") {
-                  value
-                }
-              }
-            }
-          }
-        }
-      }
-    `, { id: `gid://shopify/Product/${numericId}` });
-    const product = data.product;
-    if (!product) return null;
-    const metafields = {};
-    for (const e of product.metafields.edges) {
-      metafields[`${e.node.namespace}.${e.node.key}`] = e.node.value;
-    }
-    const aggregated = aggregateVariantDescriptions(product.variants.edges.map((e) => e.node));
-    const snap = {
-      id: String(product.id.split("/").pop()),
-      title: product.title,
-      handle: product.handle,
-      vendor: product.vendor,
-      body_html: product.descriptionHtml,
-      status: product.status.toLowerCase(),
-      // GraphQL returns 'DRAFT' uppercase; normalise
-      product_type: product.productType,
-      updated_at: product.updatedAt,
-      metafields,
-      images: product.media.edges.map((e) => e.node.preview?.image?.url).filter((u) => !!u).map((src) => ({ src }))
-    };
-    const aggregatedDescription = aggregated ?? metafields["custom.original_description"] ?? void 0;
-    if (aggregatedDescription) snap.aggregatedDescription = aggregatedDescription;
-    return snap;
-  } catch (err) {
-    console.warn(`[enricher-brief] fetchProductSnapshot ${numericId} failed:`, err instanceof Error ? err.message : err);
-    return null;
+function computeAvailable(index2, s) {
+  const moods = /* @__PURE__ */ new Set();
+  const audiences = /* @__PURE__ */ new Set();
+  const matters = /* @__PURE__ */ new Set();
+  const hasMood = s.mood.length > 0;
+  const hasAudience = s.audience.length > 0;
+  const hasMatters = s.matters.length > 0;
+  for (const p of index2) {
+    const okMood = !hasMood || s.mood.some((m) => p.mood.includes(m));
+    const okAudience = !hasAudience || s.audience.some((a) => p.audience.includes(a));
+    const okMatters = !hasMatters || s.matters.some((k) => p.matters.includes(k));
+    if (okAudience && okMatters) for (const m of p.mood) moods.add(m);
+    if (okMood && okMatters) for (const a of p.audience) audiences.add(a);
+    if (okMood && okAudience) for (const k of p.matters) matters.add(k);
   }
+  return { moods, audiences, matters };
 }
-function aggregateVariantDescriptions(variants) {
-  if (variants.length === 0) return void 0;
-  const seen = /* @__PURE__ */ new Set();
-  const pieces = [];
-  for (const v of variants) {
-    const value = v.metafield?.value?.trim();
-    if (!value) continue;
-    const norm = value.toLowerCase().replace(/\s+/g, " ").slice(0, 200);
-    if (seen.has(norm)) continue;
-    seen.add(norm);
-    const piece = v.title && v.title !== "Default Title" ? `[${v.title}] ${value}` : value;
-    pieces.push(piece);
-  }
-  if (pieces.length === 0) return void 0;
-  let aggregated = pieces.join("\n\n");
-  if (aggregated.length > VARIANT_DESC_AGGREGATE_CAP) {
-    aggregated = aggregated.slice(0, VARIANT_DESC_AGGREGATE_CAP) + "\n\u2026[truncated]";
-  }
-  return aggregated;
-}
-async function gatherProductBrief(numericProductId) {
-  const snap = await fetchProductSnapshot(numericProductId);
-  if (!snap) return null;
-  const histRows = await db.select({
-    sku: dealHistory.sku,
-    brand: dealHistory.brand,
-    categories: dealHistory.categories
-  }).from(dealHistory).where(eq12(dealHistory.shopifyProductId, numericProductId)).limit(1);
-  const hist = histRows[0];
-  const sku = hist?.sku;
-  const brand = hist?.brand ?? snap.vendor ?? "";
-  const categories = hist?.categories ?? [];
-  const msrp = Number(snap.metafields["xdipx.original_price"]) || 0;
-  const dealPrice = Number(snap.metafields["xdipx.map_price"]) || msrp;
-  const pairingCandidates = await getPairingCandidates({
-    shopifyProductId: numericProductId,
-    subCategories: categories
-  }).catch(() => []);
-  const rawDescription = snap.aggregatedDescription ?? (snap.body_html ?? "").replace(/<[^>]+>/g, " ").slice(0, 2e3);
-  const brief = {
-    shopifyProductId: numericProductId,
-    rawTitle: snap.title,
-    brand,
-    vendor: snap.vendor,
-    rawDescription,
-    categories,
-    dealPrice,
-    msrp,
-    existingMetafields: snap.metafields,
-    pairingCandidates: pairingCandidates.map((c) => {
-      const pc = {
-        productId: c.productId,
-        title: c.title
-      };
-      if (c.brand) pc.brand = c.brand;
-      if (c.productTypeDial) pc.productTypeDial = c.productTypeDial;
-      if (typeof c.price === "number") pc.price = c.price;
-      return pc;
-    })
-  };
-  if (sku) brief.sku = sku;
-  return brief;
-}
-async function loadSharedEnrichmentContext() {
-  const [dialRegistry, dialTaxonomy, vocab] = await Promise.all([
-    getDialRegistry(),
-    getDialTaxonomy(),
-    getAskEmmaVocabulary()
-  ]);
+function availableToArrays(a) {
   return {
-    moodVocab: vocab.mood,
-    audienceVocab: vocab.audience,
-    mattersVocab: vocab.matters,
-    dialRegistryByType: dialRegistry,
-    dialTaxonomy
+    moods: Array.from(a.moods),
+    audiences: Array.from(a.audiences),
+    matters: Array.from(a.matters)
   };
 }
-var VARIANT_DESC_AGGREGATE_CAP;
-var init_enricher_brief_server = __esm({
-  "app/lib/enricher-brief.server.ts"() {
-    "use strict";
-    init_db_server();
-    init_schema();
-    init_shopify_server();
-    init_dial_registry_server();
-    init_ask_emma_vocab_server();
-    VARIANT_DESC_AGGREGATE_CAP = 6e3;
-  }
-});
-
-// app/lib/batch-enrichment.server.ts
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-import Anthropic5 from "@anthropic-ai/sdk";
-function stripFences2(raw) {
-  return raw.replace(/^```(?:html|json)?\n?/i, "").replace(/\n?```$/i, "").trim();
-}
-async function loadEnricherAgentPrompt() {
-  if (_cachedAgentPrompt !== null) return _cachedAgentPrompt;
-  const here = dirname(fileURLToPath(import.meta.url));
-  const path = resolve(here, "..", "..", ".claude", "agents", "emma-product-enricher.md");
-  const raw = await readFile(path, "utf8");
-  const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
-  if (!body) throw new Error(`empty agent prompt at ${path}`);
-  _cachedAgentPrompt = body;
-  return body;
-}
-function buildSharedContextBlock(ctx) {
-  const dialReg = Object.entries(ctx.dialRegistryByType).map(([t, labels]) => `  ${t}: ${labels.join(", ")}`).join("\n");
-  const dialTax = Object.entries(ctx.dialTaxonomy).map(([t, items]) => {
-    const lines = items.map((i) => {
-      const scaleParts = [];
-      if (i.scaleLow) scaleParts.push(`1=${i.scaleLow}`);
-      if (i.scaleMid) scaleParts.push(`3=${i.scaleMid}`);
-      if (i.scaleHigh) scaleParts.push(`5=${i.scaleHigh}`);
-      const scaleSuffix = scaleParts.length > 0 ? `  (${scaleParts.join(" | ")})` : "";
-      const def = i.definition ? `: ${i.definition}` : "";
-      return `    - ${i.label}${def}${scaleSuffix}`;
-    }).join("\n");
-    return `  ${t}:
-${lines}`;
-  }).join("\n");
-  return `Shared editorial context for this batch (vocabularies, dial registry, dial taxonomy). Apply per the <inputs> section of your agent prompt.
-
-moodVocab: ${ctx.moodVocab.join(", ")}
-audienceVocab: ${ctx.audienceVocab.join(", ")}
-mattersVocab: ${ctx.mattersVocab.join(", ")}
-
-dialRegistryByType:
-${dialReg}
-
-dialTaxonomy:
-${dialTax}`;
-}
-function buildPerProductUserPrompt(brief) {
-  return `Product brief:
-\`\`\`json
-${JSON.stringify(brief, null, 2)}
-\`\`\`
-
-Return ONLY the ProductWrites JSON object per your <output_schema>. No markdown fences. No commentary. No preamble.`;
-}
-function addUsage(acc, delta) {
-  acc.inputTokens += delta.inputTokens;
-  acc.outputTokens += delta.outputTokens;
-  acc.cacheCreationTokens += delta.cacheCreationTokens;
-  acc.cacheReadTokens += delta.cacheReadTokens;
-}
-async function buildFullEnrichmentRequests(inputs, context, opts = {}) {
-  const emmaBlocks = await buildEmmaSystemBlocks(opts.brandVoice);
-  const agentPrompt = await loadEnricherAgentPrompt();
-  const contextBlock = buildSharedContextBlock(context);
-  const systemParam = [
-    ...emmaBlocks.map((b) => ({
-      type: "text",
-      text: b.text,
-      ...b.cache ? { cache_control: { type: "ephemeral" } } : {}
-    })),
-    { type: "text", text: agentPrompt, cache_control: { type: "ephemeral" } },
-    { type: "text", text: contextBlock, cache_control: { type: "ephemeral" } }
-  ];
-  return inputs.map(({ productId, brief }) => ({
-    custom_id: `${productId}${FULL_ENRICHMENT_SUFFIX}`,
-    params: {
-      model: MODEL_SONNET,
-      max_tokens: opts.maxTokens ?? 4096,
-      system: systemParam,
-      messages: [{ role: "user", content: buildPerProductUserPrompt(brief) }]
-    }
-  }));
-}
-function parseFullEnrichmentEntry(entry) {
-  if (!entry) return { error: "no result for custom_id" };
-  if (entry.result.type !== "succeeded") {
-    const reason = entry.result.type === "errored" ? entry.result.error.error.message : entry.result.type;
-    return { error: `batch ${entry.result.type}: ${reason}` };
-  }
-  const msg = entry.result.message;
-  const u = msg.usage;
-  const usage = {
-    inputTokens: u?.input_tokens ?? 0,
-    outputTokens: u?.output_tokens ?? 0,
-    cacheCreationTokens: u?.cache_creation_input_tokens ?? 0,
-    cacheReadTokens: u?.cache_read_input_tokens ?? 0
+function mulberry322(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t = t + 1831565813 >>> 0;
+    let r = t;
+    r = Math.imul(r ^ r >>> 15, r | 1);
+    r ^= r + Math.imul(r ^ r >>> 7, r | 61);
+    return ((r ^ r >>> 14) >>> 0) / 4294967296;
   };
-  const block = msg.content[0];
-  if (block?.type !== "text") return { error: "unexpected non-text response block", usage };
-  const cleaned = stripFences2(block.text).trim();
-  if (!cleaned) return { error: "empty response", usage };
-  try {
-    return { writes: JSON.parse(cleaned), usage };
-  } catch (err) {
-    const preview = cleaned.slice(0, 200).replace(/\n/g, " ");
-    return { error: `JSON parse failed: ${err instanceof Error ? err.message : String(err)} | preview: ${preview}`, usage };
+}
+function seededShuffle2(arr, seed) {
+  const rand = mulberry322(seed);
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
   }
 }
-async function submitFullEnrichmentBatch(inputs, context, opts = {}) {
-  if (inputs.length === 0) throw new Error("submitFullEnrichmentBatch: no inputs");
-  const requests = await buildFullEnrichmentRequests(inputs, context, opts);
-  const batch = await client4.messages.batches.create({ requests });
-  console.log(`[batch] submitted full-enrichment batch ${batch.id} with ${requests.length} requests (no poll)`);
-  return { batchId: batch.id, productIds: inputs.map((i) => i.productId), submittedCount: requests.length };
-}
-async function collectFullEnrichmentBatch(batchId) {
-  const current = await client4.messages.batches.retrieve(batchId);
-  if (current.processing_status !== "ended") {
-    return { ended: false, status: current.processing_status, succeeded: current.request_counts.succeeded };
-  }
-  const results = /* @__PURE__ */ new Map();
-  const failures = [];
-  const usage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
-  const stream = await client4.messages.batches.results(batchId);
-  for await (const entry of stream) {
-    if (!entry.custom_id.endsWith(FULL_ENRICHMENT_SUFFIX)) continue;
-    const productId = entry.custom_id.slice(0, -FULL_ENRICHMENT_SUFFIX.length);
-    const parsed = parseFullEnrichmentEntry(entry);
-    if (parsed.usage) addUsage(usage, parsed.usage);
-    if (parsed.writes) results.set(productId, parsed.writes);
-    else failures.push({ productId, error: parsed.error });
-  }
-  return { ended: true, results, failures, usage };
-}
-var client4, MODEL_SONNET, POLL_TIMEOUT_DEFAULT_MS, _cachedAgentPrompt, FULL_ENRICHMENT_SUFFIX;
-var init_batch_enrichment_server = __esm({
-  "app/lib/batch-enrichment.server.ts"() {
-    "use strict";
-    init_claude_server();
-    client4 = new Anthropic5({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
-    MODEL_SONNET = "claude-sonnet-4-20250514";
-    POLL_TIMEOUT_DEFAULT_MS = 24 * 60 * 60 * 1e3;
-    _cachedAgentPrompt = null;
-    FULL_ENRICHMENT_SUFFIX = "_fullEnrichment";
-  }
-});
-
-// app/lib/import-enrich.server.ts
-var import_enrich_server_exports = {};
-__export(import_enrich_server_exports, {
-  collectEnrichmentBatch: () => collectEnrichmentBatch,
-  publishEnrichedProducts: () => publishEnrichedProducts,
-  runImportEnrichTick: () => runImportEnrichTick,
-  submitEnrichmentBatch: () => submitEnrichmentBatch
-});
-import { and as and3, asc as asc2, eq as eq13, inArray as inArray3, isNull as isNull2, sql as sql7 } from "drizzle-orm";
-function normalizeIvrExperience(raw) {
-  const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
-  return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
-}
-async function isEnrichEnabled() {
-  return await getPipelineSetting("import_enrich_enabled") === "true";
-}
-async function getBatchCap() {
-  const raw = await getPipelineSetting("import_enrich_batch_cap");
-  const n = raw ? parseInt(raw, 10) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_BATCH_CAP;
-}
-function inferCategoryFallback(stored) {
-  if (!stored) return ["for-him", "for-her"];
-  if (stored.trim().startsWith("[")) {
-    try {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed)) {
-        const valid = /* @__PURE__ */ new Set(["for-him", "for-her", "couples"]);
-        return parsed.filter((s) => typeof s === "string" && valid.has(s));
-      }
-    } catch {
-    }
-  }
-  if (stored === "both") return ["for-him", "for-her"];
-  if (stored === "for-him" || stored === "for-her" || stored === "couples") return [stored];
-  return ["for-him", "for-her"];
-}
-function stripDashes(s) {
-  return s.replace(/\s*—\s*/g, ", ").replace(/\s*–\s*/g, "-");
-}
-async function applyFullEnrichmentWrites(numericProductId, writes) {
-  const snap = await fetchProductSnapshot(numericProductId);
-  if (!snap) throw new Error(`fetchProductSnapshot returned null for ${numericProductId}`);
-  const category = inferCategoryFallback(snap.metafields["xdipx.category"]);
-  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq13(dealHistory.shopifyProductId, numericProductId)).limit(1);
-  const editorialTags = (histRows[0]?.categories ?? []).filter(
-    (c) => !!c && c !== "(uncategorized)"
-  );
-  const sTagline = ed(writes.tagline);
-  const sSeo = ed(writes.seoMetaDescription);
-  const sDesc = ed(writes.descriptionHtml);
-  const sSpecs = edA(writes.specifications);
-  const sCare = edA(writes.careInstructions);
-  const sBox = edA(writes.boxContents);
-  const section = deriveSection({
-    productType: snap.product_type,
-    title: snap.title,
-    productTypeDial: writes.productTypeDial
-  });
-  const doc = {
-    shopifyProductId: numericProductId,
-    category,
-    sectionTags: [section],
-    tagline: sTagline,
-    seoMetaDescription: sSeo,
-    descriptionHtml: sDesc,
-    moodTags: writes.moodTags,
-    audienceTags: writes.audienceTags,
-    mattersTags: writes.mattersTags,
-    productTypeDial: writes.productTypeDial
+function rankRails(products, state, opts = {}) {
+  const { perRail = 4, dropEmpty = false, seed } = opts;
+  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
+  const filtered = products.filter((p) => p.price <= state.budget);
+  const buckets = {
+    Pleasure: [],
+    Play: [],
+    Body: [],
+    Wear: []
   };
-  if (writes.productTitleAugmented && writes.productTitle) {
-    doc.title = ed(writes.productTitle);
-    doc.seoTitle = ed(writes.productTitle);
+  const totals = { Pleasure: 0, Play: 0, Body: 0, Wear: 0 };
+  const aggScore = { Pleasure: 0, Play: 0, Body: 0, Wear: 0 };
+  for (const p of filtered) {
+    const score2 = hasAny ? scoreProduct2(p, state) : 0;
+    buckets[p.category].push({ product: p, score: score2 });
+    totals[p.category] += 1;
+    aggScore[p.category] += score2;
   }
-  if (writes.originalTitle) doc.originalTitle = ed(writes.originalTitle);
-  if (writes.productSubtypeDial != null) doc.productSubtypeDial = writes.productSubtypeDial;
-  if (writes.sensationDialV2) doc.sensationDialV2 = writes.sensationDialV2;
-  if (sSpecs?.length) doc.specifications = sSpecs;
-  if (sCare?.length) doc.careInstructions = sCare;
-  if (sBox?.length) doc.boxContents = sBox;
-  if (writes.emmaHero) doc.emmaHero = writes.emmaHero;
-  if (writes.moodImageUrl) doc.moodImageUrl = writes.moodImageUrl;
-  await pushProductToShopify(doc);
-  try {
-    const gid = `gid://shopify/Product/${numericProductId}`;
-    const upsertParams = {
-      handle: snap.handle,
-      shopifyProductId: gid,
-      title: doc.title ?? snap.title,
-      vendor: snap.vendor,
-      category,
-      tagline: sTagline,
-      description: sDesc,
-      seoDescription: sSeo,
-      productTypeDial: writes.productTypeDial,
-      moodTags: writes.moodTags,
-      audienceTags: writes.audienceTags,
-      mattersTags: writes.mattersTags
-    };
-    if (editorialTags.length) upsertParams.tags = editorialTags;
-    if (doc.seoTitle) upsertParams.seoTitle = doc.seoTitle;
-    if (writes.productSubtypeDial != null) upsertParams.productSubtypeDial = writes.productSubtypeDial;
-    if (writes.sensationDialV2) upsertParams.sensationDialV2 = writes.sensationDialV2;
-    if (sSpecs?.length) upsertParams.specifications = sSpecs;
-    if (sCare?.length) upsertParams.careInstructions = sCare;
-    if (sBox?.length) upsertParams.boxContents = sBox;
-    const ivrExperience = normalizeIvrExperience(writes.ivrExperience);
-    if (ivrExperience.length) upsertParams.ivrExperience = ivrExperience;
-    if (writes.ivrUseCase?.length) upsertParams.ivrUseCase = writes.ivrUseCase;
-    if (writes.ivrFeatures?.length) upsertParams.ivrFeatures = writes.ivrFeatures;
-    if (writes.productFaqs?.length) upsertParams.productFaqs = writes.productFaqs;
-    if (writes.originalTitle) upsertParams.originalTitle = writes.originalTitle;
-    if (writes.moodImageUrl) upsertParams.moodImageUrl = writes.moodImageUrl;
-    const firstImage = snap.images[0]?.src;
-    if (firstImage) upsertParams.imageUrl = firstImage;
-    let lastErr;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        await upsertProductPage(upsertParams);
-        lastErr = null;
-        break;
-      } catch (err) {
-        lastErr = err;
-        if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
-      }
+  for (let ci = 0; ci < CATEGORIES.length; ci++) {
+    const cat = CATEGORIES[ci];
+    if (!hasAny && seed !== void 0) {
+      seededShuffle2(buckets[cat], (seed ^ (ci + 1) * 2654435761) >>> 0);
+    } else {
+      buckets[cat].sort((a, b) => b.score - a.score);
     }
-    if (lastErr) {
-      console.error(`[import-enrich] sanity upsert failed for ${numericProductId}:`, lastErr);
-    }
-  } catch (err) {
-    console.error(`[import-enrich] sanity mirror error for ${numericProductId}:`, err);
   }
-}
-async function submitEnrichmentBatch(cap) {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq13(importCandidates.dealHistoryId, dealHistory.id)).where(and3(
-    eq13(importCandidates.status, "imported"),
-    isNull2(importCandidates.enrichedAt),
-    isNull2(importCandidates.enrichBatchId)
-  )).orderBy(asc2(importCandidates.id)).limit(cap);
-  const valid = rows.filter((r) => Boolean(r.productId));
-  if (valid.length === 0) return { submitted: 0, reason: "no_unenriched" };
-  const context = await loadSharedEnrichmentContext();
-  const inputs = [];
-  const candidateIds = [];
-  for (const r of valid) {
-    const brief = await gatherProductBrief(r.productId);
-    if (!brief) {
-      console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) \u2014 skipping`);
-      continue;
-    }
-    inputs.push({ productId: r.productId, brief });
-    candidateIds.push(r.id);
-  }
-  if (inputs.length === 0) return { submitted: 0, reason: "no_briefs" };
-  const brandVoice = await getPipelineSetting("brandVoice").catch(() => null) ?? void 0;
-  const { batchId, productIds } = await submitFullEnrichmentBatch(
-    inputs,
-    context,
-    brandVoice ? { brandVoice } : {}
-  );
-  await db.insert(enrichmentBatches).values({ batchId, status: "pending", candidateIds, productIds });
-  await db.update(importCandidates).set({ enrichBatchId: batchId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray3(importCandidates.id, candidateIds));
-  console.log(`[import-enrich] submitted batch ${batchId} for ${inputs.length} product(s)`);
-  return { submitted: inputs.length, batchId };
-}
-async function collectEnrichmentBatch() {
-  const pendingBatches = await db.select().from(enrichmentBatches).where(eq13(enrichmentBatches.status, "pending")).orderBy(asc2(enrichmentBatches.submittedAt));
-  let enrichedTotal = 0;
-  let failedTotal = 0;
-  let stillPending = 0;
-  for (const batch of pendingBatches) {
-    let res;
-    try {
-      res = await collectFullEnrichmentBatch(batch.batchId);
-    } catch (err) {
-      console.error(`[import-enrich] collect retrieve failed for batch ${batch.batchId}:`, err);
-      stillPending++;
-      continue;
-    }
-    if (!res.ended) {
-      stillPending++;
-      continue;
-    }
-    const idByProduct = /* @__PURE__ */ new Map();
-    batch.productIds.forEach((p, i) => {
-      const cid = batch.candidateIds[i];
-      if (cid !== void 0) idByProduct.set(p, cid);
+  const order = [...CATEGORIES];
+  if (hasAny) {
+    order.sort((a, b) => {
+      const diff = aggScore[b] - aggScore[a];
+      if (diff !== 0) return diff;
+      return CATEGORIES.indexOf(a) - CATEGORIES.indexOf(b);
     });
-    const failures = [...res.failures];
-    let enriched = 0;
-    for (const [productId, writes] of res.results) {
-      try {
-        await applyFullEnrichmentWrites(productId, writes);
-        const candidateId = idByProduct.get(productId);
-        if (candidateId !== void 0) {
-          await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq13(importCandidates.id, candidateId));
-        }
-        enriched++;
-      } catch (err) {
-        failures.push({ productId, error: `apply: ${err instanceof Error ? err.message : String(err)}` });
+  }
+  const rails = order.map((cat) => ({
+    category: cat,
+    score: aggScore[cat],
+    total: totals[cat],
+    items: buckets[cat].slice(0, perRail)
+  }));
+  return dropEmpty ? rails.filter((r) => r.items.length > 0) : rails;
+}
+function rankSingleRail(products, state, category, offset, limit) {
+  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
+  const filtered = products.filter((p) => p.price <= state.budget && p.category === category);
+  const scored = filtered.map((p) => ({
+    product: p,
+    score: hasAny ? scoreProduct2(p, state) : 0
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return { items: scored.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(0, limit)), total: scored.length };
+}
+var SCORE_MOOD, SCORE_AUDIENCE, SCORE_MATTERS;
+var init_discovery_emma = __esm({
+  "app/lib/discovery-emma.ts"() {
+    "use strict";
+    init_discovery();
+    SCORE_MOOD = 3;
+    SCORE_AUDIENCE = 2;
+    SCORE_MATTERS = 2;
+  }
+});
+
+// app/lib/discovery-tags.ts
+function normalizeTag2(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  return trimmed.toLowerCase().split(/(\s+|-)/).map((part) => {
+    if (/^\s+$/.test(part) || part === "-") return part;
+    if (part.length === 0) return part;
+    return part[0].toUpperCase() + part.slice(1);
+  }).join("");
+}
+var init_discovery_tags = __esm({
+  "app/lib/discovery-tags.ts"() {
+    "use strict";
+  }
+});
+
+// app/lib/discovery-rules.server.ts
+import { eq as eq16, and as and4, asc as asc3 } from "drizzle-orm";
+async function getActiveDiscoveryRules() {
+  const cached2 = await kvGet(RULES_CACHE_KEY);
+  if (cached2 && Array.isArray(cached2)) return cached2;
+  const rows = await db.select().from(discoveryRules).where(eq16(discoveryRules.active, true)).orderBy(asc3(discoveryRules.ruleType), asc3(discoveryRules.sortOrder), asc3(discoveryRules.id));
+  const rules = rows.map(rowToRule);
+  await kvSet(RULES_CACHE_KEY, rules, RULES_TTL_SECONDS);
+  return rules;
+}
+async function getInventoryMin() {
+  const cached2 = await kvGet(INVENTORY_MIN_CACHE_KEY);
+  if (typeof cached2 === "number") return cached2;
+  const row = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq16(pipelineSettings.key, "discovery_inventory_min")).limit(1);
+  const parsed = row.length && row[0] ? parseInt(row[0].value, 10) : 0;
+  const value = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  await kvSet(INVENTORY_MIN_CACHE_KEY, value, INVENTORY_MIN_CACHE_TTL);
+  return value;
+}
+function rowToRule(row) {
+  return {
+    id: row.id,
+    ruleType: row.ruleType,
+    ruleValue: row.ruleValue,
+    category: row.category ?? null,
+    sortOrder: row.sortOrder,
+    notes: row.notes ?? null,
+    active: row.active,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+function applyRules(products, rules, inventoryMin) {
+  if (rules.length === 0 && inventoryMin === 0) return products;
+  const excludeHandles = /* @__PURE__ */ new Set();
+  const excludeTypes = [];
+  const excludeKeywords = [];
+  const priceFloors = [];
+  const priceCeilings = [];
+  for (const rule of rules) {
+    switch (rule.ruleType) {
+      case "exclude_product":
+        excludeHandles.add(rule.ruleValue);
+        break;
+      case "exclude_product_type":
+        excludeTypes.push({ value: rule.ruleValue.trim().toLowerCase(), category: rule.category });
+        break;
+      case "exclude_keyword":
+        excludeKeywords.push(rule.ruleValue.toLowerCase());
+        break;
+      case "exclude_price_min": {
+        const n = parseFloat(rule.ruleValue);
+        if (Number.isFinite(n)) priceFloors.push(n);
+        break;
+      }
+      case "exclude_price_max": {
+        const n = parseFloat(rule.ruleValue);
+        if (Number.isFinite(n)) priceCeilings.push(n);
+        break;
       }
     }
-    await db.update(enrichmentBatches).set({
-      status: "collected",
-      collectedAt: /* @__PURE__ */ new Date(),
-      succeeded: enriched,
-      failed: failures.length,
-      error: failures.length ? JSON.stringify(failures).slice(0, 4e3) : null
-    }).where(eq13(enrichmentBatches.id, batch.id));
-    if (failures.length) {
-      console.error(`[import-enrich] batch ${batch.batchId} collected with ${failures.length} failure(s):`, failures);
-    }
-    console.log(`[import-enrich] batch ${batch.batchId} collected: enriched=${enriched} failed=${failures.length}`);
-    enrichedTotal += enriched;
-    failedTotal += failures.length;
   }
-  return { enriched: enrichedTotal, failed: failedTotal, stillPending };
+  return products.filter((p) => {
+    if (excludeHandles.has(p.handle)) return false;
+    if (p.productType) {
+      const productTypeLc = p.productType.trim().toLowerCase();
+      for (const et of excludeTypes) {
+        if (et.value === productTypeLc && (et.category === null || et.category === p.category)) {
+          return false;
+        }
+      }
+    }
+    const lowerTitle = p.title.toLowerCase();
+    for (const kw of excludeKeywords) {
+      if (lowerTitle.includes(kw)) return false;
+    }
+    for (const floor of priceFloors) {
+      if (p.price < floor) return false;
+    }
+    for (const ceiling of priceCeilings) {
+      if (p.price > ceiling) return false;
+    }
+    if (inventoryMin > 0 && p.totalInventory !== null && p.totalInventory < inventoryMin) {
+      return false;
+    }
+    return true;
+  });
 }
-async function publishEnrichedProducts() {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq13(importCandidates.dealHistoryId, dealHistory.id)).where(and3(
-    eq13(importCandidates.status, "imported"),
-    sql7`${importCandidates.enrichedAt} IS NOT NULL`,
-    isNull2(importCandidates.publishedAt)
-  ));
-  let published = 0;
-  let failed = 0;
-  for (const r of rows) {
-    if (!r.productId) continue;
+function fillFallbacks(rail, rules, filteredIndex, perRail, alreadyIncludedIds = /* @__PURE__ */ new Set(), collectionPinIds = {}, honoraryProductsByCategory = {}) {
+  const slots = perRail - rail.items.length;
+  if (slots <= 0) return rail;
+  const byHandle = /* @__PURE__ */ new Map();
+  const byId = /* @__PURE__ */ new Map();
+  for (const p of filteredIndex) {
+    byHandle.set(p.handle, p);
+    byId.set(p.id, p);
+  }
+  for (const p of honoraryProductsByCategory[rail.category] ?? []) {
+    if (!byId.has(p.id)) byId.set(p.id, p);
+  }
+  const inRail = new Set(rail.items.map((sp) => sp.product.handle));
+  const inRailIds = new Set(rail.items.map((sp) => sp.product.id));
+  const pins = rules.filter((r) => r.ruleType === "pin_fallback" && r.category === rail.category).sort((a, b) => a.sortOrder - b.sortOrder);
+  const extras = [];
+  const usedIds = /* @__PURE__ */ new Set();
+  for (const pin of pins) {
+    if (extras.length >= slots) break;
+    const product = byHandle.get(pin.ruleValue);
+    if (!product) continue;
+    if (inRail.has(product.handle)) continue;
+    if (alreadyIncludedIds.has(product.id)) continue;
+    if (usedIds.has(product.id)) continue;
+    extras.push({ product, score: 0 });
+    usedIds.add(product.id);
+  }
+  const collectionIds = collectionPinIds[rail.category] ?? [];
+  for (const id of collectionIds) {
+    if (extras.length >= slots) break;
+    const product = byId.get(id);
+    if (!product) continue;
+    if (product.category !== rail.category) continue;
+    if (inRailIds.has(product.id)) continue;
+    if (alreadyIncludedIds.has(product.id)) continue;
+    if (usedIds.has(product.id)) continue;
+    extras.push({ product, score: 0 });
+    usedIds.add(product.id);
+  }
+  if (extras.length === 0) return rail;
+  return {
+    ...rail,
+    items: [...rail.items, ...extras],
+    total: rail.total + extras.length
+  };
+}
+function cleanCollectionHandle(input) {
+  if (!input) return "";
+  let s = input.trim().toLowerCase();
+  const protoMatch = s.match(/^https?:\/\/[^/]+(.*)$/);
+  if (protoMatch && protoMatch[1] !== void 0) s = protoMatch[1];
+  s = s.replace(/^\/+collections\/+/, "").replace(/^\/+/, "");
+  const stop = s.search(/[?#/]/);
+  if (stop !== -1) s = s.slice(0, stop);
+  return s;
+}
+async function resolveCollectionPins(rules, fetcher) {
+  const collectionPins = rules.filter((r) => r.ruleType === "pin_collection_fallback" && r.category !== null).sort((a, b) => a.sortOrder - b.sortOrder);
+  if (collectionPins.length === 0) return {};
+  const handleCache = /* @__PURE__ */ new Map();
+  const result = {};
+  for (const pin of collectionPins) {
+    const handle = cleanCollectionHandle(pin.ruleValue);
+    if (!handle || !pin.category) continue;
+    let ids = handleCache.get(handle);
+    if (!ids) {
+      ids = await fetcher(handle);
+      handleCache.set(handle, ids);
+    }
+    const seen = new Set(result[pin.category] ?? []);
+    const merged = result[pin.category] ?? [];
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      merged.push(id);
+    }
+    result[pin.category] = merged;
+  }
+  return result;
+}
+function autoLoosen(category, state, filteredIndex, perRail) {
+  const withoutMatters = { ...state, matters: [] };
+  const r1 = rankSingleRail(filteredIndex, withoutMatters, category, 0, perRail);
+  if (r1.items.length > 0) {
+    return { items: r1.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
+  }
+  const withoutAudience = { ...withoutMatters, audience: [] };
+  const r2 = rankSingleRail(filteredIndex, withoutAudience, category, 0, perRail);
+  if (r2.items.length > 0) {
+    return { items: r2.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
+  }
+  const withoutMood = { ...withoutAudience, mood: [] };
+  const r3 = rankSingleRail(filteredIndex, withoutMood, category, 0, perRail);
+  if (r3.items.length > 0) {
+    return { items: r3.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
+  }
+  return null;
+}
+var RULES_CACHE_KEY, RULES_TTL_SECONDS, INVENTORY_MIN_CACHE_KEY, INVENTORY_MIN_CACHE_TTL;
+var init_discovery_rules_server = __esm({
+  "app/lib/discovery-rules.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_kv_server();
+    init_discovery_emma();
+    init_discovery_server();
+    RULES_CACHE_KEY = "discovery:rules:v1";
+    RULES_TTL_SECONDS = 5 * 60;
+    INVENTORY_MIN_CACHE_KEY = "discovery:inventory-min:v1";
+    INVENTORY_MIN_CACHE_TTL = 5 * 60;
+  }
+});
+
+// app/lib/discovery.server.ts
+var discovery_server_exports = {};
+__export(discovery_server_exports, {
+  INDEX_KEY: () => INDEX_KEY,
+  INDEX_TTL_SECONDS: () => INDEX_TTL_SECONDS,
+  VOCAB_KEY: () => VOCAB_KEY,
+  VOCAB_TTL_SECONDS: () => VOCAB_TTL_SECONDS,
+  buildDiscoveryIndex: () => buildDiscoveryIndex,
+  computeVocab: () => computeVocab,
+  fetchHonoraryProducts: () => fetchHonoraryProducts,
+  getDiscoveryIndex: () => getDiscoveryIndex,
+  getDiscoveryRailPage: () => getDiscoveryRailPage,
+  getDiscoveryRails: () => getDiscoveryRails,
+  getDiscoveryVocab: () => getDiscoveryVocab,
+  getHonoraryProductsForPin: () => getHonoraryProductsForPin,
+  getProductIdsByCollectionHandle: () => getProductIdsByCollectionHandle,
+  invalidateDiscoveryIndex: () => invalidateDiscoveryIndex,
+  reportTagCoverage: () => reportTagCoverage,
+  triggerDiscoveryRebuild: () => triggerDiscoveryRebuild
+});
+function dialToSubcategory(dial) {
+  switch (dial) {
+    case "vibrator":
+      return "Vibrators";
+    case "dildo":
+      return "Dildos";
+    case "anal":
+      return "Anal";
+    case "cock-ring":
+    case "stroker":
+    case "extender":
+    case "pump":
+    case "sex-machine":
+      return "For Him";
+    case "bondage":
+      return "Bondage & Kink";
+    case "couples":
+      return "Couples";
+    case "lube":
+      return "Lubricants";
+    case "massage":
+      return "Massage";
+    case "enhancer":
+    case "wellness":
+      return "Wellness";
+    case "wear":
+      return "Lingerie";
+    case "harness":
+      return "Accessories";
+    default:
+      return null;
+  }
+}
+function cleanTagList(arr) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const raw of arr) {
+    const v = normalizeTag2(raw);
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+function classifyOptionValues(options) {
+  let colorValues = [];
+  let sizeValues = [];
+  for (const o of options) {
+    const name = o.name.toLowerCase();
+    const values = o.optionValues.map((v) => v.name.trim()).filter(Boolean);
+    if (/colou?r/.test(name)) colorValues = values;
+    else if (/size|length/.test(name)) sizeValues = values;
+  }
+  return { colorValues, sizeValues };
+}
+function derivePricingAndOptions(n, price) {
+  const maxRaw = Number(n.priceRangeV2.maxVariantPrice?.amount);
+  const priceMax = Number.isFinite(maxRaw) && maxRaw > price ? maxRaw : null;
+  const originalRaw = Number(n.originalPriceRaw?.value);
+  const compareRaw = Number(n.compareAtPriceRange?.minVariantCompareAtPrice?.amount);
+  const msrp = Number.isFinite(originalRaw) && originalRaw > 0 ? originalRaw : Number.isFinite(compareRaw) ? compareRaw : NaN;
+  const compareAtPrice = Number.isFinite(msrp) && msrp > price ? msrp : null;
+  const { colorValues, sizeValues } = classifyOptionValues(n.options ?? []);
+  return { priceMax, compareAtPrice, colorValues, sizeValues };
+}
+function parseListMetafield(value) {
+  if (!value) return [];
+  if (value.trim().startsWith("[")) {
     try {
-      await activateShopifyProduct(r.productId);
-      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq13(importCandidates.id, r.id));
-      published++;
-    } catch (err) {
-      console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err);
-      failed++;
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      return [];
     }
   }
-  return { published, failed };
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
 }
-async function runImportEnrichTick(opts = {}) {
-  if (!await isEnrichEnabled()) {
-    return { ok: true, skipped: true, reason: "disabled" };
-  }
-  void opts;
-  const collect = await collectEnrichmentBatch();
-  const publish = await publishEnrichedProducts();
-  let submit = { submitted: 0, reason: "batch_in_flight" };
-  const pendingRow = await db.select({ c: sql7`count(*)::int` }).from(enrichmentBatches).where(eq13(enrichmentBatches.status, "pending"));
-  const pendingCount = Number(pendingRow[0]?.c ?? 0);
-  if (pendingCount === 0) {
-    submit = await submitEnrichmentBatch(await getBatchCap());
-  }
-  return { ok: true, collect, publish, submit };
+function nodeToDiscoveryProduct(n, categoryMap) {
+  const category = categoryMap.get(n.id);
+  if (!category) return null;
+  const price = Number(n.priceRangeV2.minVariantPrice.amount);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const dial = n.productTypeDial?.value ?? "";
+  const subcategory = dialToSubcategory(dial) ?? category;
+  const mood = cleanTagList(parseListMetafield(n.moodTagsRaw?.value));
+  const audience = cleanTagList(parseListMetafield(n.audienceTagsRaw?.value));
+  const matters = cleanTagList(parseListMetafield(n.mattersTagsRaw?.value));
+  const productType = (n.productType ?? "").trim() || null;
+  const productTypeDial = dial || null;
+  const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(n, price);
+  return {
+    id: n.id,
+    handle: n.handle,
+    title: n.title,
+    price,
+    priceMax,
+    compareAtPrice,
+    colorValues,
+    sizeValues,
+    imageUrl: n.featuredImage?.url ?? null,
+    imageAlt: n.featuredImage?.altText ?? null,
+    category,
+    subcategory,
+    mood,
+    audience,
+    matters,
+    totalInventory: n.totalInventory ?? null,
+    productType,
+    productTypeDial
+  };
 }
-var VALID_IVR_EXPERIENCE, DEFAULT_BATCH_CAP, ed, edA;
-var init_import_enrich_server = __esm({
-  "app/lib/import-enrich.server.ts"() {
-    "use strict";
-    init_db_server();
-    init_schema();
-    init_enricher_brief_server();
-    init_batch_enrichment_server();
-    init_shopify_server();
-    init_sanity_server();
-    init_feed_processor_server();
-    init_claude_server();
-    VALID_IVR_EXPERIENCE = new Set(IVR_EXPERIENCE_LEVELS);
-    DEFAULT_BATCH_CAP = 10;
-    ed = (s) => s == null ? s : stripDashes(s);
-    edA = (a) => a?.map(stripDashes);
+async function fetchCollectionProductIds(collectionGid) {
+  const ids = /* @__PURE__ */ new Set();
+  let cursor = null;
+  while (true) {
+    const data = await adminGraphQL(
+      COLLECTION_PRODUCTS_QUERY,
+      { id: collectionGid, cursor }
+    );
+    const page = data.collection?.products;
+    if (!page) break;
+    for (const n of page.nodes) ids.add(n.id);
+    if (!page.pageInfo.hasNextPage) break;
+    cursor = page.pageInfo.endCursor;
+    if (!cursor) break;
   }
-});
-
-// app/lib/attribution.server.ts
-import { parse as parseCookie, serialize as serializeCookie } from "cookie";
-function getClientIP(request) {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? request.headers.get("x-real-ip") ?? "0.0.0.0";
+  return ids;
 }
-function hashIP(ip) {
-  let hash = 0;
-  for (let i = 0; i < ip.length; i++) {
-    hash = (hash << 5) - hash + ip.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(16).padStart(8, "0");
-}
-var THIRTY_DAYS;
-var init_attribution_server = __esm({
-  "app/lib/attribution.server.ts"() {
-    "use strict";
-    THIRTY_DAYS = 60 * 60 * 24 * 30;
-  }
-});
-
-// app/lib/consent.server.ts
-var consent_server_exports = {};
-__export(consent_server_exports, {
-  MARKETING_CONSENT_COOKIE: () => MARKETING_CONSENT_COOKIE,
-  getMarketingConsent: () => getMarketingConsent,
-  logConsent: () => logConsent,
-  logTosAcceptance: () => logTosAcceptance
-});
-import { parse as parseCookie2 } from "cookie";
-function getMarketingConsent(request) {
-  const cookies = parseCookie2(request.headers.get("Cookie") ?? "");
-  const raw = cookies[MARKETING_CONSENT_COOKIE];
-  if (!raw) return false;
+async function getProductIdsByCollectionHandle(handle) {
+  const key = handle.trim().toLowerCase();
+  if (!key) return [];
+  const cacheKey3 = collectionHandleKey(key);
+  const cached2 = await kvGet(cacheKey3);
+  if (cached2 && Array.isArray(cached2)) return cached2;
+  let ids = [];
   try {
-    const parsed = JSON.parse(raw);
-    return parsed.marketing === true;
-  } catch {
-    return false;
+    const data = await adminGraphQL(
+      COLLECTION_BY_HANDLE_QUERY,
+      { handle: key }
+    );
+    const gid = data.collectionByHandle?.id;
+    if (gid) {
+      const set = await fetchCollectionProductIds(gid);
+      ids = Array.from(set);
+    }
+  } catch (err) {
+    console.error("[discovery] getProductIdsByCollectionHandle error for", key, err);
+    return [];
   }
+  await kvSet(cacheKey3, ids, COLLECTION_HANDLE_CACHE_TTL);
+  return ids;
 }
-async function logConsent(request, opts) {
-  await db.insert(consentLog).values({
-    sessionId: opts.sessionId,
-    customerId: opts.customerId ?? null,
-    ipHash: hashIP(getClientIP(request)),
-    consentGiven: true,
-    consentType: opts.consentType,
-    policyVersion: opts.policyVersion
+async function fetchHonoraryProducts(ids, category) {
+  if (ids.length === 0) return [];
+  const out = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const batch = ids.slice(i, i + 100);
+    let resp;
+    try {
+      resp = await adminGraphQL(NODES_BY_IDS_QUERY, { ids: batch });
+    } catch (err) {
+      console.error("[discovery] fetchHonoraryProducts batch failed:", err);
+      continue;
+    }
+    for (const node of resp.nodes) {
+      if (!node || node.status !== "ACTIVE") continue;
+      const price = Number(node.priceRangeV2.minVariantPrice.amount);
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const dial = node.productTypeDial?.value ?? "";
+      const subcategory = dialToSubcategory(dial) ?? category;
+      const productType = (node.productType ?? "").trim() || null;
+      const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(node, price);
+      out.push({
+        id: node.id,
+        handle: node.handle,
+        title: node.title,
+        price,
+        priceMax,
+        compareAtPrice,
+        colorValues,
+        sizeValues,
+        imageUrl: node.featuredImage?.url ?? null,
+        imageAlt: node.featuredImage?.altText ?? null,
+        category,
+        // honorary — forced to the pinned rail's category
+        subcategory,
+        mood: cleanTagList(parseListMetafield(node.moodTagsRaw?.value)),
+        audience: cleanTagList(parseListMetafield(node.audienceTagsRaw?.value)),
+        matters: cleanTagList(parseListMetafield(node.mattersTagsRaw?.value)),
+        totalInventory: node.totalInventory ?? null,
+        productType,
+        productTypeDial: dial || null
+      });
+    }
+  }
+  return out;
+}
+async function getHonoraryProductsForPin(handle, category) {
+  const cleaned = handle.trim().toLowerCase();
+  if (!cleaned) return [];
+  const cacheKey3 = honoraryCacheKey(category, cleaned);
+  const cached2 = await kvGet(cacheKey3);
+  if (cached2 && Array.isArray(cached2)) return cached2;
+  const ids = await getProductIdsByCollectionHandle(cleaned);
+  if (ids.length === 0) {
+    await kvSet(cacheKey3, [], HONORARY_CACHE_TTL);
+    return [];
+  }
+  const products = await fetchHonoraryProducts(ids, category);
+  await kvSet(cacheKey3, products, HONORARY_CACHE_TTL);
+  return products;
+}
+async function buildCategoryMap() {
+  const sets = await Promise.all(
+    CATEGORY_PRIORITY.map(async (cat) => ({
+      cat,
+      ids: await fetchCollectionProductIds(CATEGORY_COLLECTION_IDS[cat])
+    }))
+  );
+  const map = /* @__PURE__ */ new Map();
+  for (const { cat, ids } of sets) {
+    for (const id of ids) {
+      if (!map.has(id)) map.set(id, cat);
+    }
+  }
+  return map;
+}
+async function buildDiscoveryIndex() {
+  const categoryMap = await buildCategoryMap();
+  const out = [];
+  let cursor = null;
+  while (true) {
+    const data = await adminGraphQL(
+      PRODUCTS_PAGE_QUERY,
+      { cursor }
+    );
+    for (const node of data.products.nodes) {
+      const dp = nodeToDiscoveryProduct(node, categoryMap);
+      if (dp) out.push(dp);
+    }
+    if (!data.products.pageInfo.hasNextPage) break;
+    cursor = data.products.pageInfo.endCursor;
+    if (!cursor) break;
+  }
+  return out;
+}
+function triggerDiscoveryRebuild() {
+  const baseUrl = process.env["BASE_URL"];
+  const cronSecret = process.env["CRON_SECRET"];
+  if (!baseUrl || !cronSecret) return;
+  void fetch(`${baseUrl}/cron/warm-discovery-index`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${cronSecret}` }
+  }).catch(() => {
   });
 }
-async function logTosAcceptance(request, opts) {
-  await db.insert(tosAcceptance).values({
-    customerId: opts.customerId,
-    email: opts.email ?? null,
-    tosVersion: opts.tosVersion,
-    ipHash: hashIP(getClientIP(request)),
-    acceptanceMethod: opts.method
-  });
+async function getDiscoveryIndex(opts = {}) {
+  if (!opts.force) {
+    const cached2 = await kvGet(INDEX_KEY);
+    if (cached2 && Array.isArray(cached2) && cached2.length > 0) return cached2;
+  }
+  triggerDiscoveryRebuild();
+  return [];
 }
-var MARKETING_CONSENT_COOKIE;
-var init_consent_server = __esm({
-  "app/lib/consent.server.ts"() {
+async function invalidateDiscoveryIndex() {
+  await kvSet(INDEX_KEY, null, 1);
+  await kvSet(VOCAB_KEY, null, 1);
+}
+function computeVocab(index2) {
+  const tally = (key) => {
+    const counts = /* @__PURE__ */ new Map();
+    for (const p of index2) {
+      for (const v of p[key]) counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([v]) => v);
+  };
+  return {
+    moods: tally("mood"),
+    audiences: tally("audience"),
+    matters: tally("matters")
+  };
+}
+async function getDiscoveryVocab() {
+  const cached2 = await kvGet(VOCAB_KEY);
+  if (cached2 && Array.isArray(cached2.moods) && cached2.moods.length > 0) return cached2;
+  const idx = await getDiscoveryIndex();
+  if (idx.length === 0) return { moods: [], audiences: [], matters: [] };
+  const vocab = computeVocab(idx);
+  if (vocab.moods.length > 0 || vocab.audiences.length > 0 || vocab.matters.length > 0) {
+    await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS);
+  }
+  return vocab;
+}
+async function getDiscoveryRails(state, opts = {}) {
+  const products = opts.index ?? await getDiscoveryIndex();
+  const perRail = opts.perRail ?? 4;
+  const [rules, inventoryMin] = await Promise.all([
+    getActiveDiscoveryRules(),
+    getInventoryMin()
+  ]);
+  const filtered = applyRules(products, rules, inventoryMin);
+  const collectionPinIds = await resolveCollectionPins(
+    rules,
+    getProductIdsByCollectionHandle
+  );
+  const rankOpts = { perRail };
+  if (opts.dropEmpty !== void 0) rankOpts.dropEmpty = opts.dropEmpty;
+  if (opts.seed !== void 0) rankOpts.seed = opts.seed;
+  const rails = rankRails(filtered, state, rankOpts);
+  const hasAnySelections = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
+  const indexedIds = new Set(filtered.map((p) => p.id));
+  const honoraryByCategory = {};
+  const collectionPinRules = rules.filter((r) => r.ruleType === "pin_collection_fallback" && r.category).sort((a, b) => a.sortOrder - b.sortOrder);
+  await Promise.all(
+    collectionPinRules.map(async (pin) => {
+      const cat = pin.category;
+      const products2 = await getHonoraryProductsForPin(pin.ruleValue, cat);
+      const novel = products2.filter((p) => !indexedIds.has(p.id));
+      if (novel.length === 0) return;
+      const allowed = applyRules(novel, rules, inventoryMin);
+      if (allowed.length === 0) return;
+      const existing = honoraryByCategory[cat] ?? [];
+      const seen = new Set(existing.map((p) => p.id));
+      for (const p of allowed) {
+        if (!seen.has(p.id)) {
+          existing.push(p);
+          seen.add(p.id);
+        }
+      }
+      honoraryByCategory[cat] = existing;
+    })
+  );
+  const includedIds = new Set(
+    rails.flatMap((r) => r.items.map((sp) => sp.product.id))
+  );
+  for (const rail of rails) {
+    if (rail.items.length < perRail) {
+      const filled = fillFallbacks(
+        rail,
+        rules,
+        filtered,
+        perRail,
+        includedIds,
+        collectionPinIds,
+        honoraryByCategory
+      );
+      for (const sp of filled.items) {
+        if (!includedIds.has(sp.product.id)) includedIds.add(sp.product.id);
+      }
+      rail.items = filled.items;
+      rail.total = filled.total;
+    }
+  }
+  for (const rail of rails) {
+    if (rail.items.length === 0 && hasAnySelections) {
+      const loosened = autoLoosen(rail.category, state, filtered, perRail);
+      if (loosened) {
+        rail.items = loosened.items;
+        rail.total = loosened.items.length;
+        rail.relaxed = true;
+        rail.relaxedReason = loosened.reason;
+      }
+    }
+  }
+  const available = availableToArrays(computeAvailable(filtered, state));
+  return { rails, total: filtered.length, available };
+}
+async function getDiscoveryRailPage(state, category, offset, limit, opts = {}) {
+  const products = opts.index ?? await getDiscoveryIndex();
+  const [rules, inventoryMin] = await Promise.all([
+    getActiveDiscoveryRules(),
+    getInventoryMin()
+  ]);
+  const filtered = applyRules(products, rules, inventoryMin);
+  return rankSingleRail(filtered, state, category, offset, limit);
+}
+async function reportTagCoverage() {
+  const idx = await getDiscoveryIndex({ force: true });
+  const report = {
+    total: idx.length,
+    withMood: 0,
+    withAudience: 0,
+    withMatters: 0,
+    withAllThree: 0,
+    withCategoryMapping: idx.length,
+    // index already requires a category mapping
+    byCategory: { Pleasure: 0, Play: 0, Body: 0, Wear: 0 }
+  };
+  for (const p of idx) {
+    if (p.mood.length > 0) report.withMood += 1;
+    if (p.audience.length > 0) report.withAudience += 1;
+    if (p.matters.length > 0) report.withMatters += 1;
+    if (p.mood.length > 0 && p.audience.length > 0 && p.matters.length > 0) {
+      report.withAllThree += 1;
+    }
+    report.byCategory[p.category] += 1;
+  }
+  return report;
+}
+var INDEX_VERSION, INDEX_KEY, INDEX_TTL_SECONDS, VOCAB_KEY, VOCAB_TTL_SECONDS, CATEGORY_COLLECTION_IDS, CATEGORY_PRIORITY, PRODUCTS_PAGE_QUERY, COLLECTION_PRODUCTS_QUERY, COLLECTION_BY_HANDLE_QUERY, COLLECTION_HANDLE_CACHE_TTL, collectionHandleKey, NODES_BY_IDS_QUERY, HONORARY_CACHE_TTL, honoraryCacheKey;
+var init_discovery_server = __esm({
+  "app/lib/discovery.server.ts"() {
     "use strict";
-    init_db_server();
-    init_schema();
-    init_attribution_server();
-    MARKETING_CONSENT_COOKIE = "__xdipx_consent";
+    init_shopify_server();
+    init_kv_server();
+    init_discovery_emma();
+    init_discovery_tags();
+    init_discovery_rules_server();
+    INDEX_VERSION = "v6";
+    INDEX_KEY = `discovery:index:${INDEX_VERSION}`;
+    INDEX_TTL_SECONDS = 60 * 60 * 24;
+    VOCAB_KEY = `discovery:vocab:${INDEX_VERSION}`;
+    VOCAB_TTL_SECONDS = 60 * 60 * 24;
+    CATEGORY_COLLECTION_IDS = {
+      Pleasure: "gid://shopify/Collection/330228727979",
+      Play: "gid://shopify/Collection/330228695211",
+      Body: "gid://shopify/Collection/330227581099",
+      Wear: "gid://shopify/Collection/330229514411"
+    };
+    CATEGORY_PRIORITY = ["Pleasure", "Play", "Body", "Wear"];
+    PRODUCTS_PAGE_QUERY = /* GraphQL */
+    `
+  query DiscoveryIndexPage($cursor: String) {
+    products(first: 100, after: $cursor, query: "status:active") {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        handle
+        title
+        status
+        productType
+        featuredImage { url altText }
+        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
+        compareAtPriceRange { minVariantCompareAtPrice { amount } }
+        options(first: 3) { name optionValues { name } }
+        totalInventory
+        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
+        productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
+        moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
+        audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
+        mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
+      }
+    }
+  }
+`;
+    COLLECTION_PRODUCTS_QUERY = /* GraphQL */
+    `
+  query DiscoveryCollectionProducts($id: ID!, $cursor: String) {
+    collection(id: $id) {
+      products(first: 250, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id }
+      }
+    }
+  }
+`;
+    COLLECTION_BY_HANDLE_QUERY = /* GraphQL */
+    `
+  query DiscoveryCollectionByHandle($handle: String!) {
+    collectionByHandle(handle: $handle) { id }
+  }
+`;
+    COLLECTION_HANDLE_CACHE_TTL = 30 * 60;
+    collectionHandleKey = (h) => `discovery:collection-pin:${INDEX_VERSION}:${h}`;
+    NODES_BY_IDS_QUERY = /* GraphQL */
+    `
+  query DiscoveryHonoraryNodes($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Product {
+        id
+        handle
+        title
+        status
+        productType
+        featuredImage { url altText }
+        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
+        compareAtPriceRange { minVariantCompareAtPrice { amount } }
+        options(first: 3) { name optionValues { name } }
+        totalInventory
+        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
+        productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
+        moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
+        audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
+        mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
+      }
+    }
+  }
+`;
+    HONORARY_CACHE_TTL = 30 * 60;
+    honoraryCacheKey = (cat, handle) => `discovery:honorary:${INDEX_VERSION}:${cat}:${handle}`;
   }
 });
 
@@ -16991,16 +18967,16 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and4, eq: eq15, isNull: isNull3, lt } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and4(isNull3(metaCapiFailures2.resolvedAt), lt(metaCapiFailures2.attempts, MAX_ATTEMPTS))).limit(100);
+    const { and: and5, eq: eq18, isNull: isNull3, lt } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and5(isNull3(metaCapiFailures2.resolvedAt), lt(metaCapiFailures2.attempts, MAX_ATTEMPTS))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq15(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq18(metaCapiFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq15(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq18(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
@@ -17035,8 +19011,8 @@ function createCronRoutes() {
   });
   router.post("/deal-activator", guard, async (_req, res) => {
     try {
-      const { dealActivator: dealActivator2 } = await Promise.resolve().then(() => (init_deal_activator_server(), deal_activator_server_exports));
-      const result = await dealActivator2();
+      const { rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
+      const result = await rotateDeal2();
       res.json({ ok: true, ...result });
     } catch (err) {
       console.error("[cron:deal-activator]", err);
@@ -17172,6 +19148,16 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
+  router.post("/enrichment-batch-poller", guard, async (_req, res) => {
+    try {
+      const { advanceInflightJobs: advanceInflightJobs2 } = await Promise.resolve().then(() => (init_batch_orchestrator_server(), batch_orchestrator_server_exports));
+      const result = await advanceInflightJobs2({ maxJobs: 10, perJobBudgetMs: 8e3 });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error("[cron:enrichment-batch-poller]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
   router.post("/inventory-check", guard, async (_req, res) => {
     try {
       const { isLiveDealSoldOut: isLiveDealSoldOut2, rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
@@ -17188,6 +19174,79 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
+  router.post("/warm-discovery-index", guard, async (_req, res) => {
+    try {
+      const {
+        buildDiscoveryIndex: buildDiscoveryIndex2,
+        computeVocab: computeVocab2,
+        INDEX_KEY: INDEX_KEY2,
+        INDEX_TTL_SECONDS: INDEX_TTL_SECONDS2,
+        VOCAB_KEY: VOCAB_KEY2,
+        VOCAB_TTL_SECONDS: VOCAB_TTL_SECONDS2
+      } = await Promise.resolve().then(() => (init_discovery_server(), discovery_server_exports));
+      const { kvSet: kvSet2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+      const fresh = await buildDiscoveryIndex2();
+      if (fresh.length > 0) {
+        const vocab = computeVocab2(fresh);
+        await kvSet2(INDEX_KEY2, fresh, INDEX_TTL_SECONDS2);
+        await kvSet2(VOCAB_KEY2, vocab, VOCAB_TTL_SECONDS2);
+        console.log(`[cron:warm-discovery-index] wrote ${fresh.length} products to KV`);
+      }
+      res.json({ ok: true, count: fresh.length });
+    } catch (err) {
+      console.error("[cron:warm-discovery-index]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  router.post("/warm", guard, async (_req, res) => {
+    try {
+      const baseUrl = process.env["BASE_URL"] ?? "";
+      const cronSecret = process.env["CRON_SECRET"] ?? "";
+      let discoveryCount = 0;
+      if (baseUrl && cronSecret) {
+        try {
+          const r = await fetch(`${baseUrl}/cron/warm-discovery-index`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${cronSecret}` }
+          });
+          if (r.ok) {
+            const body = await r.json();
+            discoveryCount = body.count ?? 0;
+          }
+        } catch (err) {
+          console.warn("[cron:warm] discovery rebuild fetch failed:", err);
+        }
+      }
+      let liveHandle = null;
+      try {
+        const { kvGet: kvGet2, KV_KEYS: KV_KEYS2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+        liveHandle = await kvGet2(KV_KEYS2.liveDealHandle) ?? null;
+      } catch (err) {
+        console.warn("[cron:warm] could not resolve live deal handle:", err);
+      }
+      const pagesWarmed = [];
+      if (baseUrl) {
+        const targets = ["/", liveHandle ? `/products/${liveHandle}` : null].filter(Boolean);
+        await Promise.allSettled(
+          targets.map(async (path) => {
+            const url = `${baseUrl}${path}`;
+            try {
+              await fetch(url, {
+                headers: { "Cache-Control": "no-cache" }
+              });
+              pagesWarmed.push(url);
+            } catch (err) {
+              console.warn(`[cron:warm] CDN warm failed for ${url}:`, err);
+            }
+          })
+        );
+      }
+      res.json({ ok: true, discoveryProducts: discoveryCount, pagesWarmed });
+    } catch (err) {
+      console.error("[cron:warm]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
   return router;
 }
 
@@ -17197,7 +19256,7 @@ init_schema();
 init_shopify_server();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq14 } from "drizzle-orm";
+import { eq as eq17 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret)
@@ -17228,11 +19287,11 @@ async function handleOrderCreated(order) {
     }).catch((err) => console.error("[webhook] metafield write failed:", err));
     const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
     await db.update(dealHistory).set({
-      unitsSold: db.$count(dealHistory, eq14(dealHistory.sku, lineItem.sku)),
+      unitsSold: db.$count(dealHistory, eq17(dealHistory.sku, lineItem.sku)),
       // increment handled via raw SQL
       totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
       totalProfit: String(profit * lineItem.quantity)
-    }).where(eq14(dealHistory.sku, lineItem.sku)).catch(() => {
+    }).where(eq17(dealHistory.sku, lineItem.sku)).catch(() => {
     });
   }
   const refCode = order.note_attributes?.find((a) => a.name === "ref_source")?.value;
@@ -17389,10 +19448,10 @@ function jsonResult(value) {
   return textResult(JSON.stringify(value, null, 2));
 }
 async function resolveKeywordId(idOrTerm) {
-  const client5 = getWriteClient3();
-  if (!client5) return null;
+  const client4 = getWriteClient3();
+  if (!client4) return null;
   if (idOrTerm.startsWith("seoKeyword.")) return idOrTerm;
-  const row = await client5.fetch(
+  const row = await client4.fetch(
     `*[_type == "seoKeyword" && lower(term) == lower($term)][0]{ _id }`,
     { term: idOrTerm }
   );
@@ -17419,8 +19478,8 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client5 = getWriteClient3();
-      if (!client5) return textResult("Sanity not configured.");
+      const client4 = getWriteClient3();
+      if (!client4) return textResult("Sanity not configured.");
       const status = args.status ?? "pending";
       const limit = args.limit ?? 50;
       const offset = args.offset ?? 0;
@@ -17460,8 +19519,8 @@ function buildMcpServer() {
         status, flagged, flagReason,
         "cluster": cluster->{ "slug": slug.current, title, pillarTerm }
       }`;
-      const rows = await client5.fetch(groq, params);
-      const total = await client5.fetch(`count(*[${filters.join(" && ")}])`, params);
+      const rows = await client4.fetch(groq, params);
+      const total = await client4.fetch(`count(*[${filters.join(" && ")}])`, params);
       return jsonResult({ total, returned: Array.isArray(rows) ? rows.length : 0, offset, limit, keywords: rows });
     }
   );
@@ -17476,13 +19535,13 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client5 = getWriteClient3();
-      if (!client5) return textResult("Sanity not configured.");
+      const client4 = getWriteClient3();
+      if (!client4) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
       const patch = { status: "approved", flagged: false };
       if (args.reason) patch.notes = args.reason;
-      await client5.patch(id).set(patch).commit();
+      await client4.patch(id).set(patch).commit();
       return textResult(`\u2713 approved (unflagged) \xB7 ${id}`);
     }
   );
@@ -17497,13 +19556,13 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client5 = getWriteClient3();
-      if (!client5) return textResult("Sanity not configured.");
+      const client4 = getWriteClient3();
+      if (!client4) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
       const patch = { status: "rejected" };
       if (args.reason) patch.notes = args.reason;
-      await client5.patch(id).set(patch).commit();
+      await client4.patch(id).set(patch).commit();
       return textResult(`\u2717 rejected \xB7 ${id}`);
     }
   );
@@ -17518,11 +19577,11 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client5 = getWriteClient3();
-      if (!client5) return textResult("Sanity not configured.");
+      const client4 = getWriteClient3();
+      if (!client4) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
-      await client5.patch(id).set({ flagged: true, flagReason: args.reason }).commit();
+      await client4.patch(id).set({ flagged: true, flagReason: args.reason }).commit();
       return textResult(`\u2691 flagged \xB7 ${id} \xB7 ${args.reason}`);
     }
   );
@@ -17537,13 +19596,13 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client5 = getWriteClient3();
-      if (!client5) return textResult("Sanity not configured.");
+      const client4 = getWriteClient3();
+      if (!client4) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
       const patch = { flagged: false };
       patch.flagReason = args.reason ?? null;
-      await client5.patch(id).set(patch).commit();
+      await client4.patch(id).set(patch).commit();
       return textResult(`\u2713 unflagged \xB7 ${id}`);
     }
   );
@@ -17561,8 +19620,8 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client5 = getWriteClient3();
-      if (!client5) return textResult("Sanity not configured.");
+      const client4 = getWriteClient3();
+      if (!client4) return textResult("Sanity not configured.");
       const results = [];
       for (const u of args.updates) {
         try {
@@ -17574,7 +19633,7 @@ function buildMcpServer() {
           const patch = { status: u.status };
           if (u.status === "approved") patch.flagged = false;
           if (u.reason) patch.notes = u.reason;
-          await client5.patch(id).set(patch).commit();
+          await client4.patch(id).set(patch).commit();
           results.push({ idOrTerm: u.idOrTerm, status: u.status, resolvedId: id, ok: true });
         } catch (err) {
           results.push({
@@ -17607,9 +19666,9 @@ function buildMcpServer() {
       inputSchema: {}
     },
     async () => {
-      const client5 = getWriteClient3();
-      if (!client5) return textResult("Sanity not configured.");
-      const stats = await client5.fetch(`{
+      const client4 = getWriteClient3();
+      if (!client4) return textResult("Sanity not configured.");
+      const stats = await client4.fetch(`{
         "total":    count(*[_type == "seoKeyword"]),
         "approved": count(*[_type == "seoKeyword" && status == "approved"]),
         "pending":  count(*[_type == "seoKeyword" && status == "pending"]),

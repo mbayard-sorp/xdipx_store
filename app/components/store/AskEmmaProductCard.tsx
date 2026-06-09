@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import type { ChatProductCard, ChatVariantOption } from '~/lib/ai-agent/chat-types'
+import { shopifyImageUrl } from '~/lib/shopify-image'
 
 interface Props {
   card: ChatProductCard
@@ -24,7 +25,7 @@ export function AskEmmaProductCard({ card, onTellMore }: Props) {
           <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-cream-2">
             {card.imageUrl ? (
               <img
-                src={card.imageUrl}
+                src={shopifyImageUrl(card.imageUrl, 120)}
                 alt={card.imageAlt ?? card.title}
                 width={48}
                 height={48}

@@ -97,8 +97,8 @@ export function createCronRoutes() {
    */
   router.post('/deal-activator', guard, async (_req, res) => {
     try {
-      const { dealActivator } = await import('../app/lib/deal-activator.server.js')
-      const result = await dealActivator()
+      const { rotateDeal } = await import('../app/lib/deal-rotator.server.js')
+      const result = await rotateDeal()
       res.json({ ok: true, ...result })
     } catch (err) {
       console.error('[cron:deal-activator]', err)

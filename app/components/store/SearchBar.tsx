@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { motion, AnimatePresence } from 'motion/react'
+import { shopifyImageUrl } from '~/lib/shopify-image'
 
 interface SearchBarProps {
   onExpandChange?: (expanded: boolean) => void
@@ -205,7 +206,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                       <div className="aspect-square rounded-xl overflow-hidden bg-cream-2 mb-2">
                         {product.previewImageUrl ? (
                           <img
-                            src={product.previewImageUrl}
+                            src={shopifyImageUrl(product.previewImageUrl, 240)}
                             alt={product.title}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                           />
@@ -424,7 +425,7 @@ export function SearchBar({ onExpandChange }: SearchBarProps) {
                             <Link to={`/products/${product.handle}`} onClick={handleResultClick} className="group block">
                               <div className="aspect-square rounded-xl overflow-hidden bg-cream-2 mb-2">
                                 {product.previewImageUrl ? (
-                                  <img src={product.previewImageUrl} alt={product.title} className="w-full h-full object-cover" />
+                                  <img src={shopifyImageUrl(product.previewImageUrl, 240)} alt={product.title} className="w-full h-full object-cover" />
                                 ) : (
                                   <div className="w-full h-full flex items-center justify-center text-ink/10 text-2xl">♥</div>
                                 )}

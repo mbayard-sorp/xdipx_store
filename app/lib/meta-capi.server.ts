@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { getMarketingConsent } from './consent.server'
+import { getFbCookies, getClientIP } from './attribution.server'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +38,58 @@ export function generateEventId(): string {
 
 export function hashPII(value: string): string {
   return createHash('sha256').update(value.trim().toLowerCase()).digest('hex')
+}
+
+// ─── Fire-and-forget helper ───────────────────────────────────────────────────
+
+/**
+ * Convenience wrapper for the common fire-and-forget CAPI pattern.
+ *
+ * Generates a dedup event id, reads consent/fbp/fbc/ip from the request,
+ * fires sendCapiEvent as a void (never blocks the loader), and returns the
+ * eventId so the browser pixel can use the same id for Meta-side dedup.
+ *
+ * Covers ViewContent and AddToCart. For Purchase (requires retry) call
+ * sendCapiEvent directly.
+ */
+export function fireCapiEvent(
+  request: Request,
+  eventName: 'ViewContent' | 'AddToCart',
+  opts: {
+    contentIds: string[]
+    value: number
+    currency?: string
+    numItems?: number
+  },
+): string {
+  const eventId = generateEventId()
+  const consentGranted = getMarketingConsent(request)
+  const { fbp, fbc } = getFbCookies(request)
+
+  void sendCapiEvent(
+    {
+      event_name:    eventName,
+      event_id:      eventId,
+      event_time:    Math.floor(Date.now() / 1000),
+      action_source: 'website',
+      user_data: {
+        client_ip_address: getClientIP(request),
+        client_user_agent: request.headers.get('user-agent') ?? undefined,
+        fbp,
+        fbc,
+      },
+      custom_data: {
+        content_ids:  opts.contentIds,
+        content_type: 'product',
+        value:        opts.value,
+        currency:     opts.currency ?? 'USD',
+        ...(opts.numItems !== undefined ? { num_items: opts.numItems } : {}),
+      },
+    },
+    { consentGranted },
+  )
+
+  return eventId
 }
 
 // ─── Core sender ──────────────────────────────────────────────────────────────
