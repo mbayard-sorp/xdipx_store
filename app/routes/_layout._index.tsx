@@ -1,6 +1,6 @@
-import { useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import type { HeadersFunction, LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { Link, data, useLoaderData, useOutletContext } from 'react-router'
+import { Await, Link, data, useLoaderData, useOutletContext } from 'react-router'
 import { getAdminUser } from '~/lib/session.server'
 import {
   getDealByShopifyId, getDealByHandle, getProductsByTag, getBonusDeal,
@@ -37,7 +37,7 @@ import { TrustBarBlock }         from '~/components/cms/TrustBarBlock'
 import { ProductStructuredData } from '~/components/seo/ProductStructuredData'
 import type { Product } from '~/types'
 import { categoryToLegacyString } from '~/types'
-import type { ProductCarouselBlock, TrustBarBlock as TrustBarBlockType } from '~/types/cms'
+import type { ContentBlock, EmmaCuratedRailBlock, ProductCarouselBlock, TrustBarBlock as TrustBarBlockType } from '~/types/cms'
 import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~/lib/analytics.client'
 import { trackFbViewContent } from '~/lib/meta-pixel.client'
 import { buildSocialMeta } from '~/lib/social-meta'
@@ -98,6 +98,61 @@ const ADMIN_BYPASS_HEADERS = {
   'Vercel-CDN-Cache-Control': 'no-store',
 } as const
 
+// Variant A renders the same Sanity CMS content blocks as the legacy home,
+// appended below the discovery rails. This data is DEFERRED (returned as an
+// un-awaited promise) so it never blocks the shell's TTFB for human visitors —
+// the HomeA shell streams immediately via onShellReady and the blocks stream in
+// after. Bots get it buffered (onAllReady), bounded by the per-leg timeouts so a
+// slow upstream can't sink the crawl. getHomepageSections() is KV-cached (60s);
+// only product-backed rails (productCarousel / emmaCuratedRail) hit Shopify.
+async function getHomeContentBlocks(): Promise<{
+  sections: ContentBlock[]
+  carouselProductMap: Record<string, Product[]>
+}> {
+  const cmsData = await withTimeout(
+    getHomepageSections(), LOADER_TIMEOUT_MS, null, 'getHomepageSections(variantA)',
+  )
+  // Drop announcementBar — the layout (_layout.tsx) already renders it pinned at
+  // the top from this same singleton, so rendering it in-page would duplicate it.
+  const sections = (cmsData?.sections ?? []).filter(s => s._type !== 'announcementBar')
+
+  const carouselBlocks = sections.filter(
+    (s): s is ProductCarouselBlock => s._type === 'productCarousel',
+  )
+  const emmaRailBlocks = sections.filter(
+    (s): s is EmmaCuratedRailBlock => s._type === 'emmaCuratedRail',
+  )
+
+  const [carouselResults, emmaRailResults] = await Promise.all([
+    carouselBlocks.length > 0
+      ? withTimeout(Promise.all(carouselBlocks.map(b => {
+          const limit = b.productLimit ?? 8
+          const source = b.source ?? 'tag'
+          if (source === 'collection' && b.collectionHandle) {
+            return getCollectionProducts(b.collectionHandle, limit)
+          }
+          if (source === 'manual' && b.productHandles?.length) {
+            return getProductsByHandles(b.productHandles.map(p => p.handle))
+          }
+          return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([] as Product[])
+        })), LOADER_TIMEOUT_MS, [] as Product[][], 'carouselResults(variantA)')
+      : Promise.resolve([] as Product[][]),
+    emmaRailBlocks.length > 0
+      ? withTimeout(Promise.all(emmaRailBlocks.map(b =>
+          b.productHandles?.length
+            ? getProductsByHandles(b.productHandles.map(p => p.handle))
+            : Promise.resolve([] as Product[]),
+        )), LOADER_TIMEOUT_MS, [] as Product[][], 'emmaRailResults(variantA)')
+      : Promise.resolve([] as Product[][]),
+  ])
+
+  const carouselProductMap: Record<string, Product[]> = {}
+  carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = carouselResults[i] ?? [] })
+  emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = emmaRailResults[i] ?? [] })
+
+  return { sections, carouselProductMap }
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   // ── Variant A: "The Compass" discovery home page ─────────────────────────
   // Resolve variant before the heavy legacy fan-out so variant A skips all
@@ -125,6 +180,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       audiences: vocab.audiences,
       matters:   vocab.matters,
       available,
+      // Deferred (un-awaited) — streams in below the discovery rails without
+      // blocking the shell's TTFB. See getHomeContentBlocks().
+      contentBlocks: getHomeContentBlocks(),
     }
   }
 
@@ -388,15 +446,37 @@ export default function Homepage() {
   // ── Variant A: "The Compass" discovery home page ─────────────────────────
   if (loaderData.variant === 'a') {
     return (
-      <HomeA
-        rails={loaderData.rails}
-        total={loaderData.total}
-        welcomeBackEnabled={loaderData.welcomeBackEnabled}
-        moods={loaderData.moods}
-        audiences={loaderData.audiences}
-        matters={loaderData.matters}
-        available={loaderData.available}
-      />
+      <>
+        <HomeA
+          rails={loaderData.rails}
+          total={loaderData.total}
+          welcomeBackEnabled={loaderData.welcomeBackEnabled}
+          moods={loaderData.moods}
+          audiences={loaderData.audiences}
+          matters={loaderData.matters}
+          available={loaderData.available}
+        />
+        {/* Sanity CMS content blocks, deferred so they never block the shell's
+            TTFB — they stream in below the discovery rails. Reuses the same
+            renderer + section schema as the legacy home. */}
+        <Suspense fallback={null}>
+          <Await resolve={loaderData.contentBlocks} errorElement={null}>
+            {({ sections, carouselProductMap }) =>
+              sections.length > 0 ? (
+                <>
+                  {sections.map(block => (
+                    <ContentBlockRenderer
+                      key={block._key}
+                      block={block}
+                      carouselProductMap={carouselProductMap}
+                    />
+                  ))}
+                </>
+              ) : null
+            }
+          </Await>
+        </Suspense>
+      </>
     )
   }
 
