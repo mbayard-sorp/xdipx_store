@@ -10,7 +10,7 @@
  */
 
 import { adminGraphQL } from '~/lib/shopify.server'
-import { kvGet, kvSet, kvDel } from '~/lib/kv.server'
+import { kvGet, kvSet } from '~/lib/kv.server'
 import type { ProductTypeDial } from '~/types'
 import type {
   Category,
@@ -47,18 +47,8 @@ import {
 //     old categorization. Bumping invalidates them.
 // v2: tag values normalized (Title-Case canonical form) before indexing.
 const INDEX_VERSION = 'v6'
-const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
-const INDEX_TTL_SECONDS = 60 * 60 * 24 // 24h — matches vocab TTL; bust explicitly via invalidateDiscoveryIndex() on tag/catalog changes
-
-/**
- * Build-lock to avoid thundering-herd on cold-start traffic spikes.
- * If N serverless instances simultaneously miss KV they would otherwise
- * each chain 30+ Admin GraphQL calls and exhaust Shopify's point bucket.
- * The first instance to acquire the lock builds; others see the lock,
- * skip the build, and return [] so the loader renders the empty state.
- */
-const BUILD_LOCK_KEY = `discovery:index:building:${INDEX_VERSION}`
-const BUILD_LOCK_TTL_SECONDS = 30
+export const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
+export const INDEX_TTL_SECONDS = 60 * 60 * 24 // 24h — matches vocab TTL; bust explicitly via invalidateDiscoveryIndex() on tag/catalog changes
 
 /**
  * Vocabulary cache: distinct mood/audience/matters tag values actually
@@ -66,8 +56,8 @@ const BUILD_LOCK_TTL_SECONDS = 30
  * UI picks up new tags Merchandisers add in Shopify within a day without
  * a deploy. Refreshed as a side effect of any index rebuild.
  */
-const VOCAB_KEY = `discovery:vocab:${INDEX_VERSION}`
-const VOCAB_TTL_SECONDS = 60 * 60 * 24 // 24h
+export const VOCAB_KEY = `discovery:vocab:${INDEX_VERSION}`
+export const VOCAB_TTL_SECONDS = 60 * 60 * 24 // 24h
 
 /**
  * Top-level category source of truth: membership in these four Shopify
@@ -569,10 +559,33 @@ export async function buildDiscoveryIndex(): Promise<DiscoveryProduct[]> {
 }
 
 /**
- * Cached read. KV miss triggers a full rebuild; concurrent misses each
- * rebuild (acceptable — the call is rare and Shopify rate limits are well
- * above our needs at home-page traffic). Returns `[]` on KV+Shopify failure
- * so the loader can render the empty state instead of crashing.
+ * Fire-and-forget: kick off a background rebuild of the discovery index by
+ * posting to the dedicated cron endpoint. Returns immediately (void) so it
+ * never blocks the calling SSR request. The cron endpoint runs in its own
+ * serverless invocation and writes the result back to KV when done.
+ *
+ * Called by getDiscoveryIndex() on a cold KV miss so the index recovers
+ * within one cron tick (~15 min max) without blocking the current request.
+ */
+export function triggerDiscoveryRebuild(): void {
+  const baseUrl = process.env['BASE_URL']
+  const cronSecret = process.env['CRON_SECRET']
+  if (!baseUrl || !cronSecret) return
+  void fetch(`${baseUrl}/cron/warm-discovery-index`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${cronSecret}` },
+  }).catch(() => {})
+}
+
+/**
+ * Cached read. On a KV hit returns the cached index immediately. On a KV
+ * miss returns [] (so the loader renders the empty/fallback state) and fires
+ * a background rebuild via the /cron/warm-discovery-index endpoint. The
+ * rebuilt index is written to KV by that endpoint; subsequent requests
+ * within the same 15-min window will hit the fresh cache.
+ *
+ * The inline rebuild path has been removed to keep cold-start SSR fast.
+ * The build lock is no longer needed because we no longer build inline.
  */
 export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise<DiscoveryProduct[]> {
   if (!opts.force) {
@@ -580,26 +593,10 @@ export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise
     if (cached && Array.isArray(cached) && cached.length > 0) return cached
   }
 
-  // Best-effort cooperative lock. KV doesn't expose SETNX through the wrapper,
-  // so this is a read-then-write race-window — acceptable because losing the
-  // race only means one extra full build, not a correctness issue.
-  const locked = await kvGet<number>(BUILD_LOCK_KEY)
-  if (locked) return []
-  await kvSet(BUILD_LOCK_KEY, Date.now(), BUILD_LOCK_TTL_SECONDS)
-
-  try {
-    const fresh = await buildDiscoveryIndex()
-    if (fresh.length > 0) {
-      await kvSet(INDEX_KEY, fresh, INDEX_TTL_SECONDS)
-      // Refresh vocab as a side effect — same data, no extra fetch.
-      await kvSet(VOCAB_KEY, computeVocab(fresh), VOCAB_TTL_SECONDS)
-    }
-    return fresh
-  } catch {
-    return []
-  } finally {
-    await kvDel(BUILD_LOCK_KEY)
-  }
+  // KV miss (or force refresh): trigger a background rebuild and return []
+  // so this SSR request is not blocked by the full Shopify catalog crawl.
+  triggerDiscoveryRebuild()
+  return []
 }
 
 /** Manual bust — call from a Shopify product webhook or admin tool. */
@@ -621,7 +618,7 @@ export interface DiscoveryVocab {
  * first so the chips a new visitor sees are the ones most likely to
  * land. Stable secondary sort by alpha for tied counts.
  */
-function computeVocab(index: DiscoveryProduct[]): DiscoveryVocab {
+export function computeVocab(index: DiscoveryProduct[]): DiscoveryVocab {
   const tally = (key: 'mood' | 'audience' | 'matters') => {
     const counts = new Map<string, number>()
     for (const p of index) {

@@ -21,7 +21,7 @@ import {
   getProductsByIds,
 } from './shopify.server'
 import { pickForContextGroup, type ContextPickCandidate } from './claude.server'
-import { kvGet, kvSet, kvDel } from './kv.server'
+import { kvGet, kvSet, kvDel, cached, invalidateCache } from './kv.server'
 import type { Product } from '~/types'
 import { categoryToLegacyString } from '~/types'
 
@@ -222,15 +222,17 @@ const RAIL_FIELDS_GROQ = `{
 const RAILS_GROQ = `*[_type == "emmaContextRail" && active == true] | order(sortOrder asc, _createdAt asc) ${RAIL_FIELDS_GROQ}`
 
 export async function listActiveRails(): Promise<RailDoc[]> {
-  const client = getReadClient()
-  if (!client) return []
-  try {
-    const rows = await client.fetch<RailDoc[]>(RAILS_GROQ)
-    return rows ?? []
-  } catch (err) {
-    console.error('[emma-rails] listActiveRails error:', err)
-    return []
-  }
+  return cached('emma:active-rails', 300, async () => {
+    const client = getReadClient()
+    if (!client) return []
+    try {
+      const rows = await client.fetch<RailDoc[]>(RAILS_GROQ)
+      return rows ?? []
+    } catch (err) {
+      console.error('[emma-rails] listActiveRails error:', err)
+      return []
+    }
+  })
 }
 
 async function getRailById(id: string): Promise<RailDoc | null> {
@@ -356,6 +358,7 @@ export async function regenerateRail(
 
     await patchCurrent(rail._id, current)
     await kvDel(`emma:rails:hydrated:${dealHandle}`)
+    invalidateCache('emma:active-rails')
     return { ok: true, count: picks.length }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'internal_error'

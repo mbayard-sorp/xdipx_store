@@ -347,5 +347,104 @@ export function createCronRoutes() {
     }
   })
 
+  /**
+   * POST /cron/warm-discovery-index
+   * Called by triggerDiscoveryRebuild() (fire-and-forget from SSR on cold KV miss)
+   * and by /cron/warm. Builds the full discovery index and vocab, writes to KV.
+   */
+  router.post('/warm-discovery-index', guard, async (_req, res) => {
+    try {
+      const {
+        buildDiscoveryIndex,
+        computeVocab,
+        INDEX_KEY,
+        INDEX_TTL_SECONDS,
+        VOCAB_KEY,
+        VOCAB_TTL_SECONDS,
+      } = await import('../app/lib/discovery.server.js')
+      const { kvSet } = await import('../app/lib/kv.server.js')
+
+      const fresh = await buildDiscoveryIndex()
+
+      if (fresh.length > 0) {
+        const vocab = computeVocab(fresh)
+        await kvSet(INDEX_KEY, fresh, INDEX_TTL_SECONDS)
+        await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS)
+        console.log(`[cron:warm-discovery-index] wrote ${fresh.length} products to KV`)
+      }
+
+      res.json({ ok: true, count: fresh.length })
+    } catch (err) {
+      console.error('[cron:warm-discovery-index]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
+   * POST /cron/warm
+   * Schedule: every 15 min (added to the inventory-check + log-monitor bucket).
+   * (1) Rebuilds the discovery index via the warm-discovery-index handler.
+   * (2) Reads the current live deal handle from deal_history.
+   * (3) Fires GET requests to / and /products/{handle} with no-cache headers
+   *     to prime the Vercel CDN SWR cache before Googlebot's next crawl window.
+   */
+  router.post('/warm', guard, async (_req, res) => {
+    try {
+      const baseUrl = process.env['BASE_URL'] ?? ''
+      const cronSecret = process.env['CRON_SECRET'] ?? ''
+
+      // Step 1: trigger the discovery index rebuild (reuses the dedicated handler).
+      let discoveryCount = 0
+      if (baseUrl && cronSecret) {
+        try {
+          const r = await fetch(`${baseUrl}/cron/warm-discovery-index`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${cronSecret}` },
+          })
+          if (r.ok) {
+            const body = await r.json() as { count?: number }
+            discoveryCount = body.count ?? 0
+          }
+        } catch (err) {
+          console.warn('[cron:warm] discovery rebuild fetch failed:', err)
+        }
+      }
+
+      // Step 2: resolve the current live deal handle from KV (the rotator
+      // maintains KV_KEYS.liveDealHandle; deal_history has no handle column).
+      let liveHandle: string | null = null
+      try {
+        const { kvGet, KV_KEYS } = await import('../app/lib/kv.server.js')
+        liveHandle = (await kvGet<string>(KV_KEYS.liveDealHandle)) ?? null
+      } catch (err) {
+        console.warn('[cron:warm] could not resolve live deal handle:', err)
+      }
+
+      // Step 3: warm the CDN edge cache.
+      const pagesWarmed: string[] = []
+      if (baseUrl) {
+        const targets = ['/', liveHandle ? `/products/${liveHandle}` : null].filter(Boolean) as string[]
+        await Promise.allSettled(
+          targets.map(async path => {
+            const url = `${baseUrl}${path}`
+            try {
+              await fetch(url, {
+                headers: { 'Cache-Control': 'no-cache' },
+              })
+              pagesWarmed.push(url)
+            } catch (err) {
+              console.warn(`[cron:warm] CDN warm failed for ${url}:`, err)
+            }
+          }),
+        )
+      }
+
+      res.json({ ok: true, discoveryProducts: discoveryCount, pagesWarmed })
+    } catch (err) {
+      console.error('[cron:warm]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
   return router
 }

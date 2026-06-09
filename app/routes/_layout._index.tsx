@@ -52,6 +52,13 @@ import { withTimeout } from '~/lib/with-timeout.server'
 const LOADER_TIMEOUT_MS = 8000
 const LOADER_DEAL_TIMEOUT_MS = 9000
 
+const DEFAULT_PIPELINE_SETTINGS_ROWS: { key: string; value: string }[] = [
+  { key: 'homepage_template',            value: 'endorsement' },
+  { key: 'homepage_show_free_shipping',  value: 'true' },
+  { key: 'homepage_pair_product_handle', value: '' },
+  { key: 'homepage_pair_discount_pct',   value: '0' },
+]
+
 async function getLiveDealRow() {
   const [dbDeal] = await db
     .select()
@@ -139,12 +146,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     withTimeout(getBonusDeal(), LOADER_TIMEOUT_MS, null, 'getBonusDeal'),
     withTimeout(getHomepageSections(), LOADER_TIMEOUT_MS, null, 'getHomepageSections'),
     withTimeout(getEmmaHeroSettings(), LOADER_TIMEOUT_MS, null, 'getEmmaHeroSettings'),
-    db.select().from(pipelineSettings).where(inArray(pipelineSettings.key, [
-      'homepage_template',
-      'homepage_show_free_shipping',
-      'homepage_pair_product_handle',
-      'homepage_pair_discount_pct',
-    ])),
+    withTimeout(
+      db.select().from(pipelineSettings).where(inArray(pipelineSettings.key, [
+        'homepage_template',
+        'homepage_show_free_shipping',
+        'homepage_pair_product_handle',
+        'homepage_pair_discount_pct',
+      ])),
+      8000, DEFAULT_PIPELINE_SETTINGS_ROWS, 'pipelineSettings',
+    ),
   ])
 
   const homepageSettings = {

@@ -3,6 +3,7 @@
  * Uses raw SQL via neon for complex join queries.
  */
 import { neon } from '@neondatabase/serverless'
+import { kvGet, kvSet } from '~/lib/kv.server'
 import type {
   Review,
   ReviewMedia,
@@ -133,6 +134,14 @@ export async function getProductReviews(
     perPage = 10,
   } = opts
 
+  // Only cache public approved-review queries. Admin queries (pending, spam, etc.)
+  // must always be fresh so moderators see the latest state.
+  if (status === 'approved') {
+    const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`
+    const hit = await kvGet<{ reviews: Review[]; total: number }>(ck)
+    if (hit) return hit
+  }
+
   const offset = (page - 1) * perPage
 
   let orderBy = 'r.created_at DESC'
@@ -188,17 +197,31 @@ export async function getProductReviews(
   })
 
   const total = parseInt((countRows[0]?.['total'] as string) ?? '0', 10)
-  return { reviews, total }
+  const result = { reviews, total }
+
+  // Populate KV cache for approved queries so repeat homepage SSR hits are ~2ms.
+  if (status === 'approved') {
+    const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`
+    kvSet(ck, result, 300).catch(() => {})
+  }
+
+  return result
 }
 
 // ─── Public: aggregate ─────────────────────────────────────────────────────
 
 export async function getProductAggregate(shopifyProductId: string): Promise<ReviewAggregate | null> {
+  const ck = `aggregate:v1:${shopifyProductId}`
+  const hit = await kvGet<ReviewAggregate>(ck)
+  if (hit) return hit
+
   const rows = await sql`
     SELECT * FROM review_aggregates WHERE shopify_product_id = ${shopifyProductId}
   `
   if (!rows[0]) return null
-  return rowToAggregate(rows[0] as Record<string, unknown>)
+  const agg = rowToAggregate(rows[0] as Record<string, unknown>)
+  kvSet(ck, agg, 300).catch(() => {})
+  return agg
 }
 
 // ─── Admin: review queue ───────────────────────────────────────────────────

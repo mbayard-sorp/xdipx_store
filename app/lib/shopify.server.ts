@@ -1016,13 +1016,17 @@ async function getDealByShopifyIdUncached(id: string): Promise<Deal | null> {
 
 export async function getDealByHandle(handle: string): Promise<Deal | null> {
   return cached(`shopify:deal:byhandle:${handle}`, READ_TTL, async () => {
-    const data = await storefront<{ product: ShopifyProductNode | null }>(`
+    const timeout = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 5000),
+    )
+    const fetch = storefront<{ product: ShopifyProductNode | null }>(`
       query GetDealByHandle($handle: String!) {
         product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
       }
     `, { handle })
-    if (!data.product) return null
-    return nodeToDeal(data.product)
+    const result = await Promise.race([fetch, timeout])
+    if (!result || !result.product) return null
+    return nodeToDeal(result.product)
   })
 }
 
