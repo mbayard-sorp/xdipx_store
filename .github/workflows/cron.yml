@@ -51,6 +51,8 @@ on:
           - import-monitor
           - import-enrich
           - enrichment-batch-poller
+          - warm
+          - warm-discovery-index
 
 concurrency:
   group: cron-${{ github.event.schedule || github.event.inputs.target }}
@@ -69,7 +71,7 @@ jobs:
         run: |
           case "${{ github.event.schedule }}" in
             '*/5 * * * *')   paths='enrichment-batch-poller' ;;
-            '*/15 * * * *')  paths='inventory-check log-monitor' ;;
+            '*/15 * * * *')  paths='inventory-check log-monitor warm' ;;
             '*/30 * * * *')  paths='import-enrich' ;;
             '0 7 * * *')     paths='pricing-batch-recompute' ;;
             '0 8 * * *')     paths='import-monitor' ;;
@@ -82,7 +84,7 @@ jobs:
               # Manual workflow_dispatch
               t='${{ github.event.inputs.target }}'
               if [ "$t" = "all" ]; then
-                paths='daily-feed-processor deal-activator profit-summary review-reminders inventory-check keyword-research log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller'
+                paths='daily-feed-processor deal-activator profit-summary review-reminders inventory-check keyword-research log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller warm warm-discovery-index'
               else
                 paths="$t"
               fi

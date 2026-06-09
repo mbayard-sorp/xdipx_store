@@ -224,12 +224,12 @@ export function EndorsementHero({ deal, copy, showFreeShipping, swatches = {} }:
             <div className="px-5 py-4 flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <Link to={pdpHref} className="block group">
-                  <p
+                  <h1
                     className="text-ink text-base md:text-lg italic leading-tight group-hover:opacity-90 transition-opacity line-clamp-2"
                     style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}
                   >
                     {deal.seoTitle}
-                  </p>
+                  </h1>
                 </Link>
               </div>
 

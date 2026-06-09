@@ -109,7 +109,7 @@ export function QuietEndorsementHero({ deal, showFreeShipping }: QuietEndorsemen
           <div
             className="bg-paper/80 backdrop-blur-sm border-t border-line px-5 py-4 text-center"
           >
-            <p
+            <h1
               className="text-ink text-xl md:text-2xl italic leading-tight"
               style={{ fontFamily: 'var(--font-display)' }}
             >
@@ -119,7 +119,7 @@ export function QuietEndorsementHero({ deal, showFreeShipping }: QuietEndorsemen
               {showFreeShipping && (
                 <span className="text-ink/70 not-italic font-normal"> · free shipping</span>
               )}
-            </p>
+            </h1>
           </div>
         </div>
       </div>
