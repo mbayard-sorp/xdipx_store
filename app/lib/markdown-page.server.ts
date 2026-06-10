@@ -36,6 +36,76 @@ function mdFooter(canonicalPath: string): string {
   ].join('\n')
 }
 
+// ─── HTML to Markdown ────────────────────────────────────────────────────────
+
+/**
+ * Convert the limited HTML subset emitted by ptToHtml() (and legacy Shopify
+ * metafields) into plain markdown. No external dependencies.
+ *
+ * Handles: <p>, <br>, <strong>/<b>, <em>/<i>, <ul>/<ol>/<li>, <h2>-<h4>,
+ * <a href>, plus entity decoding. Strips any other tags.
+ */
+export function htmlToMarkdown(html: string): string {
+  if (!html || !html.trim()) return ''
+
+  let md = html
+
+  // Decode common HTML entities first
+  md = md
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+
+  // Headings (before stripping tags)
+  md = md.replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, '\n\n## $1\n\n')
+  md = md.replace(/<h3[^>]*>([\s\S]*?)<\/h3>/gi, '\n\n### $1\n\n')
+  md = md.replace(/<h4[^>]*>([\s\S]*?)<\/h4>/gi, '\n\n#### $1\n\n')
+
+  // Links
+  md = md.replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, '[$2]($1)')
+
+  // Bold
+  md = md.replace(/<strong[^>]*>([\s\S]*?)<\/strong>/gi, '**$1**')
+  md = md.replace(/<b[^>]*>([\s\S]*?)<\/b>/gi, '**$1**')
+
+  // Italic
+  md = md.replace(/<em[^>]*>([\s\S]*?)<\/em>/gi, '*$1*')
+  md = md.replace(/<i[^>]*>([\s\S]*?)<\/i>/gi, '*$1*')
+
+  // List items (capture before removing ul/ol wrappers)
+  // Ordered lists: wrap items with a counter. Process each <ol> block separately.
+  md = md.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_match, inner: string) => {
+    let counter = 0
+    return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m: string, content: string) => {
+      counter++
+      return `\n${counter}. ${content.replace(/<[^>]+>/g, '').trim()}`
+    }) + '\n'
+  })
+
+  // Unordered lists
+  md = md.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_match, inner: string) => {
+    return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m: string, content: string) => {
+      return `\n- ${content.replace(/<[^>]+>/g, '').trim()}`
+    }) + '\n'
+  })
+
+  // Paragraphs and line breaks
+  md = md.replace(/<\/p>/gi, '\n\n')
+  md = md.replace(/<p[^>]*>/gi, '')
+  md = md.replace(/<br\s*\/?>/gi, '\n')
+
+  // Strip any remaining tags
+  md = md.replace(/<[^>]+>/g, '')
+
+  // Collapse 3+ consecutive newlines to 2
+  md = md.replace(/\n{3,}/g, '\n\n')
+
+  return md.trim()
+}
+
 // ─── Portable Text to Markdown ───────────────────────────────────────────────
 
 type PtSpan = { _type: 'span'; text: string; marks?: string[] }
@@ -174,7 +244,7 @@ export function productToMarkdown(deal: Deal, _opts: ProductMarkdownOpts = {}): 
   }
 
   if (deal.fullStory) {
-    lines.push(deal.fullStory)
+    lines.push(htmlToMarkdown(deal.fullStory))
     lines.push('')
   }
 
@@ -182,13 +252,13 @@ export function productToMarkdown(deal: Deal, _opts: ProductMarkdownOpts = {}): 
   if (deal.worksForHim) {
     lines.push('## Works for him')
     lines.push('')
-    lines.push(deal.worksForHim)
+    lines.push(htmlToMarkdown(deal.worksForHim))
     lines.push('')
   }
   if (deal.worksForHer) {
     lines.push('## Works for her')
     lines.push('')
-    lines.push(deal.worksForHer)
+    lines.push(htmlToMarkdown(deal.worksForHer))
     lines.push('')
   }
 
