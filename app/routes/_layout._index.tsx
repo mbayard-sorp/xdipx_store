@@ -394,6 +394,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
       { title: BRAND_TITLE },
       { name: 'description', content: BRAND_DESCRIPTION },
       { tagName: 'link', rel: 'canonical', href: canonical },
+      { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: 'https://xdipx.com/index.md' },
       ...buildSocialMeta({ title: BRAND_TITLE, description: BRAND_DESCRIPTION, url: canonical, image: null, type: 'website' }),
     ]
   }
@@ -405,6 +406,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: canonical },
+    { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: 'https://xdipx.com/index.md' },
     ...(heroPreload ? [heroPreload] : []),
     ...buildSocialMeta({
       title,

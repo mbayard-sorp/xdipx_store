@@ -52,6 +52,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: canonical },
+    { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: `${canonical}.md` },
     ...buildSocialMeta({ title, description, url: canonical, image: null, type: 'website' }),
   ]
 }

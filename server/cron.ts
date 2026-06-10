@@ -326,6 +326,73 @@ export function createCronRoutes() {
   })
 
   /**
+   * POST /cron/aeo-surface-check
+   * Schedule: weekly Sunday 06:00 UTC — spot-check that AEO markdown surfaces
+   * are reachable. Parses /llms.txt, fetches 3-5 .md URLs cold, logs errors so
+   * Sentry picks them up without failing the deployment.
+   */
+  router.post('/aeo-surface-check', guard, async (_req, res) => {
+    const siteUrl = process.env['BASE_URL'] ?? process.env['SITE_URL'] ?? ''
+    if (!siteUrl) {
+      console.error('[cron:aeo-surface-check] BASE_URL / SITE_URL not set — skipping')
+      res.json({ ok: true, skipped: true, reason: 'BASE_URL not set' })
+      return
+    }
+
+    const results: { url: string; status: number; ok: boolean; error?: string }[] = []
+
+    try {
+      // Fetch llms.txt
+      const llmsRes = await fetch(`${siteUrl}/llms.txt`, { headers: { 'Cache-Control': 'no-cache' } })
+      if (!llmsRes.ok) {
+        console.error(`[cron:aeo-surface-check] /llms.txt returned ${llmsRes.status}`)
+        res.json({ ok: false, llmsStatus: llmsRes.status, results })
+        return
+      }
+
+      const llmsText = await llmsRes.text()
+
+      // Parse up to 5 .md URLs from the response body
+      const mdUrls = [...llmsText.matchAll(/https:\/\/[^\s)]+\.md/g)]
+        .map(m => m[0]!)
+        .filter((u, i, arr) => arr.indexOf(u) === i) // dedupe
+        .slice(0, 5)
+
+      await Promise.allSettled(
+        mdUrls.map(async url => {
+          try {
+            const r = await fetch(url, { headers: { 'Cache-Control': 'no-cache' } })
+            const ct = r.headers.get('content-type') ?? ''
+            const ok = r.ok && ct.includes('text/markdown')
+            if (!ok) {
+              console.error(
+                `[cron:aeo-surface-check] ${url} returned status=${r.status} content-type="${ct}"`,
+              )
+            }
+            results.push({ url, status: r.status, ok })
+          } catch (err) {
+            console.error(`[cron:aeo-surface-check] fetch failed for ${url}:`, err)
+            results.push({ url, status: 0, ok: false, error: String(err) })
+          }
+        }),
+      )
+
+      const failures = results.filter(r => !r.ok)
+      if (failures.length > 0) {
+        console.error(
+          `[cron:aeo-surface-check] ${failures.length} of ${results.length} .md URLs failed`,
+          failures,
+        )
+      }
+
+      res.json({ ok: failures.length === 0, checked: results.length, failures: failures.length, results })
+    } catch (err) {
+      console.error('[cron:aeo-surface-check]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/inventory-check
    * Schedule: every 5 min — check if live deal is sold out, rotate if so
    */

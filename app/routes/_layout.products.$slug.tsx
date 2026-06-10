@@ -370,6 +370,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
       { title },
       { name: 'description', content: description },
       { tagName: 'link', rel: 'canonical', href: url },
+      { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: `${url}.md` },
       ...(heroPreload ? [heroPreload] : []),
       ...buildSocialMeta({
         title,
@@ -391,6 +392,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: url },
+    { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: `${url}.md` },
     ...(heroPreload ? [heroPreload] : []),
     ...buildSocialMeta({
       title,

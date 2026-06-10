@@ -48,6 +48,7 @@ export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: canonical },
+    { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: `${canonical}.md` },
     ...buildSocialMeta({ title, description, url: canonical, image, type: 'article' }),
     { property: 'article:published_time', content: post.publishedAt },
     ...(post.author ? [{ property: 'article:author', content: post.author.name }] : []),
