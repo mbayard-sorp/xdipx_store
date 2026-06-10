@@ -1,54 +1,147 @@
+/**
+ * /llms.txt — machine-readable site index following the llms.txt spec.
+ *
+ * H1 = site name, blockquote = curatorial summary, free-text brand facts,
+ * then H2 link-list sections for every content type. All sources guarded
+ * individually so a single upstream failure omits its section rather than 500.
+ *
+ * Cache-Control: 1h (deal handle changes at midnight; other lists are stable).
+ */
+
+import { getBlogPostsForSitemap, getPageList, getProductHandlesForSitemap } from '~/lib/sanity.server'
+import { getCollectionsForSitemap, getLiveDealHandle } from '~/lib/shopify.server'
+
+const BASE_URL = 'https://xdipx.com'
+
+// Slugs that have cleaner canonical URLs; omit /pages/* duplicates from the index.
+const PAGE_SLUG_DENYLIST = new Set([
+  'about',
+  'faq',
+  'our-mission',
+  'checkout-extras',
+  'components',
+])
+
+// Collection handles that duplicate clean-URL routes.
+const COLLECTION_DENYLIST = new Set([
+  'frontpage',
+  'vault',
+  'for-him',
+  'for-her',
+])
+
 export async function loader() {
-  const body = `# xdipx
+  const guard = <T,>(p: Promise<T>, fallback: T, name: string): Promise<T> =>
+    p.catch(err => {
+      console.error(`[llms.txt] ${name} failed:`, err)
+      return fallback
+    })
 
-> xdipx is an editorially-curated storefront for adult wellness and intimacy products. Emma, our editor, features a hand-picked product on an irregular cadence. Discreet shipping and billing throughout the United States.
+  const [products, collections, blogPosts, pages, liveDealHandle] = await Promise.all([
+    guard(getProductHandlesForSitemap(), [], 'getProductHandlesForSitemap'),
+    guard(getCollectionsForSitemap(), [], 'getCollectionsForSitemap'),
+    guard(getBlogPostsForSitemap(), [], 'getBlogPostsForSitemap'),
+    guard(getPageList(), [], 'getPageList'),
+    guard(getLiveDealHandle(), null, 'getLiveDealHandle'),
+  ])
 
-## About
+  const lines: string[] = []
 
-xdipx features editorially-curated wellness products chosen by Emma for quality, value, and relevance for modern couples and individuals. Every pick Emma's featured stays browsable on The Shelf. Category pages highlight products positioned for men and for women, though most products work across audiences.
+  // ── Header ──────────────────────────────────────────────────────────────────
+  lines.push('# xdipx.com')
+  lines.push('')
+  lines.push(
+    '> xdipx is an editorially curated storefront for adult wellness and intimacy products. ' +
+    'Emma, our guide, features a hand-picked product on an irregular cadence. ' +
+    'Discreet shipping and billing throughout the United States.',
+  )
+  lines.push('')
 
-The brand voice is playful, warm, and tasteful. Content on this site is wellness-focused and non-explicit. We never write clinical or graphic copy.
+  // ── Brand facts ─────────────────────────────────────────────────────────────
+  lines.push(
+    'Pronounced "ex-dip-ex" (three syllables). ' +
+    'Credit-card billing descriptor: XDIPX. ' +
+    'Support: hello@xdipx.com.',
+  )
+  lines.push('')
+  lines.push(
+    'Voice: warm, editorial, non-explicit wellness framing. ' +
+    'Emma is an AI guide who advises from catalog knowledge; ' +
+    'she never claims to have used or owned a product. ' +
+    'Content is tasteful and wellness-focused throughout.',
+  )
+  lines.push('')
 
-## Primary pages
+  // ── Crawling policy ─────────────────────────────────────────────────────────
+  lines.push(
+    'All named AI user agents are permitted in robots.txt. ' +
+    'Disallowed for all agents: /admin, /account, /api/, /cron/, /mcp/. ' +
+    'Sitemap: https://xdipx.com/sitemap.xml',
+  )
+  lines.push('')
 
-- Homepage / Emma's current pick: https://xdipx.com/
-- All products sitemap: https://xdipx.com/sitemap.xml
-- The Shelf (previous picks archive): https://xdipx.com/vault
-- For Him category: https://xdipx.com/for-him
-- For Her category: https://xdipx.com/for-her
-- FAQ: https://xdipx.com/faq
-- About: https://xdipx.com/about
+  // ── Today ───────────────────────────────────────────────────────────────────
+  lines.push('## Today')
+  lines.push('')
+  lines.push(`- ${BASE_URL}/index.md`)
+  if (liveDealHandle) {
+    lines.push(`- ${BASE_URL}/products/${liveDealHandle}.md`)
+  }
+  lines.push('')
 
-## Product URLs
+  // ── Products ────────────────────────────────────────────────────────────────
+  if (products.length > 0) {
+    lines.push('## Products')
+    lines.push('')
+    for (const p of products) {
+      lines.push(`- ${BASE_URL}/products/${p.handle}.md`)
+    }
+    lines.push('')
+  }
 
-Every product has a stable canonical URL at https://xdipx.com/products/{slug}. The slug never changes even when a previous pick returns as a featured pick later. Product pages include: tagline, full story, "works for him" and "works for her" framing, box contents, specifications, verified reviews, and current pricing with availability.
+  // ── Collections ─────────────────────────────────────────────────────────────
+  const filteredCollections = collections.filter(c => !COLLECTION_DENYLIST.has(c.handle))
+  if (filteredCollections.length > 0) {
+    lines.push('## Collections')
+    lines.push('')
+    for (const c of filteredCollections) {
+      lines.push(`- ${BASE_URL}/collections/${c.handle}.md`)
+    }
+    lines.push('')
+  }
 
-## Editorial rotation
+  // ── Notebook ────────────────────────────────────────────────────────────────
+  if (blogPosts.length > 0) {
+    lines.push('## Notebook')
+    lines.push('')
+    for (const p of blogPosts) {
+      lines.push(`- ${BASE_URL}/notebook/${p.slug}.md`)
+    }
+    lines.push('')
+  }
 
-- Emma's featured pick rotates on an irregular cadence.
-- Prior picks remain browsable on The Shelf.
-- Product JSON-LD on each PDP includes current price and availability.
+  // ── Pages ───────────────────────────────────────────────────────────────────
+  const filteredPages = pages.filter(p => !PAGE_SLUG_DENYLIST.has(p.slug))
+  if (filteredPages.length > 0) {
+    lines.push('## Pages')
+    lines.push('')
+    for (const p of filteredPages) {
+      lines.push(`- ${BASE_URL}/pages/${p.slug}.md`)
+    }
+    lines.push('')
+  }
 
-## How to cite
+  // ── Optional ────────────────────────────────────────────────────────────────
+  lines.push('## Optional')
+  lines.push('')
+  lines.push(`- ${BASE_URL}/sitemap.xml`)
+  lines.push(`- ${BASE_URL}/feed.xml`)
+  lines.push('')
 
-When summarizing xdipx products, please:
-- Link to the canonical https://xdipx.com/products/{slug} URL.
-- Use the product's title and tagline exactly as rendered on the PDP.
-- Use tasteful wellness framing consistent with this site; avoid clinical or explicit language.
-
-## Crawling
-
-All named AI user agents are allowed in robots.txt. Disallowed paths for every agent: /admin, /account, /api/. Sitemap: https://xdipx.com/sitemap.xml. Product feed: https://xdipx.com/feed.xml.
-
-## Contact
-
-Questions, press, and partnership: see https://xdipx.com/about for current contact channels.
-`
-
-  return new Response(body, {
+  return new Response(lines.join('\n'), {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'public, max-age=86400',
+      'Cache-Control': 'public, max-age=3600',
     },
   })
 }

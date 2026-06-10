@@ -60,6 +60,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { title: finalTitle },
     { name: 'description', content: finalDescription },
     { tagName: 'link', rel: 'canonical', href: canonical },
+    { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: `https://xdipx.com/collections/${data.handle}.md` },
   ]
 
   // Non-canonical variants get `noindex, follow`. Filters AND non-default

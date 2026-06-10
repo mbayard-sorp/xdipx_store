@@ -2635,7 +2635,7 @@ async function getPairingCandidates(opts) {
   return out;
 }
 async function getProductImagesForSitemap() {
-  return cached("shopify:sitemap:product-images", 3600, async () => {
+  const entries = await cached("shopify:sitemap:product-images:v2", 3600, async () => {
     const map = /* @__PURE__ */ new Map();
     let cursor = null;
     for (let page = 0; page < 4; page++) {
@@ -2664,8 +2664,9 @@ async function getProductImagesForSitemap() {
       cursor = data.products.pageInfo.endCursor;
       if (!cursor) break;
     }
-    return map;
+    return Array.from(map.entries());
   });
+  return new Map(entries);
 }
 async function getCollection(handle) {
   return cached(`shopify:col-meta:${handle}`, READ_TTL, async () => {
@@ -19155,6 +19156,54 @@ function createCronRoutes() {
       res.json({ ok: true, ...result });
     } catch (err) {
       console.error("[cron:enrichment-batch-poller]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  router.post("/aeo-surface-check", guard, async (_req, res) => {
+    const siteUrl = process.env["BASE_URL"] ?? process.env["SITE_URL"] ?? "";
+    if (!siteUrl) {
+      console.error("[cron:aeo-surface-check] BASE_URL / SITE_URL not set \u2014 skipping");
+      res.json({ ok: true, skipped: true, reason: "BASE_URL not set" });
+      return;
+    }
+    const results = [];
+    try {
+      const llmsRes = await fetch(`${siteUrl}/llms.txt`, { headers: { "Cache-Control": "no-cache" } });
+      if (!llmsRes.ok) {
+        console.error(`[cron:aeo-surface-check] /llms.txt returned ${llmsRes.status}`);
+        res.json({ ok: false, llmsStatus: llmsRes.status, results });
+        return;
+      }
+      const llmsText = await llmsRes.text();
+      const mdUrls = [...llmsText.matchAll(/https:\/\/[^\s)]+\.md/g)].map((m) => m[0]).filter((u, i, arr) => arr.indexOf(u) === i).slice(0, 5);
+      await Promise.allSettled(
+        mdUrls.map(async (url) => {
+          try {
+            const r = await fetch(url, { headers: { "Cache-Control": "no-cache" } });
+            const ct = r.headers.get("content-type") ?? "";
+            const ok = r.ok && ct.includes("text/markdown");
+            if (!ok) {
+              console.error(
+                `[cron:aeo-surface-check] ${url} returned status=${r.status} content-type="${ct}"`
+              );
+            }
+            results.push({ url, status: r.status, ok });
+          } catch (err) {
+            console.error(`[cron:aeo-surface-check] fetch failed for ${url}:`, err);
+            results.push({ url, status: 0, ok: false, error: String(err) });
+          }
+        })
+      );
+      const failures = results.filter((r) => !r.ok);
+      if (failures.length > 0) {
+        console.error(
+          `[cron:aeo-surface-check] ${failures.length} of ${results.length} .md URLs failed`,
+          failures
+        );
+      }
+      res.json({ ok: failures.length === 0, checked: results.length, failures: failures.length, results });
+    } catch (err) {
+      console.error("[cron:aeo-surface-check]", err);
       res.status(500).json({ error: String(err) });
     }
   });
