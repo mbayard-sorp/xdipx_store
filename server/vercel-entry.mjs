@@ -6237,7 +6237,7 @@ async function fetchInventory(variantGid) {
   }
 }
 function cacheKey(variantId) {
-  return `velocity:${variantId}`;
+  return `velocity:${variantId.split("/").pop() ?? variantId}`;
 }
 async function readCache2(variantId) {
   try {
