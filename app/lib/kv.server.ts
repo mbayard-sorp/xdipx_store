@@ -143,6 +143,26 @@ export async function kvDel(key: string): Promise<void> {
   memDel(key)
 }
 
+/**
+ * Set a KV key only if it does not already exist (NX semantics), with a TTL.
+ * Returns true if the lock was newly acquired, false if it was already held.
+ * Uses Upstash set NX option in prod; emulates NX via memGet check in the
+ * in-memory fallback so local dev concurrency behaviour matches prod KV.
+ */
+export async function kvSetNX(key: string, value: string, exSeconds: number): Promise<boolean> {
+  const kv = await getKV()
+  if (kv) {
+    try {
+      const result = await kv.set(key, value, { nx: true, ex: exSeconds })
+      return result === 'OK'
+    } catch (err) { warnKvFallback('setNX', err) }
+  }
+  // In-memory fallback: acquire only if absent.
+  if (memGet(key) !== null) return false
+  memSet(key, value, exSeconds)
+  return true
+}
+
 // ─── Two-tier cache (in-memory L1 + KV L2) ────────────────────────────────
 // Cuts Shopify/Sanity API calls on hot read paths. Short TTLs keep admin
 // changes visible quickly; `invalidateCache(prefix)` lets admin flows bust

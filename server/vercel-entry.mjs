@@ -1136,6 +1136,7 @@ __export(kv_server_exports, {
   kvGet: () => kvGet,
   kvIncr: () => kvIncr,
   kvSet: () => kvSet,
+  kvSetNX: () => kvSetNX,
   setPinnedAccessoryIds: () => setPinnedAccessoryIds
 });
 function resolveKvCreds() {
@@ -1243,6 +1244,20 @@ async function kvDel(key) {
     }
   }
   memDel(key);
+}
+async function kvSetNX(key, value, exSeconds) {
+  const kv = await getKV();
+  if (kv) {
+    try {
+      const result = await kv.set(key, value, { nx: true, ex: exSeconds });
+      return result === "OK";
+    } catch (err) {
+      warnKvFallback("setNX", err);
+    }
+  }
+  if (memGet(key) !== null) return false;
+  memSet(key, value, exSeconds);
+  return true;
 }
 async function cached(key, ttlSeconds, fn) {
   const ttlMs = ttlSeconds * 1e3;
@@ -19000,7 +19015,8 @@ function createCronRoutes() {
     }
     next();
   };
-  router.post("/daily-feed-processor", guard, async (_req, res) => {
+  const cronRoute = (path, handler) => router.route(path).get(guard, handler).post(guard, handler);
+  cronRoute("/daily-feed-processor", async (_req, res) => {
     try {
       const { dailyFeedProcessor: dailyFeedProcessor2 } = await Promise.resolve().then(() => (init_feed_processor_server(), feed_processor_server_exports));
       const result = await dailyFeedProcessor2();
@@ -19010,7 +19026,7 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
-  router.post("/deal-activator", guard, async (_req, res) => {
+  cronRoute("/deal-activator", async (_req, res) => {
     try {
       const { rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
       const result = await rotateDeal2();
@@ -19020,7 +19036,7 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
-  router.post("/profit-summary", guard, async (_req, res) => {
+  cronRoute("/profit-summary", async (_req, res) => {
     try {
       const { writeProfitSummary: writeProfitSummary2 } = await Promise.resolve().then(() => (init_profit_server(), profit_server_exports));
       await writeProfitSummary2();
@@ -19031,7 +19047,7 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
-  router.post("/review-reminders", guard, async (_req, res) => {
+  cronRoute("/review-reminders", async (_req, res) => {
     try {
       const { getReviewSettings: getReviewSettings2, getPendingReminderInvites: getPendingReminderInvites2, markReminderSent: markReminderSent2 } = await Promise.resolve().then(() => (init_reviews_server(), reviews_server_exports));
       const settings = await getReviewSettings2();
@@ -19089,13 +19105,15 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
-  router.post("/keyword-research", guard, async (req, res) => {
+  cronRoute("/keyword-research", async (req, res) => {
     try {
       const { runKeywordResearch: runKeywordResearch2 } = await Promise.resolve().then(() => (init_seo_research_server(), seo_research_server_exports));
       const opts = {};
-      if (typeof req.body?.maxSeeds === "number") opts.maxSeeds = req.body.maxSeeds;
-      if (Array.isArray(req.body?.manualSeeds)) {
-        opts.manualSeeds = req.body.manualSeeds.filter((s) => typeof s === "string");
+      const rawMaxSeeds = req.body?.maxSeeds ?? (req.query["maxSeeds"] ? Number(req.query["maxSeeds"]) : void 0);
+      if (typeof rawMaxSeeds === "number" && !isNaN(rawMaxSeeds)) opts.maxSeeds = rawMaxSeeds;
+      const rawManualSeeds = req.body?.manualSeeds ?? (typeof req.query["manualSeeds"] === "string" ? req.query["manualSeeds"].split(",").map((s) => s.trim()).filter(Boolean) : void 0);
+      if (Array.isArray(rawManualSeeds)) {
+        opts.manualSeeds = rawManualSeeds.filter((s) => typeof s === "string");
       }
       const result = await runKeywordResearch2(opts);
       res.json({ ok: true, ...result });
@@ -19104,10 +19122,11 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
-  router.post("/log-monitor", guard, async (req, res) => {
+  cronRoute("/log-monitor", async (req, res) => {
     try {
       const { runLogMonitor: runLogMonitor2 } = await Promise.resolve().then(() => (init_log_monitor_server(), log_monitor_server_exports));
-      const windowMinutes = typeof req.body?.windowMinutes === "number" ? req.body.windowMinutes : 15;
+      const rawWindow = req.body?.windowMinutes ?? (req.query["windowMinutes"] ? Number(req.query["windowMinutes"]) : void 0);
+      const windowMinutes = typeof rawWindow === "number" && !isNaN(rawWindow) ? rawWindow : 15;
       const result = await runLogMonitor2({ windowMinutes });
       res.json({ ok: true, ...result });
     } catch (err) {
@@ -19115,8 +19134,8 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
-  router.post("/pricing-batch-recompute", guard, handlePricingBatchRecompute);
-  router.post("/import-monitor", guard, async (_req, res) => {
+  cronRoute("/pricing-batch-recompute", handlePricingBatchRecompute);
+  cronRoute("/import-monitor", async (_req, res) => {
     try {
       const { getPipelineSetting: getPipelineSetting2 } = await Promise.resolve().then(() => (init_feed_processor_server(), feed_processor_server_exports));
       const enabled = await getPipelineSetting2("import_monitor_enabled");
@@ -19139,7 +19158,13 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
-  router.post("/import-enrich", guard, async (_req, res) => {
+  cronRoute("/import-enrich", async (_req, res) => {
+    const { kvSetNX: kvSetNX2, kvDel: kvDel2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+    const acquired = await kvSetNX2("lock:import-enrich", String(Date.now()), 110);
+    if (!acquired) {
+      res.json({ ok: true, skipped: "locked" });
+      return;
+    }
     try {
       const { runImportEnrichTick: runImportEnrichTick2 } = await Promise.resolve().then(() => (init_import_enrich_server(), import_enrich_server_exports));
       const result = await runImportEnrichTick2({ source: "cron" });
@@ -19147,9 +19172,17 @@ function createCronRoutes() {
     } catch (err) {
       console.error("[cron:import-enrich]", err);
       res.status(500).json({ error: String(err) });
+    } finally {
+      await kvDel2("lock:import-enrich");
     }
   });
-  router.post("/enrichment-batch-poller", guard, async (_req, res) => {
+  cronRoute("/enrichment-batch-poller", async (_req, res) => {
+    const { kvSetNX: kvSetNX2, kvDel: kvDel2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+    const acquired = await kvSetNX2("lock:enrichment-poller", String(Date.now()), 110);
+    if (!acquired) {
+      res.json({ ok: true, skipped: "locked" });
+      return;
+    }
     try {
       const { advanceInflightJobs: advanceInflightJobs2 } = await Promise.resolve().then(() => (init_batch_orchestrator_server(), batch_orchestrator_server_exports));
       const result = await advanceInflightJobs2({ maxJobs: 10, perJobBudgetMs: 8e3 });
@@ -19157,9 +19190,11 @@ function createCronRoutes() {
     } catch (err) {
       console.error("[cron:enrichment-batch-poller]", err);
       res.status(500).json({ error: String(err) });
+    } finally {
+      await kvDel2("lock:enrichment-poller");
     }
   });
-  router.post("/aeo-surface-check", guard, async (_req, res) => {
+  cronRoute("/aeo-surface-check", async (_req, res) => {
     const siteUrl = process.env["BASE_URL"] ?? process.env["SITE_URL"] ?? "";
     if (!siteUrl) {
       console.error("[cron:aeo-surface-check] BASE_URL / SITE_URL not set \u2014 skipping");
@@ -19207,7 +19242,7 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
-  router.post("/inventory-check", guard, async (_req, res) => {
+  cronRoute("/inventory-check", async (_req, res) => {
     try {
       const { isLiveDealSoldOut: isLiveDealSoldOut2, rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
       const { soldOut } = await isLiveDealSoldOut2();
