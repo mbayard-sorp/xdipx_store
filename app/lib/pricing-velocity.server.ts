@@ -128,7 +128,10 @@ interface VelocityCachePayload {
 }
 
 function cacheKey(variantId: string): string {
-  return `velocity:${variantId}`
+  // pipeline_settings.key is varchar(50); the full Shopify GID
+  // (gid://shopify/ProductVariant/...) overflows it and the write 22001s,
+  // so key on just the numeric variant id.
+  return `velocity:${variantId.split('/').pop() ?? variantId}`
 }
 
 async function readCache(variantId: string): Promise<VelocityBucket | null> {
