@@ -76,11 +76,18 @@ export function createCronRoutes() {
     next()
   }
 
+  // Registers a scheduled cron endpoint on both GET (Vercel native cron) and POST
+  // (GitHub fallback / manual / internal). POST-only internal routes keep router.post.
+  const cronRoute = (
+    path: string,
+    handler: (req: Request, res: Response) => void | Promise<void>,
+  ) => router.route(path).get(guard, handler).post(guard, handler)
+
   /**
    * POST /cron/daily-feed-processor
    * Schedule: 11:45 PM — fetch Nalpac feed, score products, stage top candidates
    */
-  router.post('/daily-feed-processor', guard, async (_req, res) => {
+  cronRoute('/daily-feed-processor', async (_req, res) => {
     try {
       const { dailyFeedProcessor } = await import('../app/lib/feed-processor.server.js')
       const result = await dailyFeedProcessor()
@@ -95,7 +102,7 @@ export function createCronRoutes() {
    * POST /cron/deal-activator
    * Schedule: 11:59 PM — archive today's deal, activate tomorrow's, trigger Klaviyo
    */
-  router.post('/deal-activator', guard, async (_req, res) => {
+  cronRoute('/deal-activator', async (_req, res) => {
     try {
       const { rotateDeal } = await import('../app/lib/deal-rotator.server.js')
       const result = await rotateDeal()
@@ -110,7 +117,7 @@ export function createCronRoutes() {
    * POST /cron/profit-summary
    * Schedule: 12:05 AM — write daily profit summary to Neon
    */
-  router.post('/profit-summary', guard, async (_req, res) => {
+  cronRoute('/profit-summary', async (_req, res) => {
     try {
       const { writeProfitSummary } = await import('../app/lib/profit.server.js')
       await writeProfitSummary()
@@ -126,7 +133,7 @@ export function createCronRoutes() {
    * POST /cron/review-reminders
    * Schedule: 9:00 AM daily — send reminder emails for pending invites
    */
-  router.post('/review-reminders', guard, async (_req, res) => {
+  cronRoute('/review-reminders', async (_req, res) => {
     try {
       const { getReviewSettings, getPendingReminderInvites, markReminderSent } = await import('../app/lib/reviews.server.js')
       const settings = await getReviewSettings()
@@ -210,13 +217,19 @@ export function createCronRoutes() {
    * Also callable on-demand by admin (with the cron secret).
    * Body (optional): { manualSeeds?: string[], maxSeeds?: number }
    */
-  router.post('/keyword-research', guard, async (req, res) => {
+  cronRoute('/keyword-research', async (req, res) => {
     try {
       const { runKeywordResearch } = await import('../app/lib/seo-research.server.js')
       const opts: { maxSeeds?: number; manualSeeds?: string[] } = {}
-      if (typeof req.body?.maxSeeds === 'number') opts.maxSeeds = req.body.maxSeeds
-      if (Array.isArray(req.body?.manualSeeds)) {
-        opts.manualSeeds = (req.body.manualSeeds as unknown[]).filter((s): s is string => typeof s === 'string')
+      const rawMaxSeeds = req.body?.maxSeeds ?? (req.query['maxSeeds'] ? Number(req.query['maxSeeds']) : undefined)
+      if (typeof rawMaxSeeds === 'number' && !isNaN(rawMaxSeeds)) opts.maxSeeds = rawMaxSeeds
+      const rawManualSeeds = req.body?.manualSeeds ?? (
+        typeof req.query['manualSeeds'] === 'string'
+          ? req.query['manualSeeds'].split(',').map(s => s.trim()).filter(Boolean)
+          : undefined
+      )
+      if (Array.isArray(rawManualSeeds)) {
+        opts.manualSeeds = (rawManualSeeds as unknown[]).filter((s): s is string => typeof s === 'string')
       }
       const result = await runKeywordResearch(opts)
       res.json({ ok: true, ...result })
@@ -232,10 +245,11 @@ export function createCronRoutes() {
    * signal vs noise via Claude haiku, open GitHub issues for P0 groups.
    * Body (optional): { windowMinutes?: number }
    */
-  router.post('/log-monitor', guard, async (req, res) => {
+  cronRoute('/log-monitor', async (req, res) => {
     try {
       const { runLogMonitor } = await import('../app/lib/log-monitor.server.js')
-      const windowMinutes = typeof req.body?.windowMinutes === 'number' ? req.body.windowMinutes : 15
+      const rawWindow = req.body?.windowMinutes ?? (req.query['windowMinutes'] ? Number(req.query['windowMinutes']) : undefined)
+      const windowMinutes = typeof rawWindow === 'number' && !isNaN(rawWindow) ? rawWindow : 15
       const result = await runLogMonitor({ windowMinutes })
       res.json({ ok: true, ...result })
     } catch (err) {
@@ -250,7 +264,7 @@ export function createCronRoutes() {
    * the v2 target-margin engine, write audit log rows, auto-apply within threshold.
    * Query: ?dry=1 to inspect counts without applying (not yet implemented; returns counts).
    */
-  router.post('/pricing-batch-recompute', guard, handlePricingBatchRecompute)
+  cronRoute('/pricing-batch-recompute', handlePricingBatchRecompute)
 
   /**
    * POST /cron/import-monitor
@@ -258,7 +272,7 @@ export function createCronRoutes() {
    * tier + score + price-preview candidates, upsert import_candidates.
    * Gated by import_monitor_enabled kill-switch and import_monitor_run_days CSV.
    */
-  router.post('/import-monitor', guard, async (_req, res) => {
+  cronRoute('/import-monitor', async (_req, res) => {
     try {
       const { getPipelineSetting } = await import('../app/lib/feed-processor.server.js')
 
@@ -297,7 +311,13 @@ export function createCronRoutes() {
    * submits a new batch if none is in flight. Gated by import_enrich_enabled
    * (checked inside runImportEnrichTick).
    */
-  router.post('/import-enrich', guard, async (_req, res) => {
+  cronRoute('/import-enrich', async (_req, res) => {
+    const { kvSetNX, kvDel } = await import('../app/lib/kv.server.js')
+    const acquired = await kvSetNX('lock:import-enrich', String(Date.now()), 110)
+    if (!acquired) {
+      res.json({ ok: true, skipped: 'locked' })
+      return
+    }
     try {
       const { runImportEnrichTick } = await import('../app/lib/import-enrich.server.js')
       const result = await runImportEnrichTick({ source: 'cron' })
@@ -305,6 +325,8 @@ export function createCronRoutes() {
     } catch (err) {
       console.error('[cron:import-enrich]', err)
       res.status(500).json({ error: String(err) })
+    } finally {
+      await kvDel('lock:import-enrich')
     }
   })
 
@@ -314,7 +336,13 @@ export function createCronRoutes() {
    * (retrieve current turn's batch; if ended, distribute + run tools + submit
    * next turn or apply). Bounded work per invocation to fit the 60s budget.
    */
-  router.post('/enrichment-batch-poller', guard, async (_req, res) => {
+  cronRoute('/enrichment-batch-poller', async (_req, res) => {
+    const { kvSetNX, kvDel } = await import('../app/lib/kv.server.js')
+    const acquired = await kvSetNX('lock:enrichment-poller', String(Date.now()), 110)
+    if (!acquired) {
+      res.json({ ok: true, skipped: 'locked' })
+      return
+    }
     try {
       const { advanceInflightJobs } = await import('../app/lib/batch-orchestrator.server.js')
       const result = await advanceInflightJobs({ maxJobs: 10, perJobBudgetMs: 8000 })
@@ -322,6 +350,8 @@ export function createCronRoutes() {
     } catch (err) {
       console.error('[cron:enrichment-batch-poller]', err)
       res.status(500).json({ error: String(err) })
+    } finally {
+      await kvDel('lock:enrichment-poller')
     }
   })
 
@@ -331,7 +361,7 @@ export function createCronRoutes() {
    * are reachable. Parses /llms.txt, fetches 3-5 .md URLs cold, logs errors so
    * Sentry picks them up without failing the deployment.
    */
-  router.post('/aeo-surface-check', guard, async (_req, res) => {
+  cronRoute('/aeo-surface-check', async (_req, res) => {
     const siteUrl = process.env['BASE_URL'] ?? process.env['SITE_URL'] ?? ''
     if (!siteUrl) {
       console.error('[cron:aeo-surface-check] BASE_URL / SITE_URL not set — skipping')
@@ -396,7 +426,7 @@ export function createCronRoutes() {
    * POST /cron/inventory-check
    * Schedule: every 5 min — check if live deal is sold out, rotate if so
    */
-  router.post('/inventory-check', guard, async (_req, res) => {
+  cronRoute('/inventory-check', async (_req, res) => {
     try {
       const { isLiveDealSoldOut, rotateDeal } = await import('../app/lib/deal-rotator.server.js')
       const { soldOut } = await isLiveDealSoldOut()
