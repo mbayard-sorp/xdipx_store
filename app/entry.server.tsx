@@ -8,7 +8,12 @@ import type { RenderToPipeableStreamOptions } from 'react-dom/server'
 import { renderToPipeableStream } from 'react-dom/server'
 import { Sentry } from '~/lib/sentry.server'
 
-export const streamTimeout = 5_000
+// Must sit ABOVE the homepage loader's per-leg fallback budgets (8–9s in
+// _index.tsx). React Router aborts pending deferred promises at streamTimeout;
+// the renderer hard-abort below fires 1s later. When this was 5s the render
+// died before the loader fallbacks could swap in real data, so cold-instance
+// Googlebot crawls got the error boundary (and a stray noindex) instead of HTML.
+export const streamTimeout = 10_000
 
 export default function handleRequest(
   request: Request,
