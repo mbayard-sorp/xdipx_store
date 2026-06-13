@@ -251,6 +251,13 @@ export function ErrorBoundary() {
     }
   }
 
+  // Only a genuinely gone/missing page may carry `noindex`. A transient 5xx, a
+  // 499 (render aborted mid-stream on a slow cold instance), or any unknown
+  // render error must NEVER emit noindex: Google treats noindex as a sticky,
+  // semi-permanent signal and will drop the URL for what was a momentary blip.
+  // Those cases fall through with no robots meta so Googlebot simply retries.
+  const isPermanentlyUnindexable = status === 404 || status === 410
+
   // Brand-safe SEO title + noindex so error pages never get indexed.
   // React 19 hoists <title>/<meta> from anywhere in the tree into <head>.
   // BRAND_TITLE and BRAND_DESCRIPTION come from app/lib/brand.ts — single source
@@ -259,7 +266,9 @@ export function ErrorBoundary() {
   return (
     <>
       <title>{BRAND_TITLE}</title>
-      <meta name="robots" content="noindex, nofollow" />
+      {isPermanentlyUnindexable && (
+        <meta name="robots" content="noindex, nofollow" />
+      )}
       <meta name="description" content={BRAND_DESCRIPTION} />
       {/* Keep the status code visible to ops without putting it in the title. */}
       {status !== null && (
