@@ -29,6 +29,7 @@ __export(schema_exports, {
   emmaChatThreads: () => emmaChatThreads,
   emmaChatTurns: () => emmaChatTurns,
   enrichmentBatches: () => enrichmentBatches,
+  homepagePayload: () => homepagePayload,
   importCandidates: () => importCandidates,
   importMonitorRuns: () => importMonitorRuns,
   ivrVoices: () => ivrVoices,
@@ -78,7 +79,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, homepagePayload;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -876,6 +877,18 @@ var init_schema = __esm({
       resolvedAt: timestamp("resolved_at")
     }, (t) => ({
       unresolvedIdx: index("idx_meta_capi_failures_unresolved").on(t.createdAt)
+    }));
+    homepagePayload = pgTable("homepage_payload", {
+      id: serial("id").primaryKey(),
+      variant: varchar("variant", { length: 8 }).notNull(),
+      // 'a' (room for 'b'/'legacy')
+      version: varchar("version", { length: 16 }).notNull(),
+      // HOMEPAGE_PAYLOAD_VERSION
+      payload: json("payload").$type().notNull(),
+      degraded: boolean("degraded").notNull().default(false),
+      builtAt: timestamp("built_at").notNull().defaultNow()
+    }, (t) => ({
+      variantVersionUniq: uniqueIndex("homepage_payload_variant_version_uniq").on(t.variant, t.version)
     }));
   }
 });
@@ -12622,6 +12635,1127 @@ var init_search_ping_server = __esm({
   }
 });
 
+// app/lib/with-timeout.server.ts
+async function withTimeout(p, ms, fallback, label = "op") {
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      console.warn(`[with-timeout] ${label} timed out after ${ms}ms \u2014 using fallback`);
+      resolve(fallback);
+    }, ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+var init_with_timeout_server = __esm({
+  "app/lib/with-timeout.server.ts"() {
+    "use strict";
+  }
+});
+
+// app/types/discovery.ts
+var MATTERS_V1, MATTERS_V2, MATTERS, CATEGORIES, DEFAULT_BUDGET, EMPTY_STATE;
+var init_discovery = __esm({
+  "app/types/discovery.ts"() {
+    "use strict";
+    MATTERS_V1 = [
+      "Beginner-Friendly",
+      "Body-Safe Silicone",
+      "Discreet Design",
+      "First-Time",
+      "Hands-Free",
+      "Rechargeable",
+      "Soft-Touch",
+      "Travel-Size",
+      "Waterproof",
+      "App-Controlled",
+      "Whisper-Quiet",
+      "Plus-Size-Friendly"
+    ];
+    MATTERS_V2 = [
+      "Beginner-friendly",
+      "Whisper-quiet",
+      "Waterproof",
+      "Travel-ready",
+      "Discreet",
+      "Hands-free",
+      "Remote-controlled",
+      "Plus-size friendly",
+      "Easy to clean",
+      "Rechargeable",
+      "Soft-touch",
+      "Latex-free"
+    ];
+    MATTERS = [...MATTERS_V1, ...MATTERS_V2];
+    CATEGORIES = ["Pleasure", "Play", "Body", "Wear"];
+    DEFAULT_BUDGET = 200;
+    EMPTY_STATE = {
+      mood: [],
+      audience: [],
+      matters: [],
+      budget: DEFAULT_BUDGET,
+      step: 0
+    };
+  }
+});
+
+// app/lib/discovery-emma.ts
+function scoreProduct2(p, s) {
+  let score2 = 0;
+  for (const m of s.mood) if (p.mood.includes(m)) score2 += SCORE_MOOD;
+  for (const a of s.audience) if (p.audience.includes(a)) score2 += SCORE_AUDIENCE;
+  for (const k of s.matters) if (p.matters.includes(k)) score2 += SCORE_MATTERS;
+  return score2;
+}
+function computeAvailable(index2, s) {
+  const moods = /* @__PURE__ */ new Set();
+  const audiences = /* @__PURE__ */ new Set();
+  const matters = /* @__PURE__ */ new Set();
+  const hasMood = s.mood.length > 0;
+  const hasAudience = s.audience.length > 0;
+  const hasMatters = s.matters.length > 0;
+  for (const p of index2) {
+    const okMood = !hasMood || s.mood.some((m) => p.mood.includes(m));
+    const okAudience = !hasAudience || s.audience.some((a) => p.audience.includes(a));
+    const okMatters = !hasMatters || s.matters.some((k) => p.matters.includes(k));
+    if (okAudience && okMatters) for (const m of p.mood) moods.add(m);
+    if (okMood && okMatters) for (const a of p.audience) audiences.add(a);
+    if (okMood && okAudience) for (const k of p.matters) matters.add(k);
+  }
+  return { moods, audiences, matters };
+}
+function availableToArrays(a) {
+  return {
+    moods: Array.from(a.moods),
+    audiences: Array.from(a.audiences),
+    matters: Array.from(a.matters)
+  };
+}
+function mulberry322(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t = t + 1831565813 >>> 0;
+    let r = t;
+    r = Math.imul(r ^ r >>> 15, r | 1);
+    r ^= r + Math.imul(r ^ r >>> 7, r | 61);
+    return ((r ^ r >>> 14) >>> 0) / 4294967296;
+  };
+}
+function seededShuffle2(arr, seed) {
+  const rand = mulberry322(seed);
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+}
+function rankRails(products, state, opts = {}) {
+  const { perRail = 4, dropEmpty = false, seed } = opts;
+  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
+  const filtered = products.filter((p) => p.price <= state.budget);
+  const buckets = {
+    Pleasure: [],
+    Play: [],
+    Body: [],
+    Wear: []
+  };
+  const totals = { Pleasure: 0, Play: 0, Body: 0, Wear: 0 };
+  const aggScore = { Pleasure: 0, Play: 0, Body: 0, Wear: 0 };
+  for (const p of filtered) {
+    const score2 = hasAny ? scoreProduct2(p, state) : 0;
+    buckets[p.category].push({ product: p, score: score2 });
+    totals[p.category] += 1;
+    aggScore[p.category] += score2;
+  }
+  for (let ci = 0; ci < CATEGORIES.length; ci++) {
+    const cat = CATEGORIES[ci];
+    if (!hasAny && seed !== void 0) {
+      seededShuffle2(buckets[cat], (seed ^ (ci + 1) * 2654435761) >>> 0);
+    } else {
+      buckets[cat].sort((a, b) => b.score - a.score);
+    }
+  }
+  const order = [...CATEGORIES];
+  if (hasAny) {
+    order.sort((a, b) => {
+      const diff = aggScore[b] - aggScore[a];
+      if (diff !== 0) return diff;
+      return CATEGORIES.indexOf(a) - CATEGORIES.indexOf(b);
+    });
+  }
+  const rails = order.map((cat) => ({
+    category: cat,
+    score: aggScore[cat],
+    total: totals[cat],
+    items: buckets[cat].slice(0, perRail)
+  }));
+  return dropEmpty ? rails.filter((r) => r.items.length > 0) : rails;
+}
+function rankSingleRail(products, state, category, offset, limit) {
+  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
+  const filtered = products.filter((p) => p.price <= state.budget && p.category === category);
+  const scored = filtered.map((p) => ({
+    product: p,
+    score: hasAny ? scoreProduct2(p, state) : 0
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return { items: scored.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(0, limit)), total: scored.length };
+}
+var SCORE_MOOD, SCORE_AUDIENCE, SCORE_MATTERS;
+var init_discovery_emma = __esm({
+  "app/lib/discovery-emma.ts"() {
+    "use strict";
+    init_discovery();
+    SCORE_MOOD = 3;
+    SCORE_AUDIENCE = 2;
+    SCORE_MATTERS = 2;
+  }
+});
+
+// app/lib/discovery-tags.ts
+function normalizeTag2(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  return trimmed.toLowerCase().split(/(\s+|-)/).map((part) => {
+    if (/^\s+$/.test(part) || part === "-") return part;
+    if (part.length === 0) return part;
+    return part[0].toUpperCase() + part.slice(1);
+  }).join("");
+}
+var init_discovery_tags = __esm({
+  "app/lib/discovery-tags.ts"() {
+    "use strict";
+  }
+});
+
+// app/lib/discovery-rules.server.ts
+import { eq as eq6, and, asc } from "drizzle-orm";
+async function getActiveDiscoveryRules() {
+  const cached2 = await kvGet(RULES_CACHE_KEY);
+  if (cached2 && Array.isArray(cached2)) return cached2;
+  const rows = await db.select().from(discoveryRules).where(eq6(discoveryRules.active, true)).orderBy(asc(discoveryRules.ruleType), asc(discoveryRules.sortOrder), asc(discoveryRules.id));
+  const rules = rows.map(rowToRule);
+  await kvSet(RULES_CACHE_KEY, rules, RULES_TTL_SECONDS);
+  return rules;
+}
+async function getInventoryMin() {
+  const cached2 = await kvGet(INVENTORY_MIN_CACHE_KEY);
+  if (typeof cached2 === "number") return cached2;
+  const row = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq6(pipelineSettings.key, "discovery_inventory_min")).limit(1);
+  const parsed = row.length && row[0] ? parseInt(row[0].value, 10) : 0;
+  const value = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  await kvSet(INVENTORY_MIN_CACHE_KEY, value, INVENTORY_MIN_CACHE_TTL);
+  return value;
+}
+function rowToRule(row) {
+  return {
+    id: row.id,
+    ruleType: row.ruleType,
+    ruleValue: row.ruleValue,
+    category: row.category ?? null,
+    sortOrder: row.sortOrder,
+    notes: row.notes ?? null,
+    active: row.active,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+function applyRules(products, rules, inventoryMin) {
+  if (rules.length === 0 && inventoryMin === 0) return products;
+  const excludeHandles = /* @__PURE__ */ new Set();
+  const excludeTypes = [];
+  const excludeKeywords = [];
+  const priceFloors = [];
+  const priceCeilings = [];
+  for (const rule of rules) {
+    switch (rule.ruleType) {
+      case "exclude_product":
+        excludeHandles.add(rule.ruleValue);
+        break;
+      case "exclude_product_type":
+        excludeTypes.push({ value: rule.ruleValue.trim().toLowerCase(), category: rule.category });
+        break;
+      case "exclude_keyword":
+        excludeKeywords.push(rule.ruleValue.toLowerCase());
+        break;
+      case "exclude_price_min": {
+        const n = parseFloat(rule.ruleValue);
+        if (Number.isFinite(n)) priceFloors.push(n);
+        break;
+      }
+      case "exclude_price_max": {
+        const n = parseFloat(rule.ruleValue);
+        if (Number.isFinite(n)) priceCeilings.push(n);
+        break;
+      }
+    }
+  }
+  return products.filter((p) => {
+    if (excludeHandles.has(p.handle)) return false;
+    if (p.productType) {
+      const productTypeLc = p.productType.trim().toLowerCase();
+      for (const et of excludeTypes) {
+        if (et.value === productTypeLc && (et.category === null || et.category === p.category)) {
+          return false;
+        }
+      }
+    }
+    const lowerTitle = p.title.toLowerCase();
+    for (const kw of excludeKeywords) {
+      if (lowerTitle.includes(kw)) return false;
+    }
+    for (const floor of priceFloors) {
+      if (p.price < floor) return false;
+    }
+    for (const ceiling of priceCeilings) {
+      if (p.price > ceiling) return false;
+    }
+    if (inventoryMin > 0 && p.totalInventory !== null && p.totalInventory < inventoryMin) {
+      return false;
+    }
+    return true;
+  });
+}
+function fillFallbacks(rail, rules, filteredIndex, perRail, alreadyIncludedIds = /* @__PURE__ */ new Set(), collectionPinIds = {}, honoraryProductsByCategory = {}) {
+  const slots = perRail - rail.items.length;
+  if (slots <= 0) return rail;
+  const byHandle = /* @__PURE__ */ new Map();
+  const byId = /* @__PURE__ */ new Map();
+  for (const p of filteredIndex) {
+    byHandle.set(p.handle, p);
+    byId.set(p.id, p);
+  }
+  for (const p of honoraryProductsByCategory[rail.category] ?? []) {
+    if (!byId.has(p.id)) byId.set(p.id, p);
+  }
+  const inRail = new Set(rail.items.map((sp) => sp.product.handle));
+  const inRailIds = new Set(rail.items.map((sp) => sp.product.id));
+  const pins = rules.filter((r) => r.ruleType === "pin_fallback" && r.category === rail.category).sort((a, b) => a.sortOrder - b.sortOrder);
+  const extras = [];
+  const usedIds = /* @__PURE__ */ new Set();
+  for (const pin of pins) {
+    if (extras.length >= slots) break;
+    const product = byHandle.get(pin.ruleValue);
+    if (!product) continue;
+    if (inRail.has(product.handle)) continue;
+    if (alreadyIncludedIds.has(product.id)) continue;
+    if (usedIds.has(product.id)) continue;
+    extras.push({ product, score: 0 });
+    usedIds.add(product.id);
+  }
+  const collectionIds = collectionPinIds[rail.category] ?? [];
+  for (const id of collectionIds) {
+    if (extras.length >= slots) break;
+    const product = byId.get(id);
+    if (!product) continue;
+    if (product.category !== rail.category) continue;
+    if (inRailIds.has(product.id)) continue;
+    if (alreadyIncludedIds.has(product.id)) continue;
+    if (usedIds.has(product.id)) continue;
+    extras.push({ product, score: 0 });
+    usedIds.add(product.id);
+  }
+  if (extras.length === 0) return rail;
+  return {
+    ...rail,
+    items: [...rail.items, ...extras],
+    total: rail.total + extras.length
+  };
+}
+function cleanCollectionHandle(input) {
+  if (!input) return "";
+  let s = input.trim().toLowerCase();
+  const protoMatch = s.match(/^https?:\/\/[^/]+(.*)$/);
+  if (protoMatch && protoMatch[1] !== void 0) s = protoMatch[1];
+  s = s.replace(/^\/+collections\/+/, "").replace(/^\/+/, "");
+  const stop = s.search(/[?#/]/);
+  if (stop !== -1) s = s.slice(0, stop);
+  return s;
+}
+async function resolveCollectionPins(rules, fetcher) {
+  const collectionPins = rules.filter((r) => r.ruleType === "pin_collection_fallback" && r.category !== null).sort((a, b) => a.sortOrder - b.sortOrder);
+  if (collectionPins.length === 0) return {};
+  const handleCache = /* @__PURE__ */ new Map();
+  const result = {};
+  for (const pin of collectionPins) {
+    const handle = cleanCollectionHandle(pin.ruleValue);
+    if (!handle || !pin.category) continue;
+    let ids = handleCache.get(handle);
+    if (!ids) {
+      ids = await fetcher(handle);
+      handleCache.set(handle, ids);
+    }
+    const seen = new Set(result[pin.category] ?? []);
+    const merged = result[pin.category] ?? [];
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      merged.push(id);
+    }
+    result[pin.category] = merged;
+  }
+  return result;
+}
+function autoLoosen(category, state, filteredIndex, perRail) {
+  const withoutMatters = { ...state, matters: [] };
+  const r1 = rankSingleRail(filteredIndex, withoutMatters, category, 0, perRail);
+  if (r1.items.length > 0) {
+    return { items: r1.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
+  }
+  const withoutAudience = { ...withoutMatters, audience: [] };
+  const r2 = rankSingleRail(filteredIndex, withoutAudience, category, 0, perRail);
+  if (r2.items.length > 0) {
+    return { items: r2.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
+  }
+  const withoutMood = { ...withoutAudience, mood: [] };
+  const r3 = rankSingleRail(filteredIndex, withoutMood, category, 0, perRail);
+  if (r3.items.length > 0) {
+    return { items: r3.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
+  }
+  return null;
+}
+var RULES_CACHE_KEY, RULES_TTL_SECONDS, INVENTORY_MIN_CACHE_KEY, INVENTORY_MIN_CACHE_TTL;
+var init_discovery_rules_server = __esm({
+  "app/lib/discovery-rules.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_kv_server();
+    init_discovery_emma();
+    init_discovery_server();
+    RULES_CACHE_KEY = "discovery:rules:v1";
+    RULES_TTL_SECONDS = 5 * 60;
+    INVENTORY_MIN_CACHE_KEY = "discovery:inventory-min:v1";
+    INVENTORY_MIN_CACHE_TTL = 5 * 60;
+  }
+});
+
+// app/lib/discovery.server.ts
+var discovery_server_exports = {};
+__export(discovery_server_exports, {
+  INDEX_KEY: () => INDEX_KEY,
+  INDEX_TTL_SECONDS: () => INDEX_TTL_SECONDS,
+  VOCAB_KEY: () => VOCAB_KEY,
+  VOCAB_TTL_SECONDS: () => VOCAB_TTL_SECONDS,
+  buildDiscoveryIndex: () => buildDiscoveryIndex,
+  computeVocab: () => computeVocab,
+  fetchHonoraryProducts: () => fetchHonoraryProducts,
+  getDiscoveryIndex: () => getDiscoveryIndex,
+  getDiscoveryRailPage: () => getDiscoveryRailPage,
+  getDiscoveryRails: () => getDiscoveryRails,
+  getDiscoveryVocab: () => getDiscoveryVocab,
+  getHonoraryProductsForPin: () => getHonoraryProductsForPin,
+  getProductIdsByCollectionHandle: () => getProductIdsByCollectionHandle,
+  invalidateDiscoveryIndex: () => invalidateDiscoveryIndex,
+  reportTagCoverage: () => reportTagCoverage,
+  triggerDiscoveryRebuild: () => triggerDiscoveryRebuild
+});
+function dialToSubcategory(dial) {
+  switch (dial) {
+    case "vibrator":
+      return "Vibrators";
+    case "dildo":
+      return "Dildos";
+    case "anal":
+      return "Anal";
+    case "cock-ring":
+    case "stroker":
+    case "extender":
+    case "pump":
+    case "sex-machine":
+      return "For Him";
+    case "bondage":
+      return "Bondage & Kink";
+    case "couples":
+      return "Couples";
+    case "lube":
+      return "Lubricants";
+    case "massage":
+      return "Massage";
+    case "enhancer":
+    case "wellness":
+      return "Wellness";
+    case "wear":
+      return "Lingerie";
+    case "harness":
+      return "Accessories";
+    default:
+      return null;
+  }
+}
+function cleanTagList(arr) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const raw of arr) {
+    const v = normalizeTag2(raw);
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+function classifyOptionValues(options) {
+  let colorValues = [];
+  let sizeValues = [];
+  for (const o of options) {
+    const name = o.name.toLowerCase();
+    const values = o.optionValues.map((v) => v.name.trim()).filter(Boolean);
+    if (/colou?r/.test(name)) colorValues = values;
+    else if (/size|length/.test(name)) sizeValues = values;
+  }
+  return { colorValues, sizeValues };
+}
+function derivePricingAndOptions(n, price) {
+  const maxRaw = Number(n.priceRangeV2.maxVariantPrice?.amount);
+  const priceMax = Number.isFinite(maxRaw) && maxRaw > price ? maxRaw : null;
+  const originalRaw = Number(n.originalPriceRaw?.value);
+  const compareRaw = Number(n.compareAtPriceRange?.minVariantCompareAtPrice?.amount);
+  const msrp = Number.isFinite(originalRaw) && originalRaw > 0 ? originalRaw : Number.isFinite(compareRaw) ? compareRaw : NaN;
+  const compareAtPrice = Number.isFinite(msrp) && msrp > price ? msrp : null;
+  const { colorValues, sizeValues } = classifyOptionValues(n.options ?? []);
+  return { priceMax, compareAtPrice, colorValues, sizeValues };
+}
+function parseListMetafield(value) {
+  if (!value) return [];
+  if (value.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
+}
+function nodeToDiscoveryProduct(n, categoryMap) {
+  const category = categoryMap.get(n.id);
+  if (!category) return null;
+  const price = Number(n.priceRangeV2.minVariantPrice.amount);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const dial = n.productTypeDial?.value ?? "";
+  const subcategory = dialToSubcategory(dial) ?? category;
+  const mood = cleanTagList(parseListMetafield(n.moodTagsRaw?.value));
+  const audience = cleanTagList(parseListMetafield(n.audienceTagsRaw?.value));
+  const matters = cleanTagList(parseListMetafield(n.mattersTagsRaw?.value));
+  const productType = (n.productType ?? "").trim() || null;
+  const productTypeDial = dial || null;
+  const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(n, price);
+  return {
+    id: n.id,
+    handle: n.handle,
+    title: n.title,
+    price,
+    priceMax,
+    compareAtPrice,
+    colorValues,
+    sizeValues,
+    imageUrl: n.featuredImage?.url ?? null,
+    imageAlt: n.featuredImage?.altText ?? null,
+    category,
+    subcategory,
+    mood,
+    audience,
+    matters,
+    totalInventory: n.totalInventory ?? null,
+    productType,
+    productTypeDial
+  };
+}
+async function fetchCollectionProductIds(collectionGid) {
+  const ids = /* @__PURE__ */ new Set();
+  let cursor = null;
+  while (true) {
+    const data = await adminGraphQL(
+      COLLECTION_PRODUCTS_QUERY,
+      { id: collectionGid, cursor }
+    );
+    const page = data.collection?.products;
+    if (!page) break;
+    for (const n of page.nodes) ids.add(n.id);
+    if (!page.pageInfo.hasNextPage) break;
+    cursor = page.pageInfo.endCursor;
+    if (!cursor) break;
+  }
+  return ids;
+}
+async function getProductIdsByCollectionHandle(handle) {
+  const key = handle.trim().toLowerCase();
+  if (!key) return [];
+  const cacheKey3 = collectionHandleKey(key);
+  const cached2 = await kvGet(cacheKey3);
+  if (cached2 && Array.isArray(cached2)) return cached2;
+  let ids = [];
+  try {
+    const data = await adminGraphQL(
+      COLLECTION_BY_HANDLE_QUERY,
+      { handle: key }
+    );
+    const gid = data.collectionByHandle?.id;
+    if (gid) {
+      const set = await fetchCollectionProductIds(gid);
+      ids = Array.from(set);
+    }
+  } catch (err) {
+    console.error("[discovery] getProductIdsByCollectionHandle error for", key, err);
+    return [];
+  }
+  await kvSet(cacheKey3, ids, COLLECTION_HANDLE_CACHE_TTL);
+  return ids;
+}
+async function fetchHonoraryProducts(ids, category) {
+  if (ids.length === 0) return [];
+  const out = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const batch = ids.slice(i, i + 100);
+    let resp;
+    try {
+      resp = await adminGraphQL(NODES_BY_IDS_QUERY, { ids: batch });
+    } catch (err) {
+      console.error("[discovery] fetchHonoraryProducts batch failed:", err);
+      continue;
+    }
+    for (const node of resp.nodes) {
+      if (!node || node.status !== "ACTIVE") continue;
+      const price = Number(node.priceRangeV2.minVariantPrice.amount);
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const dial = node.productTypeDial?.value ?? "";
+      const subcategory = dialToSubcategory(dial) ?? category;
+      const productType = (node.productType ?? "").trim() || null;
+      const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(node, price);
+      out.push({
+        id: node.id,
+        handle: node.handle,
+        title: node.title,
+        price,
+        priceMax,
+        compareAtPrice,
+        colorValues,
+        sizeValues,
+        imageUrl: node.featuredImage?.url ?? null,
+        imageAlt: node.featuredImage?.altText ?? null,
+        category,
+        // honorary — forced to the pinned rail's category
+        subcategory,
+        mood: cleanTagList(parseListMetafield(node.moodTagsRaw?.value)),
+        audience: cleanTagList(parseListMetafield(node.audienceTagsRaw?.value)),
+        matters: cleanTagList(parseListMetafield(node.mattersTagsRaw?.value)),
+        totalInventory: node.totalInventory ?? null,
+        productType,
+        productTypeDial: dial || null
+      });
+    }
+  }
+  return out;
+}
+async function getHonoraryProductsForPin(handle, category) {
+  const cleaned = handle.trim().toLowerCase();
+  if (!cleaned) return [];
+  const cacheKey3 = honoraryCacheKey(category, cleaned);
+  const cached2 = await kvGet(cacheKey3);
+  if (cached2 && Array.isArray(cached2)) return cached2;
+  const ids = await getProductIdsByCollectionHandle(cleaned);
+  if (ids.length === 0) {
+    await kvSet(cacheKey3, [], HONORARY_CACHE_TTL);
+    return [];
+  }
+  const products = await fetchHonoraryProducts(ids, category);
+  await kvSet(cacheKey3, products, HONORARY_CACHE_TTL);
+  return products;
+}
+async function buildCategoryMap() {
+  const sets = await Promise.all(
+    CATEGORY_PRIORITY.map(async (cat) => ({
+      cat,
+      ids: await fetchCollectionProductIds(CATEGORY_COLLECTION_IDS[cat])
+    }))
+  );
+  const map = /* @__PURE__ */ new Map();
+  for (const { cat, ids } of sets) {
+    for (const id of ids) {
+      if (!map.has(id)) map.set(id, cat);
+    }
+  }
+  return map;
+}
+async function buildDiscoveryIndex() {
+  const categoryMap = await buildCategoryMap();
+  const out = [];
+  let cursor = null;
+  while (true) {
+    const data = await adminGraphQL(
+      PRODUCTS_PAGE_QUERY,
+      { cursor }
+    );
+    for (const node of data.products.nodes) {
+      const dp = nodeToDiscoveryProduct(node, categoryMap);
+      if (dp) out.push(dp);
+    }
+    if (!data.products.pageInfo.hasNextPage) break;
+    cursor = data.products.pageInfo.endCursor;
+    if (!cursor) break;
+  }
+  return out;
+}
+function triggerDiscoveryRebuild() {
+  const baseUrl = process.env["BASE_URL"];
+  const cronSecret = process.env["CRON_SECRET"];
+  if (!baseUrl || !cronSecret) return;
+  void fetch(`${baseUrl}/cron/warm-discovery-index`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${cronSecret}` }
+  }).catch(() => {
+  });
+}
+async function getDiscoveryIndex(opts = {}) {
+  if (!opts.force) {
+    const cached2 = await kvGet(INDEX_KEY);
+    if (cached2 && Array.isArray(cached2) && cached2.length > 0) return cached2;
+  }
+  triggerDiscoveryRebuild();
+  return [];
+}
+async function invalidateDiscoveryIndex() {
+  await kvSet(INDEX_KEY, null, 1);
+  await kvSet(VOCAB_KEY, null, 1);
+}
+function computeVocab(index2) {
+  const tally = (key) => {
+    const counts = /* @__PURE__ */ new Map();
+    for (const p of index2) {
+      for (const v of p[key]) counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([v]) => v);
+  };
+  return {
+    moods: tally("mood"),
+    audiences: tally("audience"),
+    matters: tally("matters")
+  };
+}
+async function getDiscoveryVocab() {
+  const cached2 = await kvGet(VOCAB_KEY);
+  if (cached2 && Array.isArray(cached2.moods) && cached2.moods.length > 0) return cached2;
+  const idx = await getDiscoveryIndex();
+  if (idx.length === 0) return { moods: [], audiences: [], matters: [] };
+  const vocab = computeVocab(idx);
+  if (vocab.moods.length > 0 || vocab.audiences.length > 0 || vocab.matters.length > 0) {
+    await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS);
+  }
+  return vocab;
+}
+async function getDiscoveryRails(state, opts = {}) {
+  const products = opts.index ?? await getDiscoveryIndex();
+  const perRail = opts.perRail ?? 4;
+  const [rules, inventoryMin] = await Promise.all([
+    getActiveDiscoveryRules(),
+    getInventoryMin()
+  ]);
+  const filtered = applyRules(products, rules, inventoryMin);
+  const collectionPinIds = await resolveCollectionPins(
+    rules,
+    getProductIdsByCollectionHandle
+  );
+  const rankOpts = { perRail };
+  if (opts.dropEmpty !== void 0) rankOpts.dropEmpty = opts.dropEmpty;
+  if (opts.seed !== void 0) rankOpts.seed = opts.seed;
+  const rails = rankRails(filtered, state, rankOpts);
+  const hasAnySelections = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
+  const indexedIds = new Set(filtered.map((p) => p.id));
+  const honoraryByCategory = {};
+  const collectionPinRules = rules.filter((r) => r.ruleType === "pin_collection_fallback" && r.category).sort((a, b) => a.sortOrder - b.sortOrder);
+  await Promise.all(
+    collectionPinRules.map(async (pin) => {
+      const cat = pin.category;
+      const products2 = await getHonoraryProductsForPin(pin.ruleValue, cat);
+      const novel = products2.filter((p) => !indexedIds.has(p.id));
+      if (novel.length === 0) return;
+      const allowed = applyRules(novel, rules, inventoryMin);
+      if (allowed.length === 0) return;
+      const existing = honoraryByCategory[cat] ?? [];
+      const seen = new Set(existing.map((p) => p.id));
+      for (const p of allowed) {
+        if (!seen.has(p.id)) {
+          existing.push(p);
+          seen.add(p.id);
+        }
+      }
+      honoraryByCategory[cat] = existing;
+    })
+  );
+  const includedIds = new Set(
+    rails.flatMap((r) => r.items.map((sp) => sp.product.id))
+  );
+  for (const rail of rails) {
+    if (rail.items.length < perRail) {
+      const filled = fillFallbacks(
+        rail,
+        rules,
+        filtered,
+        perRail,
+        includedIds,
+        collectionPinIds,
+        honoraryByCategory
+      );
+      for (const sp of filled.items) {
+        if (!includedIds.has(sp.product.id)) includedIds.add(sp.product.id);
+      }
+      rail.items = filled.items;
+      rail.total = filled.total;
+    }
+  }
+  for (const rail of rails) {
+    if (rail.items.length === 0 && hasAnySelections) {
+      const loosened = autoLoosen(rail.category, state, filtered, perRail);
+      if (loosened) {
+        rail.items = loosened.items;
+        rail.total = loosened.items.length;
+        rail.relaxed = true;
+        rail.relaxedReason = loosened.reason;
+      }
+    }
+  }
+  const available = availableToArrays(computeAvailable(filtered, state));
+  return { rails, total: filtered.length, available };
+}
+async function getDiscoveryRailPage(state, category, offset, limit, opts = {}) {
+  const products = opts.index ?? await getDiscoveryIndex();
+  const [rules, inventoryMin] = await Promise.all([
+    getActiveDiscoveryRules(),
+    getInventoryMin()
+  ]);
+  const filtered = applyRules(products, rules, inventoryMin);
+  return rankSingleRail(filtered, state, category, offset, limit);
+}
+async function reportTagCoverage() {
+  const idx = await getDiscoveryIndex({ force: true });
+  const report = {
+    total: idx.length,
+    withMood: 0,
+    withAudience: 0,
+    withMatters: 0,
+    withAllThree: 0,
+    withCategoryMapping: idx.length,
+    // index already requires a category mapping
+    byCategory: { Pleasure: 0, Play: 0, Body: 0, Wear: 0 }
+  };
+  for (const p of idx) {
+    if (p.mood.length > 0) report.withMood += 1;
+    if (p.audience.length > 0) report.withAudience += 1;
+    if (p.matters.length > 0) report.withMatters += 1;
+    if (p.mood.length > 0 && p.audience.length > 0 && p.matters.length > 0) {
+      report.withAllThree += 1;
+    }
+    report.byCategory[p.category] += 1;
+  }
+  return report;
+}
+var INDEX_VERSION, INDEX_KEY, INDEX_TTL_SECONDS, VOCAB_KEY, VOCAB_TTL_SECONDS, CATEGORY_COLLECTION_IDS, CATEGORY_PRIORITY, PRODUCTS_PAGE_QUERY, COLLECTION_PRODUCTS_QUERY, COLLECTION_BY_HANDLE_QUERY, COLLECTION_HANDLE_CACHE_TTL, collectionHandleKey, NODES_BY_IDS_QUERY, HONORARY_CACHE_TTL, honoraryCacheKey;
+var init_discovery_server = __esm({
+  "app/lib/discovery.server.ts"() {
+    "use strict";
+    init_shopify_server();
+    init_kv_server();
+    init_discovery_emma();
+    init_discovery_tags();
+    init_discovery_rules_server();
+    INDEX_VERSION = "v6";
+    INDEX_KEY = `discovery:index:${INDEX_VERSION}`;
+    INDEX_TTL_SECONDS = 60 * 60 * 24;
+    VOCAB_KEY = `discovery:vocab:${INDEX_VERSION}`;
+    VOCAB_TTL_SECONDS = 60 * 60 * 24;
+    CATEGORY_COLLECTION_IDS = {
+      Pleasure: "gid://shopify/Collection/330228727979",
+      Play: "gid://shopify/Collection/330228695211",
+      Body: "gid://shopify/Collection/330227581099",
+      Wear: "gid://shopify/Collection/330229514411"
+    };
+    CATEGORY_PRIORITY = ["Pleasure", "Play", "Body", "Wear"];
+    PRODUCTS_PAGE_QUERY = /* GraphQL */
+    `
+  query DiscoveryIndexPage($cursor: String) {
+    products(first: 100, after: $cursor, query: "status:active") {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        handle
+        title
+        status
+        productType
+        featuredImage { url altText }
+        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
+        compareAtPriceRange { minVariantCompareAtPrice { amount } }
+        options(first: 3) { name optionValues { name } }
+        totalInventory
+        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
+        productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
+        moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
+        audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
+        mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
+      }
+    }
+  }
+`;
+    COLLECTION_PRODUCTS_QUERY = /* GraphQL */
+    `
+  query DiscoveryCollectionProducts($id: ID!, $cursor: String) {
+    collection(id: $id) {
+      products(first: 250, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id }
+      }
+    }
+  }
+`;
+    COLLECTION_BY_HANDLE_QUERY = /* GraphQL */
+    `
+  query DiscoveryCollectionByHandle($handle: String!) {
+    collectionByHandle(handle: $handle) { id }
+  }
+`;
+    COLLECTION_HANDLE_CACHE_TTL = 30 * 60;
+    collectionHandleKey = (h) => `discovery:collection-pin:${INDEX_VERSION}:${h}`;
+    NODES_BY_IDS_QUERY = /* GraphQL */
+    `
+  query DiscoveryHonoraryNodes($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Product {
+        id
+        handle
+        title
+        status
+        productType
+        featuredImage { url altText }
+        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
+        compareAtPriceRange { minVariantCompareAtPrice { amount } }
+        options(first: 3) { name optionValues { name } }
+        totalInventory
+        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
+        productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
+        moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
+        audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
+        mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
+      }
+    }
+  }
+`;
+    HONORARY_CACHE_TTL = 30 * 60;
+    honoraryCacheKey = (cat, handle) => `discovery:honorary:${INDEX_VERSION}:${cat}:${handle}`;
+  }
+});
+
+// app/lib/homepage-payload.server.ts
+var homepage_payload_server_exports = {};
+__export(homepage_payload_server_exports, {
+  HOMEPAGE_PAYLOAD_KV_KEY: () => HOMEPAGE_PAYLOAD_KV_KEY,
+  HOMEPAGE_PAYLOAD_KV_PREFIX: () => HOMEPAGE_PAYLOAD_KV_PREFIX,
+  HOMEPAGE_PAYLOAD_VERSION: () => HOMEPAGE_PAYLOAD_VERSION,
+  assertJsonSafe: () => assertJsonSafe,
+  buildHomeContentBlocks: () => buildHomeContentBlocks,
+  buildHomepagePayloadA: () => buildHomepagePayloadA,
+  invalidateHomepagePayloadA: () => invalidateHomepagePayloadA,
+  readHomepagePayloadA: () => readHomepagePayloadA,
+  reshuffleRailsWithSeed: () => reshuffleRailsWithSeed,
+  triggerHomepageWarm: () => triggerHomepageWarm,
+  warmHomepagePayloadA: () => warmHomepagePayloadA,
+  writeHomepagePayloadA: () => writeHomepagePayloadA
+});
+import { eq as eq7 } from "drizzle-orm";
+async function buildHomeContentBlocks() {
+  const cmsData = await withTimeout(
+    getHomepageSections(),
+    BUILD_TIMEOUT_MS,
+    null,
+    "getHomepageSections(payloadA)"
+  );
+  const sections = (cmsData?.sections ?? []).filter((s) => s._type !== "announcementBar");
+  const carouselBlocks = sections.filter(
+    (s) => s._type === "productCarousel"
+  );
+  const emmaRailBlocks = sections.filter(
+    (s) => s._type === "emmaCuratedRail"
+  );
+  const [carouselResults, emmaRailResults] = await Promise.all([
+    carouselBlocks.length > 0 ? withTimeout(Promise.all(carouselBlocks.map((b) => {
+      const limit = b.productLimit ?? 8;
+      const source = b.source ?? "tag";
+      if (source === "collection" && b.collectionHandle) {
+        return getCollectionProducts(b.collectionHandle, limit);
+      }
+      if (source === "manual" && b.productHandles?.length) {
+        return getProductsByHandles(b.productHandles.map((p) => p.handle));
+      }
+      return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([]);
+    })), BUILD_TIMEOUT_MS, [], "carouselResults(payloadA)") : Promise.resolve([]),
+    emmaRailBlocks.length > 0 ? withTimeout(Promise.all(emmaRailBlocks.map(
+      (b) => b.productHandles?.length ? getProductsByHandles(b.productHandles.map((p) => p.handle)) : Promise.resolve([])
+    )), BUILD_TIMEOUT_MS, [], "emmaRailResults(payloadA)") : Promise.resolve([])
+  ]);
+  const carouselProductMap = {};
+  carouselBlocks.forEach((b, i) => {
+    carouselProductMap[b._key] = carouselResults[i] ?? [];
+  });
+  emmaRailBlocks.forEach((b, i) => {
+    carouselProductMap[b._key] = emmaRailResults[i] ?? [];
+  });
+  return { sections, carouselProductMap };
+}
+async function buildHomepagePayloadA() {
+  const [railsResult, vocab, content] = await Promise.all([
+    withTimeout(
+      getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: 0 }),
+      BUILD_TIMEOUT_MS,
+      { rails: [], total: 0, available: { moods: [], audiences: [], matters: [] } },
+      "getDiscoveryRails(payloadA)"
+    ),
+    withTimeout(
+      getDiscoveryVocab(),
+      BUILD_TIMEOUT_MS,
+      { moods: [], audiences: [], matters: [] },
+      "getDiscoveryVocab(payloadA)"
+    ),
+    buildHomeContentBlocks()
+  ]);
+  const payload = {
+    version: HOMEPAGE_PAYLOAD_VERSION,
+    variant: "a",
+    rails: railsResult.rails,
+    total: railsResult.total,
+    welcomeBackEnabled: true,
+    moods: vocab.moods,
+    audiences: vocab.audiences,
+    matters: vocab.matters,
+    available: railsResult.available,
+    sections: content.sections,
+    carouselProductMap: content.carouselProductMap,
+    builtAt: Date.now(),
+    // Empty rails == the discovery index was cold during the build. Strictly
+    // worse than a populated blob; the write guard refuses to clobber a good
+    // blob with a degraded one unless forced.
+    degraded: railsResult.rails.length === 0
+  };
+  return payload;
+}
+function assertJsonSafe(payload) {
+  const round = JSON.parse(JSON.stringify(payload));
+  if (!Array.isArray(round.rails)) throw new Error("payload.rails not array after JSON round-trip");
+  if (typeof round.builtAt !== "number") throw new Error("payload.builtAt not number after JSON round-trip");
+  if (round.version !== HOMEPAGE_PAYLOAD_VERSION) throw new Error("payload.version mismatch after JSON round-trip");
+}
+async function readHomepagePayloadA() {
+  try {
+    const kv = await kvGet(HOMEPAGE_PAYLOAD_KV_KEY);
+    if (kv && kv.version === HOMEPAGE_PAYLOAD_VERSION) return kv;
+  } catch (err) {
+    console.warn("[homepage-payload] KV read failed, trying Neon:", err);
+  }
+  try {
+    const [row] = await db.select().from(homepagePayload).where(eq7(homepagePayload.variant, "a")).limit(1);
+    if (row && row.version === HOMEPAGE_PAYLOAD_VERSION && row.payload) {
+      const payload = row.payload;
+      void kvSet(HOMEPAGE_PAYLOAD_KV_KEY, payload, KV_TTL_SECONDS).catch(() => {
+      });
+      return payload;
+    }
+  } catch (err) {
+    console.warn("[homepage-payload] Neon read failed:", err);
+  }
+  return null;
+}
+async function writeHomepagePayloadA(payload, opts = {}) {
+  assertJsonSafe(payload);
+  if (payload.degraded && !opts.force) {
+    const existing = await readHomepagePayloadA();
+    if (existing && !existing.degraded) {
+      console.warn("[homepage-payload] skipping degraded write over a good blob (use force to override)");
+      return;
+    }
+  }
+  await kvSet(HOMEPAGE_PAYLOAD_KV_KEY, payload, KV_TTL_SECONDS);
+  try {
+    await db.insert(homepagePayload).values({
+      variant: "a",
+      version: HOMEPAGE_PAYLOAD_VERSION,
+      payload,
+      degraded: payload.degraded
+    }).onConflictDoUpdate({
+      target: [homepagePayload.variant, homepagePayload.version],
+      set: {
+        payload,
+        degraded: payload.degraded,
+        builtAt: /* @__PURE__ */ new Date()
+      }
+    });
+  } catch (err) {
+    console.error("[homepage-payload] Neon upsert failed (KV still written):", err);
+  }
+}
+async function warmHomepagePayloadA(opts = {}) {
+  const force = opts.force ?? true;
+  const payload = await buildHomepagePayloadA();
+  await writeHomepagePayloadA(payload, { force });
+  return payload;
+}
+async function invalidateHomepagePayloadA() {
+  await kvDel(HOMEPAGE_PAYLOAD_KV_KEY);
+}
+function triggerHomepageWarm() {
+  const baseUrl = process.env["BASE_URL"];
+  const cronSecret = process.env["CRON_SECRET"];
+  if (!baseUrl || !cronSecret) return;
+  void fetch(`${baseUrl}/cron/warm-homepage`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${cronSecret}` }
+  }).catch(() => {
+  });
+}
+function mulberry323(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t = t + 1831565813 >>> 0;
+    let r = t;
+    r = Math.imul(r ^ r >>> 15, r | 1);
+    r ^= r + Math.imul(r ^ r >>> 7, r | 61);
+    return ((r ^ r >>> 14) >>> 0) / 4294967296;
+  };
+}
+function reshuffleRailsWithSeed(rails, seed) {
+  return rails.map((rail, railIdx) => {
+    if (rail.items.length <= 1) return rail;
+    const items = [...rail.items];
+    const rand = mulberry323(seed + railIdx * 2654435761);
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      const tmp = items[i];
+      items[i] = items[j];
+      items[j] = tmp;
+    }
+    return { ...rail, items };
+  });
+}
+var HOMEPAGE_PAYLOAD_VERSION, HOMEPAGE_PAYLOAD_KV_KEY, HOMEPAGE_PAYLOAD_KV_PREFIX, KV_TTL_SECONDS, BUILD_TIMEOUT_MS;
+var init_homepage_payload_server = __esm({
+  "app/lib/homepage-payload.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_kv_server();
+    init_with_timeout_server();
+    init_discovery_server();
+    init_discovery();
+    init_sanity_server();
+    init_shopify_server();
+    HOMEPAGE_PAYLOAD_VERSION = "v1";
+    HOMEPAGE_PAYLOAD_KV_KEY = `homepage:payload:${HOMEPAGE_PAYLOAD_VERSION}`;
+    HOMEPAGE_PAYLOAD_KV_PREFIX = "homepage:payload";
+    KV_TTL_SECONDS = 6 * 60 * 60;
+    BUILD_TIMEOUT_MS = 8e3;
+  }
+});
+
 // app/lib/deal-rotator.server.ts
 var deal_rotator_server_exports = {};
 __export(deal_rotator_server_exports, {
@@ -12630,7 +13764,7 @@ __export(deal_rotator_server_exports, {
   rotateDeal: () => rotateDeal,
   transitionToVaultPricing: () => transitionToVaultPricing
 });
-import { eq as eq6, and, isNull, asc, inArray as inArray2 } from "drizzle-orm";
+import { eq as eq8, and as and2, isNull, asc as asc2, inArray as inArray2 } from "drizzle-orm";
 function estDate(offsetDays = 0) {
   const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1e3);
   return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -12643,7 +13777,7 @@ function pastDealTag(dealDate) {
   return `past-daily-deal-${mm}-${yyyy.slice(2)}`;
 }
 async function getVaultDiscountPct() {
-  const [row] = await db.select().from(pipelineSettings).where(eq6(pipelineSettings.key, "vaultDiscountPct")).limit(1);
+  const [row] = await db.select().from(pipelineSettings).where(eq8(pipelineSettings.key, "vaultDiscountPct")).limit(1);
   const pct = parseFloat(row?.value ?? "25");
   return isNaN(pct) ? 25 : Math.max(5, Math.min(60, pct));
 }
@@ -12685,7 +13819,7 @@ async function transitionToVaultPricing(deal) {
     status: "queued",
     completedAt: /* @__PURE__ */ new Date(),
     vaultPrice: vaultPrice > 0 ? vaultPrice.toFixed(2) : null
-  }).where(and(eq6(dealHistory.id, deal.id), eq6(dealHistory.status, "live")));
+  }).where(and2(eq8(dealHistory.id, deal.id), eq8(dealHistory.status, "live")));
   try {
     const { archiveHomepageRailsForDeal: archiveHomepageRailsForDeal2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
     const { archived } = await archiveHomepageRailsForDeal2(deal.shopifyProductId);
@@ -12698,24 +13832,24 @@ async function transitionToVaultPricing(deal) {
 }
 async function activateDeal(deal) {
   if (!deal.shopifyProductId) return;
-  const blockingJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and(
-    eq6(batchJobs.gatesDealId, deal.id),
+  const blockingJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and2(
+    eq8(batchJobs.gatesDealId, deal.id),
     inArray2(batchJobs.status, ["queued", "submitted", "processing", "applying"])
   ));
   if (blockingJobs.length > 0) {
     console.log(`[deal-rotator] enrichment in flight for deal ${deal.id} \u2014 deferring activation (${blockingJobs.length} blocking job(s))`);
     return;
   }
-  const failedJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and(eq6(batchJobs.gatesDealId, deal.id), eq6(batchJobs.status, "failed")));
+  const failedJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and2(eq8(batchJobs.gatesDealId, deal.id), eq8(batchJobs.status, "failed")));
   if (failedJobs.length > 0) {
     console.warn(`[deal-rotator] WARN gated enrichment failed for deal ${deal.id}; activating with stale/partial copy (degraded-enrichment path)`);
   }
-  const claimed = await db.update(dealHistory).set({ status: "live" }).where(and(eq6(dealHistory.id, deal.id), inArray2(dealHistory.status, ["queued", "pending_approval"]))).returning({ id: dealHistory.id });
+  const claimed = await db.update(dealHistory).set({ status: "live" }).where(and2(eq8(dealHistory.id, deal.id), inArray2(dealHistory.status, ["queued", "pending_approval"]))).returning({ id: dealHistory.id });
   if (claimed.length === 0) {
     console.log(`[deal-rotator] deal ${deal.id} already live \u2014 skipping duplicate activation`);
     return;
   }
-  const anyGatingJob = await db.select({ id: batchJobs.id, status: batchJobs.status }).from(batchJobs).where(eq6(batchJobs.gatesDealId, deal.id)).limit(1);
+  const anyGatingJob = await db.select({ id: batchJobs.id, status: batchJobs.status }).from(batchJobs).where(eq8(batchJobs.gatesDealId, deal.id)).limit(1);
   const skipInlineHero = anyGatingJob.length > 0;
   const numericId = deal.shopifyProductId.replace("gid://shopify/Product/", "");
   await activateShopifyProduct(numericId);
@@ -12805,7 +13939,7 @@ async function activateDeal(deal) {
   await db.update(dealHistory).set({
     activatedAt: /* @__PURE__ */ new Date(),
     dealDate: estDate(0)
-  }).where(eq6(dealHistory.id, deal.id));
+  }).where(eq8(dealHistory.id, deal.id));
   await kvSet(KV_KEYS.dealOfDay, {
     sku: deal.sku,
     title: deal.seoTitle,
@@ -12842,16 +13976,16 @@ async function activateDeal(deal) {
   }
 }
 async function rotateDeal() {
-  const [liveDeal] = await db.select().from(dealHistory).where(eq6(dealHistory.status, "live")).limit(1);
+  const [liveDeal] = await db.select().from(dealHistory).where(eq8(dealHistory.status, "live")).limit(1);
   if (liveDeal) {
     await transitionToVaultPricing(liveDeal);
   }
   const [nextDeal] = await db.select().from(dealHistory).where(
-    and(
-      eq6(dealHistory.status, "queued"),
+    and2(
+      eq8(dealHistory.status, "queued"),
       isNull(dealHistory.completedAt)
     )
-  ).orderBy(asc(dealHistory.sortOrder)).limit(1);
+  ).orderBy(asc2(dealHistory.sortOrder)).limit(1);
   if (nextDeal) {
     await activateDeal(nextDeal);
     let liveHandle = null;
@@ -12873,6 +14007,13 @@ async function rotateDeal() {
     } catch (err) {
       console.error("[deal-rotator] search ping failed (non-blocking):", err);
     }
+    try {
+      const { warmHomepagePayloadA: warmHomepagePayloadA2 } = await Promise.resolve().then(() => (init_homepage_payload_server(), homepage_payload_server_exports));
+      const p = await warmHomepagePayloadA2({ force: true });
+      console.log(`[deal-rotator] homepage payload precomputed (rails=${p.rails.length}, sections=${p.sections.length}, degraded=${p.degraded})`);
+    } catch (err) {
+      console.error("[deal-rotator] homepage precompute failed (non-blocking):", err);
+    }
   }
   return {
     vaulted: liveDeal?.sku ?? null,
@@ -12880,7 +14021,7 @@ async function rotateDeal() {
   };
 }
 async function isLiveDealSoldOut() {
-  const [liveDeal] = await db.select().from(dealHistory).where(eq6(dealHistory.status, "live")).limit(1);
+  const [liveDeal] = await db.select().from(dealHistory).where(eq8(dealHistory.status, "live")).limit(1);
   if (!liveDeal?.shopifyProductId) return { soldOut: false, dealId: null };
   const numericId = liveDeal.shopifyProductId.replace("gid://shopify/Product/", "");
   const { product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`);
@@ -12908,10 +14049,10 @@ __export(profit_server_exports, {
   getDashboardStats: () => getDashboardStats,
   writeProfitSummary: () => writeProfitSummary
 });
-import { eq as eq7, sql as sql3 } from "drizzle-orm";
+import { eq as eq9, sql as sql3 } from "drizzle-orm";
 async function writeProfitSummary() {
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-  const [todayDeal] = await db.select().from(dealHistory).where(eq7(dealHistory.dealDate, today)).limit(1);
+  const [todayDeal] = await db.select().from(dealHistory).where(eq9(dealHistory.dealDate, today)).limit(1);
   if (!todayDeal) return;
   const { shopifyAdmin: shopifyAdmin2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
   const ordersData = await shopifyAdmin2(`/orders.json?status=paid&created_at_min=${today}T00:00:00-00:00`);
@@ -12950,7 +14091,7 @@ async function writeProfitSummary() {
     unitsSold: totalOrders,
     totalRevenue: totalRevenue.toFixed(2),
     totalProfit: totalProfit.toFixed(2)
-  }).where(eq7(dealHistory.dealDate, today));
+  }).where(eq9(dealHistory.dealDate, today));
 }
 async function getDashboardStats(days = 30) {
   const rows = await db.select().from(dailyProfitSummary).orderBy(sql3`${dailyProfitSummary.summaryDate} DESC`).limit(days);
@@ -13558,44 +14699,6 @@ var init_reviews_server = __esm({
     "use strict";
     init_kv_server();
     sql4 = neon2(process.env["DATABASE_URL"]);
-  }
-});
-
-// app/types/discovery.ts
-var MATTERS_V1, MATTERS_V2, MATTERS, CATEGORIES;
-var init_discovery = __esm({
-  "app/types/discovery.ts"() {
-    "use strict";
-    MATTERS_V1 = [
-      "Beginner-Friendly",
-      "Body-Safe Silicone",
-      "Discreet Design",
-      "First-Time",
-      "Hands-Free",
-      "Rechargeable",
-      "Soft-Touch",
-      "Travel-Size",
-      "Waterproof",
-      "App-Controlled",
-      "Whisper-Quiet",
-      "Plus-Size-Friendly"
-    ];
-    MATTERS_V2 = [
-      "Beginner-friendly",
-      "Whisper-quiet",
-      "Waterproof",
-      "Travel-ready",
-      "Discreet",
-      "Hands-free",
-      "Remote-controlled",
-      "Plus-size friendly",
-      "Easy to clean",
-      "Rechargeable",
-      "Soft-touch",
-      "Latex-free"
-    ];
-    MATTERS = [...MATTERS_V1, ...MATTERS_V2];
-    CATEGORIES = ["Pleasure", "Play", "Body", "Wear"];
   }
 });
 
@@ -14649,7 +15752,7 @@ var init_pricing_report_server = __esm({
 });
 
 // app/lib/pricing-agent.server.ts
-import { eq as eq8 } from "drizzle-orm";
+import { eq as eq10 } from "drizzle-orm";
 var init_pricing_agent_server = __esm({
   "app/lib/pricing-agent.server.ts"() {
     "use strict";
@@ -14672,7 +15775,7 @@ var init_pricing_apply_server = __esm({
 });
 
 // app/lib/pricing-webhook.server.ts
-import { eq as eq9, sql as sql5 } from "drizzle-orm";
+import { eq as eq11, sql as sql5 } from "drizzle-orm";
 async function setPipelineSetting(key, value) {
   await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
     target: pipelineSettings.key,
@@ -15375,7 +16478,7 @@ Be efficient. Each tool is a single call. Do NOT call the same tool twice.`;
 });
 
 // app/lib/enricher-brief.server.ts
-import { eq as eq10 } from "drizzle-orm";
+import { eq as eq12 } from "drizzle-orm";
 async function adminGraphQLWithRetry(query, variables, attempt = 0) {
   try {
     return await adminGraphQL(query, variables);
@@ -15483,7 +16586,7 @@ async function gatherProductBrief(numericProductId) {
     sku: dealHistory.sku,
     brand: dealHistory.brand,
     categories: dealHistory.categories
-  }).from(dealHistory).where(eq10(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  }).from(dealHistory).where(eq12(dealHistory.shopifyProductId, numericProductId)).limit(1);
   const hist = histRows[0];
   const sku = hist?.sku;
   const brand = hist?.brand ?? snap.vendor ?? "";
@@ -15541,7 +16644,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and2, asc as asc2, eq as eq11, inArray as inArray3, isNull as isNull2, sql as sql6 } from "drizzle-orm";
+import { and as and3, asc as asc3, eq as eq13, inArray as inArray3, isNull as isNull2, sql as sql6 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -15577,7 +16680,7 @@ async function applyFullEnrichmentWrites(numericProductId, writes) {
   const snap = await fetchProductSnapshot(numericProductId);
   if (!snap) throw new Error(`fetchProductSnapshot returned null for ${numericProductId}`);
   const category = inferCategoryFallback(snap.metafields["xdipx.category"]);
-  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq11(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq13(dealHistory.shopifyProductId, numericProductId)).limit(1);
   const editorialTags = (histRows[0]?.categories ?? []).filter(
     (c) => !!c && c !== "(uncategorized)"
   );
@@ -15668,11 +16771,11 @@ async function applyFullEnrichmentWrites(numericProductId, writes) {
   }
 }
 async function submitEnrichmentBatch(cap) {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId, sku: importCandidates.masterKey }).from(importCandidates).innerJoin(dealHistory, eq11(importCandidates.dealHistoryId, dealHistory.id)).where(and2(
-    eq11(importCandidates.status, "imported"),
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId, sku: importCandidates.masterKey }).from(importCandidates).innerJoin(dealHistory, eq13(importCandidates.dealHistoryId, dealHistory.id)).where(and3(
+    eq13(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichBatchId)
-  )).orderBy(asc2(importCandidates.id)).limit(cap);
+  )).orderBy(asc3(importCandidates.id)).limit(cap);
   const valid = rows.filter((r) => Boolean(r.productId));
   if (valid.length === 0) return { submitted: 0, reason: "no_unenriched" };
   const products = [];
@@ -15737,11 +16840,11 @@ async function collectEnrichmentBatch() {
   const pendingCandidates = await db.select({
     id: importCandidates.id,
     jobId: importCandidates.enrichBatchId
-  }).from(importCandidates).where(and2(
-    eq11(importCandidates.status, "imported"),
+  }).from(importCandidates).where(and3(
+    eq13(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
     sql6`${importCandidates.enrichBatchId} IS NOT NULL`
-  )).orderBy(asc2(importCandidates.id));
+  )).orderBy(asc3(importCandidates.id));
   if (pendingCandidates.length === 0) {
     return { enriched: 0, failed: 0, stillPending: 0 };
   }
@@ -15759,11 +16862,11 @@ async function collectEnrichmentBatch() {
       continue;
     }
     if (status === "done") {
-      await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.id, candidate.id));
+      await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq13(importCandidates.id, candidate.id));
       enrichedTotal++;
       console.log(`[import-enrich] candidate ${candidate.id} job ${jobId} done -- stamped enriched_at`);
     } else {
-      await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.id, candidate.id));
+      await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq13(importCandidates.id, candidate.id));
       failedTotal++;
       console.warn(
         `[import-enrich] candidate ${candidate.id} job ${jobId} failed -- stamping enriched_at to unblock queue (partial writes may apply)`
@@ -15773,8 +16876,8 @@ async function collectEnrichmentBatch() {
   return { enriched: enrichedTotal, failed: failedTotal, stillPending };
 }
 async function publishEnrichedProducts() {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq11(importCandidates.dealHistoryId, dealHistory.id)).where(and2(
-    eq11(importCandidates.status, "imported"),
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq13(importCandidates.dealHistoryId, dealHistory.id)).where(and3(
+    eq13(importCandidates.status, "imported"),
     sql6`${importCandidates.enrichedAt} IS NOT NULL`,
     isNull2(importCandidates.publishedAt)
   ));
@@ -15784,7 +16887,7 @@ async function publishEnrichedProducts() {
     if (!r.productId) continue;
     try {
       await activateShopifyProduct(r.productId);
-      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq11(importCandidates.id, r.id));
+      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq13(importCandidates.id, r.id));
       published++;
     } catch (err) {
       console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err);
@@ -15801,8 +16904,8 @@ async function runImportEnrichTick(opts = {}) {
   const collect = await collectEnrichmentBatch();
   const publish = await publishEnrichedProducts();
   let submit = { submitted: 0, reason: "batch_in_flight" };
-  const inflightRow = await db.select({ c: sql6`count(*)::int` }).from(batchJobs).where(and2(
-    eq11(batchJobs.source, "import-product"),
+  const inflightRow = await db.select({ c: sql6`count(*)::int` }).from(batchJobs).where(and3(
+    eq13(batchJobs.source, "import-product"),
     inArray3(batchJobs.status, ["queued", "submitted", "processing", "applying"])
   ));
   const inflightCount = Number(inflightRow[0]?.c ?? 0);
@@ -15837,7 +16940,7 @@ __export(field_regen_runner_server_exports, {
   enqueueFieldRegenJob: () => enqueueFieldRegenJob
 });
 import Anthropic5 from "@anthropic-ai/sdk";
-import { eq as eq12 } from "drizzle-orm";
+import { eq as eq14 } from "drizzle-orm";
 function toDbRunnerState(rs) {
   return rs;
 }
@@ -16060,7 +17163,7 @@ async function advanceFieldRegenJob(job) {
           maxTokens: f.maxTokens
         };
       }
-      await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq12(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq14(batchJobs.jobId, job.jobId));
       const client4 = getClient2();
       const requests = [];
       const systemParam = systemBlocks.map((b) => ({
@@ -16088,7 +17191,7 @@ async function advanceFieldRegenJob(job) {
         runnerState: toDbRunnerState(newRunnerState),
         submittedAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq12(batchJobs.jobId, job.jobId));
+      }).where(eq14(batchJobs.jobId, job.jobId));
       outcome.submitted = true;
       console.log(`[field-regen] job ${job.jobId} submitted batch ${batch.id} (${requests.length} requests)`);
       break;
@@ -16102,7 +17205,7 @@ async function advanceFieldRegenJob(job) {
       const client4 = getClient2();
       const batch = await client4.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
-        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq12(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq14(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
@@ -16153,7 +17256,7 @@ async function advanceFieldRegenJob(job) {
         currentBatchId: null,
         runnerState: toDbRunnerState(updatedRs),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq12(batchJobs.jobId, job.jobId));
+      }).where(eq14(batchJobs.jobId, job.jobId));
       break;
     }
     case "applying": {
@@ -16194,11 +17297,11 @@ async function advanceFieldRegenJob(job) {
           runnerState: toDbRunnerState(updatedRs),
           completedAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq12(batchJobs.jobId, job.jobId));
+        }).where(eq14(batchJobs.jobId, job.jobId));
         if (finalStatus === "done") outcome.done = true;
         else outcome.failed = true;
       } else {
-        await db.update(batchJobs).set({ runnerState: toDbRunnerState(updatedRs), updatedAt: /* @__PURE__ */ new Date() }).where(eq12(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ runnerState: toDbRunnerState(updatedRs), updatedAt: /* @__PURE__ */ new Date() }).where(eq14(batchJobs.jobId, job.jobId));
       }
       break;
     }
@@ -16326,7 +17429,7 @@ async function enqueueFieldRegenJob(context) {
   const fields = context.kind === "copy-fields" ? context.fields.map((f) => f) : context.kind === "emma-hero" ? ["emma-hero"] : ["emma-take"];
   const meta = { jobKind: "field-regen", context, systemBlocks, fields };
   const runnerState = { "__meta": meta };
-  await db.update(batchJobs).set({ runnerState: toDbRunnerState(runnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq12(batchJobs.jobId, result.jobId));
+  await db.update(batchJobs).set({ runnerState: toDbRunnerState(runnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq14(batchJobs.jobId, result.jobId));
   return result;
 }
 var MODEL4, MODEL_FAST3;
@@ -16354,7 +17457,7 @@ __export(batch_orchestrator_server_exports, {
 });
 import { randomUUID as randomUUID2 } from "node:crypto";
 import Anthropic6 from "@anthropic-ai/sdk";
-import { eq as eq13, inArray as inArray4 } from "drizzle-orm";
+import { eq as eq15, inArray as inArray4 } from "drizzle-orm";
 function getClient3() {
   return new Anthropic6({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
 }
@@ -16398,7 +17501,7 @@ async function enqueueBatchJob(args) {
       appliedSkus: [],
       productStatuses: Object.fromEntries(products.map((p) => [p.sku, "running"]))
     };
-    await kvSet(KV_KEYS.enrichmentJob(jobId), summary, KV_TTL_SECONDS);
+    await kvSet(KV_KEYS.enrichmentJob(jobId), summary, KV_TTL_SECONDS2);
   } catch (err) {
     console.warn("[batch-orchestrator] KV mirror failed (non-fatal):", err);
   }
@@ -16419,7 +17522,7 @@ async function advanceInflightJobs(opts = {}) {
       if (outcome.failed) result.failed++;
     } catch (err) {
       console.error(`[batch-orchestrator] advanceJob ${job.jobId} threw:`, err);
-      await db.update(batchJobs).set({ status: "failed", error: String(err), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ status: "failed", error: String(err), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(batchJobs.jobId, job.jobId));
       result.failed++;
     }
   }
@@ -16443,7 +17546,7 @@ async function advanceJob(job) {
       for (const p of job.products) {
         runnerState[p.productId] = freshRunnerState(p, job.jobId);
       }
-      await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq15(batchJobs.jobId, job.jobId));
       const updatedJob = { ...job, runnerState };
       await submitTurnBatch(updatedJob);
       outcome.submitted = true;
@@ -16458,7 +17561,7 @@ async function advanceJob(job) {
       const client4 = getClient3();
       const batch = await client4.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
-        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq15(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
@@ -16518,7 +17621,7 @@ async function advanceJob(job) {
               lastProcessedBatchId: job.currentBatchId
             };
           }
-          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq15(batchJobs.jobId, job.jobId));
           continue;
         }
         const msg = entry.result.message;
@@ -16538,7 +17641,7 @@ async function advanceJob(job) {
             status: "done",
             lastProcessedBatchId: job.currentBatchId
           };
-          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq15(batchJobs.jobId, job.jobId));
           continue;
         }
         const state = stateFor(ps, p, {
@@ -16611,7 +17714,7 @@ async function advanceJob(job) {
           messages: finalMessages,
           lastProcessedBatchId: job.currentBatchId
         };
-        await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq15(batchJobs.jobId, job.jobId));
       }
       if (turnCount > 0) {
         void logApiTokens({
@@ -16644,7 +17747,7 @@ async function advanceJob(job) {
           turn: nowTurn,
           runnerState,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq13(batchJobs.jobId, job.jobId));
+        }).where(eq15(batchJobs.jobId, job.jobId));
       } else {
         const updatedJob = {
           ...job,
@@ -16681,7 +17784,7 @@ async function advanceJob(job) {
           if (idx >= 0) results[idx] = resultEntry;
           else results.push(resultEntry);
           runnerState[p.productId] = { ...ps, applyRetries: 0 };
-          await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq15(batchJobs.jobId, job.jobId));
         } catch (err) {
           const applyRetries = (ps.applyRetries ?? 0) + 1;
           const errMsg = err instanceof Error ? err.message : String(err);
@@ -16704,7 +17807,7 @@ async function advanceJob(job) {
               error: `apply-permafail: ${errMsg}`
             };
           }
-          await db.update(batchJobs).set({ results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq15(batchJobs.jobId, job.jobId));
         }
       }
       outcome.applied = appliedThisTick;
@@ -16727,7 +17830,7 @@ async function advanceJob(job) {
           appliedSkus,
           completedAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq13(batchJobs.jobId, job.jobId));
+        }).where(eq15(batchJobs.jobId, job.jobId));
         if (finalStatus === "done") outcome.done = true;
         else outcome.failed = true;
       }
@@ -16738,7 +17841,7 @@ async function advanceJob(job) {
       break;
   }
   try {
-    const fresh = await db.select().from(batchJobs).where(eq13(batchJobs.jobId, job.jobId)).limit(1);
+    const fresh = await db.select().from(batchJobs).where(eq15(batchJobs.jobId, job.jobId)).limit(1);
     const row = fresh[0];
     if (row) {
       const productStatuses = {};
@@ -16765,7 +17868,7 @@ async function advanceJob(job) {
         error: row.error ?? null,
         productStatuses
       };
-      await kvSet(KV_KEYS.enrichmentJob(job.jobId), summary, KV_TTL_SECONDS);
+      await kvSet(KV_KEYS.enrichmentJob(job.jobId), summary, KV_TTL_SECONDS2);
     }
   } catch (err) {
     console.warn("[batch-orchestrator] KV mirror update failed (non-fatal):", err);
@@ -16811,7 +17914,7 @@ async function submitTurnBatch(job) {
     runnerState,
     updatedAt: /* @__PURE__ */ new Date(),
     ...isFirstSubmit ? { submittedAt: /* @__PURE__ */ new Date() } : {}
-  }).where(eq13(batchJobs.jobId, job.jobId));
+  }).where(eq15(batchJobs.jobId, job.jobId));
   console.log(`[batch-orchestrator] job ${job.jobId} turn ${job.turn + 1}: submitted batch ${batch.id} (${requests.length} requests)`);
 }
 function buildCustomId2(jobId, productId) {
@@ -16859,8 +17962,8 @@ function stateFor(ps, p, taxonomy) {
 async function maybeActivateGatedDeal(jobId, gatesDealId) {
   try {
     const { dealHistory: dealHistory2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    const { eq: eq18 } = await import("drizzle-orm");
-    const rows = await db.select().from(dealHistory2).where(eq18(dealHistory2.id, gatesDealId)).limit(1);
+    const { eq: eq19 } = await import("drizzle-orm");
+    const rows = await db.select().from(dealHistory2).where(eq19(dealHistory2.id, gatesDealId)).limit(1);
     const deal = rows[0];
     if (!deal) {
       console.warn(`[batch-orchestrator] maybeActivateGatedDeal: deal ${gatesDealId} not found`);
@@ -16885,13 +17988,13 @@ async function maybeActivateGatedDeal(jobId, gatesDealId) {
   }
 }
 async function getBatchJobById(jobId) {
-  const rows = await db.select().from(batchJobs).where(eq13(batchJobs.jobId, jobId)).limit(1);
+  const rows = await db.select().from(batchJobs).where(eq15(batchJobs.jobId, jobId)).limit(1);
   return rows[0] ?? null;
 }
 async function listRecentBatchJobs(limit = 50) {
   return db.select().from(batchJobs).orderBy(batchJobs.createdAt).limit(limit);
 }
-var MODEL5, KV_TTL_SECONDS;
+var MODEL5, KV_TTL_SECONDS2;
 var init_batch_orchestrator_server = __esm({
   "app/lib/batch-orchestrator.server.ts"() {
     "use strict";
@@ -16905,7 +18008,7 @@ var init_batch_orchestrator_server = __esm({
     init_kv_server();
     init_claude_server();
     MODEL5 = "claude-sonnet-4-20250514";
-    KV_TTL_SECONDS = 24 * 60 * 60;
+    KV_TTL_SECONDS2 = 24 * 60 * 60;
   }
 });
 
@@ -16919,7 +18022,7 @@ __export(bulk_import_server_exports, {
   parseBulkImportCSV: () => parseBulkImportCSV
 });
 import { parse as parse3 } from "csv-parse/sync";
-import { eq as eq14, max } from "drizzle-orm";
+import { eq as eq16, max } from "drizzle-orm";
 function inferCategory(categories) {
   const forHimCats = ["Vagina Strokers", "Body Molds", "Prostate Toys", "Masturbators", "Hands-Free Masturbators"];
   const forHerCats = ["Dual Action and Rabbits", "Finger and Clit", "Air Pulse and Suction", "Bullets and Eggs"];
@@ -17029,7 +18132,7 @@ function parseBulkImportCSV(csvText) {
   return { groups, parseErrors };
 }
 async function isSkuAlreadyImported(sku) {
-  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq14(dealHistory.sku, sku)).limit(1);
+  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq16(dealHistory.sku, sku)).limit(1);
   return rows.length > 0;
 }
 async function importProductGroup(group) {
@@ -17548,7 +18651,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and3, eq as eq15, inArray as inArray5, sql as sql7 } from "drizzle-orm";
+import { and as and4, eq as eq17, inArray as inArray5, sql as sql7 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -17717,21 +18820,21 @@ async function runImportMonitor(opts = {}) {
         candidatesNew++;
         candidatesFound++;
       } else if (existing.status === "rejected" || existing.status === "imported") {
-        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.masterKey, masterKey));
       } else if (existing.status === "watching") {
         const priorScore = parseFloat(existing.watchScore ?? "0");
         const priorPrice = parseFloat(existing.watchPrice ?? "0");
         const scoreImproved = score2 >= priorScore + watchScoreDelta;
         const priceDropped = priorPrice > 0 && proposedPrice <= priorPrice * (1 - watchPriceDropPct);
         if (scoreImproved || priceDropped) {
-          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq15(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq17(importCandidates.masterKey, masterKey));
           candidatesResurfaced++;
           candidatesFound++;
         } else {
-          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.masterKey, masterKey));
         }
       } else {
-        await db.update(importCandidates).set(upsertPayload).where(eq15(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set(upsertPayload).where(eq17(importCandidates.masterKey, masterKey));
         candidatesFound++;
       }
     }
@@ -17748,7 +18851,7 @@ async function runImportMonitor(opts = {}) {
       candidatesNew,
       candidatesResurfaced,
       autoImported
-    }).where(eq15(importMonitorRuns.id, runId));
+    }).where(eq17(importMonitorRuns.id, runId));
     await setPipelineSetting("import_monitor_last_run_at", (/* @__PURE__ */ new Date()).toISOString());
     console.info(
       `[import-monitor] done: feedsOk=${feedsOk} found=${candidatesFound} new=${candidatesNew} resurfaced=${candidatesResurfaced}`
@@ -17761,7 +18864,7 @@ async function runImportMonitor(opts = {}) {
       finishedAt: /* @__PURE__ */ new Date(),
       feedsOk: false,
       errorMessage
-    }).where(eq15(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
+    }).where(eq17(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
     return {
       feedsOk: false,
       candidatesFound: 0,
@@ -17792,7 +18895,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
   const requireCarried = (requireCarriedStr ?? "true") !== "false";
   const maxPerDay = Math.max(0, parseInt(maxPerDayStr ?? "3", 10) || 0);
   if (maxPerDay <= 0) return 0;
-  const importedTodayRows = await db.select({ cnt: sql7`count(*)::int` }).from(importCandidates).where(and3(eq15(importCandidates.status, "imported"), eq15(importCandidates.runDate, todayStr)));
+  const importedTodayRows = await db.select({ cnt: sql7`count(*)::int` }).from(importCandidates).where(and4(eq17(importCandidates.status, "imported"), eq17(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -17809,8 +18912,8 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
     mapPrice: importCandidates.mapPrice,
     proposedPrice: importCandidates.proposedPrice,
     needsReview: importCandidates.needsReview
-  }).from(importCandidates).where(and3(
-    eq15(importCandidates.status, "pending"),
+  }).from(importCandidates).where(and4(
+    eq17(importCandidates.status, "pending"),
     inArray5(importCandidates.masterKey, cappedKeys)
   )).orderBy(importCandidates.tier, sql7`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
@@ -17901,10 +19004,10 @@ async function stageMasterCandidatesBySkus(skus, opts) {
       }).onConflictDoNothing();
       staged++;
     } else if (existingStatus === "watching") {
-      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq15(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq17(importCandidates.masterKey, masterKey));
       staged++;
     } else {
-      await db.update(importCandidates).set(upsertPayload).where(eq15(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set(upsertPayload).where(eq17(importCandidates.masterKey, masterKey));
       staged++;
     }
   }
@@ -17969,23 +19072,23 @@ async function updateCandidateStatus(id, status, opts = {}) {
     updatedAt: now
   };
   if (status === "watching") {
-    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq15(importCandidates.id, id)).limit(1);
+    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq17(importCandidates.id, id)).limit(1);
     if (rows[0]) {
       base.watchScore = rows[0].dealScore;
       base.watchPrice = rows[0].proposedPrice;
     }
   }
-  await db.update(importCandidates).set(base).where(eq15(importCandidates.id, id));
+  await db.update(importCandidates).set(base).where(eq17(importCandidates.id, id));
 }
 async function approveAndImport(id) {
-  const rows = await db.select().from(importCandidates).where(eq15(importCandidates.id, id)).limit(1);
+  const rows = await db.select().from(importCandidates).where(eq17(importCandidates.id, id)).limit(1);
   const candidate = rows[0];
   if (!candidate) {
     return { ok: false, error: `candidate ${id} not found` };
   }
   const repSku = candidate.sku;
   if (await isSkuAlreadyImported(repSku)) {
-    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, id));
+    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.id, id));
     return { ok: true, skipped: true };
   }
   const feedResult = await fetchAllNalpacFeeds();
@@ -18055,13 +19158,13 @@ async function approveAndImport(id) {
   if (!result.success && !result.skipped) {
     return { ok: false, error: result.error ?? "importProductGroupRaw failed" };
   }
-  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq15(dealHistory.sku, repSku)).limit(1);
+  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq17(dealHistory.sku, repSku)).limit(1);
   const dealHistoryId = dhRows[0]?.id;
   await db.update(importCandidates).set({
     status: "imported",
     dealHistoryId: dealHistoryId ?? null,
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq15(importCandidates.id, id));
+  }).where(eq17(importCandidates.id, id));
   return {
     ok: true,
     ...result.shopifyProductId !== void 0 ? { shopifyProductId: result.shopifyProductId } : {},
@@ -18082,851 +19185,6 @@ var init_import_monitor_server = __esm({
     init_bulk_import_server();
     init_master_collapse_server();
     KV_FEED_SKUS = "monitor:feed-skus";
-  }
-});
-
-// app/lib/discovery-emma.ts
-function scoreProduct2(p, s) {
-  let score2 = 0;
-  for (const m of s.mood) if (p.mood.includes(m)) score2 += SCORE_MOOD;
-  for (const a of s.audience) if (p.audience.includes(a)) score2 += SCORE_AUDIENCE;
-  for (const k of s.matters) if (p.matters.includes(k)) score2 += SCORE_MATTERS;
-  return score2;
-}
-function computeAvailable(index2, s) {
-  const moods = /* @__PURE__ */ new Set();
-  const audiences = /* @__PURE__ */ new Set();
-  const matters = /* @__PURE__ */ new Set();
-  const hasMood = s.mood.length > 0;
-  const hasAudience = s.audience.length > 0;
-  const hasMatters = s.matters.length > 0;
-  for (const p of index2) {
-    const okMood = !hasMood || s.mood.some((m) => p.mood.includes(m));
-    const okAudience = !hasAudience || s.audience.some((a) => p.audience.includes(a));
-    const okMatters = !hasMatters || s.matters.some((k) => p.matters.includes(k));
-    if (okAudience && okMatters) for (const m of p.mood) moods.add(m);
-    if (okMood && okMatters) for (const a of p.audience) audiences.add(a);
-    if (okMood && okAudience) for (const k of p.matters) matters.add(k);
-  }
-  return { moods, audiences, matters };
-}
-function availableToArrays(a) {
-  return {
-    moods: Array.from(a.moods),
-    audiences: Array.from(a.audiences),
-    matters: Array.from(a.matters)
-  };
-}
-function mulberry322(seed) {
-  let t = seed >>> 0;
-  return () => {
-    t = t + 1831565813 >>> 0;
-    let r = t;
-    r = Math.imul(r ^ r >>> 15, r | 1);
-    r ^= r + Math.imul(r ^ r >>> 7, r | 61);
-    return ((r ^ r >>> 14) >>> 0) / 4294967296;
-  };
-}
-function seededShuffle2(arr, seed) {
-  const rand = mulberry322(seed);
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    const tmp = arr[i];
-    arr[i] = arr[j];
-    arr[j] = tmp;
-  }
-}
-function rankRails(products, state, opts = {}) {
-  const { perRail = 4, dropEmpty = false, seed } = opts;
-  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
-  const filtered = products.filter((p) => p.price <= state.budget);
-  const buckets = {
-    Pleasure: [],
-    Play: [],
-    Body: [],
-    Wear: []
-  };
-  const totals = { Pleasure: 0, Play: 0, Body: 0, Wear: 0 };
-  const aggScore = { Pleasure: 0, Play: 0, Body: 0, Wear: 0 };
-  for (const p of filtered) {
-    const score2 = hasAny ? scoreProduct2(p, state) : 0;
-    buckets[p.category].push({ product: p, score: score2 });
-    totals[p.category] += 1;
-    aggScore[p.category] += score2;
-  }
-  for (let ci = 0; ci < CATEGORIES.length; ci++) {
-    const cat = CATEGORIES[ci];
-    if (!hasAny && seed !== void 0) {
-      seededShuffle2(buckets[cat], (seed ^ (ci + 1) * 2654435761) >>> 0);
-    } else {
-      buckets[cat].sort((a, b) => b.score - a.score);
-    }
-  }
-  const order = [...CATEGORIES];
-  if (hasAny) {
-    order.sort((a, b) => {
-      const diff = aggScore[b] - aggScore[a];
-      if (diff !== 0) return diff;
-      return CATEGORIES.indexOf(a) - CATEGORIES.indexOf(b);
-    });
-  }
-  const rails = order.map((cat) => ({
-    category: cat,
-    score: aggScore[cat],
-    total: totals[cat],
-    items: buckets[cat].slice(0, perRail)
-  }));
-  return dropEmpty ? rails.filter((r) => r.items.length > 0) : rails;
-}
-function rankSingleRail(products, state, category, offset, limit) {
-  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
-  const filtered = products.filter((p) => p.price <= state.budget && p.category === category);
-  const scored = filtered.map((p) => ({
-    product: p,
-    score: hasAny ? scoreProduct2(p, state) : 0
-  }));
-  scored.sort((a, b) => b.score - a.score);
-  return { items: scored.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(0, limit)), total: scored.length };
-}
-var SCORE_MOOD, SCORE_AUDIENCE, SCORE_MATTERS;
-var init_discovery_emma = __esm({
-  "app/lib/discovery-emma.ts"() {
-    "use strict";
-    init_discovery();
-    SCORE_MOOD = 3;
-    SCORE_AUDIENCE = 2;
-    SCORE_MATTERS = 2;
-  }
-});
-
-// app/lib/discovery-tags.ts
-function normalizeTag2(raw) {
-  const trimmed = raw.trim();
-  if (!trimmed) return "";
-  return trimmed.toLowerCase().split(/(\s+|-)/).map((part) => {
-    if (/^\s+$/.test(part) || part === "-") return part;
-    if (part.length === 0) return part;
-    return part[0].toUpperCase() + part.slice(1);
-  }).join("");
-}
-var init_discovery_tags = __esm({
-  "app/lib/discovery-tags.ts"() {
-    "use strict";
-  }
-});
-
-// app/lib/discovery-rules.server.ts
-import { eq as eq16, and as and4, asc as asc3 } from "drizzle-orm";
-async function getActiveDiscoveryRules() {
-  const cached2 = await kvGet(RULES_CACHE_KEY);
-  if (cached2 && Array.isArray(cached2)) return cached2;
-  const rows = await db.select().from(discoveryRules).where(eq16(discoveryRules.active, true)).orderBy(asc3(discoveryRules.ruleType), asc3(discoveryRules.sortOrder), asc3(discoveryRules.id));
-  const rules = rows.map(rowToRule);
-  await kvSet(RULES_CACHE_KEY, rules, RULES_TTL_SECONDS);
-  return rules;
-}
-async function getInventoryMin() {
-  const cached2 = await kvGet(INVENTORY_MIN_CACHE_KEY);
-  if (typeof cached2 === "number") return cached2;
-  const row = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq16(pipelineSettings.key, "discovery_inventory_min")).limit(1);
-  const parsed = row.length && row[0] ? parseInt(row[0].value, 10) : 0;
-  const value = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-  await kvSet(INVENTORY_MIN_CACHE_KEY, value, INVENTORY_MIN_CACHE_TTL);
-  return value;
-}
-function rowToRule(row) {
-  return {
-    id: row.id,
-    ruleType: row.ruleType,
-    ruleValue: row.ruleValue,
-    category: row.category ?? null,
-    sortOrder: row.sortOrder,
-    notes: row.notes ?? null,
-    active: row.active,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt
-  };
-}
-function applyRules(products, rules, inventoryMin) {
-  if (rules.length === 0 && inventoryMin === 0) return products;
-  const excludeHandles = /* @__PURE__ */ new Set();
-  const excludeTypes = [];
-  const excludeKeywords = [];
-  const priceFloors = [];
-  const priceCeilings = [];
-  for (const rule of rules) {
-    switch (rule.ruleType) {
-      case "exclude_product":
-        excludeHandles.add(rule.ruleValue);
-        break;
-      case "exclude_product_type":
-        excludeTypes.push({ value: rule.ruleValue.trim().toLowerCase(), category: rule.category });
-        break;
-      case "exclude_keyword":
-        excludeKeywords.push(rule.ruleValue.toLowerCase());
-        break;
-      case "exclude_price_min": {
-        const n = parseFloat(rule.ruleValue);
-        if (Number.isFinite(n)) priceFloors.push(n);
-        break;
-      }
-      case "exclude_price_max": {
-        const n = parseFloat(rule.ruleValue);
-        if (Number.isFinite(n)) priceCeilings.push(n);
-        break;
-      }
-    }
-  }
-  return products.filter((p) => {
-    if (excludeHandles.has(p.handle)) return false;
-    if (p.productType) {
-      const productTypeLc = p.productType.trim().toLowerCase();
-      for (const et of excludeTypes) {
-        if (et.value === productTypeLc && (et.category === null || et.category === p.category)) {
-          return false;
-        }
-      }
-    }
-    const lowerTitle = p.title.toLowerCase();
-    for (const kw of excludeKeywords) {
-      if (lowerTitle.includes(kw)) return false;
-    }
-    for (const floor of priceFloors) {
-      if (p.price < floor) return false;
-    }
-    for (const ceiling of priceCeilings) {
-      if (p.price > ceiling) return false;
-    }
-    if (inventoryMin > 0 && p.totalInventory !== null && p.totalInventory < inventoryMin) {
-      return false;
-    }
-    return true;
-  });
-}
-function fillFallbacks(rail, rules, filteredIndex, perRail, alreadyIncludedIds = /* @__PURE__ */ new Set(), collectionPinIds = {}, honoraryProductsByCategory = {}) {
-  const slots = perRail - rail.items.length;
-  if (slots <= 0) return rail;
-  const byHandle = /* @__PURE__ */ new Map();
-  const byId = /* @__PURE__ */ new Map();
-  for (const p of filteredIndex) {
-    byHandle.set(p.handle, p);
-    byId.set(p.id, p);
-  }
-  for (const p of honoraryProductsByCategory[rail.category] ?? []) {
-    if (!byId.has(p.id)) byId.set(p.id, p);
-  }
-  const inRail = new Set(rail.items.map((sp) => sp.product.handle));
-  const inRailIds = new Set(rail.items.map((sp) => sp.product.id));
-  const pins = rules.filter((r) => r.ruleType === "pin_fallback" && r.category === rail.category).sort((a, b) => a.sortOrder - b.sortOrder);
-  const extras = [];
-  const usedIds = /* @__PURE__ */ new Set();
-  for (const pin of pins) {
-    if (extras.length >= slots) break;
-    const product = byHandle.get(pin.ruleValue);
-    if (!product) continue;
-    if (inRail.has(product.handle)) continue;
-    if (alreadyIncludedIds.has(product.id)) continue;
-    if (usedIds.has(product.id)) continue;
-    extras.push({ product, score: 0 });
-    usedIds.add(product.id);
-  }
-  const collectionIds = collectionPinIds[rail.category] ?? [];
-  for (const id of collectionIds) {
-    if (extras.length >= slots) break;
-    const product = byId.get(id);
-    if (!product) continue;
-    if (product.category !== rail.category) continue;
-    if (inRailIds.has(product.id)) continue;
-    if (alreadyIncludedIds.has(product.id)) continue;
-    if (usedIds.has(product.id)) continue;
-    extras.push({ product, score: 0 });
-    usedIds.add(product.id);
-  }
-  if (extras.length === 0) return rail;
-  return {
-    ...rail,
-    items: [...rail.items, ...extras],
-    total: rail.total + extras.length
-  };
-}
-function cleanCollectionHandle(input) {
-  if (!input) return "";
-  let s = input.trim().toLowerCase();
-  const protoMatch = s.match(/^https?:\/\/[^/]+(.*)$/);
-  if (protoMatch && protoMatch[1] !== void 0) s = protoMatch[1];
-  s = s.replace(/^\/+collections\/+/, "").replace(/^\/+/, "");
-  const stop = s.search(/[?#/]/);
-  if (stop !== -1) s = s.slice(0, stop);
-  return s;
-}
-async function resolveCollectionPins(rules, fetcher) {
-  const collectionPins = rules.filter((r) => r.ruleType === "pin_collection_fallback" && r.category !== null).sort((a, b) => a.sortOrder - b.sortOrder);
-  if (collectionPins.length === 0) return {};
-  const handleCache = /* @__PURE__ */ new Map();
-  const result = {};
-  for (const pin of collectionPins) {
-    const handle = cleanCollectionHandle(pin.ruleValue);
-    if (!handle || !pin.category) continue;
-    let ids = handleCache.get(handle);
-    if (!ids) {
-      ids = await fetcher(handle);
-      handleCache.set(handle, ids);
-    }
-    const seen = new Set(result[pin.category] ?? []);
-    const merged = result[pin.category] ?? [];
-    for (const id of ids) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      merged.push(id);
-    }
-    result[pin.category] = merged;
-  }
-  return result;
-}
-function autoLoosen(category, state, filteredIndex, perRail) {
-  const withoutMatters = { ...state, matters: [] };
-  const r1 = rankSingleRail(filteredIndex, withoutMatters, category, 0, perRail);
-  if (r1.items.length > 0) {
-    return { items: r1.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
-  }
-  const withoutAudience = { ...withoutMatters, audience: [] };
-  const r2 = rankSingleRail(filteredIndex, withoutAudience, category, 0, perRail);
-  if (r2.items.length > 0) {
-    return { items: r2.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
-  }
-  const withoutMood = { ...withoutAudience, mood: [] };
-  const r3 = rankSingleRail(filteredIndex, withoutMood, category, 0, perRail);
-  if (r3.items.length > 0) {
-    return { items: r3.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
-  }
-  return null;
-}
-var RULES_CACHE_KEY, RULES_TTL_SECONDS, INVENTORY_MIN_CACHE_KEY, INVENTORY_MIN_CACHE_TTL;
-var init_discovery_rules_server = __esm({
-  "app/lib/discovery-rules.server.ts"() {
-    "use strict";
-    init_db_server();
-    init_schema();
-    init_kv_server();
-    init_discovery_emma();
-    init_discovery_server();
-    RULES_CACHE_KEY = "discovery:rules:v1";
-    RULES_TTL_SECONDS = 5 * 60;
-    INVENTORY_MIN_CACHE_KEY = "discovery:inventory-min:v1";
-    INVENTORY_MIN_CACHE_TTL = 5 * 60;
-  }
-});
-
-// app/lib/discovery.server.ts
-var discovery_server_exports = {};
-__export(discovery_server_exports, {
-  INDEX_KEY: () => INDEX_KEY,
-  INDEX_TTL_SECONDS: () => INDEX_TTL_SECONDS,
-  VOCAB_KEY: () => VOCAB_KEY,
-  VOCAB_TTL_SECONDS: () => VOCAB_TTL_SECONDS,
-  buildDiscoveryIndex: () => buildDiscoveryIndex,
-  computeVocab: () => computeVocab,
-  fetchHonoraryProducts: () => fetchHonoraryProducts,
-  getDiscoveryIndex: () => getDiscoveryIndex,
-  getDiscoveryRailPage: () => getDiscoveryRailPage,
-  getDiscoveryRails: () => getDiscoveryRails,
-  getDiscoveryVocab: () => getDiscoveryVocab,
-  getHonoraryProductsForPin: () => getHonoraryProductsForPin,
-  getProductIdsByCollectionHandle: () => getProductIdsByCollectionHandle,
-  invalidateDiscoveryIndex: () => invalidateDiscoveryIndex,
-  reportTagCoverage: () => reportTagCoverage,
-  triggerDiscoveryRebuild: () => triggerDiscoveryRebuild
-});
-function dialToSubcategory(dial) {
-  switch (dial) {
-    case "vibrator":
-      return "Vibrators";
-    case "dildo":
-      return "Dildos";
-    case "anal":
-      return "Anal";
-    case "cock-ring":
-    case "stroker":
-    case "extender":
-    case "pump":
-    case "sex-machine":
-      return "For Him";
-    case "bondage":
-      return "Bondage & Kink";
-    case "couples":
-      return "Couples";
-    case "lube":
-      return "Lubricants";
-    case "massage":
-      return "Massage";
-    case "enhancer":
-    case "wellness":
-      return "Wellness";
-    case "wear":
-      return "Lingerie";
-    case "harness":
-      return "Accessories";
-    default:
-      return null;
-  }
-}
-function cleanTagList(arr) {
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  for (const raw of arr) {
-    const v = normalizeTag2(raw);
-    if (!v || seen.has(v)) continue;
-    seen.add(v);
-    out.push(v);
-  }
-  return out;
-}
-function classifyOptionValues(options) {
-  let colorValues = [];
-  let sizeValues = [];
-  for (const o of options) {
-    const name = o.name.toLowerCase();
-    const values = o.optionValues.map((v) => v.name.trim()).filter(Boolean);
-    if (/colou?r/.test(name)) colorValues = values;
-    else if (/size|length/.test(name)) sizeValues = values;
-  }
-  return { colorValues, sizeValues };
-}
-function derivePricingAndOptions(n, price) {
-  const maxRaw = Number(n.priceRangeV2.maxVariantPrice?.amount);
-  const priceMax = Number.isFinite(maxRaw) && maxRaw > price ? maxRaw : null;
-  const originalRaw = Number(n.originalPriceRaw?.value);
-  const compareRaw = Number(n.compareAtPriceRange?.minVariantCompareAtPrice?.amount);
-  const msrp = Number.isFinite(originalRaw) && originalRaw > 0 ? originalRaw : Number.isFinite(compareRaw) ? compareRaw : NaN;
-  const compareAtPrice = Number.isFinite(msrp) && msrp > price ? msrp : null;
-  const { colorValues, sizeValues } = classifyOptionValues(n.options ?? []);
-  return { priceMax, compareAtPrice, colorValues, sizeValues };
-}
-function parseListMetafield(value) {
-  if (!value) return [];
-  if (value.trim().startsWith("[")) {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed.map(String) : [];
-    } catch {
-      return [];
-    }
-  }
-  return value.split(",").map((s) => s.trim()).filter(Boolean);
-}
-function nodeToDiscoveryProduct(n, categoryMap) {
-  const category = categoryMap.get(n.id);
-  if (!category) return null;
-  const price = Number(n.priceRangeV2.minVariantPrice.amount);
-  if (!Number.isFinite(price) || price <= 0) return null;
-  const dial = n.productTypeDial?.value ?? "";
-  const subcategory = dialToSubcategory(dial) ?? category;
-  const mood = cleanTagList(parseListMetafield(n.moodTagsRaw?.value));
-  const audience = cleanTagList(parseListMetafield(n.audienceTagsRaw?.value));
-  const matters = cleanTagList(parseListMetafield(n.mattersTagsRaw?.value));
-  const productType = (n.productType ?? "").trim() || null;
-  const productTypeDial = dial || null;
-  const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(n, price);
-  return {
-    id: n.id,
-    handle: n.handle,
-    title: n.title,
-    price,
-    priceMax,
-    compareAtPrice,
-    colorValues,
-    sizeValues,
-    imageUrl: n.featuredImage?.url ?? null,
-    imageAlt: n.featuredImage?.altText ?? null,
-    category,
-    subcategory,
-    mood,
-    audience,
-    matters,
-    totalInventory: n.totalInventory ?? null,
-    productType,
-    productTypeDial
-  };
-}
-async function fetchCollectionProductIds(collectionGid) {
-  const ids = /* @__PURE__ */ new Set();
-  let cursor = null;
-  while (true) {
-    const data = await adminGraphQL(
-      COLLECTION_PRODUCTS_QUERY,
-      { id: collectionGid, cursor }
-    );
-    const page = data.collection?.products;
-    if (!page) break;
-    for (const n of page.nodes) ids.add(n.id);
-    if (!page.pageInfo.hasNextPage) break;
-    cursor = page.pageInfo.endCursor;
-    if (!cursor) break;
-  }
-  return ids;
-}
-async function getProductIdsByCollectionHandle(handle) {
-  const key = handle.trim().toLowerCase();
-  if (!key) return [];
-  const cacheKey3 = collectionHandleKey(key);
-  const cached2 = await kvGet(cacheKey3);
-  if (cached2 && Array.isArray(cached2)) return cached2;
-  let ids = [];
-  try {
-    const data = await adminGraphQL(
-      COLLECTION_BY_HANDLE_QUERY,
-      { handle: key }
-    );
-    const gid = data.collectionByHandle?.id;
-    if (gid) {
-      const set = await fetchCollectionProductIds(gid);
-      ids = Array.from(set);
-    }
-  } catch (err) {
-    console.error("[discovery] getProductIdsByCollectionHandle error for", key, err);
-    return [];
-  }
-  await kvSet(cacheKey3, ids, COLLECTION_HANDLE_CACHE_TTL);
-  return ids;
-}
-async function fetchHonoraryProducts(ids, category) {
-  if (ids.length === 0) return [];
-  const out = [];
-  for (let i = 0; i < ids.length; i += 100) {
-    const batch = ids.slice(i, i + 100);
-    let resp;
-    try {
-      resp = await adminGraphQL(NODES_BY_IDS_QUERY, { ids: batch });
-    } catch (err) {
-      console.error("[discovery] fetchHonoraryProducts batch failed:", err);
-      continue;
-    }
-    for (const node of resp.nodes) {
-      if (!node || node.status !== "ACTIVE") continue;
-      const price = Number(node.priceRangeV2.minVariantPrice.amount);
-      if (!Number.isFinite(price) || price <= 0) continue;
-      const dial = node.productTypeDial?.value ?? "";
-      const subcategory = dialToSubcategory(dial) ?? category;
-      const productType = (node.productType ?? "").trim() || null;
-      const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(node, price);
-      out.push({
-        id: node.id,
-        handle: node.handle,
-        title: node.title,
-        price,
-        priceMax,
-        compareAtPrice,
-        colorValues,
-        sizeValues,
-        imageUrl: node.featuredImage?.url ?? null,
-        imageAlt: node.featuredImage?.altText ?? null,
-        category,
-        // honorary — forced to the pinned rail's category
-        subcategory,
-        mood: cleanTagList(parseListMetafield(node.moodTagsRaw?.value)),
-        audience: cleanTagList(parseListMetafield(node.audienceTagsRaw?.value)),
-        matters: cleanTagList(parseListMetafield(node.mattersTagsRaw?.value)),
-        totalInventory: node.totalInventory ?? null,
-        productType,
-        productTypeDial: dial || null
-      });
-    }
-  }
-  return out;
-}
-async function getHonoraryProductsForPin(handle, category) {
-  const cleaned = handle.trim().toLowerCase();
-  if (!cleaned) return [];
-  const cacheKey3 = honoraryCacheKey(category, cleaned);
-  const cached2 = await kvGet(cacheKey3);
-  if (cached2 && Array.isArray(cached2)) return cached2;
-  const ids = await getProductIdsByCollectionHandle(cleaned);
-  if (ids.length === 0) {
-    await kvSet(cacheKey3, [], HONORARY_CACHE_TTL);
-    return [];
-  }
-  const products = await fetchHonoraryProducts(ids, category);
-  await kvSet(cacheKey3, products, HONORARY_CACHE_TTL);
-  return products;
-}
-async function buildCategoryMap() {
-  const sets = await Promise.all(
-    CATEGORY_PRIORITY.map(async (cat) => ({
-      cat,
-      ids: await fetchCollectionProductIds(CATEGORY_COLLECTION_IDS[cat])
-    }))
-  );
-  const map = /* @__PURE__ */ new Map();
-  for (const { cat, ids } of sets) {
-    for (const id of ids) {
-      if (!map.has(id)) map.set(id, cat);
-    }
-  }
-  return map;
-}
-async function buildDiscoveryIndex() {
-  const categoryMap = await buildCategoryMap();
-  const out = [];
-  let cursor = null;
-  while (true) {
-    const data = await adminGraphQL(
-      PRODUCTS_PAGE_QUERY,
-      { cursor }
-    );
-    for (const node of data.products.nodes) {
-      const dp = nodeToDiscoveryProduct(node, categoryMap);
-      if (dp) out.push(dp);
-    }
-    if (!data.products.pageInfo.hasNextPage) break;
-    cursor = data.products.pageInfo.endCursor;
-    if (!cursor) break;
-  }
-  return out;
-}
-function triggerDiscoveryRebuild() {
-  const baseUrl = process.env["BASE_URL"];
-  const cronSecret = process.env["CRON_SECRET"];
-  if (!baseUrl || !cronSecret) return;
-  void fetch(`${baseUrl}/cron/warm-discovery-index`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${cronSecret}` }
-  }).catch(() => {
-  });
-}
-async function getDiscoveryIndex(opts = {}) {
-  if (!opts.force) {
-    const cached2 = await kvGet(INDEX_KEY);
-    if (cached2 && Array.isArray(cached2) && cached2.length > 0) return cached2;
-  }
-  triggerDiscoveryRebuild();
-  return [];
-}
-async function invalidateDiscoveryIndex() {
-  await kvSet(INDEX_KEY, null, 1);
-  await kvSet(VOCAB_KEY, null, 1);
-}
-function computeVocab(index2) {
-  const tally = (key) => {
-    const counts = /* @__PURE__ */ new Map();
-    for (const p of index2) {
-      for (const v of p[key]) counts.set(v, (counts.get(v) ?? 0) + 1);
-    }
-    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([v]) => v);
-  };
-  return {
-    moods: tally("mood"),
-    audiences: tally("audience"),
-    matters: tally("matters")
-  };
-}
-async function getDiscoveryVocab() {
-  const cached2 = await kvGet(VOCAB_KEY);
-  if (cached2 && Array.isArray(cached2.moods) && cached2.moods.length > 0) return cached2;
-  const idx = await getDiscoveryIndex();
-  if (idx.length === 0) return { moods: [], audiences: [], matters: [] };
-  const vocab = computeVocab(idx);
-  if (vocab.moods.length > 0 || vocab.audiences.length > 0 || vocab.matters.length > 0) {
-    await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS);
-  }
-  return vocab;
-}
-async function getDiscoveryRails(state, opts = {}) {
-  const products = opts.index ?? await getDiscoveryIndex();
-  const perRail = opts.perRail ?? 4;
-  const [rules, inventoryMin] = await Promise.all([
-    getActiveDiscoveryRules(),
-    getInventoryMin()
-  ]);
-  const filtered = applyRules(products, rules, inventoryMin);
-  const collectionPinIds = await resolveCollectionPins(
-    rules,
-    getProductIdsByCollectionHandle
-  );
-  const rankOpts = { perRail };
-  if (opts.dropEmpty !== void 0) rankOpts.dropEmpty = opts.dropEmpty;
-  if (opts.seed !== void 0) rankOpts.seed = opts.seed;
-  const rails = rankRails(filtered, state, rankOpts);
-  const hasAnySelections = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
-  const indexedIds = new Set(filtered.map((p) => p.id));
-  const honoraryByCategory = {};
-  const collectionPinRules = rules.filter((r) => r.ruleType === "pin_collection_fallback" && r.category).sort((a, b) => a.sortOrder - b.sortOrder);
-  await Promise.all(
-    collectionPinRules.map(async (pin) => {
-      const cat = pin.category;
-      const products2 = await getHonoraryProductsForPin(pin.ruleValue, cat);
-      const novel = products2.filter((p) => !indexedIds.has(p.id));
-      if (novel.length === 0) return;
-      const allowed = applyRules(novel, rules, inventoryMin);
-      if (allowed.length === 0) return;
-      const existing = honoraryByCategory[cat] ?? [];
-      const seen = new Set(existing.map((p) => p.id));
-      for (const p of allowed) {
-        if (!seen.has(p.id)) {
-          existing.push(p);
-          seen.add(p.id);
-        }
-      }
-      honoraryByCategory[cat] = existing;
-    })
-  );
-  const includedIds = new Set(
-    rails.flatMap((r) => r.items.map((sp) => sp.product.id))
-  );
-  for (const rail of rails) {
-    if (rail.items.length < perRail) {
-      const filled = fillFallbacks(
-        rail,
-        rules,
-        filtered,
-        perRail,
-        includedIds,
-        collectionPinIds,
-        honoraryByCategory
-      );
-      for (const sp of filled.items) {
-        if (!includedIds.has(sp.product.id)) includedIds.add(sp.product.id);
-      }
-      rail.items = filled.items;
-      rail.total = filled.total;
-    }
-  }
-  for (const rail of rails) {
-    if (rail.items.length === 0 && hasAnySelections) {
-      const loosened = autoLoosen(rail.category, state, filtered, perRail);
-      if (loosened) {
-        rail.items = loosened.items;
-        rail.total = loosened.items.length;
-        rail.relaxed = true;
-        rail.relaxedReason = loosened.reason;
-      }
-    }
-  }
-  const available = availableToArrays(computeAvailable(filtered, state));
-  return { rails, total: filtered.length, available };
-}
-async function getDiscoveryRailPage(state, category, offset, limit, opts = {}) {
-  const products = opts.index ?? await getDiscoveryIndex();
-  const [rules, inventoryMin] = await Promise.all([
-    getActiveDiscoveryRules(),
-    getInventoryMin()
-  ]);
-  const filtered = applyRules(products, rules, inventoryMin);
-  return rankSingleRail(filtered, state, category, offset, limit);
-}
-async function reportTagCoverage() {
-  const idx = await getDiscoveryIndex({ force: true });
-  const report = {
-    total: idx.length,
-    withMood: 0,
-    withAudience: 0,
-    withMatters: 0,
-    withAllThree: 0,
-    withCategoryMapping: idx.length,
-    // index already requires a category mapping
-    byCategory: { Pleasure: 0, Play: 0, Body: 0, Wear: 0 }
-  };
-  for (const p of idx) {
-    if (p.mood.length > 0) report.withMood += 1;
-    if (p.audience.length > 0) report.withAudience += 1;
-    if (p.matters.length > 0) report.withMatters += 1;
-    if (p.mood.length > 0 && p.audience.length > 0 && p.matters.length > 0) {
-      report.withAllThree += 1;
-    }
-    report.byCategory[p.category] += 1;
-  }
-  return report;
-}
-var INDEX_VERSION, INDEX_KEY, INDEX_TTL_SECONDS, VOCAB_KEY, VOCAB_TTL_SECONDS, CATEGORY_COLLECTION_IDS, CATEGORY_PRIORITY, PRODUCTS_PAGE_QUERY, COLLECTION_PRODUCTS_QUERY, COLLECTION_BY_HANDLE_QUERY, COLLECTION_HANDLE_CACHE_TTL, collectionHandleKey, NODES_BY_IDS_QUERY, HONORARY_CACHE_TTL, honoraryCacheKey;
-var init_discovery_server = __esm({
-  "app/lib/discovery.server.ts"() {
-    "use strict";
-    init_shopify_server();
-    init_kv_server();
-    init_discovery_emma();
-    init_discovery_tags();
-    init_discovery_rules_server();
-    INDEX_VERSION = "v6";
-    INDEX_KEY = `discovery:index:${INDEX_VERSION}`;
-    INDEX_TTL_SECONDS = 60 * 60 * 24;
-    VOCAB_KEY = `discovery:vocab:${INDEX_VERSION}`;
-    VOCAB_TTL_SECONDS = 60 * 60 * 24;
-    CATEGORY_COLLECTION_IDS = {
-      Pleasure: "gid://shopify/Collection/330228727979",
-      Play: "gid://shopify/Collection/330228695211",
-      Body: "gid://shopify/Collection/330227581099",
-      Wear: "gid://shopify/Collection/330229514411"
-    };
-    CATEGORY_PRIORITY = ["Pleasure", "Play", "Body", "Wear"];
-    PRODUCTS_PAGE_QUERY = /* GraphQL */
-    `
-  query DiscoveryIndexPage($cursor: String) {
-    products(first: 100, after: $cursor, query: "status:active") {
-      pageInfo { hasNextPage endCursor }
-      nodes {
-        id
-        handle
-        title
-        status
-        productType
-        featuredImage { url altText }
-        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
-        compareAtPriceRange { minVariantCompareAtPrice { amount } }
-        options(first: 3) { name optionValues { name } }
-        totalInventory
-        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
-        productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
-        moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
-        audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
-        mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
-      }
-    }
-  }
-`;
-    COLLECTION_PRODUCTS_QUERY = /* GraphQL */
-    `
-  query DiscoveryCollectionProducts($id: ID!, $cursor: String) {
-    collection(id: $id) {
-      products(first: 250, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { id }
-      }
-    }
-  }
-`;
-    COLLECTION_BY_HANDLE_QUERY = /* GraphQL */
-    `
-  query DiscoveryCollectionByHandle($handle: String!) {
-    collectionByHandle(handle: $handle) { id }
-  }
-`;
-    COLLECTION_HANDLE_CACHE_TTL = 30 * 60;
-    collectionHandleKey = (h) => `discovery:collection-pin:${INDEX_VERSION}:${h}`;
-    NODES_BY_IDS_QUERY = /* GraphQL */
-    `
-  query DiscoveryHonoraryNodes($ids: [ID!]!) {
-    nodes(ids: $ids) {
-      ... on Product {
-        id
-        handle
-        title
-        status
-        productType
-        featuredImage { url altText }
-        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
-        compareAtPriceRange { minVariantCompareAtPrice { amount } }
-        options(first: 3) { name optionValues { name } }
-        totalInventory
-        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
-        productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
-        moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
-        audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
-        mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
-      }
-    }
-  }
-`;
-    HONORARY_CACHE_TTL = 30 * 60;
-    honoraryCacheKey = (cat, handle) => `discovery:honorary:${INDEX_VERSION}:${cat}:${handle}`;
   }
 });
 
@@ -18983,16 +19241,16 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and5, eq: eq18, isNull: isNull3, lt } = await import("drizzle-orm");
+    const { and: and5, eq: eq19, isNull: isNull3, lt } = await import("drizzle-orm");
     const rows = await db2.select().from(metaCapiFailures2).where(and5(isNull3(metaCapiFailures2.resolvedAt), lt(metaCapiFailures2.attempts, MAX_ATTEMPTS))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq18(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq19(metaCapiFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq18(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq19(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
@@ -19282,6 +19540,22 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
+  cronRoute("/warm-homepage", async (_req, res) => {
+    try {
+      const { warmHomepagePayloadA: warmHomepagePayloadA2 } = await Promise.resolve().then(() => (init_homepage_payload_server(), homepage_payload_server_exports));
+      const p = await warmHomepagePayloadA2({ force: true });
+      res.json({
+        ok: true,
+        degraded: p.degraded,
+        bytes: JSON.stringify(p).length,
+        sections: p.sections.length,
+        rails: p.rails.length
+      });
+    } catch (err) {
+      console.error("[cron:warm-homepage]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
   router.post("/warm", guard, async (_req, res) => {
     try {
       const baseUrl = process.env["BASE_URL"] ?? "";
@@ -19300,6 +19574,16 @@ function createCronRoutes() {
         } catch (err) {
           console.warn("[cron:warm] discovery rebuild fetch failed:", err);
         }
+      }
+      let homepageBytes = 0;
+      let homepageRails = 0;
+      try {
+        const { warmHomepagePayloadA: warmHomepagePayloadA2 } = await Promise.resolve().then(() => (init_homepage_payload_server(), homepage_payload_server_exports));
+        const p = await warmHomepagePayloadA2({ force: false });
+        homepageBytes = JSON.stringify(p).length;
+        homepageRails = p.rails.length;
+      } catch (err) {
+        console.warn("[cron:warm] homepage payload warm failed:", err);
       }
       let liveHandle = null;
       try {
@@ -19325,7 +19609,7 @@ function createCronRoutes() {
           })
         );
       }
-      res.json({ ok: true, discoveryProducts: discoveryCount, pagesWarmed });
+      res.json({ ok: true, discoveryProducts: discoveryCount, pagesWarmed, homepageBytes, homepageRails });
     } catch (err) {
       console.error("[cron:warm]", err);
       res.status(500).json({ error: String(err) });
@@ -19340,7 +19624,7 @@ init_schema();
 init_shopify_server();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq17 } from "drizzle-orm";
+import { eq as eq18 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret)
@@ -19371,11 +19655,11 @@ async function handleOrderCreated(order) {
     }).catch((err) => console.error("[webhook] metafield write failed:", err));
     const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
     await db.update(dealHistory).set({
-      unitsSold: db.$count(dealHistory, eq17(dealHistory.sku, lineItem.sku)),
+      unitsSold: db.$count(dealHistory, eq18(dealHistory.sku, lineItem.sku)),
       // increment handled via raw SQL
       totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
       totalProfit: String(profit * lineItem.quantity)
-    }).where(eq17(dealHistory.sku, lineItem.sku)).catch(() => {
+    }).where(eq18(dealHistory.sku, lineItem.sku)).catch(() => {
     });
   }
   const refCode = order.note_attributes?.find((a) => a.name === "ref_source")?.value;
