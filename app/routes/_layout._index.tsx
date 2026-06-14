@@ -13,6 +13,11 @@ import { kvGet, KV_KEYS } from '~/lib/kv.server'
 import { getHomepageSections, getEmmaHeroSettings, getHomeConfig } from '~/lib/sanity.server'
 import { resolveHomeVariant } from '~/lib/home-variant.server'
 import { getDiscoveryRails, getDiscoveryVocab } from '~/lib/discovery.server'
+import {
+  readHomepagePayloadA, reshuffleRailsWithSeed, triggerHomepageWarm,
+  buildHomeContentBlocks, type HomeContentBlocks,
+} from '~/lib/homepage-payload.server'
+import { isLikelyBot } from '~/lib/is-bot.server'
 import { EMPTY_STATE } from '~/types/discovery'
 import { HomeA } from '~/components/discovery/HomeA'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
@@ -35,7 +40,7 @@ import { TrustBarBlock }         from '~/components/cms/TrustBarBlock'
 import { ProductStructuredData } from '~/components/seo/ProductStructuredData'
 import type { Product } from '~/types'
 import { categoryToLegacyString } from '~/types'
-import type { ContentBlock, EmmaCuratedRailBlock, ProductCarouselBlock, TrustBarBlock as TrustBarBlockType } from '~/types/cms'
+import type { ProductCarouselBlock, TrustBarBlock as TrustBarBlockType } from '~/types/cms'
 import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~/lib/analytics.client'
 import { trackFbViewContent } from '~/lib/meta-pixel.client'
 import { buildSocialMeta } from '~/lib/social-meta'
@@ -96,59 +101,66 @@ const ADMIN_BYPASS_HEADERS = {
   'Vercel-CDN-Cache-Control': 'no-store',
 } as const
 
-// Variant A renders the same Sanity CMS content blocks as the legacy home,
-// appended below the discovery rails. This data is DEFERRED (returned as an
-// un-awaited promise) so it never blocks the shell's TTFB for human visitors —
-// the HomeA shell streams immediately via onShellReady and the blocks stream in
-// after. Bots get it buffered (onAllReady), bounded by the per-leg timeouts so a
-// slow upstream can't sink the crawl. getHomepageSections() is KV-cached (60s);
-// only product-backed rails (productCarousel / emmaCuratedRail) hit Shopify.
-async function getHomeContentBlocks(): Promise<{
-  sections: ContentBlock[]
-  carouselProductMap: Record<string, Product[]>
-}> {
-  const cmsData = await withTimeout(
-    getHomepageSections(), LOADER_TIMEOUT_MS, null, 'getHomepageSections(variantA)',
-  )
-  // Drop announcementBar — the layout (_layout.tsx) already renders it pinned at
-  // the top from this same singleton, so rendering it in-page would duplicate it.
-  const sections = (cmsData?.sections ?? []).filter(s => s._type !== 'announcementBar')
+// Variant A loader-data shape, shared across the precompute / live / minimal
+// assembly paths so the component renders identically regardless of source.
+// `contentBlocks` is ALWAYS a promise: deferred (live) so it streams in below
+// the rails, or pre-resolved (blob / minimal) so bots still get it buffered via
+// onAllReady. See assembleVariantALive / assembleVariantAMinimal below.
+interface VariantAData {
+  variant: 'a'
+  rails: Awaited<ReturnType<typeof getDiscoveryRails>>['rails']
+  total: number
+  welcomeBackEnabled: boolean
+  moods: string[]
+  audiences: string[]
+  matters: string[]
+  available: Awaited<ReturnType<typeof getDiscoveryRails>>['available']
+  contentBlocks: Promise<HomeContentBlocks>
+}
 
-  const carouselBlocks = sections.filter(
-    (s): s is ProductCarouselBlock => s._type === 'productCarousel',
-  )
-  const emmaRailBlocks = sections.filter(
-    (s): s is EmmaCuratedRailBlock => s._type === 'emmaCuratedRail',
-  )
-
-  const [carouselResults, emmaRailResults] = await Promise.all([
-    carouselBlocks.length > 0
-      ? withTimeout(Promise.all(carouselBlocks.map(b => {
-          const limit = b.productLimit ?? 8
-          const source = b.source ?? 'tag'
-          if (source === 'collection' && b.collectionHandle) {
-            return getCollectionProducts(b.collectionHandle, limit)
-          }
-          if (source === 'manual' && b.productHandles?.length) {
-            return getProductsByHandles(b.productHandles.map(p => p.handle))
-          }
-          return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([] as Product[])
-        })), LOADER_TIMEOUT_MS, [] as Product[][], 'carouselResults(variantA)')
-      : Promise.resolve([] as Product[][]),
-    emmaRailBlocks.length > 0
-      ? withTimeout(Promise.all(emmaRailBlocks.map(b =>
-          b.productHandles?.length
-            ? getProductsByHandles(b.productHandles.map(p => p.handle))
-            : Promise.resolve([] as Product[]),
-        )), LOADER_TIMEOUT_MS, [] as Product[][], 'emmaRailResults(variantA)')
-      : Promise.resolve([] as Product[][]),
+// Live assembly — TODAY'S behavior, unchanged. Request-time fan-out to
+// discovery + vocab, with the CMS content blocks DEFERRED (un-awaited) so they
+// never block the shell's TTFB for humans; bots get them buffered (onAllReady),
+// bounded by the per-leg timeouts. This is the admin path AND the cold-miss
+// fallback for humans. buildHomeContentBlocks() is the shared CMS assembler.
+async function assembleVariantALive(
+  welcomeBackEnabled: boolean,
+): Promise<VariantAData> {
+  // Reshuffle the empty-state rails on each 60s edge-cache revalidation so the
+  // home page doesn't always lead with the same products (a time bucket, not a
+  // per-visitor cookie, is what varies the shared edge-cached output).
+  const railSeed = Math.floor(Date.now() / 60_000)
+  const [{ rails, total, available }, vocab] = await Promise.all([
+    getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
+    getDiscoveryVocab(),
   ])
+  return {
+    variant: 'a',
+    rails, total, welcomeBackEnabled,
+    moods: vocab.moods, audiences: vocab.audiences, matters: vocab.matters,
+    available,
+    contentBlocks: buildHomeContentBlocks(), // deferred (un-awaited)
+  }
+}
 
-  const carouselProductMap: Record<string, Product[]> = {}
-  carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = carouselResults[i] ?? [] })
-  emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = emmaRailResults[i] ?? [] })
-
-  return { sections, carouselProductMap }
+// Minimal-but-valid 200 for BOTS on a total precompute miss. Rails from the
+// discovery index (KV) only; CMS content blocks resolved empty. Still complete,
+// indexable HTML — never the request-time fan-out / abort path.
+async function assembleVariantAMinimal(
+  welcomeBackEnabled: boolean,
+): Promise<VariantAData> {
+  const railSeed = Math.floor(Date.now() / 60_000)
+  const [{ rails, total, available }, vocab] = await Promise.all([
+    getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
+    getDiscoveryVocab(),
+  ])
+  return {
+    variant: 'a',
+    rails, total, welcomeBackEnabled,
+    moods: vocab.moods, audiences: vocab.audiences, matters: vocab.matters,
+    available,
+    contentBlocks: Promise.resolve({ sections: [], carouselProductMap: {} }),
+  }
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -160,28 +172,58 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { variant } = resolveHomeVariant(request, homeConfig?.activeVariant ?? null)
 
   if (variant === 'a') {
-    // Reshuffle the empty-state rails on each 60s edge-cache revalidation so
-    // the home page doesn't always lead with the same products. The homepage
-    // HTML is edge-cached (and shared across anon visitors), so a time bucket
-    // — not a per-visitor cookie — is what actually varies the cached output.
-    const railSeed = Math.floor(Date.now() / 60_000)
-    const [{ rails, total, available }, vocab] = await Promise.all([
-      getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
-      getDiscoveryVocab(),
-    ])
-    return {
-      variant: 'a' as const,
-      rails,
-      total,
-      welcomeBackEnabled: homeConfig?.welcomeBackEnabled ?? true,
-      moods:     vocab.moods,
-      audiences: vocab.audiences,
-      matters:   vocab.matters,
-      available,
-      // Deferred (un-awaited) — streams in below the discovery rails without
-      // blocking the shell's TTFB. See getHomeContentBlocks().
-      contentBlocks: getHomeContentBlocks(),
+    const welcomeBackEnabled = homeConfig?.welcomeBackEnabled ?? true
+
+    // Admin always gets live + no-store so template / Sanity edits propagate
+    // immediately (this path never existed on variant A before — GAP FIX).
+    const adminUser = await getAdminUser(request).catch(() => null)
+    if (adminUser) {
+      const value = await assembleVariantALive(welcomeBackEnabled)
+      return data(value, { headers: ADMIN_BYPASS_HEADERS })
     }
+
+    // Flag: when disabled, variant A uses today's live assembly (no precompute
+    // read). Flip HOMEPAGE_PRECOMPUTE_ENABLED=true after observing populated
+    // blobs + sane sizes in prod logs. Mirrors the HOME_VARIANT env pattern.
+    const precomputeEnabled = process.env['HOMEPAGE_PRECOMPUTE_ENABLED']?.trim().toLowerCase() === 'true'
+    if (!precomputeEnabled) {
+      return assembleVariantALive(welcomeBackEnabled)
+    }
+
+    const payload = await readHomepagePayloadA()
+    if (payload) {
+      // Warm-blob fast path — ZERO upstreams. Only a cheap in-memory per-request
+      // overlay: reshuffle the stored rails by the minute bucket so edge-cached
+      // HTML still varies across the 60s window. welcomeBackEnabled comes from
+      // the already-fetched live homeConfig (kept live, it's free here).
+      const railSeed = Math.floor(Date.now() / 60_000)
+      const value: VariantAData = {
+        variant: 'a',
+        rails: reshuffleRailsWithSeed(payload.rails, railSeed),
+        total: payload.total,
+        welcomeBackEnabled,
+        moods: payload.moods,
+        audiences: payload.audiences,
+        matters: payload.matters,
+        available: payload.available,
+        // Pre-resolved (NOT deferred) so bots get complete buffered HTML via
+        // onAllReady, while the existing <Suspense>/<Await> JSX stays unchanged.
+        contentBlocks: Promise.resolve({
+          sections: payload.sections,
+          carouselProductMap: payload.carouselProductMap,
+        }),
+      }
+      return value
+    }
+
+    // ── Cold miss (first deploy / evicted KV+Neon / version bump) ───────────
+    // Fire-and-forget warm so the blob self-heals within one cron tick.
+    triggerHomepageWarm()
+    // Bots get the guaranteed-fast minimal-but-valid 200 (never the fan-out /
+    // abort path); humans get today's live assembly with deferred blocks.
+    return isLikelyBot(request)
+      ? assembleVariantAMinimal(welcomeBackEnabled)
+      : assembleVariantALive(welcomeBackEnabled)
   }
 
   // ── Legacy path (unchanged) ───────────────────────────────────────────────

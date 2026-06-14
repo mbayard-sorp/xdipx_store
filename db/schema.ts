@@ -16,6 +16,9 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core'
+// Type-only import — fully erased at build, so no runtime coupling / cycle
+// despite homepage-payload.server.ts importing the `homepagePayload` table back.
+import type { HomepagePayloadA } from '~/lib/homepage-payload.server'
 
 export const dealHistory = pgTable('deal_history', {
   id:               serial('id').primaryKey(),
@@ -1045,5 +1048,25 @@ export const metaCapiFailures = pgTable('meta_capi_failures', {
   resolvedAt: timestamp('resolved_at'),
 }, t => ({
   unresolvedIdx: index('idx_meta_capi_failures_unresolved').on(t.createdAt),
+}))
+
+/**
+ * Durable backstop for the precomputed Variant A homepage payload. KV is the
+ * fast path; this table survives KV eviction so a Googlebot crawl on a cold
+ * instance reads ONE indexed row instead of fanning out to 5+ upstreams.
+ * Exactly one current row per (variant, version) — upserted on the unique
+ * index. The `payload` JSON column holds the JSON-safe HomepagePayloadA blob
+ * (no Map/Set/Date inside); `built_at` is separate row metadata.
+ * See app/lib/homepage-payload.server.ts.
+ */
+export const homepagePayload = pgTable('homepage_payload', {
+  id:        serial('id').primaryKey(),
+  variant:   varchar('variant', { length: 8 }).notNull(),   // 'a' (room for 'b'/'legacy')
+  version:   varchar('version', { length: 16 }).notNull(),  // HOMEPAGE_PAYLOAD_VERSION
+  payload:   json('payload').$type<HomepagePayloadA>().notNull(),
+  degraded:  boolean('degraded').notNull().default(false),
+  builtAt:   timestamp('built_at').notNull().defaultNow(),
+}, t => ({
+  variantVersionUniq: uniqueIndex('homepage_payload_variant_version_uniq').on(t.variant, t.version),
 }))
 

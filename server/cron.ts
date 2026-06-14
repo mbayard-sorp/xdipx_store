@@ -485,6 +485,30 @@ export function createCronRoutes() {
    * (3) Fires GET requests to / and /products/{handle} with no-cache headers
    *     to prime the Vercel CDN SWR cache before Googlebot's next crawl window.
    */
+  /**
+   * GET|POST /cron/warm-homepage
+   * Rebuilds the precomputed Variant A homepage payload (KV + Neon) so the
+   * indexable request path reads one blob instead of fanning out. force=true:
+   * an explicit warm always refreshes. Standalone for on-demand / admin use;
+   * also folded into /warm Step 1.5 for the scheduled 15-min sweep.
+   */
+  cronRoute('/warm-homepage', async (_req, res) => {
+    try {
+      const { warmHomepagePayloadA } = await import('../app/lib/homepage-payload.server.js')
+      const p = await warmHomepagePayloadA({ force: true })
+      res.json({
+        ok: true,
+        degraded: p.degraded,
+        bytes: JSON.stringify(p).length,
+        sections: p.sections.length,
+        rails: p.rails.length,
+      })
+    } catch (err) {
+      console.error('[cron:warm-homepage]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
   router.post('/warm', guard, async (_req, res) => {
     try {
       const baseUrl = process.env['BASE_URL'] ?? ''
@@ -505,6 +529,22 @@ export function createCronRoutes() {
         } catch (err) {
           console.warn('[cron:warm] discovery rebuild fetch failed:', err)
         }
+      }
+
+      // Step 1.5: precompute the homepage payload right after the discovery
+      // index is fresh (the payload's rails are built from that index). Direct
+      // in-process call — not a fetch — since we're already inside the cron
+      // invocation. Non-forced so a transient cold index can't clobber a good
+      // blob with a degraded one; rotation is the forced refresh.
+      let homepageBytes = 0
+      let homepageRails = 0
+      try {
+        const { warmHomepagePayloadA } = await import('../app/lib/homepage-payload.server.js')
+        const p = await warmHomepagePayloadA({ force: false })
+        homepageBytes = JSON.stringify(p).length
+        homepageRails = p.rails.length
+      } catch (err) {
+        console.warn('[cron:warm] homepage payload warm failed:', err)
       }
 
       // Step 2: resolve the current live deal handle from KV (the rotator
@@ -536,7 +576,7 @@ export function createCronRoutes() {
         )
       }
 
-      res.json({ ok: true, discoveryProducts: discoveryCount, pagesWarmed })
+      res.json({ ok: true, discoveryProducts: discoveryCount, pagesWarmed, homepageBytes, homepageRails })
     } catch (err) {
       console.error('[cron:warm]', err)
       res.status(500).json({ error: String(err) })

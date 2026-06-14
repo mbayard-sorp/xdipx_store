@@ -428,6 +428,20 @@ export async function rotateDeal(): Promise<{
     } catch (err) {
       console.error('[deal-rotator] search ping failed (non-blocking):', err)
     }
+
+    // 7. Precompute the full Variant A homepage payload so the indexable path
+    //    never fans out at request time. Runs after regenerateActiveRails so
+    //    the curated rails exist before the payload is built. force=true since
+    //    the deal/content genuinely changed. Non-blocking — a failure must not
+    //    leave the site without a live deal (the loader's live-assembly path is
+    //    the safety net).
+    try {
+      const { warmHomepagePayloadA } = await import('./homepage-payload.server')
+      const p = await warmHomepagePayloadA({ force: true })
+      console.log(`[deal-rotator] homepage payload precomputed (rails=${p.rails.length}, sections=${p.sections.length}, degraded=${p.degraded})`)
+    } catch (err) {
+      console.error('[deal-rotator] homepage precompute failed (non-blocking):', err)
+    }
   }
 
   return {
