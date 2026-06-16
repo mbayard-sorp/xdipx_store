@@ -6,10 +6,11 @@ import { buildEmmaSystemBlocks } from '~/lib/claude.server'
 import { logApiTokens } from '~/lib/token-log.server'
 import type { ProductWrites } from '~/lib/emma-orchestrator.server'
 import type { Deal } from '~/types'
+import { SONNET } from './models.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
-const MODEL_SONNET = 'claude-sonnet-4-20250514'
+const MODEL_SONNET = SONNET
 const MODEL_HAIKU  = 'claude-haiku-4-5-20251001'
 
 const POLL_INTERVAL_DEFAULT_MS = 30_000

@@ -35,10 +35,11 @@ import {
   type DiscoveryState,
   type DiscoverySlots,
 } from '../discovery-gate.server'
+import { SONNET } from '../../models.server'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const SMS_MODEL = 'claude-sonnet-4-20250514'
+const SMS_MODEL = SONNET
 
 // ─── Anthropic client (module-level for test seam) ────────────────────────────
 

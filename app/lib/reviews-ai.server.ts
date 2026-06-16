@@ -3,10 +3,11 @@
  * Pattern mirrors claude.server.ts.
  */
 import Anthropic from '@anthropic-ai/sdk'
+import { SONNET } from './models.server'
 import type { Review, ReviewAIAnalysis } from '~/types/reviews'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
-const MODEL  = 'claude-sonnet-4-20250514'
+const MODEL  = SONNET
 
 const SYSTEM_PROMPT = `You are the voice of xdipx.com — a daily flash-sale site for sexual wellness products.
 Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy.

@@ -51,8 +51,9 @@ import { applyFullEnrichmentWrites } from '~/lib/import-enrich.server'
 import { logApiTokens } from '~/lib/token-log.server'
 import { kvSet, KV_KEYS } from '~/lib/kv.server'
 import { drainToolTokens } from '~/lib/claude.server'
+import { SONNET } from './models.server'
 
-const MODEL = 'claude-sonnet-4-20250514'
+const MODEL = SONNET
 const KV_TTL_SECONDS = 24 * 60 * 60 // 24h
 
 // ─── Anthropic client (API path only) ────────────────────────────────────────

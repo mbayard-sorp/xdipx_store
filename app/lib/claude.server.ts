@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { SONNET } from './models.server'
 import { createHash } from 'node:crypto'
 import type {
   Deal, EmmaHeroCopy, EmmaHeroVariant, GenerateCopyRequest, GenerateCopyResult, ProductScore,
@@ -156,7 +157,7 @@ export function drainToolTokens(): { input: number; output: number; cacheCreatio
 
 // Tiered models: HAIKU for short/templated copy (~20× cheaper), SONNET for
 // long-form narrative and structured tasks (full_story, specs, schedule, blog).
-const MODEL      = 'claude-sonnet-4-20250514'
+const MODEL      = SONNET
 const MODEL_FAST = 'claude-haiku-4-5-20251001'
 
 const SYSTEM_PROMPT = `You are the voice of xdipx.com, a daily flash-sale site for sexual wellness products.

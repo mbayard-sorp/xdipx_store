@@ -24,8 +24,9 @@ import 'dotenv/config'
 import Anthropic from '@anthropic-ai/sdk'
 import { writeDialTaxonomyForType, type DialDimensionEntry } from '../app/lib/dial-registry.server'
 import type { ProductTypeDial } from '../app/types/index'
+import { SONNET } from '../app/lib/models.server'
 
-const MODEL = 'claude-sonnet-4-20250514'
+const MODEL = SONNET
 
 const PRODUCT_TYPE_HINTS: Record<ProductTypeDial, string> = {
   'air-pulsation': 'Clitoral suction / air-pulse / pressure-wave devices (e.g. Womanizer, Satisfyer Pro). Dimensions cover suction strength, pulse pattern, fit, learning curve, quietness, and travel-friendliness.',

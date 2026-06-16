@@ -28,6 +28,7 @@ import {
   hasPitchClose,
 } from '../app/lib/sms-v2/stages/research.server'
 import type { EmmaContext, IntentResult } from '../app/lib/sms-v2/types.server'
+import { SONNET } from '../app/lib/models.server'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -144,7 +145,7 @@ async function runScenario2(): Promise<void> {
           type:        'message',
           role:        'assistant',
           stop_reason: 'end_turn',
-          model:       'claude-sonnet-4-20250514',
+          model:       SONNET,
           content: [{
             type: 'text',
             text: 'This product is great and very affordable. Check it out at https://xdipx.com/products/this-is-totally-fake-url-xyz only $9999.99!',
@@ -244,7 +245,7 @@ async function runScenario4(): Promise<void> {
           type:        'message',
           role:        'assistant',
           stop_reason: 'end_turn',
-          model:       'claude-sonnet-4-20250514',
+          model:       SONNET,
           content: [{
             type: 'text',
             text: 'Great question! The Lovense Lush 99 is actually way better than a wand. It has 15 motors and retails for $299. Want me to compare it with other options?',

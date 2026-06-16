@@ -25,10 +25,11 @@ import { resolveTransition } from '../transitions.server'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 import { fetchProductContext } from './_product-context.server'
 import { pickObjectionTemplate } from '../templates/objection-templates'
+import { SONNET } from '../../models.server'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const SMS_MODEL = 'claude-sonnet-4-20250514'
+const SMS_MODEL = SONNET
 
 // ─── Anthropic client (module-level for test seam) ────────────────────────────
 
