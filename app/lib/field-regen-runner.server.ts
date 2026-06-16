@@ -31,11 +31,12 @@ import {
 } from '~/lib/shopify.server'
 import { buildEmmaSystemBlocks, BRAND_VOICE_SYSTEM_PROMPT } from '~/lib/claude.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
+import { SONNET } from './models.server'
 import type { GenerateCopyRequest } from '~/types'
 import type { EmmaHeroVariant } from '~/types'
 import type { Deal } from '~/types'
 
-const MODEL      = 'claude-sonnet-4-20250514'
+const MODEL      = SONNET
 const MODEL_FAST = 'claude-haiku-4-5-20251001'
 
 // ---------------------------------------------------------------------------

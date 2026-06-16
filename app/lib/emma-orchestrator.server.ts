@@ -33,11 +33,12 @@ import { getAskEmmaVocabulary, type AskEmmaVocabulary } from '~/lib/ask-emma-voc
 import { generateMoodImage } from '~/lib/imagen.server'
 import { uploadMoodImageToShopifyFiles, type PairingCandidate } from '~/lib/shopify.server'
 import { getDefaultClient, loadAgentSdk, type LLMClient } from '~/lib/llm-client.server'
+import { SONNET } from './models.server'
 import type {
   Deal, EmmaHeroCopy, ProductTypeDial, ProductSubtypeDial, SensationDialV2,
 } from '~/types'
 
-const MODEL = 'claude-sonnet-4-20250514'
+const MODEL = SONNET
 const MAX_TURNS = 24
 
 // ─── Public types ────────────────────────────────────────────────────────────

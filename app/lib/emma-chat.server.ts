@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { SONNET } from './models.server'
 import { and, asc, desc, eq, sql as drizzleSql } from 'drizzle-orm'
 import { db } from './db.server'
 import {
@@ -9,7 +10,7 @@ import {
 } from '../../db/schema'
 import { EMMA_CHAT_TOOLS, executeEmmaChatTool } from './emma-chat-tools.server'
 
-export const MODEL = 'claude-sonnet-4-20250514'
+export const MODEL = SONNET
 const MAX_OUTPUT_TOKENS = 4096
 const MAX_TOOL_HOPS = 6
 

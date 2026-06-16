@@ -22,10 +22,11 @@ import { resolveTransition } from '../transitions.server'
 import { orderStatusLookup, OrderNotFoundError, type OrderStatus } from '../tools/order-status.server'
 import { GENERIC_POST_PURCHASE_FALLBACK } from '../templates/post-purchase-templates'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
+import { SONNET } from '../../models.server'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
-const MODEL = 'claude-sonnet-4-20250514'
+const MODEL = SONNET
 const MAX_TOKENS = 220
 
 // Patterns that indicate the LLM is trying to sell something

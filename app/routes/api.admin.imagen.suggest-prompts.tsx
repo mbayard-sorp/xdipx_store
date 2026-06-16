@@ -2,9 +2,10 @@ import type { ActionFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import Anthropic from '@anthropic-ai/sdk'
 import { logApiTokens } from '~/lib/token-log.server'
+import { SONNET } from '../lib/models.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
-const MODEL = 'claude-sonnet-4-20250514'
+const MODEL = SONNET
 
 export async function action({ request }: ActionFunctionArgs) {
   await requireAdmin(request)

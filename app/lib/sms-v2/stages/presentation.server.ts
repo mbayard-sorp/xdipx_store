@@ -22,11 +22,12 @@ import { resolveTransition } from '../transitions.server'
 import type { EmmaContext, IntentResult, StageResponse, ProductRef } from '../types.server'
 import { fetchProductContext } from './_product-context.server'
 import { pickFitCloser, type FitCloserContext } from '../templates/fit-closer-bank'
+import { SONNET } from '../../models.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
 // Sonnet 4.6 model — per spec
-const SMS_MODEL = 'claude-sonnet-4-20250514'
+const SMS_MODEL = SONNET
 
 // Tool definition for searchForIvr (IVR-tuned search, compact cards).
 // kbLookup is listed for future Phase 6c wiring; not registered here.
