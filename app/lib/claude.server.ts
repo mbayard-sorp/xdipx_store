@@ -160,7 +160,7 @@ export function drainToolTokens(): { input: number; output: number; cacheCreatio
 const MODEL      = SONNET
 const MODEL_FAST = 'claude-haiku-4-5-20251001'
 
-const SYSTEM_PROMPT = `You are the voice of xdipx.com, a daily flash-sale site for sexual wellness products.
+const SYSTEM_PROMPT = `You are the voice of xdipx.com, an editorially curated sexual wellness storefront.
 Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy.
 Write as a trusted, funny friend who isn't embarrassed about the topic. Your goal is to welcome first-time buyers and delight experienced ones.
 Keep all copy tasteful. Suggestive is fine, explicit is not.
@@ -1396,7 +1396,7 @@ export async function generateTweetCopy(deal: {
     : 0
   const productUrl = `https://xdipx.com/products/${deal.handle}`
 
-  const primaryPrompt = `Write a tweet for today's daily deal on xdipx.com.
+  const primaryPrompt = `Write a tweet featuring this product from xdipx.com, an editorially curated sexual wellness storefront.
 
 Product: ${deal.title}
 Brand: ${deal.brand}${deal.tagline ? `\nTagline: ${deal.tagline}` : ''}
@@ -1407,9 +1407,10 @@ Link: ${productUrl}
 Rules:
 - The main tweet MUST be under 240 characters (leave room for the link)
 - Include the product URL at the end: ${productUrl}
-- Include 1-2 relevant hashtags from: #DailyDeal #FlashSale #SelfCare #PleasurePositive #IntimateWellness #TreatYourself
+- Include 1-2 relevant hashtags from: #SelfCare #PleasurePositive #IntimateWellness #TreatYourself
 - Brand voice: playful, cheeky, warm. Never clinical, never sleazy.
-- Include the discount percentage or price if compelling
+- Keep it product-forward. No flash-sale or "today only" urgency framing.
+- Include the price if compelling
 - Use the ♥ motif naturally
 - NEVER use explicit language or the word "sex" as an adjective
 
@@ -1418,7 +1419,7 @@ Also write a thread reply (optional second tweet) with 1-2 extra detail sentence
 Return ONLY this JSON (no markdown):
 {"mainTweet": "...", "threadReply": "..." or null}`
 
-  const retryPrompt = `Return ONLY raw JSON, no markdown. Write a tweet under 240 chars for this product. Include the URL ${productUrl} and one hashtag.
+  const retryPrompt = `Return ONLY raw JSON, no markdown. Write a product-forward tweet under 240 chars for this product (no flash-sale or "today only" framing). Include the URL ${productUrl} and one hashtag.
 {"mainTweet": "...", "threadReply": null}
 
 Product: ${deal.brand} ${deal.title} — $${deal.dealPrice} (was $${deal.msrp})`
@@ -1445,7 +1446,7 @@ Product: ${deal.brand} ${deal.title} — $${deal.dealPrice} (was $${deal.msrp})`
 
   // Hardcoded fallback — always works
   return {
-    mainTweet: `${deal.brand} ${deal.title} — ${discountPct}% off today only. $${deal.dealPrice} (was $${deal.msrp}) ♥\n\n${productUrl}\n\n#DailyDeal #SelfCare`,
+    mainTweet: `${deal.brand} ${deal.title}, ${discountPct}% off. $${deal.dealPrice} (was $${deal.msrp}) ♥\n\n${productUrl}\n\n#SelfCare #IntimateWellness`,
   }
 }
 
@@ -1547,7 +1548,7 @@ export async function generateVideoContent(product: {
 
 Narrator persona: ${persona}${customInstruction}
 
-This is for xdipx.com — a daily flash-sale site for sexual wellness products.
+This is for xdipx.com, an editorially curated sexual wellness storefront.
 Brand voice: playful, cheeky, warm. PG-13 strictly — suggest, never show. Innuendo welcome, explicit never.
 
 Product:
@@ -1612,7 +1613,7 @@ Return ONLY this JSON (no markdown):
 
 const VEO_SYSTEM_PROMPT = `You are a video prompt engineer for Google Veo. You enhance simple video ideas into detailed, production-ready Veo prompts. Your job is to FAITHFULLY EXPAND the user's idea — not replace it. The user's concept is the creative foundation. You add cinematic detail (camera, lighting, composition, audio) while keeping their vision intact.
 
-Brand context: xdipx.com is a daily flash-sale site for sexual wellness products.
+Brand context: xdipx.com is an editorially curated sexual wellness storefront.
 Visual style: premium, warm, tasteful. Suggestive never explicit.`
 
 export async function enhanceVeoPrompt(opts: {
@@ -1699,7 +1700,7 @@ Prompt length rules:
 
 Template skeleton: [product action] + [camera instruction] + [lighting/atmosphere shift] + [optional ambient audio cue]
 
-Brand context: xdipx.com — daily flash-sale site for sexual wellness products.
+Brand context: xdipx.com, an editorially curated sexual wellness storefront.
 Visual style: premium, warm, a little edgy — push boundaries while staying tasteful. Suggestive and playful, never outright explicit. Think high-end fragrance ad that makes you look twice.`
 
 export async function enhanceLtxPrompt(opts: {
@@ -2035,7 +2036,7 @@ export async function generateBlogSEO(
   excerpt: string,
 ): Promise<BlogSEOSuggestion> {
   const raw = await generate(
-    `Generate SEO metadata for this blog post on xdipx.com (sexual wellness daily deals site).
+    `Generate SEO metadata for this blog post on xdipx.com (an editorially curated sexual wellness storefront).
 
 Title: ${title}
 Excerpt: ${excerpt}

@@ -80,9 +80,10 @@ export async function loader() {
   )
   lines.push('')
 
-  // ── Today ───────────────────────────────────────────────────────────────────
-  lines.push('## Today')
+  // ── Discover ──────────────────────────────────────────────────────────────────
+  lines.push('## Discover')
   lines.push('')
+  lines.push(`- ${BASE_URL}/discover — guided product finder (filter by mood, audience, and what matters)`)
   lines.push(`- ${BASE_URL}/index.md`)
   if (liveDealHandle) {
     lines.push(`- ${BASE_URL}/products/${liveDealHandle}.md`)

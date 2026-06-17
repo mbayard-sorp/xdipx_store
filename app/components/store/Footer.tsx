@@ -44,7 +44,7 @@ export function Footer({ socialLinks = [], footerColumns = [], logoUrl, logoAlt 
               )}
             </Link>
             <p className="text-white/50 text-sm mt-2 leading-relaxed max-w-[200px]">
-              {tagline || 'One deal. Every day. For everyone. ♥'}
+              {tagline || 'Curated intimate wellness, for everyone. ♥'}
             </p>
 
             {/* Social links */}

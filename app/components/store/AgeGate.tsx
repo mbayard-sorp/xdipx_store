@@ -130,7 +130,7 @@ export function AgeGatePanel({ verificationLevel = 'click_through' }: AgeGatePan
           xdipx
         </span>
         <span className="text-white/70 text-xs block text-center -mt-1 tracking-widest uppercase">
-          daily wellness deals
+          curated wellness picks
         </span>
       </div>
 
