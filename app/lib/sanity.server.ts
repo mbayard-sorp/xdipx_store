@@ -307,6 +307,39 @@ export function invalidateCmsCache(): void {
   invalidateCache('sanity:homepage')
 }
 
+const HOMEPAGE_DOC_ID = 'singleton.homepage'
+
+/**
+ * Full raw homepage singleton document (every field + section, incl. inactive
+ * ones) — used to snapshot a last-good copy for the homepage healthcheck.
+ * Returns null when Sanity is unconfigured or the doc doesn't exist.
+ */
+export async function getHomepageDocRaw(): Promise<Record<string, unknown> | null> {
+  const client = getClient(true, false, 'raw')
+  if (!client) return null
+  const doc = await client.getDocument(HOMEPAGE_DOC_ID)
+  return (doc as Record<string, unknown> | undefined) ?? null
+}
+
+/**
+ * Restore (publish) a previously-snapshotted homepage singleton, used by the
+ * healthcheck to roll back a broken auto-publish. Strips Sanity system fields,
+ * forces the canonical id/type, and busts the CMS cache.
+ */
+export async function restoreHomepageDoc(snapshot: Record<string, unknown>): Promise<void> {
+  const client = getClient(true, false, 'raw')
+  if (!client) throw new Error('Sanity not configured — cannot restore homepage doc')
+  // Drop ALL top-level system fields (_rev, _updatedAt, _createdAt, _originalId,
+  // …) — nested _key/_type inside sections[] are content and must survive.
+  const rest: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(snapshot)) {
+    if (!k.startsWith('_')) rest[k] = v
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await client.createOrReplace({ ...rest, _id: HOMEPAGE_DOC_ID, _type: 'homepageSections' } as any)
+  invalidateCmsCache()
+}
+
 // ─── Shopify → Sanity product sync ───────────────────────────────────────────
 
 /**
