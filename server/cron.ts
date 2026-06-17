@@ -114,6 +114,26 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/homepage-healthcheck
+   * Schedule: every 30 min — assert `/` + `/discover` render cleanly. On a broken
+   * homepage, roll the Sanity homepage doc back to last-good, re-warm the Variant A
+   * payload, and alert (Sentry + P0 GitHub issue). Safety net for the autonomous
+   * merchandiser's content auto-publish.
+   */
+  cronRoute('/homepage-healthcheck', async (_req, res) => {
+    try {
+      const { runHomepageHealthcheck } = await import('../app/lib/homepage-healthcheck.server.js')
+      const result = await runHomepageHealthcheck()
+      // Non-2xx on failure so Vercel cron + monitoring surface it (recovery,
+      // if any, already happened inside runHomepageHealthcheck).
+      res.status(result.ok ? 200 : 503).json(result)
+    } catch (err) {
+      console.error('[cron:homepage-healthcheck]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/profit-summary
    * Schedule: 12:05 AM — write daily profit summary to Neon
    */
