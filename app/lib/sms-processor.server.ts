@@ -23,13 +23,13 @@ const HELP_WORDS = new Set(['help', 'info'])
 const AGE_CONFIRM_RE = /^(y|ya|yes|yep|yup|sure|ok|okay|confirm|im18|iam18|18|18plus)$/i
 
 export const HELP_REPLY =
-  "xdipx: daily flash-sale wellness deals. Reply STOP to opt out, START to resume. Msg&data rates may apply. Help: hello@xdipx.com"
+  "xdipx: curated wellness picks. Reply STOP to opt out, START to resume. Msg&data rates may apply. Help: hello@xdipx.com"
 export const STOP_REPLY = "You're opted out of xdipx messages. Reply START anytime to resume."
 export const START_REPLY = "You're back in. Reply STOP to opt out anytime. Msg&data rates may apply."
 export const AGE_GATE_REPLY =
   "xdipx is 18+ only. Reply YES to confirm you're 18 or older AND agree to receive recurring marketing texts from xdipx (auto-dialed, ~4 msgs/month, msg & data rates may apply). Reply STOP to opt out anytime, HELP for help."
 export const AGE_WELCOME_REPLY =
-  "You're in. I'm Emma — ask me anything about our daily deals, products, or your orders. What's on your mind?"
+  "You're in. I'm Emma — ask me anything about our products or your orders. What's on your mind?"
 
 export interface ProcessSmsInput {
   from: string

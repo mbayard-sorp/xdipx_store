@@ -109,6 +109,7 @@ export async function loader() {
         priority: '0.9',
       }
     }),
+    { loc: `${base}/discover`,    lastmod: today, changefreq: 'weekly', priority: '0.7' },
     { loc: `${base}/collections`, lastmod: collectionsHubLastmod ?? today, changefreq: 'weekly', priority: '0.7' },
     { loc: `${base}/notebook`,    lastmod: today, changefreq: 'weekly', priority: '0.5' },
 

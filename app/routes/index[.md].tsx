@@ -1,7 +1,8 @@
 /**
  * /index.md — Markdown twin for the homepage.
- * Shows today's pick plus navigation links to .md twins.
- * Cache-Control: 15 min (deal rotates at midnight).
+ * Describes the curated storefront with category navigation, plus Emma's
+ * current featured pick when one is set.
+ * Cache-Control: 15 min (featured pick rotates on its own cadence).
  */
 
 import { getDailyDeal } from '~/lib/shopify.server'

@@ -1070,3 +1070,69 @@ export const homepagePayload = pgTable('homepage_payload', {
   variantVersionUniq: uniqueIndex('homepage_payload_variant_version_uniq').on(t.variant, t.version),
 }))
 
+// ---------------------------------------------------------------------------
+// Autonomous homepage merchandising team (migration 049)
+// Control plane only. Spend lives in api_token_log, not here.
+// ---------------------------------------------------------------------------
+
+/** One row per team run (daily merchandise, or a weekly design cycle). */
+export const homepageTeamRuns = pgTable('homepage_team_runs', {
+  id:           serial('id').primaryKey(),
+  runType:      varchar('run_type', { length: 24 }).notNull(),        // merchandise|design|manual
+  status:       varchar('status', { length: 16 }).notNull().default('running'),
+  currentPhase: varchar('current_phase', { length: 48 }),
+  currentAgent: varchar('current_agent', { length: 48 }),
+  summary:      text('summary'),
+  prUrl:        text('pr_url'),
+  error:        text('error'),
+  attemptCount: integer('attempt_count').notNull().default(1),
+  startedAt:    timestamp('started_at').notNull().defaultNow(),
+  finishedAt:   timestamp('finished_at'),
+}, t => ({
+  startedIdx: index('idx_homepage_team_runs_started').on(t.startedAt),
+  statusIdx:  index('idx_homepage_team_runs_status').on(t.status, t.startedAt),
+}))
+
+/** Per-step/agent activity feed — dashboard timeline + conversation viewer. */
+export const homepageTeamEvents = pgTable('homepage_team_events', {
+  id:            serial('id').primaryKey(),
+  runId:         integer('run_id').notNull().references(() => homepageTeamRuns.id, { onDelete: 'cascade' }),
+  ts:            timestamp('ts').notNull().defaultNow(),
+  agentRole:     varchar('agent_role', { length: 48 }),
+  phase:         varchar('phase', { length: 48 }),
+  eventType:     varchar('event_type', { length: 16 }).notNull(),     // step|message|tool|decision|error
+  summary:       text('summary').notNull(),
+  transcriptRef: text('transcript_ref'),                              // Vercel Blob key
+}, t => ({
+  runIdx: index('idx_homepage_team_events_run').on(t.runId, t.ts),
+}))
+
+/** process-optimizer suggestions — human-approved before anything changes. */
+export const homepageTeamSuggestions = pgTable('homepage_team_suggestions', {
+  id:            serial('id').primaryKey(),
+  runId:         integer('run_id').references(() => homepageTeamRuns.id, { onDelete: 'set null' }),
+  category:      varchar('category', { length: 32 }).notNull(),       // model|turns|caching|prompt|agents|other
+  suggestion:    text('suggestion').notNull(),
+  estSavingsUsd: decimal('est_savings_usd', { precision: 10, scale: 4 }).notNull().default('0'),
+  cxRisk:        varchar('cx_risk', { length: 8 }).notNull().default('low'), // low|med|high
+  status:        varchar('status', { length: 12 }).notNull().default('proposed'), // proposed|approved|applied|dismissed
+  createdAt:     timestamp('created_at').notNull().defaultNow(),
+}, t => ({
+  statusIdx: index('idx_homepage_team_suggestions_status').on(t.status, t.createdAt),
+}))
+
+/** Marketing calendar — promos, holidays, campaign themes the team merchandises around. */
+export const marketingCalendar = pgTable('marketing_calendar', {
+  id:         serial('id').primaryKey(),
+  eventDate:  date('event_date').notNull(),
+  name:       varchar('name', { length: 120 }).notNull(),
+  type:       varchar('type', { length: 16 }).notNull().default('promo'), // holiday|promo|campaign
+  theme:      text('theme'),
+  status:     varchar('status', { length: 12 }).notNull().default('planned'), // planned|active|done|skipped
+  assetsJson: json('assets_json'),
+  createdAt:  timestamp('created_at').notNull().defaultNow(),
+  updatedAt:  timestamp('updated_at').notNull().defaultNow(),
+}, t => ({
+  dateIdx: index('idx_marketing_calendar_date').on(t.eventDate),
+}))
+

@@ -27,7 +27,7 @@ import { withTimeout } from '~/lib/twilio.server'
 // The canonical export of AGE_WELCOME_REPLY stays in sms-processor.server.ts
 // for all other callers — this local copy is only used internally by sms-config.
 const AGE_WELCOME_REPLY =
-  "You're in. I'm Emma — ask me anything about our daily deals, products, or your orders. What's on your mind?"
+  "You're in. I'm Emma — ask me anything about our products or your orders. What's on your mind?"
 
 /** Default returning-customer greeting prefix. Mirrors discovery-welcome's
  *  static fallback wording so behaviour stays the same when no override

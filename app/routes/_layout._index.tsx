@@ -12,14 +12,10 @@ import { eq, inArray } from 'drizzle-orm'
 import { kvGet, KV_KEYS } from '~/lib/kv.server'
 import { getHomepageSections, getEmmaHeroSettings, getHomeConfig } from '~/lib/sanity.server'
 import { resolveHomeVariant } from '~/lib/home-variant.server'
-import { getDiscoveryRails, getDiscoveryVocab } from '~/lib/discovery.server'
-import {
-  readHomepagePayloadA, reshuffleRailsWithSeed, triggerHomepageWarm,
-  buildHomeContentBlocks, type HomeContentBlocks,
-} from '~/lib/homepage-payload.server'
-import { isLikelyBot } from '~/lib/is-bot.server'
-import { EMPTY_STATE } from '~/types/discovery'
+import { loadVariantAData } from '~/lib/home-discover.server'
+import { assembleStorefrontHome } from '~/lib/storefront-home.server'
 import { HomeA } from '~/components/discovery/HomeA'
+import { StorefrontHome } from '~/components/store/StorefrontHome'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getEmmaContextRows }    from '~/lib/emma-rails.server'
@@ -101,67 +97,10 @@ const ADMIN_BYPASS_HEADERS = {
   'Vercel-CDN-Cache-Control': 'no-store',
 } as const
 
-// Variant A loader-data shape, shared across the precompute / live / minimal
-// assembly paths so the component renders identically regardless of source.
-// `contentBlocks` is ALWAYS a promise: deferred (live) so it streams in below
-// the rails, or pre-resolved (blob / minimal) so bots still get it buffered via
-// onAllReady. See assembleVariantALive / assembleVariantAMinimal below.
-interface VariantAData {
-  variant: 'a'
-  rails: Awaited<ReturnType<typeof getDiscoveryRails>>['rails']
-  total: number
-  welcomeBackEnabled: boolean
-  moods: string[]
-  audiences: string[]
-  matters: string[]
-  available: Awaited<ReturnType<typeof getDiscoveryRails>>['available']
-  contentBlocks: Promise<HomeContentBlocks>
-}
-
-// Live assembly — TODAY'S behavior, unchanged. Request-time fan-out to
-// discovery + vocab, with the CMS content blocks DEFERRED (un-awaited) so they
-// never block the shell's TTFB for humans; bots get them buffered (onAllReady),
-// bounded by the per-leg timeouts. This is the admin path AND the cold-miss
-// fallback for humans. buildHomeContentBlocks() is the shared CMS assembler.
-async function assembleVariantALive(
-  welcomeBackEnabled: boolean,
-): Promise<VariantAData> {
-  // Reshuffle the empty-state rails on each 60s edge-cache revalidation so the
-  // home page doesn't always lead with the same products (a time bucket, not a
-  // per-visitor cookie, is what varies the shared edge-cached output).
-  const railSeed = Math.floor(Date.now() / 60_000)
-  const [{ rails, total, available }, vocab] = await Promise.all([
-    getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
-    getDiscoveryVocab(),
-  ])
-  return {
-    variant: 'a',
-    rails, total, welcomeBackEnabled,
-    moods: vocab.moods, audiences: vocab.audiences, matters: vocab.matters,
-    available,
-    contentBlocks: buildHomeContentBlocks(), // deferred (un-awaited)
-  }
-}
-
-// Minimal-but-valid 200 for BOTS on a total precompute miss. Rails from the
-// discovery index (KV) only; CMS content blocks resolved empty. Still complete,
-// indexable HTML — never the request-time fan-out / abort path.
-async function assembleVariantAMinimal(
-  welcomeBackEnabled: boolean,
-): Promise<VariantAData> {
-  const railSeed = Math.floor(Date.now() / 60_000)
-  const [{ rails, total, available }, vocab] = await Promise.all([
-    getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
-    getDiscoveryVocab(),
-  ])
-  return {
-    variant: 'a',
-    rails, total, welcomeBackEnabled,
-    moods: vocab.moods, audiences: vocab.audiences, matters: vocab.matters,
-    available,
-    contentBlocks: Promise.resolve({ sections: [], carouselProductMap: {} }),
-  }
-}
+// Variant-A "The Compass" assembly (VariantAData, assembleVariantALive,
+// assembleVariantAMinimal, loadVariantAData) now lives in
+// `~/lib/home-discover.server` so the standalone `/discover` route can reuse it.
+// Storefront (variant 'b') assembly lives in `~/lib/storefront-home.server`.
 
 export async function loader({ request }: LoaderFunctionArgs) {
   // ── Variant A: "The Compass" discovery home page ─────────────────────────
@@ -172,58 +111,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { variant } = resolveHomeVariant(request, homeConfig?.activeVariant ?? null)
 
   if (variant === 'a') {
+    // "The Compass" discovery home. Assembly (admin / precompute / cold-miss /
+    // bot-fallback) lives in loadVariantAData so `/discover` reuses it verbatim.
     const welcomeBackEnabled = homeConfig?.welcomeBackEnabled ?? true
-
-    // Admin always gets live + no-store so template / Sanity edits propagate
-    // immediately (this path never existed on variant A before — GAP FIX).
     const adminUser = await getAdminUser(request).catch(() => null)
-    if (adminUser) {
-      const value = await assembleVariantALive(welcomeBackEnabled)
-      return data(value, { headers: ADMIN_BYPASS_HEADERS })
-    }
+    const value = await loadVariantAData(request, { welcomeBackEnabled, isAdmin: !!adminUser })
+    return adminUser ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
+  }
 
-    // Flag: when disabled, variant A uses today's live assembly (no precompute
-    // read). Flip HOMEPAGE_PRECOMPUTE_ENABLED=true after observing populated
-    // blobs + sane sizes in prod logs. Mirrors the HOME_VARIANT env pattern.
-    const precomputeEnabled = process.env['HOMEPAGE_PRECOMPUTE_ENABLED']?.trim().toLowerCase() === 'true'
-    if (!precomputeEnabled) {
-      return assembleVariantALive(welcomeBackEnabled)
-    }
-
-    const payload = await readHomepagePayloadA()
-    if (payload) {
-      // Warm-blob fast path — ZERO upstreams. Only a cheap in-memory per-request
-      // overlay: reshuffle the stored rails by the minute bucket so edge-cached
-      // HTML still varies across the 60s window. welcomeBackEnabled comes from
-      // the already-fetched live homeConfig (kept live, it's free here).
-      const railSeed = Math.floor(Date.now() / 60_000)
-      const value: VariantAData = {
-        variant: 'a',
-        rails: reshuffleRailsWithSeed(payload.rails, railSeed),
-        total: payload.total,
-        welcomeBackEnabled,
-        moods: payload.moods,
-        audiences: payload.audiences,
-        matters: payload.matters,
-        available: payload.available,
-        // Pre-resolved (NOT deferred) so bots get complete buffered HTML via
-        // onAllReady, while the existing <Suspense>/<Await> JSX stays unchanged.
-        contentBlocks: Promise.resolve({
-          sections: payload.sections,
-          carouselProductMap: payload.carouselProductMap,
-        }),
-      }
-      return value
-    }
-
-    // ── Cold miss (first deploy / evicted KV+Neon / version bump) ───────────
-    // Fire-and-forget warm so the blob self-heals within one cron tick.
-    triggerHomepageWarm()
-    // Bots get the guaranteed-fast minimal-but-valid 200 (never the fan-out /
-    // abort path); humans get today's live assembly with deferred blocks.
-    return isLikelyBot(request)
-      ? assembleVariantAMinimal(welcomeBackEnabled)
-      : assembleVariantALive(welcomeBackEnabled)
+  // ── Variant B: the new traditional storefront home page ───────────────────
+  // Content-rich, crawlable catalog front door. Reuses the discovery index for
+  // "best of" rails so there is no cold-KV degraded-HTML gap. Default stays
+  // 'legacy'/'a' until HOME_VARIANT=b (or Sanity activeVariant='b') flips it on.
+  if (variant === 'b') {
+    const adminUser = await getAdminUser(request).catch(() => null)
+    const value = await assembleStorefrontHome()
+    return adminUser ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
   }
 
   // ── Legacy path (unchanged) ───────────────────────────────────────────────
@@ -431,7 +334,7 @@ function preloadHeroImageTag(imageUrl: string | undefined | null) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const canonical = 'https://xdipx.com/'
   // Variant A uses generic brand meta -- no deal-specific fields available.
-  if (!data || data.variant === 'a' || !data.deal || !('seoTitle' in data.deal)) {
+  if (!data || data.variant === 'a' || data.variant === 'b' || !('deal' in data) || !data.deal || !('seoTitle' in data.deal)) {
     return [
       { title: BRAND_TITLE },
       { name: 'description', content: BRAND_DESCRIPTION },
@@ -499,6 +402,11 @@ export default function Homepage() {
         </Suspense>
       </>
     )
+  }
+
+  // ── Variant B: the new traditional storefront home page ───────────────────
+  if (loaderData.variant === 'b') {
+    return <StorefrontHome {...loaderData} />
   }
 
   // ── Legacy path ───────────────────────────────────────────────────────────

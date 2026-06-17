@@ -418,10 +418,19 @@ export function homepageToMarkdown(deal: Deal | null): string {
   lines.push('# xdipx.com')
   lines.push('')
   lines.push(
-    '> xdipx is an editorially curated storefront for adult wellness and intimacy products. ' +
-    'Emma, our guide, features a hand-picked product on an irregular cadence. ' +
-    'Discreet shipping and billing throughout the United States.',
+    '> xdipx is an editorially curated sexual wellness storefront. ' +
+    'Emma, our guide, hand-picks products and advises on how each one works ' +
+    'and who it suits. Discreet shipping and billing throughout the United States.',
   )
+  lines.push('')
+
+  lines.push('## Shop')
+  lines.push('')
+  lines.push(`- [Discover (guided product finder)](${BASE_URL}/discover)`)
+  lines.push(`- [For her](${BASE_URL}/for-her)`)
+  lines.push(`- [For him](${BASE_URL}/for-him)`)
+  lines.push(`- [The Vault (full catalog)](${BASE_URL}/vault)`)
+  lines.push(`- [Collections](${BASE_URL}/collections)`)
   lines.push('')
 
   if (deal) {
@@ -445,17 +454,10 @@ export function homepageToMarkdown(deal: Deal | null): string {
     }
     lines.push(`Full details: ${BASE_URL}/products/${deal.handle}.md`)
     lines.push('')
-  } else {
-    lines.push("## Emma's current pick")
-    lines.push('')
-    lines.push('No active pick at this time. Check back soon.')
-    lines.push('')
   }
 
-  lines.push('## Explore')
+  lines.push('## More')
   lines.push('')
-  lines.push(`- [The Shelf (archive)](${BASE_URL}/vault)`)
-  lines.push(`- [Collections](${BASE_URL}/collections)`)
   lines.push(`- [Notebook](${BASE_URL}/notebook)`)
   lines.push(`- [All products (markdown index)](${BASE_URL}/index.md)`)
   lines.push('')

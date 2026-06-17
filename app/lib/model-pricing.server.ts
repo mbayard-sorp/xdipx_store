@@ -31,3 +31,29 @@ export function estimateCostUsd(args: {
     args.cacheReadTokens     * perTok(r.input * 0.10)
   return Math.round(cost * 1e5) / 1e5
 }
+
+// ---------------------------------------------------------------------------
+// Image generation pricing — USD per generated image, by provider/model key.
+// Images are the main METERED cost of the autonomous homepage team (LLM
+// reasoning runs on the Max subscription). Approximate list prices as of 2026;
+// adjust here if a provider changes pricing. Keys match the `model` strings the
+// fal/imagen wrappers pass to logImageCost().
+// ---------------------------------------------------------------------------
+
+const IMAGE_RATES: Record<string, number> = {
+  'fal/flux-schnell':   0.003,
+  'fal/flux-dev':       0.025,
+  'fal/flux-pro':       0.05,
+  'fal/nano-banana':    0.039, // fal's Gemini-flash-image endpoint
+  'imagen':             0.04,  // Google Vertex gemini-2.5-flash-image
+  'imagen-3':           0.04,
+}
+
+const DEFAULT_IMAGE_RATE = 0.04 // unknown model -> assume a flash-image-tier price
+
+/** Estimated USD for `count` images from `model`. Never negative. */
+export function estimateImageCostUsd(model: string, count: number): number {
+  const per = IMAGE_RATES[model] ?? DEFAULT_IMAGE_RATE
+  const cost = per * Math.max(0, count)
+  return Math.round(cost * 1e5) / 1e5
+}

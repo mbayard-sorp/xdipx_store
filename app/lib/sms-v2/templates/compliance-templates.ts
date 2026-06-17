@@ -15,7 +15,7 @@ export const AGE_GATE_REPLY =
   "xdipx is 18+ only. Reply YES to confirm you're 18 or older AND agree to receive recurring marketing texts from xdipx (auto-dialed, ~4 msgs/month, msg & data rates may apply). Reply STOP to opt out anytime, HELP for help."
 
 export const AGE_WELCOME_REPLY =
-  "You're in. I'm Emma — ask me anything about our daily deals, products, or your orders. What's on your mind?"
+  "You're in. I'm Emma — ask me anything about our products or your orders. What's on your mind?"
 
 export const RETURNING_GREETING_REPLY =
   "Welcome back. What can I help you find today?"

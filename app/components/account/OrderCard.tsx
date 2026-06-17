@@ -14,12 +14,12 @@ interface OrderCardProps {
  * row is its own Link so users can tap the order number/date to open
  * the detail view.
  *
- * Reorder note: this storefront is a rotating daily-deal site — the
- * products on historical orders may no longer be live in Shopify, and
- * `StorefrontOrder.lineItems` does not expose a `variantId`. So the
- * "Reorder ♥" button here is a Link that takes the customer to today's
- * deal rather than a true re-add-to-cart. See `reorder flow context`
- * in the phase 3 spec.
+ * Reorder note: this storefront is an editorially curated shop with a
+ * rotating catalog. The products on historical orders may no longer be
+ * live in Shopify, and `StorefrontOrder.lineItems` does not expose a
+ * `variantId`. So the "Reorder ♥" button here is a Link that takes the
+ * customer to the current featured pick rather than a true re-add-to-cart.
+ * See `reorder flow context` in the phase 3 spec.
  */
 export function OrderCard({ order }: OrderCardProps): ReactElement {
   const date = new Date(order.processedAt).toLocaleDateString('en-US', {
