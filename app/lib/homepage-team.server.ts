@@ -17,6 +17,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { and, desc, eq, gte, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
+import { TEAM_KEYS } from '~/lib/homepage-team-keys'
 import {
   pipelineSettings,
   homepageTeamRuns,
@@ -41,14 +42,10 @@ export function assertTeamAuth(request: Request): void {
   }
 }
 
-// pipeline_settings keys (all <= varchar(50)).
-export const TEAM_KEYS = {
-  enabled:          'homepage_team_enabled',
-  dailyCents:       'homepage_team_daily_cents',
-  buildCents:       'homepage_team_build_cents',
-  maxImagesPerDay:  'homepage_team_max_images',
-  maxRunsPerDay:    'homepage_team_max_runs',
-} as const
+// pipeline_settings keys live in the client-safe `homepage-team-keys` module
+// (so the admin route component can use them); re-exported here for callers
+// that already import them from the server module.
+export { TEAM_KEYS }
 
 const DEFAULTS = {
   enabled:         false, // OFF by default — owner flips it on from /admin/homepage-team
