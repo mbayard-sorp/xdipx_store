@@ -60,6 +60,55 @@ export async function logApiTokens(entry: TokenLogEntry): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Image-generation spend logger
+// ---------------------------------------------------------------------------
+
+export interface ImageCostEntry {
+  /** Feature label, e.g. 'homepage-images'. Surfaces on /admin/usage. */
+  feature:    string
+  /** Provider/model key from model-pricing IMAGE_RATES, e.g. 'fal/flux-dev', 'imagen'. */
+  model:      string
+  /** Number of images generated in this call. */
+  count:      number
+  caller?:    string
+  productId?: string
+  sku?:       string
+}
+
+/**
+ * Log image-generation spend into api_token_log so it shows on /admin/usage
+ * alongside token costs. Images carry no tokens, so est_cost_usd is computed
+ * from the per-image IMAGE_RATES map (estimateImageCostUsd) and written
+ * directly. BEST-EFFORT: never throws into the caller.
+ */
+export async function logImageCost(entry: ImageCostEntry): Promise<void> {
+  try {
+    if (!entry.count || entry.count <= 0) return
+    const { db } = await import('./db.server')
+    const { apiTokenLog } = await import('../../db/schema')
+    const { estimateImageCostUsd } = await import('./model-pricing.server')
+    const cost = estimateImageCostUsd(entry.model, entry.count)
+    await db.insert(apiTokenLog).values({
+      feature:             entry.feature,
+      model:               entry.model,
+      source:              'sync',
+      batchId:             null,
+      productId:           entry.productId ?? null,
+      sku:                 entry.sku       ?? null,
+      caller:              entry.caller    ?? null,
+      inputTokens:         0,
+      outputTokens:        0,
+      cacheCreationTokens: 0,
+      cacheReadTokens:     0,
+      requestCount:        entry.count,
+      estCostUsd:          String(cost),
+    })
+  } catch (err) {
+    console.error('[token-log] best-effort image-cost write failed (ignored):', err)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Daily rollup read for /admin/usage
 // ---------------------------------------------------------------------------
 
