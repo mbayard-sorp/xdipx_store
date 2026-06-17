@@ -45,6 +45,12 @@ No hardcoded product data anywhere except `db/seed.ts`. All product data comes f
 
 AI generates content; humans approve. The `admin/today` route has an approval toggle. **Never** auto-publish a deal without `deal_status: approved` in Shopify metafield.
 
+**Carve-out — autonomous homepage merchandising team:** the homepage team (see `docs/homepage-team/`) MAY auto-publish *content-only* homepage changes (featured product rotation, Emma copy refresh, image swaps, section reorder via Sanity) without per-change approval, within the `/admin/homepage-team` kill switch + daily $ budget. Any *code/layout/component* change still goes through a reviewed PR (never auto-merged). Daily-deal publishing keeps its `deal_status: approved` gate unchanged.
+
+### Home page variants (`app/lib/home-variant.server.ts`)
+
+`/` resolves a variant: `a` = "The Compass" discovery finder (now also served standalone at `/discover`), `b` = the new traditional storefront (`StorefrontHome`), `legacy` = the daily-deal home (deferred; daily deals are a later phase). Default until flipped is `legacy`/`a`; set `HOME_VARIANT=b` (or Sanity `activeVariant='b'`) to make the storefront the homepage. Preview any variant with `?variant=a|b`.
+
 ### Mobile-First
 
 Build and test at 375px first. Most traffic will be mobile. Use responsive classes in order: base (375px) → `sm:` → `md:` → `lg:`.
@@ -145,7 +151,8 @@ app/
 
   routes/
     _layout.tsx            ← Store layout (Navbar, Footer, TrustBar)
-    _layout._index.tsx     ← Homepage (daily deal PDP)
+    _layout._index.tsx     ← Homepage (variant-resolved: storefront 'b' / Compass 'a' / legacy)
+    _layout.discover.tsx   ← "The Compass" discovery finder (standalone)
     _layout.checkout-extras.tsx
     _layout.products.$slug.tsx  ← Canonical product URL
     _layout.vault.tsx
