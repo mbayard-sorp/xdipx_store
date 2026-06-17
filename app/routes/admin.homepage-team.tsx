@@ -18,9 +18,10 @@ import { requireAdmin } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
 import {
-  TEAM_KEYS, getTeamConfig, gate, listRecentRuns, listRunEvents,
+  getTeamConfig, gate, listRecentRuns, listRunEvents,
   type TeamConfig, type GateResult,
 } from '~/lib/homepage-team.server'
+import { TEAM_KEYS } from '~/lib/homepage-team-keys'
 
 export const meta: MetaFunction = () => [{ title: 'Homepage Team — xdipx Admin' }]
 
