@@ -164,6 +164,8 @@ interface AdminUserInfo {
 const NAV_ITEMS = [
   { to: '/admin',                label: 'Dashboard',    Icon: DashboardIcon },
   { to: '/admin/deals',              label: 'Deals',            Icon: StarIcon       },
+  { to: '/admin/homepage-team',      label: 'Homepage Team',    Icon: SlidersIcon    },
+  { to: '/admin/marketing-calendar', label: 'Marketing Calendar', Icon: SocialsIcon  },
   { to: '/admin/pricing',           label: 'Pricing',          Icon: PricingIcon    },
   { to: '/admin/checkout-upsells',  label: 'Checkout Upsells', Icon: CartUpsellIcon },
   { to: '/admin/bulk-import',       label: 'Bulk Import',      Icon: UploadIcon     },
