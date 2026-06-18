@@ -339,51 +339,11 @@ function RotatingRails({ rails }: { rails: Rail[] }) {
 }
 
 /* ── 6 · Social proof ──────────────────────────────────────────────────────
-   TODO(before HOME_VARIANT=b flip): replace these with REAL customer quotes
-   (wire the Sanity `testimonials` block). Placeholder copy from the hi-fi
-   design — never invent review counts/stars. */
-
-const TESTIMONIALS = [
-  {
-    quote: 'I had no idea where to start. Emma narrowed it to three things and the first one was right.',
-    by: 'Mara K., Austin',
-  },
-  {
-    quote: 'The packaging really is plain. Nobody at my building blinked, and the charge just says XDIPX.',
-    by: 'Devin R., Portland',
-  },
-  {
-    quote: 'Asked one awkward question, got a straight answer and a good suggestion. That was the whole thing.',
-    by: 'Priya N., Chicago',
-  },
-]
-
-function SocialProof() {
-  return (
-    <section className="bg-paper">
-        <div className="mx-auto max-w-[1320px] px-6 py-16 md:px-10 md:py-24">
-          <h2
-            className="mb-10 max-w-[18ch] text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]"
-            style={DISPLAY}
-          >
-            From people who took the <em className="em">plunge</em>.
-          </h2>
-          <div className="grid gap-[18px] sm:grid-cols-2 lg:grid-cols-3">
-            {TESTIMONIALS.map(t => (
-              <figure key={t.by} className="rounded-[var(--radius-lg)] border border-line p-7">
-                <blockquote className="text-[1.3rem] leading-[1.4] text-ink" style={DISPLAY}>
-                  "{t.quote}"
-                </blockquote>
-                <figcaption className="mt-5 text-[13.5px] uppercase tracking-[0.08em] text-ink-4" style={MONO}>
-                  {t.by}
-                </figcaption>
-              </figure>
-            ))}
-          </div>
-        </div>
-    </section>
-  )
-}
+   Intentionally NOT rendered: the store is pre-launch and has no real customer
+   reviews yet. We do not ship invented testimonials (brand voice + FTC
+   endorsement rules). Re-add a real social-proof section once orders generate
+   genuine reviews — wire the Sanity `testimonials` block (Routine B) so the
+   team can publish real quotes without a deploy. */
 
 /* ── 7 · Couples ───────────────────────────────────────────────────────────
    Play-together banner. The couples product rail is a follow-up (needs a
@@ -514,7 +474,6 @@ export function StorefrontHome({ featured, rails }: StorefrontData) {
       <MeetEmma />
       <FindYourWayIn />
       <RotatingRails rails={rails} />
-      <SocialProof />
       <Couples />
       <StillDecidingBand />
 
