@@ -12,10 +12,7 @@
  */
 
 import { getDiscoveryRails } from '~/lib/discovery.server'
-import { getProductsByTag } from '~/lib/shopify.server'
-import { buildHomeContentBlocks, type HomeContentBlocks } from '~/lib/homepage-payload.server'
 import { EMPTY_STATE, type DiscoveryProduct, type Rail } from '~/types/discovery'
-import type { Product } from '~/types'
 
 export interface StorefrontData {
   variant: 'b'
@@ -25,14 +22,11 @@ export interface StorefrontData {
   featured: DiscoveryProduct[]
   /** Total products surfaced across the rails (a soft "X products" signal). */
   total: number
-  forHim: Product[]
-  forHer: Product[]
-  /**
-   * Sanity homepage sections, DEFERRED so they never block the shell's TTFB.
-   * This is the surface the daily merchandiser team writes to (promo banners,
-   * editorial tiles, curated carousels) — content-only changes, no deploy.
-   */
-  contentBlocks: Promise<HomeContentBlocks>
+  // NOTE: the deferred Sanity `contentBlocks` surface was removed for the
+  // "Emma's Edit" v1 — the live payload still holds emoji-headed carousels +
+  // testimonials that duplicate the new static shell. Re-add it (behind an
+  // allowlist of editorialTiles/promoBanner/richText/brandLogoWall) in
+  // Routine B once the homepage doc is curated to this design.
 }
 
 /**
@@ -45,11 +39,7 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
   // home page doesn't always lead with the same products (time bucket, not a
   // per-visitor cookie).
   const railSeed = Math.floor(Date.now() / 60_000)
-  const [railsResult, forHim, forHer] = await Promise.all([
-    getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
-    getProductsByTag('for-him', 8).catch(() => [] as Product[]),
-    getProductsByTag('for-her', 8).catch(() => [] as Product[]),
-  ])
+  const railsResult = await getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed })
 
   const rails = railsResult.rails
   // Hero feature set: the single highest-ranked product from each populated
@@ -63,8 +53,5 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
     rails,
     featured,
     total: railsResult.total,
-    forHim,
-    forHer,
-    contentBlocks: buildHomeContentBlocks(), // deferred — team-managed CMS
   }
 }

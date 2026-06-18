@@ -1,7 +1,17 @@
 import { useFetcher } from 'react-router'
 import { useEffect, useState } from 'react'
 
-export function EmailSubscribe() {
+interface EmailSubscribeProps {
+  heading?: string
+  subcopy?: string
+  buttonLabel?: string
+}
+
+export function EmailSubscribe({
+  heading = "Get tomorrow's deal before it drops.",
+  subcopy = 'No spam. No fluff. Just one email when the next deal goes live.',
+  buttonLabel = 'Dip In ♥',
+}: EmailSubscribeProps = {}) {
   const fetcher = useFetcher()
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
@@ -20,14 +30,12 @@ export function EmailSubscribe() {
       <div className="max-w-xl mx-auto text-center">
         <p className="text-sage text-2xl mb-2" aria-hidden="true">♥</p>
         <h2
-          className="text-2xl md:text-3xl font-bold text-ink mb-2"
-          style={{ fontFamily: 'var(--font-display)' }}
+          className="text-2xl md:text-3xl text-ink mb-2"
+          style={{ fontFamily: 'var(--font-display)', fontWeight: 450 }}
         >
-          Get tomorrow's deal before it drops.
+          {heading}
         </h2>
-        <p className="text-ink/60 mb-8">
-          No spam. No fluff. Just one email when the next deal goes live.
-        </p>
+        <p className="text-ink/60 mb-8">{subcopy}</p>
 
         {submitted ? (
           <div className="fade-in">
@@ -60,10 +68,10 @@ export function EmailSubscribe() {
               <button
                 type="submit"
                 disabled={isPending}
-                className="bg-coral text-white font-bold px-6 py-3 rounded-full transition-opacity hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
-                style={{ fontFamily: 'var(--font-display)' }}
+                className="bg-coral text-white font-medium px-6 py-3 rounded-full transition-opacity hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
+                style={{ fontFamily: 'var(--font-body)' }}
               >
-                {isPending ? 'Joining...' : 'Dip In ♥'}
+                {isPending ? 'Joining...' : buttonLabel}
               </button>
             </fetcher.Form>
             {error && (
