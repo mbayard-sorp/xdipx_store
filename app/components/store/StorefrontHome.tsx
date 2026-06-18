@@ -19,13 +19,21 @@
  * hero image (zero CLS).
  */
 
-import { Link } from 'react-router'
+import { Suspense } from 'react'
+import { Await, Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { EmailSubscribe } from '~/components/store/EmailSubscribe'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
+import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import type { StorefrontData } from '~/lib/storefront-home.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
+
+/* Team-controlled Sanity block types the storefront renders (everything else
+   in `singleton.homepage` is shell-owned or legacy and intentionally ignored). */
+const TEAM_RAIL_TYPE = 'emmaCuratedRail'
+const TEAM_NOTEBOOK_TYPE = 'editorialTiles'
+const MAX_TEAM_RAILS = 4
 
 const MONO = { fontFamily: 'var(--font-mono)' } as const
 const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 400 } as const
@@ -467,23 +475,63 @@ function FAQ() {
    Order is the stable shell. The deferred Sanity blocks (the team's
    notebook/promo/editorial surface) stream in between Couples and FAQ. */
 
-export function StorefrontHome({ featured, rails }: StorefrontData) {
+export function StorefrontHome({ featured, rails, contentBlocks }: StorefrontData) {
+  const discoveryRails = <RotatingRails rails={rails} />
   return (
     <>
       <Hero featured={featured} />
       <MeetEmma />
       <FindYourWayIn />
-      <RotatingRails rails={rails} />
+
+      {/* Rotating rails — the team's `emmaCuratedRail` blocks when published,
+          otherwise the discovery "best of" rails (cold-start fallback). The
+          team owns this surface via Sanity; no deploy needed to reshuffle. */}
+      <Suspense fallback={null}>
+        <Await resolve={contentBlocks} errorElement={discoveryRails}>
+          {({ sections, carouselProductMap }) => {
+            const teamRails = sections
+              .filter(b => b._type === TEAM_RAIL_TYPE)
+              .slice(0, MAX_TEAM_RAILS)
+            if (teamRails.length === 0) return discoveryRails
+            return (
+              <>
+                {teamRails.map(block => (
+                  <ContentBlockRenderer
+                    key={block._key}
+                    block={block}
+                    carouselProductMap={carouselProductMap}
+                  />
+                ))}
+              </>
+            )
+          }}
+        </Await>
+      </Suspense>
+
       <Couples />
       <StillDecidingBand />
 
-      {/* TODO(Routine B): re-introduce the team's Sanity merchandising surface
-          (a "From the Notebook" editorialTiles block + promoBanner) once the
-          homepage doc is curated to this design. It is intentionally NOT
-          rendered here for v1: the live payload still holds emoji-headed
-          carousels + testimonials that duplicate this shell. Re-enable behind
-          an allowlist of non-duplicating block types (editorialTiles,
-          promoBanner, richText, brandLogoWall). */}
+      {/* From the Notebook — team's `editorialTiles` blocks (each card also
+          links a product/collection). Renders nothing until the team publishes. */}
+      <Suspense fallback={null}>
+        <Await resolve={contentBlocks} errorElement={null}>
+          {({ sections, carouselProductMap }) => {
+            const notebook = sections.filter(b => b._type === TEAM_NOTEBOOK_TYPE)
+            if (notebook.length === 0) return null
+            return (
+              <>
+                {notebook.map(block => (
+                  <ContentBlockRenderer
+                    key={block._key}
+                    block={block}
+                    carouselProductMap={carouselProductMap}
+                  />
+                ))}
+              </>
+            )
+          }}
+        </Await>
+      </Suspense>
 
       <FAQ />
       <EmailSubscribe

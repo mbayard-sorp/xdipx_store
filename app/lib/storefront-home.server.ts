@@ -12,6 +12,7 @@
  */
 
 import { getDiscoveryRails } from '~/lib/discovery.server'
+import { buildHomeContentBlocks, type HomeContentBlocks } from '~/lib/homepage-payload.server'
 import { EMPTY_STATE, type DiscoveryProduct, type Rail } from '~/types/discovery'
 
 export interface StorefrontData {
@@ -22,11 +23,18 @@ export interface StorefrontData {
   featured: DiscoveryProduct[]
   /** Total products surfaced across the rails (a soft "X products" signal). */
   total: number
-  // NOTE: the deferred Sanity `contentBlocks` surface was removed for the
-  // "Emma's Edit" v1 — the live payload still holds emoji-headed carousels +
-  // testimonials that duplicate the new static shell. Re-add it (behind an
-  // allowlist of editorialTiles/promoBanner/richText/brandLogoWall) in
-  // Routine B once the homepage doc is curated to this design.
+  /**
+   * Team-managed Sanity homepage blocks (DEFERRED — never blocks the shell's
+   * TTFB). The autonomous merchandising team writes `singleton.homepage`; the
+   * storefront renders only the team's merchandising surfaces from it:
+   *   - `emmaCuratedRail` → the rotating-rails zone (discovery rails are the
+   *     cold-start / no-team-content fallback)
+   *   - `editorialTiles`  → the "From the Notebook" zone
+   * Shell-owned types (hero, trust, mosaic, FAQ, etc.) are NOT read from Sanity,
+   * and legacy `productCarousel` / shell-duplicate blocks are intentionally
+   * ignored so stale v2 content can't surface on the new homepage.
+   */
+  contentBlocks: Promise<HomeContentBlocks>
 }
 
 /**
@@ -53,5 +61,6 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
     rails,
     featured,
     total: railsResult.total,
+    contentBlocks: buildHomeContentBlocks(), // deferred — team-managed Sanity surface
   }
 }
