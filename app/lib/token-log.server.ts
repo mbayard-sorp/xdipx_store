@@ -145,3 +145,81 @@ export async function getDailyTokenRollup(opts: { days?: number } = {}): Promise
   )
   return result.rows as unknown as DailyTokenRow[]
 }
+
+// ---------------------------------------------------------------------------
+// Drill-down: per-call detail for one (day, feature[, model, source]) bucket
+// ---------------------------------------------------------------------------
+
+/**
+ * One attribution group within a daily-rollup bucket. Raw api_token_log rows
+ * are grouped by (caller, sku, product_id, batch_id) so the /admin/usage
+ * drill-down can answer "what did this spend actually do, and on what SKUs."
+ *
+ * For source='batch' rows the per-SKU split is unavailable (one logged row
+ * aggregates a whole batch turn), so job_type / job_sku_list are surfaced from
+ * batch_jobs (joined on batch_id) to at least show which SKUs the job touched.
+ * All numeric columns arrive as strings from SUM()/DECIMAL — caller parses.
+ */
+export interface TokenCallDetailRow {
+  caller:                string | null
+  sku:                   string | null
+  product_id:            string | null
+  batch_id:              string | null
+  job_type:              string | null
+  job_sku_list:          string[] | null
+  row_count:             string
+  calls:                 string
+  input_tokens:          string
+  output_tokens:         string
+  cache_creation_tokens: string
+  cache_read_tokens:     string
+  est_cost_usd:          string
+  first_ts:              string
+  last_ts:               string
+}
+
+export async function getTokenCallDetail(opts: {
+  day:     string            // ISO date 'YYYY-MM-DD'
+  feature: string
+  model?:  string | null
+  source?: string | null
+}): Promise<TokenCallDetailRow[]> {
+  const { db } = await import('./db.server')
+  const { sql } = await import('drizzle-orm')
+  const model  = opts.model  ?? null
+  const source = opts.source ?? null
+  const result = await db.execute(
+    sql`
+      WITH grouped AS (
+        SELECT
+          caller, sku, product_id, batch_id,
+          COUNT(*)                   AS row_count,
+          SUM(request_count)         AS calls,
+          SUM(input_tokens)          AS input_tokens,
+          SUM(output_tokens)         AS output_tokens,
+          SUM(cache_creation_tokens) AS cache_creation_tokens,
+          SUM(cache_read_tokens)     AS cache_read_tokens,
+          SUM(est_cost_usd)          AS est_cost_usd,
+          MIN(ts)                    AS first_ts,
+          MAX(ts)                    AS last_ts
+        FROM api_token_log
+        WHERE date_trunc('day', ts)::date = ${opts.day}::date
+          AND feature = ${opts.feature}
+          AND (${model}::text  IS NULL OR model  = ${model})
+          AND (${source}::text IS NULL OR source = ${source})
+        GROUP BY caller, sku, product_id, batch_id
+      )
+      SELECT g.*, bj.job_type, bj.sku_list AS job_sku_list
+      FROM grouped g
+      LEFT JOIN LATERAL (
+        SELECT job_type, sku_list
+        FROM batch_jobs
+        WHERE g.batch_id IS NOT NULL
+          AND (current_batch_id = g.batch_id OR batch_ids::jsonb ? g.batch_id)
+        LIMIT 1
+      ) bj ON TRUE
+      ORDER BY est_cost_usd DESC
+    `
+  )
+  return result.rows as unknown as TokenCallDetailRow[]
+}

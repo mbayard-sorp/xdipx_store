@@ -10,7 +10,7 @@
  * Breaking out by source is only in the detail table below.
  */
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { useLoaderData } from 'react-router'
+import { Link, useLoaderData } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { getDailyTokenRollup } from '~/lib/token-log.server'
 
@@ -154,13 +154,17 @@ export default function UsagePage() {
             <table className="w-full text-xs text-left">
               <thead className="bg-paper-2 text-ink-4">
                 <tr>
-                  {['Day', 'Feature', 'Model', 'Source', 'Calls', 'Input', 'Output', 'Cache-W', 'Cache-R', 'Est. $'].map(h => (
-                    <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
+                  {['Day', 'Feature', 'Model', 'Source', 'Calls', 'Input', 'Output', 'Cache-W', 'Cache-R', 'Est. $', ''].map((h, hi) => (
+                    <th key={hi} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
-                {rows.map((r, i) => (
+                {rows.map((r, i) => {
+                  const detailHref =
+                    `/admin/usage/${encodeURIComponent(r.day)}/${encodeURIComponent(r.feature)}` +
+                    `?model=${encodeURIComponent(r.model)}&source=${encodeURIComponent(r.source)}`
+                  return (
                   <tr key={i} className="hover:bg-paper-2 transition-colors">
                     <td className="px-3 py-2 font-mono text-ink-4 whitespace-nowrap">{r.day}</td>
                     <td className="px-3 py-2 text-ink">{r.feature}</td>
@@ -180,8 +184,12 @@ export default function UsagePage() {
                     <td className="px-3 py-2 text-right font-mono text-ink-3">{fmtNum(r.cacheCreationTokens)}</td>
                     <td className="px-3 py-2 text-right font-mono text-ink-3">{fmtNum(r.cacheReadTokens)}</td>
                     <td className="px-3 py-2 text-right font-mono font-semibold text-ink">{fmtUsd(r.estCostUsd)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <Link to={detailHref} className="link-coral" prefetch="intent">view →</Link>
+                    </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

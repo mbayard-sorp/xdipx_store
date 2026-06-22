@@ -145,6 +145,7 @@ export async function getEmmaEncouragement(args: EncouragementArgs): Promise<Enc
       user:      buildUserPrompt(args),
       maxTokens: MAX_OUTPUT_TOKENS,
       timeoutMs: HAIKU_TIMEOUT_MS,
+      caller:    'emma-encouragement',
     })
     const message = parseMessage(raw)
     if (!message) throw new Error('Encouragement parse failed')

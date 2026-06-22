@@ -180,6 +180,7 @@ export async function generateNarrative(report: PricingReport): Promise<string |
       user,
       model,
       maxTokens: 200,
+      caller: 'pricing-report',
     })
     return text.trim()
   } catch (err) {
