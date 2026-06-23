@@ -206,6 +206,7 @@ export async function getEmmaCartAside(args: EmmaCartAsideArgs): Promise<EmmaCar
       user:      userPrompt,
       maxTokens: MAX_OUTPUT_TOKENS,
       timeoutMs: HAIKU_TIMEOUT_MS,
+      caller:    'emma-cart-aside',
     })
     const text = cleanOutput(raw)
     if (!text) throw new Error('Empty Claude response')

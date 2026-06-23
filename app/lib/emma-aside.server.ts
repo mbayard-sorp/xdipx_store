@@ -155,6 +155,8 @@ export async function getEmmaAside(args: EmmaAsideArgs): Promise<EmmaAsideResult
       user:      userPrompt,
       maxTokens: MAX_OUTPUT_TOKENS,
       timeoutMs: HAIKU_TIMEOUT_MS,
+      caller:    'emma-aside',
+      productId: product.shopifyProductId,
     })
     const text = cleanOutput(raw)
     if (!text) throw new Error('Empty Claude response')

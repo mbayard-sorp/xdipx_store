@@ -26,6 +26,7 @@ async function inferWithClaude(labels: string[]): Promise<SwatchMap> {
     user,
     maxTokens: Math.min(256, 32 + labels.length * 24),
     timeoutMs: 1500,
+    caller: 'swatches',
   })
   const parsed = JSON.parse(stripFences(raw)) as Record<string, unknown>
   const out: SwatchMap = {}

@@ -364,6 +364,7 @@ export async function getEmmaDiscovery(args: DiscoveryArgs): Promise<DiscoveryRe
       user:      buildUserPrompt(args),
       maxTokens: MAX_OUTPUT_TOKENS,
       timeoutMs: HAIKU_TIMEOUT_MS,
+      caller:    'emma-discovery',
     })
     const parsed = parseDiscoveryJson(raw, args.candidates)
     if (!parsed) throw new Error('Discovery JSON parse failed')

@@ -213,6 +213,14 @@ export async function generateWithSystem(opts: {
   model?:     string
   maxTokens?: number
   timeoutMs?: number
+  /** Token-log attribution. feature defaults to 'copy-gen'. */
+  feature?:   string
+  /** Token-log attribution. Identifies the surface, e.g. 'emma-aside'. Defaults to 'generateWithSystem'. */
+  caller?:    string
+  /** Token-log attribution. SKU when a single product is in scope. */
+  sku?:       string
+  /** Token-log attribution. Shopify product GID when a single product is in scope. */
+  productId?: string
 }): Promise<string> {
   const { system, user, model = MODEL_FAST, maxTokens = 128, timeoutMs } = opts
   const call = client.messages.create({
@@ -236,14 +244,18 @@ export async function generateWithSystem(opts: {
     cache_creation_input_tokens?: number
     cache_read_input_tokens?:     number
   }
-  void import('./token-log.server').then(({ logApiTokens }) =>
-    logApiTokens({
-      feature: 'copy-gen', model, source: 'sync', caller: 'generateWithSystem',
+  void import('./token-log.server').then(({ logApiTokens }) => {
+    const entry: import('./token-log.server').TokenLogEntry = {
+      feature: opts.feature ?? 'copy-gen', model, source: 'sync',
+      caller: opts.caller ?? 'generateWithSystem',
       inputTokens: u.input_tokens, outputTokens: u.output_tokens,
       cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
       cacheReadTokens:     u.cache_read_input_tokens     ?? 0,
-    })
-  ).catch((err) => console.error('[claude] generateWithSystem token-log failed (ignored):', err))
+    }
+    if (opts.sku) entry.sku = opts.sku
+    if (opts.productId) entry.productId = opts.productId
+    return logApiTokens(entry)
+  }).catch((err) => console.error('[claude] generateWithSystem token-log failed (ignored):', err))
   return block.text
 }
 
