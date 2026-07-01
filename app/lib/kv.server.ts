@@ -46,6 +46,17 @@ async function getKV() {
   return _kv
 }
 
+/**
+ * True when real KV credentials are resolvable (prod / a `vercel env pull`),
+ * false when we're on the in-memory fallback (local dev, or `KV_DISABLE=1`).
+ * Callers use this to decide whether a cold cache can be repopulated by a
+ * background cron (prod) or must be built inline (local dev, where the
+ * fire-and-forget rebuild trigger has no BASE_URL to reach).
+ */
+export function isKvConfigured(): boolean {
+  return resolveKvCreds() !== null
+}
+
 // In-memory fallback used when KV is not configured (local dev).
 // Stored on globalThis so it survives Vite HMR module re-evaluation.
 const _g = globalThis as unknown as { __kvMemStore?: Map<string, unknown> }
