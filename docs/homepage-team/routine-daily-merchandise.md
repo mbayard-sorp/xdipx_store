@@ -108,10 +108,26 @@ post the spend yourself (Step 6) when the routine drives generation.
 
 ## Step 5 — Write Sanity + Shopify (diff before write)
 
-Write the homepage `singleton.homepage` Sanity doc and the relevant Shopify metafields. **Snapshot the
-current Sanity doc revision first** (last-good pointer for healthcheck rollback). **Diff before write:**
-patch only fields that actually changed; skip no-op publishes (avoids version bloat + SEO churn).
-**Content only** — never change URLs, canonical, section structure, or components here.
+**Know your render surfaces (verified 2026-07-01 — do NOT write blind).** The live homepage is the
+`variant b` storefront (`StorefrontHome.tsx`). It renders team content from ONLY these Sanity places:
+
+| Lever | Where | Renders on |
+|---|---|---|
+| Curated rails | `emmaCuratedRail` docs (`target:"homepage"`, `status:"live"`, `active:true`) **referenced** in `singleton.homepage.sections[]` as `emmaCuratedRailRef`. `buildHomeContentBlocks()` resolves `productHandles`. The storefront shows up to `MAX_TEAM_RAILS` (4); with zero refs it falls back to the algorithmic discovery rails. | storefront `/` |
+| Notebook | `editorialTiles` block in `singleton.homepage.sections[]` (`tiles[]`: label/body/link/linkLabel/emoji/image). | storefront `/` |
+| Announcement ticker | `announcementBar` messages in `singleton.homepage` (the layout pins it site-wide). | all pages |
+
+**Do NOT** expect these to change the storefront: the hero (derived from discovery `featured`, not
+`singleton.emmaHero` — that hero doc is a legacy/variant-A lever), and `productCarousel` /
+`promoBanner` / `categoryGrid` / `playTogetherBanner` / `testimonials` blocks (the storefront ignores
+them). **Those blocks DO still render on `/discover` (variant A)** — so edit their copy if you want,
+but never delete them without checking `/discover`. Never ship invented `testimonials` (FTC + brand).
+
+To merchandise: create/refresh `emmaCuratedRail` docs (Emma heading/eyebrow/aside + valid Shopify
+handles, verify each resolves 200), wire 2–4 into `singleton.homepage.sections`, and refresh
+`editorialTiles`. **Snapshot the current doc revision first** (last-good for healthcheck rollback).
+**Diff before write:** patch only changed fields; skip no-op publishes. **Content only** — never change
+URLs, canonical, section structure, or components here (that is Routine B, PR-gated).
 
 ## Step 6 — Record spend
 
