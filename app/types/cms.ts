@@ -192,6 +192,39 @@ export interface BonusDealBlock {
   bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
 }
 
+// ─── Wayfinder Mosaic ("Find your way in") ────────────────────────────────
+
+export interface WayfinderTile {
+  _key: string
+  label: string
+  link: string
+  emmaAside?: string
+  image?: SanityImageAsset
+}
+
+export interface WayfinderPromo {
+  eyebrow?: string
+  heading?: string
+  emphasis?: string
+  body?: string
+  ctaLabel?: string
+  ctaLink?: string
+  image?: SanityImageAsset
+}
+
+export interface WayfinderMosaicBlock {
+  _type: 'wayfinderMosaic'
+  _key: string
+  active: boolean
+  order: number
+  eyebrow?: string
+  heading?: string
+  emphasis?: string
+  bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
+  wayfinderTiles?: WayfinderTile[]
+  promo?: WayfinderPromo
+}
+
 // ─── Trust Bar ───────────────────────────────────────────────────────────
 
 export type TrustIcon = 'lock' | 'shield' | 'package' | 'heart' | 'truck' | 'star' | 'leaf' | 'chat'
@@ -291,6 +324,7 @@ export type ContentBlock =
   | TrustBarBlock
   | RichTextBlock
   | EditorBioBlock
+  | WayfinderMosaicBlock
 
 export interface HomepageSections {
   _id: string

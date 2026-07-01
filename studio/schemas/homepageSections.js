@@ -24,6 +24,7 @@ export default {
         { type: 'trustBar'           },
         { type: 'richText'           },
         { type: 'editorBio'          },
+        { type: 'wayfinderMosaic'    },
       ],
     },
   ],
