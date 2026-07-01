@@ -33,6 +33,13 @@ export interface GenerateImageOpts {
   referenceImageBuffers?: Buffer[]
   /** Force a provider (testing). Default tries fal then imagen. */
   only?: 'fal' | 'imagen'
+  /**
+   * Whether this call should log its own spend row via logImageCost. Default
+   * true. Set false when the caller owns the spend row instead (e.g. the
+   * homepage-team CLI posts /api/homepage-team/spend itself — logging here
+   * too would double-count the cost and trip the daily $ cap at half budget).
+   */
+  logCost?: boolean
 }
 
 export interface GenerateImageResult {
@@ -52,6 +59,7 @@ const EMPTY: GenerateImageResult = { buffers: [], provider: 'none', model: 'none
 export async function generateImage(opts: GenerateImageOpts): Promise<GenerateImageResult> {
   const count = Math.min(Math.max(1, opts.count ?? 1), 4)
   const feature = opts.feature ?? 'homepage-images'
+  const logCost = opts.logCost ?? true
   const logBase = {
     feature,
     ...(opts.caller ? { caller: opts.caller } : {}),
@@ -64,7 +72,7 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
     try {
       const { buffers, costKey } = await falGenerate({ prompt: opts.prompt, count })
       if (buffers.length) {
-        void logImageCost({ ...logBase, model: costKey, count: buffers.length })
+        if (logCost) void logImageCost({ ...logBase, model: costKey, count: buffers.length })
         return { buffers, provider: 'fal', model: costKey }
       }
     } catch (err) {
@@ -82,7 +90,7 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
         ...(opts.referenceImageBuffers ? { referenceImageBuffers: opts.referenceImageBuffers } : {}),
       })
       if (buffers.length) {
-        void logImageCost({ ...logBase, model: 'imagen', count: buffers.length })
+        if (logCost) void logImageCost({ ...logBase, model: 'imagen', count: buffers.length })
         return { buffers, provider: 'imagen', model: 'imagen' }
       }
     } catch (err) {

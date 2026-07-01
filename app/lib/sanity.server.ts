@@ -1,4 +1,5 @@
 import { createClient } from '@sanity/client'
+import type { SanityImageAssetDocument } from '@sanity/client'
 import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
 import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig } from '~/types/cms'
@@ -43,6 +44,24 @@ const CONTENT_BLOCKS_PROJECTION = `
     label, body, link, linkLabel, emoji,
     "image": image{ "url": asset->url, alt }
   },
+  // wayfinderMosaic — shares eyebrow/heading (above) plus its own emphasis word.
+  // "tiles" above is editorialTiles-shaped (no _key) — wayfinderMosaic tiles need
+  // _key (the image bridge addresses tiles by _key), so they get their own field
+  // name to avoid colliding with the editorialTiles projection. select() keeps
+  // every other block type null-safe.
+  emphasis,
+  "wayfinderTiles": select(
+    _type == "wayfinderMosaic" => tiles[]{
+      _key, label, link, emmaAside,
+      "image": image{ "url": asset->url, alt }
+    }
+  ),
+  "promo": select(
+    _type == "wayfinderMosaic" => promo{
+      eyebrow, heading, emphasis, body, ctaLabel, ctaLink,
+      "image": image{ "url": asset->url, alt }
+    }
+  ),
   // categoryGrid + testimonials use inline item objects; trustBar uses references.
   // Keep them in separate fields — combining them via select() silently null-derefs
   // the trustBar references (GROQ quirk). TrustBarBlock reads trustItems.
@@ -289,6 +308,85 @@ export async function updateCmsBlock(key: string, patch: Record<string, unknown>
         Object.entries(patch).map(([field, value]) => [`sections[_key=="${key}"].${field}`, value])
       )
     )
+    .commit()
+  invalidateCache('sanity:homepage')
+}
+
+/**
+ * Upload a raw image buffer (e.g. from fal.ai / Imagen generation) straight to
+ * Sanity's asset store. Unlike the private `uploadImageToSanity` above (which
+ * fetches a URL and only returns the CDN url), this returns the asset `_id`
+ * too — callers need it to build a `sanityImageRef` for array-in-array patches
+ * (tile/promo images) where a bare url string would null-deref the GROQ
+ * `image{ "url": asset->url }` projection.
+ */
+export async function uploadBufferToSanity(
+  buffer: Buffer,
+  filename: string,
+  contentType?: string,
+): Promise<{ assetId: string; url: string }> {
+  const client = getClient(true)
+  if (!client) throw new Error('Sanity not configured')
+  const asset: SanityImageAssetDocument = await client.assets.upload('image', buffer, {
+    filename,
+    ...(contentType ? { contentType } : {}),
+  })
+  return { assetId: asset._id, url: asset.url }
+}
+
+/**
+ * Build the exact shape the `image{ "url": asset->url, alt }` GROQ projection
+ * requires. A bare url string null-derefs `asset->url` — homepage image fields
+ * always need a real `{ _type:'image', asset:{ _ref } }` reference.
+ */
+export function sanityImageRef(assetId: string, alt: string): {
+  _type: 'image'
+  asset: { _type: 'reference'; _ref: string }
+  alt: string
+} {
+  return { _type: 'image', asset: { _type: 'reference', _ref: assetId }, alt }
+}
+
+/**
+ * Patch an image onto one tile inside `sections[_key==blockKey].tiles[]` —
+ * the array-in-array case `updateCmsBlock` can't express (it only patches a
+ * field directly on the section, not a nested array item). Tiles are targeted
+ * by `_key`, never by index.
+ */
+export async function updateCmsTileImage(
+  blockKey: string,
+  tileKey: string,
+  assetId: string,
+  alt: string,
+): Promise<void> {
+  const client = getClient(true)
+  if (!client) throw new Error('Sanity not configured')
+  await client
+    .patch('singleton.homepage')
+    .set({
+      [`sections[_key=="${blockKey}"].tiles[_key=="${tileKey}"].image`]: sanityImageRef(assetId, alt),
+    })
+    .commit()
+  invalidateCache('sanity:homepage')
+}
+
+/**
+ * Patch an image onto a block's `promo.image` field — the single nested-field
+ * case (no array-in-array addressing needed, but still one level deeper than
+ * `updateCmsBlock` can reach in one field name).
+ */
+export async function updateCmsPromoImage(
+  blockKey: string,
+  assetId: string,
+  alt: string,
+): Promise<void> {
+  const client = getClient(true)
+  if (!client) throw new Error('Sanity not configured')
+  await client
+    .patch('singleton.homepage')
+    .set({
+      [`sections[_key=="${blockKey}"].promo.image`]: sanityImageRef(assetId, alt),
+    })
     .commit()
   invalidateCache('sanity:homepage')
 }
