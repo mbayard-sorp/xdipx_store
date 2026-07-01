@@ -106,6 +106,23 @@ export async function getTodayRunCount(): Promise<number> {
   return Number((res.rows?.[0] as { n?: number } | undefined)?.n ?? 0)
 }
 
+/**
+ * Count of images the team generated today. Image rows are logged via
+ * logImageCost() with feature='homepage-images' (both the internal
+ * generateImage() cost path and the /api/homepage-team/spend {kind:'image'}
+ * path use this same feature label — token rows use other feature values
+ * like 'homepage-merchandise'), so filtering on that exact feature isolates
+ * image spend from LLM token spend within the broader 'homepage-%' rollup.
+ */
+export async function getTodayImageCount(): Promise<number> {
+  const res = await db.execute(
+    sql`SELECT COALESCE(SUM(request_count), 0)::int AS n
+        FROM api_token_log
+        WHERE ts >= current_date AND feature = 'homepage-images'`,
+  )
+  return Number((res.rows?.[0] as { n?: number } | undefined)?.n ?? 0)
+}
+
 /** True if a run is currently in progress (started within the lock window). */
 export async function isRunInProgress(): Promise<boolean> {
   const since = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 60_000)
@@ -120,25 +137,28 @@ export async function isRunInProgress(): Promise<boolean> {
 export interface GateResult {
   enabled: boolean
   /** Why a run is refused, when ok=false. */
-  reason?: 'disabled' | 'over_budget' | 'over_run_cap' | 'run_in_progress'
+  reason?: 'disabled' | 'over_budget' | 'over_run_cap' | 'run_in_progress' | 'over_image_cap'
   ok: boolean
   dailyCents: number
   spentCents: number
   remainingCents: number
   runsToday: number
   maxRunsPerDay: number
+  imagesToday: number
+  maxImagesPerDay: number
 }
 
 /**
  * The gate the scheduled routine calls before doing anything paid. Returns
  * ok=false (with a reason) when disabled, over budget, over the daily run cap,
- * or a run is already in progress.
+ * over the daily image cap, or a run is already in progress.
  */
 export async function gate(): Promise<GateResult> {
-  const [cfg, spentCents, runsToday, inProgress] = await Promise.all([
+  const [cfg, spentCents, runsToday, imagesToday, inProgress] = await Promise.all([
     getTeamConfig(),
     getTodaySpendCents(),
     getTodayRunCount(),
+    getTodayImageCount(),
     isRunInProgress(),
   ])
   const remainingCents = Math.max(0, cfg.dailyCents - spentCents)
@@ -149,11 +169,14 @@ export async function gate(): Promise<GateResult> {
     remainingCents,
     runsToday,
     maxRunsPerDay: cfg.maxRunsPerDay,
+    imagesToday,
+    maxImagesPerDay: cfg.maxImagesPerDay,
   }
-  if (!cfg.enabled)               return { ...base, ok: false, reason: 'disabled' }
-  if (inProgress)                 return { ...base, ok: false, reason: 'run_in_progress' }
-  if (remainingCents <= 0)        return { ...base, ok: false, reason: 'over_budget' }
-  if (runsToday >= cfg.maxRunsPerDay) return { ...base, ok: false, reason: 'over_run_cap' }
+  if (!cfg.enabled)                       return { ...base, ok: false, reason: 'disabled' }
+  if (inProgress)                         return { ...base, ok: false, reason: 'run_in_progress' }
+  if (remainingCents <= 0)                return { ...base, ok: false, reason: 'over_budget' }
+  if (runsToday >= cfg.maxRunsPerDay)      return { ...base, ok: false, reason: 'over_run_cap' }
+  if (imagesToday >= cfg.maxImagesPerDay)  return { ...base, ok: false, reason: 'over_image_cap' }
   return { ...base, ok: true }
 }
 
