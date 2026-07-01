@@ -23,12 +23,27 @@ const LAST_GOOD_KEY = 'homepage:healthcheck:lastgood'
 const PATHS = ['/', '/discover']
 const FETCH_TIMEOUT_MS = 12_000
 const MIN_BODY_BYTES = 1000
+// A single server-side self-fetch can hit a cold Fluid instance / a transient
+// degraded render and momentarily lack the streamed hero <img> or JSON-LD. That
+// is NOT grounds to destructively roll back Sanity content, so we retry a few
+// times and only act on the best (least-broken) result.
+const MAX_ATTEMPTS = 3
+const RETRY_BACKOFF_MS = 1500
 
 export interface PageCheck {
   path: string
   status: number
   ok: boolean
   problems: string[]
+  /** The page is genuinely serving real content (HTTP 200 + a real-sized body). */
+  bodyOk: boolean
+  /**
+   * A hard server failure (5xx) that restoring last-good Sanity CONTENT could
+   * plausibly fix. A 200 that merely fails the render heuristics (no <img> /
+   * JSON-LD) is NOT hard — a content rollback can't add an image, so we alert
+   * without the destructive rollback.
+   */
+  hardFail: boolean
 }
 
 export interface HomepageHealthResult {
@@ -65,10 +80,11 @@ function extractJsonLd(html: string): { parsed: number; scripts: number } {
   return { parsed, scripts }
 }
 
-async function checkPage(path: string): Promise<PageCheck> {
+async function checkPageOnce(path: string): Promise<PageCheck> {
   const url = `${siteOrigin()}${path}`
   const problems: string[] = []
   let status = 0
+  let bodyOk = false
   try {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
@@ -82,6 +98,7 @@ async function checkPage(path: string): Promise<PageCheck> {
     if (status !== 200) problems.push(`HTTP ${status}`)
     if (html.length < MIN_BODY_BYTES) problems.push(`body too small (${html.length} bytes)`)
     if (!/<img[\s>]/i.test(html)) problems.push('no <img> (hero/LCP image likely missing)')
+    bodyOk = status === 200 && html.length >= MIN_BODY_BYTES
 
     const { parsed, scripts } = extractJsonLd(html)
     if (parsed === 0) problems.push('no valid JSON-LD')
@@ -92,7 +109,30 @@ async function checkPage(path: string): Promise<PageCheck> {
   } catch (err) {
     problems.push(`fetch error: ${err instanceof Error ? err.message : String(err)}`)
   }
-  return { path, status, ok: problems.length === 0, problems }
+  // Only a 5xx is "hard" — a state that restoring last-good Sanity content could
+  // plausibly fix. A 200 that trips the render heuristics, a fetch/timeout error,
+  // or a tiny body are infra/degradation issues a content rollback cannot repair.
+  const hardFail = status >= 500
+  return { path, status, ok: problems.length === 0, problems, bodyOk, hardFail }
+}
+
+/**
+ * Retry a page check up to MAX_ATTEMPTS. A clean pass wins immediately; otherwise
+ * we keep the least-broken attempt (fewest problems). This absorbs a single cold
+ * Fluid-instance / transient-degraded self-fetch so it cannot trigger a spurious
+ * destructive rollback.
+ */
+async function checkPage(path: string): Promise<PageCheck> {
+  let best: PageCheck | null = null
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const c = await checkPageOnce(path)
+    if (c.ok) return c
+    if (!best || c.problems.length < best.problems.length) best = c
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS))
+    }
+  }
+  return best as PageCheck
 }
 
 /** Open (or comment on an existing) P0 GitHub issue. Self-contained REST call. */
@@ -143,31 +183,41 @@ async function openHealthcheckIssue(title: string, body: string): Promise<string
 export async function runHomepageHealthcheck(): Promise<HomepageHealthResult> {
   const checks = await Promise.all(PATHS.map(checkPage))
   const healthy = checks.every((c) => c.ok)
+  const home = checks.find((c) => c.path === '/')
 
-  if (healthy) {
-    // Capture the current (good) Sanity homepage doc as the last-good copy.
+  // Refresh the last-good snapshot whenever the homepage is genuinely serving
+  // real content (HTTP 200 + real body), even if a render heuristic is being
+  // flaky on this self-fetch. This keeps last-good current instead of freezing it
+  // at a stale revision a later rollback would wrongly restore over team content.
+  if (home?.bodyOk) {
     try {
       const doc = await getHomepageDocRaw()
       if (doc) await kvSet(LAST_GOOD_KEY, doc)
     } catch (err) {
       console.warn('[homepage-healthcheck] last-good snapshot failed', err)
     }
+  }
+
+  if (healthy) {
     return { ok: true, checks, action: 'snapshot', rolledBack: false, alerted: false }
   }
 
   const failed = checks.filter((c) => !c.ok)
   const summary = failed.map((c) => `${c.path}: ${c.problems.join('; ')}`).join(' | ')
-  const homeFailed = checks.some((c) => c.path === '/' && !c.ok)
+  // Roll back ONLY on a hard (5xx) homepage failure. A homepage that returns 200
+  // but trips the render heuristics is not a Sanity-content failure — restoring an
+  // old doc cannot add a missing hero image, and doing so would silently wipe the
+  // merchandising team's published rails/notebook. Those cases alert, never roll back.
+  const homeHardBroken = !!home?.hardFail
   const result: HomepageHealthResult = {
     ok: false,
     checks,
-    action: homeFailed ? 'rollback' : 'alert',
+    action: homeHardBroken ? 'rollback' : 'alert',
     rolledBack: false,
     alerted: false,
   }
 
-  // Roll back only when the homepage itself is broken — that's the doc we control.
-  if (homeFailed) {
+  if (homeHardBroken) {
     try {
       const lastGood = await kvGet<Record<string, unknown>>(LAST_GOOD_KEY)
       const valid =
@@ -193,33 +243,43 @@ export async function runHomepageHealthcheck(): Promise<HomepageHealthResult> {
     } catch (err) {
       result.message = `rollback failed: ${err instanceof Error ? err.message : String(err)}`
     }
+  } else if (home && !home.ok) {
+    result.message =
+      'homepage returned 200 but tripped render heuristics — not a Sanity-content failure; alerting without rollback'
   } else {
     result.message = 'non-homepage page unhealthy; no homepage rollback applicable'
   }
 
-  // Alert once per incident (Sentry + a deduplicated P0 GitHub issue). Any
-  // rollback failure is carried in result.message, so this single capture covers it.
-  Sentry.captureException(new Error(`Homepage healthcheck failed — ${summary}`), {
-    tags: { healthcheck: 'homepage', severity: 'P0' },
-    extra: { checks, rolledBack: result.rolledBack, note: result.message },
-  })
-  const issueBody = [
-    `Homepage healthcheck failed against ${siteOrigin()}.`,
-    '',
-    '**Problems**',
-    summary,
-    '',
-    `**Auto-recovery:** ${
-      result.rolledBack
-        ? 'rolled the Sanity homepage doc back to last-good and re-warmed the Variant A payload.'
-        : result.message ?? 'none'
-    }`,
-    '',
-    '_Filed automatically by `/cron/homepage-healthcheck`._',
-  ].join('\n')
-  const issueUrl = await openHealthcheckIssue('[P0] Homepage healthcheck failing', issueBody)
+  // A hard (5xx) failure or an actual rollback is a real P0. A soft 200-degradation
+  // (render heuristic tripped on the self-fetch) is worth a lower-severity Sentry
+  // breadcrumb but must NOT spam a P0 GitHub issue every 30 min.
+  const isP0 = homeHardBroken || result.rolledBack
+  Sentry.captureException(
+    new Error(`Homepage healthcheck ${isP0 ? 'failed' : 'soft-degraded'} — ${summary}`),
+    {
+      tags: { healthcheck: 'homepage', severity: isP0 ? 'P0' : 'P2' },
+      extra: { checks, rolledBack: result.rolledBack, note: result.message },
+    },
+  )
   result.alerted = true
-  if (issueUrl) result.message = `${result.message ? result.message + ' · ' : ''}issue: ${issueUrl}`
+  if (isP0) {
+    const issueBody = [
+      `Homepage healthcheck failed against ${siteOrigin()}.`,
+      '',
+      '**Problems**',
+      summary,
+      '',
+      `**Auto-recovery:** ${
+        result.rolledBack
+          ? 'rolled the Sanity homepage doc back to last-good and re-warmed the Variant A payload.'
+          : result.message ?? 'none'
+      }`,
+      '',
+      '_Filed automatically by `/cron/homepage-healthcheck`._',
+    ].join('\n')
+    const issueUrl = await openHealthcheckIssue('[P0] Homepage healthcheck failing', issueBody)
+    if (issueUrl) result.message = `${result.message ? result.message + ' · ' : ''}issue: ${issueUrl}`
+  }
 
   return result
 }
