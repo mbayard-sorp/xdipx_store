@@ -8,6 +8,28 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// app/lib/sentry.server.ts
+import * as Sentry from "@sentry/node";
+function initSentryServer() {
+  if (initialized) return;
+  const dsn = process.env["SENTRY_DSN"];
+  if (!dsn) return;
+  Sentry.init({
+    dsn,
+    environment: process.env["NODE_ENV"] ?? "development",
+    tracesSampleRate: 0.1,
+    sendDefaultPii: false
+  });
+  initialized = true;
+}
+var initialized;
+var init_sentry_server = __esm({
+  "app/lib/sentry.server.ts"() {
+    "use strict";
+    initialized = false;
+  }
+});
+
 // db/schema.ts
 var schema_exports = {};
 __export(schema_exports, {
@@ -30,9 +52,13 @@ __export(schema_exports, {
   emmaChatTurns: () => emmaChatTurns,
   enrichmentBatches: () => enrichmentBatches,
   homepagePayload: () => homepagePayload,
+  homepageTeamEvents: () => homepageTeamEvents,
+  homepageTeamRuns: () => homepageTeamRuns,
+  homepageTeamSuggestions: () => homepageTeamSuggestions,
   importCandidates: () => importCandidates,
   importMonitorRuns: () => importMonitorRuns,
   ivrVoices: () => ivrVoices,
+  marketingCalendar: () => marketingCalendar,
   metaCapiFailures: () => metaCapiFailures,
   orderLineItems: () => orderLineItems,
   pdpDialVotes: () => pdpDialVotes,
@@ -79,7 +105,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, homepagePayload;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, homepagePayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, marketingCalendar;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -890,6 +916,67 @@ var init_schema = __esm({
     }, (t) => ({
       variantVersionUniq: uniqueIndex("homepage_payload_variant_version_uniq").on(t.variant, t.version)
     }));
+    homepageTeamRuns = pgTable("homepage_team_runs", {
+      id: serial("id").primaryKey(),
+      runType: varchar("run_type", { length: 24 }).notNull(),
+      // merchandise|design|manual
+      status: varchar("status", { length: 16 }).notNull().default("running"),
+      currentPhase: varchar("current_phase", { length: 48 }),
+      currentAgent: varchar("current_agent", { length: 48 }),
+      summary: text("summary"),
+      prUrl: text("pr_url"),
+      error: text("error"),
+      attemptCount: integer("attempt_count").notNull().default(1),
+      startedAt: timestamp("started_at").notNull().defaultNow(),
+      finishedAt: timestamp("finished_at")
+    }, (t) => ({
+      startedIdx: index("idx_homepage_team_runs_started").on(t.startedAt),
+      statusIdx: index("idx_homepage_team_runs_status").on(t.status, t.startedAt)
+    }));
+    homepageTeamEvents = pgTable("homepage_team_events", {
+      id: serial("id").primaryKey(),
+      runId: integer("run_id").notNull().references(() => homepageTeamRuns.id, { onDelete: "cascade" }),
+      ts: timestamp("ts").notNull().defaultNow(),
+      agentRole: varchar("agent_role", { length: 48 }),
+      phase: varchar("phase", { length: 48 }),
+      eventType: varchar("event_type", { length: 16 }).notNull(),
+      // step|message|tool|decision|error
+      summary: text("summary").notNull(),
+      transcriptRef: text("transcript_ref")
+      // Vercel Blob key
+    }, (t) => ({
+      runIdx: index("idx_homepage_team_events_run").on(t.runId, t.ts)
+    }));
+    homepageTeamSuggestions = pgTable("homepage_team_suggestions", {
+      id: serial("id").primaryKey(),
+      runId: integer("run_id").references(() => homepageTeamRuns.id, { onDelete: "set null" }),
+      category: varchar("category", { length: 32 }).notNull(),
+      // model|turns|caching|prompt|agents|other
+      suggestion: text("suggestion").notNull(),
+      estSavingsUsd: decimal("est_savings_usd", { precision: 10, scale: 4 }).notNull().default("0"),
+      cxRisk: varchar("cx_risk", { length: 8 }).notNull().default("low"),
+      // low|med|high
+      status: varchar("status", { length: 12 }).notNull().default("proposed"),
+      // proposed|approved|applied|dismissed
+      createdAt: timestamp("created_at").notNull().defaultNow()
+    }, (t) => ({
+      statusIdx: index("idx_homepage_team_suggestions_status").on(t.status, t.createdAt)
+    }));
+    marketingCalendar = pgTable("marketing_calendar", {
+      id: serial("id").primaryKey(),
+      eventDate: date("event_date").notNull(),
+      name: varchar("name", { length: 120 }).notNull(),
+      type: varchar("type", { length: 16 }).notNull().default("promo"),
+      // holiday|promo|campaign
+      theme: text("theme"),
+      status: varchar("status", { length: 12 }).notNull().default("planned"),
+      // planned|active|done|skipped
+      assetsJson: json("assets_json"),
+      createdAt: timestamp("created_at").notNull().defaultNow(),
+      updatedAt: timestamp("updated_at").notNull().defaultNow()
+    }, (t) => ({
+      dateIdx: index("idx_marketing_calendar_date").on(t.eventDate)
+    }));
   }
 });
 
@@ -1145,6 +1232,7 @@ __export(kv_server_exports, {
   getPinnedAccessoryIds: () => getPinnedAccessoryIds,
   getVaultFilterTabs: () => getVaultFilterTabs,
   invalidateCache: () => invalidateCache,
+  isKvConfigured: () => isKvConfigured,
   kvDel: () => kvDel,
   kvGet: () => kvGet,
   kvIncr: () => kvIncr,
@@ -1174,6 +1262,9 @@ async function getKV() {
   const { createClient: createClient9 } = await import("@vercel/kv");
   _kv = createClient9(creds);
   return _kv;
+}
+function isKvConfigured() {
+  return resolveKvCreds() !== null;
 }
 function warnKvFallback(op, err) {
   const now = Date.now();
@@ -1983,11 +2074,11 @@ async function adminGraphQL(query, variables) {
     },
     body: JSON.stringify({ query, variables })
   });
-  const MAX_ATTEMPTS = 4;
+  const MAX_ATTEMPTS2 = 4;
   for (let attempt = 1; ; attempt++) {
     const res = await doFetch();
     if (res.status === 429) {
-      if (attempt >= MAX_ATTEMPTS) throw new Error("Shopify Admin GraphQL error: 429");
+      if (attempt >= MAX_ATTEMPTS2) throw new Error("Shopify Admin GraphQL error: 429");
       const retryAfter = Number(res.headers.get("retry-after")) || 1;
       await new Promise((r) => setTimeout(r, Math.min(retryAfter * 1e3, 5e3)));
       continue;
@@ -1997,7 +2088,7 @@ async function adminGraphQL(query, variables) {
     const throttled = body.errors?.some(
       (e) => e.extensions?.code === "THROTTLED" || /throttled/i.test(e.message)
     );
-    if (throttled && attempt < MAX_ATTEMPTS) {
+    if (throttled && attempt < MAX_ATTEMPTS2) {
       const cost = body.extensions?.cost;
       const needed = (cost?.requestedQueryCost ?? 0) - (cost?.throttleStatus?.currentlyAvailable ?? 0);
       const restoreRate = cost?.throttleStatus?.restoreRate ?? 0;
@@ -2523,7 +2614,7 @@ async function getDealByShopifyIdUncached(id) {
 async function getDealByHandle(handle) {
   return cached(`shopify:deal:byhandle:${handle}`, READ_TTL, async () => {
     const timeout = new Promise(
-      (resolve) => setTimeout(() => resolve(null), 5e3)
+      (resolve2) => setTimeout(() => resolve2(null), 5e3)
     );
     const fetch2 = storefront(`
       query GetDealByHandle($handle: String!) {
@@ -6947,6 +7038,7 @@ __export(sanity_server_exports, {
   getEmmaPersona: () => getEmmaPersona,
   getEmmaPresets: () => getEmmaPresets,
   getHomeConfig: () => getHomeConfig,
+  getHomepageDocRaw: () => getHomepageDocRaw,
   getHomepageSections: () => getHomepageSections,
   getPage: () => getPage,
   getPageList: () => getPageList,
@@ -6965,8 +7057,13 @@ __export(sanity_server_exports, {
   publishEmmaRailDraft: () => publishEmmaRailDraft,
   removeCmsBlock: () => removeCmsBlock,
   removeRailRefFromHomepage: () => removeRailRefFromHomepage,
+  restoreHomepageDoc: () => restoreHomepageDoc,
+  sanityImageRef: () => sanityImageRef,
   unarchiveHomepageRailsForDeal: () => unarchiveHomepageRailsForDeal,
   updateCmsBlock: () => updateCmsBlock,
+  updateCmsPromoImage: () => updateCmsPromoImage,
+  updateCmsTileImage: () => updateCmsTileImage,
+  uploadBufferToSanity: () => uploadBufferToSanity,
   upsertAnnouncementBar: () => upsertAnnouncementBar,
   upsertEmmaPick: () => upsertEmmaPick,
   upsertProductPage: () => upsertProductPage
@@ -7092,6 +7189,34 @@ async function updateCmsBlock(key, patch) {
   ).commit();
   invalidateCache("sanity:homepage");
 }
+async function uploadBufferToSanity(buffer, filename, contentType) {
+  const client4 = getClient(true);
+  if (!client4) throw new Error("Sanity not configured");
+  const asset = await client4.assets.upload("image", buffer, {
+    filename,
+    ...contentType ? { contentType } : {}
+  });
+  return { assetId: asset._id, url: asset.url };
+}
+function sanityImageRef(assetId, alt) {
+  return { _type: "image", asset: { _type: "reference", _ref: assetId }, alt };
+}
+async function updateCmsTileImage(blockKey, tileKey, assetId, alt) {
+  const client4 = getClient(true);
+  if (!client4) throw new Error("Sanity not configured");
+  await client4.patch("singleton.homepage").set({
+    [`sections[_key=="${blockKey}"].tiles[_key=="${tileKey}"].image`]: sanityImageRef(assetId, alt)
+  }).commit();
+  invalidateCache("sanity:homepage");
+}
+async function updateCmsPromoImage(blockKey, assetId, alt) {
+  const client4 = getClient(true);
+  if (!client4) throw new Error("Sanity not configured");
+  await client4.patch("singleton.homepage").set({
+    [`sections[_key=="${blockKey}"].promo.image`]: sanityImageRef(assetId, alt)
+  }).commit();
+  invalidateCache("sanity:homepage");
+}
 async function removeCmsBlock(key) {
   const client4 = getClient(true);
   if (!client4) throw new Error("Sanity not configured");
@@ -7100,6 +7225,22 @@ async function removeCmsBlock(key) {
 }
 function invalidateCmsCache() {
   invalidateCache("sanity:homepage");
+}
+async function getHomepageDocRaw() {
+  const client4 = getClient(true, false, "raw");
+  if (!client4) return null;
+  const doc = await client4.getDocument(HOMEPAGE_DOC_ID);
+  return doc ?? null;
+}
+async function restoreHomepageDoc(snapshot) {
+  const client4 = getClient(true, false, "raw");
+  if (!client4) throw new Error("Sanity not configured \u2014 cannot restore homepage doc");
+  const rest = {};
+  for (const [k, v] of Object.entries(snapshot)) {
+    if (!k.startsWith("_")) rest[k] = v;
+  }
+  await client4.createOrReplace({ ...rest, _id: HOMEPAGE_DOC_ID, _type: "homepageSections" });
+  invalidateCmsCache();
 }
 function stringToPortableText(text2) {
   const trimmed = text2.trim();
@@ -7883,7 +8024,7 @@ async function getHomeConfig() {
     }
   });
 }
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, HOME_CONFIG_GROQ;
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, HOME_CONFIG_GROQ;
 var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
@@ -7902,6 +8043,24 @@ var init_sanity_server = __esm({
     label, body, link, linkLabel, emoji,
     "image": image{ "url": asset->url, alt }
   },
+  // wayfinderMosaic \u2014 shares eyebrow/heading (above) plus its own emphasis word.
+  // "tiles" above is editorialTiles-shaped (no _key) \u2014 wayfinderMosaic tiles need
+  // _key (the image bridge addresses tiles by _key), so they get their own field
+  // name to avoid colliding with the editorialTiles projection. select() keeps
+  // every other block type null-safe.
+  emphasis,
+  "wayfinderTiles": select(
+    _type == "wayfinderMosaic" => tiles[]{
+      _key, label, link, emmaAside,
+      "image": image{ "url": asset->url, alt }
+    }
+  ),
+  "promo": select(
+    _type == "wayfinderMosaic" => promo{
+      eyebrow, heading, emphasis, body, ctaLabel, ctaLink,
+      "image": image{ "url": asset->url, alt }
+    }
+  ),
   // categoryGrid + testimonials use inline item objects; trustBar uses references.
   // Keep them in separate fields \u2014 combining them via select() silently null-derefs
   // the trustBar references (GROQ quirk). TrustBarBlock reads trustItems.
@@ -7988,6 +8147,7 @@ var init_sanity_server = __esm({
     label, "slug": slug.current, narratorCopy, moodTags, audienceTags, mattersTags, priceMax, featured, order
   }
 `;
+    HOMEPAGE_DOC_ID = "singleton.homepage";
     _blogCache = /* @__PURE__ */ new Map();
     BLOG_CACHE_TTL = 6e4;
     BLOG_CAT_CACHE_TTL = 3e5;
@@ -8589,6 +8749,15 @@ var init_klaviyo_server = __esm({
   }
 });
 
+// app/lib/models.server.ts
+var SONNET;
+var init_models_server = __esm({
+  "app/lib/models.server.ts"() {
+    "use strict";
+    SONNET = "claude-sonnet-4-6";
+  }
+});
+
 // app/lib/seo-keywords.server.ts
 import { createClient as createClient2 } from "@sanity/client";
 function getReadClient() {
@@ -9024,10 +9193,49 @@ var init_emma_rail_tools_server = __esm({
   }
 });
 
+// app/lib/emma-voice.server.ts
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+function slice(text2, startMarker, endMarker) {
+  const start = text2.indexOf(startMarker);
+  const end = text2.indexOf(endMarker);
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error(`emma-voice.server: missing marker pair ${startMarker} / ${endMarker} in docs/emma-voice.md`);
+  }
+  return text2.slice(start + startMarker.length, end).trim();
+}
+var __dirname, charter, EMMA_VOICE_CORE, MARKETING_ADDENDUM, ENRICHMENT_ADDENDUM, CONVERSATIONAL_ADDENDUM, SUPPORT_ADDENDUM, EMMA_VOICE_MARKETING, EMMA_VOICE_ENRICHMENT, EMMA_VOICE_CONVERSATIONAL, EMMA_VOICE_SUPPORT;
+var init_emma_voice_server = __esm({
+  "app/lib/emma-voice.server.ts"() {
+    "use strict";
+    __dirname = dirname(fileURLToPath(import.meta.url));
+    charter = readFileSync(resolve(__dirname, "../../docs/emma-voice.md"), "utf-8");
+    EMMA_VOICE_CORE = slice(charter, "<!-- core:start -->", "<!-- core:end -->");
+    MARKETING_ADDENDUM = slice(charter, "<!-- addendum:marketing:start -->", "<!-- addendum:marketing:end -->");
+    ENRICHMENT_ADDENDUM = slice(charter, "<!-- addendum:enrichment:start -->", "<!-- addendum:enrichment:end -->");
+    CONVERSATIONAL_ADDENDUM = slice(charter, "<!-- addendum:conversational:start -->", "<!-- addendum:conversational:end -->");
+    SUPPORT_ADDENDUM = slice(charter, "<!-- addendum:support:start -->", "<!-- addendum:support:end -->");
+    EMMA_VOICE_MARKETING = `${EMMA_VOICE_CORE}
+
+${MARKETING_ADDENDUM}`;
+    EMMA_VOICE_ENRICHMENT = `${EMMA_VOICE_CORE}
+
+${ENRICHMENT_ADDENDUM}`;
+    EMMA_VOICE_CONVERSATIONAL = `${EMMA_VOICE_CORE}
+
+${CONVERSATIONAL_ADDENDUM}`;
+    EMMA_VOICE_SUPPORT = `${EMMA_VOICE_CORE}
+
+${SUPPORT_ADDENDUM}`;
+  }
+});
+
 // app/lib/model-pricing.server.ts
 var model_pricing_server_exports = {};
 __export(model_pricing_server_exports, {
-  estimateCostUsd: () => estimateCostUsd
+  estimateCostUsd: () => estimateCostUsd,
+  estimateImageCostUsd: () => estimateImageCostUsd
 });
 function estimateCostUsd(args) {
   if (args.source === "agent-sdk") return 0;
@@ -9037,7 +9245,12 @@ function estimateCostUsd(args) {
   const cost = args.inputTokens * perTok(r.input) + args.outputTokens * perTok(r.output) + args.cacheCreationTokens * perTok(r.input * 1.25) + args.cacheReadTokens * perTok(r.input * 0.1);
   return Math.round(cost * 1e5) / 1e5;
 }
-var RATES, DEFAULT_RATE;
+function estimateImageCostUsd(model, count) {
+  const per = IMAGE_RATES[model] ?? DEFAULT_IMAGE_RATE;
+  const cost = per * Math.max(0, count);
+  return Math.round(cost * 1e5) / 1e5;
+}
+var RATES, DEFAULT_RATE, IMAGE_RATES, DEFAULT_IMAGE_RATE;
 var init_model_pricing_server = __esm({
   "app/lib/model-pricing.server.ts"() {
     "use strict";
@@ -9048,6 +9261,17 @@ var init_model_pricing_server = __esm({
       "claude-haiku-4-5-20251001": { input: 1, output: 5 }
     };
     DEFAULT_RATE = { input: 3, output: 15 };
+    IMAGE_RATES = {
+      "fal/flux-schnell": 3e-3,
+      "fal/flux-dev": 0.025,
+      "fal/flux-pro": 0.05,
+      "fal/nano-banana": 0.039,
+      // fal's Gemini-flash-image endpoint
+      "imagen": 0.04,
+      // Google Vertex gemini-2.5-flash-image
+      "imagen-3": 0.04
+    };
+    DEFAULT_IMAGE_RATE = 0.04;
   }
 });
 
@@ -9055,7 +9279,9 @@ var init_model_pricing_server = __esm({
 var token_log_server_exports = {};
 __export(token_log_server_exports, {
   getDailyTokenRollup: () => getDailyTokenRollup,
-  logApiTokens: () => logApiTokens
+  getTokenCallDetail: () => getTokenCallDetail,
+  logApiTokens: () => logApiTokens,
+  logImageCost: () => logImageCost
 });
 async function logApiTokens(entry) {
   try {
@@ -9091,6 +9317,32 @@ async function logApiTokens(entry) {
     console.error("[token-log] best-effort write failed (ignored):", err);
   }
 }
+async function logImageCost(entry) {
+  try {
+    if (!entry.count || entry.count <= 0) return;
+    const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
+    const { apiTokenLog: apiTokenLog2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+    const { estimateImageCostUsd: estimateImageCostUsd2 } = await Promise.resolve().then(() => (init_model_pricing_server(), model_pricing_server_exports));
+    const cost = estimateImageCostUsd2(entry.model, entry.count);
+    await db2.insert(apiTokenLog2).values({
+      feature: entry.feature,
+      model: entry.model,
+      source: "sync",
+      batchId: null,
+      productId: entry.productId ?? null,
+      sku: entry.sku ?? null,
+      caller: entry.caller ?? null,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      requestCount: entry.count,
+      estCostUsd: String(cost)
+    });
+  } catch (err) {
+    console.error("[token-log] best-effort image-cost write failed (ignored):", err);
+  }
+}
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
   const { sql: sql8 } = await import("drizzle-orm");
@@ -9099,6 +9351,46 @@ async function getDailyTokenRollup(opts = {}) {
     sql8`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
+  );
+  return result.rows;
+}
+async function getTokenCallDetail(opts) {
+  const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
+  const { sql: sql8 } = await import("drizzle-orm");
+  const model = opts.model ?? null;
+  const source = opts.source ?? null;
+  const result = await db2.execute(
+    sql8`
+      WITH grouped AS (
+        SELECT
+          caller, sku, product_id, batch_id,
+          COUNT(*)                   AS row_count,
+          SUM(request_count)         AS calls,
+          SUM(input_tokens)          AS input_tokens,
+          SUM(output_tokens)         AS output_tokens,
+          SUM(cache_creation_tokens) AS cache_creation_tokens,
+          SUM(cache_read_tokens)     AS cache_read_tokens,
+          SUM(est_cost_usd)          AS est_cost_usd,
+          MIN(ts)                    AS first_ts,
+          MAX(ts)                    AS last_ts
+        FROM api_token_log
+        WHERE date_trunc('day', ts)::date = ${opts.day}::date
+          AND feature = ${opts.feature}
+          AND (${model}::text  IS NULL OR model  = ${model})
+          AND (${source}::text IS NULL OR source = ${source})
+        GROUP BY caller, sku, product_id, batch_id
+      )
+      SELECT g.*, bj.job_type, bj.sku_list AS job_sku_list
+      FROM grouped g
+      LEFT JOIN LATERAL (
+        SELECT job_type, sku_list
+        FROM batch_jobs
+        WHERE g.batch_id IS NOT NULL
+          AND (current_batch_id = g.batch_id OR batch_ids::jsonb ? g.batch_id)
+        LIMIT 1
+      ) bj ON TRUE
+      ORDER BY est_cost_usd DESC
+    `
   );
   return result.rows;
 }
@@ -9238,18 +9530,21 @@ async function generateWithSystem(opts) {
   const block = msg.content[0];
   if (block?.type !== "text") throw new Error("Unexpected Claude response type");
   const u = msg.usage;
-  void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
-    ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
-      feature: "copy-gen",
+  void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(({ logApiTokens: logApiTokens2 }) => {
+    const entry = {
+      feature: opts.feature ?? "copy-gen",
       model,
       source: "sync",
-      caller: "generateWithSystem",
+      caller: opts.caller ?? "generateWithSystem",
       inputTokens: u.input_tokens,
       outputTokens: u.output_tokens,
       cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
       cacheReadTokens: u.cache_read_input_tokens ?? 0
-    })
-  ).catch((err) => console.error("[claude] generateWithSystem token-log failed (ignored):", err));
+    };
+    if (opts.sku) entry.sku = opts.sku;
+    if (opts.productId) entry.productId = opts.productId;
+    return logApiTokens2(entry);
+  }).catch((err) => console.error("[claude] generateWithSystem token-log failed (ignored):", err));
   return block.text;
 }
 function stripFences(raw) {
@@ -10128,7 +10423,7 @@ Return ONLY raw JSON (no markdown):
 async function generateTweetCopy(deal, llmClient) {
   const discountPct = deal.msrp > 0 ? Math.round(100 - deal.dealPrice / deal.msrp * 100) : 0;
   const productUrl = `https://xdipx.com/products/${deal.handle}`;
-  const primaryPrompt = `Write a tweet for today's daily deal on xdipx.com.
+  const primaryPrompt = `Write a tweet featuring this product from xdipx.com, an editorially curated sexual wellness storefront.
 
 Product: ${deal.title}
 Brand: ${deal.brand}${deal.tagline ? `
@@ -10140,9 +10435,10 @@ Link: ${productUrl}
 Rules:
 - The main tweet MUST be under 240 characters (leave room for the link)
 - Include the product URL at the end: ${productUrl}
-- Include 1-2 relevant hashtags from: #DailyDeal #FlashSale #SelfCare #PleasurePositive #IntimateWellness #TreatYourself
+- Include 1-2 relevant hashtags from: #SelfCare #PleasurePositive #IntimateWellness #TreatYourself
 - Brand voice: playful, cheeky, warm. Never clinical, never sleazy.
-- Include the discount percentage or price if compelling
+- Keep it product-forward. No flash-sale or "today only" urgency framing.
+- Include the price if compelling
 - Use the \u2665 motif naturally
 - NEVER use explicit language or the word "sex" as an adjective
 
@@ -10150,7 +10446,7 @@ Also write a thread reply (optional second tweet) with 1-2 extra detail sentence
 
 Return ONLY this JSON (no markdown):
 {"mainTweet": "...", "threadReply": "..." or null}`;
-  const retryPrompt = `Return ONLY raw JSON, no markdown. Write a tweet under 240 chars for this product. Include the URL ${productUrl} and one hashtag.
+  const retryPrompt = `Return ONLY raw JSON, no markdown. Write a product-forward tweet under 240 chars for this product (no flash-sale or "today only" framing). Include the URL ${productUrl} and one hashtag.
 {"mainTweet": "...", "threadReply": null}
 
 Product: ${deal.brand} ${deal.title} \u2014 $${deal.dealPrice} (was $${deal.msrp})`;
@@ -10173,11 +10469,11 @@ Product: ${deal.brand} ${deal.title} \u2014 $${deal.dealPrice} (was $${deal.msrp
   const secondParsed = tryParse(retried);
   if (secondParsed) return secondParsed;
   return {
-    mainTweet: `${deal.brand} ${deal.title} \u2014 ${discountPct}% off today only. $${deal.dealPrice} (was $${deal.msrp}) \u2665
+    mainTweet: `${deal.brand} ${deal.title}, ${discountPct}% off. $${deal.dealPrice} (was $${deal.msrp}) \u2665
 
 ${productUrl}
 
-#DailyDeal #SelfCare`
+#SelfCare #IntimateWellness`
   };
 }
 function pickFormat(category) {
@@ -10228,7 +10524,7 @@ ${product.customPrompt}
 
 Narrator persona: ${persona}${customInstruction}
 
-This is for xdipx.com \u2014 a daily flash-sale site for sexual wellness products.
+This is for xdipx.com, an editorially curated sexual wellness storefront.
 Brand voice: playful, cheeky, warm. PG-13 strictly \u2014 suggest, never show. Innuendo welcome, explicit never.
 
 Product:
@@ -10458,9 +10754,9 @@ function emmaHeroFallback(deal, variant, voiceHash) {
   const base = {
     variant,
     eyebrow: "Kinda obsessed",
-    headline: deal.tagline || `This ${deal.brand} one quietly made it into my rotation.`,
-    body: `Slow-burn build, surprisingly gentle finish. If you want something that feels considered \u2014 not gimmicky \u2014 this is the one.`,
-    aside: `\u2014 Emma \xB7 still on my desk`,
+    headline: deal.tagline || `This ${deal.brand} one earned its spot for a reason.`,
+    body: `Slow-burn build, surprisingly gentle finish. If you want something that feels considered, not gimmicky, this is the one.`,
+    aside: `Emma, on the specs: worth the closer look`,
     generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
     voiceHash
   };
@@ -10530,7 +10826,9 @@ Return ONLY this JSON (no markdown):
   }
 }
 async function generateEmmaTagline() {
-  const system = `You are Emma \u2014 the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You write like a trusted, funny friend. Tasteful, warm, curious. Never clinical. Never sleazy. Never "sex" as an adjective.`;
+  const system = `You are Emma, xdipx's AI guide. You write like a trusted, funny friend. Tasteful, warm, curious. Never clinical. Never sleazy. Never "sex" as an adjective.
+
+${EMMA_VOICE_CORE}`;
   const user = `Write ONE short tagline for the Emma chat window's status line. It sits right under "Ask Emma \xB7 Online".
 
 Rules:
@@ -10539,7 +10837,8 @@ Rules:
 - Ends with the \u2665 glyph (exactly one).
 - No quotes, no period, no emoji other than \u2665.
 - No "buy now", no countdown, no pricing, no "sex" as adjective.
-- Feel friendly and specific \u2014 the kind of thing a friend might say when you open the chat. Examples of the vibe (don't copy): "here to help you find what you're into \u2665", "pick my brain, I've tried most of it \u2665".
+- Never claim lived experience (no "I've tried", "I've tested"). Speak from catalog knowledge.
+- Feel friendly and specific, the kind of thing a friend might say when you open the chat. Examples of the vibe (don't copy): "here to help you find what you're into \u2665", "pick my brain, I know the catalog cold \u2665".
 
 Return ONLY the tagline text, nothing else.`;
   try {
@@ -10574,7 +10873,7 @@ Return ONLY the tagline text, nothing else.`;
 }
 async function generateBlogSEO(title, excerpt) {
   const raw = await generate(
-    `Generate SEO metadata for this blog post on xdipx.com (sexual wellness daily deals site).
+    `Generate SEO metadata for this blog post on xdipx.com (an editorially curated sexual wellness storefront).
 
 Title: ${title}
 Excerpt: ${excerpt}
@@ -11486,9 +11785,9 @@ TASK
 Pick the best ${input.maxPicks} products from the candidates above. For each pick, write Emma\u2019s 12\u201320 word first-person aside explaining why it fits with the hero deal in *this* group\u2019s context.
 
 Voice rules (must follow):
-- First person ("been testing these side by side", "I keep coming back to this one").
+- First person, from catalog knowledge, never lived experience ("reviewers rate these two highest together", "the specs line up for pairing"). Never "been testing these", "I keep coming back to this one", or any claim Emma has used, tried, or owned a product.
 - Never "Buy now", "limited time", "until midnight", or any countdown language.
-- Never use "sex" as an adjective \u2014 use intimate, pleasure, wellness, slow-burn.
+- Never use "sex" as an adjective, use intimate, pleasure, wellness, slow-burn.
 - Never assume the reader\u2019s experience level.
 - Tasteful and warm. Suggestive OK, explicit not OK.
 - Use \u2665 sparingly (at most one per group).
@@ -11503,7 +11802,7 @@ Return exactly ${input.maxPicks} picks, ordered best\u2192worst. Use only ids fr
     // Cache the brand voice + hero context across groups within the same deal
     // rotation. Ephemeral cache TTL ~5m; a midnight pass finishes in seconds.
     system: [
-      { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+      { type: "text", text: EMMA_VOICE_CORE, cache_control: { type: "ephemeral" } },
       { type: "text", text: heroBlock, cache_control: { type: "ephemeral" } }
     ],
     messages: [{ role: "user", content: userPrompt }]
@@ -11576,8 +11875,8 @@ You are curating cross-sell rails for an editorial storefront. Your goal: propos
 Rules:
 - Use list_candidate_pool first to see what's available. Only fall back to query_products_by_tag/collection if the pool is thin.
 - Never include the primary deal product or its pair partner in any rail.
-- Each rail should have a clear theme (a mood, an audience, a use case) \u2014 not a random grab bag.
-- The "emmaAside" is first-person and short ("been pairing these all month", "the trio I keep recommending").
+- Each rail should have a clear theme (a mood, an audience, a use case), not a random grab bag.
+- The "emmaAside" is first-person and short, from catalog knowledge, not lived experience ("the specs line up for this pairing", "reviewers group these two together often").
 - The rail "heading" is a confident editorial label, 3\u20137 words. Never "buy now" / "shop now".
 - After all rails and pairing_why blurbs are proposed, simply stop responding (end_turn). Do not summarize.`;
   const userPrompt = `Deal context:
@@ -11655,32 +11954,19 @@ var client, _toolTokenAccumulator, MODEL, MODEL_FAST, SYSTEM_PROMPT, BRAND_VOICE
 var init_claude_server = __esm({
   "app/lib/claude.server.ts"() {
     "use strict";
+    init_models_server();
     init_feed_processor_server();
     init_seo_keywords_server();
     init_editorial_author_server();
     init_emma_rail_tools_server();
+    init_emma_voice_server();
     client = new Anthropic({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
     _toolTokenAccumulator = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
-    MODEL = "claude-sonnet-4-20250514";
+    MODEL = SONNET;
     MODEL_FAST = "claude-haiku-4-5-20251001";
-    SYSTEM_PROMPT = `You are the voice of xdipx.com, a daily flash-sale site for sexual wellness products.
-Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy.
-Write as a trusted, funny friend who isn't embarrassed about the topic. Your goal is to welcome first-time buyers and delight experienced ones.
-Keep all copy tasteful. Suggestive is fine, explicit is not.
-Always signal discretion, value, and trust.
-Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait.
-Never assume the reader's experience level.
+    SYSTEM_PROMPT = `${EMMA_VOICE_MARKETING}
+
 Always end descriptions with a curiosity hook that makes the reader want to try it.
-
-Punctuation rules (strict):
-- NEVER use em-dashes ("\u2014") or en-dashes ("\u2013"). They read as AI-written.
-- Use periods, commas, or parentheses instead. Two short sentences beat one long sentence with an em-dash.
-- Hyphens ("-") inside compound words ("soft-touch", "travel-size") are fine.
-
-Hard facts (never invent variants):
-- Credit-card statement descriptor is "XDIPX". If you mention billing, the descriptor, or what shows on a statement, write it as XDIPX. Never invent another descriptor (no DIPCOM, no XDIPX.COM, no variants).
-- Brand name is "xdipx" (lowercase) and is pronounced "ex-dip-ex" (three syllables). Never "ex-dip" or "x-dipx".
-- Orders ship in plain unbranded packaging. Don't claim same-day or next-day shipping unless given as context.
 
 SEO targeting:
 - When a <keyword_targets> block appears in the input, weave the primary term into the headline and first 100 words exactly once. Integrate secondary terms naturally across headings and body. Long-tail and question terms surface best in FAQs, asides, and supporting paragraphs.
@@ -11712,7 +11998,7 @@ SEO targeting:
     CTA_WORDS = ["Today.", "Yours.", "Obviously.", "Go on.", "Finally."];
     VEO_SYSTEM_PROMPT = `You are a video prompt engineer for Google Veo. You enhance simple video ideas into detailed, production-ready Veo prompts. Your job is to FAITHFULLY EXPAND the user's idea \u2014 not replace it. The user's concept is the creative foundation. You add cinematic detail (camera, lighting, composition, audio) while keeping their vision intact.
 
-Brand context: xdipx.com is a daily flash-sale site for sexual wellness products.
+Brand context: xdipx.com is an editorially curated sexual wellness storefront.
 Visual style: premium, warm, tasteful. Suggestive never explicit.`;
     LTX_SYSTEM_PROMPT = `You are a video prompt engineer for LTX Video, an image-to-video model. You enhance simple video ideas into detailed, production-ready prompts.
 
@@ -11739,15 +12025,19 @@ Prompt length rules:
 
 Template skeleton: [product action] + [camera instruction] + [lighting/atmosphere shift] + [optional ambient audio cue]
 
-Brand context: xdipx.com \u2014 daily flash-sale site for sexual wellness products.
+Brand context: xdipx.com, an editorially curated sexual wellness storefront.
 Visual style: premium, warm, a little edgy \u2014 push boundaries while staying tasteful. Suggestive and playful, never outright explicit. Think high-end fragrance ad that makes you look twice.`;
-    DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful \u2014 suggestive is fine, explicit is not. Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait. Never "Buy now" \u2014 use "Take a peek \u2192" or "I'll take it \u2665". Never surface a countdown or "until midnight." Always include a short first-person advisory aside ("the one I'd point you to for slow nights," "an easy yes if quiet matters"). Emma advises from product knowledge only. Never imply she has used, tried, tested, or owned the product (no "been living on my desk", "I reach for this", "my go-to"). Never assume the reader's experience level. If any keyword targets, vocabulary lists, or input fields in the prompt do not fit the actual product, silently ignore them \u2014 write from the product details only. Never narrate a mismatch, never preface output with explanation, never write meta-commentary about the prompt. Output only the requested copy.`;
-    EMMA_SYSTEM_PROMPT = `You are Emma, the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You write in first person, warm and specific, like a note to a friend. You are a curator, not a customer: recommend from product knowledge and what a product is known or designed for. Never claim you personally own, use, tried, or tested a product.`;
+    DEFAULT_BRAND_VOICE = `${EMMA_VOICE_MARKETING}
+
+If any keyword targets, vocabulary lists, or input fields in the prompt do not fit the actual product, silently ignore them \u2014 write from the product details only. Never narrate a mismatch, never preface output with explanation, never write meta-commentary about the prompt. Output only the requested copy.`;
+    EMMA_SYSTEM_PROMPT = `You are Emma, xdipx's AI guide. You write in first person, warm and specific, like a note to a friend. You are a curator, not a customer: recommend from product knowledge and what a product is known or designed for.
+
+${EMMA_VOICE_CORE}`;
     EMMA_TAGLINE_FALLBACKS = [
       "here to help you find what you\u2019re into \u2665",
       "your no-judgment guide to pleasure \u2665",
       "quietly obsessed with the good stuff \u2665",
-      "pick my brain \u2014 I\u2019ve tested most of it \u2665",
+      "pick my brain, I know the catalog cold \u2665",
       "tell me what you\u2019re curious about \u2665"
     ];
     PRODUCT_FAQ_CATEGORIES = ["general", "care", "usage", "compatibility", "shipping"];
@@ -12638,10 +12928,10 @@ var init_search_ping_server = __esm({
 // app/lib/with-timeout.server.ts
 async function withTimeout(p, ms, fallback, label = "op") {
   let timer;
-  const timeout = new Promise((resolve) => {
+  const timeout = new Promise((resolve2) => {
     timer = setTimeout(() => {
       console.warn(`[with-timeout] ${label} timed out after ${ms}ms \u2014 using fallback`);
-      resolve(fallback);
+      resolve2(fallback);
     }, ms);
   });
   try {
@@ -13314,6 +13604,14 @@ async function getDiscoveryIndex(opts = {}) {
   if (!opts.force) {
     const cached2 = await kvGet(INDEX_KEY);
     if (cached2 && Array.isArray(cached2) && cached2.length > 0) return cached2;
+  }
+  if (!isKvConfigured()) {
+    const fresh = await buildDiscoveryIndex();
+    if (fresh.length > 0) {
+      await kvSet(INDEX_KEY, fresh, INDEX_TTL_SECONDS);
+      await kvSet(VOCAB_KEY, computeVocab(fresh), VOCAB_TTL_SECONDS);
+    }
+    return fresh;
   }
   triggerDiscoveryRebuild();
   return [];
@@ -14040,6 +14338,200 @@ var init_deal_rotator_server = __esm({
     init_shopify_server();
     init_klaviyo_server();
     init_kv_server();
+  }
+});
+
+// app/lib/homepage-healthcheck.server.ts
+var homepage_healthcheck_server_exports = {};
+__export(homepage_healthcheck_server_exports, {
+  runHomepageHealthcheck: () => runHomepageHealthcheck
+});
+function siteOrigin() {
+  const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
+  return base.replace(/\/$/, "") || "https://xdipx.com";
+}
+function extractJsonLd(html) {
+  let parsed = 0;
+  let scripts = 0;
+  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    scripts += 1;
+    try {
+      JSON.parse((m[1] ?? "").trim());
+      parsed += 1;
+    } catch {
+    }
+  }
+  return { parsed, scripts };
+}
+async function checkPageOnce(path) {
+  const url = `${siteOrigin()}${path}`;
+  const problems = [];
+  let status = 0;
+  let bodyOk = false;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    const res = await fetch(url, {
+      headers: { "user-agent": "xdipx-homepage-healthcheck" },
+      signal: ctrl.signal
+    }).finally(() => clearTimeout(timer));
+    status = res.status;
+    const html = await res.text();
+    if (status !== 200) problems.push(`HTTP ${status}`);
+    if (html.length < MIN_BODY_BYTES) problems.push(`body too small (${html.length} bytes)`);
+    if (!/<img[\s>]/i.test(html)) problems.push("no <img> (hero/LCP image likely missing)");
+    bodyOk = status === 200 && html.length >= MIN_BODY_BYTES;
+    const { parsed, scripts } = extractJsonLd(html);
+    if (parsed === 0) problems.push("no valid JSON-LD");
+    else if (parsed < scripts) problems.push(`malformed JSON-LD (${scripts - parsed} unparseable)`);
+  } catch (err) {
+    problems.push(`fetch error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const hardFail = status >= 500;
+  return { path, status, ok: problems.length === 0, problems, bodyOk, hardFail };
+}
+async function checkPage(path) {
+  let best = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const c = await checkPageOnce(path);
+    if (c.ok) return c;
+    if (!best || c.problems.length < best.problems.length) best = c;
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS));
+    }
+  }
+  return best;
+}
+async function openHealthcheckIssue(title, body) {
+  const token = process.env["GITHUB_TOKEN"];
+  const owner = process.env["GITHUB_OWNER"];
+  const repo = process.env["GITHUB_REPO"];
+  if (!token || !owner || !repo) {
+    console.warn("[homepage-healthcheck] GITHUB_TOKEN/OWNER/REPO not set \u2014 skipping issue");
+    return null;
+  }
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json"
+  };
+  try {
+    const q = encodeURIComponent(`repo:${owner}/${repo} is:issue is:open in:title "${title}"`);
+    const search = await fetch(`https://api.github.com/search/issues?q=${q}`, { headers });
+    const existing = search.ok ? ((await search.json()).items ?? [])[0] : void 0;
+    if (existing) {
+      await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${existing.number}/comments`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ body })
+      });
+      return existing.html_url;
+    }
+    const create = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ title, body, labels: ["healthcheck", "P0"] })
+    });
+    if (!create.ok) {
+      console.error(`[homepage-healthcheck] issue create ${create.status}`);
+      return null;
+    }
+    return (await create.json()).html_url;
+  } catch (err) {
+    console.error("[homepage-healthcheck] issue error", err);
+    return null;
+  }
+}
+async function runHomepageHealthcheck() {
+  const checks = await Promise.all(PATHS.map(checkPage));
+  const healthy = checks.every((c) => c.ok);
+  const home = checks.find((c) => c.path === "/");
+  if (home?.bodyOk) {
+    try {
+      const doc = await getHomepageDocRaw();
+      if (doc) await kvSet(LAST_GOOD_KEY, doc);
+    } catch (err) {
+      console.warn("[homepage-healthcheck] last-good snapshot failed", err);
+    }
+  }
+  if (healthy) {
+    return { ok: true, checks, action: "snapshot", rolledBack: false, alerted: false };
+  }
+  const failed = checks.filter((c) => !c.ok);
+  const summary = failed.map((c) => `${c.path}: ${c.problems.join("; ")}`).join(" | ");
+  const homeHardBroken = !!home?.hardFail;
+  const result = {
+    ok: false,
+    checks,
+    action: homeHardBroken ? "rollback" : "alert",
+    rolledBack: false,
+    alerted: false
+  };
+  if (homeHardBroken) {
+    try {
+      const lastGood = await kvGet(LAST_GOOD_KEY);
+      const valid = !!lastGood && lastGood["_type"] === "homepageSections" && Array.isArray(lastGood["sections"]);
+      if (valid) {
+        await invalidateHomepagePayloadA().catch(() => {
+        });
+        await restoreHomepageDoc(lastGood);
+        await warmHomepagePayloadA({ force: true }).catch(
+          (e) => console.error("[homepage-healthcheck] payload rewarm failed", e)
+        );
+        result.rolledBack = true;
+      } else {
+        result.message = lastGood ? "last-good snapshot is malformed \u2014 skipping rollback" : "no last-good snapshot available to roll back to";
+      }
+    } catch (err) {
+      result.message = `rollback failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  } else if (home && !home.ok) {
+    result.message = "homepage returned 200 but tripped render heuristics \u2014 not a Sanity-content failure; alerting without rollback";
+  } else {
+    result.message = "non-homepage page unhealthy; no homepage rollback applicable";
+  }
+  const isP0 = homeHardBroken || result.rolledBack;
+  Sentry.captureException(
+    new Error(`Homepage healthcheck ${isP0 ? "failed" : "soft-degraded"} \u2014 ${summary}`),
+    {
+      tags: { healthcheck: "homepage", severity: isP0 ? "P0" : "P2" },
+      extra: { checks, rolledBack: result.rolledBack, note: result.message }
+    }
+  );
+  result.alerted = true;
+  if (isP0) {
+    const issueBody = [
+      `Homepage healthcheck failed against ${siteOrigin()}.`,
+      "",
+      "**Problems**",
+      summary,
+      "",
+      `**Auto-recovery:** ${result.rolledBack ? "rolled the Sanity homepage doc back to last-good and re-warmed the Variant A payload." : result.message ?? "none"}`,
+      "",
+      "_Filed automatically by `/cron/homepage-healthcheck`._"
+    ].join("\n");
+    const issueUrl = await openHealthcheckIssue("[P0] Homepage healthcheck failing", issueBody);
+    if (issueUrl) result.message = `${result.message ? result.message + " \xB7 " : ""}issue: ${issueUrl}`;
+  }
+  return result;
+}
+var LAST_GOOD_KEY, PATHS, FETCH_TIMEOUT_MS, MIN_BODY_BYTES, MAX_ATTEMPTS, RETRY_BACKOFF_MS;
+var init_homepage_healthcheck_server = __esm({
+  "app/lib/homepage-healthcheck.server.ts"() {
+    "use strict";
+    init_sentry_server();
+    init_kv_server();
+    init_sanity_server();
+    init_homepage_payload_server();
+    LAST_GOOD_KEY = "homepage:healthcheck:lastgood";
+    PATHS = ["/", "/discover"];
+    FETCH_TIMEOUT_MS = 12e3;
+    MIN_BODY_BYTES = 1e3;
+    MAX_ATTEMPTS = 3;
+    RETRY_BACKOFF_MS = 1500;
   }
 });
 
@@ -16368,6 +16860,7 @@ var init_emma_orchestrator_server = __esm({
     init_imagen_server();
     init_shopify_server();
     init_llm_client_server();
+    init_models_server();
     TOOLS = [
       {
         name: "classifyProductTypeDial",
@@ -17442,7 +17935,8 @@ var init_field_regen_runner_server = __esm({
     init_shopify_server();
     init_claude_server();
     init_feed_processor_server();
-    MODEL4 = "claude-sonnet-4-20250514";
+    init_models_server();
+    MODEL4 = SONNET;
     MODEL_FAST3 = "claude-haiku-4-5-20251001";
   }
 });
@@ -18007,7 +18501,8 @@ var init_batch_orchestrator_server = __esm({
     init_token_log_server();
     init_kv_server();
     init_claude_server();
-    MODEL5 = "claude-sonnet-4-20250514";
+    init_models_server();
+    MODEL5 = SONNET;
     KV_TTL_SECONDS2 = 24 * 60 * 60;
   }
 });
@@ -19189,25 +19684,8 @@ var init_import_monitor_server = __esm({
 });
 
 // server/index.ts
+init_sentry_server();
 import "dotenv/config";
-
-// app/lib/sentry.server.ts
-import * as Sentry from "@sentry/node";
-var initialized = false;
-function initSentryServer() {
-  if (initialized) return;
-  const dsn = process.env["SENTRY_DSN"];
-  if (!dsn) return;
-  Sentry.init({
-    dsn,
-    environment: process.env["NODE_ENV"] ?? "development",
-    tracesSampleRate: 0.1,
-    sendDefaultPii: false
-  });
-  initialized = true;
-}
-
-// server/index.ts
 import express from "express";
 import compression from "compression";
 import { createRequestHandler } from "@react-router/express";
@@ -19236,13 +19714,13 @@ function safeEqual(a, b) {
   return timingSafeEqual(ab, bb);
 }
 async function drainMetaCapiFailures() {
-  const MAX_ATTEMPTS = 5;
+  const MAX_ATTEMPTS2 = 5;
   try {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
     const { and: and5, eq: eq19, isNull: isNull3, lt } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and5(isNull3(metaCapiFailures2.resolvedAt), lt(metaCapiFailures2.attempts, MAX_ATTEMPTS))).limit(100);
+    const rows = await db2.select().from(metaCapiFailures2).where(and5(isNull3(metaCapiFailures2.resolvedAt), lt(metaCapiFailures2.attempts, MAX_ATTEMPTS2))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
@@ -19291,6 +19769,16 @@ function createCronRoutes() {
       res.json({ ok: true, ...result });
     } catch (err) {
       console.error("[cron:deal-activator]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  cronRoute("/homepage-healthcheck", async (_req, res) => {
+    try {
+      const { runHomepageHealthcheck: runHomepageHealthcheck2 } = await Promise.resolve().then(() => (init_homepage_healthcheck_server(), homepage_healthcheck_server_exports));
+      const result = await runHomepageHealthcheck2();
+      res.status(result.ok ? 200 : 503).json(result);
+    } catch (err) {
+      console.error("[cron:homepage-healthcheck]", err);
       res.status(500).json({ error: String(err) });
     }
   });

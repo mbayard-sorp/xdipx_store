@@ -26,6 +26,11 @@ this one.
 
 ## Flow
 
+### Before anything — voice charter (mandatory)
+
+Read `docs/emma-voice.md`. All copy written or edited in this run must comply. If the charter is
+missing from the checkout, STOP and report instead of writing copy.
+
 ### 0. Lifecycle start + gate
 
 Start a run and check the gate, exactly as in Routine A but with `runType:'design'`:
@@ -70,7 +75,8 @@ imagery via `media-manager` (reuse-first), copy via `emma-copywriter`.
   the change is non-trivial.
 - `qa-reviewer` — typecheck, build, tests, and the prototype exercised in the preview MCP at 375px +
   desktop, with a CLS check and proof screenshots.
-- **Emma voice gate** — `emma-empathy-reviewer` signs off on all customer-facing copy.
+- **Emma voice gate** — `emma-empathy-reviewer` signs off on all customer-facing copy against
+  `docs/emma-voice.md` (the canonical voice charter).
 - `seo-pdp-auditor` + `aeo-geo-auditor` — when the change affects rendering, JSON-LD, canonical, the
   markdown/llms surface, or section structure.
 

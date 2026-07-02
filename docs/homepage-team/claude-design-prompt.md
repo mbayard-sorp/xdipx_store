@@ -25,6 +25,13 @@ the wireframe surfaced:
   duplicates. Notebook cards each also link a product/collection. Social proof keeps real first-name
   quotes with **no invented counts**.
 
+**v4 voice note (2026-07-02):** `docs/emma-voice.md` is now the canonical voice charter and
+supersedes any copy rule restated in this prompt. v4 also allows "sex toy" as a plain noun, bans
+"sexy" as a branding adjective, retires the house tics ("keep(s) coming back to", "flying off our
+shelves", "the one I'd..." as the default aside opener), and demotes Emma from hero top billing
+(no "Curated by Emma" kicker, no Emma aside above the fold; she lives in the mid-page intro).
+Where the prompt text below disagrees, the charter wins.
+
 The v1 prompt (initial generation) is preserved at the bottom for history.
 
 ---
@@ -52,7 +59,7 @@ VOICE CORRECTIONS (use this exact copy; do not reintroduce the old lines):
 
 REMAINING SECTION UPDATES:
 - 5 FIND YOUR WAY IN (mosaic): tiles "For her", "For him", "First time?", and a LARGER "Discover You" tile that uses a soft plum tint background (#F3E8FB), not a solid plum block.
-- 6 ROTATING RAILS: 2–3 rails; the FIRST is an always-present "Best sellers" anchor (kicker "WHAT'S WORKING", heading "The ones people keep coming back to."). Cards: small mono category kicker, product name, price in ink (not coral), "Take a peek →". One curated "Emma's edit" rail shows a single italic Emma aside under its lead card in sage with a ♥: "the one I'd point you to for slow nights."
+- 6 ROTATING RAILS: 2–3 rails; the FIRST is an always-present "Best sellers" anchor (kicker "WHAT'S WORKING", heading "Bestsellers, for good reason."). Cards: small mono category kicker, product name, price in ink (not coral), "Take a peek →". One curated "Emma's edit" rail shows a single italic Emma aside under its lead card in sage with a ♥: "an easy yes for slow nights, reviewers rate it highest for quiet."
 - 8 COUPLES: warm play-together banner, headline "Better together.", CTA "Show me →".
 - 9 dark "mood" band: kicker "STILL DECIDING?" (do not repeat "Discover You" here), headline "Tell me what you're into, or what you're curious about. Same thing." with one plum italic word, coral CTA "Find your fit →".
 - 10 FROM THE NOTEBOOK: kicker "EMMA'S READS", 3 article cards (image, headline, 2-line excerpt, read-time); each card also links a related product or collection, not just the article.
@@ -97,7 +104,7 @@ PAGE (top → bottom), render this REAL copy:
 
 5. FIND YOUR WAY IN — editorial category mosaic (asymmetric; 2-col mobile). Image-backed tiles with Newsreader labels: "For her", "For him", "First time?", and a LARGER, visually distinct (plum-soft) "Discover You" tile linking to the guided finder.
 
-6. ROTATING RAILS — 2 to 3 product rails (an always-present "Best sellers" first, then 1–2 rotating). Kicker + Newsreader heading per rail, e.g. "WHAT'S WORKING / The ones people keep coming back to." Cards: square image, mono category micro-kicker, Newsreader title, price in INK (not coral), "Take a peek →"; horizontal scroll on mobile. One curated rail ("Emma's edit") may show a single italic Emma aside under its lead card (sage ♥).
+6. ROTATING RAILS — 2 to 3 product rails (an always-present "Best sellers" first, then 1–2 rotating). Kicker + Newsreader heading per rail, e.g. "WHAT'S WORKING / Bestsellers, for good reason." Cards: square image, mono category micro-kicker, Newsreader title, price in INK (not coral), "Take a peek →"; horizontal scroll on mobile. One curated rail ("Emma's edit") may show a single italic Emma aside under its lead card (sage ♥).
 
 7. SOCIAL PROOF — heading "From people who took the plunge." 3 quote cards: 2–3 line quote, first name + initial only, no photos, NO invented aggregate numbers.
 

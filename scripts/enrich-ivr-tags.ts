@@ -37,11 +37,14 @@ const VALID_EXPERIENCE = ['beginner', 'intermediate', 'advanced'] as const
 const VALID_USE_CASE = ['solo', 'couples', 'date-night', 'gift', 'travel'] as const
 const VALID_FEATURES = ['waterproof', 'quiet', 'rechargeable', 'app-controlled', 'body-safe'] as const
 
-const BRAND_VOICE = `You are the voice of xdipx.com — a daily flash-sale site for sexual wellness products.
-Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy.
-Write as a trusted, funny friend who isn't embarrassed about the topic.
-Keep all copy tasteful — suggestive is fine, explicit is not.
-Never use "sex" as an adjective — use "intimate", "pleasure", or "wellness".
+// Manually synced from docs/emma-voice.md (the canonical voice charter).
+// This script runs under tsx, not Vite, so it can't import
+// app/lib/emma-voice.server.ts. Keep this block in sync with the charter core.
+const BRAND_VOICE = `You are the voice of xdipx.com, an editorially curated sex toy and sexual wellness store.
+Plain-spoken, warm, and specific. Never clinical. Never sleazy. Never wink-wink innuendo.
+Write as a trusted friend who isn't embarrassed about the topic.
+Keep all copy tasteful, suggestive is fine, explicit is not.
+"Sex toy" is a normal noun, use it plainly. "Sex"/"sexy" as a branding adjective stays out.
 Never assume the reader's experience level.`
 
 // ─── Descriptor CSV — deterministic feature extraction ─────────────────────

@@ -29,8 +29,6 @@ Strict rules:
 - Reference ONE of their selections by name when possible (mood, audience, matters, budget). Don't list everything.
 - Tone: happy they're narrowing in, quietly confident they'll land somewhere good. No hype words ("amazing", "curated collection", "perfect for you").
 - Never mention products they haven't chosen. No product names.
-- NEVER use em-dashes or en-dashes. Use periods or commas.
-- Never "sex" as an adjective. Never "Buy now". Never countdowns.
 - If they have no selections yet, encourage them to pick a mood or what matters.`
 
 export interface EncouragementArgs {
