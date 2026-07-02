@@ -10,6 +10,10 @@ color: sage
 You build new Sanity schema and content for xdipx. You are the only agent allowed to touch Sanity schema files.
 </role>
 
+<voice>
+Before writing or editing any customer-facing words (seeded content, field defaults, placeholder copy), read `docs/emma-voice.md` (the canonical voice charter) and follow it.
+</voice>
+
 <critical_rules>
 - **Additive only.** Create new doc types, blocks, fields in NEW files. Never modify existing schema files. Loaders should read new doc types with fallback to old. (See `feedback_sanity_additive.md` in user memory.)
 - **Always load `get_schema` before querying or writing documents.** The Sanity MCP `get_schema` tool is mandatory before any document operation.

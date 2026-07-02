@@ -58,8 +58,11 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
   // by field, so a half-filled draft never blanks out a section — anything
   // missing falls back to the discovery-derived defaults below. The LCP
   // product image always stays derived from `featured[0]`, never the doc.
-  const eyebrow = emmaHero?.eyebrow || 'Curated by Emma, your AI guide'
-  const aside = emmaHero?.aside || "Tell me what matters and I'll point you to the fit."
+  //
+  // Emma has no top billing in the hero (owner decision): the eyebrow is a
+  // plain category label, not an Emma byline, and the hero drops the Emma
+  // aside chip entirely. She still appears mid-page in MeetEmma() below.
+  const eyebrow = emmaHero?.eyebrow || 'Curated sexual wellness'
 
   return (
     <section className="bg-paper">
@@ -90,25 +93,6 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
               {emmaHero.body}
             </p>
           )}
-
-          {/* Emma byline chip */}
-          <div className="mt-7 flex items-center gap-3.5">
-            <OptimizedImage
-              src="/emma.png"
-              alt="Emma, your AI guide"
-              widths={[46, 92]}
-              fallbackWidth={92}
-              className="h-[46px] w-[46px] flex-none rounded-full object-cover ring-[3px] ring-sage/30"
-            />
-            <div className="leading-snug">
-              <div className="text-[14px] font-semibold text-ink" style={BODY}>
-                Emma, your guide
-              </div>
-              <div className="text-[13.5px] text-ink-3" style={BODY}>
-                {aside}
-              </div>
-            </div>
-          </div>
 
           {emmaHero?.pullQuote && (
             <p className="mt-6 text-[1.05rem] italic text-sage" style={DISPLAY}>
@@ -422,8 +406,8 @@ function RotatingRails({ rails }: { rails: Rail[] }) {
     <section id="rails" className="bg-paper-2 py-16 md:py-24">
         <Rail
           eyebrow="What's working"
-          heading="The ones people"
-          emphasis="keep coming back to."
+          heading="Bestsellers, with the"
+          emphasis="reviews to prove it."
           rail={best}
           leadPriority
         />
@@ -431,10 +415,10 @@ function RotatingRails({ rails }: { rails: Rail[] }) {
           <div className="pt-8">
             <Rail
               eyebrow="Emma's edit"
-              heading="The ones I'd point you to"
-              emphasis="first."
+              heading="Picked for"
+              emphasis="slow nights."
               rail={edit}
-              aside="the one I'd point you to for slow nights."
+              aside="Picked for pacing, not just power. Good for slowing down."
             />
           </div>
         )}

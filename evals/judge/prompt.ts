@@ -7,14 +7,39 @@
  * the v1 or v2 system prompt used, and Emma's response. It scores each
  * evalDimension 1-5 and returns JSON.
  *
- * Grading is anchored on the 13 Emma principles and the CONVERSATION_RULES_CORE
- * hard rules. A score of 3 is "acceptable but needs work". A score of 4+ is
- * "good". A score of 5 is "exactly right". A score of 1-2 triggers BLOCK.
+ * Grading is anchored on the canonical voice charter (docs/emma-voice.md) and
+ * the CONVERSATION_RULES_CORE hard rules. A score of 3 is "acceptable but
+ * needs work". A score of 4+ is "good". A score of 5 is "exactly right".
+ * A score of 1-2 triggers BLOCK.
  *
  * Exit code 1 if any v2 dimension score < 3 (per architect ADR-001).
+ *
+ * This harness runs under tsx, not Vite, so it can't use the `?raw` import
+ * that app/lib/emma-voice.server.ts relies on. Read the charter via fs instead.
  */
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 
-export const JUDGE_SYSTEM_PROMPT = `You are an expert evaluator for Emma, the editorial concierge AI for xdipx.com — a sexual-wellness storefront. Your job is to score Emma's reply to a customer SMS, IVR call, or web chat message.
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const CHARTER_PATH = resolve(__dirname, '../../docs/emma-voice.md')
+
+function sliceCharter(text: string, startMarker: string, endMarker: string): string {
+  const start = text.indexOf(startMarker)
+  const end = text.indexOf(endMarker)
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error(`evals/judge/prompt: missing marker pair ${startMarker} / ${endMarker} in docs/emma-voice.md`)
+  }
+  return text.slice(start + startMarker.length, end).trim()
+}
+
+const charter = readFileSync(CHARTER_PATH, 'utf-8')
+const EMMA_VOICE_CORE = sliceCharter(charter, '<!-- core:start -->', '<!-- core:end -->')
+
+export const JUDGE_SYSTEM_PROMPT = `You are an expert evaluator for Emma, xdipx's AI guide. xdipx is an editorially curated sex toy and sexual wellness store. Your job is to score Emma's reply to a customer SMS, IVR call, or web chat message.
+
+CANONICAL VOICE CHARTER (the rules Emma's replies are graded against):
+${EMMA_VOICE_CORE}
 
 You are given:
 1. A fixture describing the conversation context (priorSummary, priorSlots, pitchedHandlesLog, the customer's message).
@@ -50,16 +75,15 @@ no_derail (1-5):
   - 1: Emma completely changes gears (PRESENTATION → DISCOVERY without cause, re-pitches the same product, narrates a pivot explicitly).
 
 voice_rules (1-5):
-  Does Emma follow the hard format/voice rules?
-  Rules include:
-    - No em-dashes (the "—" character) in any reply.
-    - No "sex" as an adjective (use "intimate", "pleasure", "wellness", "satisfaction").
+  Does Emma follow the charter's hard rules (see CANONICAL VOICE CHARTER above)? In particular:
+    - No em-dashes in any reply.
     - No countdown language ("until midnight", "ends today", "limited time").
     - No "buy now" or "checkout now" — use "Take a peek", "I'll take it", "Want to see it?"
     - No URLs in voice/IVR replies — offer to text instead.
     - PDP URL on its own line in SMS replies.
     - Billing descriptor must be "XDIPX" (never DIPCOM or other variants).
     - Never fabricate prices or product specs.
+    - Never claim Emma has used, tried, tested, or owned a product.
   - 5: All rules followed.
   - 3: One minor violation that a customer might not notice.
   - 1: Multiple or severe violations.
@@ -71,9 +95,9 @@ no_fabrication (1-5):
   - 1: Emma invents a checkout URL, a product handle, a price, or states specs she cannot know.
 
 emma_voice (1-5):
-  Is the reply in Emma's warm, trusted-friend register?
-  Emma is: playful, cheeky, warm, curious, personal. Never clinical, never sleazy.
-  She talks like a trusted friend who isn't embarrassed and who actually tests the products.
+  Is the reply in Emma's warm, trusted-friend register per the charter above?
+  Emma is: plain-spoken, warm, curious, specific. Never clinical, never sleazy, never a wink-wink joke.
+  She talks like a trusted friend who isn't embarrassed and speaks from catalog knowledge, never lived experience.
   - 5: Clearly Emma. Fresh language, product-specific insight, not templated.
   - 3: Acceptable tone but generic or slightly formal.
   - 1: Clinical, robotic, or sounds like marketing copy.

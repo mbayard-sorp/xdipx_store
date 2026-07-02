@@ -46,7 +46,7 @@ const SMS_TEMPLATES: ReadonlyArray<(slots: UpsellTemplateSlots) => string> = [
     `If you're new to this, trust me on ${name} (${price}). It's the difference between 'this is fine' and 'oh, that's why people love this'.\n\n${pdpUrl}\n\n👍 to add it, 'no thanks' to skip.`,
 
   ({ name, price, pdpUrl }) =>
-    `Worth knowing: ${name} (${price}) is the one folks keep coming back for. The ones who skip it always ask what they missed.\n\n${pdpUrl}\n\n👍 / 'yes' to toss it in, 'no' to skip.`,
+    `Worth knowing: ${name} (${price}) is a repeat buy for a reason. The ones who skip it always ask what they missed.\n\n${pdpUrl}\n\n👍 / 'yes' to toss it in, 'no' to skip.`,
 
   ({ name, price, pdpUrl }) =>
     `Honest pro tip: ${name} (${price}) turns a good experience into a great one. Most folks regret skipping it more than any toy choice.\n\n${pdpUrl}\n\n👍 to add it, 'no' to skip.`,
@@ -66,7 +66,7 @@ const WEB_TEMPLATES: ReadonlyArray<(slots: UpsellTemplateSlots) => string> = [
     `If you're new to this, trust me on **${name}** (${price}). It's the difference between 'this is fine' and 'oh, that's why people love this'. Want it?`,
 
   ({ name, price }) =>
-    `Worth knowing: **${name}** (${price}) is the one folks keep coming back for. The ones who skip it always ask what they missed. Add it?`,
+    `Worth knowing: **${name}** (${price}) is a repeat buy for a reason. The ones who skip it always ask what they missed. Add it?`,
 
   ({ name, price }) =>
     `Honest pro tip: **${name}** (${price}) turns a good experience into a great one. Most folks regret skipping it more than any toy choice. Toss it in?`,
@@ -89,7 +89,7 @@ const VOICE_TEMPLATES: ReadonlyArray<(slots: UpsellTemplateSlots) => string> = [
     `If you're new to this, trust me on ${name}, runs about ${price}. It's the difference between this is fine and oh, that's why people love this. Add it for you?`,
 
   ({ name, price }) =>
-    `Worth knowing, ${name} at ${price} is the one folks keep coming back for. The ones who skip it always ask what they missed. Want me to toss it in?`,
+    `Worth knowing, ${name} at ${price} is a repeat buy for a reason. The ones who skip it always ask what they missed. Want me to toss it in?`,
 
   ({ name, price }) =>
     `Honest pro tip, ${name} at ${price} turns a good experience into a great one. Most folks regret skipping it more than any toy choice. Should I add it?`,

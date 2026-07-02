@@ -13,8 +13,12 @@ brand's AI wellness guide), leads a cold visitor into a low-friction **guided pa
 trust — while keeping high-intent products and the team's experiment surface prominent. North star:
 **drive sales.** Brand: tasteful editorial, never explicit, age-gated, discreet (billed `XDIPX`),
 v3 tokens (white paper, coral accent, plum emphasis, Newsreader / DM Sans / JetBrains-Mono kickers,
-22px radii, editorial reveal motion). No emoji in headings; `♥` only in CTAs/Emma asides; no
-em-dashes; no countdowns; Emma never claims lived experience.
+22px radii, editorial reveal motion). Voice: all copy follows `docs/emma-voice.md` (the canonical
+voice charter). Note the v4 charter changes (2026-07-02): "sex toy" is a normal noun, "sexy" as a
+branding adjective is banned, the house tics ("keep(s) coming back to", "the one I'd..." aside
+openers) are retired, and Emma no longer gets hero top billing (no "Curated by Emma" eyebrow, no
+Emma aside above the fold; she lives in the mid-page intro and guided entries). Where this brief's
+copy or hero framing disagrees, the charter wins.
 
 ## Locked section order (mobile-first)
 

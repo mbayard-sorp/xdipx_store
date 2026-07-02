@@ -4,16 +4,13 @@
  */
 import Anthropic from '@anthropic-ai/sdk'
 import { SONNET } from './models.server'
+import { EMMA_VOICE_CORE } from './emma-voice.server'
 import type { Review, ReviewAIAnalysis } from '~/types/reviews'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 const MODEL  = SONNET
 
-const SYSTEM_PROMPT = `You are the voice of xdipx.com, an editorially curated sexual wellness storefront.
-Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy.
-Write as a trusted, funny friend who isn't embarrassed about the topic.
-Keep all copy tasteful — suggestive is fine, explicit is not.
-Never use "sex" as an adjective — use "intimate", "pleasure", or "wellness".`
+const SYSTEM_PROMPT = EMMA_VOICE_CORE
 
 /** Strip markdown code fences that Claude sometimes wraps JSON in. */
 function stripFences(raw: string): string {

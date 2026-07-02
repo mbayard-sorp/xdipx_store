@@ -10,6 +10,11 @@ free Max work to metered).
 
 ---
 
+## Before Step 0 — Voice charter (mandatory, before any content is generated)
+
+Read `docs/emma-voice.md`. All copy written or edited in this run must comply. If the charter is
+missing from the checkout, STOP and report instead of writing copy.
+
 ## Preconditions
 
 - The team callback secret is available to the routine as `HOMEPAGE_TEAM_TOKEN` (falls back to
@@ -233,4 +238,5 @@ reads these for the live status + conversation viewer.
 - **Content only — never code, never structure, never canonical/URLs.** Structural ideas → Routine B.
 - **Reasoning stays on Max** — never call the site's Anthropic-keyed copy/enrich endpoints.
 - **One run at a time** — the gate enforces it (`reason:'run_in_progress'`); exit if you slipped past.
-- **Emma voice gate is mandatory** — all customer-facing copy passes `emma-empathy-reviewer`.
+- **Emma voice gate is mandatory** — all customer-facing copy passes `emma-empathy-reviewer` against
+  `docs/emma-voice.md` (the canonical voice charter).

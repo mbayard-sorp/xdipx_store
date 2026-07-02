@@ -20,17 +20,17 @@ const WAND: Pool = [
   "Start low. Loud wands deserve a gentle intro.",
   "Built for the nights you want zero subtlety.",
   "If it's your first wand, keep a free hand. The lowest setting is louder than it looks.",
-  "The one to point you to when nothing else is cutting it ♥",
+  "Reviewers reach for this one when nothing else is cutting it ♥",
   "Neighbors will know. Worth it.",
 ]
 
 const VIBRATOR: Pool = [
   "Small, mighty, and weirdly easy to recommend to anyone.",
-  "Reviewers keep coming back to this one on slow Sunday mornings. The repeat-buy rate says it all ♥",
+  "Reviewers reach for this one most on slow Sunday mornings. The repeat-buy rate says it all ♥",
   "Quiet enough for a roommate situation, loud enough where it counts.",
   "Known for landing in the top drawer, not the forgotten back one.",
   "Honestly the ratio of fuss to payoff here is very in your favor.",
-  "If you're new to this category, this is the one I'd point a friend toward first.",
+  "If you're new to this category, reviewers rate this one best for a first try.",
   "Discreet shape, not-so-discreet reputation ♥",
 ]
 

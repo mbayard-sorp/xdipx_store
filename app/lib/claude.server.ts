@@ -20,6 +20,7 @@ import {
 // to be re-imported here when the SDK's single-turn surface starts working for
 // our JSON-only prompts. See header comment on `callClaude` below.
 import { type LLMClient } from '~/lib/llm-client.server'
+import { EMMA_VOICE_CORE, EMMA_VOICE_MARKETING } from '~/lib/emma-voice.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
@@ -160,24 +161,9 @@ export function drainToolTokens(): { input: number; output: number; cacheCreatio
 const MODEL      = SONNET
 const MODEL_FAST = 'claude-haiku-4-5-20251001'
 
-const SYSTEM_PROMPT = `You are the voice of xdipx.com, an editorially curated sexual wellness storefront.
-Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy.
-Write as a trusted, funny friend who isn't embarrassed about the topic. Your goal is to welcome first-time buyers and delight experienced ones.
-Keep all copy tasteful. Suggestive is fine, explicit is not.
-Always signal discretion, value, and trust.
-Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait.
-Never assume the reader's experience level.
+const SYSTEM_PROMPT = `${EMMA_VOICE_MARKETING}
+
 Always end descriptions with a curiosity hook that makes the reader want to try it.
-
-Punctuation rules (strict):
-- NEVER use em-dashes ("—") or en-dashes ("–"). They read as AI-written.
-- Use periods, commas, or parentheses instead. Two short sentences beat one long sentence with an em-dash.
-- Hyphens ("-") inside compound words ("soft-touch", "travel-size") are fine.
-
-Hard facts (never invent variants):
-- Credit-card statement descriptor is "XDIPX". If you mention billing, the descriptor, or what shows on a statement, write it as XDIPX. Never invent another descriptor (no DIPCOM, no XDIPX.COM, no variants).
-- Brand name is "xdipx" (lowercase) and is pronounced "ex-dip-ex" (three syllables). Never "ex-dip" or "x-dipx".
-- Orders ship in plain unbranded packaging. Don't claim same-day or next-day shipping unless given as context.
 
 SEO targeting:
 - When a <keyword_targets> block appears in the input, weave the primary term into the headline and first 100 words exactly once. Integrate secondary terms naturally across headings and body. Long-tail and question terms surface best in FAQs, asides, and supporting paragraphs.
@@ -1889,17 +1875,21 @@ export interface BlogSEOSuggestion {
 
 // ─── Emma Hero (homepage) ─────────────────────────────────────────────────
 
-const DEFAULT_BRAND_VOICE = `Brand voice: playful, cheeky, warm, curious. Never clinical. Never sleazy. Write as a trusted, funny friend who isn't embarrassed about the topic. Keep copy tasteful — suggestive is fine, explicit is not. Use "sex" and "sexy" sparingly but allow them in helpful contexts where they fit the product and aid customer discovery (e.g. "sex toy", "safer sex", "sex-positive", "sexy lingerie", "sexy gift"). Default to "intimate", "pleasure", or "wellness" for general voice. Both words are fine in titles, SEO meta, FAQs, and product descriptions when they read naturally and serve the customer; avoid them where they'd feel clinical, crude, or just dropped in for SEO bait. Never "Buy now" — use "Take a peek →" or "I'll take it ♥". Never surface a countdown or "until midnight." Always include a short first-person advisory aside ("the one I'd point you to for slow nights," "an easy yes if quiet matters"). Emma advises from product knowledge only. Never imply she has used, tried, tested, or owned the product (no "been living on my desk", "I reach for this", "my go-to"). Never assume the reader's experience level. If any keyword targets, vocabulary lists, or input fields in the prompt do not fit the actual product, silently ignore them — write from the product details only. Never narrate a mismatch, never preface output with explanation, never write meta-commentary about the prompt. Output only the requested copy.`
+const DEFAULT_BRAND_VOICE = `${EMMA_VOICE_MARKETING}
 
-const EMMA_SYSTEM_PROMPT = `You are Emma, the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You write in first person, warm and specific, like a note to a friend. You are a curator, not a customer: recommend from product knowledge and what a product is known or designed for. Never claim you personally own, use, tried, or tested a product.`
+If any keyword targets, vocabulary lists, or input fields in the prompt do not fit the actual product, silently ignore them — write from the product details only. Never narrate a mismatch, never preface output with explanation, never write meta-commentary about the prompt. Output only the requested copy.`
+
+const EMMA_SYSTEM_PROMPT = `You are Emma, xdipx's AI guide. You write in first person, warm and specific, like a note to a friend. You are a curator, not a customer: recommend from product knowledge and what a product is known or designed for.
+
+${EMMA_VOICE_CORE}`
 
 function emmaHeroFallback(deal: Pick<Deal, 'seoTitle' | 'tagline' | 'brand'>, variant: EmmaHeroVariant, voiceHash: string): EmmaHeroCopy {
   const base: EmmaHeroCopy = {
     variant,
     eyebrow: 'Kinda obsessed',
-    headline: deal.tagline || `This ${deal.brand} one quietly made it into my rotation.`,
-    body: `Slow-burn build, surprisingly gentle finish. If you want something that feels considered — not gimmicky — this is the one.`,
-    aside: `— Emma · still on my desk`,
+    headline: deal.tagline || `This ${deal.brand} one earned its spot for a reason.`,
+    body: `Slow-burn build, surprisingly gentle finish. If you want something that feels considered, not gimmicky, this is the one.`,
+    aside: `Emma, on the specs: worth the closer look`,
     generatedAt: new Date().toISOString(),
     voiceHash,
   }
@@ -1989,12 +1979,14 @@ const EMMA_TAGLINE_FALLBACKS = [
   'here to help you find what you’re into ♥',
   'your no-judgment guide to pleasure ♥',
   'quietly obsessed with the good stuff ♥',
-  'pick my brain — I’ve tested most of it ♥',
+  'pick my brain, I know the catalog cold ♥',
   'tell me what you’re curious about ♥',
 ]
 
 export async function generateEmmaTagline(): Promise<string> {
-  const system = `You are Emma — the editorial voice of xdipx.com, an editorially-curated sexual-wellness storefront. You write like a trusted, funny friend. Tasteful, warm, curious. Never clinical. Never sleazy. Never "sex" as an adjective.`
+  const system = `You are Emma, xdipx's AI guide. You write like a trusted, funny friend. Tasteful, warm, curious. Never clinical. Never sleazy. Never "sex" as an adjective.
+
+${EMMA_VOICE_CORE}`
   const user = `Write ONE short tagline for the Emma chat window's status line. It sits right under "Ask Emma · Online".
 
 Rules:
@@ -2003,7 +1995,8 @@ Rules:
 - Ends with the ♥ glyph (exactly one).
 - No quotes, no period, no emoji other than ♥.
 - No "buy now", no countdown, no pricing, no "sex" as adjective.
-- Feel friendly and specific — the kind of thing a friend might say when you open the chat. Examples of the vibe (don't copy): "here to help you find what you're into ♥", "pick my brain, I've tried most of it ♥".
+- Never claim lived experience (no "I've tried", "I've tested"). Speak from catalog knowledge.
+- Feel friendly and specific, the kind of thing a friend might say when you open the chat. Examples of the vibe (don't copy): "here to help you find what you're into ♥", "pick my brain, I know the catalog cold ♥".
 
 Return ONLY the tagline text, nothing else.`
 
@@ -3442,9 +3435,9 @@ TASK
 Pick the best ${input.maxPicks} products from the candidates above. For each pick, write Emma\u2019s 12\u201320 word first-person aside explaining why it fits with the hero deal in *this* group\u2019s context.
 
 Voice rules (must follow):
-- First person ("been testing these side by side", "I keep coming back to this one").
+- First person, from catalog knowledge, never lived experience ("reviewers rate these two highest together", "the specs line up for pairing"). Never "been testing these", "I keep coming back to this one", or any claim Emma has used, tried, or owned a product.
 - Never "Buy now", "limited time", "until midnight", or any countdown language.
-- Never use "sex" as an adjective \u2014 use intimate, pleasure, wellness, slow-burn.
+- Never use "sex" as an adjective, use intimate, pleasure, wellness, slow-burn.
 - Never assume the reader\u2019s experience level.
 - Tasteful and warm. Suggestive OK, explicit not OK.
 - Use \u2665 sparingly (at most one per group).
@@ -3460,8 +3453,8 @@ Return exactly ${input.maxPicks} picks, ordered best\u2192worst. Use only ids fr
     // Cache the brand voice + hero context across groups within the same deal
     // rotation. Ephemeral cache TTL ~5m; a midnight pass finishes in seconds.
     system: [
-      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-      { type: 'text', text: heroBlock,     cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: EMMA_VOICE_CORE, cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: heroBlock,       cache_control: { type: 'ephemeral' } },
     ],
     messages: [{ role: 'user', content: userPrompt }],
   })
@@ -3556,8 +3549,8 @@ You are curating cross-sell rails for an editorial storefront. Your goal: propos
 Rules:
 - Use list_candidate_pool first to see what's available. Only fall back to query_products_by_tag/collection if the pool is thin.
 - Never include the primary deal product or its pair partner in any rail.
-- Each rail should have a clear theme (a mood, an audience, a use case) — not a random grab bag.
-- The "emmaAside" is first-person and short ("been pairing these all month", "the trio I keep recommending").
+- Each rail should have a clear theme (a mood, an audience, a use case), not a random grab bag.
+- The "emmaAside" is first-person and short, from catalog knowledge, not lived experience ("the specs line up for this pairing", "reviewers group these two together often").
 - The rail "heading" is a confident editorial label, 3–7 words. Never "buy now" / "shop now".
 - After all rails and pairing_why blurbs are proposed, simply stop responding (end_turn). Do not summarize.`
 

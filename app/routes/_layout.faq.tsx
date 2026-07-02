@@ -43,7 +43,7 @@ const FAQ_SECTIONS = [
     items: [
       {
         q: 'What\'s your return policy?',
-        a: 'Unopened items in original packaging within 14 days. Hygiene restrictions apply to used products. Something wrong? Email us at hello@xdipx.com — we\'ll make it right.',
+        a: 'Unopened items in original packaging within 30 days. Hygiene restrictions apply to used products. Something wrong? Email us at hello@xdipx.com, we\'ll make it right.',
       },
     ],
   },
