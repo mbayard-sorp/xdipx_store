@@ -98,13 +98,30 @@ the cleaned top-100 list to pick the **brand-representative hero + featured prod
 copy (taglines, hero asides, section blurbs). Gate the result through `emma-empathy-reviewer` (the
 Emma voice gate). Emit a `decision` event recording which products Emma chose and why.
 
-## Step 4 — Imagery (reuse or generate)
+## Step 4 — Imagery (reuse or generate, and place)
 
-Hand the chosen products to `media-manager`. **Reuse-before-generate:** it checks Shopify Files for a
-fitting asset first; only generates (fal.ai primary → Imagen → existing catalog photo) when none
-exists. Before each generation, re-check the gate / your tracked `remainingCents`; respect
-`homepage_team_max_images`. `generateImage()` logs image cost — but to keep the dashboard live, also
-post the spend yourself (Step 6) when the routine drives generation.
+Hand the chosen surfaces to `media-manager`. **Reuse-before-generate:** it checks existing **Sanity**
+assets (homepage art lives in Sanity, not Shopify Files) for a fitting image first; only generates when
+none fits. Editorial mood scenes only (morning light, linen, ceramic, product-on-a-styled-surface) —
+never a body, never explicit.
+
+Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counter:
+
+1. **Re-check the gate before each generation** (or decrement your tracked `remainingCents`). Hard-stop
+   the loop when `remainingCents <= 0` OR `imagesSoFar >= homepage_team_max_images` (12). The gate now
+   also returns `imagesToday` + `maxImagesPerDay` and refuses with `reason:'over_image_cap'` server-side,
+   so a stray extra call is rejected — but stop yourself first.
+2. `media-manager` runs `scripts/gen-homepage-image.ts --target block|tile|promo --block-key <k>
+   [--tile-key <k>] --prompt "<scene>" --alt "<screen-reader alt>" --images-so-far <n>
+   --caller "merch-routine/<surface>"`.
+3. The script **gates → generates (fal FLUX → Imagen) → uploads to a Sanity asset → patches
+   `singleton.homepage` → posts spend → prints a JSON manifest**. Read the manifest; if
+   `placed:true`, increment `imagesSoFar`. If `skipped:true`, stop the imagery loop.
+
+**Placement happens here, in Step 4** (the script patches the image directly). Do NOT re-post image
+spend in Step 6 — the script already posts exactly one `{kind:'image'}` row per placed image (it runs
+`generateImage` with internal cost-logging disabled so the row is not double-counted). Step 6 is for
+**Max reasoning tokens only.**
 
 ## Step 5 — Write Sanity + Shopify (diff before write)
 
@@ -115,6 +132,7 @@ post the spend yourself (Step 6) when the routine drives generation.
 |---|---|---|
 | Curated rails | `emmaCuratedRail` docs (`target:"homepage"`, `status:"live"`, `active:true`) **referenced** in `singleton.homepage.sections[]` as `emmaCuratedRailRef`. `buildHomeContentBlocks()` resolves `productHandles`. The storefront shows up to `MAX_TEAM_RAILS` (4); with zero refs it falls back to the algorithmic discovery rails. | storefront `/` |
 | Notebook | `editorialTiles` block in `singleton.homepage.sections[]` (`tiles[]`: label/body/link/linkLabel/emoji/image). | storefront `/` |
+| Wayfinder mosaic | `wayfinderMosaic` block in `singleton.homepage.sections[]` — the "Find your way in" tiles + "Discover You" promo. `tiles[]` (label/link/emmaAside/image, 3-4) + `promo` (eyebrow/heading/emphasis/body/cta/image). Empty/unset → the storefront renders its hardcoded fallback tiles (never blank). Place tile images via `--target tile --tile-key`, the promo via `--target promo`. | storefront `/` |
 | Announcement ticker | `announcementBar` messages in `singleton.homepage` (the layout pins it site-wide). | all pages |
 
 **Do NOT** expect these to change the storefront: the hero (derived from discovery `featured`, not
@@ -139,15 +157,18 @@ curl -s -X POST "$BASE_URL/api/homepage-team/spend" \
   -d '{"kind":"tokens","source":"agent-sdk","model":"claude-sonnet-4-6","feature":"homepage-merchandise","inputTokens":12000,"outputTokens":3000,"caller":"homepage-orchestrator"}'
 ```
 
-For each image generated (the real metered cost):
+**Do not post image spend here.** `scripts/gen-homepage-image.ts` already posts exactly one
+`{kind:"image", feature:"homepage-images", ...}` row per placed image in Step 4 (and disables
+`generateImage`'s internal cost log so it is not double-counted). Re-posting here would double the
+image spend and trip the $/day cap at half budget. For reference, the row the script sends:
 
-```bash
-curl -s -X POST "$BASE_URL/api/homepage-team/spend" \
-  -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"kind":"image","feature":"homepage-images","model":"fal/flux-dev","count":1,"caller":"media-manager","productId":"<gid>","sku":"<nalpacSku>"}'
+```jsonc
+// posted BY the script, not by you:
+{"kind":"image","feature":"homepage-images","model":"fal/flux-dev","count":1,"caller":"merch-routine/<surface>"}
 ```
 
-Both land in `api_token_log` and surface on `/admin/usage`. Image rows are what the $/day cap governs.
+Token rows (above) and image rows (from Step 4) both land in `api_token_log` and surface on
+`/admin/usage`. Image rows are what the $/day cap governs.
 
 ## Step 7 — Self-validate the render
 

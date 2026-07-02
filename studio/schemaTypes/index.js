@@ -16,6 +16,7 @@ import blogVideoEmbed     from '../schemas/blocks/blogVideoEmbed.js'
 import richText           from '../schemas/blocks/richText.js'
 import editorBio          from '../schemas/blocks/editorBio.js'
 import productFaq         from '../schemas/blocks/productFaq.js'
+import wayfinderMosaic    from '../schemas/blocks/wayfinderMosaic.js'
 import homepageSections   from '../schemas/homepageSections.js'
 import siteSettings       from '../schemas/siteSettings.js'
 import pdpDefaults        from '../schemas/pdpDefaults.js'
@@ -122,6 +123,8 @@ export const schemaTypes = [
   bonusDeal,
   trustBar,
   editorBio,
+  // Plane B — team-editable "Find your way in" mosaic (additive homepage block)
+  wayfinderMosaic,
   // PDP — per-product FAQ entries (Q&A pairs, additive).
   productFaq,
   // PDP — rich sensation dial dimension (label + 1/3/5 scale docs).

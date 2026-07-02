@@ -28,12 +28,13 @@ import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import type { StorefrontData } from '~/lib/storefront-home.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
-import type { EmmaHeroSettings } from '~/types/cms'
+import type { EmmaHeroSettings, WayfinderMosaicBlock } from '~/types/cms'
 
 /* Team-controlled Sanity block types the storefront renders (everything else
    in `singleton.homepage` is shell-owned or legacy and intentionally ignored). */
 const TEAM_RAIL_TYPE = 'emmaCuratedRail'
 const TEAM_NOTEBOOK_TYPE = 'editorialTiles'
+const TEAM_WAYFINDER_TYPE = 'wayfinderMosaic'
 const MAX_TEAM_RAILS = 4
 
 const MONO = { fontFamily: 'var(--font-mono)' } as const
@@ -245,55 +246,120 @@ const MOSAIC_TILES = [
   { label: 'First time?', to: '/discover' },
 ]
 
-function FindYourWayIn() {
+interface WayfinderTileNormalized {
+  _key: string
+  label: string
+  link: string
+  emmaAside?: string
+  image?: { url?: string; alt?: string }
+}
+
+function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } = {}) {
+  const tiles: WayfinderTileNormalized[] = block?.wayfinderTiles?.length
+    ? block.wayfinderTiles
+    : MOSAIC_TILES.map(t => ({ _key: t.label, label: t.label, link: t.to }))
+
+  const eyebrow = block?.eyebrow || 'Where to begin'
+  const heading = block?.heading || 'Find your way in.'
+  const emphasis = block?.emphasis || 'way'
+  // Render the heading with the emphasis word italicized, matching the
+  // hardcoded fallback's `Find your <em>way</em> in.` structure.
+  const headingParts = heading.includes(emphasis)
+    ? heading.split(emphasis)
+    : [heading, '']
+
+  const promo = block?.promo
+  const promoEyebrow = promo?.eyebrow || 'Discover You'
+  const promoHeading = promo?.heading || 'Not sure where you land? Discover You.'
+  const promoEmphasis = promo?.emphasis || 'Discover'
+  const promoHeadingParts = promoHeading.includes(promoEmphasis)
+    ? promoHeading.split(promoEmphasis)
+    : [promoHeading, '']
+  const promoBody = promo?.body
+    || "Answer a few quiet questions and Emma builds you a short list that actually fits."
+  const promoCtaLabel = promo?.ctaLabel || 'Find your fit →'
+  const promoCtaLink = promo?.ctaLink || '/discover'
+
   return (
     <section className="bg-paper">
         <div className="mx-auto max-w-[1320px] px-6 py-16 md:px-10 md:py-24">
           <p className="mb-3.5 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
-            Where to begin
+            {eyebrow}
           </p>
           <h2
             className="mb-9 text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]"
             style={DISPLAY}
           >
-            Find your <em className="em">way</em> in.
+            {headingParts[0]}<em className="em">{emphasis}</em>{headingParts[1]}
           </h2>
 
           <div className="mb-4 flex flex-wrap gap-4">
-            {MOSAIC_TILES.map(t => (
-              <Link
-                key={t.label}
-                to={t.to}
-                className="flex min-h-[200px] flex-1 basis-[180px] items-end rounded-[var(--radius-lg)] border border-line bg-paper-3 p-5 transition-transform hover:-translate-y-0.5"
-              >
-                <span className="text-[1.5rem] text-ink" style={DISPLAY_MED}>
-                  {t.label}
-                </span>
-              </Link>
-            ))}
+            {tiles.map(t => {
+              const hasImage = !!t.image?.url
+              return (
+                <Link
+                  key={t._key}
+                  to={t.link}
+                  className="relative flex min-h-[200px] flex-1 basis-[180px] items-end overflow-hidden rounded-[var(--radius-lg)] border border-line bg-paper-3 p-5 transition-transform hover:-translate-y-0.5"
+                >
+                  {hasImage && (
+                    <OptimizedImage
+                      src={t.image!.url!}
+                      alt={t.image!.alt ?? t.label}
+                      sizes="(max-width: 768px) 100vw, 33vw"
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  )}
+                  <div className="relative z-[1]">
+                    <span
+                      className="text-[1.5rem] text-ink"
+                      style={{ ...DISPLAY_MED, ...(hasImage ? { color: 'white' } : {}) }}
+                    >
+                      {t.label}
+                    </span>
+                    {t.emmaAside && (
+                      <p
+                        className="mt-1 text-[13.5px] italic text-sage"
+                        style={{ ...DISPLAY, ...(hasImage ? { color: 'white' } : {}) }}
+                      >
+                        ♥ {t.emmaAside}
+                      </p>
+                    )}
+                  </div>
+                </Link>
+              )
+            })}
           </div>
 
-          {/* Discover You — larger plum-soft tile */}
+          {/* Discover You — larger plum-soft tile (or promo.image when set) */}
           <Link
-            to="/discover"
-            className="flex flex-wrap items-center justify-between gap-5 rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
+            to={promoCtaLink}
+            className="relative flex flex-wrap items-center justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
           >
-            <div className="flex-1 basis-[320px]">
+            {promo?.image?.url && (
+              <OptimizedImage
+                src={promo.image.url}
+                alt={promo.image.alt ?? promoHeading}
+                sizes="100vw"
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+            )}
+            <div className="relative z-[1] flex-1 basis-[320px]">
               <p className="mb-3.5 text-[11px] uppercase tracking-[0.18em] text-plum" style={MONO}>
-                Discover You
+                {promoEyebrow}
               </p>
               <h3 className="mb-3 text-[1.7rem] leading-[1.1] text-ink md:text-[2.5rem]" style={DISPLAY}>
-                Not sure where you land? <em className="em">Discover</em> You.
+                {promoHeadingParts[0]}<em className="em">{promoEmphasis}</em>{promoHeadingParts[1]}
               </h3>
               <p className="max-w-[46ch] text-[16px] leading-relaxed text-ink-3" style={BODY}>
-                Answer a few quiet questions and Emma builds you a short list that actually fits.
+                {promoBody}
               </p>
             </div>
             <span
-              className="whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white"
+              className="relative z-[1] whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white"
               style={BODY}
             >
-              Find your fit →
+              {promoCtaLabel}
             </span>
           </Link>
         </div>
@@ -511,7 +577,18 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: Sto
     <>
       <Hero featured={featured} emmaHero={emmaHero} />
       <MeetEmma />
-      <FindYourWayIn />
+
+      {/* Find your way in — the team's `wayfinderMosaic` block when published,
+          otherwise the hardcoded fallback (unset block, pending promise, AND
+          rejected promise all render the same fallback — never empty boxes). */}
+      <Suspense fallback={<FindYourWayIn />}>
+        <Await resolve={contentBlocks} errorElement={<FindYourWayIn />}>
+          {({ sections }) => {
+            const block = sections.find(b => b._type === TEAM_WAYFINDER_TYPE) as WayfinderMosaicBlock | undefined
+            return <FindYourWayIn block={block} />
+          }}
+        </Await>
+      </Suspense>
 
       {/* Rotating rails — the team's `emmaCuratedRail` blocks when published,
           otherwise the discovery "best of" rails (cold-start fallback). The

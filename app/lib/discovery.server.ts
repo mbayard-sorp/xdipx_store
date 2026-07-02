@@ -10,7 +10,7 @@
  */
 
 import { adminGraphQL } from '~/lib/shopify.server'
-import { kvGet, kvSet } from '~/lib/kv.server'
+import { kvGet, kvSet, isKvConfigured } from '~/lib/kv.server'
 import type { ProductTypeDial } from '~/types'
 import type {
   Category,
@@ -591,6 +591,19 @@ export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise
   if (!opts.force) {
     const cached = await kvGet<DiscoveryProduct[]>(INDEX_KEY)
     if (cached && Array.isArray(cached) && cached.length > 0) return cached
+  }
+
+  // Local dev (in-memory KV fallback, e.g. KV_DISABLE=1): the fire-and-forget
+  // rebuild trigger no-ops because there's no BASE_URL to reach, so the index
+  // would never populate and every chip filter would render empty. Build inline
+  // and seed the in-memory cache so pills show without a live cron endpoint.
+  if (!isKvConfigured()) {
+    const fresh = await buildDiscoveryIndex()
+    if (fresh.length > 0) {
+      await kvSet(INDEX_KEY, fresh, INDEX_TTL_SECONDS)
+      await kvSet(VOCAB_KEY, computeVocab(fresh), VOCAB_TTL_SECONDS)
+    }
+    return fresh
   }
 
   // KV miss (or force refresh): trigger a background rebuild and return []
