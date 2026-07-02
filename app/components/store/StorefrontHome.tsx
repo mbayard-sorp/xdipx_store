@@ -28,7 +28,7 @@ import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import type { StorefrontData } from '~/lib/storefront-home.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
-import type { WayfinderMosaicBlock } from '~/types/cms'
+import type { EmmaHeroSettings, WayfinderMosaicBlock } from '~/types/cms'
 
 /* Team-controlled Sanity block types the storefront renders (everything else
    in `singleton.homepage` is shell-owned or legacy and intentionally ignored). */
@@ -50,23 +50,46 @@ const MOOD_PILLS = ['Just curious', 'Slow nights', 'For two', 'Hands-free', 'Sur
    Text column on the left, one large static product still on the right (the
    LCP candidate — priority, fixed aspect, never wrapped in Reveal). */
 
-function Hero({ featured }: { featured: DiscoveryProduct[] }) {
+function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?: EmmaHeroSettings | null }) {
   const lead = featured[0]
   const peekHref = lead ? `/products/${lead.handle}` : '/vault'
+
+  // Team-managed `singleton.emmaHero` (Sanity) drives the text/config, field
+  // by field, so a half-filled draft never blanks out a section — anything
+  // missing falls back to the discovery-derived defaults below. The LCP
+  // product image always stays derived from `featured[0]`, never the doc.
+  const eyebrow = emmaHero?.eyebrow || 'Curated by Emma, your AI guide'
+  const aside = emmaHero?.aside || "Tell me what matters and I'll point you to the fit."
+
   return (
     <section className="bg-paper">
       <div className="mx-auto grid max-w-[1320px] items-center gap-10 px-6 py-10 md:grid-cols-2 md:gap-16 md:px-10 md:py-16">
         {/* text column */}
         <div className="min-w-0">
           <p className="mb-5 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
-            Curated by Emma, your AI guide
+            {eyebrow}
           </p>
-          <h1
-            className="text-[2.7rem] leading-[1.04] tracking-[-0.015em] text-ink md:text-[4.4rem]"
-            style={{ fontFamily: 'var(--font-display)', fontWeight: 450 }}
-          >
-            Pleasure, worth getting <em className="em">right</em>.
-          </h1>
+          {emmaHero?.headline ? (
+            <h1
+              className="text-[2.7rem] leading-[1.04] tracking-[-0.015em] text-ink md:text-[4.4rem]"
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 450 }}
+            >
+              {emmaHero.headline}
+            </h1>
+          ) : (
+            <h1
+              className="text-[2.7rem] leading-[1.04] tracking-[-0.015em] text-ink md:text-[4.4rem]"
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 450 }}
+            >
+              Pleasure, worth getting <em className="em">right</em>.
+            </h1>
+          )}
+
+          {emmaHero?.body && (
+            <p className="mt-6 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3" style={BODY}>
+              {emmaHero.body}
+            </p>
+          )}
 
           {/* Emma byline chip */}
           <div className="mt-7 flex items-center gap-3.5">
@@ -82,10 +105,16 @@ function Hero({ featured }: { featured: DiscoveryProduct[] }) {
                 Emma, your guide
               </div>
               <div className="text-[13.5px] text-ink-3" style={BODY}>
-                Tell me what matters and I'll point you to the fit.
+                {aside}
               </div>
             </div>
           </div>
+
+          {emmaHero?.pullQuote && (
+            <p className="mt-6 text-[1.05rem] italic text-sage" style={DISPLAY}>
+              ♥ {emmaHero.pullQuote}
+            </p>
+          )}
 
           {/* CTAs — one primary coral, one clearly-secondary ghost */}
           <div className="mt-7 flex flex-wrap items-center gap-3">
@@ -542,11 +571,11 @@ function FAQ() {
    Order is the stable shell. The deferred Sanity blocks (the team's
    notebook/promo/editorial surface) stream in between Couples and FAQ. */
 
-export function StorefrontHome({ featured, rails, contentBlocks }: StorefrontData) {
+export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: StorefrontData) {
   const discoveryRails = <RotatingRails rails={rails} />
   return (
     <>
-      <Hero featured={featured} />
+      <Hero featured={featured} emmaHero={emmaHero} />
       <MeetEmma />
 
       {/* Find your way in — the team's `wayfinderMosaic` block when published,
