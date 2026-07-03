@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
+import { normalizeTag } from '~/lib/discovery-tags'
 import type { EmmaPreset } from '~/types/cms'
 
 export interface AskEmmaRailProduct {
@@ -28,8 +29,10 @@ interface AskEmmaRailProps {
   relatedCategories?: Array<{ handle: string; label: string }>
 }
 
+// Values pass through normalizeTag() so URL params, preset tags, and
+// product metafield tags all compare in one canonical casing.
 const csvToSet = (csv: string | null): Set<string> =>
-  new Set((csv ?? '').split(',').map(s => s.trim()).filter(Boolean))
+  new Set((csv ?? '').split(',').map(s => normalizeTag(s.trim())).filter(Boolean))
 const setToCsv = (set: Set<string>): string => Array.from(set).join(',')
 
 /**
@@ -76,8 +79,9 @@ export function AskEmmaRail({
   function toggle(group: 'mood' | 'audience' | 'matters', value: string) {
     updateParams(next => {
       const current = csvToSet(next.get(group))
-      if (current.has(value)) current.delete(value)
-      else current.add(value)
+      const v = normalizeTag(value)
+      if (current.has(v)) current.delete(v)
+      else current.add(v)
       if (current.size === 0) next.delete(group)
       else next.set(group, setToCsv(current))
       next.delete('preset') // manual edits clear preset
@@ -291,7 +295,7 @@ function ChipGroup({
   return (
     <div className="flex flex-wrap gap-1.5">
       {values.map(v => {
-        const isOn  = active.has(v)
+        const isOn  = active.has(normalizeTag(v))
         const isOff = disabled?.has(v) && !isOn
         return (
           <button
@@ -335,10 +339,11 @@ function useDeadEndChips(
     const dead = new Set<string>()
     if (!products || products.length === 0 || values.length === 0) return dead
     for (const v of values) {
-      if (active.has(v)) continue
+      const nv = normalizeTag(v)
+      if (active.has(nv)) continue
       const sim = new URLSearchParams(params)
       const next = new Set(active)
-      next.add(v)
+      next.add(nv)
       sim.set(group, setToCsv(next))
       sim.delete('preset')
       const hit = products.some(p => matchesAskEmmaFilters(p, sim))
@@ -435,14 +440,17 @@ export function matchesAskEmmaFilters(
   product: { moodTags?: string[]; audienceTags?: string[]; mattersTags?: string[]; price: number },
   params: URLSearchParams,
 ): boolean {
+  // csvToSet canonicalizes the wanted values; product tags are canonicalized
+  // at compare time because merchandisers tag in mixed case (adventurous,
+  // Latex-free) and neither side should 0-result over casing.
   const wantMoods     = csvToSet(params.get('mood'))
   const wantAudiences = csvToSet(params.get('audience'))
   const wantMatters   = csvToSet(params.get('matters'))
   const budgetMax     = Number(params.get('budgetMax') ?? Infinity)
 
-  if (wantMoods.size     && !(product.moodTags     ?? []).some(t => wantMoods.has(t)))     return false
-  if (wantAudiences.size && !(product.audienceTags ?? []).some(t => wantAudiences.has(t))) return false
-  if (wantMatters.size   && !(product.mattersTags  ?? []).some(t => wantMatters.has(t)))   return false
+  if (wantMoods.size     && !(product.moodTags     ?? []).some(t => wantMoods.has(normalizeTag(t))))     return false
+  if (wantAudiences.size && !(product.audienceTags ?? []).some(t => wantAudiences.has(normalizeTag(t)))) return false
+  if (wantMatters.size   && !(product.mattersTags  ?? []).some(t => wantMatters.has(normalizeTag(t))))   return false
   if (product.price > budgetMax) return false
   return true
 }
