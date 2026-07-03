@@ -15,7 +15,7 @@
 import { useEffect, useRef } from 'react'
 import { useFetcher } from 'react-router'
 import { trackHomeVariantView } from '~/lib/analytics.client'
-import type { Rail as RailType } from '~/types/discovery'
+import type { DiscoveryProduct, DiscoveryState, Rail as RailType } from '~/types/discovery'
 import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
 import { DiscoveryProvider, useDiscovery } from '~/stores/discovery'
 import { ChipGroup } from './ChipGroup'
@@ -23,6 +23,7 @@ import { BudgetSlider } from './BudgetSlider'
 import { Rail } from './Rail'
 import { EmmaHeroIntro } from './EmmaHeroIntro'
 import { WelcomeBackBanner } from './WelcomeBackBanner'
+import { FitCard } from './FitCard'
 import { DEFAULT_BUDGET } from '~/types/discovery'
 
 interface HomeAProps {
@@ -35,6 +36,12 @@ interface HomeAProps {
   matters:   string[]
   /** Which chip values still yield ≥1 product under the SSR (empty) state. */
   available: ChipAvailabilityArrays
+  /**
+   * Preset deep-link seed (?preset=...), resolved server-side via
+   * app/lib/discovery-presets.ts. Seeds DiscoveryProvider so the page lands
+   * with chips pre-applied. Undefined/null on the bare route.
+   */
+  initialDiscoveryState?: DiscoveryState | null
 }
 
 /* ── Inner component (needs DiscoveryProvider in scope) ─────────────────── */
@@ -85,6 +92,21 @@ function HomeAInner({ initialRails, initialAvailable, welcomeBackEnabled, moods,
 
   const hasSelections =
     state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0
+
+  // Closer card: single top-ranked product across all rails, once at least
+  // one chip is active and something actually matched. rankRails already
+  // sorts each rail's items by score desc, so the top item of the
+  // highest-scoring rail is the single best match overall.
+  const topFit: DiscoveryProduct | null = (() => {
+    if (!hasSelections) return null
+    let best: { product: DiscoveryProduct; score: number } | null = null
+    for (const rail of activeRails) {
+      const first = rail.items[0]
+      if (!first) continue
+      if (!best || first.score > best.score) best = first
+    }
+    return best?.product ?? null
+  })()
 
   return (
     <>
@@ -227,6 +249,12 @@ function HomeAInner({ initialRails, initialAvailable, welcomeBackEnabled, moods,
               )}
             </div>
 
+            {/* Closer card — "Emma's fit": the single top-ranked product once
+                a brief is forming and something actually matched. Sits above
+                the rails so it reads as the answer to the brief, not one more
+                row of it. */}
+            {topFit && <FitCard product={topFit} state={state} />}
+
             {/* Rails section — Style Guide §09: "Shaped for you" header with
                 a mono "X of Y" count and "Reordered by relevance ↓" note. */}
             <div className="border-t border-line-2 pt-10">
@@ -304,9 +332,9 @@ function FilterBlock({ num, label, hint, children }: FilterBlockProps) {
 
 /* ── Public export — wraps with DiscoveryProvider ───────────────────────── */
 
-export function HomeA({ rails, welcomeBackEnabled, moods, audiences, matters, available }: HomeAProps) {
+export function HomeA({ rails, welcomeBackEnabled, moods, audiences, matters, available, initialDiscoveryState }: HomeAProps) {
   return (
-    <DiscoveryProvider>
+    <DiscoveryProvider {...(initialDiscoveryState ? { initialState: initialDiscoveryState } : {})}>
       <HomeAInner
         initialRails={rails}
         initialAvailable={available}

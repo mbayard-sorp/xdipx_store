@@ -17,6 +17,8 @@ import { loadVariantAData } from '~/lib/home-discover.server'
 import { HomeA } from '~/components/discovery/HomeA'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import { buildSocialMeta } from '~/lib/social-meta'
+import { resolvePresetState } from '~/lib/discovery-presets'
+import type { DiscoveryState } from '~/types/discovery'
 
 const CANONICAL = 'https://xdipx.com/discover'
 const TITLE = 'Find your fit — the xdipx product finder'
@@ -41,11 +43,19 @@ const ADMIN_BYPASS_HEADERS = {
 } as const
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url)
+  // Preset deep links (?preset=just-curious|slow-nights|for-two|hands-free|
+  // surprise-me) pre-seed the discovery selection so the page lands with
+  // chips already applied. Unknown/missing preset values resolve to null and
+  // the page renders exactly as the bare route always has.
+  const initialDiscoveryState: DiscoveryState | null = resolvePresetState(url.searchParams.get('preset'))
+
   const homeConfig = await getHomeConfig().catch(() => null)
   const welcomeBackEnabled = homeConfig?.welcomeBackEnabled ?? true
   const adminUser = await getAdminUser(request).catch(() => null)
   const value = await loadVariantAData(request, { welcomeBackEnabled, isAdmin: !!adminUser })
-  return adminUser ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
+  const payload = { ...value, initialDiscoveryState }
+  return adminUser ? data(payload, { headers: ADMIN_BYPASS_HEADERS }) : payload
 }
 
 export const meta: MetaFunction<typeof loader> = () => [
@@ -68,6 +78,7 @@ export default function DiscoverPage() {
         audiences={loaderData.audiences}
         matters={loaderData.matters}
         available={loaderData.available}
+        initialDiscoveryState={loaderData.initialDiscoveryState}
       />
       <Suspense fallback={null}>
         <Await resolve={loaderData.contentBlocks} errorElement={null}>
