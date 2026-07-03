@@ -1,6 +1,7 @@
 import { createClient } from '@sanity/client'
 import type { Bundle, BundleComponent, Product } from '~/types'
 import { getProductsByHandles } from '~/lib/shopify.server'
+import { cached } from '~/lib/kv.server'
 
 const projectId  = process.env['SANITY_PROJECT_ID']
 const dataset    = process.env['SANITY_DATASET'] ?? 'production'
@@ -101,18 +102,20 @@ async function hydrateComponents(
 }
 
 export async function getBundleByHandle(handle: string): Promise<Bundle | null> {
-  const client = getClient()
-  if (!client) return null
-  try {
-    const doc = await client.fetch<BundleDoc | null>(BUNDLE_BY_HANDLE_GROQ, { handle })
-    if (!doc) return null
-    const components = await hydrateComponents(doc.components)
-    if (components.length === 0) return null
-    return buildBundle(doc, components)
-  } catch (err) {
-    console.error('[bundles] getBundleByHandle error:', err)
-    return null
-  }
+  return cached(`bundle:by-handle:${handle}`, 60, async () => {
+    const client = getClient()
+    if (!client) return null
+    try {
+      const doc = await client.fetch<BundleDoc | null>(BUNDLE_BY_HANDLE_GROQ, { handle })
+      if (!doc) return null
+      const components = await hydrateComponents(doc.components)
+      if (components.length === 0) return null
+      return buildBundle(doc, components)
+    } catch (err) {
+      console.error('[bundles] getBundleByHandle error:', err)
+      return null
+    }
+  })
 }
 
 export async function getBundleCompanionFor(handle: string): Promise<Bundle | null> {

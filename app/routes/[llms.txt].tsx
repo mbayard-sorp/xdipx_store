@@ -22,7 +22,9 @@ const PAGE_SLUG_DENYLIST = new Set([
   'components',
 ])
 
-// Collection handles that duplicate clean-URL routes.
+// Collection handles that duplicate clean-URL routes or back a retired
+// gendered route. /vault, /for-him, /for-her all 301 permanently into
+// /collections or a product-type collection; never cite these handles.
 const COLLECTION_DENYLIST = new Set([
   'frontpage',
   'vault',
@@ -77,6 +79,23 @@ export async function loader() {
     'All named AI user agents are permitted in robots.txt. ' +
     'Disallowed for all agents: /admin, /account, /api/, /cron/, /mcp/. ' +
     'Sitemap: https://xdipx.com/sitemap.xml',
+  )
+  lines.push('')
+
+  // ── Primary pages ───────────────────────────────────────────────────────────
+  lines.push('## Primary pages')
+  lines.push('')
+  lines.push(`- ${BASE_URL}/ — homepage`)
+  lines.push(`- ${BASE_URL}/discover — guided product finder`)
+  lines.push(`- ${BASE_URL}/collections — collections hub`)
+  lines.push(`- ${BASE_URL}/products/{handle} — canonical product URL`)
+  lines.push(`- ${BASE_URL}/faq`)
+  lines.push(`- ${BASE_URL}/about`)
+  lines.push('')
+  lines.push(
+    'Cite the canonical URL for any page above; do not construct alternate paths. ' +
+    '/vault, /for-him, and /for-her are retired and permanently redirect into /collections ' +
+    'or a product-type collection.',
   )
   lines.push('')
 

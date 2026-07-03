@@ -30,6 +30,19 @@ export interface HomepageSignals {
   engagementRate: number
   topPages: Array<{ path: string; views: number }>
   topProductPages: Array<{ path: string; views: number }>
+  /** Ecommerce totals, zeroed when the property has no ecommerce events yet. */
+  addToCarts: number
+  checkouts: number
+  purchases: number
+  revenue: number
+  /** Per-item-list breakdown (GA4 itemListName), empty until list events flow. */
+  itemLists: Array<{
+    listName: string
+    itemsViewed: number
+    itemsAddedToCart: number
+    itemsPurchased: number
+    itemRevenue: number
+  }>
   /** Non-fatal warnings (a sub-report failed, sparse data, auth error, etc.). */
   dataGaps: string[]
 }
@@ -51,6 +64,11 @@ function empty(windowDays: number, isConfigured: boolean, gap?: string): Homepag
     engagementRate: 0,
     topPages: [],
     topProductPages: [],
+    addToCarts: 0,
+    checkouts: 0,
+    purchases: 0,
+    revenue: 0,
+    itemLists: [],
     dataGaps: gap ? [gap] : [],
   }
 }
@@ -151,16 +169,73 @@ async function fetchSignals(windowDays: number): Promise<HomepageSignals> {
     gaps.push(`topPages: ${err instanceof Error ? err.message : String(err)}`)
   }
 
+  // Ecommerce totals. Events may not exist yet on a young property. A failed or
+  // empty report degrades to zeros so callers can treat 0 as "no signal".
+  try {
+    const commerce = await runReport(propertyId, token, {
+      dateRanges,
+      metrics: [
+        { name: 'addToCarts' },
+        { name: 'checkouts' },
+        { name: 'ecommercePurchases' },
+        { name: 'purchaseRevenue' },
+      ],
+    })
+    const v = commerce.rows?.[0]?.metricValues ?? []
+    out.addToCarts = Math.round(Number(v[0]?.value ?? 0))
+    out.checkouts = Math.round(Number(v[1]?.value ?? 0))
+    out.purchases = Math.round(Number(v[2]?.value ?? 0))
+    const rev = Number(v[3]?.value ?? 0)
+    out.revenue = Number.isFinite(rev) ? rev : 0
+  } catch (err) {
+    gaps.push(`commerce: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  // Per-item-list breakdown. itemListName is item-scoped, so only item-scoped
+  // metrics are valid here (not addToCarts/checkouts).
+  try {
+    const lists = await runReport(propertyId, token, {
+      dateRanges,
+      dimensions: [{ name: 'itemListName' }],
+      metrics: [
+        { name: 'itemsViewedInList' },
+        { name: 'itemsAddedToCart' },
+        { name: 'itemsPurchased' },
+        { name: 'itemRevenue' },
+      ],
+      orderBys: [{ metric: { metricName: 'itemsViewedInList' }, desc: true }],
+      limit: 25,
+    })
+    for (const r of lists.rows ?? []) {
+      const listName = r.dimensionValues?.[0]?.value ?? ''
+      if (!listName || listName === '(not set)') continue
+      const m = r.metricValues ?? []
+      out.itemLists.push({
+        listName,
+        itemsViewed: Math.round(Number(m[0]?.value ?? 0)),
+        itemsAddedToCart: Math.round(Number(m[1]?.value ?? 0)),
+        itemsPurchased: Math.round(Number(m[2]?.value ?? 0)),
+        itemRevenue: Number(m[3]?.value ?? 0) || 0,
+      })
+      if (out.itemLists.length >= 10) break
+    }
+  } catch (err) {
+    gaps.push(`itemLists: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
   out.dataGaps = gaps
   return out
 }
 
 /**
- * Homepage engagement + top-page signals over the last `windowDays` (default 28).
- * Cached 10 min. Returns isConfigured:false with zeroed signals when GA4 isn't
- * set up, and never throws — treat sparse early traffic as a weak signal.
+ * Homepage engagement + top-page + ecommerce signals over the last `windowDays`
+ * (default 28). Cached 10 min. Returns isConfigured:false with zeroed signals
+ * when GA4 isn't set up, and never throws — treat sparse early traffic as a weak
+ * signal. Ecommerce fields (addToCarts/checkouts/purchases/revenue/itemLists)
+ * zero out gracefully when the property has no ecommerce events yet.
  */
 export async function getHomepageSignals(opts: { windowDays?: number } = {}): Promise<HomepageSignals> {
   const windowDays = opts.windowDays ?? 28
-  return cached(`ga4:homepage-signals:${windowDays}`, CACHE_TTL_SECONDS, () => fetchSignals(windowDays))
+  // v2 key: the cached shape gained ecommerce fields; old entries must not serve.
+  return cached(`ga4:homepage-signals:v2:${windowDays}`, CACHE_TTL_SECONDS, () => fetchSignals(windowDays))
 }

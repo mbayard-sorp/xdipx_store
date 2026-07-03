@@ -19,9 +19,11 @@ interface StorefrontProductCardProps {
   product: DiscoveryProduct
   /** Eager-load the first row of the first rail for a better LCP. */
   priority?: boolean
+  /** Fired on click, before navigation — used for GA4 select_item attribution. */
+  onSelect?: () => void
 }
 
-export function StorefrontProductCard({ product, priority = false }: StorefrontProductCardProps) {
+export function StorefrontProductCard({ product, priority = false, onSelect }: StorefrontProductCardProps) {
   const onSale = product.compareAtPrice != null && product.compareAtPrice > product.price
   const savePct = onSale
     ? Math.round(((product.compareAtPrice! - product.price) / product.compareAtPrice!) * 100)
@@ -33,6 +35,7 @@ export function StorefrontProductCard({ product, priority = false }: StorefrontP
       to={`/products/${product.handle}`}
       className="group block w-[220px] shrink-0 sm:w-auto sm:shrink"
       aria-label={product.title}
+      onClick={onSelect}
     >
       <div className="relative aspect-square overflow-hidden rounded-[var(--radius-lg)] bg-paper-2 border border-line">
         {product.imageUrl ? (

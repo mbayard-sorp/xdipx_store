@@ -19,13 +19,14 @@
  * hero image (zero CLS).
  */
 
-import { Suspense } from 'react'
+import { Suspense, useEffect, useRef } from 'react'
 import { Await, Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { EmailSubscribe } from '~/components/store/EmailSubscribe'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
+import { trackViewItemList, trackSelectItem, type GA4Item } from '~/lib/analytics.client'
 import type { StorefrontData } from '~/lib/storefront-home.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
 import type { EmmaHeroSettings, WayfinderMosaicBlock } from '~/types/cms'
@@ -42,9 +43,15 @@ const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 400 } as const
 const DISPLAY_MED = { fontFamily: 'var(--font-display)', fontWeight: 500 } as const
 const BODY = { fontFamily: 'var(--font-body)' } as const
 
-/* The above-the-fold guided entry. Each pill routes to the discovery finder;
-   preset deep-linking (?preset=slug) is a follow-up once presets are published. */
-const MOOD_PILLS = ['Just curious', 'Slow nights', 'For two', 'Hands-free', 'Surprise me']
+/* The above-the-fold guided entry. Each pill deep-links to a discovery preset
+   (?preset=slug); /discover consumes these five slugs to pre-set its filters. */
+const MOOD_PILLS = [
+  { label: 'Just curious', slug: 'just-curious' },
+  { label: 'Slow nights', slug: 'slow-nights' },
+  { label: 'For two', slug: 'for-two' },
+  { label: 'Hands-free', slug: 'hands-free' },
+  { label: 'Surprise me', slug: 'surprise-me' },
+]
 
 /* ── 1 · Hero (Direction A: editorial split) ───────────────────────────────
    Text column on the left, one large static product still on the right (the
@@ -52,7 +59,7 @@ const MOOD_PILLS = ['Just curious', 'Slow nights', 'For two', 'Hands-free', 'Sur
 
 function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?: EmmaHeroSettings | null }) {
   const lead = featured[0]
-  const peekHref = lead ? `/products/${lead.handle}` : '/vault'
+  const peekHref = lead ? `/products/${lead.handle}` : '/discover'
 
   // Team-managed `singleton.emmaHero` (Sanity) drives the text/config, field
   // by field, so a half-filled draft never blanks out a section — anything
@@ -125,12 +132,12 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
           <div className="-mx-1 mt-3 flex gap-2.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {MOOD_PILLS.map(pill => (
               <Link
-                key={pill}
-                to="/discover"
+                key={pill.slug}
+                to={`/discover?preset=${pill.slug}`}
                 className="flex-none whitespace-nowrap rounded-full border border-line bg-paper px-[18px] py-2.5 text-[14px] text-ink transition-colors hover:bg-paper-2"
                 style={BODY}
               >
-                {pill}
+                {pill.label}
               </Link>
             ))}
           </div>
@@ -225,8 +232,8 @@ function MeetEmma() {
    Replaces the retired "Vault" with "Discover You". */
 
 const MOSAIC_TILES = [
-  { label: 'For her', to: '/for-her' },
-  { label: 'For him', to: '/for-him' },
+  { label: 'New here?', to: '/discover?preset=just-curious' },
+  { label: 'For two', to: '/discover?preset=for-two' },
   { label: 'First time?', to: '/discover' },
 ]
 
@@ -355,11 +362,25 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
    Always-on "Best sellers" anchor + an "Emma's edit" curated rail. The daily
    merchandiser reorders/swaps these as content; the shell stays fixed. */
 
+/** Maps a DiscoveryProduct into the GA4 item shape shared with the PDP's add_to_cart call. */
+function toGA4Item(product: DiscoveryProduct, index: number, listId: string, listName: string): GA4Item {
+  return {
+    item_id: product.id,
+    item_name: product.title,
+    item_category: product.category,
+    price: product.price,
+    index,
+    item_list_id: listId,
+    item_list_name: listName,
+  }
+}
+
 function Rail({
   eyebrow,
   heading,
   emphasis,
   rail,
+  listKey,
   leadPriority,
   aside,
 }: {
@@ -367,9 +388,23 @@ function Rail({
   heading: string
   emphasis: string
   rail: Rail
+  /** Stable rail key for GA4 item_list_id/item_list_name (e.g. "bestsellers", "emmas-edit"). */
+  listKey: string
   leadPriority?: boolean
   aside?: string
 }) {
+  // Fire view_item_list once per rail per page view, when the rail's products render.
+  const firedView = useRef(false)
+  useEffect(() => {
+    if (firedView.current || !rail.items.length) return
+    firedView.current = true
+    trackViewItemList(
+      listKey,
+      listKey,
+      rail.items.slice(0, 10).map((it, i) => toGA4Item(it.product, i, listKey, listKey)),
+    )
+  }, [rail.items, listKey])
+
   if (!rail.items.length) return null
   return (
     <div className="py-2">
@@ -384,7 +419,11 @@ function Rail({
       <div className="flex snap-x gap-[18px] overflow-x-auto px-6 pb-3.5 [scrollbar-width:none] md:px-10 [&::-webkit-scrollbar]:hidden">
         {rail.items.slice(0, 10).map((it, i) => (
           <div key={it.product.id} className="w-[220px] shrink-0 snap-start">
-            <StorefrontProductCard product={it.product} priority={!!leadPriority && i === 0} />
+            <StorefrontProductCard
+              product={it.product}
+              priority={!!leadPriority && i === 0}
+              onSelect={() => trackSelectItem(listKey, listKey, toGA4Item(it.product, i, listKey, listKey), i)}
+            />
           </div>
         ))}
       </div>
@@ -406,9 +445,10 @@ function RotatingRails({ rails }: { rails: Rail[] }) {
     <section id="rails" className="bg-paper-2 py-16 md:py-24">
         <Rail
           eyebrow="What's working"
-          heading="Bestsellers, with the"
-          emphasis="reviews to prove it."
+          heading="Most picked,"
+          emphasis="right now."
           rail={best}
+          listKey="bestsellers"
           leadPriority
         />
         {populated.length > 1 && (
@@ -418,6 +458,7 @@ function RotatingRails({ rails }: { rails: Rail[] }) {
               heading="Picked for"
               emphasis="slow nights."
               rail={edit}
+              listKey="emmas-edit"
               aside="Picked for pacing, not just power. Good for slowing down."
             />
           </div>

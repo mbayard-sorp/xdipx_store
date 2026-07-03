@@ -26,6 +26,7 @@ function product(overrides: Partial<DiscoveryProduct> = {}): DiscoveryProduct {
     id:             'gid://test/1',
     handle:         'test-product',
     title:          'Test Product',
+    defaultVariantId: null,
     price:          50,
     priceMax:       null,
     compareAtPrice: null,
