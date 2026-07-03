@@ -9,6 +9,9 @@
  * 3K-SKU index fits comfortably in KV and is fast to ship to the client.
  */
 
+import { eq } from 'drizzle-orm'
+import { db } from '~/lib/db.server'
+import { discoveryIndexPayload } from '../../db/schema'
 import { adminGraphQL } from '~/lib/shopify.server'
 import { kvGet, kvSet, isKvConfigured } from '~/lib/kv.server'
 import type { ProductTypeDial } from '~/types'
@@ -35,6 +38,9 @@ import {
  * Bump when the index shape changes so old cached entries are ignored.
  * KV writes and reads are namespaced by version; old entries expire on TTL.
  */
+// v7: DiscoveryProduct gained defaultVariantId (first variant GID) so the
+//     discover-page FitCard can add to cart directly; v6 entries lack it and
+//     the card would fall back to PDP-link-only for every product.
 // v6: DiscoveryProduct gained priceMax + compareAtPrice + colorValues +
 //     sizeValues for the home-page card savings line and color/size indicators.
 //     v5 entries lack these; the card would render no savings/indicators.
@@ -46,7 +52,7 @@ import {
 //     (Pleasure / Play / Body / Wear). v2 cached entries reference the
 //     old categorization. Bumping invalidates them.
 // v2: tag values normalized (Title-Case canonical form) before indexing.
-const INDEX_VERSION = 'v6'
+const INDEX_VERSION = 'v7'
 export const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 export const INDEX_TTL_SECONDS = 60 * 60 * 24 // 24h — matches vocab TTL; bust explicitly via invalidateDiscoveryIndex() on tag/catalog changes
 
@@ -132,6 +138,7 @@ interface AdminProductNode {
   status:       string
   productType:  string | null   // Shopify's native "Product organization → Type"
   featuredImage: { url: string; altText: string | null } | null
+  variants: { nodes: Array<{ id: string }> } | null
   priceRangeV2: {
     minVariantPrice: { amount: string }
     maxVariantPrice: { amount: string } | null
@@ -215,6 +222,7 @@ const PRODUCTS_PAGE_QUERY = /* GraphQL */ `
         status
         productType
         featuredImage { url altText }
+        variants(first: 1) { nodes { id } }
         priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
         compareAtPriceRange { minVariantCompareAtPrice { amount } }
         options(first: 3) { name optionValues { name } }
@@ -276,6 +284,7 @@ function nodeToDiscoveryProduct(
     id:          n.id,
     handle:      n.handle,
     title:       n.title,
+    defaultVariantId: n.variants?.nodes?.[0]?.id ?? null,
     price,
     priceMax,
     compareAtPrice,
@@ -397,6 +406,7 @@ const NODES_BY_IDS_QUERY = /* GraphQL */ `
         status
         productType
         featuredImage { url altText }
+        variants(first: 1) { nodes { id } }
         priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
         compareAtPriceRange { minVariantCompareAtPrice { amount } }
         options(first: 3) { name optionValues { name } }
@@ -451,6 +461,7 @@ export async function fetchHonoraryProducts(
         id:             node.id,
         handle:         node.handle,
         title:          node.title,
+        defaultVariantId: node.variants?.nodes?.[0]?.id ?? null,
         price,
         priceMax,
         compareAtPrice,
@@ -577,20 +588,137 @@ export function triggerDiscoveryRebuild(): void {
   }).catch(() => {})
 }
 
+/* ─── L1 memory tier + Neon durable backstop ────────────────────────────
+ * Mirrors readHomepagePayloadA()/writeHomepagePayloadA() in
+ * homepage-payload.server.ts: L1 (module memo) -> KV (L2) -> Neon durable
+ * row -> [] with a background rebuild trigger. Keyed by INDEX_VERSION so a
+ * shape-changing deploy treats any old row/memo as a miss.
+ */
+
+interface IndexMemoEntry {
+  index:   DiscoveryProduct[]
+  vocab:   DiscoveryVocab
+  ts:      number
+}
+
+// L1 TTL — short. This only exists to cut redundant Upstash round-trips of
+// the ~3K-SKU blob within a single warm instance's request burst; KV (24h)
+// and Neon remain the source of truth.
+const L1_TTL_MS = 120_000 // 2 minutes
+
+// Stored on globalThis so it survives Vite HMR module re-evaluation in dev,
+// matching the pattern used by the in-memory KV fallback in kv.server.ts.
+const _g = globalThis as unknown as { __discoveryIndexMemo?: IndexMemoEntry | null }
+if (_g.__discoveryIndexMemo === undefined) _g.__discoveryIndexMemo = null
+
+function readL1Memo(): IndexMemoEntry | null {
+  const entry = _g.__discoveryIndexMemo
+  if (!entry) return null
+  if (Date.now() - entry.ts > L1_TTL_MS) return null
+  return entry
+}
+
+function writeL1Memo(index: DiscoveryProduct[], vocab: DiscoveryVocab): void {
+  _g.__discoveryIndexMemo = { index, vocab, ts: Date.now() }
+}
+
 /**
- * Cached read. On a KV hit returns the cached index immediately. On a KV
- * miss returns [] (so the loader renders the empty/fallback state) and fires
- * a background rebuild via the /cron/warm-discovery-index endpoint. The
- * rebuilt index is written to KV by that endpoint; subsequent requests
- * within the same 15-min window will hit the fresh cache.
+ * Read the Neon durable row for the current INDEX_VERSION. Returns null on
+ * any failure or version mismatch — callers fall back to [] + background
+ * rebuild. On hit, opportunistically re-seeds KV (fire-and-forget) so the
+ * next request is L2-hot.
+ */
+async function readDiscoveryIndexDurable(): Promise<{ index: DiscoveryProduct[]; vocab: DiscoveryVocab } | null> {
+  try {
+    const [row] = await db
+      .select()
+      .from(discoveryIndexPayload)
+      .where(eq(discoveryIndexPayload.version, INDEX_VERSION))
+      .limit(1)
+    if (!row) return null
+    const index = row.indexJson as DiscoveryProduct[]
+    const vocab = row.vocabJson as DiscoveryVocab
+    if (!Array.isArray(index) || index.length === 0) return null
+
+    // Re-seed KV so subsequent reads are L2-hot. Fire-and-forget.
+    void kvSet(INDEX_KEY, index, INDEX_TTL_SECONDS).catch(() => {})
+    void kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS).catch(() => {})
+
+    return { index, vocab }
+  } catch (err) {
+    console.warn('[discovery] Neon durable read failed:', err)
+    return null
+  }
+}
+
+/**
+ * Write path used by the rebuild cron: writes the fresh index + derived
+ * vocab to KV (L1/L2, same as today) AND upserts the Neon durable row so a
+ * later KV eviction/cold-start can self-heal without re-crawling Shopify.
+ * A Neon write failure is non-fatal — KV already holds the fresh blob.
+ */
+export async function writeDiscoveryIndexDurable(
+  index: DiscoveryProduct[],
+  vocab: DiscoveryVocab,
+): Promise<void> {
+  if (index.length === 0) return
+
+  await kvSet(INDEX_KEY, index, INDEX_TTL_SECONDS)
+  await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS)
+  writeL1Memo(index, vocab)
+
+  try {
+    await db
+      .insert(discoveryIndexPayload)
+      .values({
+        version:   INDEX_VERSION,
+        indexJson: index,
+        vocabJson: vocab,
+        count:     index.length,
+      })
+      .onConflictDoUpdate({
+        target: [discoveryIndexPayload.version],
+        set: {
+          indexJson: index,
+          vocabJson: vocab,
+          count:     index.length,
+          builtAt:   new Date(),
+        },
+      })
+  } catch (err) {
+    console.error('[discovery] Neon durable upsert failed (KV still written):', err)
+  }
+}
+
+/**
+ * Cached read. Precedence: L1 memory memo -> KV (L2) -> Neon durable row
+ * (re-seeds KV on hit) -> [] with a background rebuild trigger.
+ *
+ * On a KV hit returns the cached index immediately. On a full miss returns
+ * [] (so the loader renders the empty/fallback state) and fires a background
+ * rebuild via the /cron/warm-discovery-index endpoint. The rebuilt index is
+ * written to KV + Neon by that endpoint; subsequent requests within the same
+ * 15-min window will hit the fresh cache.
  *
  * The inline rebuild path has been removed to keep cold-start SSR fast.
  * The build lock is no longer needed because we no longer build inline.
  */
 export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise<DiscoveryProduct[]> {
   if (!opts.force) {
+    // L1 — cuts a full Upstash round-trip of the ~3K-SKU blob on every
+    // request from a warm instance.
+    const memo = readL1Memo()
+    if (memo) return memo.index
+
+    // L2 (KV).
     const cached = await kvGet<DiscoveryProduct[]>(INDEX_KEY)
-    if (cached && Array.isArray(cached) && cached.length > 0) return cached
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      // Best-effort vocab alongside for the L1 memo; a miss here just means
+      // the memo caches an empty vocab until the next KV/Neon hit refreshes it.
+      const vocab = (await kvGet<DiscoveryVocab>(VOCAB_KEY)) ?? computeVocab(cached)
+      writeL1Memo(cached, vocab)
+      return cached
+    }
   }
 
   // Local dev (in-memory KV fallback, e.g. KV_DISABLE=1): the fire-and-forget
@@ -600,14 +728,25 @@ export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise
   if (!isKvConfigured()) {
     const fresh = await buildDiscoveryIndex()
     if (fresh.length > 0) {
-      await kvSet(INDEX_KEY, fresh, INDEX_TTL_SECONDS)
-      await kvSet(VOCAB_KEY, computeVocab(fresh), VOCAB_TTL_SECONDS)
+      await writeDiscoveryIndexDurable(fresh, computeVocab(fresh))
     }
     return fresh
   }
 
-  // KV miss (or force refresh): trigger a background rebuild and return []
-  // so this SSR request is not blocked by the full Shopify catalog crawl.
+  // KV miss (or force refresh): try the Neon durable backstop before giving
+  // up. This is the cold-start / KV-eviction self-heal path — it avoids
+  // rendering (and edge-caching) an empty storefront while the background
+  // rebuild is in flight.
+  if (!opts.force) {
+    const durable = await readDiscoveryIndexDurable()
+    if (durable) {
+      writeL1Memo(durable.index, durable.vocab)
+      return durable.index
+    }
+  }
+
+  // Full miss: trigger a background rebuild and return [] so this SSR
+  // request is not blocked by the full Shopify catalog crawl.
   triggerDiscoveryRebuild()
   return []
 }
@@ -616,6 +755,7 @@ export async function getDiscoveryIndex(opts: { force?: boolean } = {}): Promise
 export async function invalidateDiscoveryIndex(): Promise<void> {
   await kvSet(INDEX_KEY, null, 1)
   await kvSet(VOCAB_KEY, null, 1)
+  _g.__discoveryIndexMemo = null
 }
 
 /* ─── Vocabulary (mood / audience / matters chip lists) ────────────────── */

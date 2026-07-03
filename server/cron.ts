@@ -474,20 +474,15 @@ export function createCronRoutes() {
       const {
         buildDiscoveryIndex,
         computeVocab,
-        INDEX_KEY,
-        INDEX_TTL_SECONDS,
-        VOCAB_KEY,
-        VOCAB_TTL_SECONDS,
+        writeDiscoveryIndexDurable,
       } = await import('../app/lib/discovery.server.js')
-      const { kvSet } = await import('../app/lib/kv.server.js')
 
       const fresh = await buildDiscoveryIndex()
 
       if (fresh.length > 0) {
         const vocab = computeVocab(fresh)
-        await kvSet(INDEX_KEY, fresh, INDEX_TTL_SECONDS)
-        await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS)
-        console.log(`[cron:warm-discovery-index] wrote ${fresh.length} products to KV`)
+        await writeDiscoveryIndexDurable(fresh, vocab)
+        console.log(`[cron:warm-discovery-index] wrote ${fresh.length} products to KV + Neon`)
       }
 
       res.json({ ok: true, count: fresh.length })

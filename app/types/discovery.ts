@@ -110,6 +110,12 @@ export interface DiscoveryProduct {
   id:          string
   handle:      string
   title:       string
+  /**
+   * First variant's GID — what /api/cart's add-item intent needs for
+   * cartLinesAdd. Null on pre-v7 index entries; add-to-cart UI must fall
+   * back to a PDP link when absent.
+   */
+  defaultVariantId: string | null
   /** Lowest variant price — the "from" price shown on the card. */
   price:       number
   /** Highest variant price; used to show a "$min–$max" range when it differs. */

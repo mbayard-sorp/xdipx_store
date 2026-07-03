@@ -18,6 +18,7 @@ function makeRail(category: 'Pleasure' | 'Play' | 'Body' | 'Wear', n: number): R
         id: `gid://shopify/Product/${category}-${i}`,
         handle: `${category.toLowerCase()}-${i}`,
         title: `Item ${i}`,
+        defaultVariantId: null,
         price: 10 + i,
         priceMax: null,
         compareAtPrice: null,

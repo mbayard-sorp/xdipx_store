@@ -1070,6 +1070,25 @@ export const homepagePayload = pgTable('homepage_payload', {
   variantVersionUniq: uniqueIndex('homepage_payload_variant_version_uniq').on(t.variant, t.version),
 }))
 
+/**
+ * Durable backstop for the discovery product index (~3K SKUs). KV is the fast
+ * path; this table survives KV eviction so a cold instance reads one indexed
+ * row instead of getDiscoveryIndex() returning [] and rendering an empty
+ * storefront (which then gets edge-cached). Exactly one current row per
+ * version, upserted on the unique index. `index_json` holds the JSON-safe
+ * DiscoveryProduct[] array; `vocab_json` holds the derived DiscoveryVocab so
+ * a Neon-fallback read can re-seed both KV keys in one round trip.
+ * See app/lib/discovery.server.ts.
+ */
+export const discoveryIndexPayload = pgTable('discovery_index_payload', {
+  id:        serial('id').primaryKey(),
+  version:   varchar('version', { length: 16 }).notNull().unique(),  // INDEX_VERSION
+  indexJson: json('index_json').notNull(),                            // DiscoveryProduct[]
+  vocabJson: json('vocab_json').notNull(),                            // DiscoveryVocab
+  count:     integer('count').notNull().default(0),
+  builtAt:   timestamp('built_at').notNull().defaultNow(),
+})
+
 // ---------------------------------------------------------------------------
 // Autonomous homepage merchandising team (migration 049)
 // Control plane only. Spend lives in api_token_log, not here.

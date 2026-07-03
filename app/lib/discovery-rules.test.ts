@@ -24,6 +24,7 @@ function makeProduct(overrides: Partial<DiscoveryProduct> & Pick<DiscoveryProduc
   return {
     id:             `gid://shopify/Product/${overrides.handle}`,
     title:          overrides.title ?? overrides.handle,
+    defaultVariantId: null,
     price:          overrides.price ?? 50,
     priceMax:       overrides.priceMax ?? null,
     compareAtPrice: overrides.compareAtPrice ?? null,
