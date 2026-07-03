@@ -49,7 +49,6 @@ import { VariantSelector, resolveVariant } from '~/components/store/VariantSelec
 import { CircleOptionSelector } from '~/components/store/CircleOptionSelector'
 import { ProductSummaryGrid } from '~/components/store/ProductSummaryGrid'
 import { getSwatchMap } from '~/lib/swatches.server'
-import { SocialProofBar }         from '~/components/store/SocialProofBar'
 // import { StockIndicator } from '~/components/store/StockIndicator'  // hidden — restore with stock indicator block
 import { WaitlistButton }         from '~/components/store/WaitlistButton'
 import { SubscriptionSelector } from '~/components/store/SubscriptionSelector'
@@ -76,10 +75,27 @@ export function headers() {
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const slug = params['slug']!
 
+  // ── Batch A ─────────────────────────────────────────────────────────────────
+  // The deal fetch and every slug-only CMS fetch are mutually independent, so
+  // fire them together rather than blocking the CMS calls behind the deal
+  // round-trip. The customer token (cookie read) rides along too. The bundle
+  // lookup rides along here as well (cached() so this stays a cheap KV hit) —
+  // its result is branched on after the batch resolves, below.
+  const [deal, pdpBlocks, fbtHandles, companionBundle, faqs, mainMenu, pdpTrustBar, customerToken, bundle] = await Promise.all([
+    getDealByHandle(slug),
+    getProductPageBlocks(slug),
+    getFrequentlyBoughtWith(slug, 4),
+    getBundleCompanionFor(slug),
+    getProductFaqs(slug),
+    getMainMenu(),
+    getPdpTrustBar(),
+    getCustomerToken(request),
+    getBundleByHandle(slug),
+  ])
+
   // Bundle fast-path: if Sanity has a bundle doc for this handle, render the
   // BundleHero instead of the normal PDP. Shopify product still needs to exist
   // (for the handle), but we skip the heavy PDP data fetches.
-  const bundle = await getBundleByHandle(slug)
   if (bundle) {
     return {
       type: 'bundle' as const,
@@ -105,20 +121,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
-  // ── Batch A ─────────────────────────────────────────────────────────────────
-  // The deal fetch and every slug-only CMS fetch are mutually independent, so
-  // fire them together rather than blocking the CMS calls behind the deal
-  // round-trip. The customer token (cookie read) rides along too.
-  const [deal, pdpBlocks, fbtHandles, companionBundle, faqs, mainMenu, pdpTrustBar, customerToken] = await Promise.all([
-    getDealByHandle(slug),
-    getProductPageBlocks(slug),
-    getFrequentlyBoughtWith(slug, 4),
-    getBundleCompanionFor(slug),
-    getProductFaqs(slug),
-    getMainMenu(),
-    getPdpTrustBar(),
-    getCustomerToken(request),
-  ])
   if (!deal) throw new Response('Product not found', { status: 404 })
   if (deal.dealStatus === 'archived') throw new Response('This product is no longer available', { status: 410 })
 
@@ -683,6 +685,9 @@ function ProductPage() {
       wasSubmittingPDP.current = false
       const data = fetcher.data as { ok?: boolean; addToCartEventId?: string } | undefined
       if (data?.ok) {
+        // Opens CartDrawer (listener in Navbar.tsx) with the EmmaRecommends
+        // upsell rail — same event PairsWith/VaultCard/etc dispatch on add.
+        window.dispatchEvent(new CustomEvent('xdipx:cart-added'))
         trackAddToCart({
           item_id: deal.shopifyProductId,
           item_name: deal.seoTitle,
@@ -755,17 +760,6 @@ function ProductPage() {
                   <span>{deal.productTypeDial}</span>
                 </>
               )}
-              {/* Star rating hidden — uncomment to restore.
-              {aggregate && aggregate.approvedCount > 0 && (
-                <>
-                  <span aria-hidden="true">•</span>
-                  <span className="inline-flex items-center gap-1 normal-case tracking-normal">
-                    <StarRating value={Math.round(aggregate.averageRating)} size="sm" readonly />
-                    <span className="text-ink/60">({aggregate.approvedCount})</span>
-                  </span>
-                </>
-              )}
-              */}
             </div>
             <h1
               className="text-2xl md:text-3xl font-bold text-ink mt-1 leading-snug"
@@ -832,9 +826,6 @@ function ProductPage() {
               voting={voteFetcher.state !== 'idle'}
             />
           )}
-
-          {/* Social proof */}
-          <SocialProofBar />
 
           {/* Subscription pill */}
           {deal.sellingPlanGroups && deal.sellingPlanGroups.length > 0 && (
