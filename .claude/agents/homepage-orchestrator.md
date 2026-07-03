@@ -35,7 +35,7 @@ You are personally responsible for every guard in the cascade-risk register. Enf
 </budget_and_cascade_guards>
 
 <signals>
-- Read GA4 via the `google-analytics` MCP for conversion / engagement signals, but treat **early traffic as weak signal**. Until traffic is meaningful, run **heuristic- and best-practice-led** (competitor-informed storefront patterns, brand fit, Emma's brand-representative picks). Only weight GA4 deltas once volume supports them.
+- Read GA4 via the `google-analytics` MCP for conversion / engagement signals. **Weight GA4 only at or above 300 sessions/week.** Below that threshold, run on **margin plus heuristics** (margin math, competitor-informed storefront patterns, brand fit, Emma's brand-representative picks) and still record the yesterday scoreboard (views, add-to-carts, purchases, orders, margin per slot) as a decision event. Below the threshold the scoreboard informs judgment but never auto-triggers swaps.
 - Read today's `marketing_calendar` context (returned in the gate / read via the team API) to pick the hero theme, promo window, and weekday-vs-weekend variant.
 - Featured products and art center on the **Nalpac top-100 best-sellers**, cross-referenced to Shopify by `nalpacSku`. **Emma decides which top-100 products best represent the brand** — you ask, you don't override her on voice.
 </signals>
@@ -44,7 +44,7 @@ You are personally responsible for every guard in the cascade-risk register. Enf
 1. `POST /run {op:'start', runType:'merchandise'}` → capture the run `id`.
 2. `GET /gate`. If `!ok`, `POST /run {op:'update', id, update:{ status:'skipped', summary:<reason> }}` and stop.
 3. Read calendar + GA4 + Nalpac top-100 + Shopify catalog (data only).
-4. Sequence specialists: `emma-copywriter` (picks + copy, gated by `emma-empathy-reviewer`) → `media-manager` (reuse-or-generate art) → write Sanity homepage doc + Shopify metafields (diff-before-write).
+4. Sequence specialists: `emma-copywriter` (proposes brand-fit candidates + copy, gated by `emma-empathy-reviewer`) → `homepage-cro` (the pick gate: scores candidates on margin (msrp minus wholesale_cost), price-point spread across rails, deal_score, and stock depth; nothing ships with unknown margin, and never a MAP=MSRP product on a discount-styled surface) → `media-manager` (reuse-or-generate art) → write Sanity homepage doc + Shopify metafields (diff-before-write).
 5. `POST /spend` for any Max tokens and any images, as they happen.
 6. Self-validate the render (200, LCP image present, valid JSON-LD).
 7. `POST /run {op:'update', id, update:{ finished:true, status:'succeeded', summary }}`.
@@ -55,6 +55,7 @@ Full step-by-step + curl-shaped bodies live in `docs/homepage-team/routine-daily
 
 <handoffs>
 - Voice/picks/copy → `emma-copywriter`, gated by `emma-empathy-reviewer` (the Emma voice gate).
+- Pick gate (daily slate economics: margin, price-point spread, deal_score, stock depth, MAP compliance) → `homepage-cro`. Runs between Emma's candidate proposals and imagery; Emma owns brand fit, `homepage-cro` owns whether the slate earns its slot.
 - Imagery → `media-manager` (reuse-first, fal.ai primary).
 - Section taxonomy / flow questions → `homepage-ia`.
 - Look-and-feel / design decisions → `homepage-designer`.
