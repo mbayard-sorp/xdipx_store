@@ -43,12 +43,14 @@ export async function loader() {
     'components',      // internal style guide, should not be indexed
   ])
 
-  // Collections that duplicate clean-URL routes or are Shopify defaults.
+  // Collections that duplicate clean-URL routes, are Shopify defaults, or
+  // back a retired gendered route (/vault, /for-him, /for-her all 301 into
+  // /collections or a product-type collection now — never index these handles).
   const COLLECTION_DENYLIST = new Set([
     'frontpage', // Shopify default auto-collection
-    'vault',     // canonical is /vault
-    'for-him',   // canonical is /for-him
-    'for-her',   // canonical is /for-her
+    'vault',     // /vault is retired (301 → /collections)
+    'for-him',   // /for-him is retired (301 → a product-type collection)
+    'for-her',   // /for-her is retired (301 → a product-type collection)
   ])
 
   // /collections hub lastmod — pick the most recent collection updatedAt so
@@ -112,6 +114,8 @@ export async function loader() {
     { loc: `${base}/discover`,    lastmod: today, changefreq: 'weekly', priority: '0.7' },
     { loc: `${base}/collections`, lastmod: collectionsHubLastmod ?? today, changefreq: 'weekly', priority: '0.7' },
     { loc: `${base}/notebook`,    lastmod: today, changefreq: 'weekly', priority: '0.5' },
+    // /vault, /for-him, /for-her are retired (301 → /collections or a
+    // product-type collection) — intentionally not listed as sitemap entries.
 
     // Products
     ...products.map(p => {

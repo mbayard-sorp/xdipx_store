@@ -46,10 +46,10 @@ function YouIcon() {
 
 const TABS: Tab[] = [
   { href: '/',             label: 'Home',  icon: <HomeIcon  />, match: p => p === '/' },
-  { href: '/collections',  label: 'Shop',  icon: <ShopIcon  />, match: p => p.startsWith('/collections') || p === '/for-him' || p === '/for-her' },
-  { href: '/picks',        label: 'Picks', icon: <PicksIcon />, match: p => p.startsWith('/picks') || p.startsWith('/products') },
-  { href: '/account/wishlist', label: 'Saved', icon: <SavedIcon />, match: p => p.startsWith('/account/wishlist') || p.startsWith('/lists') },
-  { href: '/account',      label: 'You',   icon: <YouIcon   />, match: p => p.startsWith('/account') && !p.startsWith('/account/wishlist') },
+  { href: '/collections',  label: 'Shop',  icon: <ShopIcon  />, match: p => p.startsWith('/collections') },
+  { href: '/collections/best-sellers', label: 'Picks', icon: <PicksIcon />, match: p => p.startsWith('/products') },
+  { href: '/account/wishlists', label: 'Saved', icon: <SavedIcon />, match: p => p.startsWith('/account/wishlists') },
+  { href: '/account',      label: 'You',   icon: <YouIcon   />, match: p => p.startsWith('/account') && !p.startsWith('/account/wishlists') },
 ]
 
 export function MobileTabBar() {
