@@ -19,10 +19,17 @@ import { OrganizationStructuredData } from '~/components/seo/OrganizationStructu
 import { WebsiteStructuredData }      from '~/components/seo/WebsiteStructuredData'
 import { getEmmaPersona, getHomepageSections, getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
 import { getAccessoryProducts, getMainMenu } from '~/lib/shopify.server'
+import type { ShopifyMenuItem } from '~/lib/shopify.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { SessionProvider } from '~/lib/session-context'
+import { withTimeout } from '~/lib/with-timeout.server'
 import type { Product } from '~/types'
 import type { AnnouncementBarBlock, MegaMenuBanner, SocialLink, FooterColumn, SiteBanner as SiteBannerData } from '~/types/cms'
+
+// Every storefront page routes through this layout loader, so a hung upstream
+// here sinks every page, not just the homepage. Bound each leg the same way
+// the homepage loader does (see `~/lib/with-timeout.server`).
+const LAYOUT_TIMEOUT_MS = 8000
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const preview  = isPreviewRequest(request)
@@ -30,11 +37,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Promise.all so we can fan accessories in parallel with everything else.
   const pinnedIds = (await getPinnedAccessoryIds()) ?? []
   const [cms, settings, menuItems, upsells, emmaPersona] = await Promise.all([
-    getHomepageSections(preview),
-    getSiteSettings(),
-    getMainMenu(),
-    pinnedIds.length ? getAccessoryProducts(pinnedIds.slice(0, 4)) : Promise.resolve<Product[]>([]),
-    getEmmaPersona(),
+    withTimeout(getHomepageSections(preview), LAYOUT_TIMEOUT_MS, null, 'getHomepageSections(layout)'),
+    withTimeout(getSiteSettings(), LAYOUT_TIMEOUT_MS, null, 'getSiteSettings'),
+    withTimeout(getMainMenu(), LAYOUT_TIMEOUT_MS, [] as ShopifyMenuItem[], 'getMainMenu'),
+    pinnedIds.length
+      ? withTimeout(getAccessoryProducts(pinnedIds.slice(0, 4)), LAYOUT_TIMEOUT_MS, [] as Product[], 'getAccessoryProducts')
+      : Promise.resolve<Product[]>([]),
+    withTimeout(getEmmaPersona(), LAYOUT_TIMEOUT_MS, null, 'getEmmaPersona'),
   ])
 
   const announcementBar = cms?.sections.find(

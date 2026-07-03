@@ -97,6 +97,14 @@ const ADMIN_BYPASS_HEADERS = {
   'Vercel-CDN-Cache-Control': 'no-store',
 } as const
 
+// Cold-KV / degraded storefront (variant b) never gets edge-cached — otherwise
+// one unlucky cold-cache render gets pinned at the edge for up to 660s
+// (60s + 600s SWR) and every visitor in that window sees an empty homepage.
+const DEGRADED_NO_STORE_HEADERS = {
+  'Cache-Control': 'no-store, max-age=0',
+  'Vercel-CDN-Cache-Control': 'no-store',
+} as const
+
 // Variant-A "The Compass" assembly (VariantAData, assembleVariantALive,
 // assembleVariantAMinimal, loadVariantAData) now lives in
 // `~/lib/home-discover.server` so the standalone `/discover` route can reuse it.
@@ -126,7 +134,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (variant === 'b') {
     const adminUser = await getAdminUser(request).catch(() => null)
     const value = await assembleStorefrontHome()
-    return adminUser ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
+    if (adminUser) return data(value, { headers: ADMIN_BYPASS_HEADERS })
+    // Cold KV / degraded assembly (no rails, no featured product) — never let
+    // the edge cache pin a blank storefront for the next 60s+SWR window.
+    const isDegraded = value.rails.length === 0 && value.featured.length === 0
+    return isDegraded ? data(value, { headers: DEGRADED_NO_STORE_HEADERS }) : value
   }
 
   // ── Legacy path (unchanged) ───────────────────────────────────────────────
@@ -334,7 +346,31 @@ function preloadHeroImageTag(imageUrl: string | undefined | null) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const canonical = 'https://xdipx.com/'
   // Variant A uses generic brand meta -- no deal-specific fields available.
-  if (!data || data.variant === 'a' || data.variant === 'b' || !('deal' in data) || !data.deal || !('seoTitle' in data.deal)) {
+  if (!data || data.variant === 'a') {
+    return [
+      { title: BRAND_TITLE },
+      { name: 'description', content: BRAND_DESCRIPTION },
+      { tagName: 'link', rel: 'canonical', href: canonical },
+      { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: 'https://xdipx.com/index.md' },
+      ...buildSocialMeta({ title: BRAND_TITLE, description: BRAND_DESCRIPTION, url: canonical, image: null, type: 'website' }),
+    ]
+  }
+  // Variant B (storefront): generic brand meta, but preload the LCP hero image
+  // — the first featured product's image — same AVIF responsive preload as
+  // the legacy/deal home gets for its hero. Guarded for empty featured (cold
+  // KV / degraded render).
+  if (data.variant === 'b') {
+    const heroPreload = preloadHeroImageTag(data.featured[0]?.imageUrl)
+    return [
+      { title: BRAND_TITLE },
+      { name: 'description', content: BRAND_DESCRIPTION },
+      { tagName: 'link', rel: 'canonical', href: canonical },
+      { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: 'https://xdipx.com/index.md' },
+      ...(heroPreload ? [heroPreload] : []),
+      ...buildSocialMeta({ title: BRAND_TITLE, description: BRAND_DESCRIPTION, url: canonical, image: null, type: 'website' }),
+    ]
+  }
+  if (!('deal' in data) || !data.deal || !('seoTitle' in data.deal)) {
     return [
       { title: BRAND_TITLE },
       { name: 'description', content: BRAND_DESCRIPTION },
