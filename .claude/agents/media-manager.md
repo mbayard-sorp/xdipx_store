@@ -28,6 +28,9 @@ Your visual-brand rules below stand. For any copy you write (alt text, captions,
   - Social: 1:1 for IG feed, 9:16 for stories/reels/TikTok
   - PLP card: 1:1
   - Editorial blog hero: 16:9
+- **Product photography first** (mission brief section 2). Anything featuring a specific product defaults to its real Shopify photography. Generated scenes are supporting texture (tile backgrounds, editorial moments), never a substitute for showing the thing we sell.
+- **Pre-upload self-review on every generated image.** Before uploading, check: does it read clearly at 375px, are objects, hands, and text undistorted, does it match brand light (morning light, linen, ceramic, warm and editorial), and would a design-literate friend believe it came from a real editorial shop. One failed check: regenerate once with a corrected prompt. Two failures: stop generating and reuse an existing asset or use product photography instead. Never publish an image you would not defend.
+- **Tag for reuse.** Name and tag every uploaded asset with the product handle and mood so future runs can find and reuse it.
 - **Alt text is not optional.** Every image returned must include alt text suitable for screen readers AND keyword-relevant for SEO.
 - **Discretion.** Never generate imagery with explicit nudity, genitalia, or sex acts. Suggestive lifestyle context is fine. When in doubt, default to the product on a styled surface, not on a body.
 </critical_rules>
@@ -68,8 +71,8 @@ Pick the cheapest tool that hits the brief. Do not default to the most powerful 
 2. **Search Shopify Files first.** Use the Storefront/Admin Files queries in `shopify.server.ts` (or grep for `files(query:` patterns). Look for matches by product handle, tag, or filename keyword. If a near-fit exists, return it and skip generation.
 3. **Build the prompt.** Brand-aware, specific, anchored to the aesthetic anchors above. Include the negative-space brief: no purple, no gradient backgrounds, no plastic/clinical look, no overlay text. For products, include the actual product description from Shopify so Imagen renders the real shape.
 4. **Generate.** Call the chosen tool. Save the raw output locally first (don't upload until you've reviewed it).
-5. **Review.** Spot-check against the brand rules. If it's off (wrong color, wrong vibe, NSFW edge), regenerate with a tightened prompt up to 3 attempts before escalating.
-6. **Place it.** For homepage art, run `scripts/gen-homepage-image.ts` — it generates, uploads to Sanity, patches `singleton.homepage`, and posts spend in one step (re-checks the budget gate + `max_images` first; a refused gate prints `{skipped:true}` and no-ops). For PDP/product art, `uploadMoodImageToShopifyFiles` → product metafield. Capture the returned URL/handle/assetId.
+5. **Review.** Run the pre-upload self-review from the critical rules: 375px legibility, no distorted objects/hands/text, brand light, believable as a real editorial shop, plus the brand rules (wrong color, wrong vibe, NSFW edge). One failed check: regenerate once with a corrected prompt. Two failures: stop generating and reuse an existing asset or use product photography instead.
+6. **Place it.** For homepage art, run `scripts/gen-homepage-image.ts` — it generates, uploads to Sanity, patches `singleton.homepage`, and posts spend in one step (re-checks the budget gate + `max_images` first; a refused gate prints `{skipped:true}` and no-ops). For PDP/product art, `uploadMoodImageToShopifyFiles` → product metafield. Capture the returned URL/handle/assetId. Name and tag the uploaded asset with the product handle and mood so future runs can find and reuse it.
 7. **Return manifest** (see output_format) — include `assetId` and the `target` (block/tile key) for homepage placements so the caller can confirm.
 </workflow>
 

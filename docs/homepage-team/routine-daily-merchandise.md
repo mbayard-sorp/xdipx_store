@@ -78,6 +78,27 @@ curl -s -X POST "$BASE_URL/api/homepage-team/run" \
 
 Otherwise note `remainingCents` — it's your hard image-budget ceiling for the run.
 
+## Step 1b: Load the mission brief (binding)
+
+Read `docs/homepage-team/mission-brief.md` and treat it as binding for the rest of the run. It
+overrides older routine framing where they conflict; the voice charter at `docs/emma-voice.md`
+overrides everything, always. If the brief is missing from the checkout, STOP and report instead of
+merchandising blind.
+
+## Step 1c: Monday only, before any merchandising
+
+Skip this step Tuesday through Sunday. On Mondays, run both of these in order before Step 2:
+
+1. **Competitor recon.** WebFetch the homepages of Lovehoney, Spectrum Boutique, In The Groove, and
+   Too Timid, plus one new competitor you have not reviewed before. Write a short recon memo into
+   the run log (an `/event` row) per mission brief section 4: what each leads with, what they do
+   badly, one idea worth adapting, and one thing we will do this week that none of them do. The
+   memo must change something concrete this week (the theme, a rail concept, a tile, or a Routine B
+   backlog item). Recon that changes nothing is a wasted step.
+2. **Set the week's theme.** Invoke `merch-calendar` to set or confirm this week's theme in
+   `marketing_calendar` per mission brief section 3. Themes are editorial curricula, not sales
+   events; the recon memo from the previous step feeds this decision.
+
 ## Step 2 — Read context (data only)
 
 Emit an event, then gather inputs:
@@ -89,7 +110,8 @@ curl -s -X POST "$BASE_URL/api/homepage-team/event" \
 ```
 
 - **Marketing calendar** — today's theme / promo window / weekday-vs-weekend variant (`merch-calendar`
-  rows in `marketing_calendar`).
+  rows in `marketing_calendar`). Per mission brief section 3, read today's theme from the calendar
+  and merchandise inside it: the hero, rails, and tiles picked below all live within the week's theme.
 - **GA4** — engagement/conversion via the `google-analytics` MCP. **Treat sparse early traffic as weak
   signal**; run heuristic/best-practice-led until volume is meaningful.
 - **Nalpac top-100** — `fetchAllNalpacFeeds()` → `inTop100Feed` (`app/lib/nalpac-feeds.server.ts`).
@@ -242,6 +264,16 @@ it and let the healthcheck/rollback path restore the last-good Sanity revision; 
 status with the error.
 
 ## Step 8 — Finish + event trail
+
+Before posting the final update, run the Definition of Done checks from mission brief section 7 and
+fold the results into the summary:
+
+- Count the live page's product/collection links versus /discover links. Report the ratio in the
+  summary and flag it if under the 70 percent target.
+- Confirm every image on the page passed the mission brief section 2 self-review or is Shopify
+  product photography.
+- The summary states: today's theme, the hero product and why, what changed versus yesterday, and
+  what will change next run. On Mondays, include the recon memo.
 
 ```bash
 curl -s -X POST "$BASE_URL/api/homepage-team/run" \

@@ -440,6 +440,10 @@ export interface EmmaHeroSettings {
   aside?: string
   pullQuote?: string
   pairProductHandle?: string
+  // Hero deep-linking. Merged in from the additive singleton.emmaHeroStorefront
+  // doc by getEmmaHeroSettings(); both unset = default hero CTA behavior.
+  primaryCtaLabel?: string
+  primaryCtaLink?: string
 }
 
 // v2 redesign — Emma persona singleton (avatar + display name)

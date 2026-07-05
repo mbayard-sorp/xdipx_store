@@ -7108,7 +7108,9 @@ async function getEmmaHeroSettings(preview = false) {
     try {
       const client4 = getClient(false, preview);
       if (!client4) return null;
-      return await client4.fetch(EMMA_HERO_GROQ) ?? null;
+      const raw = await client4.fetch(EMMA_HERO_GROQ);
+      if (!raw?.settings && !raw?.cta) return null;
+      return { ...raw.settings, ...raw.cta };
     } catch (err) {
       console.error("[sanity] getEmmaHeroSettings error:", err);
       return null;
@@ -8137,9 +8139,14 @@ var init_sanity_server = __esm({
   }
 `;
     EMMA_HERO_GROQ = `
-  *[_id == "singleton.emmaHero"][0]{
+{
+  "settings": *[_id == "singleton.emmaHero"][0]{
     heroVariant, eyebrow, headline, body, aside, pullQuote, pairProductHandle
+  },
+  "cta": *[_id == "singleton.emmaHeroStorefront"][0]{
+    primaryCtaLabel, primaryCtaLink
   }
+}
 `;
     EDITOR_GROQ = `
   *[_id == "singleton.editor"][0]{

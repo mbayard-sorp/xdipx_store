@@ -152,11 +152,19 @@ const HOMEPAGE_GROQ = `
   }
 `
 
-// v2 redesign — Emma hero settings singleton
+// v2 redesign — Emma hero settings singleton, merged with the additive hero
+// deep-link CTA singleton (singleton.emmaHeroStorefront). The emmaHeroSettings
+// schema is frozen under the additive-only rule, so the CTA fields live apart
+// and get folded into one EmmaHeroSettings payload here.
 const EMMA_HERO_GROQ = `
-  *[_id == "singleton.emmaHero"][0]{
+{
+  "settings": *[_id == "singleton.emmaHero"][0]{
     heroVariant, eyebrow, headline, body, aside, pullQuote, pairProductHandle
+  },
+  "cta": *[_id == "singleton.emmaHeroStorefront"][0]{
+    primaryCtaLabel, primaryCtaLink
   }
+}
 `
 
 export async function getEmmaHeroSettings(preview = false): Promise<EmmaHeroSettings | null> {
@@ -166,7 +174,12 @@ export async function getEmmaHeroSettings(preview = false): Promise<EmmaHeroSett
     try {
       const client = getClient(false, preview)
       if (!client) return null
-      return (await client.fetch<EmmaHeroSettings>(EMMA_HERO_GROQ)) ?? null
+      const raw = await client.fetch<{
+        settings: EmmaHeroSettings | null
+        cta: Pick<EmmaHeroSettings, 'primaryCtaLabel' | 'primaryCtaLink'> | null
+      } | null>(EMMA_HERO_GROQ)
+      if (!raw?.settings && !raw?.cta) return null
+      return { ...raw.settings, ...raw.cta }
     } catch (err) {
       console.error('[sanity] getEmmaHeroSettings error:', err)
       return null

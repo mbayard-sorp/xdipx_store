@@ -31,6 +31,12 @@ this one.
 Read `docs/emma-voice.md`. All copy written or edited in this run must comply. If the charter is
 missing from the checkout, STOP and report instead of writing copy.
 
+### Also before anything: mission brief (mandatory, same as Routine A)
+
+Read `docs/homepage-team/mission-brief.md` and treat it as binding for the run. It overrides older
+routine framing where they conflict; the voice charter overrides everything, always. If the brief
+is missing from the checkout, STOP and report.
+
 ### 0. Lifecycle start + gate
 
 Start a run and check the gate, exactly as in Routine A but with `runType:'design'`:
@@ -100,6 +106,17 @@ requires that approval** — the team cannot merge its own code. That is the enf
 Log Max reasoning tokens via `POST /spend {kind:'tokens', source:'agent-sdk', feature:'homepage-design'}`
 and any images via `POST /spend {kind:'image', feature:'homepage-images'}`, same shapes as Routine A.
 The design cycle's allowance is `homepage_team_build_cents`, not the daily merchandising cap.
+
+---
+
+## Prioritized backlog
+
+1. **Hero deep-link CTA: verify shipped, then use.** `primaryCtaLink` + `primaryCtaLabel` support
+   on the storefront hero, so the hero CTA can deep-link to `/products/{handle}` (mission brief
+   section 1). Implementation is landing in the same PR as this playbook edit, so the job here is
+   to verify it is live in production, then have Routine A point the hero CTA at the featured
+   product's page every run. If it turns out not to be live, finishing it is this routine's top
+   item.
 
 ---
 
