@@ -301,6 +301,11 @@ function CategoryPill({ slug, name, active }: { slug: string | null; name: strin
   return (
     <Link
       to={slug ? `/notebook?${params.toString()}` : '/notebook'}
+      // Faceted `?category=` views are noindex,follow and canonical to bare
+      // /notebook. nofollow the filter link so Google stops queuing the param
+      // URL for crawl (it kept tripping the "Excluded by noindex" validation).
+      // The "All" link (bare /notebook) stays crawlable.
+      rel={slug ? 'nofollow' : undefined}
       className={`shrink-0 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-wider transition-colors border ${
         active
           ? 'bg-coral text-white border-coral'
@@ -331,6 +336,9 @@ function PaginationLink({
   return (
     <Link
       to={search ? `/notebook?${search}` : '/notebook'}
+      // Category-filtered pagination is a faceted (noindex) view — nofollow so
+      // Google doesn't queue `?category=…&page=N`. Clean `?page=N` stays crawlable.
+      rel={category ? 'nofollow' : undefined}
       className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
         active ? 'bg-coral text-white' : 'text-ink/60 hover:bg-cream-2'
       }`}
