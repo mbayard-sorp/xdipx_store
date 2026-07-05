@@ -8144,7 +8144,7 @@ var init_sanity_server = __esm({
     heroVariant, eyebrow, headline, body, aside, pullQuote, pairProductHandle
   },
   "cta": *[_id == "singleton.emmaHeroStorefront"][0]{
-    primaryCtaLabel, primaryCtaLink
+    primaryCtaLabel, primaryCtaLink, featuredProductHandle
   }
 }
 `;

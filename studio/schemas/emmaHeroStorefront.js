@@ -3,7 +3,8 @@
 // The existing `emmaHeroSettings` schema is frozen (additive-only rule), so these
 // fields live in their own singleton, `singleton.emmaHeroStorefront`, and the
 // loader merges them into the emmaHero payload. Future fields from that spec
-// (featuredProductHandle, moodPills, bgStyle, ...) should land here too.
+// (moodPills, bgStyle, ...) should land here too. featuredProductHandle landed
+// with the pinnable headliner (pins the hero image + peek link to one product).
 export default {
   name: 'emmaHeroStorefront',
   title: 'Storefront hero CTA',
@@ -32,12 +33,29 @@ export default {
       description:
         'Internal path only, usually /products/{handle}. Leave unset to keep the default behavior (hero links to the lead discovery product).',
     },
+    {
+      name: 'featuredProductHandle',
+      title: 'Featured product handle (pins the hero image)',
+      type: 'string',
+      description:
+        'Shopify product handle (no /products/ prefix). When set, the storefront hero image and peek link are pinned to this product instead of rotating with the discovery shuffle. Leave unset to keep the rotating behavior. Set this to the same product the hero copy targets.',
+      validation: Rule =>
+        Rule.custom(value => {
+          if (value == null || value === '') return true
+          return /^[a-z0-9][a-z0-9-]*$/.test(value)
+            ? true
+            : 'Must be a bare product handle, lowercase letters, digits, and hyphens only (no slashes or spaces)'
+        }),
+    },
   ],
   preview: {
-    select: { label: 'primaryCtaLabel', link: 'primaryCtaLink' },
-    prepare: ({ label, link }) => ({
+    select: { label: 'primaryCtaLabel', link: 'primaryCtaLink', pinned: 'featuredProductHandle' },
+    prepare: ({ label, link, pinned }) => ({
       title: 'Storefront hero CTA',
-      subtitle: link ? `${label ?? 'Take a peek →'} · ${link}` : 'unset (discovery default)',
+      subtitle: [
+        link ? `${label ?? 'Take a peek →'} · ${link}` : 'CTA unset (discovery default)',
+        pinned ? `pinned: ${pinned}` : 'image: rotating',
+      ].join(' · '),
     }),
   },
 }
