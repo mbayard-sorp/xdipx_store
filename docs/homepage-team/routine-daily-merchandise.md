@@ -48,8 +48,12 @@ Capture `id` (call it `$RUN_ID`). Use it on every `/event` and `/run update` bel
 
 ## Step 1 — Gate (abort if not ok)
 
+Always pass your own `$RUN_ID` as `excludeRun`. Step 0 already inserted your
+run row as `running`, so without it the concurrency guard refuses YOUR OWN run
+as `run_in_progress`. Other running rows still lock as intended.
+
 ```bash
-curl -s "$BASE_URL/api/homepage-team/gate" \
+curl -s "$BASE_URL/api/homepage-team/gate?excludeRun=$RUN_ID" \
   -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN"
 ```
 
@@ -180,7 +184,8 @@ Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counte
    so a stray extra call is rejected — but stop yourself first.
 2. `media-manager` runs `scripts/gen-homepage-image.ts --target block|tile|promo --block-key <k>
    [--tile-key <k>] --prompt "<scene>" --alt "<screen-reader alt>" --images-so-far <n>
-   --caller "merch-routine/<surface>"`.
+   --run-id $RUN_ID --caller "merch-routine/<surface>"`. `--run-id` keeps the script's
+   internal gate re-check from refusing on your own running row.
 3. The script **gates → generates (fal FLUX → Imagen) → uploads to a Sanity asset → patches
    `singleton.homepage` → posts spend → prints a JSON manifest**. Read the manifest; if
    `placed:true`, increment `imagesSoFar`. If `skipped:true`, stop the imagery loop.
