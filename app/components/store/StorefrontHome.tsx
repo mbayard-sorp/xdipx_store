@@ -43,14 +43,17 @@ const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 400 } as const
 const DISPLAY_MED = { fontFamily: 'var(--font-display)', fontWeight: 500 } as const
 const BODY = { fontFamily: 'var(--font-body)' } as const
 
-/* The above-the-fold guided entry. Each pill deep-links to a discovery preset
-   (?preset=slug); /discover consumes these five slugs to pre-set its filters. */
+/* The above-the-fold guided entry. Four pills go straight to a matching live
+   collection; "Surprise me" keeps the single preset deep-link the mission
+   brief allows (/discover appears at most twice on the page: the closer band
+   plus at most one preset pill). Its preset is a randomized shuffle with no
+   collection equivalent, so it is the one that stays. */
 const MOOD_PILLS = [
-  { label: 'Just curious', slug: 'just-curious' },
-  { label: 'Slow nights', slug: 'slow-nights' },
-  { label: 'For two', slug: 'for-two' },
-  { label: 'Hands-free', slug: 'hands-free' },
-  { label: 'Surprise me', slug: 'surprise-me' },
+  { label: 'Just curious', to: '/collections/first-time' },
+  { label: 'Slow nights', to: '/collections/massage-mood' },
+  { label: 'For two', to: '/collections/couples' },
+  { label: 'Hands-free', to: '/collections/wearable-toys' },
+  { label: 'Surprise me', to: '/discover?preset=surprise-me' },
 ]
 
 /* ── 1 · Hero (Direction A: editorial split) ───────────────────────────────
@@ -63,7 +66,7 @@ const HERO_CTA_WHITELIST = ['Take a peek →', 'Show me', 'Find your fit →', "
 
 function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?: EmmaHeroSettings | null }) {
   const lead = featured[0]
-  const peekHref = lead ? `/products/${lead.handle}` : '/discover'
+  const peekHref = lead ? `/products/${lead.handle}` : '/collections/best-sellers'
 
   // Hero deep-linking: the team can point the primary CTA at a product page
   // via singleton.emmaHeroStorefront (primaryCtaLink / primaryCtaLabel).
@@ -136,11 +139,11 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
               )}
             </Link>
             <Link
-              to="/discover"
+              to="/collections"
               className="inline-flex items-center gap-2 rounded-full border border-line-2 px-5 py-3 text-[15px] font-medium text-ink transition-colors hover:border-ink-3"
               style={BODY}
             >
-              Find your fit <span aria-hidden="true">→</span>
+              Show me <span aria-hidden="true">→</span>
             </Link>
           </div>
 
@@ -151,8 +154,8 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
           <div className="-mx-1 mt-3 flex gap-2.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {MOOD_PILLS.map(pill => (
               <Link
-                key={pill.slug}
-                to={`/discover?preset=${pill.slug}`}
+                key={pill.label}
+                to={pill.to}
                 className="flex-none whitespace-nowrap rounded-full border border-line bg-paper px-[18px] py-2.5 text-[14px] text-ink transition-colors hover:bg-paper-2"
                 style={BODY}
               >
@@ -233,8 +236,11 @@ function MeetEmma() {
               I don't get embarrassed, and I don't have a shelf to push. Tell me a little about what
               you're after and I'll do the reading for you.
             </p>
+            {/* Anchors to the Compass closer band below. It keeps the guided-fit
+                promise in this copy without adding a third /discover link (mission
+                brief caps the page at the closer plus one preset pill). */}
             <Link
-              to="/discover"
+              to="#discover"
               className="mt-7 inline-flex items-center gap-2 rounded-full border border-line-2 px-5 py-3 text-[15px] font-medium text-ink transition-colors hover:border-ink-3"
               style={BODY}
             >
@@ -251,9 +257,9 @@ function MeetEmma() {
    Replaces the retired "Vault" with "Discover You". */
 
 const MOSAIC_TILES = [
-  { label: 'New here?', to: '/discover?preset=just-curious' },
-  { label: 'For two', to: '/discover?preset=for-two' },
-  { label: 'First time?', to: '/discover' },
+  { label: 'New here?', to: '/collections/first-time' },
+  { label: 'For two', to: '/collections/couples' },
+  { label: 'Best sellers', to: '/collections/best-sellers' },
 ]
 
 interface WayfinderTileNormalized {
@@ -288,6 +294,9 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
   const promoBody = promo?.body
     || "Answer a few quiet questions and Emma builds you a short list that actually fits."
   const promoCtaLabel = promo?.ctaLabel || 'Find your fit →'
+  // The mosaic promo slot is the one tile the mission brief allows to keep
+  // /discover. This fallback only renders when no wayfinderMosaic block is
+  // published; once the team publishes, ctaLink is content-controlled.
   const promoCtaLink = promo?.ctaLink || '/discover'
 
   return (
@@ -511,7 +520,7 @@ function Couples() {
               </h2>
             </div>
             <Link
-              to="/discover"
+              to="/collections/couples"
               className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white transition-transform hover:-translate-y-0.5"
               style={BODY}
             >
@@ -523,7 +532,7 @@ function Couples() {
   )
 }
 
-/* ── 8 · "Still deciding?" dark band — second guided entry → /discover ──────── */
+/* ── 8 · "Still deciding?" dark band — the Compass closer → /discover ──────── */
 
 function StillDecidingBand() {
   return (
