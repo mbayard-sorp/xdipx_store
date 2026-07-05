@@ -15,7 +15,7 @@
  */
 
 import { timingSafeEqual } from 'node:crypto'
-import { and, desc, eq, gte, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, ne, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
 import {
@@ -123,13 +123,20 @@ export async function getTodayImageCount(): Promise<number> {
   return Number((res.rows?.[0] as { n?: number } | undefined)?.n ?? 0)
 }
 
-/** True if a run is currently in progress (started within the lock window). */
-export async function isRunInProgress(): Promise<boolean> {
+/**
+ * True if a run is currently in progress (started within the lock window).
+ * The routine starts its own run row (Step 0) BEFORE checking the gate
+ * (Step 1), so the caller passes its own run id via excludeRunId to avoid
+ * self-blocking on the row it just created. Any OTHER running row still locks.
+ */
+export async function isRunInProgress(excludeRunId?: number): Promise<boolean> {
   const since = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 60_000)
+  const conditions = [eq(homepageTeamRuns.status, 'running'), gte(homepageTeamRuns.startedAt, since)]
+  if (excludeRunId !== undefined) conditions.push(ne(homepageTeamRuns.id, excludeRunId))
   const [row] = await db
     .select({ id: homepageTeamRuns.id })
     .from(homepageTeamRuns)
-    .where(and(eq(homepageTeamRuns.status, 'running'), gte(homepageTeamRuns.startedAt, since)))
+    .where(and(...conditions))
     .limit(1)
   return !!row
 }
@@ -151,15 +158,17 @@ export interface GateResult {
 /**
  * The gate the scheduled routine calls before doing anything paid. Returns
  * ok=false (with a reason) when disabled, over budget, over the daily run cap,
- * over the daily image cap, or a run is already in progress.
+ * over the daily image cap, or a run is already in progress. Callers that
+ * already hold a run row pass its id as excludeRunId so the concurrency guard
+ * checks for OTHER runs only.
  */
-export async function gate(): Promise<GateResult> {
+export async function gate(excludeRunId?: number): Promise<GateResult> {
   const [cfg, spentCents, runsToday, imagesToday, inProgress] = await Promise.all([
     getTeamConfig(),
     getTodaySpendCents(),
     getTodayRunCount(),
     getTodayImageCount(),
-    isRunInProgress(),
+    isRunInProgress(excludeRunId),
   ])
   const remainingCents = Math.max(0, cfg.dailyCents - spentCents)
   const base = {
