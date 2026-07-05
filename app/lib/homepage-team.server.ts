@@ -15,7 +15,7 @@
  */
 
 import { timingSafeEqual } from 'node:crypto'
-import { and, desc, eq, gte, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, lt, ne, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
 import {
@@ -98,10 +98,16 @@ export async function getTodaySpendCents(): Promise<number> {
   return Math.round(dollars * 100)
 }
 
-/** Count of team runs started today. */
-export async function getTodayRunCount(): Promise<number> {
+/**
+ * Count of team runs started today. Pass the caller's own run id so a routine
+ * that starts its row before gating doesn't count itself toward the cap.
+ */
+export async function getTodayRunCount(excludeRunId?: number): Promise<number> {
   const res = await db.execute(
-    sql`SELECT COUNT(*)::int AS n FROM homepage_team_runs WHERE started_at >= current_date`,
+    excludeRunId == null
+      ? sql`SELECT COUNT(*)::int AS n FROM homepage_team_runs WHERE started_at >= current_date`
+      : sql`SELECT COUNT(*)::int AS n FROM homepage_team_runs
+            WHERE started_at >= current_date AND id <> ${excludeRunId}`,
   )
   return Number((res.rows?.[0] as { n?: number } | undefined)?.n ?? 0)
 }
@@ -141,6 +147,25 @@ export async function isRunInProgress(excludeRunId?: number): Promise<boolean> {
   return !!row
 }
 
+/**
+ * Mark zombie rows failed: status='running' but started before the lock
+ * window, meaning the routine died without posting a final update. They no
+ * longer hold the lock (isRunInProgress ignores them) but they linger on the
+ * dashboard as in-progress forever. Called from gate() so cleanup rides the
+ * calls the routine already makes.
+ */
+export async function expireStaleRuns(): Promise<void> {
+  const cutoff = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 60_000)
+  await db
+    .update(homepageTeamRuns)
+    .set({
+      status: 'failed',
+      error: `auto-expired: still 'running' past the ${RUN_LOCK_WINDOW_MIN}-minute lock window`,
+      finishedAt: new Date(),
+    })
+    .where(and(eq(homepageTeamRuns.status, 'running'), lt(homepageTeamRuns.startedAt, cutoff)))
+}
+
 export interface GateResult {
   enabled: boolean
   /** Why a run is refused, when ok=false. */
@@ -163,10 +188,11 @@ export interface GateResult {
  * checks for OTHER runs only.
  */
 export async function gate(excludeRunId?: number): Promise<GateResult> {
+  await expireStaleRuns()
   const [cfg, spentCents, runsToday, imagesToday, inProgress] = await Promise.all([
     getTeamConfig(),
     getTodaySpendCents(),
-    getTodayRunCount(),
+    getTodayRunCount(excludeRunId),
     getTodayImageCount(),
     isRunInProgress(excludeRunId),
   ])
