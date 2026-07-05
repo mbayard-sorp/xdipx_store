@@ -15,7 +15,7 @@
  */
 
 import { timingSafeEqual } from 'node:crypto'
-import { and, desc, eq, gte, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, lt, ne, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
 import {
@@ -98,10 +98,16 @@ export async function getTodaySpendCents(): Promise<number> {
   return Math.round(dollars * 100)
 }
 
-/** Count of team runs started today. */
-export async function getTodayRunCount(): Promise<number> {
+/**
+ * Count of team runs started today. Pass the caller's own run id so a routine
+ * that starts its row before gating doesn't count itself toward the cap.
+ */
+export async function getTodayRunCount(excludeRunId?: number): Promise<number> {
   const res = await db.execute(
-    sql`SELECT COUNT(*)::int AS n FROM homepage_team_runs WHERE started_at >= current_date`,
+    excludeRunId == null
+      ? sql`SELECT COUNT(*)::int AS n FROM homepage_team_runs WHERE started_at >= current_date`
+      : sql`SELECT COUNT(*)::int AS n FROM homepage_team_runs
+            WHERE started_at >= current_date AND id <> ${excludeRunId}`,
   )
   return Number((res.rows?.[0] as { n?: number } | undefined)?.n ?? 0)
 }
@@ -123,15 +129,43 @@ export async function getTodayImageCount(): Promise<number> {
   return Number((res.rows?.[0] as { n?: number } | undefined)?.n ?? 0)
 }
 
-/** True if a run is currently in progress (started within the lock window). */
-export async function isRunInProgress(): Promise<boolean> {
+/**
+ * True if a run is currently in progress (started within the lock window).
+ * The playbook starts the run row (Step 0) BEFORE calling the gate (Step 1),
+ * so callers must pass their own run id or they deadlock on their own lock.
+ */
+export async function isRunInProgress(excludeRunId?: number): Promise<boolean> {
   const since = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 60_000)
+  const conditions = [
+    eq(homepageTeamRuns.status, 'running'),
+    gte(homepageTeamRuns.startedAt, since),
+  ]
+  if (excludeRunId != null) conditions.push(ne(homepageTeamRuns.id, excludeRunId))
   const [row] = await db
     .select({ id: homepageTeamRuns.id })
     .from(homepageTeamRuns)
-    .where(and(eq(homepageTeamRuns.status, 'running'), gte(homepageTeamRuns.startedAt, since)))
+    .where(and(...conditions))
     .limit(1)
   return !!row
+}
+
+/**
+ * Mark zombie rows failed: status='running' but started before the lock
+ * window, meaning the routine died without posting a final update. They no
+ * longer hold the lock (isRunInProgress ignores them) but they linger on the
+ * dashboard as in-progress forever. Called from gate() so cleanup rides the
+ * calls the routine already makes.
+ */
+export async function expireStaleRuns(): Promise<void> {
+  const cutoff = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 60_000)
+  await db
+    .update(homepageTeamRuns)
+    .set({
+      status: 'failed',
+      error: `auto-expired: still 'running' past the ${RUN_LOCK_WINDOW_MIN}-minute lock window`,
+      finishedAt: new Date(),
+    })
+    .where(and(eq(homepageTeamRuns.status, 'running'), lt(homepageTeamRuns.startedAt, cutoff)))
 }
 
 export interface GateResult {
@@ -152,14 +186,19 @@ export interface GateResult {
  * The gate the scheduled routine calls before doing anything paid. Returns
  * ok=false (with a reason) when disabled, over budget, over the daily run cap,
  * over the daily image cap, or a run is already in progress.
+ *
+ * excludeRunId is the caller's own run row (started in playbook Step 0, before
+ * this gate). Without it the caller's row trips both the run_in_progress lock
+ * and the run cap.
  */
-export async function gate(): Promise<GateResult> {
+export async function gate(excludeRunId?: number): Promise<GateResult> {
+  await expireStaleRuns()
   const [cfg, spentCents, runsToday, imagesToday, inProgress] = await Promise.all([
     getTeamConfig(),
     getTodaySpendCents(),
-    getTodayRunCount(),
+    getTodayRunCount(excludeRunId),
     getTodayImageCount(),
-    isRunInProgress(),
+    isRunInProgress(excludeRunId),
   ])
   const remainingCents = Math.max(0, cfg.dailyCents - spentCents)
   const base = {

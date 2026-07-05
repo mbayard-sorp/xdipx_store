@@ -46,8 +46,11 @@ curl -s -X POST "$BASE_URL/api/homepage-team/run" \
   -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN" -H "content-type: application/json" \
   -d '{"op":"start","runType":"design"}'      # → { "id": $RUN_ID }
 
-curl -s "$BASE_URL/api/homepage-team/gate" -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN"
+curl -s "$BASE_URL/api/homepage-team/gate?excludeRun=$RUN_ID" -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN"
 ```
+
+`excludeRun=$RUN_ID` is required: your own just-started run row would otherwise trip the
+one-run-at-a-time lock (`reason:'run_in_progress'`). The lock still blocks any other run.
 
 If `gate.ok` is `false`, post a `skipped` status and stop (same as Routine A). Emit `/event` rows
 through every phase below so the dashboard shows the design cycle live.

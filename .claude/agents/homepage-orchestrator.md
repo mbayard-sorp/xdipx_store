@@ -25,7 +25,7 @@ Before writing or editing any customer-facing words (or approving copy from a su
 
 <budget_and_cascade_guards>
 You are personally responsible for every guard in the cascade-risk register. Enforce all of them:
-- **Gate first, gate often.** Call `GET /api/homepage-team/gate` before doing anything paid. If `ok:false`, abort — post a `skipped` run status and stop. Re-check the gate before **every** image generation; hard-stop the moment `remainingCents` hits 0.
+- **Gate first, gate often.** Call `GET /api/homepage-team/gate?excludeRun=$RUN_ID` before doing anything paid (the exclusion keeps your own Step-0 run row from tripping the `run_in_progress` lock). If `ok:false`, abort — post a `skipped` run status and stop. Re-check the gate before **every** image generation (pass `--run-id $RUN_ID` to `gen-homepage-image.ts`); hard-stop the moment `remainingCents` hits 0.
 - **Hard `maxTurns`.** The routine has a turn cap (~12–16). If you're looping without converging, stop and report rather than burning turns. Never re-run yourself.
 - **One run at a time.** The gate refuses with `reason:'run_in_progress'` if another run holds the lock. If you somehow start anyway, exit immediately.
 - **Reuse before generate.** Always instruct `media-manager` to find an existing Shopify Files asset before spending on a new image. Respect `homepage_team_max_images` for the day.
