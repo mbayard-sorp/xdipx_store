@@ -202,19 +202,28 @@ spend in Step 6 — the script already posts exactly one `{kind:'image'}` row pe
 
 | Lever | Where | Renders on |
 |---|---|---|
-| Hero copy | `singleton.emmaHero` (Sanity `emmaHeroSettings`): `eyebrow`, `headline`, `body`, `pullQuote`. The storefront hero reads these directly (PR #190), field-by-field fallback to hardcoded defaults when unset. The hero PRODUCT is still discovery `featured[0]`, not set here. | storefront `/` |
+| Hero copy | `singleton.emmaHero` (Sanity `emmaHeroSettings`): `eyebrow`, `headline`, `body`, `pullQuote`. The storefront hero reads these directly (PR #190), field-by-field fallback to hardcoded defaults when unset. The hero PRODUCT is pinned via `singleton.emmaHeroStorefront`, not set here. | storefront `/` |
+| Hero product pin + CTA | `singleton.emmaHeroStorefront` (Sanity `emmaHeroStorefront`): `featuredProductHandle` pins the hero image and peek link to one product (bare Shopify handle, no `/products/` prefix); unset means the hero image rotates with the 60s discovery shuffle. `primaryCtaLabel` (whitelist only) + `primaryCtaLink` deep-link the primary CTA. | storefront `/` |
 | Curated rails | `emmaCuratedRail` docs (`target:"homepage"`, `status:"live"`, `active:true`) **referenced** in `singleton.homepage.sections[]` as `emmaCuratedRailRef`. `buildHomeContentBlocks()` resolves `productHandles`. The storefront shows up to `MAX_TEAM_RAILS` (4); with zero refs it falls back to the algorithmic discovery rails. | storefront `/` |
 | Notebook | `editorialTiles` block in `singleton.homepage.sections[]` (`tiles[]`: label/body/link/linkLabel/emoji/image). | storefront `/` |
 | Wayfinder mosaic | `wayfinderMosaic` block in `singleton.homepage.sections[]` — the "Find your way in" tiles + "Discover You" promo. `tiles[]` (label/link/emmaAside/image, 3-4) + `promo` (eyebrow/heading/emphasis/body/cta/image). Empty/unset → the storefront renders its hardcoded fallback tiles (never blank). Place tile images via `--target tile --tile-key`, the promo via `--target promo`. | storefront `/` |
 | Announcement ticker | `announcementBar` messages in `singleton.homepage` (the layout pins it site-wide). | all pages |
 
-**Hero rule (updated for PR #190):** `singleton.emmaHero` IS the storefront hero copy source. The
-storefront hero renders its `eyebrow`, `headline`, `body`, and `pullQuote` fields, falling back
-field-by-field to hardcoded defaults when a field is unset. Refreshing that doc is an explicit daily
-team lever: keep the hero copy in step with today's featured pick and calendar theme, through the
-same Emma voice gate and diff-before-write rules as every other surface. The hero PRODUCT is not a
-copy decision: it stays derived from discovery `featured[0]` and is chosen in Step 3, not by editing
-`singleton.emmaHero`.
+**Hero rule (updated for PR #190, pin added after run 10):** `singleton.emmaHero` IS the storefront
+hero copy source. The storefront hero renders its `eyebrow`, `headline`, `body`, and `pullQuote`
+fields, falling back field-by-field to hardcoded defaults when a field is unset. Refreshing that doc
+is an explicit daily team lever: keep the hero copy in step with today's featured pick and calendar
+theme, through the same Emma voice gate and diff-before-write rules as every other surface.
+
+**The hero PRODUCT is pinned, not left to rotation.** Run 10 confirmed the failure mode: hero copy
+targeted one product while the hero image reshuffled to unrelated products every 60 seconds, so copy
+and image mismatched most of the time. Whenever you rotate the hero (new featured pick chosen in
+Step 3), you MUST also set `featuredProductHandle` on `singleton.emmaHeroStorefront` to that pick's
+Shopify handle (bare handle, no `/products/` prefix), and point `primaryCtaLink` at
+`/products/{handle}` in the same patch. The pin makes the storefront's `featured[0]` (hero image,
+LCP preload, peek link) that exact product. An unknown handle logs a warning and falls back to
+rotation, so verify the handle resolves 200 before writing it. Leave the field unset ONLY when
+there is deliberately no product-specific hero copy live.
 
 **Do NOT** expect these to change the storefront: `productCarousel` / `promoBanner` / `categoryGrid`
 / `playTogetherBanner` / `testimonials` blocks (the storefront ignores them). **Those blocks DO
@@ -223,7 +232,9 @@ without checking `/discover`. Never ship invented `testimonials` (FTC + brand).
 
 To merchandise: create/refresh `emmaCuratedRail` docs (Emma heading/eyebrow/aside + valid Shopify
 handles, verify each resolves 200), wire 2–4 into `singleton.homepage.sections`, refresh
-`editorialTiles`, and refresh `singleton.emmaHero` copy to match the day's slate.
+`editorialTiles`, refresh `singleton.emmaHero` copy to match the day's slate, and pin the hero by
+setting `featuredProductHandle` + `primaryCtaLink` on `singleton.emmaHeroStorefront` to today's
+featured pick.
 
 **Pairing merchandising is mandatory:**
 

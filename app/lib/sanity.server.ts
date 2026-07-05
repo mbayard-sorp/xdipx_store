@@ -162,7 +162,7 @@ const EMMA_HERO_GROQ = `
     heroVariant, eyebrow, headline, body, aside, pullQuote, pairProductHandle
   },
   "cta": *[_id == "singleton.emmaHeroStorefront"][0]{
-    primaryCtaLabel, primaryCtaLink
+    primaryCtaLabel, primaryCtaLink, featuredProductHandle
   }
 }
 `
@@ -176,7 +176,7 @@ export async function getEmmaHeroSettings(preview = false): Promise<EmmaHeroSett
       if (!client) return null
       const raw = await client.fetch<{
         settings: EmmaHeroSettings | null
-        cta: Pick<EmmaHeroSettings, 'primaryCtaLabel' | 'primaryCtaLink'> | null
+        cta: Pick<EmmaHeroSettings, 'primaryCtaLabel' | 'primaryCtaLink' | 'featuredProductHandle'> | null
       } | null>(EMMA_HERO_GROQ)
       if (!raw?.settings && !raw?.cta) return null
       return { ...raw.settings, ...raw.cta }

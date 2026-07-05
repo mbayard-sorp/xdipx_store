@@ -11,7 +11,7 @@
  * Server-only (`.server.ts`): never import from a client component.
  */
 
-import { getDiscoveryRails } from '~/lib/discovery.server'
+import { getDiscoveryIndex, getDiscoveryRails } from '~/lib/discovery.server'
 import { buildHomeContentBlocks, type HomeContentBlocks } from '~/lib/homepage-payload.server'
 import { getEmmaHeroSettings } from '~/lib/sanity.server'
 import { withTimeout } from '~/lib/with-timeout.server'
@@ -32,8 +32,11 @@ export interface StorefrontData {
    * Team-managed `singleton.emmaHero` doc (Sanity `emmaHeroSettings`). Text/
    * config only — eyebrow/headline/body/aside/pullQuote/heroVariant. The Hero
    * falls back field-by-field to the discovery-derived defaults when this is
-   * null or a field is empty. Never used for the LCP product image, which
-   * always stays derived from `featured[0]`.
+   * null or a field is empty. The LCP product image always stays derived from
+   * `featured[0]`; the doc's one lever over it is `featuredProductHandle`
+   * (merged in from `singleton.emmaHeroStorefront`), which pins `featured[0]`
+   * to a specific product at assembly time so the hero image + peek link stop
+   * rotating out from under the hero copy. Unset = rotating behavior.
    */
   emmaHero: EmmaHeroSettings | null
   /**
@@ -74,9 +77,32 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
   const rails = railsResult.rails
   // Hero feature set: the single highest-ranked product from each populated
   // rail, in category order — a tidy 1–4 product editorial lead.
-  const featured = rails
+  let featured = rails
     .map(r => r.items[0]?.product)
     .filter((p): p is DiscoveryProduct => !!p)
+
+  // Pinnable headliner: when the team sets featuredProductHandle on
+  // singleton.emmaHeroStorefront, pin that product to featured[0] so the hero
+  // image + peek link match the hero copy instead of following the 60s rail
+  // shuffle. Unknown handle (or a timed-out Sanity leg) degrades to the
+  // rotating default; unset skips this block entirely.
+  const pinnedHandle = emmaHero?.featuredProductHandle?.trim()
+  if (pinnedHandle) {
+    const pinned =
+      featured.find(p => p.handle === pinnedHandle) ??
+      rails.flatMap(r => r.items).find(i => i.product.handle === pinnedHandle)?.product ??
+      // Not surfaced by today's rails: pull it from the discovery index. The
+      // rails call above already warmed the L1 memo, so this is an in-memory
+      // lookup, not a second KV round-trip.
+      (await getDiscoveryIndex()).find(p => p.handle === pinnedHandle)
+    if (pinned) {
+      featured = [pinned, ...featured.filter(p => p.handle !== pinnedHandle)]
+    } else {
+      console.warn(
+        `[storefront-home] featuredProductHandle "${pinnedHandle}" not in discovery index, hero stays rotating`,
+      )
+    }
+  }
 
   return {
     variant: 'b',

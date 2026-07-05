@@ -444,6 +444,10 @@ export interface EmmaHeroSettings {
   // doc by getEmmaHeroSettings(); both unset = default hero CTA behavior.
   primaryCtaLabel?: string
   primaryCtaLink?: string
+  // Pinnable headliner, also merged in from singleton.emmaHeroStorefront. When
+  // set, the storefront hero image and peek link pin to this product handle
+  // instead of rotating with the discovery shuffle. Unset = rotating behavior.
+  featuredProductHandle?: string
 }
 
 // v2 redesign — Emma persona singleton (avatar + display name)
