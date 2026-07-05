@@ -131,16 +131,14 @@ export async function getTodayImageCount(): Promise<number> {
 
 /**
  * True if a run is currently in progress (started within the lock window).
- * The playbook starts the run row (Step 0) BEFORE calling the gate (Step 1),
- * so callers must pass their own run id or they deadlock on their own lock.
+ * The routine starts its own run row (Step 0) BEFORE checking the gate
+ * (Step 1), so the caller passes its own run id via excludeRunId to avoid
+ * self-blocking on the row it just created. Any OTHER running row still locks.
  */
 export async function isRunInProgress(excludeRunId?: number): Promise<boolean> {
   const since = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 60_000)
-  const conditions = [
-    eq(homepageTeamRuns.status, 'running'),
-    gte(homepageTeamRuns.startedAt, since),
-  ]
-  if (excludeRunId != null) conditions.push(ne(homepageTeamRuns.id, excludeRunId))
+  const conditions = [eq(homepageTeamRuns.status, 'running'), gte(homepageTeamRuns.startedAt, since)]
+  if (excludeRunId !== undefined) conditions.push(ne(homepageTeamRuns.id, excludeRunId))
   const [row] = await db
     .select({ id: homepageTeamRuns.id })
     .from(homepageTeamRuns)
@@ -185,11 +183,9 @@ export interface GateResult {
 /**
  * The gate the scheduled routine calls before doing anything paid. Returns
  * ok=false (with a reason) when disabled, over budget, over the daily run cap,
- * over the daily image cap, or a run is already in progress.
- *
- * excludeRunId is the caller's own run row (started in playbook Step 0, before
- * this gate). Without it the caller's row trips both the run_in_progress lock
- * and the run cap.
+ * over the daily image cap, or a run is already in progress. Callers that
+ * already hold a run row pass its id as excludeRunId so the concurrency guard
+ * checks for OTHER runs only.
  */
 export async function gate(excludeRunId?: number): Promise<GateResult> {
   await expireStaleRuns()

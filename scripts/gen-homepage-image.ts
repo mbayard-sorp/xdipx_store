@@ -57,7 +57,7 @@ async function main() {
   const dryRun      = hasFlag('dry-run')
 
   if (!prompt || !alt || !targetKind || !blockKey) {
-    console.error('Usage: gen-homepage-image.ts --prompt <p> --alt <a> --target block|tile|promo --block-key <k> [--tile-key <k>] [--only fal|imagen] [--caller <c>] [--images-so-far <n>] [--run-id <id>] [--dry-run]')
+    console.error('Usage: gen-homepage-image.ts --prompt <p> --alt <a> --target block|tile|promo --block-key <k> [--tile-key <k>] [--only fal|imagen] [--caller <c>] [--images-so-far <n>] [--run-id <n>] [--dry-run]')
     process.exit(1)
   }
   if (targetKind === 'tile' && !tileKey) {
@@ -69,9 +69,10 @@ async function main() {
   const TEAM_TOKEN = process.env['HOMEPAGE_TEAM_TOKEN'] ?? process.env['CRON_SECRET'] ?? ''
   const teamHeaders = { 'x-team-secret': TEAM_TOKEN, 'content-type': 'application/json' }
 
-  // ── 1. Gate re-check (excludeRun keeps the routine's own run row from
-  // tripping the run_in_progress lock) ──────────────────────────────────────
-  const gateUrl = `${BASE_URL}/api/homepage-team/gate${runId ? `?excludeRun=${encodeURIComponent(runId)}` : ''}`
+  // ── 1. Gate re-check ──────────────────────────────────────────────────────
+  // --run-id excludes the caller's own running row from the concurrency guard;
+  // without it the gate refuses mid-run with run_in_progress.
+  const gateUrl = `${BASE_URL}/api/homepage-team/gate${runId && /^\d+$/.test(runId) ? `?excludeRun=${runId}` : ''}`
   const gateRes = await fetch(gateUrl, { headers: teamHeaders })
   const gateJson = await gateRes.json().catch(() => ({})) as {
     ok?: boolean

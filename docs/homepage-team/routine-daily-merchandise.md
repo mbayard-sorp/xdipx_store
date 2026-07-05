@@ -48,10 +48,9 @@ Capture `id` (call it `$RUN_ID`). Use it on every `/event` and `/run update` bel
 
 ## Step 1 — Gate (abort if not ok)
 
-Always pass `excludeRun=$RUN_ID`. Step 0 already inserted your run row with
-`status:'running'`; without the exclusion the gate sees your own row and refuses with
-`reason:'run_in_progress'` every time. The one-run-at-a-time lock still applies to every
-other run.
+Always pass your own `$RUN_ID` as `excludeRun`. Step 0 already inserted your
+run row as `running`, so without it the concurrency guard refuses YOUR OWN run
+as `run_in_progress`. Other running rows still lock as intended.
 
 ```bash
 curl -s "$BASE_URL/api/homepage-team/gate?excludeRun=$RUN_ID" \
@@ -179,15 +178,14 @@ never a body, never explicit.
 
 Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counter:
 
-1. **Re-check the gate before each generation** (or decrement your tracked `remainingCents`),
-   always with `?excludeRun=$RUN_ID` so your own run row does not trip the lock. Hard-stop
+1. **Re-check the gate before each generation** (or decrement your tracked `remainingCents`). Hard-stop
    the loop when `remainingCents <= 0` OR `imagesSoFar >= homepage_team_max_images` (12). The gate now
    also returns `imagesToday` + `maxImagesPerDay` and refuses with `reason:'over_image_cap'` server-side,
    so a stray extra call is rejected — but stop yourself first.
 2. `media-manager` runs `scripts/gen-homepage-image.ts --target block|tile|promo --block-key <k>
    [--tile-key <k>] --prompt "<scene>" --alt "<screen-reader alt>" --images-so-far <n>
-   --run-id $RUN_ID --caller "merch-routine/<surface>"`. The `--run-id` flag makes the script's
-   internal gate re-check exclude your run too.
+   --run-id $RUN_ID --caller "merch-routine/<surface>"`. `--run-id` keeps the script's
+   internal gate re-check from refusing on your own running row.
 3. The script **gates → generates (fal FLUX → Imagen) → uploads to a Sanity asset → patches
    `singleton.homepage` → posts spend → prints a JSON manifest**. Read the manifest; if
    `placed:true`, increment `imagesSoFar`. If `skipped:true`, stop the imagery loop.
@@ -335,7 +333,6 @@ reads these for the live status + conversation viewer.
 - **Diff before write; skip no-op publishes.**
 - **Content only — never code, never structure, never canonical/URLs.** Structural ideas → Routine B.
 - **Reasoning stays on Max** — never call the site's Anthropic-keyed copy/enrich endpoints.
-- **One run at a time** — the gate enforces it (`reason:'run_in_progress'`); always pass
-  `excludeRun=$RUN_ID` so your own run is not the one blocking you; exit if you slipped past.
+- **One run at a time** — the gate enforces it (`reason:'run_in_progress'`); exit if you slipped past.
 - **Emma voice gate is mandatory** — all customer-facing copy passes `emma-empathy-reviewer` against
   `docs/emma-voice.md` (the canonical voice charter).
