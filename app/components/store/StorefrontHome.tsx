@@ -7,12 +7,16 @@
  * stable "shell"; the daily merchandising team changes *content* (featured
  * products, copy, the deferred Sanity bands) inside it, never the structure.
  *
- * Locked design: docs/homepage-team/homepage-redesign-brief.md +
- * docs/homepage-team/hifi-reference.html (claude.ai/design hi-fi pass).
+ * Locked design: docs/homepage-team/redesign-v2-spec.md (art direction +
+ * section-by-section build spec, Routine B). Supersedes the section styling
+ * in docs/homepage-team/homepage-redesign-brief.md; section ORDER and the
+ * locked shell (announcement / hero / trust / email last) are unchanged from
+ * the original brief.
  *
- * Voice: Emma is an AI guide with NO lived experience — she advises from
+ * Voice: Emma is an AI guide with NO lived experience, she advises from
  * catalog knowledge, never claims to have used/owned/reached-for a product.
- * No em-dashes, no countdowns, ♥ only in CTAs/asides.
+ * No em-dashes, no countdowns, CTAs from the whitelist only, heart motif only
+ * in CTAs/asides.
  *
  * SSR-visible content everywhere (no client-only critical content) so it
  * indexes cleanly. Reveal is used for scroll polish but never wraps the LCP
@@ -26,10 +30,12 @@ import { EmailSubscribe } from '~/components/store/EmailSubscribe'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
+import { Reveal } from '~/components/motion/Reveal'
 import { trackViewItemList, trackSelectItem, type GA4Item } from '~/lib/analytics.client'
 import type { StorefrontData } from '~/lib/storefront-home.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
-import type { EmmaHeroSettings, WayfinderMosaicBlock } from '~/types/cms'
+import type { EmmaHeroSettings, WayfinderMosaicBlock, PlayTogetherBannerBlock, EmmaCuratedRailBlock } from '~/types/cms'
+import type { Product } from '~/types'
 
 /* Team-controlled Sanity block types the storefront renders (everything else
    in `singleton.homepage` is shell-owned or legacy and intentionally ignored). */
@@ -43,22 +49,38 @@ const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 400 } as const
 const DISPLAY_MED = { fontFamily: 'var(--font-display)', fontWeight: 500 } as const
 const BODY = { fontFamily: 'var(--font-body)' } as const
 
-/* The above-the-fold guided entry. Four pills go straight to a matching live
-   collection; "Surprise me" keeps the single preset deep-link the mission
-   brief allows (/discover appears at most twice on the page: the closer band
-   plus at most one preset pill). Its preset is a randomized shuffle with no
-   collection equivalent, so it is the one that stays. */
+/* The above-the-fold guided entry. All five pills go straight to a matching
+   live collection — the redesign v2 spec caps /discover at exactly two links
+   on the page (the Nº 05 mosaic promo tile and the Nº 08 closer band), so
+   "Surprise me" points at the best-sellers collection instead of the old
+   /discover?preset=surprise-me deep link. */
 const MOOD_PILLS = [
   { label: 'Just curious', to: '/collections/first-time' },
   { label: 'Slow nights', to: '/collections/massage-mood' },
   { label: 'For two', to: '/collections/couples' },
   { label: 'Hands-free', to: '/collections/wearable-toys' },
-  { label: 'Surprise me', to: '/discover?preset=surprise-me' },
+  { label: 'Surprise me', to: '/collections/best-sellers' },
 ]
 
-/* ── 1 · Hero (Direction A: editorial split) ───────────────────────────────
-   Text column on the left, one large static product still on the right (the
-   LCP candidate — priority, fixed aspect, never wrapped in Reveal). */
+/* ── Section numeral motif — "Nº 0X" mono tag used on major bands/tiles. ──── */
+
+function SectionNumeral({ n, className = '', tone = 'ink-4' }: { n: string; className?: string; tone?: string }) {
+  return (
+    <span
+      className={`text-[11px] uppercase tracking-[0.18em] text-${tone} ${className}`}
+      style={MONO}
+      aria-hidden="true"
+    >
+      Nº {n}
+    </span>
+  )
+}
+
+/* ── Nº 01 · Hero (editorial split, coral-soft product frame) ─────────────
+   Text column first on mobile, product still bleeds full-width below it (the
+   LCP candidate — priority, fixed aspect, never wrapped in Reveal). Text
+   column is one Reveal("up") group, above the fold, so it renders visible
+   immediately. */
 
 /** Voice-charter CTA whitelist. A Sanity-supplied hero CTA label must be one
  *  of these exactly or the hero falls back to the default label. */
@@ -85,13 +107,13 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
   // Emma has no top billing in the hero (owner decision): the eyebrow is a
   // plain category label, not an Emma byline, and the hero drops the Emma
   // aside chip entirely. She still appears mid-page in MeetEmma() below.
-  const eyebrow = emmaHero?.eyebrow || 'Curated sexual wellness'
+  const eyebrow = emmaHero?.eyebrow || "This week's pick"
 
   return (
     <section className="bg-paper">
-      <div className="mx-auto grid max-w-[1320px] items-center gap-10 px-6 py-10 md:grid-cols-2 md:gap-16 md:px-10 md:py-16">
-        {/* text column */}
-        <div className="min-w-0">
+      <div className="mx-auto grid max-w-[1320px] items-center gap-10 px-6 py-10 md:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] md:gap-16 md:px-16 md:py-16">
+        {/* text column — single Reveal group, above the fold */}
+        <Reveal variant="up" disabled className="min-w-0">
           <p className="mb-5 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
             {eyebrow}
           </p>
@@ -111,9 +133,14 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
             </h1>
           )}
 
-          {emmaHero?.body && (
+          {emmaHero?.body ? (
             <p className="mt-6 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3" style={BODY}>
               {emmaHero.body}
+            </p>
+          ) : (
+            <p className="mt-6 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3" style={BODY}>
+              A short, checked selection instead of a wall of options. Start with the one below, or
+              tell us what you're after.
             </p>
           )}
 
@@ -143,7 +170,9 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
               className="inline-flex items-center gap-2 rounded-full border border-line-2 px-5 py-3 text-[15px] font-medium text-ink transition-colors hover:border-ink-3"
               style={BODY}
             >
-              Show me <span aria-hidden="true">→</span>
+              {/* Never duplicate the primary's label (both are whitelist picks). */}
+              {primaryLabel.startsWith('Take a peek') ? 'Show me' : 'Take a peek'}{' '}
+              <span aria-hidden="true">→</span>
             </Link>
           </div>
 
@@ -163,11 +192,20 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
               </Link>
             ))}
           </div>
-        </div>
+        </Reveal>
 
-        {/* product still — static LCP, never animated, fixed aspect */}
-        <div className="min-w-0">
-          <div className="aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-lg)] border border-line bg-paper-2">
+        {/* product still — static LCP, never animated, coral-soft frame w/ inset vignette */}
+        <div className="relative min-w-0">
+          <div
+            className="relative aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-lg)] border border-line bg-coral-soft"
+            style={{ boxShadow: 'inset 0 -60px 90px rgba(26,20,24,0.07)' }}
+          >
+            <span
+              className="absolute left-4 top-4 z-[1] rounded-full bg-paper/85 px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-ink-3"
+              style={MONO}
+            >
+              Nº 01, this week's pick
+            </span>
             {lead?.imageUrl ? (
               <OptimizedImage
                 src={lead.imageUrl}
@@ -183,9 +221,9 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
         </div>
       </div>
 
-      {/* 2 · Trust strip — raised into the hero band, inside the first viewport */}
-      <div className="border-t border-line">
-        <div className="mx-auto flex max-w-[1320px] flex-wrap items-center justify-between gap-x-8 gap-y-3.5 px-6 py-[18px] md:px-10">
+      {/* Nº 02 · Trust strip — raised into the hero band, inside the first viewport */}
+      <Reveal variant="fade" as="div" className="border-t border-line">
+        <div className="mx-auto grid max-w-[1320px] grid-cols-2 gap-x-6 gap-y-3.5 px-6 py-[18px] md:flex md:flex-nowrap md:items-center md:justify-between md:gap-x-8 md:px-16">
           {[
             'Ships in plain packaging',
             'Billed as XDIPX',
@@ -197,7 +235,7 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
             </div>
           ))}
         </div>
-      </div>
+      </Reveal>
     </section>
   )
 }
@@ -205,11 +243,151 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
 /* ── 3 · Meet Emma ─────────────────────────────────────────────────────────
    Who she is, in her own AI-guide voice (E-E-A-T + brand trust). */
 
+/* ── Nº 03 · "Most picked, right now" — promoted primary grid ──────────────
+   The single biggest structural change: the anchor best-seller set moves up
+   from the buried rail zone to a bright, static grid immediately after the
+   trust strip, so the page opens with a wall of clickable product. */
+
+/** Render a heading with its last word in the italic plum emphasis style,
+    matching the editorial headline treatment across the page. */
+function EmphasizedHeading({ text }: { text: string }) {
+  const trimmed = text.trim()
+  const trailing = trimmed.match(/[.?!]$/)?.[0] ?? ''
+  const core = trailing ? trimmed.slice(0, -1) : trimmed
+  const words = core.split(' ')
+  if (words.length < 2) return <>{trimmed}</>
+  const last = words.pop() as string
+  return <>{words.join(' ')} <em className="em">{last}</em>{trailing}</>
+}
+
+/** Adapt a full Shopify product (team-rail fetch) to the lean grid-card shape.
+    Only the fields StorefrontProductCard reads matter; the rest are inert. */
+function shopifyToDiscovery(p: Product): DiscoveryProduct {
+  return {
+    id: p.id,
+    handle: p.handle,
+    title: p.title,
+    defaultVariantId: null,
+    price: p.price,
+    priceMax: null,
+    // Shopify's compareAtPrice already encodes what we're allowed to strike
+    // (MAP-restricted products have it unset upstream).
+    compareAtPrice: p.compareAtPrice && p.compareAtPrice > p.price ? p.compareAtPrice : null,
+    colorValues: [],
+    sizeValues: [],
+    imageUrl: p.images[0]?.url ?? null,
+    imageAlt: p.images[0]?.altText ?? null,
+    category: 'Pleasure',
+    subcategory: p.brand ?? '',
+    mood: [],
+    audience: [],
+    matters: [],
+    totalInventory: null,
+    productType: null,
+    productTypeDial: null,
+  }
+}
+
+/** Wrap a team `emmaCuratedRail` block's fetched products in the Rail shape
+    the Nº 03 grid renders, so the day's slate gets grid density instead of a
+    horizontal scroller. */
+function teamRailToGridRail(products: Product[]): Rail {
+  return {
+    category: 'Pleasure',
+    score: 0,
+    total: products.length,
+    items: products.map(p => ({ score: 0, product: shopifyToDiscovery(p) })),
+  }
+}
+
+function ProductGrid({
+  rail,
+  eyebrow = "What's working",
+  heading,
+  seeAllHref = '/collections/best-sellers',
+  seeAllLabel = 'See all →',
+}: {
+  rail: Rail
+  eyebrow?: string
+  heading?: string
+  seeAllHref?: string
+  seeAllLabel?: string
+}) {
+  if (!rail.items.length) return null
+  const items = rail.items.slice(0, 8)
+
+  // GA4: fire view_item_list once per page view when the grid renders.
+  const firedView = useRef(false)
+  useEffect(() => {
+    if (firedView.current || !items.length) return
+    firedView.current = true
+    trackViewItemList('most-picked-grid', 'most-picked-grid', items.map((it, i) =>
+      toGA4Item(it.product, i, 'most-picked-grid', 'most-picked-grid'),
+    ))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <section className="bg-paper py-16 md:py-20">
+      <div className="mx-auto max-w-[1320px] px-6 md:px-16">
+        <Reveal variant="up" className="mb-9 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="mb-3 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
+              {eyebrow}
+            </p>
+            <h2 className="text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]" style={DISPLAY}>
+              {heading
+                ? <EmphasizedHeading text={heading} />
+                : <>Most picked, <em className="em">right now</em>.</>}
+            </h2>
+          </div>
+          <Link
+            to={seeAllHref}
+            className="hidden text-[15px] font-medium text-ink link-coral md:inline-block"
+            style={BODY}
+          >
+            {seeAllLabel}
+          </Link>
+        </Reveal>
+
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-5">
+          {items.map((it, i) => (
+            <Reveal key={it.product.id} variant="up" index={i}>
+              <StorefrontProductCard
+                product={it.product}
+                priority={i === 0}
+                fluid
+                onSelect={() => trackSelectItem(
+                  'most-picked-grid', 'most-picked-grid',
+                  toGA4Item(it.product, i, 'most-picked-grid', 'most-picked-grid'), i,
+                )}
+              />
+            </Reveal>
+          ))}
+        </div>
+
+        <Link
+          to={seeAllHref}
+          className="mt-7 inline-block text-[15px] font-medium text-ink link-coral md:hidden"
+          style={BODY}
+        >
+          {seeAllLabel}
+        </Link>
+      </div>
+    </section>
+  )
+}
+
+/* ── Nº 04 · Meet Emma ──────────────────────────────────────────────────────
+   Who she is, in her own AI-guide voice (E-E-A-T + brand trust). The
+   headline is set as an oversized pull-quote — typographic art, not caption
+   text — with a large coral opening ♥ as a display mark. */
+
 function MeetEmma() {
   return (
-    <section id="meet-emma" className="bg-paper-2">
-        <div className="mx-auto flex max-w-[1320px] flex-wrap items-center gap-10 px-6 py-16 md:gap-16 md:px-10 md:py-24">
-          <div className="min-w-[240px] max-w-[420px] flex-1">
+    <section id="meet-emma" className="bg-paper-2 py-16 md:py-20">
+        <div className="mx-auto flex max-w-[1320px] flex-wrap items-center gap-10 px-6 md:gap-16 md:px-16">
+          <Reveal variant="scale" className="min-w-[240px] max-w-[420px] flex-1">
             <div className="aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-lg)] bg-paper-3 ring-[6px] ring-sage/15">
               <OptimizedImage
                 src="/emma.png"
@@ -220,21 +398,23 @@ function MeetEmma() {
                 className="h-full w-full object-cover"
               />
             </div>
-          </div>
-          <div className="min-w-[300px] flex-1">
+          </Reveal>
+          <Reveal variant="up" className="min-w-[300px] flex-1">
+            <SectionNumeral n="04" className="mb-3 block" />
             <p className="mb-5 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
               Meet Emma
             </p>
-            <h2
-              className="text-[1.9rem] leading-[1.12] tracking-[-0.01em] text-ink md:text-[2.9rem]"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 450 }}
+            <p
+              className="text-[1.9rem] leading-[1.16] tracking-[-0.01em] text-ink md:text-[2.9rem]"
+              style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 450 }}
             >
-              I'm Emma, xdipx's AI guide. I know the catalog cold, every spec and thousands of
-              reviews, so I can point you to what actually <em className="em">fits</em>.
-            </h2>
+              <span className="mr-1 not-italic text-coral" aria-hidden="true">♥</span>
+              I know the catalog cold, every spec and the review patterns behind it, so I can
+              point you to what actually <em className="em">fits</em>.
+            </p>
             <p className="mt-6 max-w-[48ch] text-[16.5px] leading-relaxed text-ink-3" style={BODY}>
-              I don't get embarrassed, and I don't have a shelf to push. Tell me a little about what
-              you're after and I'll do the reading for you.
+              I'm an AI guide, so I don't get embarrassed and I don't have a shelf to push. Tell me a
+              little about what you're after and I'll do the reading for you.
             </p>
             {/* Anchors to the Compass closer band below. It keeps the guided-fit
                 promise in this copy without adding a third /discover link (mission
@@ -246,7 +426,7 @@ function MeetEmma() {
             >
               Find your fit <span aria-hidden="true">→</span>
             </Link>
-          </div>
+          </Reveal>
         </div>
     </section>
   )
@@ -292,7 +472,7 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
     ? promoHeading.split(promoEmphasis)
     : [promoHeading, '']
   const promoBody = promo?.body
-    || "Answer a few quiet questions and Emma builds you a short list that actually fits."
+    || "Answer a few quiet questions and Emma narrows it down to a few that fit."
   const promoCtaLabel = promo?.ctaLabel || 'Find your fit →'
   // The mosaic promo slot is the one tile the mission brief allows to keep
   // /discover. This fallback only renders when no wayfinderMosaic block is
@@ -300,87 +480,101 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
   const promoCtaLink = promo?.ctaLink || '/discover'
 
   return (
-    <section className="bg-paper">
-        <div className="mx-auto max-w-[1320px] px-6 py-16 md:px-10 md:py-24">
-          <p className="mb-3.5 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
-            {eyebrow}
-          </p>
-          <h2
-            className="mb-9 text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]"
-            style={DISPLAY}
-          >
-            {headingParts[0]}<em className="em">{emphasis}</em>{headingParts[1]}
-          </h2>
+    <section className="bg-paper py-16 md:py-20">
+        <div className="mx-auto max-w-[1320px] px-6 md:px-16">
+          <Reveal variant="up">
+            <SectionNumeral n="05" className="mb-3 block" />
+            <p className="mb-3.5 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
+              {eyebrow}
+            </p>
+            <h2
+              className="mb-9 text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]"
+              style={DISPLAY}
+            >
+              {headingParts[0]}<em className="em">{emphasis}</em>{headingParts[1]}
+            </h2>
+          </Reveal>
 
           <div className="mb-4 flex flex-wrap gap-4">
-            {tiles.map(t => {
+            {tiles.map((t, i) => {
               const hasImage = !!t.image?.url
               return (
-                <Link
-                  key={t._key}
-                  to={t.link}
-                  className="relative flex min-h-[200px] flex-1 basis-[180px] items-end overflow-hidden rounded-[var(--radius-lg)] border border-line bg-paper-3 p-5 transition-transform hover:-translate-y-0.5"
-                >
-                  {hasImage && (
-                    <OptimizedImage
-                      src={t.image!.url!}
-                      alt={t.image!.alt ?? t.label}
-                      sizes="(max-width: 768px) 100vw, 33vw"
-                      className="absolute inset-0 h-full w-full object-cover"
-                    />
-                  )}
-                  <div className="relative z-[1]">
-                    <span
-                      className="text-[1.5rem] text-ink"
-                      style={{ ...DISPLAY_MED, ...(hasImage ? { color: 'white' } : {}) }}
-                    >
-                      {t.label}
-                    </span>
-                    {t.emmaAside && (
-                      <p
-                        className="mt-1 text-[13.5px] italic text-sage"
-                        style={{ ...DISPLAY, ...(hasImage ? { color: 'white' } : {}) }}
-                      >
-                        ♥ {t.emmaAside}
-                      </p>
+                <Reveal key={t._key} variant="up" index={i} className="flex-1 basis-[180px]">
+                  <Link
+                    to={t.link}
+                    className="relative flex min-h-[200px] w-full items-end overflow-hidden rounded-[var(--radius-lg)] border border-line bg-paper-3 p-5 transition-transform hover:-translate-y-0.5"
+                  >
+                    {hasImage && (
+                      <>
+                        <OptimizedImage
+                          src={t.image!.url!}
+                          alt={t.image!.alt ?? t.label}
+                          sizes="(max-width: 768px) 100vw, 33vw"
+                          className="absolute inset-0 h-full w-full object-cover"
+                        />
+                        {/* Ink gradient scrim so the white label stays legible over any photo */}
+                        <div
+                          className="absolute inset-0"
+                          style={{ background: 'linear-gradient(to top, rgba(26,20,24,0.75), rgba(26,20,24,0.05) 60%)' }}
+                          aria-hidden="true"
+                        />
+                      </>
                     )}
-                  </div>
-                </Link>
+                    <div className="relative z-[1]">
+                      <span
+                        className="text-[1.5rem] text-ink"
+                        style={{ ...DISPLAY_MED, ...(hasImage ? { color: 'white' } : {}) }}
+                      >
+                        {t.label}
+                      </span>
+                      {t.emmaAside && (
+                        <p
+                          className="mt-1 text-[13.5px] italic text-sage"
+                          style={{ ...DISPLAY, ...(hasImage ? { color: 'white' } : {}) }}
+                        >
+                          ♥ {t.emmaAside}
+                        </p>
+                      )}
+                    </div>
+                  </Link>
+                </Reveal>
               )
             })}
           </div>
 
           {/* Discover You — larger plum-soft tile (or promo.image when set) */}
-          <Link
-            to={promoCtaLink}
-            className="relative flex flex-wrap items-center justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
-          >
-            {promo?.image?.url && (
-              <OptimizedImage
-                src={promo.image.url}
-                alt={promo.image.alt ?? promoHeading}
-                sizes="100vw"
-                className="absolute inset-0 h-full w-full object-cover"
-              />
-            )}
-            <div className="relative z-[1] flex-1 basis-[320px]">
-              <p className="mb-3.5 text-[11px] uppercase tracking-[0.18em] text-plum" style={MONO}>
-                {promoEyebrow}
-              </p>
-              <h3 className="mb-3 text-[1.7rem] leading-[1.1] text-ink md:text-[2.5rem]" style={DISPLAY}>
-                {promoHeadingParts[0]}<em className="em">{promoEmphasis}</em>{promoHeadingParts[1]}
-              </h3>
-              <p className="max-w-[46ch] text-[16px] leading-relaxed text-ink-3" style={BODY}>
-                {promoBody}
-              </p>
-            </div>
-            <span
-              className="relative z-[1] whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white"
-              style={BODY}
+          <Reveal variant="scale">
+            <Link
+              to={promoCtaLink}
+              className="relative flex flex-wrap items-center justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
             >
-              {promoCtaLabel}
-            </span>
-          </Link>
+              {promo?.image?.url && (
+                <OptimizedImage
+                  src={promo.image.url}
+                  alt={promo.image.alt ?? promoHeading}
+                  sizes="100vw"
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+              )}
+              <div className="relative z-[1] flex-1 basis-[320px]">
+                <p className="mb-3.5 text-[11px] uppercase tracking-[0.18em] text-plum" style={MONO}>
+                  {promoEyebrow}
+                </p>
+                <h3 className="mb-3 text-[1.7rem] leading-[1.1] text-ink md:text-[2.5rem]" style={DISPLAY}>
+                  {promoHeadingParts[0]}<em className="em">{promoEmphasis}</em>{promoHeadingParts[1]}
+                </h3>
+                <p className="max-w-[46ch] text-[16px] leading-relaxed text-ink-3" style={BODY}>
+                  {promoBody}
+                </p>
+              </div>
+              <span
+                className="relative z-[1] whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white"
+                style={BODY}
+              >
+                {promoCtaLabel}
+              </span>
+            </Link>
+          </Reveal>
         </div>
     </section>
   )
@@ -402,6 +596,11 @@ function toGA4Item(product: DiscoveryProduct, index: number, listId: string, lis
     item_list_name: listName,
   }
 }
+
+/* ── Nº 06 · Emma's edit — curated rail, kept as a horizontal scroller ─────
+   Contrast with the Nº 03 grid gives the page rhythm; two identical grids
+   would be monotone. The whole rail block gets one Reveal("fade") — no
+   per-card reveal inside a horizontal scroller. */
 
 function Rail({
   eyebrow,
@@ -435,8 +634,9 @@ function Rail({
 
   if (!rail.items.length) return null
   return (
-    <div className="py-2">
-      <div className="mb-3 px-6 md:px-10">
+    <Reveal variant="fade" className="py-2">
+      <div className="mb-3 px-6 md:px-16">
+        <SectionNumeral n="06" className="mb-3 block" />
         <p className="mb-3 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
           {eyebrow}
         </p>
@@ -444,7 +644,7 @@ function Rail({
           {heading} <em className="em">{emphasis}</em>
         </h2>
       </div>
-      <div className="flex snap-x gap-[18px] overflow-x-auto px-6 pb-3.5 [scrollbar-width:none] md:px-10 [&::-webkit-scrollbar]:hidden">
+      <div className="flex snap-x gap-[18px] overflow-x-auto px-6 pb-3.5 [scrollbar-width:none] md:px-16 [&::-webkit-scrollbar]:hidden">
         {rail.items.slice(0, 10).map((it, i) => (
           <div key={it.product.id} className="w-[220px] shrink-0 snap-start">
             <StorefrontProductCard
@@ -456,88 +656,157 @@ function Rail({
         ))}
       </div>
       {aside && (
-        <p className="px-6 pt-3 text-[1.05rem] italic text-sage md:px-10" style={DISPLAY}>
+        <p className="px-6 pt-3 text-[1.05rem] italic text-sage md:px-16" style={DISPLAY}>
           ♥ {aside}
         </p>
       )}
-    </div>
+    </Reveal>
   )
 }
 
-function RotatingRails({ rails }: { rails: Rail[] }) {
+/** Emma's edit — the second populated rail (falls back to the first if only
+ *  one rail has products). The best-of anchor rail (rails[0]) is promoted to
+ *  the Nº 03 static grid above, so this section only needs the "second"
+ *  curated set to avoid rendering the same products twice in a row. */
+function EmmasEdit({ rails }: { rails: Rail[] }) {
   const populated = rails.filter(r => r.items.length > 0)
   if (!populated.length) return null
-  const best = populated[0]!
   const edit = populated[1] ?? populated[0]!
   return (
-    <section id="rails" className="bg-paper-2 py-16 md:py-24">
-        <Rail
-          eyebrow="What's working"
-          heading="Most picked,"
-          emphasis="right now."
-          rail={best}
-          listKey="bestsellers"
-          leadPriority
-        />
-        {populated.length > 1 && (
-          <div className="pt-8">
-            <Rail
-              eyebrow="Emma's edit"
-              heading="Picked for"
-              emphasis="slow nights."
-              rail={edit}
-              listKey="emmas-edit"
-              aside="Picked for pacing, not just power. Good for slowing down."
-            />
-          </div>
-        )}
+    <section id="emmas-edit" className="bg-paper-2 py-16 md:py-20">
+      <Rail
+        eyebrow="Emma's edit"
+        heading="Chosen for how they"
+        emphasis="feel."
+        rail={edit}
+        listKey="emmas-edit"
+        aside="Picked for pacing and material, not just power. A calm place to start."
+      />
     </section>
   )
 }
 
-/* ── 6 · Social proof ──────────────────────────────────────────────────────
+/* ── Social proof ───────────────────────────────────────────────────────────
    Intentionally NOT rendered: the store is pre-launch and has no real customer
    reviews yet. We do not ship invented testimonials (brand voice + FTC
    endorsement rules). Re-add a real social-proof section once orders generate
    genuine reviews — wire the Sanity `testimonials` block (Routine B) so the
    team can publish real quotes without a deploy. */
 
-/* ── 7 · Couples ───────────────────────────────────────────────────────────
-   Play-together banner. The couples product rail is a follow-up (needs a
-   confirmed couples collection/tag); banner ships now. */
+/* ── Nº 07 · Couples — photographic band + rail ────────────────────────────
+   Today's flat coral-soft box earns no clicks. Rebuilt as a full-bleed
+   photographic banner (image + ink scrim + white label + CTA) with a couples
+   product rail beneath it. Falls back to the flat banner alone when no
+   couples-tagged rail is available (graceful degrade — never blank). */
 
-function Couples() {
+function PhotoBand({
+  block,
+  fallbackHref = '/collections/couples',
+}: {
+  block?: PlayTogetherBannerBlock | undefined
+  fallbackHref?: string
+}) {
+  const heading = block?.heading || 'Better together.'
+  const emphasis = 'together'
+  const headingParts = heading.includes(emphasis) ? heading.split(emphasis) : [heading, '']
+  const body = block?.body
+    || 'A few things designed for shared control, made for playing together rather than solo.'
+  const ctaLabel = block?.ctaLabel && HERO_CTA_WHITELIST.includes(block.ctaLabel) ? block.ctaLabel : 'Show me'
+  const ctaLink = block?.ctaLink || fallbackHref
+  const hasImage = !!block?.image?.url
+
   return (
-    <section className="bg-paper-3">
-        <div className="mx-auto max-w-[1320px] px-6 py-16 md:px-10 md:py-24">
-          <div className="flex flex-wrap items-end justify-between gap-5 rounded-[var(--radius-lg)] bg-coral-soft p-8 md:p-14">
-            <div className="flex-1 basis-[320px]">
-              <p className="mb-3.5 text-[11px] uppercase tracking-[0.18em] text-ink-3" style={MONO}>
-                For two
-              </p>
-              <h2 className="text-[2.1rem] leading-[1.05] tracking-[-0.01em] text-ink md:text-[3.2rem]" style={DISPLAY}>
-                Better <em className="em">together</em>.
-              </h2>
-            </div>
-            <Link
-              to="/collections/couples"
-              className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white transition-transform hover:-translate-y-0.5"
-              style={BODY}
-            >
-              Show me <span aria-hidden="true">→</span>
-            </Link>
-          </div>
+    <Reveal variant="scale">
+      <Link
+        to={ctaLink}
+        className="relative flex min-h-[360px] flex-wrap items-end justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-coral-soft p-8 transition-transform hover:-translate-y-0.5 md:p-14"
+      >
+        {hasImage && (
+          <>
+            <OptimizedImage
+              src={block!.image!.url!}
+              alt={block!.image!.alt ?? heading}
+              sizes="100vw"
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+            <div
+              className="absolute inset-0"
+              style={{ background: 'linear-gradient(to top, rgba(26,20,24,0.72), rgba(26,20,24,0.05) 55%)' }}
+              aria-hidden="true"
+            />
+          </>
+        )}
+        <div className="relative z-[1] flex-1 basis-[320px]">
+          <p
+            className="mb-3.5 text-[11px] uppercase tracking-[0.18em]"
+            style={{ ...MONO, color: hasImage ? 'white' : 'var(--color-ink-3)' }}
+          >
+            For two
+          </p>
+          <h2
+            className="text-[2.1rem] leading-[1.05] tracking-[-0.01em] md:text-[3.2rem]"
+            style={{ ...DISPLAY, color: hasImage ? 'white' : 'var(--color-ink)' }}
+          >
+            {headingParts[0]}<em className="em">{emphasis}</em>{headingParts[1]}
+          </h2>
+          {hasImage && (
+            <p className="mt-3 max-w-[42ch] text-[15px] leading-relaxed text-white/85" style={BODY}>
+              {body}
+            </p>
+          )}
         </div>
+        <span
+          className="relative z-[1] inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white transition-transform hover:-translate-y-0.5"
+          style={BODY}
+        >
+          {ctaLabel} <span aria-hidden="true">→</span>
+        </span>
+      </Link>
+    </Reveal>
+  )
+}
+
+function Couples({
+  block,
+  rail,
+}: {
+  block?: PlayTogetherBannerBlock | undefined
+  rail?: Rail | undefined
+}) {
+  return (
+    <section className="bg-paper-3 py-16 md:py-20">
+        <div className="mx-auto max-w-[1320px] px-6 md:px-16">
+          <PhotoBand block={block} />
+        </div>
+        {rail && rail.items.length > 0 && (
+          <Reveal variant="fade" className="mt-8">
+            <div className="mb-3 px-6 md:px-16">
+              <p className="text-[1.05rem] italic text-sage" style={DISPLAY}>
+                ♥ A few more, chosen for sharing.
+              </p>
+            </div>
+            <div className="flex snap-x gap-[18px] overflow-x-auto px-6 pb-3.5 [scrollbar-width:none] md:px-16 [&::-webkit-scrollbar]:hidden">
+              {rail.items.slice(0, 10).map((it, i) => (
+                <div key={it.product.id} className="w-[220px] shrink-0 snap-start">
+                  <StorefrontProductCard
+                    product={it.product}
+                    onSelect={() => trackSelectItem('couples', 'couples', toGA4Item(it.product, i, 'couples', 'couples'), i)}
+                  />
+                </div>
+              ))}
+            </div>
+          </Reveal>
+        )}
     </section>
   )
 }
 
-/* ── 8 · "Still deciding?" dark band — the Compass closer → /discover ──────── */
+/* ── Nº 08 · "Still deciding?" dark band — the Compass closer → /discover ─── */
 
 function StillDecidingBand() {
   return (
     <section id="discover" className="bg-ink text-paper">
-        <div className="mx-auto max-w-[1320px] px-6 py-20 text-center md:px-10 md:py-32">
+        <Reveal variant="up" className="mx-auto max-w-[1320px] px-6 py-20 text-center md:px-16 md:py-32">
           <p className="mb-6 text-[11px] uppercase tracking-[0.18em] text-coral" style={MONO}>
             Still deciding?
           </p>
@@ -558,12 +827,12 @@ function StillDecidingBand() {
           >
             Find your fit <span aria-hidden="true">→</span>
           </Link>
-        </div>
+        </Reveal>
     </section>
   )
 }
 
-/* ── 11 · FAQ (+ FAQPage JSON-LD for AEO) ──────────────────────────────────── */
+/* ── Nº 10 · FAQ (+ FAQPage JSON-LD for AEO) ───────────────────────────────── */
 
 const FAQS = [
   {
@@ -579,7 +848,7 @@ const FAQS = [
   {
     question: 'Who is Emma?',
     answer:
-      "Emma is xdipx's AI guide. She knows the catalog and the reviews cold and points you to what fits. She is not a customer, and she has nothing to push.",
+      "Emma is xdipx's AI guide. She knows the catalog and the reviews cold and helps you find what fits. She is not a customer, and she has nothing to push.",
   },
   {
     question: 'What payment methods do you take?',
@@ -590,9 +859,10 @@ const FAQS = [
 
 function FAQ() {
   return (
-    <section className="bg-paper-2">
+    <section className="bg-paper-2 py-16 md:py-20">
       <FAQStructuredData faqs={FAQS} />
-        <div className="mx-auto max-w-[820px] px-6 py-16 md:px-10 md:py-24">
+        <Reveal variant="up" className="mx-auto max-w-[820px] px-6 md:px-16">
+          <SectionNumeral n="10" className="mb-3 block" />
           <h2
             className="mb-9 text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]"
             style={DISPLAY}
@@ -615,7 +885,7 @@ function FAQ() {
               </p>
             </details>
           ))}
-        </div>
+        </Reveal>
     </section>
   )
 }
@@ -625,10 +895,66 @@ function FAQ() {
    notebook/promo/editorial surface) stream in between Couples and FAQ. */
 
 export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: StorefrontData) {
-  const discoveryRails = <RotatingRails rails={rails} />
+  // Nº 03 grid + Nº 06 rail cold-start fallback — the discovery "best of" set
+  // sourced straight from the loader payload's `rails[]` (no new Shopify
+  // calls). rails[0] promotes to the bright static grid; rails[1] (or the
+  // same rail again when there's only one populated) stays the calm scroller
+  // so the two sections never render an identical product set back to back.
+  const populatedRails = rails.filter(r => r.items.length > 0)
+  const gridRail = populatedRails[0]
+  const editRails = populatedRails.length > 1 ? populatedRails.slice(1) : populatedRails
+
   return (
     <>
       <Hero featured={featured} emmaHero={emmaHero} />
+
+      {/* Nº 03 · Most picked, right now — the team's first `emmaCuratedRail`
+          block when published (rendered as the existing carousel component,
+          untouched — the Sanity render path is a restyle, not a data-layer
+          change), otherwise the discovery best-of anchor rail as a bright
+          static grid. Never blank: gridRail is undefined only when every
+          discovery rail is empty (cold KV), in which case nothing renders
+          here and the page still reads complete. */}
+      <Suspense fallback={gridRail ? <ProductGrid rail={gridRail} /> : null}>
+        <Await
+          resolve={contentBlocks}
+          errorElement={gridRail ? <ProductGrid rail={gridRail} /> : null}
+        >
+          {({ sections, carouselProductMap }) => {
+            const teamRails = sections
+              .filter(b => b._type === TEAM_RAIL_TYPE)
+              .slice(0, MAX_TEAM_RAILS)
+            const firstTeamRail = teamRails[0] as EmmaCuratedRailBlock | undefined
+            if (firstTeamRail) {
+              const products = carouselProductMap[firstTeamRail._key] ?? []
+              if (products.length > 0) {
+                // The day's slate gets the dense grid treatment (spec Nº 03),
+                // not a horizontal scroller — heading/eyebrow come from the
+                // team's Sanity block so merchandising still owns the words.
+                return (
+                  <ProductGrid
+                    rail={teamRailToGridRail(products)}
+                    eyebrow={firstTeamRail.eyebrow || "What's working"}
+                    heading={firstTeamRail.heading}
+                    seeAllHref={firstTeamRail.ctaLink || '/collections/best-sellers'}
+                    seeAllLabel={firstTeamRail.ctaLabel || 'See all →'}
+                  />
+                )
+              }
+              // Product fetch failed/empty — fall back to the carousel path
+              // rather than an empty grid.
+              return (
+                <ContentBlockRenderer
+                  block={firstTeamRail}
+                  carouselProductMap={carouselProductMap}
+                />
+              )
+            }
+            return gridRail ? <ProductGrid rail={gridRail} /> : null
+          }}
+        </Await>
+      </Suspense>
+
       <MeetEmma />
 
       {/* Find your way in — the team's `wayfinderMosaic` block when published,
@@ -643,32 +969,47 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: Sto
         </Await>
       </Suspense>
 
-      {/* Rotating rails — the team's `emmaCuratedRail` blocks when published,
-          otherwise the discovery "best of" rails (cold-start fallback). The
-          team owns this surface via Sanity; no deploy needed to reshuffle. */}
-      <Suspense fallback={null}>
-        <Await resolve={contentBlocks} errorElement={discoveryRails}>
+      {/* Nº 06 · Emma's edit — the team's remaining `emmaCuratedRail` blocks
+          (2nd..Nth) when published, otherwise the discovery rails not already
+          used by the Nº 03 grid, rendered as the calm horizontal scroller. */}
+      <Suspense fallback={<EmmasEdit rails={editRails} />}>
+        <Await resolve={contentBlocks} errorElement={<EmmasEdit rails={editRails} />}>
           {({ sections, carouselProductMap }) => {
             const teamRails = sections
               .filter(b => b._type === TEAM_RAIL_TYPE)
               .slice(0, MAX_TEAM_RAILS)
-            if (teamRails.length === 0) return discoveryRails
-            return (
-              <>
-                {teamRails.map(block => (
-                  <ContentBlockRenderer
-                    key={block._key}
-                    block={block}
-                    carouselProductMap={carouselProductMap}
-                  />
-                ))}
-              </>
-            )
+            const restTeamRails = teamRails.slice(1)
+            if (restTeamRails.length > 0) {
+              return (
+                <>
+                  {restTeamRails.map(block => (
+                    <ContentBlockRenderer
+                      key={block._key}
+                      block={block}
+                      carouselProductMap={carouselProductMap}
+                    />
+                  ))}
+                </>
+              )
+            }
+            if (teamRails.length === 1) return null // the one team rail already fed the Nº 03 grid
+            return <EmmasEdit rails={editRails} />
           }}
         </Await>
       </Suspense>
 
-      <Couples />
+      {/* Nº 07 · Couples — the `playTogetherBanner` block supplies the band's
+          photo + copy when published; fallback renders the coral-soft band
+          with hardcoded copy (never blank). */}
+      <Suspense fallback={<Couples />}>
+        <Await resolve={contentBlocks} errorElement={<Couples />}>
+          {({ sections }) => (
+            <Couples
+              block={sections.find(b => b._type === 'playTogetherBanner') as PlayTogetherBannerBlock | undefined}
+            />
+          )}
+        </Await>
+      </Suspense>
       <StillDecidingBand />
 
       {/* From the Notebook — team's `editorialTiles` blocks (each card also
@@ -696,7 +1037,7 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: Sto
       <FAQ />
       <EmailSubscribe
         heading="Good taste, delivered quietly."
-        subcopy="Emma's picks, once a week. Discreet, direct."
+        subcopy="Emma's picks, on an irregular schedule. Discreet, direct."
         buttonLabel="I'm in ♥"
       />
     </>

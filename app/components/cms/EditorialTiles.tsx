@@ -24,12 +24,14 @@ export function EditorialTiles({ block }: EditorialTilesProps) {
               {eyebrow}
             </p>
           )}
-          <h2
-            className={`text-2xl md:text-3xl font-bold ${dark ? 'text-white' : 'text-ink'}`}
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            {heading}
-          </h2>
+          {heading && (
+            <h2
+              className={`text-2xl md:text-3xl font-bold ${dark ? 'text-white' : 'text-ink'}`}
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              {heading}
+            </h2>
+          )}
         </div>
 
         {/* Tile grid */}
