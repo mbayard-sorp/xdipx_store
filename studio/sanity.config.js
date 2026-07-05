@@ -30,6 +30,11 @@ export default defineConfig({
               .icon(() => '✨')
               .child(S.document().schemaType('emmaHeroSettings').documentId('singleton.emmaHero')),
             S.listItem()
+              .title('Storefront hero CTA')
+              .id('emmaHeroStorefront')
+              .icon(() => '🔗')
+              .child(S.document().schemaType('emmaHeroStorefront').documentId('singleton.emmaHeroStorefront')),
+            S.listItem()
               .title('Home Config')
               .id('homeConfig')
               .icon(() => '🧭')

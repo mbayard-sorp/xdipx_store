@@ -28,6 +28,9 @@ import blogCategory       from '../schemas/blogCategory.js'
 import blogAuthor         from '../schemas/blogAuthor.js'
 import blogHomepage       from '../schemas/blogHomepage.js'
 import emmaHeroSettings   from '../schemas/emmaHeroSettings.js'
+// Hero deep-linking. CTA override singleton per docs/homepage-team/new-blocks.md
+// (additive; emmaHeroSettings untouched).
+import emmaHeroStorefront from '../schemas/emmaHeroStorefront.js'
 import emmaPreset         from '../schemas/emmaPreset.js'
 import emmaPick           from '../schemas/emmaPick.js'
 import emmaContextRail    from '../schemas/emmaContextRail.js'
@@ -77,6 +80,8 @@ export const schemaTypes = [
   blogHomepage,
   // v2 redesign — Emma hero (additive; homepageSections untouched)
   emmaHeroSettings,
+  // Hero deep-linking. Primary CTA label/link singleton (additive; emmaHeroSettings untouched)
+  emmaHeroStorefront,
   // v2 redesign — Emma presets for Ask Emma rail
   emmaPreset,
   // v2 redesign — Emma-voice picks indexed per featured product (Claude-generated)

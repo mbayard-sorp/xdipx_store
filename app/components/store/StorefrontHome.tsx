@@ -57,9 +57,22 @@ const MOOD_PILLS = [
    Text column on the left, one large static product still on the right (the
    LCP candidate — priority, fixed aspect, never wrapped in Reveal). */
 
+/** Voice-charter CTA whitelist. A Sanity-supplied hero CTA label must be one
+ *  of these exactly or the hero falls back to the default label. */
+const HERO_CTA_WHITELIST = ['Take a peek →', 'Show me', 'Find your fit →', "I'll take it ♥"]
+
 function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?: EmmaHeroSettings | null }) {
   const lead = featured[0]
   const peekHref = lead ? `/products/${lead.handle}` : '/discover'
+
+  // Hero deep-linking: the team can point the primary CTA at a product page
+  // via singleton.emmaHeroStorefront (primaryCtaLink / primaryCtaLabel).
+  // Internal paths only; anything else (or unset) keeps today's behavior.
+  const ctaLink = emmaHero?.primaryCtaLink
+  const primaryHref = ctaLink?.startsWith('/') ? ctaLink : peekHref
+  const ctaLabel = emmaHero?.primaryCtaLabel
+  const primaryLabel =
+    ctaLabel && HERO_CTA_WHITELIST.includes(ctaLabel) ? ctaLabel : 'Take a peek →'
 
   // Team-managed `singleton.emmaHero` (Sanity) drives the text/config, field
   // by field, so a half-filled draft never blanks out a section — anything
@@ -110,11 +123,17 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
           {/* CTAs — one primary coral, one clearly-secondary ghost */}
           <div className="mt-7 flex flex-wrap items-center gap-3">
             <Link
-              to={peekHref}
+              to={primaryHref}
               className="inline-flex items-center gap-2 rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white transition-transform hover:-translate-y-0.5"
               style={BODY}
             >
-              Take a peek <span aria-hidden="true">→</span>
+              {primaryLabel.endsWith('→') ? (
+                <>
+                  {primaryLabel.slice(0, -1).trimEnd()} <span aria-hidden="true">→</span>
+                </>
+              ) : (
+                primaryLabel
+              )}
             </Link>
             <Link
               to="/discover"

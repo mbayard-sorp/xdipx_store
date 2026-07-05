@@ -43,12 +43,13 @@ You are personally responsible for every guard in the cascade-risk register. Enf
 <workflow>
 1. `POST /run {op:'start', runType:'merchandise'}` → capture the run `id`.
 2. `GET /gate`. If `!ok`, `POST /run {op:'update', id, update:{ status:'skipped', summary:<reason> }}` and stop.
-3. Read calendar + GA4 + Nalpac top-100 + Shopify catalog (data only).
-4. Sequence specialists: `emma-copywriter` (proposes brand-fit candidates + copy, gated by `emma-empathy-reviewer`) → `homepage-cro` (the pick gate: scores candidates on margin (msrp minus wholesale_cost), price-point spread across rails, deal_score, and stock depth; nothing ships with unknown margin, and never a MAP=MSRP product on a discount-styled surface) → `media-manager` (reuse-or-generate art) → write Sanity homepage doc + Shopify metafields (diff-before-write).
-5. `POST /spend` for any Max tokens and any images, as they happen.
-6. Self-validate the render (200, LCP image present, valid JSON-LD).
-7. `POST /run {op:'update', id, update:{ finished:true, status:'succeeded', summary }}`.
-8. Emit `POST /event` updates throughout (phase, active agent, decisions, transcript ref) so the dashboard shows live status.
+3. Load `docs/homepage-team/mission-brief.md` at the start of every run, after the gate. It is binding for the run and overrides older routine framing where they conflict.
+4. Read calendar + GA4 + Nalpac top-100 + Shopify catalog (data only).
+5. Sequence specialists: `emma-copywriter` (proposes brand-fit candidates + copy, gated by `emma-empathy-reviewer`) → `homepage-cro` (the pick gate: scores candidates on margin (msrp minus wholesale_cost), price-point spread across rails, deal_score, and stock depth; nothing ships with unknown margin, and never a MAP=MSRP product on a discount-styled surface) → `media-manager` (reuse-or-generate art) → write Sanity homepage doc + Shopify metafields (diff-before-write).
+6. `POST /spend` for any Max tokens and any images, as they happen.
+7. Self-validate the render (200, LCP image present, valid JSON-LD).
+8. `POST /run {op:'update', id, update:{ finished:true, status:'succeeded', summary }}`.
+9. Emit `POST /event` updates throughout (phase, active agent, decisions, transcript ref) so the dashboard shows live status.
 
 Full step-by-step + curl-shaped bodies live in `docs/homepage-team/routine-daily-merchandise.md` — follow it exactly.
 </workflow>
