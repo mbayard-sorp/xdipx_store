@@ -46,6 +46,16 @@
   --color-plum-soft:    #F3E8FB;
   --color-sage:         #7C8F78;
 
+  /* ─── Merch components v1 — 1j promo tile no-scrim panel ──────────────────
+         Intentional NON-PALETTE tint, documented per merch-spec.md §1j. Pale
+         peach backdrop for the no-scrim promo variant only (desktop + mobile
+         copy panel). Do not use elsewhere — every other surface uses the v3
+         tokens above. (The spec's other non-palette color, #E8A18E, is a
+         placeholder for a failing photo in the comp and is never hardcoded
+         in real markup — the scrimmed-fallback panel here is a real image's
+         backdrop, so no swatch is needed for it.) */
+  --color-promo-no-scrim: #FDF6F3;
+
   /* ─── Legacy v2 aliases — mapped onto the new palette so existing
          utility classes continue to compile. Do not use in new code. */
   --color-cream:        #FFFFFF;       /* was #FAF4EA */
