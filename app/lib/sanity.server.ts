@@ -972,6 +972,17 @@ export interface CollectionPageSanity {
   heroImageAlt:   string | null
   faqs: Array<{ question: string; answer: string }>
   related: Array<{ handle: string; label: string }>
+  // Merch components v1 — 1k PLP merch header (see build plan). Optional:
+  // existing collectionPage docs have no value here, so PLP falls back to
+  // rendering nothing above the grid when unset.
+  merchHeader: PlpMerchHeaderSanity | null
+}
+
+export interface PlpMerchHeaderSanity {
+  mastheadKicker: string | null
+  themeLine:      string | null
+  emphasisWord:   string | null
+  presets:        EmmaPreset[]
 }
 
 export async function getCollectionPage(handle: string, preview = false): Promise<CollectionPageSanity | null> {
@@ -989,6 +1000,12 @@ export async function getCollectionPage(handle: string, preview = false): Promis
       heroImage:      { url: string | null; alt: string | null } | null
       faqs:  Array<{ question: string; answer: string }> | null
       related: Array<{ handle: string; label: string }> | null
+      merchHeader: {
+        mastheadKicker: string | null
+        themeLine:      string | null
+        emphasisWord:   string | null
+        presets: EmmaPreset[] | null
+      } | null
     } | null>(
       `*[_type == "collectionPage" && shopifyHandle == $handle][0]{
         shopifyHandle,
@@ -999,7 +1016,19 @@ export async function getCollectionPage(handle: string, preview = false): Promis
         introCopy,
         "heroImage": heroImageOverride{ "url": asset->url, alt },
         "faqs": faqs[]{ question, answer },
-        "related": relatedCollections[]{ handle, label }
+        "related": relatedCollections[]{ handle, label },
+        // Merch components v1 — 1k PLP merch header. Additive optional field;
+        // dereferences the same emmaPreset docs the Ask Emma rail uses so the
+        // pill shape matches getEmmaPresets() exactly. Capped at 5 by the
+        // schema's Rule.max(5), so no overflow handling is needed downstream.
+        "merchHeader": merchHeader{
+          mastheadKicker,
+          themeLine,
+          emphasisWord,
+          "presets": presets[]->{
+            label, "slug": slug.current, narratorCopy, moodTags, audienceTags, mattersTags, priceMax
+          }
+        }
       }`,
       { handle },
     )
@@ -1007,6 +1036,15 @@ export async function getCollectionPage(handle: string, preview = false): Promis
 
     const introHtml = data.introCopy && data.introCopy.length > 0
       ? toHTML(data.introCopy as PortableTextBlocks)
+      : null
+
+    const merchHeader: PlpMerchHeaderSanity | null = data.merchHeader
+      ? {
+          mastheadKicker: data.merchHeader.mastheadKicker ?? null,
+          themeLine:      data.merchHeader.themeLine ?? null,
+          emphasisWord:   data.merchHeader.emphasisWord ?? null,
+          presets:        (data.merchHeader.presets ?? []).filter(p => p?.label && p?.slug),
+        }
       : null
 
     return {
@@ -1020,6 +1058,7 @@ export async function getCollectionPage(handle: string, preview = false): Promis
       heroImageAlt:   data.heroImage?.alt ?? null,
       faqs:           (data.faqs ?? []).filter(f => f?.question && f?.answer),
       related:        (data.related ?? []).filter(r => r?.handle && r?.label),
+      merchHeader,
     }
   } catch (err) {
     console.error('[sanity] getCollectionPage error:', err)
