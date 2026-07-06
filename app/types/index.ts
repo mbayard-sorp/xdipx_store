@@ -320,6 +320,11 @@ export interface Product {
   mattersTags?:  string[]
   // v2 redesign — 9:16 card hero video
   heroVideo?:    HeroVideo
+  // Merch components v1 — 1d Sensation Dial Card. Surfaced from the same
+  // xdipx.sensation_dial_v2 / product_type_dial metafields Deal already reads;
+  // absent when the product hasn't been enriched yet (card falls back).
+  sensationDialV2?: SensationDialV2
+  productTypeDial?: ProductTypeDial
 }
 
 /**

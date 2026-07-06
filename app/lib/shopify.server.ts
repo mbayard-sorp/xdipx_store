@@ -607,6 +607,12 @@ function nodeToProduct(node: ShopifyProductNode): Product {
   const audienceTags = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
   const mattersTags  = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
   const heroVideo    = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
+  // Merch components v1 — 1d Sensation Dial Card. Same metafields Deal reads
+  // (sensation_dial_v2 with legacy sensation_dial projection fallback).
+  const productTypeDial = parseMetafield(mf, 'product_type_dial') as ProductTypeDial | ''
+  const legacySensationDial = parseMetafieldJSON<SensationDial>(mf, 'sensation_dial', {})
+  const sensationDialV2 = normalizeSensationDialV2(parseMetafieldJSON<unknown>(mf, 'sensation_dial_v2', null))
+    ?? projectLegacyDial(legacySensationDial as SensationDial | undefined)
   return {
     id: node.id,
     handle: node.handle,
@@ -635,6 +641,8 @@ function nodeToProduct(node: ShopifyProductNode): Product {
     ...(heroVideo?.src && typeof heroVideo.duration === 'number'
       ? { heroVideo: { src: heroVideo.src, duration: heroVideo.duration, ...(heroVideo.poster ? { poster: heroVideo.poster } : {}) } }
       : {}),
+    ...(productTypeDial ? { productTypeDial } : {}),
+    ...(sensationDialV2 ? { sensationDialV2 } : {}),
   }
 }
 
