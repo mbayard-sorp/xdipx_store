@@ -45,21 +45,36 @@ Every module must earn a click to a specific product or collection.
 
 ## 2. Images: the product is the star
 
-Generated images have shipped below the bar before. Standing rules:
+Generated images have shipped below the bar before. In July 2026 a run
+shipped tea cups, ceramic bowls, and notebooks as tile art. No one comes to
+a sex toy store to shop for tableware. Standing rules (Mike's directive,
+2026-07-05):
 
-- Default to the product's real Shopify photography wherever a specific
-  product is featured. Generated scenes are supporting texture (tile
-  backgrounds, editorial moments), never a substitute for showing the thing
-  we are selling.
-- Every generated image gets a self-review before upload. Check: does it read
-  clearly at 375px, are objects and hands and text undistorted, does it match
-  brand light (morning light, linen, ceramic, warm and editorial), and would
-  a design-literate friend believe it came from a real editorial shop. One
-  failed check means regenerate once with a corrected prompt. Two failures
-  means stop generating and use product photography or a reused Sanity asset
-  instead. Never publish an image you would not defend to Mike.
-- Reuse-first stands. When uploading, name and tag assets with product handle
-  and mood so future runs can find them.
+- **Every merchandising image shows what we sell.** Either the actual
+  product (its real Shopify photo submitted to fal as a Kontext reference
+  image via `--ref-image` on `scripts/gen-homepage-image.ts`), or a sensual
+  human context matched to what the surface links to: lingerie on a body,
+  silk against skin, an unmade bed with intent, hands, silhouettes, tension.
+- **Banned as the subject:** tea cups, mugs, ceramic bowls, notebooks,
+  candles, fruit, napkins, empty styled tables — any still life a homewares
+  store could run. Props may support a product; they may never replace it.
+- **The mood is charged and anticipatory.** A visitor should feel on the
+  edge of finding something that will bring them pleasure. Attractive,
+  curiosity-inspiring, sexy. Hard limits for legal / processor / ad-platform
+  safety: no exposed genitalia, no nipples, no sex acts — nothing a premium
+  lingerie campaign could not run. Short of that, push.
+- Every generated image gets a self-review before upload. Check: does it
+  read clearly at 375px, are objects and hands and bodies undistorted, is
+  the product or the sensual context unmistakably the subject, and would a
+  design-literate friend believe it came from a high-end sexual-wellness
+  brand. One failed check means regenerate once with a corrected prompt.
+  Two failures means stop generating and use product photography or a
+  reused Sanity asset instead. Never publish an image you would not defend
+  to Mike.
+- Reuse-first stands, but only for assets that meet these rules. The July
+  2026 housewares set is retired; do not re-place those assets. When
+  uploading, name and tag assets with product handle and mood so future
+  runs can find them.
 
 ## 3. Weekly rhythm: mix it up
 

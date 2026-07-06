@@ -62,10 +62,31 @@ export async function removeBackground(imageUrl: string): Promise<BirefnetResult
 
 /** fal model endpoint → cost key understood by model-pricing IMAGE_RATES. */
 const FAL_COST_KEY: Record<string, string> = {
-  'fal-ai/flux/schnell': 'fal/flux-schnell',
-  'fal-ai/flux/dev':     'fal/flux-dev',
-  'fal-ai/flux-pro':     'fal/flux-pro',
-  'fal-ai/nano-banana':  'fal/nano-banana',
+  'fal-ai/flux/schnell':       'fal/flux-schnell',
+  'fal-ai/flux/dev':           'fal/flux-dev',
+  'fal-ai/flux-pro':           'fal/flux-pro',
+  'fal-ai/flux-pro/kontext':   'fal/flux-kontext',
+  'fal-ai/flux-kontext/dev':   'fal/flux-kontext-dev',
+  'fal-ai/nano-banana':        'fal/nano-banana',
+}
+
+/**
+ * Image-conditioned model used whenever a reference image is supplied. The
+ * open-weights dev endpoint, NOT flux-pro/kontext: the pro endpoint runs a
+ * mandatory output safety checker that flags sex-toy product photos as NSFW
+ * and returns solid-black frames (verified 2026-07-05). Dev accepts
+ * enable_safety_checker:false like the other open FLUX endpoints.
+ */
+const FAL_KONTEXT_MODEL = 'fal-ai/flux-kontext/dev'
+
+/** fal image_size enum → Kontext resolution_mode/aspect (no image_size param). */
+const KONTEXT_ASPECT: Record<string, string> = {
+  square_hd:      '1:1',
+  square:         '1:1',
+  portrait_4_3:   '3:4',
+  portrait_16_9:  '9:16',
+  landscape_4_3:  '4:3',
+  landscape_16_9: '16:9',
 }
 
 /** Default endpoint: FLUX dev balances quality and cost for editorial scenes. */
@@ -79,6 +100,12 @@ export interface FalGenerateOpts {
   model?: string
   /** fal image_size enum or {width,height}. Defaults to landscape 16:9. */
   imageSize?: string | { width: number; height: number }
+  /**
+   * Publicly fetchable reference image (e.g. a real Shopify product photo).
+   * When set, generation routes to FLUX Kontext so the actual product appears
+   * in the generated scene instead of a model-invented lookalike.
+   */
+  refImageUrl?: string
 }
 
 export interface FalGenerateResult {
@@ -98,9 +125,28 @@ export function falConfigured(): boolean {
  */
 export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateResult> {
   const key = requireKey()
-  const model = opts.model?.trim() || DEFAULT_FAL_IMAGE_MODEL
+  const model = opts.refImageUrl
+    ? (opts.model?.trim() || FAL_KONTEXT_MODEL)
+    : (opts.model?.trim() || DEFAULT_FAL_IMAGE_MODEL)
   const count = Math.min(Math.max(1, opts.count ?? 1), 4)
   const image_size = opts.imageSize ?? 'landscape_16_9'
+
+  // Kontext dev takes image_url + resolution_mode; the text-to-image endpoints
+  // take image_size. Same sync endpoint pattern otherwise.
+  const body = opts.refImageUrl
+    ? {
+        prompt:                opts.prompt,
+        image_url:             opts.refImageUrl,
+        num_images:            count,
+        resolution_mode:       typeof image_size === 'string' ? (KONTEXT_ASPECT[image_size] ?? '16:9') : '16:9',
+        enable_safety_checker: false,
+      }
+    : {
+        prompt:                opts.prompt,
+        num_images:            count,
+        image_size,
+        enable_safety_checker: false,
+      }
 
   const res = await fetch(`${FAL_SYNC_ENDPOINT}/${model}`, {
     method: 'POST',
@@ -108,12 +154,7 @@ export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateRes
       'Authorization': `Key ${key}`,
       'Content-Type':  'application/json',
     },
-    body: JSON.stringify({
-      prompt:                opts.prompt,
-      num_images:            count,
-      image_size,
-      enable_safety_checker: false,
-    }),
+    body: JSON.stringify(body),
   })
 
   if (!res.ok) {

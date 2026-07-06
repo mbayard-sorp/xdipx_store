@@ -51,13 +51,14 @@ async function main() {
   const blockKey    = arg('block-key')
   const tileKey     = arg('tile-key')
   const only        = arg('only') as 'fal' | 'imagen' | undefined
+  const refImage    = arg('ref-image')
   const caller      = arg('caller') ?? 'media-manager'
   const imagesSoFar = Number(arg('images-so-far') ?? '0')
   const runId       = arg('run-id')
   const dryRun      = hasFlag('dry-run')
 
   if (!prompt || !alt || !targetKind || !blockKey) {
-    console.error('Usage: gen-homepage-image.ts --prompt <p> --alt <a> --target block|tile|promo --block-key <k> [--tile-key <k>] [--only fal|imagen] [--caller <c>] [--images-so-far <n>] [--run-id <n>] [--dry-run]')
+    console.error('Usage: gen-homepage-image.ts --prompt <p> --alt <a> --target block|tile|promo --block-key <k> [--tile-key <k>] [--ref-image <url>] [--only fal|imagen] [--caller <c>] [--images-so-far <n>] [--run-id <n>] [--dry-run]')
     process.exit(1)
   }
   if (targetKind === 'tile' && !tileKey) {
@@ -105,7 +106,7 @@ async function main() {
   if (dryRun) {
     console.log(JSON.stringify({
       dryRun: true,
-      plan: { prompt, alt, target, only: only ?? 'fal-then-imagen', caller },
+      plan: { prompt, alt, target, only: only ?? 'fal-then-imagen', caller, ...(refImage ? { refImage } : {}) },
     }))
     process.exit(0)
   }
@@ -120,7 +121,7 @@ async function main() {
     alt,
     target,
     caller,
-    ...(only ? { gen: { only } } : {}),
+    ...(only || refImage ? { gen: { ...(only ? { only } : {}), ...(refImage ? { refImageUrl: refImage } : {}) } } : {}),
   })
 
   // ── 5. Post spend once — this script is the single owner of the row ──────

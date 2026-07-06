@@ -173,8 +173,11 @@ Emit a `decision` event recording the proposed candidates, the scores, and the f
 
 Hand the chosen surfaces to `media-manager`. **Reuse-before-generate:** it checks existing **Sanity**
 assets (homepage art lives in Sanity, not Shopify Files) for a fitting image first; only generates when
-none fits. Editorial mood scenes only (morning light, linen, ceramic, product-on-a-styled-surface) —
-never a body, never explicit.
+none fits. Imagery follows mission brief section 2: the product is the star — pass the product's real
+Shopify photo as a Kontext reference (`--ref-image`) for every product-linked surface, or use sensual
+human context (lingerie on a body, skin, tension) matched to what the surface sells. Housewares
+still-lifes with no product are banned. Charged and sexy is the target; exposed genitalia, nipples,
+and sex acts are the hard limit.
 
 Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counter:
 
@@ -183,9 +186,11 @@ Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counte
    also returns `imagesToday` + `maxImagesPerDay` and refuses with `reason:'over_image_cap'` server-side,
    so a stray extra call is rejected — but stop yourself first.
 2. `media-manager` runs `scripts/gen-homepage-image.ts --target block|tile|promo --block-key <k>
-   [--tile-key <k>] --prompt "<scene>" --alt "<screen-reader alt>" --images-so-far <n>
-   --run-id $RUN_ID --caller "merch-routine/<surface>"`. `--run-id` keeps the script's
-   internal gate re-check from refusing on your own running row.
+   [--tile-key <k>] --prompt "<scene>" --alt "<screen-reader alt>" [--ref-image <shopify-photo-url>]
+   --images-so-far <n> --run-id $RUN_ID --caller "merch-routine/<surface>"`. `--run-id` keeps the
+   script's internal gate re-check from refusing on your own running row. `--ref-image` routes to
+   FLUX Kontext so the real product appears in the scene — use it whenever the surface links to a
+   product.
 3. The script **gates → generates (fal FLUX → Imagen) → uploads to a Sanity asset → patches
    `singleton.homepage` → posts spend → prints a JSON manifest**. Read the manifest; if
    `placed:true`, increment `imagesSoFar`. If `skipped:true`, stop the imagery loop.

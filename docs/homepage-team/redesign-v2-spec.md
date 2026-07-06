@@ -178,8 +178,8 @@ hardcoded defaults when Sanity is empty (never a blank box).
 - **Background:** `paper`. Tiles carry photography; promo is `plum-soft`.
 - **Data:** `wayfinderMosaic` block (tiles + promo) with the existing `MOSAIC_TILES` fallback.
   Tile links → live collections; the promo slot is the ONE tile allowed to keep `/discover`.
-- **Imagery:** 3 editorial tile scenes (see manifest #3–5). Product-in-context still lifes,
-  never a body. Each tile gets an `image` in Sanity; when unset, tile falls back to a
+- **Imagery:** 3 tile scenes (see manifest #3–5). Product-linked tiles place the real product via
+  Kontext ref; the rest use sensual human context. Each tile gets an `image` in Sanity; when unset, tile falls back to a
   `paper-3` fill with the label (never blank).
 - **Motion:** heading `Reveal up`; tiles `Reveal up` with `index` stagger; promo `Reveal scale`.
 - **Copy slots:**
@@ -222,8 +222,8 @@ hardcoded defaults when Sanity is empty (never a blank box).
 - **Data:** `playTogetherBanner` block for the banner; a `productCarousel`/`emmaCuratedRail`
   sourced from `/collections/couples` for the rail. If the couples rail is empty, render the
   banner alone (graceful degrade).
-- **Imagery:** 1 couples-mood editorial scene (manifest #6): two coffee cups, tangled linen,
-  morning light, product on the nightstand. Suggestive of "two," never a body.
+- **Imagery:** 1 couples-mood scene (manifest #6): two silhouettes close on an unmade bed, a silk
+  robe slipping, low warm light. Charged and intimate; bodies in-bounds, nothing explicit.
 - **Motion:** banner `Reveal scale`; rail `Reveal fade`.
 - **Copy slots:**
   - kicker: `For two`
@@ -258,8 +258,9 @@ hardcoded defaults when Sanity is empty (never a blank box).
 - **Background:** `paper` (bright, editorial).
 - **Data:** `editorialTiles` block; renders nothing when unpublished (acceptable — it is a
   deepen module, not load-bearing, and the page reads complete without it).
-- **Imagery:** 3 editorial "notebook" scenes (manifest #7–9): flat-lays of a guide in context
-  (ceramic, linen, morning light). Never a body, never a product close-up that reads clinical.
+- **Imagery:** 3 sensual scenes (manifest #7–9): the linked product in a charged human context
+  (Kontext ref from its Shopify photo) or lingerie-on-sheets for non-product reads. Never a
+  housewares flat-lay, never a clinical close-up, nothing explicit.
 - **Motion:** heading `Reveal up`; cards `Reveal up` with `index` stagger.
 - **Copy slots:**
   - kicker: `Emma's reads`
@@ -343,27 +344,31 @@ bright → soft → bright. Compared to today's near-flat grey wash, this is the
 ## 4. Imagery manifest
 
 Every image the build needs. Real Shopify product photography is the default wherever a specific
-product is featured (hero, all product cards) — those are NOT generated. Generated scenes are
-supporting texture only (category tiles, couples band, notebook), and each must pass the mission
-brief §2 self-review (reads at 375px, undistorted, brand light, defensible). Never a body, never
-explicit, never a clinical product close-up. Hand this manifest to `media-manager`.
+product is featured (hero, all product cards) — those are NOT generated. Generated scenes must show
+what we sell (mission brief §2, Mike's 2026-07-05 directive): either the actual product placed via
+its real Shopify photo submitted as a FLUX Kontext reference (`--ref-image`), or sensual human
+context (lingerie on a body, skin, tension) matched to what the surface links to. Housewares
+still-lifes with no product — tea cups, ceramic bowls, notebooks, candles — are banned; that set
+shipped in July 2026 and made us look like a tableware shop. Each image must pass the mission brief
+§2 self-review. Hard limits: no exposed genitalia, no nipples, no sex acts. Hand this manifest to
+`media-manager`.
 
-Shared prompt DNA (prepend to every generated prompt): *"Editorial still-life photograph, soft
-diffused morning window light, warm neutral palette, natural linen and matte ceramic surfaces,
-shallow depth of field, film-grain texture, calm and tasteful, no people, no text, no logos,
-Aesop/Kinfolk art direction, shot on medium format."*
+Shared prompt DNA (prepend to every generated prompt): *"Sensual editorial photograph for a premium
+sexual-wellness brand, low warm intimate light, charged and anticipatory mood, shallow depth of
+field, film-grain texture, confident and tasteful, no text, no logos, premium lingerie-campaign art
+direction, shot on medium format."*
 
 | # | Lands in (Sanity field) | Aspect | Subject / prompt |
 |---|------------------------|--------|------------------|
 | 1 | Hero product image | 4:5 | **Not generated.** Real Shopify photo of `featured[0]`. |
-| 2 | Meet Emma portrait (`emmaPersona.avatarUrl` / `/emma.png`) | 4:5 | Existing Emma portrait. Keep. If regenerating: warm editorial portrait-adjacent scene, no explicit content, matches brand light. |
-| 3 | `wayfinderMosaic.wayfinderTiles[0].image` ("New here?") | 3:4 | "A single unopened plain kraft box on a linen surface beside a ceramic cup of coffee, morning light through a window, soft shadows, calm and inviting." |
-| 4 | `wayfinderMosaic.wayfinderTiles[1].image` ("For two") | 3:4 | "Two matte ceramic mugs and a folded linen throw on a bed corner in soft morning light, warm neutral tones, intimate but discreet, no people." |
-| 5 | `wayfinderMosaic.wayfinderTiles[2].image` ("Best sellers") | 3:4 | "A small curated arrangement of matte wellness objects on a stone tray, linen backdrop, editorial product-in-context still life, warm morning light." |
-| 6 | `playTogetherBanner.image` (Couples band) | 16:9 | "Sunlit unmade bed with rumpled white linen, two coffee cups on the nightstand, a small matte object resting on a folded throw, warm and intimate morning scene, tasteful, no people." |
-| 7 | `editorialTiles.tiles[0].image` (first-timer read) | 3:2 | "An open notebook and pen on a linen tablecloth beside a ceramic mug, soft morning light, calm editorial flat-lay, no text visible on the page." |
-| 8 | `editorialTiles.tiles[1].image` (slow-nights read) | 3:2 | "A single lit candle and a matte ceramic dish on a dark wood surface in low warm evening light, quiet and intimate, editorial still life, no people." |
-| 9 | `editorialTiles.tiles[2].image` (for-two read) | 3:2 | "Two linen napkins and two ceramic cups on a wooden table in warm morning light, suggesting a shared quiet moment, editorial still life, no people." |
+| 2 | Meet Emma portrait (`emmaPersona.avatarUrl` / `/emma.png`) | 4:5 | Existing Emma portrait. Keep. |
+| 3 | `wayfinderMosaic.wayfinderTiles[0].image` ("New here?" → a starter product) | 3:4 | Kontext ref = the linked product's Shopify photo. "This product resting on rumpled bedsheets beside a silk slip, low warm lamplight, the box half open, the moment before." |
+| 4 | `wayfinderMosaic.wayfinderTiles[1].image` ("For two" → couples collection) | 3:4 | "A woman's hand in a lace cuff resting on a partner's bare shoulder in low warm light, close crop, charged and intimate, nothing explicit." |
+| 5 | `wayfinderMosaic.wayfinderTiles[2].image` (product-linked) | 3:4 | Kontext ref = the linked product's Shopify photo. "This product on a nightstand beside discarded lingerie, low evening lamplight, anticipatory." |
+| 6 | `playTogetherBanner.image` (Couples band) | 16:9 | "Two silhouettes close together on an unmade bed in low warm light, a silk robe slipping off one shoulder, charged and intimate, nothing explicit." |
+| 7 | `editorialTiles.tiles[0].image` (first-timer read → product PDP) | 3:2 | Kontext ref = the linked product's Shopify photo. "This product held loosely in a hand against bare thigh and silk, soft warm light, curious and unhurried." |
+| 8 | `editorialTiles.tiles[1].image` (slow-nights read → product PDP) | 3:2 | Kontext ref = the linked product's Shopify photo. "This product on the edge of a bathtub, candlelight, skin and steam suggested at the frame's edge." |
+| 9 | `editorialTiles.tiles[2].image` (questions/FAQ) | 3:2 | "Lace lingerie laid out on dark bedsheets next to a small unopened gift box, low warm light, inviting and unintimidating." |
 
 Reuse-first: before generating, `media-manager` checks existing Sanity assets tagged by mood /
 handle. When uploading new assets, tag with the mood + section so future weekly runs find them.
