@@ -62,6 +62,18 @@ import kbCompatibilityRule from '../schemas/kbCompatibilityRule.js'
 import kbTroubleshooting   from '../schemas/kbTroubleshooting.js'
 import kbBrandFaq          from '../schemas/kbBrandFaq.js'
 
+// Merch components v1 — 12-component merchandising family (additive; see
+// docs/merch-build-plan.md + merch-spec.md). Schema/GROQ/types only in this
+// pass; components land separately.
+import headlinerSpotlight  from '../schemas/blocks/headlinerSpotlight.js'
+import curiosityRail       from '../schemas/blocks/curiosityRail.js'
+import curiosityChooser    from '../schemas/blocks/curiosityChooser.js'
+import orFork              from '../schemas/blocks/orFork.js'
+import quickNavGrid        from '../schemas/blocks/quickNavGrid.js'
+import honestProof         from '../schemas/blocks/honestProof.js'
+import emailCaptureBand    from '../schemas/blocks/emailCaptureBand.js'
+import plpMerchHeader      from '../schemas/blocks/plpMerchHeader.js'
+
 export const schemaTypes = [
   // Documents (singletons)
   homepageSections,
@@ -150,4 +162,13 @@ export const schemaTypes = [
   kbCompatibilityRule,
   kbTroubleshooting,
   kbBrandFaq,
+  // Merch components v1 — additive block object types (see comment above imports).
+  headlinerSpotlight,
+  curiosityRail,
+  curiosityChooser,
+  orFork,
+  quickNavGrid,
+  honestProof,
+  emailCaptureBand,
+  plpMerchHeader,
 ]

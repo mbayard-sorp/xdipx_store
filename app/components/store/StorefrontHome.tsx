@@ -26,15 +26,21 @@
 import { Suspense, useEffect, useRef } from 'react'
 import { Await, Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
-import { EmailSubscribe } from '~/components/store/EmailSubscribe'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
+import { TrustStrip } from '~/components/store/TrustStrip'
+import { EmailCaptureBand } from '~/components/store/EmailCaptureBand'
+import { SensationDialCard } from '~/components/store/SensationDialCard'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { Reveal } from '~/components/motion/Reveal'
 import { trackViewItemList, trackSelectItem, type GA4Item } from '~/lib/analytics.client'
 import type { StorefrontData } from '~/lib/storefront-home.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
-import type { EmmaHeroSettings, WayfinderMosaicBlock, PlayTogetherBannerBlock, EmmaCuratedRailBlock } from '~/types/cms'
+import type {
+  EmmaHeroSettings, WayfinderMosaicBlock, PlayTogetherBannerBlock, EmmaCuratedRailBlock,
+  HeadlinerSpotlightBlock, QuickNavGridBlock, CuriosityChooserBlock, CuriosityRailBlock, OrForkBlock,
+  HonestProofBlock, EmailCaptureBandBlock,
+} from '~/types/cms'
 import type { Product } from '~/types'
 
 /* Team-controlled Sanity block types the storefront renders (everything else
@@ -43,6 +49,16 @@ const TEAM_RAIL_TYPE = 'emmaCuratedRail'
 const TEAM_NOTEBOOK_TYPE = 'editorialTiles'
 const TEAM_WAYFINDER_TYPE = 'wayfinderMosaic'
 const MAX_TEAM_RAILS = 4
+// Merch components v1 — new team-publishable blocks. Each renders only when
+// published (fallback null), matching the wayfinder/rail/notebook precedent
+// above, EXCEPT TrustStrip which is fixed shell chrome (always-on, no Sanity).
+const TEAM_HEADLINER_TYPE = 'headlinerSpotlight'
+const TEAM_QUICKNAV_TYPE = 'quickNavGrid'
+const TEAM_CHOOSER_TYPE = 'curiosityChooser'
+const TEAM_CURIOSITY_RAIL_TYPE = 'curiosityRail'
+const TEAM_ORFORK_TYPE = 'orFork'
+const TEAM_PROOF_TYPE = 'honestProof'
+const TEAM_EMAIL_BAND_TYPE = 'emailCaptureBand'
 
 const MONO = { fontFamily: 'var(--font-mono)' } as const
 const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 400 } as const
@@ -432,6 +448,137 @@ function MeetEmma() {
   )
 }
 
+/* ── 1j · Promo tile (no-scrim variant + scrimmed fallback) ────────────────
+   Honors the wayfinderMosaic promo's additive `scrim` field. The contrast/
+   luminance gate ("text-safe zone must measure L* >= 85 across the whole
+   zone") runs at PUBLISH time, not render time (per spec) — this component
+   only reads the stored variant choice, it never samples image luminance
+   itself. 'auto' (unset, the only value pre-existing docs can have) keeps
+   today's coral-filled-CTA-over-gradient-scrim render unchanged. */
+
+interface PromoTileProps {
+  heading: string
+  emphasis: string
+  headingParts: string[]
+  eyebrow: string
+  body: string
+  ctaLabel: string
+  ctaLink: string
+  image?: { url?: string; alt?: string } | undefined
+  scrim: 'auto' | 'none' | 'always'
+}
+
+function PromoTile({ heading, emphasis, headingParts, eyebrow, body, ctaLabel, ctaLink, image, scrim }: PromoTileProps) {
+  const hasImage = !!image?.url
+
+  // 'none' — no-scrim: ink copy directly on the #FDF6F3 panel, text-safe zone
+  // (left 66% desktop / upper-left 65% width mobile), subject in the right
+  // third / lower-right. Hairline link, never a filled button.
+  if (scrim === 'none') {
+    return (
+      <Link
+        to={ctaLink}
+        className="relative block overflow-hidden rounded-[var(--radius-md)] bg-promo-no-scrim md:grid md:min-h-[240px] md:grid-cols-[2fr_1fr]"
+      >
+        {/* Copy — text-safe zone. Desktop: left 66% (the 2fr of a 2fr/1fr
+            grid ≈ 66.6%). Mobile: constrained to max-w 65% via the heading. */}
+        <div className="relative z-[1] flex flex-col items-start gap-2.5 p-[22px] pr-0 min-h-[230px] md:min-h-0 md:items-start md:justify-center md:gap-3 md:p-9">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-ink" style={MONO}>
+            {eyebrow}
+          </p>
+          <h3
+            className="max-w-[65%] text-[26px] leading-[1.15] text-ink line-clamp-2 md:max-w-none md:text-[32px]"
+            style={DISPLAY}
+          >
+            {headingParts[0]}<em className="em">{emphasis}</em>{headingParts[1]}
+          </h3>
+          <span className="border-b border-coral pb-0.5 text-[14px] text-ink" style={BODY}>
+            {ctaLabel}
+          </span>
+        </div>
+
+        {/* Subject — right third (desktop) / lower-right absolute block (mobile). */}
+        <div className="absolute bottom-0 right-0 h-[70%] w-[34%] overflow-hidden rounded-tl-[14px] bg-coral-soft md:relative md:h-full md:w-full md:rounded-none">
+          {hasImage && (
+            <OptimizedImage
+              src={image!.url!}
+              alt={image!.alt ?? heading}
+              sizes="(max-width: 768px) 34vw, 33vw"
+              className="h-full w-full object-cover"
+            />
+          )}
+        </div>
+      </Link>
+    )
+  }
+
+  // 'always' — scrimmed fallback: full-bleed image, flat 94%-white panel
+  // docked to the bottom edge (never a gradient).
+  if (scrim === 'always') {
+    return (
+      <Link
+        to={ctaLink}
+        className="relative flex min-h-[230px] flex-col justify-end overflow-hidden rounded-[var(--radius-md)] bg-coral-soft md:min-h-[300px]"
+      >
+        {hasImage && (
+          <OptimizedImage
+            src={image!.url!}
+            alt={image!.alt ?? heading}
+            sizes="100vw"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        )}
+        <div className="relative z-[1] flex flex-col items-start gap-2 bg-white/94 p-[22px] pt-5 md:p-9">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-ink" style={MONO}>
+            {eyebrow}
+          </p>
+          <h3 className="text-[24px] leading-[1.15] text-ink line-clamp-2 md:text-[32px]" style={DISPLAY}>
+            {headingParts[0]}<em className="em">{emphasis}</em>{headingParts[1]}
+          </h3>
+          <span className="border-b border-coral pb-0.5 text-[14px] text-ink" style={BODY}>
+            {ctaLabel}
+          </span>
+        </div>
+      </Link>
+    )
+  }
+
+  // 'auto' (default / unset) — unchanged today's render: coral-filled CTA
+  // over an ink gradient scrim (or the flat plum-soft tile when no image).
+  return (
+    <Link
+      to={ctaLink}
+      className="relative flex flex-wrap items-center justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
+    >
+      {hasImage && (
+        <OptimizedImage
+          src={image!.url!}
+          alt={image!.alt ?? heading}
+          sizes="100vw"
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      )}
+      <div className="relative z-[1] flex-1 basis-[320px]">
+        <p className="mb-3.5 text-[11px] uppercase tracking-[0.18em] text-plum" style={MONO}>
+          {eyebrow}
+        </p>
+        <h3 className="mb-3 text-[1.7rem] leading-[1.1] text-ink md:text-[2.5rem]" style={DISPLAY}>
+          {headingParts[0]}<em className="em">{emphasis}</em>{headingParts[1]}
+        </h3>
+        <p className="max-w-[46ch] text-[16px] leading-relaxed text-ink-3" style={BODY}>
+          {body}
+        </p>
+      </div>
+      <span
+        className="relative z-[1] whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white"
+        style={BODY}
+      >
+        {ctaLabel}
+      </span>
+    </Link>
+  )
+}
+
 /* ── 4 · Find your way in (category mosaic) ────────────────────────────────
    Three category tiles + a larger plum-soft "Discover You" guided-finder tile.
    Replaces the retired "Vault" with "Discover You". */
@@ -542,38 +689,23 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
             })}
           </div>
 
-          {/* Discover You — larger plum-soft tile (or promo.image when set) */}
+          {/* Discover You / 1j promo tile — scrim-aware. `scrim` is undefined
+              on pre-existing docs ('auto' behavior): today's coral-filled CTA
+              over an image + gradient scrim, unchanged. 'none'/'always' render
+              the spec'd 1j variants below (hairline link, never a filled
+              button — this tile orients, 1a closes). */}
           <Reveal variant="scale">
-            <Link
-              to={promoCtaLink}
-              className="relative flex flex-wrap items-center justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
-            >
-              {promo?.image?.url && (
-                <OptimizedImage
-                  src={promo.image.url}
-                  alt={promo.image.alt ?? promoHeading}
-                  sizes="100vw"
-                  className="absolute inset-0 h-full w-full object-cover"
-                />
-              )}
-              <div className="relative z-[1] flex-1 basis-[320px]">
-                <p className="mb-3.5 text-[11px] uppercase tracking-[0.18em] text-plum" style={MONO}>
-                  {promoEyebrow}
-                </p>
-                <h3 className="mb-3 text-[1.7rem] leading-[1.1] text-ink md:text-[2.5rem]" style={DISPLAY}>
-                  {promoHeadingParts[0]}<em className="em">{promoEmphasis}</em>{promoHeadingParts[1]}
-                </h3>
-                <p className="max-w-[46ch] text-[16px] leading-relaxed text-ink-3" style={BODY}>
-                  {promoBody}
-                </p>
-              </div>
-              <span
-                className="relative z-[1] whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white"
-                style={BODY}
-              >
-                {promoCtaLabel}
-              </span>
-            </Link>
+            <PromoTile
+              heading={promoHeading}
+              emphasis={promoEmphasis}
+              headingParts={promoHeadingParts}
+              eyebrow={promoEyebrow}
+              body={promoBody}
+              ctaLabel={promoCtaLabel}
+              ctaLink={promoCtaLink}
+              image={promo?.image}
+              scrim={promo?.scrim ?? 'auto'}
+            />
           </Reveal>
         </div>
     </section>
@@ -890,6 +1022,35 @@ function FAQ() {
   )
 }
 
+/* ── 1d showcase · "How it actually feels" ──────────────────────────────────
+   Fixed shell section (not a Sanity block) demonstrating SensationDialCard —
+   otherwise built but rendered nowhere. Renders nothing when no in-stock
+   product with usable dial data resolves (never an empty-tracks card). */
+
+function SensationDialShowcase({ products }: { products: Product[] }) {
+  if (products.length === 0) return null
+
+  return (
+    <section className="bg-paper-2 px-5 py-7 md:px-8 md:py-9">
+      <div className="mx-auto max-w-[1320px]">
+        <p className="mb-1 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
+          How it actually feels
+        </p>
+        <h2 className="mb-4 text-[26px] leading-[1.1] tracking-[-0.01em] text-ink md:mb-5 md:text-[30px]" style={DISPLAY}>
+          Read the dial <em className="em">before</em> you buy.
+        </h2>
+        <div className="flex gap-3.5 overflow-x-auto pb-2 [scrollbar-width:none] md:grid md:grid-cols-3 md:overflow-visible [&::-webkit-scrollbar]:hidden">
+          {products.map((product, i) => (
+            <Reveal key={product.id} variant="up" index={i}>
+              <SensationDialCard product={product} priority={i === 0} index={i} />
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 /* ── Composition ───────────────────────────────────────────────────────────
    Order is the stable shell. The deferred Sanity blocks (the team's
    notebook/promo/editorial surface) stream in between Couples and FAQ. */
@@ -907,6 +1068,86 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: Sto
   return (
     <>
       <Hero featured={featured} emmaHero={emmaHero} />
+
+      {/* 1a · Headliner spotlight — the page's ONE primary CTA. Renders only
+          when the team has published a headlinerSpotlight block AND its
+          product ref resolved (HeadlinerSpotlight itself returns null on a
+          dead ref). Never a fallback — this is bonus merchandising, not shell. */}
+      <Suspense fallback={null}>
+        <Await resolve={contentBlocks} errorElement={null}>
+          {({ sections, carouselProductMap }) => {
+            const block = sections.find(b => b._type === TEAM_HEADLINER_TYPE) as HeadlinerSpotlightBlock | undefined
+            if (!block) return null
+            return <ContentBlockRenderer block={block} carouselProductMap={carouselProductMap} />
+          }}
+        </Await>
+      </Suspense>
+
+      {/* 1b · Trust & discretion strip — fixed shell, always-on, no Sanity. */}
+      <TrustStrip />
+
+      {/* 1g · Category quick-nav grid — the seeker's fast lane, high on the
+          page. Team-published only (fallback null): the existing 1o5
+          FindYourWayIn tiles below already cover this need until the team
+          publishes a quickNavGrid. */}
+      <Suspense fallback={null}>
+        <Await resolve={contentBlocks} errorElement={null}>
+          {({ sections }) => {
+            const block = sections.find(b => b._type === TEAM_QUICKNAV_TYPE) as QuickNavGridBlock | undefined
+            if (!block) return null
+            return <ContentBlockRenderer block={block} carouselProductMap={{}} />
+          }}
+        </Await>
+      </Suspense>
+
+      {/* 1e · Curiosity chooser — SSR-first, ?preset= links; JS filters the
+          rail in place. Fallback null: unpublished draft renders nothing. */}
+      <Suspense fallback={null}>
+        <Await resolve={contentBlocks} errorElement={null}>
+          {({ sections, carouselProductMap }) => {
+            const block = sections.find(b => b._type === TEAM_CHOOSER_TYPE) as CuriosityChooserBlock | undefined
+            if (!block) return null
+            return <ContentBlockRenderer block={block} carouselProductMap={carouselProductMap} />
+          }}
+        </Await>
+      </Suspense>
+
+      {/* 1c · Curiosity spread rail — four typed role cards, fixed price
+          ladder. Fallback null: needs at least one resolved role product
+          (CuriosityRail itself returns null when zero resolve). */}
+      <Suspense fallback={null}>
+        <Await resolve={contentBlocks} errorElement={null}>
+          {({ sections, carouselProductMap }) => {
+            const block = sections.find(b => b._type === TEAM_CURIOSITY_RAIL_TYPE) as CuriosityRailBlock | undefined
+            if (!block) return null
+            return <ContentBlockRenderer block={block} carouselProductMap={carouselProductMap} />
+          }}
+        </Await>
+      </Suspense>
+
+      {/* 1d showcase · "How it actually feels" — demonstrates the otherwise
+          orphaned SensationDialCard. Fixed shell (not a Sanity block); renders
+          nothing when no in-stock dial-data product resolves. */}
+      <Suspense fallback={null}>
+        <Await resolve={contentBlocks} errorElement={null}>
+          {({ dialShowcaseProducts }) => (
+            <SensationDialShowcase products={dialShowcaseProducts ?? []} />
+          )}
+        </Await>
+      </Suspense>
+
+      {/* 1f · "Or" fork — two products, one question. Renders only when both
+          sides resolve (OrFork returns null otherwise — a half fork is worse
+          than none). */}
+      <Suspense fallback={null}>
+        <Await resolve={contentBlocks} errorElement={null}>
+          {({ sections, carouselProductMap }) => {
+            const block = sections.find(b => b._type === TEAM_ORFORK_TYPE) as OrForkBlock | undefined
+            if (!block) return null
+            return <ContentBlockRenderer block={block} carouselProductMap={carouselProductMap} />
+          }}
+        </Await>
+      </Suspense>
 
       {/* Nº 03 · Most picked, right now — the team's first `emmaCuratedRail`
           block when published (rendered as the existing carousel component,
@@ -998,6 +1239,19 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: Sto
         </Await>
       </Suspense>
 
+      {/* 1h · Honest proof module — zero hype. Renders only when the team has
+          published at least one approved verbatim quote (HonestProof itself
+          returns null otherwise — never filler testimonials). */}
+      <Suspense fallback={null}>
+        <Await resolve={contentBlocks} errorElement={null}>
+          {({ sections, carouselProductMap }) => {
+            const block = sections.find(b => b._type === TEAM_PROOF_TYPE) as HonestProofBlock | undefined
+            if (!block) return null
+            return <ContentBlockRenderer block={block} carouselProductMap={carouselProductMap} />
+          }}
+        </Await>
+      </Suspense>
+
       {/* Nº 07 · Couples — the `playTogetherBanner` block supplies the band's
           photo + copy when published; fallback renders the coral-soft band
           with hardcoded copy (never blank). */}
@@ -1035,11 +1289,19 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: Sto
       </Suspense>
 
       <FAQ />
-      <EmailSubscribe
-        heading="Good taste, delivered quietly."
-        subcopy="Emma's picks, on an irregular schedule. Discreet, direct."
-        buttonLabel="I'm in ♥"
-      />
+
+      {/* 1i · Email capture band ("Emma's list") — team copy when published,
+          otherwise the component's own Emma-voice defaults (never blank —
+          this replaces the old EmailSubscribe closer with the spec'd band). */}
+      <Suspense fallback={<EmailCaptureBand />}>
+        <Await resolve={contentBlocks} errorElement={<EmailCaptureBand />}>
+          {({ sections }) => (
+            <EmailCaptureBand
+              block={sections.find(b => b._type === TEAM_EMAIL_BAND_TYPE) as EmailCaptureBandBlock | undefined}
+            />
+          )}
+        </Await>
+      </Suspense>
     </>
   )
 }

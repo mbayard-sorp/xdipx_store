@@ -28,7 +28,10 @@ import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
 import { getHomepageSections } from '~/lib/sanity.server'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
 import type { Product } from '~/types'
-import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock } from '~/types/cms'
+import type {
+  ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock,
+  HeadlinerSpotlightBlock, CuriosityRailBlock, CuriosityChooserBlock, OrForkBlock,
+} from '~/types/cms'
 
 /**
  * Bump on ANY shape change to `HomepagePayloadA` (mirrors INDEX_VERSION in
@@ -76,7 +79,27 @@ export interface HomepagePayloadA {
 export interface HomeContentBlocks {
   sections: ContentBlock[]
   carouselProductMap: Record<string, Product[]>
+  /**
+   * Merch components v1 — 1d Sensation Dial Card showcase. Fixed shell
+   * section (not a Sanity block), so it isn't part of `sections`. In-stock
+   * products with sensationDialV2 data, resolved from DIAL_SHOWCASE_HANDLES
+   * below. Optional/undefined (e.g. variant A's hardcoded minimal payloads)
+   * is treated as empty by the storefront — never an empty-tracks card.
+   */
+  dialShowcaseProducts?: Product[]
 }
+
+/**
+ * Known-good product handles carrying sensation_dial_v2 metafield data,
+ * checked for the 1d Sensation Dial Card showcase section. There is no
+ * dedicated Shopify tag/collection indexing "has dial data" yet, so this is
+ * a small hand-maintained candidate list rather than a full-catalog scan —
+ * add a handle here once its sensation_dial_v2 metafield is enriched.
+ */
+const DIAL_SHOWCASE_HANDLES = ['temptasia-rattle-snake-dark-millenia']
+
+/** Cap on how many dial-data products the showcase renders. */
+const DIAL_SHOWCASE_LIMIT = 3
 
 /**
  * Assemble the Sanity CMS content blocks + their product maps. Extracted from
@@ -97,8 +120,30 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
   const emmaRailBlocks = sections.filter(
     (s): s is EmmaCuratedRailBlock => s._type === 'emmaCuratedRail',
   )
+  // Merch components v1 — blocks that carry product-handle refs needing
+  // resolution to full Product objects (image/price/title). honestProof's
+  // quote provenance is display text only (handle/name string), no product
+  // fetch needed. Same carouselProductMap contract every other block uses:
+  // a flat, deduped Product[] keyed by block._key (see ContentBlockRenderer,
+  // which re-splits the flat list back into each block's role/tile/side shape).
+  const headlinerBlocks = sections.filter(
+    (s): s is HeadlinerSpotlightBlock => s._type === 'headlinerSpotlight',
+  )
+  const curiosityRailBlocks = sections.filter(
+    (s): s is CuriosityRailBlock => s._type === 'curiosityRail',
+  )
+  const curiosityChooserBlocks = sections.filter(
+    (s): s is CuriosityChooserBlock => s._type === 'curiosityChooser',
+  )
+  const orForkBlocks = sections.filter(
+    (s): s is OrForkBlock => s._type === 'orFork',
+  )
 
-  const [carouselResults, emmaRailResults] = await Promise.all([
+  const [
+    carouselResults, emmaRailResults,
+    headlinerResults, curiosityRailResults, curiosityChooserResults, orForkResults,
+    dialShowcaseResults,
+  ] = await Promise.all([
     carouselBlocks.length > 0
       ? withTimeout(Promise.all(carouselBlocks.map(b => {
           const limit = b.productLimit ?? 8
@@ -119,13 +164,66 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
             : Promise.resolve([] as Product[]),
         )), BUILD_TIMEOUT_MS, [] as Product[][], 'emmaRailResults(payloadA)')
       : Promise.resolve([] as Product[][]),
+    // 1a — single product ref.
+    headlinerBlocks.length > 0
+      ? withTimeout(Promise.all(headlinerBlocks.map(b =>
+          b.headlinerProductHandle ? getProductsByHandles([b.headlinerProductHandle]) : Promise.resolve([] as Product[]),
+        )), BUILD_TIMEOUT_MS, [] as Product[][], 'headlinerResults')
+      : Promise.resolve([] as Product[][]),
+    // 1c — four typed role slots (onRamp/standby/headliner/reach), one handle each.
+    curiosityRailBlocks.length > 0
+      ? withTimeout(Promise.all(curiosityRailBlocks.map(b => {
+          const handles = [b.onRamp?.productHandle, b.standby?.productHandle, b.headlinerRole?.productHandle, b.reach?.productHandle]
+            .filter((h): h is string => !!h)
+          return handles.length > 0 ? getProductsByHandles(handles) : Promise.resolve([] as Product[])
+        })), BUILD_TIMEOUT_MS, [] as Product[][], 'curiosityRailResults')
+      : Promise.resolve([] as Product[][]),
+    // 1e — tiles may pin productHandles; also resolve a default (unfiltered)
+    // rail from the union of all tile handles, capped at 3, for the
+    // no-selection state. Stored separately under `${_key}:default`.
+    curiosityChooserBlocks.length > 0
+      ? withTimeout(Promise.all(curiosityChooserBlocks.map(b => {
+          const handles = (b.chooserTiles ?? []).flatMap(t => t.productHandles ?? [])
+          const unique = [...new Set(handles)]
+          return unique.length > 0 ? getProductsByHandles(unique) : Promise.resolve([] as Product[])
+        })), BUILD_TIMEOUT_MS, [] as Product[][], 'curiosityChooserResults')
+      : Promise.resolve([] as Product[][]),
+    // 1f — two sides, one handle each.
+    orForkBlocks.length > 0
+      ? withTimeout(Promise.all(orForkBlocks.map(b => {
+          const handles = [b.forkSideA?.productHandle, b.forkSideB?.productHandle].filter((h): h is string => !!h)
+          return handles.length > 0 ? getProductsByHandles(handles) : Promise.resolve([] as Product[])
+        })), BUILD_TIMEOUT_MS, [] as Product[][], 'orForkResults')
+      : Promise.resolve([] as Product[][]),
+    // 1d — Sensation Dial Card showcase (fixed section, not a Sanity block).
+    withTimeout(getProductsByHandles(DIAL_SHOWCASE_HANDLES), BUILD_TIMEOUT_MS, [] as Product[], 'dialShowcaseResults'),
   ])
 
   const carouselProductMap: Record<string, Product[]> = {}
   carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = carouselResults[i] ?? [] })
   emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = emmaRailResults[i] ?? [] })
+  headlinerBlocks.forEach((b, i) => { carouselProductMap[b._key] = headlinerResults[i] ?? [] })
+  curiosityRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = curiosityRailResults[i] ?? [] })
+  orForkBlocks.forEach((b, i) => { carouselProductMap[b._key] = orForkResults[i] ?? [] })
+  curiosityChooserBlocks.forEach((b, i) => {
+    const allTileProducts = curiosityChooserResults[i] ?? []
+    carouselProductMap[b._key] = allTileProducts
+    // Default (unfiltered) rail — first 3 of the union set. A dedicated
+    // Sanity "default rail" slot doesn't exist yet; this keeps the no-JS /
+    // no-selection state populated from the same already-fetched products
+    // rather than adding a second Shopify round-trip.
+    carouselProductMap[`${b._key}:default`] = allTileProducts.slice(0, 3)
+  })
 
-  return { sections, carouselProductMap }
+  // 1d showcase — in-stock (any variant availableForSale) products with
+  // usable dial data (SensationDialCard needs >=2 items). Capped; empty when
+  // none resolve so the component renders nothing rather than empty tracks.
+  const dialShowcaseProducts = (dialShowcaseResults ?? [])
+    .filter(p => (p.sensationDialV2?.items?.length ?? 0) >= 2)
+    .filter(p => p.variants.some(v => v.availableForSale))
+    .slice(0, DIAL_SHOWCASE_LIMIT)
+
+  return { sections, carouselProductMap, dialShowcaseProducts }
 }
 
 /**

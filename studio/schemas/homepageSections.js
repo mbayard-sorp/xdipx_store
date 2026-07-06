@@ -25,6 +25,17 @@ export default {
         { type: 'richText'           },
         { type: 'editorBio'          },
         { type: 'wayfinderMosaic'    },
+        // Merch components v1 — additive block registrations (see
+        // docs/merch-build-plan.md + merch-spec.md). Existing entries above
+        // are untouched.
+        { type: 'headlinerSpotlight' },
+        { type: 'curiosityRail'      },
+        { type: 'curiosityChooser'   },
+        { type: 'orFork'             },
+        { type: 'quickNavGrid'       },
+        { type: 'honestProof'        },
+        { type: 'emailCaptureBand'   },
+        { type: 'plpMerchHeader'     },
       ],
     },
   ],

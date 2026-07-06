@@ -41,6 +41,8 @@ export default {
     { name: 'editorial', title: 'Editorial Copy'               },
     { name: 'faqs',      title: 'FAQs'                         },
     { name: 'related',   title: 'Related Collections'          },
+    // Merch components v1 — 1k PLP merch header. Additive group + field.
+    { name: 'merch',     title: 'Merch Header'                 },
   ],
 
   fields: [
@@ -209,6 +211,17 @@ export default {
         },
       ],
       validation: Rule => Rule.max(8),
+    },
+
+    // Merch components v1 — 1k PLP merch header. Additive optional field:
+    // existing collectionPage docs have no value here, so the PLP falls back
+    // to its current header rendering when unset. Nothing existing changes.
+    {
+      name: 'merchHeader',
+      title: 'PLP Merch Header',
+      type: 'plpMerchHeader',
+      group: 'merch',
+      description: 'Optional masthead + curated preset pills shown above the product grid on this collection page.',
     },
   ],
 

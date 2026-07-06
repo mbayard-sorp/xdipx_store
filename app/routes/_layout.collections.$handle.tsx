@@ -6,6 +6,7 @@ import { getCollectionPage, getEmmaPresets, getBlogPosts } from '~/lib/sanity.se
 import { canonicalUrl, pageTitle, robotsContent, truncateForMeta } from '~/lib/seo'
 import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
 import { VaultCard } from '~/components/store/VaultCard'
+import { PlpMerchHeader } from '~/components/store/PlpMerchHeader'
 import { AskEmmaRail, matchesAskEmmaFilters } from '~/components/store/AskEmmaRail'
 import { EmmaDiscoveryRail } from '~/components/store/EmmaDiscoveryRail'
 import { EmmaEncouragementStrip } from '~/components/store/EmmaEncouragementStrip'
@@ -230,6 +231,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     relatedCollections,
     productsCount: collection.productsCount,
     notebookPosts: notebook.posts,
+    merchHeader: sanity?.merchHeader ?? null,
   }
 }
 
@@ -253,6 +255,7 @@ export default function CollectionPage() {
     filtersApplied,
     productsCount,
     notebookPosts,
+    merchHeader,
   } = useLoaderData<typeof loader>()
   // Page 1 is the canonical document — render the full editorial frame
   // (hero, intro, FAQs, notebook rail). Pages > 1 are pagination-only and
@@ -402,6 +405,20 @@ export default function CollectionPage() {
           {h1}{page > 1 ? ` — Page ${page}` : ''}
         </h1>
       </header>
+
+      {/* 1k PLP merch header — masthead + curated preset pills above the
+          grid. Canonical page only; falls back to rendering nothing when no
+          Sanity merchHeader is set on this collectionPage doc. */}
+      {isCanonicalPage && merchHeader && (
+        <div className="mb-6 -mx-4">
+          <PlpMerchHeader
+            {...(merchHeader.mastheadKicker ? { mastheadKicker: merchHeader.mastheadKicker } : {})}
+            {...(merchHeader.themeLine ? { themeLine: merchHeader.themeLine } : {})}
+            {...(merchHeader.emphasisWord ? { emphasisWord: merchHeader.emphasisWord } : {})}
+            presets={merchHeader.presets}
+          />
+        </div>
+      )}
 
       <div className="flex flex-col md:flex-row gap-8">
         <div className="flex flex-col gap-4 md:w-[260px] md:shrink-0">

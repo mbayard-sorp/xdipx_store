@@ -1026,7 +1026,17 @@ function ProductPage() {
 
       <div className="max-w-6xl mx-auto px-4">
         {pairsWithItems.length > 0
-          ? <PairsWith items={pairsWithItems} />
+          ? (
+            <PairsWith
+              main={{
+                handle: deal.handle,
+                title:  deal.seoTitle,
+                image:  deal.images[0]?.url ?? null,
+                price,
+              }}
+              items={pairsWithItems}
+            />
+          )
           : <FrequentlyBoughtWith products={fbtProducts} />
         }
         <RecentlyBrowsed currentHandle={deal.handle} />

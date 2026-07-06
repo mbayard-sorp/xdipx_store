@@ -3,6 +3,10 @@ import type { SanityImageAssetDocument } from '@sanity/client'
 import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
 import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig } from '~/types/cms'
+// Merch components v1 — additive block types (see docs/merch-build-plan.md +
+// merch-spec.md). Types live in ~/types/cms for the rr7 engineer's component
+// layer to import; CONTENT_BLOCKS_PROJECTION below is untyped raw GROQ (same
+// as every other block in this projection), so no import is needed here yet.
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
@@ -59,7 +63,9 @@ const CONTENT_BLOCKS_PROJECTION = `
   "promo": select(
     _type == "wayfinderMosaic" => promo{
       eyebrow, heading, emphasis, body, ctaLabel, ctaLink,
-      "image": image{ "url": asset->url, alt }
+      "image": image{ "url": asset->url, alt },
+      // Merch components v1 — 1j additive field; absent on pre-existing docs.
+      scrim
     }
   ),
   // categoryGrid + testimonials use inline item objects; trustBar uses references.
@@ -98,6 +104,65 @@ const CONTENT_BLOCKS_PROJECTION = `
       shortBio, longBio,
       "picksSince": picksSince,
       instagram, email
+    }
+  ),
+  // ─── Merch components v1 (additive) ──────────────────────────────────────
+  // See docs/merch-build-plan.md + merch-spec.md. Every new block gets its own
+  // field name (never reused across block types) so select() branches stay
+  // null-safe per the categoryGrid/testimonials/trustBar precedent above.
+  //
+  // headlinerSpotlight
+  kicker, headline, emphasisWord,
+  "headlinerProductHandle": productHandle,
+  priceOverride, mechanismCallout,
+  "headlinerCtaLabel": select(_type == "headlinerSpotlight" => ctaLabel),
+  "headlinerCtaLink":  select(_type == "headlinerSpotlight" => ctaLink),
+  "headlinerImage": select(
+    _type == "headlinerSpotlight" => image{ "url": asset->url, alt }
+  ),
+  // curiosityRail — four typed role slots + see-all link. Product refs are
+  // manual handles (no reference type), matching emmaCuratedRail.productHandles.
+  // Each slot's optional generated image falls back to the live Shopify
+  // product photo in the component when unset.
+  "onRamp": select(_type == "curiosityRail" => onRamp{ productHandle, copyLine, "image": image{ "url": asset->url, alt } }),
+  "standby": select(_type == "curiosityRail" => standby{ productHandle, copyLine, "image": image{ "url": asset->url, alt } }),
+  "headlinerRole": select(_type == "curiosityRail" => headliner{ productHandle, copyLine, "image": image{ "url": asset->url, alt } }),
+  "reach": select(_type == "curiosityRail" => reach{ productHandle, copyLine, "image": image{ "url": asset->url, alt } }),
+  "railCtaLink": select(_type == "curiosityRail" => ctaLink),
+  "railCtaLabelOverride": select(_type == "curiosityRail" => ctaLabelOverride),
+  // curiosityChooser — tiles may carry an optional generated image per tile.
+  "chooserTiles": select(
+    _type == "curiosityChooser" => tiles[]{
+      _key, label, presetSlug, productHandles, narratorLine,
+      "image": image{ "url": asset->url, alt }
+    }
+  ),
+  // orFork — each side's optional generated image falls back to the live
+  // Shopify product photo in the component when unset.
+  question,
+  "forkSideA": select(_type == "orFork" => sideA{ productHandle, answerLine, "image": image{ "url": asset->url, alt } }),
+  "forkSideB": select(_type == "orFork" => sideB{ productHandle, answerLine, "image": image{ "url": asset->url, alt } }),
+  // quickNavGrid
+  "navTiles": select(
+    _type == "quickNavGrid" => tiles[]{ _key, label, link, tintHint }
+  ),
+  // honestProof
+  "proofQuotes": select(
+    _type == "honestProof" => quotes[]{
+      _key, verbatimText, productHandle, durationOwned, verified
+    }
+  ),
+  "proofPress": select(
+    _type == "honestProof" => press[]{ _key, quote, publication }
+  ),
+  // emailCaptureBand
+  subcopy, buttonLabel, finePrint,
+  // plpMerchHeader — dereference emmaPreset refs to the same shape
+  // getEmmaPresets() already returns, capped at 5 by schema validation.
+  mastheadKicker, themeLine,
+  "presets": select(
+    _type == "plpMerchHeader" => presets[]->{
+      label, "slug": slug.current, narratorCopy, moodTags, audienceTags, mattersTags, priceMax
     }
   ),
 `
@@ -911,6 +976,17 @@ export interface CollectionPageSanity {
   heroImageAlt:   string | null
   faqs: Array<{ question: string; answer: string }>
   related: Array<{ handle: string; label: string }>
+  // Merch components v1 — 1k PLP merch header (see build plan). Optional:
+  // existing collectionPage docs have no value here, so PLP falls back to
+  // rendering nothing above the grid when unset.
+  merchHeader: PlpMerchHeaderSanity | null
+}
+
+export interface PlpMerchHeaderSanity {
+  mastheadKicker: string | null
+  themeLine:      string | null
+  emphasisWord:   string | null
+  presets:        EmmaPreset[]
 }
 
 export async function getCollectionPage(handle: string, preview = false): Promise<CollectionPageSanity | null> {
@@ -928,6 +1004,12 @@ export async function getCollectionPage(handle: string, preview = false): Promis
       heroImage:      { url: string | null; alt: string | null } | null
       faqs:  Array<{ question: string; answer: string }> | null
       related: Array<{ handle: string; label: string }> | null
+      merchHeader: {
+        mastheadKicker: string | null
+        themeLine:      string | null
+        emphasisWord:   string | null
+        presets: EmmaPreset[] | null
+      } | null
     } | null>(
       `*[_type == "collectionPage" && shopifyHandle == $handle][0]{
         shopifyHandle,
@@ -938,7 +1020,19 @@ export async function getCollectionPage(handle: string, preview = false): Promis
         introCopy,
         "heroImage": heroImageOverride{ "url": asset->url, alt },
         "faqs": faqs[]{ question, answer },
-        "related": relatedCollections[]{ handle, label }
+        "related": relatedCollections[]{ handle, label },
+        // Merch components v1 — 1k PLP merch header. Additive optional field;
+        // dereferences the same emmaPreset docs the Ask Emma rail uses so the
+        // pill shape matches getEmmaPresets() exactly. Capped at 5 by the
+        // schema's Rule.max(5), so no overflow handling is needed downstream.
+        "merchHeader": merchHeader{
+          mastheadKicker,
+          themeLine,
+          emphasisWord,
+          "presets": presets[]->{
+            label, "slug": slug.current, narratorCopy, moodTags, audienceTags, mattersTags, priceMax
+          }
+        }
       }`,
       { handle },
     )
@@ -946,6 +1040,15 @@ export async function getCollectionPage(handle: string, preview = false): Promis
 
     const introHtml = data.introCopy && data.introCopy.length > 0
       ? toHTML(data.introCopy as PortableTextBlocks)
+      : null
+
+    const merchHeader: PlpMerchHeaderSanity | null = data.merchHeader
+      ? {
+          mastheadKicker: data.merchHeader.mastheadKicker ?? null,
+          themeLine:      data.merchHeader.themeLine ?? null,
+          emphasisWord:   data.merchHeader.emphasisWord ?? null,
+          presets:        (data.merchHeader.presets ?? []).filter(p => p?.label && p?.slug),
+        }
       : null
 
     return {
@@ -959,6 +1062,7 @@ export async function getCollectionPage(handle: string, preview = false): Promis
       heroImageAlt:   data.heroImage?.alt ?? null,
       faqs:           (data.faqs ?? []).filter(f => f?.question && f?.answer),
       related:        (data.related ?? []).filter(r => r?.handle && r?.label),
+      merchHeader,
     }
   } catch (err) {
     console.error('[sanity] getCollectionPage error:', err)
