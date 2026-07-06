@@ -3,6 +3,10 @@ import type { SanityImageAssetDocument } from '@sanity/client'
 import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
 import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig } from '~/types/cms'
+// Merch components v1 — additive block types (see docs/merch-build-plan.md +
+// merch-spec.md). Types live in ~/types/cms for the rr7 engineer's component
+// layer to import; CONTENT_BLOCKS_PROJECTION below is untyped raw GROQ (same
+// as every other block in this projection), so no import is needed here yet.
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
@@ -59,7 +63,9 @@ const CONTENT_BLOCKS_PROJECTION = `
   "promo": select(
     _type == "wayfinderMosaic" => promo{
       eyebrow, heading, emphasis, body, ctaLabel, ctaLink,
-      "image": image{ "url": asset->url, alt }
+      "image": image{ "url": asset->url, alt },
+      // Merch components v1 — 1j additive field; absent on pre-existing docs.
+      scrim
     }
   ),
   // categoryGrid + testimonials use inline item objects; trustBar uses references.
@@ -98,6 +104,61 @@ const CONTENT_BLOCKS_PROJECTION = `
       shortBio, longBio,
       "picksSince": picksSince,
       instagram, email
+    }
+  ),
+  // ─── Merch components v1 (additive) ──────────────────────────────────────
+  // See docs/merch-build-plan.md + merch-spec.md. Every new block gets its own
+  // field name (never reused across block types) so select() branches stay
+  // null-safe per the categoryGrid/testimonials/trustBar precedent above.
+  //
+  // headlinerSpotlight
+  kicker, headline, emphasisWord,
+  "headlinerProductHandle": productHandle,
+  priceOverride, mechanismCallout,
+  "headlinerCtaLabel": select(_type == "headlinerSpotlight" => ctaLabel),
+  "headlinerCtaLink":  select(_type == "headlinerSpotlight" => ctaLink),
+  "headlinerImage": select(
+    _type == "headlinerSpotlight" => image{ "url": asset->url, alt }
+  ),
+  // curiosityRail — four typed role slots + see-all link. Product refs are
+  // manual handles (no reference type), matching emmaCuratedRail.productHandles.
+  "onRamp": select(_type == "curiosityRail" => onRamp{ productHandle, copyLine }),
+  "standby": select(_type == "curiosityRail" => standby{ productHandle, copyLine }),
+  "headlinerRole": select(_type == "curiosityRail" => headliner{ productHandle, copyLine }),
+  "reach": select(_type == "curiosityRail" => reach{ productHandle, copyLine }),
+  "railCtaLink": select(_type == "curiosityRail" => ctaLink),
+  "railCtaLabelOverride": select(_type == "curiosityRail" => ctaLabelOverride),
+  // curiosityChooser
+  "chooserTiles": select(
+    _type == "curiosityChooser" => tiles[]{
+      _key, label, presetSlug, productHandles, narratorLine
+    }
+  ),
+  // orFork
+  question,
+  "forkSideA": select(_type == "orFork" => sideA{ productHandle, answerLine }),
+  "forkSideB": select(_type == "orFork" => sideB{ productHandle, answerLine }),
+  // quickNavGrid
+  "navTiles": select(
+    _type == "quickNavGrid" => tiles[]{ _key, label, link, tintHint }
+  ),
+  // honestProof
+  "proofQuotes": select(
+    _type == "honestProof" => quotes[]{
+      _key, verbatimText, productHandle, durationOwned, verified
+    }
+  ),
+  "proofPress": select(
+    _type == "honestProof" => press[]{ _key, quote, publication }
+  ),
+  // emailCaptureBand
+  subcopy, buttonLabel, finePrint,
+  // plpMerchHeader — dereference emmaPreset refs to the same shape
+  // getEmmaPresets() already returns, capped at 5 by schema validation.
+  mastheadKicker, themeLine,
+  "presets": select(
+    _type == "plpMerchHeader" => presets[]->{
+      label, "slug": slug.current, narratorCopy, moodTags, audienceTags, mattersTags, priceMax
     }
   ),
 `

@@ -210,6 +210,9 @@ export interface WayfinderPromo {
   ctaLabel?: string
   ctaLink?: string
   image?: SanityImageAsset
+  // Merch components v1 — 1j promo tile no-scrim upgrade. Additive optional
+  // field; undefined on existing docs means 'auto' (current behavior).
+  scrim?: 'auto' | 'none' | 'always'
 }
 
 export interface WayfinderMosaicBlock {
@@ -308,6 +311,171 @@ export interface RichTextBlock {
   maxWidth: 'narrow' | 'medium' | 'wide'
 }
 
+// ─── Merch components v1 (additive) ──────────────────────────────────────
+// See docs/merch-build-plan.md + merch-spec.md. Schema/GROQ/types only in
+// this pass; app/components/cms/*.tsx land separately (rr7 engineer owns
+// those). CTA labels are always one of the whitelist strings below.
+
+export type MerchCtaLabel = 'Take a peek →' | 'Show me' | 'Find your fit →' | "I'll take it ♥"
+
+// ─── 1a Headliner Spotlight ───────────────────────────────────────────────
+
+export interface HeadlinerSpotlightBlock {
+  _type: 'headlinerSpotlight'
+  _key: string
+  active: boolean
+  order: number
+  headlinerProductHandle: string
+  kicker?: string
+  headline: string
+  emphasisWord?: string
+  priceOverride?: number
+  mechanismCallout?: string
+  headlinerCtaLabel?: MerchCtaLabel
+  headlinerCtaLink?: string
+  headlinerImage?: SanityImageAsset
+}
+
+// ─── 1c Curiosity Spread Rail ─────────────────────────────────────────────
+
+export interface CuriosityRailSlot {
+  productHandle?: string
+  copyLine?: string
+}
+
+export interface CuriosityRailBlock {
+  _type: 'curiosityRail'
+  _key: string
+  active: boolean
+  order: number
+  eyebrow?: string
+  heading?: string
+  emphasisWord?: string
+  onRamp?: CuriosityRailSlot
+  standby?: CuriosityRailSlot
+  headlinerRole?: CuriosityRailSlot
+  reach?: CuriosityRailSlot
+  railCtaLink?: string
+  railCtaLabelOverride?: MerchCtaLabel
+}
+
+// ─── 1e Curiosity Chooser ─────────────────────────────────────────────────
+
+export interface CuriosityChooserTile {
+  _key: string
+  label: string
+  presetSlug?: string
+  productHandles?: string[]
+  narratorLine?: string
+}
+
+export interface CuriosityChooserBlock {
+  _type: 'curiosityChooser'
+  _key: string
+  active: boolean
+  order: number
+  heading?: string
+  emphasisWord?: string
+  chooserTiles?: CuriosityChooserTile[]
+}
+
+// ─── 1f "Or" Fork ──────────────────────────────────────────────────────────
+
+export interface OrForkSide {
+  productHandle?: string
+  answerLine?: string
+}
+
+export interface OrForkBlock {
+  _type: 'orFork'
+  _key: string
+  active: boolean
+  order: number
+  question?: string
+  emphasisWord?: string
+  forkSideA?: OrForkSide
+  forkSideB?: OrForkSide
+}
+
+// ─── 1g Category Quick-Nav Grid ───────────────────────────────────────────
+
+export type QuickNavTintHint = 'coral-soft' | 'plum-soft' | 'paper-3'
+
+export interface QuickNavTile {
+  _key: string
+  label: string
+  link: string
+  tintHint?: QuickNavTintHint
+}
+
+export interface QuickNavGridBlock {
+  _type: 'quickNavGrid'
+  _key: string
+  active: boolean
+  order: number
+  navTiles?: QuickNavTile[]
+}
+
+// ─── 1h Honest Proof ───────────────────────────────────────────────────────
+
+export interface HonestProofQuote {
+  _key: string
+  verbatimText: string
+  productHandle?: string
+  durationOwned?: string
+  verified?: boolean
+}
+
+export interface HonestProofPress {
+  _key: string
+  quote: string
+  publication?: string
+}
+
+export interface HonestProofBlock {
+  _type: 'honestProof'
+  _key: string
+  active: boolean
+  order: number
+  eyebrow?: string
+  proofQuotes?: HonestProofQuote[]
+  proofPress?: HonestProofPress[]
+}
+
+// ─── 1i Email Capture Band ("Emma's list") ────────────────────────────────
+
+export interface EmailCaptureBandBlock {
+  _type: 'emailCaptureBand'
+  _key: string
+  active: boolean
+  order: number
+  eyebrow?: string
+  heading?: string
+  emphasisWord?: string
+  subcopy?: string
+  buttonLabel?: MerchCtaLabel
+  finePrint?: string
+}
+
+// ─── 1j Promo Tile (no-scrim) — additive `scrim` field on WayfinderPromo ──
+// See WayfinderPromo above; `scrim` was added there as a purely additive
+// optional field rather than a new block (see build summary for rationale).
+
+export type PromoScrim = 'auto' | 'none' | 'always'
+
+// ─── 1k PLP Merch Header ──────────────────────────────────────────────────
+
+export interface PlpMerchHeaderBlock {
+  _type: 'plpMerchHeader'
+  _key: string
+  active: boolean
+  order: number
+  mastheadKicker?: string
+  themeLine?: string
+  emphasisWord?: string
+  presets?: EmmaPreset[]
+}
+
 // ─── Union ────────────────────────────────────────────────────────────────
 
 export type ContentBlock =
@@ -325,6 +493,14 @@ export type ContentBlock =
   | RichTextBlock
   | EditorBioBlock
   | WayfinderMosaicBlock
+  | HeadlinerSpotlightBlock
+  | CuriosityRailBlock
+  | CuriosityChooserBlock
+  | OrForkBlock
+  | QuickNavGridBlock
+  | HonestProofBlock
+  | EmailCaptureBandBlock
+  | PlpMerchHeaderBlock
 
 export interface HomepageSections {
   _id: string
