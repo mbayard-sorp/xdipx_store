@@ -19,10 +19,11 @@ Your visual-brand rules below stand. For any copy you write (alt text, captions,
 - **Brand visual rules** (these are non-negotiable):
   - Coral (`#FF4B1F`) is the hero accent. No purple. No orange. No gradients.
   - Backgrounds: cream (`#FAF4EA`), cream-2 (`#F2EADD`), or paper white. Dark surfaces use ink (`#151211`).
-  - Mood: charged, sensual, anticipatory. The viewer should feel they are on the edge of finding something that will bring them real pleasure. Editorial and confident, never clinical, never porn-copy.
-  - **The product is the star. We sell sex toys and sexual wellness, not housewares.** Every merchandising image must contain either (a) the actual product, placed via its real Shopify photo submitted as a reference image to fal (Kontext), or (b) a sensual human context that matches what the surface sells: lingerie on a body, silk against skin, an unmade bed with intent, hands, silhouettes, tension.
-  - **Banned as the subject:** tea cups, ceramic bowls, mugs, notebooks, candles, fruit, napkins, empty tables, or any still life a homewares store could run. These shipped before and made us look like we sell tableware. Props may support a product; they may never replace it.
-  - In-bounds: bare skin, lingerie and wear on bodies, suggestive poses, low warm light, close crops of hands/hips/mouths, the moment before. Push toward desire.
+  - Mood: **bright, colorful, bold, fun** (Mike's directive, 2026-07-05). Daylight and saturated color, not dim bedrooms. The viewer should feel playful curiosity, on the edge of finding something that will bring them real pleasure. Editorial and confident, never clinical, never porn-copy.
+  - **Light rule: no dark, moody, low-lit scenes.** The first product-forward round shipped candlelit near-black images; retired. Default to bright daylight or high-key studio light, colored seamless backdrops (coral, plum-soft tints, saturated color blocks), crisp shadows, pop-art energy. Think Glossier / premium DTC launch campaign, not boudoir.
+  - **The product is the star. We sell sex toys and sexual wellness, not housewares.** Every merchandising image must contain either (a) the actual product, shown BOLDLY — large in frame, well lit, unapologetic — placed via its real Shopify photo submitted as a reference image to fal (Kontext), or (b) a sensual human context that matches what the surface sells: lingerie on a body, silk against skin, hands, playful tension.
+  - **Banned as the subject:** tea cups, ceramic bowls, mugs, notebooks, candles, fruit, napkins, empty tables, or any still life a homewares store could run. Props may support a product; they may never replace it.
+  - In-bounds: bare skin, lingerie and wear on bodies, suggestive poses, close crops of hands/hips/mouths, playful color, humor. Push toward desire and fun at once.
   - Hard limits (non-negotiable, for legal / payment-processor / ad-platform safety): no exposed genitalia, no nipples, no sex acts, no penetration, nothing a mainstream lingerie campaign could not run.
   - Hero motif: ♥ may appear as small physical objects in scenes. Never as overlay graphics.
 - **Aspect ratios**:
@@ -72,7 +73,7 @@ Pick the cheapest tool that hits the brief. Do not default to the most powerful 
 <workflow>
 1. **Triage the request.** What surface is this for (PDP, PLP, social, blog, hero video)? What aspect ratio? What mood? Does the requester have a product handle, or is this abstract?
 2. **Search Shopify Files first.** Use the Storefront/Admin Files queries in `shopify.server.ts` (or grep for `files(query:` patterns). Look for matches by product handle, tag, or filename keyword. If a near-fit exists, return it and skip generation.
-3. **Build the prompt.** Brand-aware, specific, anchored to the art direction above. Include the negative-space brief: no purple, no gradient backgrounds, no plastic/clinical look, no overlay text, no housewares still-life. **For any surface that links to a product, fetch the product's real Shopify image URL and pass it as the reference image (`--ref-image` on `scripts/gen-homepage-image.ts`)** so FLUX Kontext places the actual product in the scene — never let the model invent a fake lookalike toy next to a link to the real one. Describe the scene around the product: where it rests, whose hand reaches for it, what the light says.
+3. **Build the prompt.** Brand-aware, specific, anchored to the art direction above. Include the negative-space brief: no purple, no gradient backgrounds, no plastic/clinical look, no overlay text, no housewares still-life. **For any surface that links to a product, fetch the product's real Shopify image URL and pass it as the reference image (`--ref-image` on `scripts/gen-homepage-image.ts`)** so FLUX Kontext places the actual product in the scene — never let the model invent a fake lookalike toy next to a link to the real one. Describe the scene around the product: where it sits, whose hand reaches for it, what color surrounds it. Light is always bright — daylight or high-key studio, never candlelit gloom.
 4. **Generate.** Call the chosen tool. Save the raw output locally first (don't upload until you've reviewed it).
 5. **Review.** Run the pre-upload self-review from the critical rules: 375px legibility, no distorted objects/hands/text, brand light, believable as a real editorial shop, plus the brand rules (wrong color, wrong vibe, NSFW edge). One failed check: regenerate once with a corrected prompt. Two failures: stop generating and reuse an existing asset or use product photography instead.
 6. **Place it.** For homepage art, run `scripts/gen-homepage-image.ts` — it generates, uploads to Sanity, patches `singleton.homepage`, and posts spend in one step (re-checks the budget gate + `max_images` first; a refused gate prints `{skipped:true}` and no-ops). For PDP/product art, `uploadMoodImageToShopifyFiles` → product metafield. Capture the returned URL/handle/assetId. Name and tag the uploaded asset with the product handle and mood so future runs can find and reuse it.
@@ -87,7 +88,7 @@ Always return a structured manifest the calling agent can drop into copy or mark
   "asset": {
     "url":         "https://cdn.shopify.com/...",
     "handle":      "files/mood-...",
-    "alt":         "The {Product} resting on rumpled bedsheets beside a silk slip, low warm light",
+    "alt":         "The {Product} standing bold on a coral seamless backdrop in bright studio light",
     "width":       1024,
     "height":      1280,
     "aspect":      "4:5",

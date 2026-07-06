@@ -353,22 +353,23 @@ shipped in July 2026 and made us look like a tableware shop. Each image must pas
 §2 self-review. Hard limits: no exposed genitalia, no nipples, no sex acts. Hand this manifest to
 `media-manager`.
 
-Shared prompt DNA (prepend to every generated prompt): *"Sensual editorial photograph for a premium
-sexual-wellness brand, low warm intimate light, charged and anticipatory mood, shallow depth of
-field, film-grain texture, confident and tasteful, no text, no logos, premium lingerie-campaign art
-direction, shot on medium format."*
+Shared prompt DNA (prepend to every generated prompt): *"Bold editorial photograph for a premium
+sexual-wellness brand, bright daylight or high-key studio light, saturated color-block backdrop
+(coral, warm plum tints), playful and confident mood, product large in frame, crisp and vivid,
+no text, no logos, premium DTC launch-campaign art direction, shot on medium format."* Never dark,
+moody, or candlelit (Mike, 2026-07-05); the mood is fun-and-curious with charge underneath.
 
 | # | Lands in (Sanity field) | Aspect | Subject / prompt |
 |---|------------------------|--------|------------------|
 | 1 | Hero product image | 4:5 | **Not generated.** Real Shopify photo of `featured[0]`. |
 | 2 | Meet Emma portrait (`emmaPersona.avatarUrl` / `/emma.png`) | 4:5 | Existing Emma portrait. Keep. |
-| 3 | `wayfinderMosaic.wayfinderTiles[0].image` ("New here?" → a starter product) | 3:4 | Kontext ref = the linked product's Shopify photo. "This product resting on rumpled bedsheets beside a silk slip, low warm lamplight, the box half open, the moment before." |
-| 4 | `wayfinderMosaic.wayfinderTiles[1].image` ("For two" → couples collection) | 3:4 | "A woman's hand in a lace cuff resting on a partner's bare shoulder in low warm light, close crop, charged and intimate, nothing explicit." |
-| 5 | `wayfinderMosaic.wayfinderTiles[2].image` (product-linked) | 3:4 | Kontext ref = the linked product's Shopify photo. "This product on a nightstand beside discarded lingerie, low evening lamplight, anticipatory." |
-| 6 | `playTogetherBanner.image` (Couples band) | 16:9 | "Two silhouettes close together on an unmade bed in low warm light, a silk robe slipping off one shoulder, charged and intimate, nothing explicit." |
-| 7 | `editorialTiles.tiles[0].image` (first-timer read → product PDP) | 3:2 | Kontext ref = the linked product's Shopify photo. "This product held loosely in a hand against bare thigh and silk, soft warm light, curious and unhurried." |
-| 8 | `editorialTiles.tiles[1].image` (slow-nights read → product PDP) | 3:2 | Kontext ref = the linked product's Shopify photo. "This product on the edge of a bathtub, candlelight, skin and steam suggested at the frame's edge." |
-| 9 | `editorialTiles.tiles[2].image` (questions/FAQ) | 3:2 | "Lace lingerie laid out on dark bedsheets next to a small unopened gift box, low warm light, inviting and unintimidating." |
+| 3 | `wayfinderMosaic.wayfinderTiles[0].image` ("New here?" → a starter product) | 3:4 | Kontext ref = the linked product's Shopify photo. "This product standing bold and centered on a coral seamless backdrop in bright studio light, crisp shadow, playful and vivid." |
+| 4 | `wayfinderMosaic.wayfinderTiles[1].image` ("For two" → couples collection) | 3:4 | "Two hands with fingers interlaced against a saturated warm color-block backdrop in bright daylight, one wrist in a lace cuff, playful and intimate, nothing explicit." |
+| 5 | `wayfinderMosaic.wayfinderTiles[2].image` (product-linked) | 3:4 | Kontext ref = the linked product's Shopify photo. "This product front and center on folded bright silk against a plum-tint backdrop, high-key studio light, bold and fun." |
+| 6 | `playTogetherBanner.image` (Couples band) | 16:9 | Prefer the professional brand couples photo already in Sanity (8b86bbf...). If regenerating: "A couple laughing close together on white bedding in bright morning daylight, silk slip and bare shoulders, playful and intimate, nothing explicit." |
+| 7 | `editorialTiles.tiles[0].image` (first-timer read → product PDP) | 3:2 | Kontext ref = the linked product's Shopify photo. "This product held up proudly in a hand against a bright coral backdrop, daylight, curious and fun, crisp and vivid." |
+| 8 | `editorialTiles.tiles[1].image` (slow-nights read → product PDP) | 3:2 | Kontext ref = the linked product's Shopify photo. "This product on white marble beside a bright silk robe and eucalyptus in airy daylight, spa-bright, inviting." |
+| 9 | `editorialTiles.tiles[2].image` (questions/FAQ) | 3:2 | "Colorful lace lingerie laid out flat on bright white sheets next to a small ribboned gift box, airy daylight, inviting and unintimidating, vivid color pops." |
 
 Reuse-first: before generating, `media-manager` checks existing Sanity assets tagged by mood /
 handle. When uploading new assets, tag with the mood + section so future weekly runs find them.
