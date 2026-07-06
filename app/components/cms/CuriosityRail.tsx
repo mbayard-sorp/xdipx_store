@@ -132,16 +132,25 @@ export function CuriosityRail({ block, productsByRole }: CuriosityRailProps) {
                 </span>
               </div>
               <div className={`relative flex aspect-[5/4] items-end justify-center p-2 ${meta.tint}`}>
-                {product.images[0]?.url ? (
-                  <OptimizedImage
-                    src={product.images[0].url}
-                    alt={product.images[0].altText || product.title}
-                    sizes="240px"
-                    className="h-full w-full rounded-[var(--radius-sm)] object-contain transition-transform duration-[var(--duration-base)] group-hover:scale-[1.03]"
-                  />
-                ) : (
-                  <div className="grid h-full w-full place-items-center text-3xl text-ink/10" aria-hidden="true">♥</div>
-                )}
+                {(() => {
+                  // Prefer the slot's generated card image; fall back to the
+                  // live Shopify product photo when unset.
+                  const img = slot.image?.url
+                    ? { url: slot.image.url, alt: slot.image.alt || product.title }
+                    : product.images[0]?.url
+                      ? { url: product.images[0].url, alt: product.images[0].altText || product.title }
+                      : null
+                  return img ? (
+                    <OptimizedImage
+                      src={img.url}
+                      alt={img.alt}
+                      sizes="240px"
+                      className="h-full w-full rounded-[var(--radius-sm)] object-contain transition-transform duration-[var(--duration-base)] group-hover:scale-[1.03]"
+                    />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center text-3xl text-ink/10" aria-hidden="true">♥</div>
+                  )
+                })()}
               </div>
               <div className="flex flex-col gap-1.5 p-3.5 md:gap-[5px] md:p-3">
                 <h3 className="line-clamp-2 text-[17px] leading-tight text-ink md:text-[16px]" style={DISPLAY_MED}>

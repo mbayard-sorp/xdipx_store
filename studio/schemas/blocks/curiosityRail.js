@@ -2,6 +2,8 @@
 // Four TYPED role slots in a fixed price-ladder order (on-ramp → standby →
 // headliner → reach). The ladder order is shell, not editorial — the roles
 // always render in this sequence regardless of price.
+import { withImageGenerator } from '../../lib/withImageGenerator'
+
 function roleSlotField(name, title, description) {
   return {
     name,
@@ -21,6 +23,9 @@ function roleSlotField(name, title, description) {
         type: 'string',
         description: 'One short line under the product name, e.g. "Zero learning curve. All mood."',
       },
+      // Optional generated card image (additive). Falls back to the live
+      // Shopify product photo when unset — see CuriosityRail.tsx.
+      ...withImageGenerator('image'),
     ],
     preview: {
       select: { title: 'productHandle', subtitle: 'copyLine' },

@@ -122,22 +122,26 @@ const CONTENT_BLOCKS_PROJECTION = `
   ),
   // curiosityRail — four typed role slots + see-all link. Product refs are
   // manual handles (no reference type), matching emmaCuratedRail.productHandles.
-  "onRamp": select(_type == "curiosityRail" => onRamp{ productHandle, copyLine }),
-  "standby": select(_type == "curiosityRail" => standby{ productHandle, copyLine }),
-  "headlinerRole": select(_type == "curiosityRail" => headliner{ productHandle, copyLine }),
-  "reach": select(_type == "curiosityRail" => reach{ productHandle, copyLine }),
+  // Each slot's optional generated image falls back to the live Shopify
+  // product photo in the component when unset.
+  "onRamp": select(_type == "curiosityRail" => onRamp{ productHandle, copyLine, "image": image{ "url": asset->url, alt } }),
+  "standby": select(_type == "curiosityRail" => standby{ productHandle, copyLine, "image": image{ "url": asset->url, alt } }),
+  "headlinerRole": select(_type == "curiosityRail" => headliner{ productHandle, copyLine, "image": image{ "url": asset->url, alt } }),
+  "reach": select(_type == "curiosityRail" => reach{ productHandle, copyLine, "image": image{ "url": asset->url, alt } }),
   "railCtaLink": select(_type == "curiosityRail" => ctaLink),
   "railCtaLabelOverride": select(_type == "curiosityRail" => ctaLabelOverride),
-  // curiosityChooser
+  // curiosityChooser — tiles may carry an optional generated image per tile.
   "chooserTiles": select(
     _type == "curiosityChooser" => tiles[]{
-      _key, label, presetSlug, productHandles, narratorLine
+      _key, label, presetSlug, productHandles, narratorLine,
+      "image": image{ "url": asset->url, alt }
     }
   ),
-  // orFork
+  // orFork — each side's optional generated image falls back to the live
+  // Shopify product photo in the component when unset.
   question,
-  "forkSideA": select(_type == "orFork" => sideA{ productHandle, answerLine }),
-  "forkSideB": select(_type == "orFork" => sideB{ productHandle, answerLine }),
+  "forkSideA": select(_type == "orFork" => sideA{ productHandle, answerLine, "image": image{ "url": asset->url, alt } }),
+  "forkSideB": select(_type == "orFork" => sideB{ productHandle, answerLine, "image": image{ "url": asset->url, alt } }),
   // quickNavGrid
   "navTiles": select(
     _type == "quickNavGrid" => tiles[]{ _key, label, link, tintHint }

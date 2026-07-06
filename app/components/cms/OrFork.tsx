@@ -37,17 +37,32 @@ export function OrFork({ block, productA, productB }: OrForkProps) {
     ? question.split(emphasis)
     : [question, '']
 
+  // Prefer each side's generated card image; fall back to the live Shopify
+  // product photo when unset.
+  const imageA = block.forkSideA?.image?.url
+    ? { url: block.forkSideA.image.url, alt: block.forkSideA.image.alt || productA.title }
+    : productA.images[0]?.url
+      ? { url: productA.images[0].url, alt: productA.images[0].altText || productA.title }
+      : null
+  const imageB = block.forkSideB?.image?.url
+    ? { url: block.forkSideB.image.url, alt: block.forkSideB.image.alt || productB.title }
+    : productB.images[0]?.url
+      ? { url: productB.images[0].url, alt: productB.images[0].altText || productB.title }
+      : null
+
   // Missing image on one side: BOTH sides fall back to tint blocks (symmetry).
-  const hasBothImages = !!productA.images[0]?.url && !!productB.images[0]?.url
+  const hasBothImages = !!imageA && !!imageB
 
   const sideA = {
     product: productA,
     answer: block.forkSideA?.answerLine,
+    image: imageA,
     tint: 'bg-coral-soft',
   }
   const sideB = {
     product: productB,
     answer: block.forkSideB?.answerLine,
+    image: imageB,
     tint: 'bg-plum-soft',
   }
 
@@ -76,8 +91,8 @@ export function OrFork({ block, productA, productB }: OrForkProps) {
               <div className={`relative flex aspect-[16/9] items-end justify-center p-2 md:aspect-[16/10] ${side.tint}`}>
                 {hasBothImages ? (
                   <OptimizedImage
-                    src={side.product.images[0]!.url}
-                    alt={side.product.images[0]!.altText || side.product.title}
+                    src={side.image!.url}
+                    alt={side.image!.alt}
                     sizes="(max-width: 768px) 100vw, 50vw"
                     className="h-full w-full object-contain transition-transform duration-[var(--duration-base)] group-hover:scale-[1.03]"
                   />

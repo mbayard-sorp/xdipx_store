@@ -1,6 +1,8 @@
 // Merch components v1 — 1e Curiosity chooser. New additive block.
 // Tile pills filter the rail in place via ?preset= — every state must be a
 // real server-rendered link (no dead ends, no JS-only filtering).
+import { withImageGenerator } from '../../lib/withImageGenerator'
+
 export default {
   name: 'curiosityChooser',
   title: 'Curiosity Chooser',
@@ -54,6 +56,9 @@ export default {
               type: 'string',
               description: 'Emma-voice line shown when this tile is selected, e.g. "Quieter, then. These keep it under the covers."',
             },
+            // Optional generated card image (additive). Falls back to the
+            // live Shopify product photo when unset — see CuriosityChooser.tsx.
+            ...withImageGenerator('image'),
           ],
           preview: {
             select: { title: 'label', subtitle: 'presetSlug' },

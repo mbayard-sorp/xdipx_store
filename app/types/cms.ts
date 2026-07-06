@@ -341,6 +341,9 @@ export interface HeadlinerSpotlightBlock {
 export interface CuriosityRailSlot {
   productHandle?: string
   copyLine?: string
+  /** Optional generated card image. Falls back to the live Shopify product
+   *  photo (product.images[0]) in CuriosityRail.tsx when unset. */
+  image?: { url: string; alt?: string }
 }
 
 export interface CuriosityRailBlock {
@@ -367,6 +370,9 @@ export interface CuriosityChooserTile {
   presetSlug?: string
   productHandles?: string[]
   narratorLine?: string
+  /** Optional generated card image. Falls back to the live Shopify product
+   *  photo (product.images[0]) in CuriosityChooser.tsx when unset. */
+  image?: { url: string; alt?: string }
 }
 
 export interface CuriosityChooserBlock {
@@ -384,6 +390,9 @@ export interface CuriosityChooserBlock {
 export interface OrForkSide {
   productHandle?: string
   answerLine?: string
+  /** Optional generated card image. Falls back to the live Shopify product
+   *  photo (product.images[0]) in OrFork.tsx when unset. */
+  image?: { url: string; alt?: string }
 }
 
 export interface OrForkBlock {

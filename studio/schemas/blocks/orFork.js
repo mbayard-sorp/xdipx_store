@@ -2,6 +2,8 @@
 // Two products, one plain question, each side is a whole-element link to its
 // PDP. If only one side resolves, the component should not render at all —
 // a half fork is worse than none (component-side logic, not schema).
+import { withImageGenerator } from '../../lib/withImageGenerator'
+
 function forkSideField(name, title) {
   return {
     name,
@@ -20,6 +22,9 @@ function forkSideField(name, title) {
         type: 'string',
         description: 'Short answer to the question, e.g. "Deep. Slow. Felt everywhere."',
       },
+      // Optional generated card image (additive). Falls back to the live
+      // Shopify product photo when unset — see OrFork.tsx.
+      ...withImageGenerator('image'),
     ],
     preview: {
       select: { title: 'productHandle', subtitle: 'answerLine' },

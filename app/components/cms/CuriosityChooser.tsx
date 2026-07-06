@@ -82,6 +82,18 @@ export function CuriosityChooser({ block, defaultProducts, productsByTile }: Cur
     }
   }
 
+  // Product-handle -> tile card image lookup, built across every tile (not
+  // just the active ones) so the default/union rail can also prefer a
+  // generated image when a product happens to be tagged on a tile that
+  // supplied one. First tile that names the handle wins on a tie.
+  const cardImageByHandle = new Map<string, { url: string; alt?: string }>()
+  for (const tile of block.chooserTiles ?? []) {
+    if (!tile.image?.url) continue
+    for (const handle of tile.productHandles ?? []) {
+      if (!cardImageByHandle.has(handle)) cardImageByHandle.set(handle, tile.image)
+    }
+  }
+
   const heading = block.heading || 'What are you curious about?'
   const emphasis = block.emphasisWord || 'curious'
   const headingParts = heading.includes(emphasis) ? heading.split(emphasis) : [heading, '']
@@ -189,16 +201,26 @@ export function CuriosityChooser({ block, defaultProducts, productsByTile }: Cur
                 className="group block"
               >
                 <div className="relative flex aspect-[4/5] items-end justify-center overflow-hidden rounded-[var(--radius-sm)] bg-paper-3 p-1.5">
-                  {product.images[0]?.url ? (
-                    <OptimizedImage
-                      src={product.images[0].url}
-                      alt={product.images[0].altText || product.title}
-                      sizes="(max-width: 768px) 30vw, 200px"
-                      className="h-full w-full object-contain transition-transform duration-[var(--duration-base)] group-hover:scale-[1.03]"
-                    />
-                  ) : (
-                    <div className="grid h-full w-full place-items-center text-2xl text-ink/10" aria-hidden="true">♥</div>
-                  )}
+                  {(() => {
+                    // Prefer a tile's generated card image for this product;
+                    // fall back to the live Shopify product photo when unset.
+                    const tileImg = cardImageByHandle.get(product.handle)
+                    const img = tileImg?.url
+                      ? { url: tileImg.url, alt: tileImg.alt || product.title }
+                      : product.images[0]?.url
+                        ? { url: product.images[0].url, alt: product.images[0].altText || product.title }
+                        : null
+                    return img ? (
+                      <OptimizedImage
+                        src={img.url}
+                        alt={img.alt}
+                        sizes="(max-width: 768px) 30vw, 200px"
+                        className="h-full w-full object-contain transition-transform duration-[var(--duration-base)] group-hover:scale-[1.03]"
+                      />
+                    ) : (
+                      <div className="grid h-full w-full place-items-center text-2xl text-ink/10" aria-hidden="true">♥</div>
+                    )
+                  })()}
                 </div>
                 <p className="mt-1.5 line-clamp-1 text-[12px] font-medium text-ink" style={BODY}>
                   {product.title}
