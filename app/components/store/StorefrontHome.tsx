@@ -30,6 +30,7 @@ import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import { TrustStrip } from '~/components/store/TrustStrip'
 import { EmailCaptureBand } from '~/components/store/EmailCaptureBand'
+import { SensationDialCard } from '~/components/store/SensationDialCard'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { Reveal } from '~/components/motion/Reveal'
 import { trackViewItemList, trackSelectItem, type GA4Item } from '~/lib/analytics.client'
@@ -1021,6 +1022,35 @@ function FAQ() {
   )
 }
 
+/* ── 1d showcase · "How it actually feels" ──────────────────────────────────
+   Fixed shell section (not a Sanity block) demonstrating SensationDialCard —
+   otherwise built but rendered nowhere. Renders nothing when no in-stock
+   product with usable dial data resolves (never an empty-tracks card). */
+
+function SensationDialShowcase({ products }: { products: Product[] }) {
+  if (products.length === 0) return null
+
+  return (
+    <section className="bg-paper-2 px-5 py-7 md:px-8 md:py-9">
+      <div className="mx-auto max-w-[1320px]">
+        <p className="mb-1 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
+          How it actually feels
+        </p>
+        <h2 className="mb-4 text-[26px] leading-[1.1] tracking-[-0.01em] text-ink md:mb-5 md:text-[30px]" style={DISPLAY}>
+          Read the dial <em className="em">before</em> you buy.
+        </h2>
+        <div className="flex gap-3.5 overflow-x-auto pb-2 [scrollbar-width:none] md:grid md:grid-cols-3 md:overflow-visible [&::-webkit-scrollbar]:hidden">
+          {products.map((product, i) => (
+            <Reveal key={product.id} variant="up" index={i}>
+              <SensationDialCard product={product} priority={i === 0} index={i} />
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 /* ── Composition ───────────────────────────────────────────────────────────
    Order is the stable shell. The deferred Sanity blocks (the team's
    notebook/promo/editorial surface) stream in between Couples and FAQ. */
@@ -1092,6 +1122,17 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: Sto
             if (!block) return null
             return <ContentBlockRenderer block={block} carouselProductMap={carouselProductMap} />
           }}
+        </Await>
+      </Suspense>
+
+      {/* 1d showcase · "How it actually feels" — demonstrates the otherwise
+          orphaned SensationDialCard. Fixed shell (not a Sanity block); renders
+          nothing when no in-stock dial-data product resolves. */}
+      <Suspense fallback={null}>
+        <Await resolve={contentBlocks} errorElement={null}>
+          {({ dialShowcaseProducts }) => (
+            <SensationDialShowcase products={dialShowcaseProducts ?? []} />
+          )}
         </Await>
       </Suspense>
 

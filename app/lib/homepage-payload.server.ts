@@ -79,7 +79,27 @@ export interface HomepagePayloadA {
 export interface HomeContentBlocks {
   sections: ContentBlock[]
   carouselProductMap: Record<string, Product[]>
+  /**
+   * Merch components v1 — 1d Sensation Dial Card showcase. Fixed shell
+   * section (not a Sanity block), so it isn't part of `sections`. In-stock
+   * products with sensationDialV2 data, resolved from DIAL_SHOWCASE_HANDLES
+   * below. Optional/undefined (e.g. variant A's hardcoded minimal payloads)
+   * is treated as empty by the storefront — never an empty-tracks card.
+   */
+  dialShowcaseProducts?: Product[]
 }
+
+/**
+ * Known-good product handles carrying sensation_dial_v2 metafield data,
+ * checked for the 1d Sensation Dial Card showcase section. There is no
+ * dedicated Shopify tag/collection indexing "has dial data" yet, so this is
+ * a small hand-maintained candidate list rather than a full-catalog scan —
+ * add a handle here once its sensation_dial_v2 metafield is enriched.
+ */
+const DIAL_SHOWCASE_HANDLES = ['temptasia-rattle-snake-dark-millenia']
+
+/** Cap on how many dial-data products the showcase renders. */
+const DIAL_SHOWCASE_LIMIT = 3
 
 /**
  * Assemble the Sanity CMS content blocks + their product maps. Extracted from
@@ -122,6 +142,7 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
   const [
     carouselResults, emmaRailResults,
     headlinerResults, curiosityRailResults, curiosityChooserResults, orForkResults,
+    dialShowcaseResults,
   ] = await Promise.all([
     carouselBlocks.length > 0
       ? withTimeout(Promise.all(carouselBlocks.map(b => {
@@ -174,6 +195,8 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
           return handles.length > 0 ? getProductsByHandles(handles) : Promise.resolve([] as Product[])
         })), BUILD_TIMEOUT_MS, [] as Product[][], 'orForkResults')
       : Promise.resolve([] as Product[][]),
+    // 1d — Sensation Dial Card showcase (fixed section, not a Sanity block).
+    withTimeout(getProductsByHandles(DIAL_SHOWCASE_HANDLES), BUILD_TIMEOUT_MS, [] as Product[], 'dialShowcaseResults'),
   ])
 
   const carouselProductMap: Record<string, Product[]> = {}
@@ -192,7 +215,15 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
     carouselProductMap[`${b._key}:default`] = allTileProducts.slice(0, 3)
   })
 
-  return { sections, carouselProductMap }
+  // 1d showcase — in-stock (any variant availableForSale) products with
+  // usable dial data (SensationDialCard needs >=2 items). Capped; empty when
+  // none resolve so the component renders nothing rather than empty tracks.
+  const dialShowcaseProducts = (dialShowcaseResults ?? [])
+    .filter(p => (p.sensationDialV2?.items?.length ?? 0) >= 2)
+    .filter(p => p.variants.some(v => v.availableForSale))
+    .slice(0, DIAL_SHOWCASE_LIMIT)
+
+  return { sections, carouselProductMap, dialShowcaseProducts }
 }
 
 /**
