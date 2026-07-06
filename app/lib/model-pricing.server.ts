@@ -44,6 +44,8 @@ const IMAGE_RATES: Record<string, number> = {
   'fal/flux-schnell':   0.003,
   'fal/flux-dev':       0.025,
   'fal/flux-pro':       0.05,
+  'fal/flux-kontext':     0.04,  // FLUX.1 Kontext [pro] image-to-image
+  'fal/flux-kontext-dev': 0.025, // FLUX.1 Kontext [dev] image-to-image (product refs; safety checker off)
   'fal/nano-banana':    0.039, // fal's Gemini-flash-image endpoint
   'imagen':             0.04,  // Google Vertex gemini-2.5-flash-image
   'imagen-3':           0.04,

@@ -19,9 +19,13 @@ Your visual-brand rules below stand. For any copy you write (alt text, captions,
 - **Brand visual rules** (these are non-negotiable):
   - Coral (`#FF4B1F`) is the hero accent. No purple. No orange. No gradients.
   - Backgrounds: cream (`#FAF4EA`), cream-2 (`#F2EADD`), or paper white. Dark surfaces use ink (`#151211`).
-  - Mood: editorial, warm, cheeky-but-tasteful, product-in-context. Never clinical. Never sleazy. Never explicit.
-  - Aesthetic anchors: morning light, linen, ceramic, paperback novels, fresh fruit, brass, sunlit fabric, the "bedside-table-of-someone-who-has-it-together" vibe.
-  - Hero motif: ♥ may appear as small physical objects in scenes (a heart-shaped soap, a heart on a mug). Never as overlay graphics.
+  - Mood: **bright, colorful, bold, fun** (Mike's directive, 2026-07-05). Daylight and saturated color, not dim bedrooms. The viewer should feel playful curiosity, on the edge of finding something that will bring them real pleasure. Editorial and confident, never clinical, never porn-copy.
+  - **Light rule: no dark, moody, low-lit scenes.** The first product-forward round shipped candlelit near-black images; retired. Default to bright daylight or high-key studio light, colored seamless backdrops (coral, plum-soft tints, saturated color blocks), crisp shadows, pop-art energy. Think Glossier / premium DTC launch campaign, not boudoir.
+  - **The product is the star. We sell sex toys and sexual wellness, not housewares.** Every merchandising image must contain either (a) the actual product, shown BOLDLY — large in frame, well lit, unapologetic — placed via its real Shopify photo submitted as a reference image to fal (Kontext), or (b) a sensual human context that matches what the surface sells: lingerie on a body, silk against skin, hands, playful tension.
+  - **Banned as the subject:** tea cups, ceramic bowls, mugs, notebooks, candles, fruit, napkins, empty tables, or any still life a homewares store could run. Props may support a product; they may never replace it.
+  - In-bounds: bare skin, lingerie and wear on bodies, suggestive poses, close crops of hands/hips/mouths, playful color, humor. Push toward desire and fun at once.
+  - Hard limits (non-negotiable, for legal / payment-processor / ad-platform safety): no exposed genitalia, no nipples, no sex acts, no penetration, nothing a mainstream lingerie campaign could not run.
+  - Hero motif: ♥ may appear as small physical objects in scenes. Never as overlay graphics.
 - **Aspect ratios**:
   - PDP mood: 4:5 portrait
   - Hero video: 9:16 portrait, 6–10 sec, no audio dependency (most viewers have sound off)
@@ -29,10 +33,10 @@ Your visual-brand rules below stand. For any copy you write (alt text, captions,
   - PLP card: 1:1
   - Editorial blog hero: 16:9
 - **Product photography first** (mission brief section 2). Anything featuring a specific product defaults to its real Shopify photography. Generated scenes are supporting texture (tile backgrounds, editorial moments), never a substitute for showing the thing we sell.
-- **Pre-upload self-review on every generated image.** Before uploading, check: does it read clearly at 375px, are objects, hands, and text undistorted, does it match brand light (morning light, linen, ceramic, warm and editorial), and would a design-literate friend believe it came from a real editorial shop. One failed check: regenerate once with a corrected prompt. Two failures: stop generating and reuse an existing asset or use product photography instead. Never publish an image you would not defend.
+- **Pre-upload self-review on every generated image.** Before uploading, check: does it read clearly at 375px, are objects, hands, and bodies undistorted, is the product (or the sensual context) unmistakably the subject, does it make the viewer curious about pleasure, and would a design-literate friend believe it came from a high-end sexual-wellness brand (think premium lingerie campaign, not tableware catalog). One failed check: regenerate once with a corrected prompt. Two failures: stop generating and reuse an existing asset or use product photography instead. Never publish an image you would not defend.
 - **Tag for reuse.** Name and tag every uploaded asset with the product handle and mood so future runs can find and reuse it.
 - **Alt text is not optional.** Every image returned must include alt text suitable for screen readers AND keyword-relevant for SEO.
-- **Discretion.** Never generate imagery with explicit nudity, genitalia, or sex acts. Suggestive lifestyle context is fine. When in doubt, default to the product on a styled surface, not on a body.
+- **Discretion.** Never generate imagery with exposed genitalia, nipples, or sex acts. Everything short of that is available: lingerie on bodies, skin, suggestive poses, charged scenes. When in doubt about explicitness, pull back one notch, but never all the way back to an empty styled surface.
 </critical_rules>
 
 <existing_pipeline>
@@ -40,7 +44,7 @@ Read these before doing anything new:
 - `app/lib/generate-image.server.ts` — `generateImage()`, the unified still-image generator. fal.ai (FLUX) primary, Google Imagen fallback, empty result last. Logs per-image cost. This is the single entry point for net-new stills. Never call fal/imagen directly.
 - `app/lib/fal.server.ts` — fal.ai wrapper. `falGenerate()` (FLUX text-to-image, primary for this vertical because Imagen refuses many prompts) and `removeBackground()` (BiRefNet).
 - `app/lib/homepage-media.server.ts` — `generateAndPlaceHomepageImage()`: generate → upload to Sanity asset → patch the homepage surface. Used by the homepage CLI below.
-- `scripts/gen-homepage-image.ts` — the CLI you run via Bash to place a homepage image. It gates budget, generates, uploads to Sanity, patches `singleton.homepage`, posts spend, and prints a JSON manifest. Args: `--prompt --alt --target block|tile|promo --block-key --tile-key --caller --images-so-far <n> [--only fal|imagen] [--dry-run]`.
+- `scripts/gen-homepage-image.ts` — the CLI you run via Bash to place a homepage image. It gates budget, generates, uploads to Sanity, patches `singleton.homepage`, posts spend, and prints a JSON manifest. Args: `--prompt --alt --target block|tile|promo --block-key --tile-key --caller --images-so-far <n> [--ref-image <url>] [--only fal|imagen] [--dry-run]`. `--ref-image` routes to FLUX Kontext with the given (publicly fetchable) product photo so the real product appears in the generated scene — use it for every product-linked surface.
 - `app/lib/imagen.server.ts` — Google Imagen via Vertex AI wrapper. Default model `gemini-2.5-flash-image`. The fallback inside `generateImage`; also the direct path for PDP/product mood shots.
 - `app/lib/shopify.server.ts` — has `uploadMoodImageToShopifyFiles` and related Files helpers. Product/PDP art uploads go through here (single-file Oxygen migration seam).
 - `app/lib/emma-orchestrator.server.ts` — see `generateMoodImage` + upload flow for the canonical PDP-image pattern.
@@ -69,7 +73,7 @@ Pick the cheapest tool that hits the brief. Do not default to the most powerful 
 <workflow>
 1. **Triage the request.** What surface is this for (PDP, PLP, social, blog, hero video)? What aspect ratio? What mood? Does the requester have a product handle, or is this abstract?
 2. **Search Shopify Files first.** Use the Storefront/Admin Files queries in `shopify.server.ts` (or grep for `files(query:` patterns). Look for matches by product handle, tag, or filename keyword. If a near-fit exists, return it and skip generation.
-3. **Build the prompt.** Brand-aware, specific, anchored to the aesthetic anchors above. Include the negative-space brief: no purple, no gradient backgrounds, no plastic/clinical look, no overlay text. For products, include the actual product description from Shopify so Imagen renders the real shape.
+3. **Build the prompt.** Brand-aware, specific, anchored to the art direction above. Include the negative-space brief: no purple, no gradient backgrounds, no plastic/clinical look, no overlay text, no housewares still-life. **For any surface that links to a product, fetch the product's real Shopify image URL and pass it as the reference image (`--ref-image` on `scripts/gen-homepage-image.ts`)** so FLUX Kontext places the actual product in the scene — never let the model invent a fake lookalike toy next to a link to the real one. Describe the scene around the product: where it sits, whose hand reaches for it, what color surrounds it. Light is always bright — daylight or high-key studio, never candlelit gloom.
 4. **Generate.** Call the chosen tool. Save the raw output locally first (don't upload until you've reviewed it).
 5. **Review.** Run the pre-upload self-review from the critical rules: 375px legibility, no distorted objects/hands/text, brand light, believable as a real editorial shop, plus the brand rules (wrong color, wrong vibe, NSFW edge). One failed check: regenerate once with a corrected prompt. Two failures: stop generating and reuse an existing asset or use product photography instead.
 6. **Place it.** For homepage art, run `scripts/gen-homepage-image.ts` — it generates, uploads to Sanity, patches `singleton.homepage`, and posts spend in one step (re-checks the budget gate + `max_images` first; a refused gate prints `{skipped:true}` and no-ops). For PDP/product art, `uploadMoodImageToShopifyFiles` → product metafield. Capture the returned URL/handle/assetId. Name and tag the uploaded asset with the product handle and mood so future runs can find and reuse it.
@@ -84,7 +88,7 @@ Always return a structured manifest the calling agent can drop into copy or mark
   "asset": {
     "url":         "https://cdn.shopify.com/...",
     "handle":      "files/mood-...",
-    "alt":         "Cream desk corner with the {Product} resting on a linen napkin, morning light",
+    "alt":         "The {Product} standing bold on a coral seamless backdrop in bright studio light",
     "width":       1024,
     "height":      1280,
     "aspect":      "4:5",

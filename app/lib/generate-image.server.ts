@@ -31,6 +31,12 @@ export interface GenerateImageOpts {
   sku?: string
   /** Reference product images (Imagen path reproduces the exact product). */
   referenceImageBuffers?: Buffer[]
+  /**
+   * Publicly fetchable reference image URL (real Shopify product photo). On
+   * the fal path this routes to FLUX Kontext so the actual product appears in
+   * the generated scene instead of a model-invented lookalike.
+   */
+  refImageUrl?: string
   /** Force a provider (testing). Default tries fal then imagen. */
   only?: 'fal' | 'imagen'
   /**
@@ -70,7 +76,11 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
   // 1. fal.ai — primary (skip if only:'imagen' or unconfigured).
   if (opts.only !== 'imagen' && falConfigured()) {
     try {
-      const { buffers, costKey } = await falGenerate({ prompt: opts.prompt, count })
+      const { buffers, costKey } = await falGenerate({
+        prompt: opts.prompt,
+        count,
+        ...(opts.refImageUrl ? { refImageUrl: opts.refImageUrl } : {}),
+      })
       if (buffers.length) {
         if (logCost) void logImageCost({ ...logBase, model: costKey, count: buffers.length })
         return { buffers, provider: 'fal', model: costKey }

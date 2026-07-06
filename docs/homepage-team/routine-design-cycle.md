@@ -65,6 +65,11 @@ through every phase below so the dashboard shows the design cycle live.
   `app/components/motion/Reveal.tsx`, `variants.ts`) and the v3 brand tokens in `app/app.css`.
 - Hard constraints still bind: mobile-first @375px, zero-CLS (transform/opacity only, **never wrap the
   LCP hero**), SSR-visible content, brand palette + Emma voice.
+- **Ambition mandate (mission brief section 9, Mike 2026-07-05):** every cycle carries at least one
+  genuinely new exploration/self-discovery experience concept from the backlog to a wire or
+  prototype — not just polish of existing sections. Judge concepts by whether a visitor learns
+  something about what fits them while moving toward a product. Log rejected concepts + reasons so
+  ambition compounds across cycles.
 
 ### 2. Prototype on a branch
 

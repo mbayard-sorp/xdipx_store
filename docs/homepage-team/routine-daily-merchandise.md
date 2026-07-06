@@ -173,8 +173,12 @@ Emit a `decision` event recording the proposed candidates, the scores, and the f
 
 Hand the chosen surfaces to `media-manager`. **Reuse-before-generate:** it checks existing **Sanity**
 assets (homepage art lives in Sanity, not Shopify Files) for a fitting image first; only generates when
-none fits. Editorial mood scenes only (morning light, linen, ceramic, product-on-a-styled-surface) —
-never a body, never explicit.
+none fits. Imagery follows mission brief section 2: the product is the star — pass the product's real
+Shopify photo as a Kontext reference (`--ref-image`) for every product-linked surface, or use sensual
+human context (lingerie on a body, skin, playful tension) matched to what the surface sells. Housewares
+still-lifes with no product are banned, and so are dark/moody/candlelit scenes: bright daylight or
+high-key studio light, saturated color-block backdrops, the product bold and large in frame. Fun and
+curiosity-inspiring is the target; exposed genitalia, nipples, and sex acts are the hard limit.
 
 Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counter:
 
@@ -183,9 +187,11 @@ Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counte
    also returns `imagesToday` + `maxImagesPerDay` and refuses with `reason:'over_image_cap'` server-side,
    so a stray extra call is rejected — but stop yourself first.
 2. `media-manager` runs `scripts/gen-homepage-image.ts --target block|tile|promo --block-key <k>
-   [--tile-key <k>] --prompt "<scene>" --alt "<screen-reader alt>" --images-so-far <n>
-   --run-id $RUN_ID --caller "merch-routine/<surface>"`. `--run-id` keeps the script's
-   internal gate re-check from refusing on your own running row.
+   [--tile-key <k>] --prompt "<scene>" --alt "<screen-reader alt>" [--ref-image <shopify-photo-url>]
+   --images-so-far <n> --run-id $RUN_ID --caller "merch-routine/<surface>"`. `--run-id` keeps the
+   script's internal gate re-check from refusing on your own running row. `--ref-image` routes to
+   FLUX Kontext so the real product appears in the scene — use it whenever the surface links to a
+   product.
 3. The script **gates → generates (fal FLUX → Imagen) → uploads to a Sanity asset → patches
    `singleton.homepage` → posts spend → prints a JSON manifest**. Read the manifest; if
    `placed:true`, increment `imagesSoFar`. If `skipped:true`, stop the imagery loop.
@@ -245,6 +251,13 @@ featured pick.
 - **One rail per week is a taxonomy rail**, keyed off `mood_tags` or `matters_tags` rather than a
   product family, so the guided-selling taxonomy gets a standing homepage surface.
 
+**Emma's Presets lineup (mission brief section 6):** the team owns `emmaPreset` publish state.
+Whenever the theme or hero changes, re-curate: max 5 published, each matching the theme and landing
+on 3+ live products (tags must come from the live vocab — `scripts/dump-discovery-vocab.ts`).
+Unpublish everything else (unpublished docs keep their drafts, so this is reversible). If nothing
+fits the theme, draft a new preset with emma-copywriter (label + narratorCopy voice-gated, tags from
+live vocab only), verify matches, publish it in place of one of the 5.
+
 **Snapshot the current doc revision first** (last-good for healthcheck rollback).
 **Diff before write:** patch only changed fields; skip no-op publishes. **Content only** — never change
 URLs, canonical, section structure, or components here (that is Routine B, PR-gated).
@@ -281,7 +294,7 @@ status with the error.
 
 ## Step 8 — Finish + event trail
 
-Before posting the final update, run the Definition of Done checks from mission brief section 7 and
+Before posting the final update, run the Definition of Done checks from mission brief section 10 and
 fold the results into the summary:
 
 - Count the live page's product/collection links versus /discover links. Report the ratio in the

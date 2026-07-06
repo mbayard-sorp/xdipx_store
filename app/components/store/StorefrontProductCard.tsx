@@ -21,9 +21,11 @@ interface StorefrontProductCardProps {
   priority?: boolean
   /** Fired on click, before navigation — used for GA4 select_item attribution. */
   onSelect?: () => void
+  /** Fill the parent column (grid layouts) instead of the fixed rail width. */
+  fluid?: boolean
 }
 
-export function StorefrontProductCard({ product, priority = false, onSelect }: StorefrontProductCardProps) {
+export function StorefrontProductCard({ product, priority = false, onSelect, fluid = false }: StorefrontProductCardProps) {
   const onSale = product.compareAtPrice != null && product.compareAtPrice > product.price
   const savePct = onSale
     ? Math.round(((product.compareAtPrice! - product.price) / product.compareAtPrice!) * 100)
@@ -33,7 +35,7 @@ export function StorefrontProductCard({ product, priority = false, onSelect }: S
   return (
     <Link
       to={`/products/${product.handle}`}
-      className="group block w-[220px] shrink-0 sm:w-auto sm:shrink"
+      className={`group block ${fluid ? 'w-full' : 'w-[220px] shrink-0 sm:w-auto sm:shrink'}`}
       aria-label={product.title}
       onClick={onSelect}
     >

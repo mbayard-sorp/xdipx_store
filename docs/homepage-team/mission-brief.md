@@ -45,21 +45,42 @@ Every module must earn a click to a specific product or collection.
 
 ## 2. Images: the product is the star
 
-Generated images have shipped below the bar before. Standing rules:
+Generated images have shipped below the bar before. In July 2026 a run
+shipped tea cups, ceramic bowls, and notebooks as tile art. No one comes to
+a sex toy store to shop for tableware. Standing rules (Mike's directive,
+2026-07-05):
 
-- Default to the product's real Shopify photography wherever a specific
-  product is featured. Generated scenes are supporting texture (tile
-  backgrounds, editorial moments), never a substitute for showing the thing
-  we are selling.
-- Every generated image gets a self-review before upload. Check: does it read
-  clearly at 375px, are objects and hands and text undistorted, does it match
-  brand light (morning light, linen, ceramic, warm and editorial), and would
-  a design-literate friend believe it came from a real editorial shop. One
-  failed check means regenerate once with a corrected prompt. Two failures
-  means stop generating and use product photography or a reused Sanity asset
-  instead. Never publish an image you would not defend to Mike.
-- Reuse-first stands. When uploading, name and tag assets with product handle
-  and mood so future runs can find them.
+- **Every merchandising image shows what we sell.** Either the actual
+  product (its real Shopify photo submitted to fal as a Kontext reference
+  image via `--ref-image` on `scripts/gen-homepage-image.ts`), or a sensual
+  human context matched to what the surface links to: lingerie on a body,
+  silk against skin, hands, playful tension.
+- **Bright, colorful, bold** (Mike, 2026-07-05, second directive). No dark,
+  moody, candlelit scenes — the first product-forward round shipped
+  near-black images and those are retired too. Default to daylight or
+  high-key studio light, saturated color-block backdrops (coral, plum
+  tints), the product LARGE in frame and unapologetic. Fun and
+  curiosity-inspiring, premium-DTC-launch energy, not boudoir gloom.
+- **Banned as the subject:** tea cups, mugs, ceramic bowls, notebooks,
+  candles, fruit, napkins, empty styled tables — any still life a homewares
+  store could run. Props may support a product; they may never replace it.
+- **The mood is playful curiosity with charge underneath.** A visitor
+  should feel on the edge of finding something that will bring them
+  pleasure, and smile on the way. Hard limits for legal / processor /
+  ad-platform safety: no exposed genitalia, no nipples, no sex acts —
+  nothing a premium lingerie campaign could not run. Short of that, push.
+- Every generated image gets a self-review before upload. Check: does it
+  read clearly at 375px, are objects and hands and bodies undistorted, is
+  the product or the sensual context unmistakably the subject, and would a
+  design-literate friend believe it came from a high-end sexual-wellness
+  brand. One failed check means regenerate once with a corrected prompt.
+  Two failures means stop generating and use product photography or a
+  reused Sanity asset instead. Never publish an image you would not defend
+  to Mike.
+- Reuse-first stands, but only for assets that meet these rules. The July
+  2026 housewares set is retired; do not re-place those assets. When
+  uploading, name and tag assets with product handle and mood so future
+  runs can find them.
 
 ## 3. Weekly rhythm: mix it up
 
@@ -92,7 +113,59 @@ Monday run, before theme setting:
   When a competitor tactic depends on discount pressure or crude copy, log it
   as a thing we deliberately do not do.
 
-## 5. Serve both visitors on the customer journey
+## 5. Product curation: pick winners, then commit to them
+
+Featuring a product is a bet; place it deliberately. When choosing the hero
+and rail products (on top of the selection criteria in Routine A):
+
+- **Photogenic first.** A featured product needs photography that can carry
+  a bright, bold image — strong silhouette, saturated color, clean shots.
+  A great product with murky photos loses the hero slot to a good product
+  that pops.
+- **Story-able.** You must be able to say in one sentence what it does for
+  the reader and why it earns the slot this week. If the enrichment data
+  (Emma's take, sensation dial, tags) is thin, either route it to
+  emma-copywriter for copy or pick something with a story ready to go.
+- **Curiosity spread.** Across the page, cover an on-ramp (approachable,
+  under $30), a headliner (the hero, the week's theme), and a
+  reach (something that stretches a browser's imagination). All three
+  jobs, every week.
+- **Follow through.** A featured product gets the full treatment: bold
+  image, fresh copy, a preset or rail that leads to it. No orphan features.
+
+## 6. Emma's Presets: the team owns the lineup
+
+`emmaPreset` docs in Sanity render as "Emma's Presets" filter pills on
+collection and search pages. Standing rules (Mike, 2026-07-05):
+
+- **The homepage team owns preset publish state.** Publishing and
+  unpublishing presets is a content-plane action the team does without
+  per-change approval, same as rails and tiles.
+- **Max 5 published at any time.** Thirty live pills bury discovery on the
+  PLPs. Five is the ceiling, not the target; fewer, sharper presets beat a
+  full row.
+- **Match the homepage theme.** The published preset lineup follows the
+  week's theme and the current homepage merchandising. When the theme
+  changes, re-curate the lineup in the same run.
+- **Every published preset must land on products.** A preset's
+  mood/audience/matters tags must match live product tags (the vocab from
+  `scripts/dump-discovery-vocab.ts`; tags outside the live vocab match
+  zero products and render a dead pill). Verify match counts before
+  publishing; a preset matching fewer than 3 products gets fixed or stays
+  unpublished.
+- **The label must keep its promise.** The tag vocabulary has no
+  material/product-type dimension, so a label like "Glass and metal mood"
+  or "Flavored and edible" filtered by mood tags alone delivers a random
+  grab-bag (the 2026-07-05 audit found five of these among the 30 then
+  live). Before publishing, eyeball the actual filtered results: if the
+  products do not look like what the label promises, rename the preset or
+  retag the products; never ship the mismatch.
+- **Create when nothing fits.** If no existing preset matches the theme,
+  draft a new one with emma-copywriter (label + narratorCopy in charter
+  voice, tags from the live vocab only), verify matches, publish it, and
+  unpublish whatever it replaces.
+
+## 7. Serve both visitors on the customer journey
 
 Two people land on this page:
 
@@ -109,7 +182,7 @@ tempt (a specific product with a reason it fits), deepen (education, the
 Notebook), or close (Compass, email capture). A module with no job gets
 better content or gets its slot re-planned via Routine B.
 
-## 6. Voice on the homepage
+## 8. Voice on the homepage
 
 The charter (docs/emma-voice.md) is the source of truth. For homepage work,
 the notes that matter most:
@@ -126,7 +199,27 @@ the notes that matter most:
 - Fresh, product-specific language on every run. Retire every coined phrase
   after one use. Whitelist CTAs only.
 
-## 7. Definition of done, every run
+## 9. Design ambition: invent the experience, don't decorate the template
+
+Mike's standing directive (2026-07-05): push the limits of the team's design
+capabilities. The bar is not "a clean page"; it is unique customer
+experiences for exploration and self-discovery that no competitor has.
+
+- Routine B exists to invent, not just to maintain. Every design cycle
+  should carry at least one genuinely new experience concept from the
+  backlog to a wire or prototype: interactive finders beyond the Compass,
+  playful self-discovery moments, bold editorial formats, new ways to make
+  browsing feel like exploring.
+- Judge concepts by whether they help a visitor learn something about
+  themselves (what they are curious about, what fits them) while moving
+  them toward a product. Exploration that dead-ends is decoration.
+- Design proposals may be ambitious; shipping stays disciplined — code and
+  layout still go through the reviewed-PR path, content experiments can
+  ship same-day within the content plane.
+- Log rejected concepts with reasons in the run record so ambition
+  compounds instead of resetting each cycle.
+
+## 10. Definition of done, every run
 
 After publishing, fetch the live homepage and verify before closing the run:
 
@@ -136,7 +229,9 @@ After publishing, fetch the live homepage and verify before closing the run:
 3. Every image on the page passed the section 2 review or is Shopify product
    photography.
 4. All new copy passed the Emma voice gate.
-5. Run summary states: theme, hero product and why, what changed versus
+5. Published `emmaPreset` count is 5 or fewer, the lineup matches the
+   current theme, and every published preset lands on 3+ products.
+6. Run summary states: theme, hero product and why, what changed versus
    yesterday, what will change next run, and (Mondays) the recon memo.
 
 A run that publishes nothing is fine. A run that publishes something broken,
