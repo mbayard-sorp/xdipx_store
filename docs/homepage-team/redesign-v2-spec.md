@@ -370,6 +370,7 @@ moody, or candlelit (Mike, 2026-07-05); the mood is fun-and-curious with charge 
 | 7 | `editorialTiles.tiles[0].image` (first-timer read → product PDP) | 3:2 | Kontext ref = the linked product's Shopify photo. "This product held up proudly in a hand against a bright coral backdrop, daylight, curious and fun, crisp and vivid." |
 | 8 | `editorialTiles.tiles[1].image` (slow-nights read → product PDP) | 3:2 | Kontext ref = the linked product's Shopify photo. "This product on white marble beside a bright silk robe and eucalyptus in airy daylight, spa-bright, inviting." |
 | 9 | `editorialTiles.tiles[2].image` (questions/FAQ) | 3:2 | "Colorful lace lingerie laid out flat on bright white sheets next to a small ribboned gift box, airy daylight, inviting and unintimidating, vivid color pops." |
+| 10 | `wayfinderMosaic.promo.image` ("Not sure where you land?" Discover You tile) | ~5:2 wide | **Legibility constraint: this tile has NO scrim — ink/plum text renders directly on the image**, so the image must be high-key and pale with the subject confined to the RIGHT third and clean negative space on the left two-thirds. "A laughing woman peeking over a bright silk sheet on the right third of the frame, pale lavender high-key backdrop, playful curiosity, generous empty space left." |
 
 Reuse-first: before generating, `media-manager` checks existing Sanity assets tagged by mood /
 handle. When uploading new assets, tag with the mood + section so future weekly runs find them.
