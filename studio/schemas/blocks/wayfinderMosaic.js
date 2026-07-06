@@ -55,6 +55,25 @@ export default {
         { name: 'ctaLink',   title: 'CTA Link',  type: 'string', initialValue: '/discover' },
         // AI image generation — adds imagePrompt sibling + wraps 'image' input
         ...withImageGenerator('image'),
+        // Merch components v1 — 1j promo tile no-scrim upgrade. Additive optional
+        // field: existing promo docs have no value here and fall back to 'auto'
+        // (the current scrimmed behavior) at render time, so nothing published
+        // before this field existed changes meaning.
+        {
+          name: 'scrim',
+          title: 'Scrim',
+          type: 'string',
+          description: 'Controls the text-safe treatment over the image. "Auto" runs the L*85 contrast gate at publish time and picks no-scrim or a scrimmed fallback panel for you. "None" forces the no-scrim layout (image must pass the gate). "Always" forces the scrimmed fallback panel regardless of image luminance.',
+          options: {
+            list: [
+              { title: 'Auto (contrast-gated)', value: 'auto' },
+              { title: 'None (force no-scrim)', value: 'none' },
+              { title: 'Always (force scrim)',  value: 'always' },
+            ],
+            layout: 'radio',
+          },
+          initialValue: 'auto',
+        },
       ],
     },
   ],
