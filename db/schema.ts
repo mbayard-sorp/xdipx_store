@@ -1094,10 +1094,15 @@ export const discoveryIndexPayload = pgTable('discovery_index_payload', {
 // Control plane only. Spend lives in api_token_log, not here.
 // ---------------------------------------------------------------------------
 
-/** One row per team run (daily merchandise, or a weekly design cycle). */
+/**
+ * One row per team run. Originally homepage-only (049); migration 051 adds a
+ * `team` column so every store team (homepage|social|ads|email|strategy)
+ * shares the same run/event/gate machinery.
+ */
 export const homepageTeamRuns = pgTable('homepage_team_runs', {
   id:           serial('id').primaryKey(),
-  runType:      varchar('run_type', { length: 24 }).notNull(),        // merchandise|design|manual
+  team:         varchar('team', { length: 24 }).notNull().default('homepage'),
+  runType:      varchar('run_type', { length: 24 }).notNull(),        // merchandise|design|manual|social|ads|email|strategy|apply
   status:       varchar('status', { length: 16 }).notNull().default('running'),
   currentPhase: varchar('current_phase', { length: 48 }),
   currentAgent: varchar('current_agent', { length: 48 }),
@@ -1110,6 +1115,7 @@ export const homepageTeamRuns = pgTable('homepage_team_runs', {
 }, t => ({
   startedIdx: index('idx_homepage_team_runs_started').on(t.startedAt),
   statusIdx:  index('idx_homepage_team_runs_status').on(t.status, t.startedAt),
+  teamIdx:    index('idx_team_runs_team').on(t.team, t.startedAt),
 }))
 
 /** Per-step/agent activity feed — dashboard timeline + conversation viewer. */
@@ -1126,18 +1132,71 @@ export const homepageTeamEvents = pgTable('homepage_team_events', {
   runIdx: index('idx_homepage_team_events_run').on(t.runId, t.ts),
 }))
 
-/** process-optimizer suggestions — human-approved before anything changes. */
+/**
+ * The store-wide improvement bus (051). Agents write `proposed` rows; the owner
+ * approves/dismisses from the dashboard; agent-editor turns approved
+ * instruction-kind rows into PRs (`pr_open`) which the owner merges (`applied`).
+ * `target_team` routes a suggestion at another team; NULL means "own team".
+ */
 export const homepageTeamSuggestions = pgTable('homepage_team_suggestions', {
   id:            serial('id').primaryKey(),
   runId:         integer('run_id').references(() => homepageTeamRuns.id, { onDelete: 'set null' }),
+  team:          varchar('team', { length: 24 }).notNull().default('homepage'),
+  targetTeam:    varchar('target_team', { length: 24 }),
   category:      varchar('category', { length: 32 }).notNull(),       // model|turns|caching|prompt|agents|other
+  kind:          varchar('kind', { length: 16 }).notNull().default('process'), // process|strategy|instructions|agent-def|config|code|campaign|promo|program
   suggestion:    text('suggestion').notNull(),
   estSavingsUsd: decimal('est_savings_usd', { precision: 10, scale: 4 }).notNull().default('0'),
   cxRisk:        varchar('cx_risk', { length: 8 }).notNull().default('low'), // low|med|high
-  status:        varchar('status', { length: 12 }).notNull().default('proposed'), // proposed|approved|applied|dismissed
+  status:        varchar('status', { length: 12 }).notNull().default('proposed'), // proposed|approved|pr_open|applied|dismissed
+  applyRef:      text('apply_ref'),                                   // PR URL / applied artifact
+  decidedAt:     timestamp('decided_at'),
   createdAt:     timestamp('created_at').notNull().defaultNow(),
 }, t => ({
   statusIdx: index('idx_homepage_team_suggestions_status').on(t.status, t.createdAt),
+  teamIdx:   index('idx_team_sugg_team').on(t.team, t.status, t.createdAt),
+}))
+
+/**
+ * Weekly store-wide strategy brief (051) — written by store-strategist, read by
+ * every team routine at run start. Publishing a new brief supersedes the
+ * previous active one; exactly one row is 'active' at a time.
+ */
+export const strategyBriefs = pgTable('strategy_briefs', {
+  id:          serial('id').primaryKey(),
+  weekStart:   date('week_start').notNull(),
+  brief:       text('brief').notNull(),          // markdown: focus, per-team directives, stop-doing list
+  metricsJson: json('metrics_json'),             // revenue, GA4, spend, engagement behind the calls
+  status:      varchar('status', { length: 12 }).notNull().default('active'), // active|superseded|draft
+  createdBy:   varchar('created_by', { length: 48 }).notNull().default('store-strategist'),
+  createdAt:   timestamp('created_at').notNull().defaultNow(),
+}, t => ({
+  statusIdx: index('idx_strategy_briefs_status').on(t.status, t.createdAt),
+}))
+
+/**
+ * Ad campaign proposals (051) — the ads-manager stub is propose-only; nothing
+ * here spends money. Launch is a human action in-platform; the external id and
+ * actual spend get synced back for the strategist's retro.
+ */
+export const adCampaigns = pgTable('ad_campaigns', {
+  id:                 serial('id').primaryKey(),
+  platform:           varchar('platform', { length: 20 }).notNull(),   // meta|x|google|reddit|other
+  name:               varchar('name', { length: 120 }).notNull(),
+  objective:          varchar('objective', { length: 40 }).notNull(),
+  status:             varchar('status', { length: 16 }).notNull().default('proposed'), // proposed|approved|launched|paused|ended|rejected
+  plannedDailyCents:  integer('planned_daily_cents').notNull().default(0),
+  plannedTotalCents:  integer('planned_total_cents'),
+  actualSpendUsd:     decimal('actual_spend_usd', { precision: 10, scale: 2 }).notNull().default('0'),
+  externalCampaignId: varchar('external_campaign_id', { length: 64 }),
+  audienceJson:       json('audience_json'),
+  creativeJson:       json('creative_json'),      // copy variants, media refs, landing UTMs
+  policyCheck:        text('policy_check').notNull(), // REQUIRED docs/ads-policy.md compliance note
+  runId:              integer('run_id').references(() => homepageTeamRuns.id, { onDelete: 'set null' }),
+  createdAt:          timestamp('created_at').notNull().defaultNow(),
+  updatedAt:          timestamp('updated_at').notNull().defaultNow(),
+}, t => ({
+  statusIdx: index('idx_ad_campaigns_status').on(t.status, t.createdAt),
 }))
 
 /** Marketing calendar — promos, holidays, campaign themes the team merchandises around. */

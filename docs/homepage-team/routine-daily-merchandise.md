@@ -350,6 +350,27 @@ reads these for the live status + conversation viewer.
 
 ---
 
+## Retro step (before the final run update)
+
+Close every run with a retro so the store-wide improvement loop has fuel
+(see `docs/store-team/improvement-loop.md`):
+
+1. Compare this run's picks against yesterday's scoreboard and the active weekly strategy brief's
+   homepage directives (`GET /api/team/brief`; the gate's `activeBriefId` says one exists).
+2. Record the verdicts as `phase:'retro'` events (`eventType:'decision'`).
+3. When there's a real, repeatable lesson (a pick pattern that keeps underperforming, a step that
+   keeps burning turns), file it on the improvement bus:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"create","team":"homepage","category":"prompt","kind":"instructions","suggestion":"<concrete change + run examples>","cxRisk":"low","runId":'$RUN_ID'}'
+```
+
+The owner approves/dismisses from the dashboard; approved instruction-kind rows become
+`agent-editor` PRs. Below 300 sessions/week, retro verdicts are recorded but never auto-trigger
+swaps — same sparse-data rule as the scoreboard.
+
 ## Hard rules for this routine
 
 - **Gate before every paid step; hard-stop at `remainingCents <= 0`.**
