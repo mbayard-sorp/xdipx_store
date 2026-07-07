@@ -64,6 +64,12 @@ a sex toy store to shop for tableware. Standing rules (Mike's directive,
 - **Banned as the subject:** tea cups, mugs, ceramic bowls, notebooks,
   candles, fruit, napkins, empty styled tables — any still life a homewares
   store could run. Props may support a product; they may never replace it.
+- **No text in generated images** (Mike's directive, 2026-07-06). Every
+  fal.ai / Imagen output must be text-free: no words, letters, captions,
+  labels, logos, watermarks, or typographic overlays baked into the pixels.
+  Copy belongs in the markup, never in the image. Add "no text, no words, no
+  letters, no watermark, no logo, no caption" to the negative brief of every
+  prompt, and reject on self-review any image with baked-in text.
 - **The mood is playful curiosity with charge underneath.** A visitor
   should feel on the edge of finding something that will bring them
   pleasure, and smile on the way. Hard limits for legal / processor /
