@@ -1,15 +1,19 @@
 /**
- * /admin/homepage-team — control + observability for the autonomous homepage
- * merchandising team.
+ * /admin/homepage-team — control + observability for ALL the store's
+ * autonomous agent teams (homepage | social | ads | email | strategy).
  *
- * - Control: kill switch, daily $ budget, cascade caps (image/run per day).
+ * - Team tabs: per-team kill switch, daily $ budget, run cap; homepage keeps
+ *   its extra image/build settings; social gets the autopost valve; strategy
+ *   gets the suggestion-apply valve (agent-editor kill switch).
  * - Status: enabled, today's spend vs budget, runs today vs cap, gate state.
- * - Run history: recent runs with status/phase/PR; click a run to see its
- *   step-by-step activity feed (the conversation viewer).
+ * - Improvement bus: suggestions from every team with Approve / Dismiss —
+ *   approved instruction-kind rows are picked up by agent-editor as PRs.
+ * - Strategy: the active weekly brief + history.
+ * - Ads: proposed campaigns with their policy check, Approve / Reject
+ *   (approve ≠ launch — launching stays a human action in-platform).
+ * - Run history: recent runs per team; click a run for its activity feed.
  *
- * Degrades gracefully when migration 049 hasn't been applied yet (the team
- * tables don't exist): shows a banner and still lets you set the toggles
- * (which live in pipeline_settings, already migrated).
+ * Degrades gracefully when migrations 049/051 haven't been applied.
  */
 
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react-router'
@@ -18,45 +22,78 @@ import { requireAdmin } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
 import {
-  getTeamConfig, gate, listRecentRuns, listRunEvents,
+  gate, getTeamConfig, getValve, listRecentRuns, listRunEvents,
+  listSuggestions, decideSuggestion, listBriefs, listAdCampaigns, decideAdCampaign,
   type TeamConfig, type GateResult,
-} from '~/lib/homepage-team.server'
-import { TEAM_KEYS } from '~/lib/homepage-team-keys'
+} from '~/lib/team.server'
+import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, VALVE_KEYS, type TeamId } from '~/lib/team-keys'
 
-export const meta: MetaFunction = () => [{ title: 'Homepage Team — xdipx Admin' }]
+export const meta: MetaFunction = () => [{ title: 'Agent Teams — xdipx Admin' }]
 
 type RunRow = Awaited<ReturnType<typeof listRecentRuns>>[number]
 type EventRow = Awaited<ReturnType<typeof listRunEvents>>[number]
+type SuggestionRow = Awaited<ReturnType<typeof listSuggestions>>[number]
+type BriefRow = Awaited<ReturnType<typeof listBriefs>>[number]
+type CampaignRow = Awaited<ReturnType<typeof listAdCampaigns>>[number]
+
+const TEAM_LABELS: Record<TeamId, string> = {
+  homepage: 'Homepage',
+  social:   'Social',
+  ads:      'Ads',
+  email:    'Email',
+  strategy: 'Strategy',
+}
 
 interface LoaderData {
+  team: TeamId
   config: TeamConfig
   migrated: boolean
   gateResult: GateResult | null
   runs: RunRow[]
   selectedRun: { run: RunRow; events: EventRow[] } | null
+  suggestions: SuggestionRow[]
+  briefs: BriefRow[]
+  campaigns: CampaignRow[]
+  autopost: boolean
+  suggestionApply: boolean
 }
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
   await requireAdmin(request)
+  const url = new URL(request.url)
+  const teamParam = url.searchParams.get('team')
+  const team: TeamId = isTeamId(teamParam) ? teamParam : 'homepage'
 
   // pipeline_settings is already migrated, so config always loads.
-  const config = await getTeamConfig().catch(() => ({
-    enabled: false, dailyCents: 1500, buildCents: 10000, maxImagesPerDay: 12, maxRunsPerDay: 4,
-  }))
+  const config = await getTeamConfig(team).catch(
+    (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1 }),
+  )
+  const [autopost, suggestionApply] = await Promise.all([
+    getValve(VALVE_KEYS.socialAutopost).catch(() => false),
+    getValve(VALVE_KEYS.suggestionApply).catch(() => false),
+  ])
 
-  // The team tables (migration 049) may not be applied yet — degrade cleanly.
+  // The team tables (049/051) may not be applied yet — degrade cleanly.
   let migrated = true
   let gateResult: GateResult | null = null
   let runs: RunRow[] = []
+  let suggestions: SuggestionRow[] = []
+  let briefs: BriefRow[] = []
+  let campaigns: CampaignRow[] = []
   try {
-    gateResult = await gate()
-    runs = await listRecentRuns(25)
+    gateResult = await gate(team)
+    runs = await listRecentRuns(team, 25)
   } catch {
     migrated = false
   }
+  if (migrated) {
+    suggestions = await listSuggestions({ limit: 60 }).catch(() => [])
+    briefs = await listBriefs(8).catch(() => [])
+    if (team === 'ads') campaigns = await listAdCampaigns(undefined, 30).catch(() => [])
+  }
 
   let selectedRun: LoaderData['selectedRun'] = null
-  const runId = Number(new URL(request.url).searchParams.get('run'))
+  const runId = Number(url.searchParams.get('run'))
   if (migrated && Number.isFinite(runId) && runId > 0) {
     const run = runs.find(r => r.id === runId)
     if (run) {
@@ -65,7 +102,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     }
   }
 
-  return { config, migrated, gateResult, runs, selectedRun }
+  return { team, config, migrated, gateResult, runs, selectedRun, suggestions, briefs, campaigns, autopost, suggestionApply }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -73,25 +110,42 @@ export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData()
   const intent = String(form.get('intent') ?? '')
 
-  const allowed = new Set<string>(Object.values(TEAM_KEYS))
-  if (intent === 'save') {
-    const key = String(form.get('key') ?? '')
-    const value = String(form.get('value') ?? '')
-    if (!allowed.has(key)) return Response.json({ ok: false, error: 'bad key' }, { status: 400 })
+  // Allowlisted pipeline_settings keys: every team's key set + homepage extras + valves.
+  const allowed = new Set<string>([
+    ...TEAM_IDS.flatMap(t => Object.values(teamKeys(t))),
+    ...Object.values(HOMEPAGE_EXTRA_KEYS),
+    ...Object.values(VALVE_KEYS),
+  ])
+
+  async function upsertSetting(key: string, value: string) {
     await db
       .insert(pipelineSettings)
       .values({ key, value })
       .onConflictDoUpdate({ target: pipelineSettings.key, set: { value, updatedAt: new Date() } })
+  }
+
+  if (intent === 'save' || intent === 'toggle') {
+    const key = String(form.get('key') ?? '')
+    const value = intent === 'toggle' ? String(form.get('next') ?? 'false') : String(form.get('value') ?? '')
+    if (!allowed.has(key)) return Response.json({ ok: false, error: 'bad key' }, { status: 400 })
+    await upsertSetting(key, value)
     return Response.json({ ok: true })
   }
-  if (intent === 'toggle') {
-    const next = String(form.get('next') ?? 'false')
-    await db
-      .insert(pipelineSettings)
-      .values({ key: TEAM_KEYS.enabled, value: next })
-      .onConflictDoUpdate({ target: pipelineSettings.key, set: { value: next, updatedAt: new Date() } })
+
+  if (intent === 'suggestion-approve' || intent === 'suggestion-dismiss') {
+    const id = Number(form.get('id'))
+    if (!Number.isFinite(id) || id <= 0) return Response.json({ ok: false }, { status: 400 })
+    await decideSuggestion(id, intent === 'suggestion-approve' ? 'approved' : 'dismissed')
     return Response.json({ ok: true })
   }
+
+  if (intent === 'ad-approve' || intent === 'ad-reject') {
+    const id = Number(form.get('id'))
+    if (!Number.isFinite(id) || id <= 0) return Response.json({ ok: false }, { status: 400 })
+    await decideAdCampaign(id, intent === 'ad-approve' ? 'approved' : 'rejected')
+    return Response.json({ ok: true })
+  }
+
   return Response.json({ ok: false }, { status: 400 })
 }
 
@@ -114,19 +168,41 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
   )
 }
 
-export default function HomepageTeamPage() {
-  const { config, migrated, gateResult, runs, selectedRun } = useLoaderData<typeof loader>()
+export default function AgentTeamsPage() {
+  const {
+    team, config, migrated, gateResult, runs, selectedRun,
+    suggestions, briefs, campaigns, autopost, suggestionApply,
+  } = useLoaderData<typeof loader>()
+  const keys = teamKeys(team)
+  const activeBrief = briefs.find(b => b.status === 'active')
+  const openSuggestions = suggestions.filter(s => s.status === 'proposed' || s.status === 'approved' || s.status === 'pr_open')
+  const closedSuggestions = suggestions.filter(s => s.status === 'applied' || s.status === 'dismissed')
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <h1 className="text-2xl font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
-        Homepage Team
+        Agent Teams
       </h1>
+
+      {/* ── Team tabs ─────────────────────────────────────────────────────── */}
+      <nav className="flex gap-2 flex-wrap">
+        {TEAM_IDS.map(t => (
+          <Link
+            key={t}
+            to={`/admin/homepage-team?team=${t}`}
+            className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
+              t === team ? 'bg-ink text-white' : 'bg-paper border border-line text-ink hover:bg-paper-2'
+            }`}
+          >
+            {TEAM_LABELS[t]}
+          </Link>
+        ))}
+      </nav>
 
       {!migrated && (
         <div className="rounded-xl border border-coral bg-coral-soft/50 px-4 py-3 text-sm text-ink">
-          Migration <code>049_homepage_team</code> isn't applied yet, so run history and the budget
-          gate are inactive. Apply it with{' '}
+          Migrations <code>049</code>/<code>051</code> aren't applied yet, so run history, the budget
+          gate, suggestions, and briefs are inactive. Apply with{' '}
           <code className="font-mono">npx tsx scripts/apply-migrations.ts --from 049</code>. You can
           still configure the controls below.
         </div>
@@ -137,12 +213,13 @@ export default function HomepageTeamPage() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
-              {config.enabled ? 'Team is ON' : 'Team is OFF'}
+              {TEAM_LABELS[team]} team is {config.enabled ? 'ON' : 'OFF'}
             </p>
-            <p className="text-xs text-ink-4">Kill switch. When off, the daily routine no-ops.</p>
+            <p className="text-xs text-ink-4">Kill switch. When off, this team's routines no-op at the gate.</p>
           </div>
           <Form method="post">
             <input type="hidden" name="intent" value="toggle" />
+            <input type="hidden" name="key" value={keys.enabled} />
             <input type="hidden" name="next" value={config.enabled ? 'false' : 'true'} />
             <button
               className={`rounded-full px-5 py-2 text-sm font-semibold text-white transition-colors ${
@@ -155,11 +232,32 @@ export default function HomepageTeamPage() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">
-          <SettingField label="Daily budget (cents)" settingKey={TEAM_KEYS.dailyCents} value={config.dailyCents} asDollars />
-          <SettingField label="Initial-build budget (cents)" settingKey={TEAM_KEYS.buildCents} value={config.buildCents} asDollars />
-          <SettingField label="Max images / day" settingKey={TEAM_KEYS.maxImagesPerDay} value={config.maxImagesPerDay} />
-          <SettingField label="Max runs / day" settingKey={TEAM_KEYS.maxRunsPerDay} value={config.maxRunsPerDay} />
+          <SettingField label="Daily budget (cents)" settingKey={keys.dailyCents} value={config.dailyCents} asDollars />
+          <SettingField label="Max runs / day" settingKey={keys.maxRunsPerDay} value={config.maxRunsPerDay} />
+          {team === 'homepage' && (
+            <>
+              <SettingField label="Initial-build budget (cents)" settingKey={HOMEPAGE_EXTRA_KEYS.buildCents} value={config.buildCents ?? 10000} asDollars />
+              <SettingField label="Max images / day" settingKey={HOMEPAGE_EXTRA_KEYS.maxImagesPerDay} value={config.maxImagesPerDay ?? 12} />
+            </>
+          )}
         </div>
+
+        {team === 'social' && (
+          <ValveRow
+            label={`Autopost is ${autopost ? 'ON' : 'OFF'}`}
+            detail="Even when ON, live posting also requires X_AUTO_POST_ENABLED and only X has plumbing. Keep OFF while the team is draft-only."
+            settingKey={VALVE_KEYS.socialAutopost}
+            on={autopost}
+          />
+        )}
+        {team === 'strategy' && (
+          <ValveRow
+            label={`Suggestion apply is ${suggestionApply ? 'ON' : 'OFF'}`}
+            detail="When ON, agent-editor turns approved instruction-suggestions into PRs (you still merge). OFF pauses the apply path entirely."
+            settingKey={VALVE_KEYS.suggestionApply}
+            on={suggestionApply}
+          />
+        )}
       </section>
 
       {/* ── Status ───────────────────────────────────────────────────────── */}
@@ -181,18 +279,153 @@ export default function HomepageTeamPage() {
         </div>
       )}
 
+      {/* ── Strategy brief ───────────────────────────────────────────────── */}
+      {migrated && (
+        <section>
+          <h2 className="kicker mb-3">Weekly strategy brief</h2>
+          {activeBrief ? (
+            <div className="bg-paper rounded-xl border border-line p-5">
+              <p className="text-xs text-ink-4 mb-2">
+                Week of <span className="font-mono">{activeBrief.weekStart}</span> · by {activeBrief.createdBy}
+              </p>
+              <pre className="whitespace-pre-wrap text-sm text-ink font-body">{activeBrief.brief}</pre>
+            </div>
+          ) : (
+            <p className="text-sm text-ink-4">
+              No active brief yet. The store-strategist's weekly routine publishes one; every team reads it at run start.
+            </p>
+          )}
+          {briefs.filter(b => b.status !== 'active').length > 0 && (
+            <p className="text-xs text-ink-4 mt-2">
+              {briefs.filter(b => b.status !== 'active').length} superseded brief(s) on record.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* ── Improvement bus (suggestions) ────────────────────────────────── */}
+      {migrated && (
+        <section>
+          <h2 className="kicker mb-3">Suggestions (all teams)</h2>
+          {openSuggestions.length === 0 ? (
+            <p className="text-sm text-ink-4">
+              Nothing proposed right now. Team retros and process-optimizer write suggestions here for your approval.
+            </p>
+          ) : (
+            <div className="bg-paper rounded-xl border border-line divide-y divide-line">
+              {openSuggestions.map(s => (
+                <div key={s.id} className="px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs text-ink-4">
+                    <span className="font-mono">#{s.id}</span>
+                    <span className="text-plum">{s.team}</span>
+                    {s.targetTeam && <span>→ {s.targetTeam}</span>}
+                    <span className="rounded bg-paper-3 px-1.5 py-0.5 font-mono">{s.kind}</span>
+                    <span>{s.category}</span>
+                    <span className={s.cxRisk === 'high' ? 'text-coral' : s.cxRisk === 'med' ? 'text-plum' : ''}>
+                      cx:{s.cxRisk}
+                    </span>
+                    {Number(s.estSavingsUsd) > 0 && <span>~${Number(s.estSavingsUsd).toFixed(2)} saved</span>}
+                    <StatusBadge status={s.status} />
+                  </div>
+                  <p className="mt-1 text-sm text-ink">{s.suggestion}</p>
+                  {s.status === 'proposed' && (
+                    <div className="mt-2 flex gap-2">
+                      <Form method="post">
+                        <input type="hidden" name="intent" value="suggestion-approve" />
+                        <input type="hidden" name="id" value={s.id} />
+                        <button className="rounded-lg bg-sage/20 px-3 py-1 text-xs font-semibold text-sage hover:bg-sage/30">
+                          Approve
+                        </button>
+                      </Form>
+                      <Form method="post">
+                        <input type="hidden" name="intent" value="suggestion-dismiss" />
+                        <input type="hidden" name="id" value={s.id} />
+                        <button className="rounded-lg bg-paper-3 px-3 py-1 text-xs font-semibold text-ink-3 hover:bg-paper-2">
+                          Dismiss
+                        </button>
+                      </Form>
+                    </div>
+                  )}
+                  {s.status === 'approved' && (
+                    <p className="mt-1 text-xs text-ink-4">
+                      Queued for agent-editor{s.kind === 'code' ? ' (code kind — route to rr7-engineer manually)' : ''}.
+                    </p>
+                  )}
+                  {s.status === 'pr_open' && s.applyRef && (
+                    <a href={s.applyRef} target="_blank" rel="noreferrer" className="link-coral mt-1 inline-block text-xs">
+                      review PR →
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {closedSuggestions.length > 0 && (
+            <p className="text-xs text-ink-4 mt-2">{closedSuggestions.length} applied/dismissed in recent history.</p>
+          )}
+        </section>
+      )}
+
+      {/* ── Ad campaign proposals ────────────────────────────────────────── */}
+      {migrated && team === 'ads' && (
+        <section>
+          <h2 className="kicker mb-3">Ad campaign proposals</h2>
+          {campaigns.length === 0 ? (
+            <p className="text-sm text-ink-4">
+              No proposals yet. The ads-manager routine writes propose-only campaigns here; launching stays manual.
+            </p>
+          ) : (
+            <div className="bg-paper rounded-xl border border-line divide-y divide-line">
+              {campaigns.map(c => (
+                <div key={c.id} className="px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs text-ink-4">
+                    <span className="font-mono">#{c.id}</span>
+                    <span className="text-plum">{c.platform}</span>
+                    <span>{c.objective}</span>
+                    <span>{fmtUsdCents(c.plannedDailyCents)}/day planned</span>
+                    <StatusBadge status={c.status} />
+                  </div>
+                  <p className="mt-1 text-sm font-medium text-ink">{c.name}</p>
+                  <p className="mt-1 text-xs text-ink-3">
+                    <span className="font-semibold">Policy check:</span> {c.policyCheck}
+                  </p>
+                  {c.status === 'proposed' && (
+                    <div className="mt-2 flex gap-2">
+                      <Form method="post">
+                        <input type="hidden" name="intent" value="ad-approve" />
+                        <input type="hidden" name="id" value={c.id} />
+                        <button className="rounded-lg bg-sage/20 px-3 py-1 text-xs font-semibold text-sage hover:bg-sage/30">
+                          Approve (launch stays manual)
+                        </button>
+                      </Form>
+                      <Form method="post">
+                        <input type="hidden" name="intent" value="ad-reject" />
+                        <input type="hidden" name="id" value={c.id} />
+                        <button className="rounded-lg bg-paper-3 px-3 py-1 text-xs font-semibold text-ink-3 hover:bg-paper-2">
+                          Reject
+                        </button>
+                      </Form>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* ── Run history ──────────────────────────────────────────────────── */}
       {migrated && (
         <section>
-          <h2 className="kicker mb-3">Recent runs</h2>
+          <h2 className="kicker mb-3">Recent {TEAM_LABELS[team].toLowerCase()} runs</h2>
           {runs.length === 0 ? (
-            <p className="text-sm text-ink-4">No runs yet. The daily routine will appear here once it fires.</p>
+            <p className="text-sm text-ink-4">No runs yet. This team's routine will appear here once it fires.</p>
           ) : (
             <div className="bg-paper rounded-xl border border-line divide-y divide-line">
               {runs.map(r => (
                 <Link
                   key={r.id}
-                  to={`/admin/homepage-team?run=${r.id}`}
+                  to={`/admin/homepage-team?team=${team}&run=${r.id}`}
                   className="flex items-center justify-between px-4 py-3 hover:bg-paper-2 transition-colors"
                 >
                   <div className="min-w-0">
@@ -245,9 +478,9 @@ export default function HomepageTeamPage() {
 
 function StatusBadge({ status }: { status: string }) {
   const tone =
-    status === 'succeeded' ? 'bg-sage/20 text-sage'
-    : status === 'failed' || status === 'rolled_back' ? 'bg-coral-soft text-coral'
-    : status === 'running' ? 'bg-plum-soft text-plum'
+    status === 'succeeded' || status === 'applied' || status === 'approved' ? 'bg-sage/20 text-sage'
+    : status === 'failed' || status === 'rolled_back' || status === 'rejected' ? 'bg-coral-soft text-coral'
+    : status === 'running' || status === 'pr_open' ? 'bg-plum-soft text-plum'
     : 'bg-paper-3 text-ink-4'
   return <span className={`shrink-0 rounded px-2 py-0.5 text-[11px] font-mono font-semibold ${tone}`}>{status}</span>
 }
@@ -275,5 +508,30 @@ function SettingField({
       </div>
       {asDollars && <p className="text-[11px] text-ink-4">Stored as cents ({display} = {value}¢).</p>}
     </Form>
+  )
+}
+
+function ValveRow({
+  label, detail, settingKey, on,
+}: { label: string; detail: string; settingKey: string; on: boolean }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-line bg-paper-2 px-4 py-3">
+      <div>
+        <p className="text-sm font-semibold text-ink">{label}</p>
+        <p className="text-xs text-ink-4">{detail}</p>
+      </div>
+      <Form method="post">
+        <input type="hidden" name="intent" value="toggle" />
+        <input type="hidden" name="key" value={settingKey} />
+        <input type="hidden" name="next" value={on ? 'false' : 'true'} />
+        <button
+          className={`rounded-full px-4 py-1.5 text-xs font-semibold text-white transition-colors ${
+            on ? 'bg-ink hover:bg-ink-2' : 'bg-coral hover:bg-coral-2'
+          }`}
+        >
+          {on ? 'Turn off' : 'Turn on'}
+        </button>
+      </Form>
+    </div>
   )
 }

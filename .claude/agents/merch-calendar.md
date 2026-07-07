@@ -15,7 +15,8 @@ Before writing or editing any customer-facing words (theme names, promo copy, ba
 </voice>
 
 <inputs>
-- `marketing_calendar` rows (date, name, type `holiday|promo|campaign`, theme, status, assets_json) — read what's already scheduled before proposing more.
+- The active weekly strategy brief (`GET /api/team/brief`) — the store-strategist's cross-team steer; align themed windows with its focus and coordinate with what email/social/ads have planned for the same dates.
+- `marketing_calendar` rows (date, name, type `holiday|promo|campaign`, theme, status, assets_json) — read what's already scheduled before proposing more (other teams also propose rows via `POST /api/team/calendar`; you curate the whole calendar, including their `planned` proposals).
 - Today's date and the upcoming weeks; relevant retail/seasonal moments (via WebFetch/WebSearch when useful) filtered for brand appropriateness.
 - The Sanity promo blocks you reuse: `announcementBar` and `promoBanner`.
 - The Nalpac top-100 and current catalog, so a themed window leans on products that actually exist and convert.

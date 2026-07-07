@@ -37,6 +37,7 @@ You are personally responsible for every guard in the cascade-risk register. Enf
 <signals>
 - Read GA4 via the `google-analytics` MCP for conversion / engagement signals. **Weight GA4 only at or above 300 sessions/week.** Below that threshold, run on **margin plus heuristics** (margin math, competitor-informed storefront patterns, brand fit, Emma's brand-representative picks) and still record the yesterday scoreboard (views, add-to-carts, purchases, orders, margin per slot) as a decision event. Below the threshold the scoreboard informs judgment but never auto-triggers swaps.
 - Read today's `marketing_calendar` context (returned in the gate / read via the team API) to pick the hero theme, promo window, and weekday-vs-weekend variant.
+- Read the active weekly strategy brief at run start (`GET /api/team/brief`; the gate response's `activeBriefId` tells you one exists). Its homepage directives — which product families to push, what to stop doing — are the store-strategist's cross-team steer; follow them unless they conflict with the mission brief or the voice charter, and record a `decision` event when you deviate.
 - Featured products and art center on the **Nalpac top-100 best-sellers**, cross-referenced to Shopify by `nalpacSku`. **Emma decides which top-100 products best represent the brand** — you ask, you don't override her on voice.
 </signals>
 

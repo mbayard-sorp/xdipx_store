@@ -9,6 +9,12 @@ This folder is the operator's runbook. The agent definitions live in `.claude/ag
 (`homepage-orchestrator`, `homepage-ia`, `homepage-designer`, `merch-calendar`, `process-optimizer`,
 plus the reused roles). The full approved plan is in `~/.claude/plans/dreamy-gathering-barto.md`.
 
+> **This team is now one of five.** The control plane was generalized to store-wide agent teams
+> (social, ads, email, strategy) sharing the same gate/run/event machinery, a suggestion
+> improvement bus with an owner-gated apply path, and a weekly strategy brief this team reads at
+> run start. See `docs/store-team/README.md` — the `/api/homepage-team/*` endpoints and everything
+> in this folder keep working unchanged.
+
 ---
 
 ## Two-plane architecture

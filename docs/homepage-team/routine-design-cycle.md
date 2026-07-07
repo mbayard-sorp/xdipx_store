@@ -128,6 +128,15 @@ The design cycle's allowance is `homepage_team_build_cents`, not the daily merch
 
 ---
 
+## Retro step (before the final run update)
+
+Close the cycle with a retro (`phase:'retro'` events): did last cycle's shipped PR move the
+conversion/engagement numbers it promised (GA4-weighted only at ≥300 sessions/week)? Did any review
+gate reject work that better instructions would have prevented? Compare against the active weekly
+strategy brief (`GET /api/team/brief`). Real lessons go on the improvement bus via
+`POST /api/team/suggestion {op:'create', team:'homepage', kind:'instructions'|'process', ...}` —
+see `docs/store-team/improvement-loop.md`.
+
 ## Hard rules for this routine
 
 - **Never auto-merge.** Always a PR; a human approves. Branch protection on `main` enforces it.
