@@ -35,6 +35,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     maxPerDayRaw,
     enrichEnabledRaw,
     enrichBatchCapRaw,
+    productManagerEnabledRaw,
+    productManagerMaxActionsRaw,
   ] = await Promise.all([
     getImportCandidatesByStatus(['pending']),
     getImportCandidatesByStatus(['watching']),
@@ -51,6 +53,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     getPipelineSetting('monitor_p2_max_auto_imports_per_day'),
     getPipelineSetting('import_enrich_enabled'),
     getPipelineSetting('import_enrich_batch_cap'),
+    getPipelineSetting('product_manager_enabled'),
+    getPipelineSetting('product_manager_max_actions_per_run'),
   ])
 
   const runDays = (runDaysRaw ?? '0,1,2,3,4,5,6')
@@ -84,6 +88,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       maxPerDay:       Math.max(0, parseInt(maxPerDayRaw ?? '8', 10) || 0),
       enrichEnabled:   enrichEnabledRaw === 'true',
       enrichBatchCap:  parseInt(enrichBatchCapRaw ?? '10', 10) || 10,
+      productManagerEnabled:      productManagerEnabledRaw === 'true',
+      productManagerMaxActions:   parseInt(productManagerMaxActionsRaw ?? '20', 10) || 20,
     },
     counts: {
       pending: pending.length,
@@ -138,6 +144,7 @@ export async function action({ request }: ActionFunctionArgs) {
       'monitor_p2_min_gap_score',
       'monitor_p2_max_auto_imports_per_day',
       'import_enrich_batch_cap',
+      'product_manager_max_actions_per_run',
     ]
     if (!key || value == null || !ALLOWED_KEYS.includes(key)) {
       return { ok: false, error: `Invalid key: ${key}` }
@@ -149,7 +156,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'toggle-p2-setting') {
     const key = form.get('key') as string | null
     const current = form.get('current') as string
-    const ALLOWED_KEYS = ['monitor_p2_require_carried_brand', 'import_enrich_enabled']
+    const ALLOWED_KEYS = ['monitor_p2_require_carried_brand', 'import_enrich_enabled', 'product_manager_enabled']
     if (!key || !ALLOWED_KEYS.includes(key)) {
       return { ok: false, error: `Invalid key: ${key}` }
     }
@@ -479,12 +486,14 @@ function Phase2SettingsPanel({ settings }: { settings: LoaderData['settings'] })
   const numberFetcher = useFetcher<{ ok: boolean; saved?: string }>()
   const carriedFetcher = useFetcher<{ ok: boolean }>()
   const enrichFetcher = useFetcher<{ ok: boolean }>()
+  const productManagerFetcher = useFetcher<{ ok: boolean }>()
 
   const [markupPct, setMarkupPct] = useState(String(settings.minMarkupPct))
   const [minQty, setMinQty] = useState(String(settings.minQty))
   const [minGapScore, setMinGapScore] = useState(String(settings.minGapScore))
   const [maxPerDay, setMaxPerDay] = useState(String(settings.maxPerDay))
   const [enrichBatchCap, setEnrichBatchCap] = useState(String(settings.enrichBatchCap))
+  const [productManagerMaxActions, setProductManagerMaxActions] = useState(String(settings.productManagerMaxActions))
 
   const optimisticCarried: boolean =
     carriedFetcher.state !== 'idle' && carriedFetcher.formData?.get('current') != null
@@ -495,6 +504,11 @@ function Phase2SettingsPanel({ settings }: { settings: LoaderData['settings'] })
     enrichFetcher.state !== 'idle' && enrichFetcher.formData?.get('current') != null
       ? enrichFetcher.formData.get('current') !== 'true'
       : settings.enrichEnabled
+
+  const optimisticProductManagerEnabled: boolean =
+    productManagerFetcher.state !== 'idle' && productManagerFetcher.formData?.get('current') != null
+      ? productManagerFetcher.formData.get('current') !== 'true'
+      : settings.productManagerEnabled
 
   function saveNumber(key: string, value: string) {
     numberFetcher.submit({ intent: 'save-p2-setting', key, value }, { method: 'post' })
@@ -510,6 +524,13 @@ function Phase2SettingsPanel({ settings }: { settings: LoaderData['settings'] })
   function toggleEnrich() {
     enrichFetcher.submit(
       { intent: 'toggle-p2-setting', key: 'import_enrich_enabled', current: String(optimisticEnrichEnabled) },
+      { method: 'post' },
+    )
+  }
+
+  function toggleProductManager() {
+    productManagerFetcher.submit(
+      { intent: 'toggle-p2-setting', key: 'product_manager_enabled', current: String(optimisticProductManagerEnabled) },
       { method: 'post' },
     )
   }
@@ -673,6 +694,53 @@ function Phase2SettingsPanel({ settings }: { settings: LoaderData['settings'] })
             <button
               type="button"
               onClick={() => saveNumber('import_enrich_batch_cap', enrichBatchCap)}
+              className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-lg hover:border-coral/50"
+            >
+              Save
+            </button>
+          </div>
+        </label>
+      </div>
+
+      <div className="border-t border-line pt-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-ink">Autonomous import queue management (product-manager agent)</p>
+            <p className="text-xs text-muted">
+              Lets the product-manager agent approve/reject/watch import candidates on its own judgment without human review. Combined with the enrichment kill switch above, this starts fully unattended enrichment/publish. Leave off unless intentionally going hands-off.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={toggleProductManager}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-coral/40 shrink-0 ${
+              optimisticProductManagerEnabled ? 'bg-coral' : 'bg-line'
+            }`}
+            aria-label={optimisticProductManagerEnabled ? 'Disable autonomous import queue management' : 'Enable autonomous import queue management'}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                optimisticProductManagerEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        <label className="block">
+          <span className="text-sm font-medium text-ink">Max autonomous actions / run</span>
+          <p className="text-xs text-muted mb-1">Per-run cap on candidates the product-manager agent can approve/reject/watch</p>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={productManagerMaxActions}
+              onChange={e => setProductManagerMaxActions(e.target.value)}
+              className="text-sm border border-line rounded-lg px-3 py-1.5 w-28"
+            />
+            <button
+              type="button"
+              onClick={() => saveNumber('product_manager_max_actions_per_run', productManagerMaxActions)}
               className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-lg hover:border-coral/50"
             >
               Save
