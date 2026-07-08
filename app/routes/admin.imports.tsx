@@ -28,6 +28,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     enabledRaw,
     phaseRaw,
     lastRunAtRaw,
+    minMarkupRaw,
+    minQtyRaw,
+    minGapRaw,
+    requireCarriedRaw,
+    maxPerDayRaw,
+    enrichEnabledRaw,
+    enrichBatchCapRaw,
   ] = await Promise.all([
     getImportCandidatesByStatus(['pending']),
     getImportCandidatesByStatus(['watching']),
@@ -37,6 +44,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     getPipelineSetting('import_monitor_enabled'),
     getPipelineSetting('import_monitor_phase'),
     getPipelineSetting('import_monitor_last_run_at'),
+    getPipelineSetting('monitor_p2_min_markup_pct'),
+    getPipelineSetting('monitor_p2_min_qty'),
+    getPipelineSetting('monitor_p2_min_gap_score'),
+    getPipelineSetting('monitor_p2_require_carried_brand'),
+    getPipelineSetting('monitor_p2_max_auto_imports_per_day'),
+    getPipelineSetting('import_enrich_enabled'),
+    getPipelineSetting('import_enrich_batch_cap'),
   ])
 
   const runDays = (runDaysRaw ?? '0,1,2,3,4,5,6')
@@ -63,6 +77,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       enabled,
       phase,
       lastRunAt: lastRunAtRaw,
+      minMarkupPct:    parseFloat(minMarkupRaw ?? '0.08'),
+      minQty:          parseInt(minQtyRaw ?? '30', 10) || 30,
+      minGapScore:     parseFloat(minGapRaw ?? '3.0'),
+      requireCarried:  (requireCarriedRaw ?? 'true') !== 'false',
+      maxPerDay:       Math.max(0, parseInt(maxPerDayRaw ?? '8', 10) || 0),
+      enrichEnabled:   enrichEnabledRaw === 'true',
+      enrichBatchCap:  parseInt(enrichBatchCapRaw ?? '10', 10) || 10,
     },
     counts: {
       pending: pending.length,
@@ -106,6 +127,35 @@ export async function action({ request }: ActionFunctionArgs) {
     const next = current === 'true' ? 'false' : 'true'
     await setPipelineSetting('import_monitor_enabled', next)
     return { ok: true, saved: 'enabled' }
+  }
+
+  if (intent === 'save-p2-setting') {
+    const key = form.get('key') as string | null
+    const value = form.get('value') as string | null
+    const ALLOWED_KEYS = [
+      'monitor_p2_min_markup_pct',
+      'monitor_p2_min_qty',
+      'monitor_p2_min_gap_score',
+      'monitor_p2_max_auto_imports_per_day',
+      'import_enrich_batch_cap',
+    ]
+    if (!key || value == null || !ALLOWED_KEYS.includes(key)) {
+      return { ok: false, error: `Invalid key: ${key}` }
+    }
+    await setPipelineSetting(key, value)
+    return { ok: true, saved: key }
+  }
+
+  if (intent === 'toggle-p2-setting') {
+    const key = form.get('key') as string | null
+    const current = form.get('current') as string
+    const ALLOWED_KEYS = ['monitor_p2_require_carried_brand', 'import_enrich_enabled']
+    if (!key || !ALLOWED_KEYS.includes(key)) {
+      return { ok: false, error: `Invalid key: ${key}` }
+    }
+    const next = current === 'true' ? 'false' : 'true'
+    await setPipelineSetting(key, next)
+    return { ok: true, saved: key }
   }
 
   return { ok: false, error: `Unknown intent: ${intent}` }
@@ -332,7 +382,7 @@ function SettingsPanel({ settings }: { settings: LoaderData['settings'] }) {
 
   const phases: { val: 1 | 2 | 3; label: string; desc: string }[] = [
     { val: 1, label: 'Phase 1', desc: 'All candidates stay pending — manual review only' },
-    { val: 2, label: 'Phase 2', desc: 'Auto-import tier A/B candidates above thresholds (≤3/day)' },
+    { val: 2, label: 'Phase 2', desc: 'Auto-import tier A/B candidates above thresholds (see below)' },
     { val: 3, label: 'Phase 3', desc: 'Relaxed thresholds, up to 5/day' },
   ]
 
@@ -416,6 +466,219 @@ function SettingsPanel({ settings }: { settings: LoaderData['settings'] }) {
             </button>
           ))}
         </div>
+      </div>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 gate thresholds + enrichment kill switch
+// ---------------------------------------------------------------------------
+
+function Phase2SettingsPanel({ settings }: { settings: LoaderData['settings'] }) {
+  const numberFetcher = useFetcher<{ ok: boolean; saved?: string }>()
+  const carriedFetcher = useFetcher<{ ok: boolean }>()
+  const enrichFetcher = useFetcher<{ ok: boolean }>()
+
+  const [markupPct, setMarkupPct] = useState(String(settings.minMarkupPct))
+  const [minQty, setMinQty] = useState(String(settings.minQty))
+  const [minGapScore, setMinGapScore] = useState(String(settings.minGapScore))
+  const [maxPerDay, setMaxPerDay] = useState(String(settings.maxPerDay))
+  const [enrichBatchCap, setEnrichBatchCap] = useState(String(settings.enrichBatchCap))
+
+  const optimisticCarried: boolean =
+    carriedFetcher.state !== 'idle' && carriedFetcher.formData?.get('current') != null
+      ? carriedFetcher.formData.get('current') !== 'true'
+      : settings.requireCarried
+
+  const optimisticEnrichEnabled: boolean =
+    enrichFetcher.state !== 'idle' && enrichFetcher.formData?.get('current') != null
+      ? enrichFetcher.formData.get('current') !== 'true'
+      : settings.enrichEnabled
+
+  function saveNumber(key: string, value: string) {
+    numberFetcher.submit({ intent: 'save-p2-setting', key, value }, { method: 'post' })
+  }
+
+  function toggleCarried() {
+    carriedFetcher.submit(
+      { intent: 'toggle-p2-setting', key: 'monitor_p2_require_carried_brand', current: String(optimisticCarried) },
+      { method: 'post' },
+    )
+  }
+
+  function toggleEnrich() {
+    enrichFetcher.submit(
+      { intent: 'toggle-p2-setting', key: 'import_enrich_enabled', current: String(optimisticEnrichEnabled) },
+      { method: 'post' },
+    )
+  }
+
+  return (
+    <section className="bg-white rounded-2xl border border-line p-5 space-y-5">
+      <h2
+        className="text-base font-semibold text-ink"
+        style={{ fontFamily: 'var(--font-display)' }}
+      >
+        Phase 2 auto-import gates
+      </h2>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <label className="block">
+          <span className="text-sm font-medium text-ink">Min markup over wholesale</span>
+          <p className="text-xs text-muted mb-1">Fraction, e.g. 0.08 = 8% above wholesale cost (covers processor fees)</p>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={markupPct}
+              onChange={e => setMarkupPct(e.target.value)}
+              className="text-sm border border-line rounded-lg px-3 py-1.5 w-28"
+            />
+            <button
+              type="button"
+              onClick={() => saveNumber('monitor_p2_min_markup_pct', markupPct)}
+              className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-lg hover:border-coral/50"
+            >
+              Save
+            </button>
+          </div>
+        </label>
+
+        <label className="block">
+          <span className="text-sm font-medium text-ink">Min qty available</span>
+          <p className="text-xs text-muted mb-1">Total qty across variants required to auto-import</p>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={minQty}
+              onChange={e => setMinQty(e.target.value)}
+              className="text-sm border border-line rounded-lg px-3 py-1.5 w-28"
+            />
+            <button
+              type="button"
+              onClick={() => saveNumber('monitor_p2_min_qty', minQty)}
+              className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-lg hover:border-coral/50"
+            >
+              Save
+            </button>
+          </div>
+        </label>
+
+        <label className="block">
+          <span className="text-sm font-medium text-ink">Min gap score</span>
+          <p className="text-xs text-muted mb-1">Gap score floor (~1-6 scale)</p>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              value={minGapScore}
+              onChange={e => setMinGapScore(e.target.value)}
+              className="text-sm border border-line rounded-lg px-3 py-1.5 w-28"
+            />
+            <button
+              type="button"
+              onClick={() => saveNumber('monitor_p2_min_gap_score', minGapScore)}
+              className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-lg hover:border-coral/50"
+            >
+              Save
+            </button>
+          </div>
+        </label>
+
+        <label className="block">
+          <span className="text-sm font-medium text-ink">Max auto-imports / day</span>
+          <p className="text-xs text-muted mb-1">Daily cap on Phase 2 auto-imports</p>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={maxPerDay}
+              onChange={e => setMaxPerDay(e.target.value)}
+              className="text-sm border border-line rounded-lg px-3 py-1.5 w-28"
+            />
+            <button
+              type="button"
+              onClick={() => saveNumber('monitor_p2_max_auto_imports_per_day', maxPerDay)}
+              className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-lg hover:border-coral/50"
+            >
+              Save
+            </button>
+          </div>
+        </label>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-ink">Require carried brand</p>
+          <p className="text-xs text-muted">Tier B masters must belong to a brand already in the catalog</p>
+        </div>
+        <button
+          type="button"
+          onClick={toggleCarried}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-coral/40 ${
+            optimisticCarried ? 'bg-coral' : 'bg-line'
+          }`}
+          aria-label={optimisticCarried ? 'Disable carried-brand requirement' : 'Enable carried-brand requirement'}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+              optimisticCarried ? 'translate-x-6' : 'translate-x-1'
+            }`}
+          />
+        </button>
+      </div>
+
+      <div className="border-t border-line pt-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-ink">Enrichment + publish (kill switch)</p>
+            <p className="text-xs text-muted">
+              Starts Anthropic Batch API spend and eventually publishes imported products live. Leave off unless intentionally starting enrichment.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={toggleEnrich}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-coral/40 shrink-0 ${
+              optimisticEnrichEnabled ? 'bg-coral' : 'bg-line'
+            }`}
+            aria-label={optimisticEnrichEnabled ? 'Disable enrichment' : 'Enable enrichment'}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                optimisticEnrichEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        <label className="block">
+          <span className="text-sm font-medium text-ink">Enrichment batch cap</span>
+          <p className="text-xs text-muted mb-1">Max candidates per enrichment batch run</p>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              step="1"
+              min="1"
+              value={enrichBatchCap}
+              onChange={e => setEnrichBatchCap(e.target.value)}
+              className="text-sm border border-line rounded-lg px-3 py-1.5 w-28"
+            />
+            <button
+              type="button"
+              onClick={() => saveNumber('import_enrich_batch_cap', enrichBatchCap)}
+              className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-lg hover:border-coral/50"
+            >
+              Save
+            </button>
+          </div>
+        </label>
       </div>
     </section>
   )
@@ -863,6 +1126,7 @@ export default function AdminImportsPage() {
 
       {/* Settings */}
       <SettingsPanel settings={data.settings} />
+      <Phase2SettingsPanel settings={data.settings} />
 
       {/* Pending candidates */}
       <section className="bg-white rounded-2xl border border-line overflow-hidden">
