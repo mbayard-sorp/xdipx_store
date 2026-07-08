@@ -53,7 +53,7 @@ const KV_FEED_SKUS = 'monitor:feed-skus'
 
 // ─── Phase 2 (implemented) / Phase 3 (deferred) ───────────────────────────────
 // Phase 2 (`import_monitor_phase` = '2'): autoImportPhase2() below auto-imports
-// masters that clear ALL strict gates (tier A/B, margin/qty/gapScore floors,
+// masters that clear ALL strict gates (tier A/B, markup/qty/gapScore floors,
 // carried-brand, hard MAP gate, not needsReview), up to a per-day cap. Gated by
 // the import_monitor_enabled kill-switch. Everything else stays 'pending'.
 // NOTE: dealScore is gap_score (~1-6 scale), NOT the old 0-1 per-SKU score.
@@ -417,13 +417,14 @@ export async function runImportMonitor(
  *
  * Gates (thresholds in pipeline_settings, defaults in code):
  *   - tier A or B only (C/D stay manual in Phase 2)
- *   - marginPct >= monitor_p2_min_margin_pct (default 0.45)
- *   - totalQty >= monitor_p2_min_qty (default 100)
+ *   - proposedPrice >= wholesaleCost * (1 + monitor_p2_min_markup_pct) (default 0.08) —
+ *     no margin floor; volume is the goal, this only covers wholesale + processor fees
+ *   - totalQty >= monitor_p2_min_qty (default 30)
  *   - dealScore (gap_score, ~1-6 scale) >= monitor_p2_min_gap_score (default 3.0)
  *   - brand already carried (monitor_p2_require_carried_brand, default true)
  *   - hard MAP gate: skip if mapPrice > 0 && proposedPrice < mapPrice
  *   - not needsReview (>30-variant masters never auto-import)
- *   - daily cap: monitor_p2_max_auto_imports_per_day (default 3), counted against
+ *   - daily cap: monitor_p2_max_auto_imports_per_day (default 8), counted against
  *     import_candidates where status='imported' AND run_date=today
  *
  * The import_monitor_enabled kill-switch short-circuits before any auto-import.
@@ -444,18 +445,18 @@ async function autoImportPhase2(
 
   if (cappedKeys.length === 0) return 0
 
-  const [minMarginStr, minQtyStr, minGapStr, requireCarriedStr, maxPerDayStr] = await Promise.all([
-    getPipelineSetting('monitor_p2_min_margin_pct'),
+  const [minMarkupStr, minQtyStr, minGapStr, requireCarriedStr, maxPerDayStr] = await Promise.all([
+    getPipelineSetting('monitor_p2_min_markup_pct'),
     getPipelineSetting('monitor_p2_min_qty'),
     getPipelineSetting('monitor_p2_min_gap_score'),
     getPipelineSetting('monitor_p2_require_carried_brand'),
     getPipelineSetting('monitor_p2_max_auto_imports_per_day'),
   ])
-  const minMarginPct      = parseFloat(minMarginStr ?? '0.45')
-  const minQty            = parseInt(minQtyStr ?? '100', 10) || 100
+  const minMarkupPct      = parseFloat(minMarkupStr ?? '0.08')
+  const minQty            = parseInt(minQtyStr ?? '30', 10) || 30
   const minGapScore       = parseFloat(minGapStr ?? '3.0')
   const requireCarried    = (requireCarriedStr ?? 'true') !== 'false'
-  const maxPerDay         = Math.max(0, parseInt(maxPerDayStr ?? '3', 10) || 0)
+  const maxPerDay         = Math.max(0, parseInt(maxPerDayStr ?? '8', 10) || 0)
 
   if (maxPerDay <= 0) return 0
 
@@ -477,7 +478,7 @@ async function autoImportPhase2(
       id:            importCandidates.id,
       tier:          importCandidates.tier,
       brand:         importCandidates.brand,
-      marginPct:     importCandidates.marginPct,
+      wholesaleCost: importCandidates.wholesaleCost,
       totalQty:      importCandidates.totalQty,
       dealScore:     importCandidates.dealScore,
       mapPrice:      importCandidates.mapPrice,
@@ -496,13 +497,14 @@ async function autoImportPhase2(
     if (!tierOk || c.needsReview) return false
     const carriedOk = requireCarried ? carriedBrands.has((c.brand ?? '').toLowerCase().trim()) : true
     if (!carriedOk) return false
-    const margin = parseFloat(c.marginPct ?? '0') / 100 // stored as percent (e.g. "45.00")
+    const wholesale = parseFloat(c.wholesaleCost ?? '0')
     const gap    = parseFloat(c.dealScore ?? '0')
     const qty    = c.totalQty ?? 0
     const map    = parseFloat(c.mapPrice ?? '0')
     const price  = parseFloat(c.proposedPrice ?? '0')
-    const mapOk  = !(map > 0 && price < map)
-    return margin >= minMarginPct && qty >= minQty && gap >= minGapScore && mapOk
+    const mapOk    = !(map > 0 && price < map)
+    const markupOk = wholesale > 0 && price >= wholesale * (1 + minMarkupPct)
+    return markupOk && qty >= minQty && gap >= minGapScore && mapOk
   })
 
   let imported = 0
