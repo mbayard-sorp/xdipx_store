@@ -8,6 +8,9 @@ name: Scheduled crons
 # that is resolved with Vercel, GitHub Actions drives the same endpoints on
 # the same UTC schedules defined in vercel.json.
 #
+# vercel.json's `crons` block is NOT authoritative — schedule changes go
+# here. (vercel.json is JSON and can't carry this warning itself.)
+#
 # Each endpoint validates `Authorization: Bearer $CRON_SECRET` (see the
 # guard in server/cron.ts). Set CRON_SECRET as a repo Actions secret:
 #   gh secret set CRON_SECRET --body "<the production CRON_SECRET>"
@@ -23,14 +26,14 @@ on:
   schedule:
     - cron: '*/5 * * * *'    # enrichment-batch-poller (Vercel was */2)
     - cron: '*/15 * * * *'   # inventory-check, log-monitor
-    - cron: '*/30 * * * *'   # import-enrich
+    - cron: '*/30 * * * *'   # import-enrich, homepage-healthcheck
     - cron: '0 7 * * *'      # pricing-batch-recompute
     - cron: '0 8 * * *'      # import-monitor
     - cron: '0 9 * * *'      # review-reminders
     - cron: '45 23 * * *'    # daily-feed-processor
     - cron: '59 23 * * *'    # deal-activator
     - cron: '5 0 * * *'      # profit-summary
-    - cron: '0 2 * * 0'      # keyword-research (Sun)
+    - cron: '0 6 * * 0'      # aeo-surface-check (Sun)
   workflow_dispatch:
     inputs:
       target:
@@ -51,6 +54,8 @@ on:
           - import-monitor
           - import-enrich
           - enrichment-batch-poller
+          - homepage-healthcheck
+          - aeo-surface-check
           - warm
           - warm-discovery-index
 
@@ -72,19 +77,21 @@ jobs:
           case "${{ github.event.schedule }}" in
             '*/5 * * * *')   paths='enrichment-batch-poller' ;;
             '*/15 * * * *')  paths='inventory-check log-monitor warm' ;;
-            '*/30 * * * *')  paths='import-enrich' ;;
+            '*/30 * * * *')  paths='import-enrich homepage-healthcheck' ;;
             '0 7 * * *')     paths='pricing-batch-recompute' ;;
             '0 8 * * *')     paths='import-monitor' ;;
             '0 9 * * *')     paths='review-reminders' ;;
             '45 23 * * *')   paths='daily-feed-processor' ;;
             '59 23 * * *')   paths='deal-activator' ;;
             '5 0 * * *')     paths='profit-summary' ;;
-            '0 2 * * 0')     paths='keyword-research' ;;
+            '0 6 * * 0')     paths='aeo-surface-check' ;;
             *)
               # Manual workflow_dispatch
               t='${{ github.event.inputs.target }}'
               if [ "$t" = "all" ]; then
-                paths='daily-feed-processor deal-activator profit-summary review-reminders inventory-check keyword-research log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller warm warm-discovery-index'
+                # keyword-research is deliberately absent: paused in #198 (still
+                # individually dispatchable via the target dropdown).
+                paths='daily-feed-processor deal-activator profit-summary review-reminders inventory-check log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller homepage-healthcheck aeo-surface-check warm warm-discovery-index'
               else
                 paths="$t"
               fi
