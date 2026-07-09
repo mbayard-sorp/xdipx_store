@@ -7,10 +7,26 @@ scheduler and this file disagree, fix one of them — the weekly strategy routin
 expected routine actually ran (the runs table has the data) and file a suggestion when one is
 missing.
 
-Status 2026-07-09: **not yet created** — trigger creation from the operator session was blocked on
-interactive tool approval. Create all 8 below, then smoke-test by firing Weekly Strategy manually:
-before migration 052 is applied it should produce a run row plus a gate-closed skip event on
-`/admin/homepage-team?team=strategy`; after 052, a full run.
+Status 2026-07-09: **created**. All 8 triggers below exist in Claude's cloud scheduler (fresh
+session per fire, completion notifications off), each firing the exact prompt in this manifest.
+Trigger IDs, for reference when editing or deleting a routine:
+
+| # | Name | Trigger ID |
+|---|---|---|
+| 1 | xdipx — Weekly Strategy | `trig_018pSqtCKWC3fxbstN7wQBvs` |
+| 2 | xdipx — Apply Pass (agent-editor) | `trig_018kKMQRtD6a5XPUJu5aVPK5` |
+| 3 | xdipx — Cost Review (process-optimizer) | `trig_01S2ha8LYtKkpZ7JoPGAJKKZ` |
+| 4 | xdipx — Ads Proposals | `trig_013PfuKac4rkjPTHuUwXWzRn` |
+| 5 | xdipx — Email Briefs | `trig_01FkT8YQZJWvPqVQ8nBEPzjq` |
+| 6 | xdipx — Social Drafts | `trig_01CKe93nZQ1uQqqDZLpQ5GG8` |
+| 7 | xdipx — Daily Merchandiser (Routine A) | `trig_01PEat4JFm4fVmbNQKomSVMS` |
+| 8 | xdipx — Design Cycle (Routine B) | `trig_017s5fsNnWgk7xpXgF8QZccB` |
+
+Still outstanding: smoke-test by firing Weekly Strategy manually (`fire_trigger` on
+`trig_018pSqtCKWC3fxbstN7wQBvs`) and confirm the run row plus gate state on
+`/admin/homepage-team?team=strategy` — gate-closed skip before migration 052 is applied, a full run
+after. The weekly strategy routine's own first scheduled fire also verifies the other 7 ran, going
+forward.
 
 ## Common prompt skeleton
 
