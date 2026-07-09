@@ -19,12 +19,27 @@
  * read — see the header comments in `evals/judge/prompt.ts`,
  * `ivr/src/emma-note.ts`, and `scripts/enrich-ivr-tags.ts`.
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const charter = readFileSync(resolve(__dirname, '../../docs/emma-voice.md'), 'utf-8')
+
+// The bundle location varies by build: app/lib/ in source and the Vite SSR
+// build, server/ in the standalone esbuild vercel-entry bundle (where a
+// __dirname-relative '../../docs' escapes /var/task and lands on the
+// nonexistent /var/docs). process.cwd() is the repo root locally and
+// /var/task on Vercel, where includeFiles places docs/ — so it goes first.
+const CHARTER_CANDIDATES = [
+  resolve(process.cwd(), 'docs/emma-voice.md'),
+  resolve(__dirname, '../../docs/emma-voice.md'),
+  resolve(__dirname, '../docs/emma-voice.md'),
+]
+const charterPath = CHARTER_CANDIDATES.find(p => existsSync(p))
+if (!charterPath) {
+  throw new Error(`emma-voice.server: docs/emma-voice.md not found; tried ${CHARTER_CANDIDATES.join(', ')}`)
+}
+const charter = readFileSync(charterPath, 'utf-8')
 
 function slice(text: string, startMarker: string, endMarker: string): string {
   const start = text.indexOf(startMarker)
