@@ -7,8 +7,13 @@ scheduler and this file disagree, fix one of them — the weekly strategy routin
 expected routine actually ran (the runs table has the data) and file a suggestion when one is
 missing.
 
-Status 2026-07-09: **created**. All 8 triggers below exist in Claude's cloud scheduler (fresh
-session per fire, completion notifications off), each firing the exact prompt in this manifest.
+Status 2026-07-09: **created** (all 9). Routines 1–8 exist as triggers in Claude's cloud scheduler
+(fresh session per fire, completion notifications off), each firing the exact prompt in this
+manifest. Routine 9 (Daily Content Writer) is scheduled differently: it is a Claude desktop
+scheduled task on the owner's machine (id `xdipx-daily-content-writer`), running from the
+`~/Claude/xdipx-deploy` checkout, and it fires only while the Claude app is open, unlike the cloud
+triggers. It still no-ops at the gate until migration 054 is applied and `content_team_enabled` is
+flipped on (see the enablement runbook appendix in `docs/store-team/routine-content-daily.md`).
 Trigger IDs, for reference when editing or deleting a routine:
 
 | # | Name | Trigger ID |
@@ -21,6 +26,7 @@ Trigger IDs, for reference when editing or deleting a routine:
 | 6 | xdipx — Social Drafts | `trig_01CKe93nZQ1uQqqDZLpQ5GG8` |
 | 7 | xdipx — Daily Merchandiser (Routine A) | `trig_01PEat4JFm4fVmbNQKomSVMS` |
 | 8 | xdipx — Design Cycle (Routine B) | `trig_017s5fsNnWgk7xpXgF8QZccB` |
+| 9 | xdipx — Daily Content Writer | `xdipx-daily-content-writer` (desktop scheduled task, not a cloud trigger) |
 
 Still outstanding: smoke-test by firing Weekly Strategy manually (`fire_trigger` on
 `trig_018pSqtCKWC3fxbstN7wQBvs`) and confirm the run row plus gate state on
@@ -39,7 +45,7 @@ homepage team) and `docs/emma-voice.md`; follow the named playbook exactly; star
 skipped event, finish the run honestly, and exit cleanly; end with the playbook's retro step; log
 spend via `POST https://xdipx.com/api/homepage-team/spend` under the team's feature label.
 
-## The 8 routines
+## The routines
 
 | # | Name | Cron (UTC) | Team / feature label | Playbook | Extra prompt clauses |
 |---|---|---|---|---|---|
@@ -51,6 +57,7 @@ spend via `POST https://xdipx.com/api/homepage-team/spend` under the team's feat
 | 6 | xdipx — Social Drafts | `0 14 * * *` (daily) | social / `social-drafts` | `docs/store-team/routine-social-daily.md` | DRAFT-ONLY: every draft passes the emma-empathy-reviewer voice gate, then lands as a `social_posts` row with status `draft`. Never post live; never touch `social_team_autopost`. |
 | 7 | xdipx — Daily Merchandiser (Routine A) | `0 10 * * *` (daily) | homepage / `homepage-*` | `docs/homepage-team/routine-daily-merchandise.md` | Entry agent homepage-orchestrator; mission brief is `docs/homepage-team/mission-brief.md`; content auto-publish within the gate/budget/image caps; never code changes. |
 | 8 | xdipx — Design Cycle (Routine B) | `0 14 * * 3` (Wed) | homepage / `homepage-build` | `docs/homepage-team/routine-design-cycle.md` | Build on a branch and open a PR; never auto-merge; stop at the open PR. |
+| 9 | xdipx — Daily Content Writer | `0 8 * * *` local Pacific (approx `0 15 * * *` UTC, daily) | content / `content-blog` | `docs/store-team/routine-content-daily.md` | Entry agent content-writer. Scheduled task id `xdipx-daily-content-writer`: a Claude desktop scheduled task on the owner's machine, running from the `~/Claude/xdipx-deploy` checkout; fires only while the Claude app is open, unlike the cloud triggers for routines 1-8. One post per run; topic from `docs/store-team/content-plan.md`; every draft passes the emma-empathy-reviewer voice gate; publish live only on PASS with the `content_team_autopublish` valve on, otherwise leave the Sanity draft. No-ops at the gate until migration 054 is applied and `content_team_enabled` is on; see the enablement runbook appendix in the playbook. |
 
 Times chosen for a US-Eastern owner: strategy Monday 8a ET, apply/cost-review Monday afternoon
 after the owner's suggestion review, ads/email Tuesday morning, social daily 10a ET, merchandiser

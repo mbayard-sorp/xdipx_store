@@ -61,8 +61,12 @@ Each posts its own events under `$RUN_ID` with its `agentRole`.
 
 ## Step 5 — Publish the brief
 
-One markdown doc: the week's focus, per-team directives (homepage, social, ads, email + pricing/
-merch notes), an explicit stop-doing list, metrics behind every call.
+One markdown doc: the week's focus, per-team directives (homepage, social, ads, email, content +
+pricing/merch notes), an explicit stop-doing list, metrics behind every call. The content section
+sets the week's blog topic slate, category-mix tuning (guides/comparisons/care/wellness-basics),
+and campaign tie-ins with the marketing calendar; the daily content playbook
+(`docs/store-team/routine-content-daily.md`) tolerates a brief without a content section, so omit
+it honestly rather than padding.
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/brief" \

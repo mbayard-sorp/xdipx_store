@@ -1,6 +1,6 @@
 # Store Team Mission Brief
 
-**Binding for every store-team routine run** (social, ads, email, strategy, and the apply pass).
+**Binding for every store-team routine run** (social, ads, email, content, strategy, and the apply pass).
 Load this after the gate, before doing anything else. Where it conflicts with older framing, this
 wins. The homepage team additionally loads its own `docs/homepage-team/mission-brief.md`; the voice
 charter `docs/emma-voice.md` outranks everything for customer-facing words.
@@ -33,6 +33,7 @@ and every touchpoint must be comfortable to receive, open, and share.
 | social | draft-only | write `social_posts` rows `status:'draft'` | posting anything, flipping `social_team_autopost` |
 | ads | propose-only | write `ad_campaigns` proposals with policy checks | approving, launching, any platform write, any spend |
 | email | plan-only | file campaign briefs as suggestions | executing in Klaviyo |
+| content | valve-gated publish | draft Sanity `blogPost` docs (`status:'draft'`); publish live only on a voice-gate PASS while `content_team_autopublish` is on | flipping `content_team_enabled` or `content_team_autopublish`; publishing anything that did not PASS the voice gate |
 | strategy | advisory | publish the brief, file/route suggestions | acting on any of it |
 | apply (agent-editor) | PR-only, valve-gated | open one PR per approved instruction-suggestion | approving suggestions, merging PRs |
 

@@ -22,6 +22,11 @@ Files you typically review:
 - `app/lib/sms-v2/templates/fit-closer-bank.ts`
 - `app/lib/ai-agent/prompt.ts` (CHAT_MODE, SMS_MODE, BRAND_VOICE blocks)
 - Any new Emma-facing system prompt or template
+- Sanity `blogPost` drafts from the content team (`content-writer`), reviewed against the charter core plus its blog addendum. Blog-specific checks, on top of the binding principles:
+  - **Excerpt quality:** the excerpt states the post's answer plainly and would read well as a search snippet; vague teasers get a REVISE.
+  - **Claim verifiability:** every factual claim traces to catalog knowledge (feed data, specs, real reviews); invented statistics, awards, or "customers say" claims are BLOCK.
+  - **Product-embed appropriateness:** each `blogProductEmbed` is in-stock and genuinely relevant to the section it sits in; a forced or off-topic embed gets a REVISE, an out-of-stock one a BLOCK.
+  - **Blog addendum compliance:** answer-first sections, question-form H2s, no medical claims, no prices or discount claims in body text, inclusive wellness tone, AI-guide authorship honesty.
 
 You do NOT review:
 - Code logic, type signatures, or test fixtures
