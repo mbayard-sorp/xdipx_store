@@ -1,18 +1,23 @@
 /**
- * Shopify Orders/create webhook — React Router action handler.
- * NOTE: The primary webhook handler lives in server/webhooks.ts (Express route)
- * for proper raw-body HMAC verification.
+ * Shopify orders/create webhook — React Router FALLBACK STUB. Not the real
+ * handler and it performs no HMAC verification and no order processing.
  *
- * This route exists as a fallback / for environments that route all traffic
- * through React Router. HMAC verification requires the raw body which is
- * available in the Express handler.
+ * The real handler is the Express route /webhooks/order-created
+ * (server/webhooks.ts), which needs the raw body for HMAC. This stub only
+ * prevents 404 retries if a Shopify subscription is ever misconfigured to
+ * point at /api/webhooks/order-created — but any hit here means an order
+ * event was swallowed (no profit metafields, no CAPI, no referral capture),
+ * so it logs at error level for the log-monitor cron to escalate. If the
+ * Shopify webhook subscriptions are confirmed to never target
+ * /api/webhooks/*, this file can be deleted.
  */
 import type { ActionFunctionArgs } from 'react-router'
 
 export async function action({ request }: ActionFunctionArgs) {
-  // Actual handling is in server/webhooks.ts
-  // This route is a no-op stub to prevent 404s if Shopify routes here
   const text = await request.text().catch(() => '')
-  console.log('[rr-webhook] order-created received', text.slice(0, 100))
+  console.error(
+    '[rr-webhook] orders/create hit the fallback stub — a Shopify webhook subscription is misconfigured; the event was NOT processed. Repoint it to /webhooks/order-created.',
+    text.slice(0, 100),
+  )
   return Response.json({ ok: true })
 }

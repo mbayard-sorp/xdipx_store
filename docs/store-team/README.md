@@ -69,6 +69,10 @@ OFF / conservative.
 | `social_team_autopost` | `false` | **Draft-mode valve.** Live posting also requires `X_AUTO_POST_ENABLED`, and only X has plumbing. |
 | `suggestion_apply_enabled` | `false` | **Apply-path valve.** When on, agent-editor turns approved instruction-suggestions into PRs. |
 
+The import-automation valves (`product_manager_enabled`, `product_manager_max_actions_per_run`,
+`import_monitor_phase`, `import_enrich_enabled`) live in the same `pipeline_settings` table but are
+edited on `/admin/imports`, not the team dashboard.
+
 Auth for every `/api/team/*` call: `x-team-secret` (or Bearer) matching `TEAM_TOKEN` /
 `HOMEPAGE_TEAM_TOKEN` / `CRON_SECRET`.
 
