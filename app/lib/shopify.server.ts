@@ -1483,6 +1483,8 @@ const GMC_FEED_METAFIELDS_FRAGMENT = `
   metafields(identifiers: [
     { namespace: "xdipx", key: "deal_date" }
     { namespace: "xdipx", key: "original_price" }
+    { namespace: "xdipx", key: "map_price" }
+    { namespace: "xdipx", key: "map_restricted" }
     { namespace: "xdipx", key: "category" }
     { namespace: "xdipx", key: "mood_tags" }
     { namespace: "xdipx", key: "audience_tags" }
@@ -1593,6 +1595,9 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
   const seoDesc       = parseMetafieldByNsKey(mf, 'xdipx', 'seo_meta_description')
   const moodImageUrl  = parseMetafieldByNsKey(mf, 'xdipx', 'mood_image_url')
   const originalPrice = parseMetafieldByNsKey(mf, 'xdipx', 'original_price')
+  const mapPriceRaw   = parseMetafieldByNsKey(mf, 'xdipx', 'map_price')
+  const mapPriceNum   = mapPriceRaw ? parseFloat(mapPriceRaw) : null
+  const mapRestricted = parseMetafieldByNsKey(mf, 'xdipx', 'map_restricted') === 'true'
   const productTypeDial = parseMetafieldByNsKey(mf, 'xdipx', 'product_type_dial')
   const dealScoreRaw   = parseMetafieldByNsKey(mf, 'xdipx', 'deal_score')
   const isDailyDealRaw = parseMetafieldByNsKey(mf, 'xdipx', 'is_daily_deal')
@@ -1642,6 +1647,8 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
     ...(specifications.length > 0 ? { specifications } : {}),
     ...(productTypeDial != null ? { productTypeDial } : {}),
     ...(originalPrice   != null ? { originalPrice }   : {}),
+    ...(mapPriceNum !== null && !isNaN(mapPriceNum) ? { mapPrice: mapPriceNum } : {}),
+    ...(mapRestricted ? { mapRestricted } : {}),
     ...(gmcCategory  != null ? { gmcCategory }  : {}),
     ...(gmcAgeGroup  != null ? { gmcAgeGroup }  : {}),
     ...(gmcGender    != null ? { gmcGender }    : {}),
@@ -1659,28 +1666,147 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
   }
 }
 
-export async function getFeedDeals(page = 1, limit = 50): Promise<{ deals: VaultDeal[]; hasNextPage: boolean }> {
+export async function getFeedDeals(after: string | null = null, limit = 50): Promise<{ deals: VaultDeal[]; hasNextPage: boolean; endCursor: string | null }> {
   const data = await storefront<{
     products: {
-      edges: { node: ShopifyFeedProductNode; cursor: string }[]
-      pageInfo: { hasNextPage: boolean }
+      edges: { node: ShopifyFeedProductNode }[]
+      pageInfo: { hasNextPage: boolean; endCursor: string | null }
     }
   }>(`
     query GetFeedPage($first: Int!, $after: String) {
-      products(first: $first, after: $after, query: "tag:deal-status-archived", sortKey: UPDATED_AT, reverse: true) {
-        pageInfo { hasNextPage }
+      products(first: $first, after: $after, query: "tag:deal-status-archived OR tag:deal-status-live", sortKey: UPDATED_AT, reverse: true) {
+        pageInfo { hasNextPage endCursor }
         edges {
-          cursor
           node { ${GMC_FEED_CARD_FRAGMENT} }
         }
       }
     }
-  `, { first: limit, after: page > 1 ? btoa(`${(page - 1) * limit}`) : null })
+  `, { first: limit, after })
 
   return {
     deals: data.products.edges.map(e => nodeToFeedDeal(e.node)),
     hasNextPage: data.products.pageInfo.hasNextPage,
+    endCursor: data.products.pageInfo.endCursor,
   }
+}
+
+// ─── GMC Feed — full catalog (lean) ───────────────────────────────────────
+//
+// The deal entries above carry the full GMC treatment (highlights, specs,
+// custom labels). The rest of the ~4k-product catalog goes into the feed with
+// a lean per-item shape so the response stays a manageable size for agentic
+// shopping crawlers.
+
+export interface FeedCatalogProduct {
+  id:              string
+  handle:          string
+  title:           string
+  brand:           string
+  /** Plain-text description, truncated at fetch time to keep the feed lean. */
+  description:     string
+  imageUrl:        string | null
+  availableForSale: boolean
+  price:           number
+  compareAtPrice:  number | null
+  barcode:         string | null
+  /** xdipx.original_price — regular price if the current price is a markdown. */
+  originalPrice:   number | null
+  /** xdipx.map_price — 0/null means no MAP constraint. */
+  mapPrice:        number | null
+  /** xdipx.map_restricted — true suppresses any advertised-discount framing. */
+  mapRestricted:   boolean
+  productTypeDial: string | null
+  gmcCategory:     string | null
+}
+
+export async function getFeedCatalogProducts(): Promise<FeedCatalogProduct[]> {
+  const out: FeedCatalogProduct[] = []
+  let cursor: string | null = null
+  // 250 per page (Storefront API cap) × 40 pages = 10k product headroom.
+  for (let page = 0; page < 40; page++) {
+    const data: {
+      products: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null }
+        edges: Array<{ node: {
+          id:            string
+          handle:        string
+          title:         string
+          vendor:        string
+          description:   string
+          featuredImage: { url: string } | null
+          variants: { edges: Array<{ node: {
+            price:            { amount: string }
+            compareAtPrice:   { amount: string } | null
+            availableForSale: boolean
+            barcode:          string | null
+          } }> }
+          metafields: ({ namespace: string; key: string; value: string } | null)[]
+        } }>
+      }
+    } = await storefront(`
+      query FeedCatalog($first: Int!, $after: String) {
+        products(first: $first, after: $after, query: "available_for_sale:true") {
+          pageInfo { hasNextPage endCursor }
+          edges {
+            node {
+              id
+              handle
+              title
+              vendor
+              description(truncateAt: 600)
+              featuredImage { url }
+              variants(first: 1) {
+                edges { node { price { amount } compareAtPrice { amount } availableForSale barcode } }
+              }
+              metafields(identifiers: [
+                { namespace: "xdipx", key: "original_price" }
+                { namespace: "xdipx", key: "map_price" }
+                { namespace: "xdipx", key: "map_restricted" }
+                { namespace: "xdipx", key: "product_type_dial" }
+                { namespace: "xdipx", key: "seo_meta_description" }
+                { namespace: "mm-google-shopping", key: "google_product_category" }
+              ]) {
+                namespace key value
+              }
+            }
+          }
+        }
+      }
+    `, { first: 250, after: cursor })
+
+    for (const { node } of data.products.edges) {
+      const variant = node.variants.edges[0]?.node
+      if (!variant) continue
+      const mf = node.metafields
+      const originalPriceRaw = parseMetafieldByNsKey(mf, 'xdipx', 'original_price')
+      const mapPriceRaw      = parseMetafieldByNsKey(mf, 'xdipx', 'map_price')
+      const originalPrice    = originalPriceRaw ? parseFloat(originalPriceRaw) : NaN
+      const mapPrice         = mapPriceRaw ? parseFloat(mapPriceRaw) : NaN
+      const seoDesc          = parseMetafieldByNsKey(mf, 'xdipx', 'seo_meta_description')
+      out.push({
+        id:               node.id,
+        handle:           node.handle,
+        title:            node.title,
+        brand:            node.vendor,
+        description:      (seoDesc ?? '').trim() || node.description,
+        imageUrl:         node.featuredImage?.url ?? null,
+        availableForSale: variant.availableForSale,
+        price:            parseFloat(variant.price.amount),
+        compareAtPrice:   variant.compareAtPrice ? parseFloat(variant.compareAtPrice.amount) : null,
+        barcode:          variant.barcode,
+        originalPrice:    Number.isFinite(originalPrice) ? originalPrice : null,
+        mapPrice:         Number.isFinite(mapPrice) ? mapPrice : null,
+        mapRestricted:    parseMetafieldByNsKey(mf, 'xdipx', 'map_restricted') === 'true',
+        productTypeDial:  parseMetafieldByNsKey(mf, 'xdipx', 'product_type_dial'),
+        gmcCategory:      parseMetafieldByNsKey(mf, 'mm-google-shopping', 'google_product_category'),
+      })
+    }
+
+    if (!data.products.pageInfo.hasNextPage) break
+    cursor = data.products.pageInfo.endCursor
+    if (!cursor) break
+  }
+  return out
 }
 
 export type CollectionSort = 'manual' | 'newest' | 'price-asc' | 'price-desc'
