@@ -150,8 +150,11 @@ The routine ships inert. To turn it on, in order:
 4. **One supervised manual run:** fire the routine by hand, watch the run row and events on
    `/admin/homepage-team?team=content`, verify the post lands in Sanity (and live, if the valve is
    on) and the revalidate call returned ok.
-5. **Enable the scheduled trigger** (routine #9 in `docs/store-team/routine-schedule.md`), then
-   record its trigger ID there.
+5. **Confirm the schedule** (routine #9 in `docs/store-team/routine-schedule.md`): the desktop
+   scheduled task `xdipx-daily-content-writer` already exists on the owner's machine and fires
+   daily at 8am local Pacific (approx 15:00 UTC) from the `~/Claude/xdipx-deploy` checkout. It
+   runs only while the Claude app is open, unlike the cloud triggers for routines 1-8, and until
+   steps 1-2 are done every fire no-ops honestly at the gate.
 
 **Kill-switch drill:** flipping `content_team_enabled` off stops runs at the gate (Step 1 skips
 honestly). Flipping `content_team_autopublish` off degrades to draft-only without stopping the
