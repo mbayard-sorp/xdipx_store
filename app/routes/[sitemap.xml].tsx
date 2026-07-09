@@ -114,6 +114,8 @@ export async function loader() {
     { loc: `${base}/discover`,    lastmod: today, changefreq: 'weekly', priority: '0.7' },
     { loc: `${base}/collections`, lastmod: collectionsHubLastmod ?? today, changefreq: 'weekly', priority: '0.7' },
     { loc: `${base}/notebook`,    lastmod: today, changefreq: 'weekly', priority: '0.5' },
+    { loc: `${base}/faq`,         lastmod: today, changefreq: 'monthly', priority: '0.5' },
+    { loc: `${base}/about`,       lastmod: today, changefreq: 'monthly', priority: '0.5' },
     // /vault, /for-him, /for-her are retired (301 → /collections or a
     // product-type collection) — intentionally not listed as sitemap entries.
 

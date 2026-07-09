@@ -143,7 +143,9 @@ describe('advanceGate — category + audience, no mood/matters (rule 5)', () => 
   it('MATTERS question includes quickChoiceOpts', () => {
     const result = advanceGate(null, { category: 'anal', audience: 'for-him' })
     expect(result.question?.quickChoiceOpts).toEqual([
-      'Beginner-friendly', 'Quiet', 'Waterproof', 'Travel-ready', 'Just show me',
+      // v2 "What Matters" chip set (#131): Discreet and Hands-free replaced
+      // Quiet and Travel-ready. See docs/what-matters-final-signoff.md.
+      'Beginner-friendly', 'Discreet', 'Waterproof', 'Hands-free', 'Just show me',
     ])
   })
 })

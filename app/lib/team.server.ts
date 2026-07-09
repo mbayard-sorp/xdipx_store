@@ -208,6 +208,8 @@ export interface GateResult {
   maxImagesPerDay: number
   /** Active strategy brief id, so routines know to fetch it (null = none yet). */
   activeBriefId: number | null
+  /** Content-only: standalone valves the routine needs (absent for other teams). */
+  valves?: { autopublish: boolean }
 }
 
 /**
@@ -217,13 +219,14 @@ export interface GateResult {
  */
 export async function gate(team: TeamId, excludeRunId?: number): Promise<GateResult> {
   await expireStaleRuns()
-  const [cfg, spentCents, runsToday, imagesToday, inProgress, brief] = await Promise.all([
+  const [cfg, spentCents, runsToday, imagesToday, inProgress, brief, autopublish] = await Promise.all([
     getTeamConfig(team),
     getTodaySpendCents(team),
     getTodayRunCount(team, excludeRunId),
     team === 'homepage' ? getTodayImageCount() : Promise.resolve(0),
     isRunInProgress(team, excludeRunId),
     getActiveBrief(),
+    team === 'content' ? getValve(VALVE_KEYS.contentAutopublish) : Promise.resolve(undefined),
   ])
   const remainingCents = Math.max(0, cfg.dailyCents - spentCents)
   const maxImagesPerDay = cfg.maxImagesPerDay ?? 0
@@ -238,6 +241,7 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
     imagesToday,
     maxImagesPerDay,
     activeBriefId: brief?.id ?? null,
+    ...(autopublish !== undefined ? { valves: { autopublish } } : {}),
   }
   if (!cfg.enabled)                   return { ...base, ok: false, reason: 'disabled' }
   if (inProgress)                     return { ...base, ok: false, reason: 'run_in_progress' }

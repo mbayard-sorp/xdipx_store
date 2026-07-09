@@ -1,4 +1,4 @@
-import { getFeedDeals } from '~/lib/shopify.server'
+import { getFeedDeals, getFeedCatalogProducts, type FeedCatalogProduct } from '~/lib/shopify.server'
 import {
   gmcProductCategory,
   gmcGender,
@@ -7,8 +7,11 @@ import {
   gmcCustomLabel2,
   gmcCustomLabel3,
   gmcCustomLabel4,
+  mapAllowsAdvertisedDiscount,
   parseSpecValue,
+  salePriceEffectiveDate,
 } from '~/lib/gmc-metafields.server'
+import { cached } from '~/lib/kv.server'
 import type { VaultDeal } from '~/types'
 
 // Google Merchant Center restricts most sexual-wellness products -- do not submit
@@ -60,28 +63,6 @@ const DIAL_TO_PRODUCT_TYPE: Record<string, string> = {
   'book-media': 'Books & Media',
 }
 
-/**
- * Formats a deal_date ISO string into a GMC sale_price_effective_date range.
- * The deal runs from midnight on deal_date through end-of-day the next day (PT).
- * Format: 2026-05-16T00:00-07:00/2026-05-17T23:59-07:00
- */
-function salePriceEffectiveDate(dealDate: string): string | null {
-  if (!dealDate) return null
-  // Accept ISO date strings like "2026-05-16" or "2026-05-16T..."
-  const dateOnly = dealDate.slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return null
-  const [year, month, day] = dateOnly.split('-').map(Number)
-  if (!year || !month || !day) return null
-
-  // next day
-  const next = new Date(Date.UTC(year, month - 1, day + 1))
-  const ny = next.getUTCFullYear()
-  const nm = String(next.getUTCMonth() + 1).padStart(2, '0')
-  const nd = String(next.getUTCDate()).padStart(2, '0')
-
-  return `${dateOnly}T00:00-07:00/${ny}-${nm}-${nd}T23:59-07:00`
-}
-
 function toEntry(d: VaultDeal): string {
   const link          = `https://xdipx.com/products/${d.handle}`
   const title         = xmlEscape(d.seoTitle)
@@ -116,13 +97,16 @@ function toEntry(d: VaultDeal): string {
   // g:sale_price = current deal price. Only emit sale_price when we have a
   // confirmed originalPrice metafield so the values are never inverted.
   // Products without originalPrice metafield show only g:price at dealPrice.
+  // MAP-gated: when MAP equals the regular price (or map_restricted is set),
+  // no advertised discount -- the item carries a single g:price at dealPrice.
   let salePriceTag = ''
   const msrp = d.msrp
   const originalPriceNum = d.originalPrice ? parseFloat(d.originalPrice) : msrp
   if (
     Number.isFinite(originalPriceNum) &&
     originalPriceNum > 0 &&
-    d.dealPrice < originalPriceNum
+    d.dealPrice < originalPriceNum &&
+    mapAllowsAdvertisedDiscount(d.mapPrice, d.mapRestricted ?? false, originalPriceNum)
   ) {
     salePriceTag = `\n      <g:sale_price>${fmtPrice(d.dealPrice)}</g:sale_price>`
     const effDate = salePriceEffectiveDate(d.dealDate)
@@ -234,28 +218,113 @@ function toEntry(d: VaultDeal): string {
   return lines.join('\n')
 }
 
-export async function loader() {
-  const pageSize = 50
-  const maxPages = 10
-  const all: VaultDeal[] = []
-  let page = 1
-  let hasNext = true
-  while (hasNext && page <= maxPages) {
-    const { deals, hasNextPage } = await getFeedDeals(page, pageSize)
-    all.push(...deals)
-    hasNext = hasNextPage
-    page += 1
+/**
+ * Lean catalog entry -- required Merchant fields plus category/identifiers,
+ * without the heavy per-item extras (highlights, specs, custom labels) so the
+ * ~4k-product catalog stays a reasonable response size. Deal-tagged products
+ * get the rich toEntry() treatment instead.
+ */
+function toLeanEntry(p: FeedCatalogProduct): string {
+  const link  = `https://xdipx.com/products/${p.handle}`
+  const title = xmlEscape(p.title)
+  const brand = xmlEscape(p.brand || 'xdipx')
+  const description = xmlEscape(
+    opt(p.description) ||
+    `${p.title} curated by xdipx. Adult wellness product, shipped discreetly.`
+  )
+
+  // Regular price for strikethrough framing: confirmed original_price
+  // metafield first, else the variant compareAtPrice.
+  const regular = p.originalPrice ?? p.compareAtPrice ?? 0
+  const onSale =
+    regular > 0 &&
+    p.price < regular &&
+    mapAllowsAdvertisedDiscount(p.mapPrice, p.mapRestricted, regular)
+
+  const gtin = opt(p.barcode)
+  const googleProductCategory = opt(p.gmcCategory) || gmcProductCategory(opt(p.productTypeDial) || null)
+  const productType = p.productTypeDial ? (DIAL_TO_PRODUCT_TYPE[p.productTypeDial] ?? xmlEscape(p.productTypeDial)) : ''
+
+  const lines: string[] = []
+  lines.push(`    <item>`)
+  lines.push(`      <g:id>${xmlEscape(p.id)}</g:id>`)
+  lines.push(`      <g:title>${title}</g:title>`)
+  lines.push(`      <g:description>${description}</g:description>`)
+  lines.push(`      <g:link>${xmlEscape(link)}</g:link>`)
+  if (p.imageUrl) {
+    lines.push(`      <g:image_link>${xmlEscape(p.imageUrl)}</g:image_link>`)
+  }
+  lines.push(`      <g:availability>${p.availableForSale ? 'in stock' : 'out of stock'}</g:availability>`)
+  if (onSale) {
+    lines.push(`      <g:price>${fmtPrice(regular)}</g:price>`)
+    // No effective-date range: catalog markdowns are open-ended, and GMC
+    // treats a dateless sale_price as active now, which matches checkout.
+    lines.push(`      <g:sale_price>${fmtPrice(p.price)}</g:sale_price>`)
+  } else {
+    lines.push(`      <g:price>${fmtPrice(p.price)}</g:price>`)
+  }
+  lines.push(`      <g:brand>${brand}</g:brand>`)
+  lines.push(`      <g:condition>new</g:condition>`)
+  lines.push(`      <g:adult>yes</g:adult>`)
+  lines.push(`      <g:age_group>adult</g:age_group>`)
+  lines.push(`      <g:google_product_category>${xmlEscape(googleProductCategory)}</g:google_product_category>`)
+  if (productType) {
+    lines.push(`      <g:product_type>${xmlEscape(productType)}</g:product_type>`)
+  }
+  lines.push(`      <g:item_group_id>${xmlEscape(p.handle)}</g:item_group_id>`)
+  if (gtin) {
+    lines.push(`      <g:gtin>${xmlEscape(gtin)}</g:gtin>`)
+    lines.push(`      <g:identifier_exists>true</g:identifier_exists>`)
+  } else {
+    lines.push(`      <g:identifier_exists>false</g:identifier_exists>`)
+  }
+  // No per-item shipping block on lean entries: at ~4k items it adds ~0.4MB
+  // to the uncompressed payload for a value that is constant store-wide.
+  lines.push(`    </item>`)
+
+  return lines.join('\n')
+}
+
+async function buildFeedXml(): Promise<string> {
+  // Rich entries: deal-tagged products (live deal + archived vault), full GMC
+  // treatment. Cursor-paginated; cap well above the current vault size.
+  const dealProducts: VaultDeal[] = []
+  let after: string | null = null
+  for (let page = 0; page < 10; page++) {
+    const { deals, hasNextPage, endCursor } = await getFeedDeals(after, 50)
+    dealProducts.push(...deals)
+    if (!hasNextPage || !endCursor) break
+    after = endCursor
   }
 
-  const body = `<?xml version="1.0" encoding="UTF-8"?>
+  // Lean entries: every live, purchasable product not already emitted above.
+  const dealIds = new Set(dealProducts.map(d => d.id))
+  const catalog = (await getFeedCatalogProducts()).filter(
+    p => !dealIds.has(p.id) && p.price > 0,
+  )
+
+  const items = [
+    ...dealProducts.map(toEntry),
+    ...catalog.map(toLeanEntry),
+  ].join('\n')
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">
   <channel>
-    <title>xdipx -- Daily Wellness Deals</title>
+    <title>xdipx -- Product Feed</title>
     <link>https://xdipx.com</link>
-    <description>Curated adult wellness and intimacy products, one featured daily deal.</description>
-${all.map(toEntry).join('\n')}
+    <description>Curated adult wellness and intimacy products. Full live catalog plus the current featured deal.</description>
+${items}
   </channel>
 </rss>`
+}
+
+export async function loader() {
+  // The XML is a plain string, safe to round-trip through cached()'s KV JSON
+  // layer (no Map/Set/Date). If the payload ever exceeds the KV value limit,
+  // kvSet degrades to the in-memory L1 with a warn, so the route still serves;
+  // the CDN s-maxage below absorbs most traffic either way.
+  const body = await cached('feed:xml:v1', 900, buildFeedXml)
 
   return new Response(body, {
     headers: {

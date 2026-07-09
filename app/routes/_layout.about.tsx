@@ -50,6 +50,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: 'https://xdipx.com/about' },
+    { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: 'https://xdipx.com/about.md' },
   ]
 }
 

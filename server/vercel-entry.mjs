@@ -2038,6 +2038,7 @@ __export(shopify_server_exports, {
   getDealByHandle: () => getDealByHandle,
   getDealByShopifyId: () => getDealByShopifyId,
   getDistinctProductTypes: () => getDistinctProductTypes,
+  getFeedCatalogProducts: () => getFeedCatalogProducts,
   getFeedDeals: () => getFeedDeals,
   getHandleByProductId: () => getHandleByProductId,
   getLiveDealHandle: () => getLiveDealHandle,
@@ -2984,6 +2985,9 @@ function nodeToFeedDeal(node) {
   const seoDesc = parseMetafieldByNsKey(mf, "xdipx", "seo_meta_description");
   const moodImageUrl = parseMetafieldByNsKey(mf, "xdipx", "mood_image_url");
   const originalPrice = parseMetafieldByNsKey(mf, "xdipx", "original_price");
+  const mapPriceRaw = parseMetafieldByNsKey(mf, "xdipx", "map_price");
+  const mapPriceNum = mapPriceRaw ? parseFloat(mapPriceRaw) : null;
+  const mapRestricted = parseMetafieldByNsKey(mf, "xdipx", "map_restricted") === "true";
   const productTypeDial = parseMetafieldByNsKey(mf, "xdipx", "product_type_dial");
   const dealScoreRaw = parseMetafieldByNsKey(mf, "xdipx", "deal_score");
   const isDailyDealRaw = parseMetafieldByNsKey(mf, "xdipx", "is_daily_deal");
@@ -3028,6 +3032,8 @@ function nodeToFeedDeal(node) {
     ...specifications.length > 0 ? { specifications } : {},
     ...productTypeDial != null ? { productTypeDial } : {},
     ...originalPrice != null ? { originalPrice } : {},
+    ...mapPriceNum !== null && !isNaN(mapPriceNum) ? { mapPrice: mapPriceNum } : {},
+    ...mapRestricted ? { mapRestricted } : {},
     ...gmcCategory != null ? { gmcCategory } : {},
     ...gmcAgeGroup != null ? { gmcAgeGroup } : {},
     ...gmcGender != null ? { gmcGender } : {},
@@ -3044,22 +3050,89 @@ function nodeToFeedDeal(node) {
     isDailyDeal
   };
 }
-async function getFeedDeals(page = 1, limit = 50) {
+async function getFeedDeals(after = null, limit = 50) {
   const data = await storefront(`
     query GetFeedPage($first: Int!, $after: String) {
-      products(first: $first, after: $after, query: "tag:deal-status-archived", sortKey: UPDATED_AT, reverse: true) {
-        pageInfo { hasNextPage }
+      products(first: $first, after: $after, query: "tag:deal-status-archived OR tag:deal-status-live", sortKey: UPDATED_AT, reverse: true) {
+        pageInfo { hasNextPage endCursor }
         edges {
-          cursor
           node { ${GMC_FEED_CARD_FRAGMENT} }
         }
       }
     }
-  `, { first: limit, after: page > 1 ? btoa(`${(page - 1) * limit}`) : null });
+  `, { first: limit, after });
   return {
     deals: data.products.edges.map((e) => nodeToFeedDeal(e.node)),
-    hasNextPage: data.products.pageInfo.hasNextPage
+    hasNextPage: data.products.pageInfo.hasNextPage,
+    endCursor: data.products.pageInfo.endCursor
   };
+}
+async function getFeedCatalogProducts() {
+  const out = [];
+  let cursor = null;
+  for (let page = 0; page < 40; page++) {
+    const data = await storefront(`
+      query FeedCatalog($first: Int!, $after: String) {
+        products(first: $first, after: $after, query: "available_for_sale:true") {
+          pageInfo { hasNextPage endCursor }
+          edges {
+            node {
+              id
+              handle
+              title
+              vendor
+              description(truncateAt: 600)
+              featuredImage { url }
+              variants(first: 1) {
+                edges { node { price { amount } compareAtPrice { amount } availableForSale barcode } }
+              }
+              metafields(identifiers: [
+                { namespace: "xdipx", key: "original_price" }
+                { namespace: "xdipx", key: "map_price" }
+                { namespace: "xdipx", key: "map_restricted" }
+                { namespace: "xdipx", key: "product_type_dial" }
+                { namespace: "xdipx", key: "seo_meta_description" }
+                { namespace: "mm-google-shopping", key: "google_product_category" }
+              ]) {
+                namespace key value
+              }
+            }
+          }
+        }
+      }
+    `, { first: 250, after: cursor });
+    for (const { node } of data.products.edges) {
+      const variant = node.variants.edges[0]?.node;
+      if (!variant) continue;
+      const mf = node.metafields;
+      const originalPriceRaw = parseMetafieldByNsKey(mf, "xdipx", "original_price");
+      const mapPriceRaw = parseMetafieldByNsKey(mf, "xdipx", "map_price");
+      const originalPrice = originalPriceRaw ? parseFloat(originalPriceRaw) : NaN;
+      const mapPrice = mapPriceRaw ? parseFloat(mapPriceRaw) : NaN;
+      const seoDesc = parseMetafieldByNsKey(mf, "xdipx", "seo_meta_description");
+      out.push({
+        id: node.id,
+        handle: node.handle,
+        title: node.title,
+        brand: node.vendor,
+        description: (seoDesc ?? "").trim() || node.description,
+        imageUrl: node.featuredImage?.url ?? null,
+        availableForSale: variant.availableForSale,
+        price: parseFloat(variant.price.amount),
+        compareAtPrice: variant.compareAtPrice ? parseFloat(variant.compareAtPrice.amount) : null,
+        barcode: variant.barcode,
+        originalPrice: Number.isFinite(originalPrice) ? originalPrice : null,
+        mapPrice: Number.isFinite(mapPrice) ? mapPrice : null,
+        mapRestricted: parseMetafieldByNsKey(mf, "xdipx", "map_restricted") === "true",
+        productTypeDial: parseMetafieldByNsKey(mf, "xdipx", "product_type_dial"),
+        gmcCategory: parseMetafieldByNsKey(mf, "mm-google-shopping", "google_product_category")
+      });
+    }
+    if (!data.products.pageInfo.hasNextPage) break;
+    cursor = data.products.pageInfo.endCursor;
+    if (!cursor) break;
+  }
+  return out;
 }
 function sortToStorefront(sort) {
   switch (sort) {
@@ -6123,6 +6196,8 @@ var init_shopify_server = __esm({
   metafields(identifiers: [
     { namespace: "xdipx", key: "deal_date" }
     { namespace: "xdipx", key: "original_price" }
+    { namespace: "xdipx", key: "map_price" }
+    { namespace: "xdipx", key: "map_restricted" }
     { namespace: "xdipx", key: "category" }
     { namespace: "xdipx", key: "mood_tags" }
     { namespace: "xdipx", key: "audience_tags" }
