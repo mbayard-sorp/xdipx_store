@@ -527,9 +527,6 @@ export function homepageToMarkdown(deal: Deal | null): string {
   lines.push('## Shop')
   lines.push('')
   lines.push(`- [Discover (guided product finder)](${BASE_URL}/discover)`)
-  lines.push(`- [For her](${BASE_URL}/for-her)`)
-  lines.push(`- [For him](${BASE_URL}/for-him)`)
-  lines.push(`- [The Vault (full catalog)](${BASE_URL}/vault)`)
   lines.push(`- [Collections](${BASE_URL}/collections)`)
   lines.push('')
 
