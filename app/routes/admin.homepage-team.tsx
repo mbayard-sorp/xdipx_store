@@ -42,6 +42,7 @@ const TEAM_LABELS: Record<TeamId, string> = {
   ads:      'Ads',
   email:    'Email',
   strategy: 'Strategy',
+  content:  'Content',
 }
 
 interface LoaderData {
@@ -56,6 +57,7 @@ interface LoaderData {
   campaigns: CampaignRow[]
   autopost: boolean
   suggestionApply: boolean
+  contentAutopublish: boolean
 }
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
@@ -68,9 +70,10 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1 }),
   )
-  const [autopost, suggestionApply] = await Promise.all([
+  const [autopost, suggestionApply, contentAutopublish] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.suggestionApply).catch(() => false),
+    getValve(VALVE_KEYS.contentAutopublish).catch(() => false),
   ])
 
   // The team tables (049/051) may not be applied yet — degrade cleanly.
@@ -102,7 +105,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     }
   }
 
-  return { team, config, migrated, gateResult, runs, selectedRun, suggestions, briefs, campaigns, autopost, suggestionApply }
+  return { team, config, migrated, gateResult, runs, selectedRun, suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -171,7 +174,7 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
 export default function AgentTeamsPage() {
   const {
     team, config, migrated, gateResult, runs, selectedRun,
-    suggestions, briefs, campaigns, autopost, suggestionApply,
+    suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
   const activeBrief = briefs.find(b => b.status === 'active')
@@ -248,6 +251,14 @@ export default function AgentTeamsPage() {
             detail="Even when ON, live posting also requires X_AUTO_POST_ENABLED and only X has plumbing. Keep OFF while the team is draft-only."
             settingKey={VALVE_KEYS.socialAutopost}
             on={autopost}
+          />
+        )}
+        {team === 'content' && (
+          <ValveRow
+            label={`Autopublish is ${contentAutopublish ? 'ON' : 'OFF'}`}
+            detail="When ON, voice-gate-passed posts publish live on the Notebook with no human step. OFF degrades the daily routine to Sanity drafts you publish by hand."
+            settingKey={VALVE_KEYS.contentAutopublish}
+            on={contentAutopublish}
           />
         )}
         {team === 'strategy' && (
