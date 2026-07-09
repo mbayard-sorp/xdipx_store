@@ -49,6 +49,7 @@ export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: canonical },
+    { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: `https://xdipx.com/notebook/category/${category.slug}.md` },
     ...buildSocialMeta({ title, description, url: canonical, image: null, type: 'website' }),
   ]
 

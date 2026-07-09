@@ -24,6 +24,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { title: pageTitle([title]) },
     { name: 'description', content: truncateForMeta(description) },
     { tagName: 'link', rel: 'canonical', href: canonical },
+    { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: `${SITE_ORIGIN}/collections.md` },
     ...buildSocialMeta({
       title,
       description,

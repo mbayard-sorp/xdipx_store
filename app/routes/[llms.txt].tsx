@@ -8,7 +8,7 @@
  * Cache-Control: 1h (deal handle changes at midnight; other lists are stable).
  */
 
-import { getBlogPostsForSitemap, getPageList, getProductHandlesForSitemap } from '~/lib/sanity.server'
+import { getBlogCategories, getBlogPostsForSitemap, getPageList, getProductHandlesForSitemap } from '~/lib/sanity.server'
 import { getCollectionsForSitemap, getLiveDealHandle } from '~/lib/shopify.server'
 
 const BASE_URL = 'https://xdipx.com'
@@ -39,10 +39,11 @@ export async function loader() {
       return fallback
     })
 
-  const [products, collections, blogPosts, pages, liveDealHandle] = await Promise.all([
+  const [products, collections, blogPosts, blogCategories, pages, liveDealHandle] = await Promise.all([
     guard(getProductHandlesForSitemap(), [], 'getProductHandlesForSitemap'),
     guard(getCollectionsForSitemap(), [], 'getCollectionsForSitemap'),
     guard(getBlogPostsForSitemap(), [], 'getBlogPostsForSitemap'),
+    guard(getBlogCategories(), [], 'getBlogCategories'),
     guard(getPageList(), [], 'getPageList'),
     guard(getLiveDealHandle(), null, 'getLiveDealHandle'),
   ])
@@ -125,6 +126,7 @@ export async function loader() {
   if (filteredCollections.length > 0) {
     lines.push('## Collections')
     lines.push('')
+    lines.push(`- ${BASE_URL}/collections.md — index of all collections, grouped by category, brand, and theme`)
     for (const c of filteredCollections) {
       lines.push(`- ${BASE_URL}/collections/${c.handle}.md`)
     }
@@ -135,6 +137,9 @@ export async function loader() {
   lines.push('## Notebook')
   lines.push('')
   lines.push(`- ${BASE_URL}/notebook.md — index of all notebook posts`)
+  for (const c of blogCategories) {
+    lines.push(`- ${BASE_URL}/notebook/category/${c.slug}.md — category archive`)
+  }
   for (const p of blogPosts) {
     lines.push(`- ${BASE_URL}/notebook/${p.slug}.md`)
   }
