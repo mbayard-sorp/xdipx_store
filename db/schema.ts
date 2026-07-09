@@ -39,7 +39,7 @@ export const dealHistory = pgTable('deal_history', {
   vaultPrice:       decimal('vault_price',   { precision: 10, scale: 2 }),
   pctOffMsrp:       decimal('pct_off_msrp',  { precision: 5,  scale: 2 }),
   sortOrder:        integer('sort_order').default(0).notNull(),
-  status:           varchar('status', { length: 20 }).default('queued').notNull(),
+  status:           varchar('status', { length: 20 }).default('pending').notNull(),
   shopifyProductId: varchar('shopify_product_id', { length: 30 }),
   createdAt:        timestamp('created_at').defaultNow().notNull(),
   activatedAt:      timestamp('activated_at'),

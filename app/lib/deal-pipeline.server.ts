@@ -9,10 +9,15 @@
  *   5. Select 2-3 accessories via Claude
  *   6. Generate all AI copy (tagline, full story, both ways, email subjects, SEO)
  *   7. Push all fields to Shopify as metafields
- *   8. Insert a dealHistory row with status: draft
+ *   8. Insert a dealHistory row with status: pending
  *
- * Called automatically after dailyFeedProcessor() in server/cron.js.
- * Can also be triggered manually via Admin → Settings → "Run Pipeline Now".
+ * Staging is triggered manually from Admin → Settings → "Run Pipeline Now"
+ * (admin.settings.tsx, intent `run-pipeline`). There is no automatic cron
+ * call — daily deals are a deferred phase. The staged row lands as
+ * `pending`; the owner approves it to `queued` on /admin/queue; the 23:59
+ * /cron/deal-activator activates only `queued` rows. (The Shopify
+ * `deal_status` metafield keeps its own vocabulary: draft/approved/live/
+ * vault, written via setDealStatus.)
  */
 
 import { kvGet } from './kv.server'
@@ -28,7 +33,7 @@ import {
   setDealStatus,
 } from './shopify.server'
 import { enqueueFieldRegenJob } from './field-regen-runner.server'
-import { eq, or } from 'drizzle-orm'
+import { inArray } from 'drizzle-orm'
 import type { ProductScore } from '~/types'
 
 const DEFAULT_MIN_MARGIN = 0.40  // 40% gross margin floor
@@ -104,12 +109,7 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
     const scheduled = await db
       .select({ sku: dealHistory.sku, dealDate: dealHistory.dealDate })
       .from(dealHistory)
-      .where(
-        or(
-          eq(dealHistory.status, 'queued'),
-          eq(dealHistory.status, 'live'),
-        ),
-      )
+      .where(inArray(dealHistory.status, ['pending', 'queued', 'live']))
     const scheduledSkus  = new Set(scheduled.map(r => r.sku))
     const scheduledDates = new Set(scheduled.map(r => r.dealDate))
 
@@ -194,7 +194,7 @@ export async function orchestrateDealPipeline(minMarginPct = DEFAULT_MIN_MARGIN)
       mapPrice:         chosen.mapPrice.toFixed(2),
       unitsAvailable:   chosen.qty,
       dealScore:        chosen.score.toFixed(3),
-      status:           'queued',
+      status:           'pending',
       shopifyProductId: numericId,
     }).onConflictDoNothing()
 

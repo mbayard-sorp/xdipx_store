@@ -42,7 +42,9 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'approve') {
     const id               = parseInt(form.get('id') as string)
     const shopifyProductId = form.get('shopifyProductId') as string | null
-    await db.update(dealHistory).set({ status: 'approved' }).where(eq(dealHistory.id, id))
+    // DB 'queued' = owner-approved and eligible for nightly activation.
+    // The Shopify metafield keeps its own 'approved' vocabulary below.
+    await db.update(dealHistory).set({ status: 'queued' }).where(eq(dealHistory.id, id))
     if (shopifyProductId) {
       await activateShopifyProduct(shopifyProductId)
       await setDealStatus(shopifyProductId, 'approved')
@@ -106,11 +108,11 @@ export async function action({ request }: ActionFunctionArgs) {
         .where(eq(dealHistory.id, liveNow.id))
     }
 
-    // Activate next approved deal (earliest date first, regardless of exact date)
+    // Activate next queued (owner-approved) deal, earliest date first
     const [nextDeal] = await db
       .select()
       .from(dealHistory)
-      .where(eq(dealHistory.status, 'approved'))
+      .where(eq(dealHistory.status, 'queued'))
       .orderBy(dealHistory.dealDate)
       .limit(1)
     if (nextDeal?.shopifyProductId) {
@@ -157,22 +159,20 @@ export async function action({ request }: ActionFunctionArgs) {
   return null
 }
 
-const ALL_STATUSES = ['pending_review', 'pending', 'approved', 'live', 'archived'] as const
+const ALL_STATUSES = ['pending', 'queued', 'live', 'archived'] as const
 
 const STATUS_LABELS: Record<string, string> = {
-  pending_review: 'Staged',
-  pending:        'Pending',
-  approved:       'Approved',
-  live:           'Live',
-  archived:       'Archived',
+  pending:  'Pending',
+  queued:   'Queued (approved)',
+  live:     'Live',
+  archived: 'Archived',
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  pending:        'bg-yellow-100 text-yellow-700',
-  pending_review: 'bg-purple-100 text-purple-700',
-  approved:       'bg-green-100 text-green-700',
-  live:           'bg-blue-100 text-blue-700',
-  archived:       'bg-gray-100 text-gray-500',
+  pending:  'bg-yellow-100 text-yellow-700',
+  queued:   'bg-green-100 text-green-700',
+  live:     'bg-blue-100 text-blue-700',
+  archived: 'bg-gray-100 text-gray-500',
 }
 
 const FILTER_ACTIVE = 'bg-ink text-white'
@@ -208,7 +208,7 @@ export default function AdminQueuePage() {
   // Default: hide archived
   const activeFilters: Set<string> = searchParams.has('status')
     ? new Set(searchParams.getAll('status'))
-    : new Set(['pending_review', 'pending', 'approved', 'live'])
+    : new Set(['pending', 'queued', 'live'])
 
   function toggleFilter(status: string) {
     const next = new Set(activeFilters)
@@ -227,7 +227,7 @@ export default function AdminQueuePage() {
   )
 
   const visibleDeals = deals.filter(d => activeFilters.has(d.status))
-  const stagedDeals  = deals.filter(d => d.status === 'pending_review')
+  const stagedDeals  = deals.filter(d => d.status === 'pending')
   const rotationResult = fetcher.data && 'rotated' in fetcher.data ? fetcher.data.rotated : null
 
   return (
@@ -241,7 +241,7 @@ export default function AdminQueuePage() {
               : 'Nothing was live. '}
             {rotationResult.activated
               ? <>Now live: <strong>{rotationResult.activated}</strong>.</>
-              : 'No approved deal found to activate.'}
+              : 'No queued deal found to activate.'}
           </span>
         </div>
       )}
@@ -250,8 +250,8 @@ export default function AdminQueuePage() {
         <div className="mb-5 bg-purple-50 border border-purple-200 rounded-2xl px-5 py-3 flex items-center gap-3 text-sm text-purple-700">
           <span className="text-base">🤖</span>
           <span>
-            <strong>{stagedDeals.length}</strong> deal{stagedDeals.length > 1 ? 's' : ''} staged by the pipeline and awaiting your review —
-            approve below to lock them in.
+            <strong>{stagedDeals.length}</strong> pending deal{stagedDeals.length > 1 ? 's' : ''} awaiting your approval —
+            approve below to queue for the nightly rotation.
           </span>
         </div>
       )}
@@ -579,8 +579,8 @@ interface ActionsDropdownProps {
 function ActionsDropdown({ deal, isOpen, onToggle, fetcher, onConfirm, onClose }: ActionsDropdownProps) {
   const ref = useRef<HTMLDivElement>(null)
 
-  const canApprove    = deal.status === 'pending' || deal.status === 'pending_review'
-  const canUnapprove  = deal.status === 'approved'
+  const canApprove    = deal.status === 'pending'
+  const canUnapprove  = deal.status === 'queued'
   const canUnarchive  = deal.status === 'archived'
   const canForceLive  = (canApprove || canUnapprove || canUnarchive) && Boolean(deal.shopifyProductId)
 
@@ -620,7 +620,7 @@ function ActionsDropdown({ deal, isOpen, onToggle, fetcher, onConfirm, onClose }
               <input type="hidden" name="intent" value="unapprove" />
               <input type="hidden" name="id" value={deal.id} />
               <button type="submit" className="w-full text-left px-4 py-2 text-xs font-medium text-yellow-600 hover:bg-cream-2 transition-colors">
-                ↩ Unapprove
+                ↩ Unqueue
               </button>
             </fetcher.Form>
           )}
