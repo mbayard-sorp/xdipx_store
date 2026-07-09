@@ -47,12 +47,22 @@ async function getVaultDiscountPct(): Promise<number> {
   return isNaN(pct) ? 25 : Math.max(5, Math.min(60, pct))
 }
 
-/** Get the first variant GID for a product (for pricing updates). */
+/**
+ * Get the first variant GID for a product (for pricing updates).
+ * Returns null (rather than throwing) if the product lookup fails — e.g. the
+ * product was deleted directly in Shopify — so callers can degrade gracefully.
+ */
 async function getFirstVariantGid(shopifyProductId: string): Promise<string | null> {
   const numericId = shopifyProductId.replace('gid://shopify/Product/', '')
-  const { product } = await shopifyAdmin<{
-    product: { variants: { id: number }[] } | null
-  }>(`/products/${numericId}.json?fields=variants`)
+  let product: { variants: { id: number }[] } | null
+  try {
+    ;({ product } = await shopifyAdmin<{
+      product: { variants: { id: number }[] } | null
+    }>(`/products/${numericId}.json?fields=variants`))
+  } catch (err) {
+    console.error(`[deal-rotator] product ${numericId} lookup failed — treating as missing:`, err)
+    return null
+  }
   const v = product?.variants?.[0]
   return v ? `gid://shopify/ProductVariant/${v.id}` : null
 }
@@ -86,32 +96,44 @@ export async function transitionToVaultPricing(
     vaultPrice = Math.round(msrp * (1 - pct / 100) * 100) / 100
   }
 
-  // Update Shopify variant price to vault price
-  if (vaultPrice > 0) {
-    const variantGid = await getFirstVariantGid(deal.shopifyProductId)
-    if (variantGid) {
-      await updateVariantPricing(
-        variantGid,
+  // Shopify-side updates (pricing, status metafield, archive tag). Wrapped
+  // together: if the product was deleted/unpublished out from under us
+  // (e.g. removed directly in Shopify), every one of these 404s. That must
+  // not block the DB transition below — a dead product still needs to stop
+  // being "live" so rotation can advance to the next queued deal.
+  try {
+    // Update Shopify variant price to vault price
+    if (vaultPrice > 0) {
+      const variantGid = await getFirstVariantGid(deal.shopifyProductId)
+      if (variantGid) {
+        await updateVariantPricing(
+          variantGid,
+          vaultPrice.toFixed(2),
+          msrp > 0 ? msrp.toFixed(2) : '',
+        )
+      }
+
+      // Store vault price in metafield
+      await updateProductMetafield(
+        deal.shopifyProductId,
+        'vault_price',
         vaultPrice.toFixed(2),
-        msrp > 0 ? msrp.toFixed(2) : '',
+        'number_decimal',
       )
     }
 
-    // Store vault price in metafield
-    await updateProductMetafield(
-      deal.shopifyProductId,
-      'vault_price',
-      vaultPrice.toFixed(2),
-      'number_decimal',
+    // Set status to vault in Shopify (metafield + tags)
+    await setDealStatus(deal.shopifyProductId, 'vault')
+
+    // Tag with `past-daily-deal-MM-YY` so monthly archive pages can filter by tag.
+    const tag = pastDealTag(deal.dealDate)
+    if (tag) await appendProductTag(deal.shopifyProductId, tag)
+  } catch (err) {
+    console.error(
+      `[deal-rotator] Shopify-side vaulting failed for deal ${deal.id} (product ${deal.shopifyProductId}) — product may no longer exist; archiving in DB only:`,
+      err,
     )
   }
-
-  // Set status to vault in Shopify (metafield + tags)
-  await setDealStatus(deal.shopifyProductId, 'vault')
-
-  // Tag with `past-daily-deal-MM-YY` so monthly archive pages can filter by tag.
-  const tag = pastDealTag(deal.dealDate)
-  if (tag) await appendProductTag(deal.shopifyProductId, tag)
 
   // Update DB — mark completed, store calculated vault price
   await db
@@ -470,9 +492,21 @@ export async function isLiveDealSoldOut(): Promise<{
   if (!liveDeal?.shopifyProductId) return { soldOut: false, dealId: null }
 
   const numericId = liveDeal.shopifyProductId.replace('gid://shopify/Product/', '')
-  const { product } = await shopifyAdmin<{
-    product: { variants: { inventory_quantity: number }[] } | null
-  }>(`/products/${numericId}.json?fields=variants`)
+  let product: { variants: { inventory_quantity: number }[] } | null
+  try {
+    ;({ product } = await shopifyAdmin<{
+      product: { variants: { inventory_quantity: number }[] } | null
+    }>(`/products/${numericId}.json?fields=variants`))
+  } catch (err) {
+    // A deleted/missing Shopify product can't be sold — treat it the same as
+    // sold-out so rotateDeal() advances to the next queued deal instead of
+    // this cron throwing on every poll.
+    console.error(
+      `[deal-rotator] live deal ${liveDeal.id} product ${numericId} lookup failed — treating as sold out:`,
+      err,
+    )
+    return { soldOut: true, dealId: liveDeal.id }
+  }
 
   if (!product) return { soldOut: false, dealId: liveDeal.id }
 

@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -33,6 +38,7 @@ var init_sentry_server = __esm({
 // db/schema.ts
 var schema_exports = {};
 __export(schema_exports, {
+  adCampaigns: () => adCampaigns,
   adminRoles: () => adminRoles,
   apiTokenLog: () => apiTokenLog,
   batchJobs: () => batchJobs,
@@ -81,6 +87,7 @@ __export(schema_exports, {
   smsOptouts: () => smsOptouts,
   smsTurns: () => smsTurns,
   socialPosts: () => socialPosts,
+  strategyBriefs: () => strategyBriefs,
   tosAcceptance: () => tosAcceptance,
   tosVersions: () => tosVersions,
   voicemails: () => voicemails,
@@ -106,7 +113,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, marketingCalendar;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, strategyBriefs, adCampaigns, marketingCalendar;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -129,7 +136,7 @@ var init_schema = __esm({
       vaultPrice: decimal("vault_price", { precision: 10, scale: 2 }),
       pctOffMsrp: decimal("pct_off_msrp", { precision: 5, scale: 2 }),
       sortOrder: integer("sort_order").default(0).notNull(),
-      status: varchar("status", { length: 20 }).default("queued").notNull(),
+      status: varchar("status", { length: 20 }).default("pending").notNull(),
       shopifyProductId: varchar("shopify_product_id", { length: 30 }),
       createdAt: timestamp("created_at").defaultNow().notNull(),
       activatedAt: timestamp("activated_at"),
@@ -930,8 +937,9 @@ var init_schema = __esm({
     });
     homepageTeamRuns = pgTable("homepage_team_runs", {
       id: serial("id").primaryKey(),
+      team: varchar("team", { length: 24 }).notNull().default("homepage"),
       runType: varchar("run_type", { length: 24 }).notNull(),
-      // merchandise|design|manual
+      // merchandise|design|manual|social|ads|email|strategy|apply
       status: varchar("status", { length: 16 }).notNull().default("running"),
       currentPhase: varchar("current_phase", { length: 48 }),
       currentAgent: varchar("current_agent", { length: 48 }),
@@ -943,7 +951,8 @@ var init_schema = __esm({
       finishedAt: timestamp("finished_at")
     }, (t) => ({
       startedIdx: index("idx_homepage_team_runs_started").on(t.startedAt),
-      statusIdx: index("idx_homepage_team_runs_status").on(t.status, t.startedAt)
+      statusIdx: index("idx_homepage_team_runs_status").on(t.status, t.startedAt),
+      teamIdx: index("idx_team_runs_team").on(t.team, t.startedAt)
     }));
     homepageTeamEvents = pgTable("homepage_team_events", {
       id: serial("id").primaryKey(),
@@ -962,17 +971,62 @@ var init_schema = __esm({
     homepageTeamSuggestions = pgTable("homepage_team_suggestions", {
       id: serial("id").primaryKey(),
       runId: integer("run_id").references(() => homepageTeamRuns.id, { onDelete: "set null" }),
+      team: varchar("team", { length: 24 }).notNull().default("homepage"),
+      targetTeam: varchar("target_team", { length: 24 }),
       category: varchar("category", { length: 32 }).notNull(),
       // model|turns|caching|prompt|agents|other
+      kind: varchar("kind", { length: 16 }).notNull().default("process"),
+      // process|strategy|instructions|agent-def|config|code|campaign|promo|program
       suggestion: text("suggestion").notNull(),
       estSavingsUsd: decimal("est_savings_usd", { precision: 10, scale: 4 }).notNull().default("0"),
       cxRisk: varchar("cx_risk", { length: 8 }).notNull().default("low"),
       // low|med|high
       status: varchar("status", { length: 12 }).notNull().default("proposed"),
-      // proposed|approved|applied|dismissed
+      // proposed|approved|pr_open|applied|dismissed
+      applyRef: text("apply_ref"),
+      // PR URL / applied artifact
+      decidedAt: timestamp("decided_at"),
       createdAt: timestamp("created_at").notNull().defaultNow()
     }, (t) => ({
-      statusIdx: index("idx_homepage_team_suggestions_status").on(t.status, t.createdAt)
+      statusIdx: index("idx_homepage_team_suggestions_status").on(t.status, t.createdAt),
+      teamIdx: index("idx_team_sugg_team").on(t.team, t.status, t.createdAt)
+    }));
+    strategyBriefs = pgTable("strategy_briefs", {
+      id: serial("id").primaryKey(),
+      weekStart: date("week_start").notNull(),
+      brief: text("brief").notNull(),
+      // markdown: focus, per-team directives, stop-doing list
+      metricsJson: json("metrics_json"),
+      // revenue, GA4, spend, engagement behind the calls
+      status: varchar("status", { length: 12 }).notNull().default("active"),
+      // active|superseded|draft
+      createdBy: varchar("created_by", { length: 48 }).notNull().default("store-strategist"),
+      createdAt: timestamp("created_at").notNull().defaultNow()
+    }, (t) => ({
+      statusIdx: index("idx_strategy_briefs_status").on(t.status, t.createdAt)
+    }));
+    adCampaigns = pgTable("ad_campaigns", {
+      id: serial("id").primaryKey(),
+      platform: varchar("platform", { length: 20 }).notNull(),
+      // meta|x|google|reddit|other
+      name: varchar("name", { length: 120 }).notNull(),
+      objective: varchar("objective", { length: 40 }).notNull(),
+      status: varchar("status", { length: 16 }).notNull().default("proposed"),
+      // proposed|approved|launched|paused|ended|rejected
+      plannedDailyCents: integer("planned_daily_cents").notNull().default(0),
+      plannedTotalCents: integer("planned_total_cents"),
+      actualSpendUsd: decimal("actual_spend_usd", { precision: 10, scale: 2 }).notNull().default("0"),
+      externalCampaignId: varchar("external_campaign_id", { length: 64 }),
+      audienceJson: json("audience_json"),
+      creativeJson: json("creative_json"),
+      // copy variants, media refs, landing UTMs
+      policyCheck: text("policy_check").notNull(),
+      // REQUIRED docs/ads-policy.md compliance note
+      runId: integer("run_id").references(() => homepageTeamRuns.id, { onDelete: "set null" }),
+      createdAt: timestamp("created_at").notNull().defaultNow(),
+      updatedAt: timestamp("updated_at").notNull().defaultNow()
+    }, (t) => ({
+      statusIdx: index("idx_ad_campaigns_status").on(t.status, t.createdAt)
     }));
     marketingCalendar = pgTable("marketing_calendar", {
       id: serial("id").primaryKey(),
@@ -9213,7 +9267,7 @@ var init_emma_rail_tools_server = __esm({
 });
 
 // app/lib/emma-voice.server.ts
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 function slice(text2, startMarker, endMarker) {
@@ -9224,12 +9278,21 @@ function slice(text2, startMarker, endMarker) {
   }
   return text2.slice(start + startMarker.length, end).trim();
 }
-var __dirname, charter, EMMA_VOICE_CORE, MARKETING_ADDENDUM, ENRICHMENT_ADDENDUM, CONVERSATIONAL_ADDENDUM, SUPPORT_ADDENDUM, EMMA_VOICE_MARKETING, EMMA_VOICE_ENRICHMENT, EMMA_VOICE_CONVERSATIONAL, EMMA_VOICE_SUPPORT;
+var __dirname, CHARTER_CANDIDATES, charterPath, charter, EMMA_VOICE_CORE, MARKETING_ADDENDUM, ENRICHMENT_ADDENDUM, CONVERSATIONAL_ADDENDUM, SUPPORT_ADDENDUM, EMMA_VOICE_MARKETING, EMMA_VOICE_ENRICHMENT, EMMA_VOICE_CONVERSATIONAL, EMMA_VOICE_SUPPORT;
 var init_emma_voice_server = __esm({
   "app/lib/emma-voice.server.ts"() {
     "use strict";
     __dirname = dirname(fileURLToPath(import.meta.url));
-    charter = readFileSync(resolve(__dirname, "../../docs/emma-voice.md"), "utf-8");
+    CHARTER_CANDIDATES = [
+      resolve(process.cwd(), "docs/emma-voice.md"),
+      resolve(__dirname, "../../docs/emma-voice.md"),
+      resolve(__dirname, "../docs/emma-voice.md")
+    ];
+    charterPath = CHARTER_CANDIDATES.find((p) => existsSync(p));
+    if (!charterPath) {
+      throw new Error(`emma-voice.server: docs/emma-voice.md not found; tried ${CHARTER_CANDIDATES.join(", ")}`);
+    }
+    charter = readFileSync(charterPath, "utf-8");
     EMMA_VOICE_CORE = slice(charter, "<!-- core:start -->", "<!-- core:end -->");
     MARKETING_ADDENDUM = slice(charter, "<!-- addendum:marketing:start -->", "<!-- addendum:marketing:end -->");
     ENRICHMENT_ADDENDUM = slice(charter, "<!-- addendum:enrichment:start -->", "<!-- addendum:enrichment:end -->");
@@ -9284,6 +9347,10 @@ var init_model_pricing_server = __esm({
       "fal/flux-schnell": 3e-3,
       "fal/flux-dev": 0.025,
       "fal/flux-pro": 0.05,
+      "fal/flux-kontext": 0.04,
+      // FLUX.1 Kontext [pro] image-to-image
+      "fal/flux-kontext-dev": 0.025,
+      // FLUX.1 Kontext [dev] image-to-image (product refs; safety checker off)
       "fal/nano-banana": 0.039,
       // fal's Gemini-flash-image endpoint
       "imagen": 0.04,
@@ -14155,7 +14222,7 @@ __export(deal_rotator_server_exports, {
   rotateDeal: () => rotateDeal,
   transitionToVaultPricing: () => transitionToVaultPricing
 });
-import { eq as eq9, and as and2, isNull, asc as asc2, inArray as inArray2 } from "drizzle-orm";
+import { eq as eq9, ne, and as and2, isNull, asc as asc2, inArray as inArray2 } from "drizzle-orm";
 function estDate(offsetDays = 0) {
   const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1e3);
   return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -14174,7 +14241,14 @@ async function getVaultDiscountPct() {
 }
 async function getFirstVariantGid(shopifyProductId) {
   const numericId = shopifyProductId.replace("gid://shopify/Product/", "");
-  const { product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`);
+  let product;
+  try {
+    ;
+    ({ product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`));
+  } catch (err) {
+    console.error(`[deal-rotator] product ${numericId} lookup failed \u2014 treating as missing:`, err);
+    return null;
+  }
   const v = product?.variants?.[0];
   return v ? `gid://shopify/ProductVariant/${v.id}` : null;
 }
@@ -14187,27 +14261,34 @@ async function transitionToVaultPricing(deal) {
     const pct = isFinite(productPct) && productPct > 0 ? Math.max(0, Math.min(100, productPct)) : await getVaultDiscountPct();
     vaultPrice = Math.round(msrp * (1 - pct / 100) * 100) / 100;
   }
-  if (vaultPrice > 0) {
-    const variantGid = await getFirstVariantGid(deal.shopifyProductId);
-    if (variantGid) {
-      await updateVariantPricing(
-        variantGid,
+  try {
+    if (vaultPrice > 0) {
+      const variantGid = await getFirstVariantGid(deal.shopifyProductId);
+      if (variantGid) {
+        await updateVariantPricing(
+          variantGid,
+          vaultPrice.toFixed(2),
+          msrp > 0 ? msrp.toFixed(2) : ""
+        );
+      }
+      await updateProductMetafield(
+        deal.shopifyProductId,
+        "vault_price",
         vaultPrice.toFixed(2),
-        msrp > 0 ? msrp.toFixed(2) : ""
+        "number_decimal"
       );
     }
-    await updateProductMetafield(
-      deal.shopifyProductId,
-      "vault_price",
-      vaultPrice.toFixed(2),
-      "number_decimal"
+    await setDealStatus(deal.shopifyProductId, "vault");
+    const tag = pastDealTag(deal.dealDate);
+    if (tag) await appendProductTag(deal.shopifyProductId, tag);
+  } catch (err) {
+    console.error(
+      `[deal-rotator] Shopify-side vaulting failed for deal ${deal.id} (product ${deal.shopifyProductId}) \u2014 product may no longer exist; archiving in DB only:`,
+      err
     );
   }
-  await setDealStatus(deal.shopifyProductId, "vault");
-  const tag = pastDealTag(deal.dealDate);
-  if (tag) await appendProductTag(deal.shopifyProductId, tag);
   await db.update(dealHistory).set({
-    status: "queued",
+    status: "archived",
     completedAt: /* @__PURE__ */ new Date(),
     vaultPrice: vaultPrice > 0 ? vaultPrice.toFixed(2) : null
   }).where(and2(eq9(dealHistory.id, deal.id), eq9(dealHistory.status, "live")));
@@ -14235,7 +14316,7 @@ async function activateDeal(deal) {
   if (failedJobs.length > 0) {
     console.warn(`[deal-rotator] WARN gated enrichment failed for deal ${deal.id}; activating with stale/partial copy (degraded-enrichment path)`);
   }
-  const claimed = await db.update(dealHistory).set({ status: "live" }).where(and2(eq9(dealHistory.id, deal.id), inArray2(dealHistory.status, ["queued", "pending_approval"]))).returning({ id: dealHistory.id });
+  const claimed = await db.update(dealHistory).set({ status: "live" }).where(and2(eq9(dealHistory.id, deal.id), ne(dealHistory.status, "live"))).returning({ id: dealHistory.id });
   if (claimed.length === 0) {
     console.log(`[deal-rotator] deal ${deal.id} already live \u2014 skipping duplicate activation`);
     return;
@@ -14415,7 +14496,17 @@ async function isLiveDealSoldOut() {
   const [liveDeal] = await db.select().from(dealHistory).where(eq9(dealHistory.status, "live")).limit(1);
   if (!liveDeal?.shopifyProductId) return { soldOut: false, dealId: null };
   const numericId = liveDeal.shopifyProductId.replace("gid://shopify/Product/", "");
-  const { product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`);
+  let product;
+  try {
+    ;
+    ({ product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`));
+  } catch (err) {
+    console.error(
+      `[deal-rotator] live deal ${liveDeal.id} product ${numericId} lookup failed \u2014 treating as sold out:`,
+      err
+    );
+    return { soldOut: true, dealId: liveDeal.id };
+  }
   if (!product) return { soldOut: false, dealId: liveDeal.id };
   const totalInventory = product.variants.reduce(
     (sum, v) => sum + (v.inventory_quantity ?? 0),
@@ -19470,18 +19561,18 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
     return 0;
   }
   if (cappedKeys.length === 0) return 0;
-  const [minMarginStr, minQtyStr, minGapStr, requireCarriedStr, maxPerDayStr] = await Promise.all([
-    getPipelineSetting("monitor_p2_min_margin_pct"),
+  const [minMarkupStr, minQtyStr, minGapStr, requireCarriedStr, maxPerDayStr] = await Promise.all([
+    getPipelineSetting("monitor_p2_min_markup_pct"),
     getPipelineSetting("monitor_p2_min_qty"),
     getPipelineSetting("monitor_p2_min_gap_score"),
     getPipelineSetting("monitor_p2_require_carried_brand"),
     getPipelineSetting("monitor_p2_max_auto_imports_per_day")
   ]);
-  const minMarginPct = parseFloat(minMarginStr ?? "0.45");
-  const minQty = parseInt(minQtyStr ?? "100", 10) || 100;
+  const minMarkupPct = parseFloat(minMarkupStr ?? "0.08");
+  const minQty = parseInt(minQtyStr ?? "30", 10) || 30;
   const minGapScore = parseFloat(minGapStr ?? "3.0");
   const requireCarried = (requireCarriedStr ?? "true") !== "false";
-  const maxPerDay = Math.max(0, parseInt(maxPerDayStr ?? "3", 10) || 0);
+  const maxPerDay = Math.max(0, parseInt(maxPerDayStr ?? "8", 10) || 0);
   if (maxPerDay <= 0) return 0;
   const importedTodayRows = await db.select({ cnt: sql7`count(*)::int` }).from(importCandidates).where(and4(eq18(importCandidates.status, "imported"), eq18(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
@@ -19494,7 +19585,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
     id: importCandidates.id,
     tier: importCandidates.tier,
     brand: importCandidates.brand,
-    marginPct: importCandidates.marginPct,
+    wholesaleCost: importCandidates.wholesaleCost,
     totalQty: importCandidates.totalQty,
     dealScore: importCandidates.dealScore,
     mapPrice: importCandidates.mapPrice,
@@ -19509,13 +19600,14 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
     if (!tierOk || c.needsReview) return false;
     const carriedOk = requireCarried ? carriedBrands.has((c.brand ?? "").toLowerCase().trim()) : true;
     if (!carriedOk) return false;
-    const margin = parseFloat(c.marginPct ?? "0") / 100;
+    const wholesale = parseFloat(c.wholesaleCost ?? "0");
     const gap = parseFloat(c.dealScore ?? "0");
     const qty = c.totalQty ?? 0;
     const map = parseFloat(c.mapPrice ?? "0");
     const price = parseFloat(c.proposedPrice ?? "0");
     const mapOk = !(map > 0 && price < map);
-    return margin >= minMarginPct && qty >= minQty && gap >= minGapScore && mapOk;
+    const markupOk = wholesale > 0 && price >= wholesale * (1 + minMarkupPct);
+    return markupOk && qty >= minQty && gap >= minGapScore && mapOk;
   });
   let imported = 0;
   for (const c of gated) {
