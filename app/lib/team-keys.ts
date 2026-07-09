@@ -10,7 +10,7 @@
  * All keys are <= varchar(50) (pipeline_settings.key constraint).
  */
 
-export const TEAM_IDS = ['homepage', 'social', 'ads', 'email', 'strategy'] as const
+export const TEAM_IDS = ['homepage', 'social', 'ads', 'email', 'strategy', 'content'] as const
 export type TeamId = (typeof TEAM_IDS)[number]
 
 export function isTeamId(v: unknown): v is TeamId {
@@ -38,6 +38,7 @@ export const TEAM_DEFAULTS: Record<TeamId, { dailyCents: number; maxRunsPerDay: 
   ads:      { dailyCents: 500,  maxRunsPerDay: 1 },
   email:    { dailyCents: 500,  maxRunsPerDay: 1 },
   strategy: { dailyCents: 300,  maxRunsPerDay: 1 },
+  content:  { dailyCents: 300,  maxRunsPerDay: 2 }, // 2nd run = one voice-gate retry
 }
 
 /** Homepage-only extras (kept from the original TEAM_KEYS set). */
@@ -52,8 +53,11 @@ export const HOMEPAGE_EXTRA_KEYS = {
  *    until this AND the env-level X_AUTO_POST_ENABLED are both true.
  *  - suggestion apply: kill switch for agent-editor turning approved
  *    instruction-suggestions into PRs.
+ *  - content autopublish: with the content team enabled, blog posts go live
+ *    only when this is on; off degrades the daily routine to draft-only.
  */
 export const VALVE_KEYS = {
-  socialAutopost:  'social_team_autopost',
-  suggestionApply: 'suggestion_apply_enabled',
+  socialAutopost:     'social_team_autopost',
+  suggestionApply:    'suggestion_apply_enabled',
+  contentAutopublish: 'content_team_autopublish',
 } as const
