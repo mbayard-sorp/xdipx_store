@@ -490,9 +490,11 @@ async function classifyAudienceWithHaiku(
       messages: [{ role: 'user', content: text }],
     })
 
-    const _u = res.usage as {
-      input_tokens: number
-      output_tokens: number
+    // Usage may be absent on injected test clients; logging is best-effort
+    // and must never unwind the call (see token-log.server.ts contract).
+    const _u = (res.usage ?? {}) as {
+      input_tokens?: number
+      output_tokens?: number
       cache_creation_input_tokens?: number
       cache_read_input_tokens?: number
     }
@@ -500,8 +502,8 @@ async function classifyAudienceWithHaiku(
       feature: 'sms',
       model: HAIKU_MODEL,
       source: 'sync',
-      inputTokens: _u.input_tokens,
-      outputTokens: _u.output_tokens,
+      inputTokens: _u.input_tokens ?? 0,
+      outputTokens: _u.output_tokens ?? 0,
       cacheCreationTokens: _u.cache_creation_input_tokens ?? 0,
       cacheReadTokens: _u.cache_read_input_tokens ?? 0,
       caller: 'classifyAudienceWithHaiku',
