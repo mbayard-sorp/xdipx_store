@@ -160,7 +160,7 @@ function DealCard({
         </div>
       )}
 
-      {(deal.status === 'pending' || deal.status === 'approved') && deal.shopifyProductId && !compact && (
+      {(deal.status === 'pending' || deal.status === 'queued') && deal.shopifyProductId && !compact && (
         <fetcher.Form
           method="post"
           className="mt-2"

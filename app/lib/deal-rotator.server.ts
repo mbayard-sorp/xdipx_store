@@ -9,7 +9,7 @@
  */
 import { db } from './db.server'
 import { dealHistory, pipelineSettings, batchJobs } from '../../db/schema'
-import { eq, and, isNull, asc, inArray } from 'drizzle-orm'
+import { eq, ne, and, isNull, asc, inArray } from 'drizzle-orm'
 import {
   setDealStatus,
   activateShopifyProduct,
@@ -117,7 +117,7 @@ export async function transitionToVaultPricing(
   await db
     .update(dealHistory)
     .set({
-      status: 'queued',
+      status: 'archived',
       completedAt: new Date(),
       vaultPrice: vaultPrice > 0 ? vaultPrice.toFixed(2) : null,
     })
@@ -182,12 +182,15 @@ export async function activateDeal(
     console.warn(`[deal-rotator] WARN gated enrichment failed for deal ${deal.id}; activating with stale/partial copy (degraded-enrichment path)`)
   }
 
-  // E1 — double-activation guard: atomic claim via UPDATE...WHERE deal_status <> 'live'.
-  // If this returns 0 rows, another path already activated — return without firing Klaviyo.
+  // E1 — double-activation guard: atomic claim via UPDATE...WHERE status <> 'live'.
+  // If this returns 0 rows, another path already activated — return without firing
+  // Klaviyo. The approval gate lives in *selection* (rotateDeal picks only
+  // status='queued', i.e. owner-approved); this claim is only the race guard, and
+  // must also admit explicit admin force-live on pending/archived rows.
   const claimed = await db
     .update(dealHistory)
     .set({ status: 'live' })
-    .where(and(eq(dealHistory.id, deal.id), inArray(dealHistory.status, ['queued', 'pending_approval'])))
+    .where(and(eq(dealHistory.id, deal.id), ne(dealHistory.status, 'live')))
     .returning({ id: dealHistory.id })
   if (claimed.length === 0) {
     console.log(`[deal-rotator] deal ${deal.id} already live — skipping duplicate activation`)

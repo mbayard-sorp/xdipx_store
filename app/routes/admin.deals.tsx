@@ -33,7 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const editId = url.searchParams.get('edit')
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1'))
-  const activeStatuses = ['pending', 'live']
+  const activeStatuses = ['pending', 'queued', 'live']
 
   // Fetch live deal separately for the card
   const [liveDealRow] = await db
@@ -283,14 +283,16 @@ export async function action({ request }: ActionFunctionArgs) {
       .from(dealHistory)
       .where(inArray(dealHistory.id, ids))
     const eligibleIds = new Set(
-      existing.filter(r => r.status === 'pending' || r.status === 'live').map(r => r.id)
+      existing
+        .filter(r => r.status === 'pending' || r.status === 'queued' || r.status === 'live')
+        .map(r => r.id)
     )
 
     const missing = ids.filter(id => !eligibleIds.has(id))
     if (missing.length > 0) {
       return {
         importErrors: [
-          `Unknown or non-editable deal_id(s): ${missing.join(', ')} (only pending/live deals can be reordered)`,
+          `Unknown or non-editable deal_id(s): ${missing.join(', ')} (only pending/queued/live deals can be reordered)`,
         ],
         importCount: 0,
       }
@@ -377,7 +379,7 @@ export async function action({ request }: ActionFunctionArgs) {
       mapPrice:         p.mapPrice?.toFixed(2) ?? null,
       unitsAvailable:   p.inventoryQuantity,
       dealScore:        p.dealScore?.toFixed(3) ?? null,
-      status:           'queued' as const,
+      status:           'pending' as const,
       sortOrder:        startOrder + i,
       shopifyProductId: p.shopifyProductId,
     }))
@@ -2051,7 +2053,7 @@ export default function AdminDealsPage() {
               const dealPrice = shopifyData?.price ?? (deal.dealPrice ? parseFloat(deal.dealPrice) : null)
               const margin    = dealPrice && wholesale ? (dealPrice - wholesale) / dealPrice : null
               const isCompleted = Boolean(deal.completedAt)
-              const isDraggable = deal.status === 'pending' && !isCompleted
+              const isDraggable = (deal.status === 'pending' || deal.status === 'queued') && !isCompleted
               const isBeingDragged = draggedId === deal.id
               const isDragTarget = dragOverId === deal.id && draggedId !== deal.id
 
@@ -2092,7 +2094,7 @@ export default function AdminDealsPage() {
                       e.preventDefault()
                       setDragOverId(null)
                       if (draggedId === null || draggedId === deal.id) return
-                      const queuedDeals = filteredDeals.filter(d => d.status === 'pending' && !d.completedAt)
+                      const queuedDeals = filteredDeals.filter(d => (d.status === 'pending' || d.status === 'queued') && !d.completedAt)
                       const ids = queuedDeals.map(d => d.id)
                       const fromIdx = ids.indexOf(draggedId)
                       const toIdx = ids.indexOf(deal.id)

@@ -258,6 +258,12 @@ export default function AgentTeamsPage() {
             on={suggestionApply}
           />
         )}
+        {team === 'strategy' && (
+          <p className="text-xs text-ink-4">
+            Import-automation valves (Phase 2 auto-import, product-manager, enrich→publish) are managed on{' '}
+            <Link to="/admin/imports" className="underline text-ink-3 hover:text-ink">/admin/imports</Link>, not here.
+          </p>
+        )}
       </section>
 
       {/* ── Status ───────────────────────────────────────────────────────── */}
