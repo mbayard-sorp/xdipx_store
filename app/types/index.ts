@@ -385,6 +385,10 @@ export interface VaultDeal {
   productTypeDial?: string | null
   /** xdipx.original_price (already mapped to msrp but kept raw for feed) */
   originalPrice?: string | null
+  /** xdipx.map_price — minimum advertised price; 0/absent means no MAP constraint */
+  mapPrice?: number
+  /** xdipx.map_restricted — true suppresses advertised-discount framing (MAP = MSRP) */
+  mapRestricted?: boolean
   // mm-google-shopping metafields
   gmcCategory?:  string | null
   gmcAgeGroup?:  string | null
