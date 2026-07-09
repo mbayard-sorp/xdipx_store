@@ -1,7 +1,7 @@
 # Store-Wide Agent Teams
 
-The homepage merchandising team's two-plane architecture, generalized to the whole store. Five
-teams — **homepage, social, ads, email, strategy** — share one control plane (gate, budgets, kill
+The homepage merchandising team's two-plane architecture, generalized to the whole store. Six
+teams — **homepage, social, ads, email, content, strategy** — share one control plane (gate, budgets, kill
 switches, run/event feed, the suggestion improvement bus, the weekly strategy brief) and run as
 scheduled Claude cloud routines billing to the Max subscription. **Everything ships OFF by default.**
 
@@ -33,7 +33,7 @@ Admin UI: /admin/homepage-team  (team tabs:
 The original `/api/homepage-team/{gate,run,event,spend}` endpoints are unchanged (they now delegate
 with `team='homepage'`). All teams log spend through the existing `POST /api/homepage-team/spend`
 under their own `feature` labels (`social-drafts`, `ads-planning`, `email-planning`,
-`strategy-weekly`); the per-team gate sums `feature LIKE '{team}-%'`.
+`strategy-weekly`, `content-blog`); the per-team gate sums `feature LIKE '{team}-%'`.
 
 - `app/lib/team.server.ts` — the generalized control plane (gate/config/runs/events/suggestions/
   brief/campaigns/social drafts/calendar). `app/lib/homepage-team.server.ts` is a compat shim.
@@ -49,11 +49,13 @@ under their own `feature` labels (`social-drafts`, `ads-planning`, `email-planni
 | ads | `ads-manager` | weekly | **propose-only** — writes `ad_campaigns` proposals; owner launches in-platform |
 | email | `email-marketing-manager` | weekly | **plan-only** — campaign briefs as suggestions; owner executes in Klaviyo |
 | strategy | `store-strategist` (+ `inventory-sentinel`, `promo-manager`, `loyalty-referral-manager` sub-steps; `agent-editor` and `process-optimizer` run under this team's budget) | weekly (Mon recommended) | advisory only — brief + suggestions |
+| content | `content-writer` | daily | **valve-gated publish**: drafts a Sanity `blogPost` per run; publishes live only on a voice-gate PASS with `content_team_autopublish` on, otherwise the post stays a Sanity draft |
 
 Routines are scheduled **externally in Claude's cloud scheduler** (same as the homepage team — the
 repo only ships the playbooks in this folder and the callback endpoints). Recommended schedule:
 strategy Monday morning, agent-editor + process-optimizer later Monday, ads/email Tuesday, social
-daily.
+daily, content daily (see `docs/store-team/routine-content-daily.md`; its trigger is created at
+enablement, not up front).
 
 ## Kill switches, budgets, valves
 
@@ -63,10 +65,11 @@ OFF / conservative.
 | Setting key | Default | Purpose |
 |---|---|---|
 | `{team}_team_enabled` | `false` | Per-team kill switch (homepage keeps `homepage_team_enabled`). |
-| `{team}_team_daily_cents` | social/ads/email 500, strategy 300, homepage 1500 | Daily metered cap per team. |
-| `{team}_team_max_runs` | social 2, others 1, homepage 4 | Max-quota guard (runs/day). |
+| `{team}_team_daily_cents` | social/ads/email 500, strategy/content 300, homepage 1500 | Daily metered cap per team. |
+| `{team}_team_max_runs` | social 2, content 2 (second run = one voice-gate retry only), others 1, homepage 4 | Max-quota guard (runs/day). |
 | `homepage_team_build_cents`, `homepage_team_max_images` | 10000 / 12 | Homepage-only extras. |
 | `social_team_autopost` | `false` | **Draft-mode valve.** Live posting also requires `X_AUTO_POST_ENABLED`, and only X has plumbing. |
+| `content_team_autopublish` | `false` | **Publish valve (content).** On = a voice-gate PASS publishes the blog post live; off = posts stay Sanity drafts. The routine keeps running either way. |
 | `suggestion_apply_enabled` | `false` | **Apply-path valve.** When on, agent-editor turns approved instruction-suggestions into PRs. |
 
 The import-automation valves (`product_manager_enabled`, `product_manager_max_actions_per_run`,
