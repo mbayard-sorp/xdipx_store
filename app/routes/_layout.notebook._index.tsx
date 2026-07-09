@@ -85,6 +85,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: data.canonical },
+    { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: 'https://xdipx.com/notebook.md' },
     ...buildSocialMeta({ title, description, url: data.canonical, image: null, type: 'website' }),
   ]
 

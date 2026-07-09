@@ -11,6 +11,7 @@
  */
 
 import type { Deal } from '~/types'
+import type { FaqSection } from '~/lib/faq-content'
 
 // ─── Shared utilities ────────────────────────────────────────────────────────
 
@@ -383,21 +384,76 @@ export function blogPostToMarkdown(post: BlogPostData): string {
 
 // ─── pageToMarkdown ──────────────────────────────────────────────────────────
 
+/**
+ * Serialize a Sanity page's content-block sections. Handles the text-bearing
+ * block types (richText bodies, the editorBio card) plus raw portable-text
+ * nodes; layout-only blocks (carousels, tiles, banners) are omitted.
+ */
+function contentSectionsToMarkdown(sections: unknown): string {
+  if (!Array.isArray(sections)) return ''
+
+  type EditorLike = {
+    name?: string | null
+    role?: string | null
+    shortBio?: string | null
+    longBio?: unknown
+  }
+
+  const parts: string[] = []
+  for (const raw of sections) {
+    if (!raw || typeof raw !== 'object') continue
+    const node = raw as { _type?: string; active?: boolean; body?: unknown; editor?: EditorLike | null }
+    if (node.active === false) continue
+
+    if (node._type === 'richText') {
+      const md = portableTextToMarkdown(node.body)
+      if (md) parts.push(md)
+      continue
+    }
+
+    if (node._type === 'editorBio') {
+      const editor = node.editor
+      if (!editor?.name) continue
+      const bio: string[] = [`## ${editor.name}`]
+      if (editor.role) bio.push('', editor.role)
+      if (editor.shortBio) bio.push('', editor.shortBio)
+      const longBio = portableTextToMarkdown(editor.longBio)
+      if (longBio) bio.push('', longBio)
+      parts.push(bio.join('\n'))
+      continue
+    }
+
+    // Raw portable-text nodes (block / image), for pages stored as plain PT
+    const md = blockToMarkdown(node as PtNode)
+    if (md) parts.push(md)
+  }
+  return parts.join('\n\n')
+}
+
 export interface PageData {
   slug: string
   title: string
   sections?: unknown
+  /** Optional intro rendered as a blockquote under the H1 (e.g. the page's SEO description). */
+  description?: string | undefined
+  /** Clean canonical path override (e.g. '/about'). Defaults to /pages/{slug}. */
+  canonicalPath?: string | undefined
 }
 
 export function pageToMarkdown(page: PageData): string {
-  const path = `/pages/${page.slug}`
+  const path = page.canonicalPath ?? `/pages/${page.slug}`
   const lines: string[] = []
 
   lines.push(`# ${page.title}`)
   lines.push('')
 
+  if (page.description) {
+    lines.push(`> ${page.description}`)
+    lines.push('')
+  }
+
   if (page.sections) {
-    const bodyMd = portableTextToMarkdown(page.sections)
+    const bodyMd = contentSectionsToMarkdown(page.sections)
     if (bodyMd) {
       lines.push(bodyMd)
       lines.push('')
@@ -461,6 +517,178 @@ export function homepageToMarkdown(deal: Deal | null): string {
   lines.push(`- [Notebook](${BASE_URL}/notebook)`)
   lines.push(`- [All products (markdown index)](${BASE_URL}/index.md)`)
   lines.push('')
+
+  lines.push(mdFooter(path))
+
+  return lines.join('\n')
+}
+
+// ─── faqToMarkdown ───────────────────────────────────────────────────────────
+
+export function faqToMarkdown(sections: FaqSection[]): string {
+  const path = '/faq'
+  const lines: string[] = []
+
+  lines.push('# xdipx FAQ')
+  lines.push('')
+  lines.push('> Questions about shipping, billing, returns, and xdipx. We answer everything.')
+  lines.push('')
+
+  for (const section of sections) {
+    lines.push(`## ${section.heading}`)
+    lines.push('')
+    for (const item of section.items) {
+      lines.push(`### ${item.q}`)
+      lines.push('')
+      lines.push(item.a)
+      lines.push('')
+    }
+  }
+
+  lines.push('Still have a question? Email hello@xdipx.com. We respond fast.')
+  lines.push('')
+
+  lines.push(mdFooter(path))
+
+  return lines.join('\n')
+}
+
+// ─── discoverToMarkdown ──────────────────────────────────────────────────────
+
+export interface DiscoverProductItem {
+  handle: string
+  title: string
+  /** Lowest variant price ("from" price). */
+  price: number
+  priceMax?: number | null | undefined
+}
+
+export interface DiscoverGroup {
+  tag: string
+  total: number
+  products: DiscoverProductItem[]
+}
+
+export interface DiscoverData {
+  moods: DiscoverGroup[]
+  audiences: DiscoverGroup[]
+  matters: DiscoverGroup[]
+}
+
+function discoverProductLine(p: DiscoverProductItem): string {
+  const from = p.priceMax != null && p.priceMax > p.price ? 'from ' : ''
+  return `- [${p.title}](${BASE_URL}/products/${p.handle}): ${from}$${p.price.toFixed(2)}`
+}
+
+function discoverGroupSection(lines: string[], heading: string, intro: string, groups: DiscoverGroup[]): void {
+  if (groups.length === 0) return
+  lines.push(`## ${heading}`)
+  lines.push('')
+  lines.push(intro)
+  lines.push('')
+  for (const g of groups) {
+    lines.push(`### ${g.tag} (${g.total} ${g.total === 1 ? 'product' : 'products'})`)
+    lines.push('')
+    for (const p of g.products) lines.push(discoverProductLine(p))
+    if (g.total > g.products.length) {
+      lines.push(`- Plus ${g.total - g.products.length} more in the finder: ${BASE_URL}/discover`)
+    }
+    lines.push('')
+  }
+}
+
+export function discoverToMarkdown(data: DiscoverData): string {
+  const path = '/discover'
+  const lines: string[] = []
+
+  lines.push('# Find your fit, the xdipx product finder')
+  lines.push('')
+  lines.push(
+    '> The Compass is xdipx\'s guided product finder. Pick a mood, who it\'s for, ' +
+    'and what matters to you, and the shelf reshapes around your answers. ' +
+    'This page lists the same catalog grouped by those filters, ' +
+    'with links to each product\'s canonical page.',
+  )
+  lines.push('')
+  lines.push(`Interactive version: ${BASE_URL}/discover`)
+  lines.push('')
+
+  discoverGroupSection(lines, 'Browse by mood', 'The mood or occasion a product suits.', data.moods)
+  discoverGroupSection(lines, 'Browse by who it\'s for', 'Who the product is designed around.', data.audiences)
+  discoverGroupSection(lines, 'Browse by what matters', 'Practical priorities like quietness, size, or ease of cleaning.', data.matters)
+
+  lines.push(mdFooter(path))
+
+  return lines.join('\n')
+}
+
+// ─── notebookHubToMarkdown ───────────────────────────────────────────────────
+
+export interface NotebookHubPost {
+  slug: string
+  title: string
+  excerpt?: string | null | undefined
+  publishedAt?: string | null | undefined
+  category?: { name?: string | null | undefined } | null | undefined
+}
+
+export interface NotebookHubCategory {
+  slug: string
+  name: string
+  description?: string | null | undefined
+}
+
+export interface NotebookHubData {
+  posts: NotebookHubPost[]
+  total: number
+  categories: NotebookHubCategory[]
+}
+
+export function notebookHubToMarkdown(hub: NotebookHubData): string {
+  const path = '/notebook'
+  const lines: string[] = []
+
+  lines.push('# The Notebook')
+  lines.push('')
+  lines.push(
+    '> The xdipx editorial notebook. Things worth knowing, things worth trying, ' +
+    'things Emma couldn\'t stop thinking about.',
+  )
+  lines.push('')
+
+  if (hub.posts.length > 0) {
+    lines.push('## Posts')
+    lines.push('')
+    for (const p of hub.posts) {
+      const metaParts: string[] = []
+      const date = p.publishedAt?.split('T')[0]
+      if (date) metaParts.push(date)
+      if (p.category?.name) metaParts.push(p.category.name)
+      const metaStr = metaParts.length > 0 ? ` (${metaParts.join(', ')})` : ''
+      const excerpt = p.excerpt?.trim() ? `: ${p.excerpt.trim()}` : ''
+      lines.push(`- [${p.title}](${BASE_URL}/notebook/${p.slug})${metaStr}${excerpt}`)
+    }
+    lines.push('')
+    if (hub.total > hub.posts.length) {
+      lines.push(`Showing the ${hub.posts.length} most recent of ${hub.total} posts. Full archive: ${BASE_URL}/notebook`)
+      lines.push('')
+    }
+    lines.push('Each post also has a markdown version at the same URL with ".md" appended.')
+    lines.push('')
+  } else {
+    lines.push('No posts published yet. New writing lands here first.')
+    lines.push('')
+  }
+
+  if (hub.categories.length > 0) {
+    lines.push('## Categories')
+    lines.push('')
+    for (const c of hub.categories) {
+      const desc = c.description?.trim() ? `: ${c.description.trim()}` : ''
+      lines.push(`- [${c.name}](${BASE_URL}/notebook/category/${c.slug})${desc}`)
+    }
+    lines.push('')
+  }
 
   lines.push(mdFooter(path))
 
