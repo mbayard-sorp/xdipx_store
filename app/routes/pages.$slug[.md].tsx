@@ -13,7 +13,7 @@ import { cached } from '~/lib/kv.server'
 
 const BASE_URL = 'https://xdipx.com'
 
-// Slugs with cleaner canonical URLs — redirect to 404 here; use /about.md etc. in future.
+// Slugs with cleaner canonical URLs 404 here; dedicated twins live at /about.md and /faq.md.
 const PAGE_SLUG_DENYLIST = new Set([
   'about',
   'faq',

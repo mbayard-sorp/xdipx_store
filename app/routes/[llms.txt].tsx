@@ -103,6 +103,7 @@ export async function loader() {
   lines.push('## Discover')
   lines.push('')
   lines.push(`- ${BASE_URL}/discover — guided product finder (filter by mood, audience, and what matters)`)
+  lines.push(`- ${BASE_URL}/discover.md — the finder's catalog grouped by mood, audience, and what matters`)
   lines.push(`- ${BASE_URL}/index.md`)
   if (liveDealHandle) {
     lines.push(`- ${BASE_URL}/products/${liveDealHandle}.md`)
@@ -131,25 +132,26 @@ export async function loader() {
   }
 
   // ── Notebook ────────────────────────────────────────────────────────────────
-  if (blogPosts.length > 0) {
-    lines.push('## Notebook')
-    lines.push('')
-    for (const p of blogPosts) {
-      lines.push(`- ${BASE_URL}/notebook/${p.slug}.md`)
-    }
-    lines.push('')
+  lines.push('## Notebook')
+  lines.push('')
+  lines.push(`- ${BASE_URL}/notebook.md — index of all notebook posts`)
+  for (const p of blogPosts) {
+    lines.push(`- ${BASE_URL}/notebook/${p.slug}.md`)
   }
+  lines.push('')
 
   // ── Pages ───────────────────────────────────────────────────────────────────
+  // /faq.md and /about.md are the dedicated twins for the clean-URL pages the
+  // denylist excludes from the generic /pages/{slug}.md route.
   const filteredPages = pages.filter(p => !PAGE_SLUG_DENYLIST.has(p.slug))
-  if (filteredPages.length > 0) {
-    lines.push('## Pages')
-    lines.push('')
-    for (const p of filteredPages) {
-      lines.push(`- ${BASE_URL}/pages/${p.slug}.md`)
-    }
-    lines.push('')
+  lines.push('## Pages')
+  lines.push('')
+  lines.push(`- ${BASE_URL}/faq.md`)
+  lines.push(`- ${BASE_URL}/about.md`)
+  for (const p of filteredPages) {
+    lines.push(`- ${BASE_URL}/pages/${p.slug}.md`)
   }
+  lines.push('')
 
   // ── Optional ────────────────────────────────────────────────────────────────
   lines.push('## Optional')
