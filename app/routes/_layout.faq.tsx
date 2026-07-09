@@ -21,7 +21,7 @@ const FAQ_SECTIONS = [
     items: [
       {
         q: 'Will anyone know what\'s inside?',
-        a: 'Absolutely not. Every xdipx order ships in a plain, unmarked box or poly mailer. No logos, no hints, nothing. The return address will say "XD Inc." — boring on purpose.',
+        a: 'Absolutely not. Every xdipx order ships in a plain, unmarked box or poly mailer. No logos, no hints, nothing. The return address will say "XD Inc." Boring on purpose.',
       },
       {
         q: 'How fast does it ship?',
@@ -34,7 +34,7 @@ const FAQ_SECTIONS = [
     items: [
       {
         q: 'What will appear on my credit card statement?',
-        a: 'A discreet descriptor — not xdipx. We\'ll confirm exactly what it shows in your order confirmation email.',
+        a: 'It reads XDIPX. Short, plain, and unremarkable, the kind of line that blends right into a statement. Your order confirmation email notes it too, so you know exactly what to look for.',
       },
     ],
   },
