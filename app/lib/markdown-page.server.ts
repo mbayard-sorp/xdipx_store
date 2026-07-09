@@ -58,6 +58,8 @@ export function htmlToMarkdown(html: string): string {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&#x2F;/gi, '/')
     .replace(/&nbsp;/g, ' ')
 
   // Headings (before stripping tags)
@@ -119,7 +121,10 @@ type PtBlock = {
   children?: PtSpan[]
   markDefs?: { _key: string; _type: string; href?: string }[]
 }
-type PtNode = PtBlock | PtImage | PtBlogImage | { _type: string; [k: string]: unknown }
+type PtProductEmbed = { _type: 'blogProductEmbed'; productHandle?: string; ctaLabel?: string }
+type PtPullQuote = { _type: 'blogPullQuote'; quote?: string; attribution?: string }
+type PtVideoEmbed = { _type: 'blogVideoEmbed'; url?: string; caption?: string }
+type PtNode = PtBlock | PtImage | PtBlogImage | PtProductEmbed | PtPullQuote | PtVideoEmbed | { _type: string; [k: string]: unknown }
 
 function inlineText(span: PtSpan, markDefs?: { _key: string; _type: string; href?: string }[]): string {
   let text = span.text ?? ''
@@ -174,7 +179,29 @@ function blockToMarkdown(node: PtNode): string {
     return `![${alt}](${url})`
   }
 
-  // Unknown block type — omit silently
+  // Product picks must survive on the .md surface (guides' ItemList source).
+  // No price here: prices live on the PDP, and stale ones would violate MAP.
+  if (node._type === 'blogProductEmbed') {
+    const embed = node as PtProductEmbed
+    if (!embed.productHandle) return ''
+    const label = embed.ctaLabel?.trim() || 'Take a peek'
+    return `**Product pick:** [${label}](${BASE_URL}/products/${embed.productHandle})`
+  }
+
+  if (node._type === 'blogPullQuote') {
+    const pq = node as PtPullQuote
+    if (!pq.quote?.trim()) return ''
+    const attribution = pq.attribution?.trim()
+    return attribution ? `> ${pq.quote}\n> (${attribution})` : `> ${pq.quote}`
+  }
+
+  if (node._type === 'blogVideoEmbed') {
+    const video = node as PtVideoEmbed
+    if (!video.url) return ''
+    return `[${video.caption?.trim() || 'Watch the video'}](${video.url})`
+  }
+
+  // blogCta and anything else unknown — omit silently
   return ''
 }
 
@@ -306,6 +333,9 @@ export interface CollectionData {
   handle: string
   title: string
   description?: string | undefined
+  /** Emma-voice explainer from Sanity collectionPage.introCopy (already markdown). Takes priority over description. */
+  introMarkdown?: string | undefined
+  faqs?: Array<{ question: string; answer: string }> | undefined
   products: CollectionItem[]
 }
 
@@ -316,7 +346,10 @@ export function collectionToMarkdown(col: CollectionData): string {
   lines.push(`# ${col.title}`)
   lines.push('')
 
-  if (col.description) {
+  if (col.introMarkdown) {
+    lines.push(col.introMarkdown)
+    lines.push('')
+  } else if (col.description) {
     lines.push(col.description)
     lines.push('')
   }
@@ -329,6 +362,17 @@ export function collectionToMarkdown(col: CollectionData): string {
       lines.push(`- [${p.title}](${BASE_URL}/products/${p.handle})${desc}`)
     }
     lines.push('')
+  }
+
+  if (col.faqs && col.faqs.length > 0) {
+    lines.push('## Frequently asked questions')
+    lines.push('')
+    for (const f of col.faqs) {
+      lines.push(`### ${f.question}`)
+      lines.push('')
+      lines.push(f.answer)
+      lines.push('')
+    }
   }
 
   lines.push(mdFooter(path))

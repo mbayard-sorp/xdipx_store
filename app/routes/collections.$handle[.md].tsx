@@ -5,7 +5,8 @@
 
 import type { LoaderFunctionArgs } from 'react-router'
 import { getCollection, getCollectionProducts } from '~/lib/shopify.server'
-import { collectionToMarkdown } from '~/lib/markdown-page.server'
+import { getCollectionPage } from '~/lib/sanity.server'
+import { collectionToMarkdown, htmlToMarkdown } from '~/lib/markdown-page.server'
 import { cached } from '~/lib/kv.server'
 
 const BASE_URL = 'https://xdipx.com'
@@ -22,17 +23,23 @@ export async function loader({ params }: LoaderFunctionArgs) {
     })
 
   const body = await cached(cacheKey, TTL, async () => {
-    const [col, products] = await Promise.all([
+    const [col, products, sanity] = await Promise.all([
       guard(getCollection(handle), null, 'getCollection'),
       guard(getCollectionProducts(handle, 50), [], 'getCollectionProducts'),
+      guard(getCollectionPage(handle), null, 'getCollectionPage'),
     ])
 
     if (!col) return null
 
+    // Same priority as the HTML route: Sanity Emma-voice intro, then Shopify description.
+    const introMarkdown = sanity?.introHtml ? htmlToMarkdown(sanity.introHtml) : undefined
+
     return collectionToMarkdown({
       handle: col.handle,
-      title: col.seoTitle ?? col.title,
+      title: sanity?.h1 ?? col.seoTitle ?? col.title,
       description: col.description || undefined,
+      introMarkdown,
+      faqs: sanity?.faqs?.length ? sanity.faqs : undefined,
       products: products.map(p => ({
         handle: p.handle,
         title: p.title,
