@@ -62,6 +62,33 @@ function getWriteClient() {
   } as any)
 }
 
+/**
+ * Deterministic backstop for the two policy categories that must never reach
+ * `approved` regardless of what the LLM classifier said: named competitors and
+ * regulated medical/efficacy claims. Mirrors the flagging rules in the
+ * classifyBatch prompt below; shared with scripts/seo-bank-triage.ts so the
+ * pipeline and the triage script can't drift apart.
+ *
+ * Deliberately narrow: category descriptors ("best vibrator brands"),
+ * comparison shapes without a brand name, and functional questions are NOT
+ * matched. Returns the matched category or null.
+ */
+const COMPETITOR_TERM_RE = new RegExp(
+  '\\b(ky jelly|astroglide|womanizer|we[- ]?vibe|lelo|magic wand|hitachi|lovense|' +
+  'satisfyer|fleshlight|lovehoney|adam (&|and) eve|babeland|fifty shades|' +
+  'target|walmart|amazon|cvs|walgreens)\\b', 'i',
+)
+const MEDICAL_CLAIM_RE = new RegExp(
+  '\\b(for (dryness|menopause|erectile|ed\\b)|doctor[- ]recommended|therapeutic|' +
+  'health benefits?|treats?\\b|cures?\\b|prescription|fda[- ]approved|clinically)\\b', 'i',
+)
+
+export function isPolicyTermRisk(term: string): 'competitor' | 'medical' | null {
+  if (COMPETITOR_TERM_RE.test(term)) return 'competitor'
+  if (MEDICAL_CLAIM_RE.test(term)) return 'medical'
+  return null
+}
+
 function slugify(s: string): string {
   return s
     .toLowerCase()
@@ -426,9 +453,13 @@ interface WriteSummary {
  *     adapters, supplements, off-category brands the LLM expansion pulled in.
  *     These shouldn't pollute the triage queue. They land as rejected so they
  *     join the <avoid> list automatically and dedupe prevents re-fetching.)
- *   - relevanceScore ≥ 0.85 AND volume ≥ 50 AND !flagged → status='approved'
- *     (auto-promote: very high confidence, real volume, no policy issue)
- *   - everything else → status='pending' (admin/agent triage)
+ *   - relevanceScore ≥ 0.85 AND !flagged AND kind != branded AND no policy-term
+ *     match AND (volume unknown OR volume ≥ 50) → status='approved'.
+ *     Volume-unknown must not block: without DataForSEO creds the whole run is
+ *     LLM-only and no term ever has volume, which is how the bank jammed with
+ *     1,700+ pending rows after the April 2026 run. The blast radius of a
+ *     mediocre approval is one weak prompt hint, not a live page.
+ *   - everything else → status='pending' (seo-curator / Studio triage)
  */
 const AUTO_REJECT_THRESHOLD  = 0.30
 const AUTO_APPROVE_THRESHOLD = 0.85
@@ -447,8 +478,10 @@ async function writeCandidates(items: ScoredCandidate[]): Promise<WriteSummary> 
       status = 'rejected'
     } else if (
       !it.flagged &&
+      it.kind !== 'branded' &&
+      isPolicyTermRisk(it.term) === null &&
       it.relevanceScore >= AUTO_APPROVE_THRESHOLD &&
-      (it.volume ?? 0) >= AUTO_APPROVE_MIN_VOLUME
+      (it.volume === undefined || it.volume >= AUTO_APPROVE_MIN_VOLUME)
     ) {
       status = 'approved'
     } else {

@@ -46,6 +46,10 @@ If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","f
 - Outcomes: `daily_profit_summary` (orders/revenue/margin/AOV/ad_spend), GA4 via the
   `google-analytics` MCP (≥300 sessions/week to weight it), `social_posts` (drafts vs posted),
   `ad_campaigns` statuses, calendar `GET /api/team/calendar`.
+- Review funnel: invite/review counts from `review_invites` + `review_aggregates` (the data behind
+  `getReviewStats` in `app/lib/reviews.server.ts`). Report invites-sent and reviews-landed in the
+  brief; **if orders shipped this week but invites-sent is 0 for 7 straight days, file a
+  suggestion** (the invite webhook or the review-reminders cron has silently broken).
 
 ## Step 3 — Retro on last week's brief
 

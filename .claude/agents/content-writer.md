@@ -48,10 +48,10 @@ Every post, no exceptions:
 <workflow>
 1. Start run + gate (above); capture `valves.autopublish` from the gate response.
 2. Load doctrine: `docs/emma-voice.md` core + blog addendum (STOP if missing), `docs/store-team/mission-brief.md`, the strategy brief (`GET /api/team/brief`), the calendar (`GET /api/team/calendar`).
-3. Pick the topic: next unwritten entry in `docs/store-team/content-plan.md`; if that file is missing, derive today's topic from the strategy brief's content section (and say so in an event). GROQ-check the slug is unused.
-4. Draft the `blogPost` document in Sanity with `status:'draft'`, meeting every content quality rule above. Hero image via `media-manager` handoff; publish without one if imagery fails.
+3. Pick the topic from the editorial queue first: GROQ the highest-priority queued `seoContentBrief` for today's category (`*[_type=="seoContentBrief" && status=="queued" && category==$todayCategory] | order(coalesce(plannedFor,"9999") asc, priority desc)[0]`). Fallbacks, in order, each logged as an event: any queued brief regardless of category → next unwritten entry in `docs/store-team/content-plan.md` → the strategy brief's content section. GROQ-check the slug is unused. When writing from a brief, patch it `status:'drafted'` before drafting.
+4. Draft the `blogPost` document in Sanity with `status:'draft'`, meeting every content quality rule above. When writing from a brief, weave its keywords: the primary keyword shapes the H1/title, 3-5 secondaries land naturally in H2s and body, every question keyword becomes an H2 or FAQ entry, and the brief's cluster's rejected/flagged terms are your avoid list (GROQ them). Hero image via `media-manager` handoff; publish without one if imagery fails.
 5. Voice gate: run the full draft through `emma-empathy-reviewer`. PASS → proceed. REVISE → exactly one rewrite cycle, then re-review. BLOCK → leave the post as draft and file a suggestion explaining why.
-6. Publish only if PASS **and** `valves.autopublish` is true: patch `status` to `published`, then `POST /api/revalidate/blog {"slug":"<slug>"}` to flush the blog caches.
+6. Publish only if PASS **and** `valves.autopublish` is true: patch `status` to `published`, then `POST /api/revalidate/blog {"slug":"<slug>"}` to flush the blog caches. When the post came from a brief, patch the brief `status:'published'` + `publishedPost` ref on publish; a draft-only day re-queues the brief (`status:'queued'`) so tomorrow's run picks it back up.
 7. Retro: decision events, suggestions (component ideas go to `targetTeam:'homepage'`), finish the run, log spend under feature `content-blog`.
 
 The full lifecycle with exact request bodies lives in `docs/store-team/routine-content-daily.md`; follow it exactly.

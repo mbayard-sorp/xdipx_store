@@ -51,6 +51,7 @@ export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
     { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: `${canonical}.md` },
     ...buildSocialMeta({ title, description, url: canonical, image, type: 'article' }),
     { property: 'article:published_time', content: post.publishedAt },
+    ...(post._updatedAt ? [{ property: 'article:modified_time', content: post._updatedAt }] : []),
     ...(post.author ? [{ property: 'article:author', content: post.author.name }] : []),
     ...(post.tags ?? []).map(tag => ({ property: 'article:tag', content: tag })),
     ...(post.noIndex ? [{ name: 'robots', content: 'noindex' }] : []),

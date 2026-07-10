@@ -28,6 +28,11 @@ Weekly mix: 3 guides, 2 comparisons, 1 care, 1 wellness-basics. Guides stay the 
 
 ## 3. 30-day topic backlog
 
+**Selection order (since the keyword-bank wiring):** the daily writer picks from the Sanity
+`seoContentBrief` queue first (planned weekly by the seo-curator routine from approved keyword
+clusters); this backlog is the fallback floor when the queue has nothing queued, and the slot
+themes in §2 plus the standing rules in §6 remain binding either way.
+
 Slugs and titles are answer-shaped to match how people phrase questions to an LLM. Collection handles are representative of the 24 live collections and must be validated against the live list before linking. No prices in any body copy.
 
 | # | Slug | Working title | Category | Target query | Embed (handles / types) | Internal links |

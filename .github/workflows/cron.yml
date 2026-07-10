@@ -35,6 +35,7 @@ on:
     - cron: '5 0 * * *'      # profit-summary
     - cron: '0 6 * * 0'      # aeo-surface-check (Sun)
     - cron: '0 6 * * 1'      # gsc-snapshot (Mon, before the noon strategy run)
+    - cron: '0 2 1 * *'      # keyword-research (monthly; valve-gated, see #198)
   workflow_dispatch:
     inputs:
       target:
@@ -88,12 +89,15 @@ jobs:
             '5 0 * * *')     paths='profit-summary' ;;
             '0 6 * * 0')     paths='aeo-surface-check' ;;
             '0 6 * * 1')     paths='gsc-snapshot' ;;
+            '0 2 1 * *')     paths='keyword-research?maxSeeds=40' ;;
             *)
               # Manual workflow_dispatch
               t='${{ github.event.inputs.target }}'
               if [ "$t" = "all" ]; then
-                # keyword-research is deliberately absent: paused in #198 (still
-                # individually dispatchable via the target dropdown).
+                # keyword-research is absent from 'all' on purpose: it runs on
+                # its own monthly schedule, is valve-gated server-side
+                # (keyword_research_enabled), and stays individually
+                # dispatchable via the target dropdown.
                 paths='daily-feed-processor deal-activator profit-summary review-reminders inventory-check log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller homepage-healthcheck aeo-surface-check warm warm-discovery-index'
               else
                 paths="$t"

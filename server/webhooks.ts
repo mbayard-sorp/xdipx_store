@@ -234,42 +234,39 @@ async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promise<void>
   const { getReviewSettings, createInvite } = await import('../app/lib/reviews.server.js')
   const settings = await getReviewSettings()
 
-  const delayMs = settings.inviteDelayDays * 24 * 60 * 60 * 1000
-  setTimeout(async () => {
-    for (const lineItem of order.line_items) {
-      if (!lineItem.sku) continue
+  // Insert scheduled invite rows immediately; a serverless instance does not
+  // live long enough for a days-long setTimeout (the previous approach, which
+  // is why no delayed invite ever fired). The daily /cron/review-reminders
+  // job sends invites whose send_after has passed and fires the Klaviyo
+  // "Review Invite Sent" event at actual send time.
+  const sendAfter = new Date(Date.now() + settings.inviteDelayDays * 24 * 60 * 60 * 1000)
 
-      const searchRes = await shopifyAdmin(
-        `/products.json?limit=1&sku=${encodeURIComponent(lineItem.sku)}`,
-        'GET',
-      ).catch(() => null) as { products?: { id: number }[] } | null
+  for (const lineItem of order.line_items) {
+    if (!lineItem.sku) continue
 
-      const productId = searchRes?.products?.[0]?.id
-      if (!productId) continue
+    const searchRes = await shopifyAdmin(
+      `/products.json?limit=1&sku=${encodeURIComponent(lineItem.sku)}`,
+      'GET',
+    ).catch(() => null) as { products?: { id: number }[] } | null
 
-      const shopifyProductId = `gid://shopify/Product/${productId}`
-      const reviewerName = [
-        order.customer?.first_name,
-        order.customer?.last_name,
-      ].filter(Boolean).join(' ') || 'Customer'
+    const productId = searchRes?.products?.[0]?.id
+    if (!productId) continue
 
-      await createInvite({
-        shopifyOrderId:    String(order.id),
-        shopifyCustomerId: order.customer?.id ? String(order.customer.id) : undefined,
-        shopifyProductId,
-        reviewerEmail:     order.email,
-        reviewerName,
-      }).catch(err => console.error('[webhook:invite-create]', err))
+    const shopifyProductId = `gid://shopify/Product/${productId}`
+    const reviewerName = [
+      order.customer?.first_name,
+      order.customer?.last_name,
+    ].filter(Boolean).join(' ') || 'Customer'
 
-      const { trackEvent } = await import('../app/lib/klaviyo.server.js')
-      await trackEvent(order.email, 'Review Invite Sent', {
-        orderId:     order.id,
-        productId:   shopifyProductId,
-        productName: lineItem.title,
-        inviteDate:  new Date().toISOString(),
-      }).catch(() => {/* non-critical */})
-    }
-  }, delayMs)
+    await createInvite({
+      shopifyOrderId:    String(order.id),
+      shopifyCustomerId: order.customer?.id ? String(order.customer.id) : undefined,
+      shopifyProductId,
+      reviewerEmail:     order.email,
+      reviewerName,
+      sendAfter,
+    }).catch(err => console.error('[webhook:invite-create]', err))
+  }
 }
 
 // ─── Product created handler ──────────────────────────────────────────────

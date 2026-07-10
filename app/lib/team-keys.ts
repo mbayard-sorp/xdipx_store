@@ -55,9 +55,20 @@ export const HOMEPAGE_EXTRA_KEYS = {
  *    instruction-suggestions into PRs.
  *  - content autopublish: with the content team enabled, blog posts go live
  *    only when this is on; off degrades the daily routine to draft-only.
+ *  - keyword research: gates the monthly /cron/keyword-research run (paused
+ *    in #198 to stop spend; the valve makes re-enabling an owner dashboard
+ *    action instead of a code change).
+ *  - seo curation: kill switch for the weekly seo-curator routine (gray-zone
+ *    keyword triage, cluster hygiene, content-brief planning).
+ *  - reviews pdp: flips the PDP review block AND aggregateRating JSON-LD
+ *    together. They must never be decoupled: emitting ratings that are not
+ *    visible on-page violates Google's review-snippet policy.
  */
 export const VALVE_KEYS = {
   socialAutopost:     'social_team_autopost',
   suggestionApply:    'suggestion_apply_enabled',
   contentAutopublish: 'content_team_autopublish',
+  keywordResearch:    'keyword_research_enabled',
+  seoCuration:        'seo_curation_enabled',
+  reviewsPdp:         'reviews_pdp_enabled',
 } as const
