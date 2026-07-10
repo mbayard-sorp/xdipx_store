@@ -44,6 +44,9 @@ import askEmmaVocabulary  from '../schemas/askEmmaVocabulary.js'
 // AI-written copy. Additive; does not touch existing schemas.
 import seoKeyword         from '../schemas/seo/seoKeyword.js'
 import seoCluster         from '../schemas/seo/seoCluster.js'
+// Editorial queue: planned Notebook posts derived from the keyword bank
+// (seo-curator plans weekly, content-writer consumes daily). Additive.
+import seoContentBrief    from '../schemas/seo/seoContentBrief.js'
 // Multi-author voice profiles for AI-generated content (Emma + future agents).
 import editorialAuthor    from '../schemas/authors/editorialAuthor.js'
 import collectionPage     from '../schemas/collectionPage.js'
@@ -105,6 +108,7 @@ export const schemaTypes = [
   // pending entries in Studio.
   seoCluster,
   seoKeyword,
+  seoContentBrief,
   // Editorial authors — voice profiles for Emma + future AI authors.
   editorialAuthor,
   // PLP SEO — editorial overrides per Shopify collection (intro copy, FAQs,
