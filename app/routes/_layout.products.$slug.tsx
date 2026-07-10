@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { Await, data, useLoaderData, useOutletContext, useFetcher, useSearchParams, useRouteLoaderData } from 'react-router'
 import type { loader as layoutLoader } from '~/routes/_layout'
 import { ProductImageGallery, type GalleryItem } from '~/components/store/ProductImageGallery'
-// import { StarRating } from '~/components/reviews/StarRating'  // hidden — restore with star rating block
+import { ReviewList } from '~/components/reviews/ReviewList'
 import {
   getDealByHandle, getProductsByTag,
   getCollectionProducts, getProductsByHandles,
@@ -12,7 +12,14 @@ import {
 import { resolveBreadcrumbs, type BreadcrumbCrumb } from '~/lib/breadcrumbs.server'
 import { getProductPageBlocks, getProductFaqs, getPdpTrustBar } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
-// Reviews imports removed while UI is paused. Restore behind a feature flag when review system goes live.
+// Reviews: UI + aggregateRating JSON-LD flip together behind the
+// reviews_pdp_enabled valve. They must never be decoupled (Google's
+// review-snippet policy requires ratings be visible on-page), and
+// deal.rating only ever comes from real approved customer reviews.
+import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
+import type { Review, ReviewAggregate } from '~/types/reviews'
+import { getValve } from '~/lib/team.server'
+import { VALVE_KEYS } from '~/lib/team-keys'
 import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
 import {
   getProductVoteAggregate,
@@ -113,6 +120,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       faqs: [] as ProductFaq[],
       emmaAsideStatic: '',
       emmaAsidePromise: null as Promise<EmmaAsideResult> | null,
+      reviewData: null as { aggregate: ReviewAggregate; reviews: Review[]; total: number } | null,
+      reviewPage: 1, reviewSort: 'newest', reviewFilter: 'all',
       breadcrumbs: [
         { label: 'Home', url: 'https://xdipx.com/', href: '/' },
         { label: bundle.title, url: `https://xdipx.com/products/${bundle.handle}`, href: `/products/${bundle.handle}` },
@@ -152,13 +161,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     (b): b is import('~/types/cms').EmmaCuratedRailBlock => b._type === 'emmaCuratedRail',
   )
 
+  // Review list URL params (namespaced so they can't clash with variant params).
+  const requestUrl = new URL(request.url)
+  const reviewPage   = Math.max(1, Number(requestUrl.searchParams.get('reviewPage') ?? '1') || 1)
+  const reviewSort   = requestUrl.searchParams.get('reviewSort') ?? 'newest'
+  const reviewFilter = requestUrl.searchParams.get('reviewFilter') ?? 'all'
+
   // ── Batch B ─────────────────────────────────────────────────────────────────
   // Everything that depends on the resolved deal (and customer), plus FBT
   // hydration and carousel/rail product resolution — all independent of each
   // other, so one parallel batch instead of three serial hops.
-  // Reviews data removed while UI is paused. Restore getProductReviews /
-  // getProductAggregate here behind a feature flag when the review system goes live.
-  const [productVoteAggregate, customerProductVote, pairProducts, swatches, fbtResolved, carouselResults, railResults] = await Promise.all([
+  const [productVoteAggregate, customerProductVote, pairProducts, swatches, fbtResolved, carouselResults, railResults, reviewData] = await Promise.all([
     hasDial
       ? getProductVoteAggregate(deal.shopifyProductId)
       : Promise.resolve({ agrees: 0, disagrees: 0, agreePct: 0 } as ProductVoteAggregate),
@@ -188,7 +201,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             : Promise.resolve([] as Product[]),
         ))
       : Promise.resolve([] as Product[][]),
+    // Reviews: gated by the reviews_pdp_enabled valve. UI and aggregateRating
+    // JSON-LD flip together; valve off (or any failure) = null = no reviews
+    // surface at all, exactly the pre-flip behavior.
+    (async (): Promise<{ aggregate: ReviewAggregate; reviews: Review[]; total: number } | null> => {
+      try {
+        if (!(await getValve(VALVE_KEYS.reviewsPdp))) return null
+        const [aggregate, list] = await Promise.all([
+          getProductAggregate(deal.shopifyProductId),
+          getProductReviews(deal.shopifyProductId, { page: reviewPage, sort: reviewSort as never, filter: reviewFilter as never }),
+        ])
+        if (!aggregate || aggregate.approvedCount < 1) return null
+        return { aggregate, reviews: list.reviews, total: list.total }
+      } catch (err) {
+        console.error('[pdp:reviews] load failed (non-fatal):', err)
+        return null
+      }
+    })(),
   ])
+
+  // aggregateRating in Product JSON-LD comes ONLY from real approved customer
+  // reviews, and only while the on-page review block renders (same valve).
+  // Never populate deal.rating from any other source (see commit 4a5b165).
+  if (reviewData) {
+    deal.rating = { value: reviewData.aggregate.averageRating, count: reviewData.aggregate.approvedCount }
+  }
 
   const breadcrumbs: BreadcrumbCrumb[] = resolveBreadcrumbs({
     menu: mainMenu,
@@ -326,6 +363,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       breadcrumbs,
       pdpTrustBar,
       viewContentEventId,
+      reviewData,
+      reviewPage,
+      reviewSort,
+      reviewFilter,
     },
     { headers: { 'Set-Cookie': browseCookieHeader } },
   )
@@ -1043,6 +1084,23 @@ function ProductPage() {
           carouselProductMap={carouselProductMap}
         />
       ))}
+
+      {/* Customer reviews — renders only when the reviews_pdp_enabled valve is
+          on AND at least one real approved review exists (same condition that
+          puts aggregateRating into the Product JSON-LD above). */}
+      {loaderData.reviewData && (
+        <div className="max-w-6xl mx-auto px-4">
+          <ReviewList
+            reviews={loaderData.reviewData.reviews}
+            aggregate={loaderData.reviewData.aggregate}
+            productId={deal.shopifyProductId}
+            total={loaderData.reviewData.total}
+            page={loaderData.reviewPage}
+            sort={loaderData.reviewSort}
+            filter={loaderData.reviewFilter}
+          />
+        </div>
+      )}
 
       <EmailSubscribe />
 

@@ -108,6 +108,7 @@ function rowToInvite(row: Record<string, unknown>): ReviewInvite {
     clickedAt:        row['clicked_at'] ? new Date(row['clicked_at'] as string).toISOString() : null,
     completedAt:      row['completed_at'] ? new Date(row['completed_at'] as string).toISOString() : null,
     reminderSentAt:   row['reminder_sent_at'] ? new Date(row['reminder_sent_at'] as string).toISOString() : null,
+    sendAfter:        row['send_after'] ? new Date(row['send_after'] as string).toISOString() : null,
     status:           row['status'] as ReviewInvite['status'],
   }
 }
@@ -546,20 +547,54 @@ export async function getReviewById(id: string): Promise<Review | null> {
 // ─── Invites ───────────────────────────────────────────────────────────────
 
 export async function createInvite(input: CreateInviteInput): Promise<ReviewInvite> {
-  const rows = await sql`
-    INSERT INTO review_invites (
-      shopify_order_id, shopify_customer_id, shopify_product_id,
-      reviewer_email, reviewer_name
-    ) VALUES (
-      ${input.shopifyOrderId},
-      ${input.shopifyCustomerId ?? null},
-      ${input.shopifyProductId},
-      ${input.reviewerEmail},
-      ${input.reviewerName}
-    )
-    RETURNING *
-  `
+  const rows = input.sendAfter
+    ? await sql`
+        INSERT INTO review_invites (
+          shopify_order_id, shopify_customer_id, shopify_product_id,
+          reviewer_email, reviewer_name, status, send_after
+        ) VALUES (
+          ${input.shopifyOrderId},
+          ${input.shopifyCustomerId ?? null},
+          ${input.shopifyProductId},
+          ${input.reviewerEmail},
+          ${input.reviewerName},
+          'scheduled',
+          ${input.sendAfter.toISOString()}
+        )
+        RETURNING *
+      `
+    : await sql`
+        INSERT INTO review_invites (
+          shopify_order_id, shopify_customer_id, shopify_product_id,
+          reviewer_email, reviewer_name
+        ) VALUES (
+          ${input.shopifyOrderId},
+          ${input.shopifyCustomerId ?? null},
+          ${input.shopifyProductId},
+          ${input.reviewerEmail},
+          ${input.reviewerName}
+        )
+        RETURNING *
+      `
   return rowToInvite(rows[0] as Record<string, unknown>)
+}
+
+/** Scheduled invites whose send_after has passed — the daily cron sends these. */
+export async function getDueScheduledInvites(limit = 200): Promise<ReviewInvite[]> {
+  const rows = await sql`
+    SELECT * FROM review_invites
+    WHERE status = 'scheduled' AND send_after <= now()
+    ORDER BY send_after ASC
+    LIMIT ${limit}
+  `
+  return rows.map(r => rowToInvite(r as Record<string, unknown>))
+}
+
+/** Flip a scheduled invite to sent; sent_at resets so reminder timing counts from the real send. */
+export async function markInviteSent(id: string): Promise<void> {
+  await sql`
+    UPDATE review_invites SET status = 'sent', sent_at = now() WHERE id = ${id}::uuid
+  `
 }
 
 export async function getInviteByToken(token: string): Promise<ReviewInvite | null> {
@@ -591,7 +626,7 @@ export async function getPendingReminderInvites(): Promise<ReviewInvite[]> {
     SELECT * FROM review_invites
     WHERE sent_at < now() - interval '5 days'
       AND reminder_sent_at IS NULL
-      AND status NOT IN ('completed', 'expired')
+      AND status NOT IN ('scheduled', 'completed', 'expired')
   `
   return rows.map(r => rowToInvite(r as Record<string, unknown>))
 }
