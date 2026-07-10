@@ -8,13 +8,18 @@ import { eq, sql } from 'drizzle-orm'
 function verifyShopifyWebhook(req: Request): boolean {
   const secret = process.env['SHOPIFY_WEBHOOK_SECRET']
   if (!secret) return false
-  const hmac      = req.headers['x-shopify-hmac-sha256'] as string
-  const body      = req.body as Buffer
-  const digest    = crypto
+  const hmac = req.headers['x-shopify-hmac-sha256']
+  if (typeof hmac !== 'string' || hmac.length === 0) return false
+  const body   = req.body as Buffer
+  const digest = crypto
     .createHmac('sha256', secret)
     .update(body)
     .digest('base64')
-  return crypto.timingSafeEqual(Buffer.from(hmac ?? ''), Buffer.from(digest))
+  const a = Buffer.from(hmac)
+  const b = Buffer.from(digest)
+  // timingSafeEqual throws on length mismatch, turning a bad header into a 500
+  if (a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
 }
 
 // ─── Order payload types ──────────────────────────────────────────────────
