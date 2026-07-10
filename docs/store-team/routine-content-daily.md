@@ -40,22 +40,40 @@ and **stop**: skip honestly, never work around the gate. If `ok:true`, capture
 2. `docs/store-team/mission-brief.md` (binding); the strategy brief (`GET /api/team/brief`); it may
    carry a per-team `content` section with the week's topic slate.
 3. Calendar (`GET /api/team/calendar`) for campaign tie-ins.
-4. Topic queue: `docs/store-team/content-plan.md` (binding: weekly slot themes, the 30-day
-   backlog, and standing rules). If the file is ever missing in your checkout, fall back
-   gracefully: derive today's topic from the strategy brief's content section, and record a `step`
-   event saying you did. A brief without a content section is also tolerated: derive from the
-   brief's overall focus and say so.
+4. Topic sources, in priority order: the `seoContentBrief` queue (primary — planned weekly by the
+   seo-curator routine from the keyword bank), then `docs/store-team/content-plan.md` (the static
+   backlog is the floor, still binding for slot themes and standing rules), then the strategy
+   brief's content section. If content-plan.md is ever missing in your checkout, fall back
+   gracefully and record a `step` event saying you did.
 
 ## Step 3: Topic selection + slug pre-check
 
-Pick the next unwritten topic. Before drafting anything, GROQ-check the slug:
+Today's category comes from the weekly rhythm in content-plan.md §2 (Mon/Wed/Fri guides, Tue/Sun
+comparisons, Thu care, Sat wellness-basics). Pick, in order, logging the source as a `step` event:
+
+1. **Brief queue (primary):**
+
+```groq
+*[_type == "seoContentBrief" && status == "queued" && category == $todayCategory]
+  | order(coalesce(plannedFor, "9999") asc, priority desc)[0]
+```
+
+2. Any queued brief regardless of category (a filled queue beats rhythm purity).
+3. The next unwritten entry in the content-plan §3 backlog.
+4. The strategy brief's content section.
+
+When a brief is chosen: patch it `status:'drafted'` immediately (idempotent claim; a crashed run
+leaves it drafted, and the curator re-queues stale drafted briefs weekly), and carry its
+`targetQuery`, keyword refs, `embedHints`, and `internalLinks` into Step 4.
+
+Before drafting anything, GROQ-check the slug:
 
 ```groq
 *[_type == "blogPost" && slug.current == "<slug>"][0]._id
 ```
 
 If it exists, take the next queued topic and re-check. One `step` event with the chosen topic,
-slug, and source (plan / brief / fallback).
+slug, and source (brief / plan / strategy-brief fallback).
 
 ## Step 4: Draft the post (Sanity, status draft)
 
@@ -85,6 +103,17 @@ Content quality bar (all mandatory, from `.claude/agents/content-writer.md`):
   prices or discount claims in body text (MAP-safe, evergreen); internal links to relevant
   collections and `/products/{slug}` PDPs; no em dashes; no countdowns or urgency.
 
+**Keyword weaving (when the topic came from a brief):** the brief's `primaryKeyword` term shapes
+the title/H1; its 3-5 `secondaryKeywords` land naturally in H2s and body copy (never stuffed);
+every `questionKeywords` term becomes a question-form H2 or an FAQ entry; the brief's cluster's
+rejected/flagged terms are the avoid list:
+
+```groq
+*[_type == "seoKeyword" && cluster._ref == $clusterId && (status == "rejected" || flagged == true)].term
+```
+
+Use `embedHints` only after verifying the handles are in stock; use `internalLinks` where natural.
+
 One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
 ## Step 5: Voice gate (mandatory, no publish path without it)
@@ -112,8 +141,12 @@ curl -s -X POST "$BASE_URL/api/revalidate/blog" \
   -d '{"slug":"<slug>"}'
 ```
 
+3. If the topic came from a brief: patch the brief `status` → `'published'` and set
+   `publishedPost` to a reference to the blogPost doc.
+
 Valve off (or verdict not PASS) → leave the post as a Sanity draft, post an event saying exactly
-that, and finish the run as succeeded. Draft-only is a valid, honest outcome, not a failure.
+that, re-queue the brief if one was claimed (`status` → `'queued'`), and finish the run as
+succeeded. Draft-only is a valid, honest outcome, not a failure.
 
 ## Step 7: Retro + finish
 
