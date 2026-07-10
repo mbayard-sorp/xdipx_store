@@ -34,6 +34,13 @@ If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","f
 ## Step 2 — Read (data only)
 
 - Previous brief: `GET /api/team/brief`.
+- Search performance: the latest `gsc_snapshots` row (written Monday 06:00 UTC by
+  `/cron/gsc-snapshot`; last-28-day totals, top queries, top pages, sitemap status). Report
+  click/impression trends and overlap with covered content clusters in the brief; file a
+  suggestion on regressions or sitemap errors. A missing or stale (> 8 days) snapshot is itself
+  reportable: either the cron broke or the GSC service-account env vars are not set yet.
+- Citation spot-check (zero infra): web-search 3 rotating queries from the approved keyword bank
+  and note in the brief whether xdipx.com is cited or linked in the answers/results.
 - Cross-team activity: `POST /api/team/event {"op":"list","sinceDays":7}`.
 - Improvement bus state: `POST /api/team/suggestion {"op":"list"}`.
 - Outcomes: `daily_profit_summary` (orders/revenue/margin/AOV/ad_spend), GA4 via the

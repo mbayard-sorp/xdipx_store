@@ -256,6 +256,25 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/gsc-snapshot
+   * Schedule: Monday 06:00 UTC — pull last-28-day Search Console top
+   * queries/pages + sitemap status into gsc_snapshots, ahead of the Monday
+   * noon weekly strategy run. No-ops with a logged skip until the GSC
+   * service-account env vars are set (GSC_SA_JSON, or GSC_SA_EMAIL +
+   * GSC_SA_PRIVATE_KEY; optional GSC_SITE_URL, default sc-domain:xdipx.com).
+   */
+  cronRoute('/gsc-snapshot', async (_req, res) => {
+    try {
+      const { runGscSnapshot } = await import('../app/lib/gsc.server.js')
+      const result = await runGscSnapshot()
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:gsc-snapshot]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/keyword-research
    * Schedule: monthly, 1st 02:00 UTC — discover new SEO keywords via
    * DataForSEO (when creds exist) or LLM-only expansion, classify, and write
