@@ -1,0 +1,78 @@
+# Routine: Weekly Off-site Scout (offsite-scout)
+
+The playbook for the weekly off-site presence routine. Entry agent: `offsite-scout`.
+**PROPOSE-ONLY**: researches the third-party roundups, listicles, and expert sources that search
+engines and LLM answers cite for sexual-wellness shopping queries, drafts outreach the owner can
+send manually, and files it all as suggestion rows. It never sends, never posts, never spends.
+
+Why this exists: AI assistants route around the adult category on generic queries and surface
+brands named in third-party editorial sources instead; Perplexity's merchant program excludes
+adult toys. The winnable game is earning slots on the pages LLMs already trust, and no on-site
+loop can do that.
+
+Runs on the **Max subscription**, Tuesday 16:00 UTC under the **strategy** team (Tuesday avoids
+the Monday strategy run so the 1-run/day cap holds). Auth: `x-team-secret: $TEAM_TOKEN` (falls
+back to `$HOMEPAGE_TEAM_TOKEN`, then `$CRON_SECRET`). `BASE_URL` = deployed origin.
+
+## Step 0: Start + gate
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/run" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"start","team":"strategy","runType":"offsite"}'   # → $RUN_ID
+
+curl -s "$BASE_URL/api/team/gate?team=strategy&excludeRun=$RUN_ID" -H "x-team-secret: $TEAM_TOKEN"
+```
+
+`ok:false` → post the skipped update and stop.
+
+## Step 1: Load doctrine + context
+
+1. `docs/ads-policy.md` in full (BINDING; its creative rules apply to outreach copy).
+2. `docs/emma-voice.md` core (pitches are brand-voiced; Emma is an AI guide, never a human tester).
+3. The strategy brief (`GET /api/team/brief`) and calendar (`GET /api/team/calendar`) for
+   seasonal angles (gift-guide windows especially).
+4. Published notebook posts (GROQ: published blogPost slugs + titles) — pitches point at real
+   content. **Fewer than 5 published posts → note it, file only the summary row, and recommend
+   waiting; thin pitches burn targets.**
+5. The latest `gsc_snapshots` row (brand impressions, referral movement) and prior offsite
+   suggestion rows (`POST /api/team/suggestion {"op":"list"}`) — never duplicate a still-proposed
+   pitch.
+
+## Step 2: Target research
+
+Web-search, at minimum: "best places to buy sex toys online", "best online sex toy stores 2026",
+plus 3 category queries derived from the approved keyword bank's biggest clusters. For each
+roundup/listicle that ranks or gets cited, record: publisher, URL, last-updated, submission or
+affiliate path if visible, competitors listed. One `step` event with the target table.
+
+## Step 3: Proposals (max 6 suggestion rows per run)
+
+For the 3-5 strongest targets, one suggestion row each:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"create","team":"strategy","category":"other","kind":"strategy","suggestion":"OFFSITE PITCH — <publication>: <target URL> | contact: <path> | angle: <one line> | draft: <the full pitch copy> | policy note: <category + why compliant>","cxRisk":"low"}'
+```
+
+Pitch rules: honest differentiators only (editorial curation, answer-shaped guides, discreet
+XDIPX billing, discreet shipping); no prices or discounts (MAP); no medical claims; never imply
+human product testing; ready to send from hello@xdipx.com with zero edits.
+
+Also propose, when found: unlinked-mention reclamations and expert-quote / creator-collaboration
+prospects (same row format, angle-labeled).
+
+## Step 4: Summary + finish
+
+One summary suggestion row (kind `process`): targets reviewed, pitches filed, movement since last
+run (new citations spotted in search results, prior pitches landed/dismissed), and the single
+highest-leverage next step. Log spend (feature `strategy-offsite`), then finish the run with an
+honest summary.
+
+## Appendix: Enablement
+
+No new valve: the strategy team's existing kill switch and budget govern this routine, and it is
+propose-only by construction. To enable: create the cloud trigger (routine #11 in
+`docs/store-team/routine-schedule.md`) and confirm the strategy team is enabled. The owner
+executes approved pitches manually from hello@xdipx.com; nothing is ever sent by the routine.
