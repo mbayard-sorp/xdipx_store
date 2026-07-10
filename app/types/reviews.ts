@@ -64,7 +64,9 @@ export interface ReviewInvite {
   clickedAt: string | null
   completedAt: string | null
   reminderSentAt: string | null
-  status: 'sent' | 'opened' | 'clicked' | 'completed' | 'expired'
+  /** When a 'scheduled' invite becomes due; null for legacy immediate invites. */
+  sendAfter: string | null
+  status: 'scheduled' | 'sent' | 'opened' | 'clicked' | 'completed' | 'expired'
 }
 
 export interface ReviewAggregate {
@@ -107,6 +109,10 @@ export interface CreateInviteInput {
   shopifyProductId: string
   reviewerEmail: string
   reviewerName: string
+  /** When set, the invite is inserted as status 'scheduled' and the daily
+   *  review-reminders cron sends it once send_after passes. Omitted =
+   *  legacy immediate 'sent' behavior (admin manual invites). */
+  sendAfter?: Date | undefined
 }
 
 export interface ReviewSettings {
