@@ -735,3 +735,114 @@ export function notebookHubToMarkdown(hub: NotebookHubData): string {
 
   return lines.join('\n')
 }
+
+// ─── notebookCategoryToMarkdown ──────────────────────────────────────────────
+
+export interface NotebookCategoryData {
+  slug: string
+  name: string
+  description?: string | null | undefined
+  posts: NotebookHubPost[]
+  total: number
+}
+
+export function notebookCategoryToMarkdown(cat: NotebookCategoryData): string {
+  const path = `/notebook/category/${cat.slug}`
+  const lines: string[] = []
+
+  lines.push(`# ${cat.name}`)
+  lines.push('')
+  lines.push(`A category of the xdipx Notebook. Full notebook index: ${BASE_URL}/notebook.md`)
+  lines.push('')
+
+  if (cat.description?.trim()) {
+    lines.push(cat.description.trim())
+    lines.push('')
+  }
+
+  if (cat.posts.length > 0) {
+    lines.push('## Posts')
+    lines.push('')
+    for (const p of cat.posts) {
+      const date = p.publishedAt?.split('T')[0]
+      const metaStr = date ? ` (${date})` : ''
+      const excerpt = p.excerpt?.trim() ? `: ${p.excerpt.trim()}` : ''
+      lines.push(`- [${p.title}](${BASE_URL}/notebook/${p.slug})${metaStr}${excerpt}`)
+    }
+    lines.push('')
+    if (cat.total > cat.posts.length) {
+      lines.push(`Showing the ${cat.posts.length} most recent of ${cat.total} posts in this category. Full archive: ${BASE_URL}${path}`)
+      lines.push('')
+    }
+    lines.push('Each post also has a markdown version at the same URL with ".md" appended.')
+    lines.push('')
+  } else {
+    lines.push('No posts in this category yet. New writing lands on the notebook first.')
+    lines.push('')
+  }
+
+  lines.push(mdFooter(path))
+
+  return lines.join('\n')
+}
+
+// ─── collectionsHubToMarkdown ────────────────────────────────────────────────
+
+export interface CollectionsHubEntry {
+  handle: string
+  title: string
+  description?: string | null | undefined
+  productsCount?: number | null | undefined
+}
+
+export interface CollectionsHubData {
+  title: string
+  /** Emma-voice hub intro (already markdown). */
+  introMarkdown?: string | undefined
+  /** Non-empty groups rendered in order; heading mirrors the HTML hub sections. */
+  groups: Array<{ heading: string; collections: CollectionsHubEntry[] }>
+  faqs?: Array<{ question: string; answer: string }> | undefined
+}
+
+export function collectionsHubToMarkdown(hub: CollectionsHubData): string {
+  const path = '/collections'
+  const lines: string[] = []
+
+  lines.push(`# ${hub.title}`)
+  lines.push('')
+
+  if (hub.introMarkdown) {
+    lines.push(hub.introMarkdown)
+    lines.push('')
+  }
+
+  for (const group of hub.groups) {
+    if (group.collections.length === 0) continue
+    lines.push(`## ${group.heading}`)
+    lines.push('')
+    for (const c of group.collections) {
+      const desc = c.description?.trim() ? `: ${c.description.trim()}` : ''
+      const count = typeof c.productsCount === 'number' && c.productsCount > 0 ? ` (${c.productsCount}+ products)` : ''
+      lines.push(`- [${c.title}](${BASE_URL}/collections/${c.handle})${desc}${count}`)
+    }
+    lines.push('')
+  }
+
+  lines.push('Each collection also has a markdown version at the same URL with ".md" appended.')
+  lines.push('')
+
+  if (hub.faqs && hub.faqs.length > 0) {
+    lines.push('## Frequently asked questions')
+    lines.push('')
+    for (const f of hub.faqs) {
+      lines.push(`### ${f.question}`)
+      lines.push('')
+      lines.push(f.answer)
+      lines.push('')
+    }
+  }
+
+  lines.push(mdFooter(path))
+
+  return lines.join('\n')
+}
