@@ -178,7 +178,9 @@ function cacheKey(input: BuildKeywordContextInput): string {
   const sortedAudiences = [...(input.audiences ?? [])].sort()
   const sortedMatters   = [...(input.matters   ?? [])].sort()
   const parts = [
-    'seo-kw:v1',
+    // v2: bumped for the 2026-07 cluster consolidation (merge-seo-clusters.ts)
+    // so stale pre-merge keyword contexts age out immediately.
+    'seo-kw:v2',
     input.contentType,
     input.productType ?? 'none',
     sortedMoods.join(','),
