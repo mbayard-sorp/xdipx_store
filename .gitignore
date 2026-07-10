@@ -40,6 +40,13 @@ mood-proposals*.json
 mood-proposals*.csv
 mood-distribution-audit.json
 scripts/output/
+# Compiled tsc strays next to server/*.ts sources. If these exist on disk,
+# tsx/esbuild/vitest resolve './webhooks.js' to the stale artifact instead of
+# the .ts source (the real Vercel entry is server/vercel-entry.mjs).
+server/index.js
+server/webhooks.js
+server/*.js.map
+
 # Stray subagent helper artifacts that occasionally drop here
 classify-chunk-*.cjs
 dispatch-all.log
