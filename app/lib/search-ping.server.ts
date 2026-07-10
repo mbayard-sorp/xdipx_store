@@ -36,7 +36,7 @@ export async function pingSearchEngines(paths: string[]): Promise<void> {
       body: JSON.stringify({
         host,
         key,
-        keyLocation: `${SITE_ORIGIN}/${key}.txt`,
+        keyLocation: `${SITE_ORIGIN}/indexnow.txt`,
         urlList,
       }),
     })

@@ -286,3 +286,36 @@ export async function setPinnedAccessoryIds(ids: string[]): Promise<void> {
   // from the cart drawer one day after being set.
   await kvSet(KV_KEYS.pinnedAccessoryIds, ids)
 }
+
+// ─── Product markdown twin cache purge (webhook-driven invalidation) ─────
+//
+// The product `.md` route caches its rendered body at `md:product:{handle}`
+// for 900s (app/routes/products.$slug[.md].tsx). That cache key is not in
+// KV_KEYS above because the route builds it as a plain template literal;
+// mirror the exact same string here so a webhook can invalidate what a
+// crawler might otherwise read stale for up to 15 minutes.
+export function mdProductCacheKey(handle: string): string {
+  return `md:product:${handle}`
+}
+
+/**
+ * Purge the markdown twin cache for a single product handle, both the L1
+ * in-memory read-through cache and the L2 KV entry. Cheap, precise, single
+ * key. Call this from a products/update webhook so a price/availability
+ * change is reflected on the next crawl instead of waiting out the TTL.
+ *
+ * Also purges the two handle-scoped Shopify read caches that back that same
+ * PDP data (`shopify:p:{handle}` from getProductByHandle, `shopify:deal:
+ * byhandle:{handle}` from getDealByHandle, both in shopify.server.ts). Both
+ * are single-key deletes keyed only by handle, so purging them here is
+ * trivially safe and keeps the HTML PDP in step with the markdown twin.
+ */
+export async function purgeMarkdownCache(handle: string): Promise<void> {
+  const keys = [
+    mdProductCacheKey(handle),
+    `shopify:p:${handle}`,
+    `shopify:deal:byhandle:${handle}`,
+  ]
+  for (const key of keys) readCache.delete(key)
+  await Promise.all(keys.map(key => kvDel(key)))
+}

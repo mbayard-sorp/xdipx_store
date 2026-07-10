@@ -290,6 +290,28 @@ async function handleProductCreated(product: ShopifyProductWebhook): Promise<voi
   console.log(`[webhook:product-created] ${product.handle} → ${result.created ? 'created in Sanity' : 'already exists'}`)
 }
 
+// ─── Product updated: purge markdown twin cache ──────────────────────────
+//
+// Shopify fires `products/update` on any product mutation (price, availability,
+// title, status, etc). The markdown twin at /products/:slug.md caches its
+// rendered body in KV for 900s (app/routes/products.$slug[.md].tsx), which
+// means an AI crawler can cite a stale price or "in stock" claim for up to
+// 15 minutes after a change. Purge just that product's own cache key (plus
+// the two handle-scoped Shopify read caches backing the same PDP data),
+// cheap, precise, single-key deletes. Collection/homepage markdown that
+// happens to embed this product's price is left to expire on its own TTL;
+// purging those would require a scan we don't want on a webhook hot path.
+
+async function handleProductUpdated(product: ShopifyProductWebhook): Promise<void> {
+  if (!product.handle) {
+    console.warn('[webhook:product-updated] payload missing handle, skipping purge:', product.id)
+    return
+  }
+  const { purgeMarkdownCache } = await import('../app/lib/kv.server.js')
+  await purgeMarkdownCache(product.handle)
+  console.log(`[webhook:product-updated] purged markdown + PDP cache for ${product.handle}`)
+}
+
 // ─── Inventory update: auto-rotate on sold-out ──────────────────────────
 
 interface ShopifyInventoryLevel {
@@ -431,6 +453,30 @@ export function createWebhookRoutes() {
     handleProductCreated(product).catch(err =>
       console.error('[webhook:product-created]', err),
     )
+  })
+
+  router.post('/product-updated', async (req: Request, res: Response) => {
+    if (!verifyShopifyWebhook(req)) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    let product: ShopifyProductWebhook | null = null
+    try {
+      product = JSON.parse((req.body as Buffer).toString()) as ShopifyProductWebhook
+    } catch (err) {
+      console.error('[webhook:product-updated] malformed payload, skipping:', err)
+    }
+
+    // Ack immediately regardless of parse outcome — a malformed payload should
+    // never cause Shopify to retry-storm this endpoint.
+    res.json({ ok: true })
+
+    if (product) {
+      handleProductUpdated(product).catch(err =>
+        console.error('[webhook:product-updated]', err),
+      )
+    }
   })
 
   router.post('/inventory-update', async (req: Request, res: Response) => {

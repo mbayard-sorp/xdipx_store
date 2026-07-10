@@ -22,6 +22,16 @@ const PAGE_SLUG_DENYLIST = new Set([
   'components',
 ])
 
+// Truncates a plain-text description to ~maxLen chars on a word boundary,
+// appending an ellipsis. Used for the Notebook posts summaries below.
+function truncate(text: string, maxLen: number): string {
+  const trimmed = text.trim()
+  if (trimmed.length <= maxLen) return trimmed
+  const cut = trimmed.slice(0, maxLen)
+  const lastSpace = cut.lastIndexOf(' ')
+  return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd()}...`
+}
+
 // Collection handles that duplicate clean-URL routes or back a retired
 // gendered route. /vault, /for-him, /for-her all 301 permanently into
 // /collections or a product-type collection; never cite these handles.
@@ -147,13 +157,22 @@ export async function loader() {
   // above) so every published post is enumerated as its markdown twin, not
   // just the hub and category archives. `getBlogPostsForSitemap` is the same
   // Sanity query [sitemap.xml].tsx uses, so this list can never drift from
-  // what's actually indexed. That query only returns slug/dates today (no
-  // title/excerpt), so the label here is the URL itself, same as Products.
+  // what's actually indexed. It now also projects title + a coalesced
+  // seoDescription/excerpt so each line carries a title and short summary
+  // instead of a bare URL.
   if (blogPosts.length > 0) {
     lines.push('## Notebook posts')
     lines.push('')
     for (const p of blogPosts) {
-      lines.push(`- ${BASE_URL}/notebook/${p.slug}.md`)
+      const url = `${BASE_URL}/notebook/${p.slug}.md`
+      const desc = p.description ? truncate(p.description, 140) : undefined
+      if (p.title && desc) {
+        lines.push(`- ${url} — ${p.title}, ${desc}`)
+      } else if (p.title) {
+        lines.push(`- ${url} — ${p.title}`)
+      } else {
+        lines.push(`- ${url}`)
+      }
     }
     lines.push('')
   }

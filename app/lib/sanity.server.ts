@@ -1300,7 +1300,7 @@ export async function getBlogCategories(): Promise<BlogCategory[]> {
   }
 }
 
-export async function getBlogPostsForSitemap(): Promise<{ slug: string; publishedAt: string; _updatedAt: string }[]> {
+export async function getBlogPostsForSitemap(): Promise<{ slug: string; publishedAt: string; _updatedAt: string; title?: string; description?: string }[]> {
   if (!projectId) return []
   try {
     const client = getClient()
@@ -1310,7 +1310,8 @@ export async function getBlogPostsForSitemap(): Promise<{ slug: string; publishe
     // warnings from a sitemap-listed but noindex'd page.
     return await client.fetch(
       `*[_type == "blogPost" && status == "published" && noIndex != true] | order(publishedAt desc) {
-        "slug": slug.current, publishedAt, _updatedAt
+        "slug": slug.current, publishedAt, _updatedAt, title,
+        "description": coalesce(seoDescription, excerpt)
       }`,
     )
   } catch (err) {

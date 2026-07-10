@@ -6,6 +6,11 @@
  * clears the in-memory blog cache (60s TTL, app/lib/sanity.server.ts) and
  * the post's markdown-twin cache entry (24h TTL, `md:notebook:{slug}`).
  * CDN s-maxage on the hub bounds any remaining lag at ~5 minutes.
+ *
+ * Also fires a best-effort IndexNow ping (app/lib/search-ping.server.ts) for
+ * the post, its .md twin, and the /notebook hub, since this endpoint is the
+ * one reliable signal every automated blog publish already calls through.
+ * Inert unless SEARCH_PING_ENABLED === 'true'; never blocks the response.
  */
 
 import type { ActionFunctionArgs } from 'react-router'
@@ -32,6 +37,13 @@ export async function action({ request }: ActionFunctionArgs) {
   const mdKey = `md:notebook:${slug}`
   invalidateCache(mdKey)
   await kvDel(mdKey)
+
+  try {
+    const { pingSearchEngines } = await import('~/lib/search-ping.server')
+    await pingSearchEngines([`/notebook/${slug}`, `/notebook/${slug}.md`, '/notebook'])
+  } catch (err) {
+    console.error('[revalidate-blog] search ping failed (non-blocking):', err)
+  }
 
   return Response.json({ ok: true, slug })
 }
