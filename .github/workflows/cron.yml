@@ -34,6 +34,7 @@ on:
     - cron: '59 23 * * *'    # deal-activator
     - cron: '5 0 * * *'      # profit-summary
     - cron: '0 6 * * 0'      # aeo-surface-check (Sun)
+    - cron: '0 6 * * 1'      # gsc-snapshot (Mon, before the noon strategy run)
   workflow_dispatch:
     inputs:
       target:
@@ -56,6 +57,7 @@ on:
           - enrichment-batch-poller
           - homepage-healthcheck
           - aeo-surface-check
+          - gsc-snapshot
           - warm
           - warm-discovery-index
 
@@ -85,6 +87,7 @@ jobs:
             '59 23 * * *')   paths='deal-activator' ;;
             '5 0 * * *')     paths='profit-summary' ;;
             '0 6 * * 0')     paths='aeo-surface-check' ;;
+            '0 6 * * 1')     paths='gsc-snapshot' ;;
             *)
               # Manual workflow_dispatch
               t='${{ github.event.inputs.target }}'
