@@ -367,7 +367,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
       { tagName: 'link', rel: 'canonical', href: canonical },
       { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: 'https://xdipx.com/index.md' },
       ...(heroPreload ? [heroPreload] : []),
-      ...buildSocialMeta({ title: BRAND_TITLE, description: BRAND_DESCRIPTION, url: canonical, image: null, type: 'website' }),
+      ...buildSocialMeta({
+        title: BRAND_TITLE,
+        description: BRAND_DESCRIPTION,
+        url: canonical,
+        image: data.featured[0]?.imageUrl ?? null,
+        type: 'website',
+      }),
     ]
   }
   if (!('deal' in data) || !data.deal || !('seoTitle' in data.deal)) {

@@ -30,6 +30,8 @@ import { EmailSubscribe } from '~/components/store/EmailSubscribe'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
+import { FeaturedProductStructuredData } from '~/components/seo/FeaturedProductStructuredData'
+import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
 import { Reveal } from '~/components/motion/Reveal'
 import { trackViewItemList, trackSelectItem, type GA4Item } from '~/lib/analytics.client'
 import type { StorefrontData } from '~/lib/storefront-home.server'
@@ -906,6 +908,22 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: Sto
 
   return (
     <>
+      {/* SEO: Product schema for the hero pick + ItemList for the featured
+          set (one lead product per populated rail). Variant 'a'/legacy each
+          own their own schema elsewhere — this only renders for variant 'b'. */}
+      {featured[0] && <FeaturedProductStructuredData product={featured[0]} />}
+      {featured.length > 0 && (
+        <ItemListStructuredData
+          name="Emma's picks"
+          url="https://xdipx.com/"
+          items={featured.map(p => ({
+            name:  p.title,
+            url:   `https://xdipx.com/products/${p.handle}`,
+            image: p.imageUrl,
+          }))}
+        />
+      )}
+
       <Hero featured={featured} emmaHero={emmaHero} />
 
       {/* Nº 03 · Most picked, right now — the team's first `emmaCuratedRail`

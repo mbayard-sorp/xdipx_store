@@ -174,26 +174,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
         className="font-body text-ink antialiased"
         style={{ fontFamily: 'var(--font-body)' }}
       >
-        {/* WebSite JSON-LD: enables the sitelinks search box (in-SERP search
-            input under the brand result). Static — no loader data needed.
-            Organization JSON-LD lives in _layout.tsx so it can read
-            socialLinks from the Sanity-backed layout loader. */}
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              '@context': 'https://schema.org',
-              '@type':    'WebSite',
-              url:        'https://xdipx.com',
-              name:       'xdipx',
-              potentialAction: {
-                '@type':       'SearchAction',
-                target:        'https://xdipx.com/search?q={search_term_string}',
-                'query-input': 'required name=search_term_string',
-              },
-            }),
-          }}
-        />
+        {/* WebSite JSON-LD lives in _layout.tsx (WebsiteStructuredData), next to
+            Organization JSON-LD so both sitewide entities render together and
+            don't duplicate — removing the inline copy that used to render here. */}
         {gtmId && (
           <noscript>
             <iframe
