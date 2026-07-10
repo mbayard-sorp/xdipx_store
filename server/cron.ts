@@ -232,13 +232,23 @@ export function createCronRoutes() {
 
   /**
    * POST /cron/keyword-research
-   * Schedule: weekly Sunday 02:00 UTC — discover new SEO keywords via
-   * DataForSEO + LLM clusterer, write to Sanity as pending or approved.
+   * Schedule: monthly, 1st 02:00 UTC — discover new SEO keywords via
+   * DataForSEO (when creds exist) or LLM-only expansion, classify, and write
+   * to Sanity as pending or approved.
+   * Gated by the keyword_research_enabled valve (paused in #198 to stop
+   * spend; the valve makes re-enabling a dashboard action).
    * Also callable on-demand by admin (with the cron secret).
    * Body (optional): { manualSeeds?: string[], maxSeeds?: number }
    */
   cronRoute('/keyword-research', async (req, res) => {
     try {
+      const { getValve } = await import('../app/lib/team.server.js')
+      const { VALVE_KEYS } = await import('../app/lib/team-keys.js')
+      if (!(await getValve(VALVE_KEYS.keywordResearch))) {
+        console.log('[cron:keyword-research] skipped: keyword_research_enabled is off')
+        res.json({ ok: true, skipped: 'keyword_research_enabled is off' })
+        return
+      }
       const { runKeywordResearch } = await import('../app/lib/seo-research.server.js')
       const opts: { maxSeeds?: number; manualSeeds?: string[] } = {}
       const rawMaxSeeds = req.body?.maxSeeds ?? (req.query['maxSeeds'] ? Number(req.query['maxSeeds']) : undefined)
