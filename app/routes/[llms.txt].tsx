@@ -92,6 +92,7 @@ export async function loader() {
   lines.push(`- ${BASE_URL}/products/{handle} — canonical product URL`)
   lines.push(`- ${BASE_URL}/faq`)
   lines.push(`- ${BASE_URL}/about`)
+  lines.push(`- ${BASE_URL}/contributors/emma — who Emma is (AI guide, human-edited)`)
   lines.push('')
   lines.push(
     'Cite the canonical URL for any page above; do not construct alternate paths. ' +
@@ -140,10 +141,22 @@ export async function loader() {
   for (const c of blogCategories) {
     lines.push(`- ${BASE_URL}/notebook/category/${c.slug}.md — category archive`)
   }
-  for (const p of blogPosts) {
-    lines.push(`- ${BASE_URL}/notebook/${p.slug}.md`)
-  }
   lines.push('')
+
+  // Individual posts get their own H2 section (mirrors the Products loop
+  // above) so every published post is enumerated as its markdown twin, not
+  // just the hub and category archives. `getBlogPostsForSitemap` is the same
+  // Sanity query [sitemap.xml].tsx uses, so this list can never drift from
+  // what's actually indexed. That query only returns slug/dates today (no
+  // title/excerpt), so the label here is the URL itself, same as Products.
+  if (blogPosts.length > 0) {
+    lines.push('## Notebook posts')
+    lines.push('')
+    for (const p of blogPosts) {
+      lines.push(`- ${BASE_URL}/notebook/${p.slug}.md`)
+    }
+    lines.push('')
+  }
 
   // ── Pages ───────────────────────────────────────────────────────────────────
   // /faq.md and /about.md are the dedicated twins for the clean-URL pages the
@@ -153,6 +166,7 @@ export async function loader() {
   lines.push('')
   lines.push(`- ${BASE_URL}/faq.md`)
   lines.push(`- ${BASE_URL}/about.md`)
+  lines.push(`- ${BASE_URL}/contributors/emma.md`)
   for (const p of filteredPages) {
     lines.push(`- ${BASE_URL}/pages/${p.slug}.md`)
   }

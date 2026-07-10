@@ -45,12 +45,25 @@ export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
   const title = `${baseTitle}${pageSuffix} | xdipx`
   const description = category.seoDescription ?? category.description ?? `Read ${category.name.toLowerCase()} posts in the xdipx Notebook.`
 
+  // Posts are ordered publishedAt desc — the first post on page 1 is the
+  // category's most recent, used as the social share image since categories
+  // have no image of their own.
+  const featuredImage = loaderData.posts[0]?.heroImageUrl ?? null
+  const featuredImageAlt = loaderData.posts[0]?.heroImageAlt
+
   const tags: ReturnType<MetaFunction> = [
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: canonical },
     { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: `https://xdipx.com/notebook/category/${category.slug}.md` },
-    ...buildSocialMeta({ title, description, url: canonical, image: null, type: 'website' }),
+    ...buildSocialMeta({
+      title,
+      description,
+      url: canonical,
+      image: featuredImage,
+      type: 'website',
+      ...(featuredImageAlt ? { imageAlt: featuredImageAlt } : {}),
+    }),
   ]
 
   // rel=prev/next for paginated category archives — helps Google understand

@@ -15,6 +15,31 @@ const BASE_URL = 'https://xdipx.com'
 // serializer notes the total and links the paginated hub if we outgrow it.
 const MAX_POSTS = 100
 
+// Static FAQ about the Notebook itself. Emma voice, no lived experience,
+// no em-dashes. Reviewed alongside site copy.
+const NOTEBOOK_FAQS: Array<{ question: string; answer: string }> = [
+  {
+    question: 'What is the Notebook?',
+    answer:
+      'The Notebook is xdipx\'s editorial section, guides, comparisons, and care basics written to answer real questions before you shop, not to sell a specific product.',
+  },
+  {
+    question: 'How often is it updated?',
+    answer:
+      'New posts land on a regular schedule, not a countdown. Check back or browse by category for the latest.',
+  },
+  {
+    question: 'Who writes the Notebook?',
+    answer:
+      'Emma, xdipx\'s AI guide, drafts every post from catalog knowledge, specs, materials, and review patterns, with human review before anything publishes.',
+  },
+  {
+    question: 'Does the Notebook recommend products?',
+    answer:
+      'Only when a product genuinely fits the answer, and only in-stock items. Each mention links to that product\'s own page, where price and availability live.',
+  },
+]
+
 export async function loader() {
   const guard = <T,>(p: Promise<T>, fallback: T, name: string): Promise<T> =>
     p.catch(err => {
@@ -42,6 +67,7 @@ export async function loader() {
         name: c.name,
         description: c.description,
       })),
+      faqs: NOTEBOOK_FAQS,
     })
   })
 

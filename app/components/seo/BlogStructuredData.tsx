@@ -19,7 +19,16 @@ export function BlogStructuredData({ post, readingTime }: { post: BlogPost; read
     wordCount,
     timeRequired: `PT${readingTime}M`,
     author: post.author
-      ? { '@type': 'Person', name: post.author.name }
+      ? {
+          '@type': 'Person',
+          name: post.author.name,
+          ...(post.author.slug === 'emma'
+            ? {
+                url: 'https://xdipx.com/contributors/emma',
+                sameAs: ['https://xdipx.com/contributors/emma'],
+              }
+            : {}),
+        }
       : undefined,
     publisher: {
       '@type': 'Organization',

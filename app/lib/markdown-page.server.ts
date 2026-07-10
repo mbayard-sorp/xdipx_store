@@ -614,6 +614,7 @@ export interface DiscoverData {
   moods: DiscoverGroup[]
   audiences: DiscoverGroup[]
   matters: DiscoverGroup[]
+  faqs?: Array<{ question: string; answer: string }> | undefined
 }
 
 function discoverProductLine(p: DiscoverProductItem): string {
@@ -658,6 +659,17 @@ export function discoverToMarkdown(data: DiscoverData): string {
   discoverGroupSection(lines, 'Browse by who it\'s for', 'Who the product is designed around.', data.audiences)
   discoverGroupSection(lines, 'Browse by what matters', 'Practical priorities like quietness, size, or ease of cleaning.', data.matters)
 
+  if (data.faqs && data.faqs.length > 0) {
+    lines.push('## Frequently asked questions')
+    lines.push('')
+    for (const f of data.faqs) {
+      lines.push(`### ${f.question}`)
+      lines.push('')
+      lines.push(f.answer)
+      lines.push('')
+    }
+  }
+
   lines.push(mdFooter(path))
 
   return lines.join('\n')
@@ -683,6 +695,7 @@ export interface NotebookHubData {
   posts: NotebookHubPost[]
   total: number
   categories: NotebookHubCategory[]
+  faqs?: Array<{ question: string; answer: string }> | undefined
 }
 
 export function notebookHubToMarkdown(hub: NotebookHubData): string {
@@ -729,6 +742,17 @@ export function notebookHubToMarkdown(hub: NotebookHubData): string {
       lines.push(`- [${c.name}](${BASE_URL}/notebook/category/${c.slug})${desc}`)
     }
     lines.push('')
+  }
+
+  if (hub.faqs && hub.faqs.length > 0) {
+    lines.push('## Frequently asked questions')
+    lines.push('')
+    for (const f of hub.faqs) {
+      lines.push(`### ${f.question}`)
+      lines.push('')
+      lines.push(f.answer)
+      lines.push('')
+    }
   }
 
   lines.push(mdFooter(path))
