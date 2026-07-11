@@ -20,6 +20,7 @@ import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
 import { invalidateHomepagePayloadA, triggerHomepageWarm } from '~/lib/homepage-payload.server'
 import { ImageManager } from '~/components/admin/ImageManager'
 import { PricingPanel } from '~/components/admin/PricingPanel'
+import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import type { Product } from '~/types'
 import { dealOrderToCSV, type DealOrderRow } from '~/lib/deal-order-csv'
 import { dealOrderFromCSV } from '~/lib/deal-order-csv.server'
@@ -1888,11 +1889,11 @@ export default function AdminDealsPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col gap-3 mb-4 md:flex-row md:items-center md:justify-between">
         <h1 className="text-2xl font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Deals
         </h1>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
             type="button"
             onClick={handleExportOrder}
@@ -1918,8 +1919,8 @@ export default function AdminDealsPage() {
       </div>
 
       {pendingImport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[85vh] overflow-y-auto p-6 space-y-4">
             <h2 className="text-lg font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
               Replace deal order?
             </h2>
@@ -1969,8 +1970,8 @@ export default function AdminDealsPage() {
       )}
 
       {/* Search bar + Move to top dropzone */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1">
+      <div className="flex flex-col gap-3 mb-4 md:flex-row md:items-center">
+        <div className="relative flex-1 min-w-0">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-3 top-1/2 -translate-y-1/2 text-ink/30">
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
           </svg>
@@ -2016,8 +2017,9 @@ export default function AdminDealsPage() {
       </div>
 
       {/* Pipeline Table */}
-      <div className="rounded-2xl overflow-visible shadow-sm">
-        <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: '0 3px' }}>
+      <div className="rounded-2xl shadow-sm">
+        <ResponsiveTable>
+        <table className="w-full text-sm min-w-[840px]" style={{ tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: '0 3px' }}>
           <colgroup>
             <col style={{ width: '220px' }} />
             <col />
@@ -2173,7 +2175,8 @@ export default function AdminDealsPage() {
             })}
           </tbody>
         </table>
-        <div className="bg-white rounded-2xl mt-1 px-4 py-2.5 flex items-center justify-between">
+        </ResponsiveTable>
+        <div className="bg-white rounded-2xl mt-1 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-ink/40">
             {totalFiltered > 0
               ? `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, totalFiltered)} of ${totalFiltered} deal${totalFiltered !== 1 ? 's' : ''}`
