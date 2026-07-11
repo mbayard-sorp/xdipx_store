@@ -71,7 +71,7 @@ export default function AdminSeoRegen() {
         Regenerate product copy with full keyword targeting. Pulls
         productTypeDial + mood/audience/matters tags so the keyword bank can
         match by tag overlap. Output below is preview-only — copy values into
-        their fields in deal-manager to save.
+        their fields in the Deals editor to save.
       </p>
 
       <form onSubmit={submit} className="bg-paper border border-line rounded p-6 space-y-4">

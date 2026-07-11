@@ -1,10 +1,10 @@
 /**
- * Channel-agnostic SMS message processor. Used by both:
- *   - the real Twilio webhook (api.twilio.sms.tsx) → simulated: false
- *   - the admin simulator (admin.sms-tester.tsx)   → simulated: true
+ * Channel-agnostic SMS message processor, driven by the Twilio webhook
+ * (api.twilio.sms.tsx) with simulated: false. The `simulated` flag marks
+ * rows created by test harnesses so production metrics can exclude them.
  *
  * Keeps STOP/START/HELP/age-gate/opt-out/rate-limit/history/Claude logic in
- * exactly one place so the simulator can never drift from production.
+ * exactly one place.
  */
 import { and, asc, eq, gte, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'

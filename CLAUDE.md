@@ -43,7 +43,7 @@ No hardcoded product data anywhere except `db/seed.ts`. All product data comes f
 
 ### Admin = Approval Only
 
-AI generates content; humans approve. The `admin/today` route has an approval toggle. **Never** auto-publish a deal without `deal_status: approved` in Shopify metafield.
+AI generates content; humans approve. The `admin/deals` route is the deal editor with the approval toggle. **Never** auto-publish a deal without `deal_status: approved` in Shopify metafield.
 
 **Carve-out — autonomous homepage merchandising team:** the homepage team (see `docs/homepage-team/`) MAY auto-publish *content-only* homepage changes (featured product rotation, Emma copy refresh, image swaps, section reorder via Sanity) without per-change approval, within the `/admin/homepage-team` kill switch + daily $ budget. Any *code/layout/component* change still goes through a reviewed PR (never auto-merged). Daily-deal publishing keeps its `deal_status: approved` gate unchanged.
 
@@ -167,9 +167,7 @@ app/
     admin._index.tsx
     admin.login.tsx
     admin.queue.tsx
-    admin.today.tsx
-    admin.generate.tsx
-    admin.emails.tsx
+    admin.deals.tsx
     api.generate-copy.tsx
     api.generate-image.tsx
     api.klaviyo.tsx

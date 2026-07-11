@@ -31,14 +31,6 @@ function PhoneIcon() {
     </svg>
   )
 }
-function MailIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-      <polyline points="22,6 12,13 2,6" />
-    </svg>
-  )
-}
 function SocialsIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -176,7 +168,6 @@ const NAV_ITEMS = [
   { to: '/admin/voicemails',     label: 'Voicemails',   Icon: PhoneIcon,    badgeKey: 'voicemails' },
   { to: '/admin/calls',          label: 'Calls',        Icon: PhoneIcon     },
   { to: '/admin/phone-orders',   label: 'Phone Orders', Icon: CartUpsellIcon },
-  { to: '/admin/emails',         label: 'Emails',       Icon: MailIcon      },
   { to: '/admin/socials',        label: 'Socials',      Icon: SocialsIcon   },
   { to: '/admin/search-filters',    label: 'Search Filters',   Icon: SearchFilterIcon },
   { to: '/admin/discovery-rules',   label: 'Discovery Rules',  Icon: SlidersIcon      },
