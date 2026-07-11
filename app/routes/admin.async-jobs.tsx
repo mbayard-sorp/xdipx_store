@@ -165,14 +165,14 @@ export default function AsyncJobsPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1
           className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Async Jobs
         </h1>
-        <div className="flex items-center gap-2 text-xs text-ink-4">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-4">
           {inFlight.length > 0 && (
             <span className="flex items-center gap-1">
               <span className="inline-block w-2 h-2 rounded-full bg-coral animate-pulse" />

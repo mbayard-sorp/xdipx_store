@@ -13,6 +13,7 @@ import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { Link, useLoaderData } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { getTokenCallDetail } from '~/lib/token-log.server'
+import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 
 export const meta: MetaFunction = () => [{ title: 'Usage detail — xdipx Admin' }]
 
@@ -100,8 +101,8 @@ export default function UsageDetailPage() {
       )}
 
       {rows.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-line">
-          <table className="w-full text-xs text-left">
+        <ResponsiveTable className="rounded-xl border border-line">
+          <table className="w-full min-w-[720px] text-xs text-left">
             <thead className="bg-paper-2 text-ink-4">
               <tr>
                 {['Action (caller)', 'SKU / Product', 'Calls', 'Input', 'Output', 'Cache-R', 'Est. $', 'Window (UTC)'].map(h => (
@@ -140,7 +141,7 @@ export default function UsageDetailPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </ResponsiveTable>
       )}
 
       <p className="text-xs text-ink-4">

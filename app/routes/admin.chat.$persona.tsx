@@ -240,7 +240,7 @@ export default function AgentChat() {
   const isClearing = clearFetcher.state !== 'idle'
 
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)] max-w-3xl">
+    <div className="flex flex-col h-[calc(100dvh-120px)] md:h-[calc(100vh-64px)] max-w-3xl">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4 shrink-0">
         <div className="min-w-0">

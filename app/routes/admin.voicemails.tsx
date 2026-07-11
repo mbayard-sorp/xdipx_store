@@ -59,14 +59,14 @@ export default function AdminVoicemails() {
 
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-3 mb-6">
         <h1
           className="text-2xl font-bold text-ink"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Voicemails
         </h1>
-        <div className="flex gap-1 text-sm">
+        <div className="flex flex-wrap gap-1 text-sm">
           {STATUSES.map((s) => {
             const active = filter === s
             return (
@@ -114,7 +114,7 @@ function VoicemailCard({
   const callback = vm.callbackNumber ?? vm.fromNumber
   return (
     <li className="bg-white rounded-2xl p-4 shadow-sm border border-cream-2">
-      <div className="flex items-start gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 text-xs text-ink/60 mb-1">
             <span>{fmtDate(vm.createdAt)}</span>
@@ -163,7 +163,7 @@ function VoicemailCard({
           </details>
         </div>
 
-        <Form method="post" className="flex flex-col gap-1 shrink-0">
+        <Form method="post" className="flex flex-row flex-wrap gap-1 sm:flex-col sm:shrink-0">
           <input type="hidden" name="id" value={vm.id} />
           {STATUSES.filter((s) => s !== filter).map((s) => (
             <button

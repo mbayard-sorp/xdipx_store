@@ -73,16 +73,16 @@ export default function AdminAccount() {
         </h2>
         <dl className="space-y-3 text-sm">
           <div className="flex gap-4">
-            <dt className="text-ink/50 w-20">Name</dt>
-            <dd className="text-ink font-medium">{user?.name}</dd>
+            <dt className="text-ink/50 w-20 shrink-0">Name</dt>
+            <dd className="text-ink font-medium min-w-0 break-words">{user?.name}</dd>
           </div>
           <div className="flex gap-4">
-            <dt className="text-ink/50 w-20">Email</dt>
-            <dd className="text-ink font-medium">{user?.email}</dd>
+            <dt className="text-ink/50 w-20 shrink-0">Email</dt>
+            <dd className="text-ink font-medium min-w-0 break-words">{user?.email}</dd>
           </div>
           <div className="flex gap-4">
-            <dt className="text-ink/50 w-20">Role</dt>
-            <dd className="text-ink font-medium capitalize">{user?.role}</dd>
+            <dt className="text-ink/50 w-20 shrink-0">Role</dt>
+            <dd className="text-ink font-medium capitalize min-w-0 break-words">{user?.role}</dd>
           </div>
         </dl>
       </div>
