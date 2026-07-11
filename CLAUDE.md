@@ -57,6 +57,8 @@ AI generates content; humans approve. The `admin/deals` route is the deal editor
 
 Build and test at 375px first. Most traffic will be mobile. Use responsive classes in order: base (375px) → `sm:` → `md:` → `lg:`.
 
+**Admin pages too.** The admin shell collapses to a drawer below `md:`. Recipes: wrap every table in `<ResponsiveTable>` (`app/components/admin/ResponsiveTable.tsx`) and give the table a `min-w-[…]` floor; stat grids `grid-cols-2 md:grid-cols-4`; form rows `flex flex-col gap-3 md:flex-row md:items-center`; page headers `flex-wrap`. Tables scroll horizontally inside their wrapper — never let the page body scroll sideways, and never restructure admin tables into cards.
+
 ## Tech Stack
 
 | Layer | Tool |
