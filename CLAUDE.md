@@ -43,7 +43,7 @@ No hardcoded product data anywhere except `db/seed.ts`. All product data comes f
 
 ### Admin = Approval Only
 
-AI generates content; humans approve. The `admin/today` route has an approval toggle. **Never** auto-publish a deal without `deal_status: approved` in Shopify metafield.
+AI generates content; humans approve. The `admin/deals` route is the deal editor with the approval toggle. **Never** auto-publish a deal without `deal_status: approved` in Shopify metafield.
 
 **Carve-out — autonomous homepage merchandising team:** the homepage team (see `docs/homepage-team/`) MAY auto-publish *content-only* homepage changes (featured product rotation, Emma copy refresh, image swaps, section reorder via Sanity) without per-change approval, within the `/admin/homepage-team` kill switch + daily $ budget. Any *code/layout/component* change still goes through a reviewed PR (never auto-merged). Daily-deal publishing keeps its `deal_status: approved` gate unchanged.
 
@@ -56,6 +56,8 @@ AI generates content; humans approve. The `admin/today` route has an approval to
 ### Mobile-First
 
 Build and test at 375px first. Most traffic will be mobile. Use responsive classes in order: base (375px) → `sm:` → `md:` → `lg:`.
+
+**Admin pages too.** The admin shell collapses to a drawer below `md:`. Recipes: wrap every table in `<ResponsiveTable>` (`app/components/admin/ResponsiveTable.tsx`) and give the table a `min-w-[…]` floor; stat grids `grid-cols-2 md:grid-cols-4`; form rows `flex flex-col gap-3 md:flex-row md:items-center`; page headers `flex-wrap`. Tables scroll horizontally inside their wrapper — never let the page body scroll sideways, and never restructure admin tables into cards.
 
 ## Tech Stack
 
@@ -167,9 +169,7 @@ app/
     admin._index.tsx
     admin.login.tsx
     admin.queue.tsx
-    admin.today.tsx
-    admin.generate.tsx
-    admin.emails.tsx
+    admin.deals.tsx
     api.generate-copy.tsx
     api.generate-image.tsx
     api.klaviyo.tsx

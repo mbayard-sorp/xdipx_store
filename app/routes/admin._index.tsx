@@ -4,11 +4,13 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { dealHistory } from '../../db/schema'
 import { getDashboardStats } from '~/lib/profit.server'
+import { requireAdmin } from '~/lib/session.server'
 import { ProfitDashboard } from '~/components/admin/ProfitDashboard'
 
 export const meta: MetaFunction = () => [{ title: 'Dashboard — xdipx Admin' }]
 
-export async function loader(_: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireAdmin(request)
   const { rows, total } = await getDashboardStats(30)
 
   // Warn when the deal loop is in use (something is live) but the 23:59
@@ -43,7 +45,7 @@ export default function AdminDashboard() {
         Dashboard
       </h1>
       {nextDealMissing && (
-        <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-2xl px-5 py-3 text-sm text-yellow-800 flex items-center gap-3">
+        <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-2xl px-5 py-3 text-sm text-yellow-800 flex items-start sm:items-center gap-3">
           <span>⚠️</span>
           <span>
             No approved deal is queued for the next rotation. Stage one via{' '}

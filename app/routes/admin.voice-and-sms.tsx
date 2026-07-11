@@ -1,3 +1,4 @@
+import { requireAdmin } from '~/lib/session.server'
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher } from 'react-router'
 import { useState } from 'react'
@@ -6,6 +7,7 @@ import { db } from '~/lib/db.server'
 import { ivrVoices, pipelineSettings } from '../../db/schema'
 import { IVR_CONFIG_DEFAULTS, getIvrConfigDiagnostic, type IvrConfigDiagnosticRow } from '~/lib/ivr-config.server'
 import { SMS_DEFAULTS } from '~/lib/sms-v2/sms-config.server'
+import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 
 type VoiceRow = {
   id: number | null
@@ -40,7 +42,8 @@ const DEFAULTS: Record<string, string> = {
   smsCheckoutClosing: SMS_DEFAULTS.checkoutClosing,
 }
 
-export async function loader(_: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireAdmin(request)
   const rows = await db.select().from(pipelineSettings)
   const settings: Record<string, string> = { ...DEFAULTS }
   for (const row of rows) {
@@ -74,6 +77,7 @@ export async function loader(_: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  await requireAdmin(request)
   const form = await request.formData()
   const intent = form.get('intent') as string
 
@@ -189,7 +193,7 @@ function SaveForm({
       <input type="hidden" name="key" value={settingKey} />
       <label className="block text-sm font-semibold text-ink">{label}</label>
       {description && <p className="text-xs text-ink/50">{description}</p>}
-      <div className={`${multiline ? 'flex flex-col gap-2' : 'flex gap-3 items-center'} pt-1`}>
+      <div className={`flex flex-col gap-2 ${multiline ? '' : 'md:flex-row md:items-center md:gap-3'} pt-1`}>
         {multiline ? (
           <textarea
             name="value"
@@ -206,7 +210,7 @@ function SaveForm({
               min={min}
               step={step}
               placeholder={placeholder}
-              className="flex-1 border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
+              className="w-full md:flex-1 border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
             />
             {suffix && <span className="text-xs text-ink/50 whitespace-nowrap">{suffix}</span>}
           </>
@@ -245,8 +249,8 @@ function DiagnosticPanel({ diagnostic }: { diagnostic: IvrConfigDiagnosticRow[] 
       </button>
 
       {open && (
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full text-xs">
+        <div className="mt-3 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+          <table className="w-full min-w-[560px] text-xs">
             <thead>
               <tr className="text-left text-ink/50 border-b border-cream-2">
                 <th className="py-1.5 pr-3">Key</th>
@@ -360,7 +364,7 @@ export default function AdminIvrPage() {
 
       {/* ElevenLabs Voice Library */}
       <section className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2
             className="text-base font-bold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}
@@ -370,7 +374,7 @@ export default function AdminIvrPage() {
           <button
             type="button"
             onClick={addRow}
-            className="text-sm font-semibold px-3 py-1.5 bg-cream-2 text-sage rounded-full hover:bg-sage/10 transition-colors"
+            className="self-start sm:self-auto text-sm font-semibold px-3 py-1.5 bg-cream-2 text-sage rounded-full hover:bg-sage/10 transition-colors"
           >
             + Add Voice
           </button>
@@ -380,8 +384,8 @@ export default function AdminIvrPage() {
           If nothing is active, the IVR falls back to the <code>ELEVENLABS_VOICE_ID_IVR</code> env var.
         </p>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <ResponsiveTable>
+          <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-ink/50 border-b border-cream-2">
                 <th className="py-2 pr-3 w-16">Active</th>
@@ -451,9 +455,9 @@ export default function AdminIvrPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </ResponsiveTable>
 
-        <div className="flex items-center gap-3 pt-2">
+        <div className="flex flex-wrap items-center gap-3 pt-2">
           <button
             type="button"
             onClick={saveVoices}

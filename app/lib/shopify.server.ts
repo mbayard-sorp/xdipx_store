@@ -6015,7 +6015,7 @@ export async function sendDraftOrderInvoice(
 
 // ─── Emma Chat Catalog Helpers ────────────────────────────────────────────
 //
-// Read-only helpers consumed by the /admin/emma-chat tool executors.
+// Read-only helpers consumed by the /admin/chat/emma tool executors.
 // All Shopify calls stay in this file (Oxygen migration seam).
 // List calls are wrapped in cached() to dedupe repeated tool invocations
 // within a single chat session.

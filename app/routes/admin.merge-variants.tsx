@@ -688,7 +688,7 @@ export default function MergeVariantsRoute() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-4 md:p-6 max-w-7xl mx-auto">
       <h1 className="font-display text-2xl font-black text-ink mb-1">
         Merge variants
       </h1>
@@ -696,7 +696,7 @@ export default function MergeVariantsRoute() {
         Combine duplicate products into a master with variants. The top bin item becomes the master product.
       </p>
 
-      <div className="flex flex-col gap-8 min-[900px]:flex-row min-[900px]:gap-10 min-[900px]:items-start">
+      <div className="flex flex-col gap-8 md:flex-row md:gap-10 md:items-start">
         <SearchColumn bin={bin} onAdd={handleAddFromSearch} />
         <MergeBinColumn bin={bin} onBinChange={handleBinChange} />
       </div>

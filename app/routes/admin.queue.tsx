@@ -1,3 +1,4 @@
+import { requireAdmin } from '~/lib/session.server'
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher, useSearchParams } from 'react-router'
 import React, { useEffect, useRef, useState } from 'react'
@@ -8,10 +9,12 @@ import { dailyFeedProcessor } from '~/lib/feed-processor.server'
 import { setDealStatus, activateShopifyProduct, getAdminProductData } from '~/lib/shopify.server'
 import { activateDeal } from '~/lib/deal-rotator.server'
 import { eq, and } from 'drizzle-orm'
+import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 
 export const meta: MetaFunction = () => [{ title: 'Deal Queue — xdipx Admin' }]
 
-export async function loader(_: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireAdmin(request)
   const deals = await db
     .select()
     .from(dealHistory)
@@ -31,6 +34,7 @@ export async function loader(_: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  await requireAdmin(request)
   const form   = await request.formData()
   const intent = form.get('intent')
 
@@ -256,11 +260,11 @@ export default function AdminQueuePage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col gap-3 mb-4 md:flex-row md:items-center md:justify-between">
         <h1 className="text-2xl font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
           Deal Queue
         </h1>
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="run-feed" />
             <button type="submit" className="text-sm font-semibold px-4 py-2 bg-cream-2 text-sage rounded-full hover:bg-sage/10 transition-colors">
@@ -306,8 +310,9 @@ export default function AdminQueuePage() {
         ))}
       </div>
 
-      <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
-        <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+      <div className="bg-white rounded-2xl shadow-sm">
+        <ResponsiveTable>
+        <table className="w-full text-sm min-w-[1080px]" style={{ tableLayout: 'fixed' }}>
           <colgroup>
             <col style={{ width: '120px' }} />
             <col style={{ width: '48px' }} />
@@ -506,6 +511,7 @@ export default function AdminQueuePage() {
             })}
           </tbody>
         </table>
+        </ResponsiveTable>
         {visibleDeals.length > 0 && (
           <div className="px-4 py-2 border-t border-cream-2 text-xs text-ink/40 text-right">
             {visibleDeals.length} deal{visibleDeals.length !== 1 ? 's' : ''} — click a row to preview images

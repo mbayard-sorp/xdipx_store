@@ -10,6 +10,7 @@ import {
   createInvite,
 } from '~/lib/reviews.server'
 import { InviteFunnel } from '~/components/reviews/InviteFunnel'
+import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 
 export const meta: MetaFunction = () => [{ title: 'Review Invites — xdipx Admin' }]
 
@@ -131,7 +132,8 @@ export default function AdminReviewInvites() {
 
       {/* Invite table */}
       <div className="bg-white rounded-2xl border border-cream-2 overflow-hidden">
-        <table className="w-full text-sm">
+        <ResponsiveTable>
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-cream-2">
               <th className="px-4 py-3 text-left text-xs font-semibold text-ink/50 uppercase tracking-wider">Recipient</th>
@@ -172,6 +174,7 @@ export default function AdminReviewInvites() {
             ))}
           </tbody>
         </table>
+        </ResponsiveTable>
 
         {totalPages > 1 && (
           <div className="px-4 py-3 border-t border-cream-2 flex items-center justify-center gap-3">

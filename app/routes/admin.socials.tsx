@@ -320,7 +320,7 @@ export default function AdminSocialsPage() {
             {posts.map((post) => (
               <div
                 key={post.id}
-                className="flex items-start gap-4 p-4 rounded-xl border border-gray-100 hover:border-gray-200 transition-colors"
+                className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4 p-4 rounded-xl border border-gray-100 hover:border-gray-200 transition-colors"
               >
                 {/* Platform icon */}
                 <div className="w-8 h-8 rounded-full bg-ink flex items-center justify-center shrink-0 mt-0.5">
@@ -356,7 +356,7 @@ export default function AdminSocialsPage() {
                 </div>
 
                 {/* Status + Actions */}
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 flex-wrap shrink-0">
                   <StatusBadge status={post.status} />
 
                   {post.status === 'posted' && post.externalPostId && (

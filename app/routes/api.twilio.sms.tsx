@@ -3,8 +3,7 @@
  *
  * Inbound SMS webhook. Verifies the Twilio signature, then hands off to the
  * shared processSmsMessage() pipeline (STOP/HELP/age-gate/opt-out/rate-limit/
- * Claude). The same pipeline backs the /admin/sms-tester simulator with
- * `simulated: true` so the two paths can never drift.
+ * Claude).
  *
  * Phase 0.5: pickPipelineVersion() selects v1 or v2 per-request. An allowlist
  * in SMS_V2_PHONES forces v2 for specific phones (dark-launch). The global

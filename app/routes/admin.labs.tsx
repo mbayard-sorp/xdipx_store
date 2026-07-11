@@ -531,7 +531,7 @@ export default function AdminLabsPage() {
         {selectedProduct && images.length > 0 && (
           <div className="pt-2">
             <p className="text-xs text-ink/50 mb-2 font-medium">Product Images ({images.length})</p>
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
               {images.map(img => (
                 <button
                   key={img.id}
@@ -607,7 +607,7 @@ export default function AdminLabsPage() {
           </div>
 
           {/* Controls grid */}
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <RadioGroup
               label="Aspect Ratio"
               value={aspectRatio}
@@ -717,7 +717,7 @@ export default function AdminLabsPage() {
                   <p className="text-sm text-ink leading-relaxed">{enhancedPrompt}</p>
                 </div>
               )}
-              <div className={`grid gap-6 ${videoUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              <div className={`grid gap-6 ${videoUrls.length > 1 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
                 {videoUrls.map((url, i) => (
                   <div key={i} className="space-y-3">
                     <video src={url} controls playsInline className="w-full rounded-xl bg-black" />
@@ -851,7 +851,7 @@ export default function AdminLabsPage() {
           </div>
 
           {/* Controls grid */}
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <RadioGroup
               label="Aspect Ratio"
               value={ltxAspectRatio}
@@ -977,7 +977,7 @@ export default function AdminLabsPage() {
                   <p className="text-xs font-semibold text-ink/70">Add Audio (ElevenLabs)</p>
 
                   {/* Audio type selector */}
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {([
                       { value: 'music',     label: 'Music',         icon: '♪' },
                       { value: 'sfx',       label: 'Sound Effects', icon: '🔊' },

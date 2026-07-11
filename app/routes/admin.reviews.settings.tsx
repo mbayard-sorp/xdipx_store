@@ -41,7 +41,7 @@ function Toggle({
   name, label, defaultChecked, description,
 }: { name: string; label: string; defaultChecked: boolean; description?: string }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-3 border-b border-cream-2 last:border-0">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4 py-3 border-b border-cream-2 last:border-0">
       <div>
         <p className="text-sm font-medium text-ink">{label}</p>
         {description && <p className="text-xs text-ink/50 mt-0.5">{description}</p>}

@@ -71,7 +71,7 @@ export default function AdminSeoRegen() {
         Regenerate product copy with full keyword targeting. Pulls
         productTypeDial + mood/audience/matters tags so the keyword bank can
         match by tag overlap. Output below is preview-only — copy values into
-        their fields in deal-manager to save.
+        their fields in the Deals editor to save.
       </p>
 
       <form onSubmit={submit} className="bg-paper border border-line rounded p-6 space-y-4">
@@ -89,7 +89,7 @@ export default function AdminSeoRegen() {
 
         <fieldset>
           <legend className="text-sm font-medium text-ink mb-2">Copy types</legend>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {COPY_TYPES.map(({ value, label }) => (
               <label key={value} className="flex items-center gap-2 text-sm">
                 <input
@@ -117,7 +117,7 @@ export default function AdminSeoRegen() {
         <button
           type="submit"
           disabled={submitting || !handle.trim() || selectedTypes.size === 0}
-          className="bg-coral hover:bg-coral-2 disabled:bg-muted text-paper font-display font-bold px-6 py-2 rounded transition"
+          className="w-full sm:w-auto bg-coral hover:bg-coral-2 disabled:bg-muted text-paper font-display font-bold px-6 py-2 rounded transition"
         >
           {submitting ? 'Regenerating…' : 'Regenerate with SEO targets'}
         </button>
@@ -138,7 +138,7 @@ export default function AdminSeoRegen() {
               </h2>
               {Object.entries(result.types).map(([type, r]) => (
                 <article key={type} className="bg-paper border border-line rounded p-4">
-                  <header className="flex items-center justify-between mb-2">
+                  <header className="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <h3 className="font-display font-bold text-ink">{type}</h3>
                     <span className={`text-xs px-2 py-0.5 rounded ${r.ok ? 'bg-sage/20 text-sage' : 'bg-coral-deep/20 text-coral-deep'}`}>
                       {r.ok ? 'ok' : 'failed'}

@@ -1,3 +1,5 @@
+import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
+
 interface DayRow {
   summaryDate:  string
   totalOrders:  number | null
@@ -37,8 +39,9 @@ export function ProfitDashboard({ rows, totals }: ProfitDashboardProps) {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
-        <table className="w-full text-sm">
+      <div className="bg-white rounded-2xl shadow-sm">
+        <ResponsiveTable>
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="bg-cream-2 text-ink/60 text-xs uppercase tracking-wide">
               <th className="px-4 py-3 text-left">Date</th>
@@ -69,6 +72,7 @@ export function ProfitDashboard({ rows, totals }: ProfitDashboardProps) {
             )}
           </tbody>
         </table>
+        </ResponsiveTable>
       </div>
     </div>
   )

@@ -31,14 +31,6 @@ function PhoneIcon() {
     </svg>
   )
 }
-function MailIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-      <polyline points="22,6 12,13 2,6" />
-    </svg>
-  )
-}
 function SocialsIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -176,7 +168,6 @@ const NAV_ITEMS = [
   { to: '/admin/voicemails',     label: 'Voicemails',   Icon: PhoneIcon,    badgeKey: 'voicemails' },
   { to: '/admin/calls',          label: 'Calls',        Icon: PhoneIcon     },
   { to: '/admin/phone-orders',   label: 'Phone Orders', Icon: CartUpsellIcon },
-  { to: '/admin/emails',         label: 'Emails',       Icon: MailIcon      },
   { to: '/admin/socials',        label: 'Socials',      Icon: SocialsIcon   },
   { to: '/admin/search-filters',    label: 'Search Filters',   Icon: SearchFilterIcon },
   { to: '/admin/discovery-rules',   label: 'Discovery Rules',  Icon: SlidersIcon      },
@@ -185,15 +176,30 @@ const NAV_ITEMS = [
   { to: '/admin/usage',          label: 'API Usage',     Icon: PricingIcon   },
   { to: '/admin/seo-regen',      label: 'SEO Regen',     Icon: LabsIcon      },
   { to: '/admin/labs',           label: 'Labs',          Icon: LabsIcon      },
-  { to: '/admin/emma-chat',      label: 'Emma Chat',    Icon: ChatBubbleIcon },
-  { to: '/admin/pm-chat',        label: 'PM Chat',      Icon: ChatBubbleIcon },
+  { to: '/admin/chat/emma',      label: 'Agent Chat',   Icon: ChatBubbleIcon },
   { to: '/admin/settings',       label: 'Settings',     Icon: SettingsIcon  },
 ]
 
-export function AdminNav({ logoUrl, adminUser }: { logoUrl: string | null; adminUser: AdminUserInfo | null }) {
+export function AdminNav({
+  logoUrl,
+  adminUser,
+  open,
+  onClose,
+}: {
+  logoUrl: string | null
+  adminUser: AdminUserInfo | null
+  open: boolean
+  onClose: () => void
+}) {
   const { pathname } = useLocation()
   const [pendingReviews, setPendingReviews] = useState<number | null>(null)
   const [newVoicemails, setNewVoicemails] = useState<number | null>(null)
+
+  // Close the mobile drawer whenever the route changes
+  useEffect(() => {
+    onClose()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
 
   useEffect(() => {
     // Fetch pending count from API (60s cache via KV on server)
@@ -214,7 +220,24 @@ export function AdminNav({ logoUrl, adminUser }: { logoUrl: string | null; admin
     : NAV_ITEMS
 
   return (
-    <aside className="w-56 bg-ink min-h-screen flex flex-col py-6 px-4 shrink-0">
+    <>
+      {/* Mobile overlay */}
+      {open && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        id="admin-nav"
+        className={[
+          'fixed inset-y-0 left-0 z-40 w-64 max-w-[85vw] bg-ink flex flex-col py-6 px-4 overflow-y-auto',
+          'transition-transform duration-200',
+          open ? 'translate-x-0' : '-translate-x-full',
+          'md:static md:z-auto md:w-56 md:max-w-none md:min-h-screen md:translate-x-0 md:shrink-0 md:transition-none',
+        ].join(' ')}
+      >
       <Link to="/" className="block mb-8">
         {logoUrl ? (
           <img src={logoUrl} alt="xdipx" className="h-8 w-auto" />
@@ -287,6 +310,7 @@ export function AdminNav({ logoUrl, adminUser }: { logoUrl: string | null; admin
           </button>
         </Form>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }
