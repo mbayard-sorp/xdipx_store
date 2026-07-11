@@ -180,10 +180,26 @@ const NAV_ITEMS = [
   { to: '/admin/settings',       label: 'Settings',     Icon: SettingsIcon  },
 ]
 
-export function AdminNav({ logoUrl, adminUser }: { logoUrl: string | null; adminUser: AdminUserInfo | null }) {
+export function AdminNav({
+  logoUrl,
+  adminUser,
+  open,
+  onClose,
+}: {
+  logoUrl: string | null
+  adminUser: AdminUserInfo | null
+  open: boolean
+  onClose: () => void
+}) {
   const { pathname } = useLocation()
   const [pendingReviews, setPendingReviews] = useState<number | null>(null)
   const [newVoicemails, setNewVoicemails] = useState<number | null>(null)
+
+  // Close the mobile drawer whenever the route changes
+  useEffect(() => {
+    onClose()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
 
   useEffect(() => {
     // Fetch pending count from API (60s cache via KV on server)
@@ -204,7 +220,24 @@ export function AdminNav({ logoUrl, adminUser }: { logoUrl: string | null; admin
     : NAV_ITEMS
 
   return (
-    <aside className="w-56 bg-ink min-h-screen flex flex-col py-6 px-4 shrink-0">
+    <>
+      {/* Mobile overlay */}
+      {open && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        id="admin-nav"
+        className={[
+          'fixed inset-y-0 left-0 z-40 w-64 max-w-[85vw] bg-ink flex flex-col py-6 px-4 overflow-y-auto',
+          'transition-transform duration-200',
+          open ? 'translate-x-0' : '-translate-x-full',
+          'md:static md:z-auto md:w-56 md:max-w-none md:min-h-screen md:translate-x-0 md:shrink-0 md:transition-none',
+        ].join(' ')}
+      >
       <Link to="/" className="block mb-8">
         {logoUrl ? (
           <img src={logoUrl} alt="xdipx" className="h-8 w-auto" />
@@ -277,6 +310,7 @@ export function AdminNav({ logoUrl, adminUser }: { logoUrl: string | null; admin
           </button>
         </Form>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }
