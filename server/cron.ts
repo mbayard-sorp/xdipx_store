@@ -297,6 +297,11 @@ export function createCronRoutes() {
       const opts: { maxSeeds?: number; manualSeeds?: string[] } = {}
       const rawMaxSeeds = req.body?.maxSeeds ?? (req.query['maxSeeds'] ? Number(req.query['maxSeeds']) : undefined)
       if (typeof rawMaxSeeds === 'number' && !isNaN(rawMaxSeeds)) opts.maxSeeds = rawMaxSeeds
+      // Scheduled (Vercel cron) invocations carry no body or query — cap those
+      // at 40 seeds, matching the cap the old GitHub Actions schedule passed via
+      // ?maxSeeds=40. Explicit callers (admin / MCP) keep the library default.
+      const isScheduled = req.headers['x-vercel-cron-schedule'] !== undefined || req.headers['user-agent'] === 'vercel-cron/1.0'
+      if (opts.maxSeeds === undefined && isScheduled) opts.maxSeeds = 40
       const rawManualSeeds = req.body?.manualSeeds ?? (
         typeof req.query['manualSeeds'] === 'string'
           ? req.query['manualSeeds'].split(',').map(s => s.trim()).filter(Boolean)
@@ -547,8 +552,8 @@ export function createCronRoutes() {
   })
 
   /**
-   * POST /cron/warm
-   * Schedule: every 15 min (added to the inventory-check + log-monitor bucket).
+   * GET|POST /cron/warm
+   * Schedule: every 15 min (Vercel cron; see vercel.json).
    * (1) Rebuilds the discovery index via the warm-discovery-index handler.
    * (2) Reads the current live deal handle from deal_history.
    * (3) Fires GET requests to / and /products/{handle} with no-cache headers
@@ -578,7 +583,7 @@ export function createCronRoutes() {
     }
   })
 
-  router.post('/warm', guard, async (_req, res) => {
+  cronRoute('/warm', async (_req, res) => {
     try {
       const baseUrl = process.env['BASE_URL'] ?? ''
       const cronSecret = process.env['CRON_SECRET'] ?? ''
@@ -634,9 +639,16 @@ export function createCronRoutes() {
           targets.map(async path => {
             const url = `${baseUrl}${path}`
             try {
-              await fetch(url, {
+              const r = await fetch(url, {
                 headers: { 'Cache-Control': 'no-cache' },
               })
+              // Drain the streamed body to completion. Dropping the response
+              // after headers aborts the origin's SSR stream mid-render, and the
+              // CDN can end up caching that truncated HTML — visitors (and the
+              // homepage healthcheck) then get a page cut off before the
+              // trailing JSON-LD blocks. Warming only counts when the full
+              // document made it into the cache.
+              await r.text()
               pagesWarmed.push(url)
             } catch (err) {
               console.warn(`[cron:warm] CDN warm failed for ${url}:`, err)

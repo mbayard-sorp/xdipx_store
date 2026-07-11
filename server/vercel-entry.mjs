@@ -14641,8 +14641,9 @@ function extractJsonLd(html) {
   }
   return { parsed, scripts };
 }
-async function checkPageOnce(path) {
-  const url = `${siteOrigin()}${path}`;
+async function checkPageOnce(path, attempt) {
+  const bust = `__healthcheck=${Date.now()}-${attempt}`;
+  const url = `${siteOrigin()}${path}${path.includes("?") ? "&" : "?"}${bust}`;
   const problems = [];
   let status = 0;
   let bodyOk = false;
@@ -14658,6 +14659,7 @@ async function checkPageOnce(path) {
     if (status !== 200) problems.push(`HTTP ${status}`);
     if (html.length < MIN_BODY_BYTES) problems.push(`body too small (${html.length} bytes)`);
     if (!/<img[\s>]/i.test(html)) problems.push("no <img> (hero/LCP image likely missing)");
+    if (!/<\/html>/i.test(html)) problems.push("truncated HTML (no </html> \u2014 stream cut off)");
     bodyOk = status === 200 && html.length >= MIN_BODY_BYTES;
     const { parsed, scripts } = extractJsonLd(html);
     if (parsed === 0) problems.push("no valid JSON-LD");
@@ -14671,7 +14673,7 @@ async function checkPageOnce(path) {
 async function checkPage(path) {
   let best = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const c = await checkPageOnce(path);
+    const c = await checkPageOnce(path, attempt);
     if (c.ok) return c;
     if (!best || c.problems.length < best.problems.length) best = c;
     if (attempt < MAX_ATTEMPTS) {
@@ -21103,6 +21105,8 @@ function createCronRoutes() {
       const opts = {};
       const rawMaxSeeds = req.body?.maxSeeds ?? (req.query["maxSeeds"] ? Number(req.query["maxSeeds"]) : void 0);
       if (typeof rawMaxSeeds === "number" && !isNaN(rawMaxSeeds)) opts.maxSeeds = rawMaxSeeds;
+      const isScheduled = req.headers["x-vercel-cron-schedule"] !== void 0 || req.headers["user-agent"] === "vercel-cron/1.0";
+      if (opts.maxSeeds === void 0 && isScheduled) opts.maxSeeds = 40;
       const rawManualSeeds = req.body?.manualSeeds ?? (typeof req.query["manualSeeds"] === "string" ? req.query["manualSeeds"].split(",").map((s) => s.trim()).filter(Boolean) : void 0);
       if (Array.isArray(rawManualSeeds)) {
         opts.manualSeeds = rawManualSeeds.filter((s) => typeof s === "string");
@@ -21285,7 +21289,7 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
-  router.post("/warm", guard, async (_req, res) => {
+  cronRoute("/warm", async (_req, res) => {
     try {
       const baseUrl = process.env["BASE_URL"] ?? "";
       const cronSecret = process.env["CRON_SECRET"] ?? "";
@@ -21328,9 +21332,10 @@ function createCronRoutes() {
           targets.map(async (path) => {
             const url = `${baseUrl}${path}`;
             try {
-              await fetch(url, {
+              const r = await fetch(url, {
                 headers: { "Cache-Control": "no-cache" }
               });
+              await r.text();
               pagesWarmed.push(url);
             } catch (err) {
               console.warn(`[cron:warm] CDN warm failed for ${url}:`, err);
