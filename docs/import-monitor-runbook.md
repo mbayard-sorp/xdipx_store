@@ -83,7 +83,7 @@ Nalpac's feed is flat (one row per sellable SKU); our store needs one product wi
 
 ---
 
-## 5. PM chat agent (`/admin/pm-chat`)
+## 5. PM chat agent (`/admin/chat/pm`)
 
 A conversational, tool-using product manager for ad-hoc merchandising questions. It mirrors the Emma admin-chat streaming engine (`streamAgentReply` in `app/lib/emma-chat.server.ts`) with a PM persona and a **propose-only** tool set — it never imports, reprices, pins, or publishes live; everything lands pending for approval.
 

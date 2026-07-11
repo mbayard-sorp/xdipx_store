@@ -176,8 +176,7 @@ const NAV_ITEMS = [
   { to: '/admin/usage',          label: 'API Usage',     Icon: PricingIcon   },
   { to: '/admin/seo-regen',      label: 'SEO Regen',     Icon: LabsIcon      },
   { to: '/admin/labs',           label: 'Labs',          Icon: LabsIcon      },
-  { to: '/admin/emma-chat',      label: 'Emma Chat',    Icon: ChatBubbleIcon },
-  { to: '/admin/pm-chat',        label: 'PM Chat',      Icon: ChatBubbleIcon },
+  { to: '/admin/chat/emma',      label: 'Agent Chat',   Icon: ChatBubbleIcon },
   { to: '/admin/settings',       label: 'Settings',     Icon: SettingsIcon  },
 ]
 
