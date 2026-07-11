@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { requireAdmin } from '~/lib/session.server'
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher } from 'react-router'
 import { db } from '~/lib/db.server'
@@ -25,7 +26,8 @@ export interface TaxonomyGroup {
 
 const SETTINGS_KEY = 'searchFilterTaxonomy'
 
-export async function loader(_: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireAdmin(request)
   const row = await db.select().from(pipelineSettings).where(eq(pipelineSettings.key, SETTINGS_KEY))
   let taxonomy: TaxonomyGroup[] = []
   if (row.length > 0) {
@@ -38,6 +40,7 @@ export async function loader(_: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  await requireAdmin(request)
   const form = await request.formData()
   const intent = form.get('intent') as string
 

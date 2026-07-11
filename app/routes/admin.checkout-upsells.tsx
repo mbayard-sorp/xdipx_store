@@ -1,3 +1,4 @@
+import { requireAdmin } from '~/lib/session.server'
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher } from 'react-router'
 import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
@@ -6,7 +7,8 @@ import { ProductPicker, productToPickerProduct } from '~/components/admin/Produc
 
 export const meta: MetaFunction = () => [{ title: 'Checkout Upsells — xdipx Admin' }]
 
-export async function loader(_args: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireAdmin(request)
   const pinnedIds = await getPinnedAccessoryIds()
   const pinnedAccessories = pinnedIds.length
     ? await getAccessoryProductsAdmin(pinnedIds)
@@ -16,6 +18,7 @@ export async function loader(_args: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  await requireAdmin(request)
   const form = await request.formData()
   const intent = form.get('intent')
 

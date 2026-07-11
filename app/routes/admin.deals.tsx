@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react
 import { useLoaderData, useFetcher, useSearchParams, redirect } from 'react-router'
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useCountdown } from '~/hooks/useCountdown'
+import { requireAdmin } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { dealHistory, pipelineSettings } from '../../db/schema'
 import { eq, like, asc, min, max, count, sql, inArray, and, isNull } from 'drizzle-orm'
@@ -30,6 +31,7 @@ export const meta: MetaFunction = () => [{ title: 'Deals — xdipx Admin' }]
 const PAGE_SIZE = 30
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  await requireAdmin(request)
   const url = new URL(request.url)
   const editId = url.searchParams.get('edit')
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1'))
@@ -237,6 +239,7 @@ async function bustHomepagePayload(): Promise<void> {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  await requireAdmin(request)
   const form   = await request.formData()
   const intent = form.get('intent')
 

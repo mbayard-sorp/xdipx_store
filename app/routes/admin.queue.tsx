@@ -1,3 +1,4 @@
+import { requireAdmin } from '~/lib/session.server'
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher, useSearchParams } from 'react-router'
 import React, { useEffect, useRef, useState } from 'react'
@@ -11,7 +12,8 @@ import { eq, and } from 'drizzle-orm'
 
 export const meta: MetaFunction = () => [{ title: 'Deal Queue — xdipx Admin' }]
 
-export async function loader(_: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireAdmin(request)
   const deals = await db
     .select()
     .from(dealHistory)
@@ -31,6 +33,7 @@ export async function loader(_: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  await requireAdmin(request)
   const form   = await request.formData()
   const intent = form.get('intent')
 

@@ -4,11 +4,13 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { dealHistory } from '../../db/schema'
 import { getDashboardStats } from '~/lib/profit.server'
+import { requireAdmin } from '~/lib/session.server'
 import { ProfitDashboard } from '~/components/admin/ProfitDashboard'
 
 export const meta: MetaFunction = () => [{ title: 'Dashboard — xdipx Admin' }]
 
-export async function loader(_: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireAdmin(request)
   const { rows, total } = await getDashboardStats(30)
 
   // Warn when the deal loop is in use (something is live) but the 23:59

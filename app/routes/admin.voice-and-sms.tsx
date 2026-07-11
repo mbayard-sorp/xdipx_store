@@ -1,3 +1,4 @@
+import { requireAdmin } from '~/lib/session.server'
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher } from 'react-router'
 import { useState } from 'react'
@@ -40,7 +41,8 @@ const DEFAULTS: Record<string, string> = {
   smsCheckoutClosing: SMS_DEFAULTS.checkoutClosing,
 }
 
-export async function loader(_: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireAdmin(request)
   const rows = await db.select().from(pipelineSettings)
   const settings: Record<string, string> = { ...DEFAULTS }
   for (const row of rows) {
@@ -74,6 +76,7 @@ export async function loader(_: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  await requireAdmin(request)
   const form = await request.formData()
   const intent = form.get('intent') as string
 
