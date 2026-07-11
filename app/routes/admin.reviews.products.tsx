@@ -6,6 +6,7 @@ import { useLoaderData } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { getProductsWithReviews } from '~/lib/reviews.server'
 import { StarRating } from '~/components/reviews/StarRating'
+import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 
 export const meta: MetaFunction = () => [{ title: 'Reviews by Product — xdipx Admin' }]
 
@@ -28,7 +29,8 @@ export default function AdminReviewsByProduct() {
       </h1>
 
       <div className="bg-white rounded-2xl border border-cream-2 overflow-hidden">
-        <table className="w-full text-sm">
+        <ResponsiveTable>
+        <table className="w-full min-w-[720px] text-sm">
           <thead>
             <tr className="border-b border-cream-2 text-left">
               <th className="px-5 py-3 text-xs font-semibold text-ink/50 uppercase tracking-wider">Product ID</th>
@@ -74,6 +76,7 @@ export default function AdminReviewsByProduct() {
             ))}
           </tbody>
         </table>
+        </ResponsiveTable>
       </div>
     </div>
   )
