@@ -229,7 +229,7 @@ export default function AdminSettingsPage() {
         {description && (
           <p className="text-xs text-ink/50">{description}</p>
         )}
-        <div className={`${multiline ? 'flex flex-col gap-2' : 'flex gap-3 items-center'} pt-1`}>
+        <div className={`flex flex-col gap-2 ${multiline ? '' : 'md:flex-row md:items-center md:gap-3'} pt-1`}>
           {multiline ? (
             <textarea
               name="value"
@@ -242,7 +242,7 @@ export default function AdminSettingsPage() {
               type={type}
               name="value"
               defaultValue={settings[settingKey] ?? ''}
-              className={`${inputWidth ?? 'flex-1'} border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30`}
+              className={`w-full ${inputWidth ? `md:${inputWidth}` : 'md:flex-1'} border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30`}
               min={min}
               max={max}
             />
@@ -276,8 +276,8 @@ export default function AdminSettingsPage() {
         {/* Health badge — shows where the active GA4 ID is being resolved from
             so a misconfigured Vercel env var (the most recent outage cause)
             is visible at a glance. */}
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-cream-2 px-4 py-3 text-sm">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between rounded-xl border border-cream-2 px-4 py-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
             <span
               className={`inline-block w-2 h-2 rounded-full ${
                 ga4.source === 'none' ? 'bg-coral' : 'bg-sage'
@@ -392,7 +392,7 @@ export default function AdminSettingsPage() {
           description="When a deal ends, the new Everyday Price will be MSRP less the value below when it leaves the buy box."
         />
 
-        <div className="flex items-center gap-6 text-sm text-ink/60 pt-2 border-t border-cream-2">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-6 text-sm text-ink/60 pt-2 border-t border-cream-2">
           <span>
             Last feed run:{' '}
             <span className="font-medium text-ink">
@@ -433,11 +433,11 @@ export default function AdminSettingsPage() {
             <strong>Batch</strong> — Anthropic Batch API, 50% off, async (results within 24h, usually minutes).
             Use this when the Nalpac automation runs nightly and you don't need instant results.
           </p>
-          <div className="flex gap-3 items-center pt-1">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3 pt-1">
             <select
               name="value"
               defaultValue={settings['enrichmentMode'] ?? 'api'}
-              className="flex-1 border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
+              className="w-full md:flex-1 border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
             >
               <option value="api">API — sync, full price</option>
               <option value="batch">Batch — async, 50% off</option>
@@ -461,13 +461,13 @@ export default function AdminSettingsPage() {
         />
 
         <div className="pt-2 border-t border-cream-2">
-          <pipelineFetcher.Form method="post" className="flex items-end gap-3">
+          <pipelineFetcher.Form method="post" className="flex flex-col gap-3 md:flex-row md:items-end">
             <input type="hidden" name="intent" value="run-pipeline" />
             <div>
               <label className="block text-xs font-semibold text-ink/50 mb-1">
                 Min Gross Margin
               </label>
-              <div className="relative w-28">
+              <div className="relative w-full md:w-28">
                 <input
                   type="number"
                   name="minMargin"
@@ -483,7 +483,7 @@ export default function AdminSettingsPage() {
             <button
               type="submit"
               disabled={pipelineFetcher.state !== 'idle'}
-              className="text-sm font-semibold px-5 py-2.5 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="w-full md:w-auto text-sm font-semibold px-5 py-2.5 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               {pipelineFetcher.state !== 'idle' ? '⏳ Running…' : '▶ Run Pipeline Now'}
             </button>
