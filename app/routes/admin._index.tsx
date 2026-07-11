@@ -45,7 +45,7 @@ export default function AdminDashboard() {
         Dashboard
       </h1>
       {nextDealMissing && (
-        <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-2xl px-5 py-3 text-sm text-yellow-800 flex items-center gap-3">
+        <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-2xl px-5 py-3 text-sm text-yellow-800 flex items-start sm:items-center gap-3">
           <span>⚠️</span>
           <span>
             No approved deal is queued for the next rotation. Stage one via{' '}

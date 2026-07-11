@@ -53,7 +53,7 @@ export default function CheckoutUpsellsPage() {
         </p>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm p-6">
+      <div className="bg-white rounded-2xl shadow-sm p-4 sm:p-6">
         <ProductPicker
           initial={pinnedAccessories.map(productToPickerProduct)}
           onSave={handleSave}

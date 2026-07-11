@@ -31,7 +31,7 @@ function FilePicker({ onParsed }: { onParsed: (csv: string) => void }) {
   return (
     <div
       className={[
-        'border-2 border-dashed rounded-2xl p-16 text-center transition-colors cursor-pointer',
+        'border-2 border-dashed rounded-2xl p-8 sm:p-16 text-center transition-colors cursor-pointer',
         dragging ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-purple-400 bg-white',
       ].join(' ')}
       onClick={() => inputRef.current?.click()}
@@ -73,7 +73,7 @@ function PreviewPhase({
 }) {
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard label="Total products"   value={job.total} />
         <StatCard label="Parse errors"     value={job.parseErrors.length} warn={job.parseErrors.length > 0} />
         <StatCard label="Ready to import"  value={job.total - job.parseErrors.length} />
@@ -92,18 +92,18 @@ function PreviewPhase({
         </details>
       )}
 
-      <div className="flex gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row">
         <button
           onClick={onStart}
           disabled={isSubmitting || job.total === 0}
-          className="px-6 py-2.5 rounded-xl bg-coral text-white font-semibold text-sm disabled:opacity-50 shadow-sm"
+          className="px-6 py-2.5 rounded-xl bg-coral text-white font-semibold text-sm disabled:opacity-50 shadow-sm w-full sm:w-auto"
         >
           {isSubmitting ? 'Starting…' : `Start Import (${job.total} products)`}
         </button>
         <button
           onClick={onCancel}
           disabled={isSubmitting}
-          className="px-6 py-2.5 rounded-xl border border-gray-300 text-gray-600 hover:text-gray-900 text-sm transition-colors"
+          className="px-6 py-2.5 rounded-xl border border-gray-300 text-gray-600 hover:text-gray-900 text-sm transition-colors w-full sm:w-auto"
         >
           Cancel
         </button>
@@ -146,7 +146,7 @@ function ProgressPhase({
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Imported"  value={job.processed} />
         <StatCard label="Skipped"   value={job.skipped} />
         <StatCard label="Failed"    value={job.failed} warn={job.failed > 0} />

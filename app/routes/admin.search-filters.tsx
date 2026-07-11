@@ -234,7 +234,7 @@ export default function AdminSearchFiltersPage() {
 
   return (
     <div className="max-w-2xl space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1
             className="text-2xl font-bold text-ink"
@@ -246,7 +246,7 @@ export default function AdminSearchFiltersPage() {
             Curate which product tags appear as filter options in the search sidebar.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
             type="button"
             onClick={handleExport}
@@ -367,7 +367,7 @@ export default function AdminSearchFiltersPage() {
             {!isCollapsed && (
               <div className="px-6 pb-6 space-y-4 border-t border-cream-2/50 pt-4">
                 {/* Group label + ID */}
-                <div className="flex gap-3">
+                <div className="flex flex-col gap-3 md:flex-row">
                   <div className="flex-1">
                     <label className="block text-xs font-semibold text-ink/50 mb-1">
                       Group Label
@@ -380,7 +380,7 @@ export default function AdminSearchFiltersPage() {
                       className="w-full border border-cream-2 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
                     />
                   </div>
-                  <div className="w-36">
+                  <div className="w-full md:w-36">
                     <label className="block text-xs font-semibold text-ink/50 mb-1">
                       ID <span className="font-normal">(auto)</span>
                     </label>
@@ -413,20 +413,20 @@ export default function AdminSearchFiltersPage() {
                     <p className="text-xs text-ink/30 italic">No tags yet. Add one below.</p>
                   )}
                   {group.tags.map((tag, ti) => (
-                    <div key={ti} className="flex items-center gap-2">
+                    <div key={ti} className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                       <input
                         type="text"
                         value={tag.tag}
                         onChange={e => updateTag(gi, ti, { tag: e.target.value })}
                         placeholder="cat:vibrators"
-                        className="flex-1 border border-cream-2 rounded-xl px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sage/30"
+                        className="flex-1 min-w-[120px] basis-full sm:basis-auto border border-cream-2 rounded-xl px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sage/30"
                       />
                       <input
                         type="text"
                         value={tag.label}
                         onChange={e => updateTag(gi, ti, { label: e.target.value })}
                         placeholder="Vibrators"
-                        className="flex-1 border border-cream-2 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
+                        className="flex-1 min-w-[120px] basis-full sm:basis-auto border border-cream-2 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
                       />
                       <span
                         className={`text-xs tabular-nums shrink-0 w-8 text-center ${(tagCounts[tag.tag] ?? 0) === 0 ? 'text-amber-500 font-medium' : 'text-ink/40'}`}
@@ -482,7 +482,7 @@ export default function AdminSearchFiltersPage() {
 
       {/* Save bar */}
       <div className="sticky bottom-4 z-10">
-        <div className="bg-white rounded-2xl shadow-lg border border-cream-2 p-4 flex items-center justify-between gap-4">
+        <div className="bg-white rounded-2xl shadow-lg border border-cream-2 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="text-sm">
             {saveResult && 'ok' in saveResult && saveResult.ok ? (
               'imported' in saveResult && saveResult.imported ? (
@@ -503,7 +503,7 @@ export default function AdminSearchFiltersPage() {
           <button
             onClick={handleSave}
             disabled={!isDirty || isSaving}
-            className="px-6 py-2.5 bg-coral text-white text-sm font-bold rounded-full hover:opacity-90 transition-opacity disabled:opacity-40"
+            className="px-6 py-2.5 bg-coral text-white text-sm font-bold rounded-full hover:opacity-90 transition-opacity disabled:opacity-40 w-full sm:w-auto"
           >
             {isSaving ? 'Saving...' : 'Save Filters'}
           </button>
