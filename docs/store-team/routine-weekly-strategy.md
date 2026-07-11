@@ -1,8 +1,8 @@
 # Routine — Weekly Strategy (store-strategist)
 
 The exact playbook for the scheduled "Weekly Strategy" cloud routine. Entry agent:
-`store-strategist`, with `inventory-sentinel`, `promo-manager`, and `loyalty-referral-manager` as
-sub-steps under the same run. **Advisory only** — this routine publishes a brief and files
+`store-strategist`, with `inventory-sentinel`, `promo-manager`, `loyalty-referral-manager`, and
+`program-manager` as sub-steps under the same run. **Advisory only** — this routine publishes a brief and files
 suggestions; it changes nothing itself. Recommended schedule: Monday morning.
 
 Runs on the **Max subscription**: own reasoning, site only for data + spend logging. Never call the
@@ -67,13 +67,21 @@ curl -s -X POST "$BASE_URL/api/team/event" \
 2. `promo-manager` — MAP-guarded promo designs for the coming window → kind `promo` suggestions +
    calendar proposals.
 3. `loyalty-referral-manager` — retention/referral moves → kind `program` suggestions.
+4. `program-manager` (run last) — audits `docs/store-team/trackers/*.md` against each
+   milestone's evidence probe, recomputes status + RAG per the trackers README, posts a
+   `decision` event per RAG change + an audit scoreboard event, files kind `process`
+   suggestions for Red/newly-Amber milestones, opens a docs-only tracker PR
+   (`pm/tracker-<date>`, never auto-merged) when rows changed, and hands the strategist a
+   **Program Status** section (overall RAG + top risks + owner asks per program) to include
+   verbatim in the brief.
 
 Each posts its own events under `$RUN_ID` with its `agentRole`.
 
 ## Step 5 — Publish the brief
 
 One markdown doc: the week's focus, per-team directives (homepage, social, ads, email, content +
-pricing/merch notes), an explicit stop-doing list, metrics behind every call. The content section
+pricing/merch notes), an explicit stop-doing list, the **Program Status** section handed over by
+`program-manager` (included verbatim), metrics behind every call. The content section
 sets the week's blog topic slate, category-mix tuning (guides/comparisons/care/wellness-basics),
 and campaign tie-ins with the marketing calendar; the daily content playbook
 (`docs/store-team/routine-content-daily.md`) tolerates a brief without a content section, so omit
