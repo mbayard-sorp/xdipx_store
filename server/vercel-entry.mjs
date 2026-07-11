@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -1299,6 +1304,8 @@ __export(kv_server_exports, {
   kvIncr: () => kvIncr,
   kvSet: () => kvSet,
   kvSetNX: () => kvSetNX,
+  mdProductCacheKey: () => mdProductCacheKey,
+  purgeMarkdownCache: () => purgeMarkdownCache,
   setPinnedAccessoryIds: () => setPinnedAccessoryIds
 });
 function resolveKvCreds() {
@@ -1455,6 +1462,18 @@ async function getPinnedAccessoryIds() {
 }
 async function setPinnedAccessoryIds(ids) {
   await kvSet(KV_KEYS.pinnedAccessoryIds, ids);
+}
+function mdProductCacheKey(handle) {
+  return `md:product:${handle}`;
+}
+async function purgeMarkdownCache(handle) {
+  const keys = [
+    mdProductCacheKey(handle),
+    `shopify:p:${handle}`,
+    `shopify:deal:byhandle:${handle}`
+  ];
+  for (const key of keys) readCache.delete(key);
+  await Promise.all(keys.map((key) => kvDel(key)));
 }
 var _kv, _g, memStore, _g3, memTimers, _lastKvWarn, _g2, readCache, KV_KEYS, DEFAULT_VAULT_TABS;
 var init_kv_server = __esm({
@@ -7954,7 +7973,8 @@ async function getBlogPostsForSitemap() {
     if (!client4) return [];
     return await client4.fetch(
       `*[_type == "blogPost" && status == "published" && noIndex != true] | order(publishedAt desc) {
-        "slug": slug.current, publishedAt, _updatedAt
+        "slug": slug.current, publishedAt, _updatedAt, title,
+        "description": coalesce(seoDescription, excerpt)
       }`
     );
   } catch (err) {
@@ -13066,7 +13086,7 @@ async function pingSearchEngines(paths) {
       body: JSON.stringify({
         host,
         key,
-        keyLocation: `${SITE_ORIGIN}/${key}.txt`,
+        keyLocation: `${SITE_ORIGIN}/indexnow.txt`,
         urlList
       })
     });
@@ -21511,6 +21531,15 @@ async function handleProductCreated(product) {
   });
   console.log(`[webhook:product-created] ${product.handle} \u2192 ${result.created ? "created in Sanity" : "already exists"}`);
 }
+async function handleProductUpdated(product) {
+  if (!product.handle) {
+    console.warn("[webhook:product-updated] payload missing handle, skipping purge:", product.id);
+    return;
+  }
+  const { purgeMarkdownCache: purgeMarkdownCache2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+  await purgeMarkdownCache2(product.handle);
+  console.log(`[webhook:product-updated] purged markdown + PDP cache for ${product.handle}`);
+}
 async function handleInventoryUpdate(level) {
   if (level.available > 0) return;
   const { isLiveDealSoldOut: isLiveDealSoldOut2, rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
@@ -21589,6 +21618,24 @@ function createWebhookRoutes() {
     handleProductCreated(product).catch(
       (err) => console.error("[webhook:product-created]", err)
     );
+  });
+  router.post("/product-updated", async (req, res) => {
+    if (!verifyShopifyWebhook(req)) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    let product = null;
+    try {
+      product = JSON.parse(req.body.toString());
+    } catch (err) {
+      console.error("[webhook:product-updated] malformed payload, skipping:", err);
+    }
+    res.json({ ok: true });
+    if (product) {
+      handleProductUpdated(product).catch(
+        (err) => console.error("[webhook:product-updated]", err)
+      );
+    }
   });
   router.post("/inventory-update", async (req, res) => {
     if (!verifyShopifyWebhook(req)) {
