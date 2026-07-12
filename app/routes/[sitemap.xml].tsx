@@ -1,4 +1,4 @@
-import { getBlogPostsForSitemap, getBlogCategories, getPageList, getProductHandlesForSitemap } from '~/lib/sanity.server'
+import { getBlogPostsForSitemap, getBlogCategories, getAllBlogSeries, getPageList, getProductHandlesForSitemap } from '~/lib/sanity.server'
 import { getProductImagesForSitemap, getCollectionsForSitemap, getMainMenu, type SitemapProductImages, type SitemapCollection } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
 import { dealHistory } from '../../db/schema'
@@ -14,9 +14,10 @@ export async function loader() {
       return fallback
     })
 
-  const [blogPosts, categories, pages, products, productImages, collections, liveDealRows, mainMenu] = await Promise.all([
+  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu] = await Promise.all([
     guard(getBlogPostsForSitemap(), [], 'getBlogPostsForSitemap'),
     guard(getBlogCategories(), [], 'getBlogCategories'),
+    guard(getAllBlogSeries(), [], 'getAllBlogSeries'),
     guard(getPageList(), [], 'getPageList'),
     guard(getProductHandlesForSitemap(), [], 'getProductHandlesForSitemap'),
     guard(getProductImagesForSitemap(), new Map<string, SitemapProductImages>(), 'getProductImagesForSitemap'),
@@ -152,6 +153,14 @@ export async function loader() {
     // Blog categories
     ...categories.map(c => ({
       loc: `${base}/notebook/category/${c.slug}`,
+      lastmod: undefined,
+      changefreq: 'weekly',
+      priority: '0.5',
+    })),
+
+    // Blog series (only series with published posts are returned)
+    ...blogSeries.map(s => ({
+      loc: `${base}/notebook/series/${s.slug}`,
       lastmod: undefined,
       changefreq: 'weekly',
       priority: '0.5',

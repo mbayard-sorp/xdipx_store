@@ -44,6 +44,26 @@ export function BlogStructuredData({ post, readingTime }: { post: BlogPost; read
       '@id': `https://xdipx.com/notebook/${post.slug}`,
     },
     ...(post.tags?.length ? { keywords: post.tags.join(', ') } : {}),
+    // Sources from the optional blogPostExtras doc surface as citations —
+    // the machine-readable half of the on-page "Sources & review" footer.
+    ...(post.extras?.sources?.length
+      ? {
+          citation: post.extras.sources.map(s => ({
+            '@type': 'CreativeWork',
+            name: s.label,
+            ...(s.url ? { url: s.url } : {}),
+          })),
+        }
+      : {}),
+    ...(post.extras?.series
+      ? {
+          isPartOf: {
+            '@type': 'CreativeWorkSeries',
+            name: post.extras.series.title,
+            url: `https://xdipx.com/notebook/series/${post.extras.series.slug}`,
+          },
+        }
+      : {}),
   }
 
   return (

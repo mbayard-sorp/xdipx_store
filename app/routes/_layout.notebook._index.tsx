@@ -1,11 +1,17 @@
 import type { LoaderFunctionArgs, MetaFunction, MetaDescriptor } from 'react-router'
 import { useLoaderData, Link } from 'react-router'
-import { getBlogPosts, getBlogCategories, getBlogHomepage, isPreviewRequest } from '~/lib/sanity.server'
+import { getBlogPosts, getBlogCategories, getBlogHomepage, getNotebookSettings, getAllBlogSeries, isPreviewRequest } from '~/lib/sanity.server'
 import { BlogPostCard } from '~/components/blog/BlogPostCard'
+import { CategoryChip } from '~/components/blog/CategoryChip'
+import { NotebookSubscribe } from '~/components/blog/NotebookSubscribe'
+import { SeriesRail } from '~/components/blog/SeriesRail'
+import { SanityImage } from '~/components/common/SanityImage'
+import { Reveal } from '~/components/motion/Reveal'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
 import { canonicalUrl, robotsContent } from '~/lib/seo'
 import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
+import { categoryAccent } from '~/lib/blog-style'
 import type { BlogPostCard as BlogPostCardType, BlogCategory } from '~/types/cms'
 
 export function headers() {
@@ -24,10 +30,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const blogOpts: Parameters<typeof getBlogPosts>[0] = { page, perPage: 12 }
   if (category) blogOpts.category = category
 
-  const [{ posts, total }, categories, blogHomepage] = await Promise.all([
+  const [{ posts, total }, categories, blogHomepage, notebookSettings, series] = await Promise.all([
     getBlogPosts(blogOpts),
     getBlogCategories(),
     getBlogHomepage(preview),
+    getNotebookSettings(),
+    getAllBlogSeries(),
   ])
 
   let featuredPost: BlogPostCardType | null = null
@@ -67,6 +75,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     categories,
     selectedCategory: category,
     blogHomepage,
+    notebookSettings,
+    series,
     canonical,
     filtersApplied,
   }
@@ -100,7 +110,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 }
 
 export default function NotebookIndex() {
-  const { posts, featuredPost, secondaryPosts, total, page, perPage, categories, selectedCategory } = useLoaderData<typeof loader>()
+  const { posts, featuredPost, secondaryPosts, total, page, perPage, categories, selectedCategory, blogHomepage, notebookSettings, series } = useLoaderData<typeof loader>()
   const totalPages = Math.ceil(total / perPage)
 
   const breadcrumbSchema = [
@@ -116,7 +126,7 @@ export default function NotebookIndex() {
   )
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 sm:py-10">
+    <div className="max-w-[75rem] mx-auto px-4 md:px-6 xl:px-8 py-6 sm:py-10">
       <BreadcrumbStructuredData items={breadcrumbSchema} />
       {!selectedCategory && listPosts.length > 0 && (
         <ItemListStructuredData
@@ -129,73 +139,84 @@ export default function NotebookIndex() {
           }))}
         />
       )}
-      {/* Masthead */}
-      <div className="text-center py-6 border-b-2 border-ink">
+
+      {/* Masthead — static, part of the LCP paint */}
+      <div className="text-center pt-4 pb-8 md:pb-10 border-b border-line-2">
+        <p className="kicker mb-3">{notebookSettings?.kicker ?? 'The xdipx Notebook'}</p>
         <h1
-          className="text-ink text-4xl sm:text-6xl leading-none"
-          style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}
+          className="text-ink text-[2.5rem] md:text-[3.75rem] xl:text-[5rem] leading-[0.95] tracking-[-0.02em]"
+          style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}
         >
-          The Notebook
+          {blogHomepage?.heading ?? 'The Notebook'}
         </h1>
-        <p className="text-muted text-xs sm:text-sm font-mono uppercase tracking-wider mt-3">
-          things worth knowing · things worth trying · things Emma couldn't stop thinking about
+        <span className="block w-10 h-0.5 bg-coral mx-auto mt-5" aria-hidden="true" />
+        <p className="text-ink-3 text-sm md:text-base mt-4 max-w-xl mx-auto leading-[1.55]">
+          {blogHomepage?.subtext ?? "Things worth knowing. Things worth trying. Things Emma couldn't stop thinking about."}
         </p>
       </div>
 
-      {/* Category rail */}
-      {categories.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto py-5 scrollbar-hide">
-          <CategoryPill slug={null} name="All" active={!selectedCategory} />
-          {categories.map((cat: BlogCategory) => (
-            <CategoryPill
-              key={cat.slug}
-              slug={cat.slug}
-              name={cat.name}
-              active={selectedCategory === cat.slug}
-            />
-          ))}
-          <span className="shrink-0 text-xs font-mono text-muted ml-auto self-center">
-            {total} {total === 1 ? 'post' : 'posts'}
-          </span>
-        </div>
-      )}
-
-      {/* Hero post + secondary posts */}
+      {/* Featured lockup — image is the index LCP, static, never animated */}
       {featuredPost && (
-        <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6 mb-10">
-          <FeaturedHero post={featuredPost} />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-4">
-            {secondaryPosts.map(p => (
-              <BlogPostCard key={p._id} post={p} />
+        <div className="mt-8 md:mt-12 grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-6 lg:gap-10 items-start">
+          <FeaturedLockup post={featuredPost} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-5">
+            {secondaryPosts.map((p, i) => (
+              <Reveal key={p._id} variant="up" index={i}>
+                <BlogPostCard post={p} />
+              </Reveal>
             ))}
           </div>
         </div>
       )}
 
-      {/* Post grid */}
-      {posts.length > 0 ? (
-        <>
-          <h2
-            className="text-ink text-xl mb-4"
-            style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
-          >
-            More from the notebook
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
-            {posts.map(post => (
-              <BlogPostCard key={post._id} post={post} />
+      {/* Category rail — one fade for the whole row */}
+      {categories.length > 0 && (
+        <Reveal variant="fade">
+          <div className="flex items-center gap-2 overflow-x-auto py-6 mt-4 scrollbar-hide">
+            <CategoryPill slug={null} name="All" active={!selectedCategory} />
+            {categories.map((cat: BlogCategory) => (
+              <CategoryPill
+                key={cat.slug}
+                slug={cat.slug}
+                name={cat.name}
+                color={cat.color}
+                active={selectedCategory === cat.slug}
+              />
             ))}
+            <span className="shrink-0 kicker ml-auto">
+              {total} {total === 1 ? 'post' : 'posts'}
+            </span>
           </div>
-        </>
+        </Reveal>
+      )}
+
+      {/* Post grid — the signature staggered entrance */}
+      {posts.length > 0 ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-7 xl:gap-8 mb-12 md:mb-16">
+          {posts.map((post, i) => (
+            <Reveal key={post._id} variant="up" index={i}>
+              <BlogPostCard post={post} />
+            </Reveal>
+          ))}
+        </div>
       ) : !featuredPost ? (
-        <div className="text-center py-16 text-ink/50">
-          <p className="text-lg">Nothing here yet — Emma's drafting ♥</p>
+        <div className="text-center py-16 text-ink-3">
+          <p className="text-lg" style={{ fontFamily: 'var(--font-display)' }}>
+            Nothing here yet. Emma's drafting ♥
+          </p>
         </div>
       ) : null}
 
+      {/* Series rail */}
+      {!selectedCategory && series.length > 0 && (
+        <div className="mb-12 md:mb-16">
+          <SeriesRail series={series} />
+        </div>
+      )}
+
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex justify-center items-center gap-2 mb-12">
+        <div className="flex justify-center items-center gap-2 mb-12 md:mb-16">
           {page > 1 && (
             <PaginationLink page={page - 1} category={selectedCategory} label="← Previous" />
           )}
@@ -214,91 +235,74 @@ export default function NotebookIndex() {
         </div>
       )}
 
-      {/* Newsletter */}
-      <div className="bg-coral/10 border border-coral/30 rounded-2xl px-6 py-5 flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-        <div className="flex-1">
-          <h3
-            className="text-ink text-lg"
-            style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
-          >
-            Get the notebook in your inbox
-          </h3>
-          <p className="text-xs font-mono text-muted mt-1">
-            One email, once-ish a week. Only the ones worth reading.
-          </p>
-        </div>
-        <Link
-          to="/#newsletter"
-          className="px-5 py-2.5 rounded-full bg-coral hover:bg-coral-deep text-white text-sm font-bold transition-colors"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          Keep me posted
-        </Link>
-      </div>
+      {/* Newsletter — inline value exchange, never a popup */}
+      <NotebookSubscribe variant="index" settings={notebookSettings} />
     </div>
   )
 }
 
-function FeaturedHero({ post }: { post: BlogPostCardType }) {
+function FeaturedLockup({ post }: { post: BlogPostCardType }) {
+  const accent = categoryAccent(post.category?.slug, post.category?.color)
+
   return (
-    <Link
-      to={`/notebook/${post.slug}`}
-      className="group block bg-paper border border-line overflow-hidden hover:border-coral transition-colors"
-    >
+    <Link to={`/notebook/${post.slug}`} className="group block">
       {post.heroImageUrl ? (
-        <div className="aspect-[16/9] overflow-hidden border-b-2 border-ink">
-          <img
+        <div className="aspect-[3/2] rounded-lg overflow-hidden">
+          <SanityImage
             src={post.heroImageUrl}
             alt={post.heroImageAlt ?? post.title}
-            className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500"
+            priority
+            sizes="(max-width: 1024px) 100vw, 60vw"
+            widths={[640, 828, 1200, 1600]}
+            fallbackWidth={1200}
+            {...(post.heroWidth ? { width: post.heroWidth } : {})}
+            {...(post.heroHeight ? { height: post.heroHeight } : {})}
+            {...(post.heroLqip ? { lqip: post.heroLqip } : {})}
+            className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500"
           />
         </div>
       ) : (
-        <div className="aspect-[16/9] bg-cream-2 border-b-2 border-ink flex items-center justify-center">
+        <div className="aspect-[3/2] rounded-lg bg-paper-2 flex items-center justify-center">
           <span className="text-6xl text-ink/10">♥</span>
         </div>
       )}
-      <div className="p-5 sm:p-6">
-        <div className="flex items-center gap-2 mb-3">
+      <Reveal variant="fade" className="pt-5">
+        <div className="flex items-center gap-3 mb-3">
+          <span className={`kicker ${accent.kicker}`}>Featured</span>
           {post.category && (
-            <span className="text-[10px] font-mono uppercase tracking-wider bg-coral text-white px-2 py-0.5 rounded-full">
-              {post.category.name}
-            </span>
+            <CategoryChip
+              name={post.category.name}
+              slug={post.category.slug}
+              color={post.category.color}
+              linked={false}
+            />
           )}
-          <span className="text-[11px] font-mono text-muted">
-            {post.readingTime} min read
-          </span>
+          {post.readingTime > 0 && <span className="kicker">{post.readingTime} min</span>}
         </div>
         <h2
-          className="text-ink text-2xl sm:text-3xl leading-[1.05] mb-2 group-hover:text-coral transition-colors"
-          style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}
+          className="text-ink text-[1.875rem] md:text-[2.625rem] xl:text-[3.375rem] leading-[1.03] tracking-[-0.01em] mb-3 group-hover:text-coral transition-colors"
+          style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}
         >
           {post.title}
         </h2>
-        <p className="text-sm text-ink/70 line-clamp-2 max-w-xl">{post.excerpt}</p>
+        <p
+          className="text-ink-3 text-base md:text-lg leading-[1.45] line-clamp-2 max-w-xl"
+          style={{ fontFamily: 'var(--font-display)', fontWeight: 400 }}
+        >
+          {post.excerpt}
+        </p>
         {post.author && (
-          <div className="flex items-center gap-2 mt-4">
-            {post.author.avatarUrl ? (
-              <img src={post.author.avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover" />
-            ) : (
-              <div
-                className="w-6 h-6 rounded-full bg-coral text-white text-[11px] flex items-center justify-center font-bold"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                {post.author.name.charAt(0)}
-              </div>
-            )}
-            <span className="text-[11px] font-mono text-muted">{post.author.name}</span>
-          </div>
+          <p className="text-[13px] text-ink-4 mt-4">{post.author.name}</p>
         )}
-      </div>
+      </Reveal>
     </Link>
   )
 }
 
-function CategoryPill({ slug, name, active }: { slug: string | null; name: string; active: boolean }) {
+function CategoryPill({ slug, name, color, active }: { slug: string | null; name: string; color?: string | undefined; active: boolean }) {
   const params = new URLSearchParams()
   if (slug) params.set('category', slug)
+  const accent = categoryAccent(slug ?? undefined, color)
 
   return (
     <Link
@@ -308,10 +312,12 @@ function CategoryPill({ slug, name, active }: { slug: string | null; name: strin
       // URL for crawl (it kept tripping the "Excluded by noindex" validation).
       // The "All" link (bare /notebook) stays crawlable.
       rel={slug ? 'nofollow' : undefined}
-      className={`shrink-0 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-wider transition-colors border ${
+      className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.06em] transition-colors press ${
         active
-          ? 'bg-coral text-white border-coral'
-          : 'bg-paper text-ink/70 border-line hover:border-coral hover:text-coral'
+          ? 'bg-ink text-white'
+          : slug
+            ? accent.chip
+            : 'bg-paper text-ink-2 border border-line hover:border-ink-3'
       }`}
     >
       {name}
@@ -341,8 +347,8 @@ function PaginationLink({
       // Category-filtered pagination is a faceted (noindex) view — nofollow so
       // Google doesn't queue `?category=…&page=N`. Clean `?page=N` stays crawlable.
       rel={category ? 'nofollow' : undefined}
-      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-        active ? 'bg-coral text-white' : 'text-ink/60 hover:bg-cream-2'
+      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors press ${
+        active ? 'bg-ink text-white' : 'text-ink-3 hover:bg-paper-2'
       }`}
     >
       {label}

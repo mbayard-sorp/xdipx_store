@@ -57,6 +57,13 @@ import mfgProductSpecs    from '../schemas/mfgProductSpecs.js'
 // Discovery home page rebuild — variant toggle + Emma copy overrides (additive).
 import homeConfig          from '../schemas/homeConfig.js'
 
+// Notebook redesign — index settings, category/post extras, and series docs
+// (additive; blogPost/blogCategory/blogAuthor/blogHomepage untouched).
+import notebookSettings    from '../schemas/notebookSettings.js'
+import blogCategoryExtras  from '../schemas/blogCategoryExtras.js'
+import blogPostExtras      from '../schemas/blogPostExtras.js'
+import blogSeries          from '../schemas/blogSeries.js'
+
 // Phase 6c — Knowledge-base doc types for SMS / IVR / chat kbLookup tool.
 // Additive — existing schemas untouched.
 import kbShippingPolicy    from '../schemas/kbShippingPolicy.js'
@@ -81,6 +88,11 @@ export const schemaTypes = [
   blogCategory,
   blogAuthor,
   blogHomepage,
+  // Notebook redesign — additive blog docs
+  notebookSettings,
+  blogCategoryExtras,
+  blogPostExtras,
+  blogSeries,
   // v2 redesign — Emma hero (additive; homepageSections untouched)
   emmaHeroSettings,
   // Hero deep-linking. Primary CTA label/link singleton (additive; emmaHeroSettings untouched)

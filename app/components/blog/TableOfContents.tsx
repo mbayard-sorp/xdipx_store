@@ -77,9 +77,7 @@ export function TableOfContents({ body }: { body: unknown[] }) {
         className="hidden lg:block sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto"
         aria-label="Table of contents"
       >
-        <p className="text-xs font-semibold text-ink/50 uppercase tracking-wider mb-3">
-          Contents
-        </p>
+        <p className="kicker mb-3">On this page</p>
         <TOCList headings={headings} activeId={activeId} />
       </nav>
     </>
@@ -99,8 +97,8 @@ function TOCList({ headings, activeId }: { headings: TOCItem[]; activeId: string
             }}
             className={`block py-1 transition-colors border-l-2 pl-3 ${
               activeId === h.id
-                ? 'border-sage text-sage font-medium'
-                : 'border-transparent text-ink/60 hover:text-ink hover:border-cream-2'
+                ? 'border-coral text-ink font-medium'
+                : 'border-transparent text-ink-3 hover:text-ink hover:border-line'
             }`}
           >
             {h.text}

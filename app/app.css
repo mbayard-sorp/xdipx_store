@@ -300,3 +300,28 @@ em.brand {
 .float-up-fade {
   animation: float-up-fade 2.4s ease-out forwards;
 }
+
+/* ─── Notebook editorial (blog redesign, art direction §4) ─────────────
+   Scoped reading-polish styles the utility layer can't express: the plum
+   drop cap on a post's opening paragraph. Static CSS only — no motion, no
+   layout shift, unaffected by reduced-motion. The drop cap applies only
+   when the body opens on a paragraph (a post that opens on a list or
+   figure gets no cap, per the art direction). */
+.notebook-dropcap > p:first-child::first-letter {
+  float: left;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 3.4em;
+  line-height: 0.82;
+  color: var(--color-plum);
+  margin-right: 0.08em;
+  padding-top: 0.02em;
+}
+@supports (initial-letter: 3) {
+  .notebook-dropcap > p:first-child::first-letter {
+    float: none;
+    initial-letter: 3;
+    font-size: unset;
+    line-height: unset;
+  }
+}

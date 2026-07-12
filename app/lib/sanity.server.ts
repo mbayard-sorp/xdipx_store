@@ -2,7 +2,7 @@ import { createClient } from '@sanity/client'
 import type { SanityImageAssetDocument } from '@sanity/client'
 import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
-import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig } from '~/types/cms'
+import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, BlogSeries, BlogCategoryExtras, NotebookSettings, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig } from '~/types/cms'
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
@@ -1128,7 +1128,10 @@ export function invalidateBlogCache(): void {
 const BLOG_POST_CARD_PROJECTION = `
   _id, title, "slug": slug.current, excerpt, publishedAt, featured,
   "heroImageUrl": heroImage.asset->url, heroImageAlt,
-  "author": author->{ name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role },
+  "heroLqip": heroImage.asset->metadata.lqip,
+  "heroWidth": heroImage.asset->metadata.dimensions.width,
+  "heroHeight": heroImage.asset->metadata.dimensions.height,
+  "author": author->{ name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role, socialLinks },
   "category": category->{ name, "slug": slug.current, color }
 `
 
@@ -1146,6 +1149,7 @@ export async function getBlogPosts(opts: {
   category?: string
   featured?: boolean
   authorSlug?: string
+  tag?: string
 } = {}): Promise<{ posts: BlogPostCard[]; total: number }> {
   if (!projectId) return { posts: [], total: 0 }
 
@@ -1154,7 +1158,7 @@ export async function getBlogPosts(opts: {
   const start = (page - 1) * perPage
   const end = start + perPage
 
-  const cacheKey = `posts:${page}:${perPage}:${opts.category ?? ''}:${opts.featured ?? ''}:${opts.authorSlug ?? ''}`
+  const cacheKey = `posts:${page}:${perPage}:${opts.category ?? ''}:${opts.featured ?? ''}:${opts.authorSlug ?? ''}:${opts.tag ?? ''}`
   const cached = getCachedBlog<{ posts: BlogPostCard[]; total: number }>(cacheKey, BLOG_CACHE_TTL)
   if (cached) return cached
 
@@ -1175,6 +1179,10 @@ export async function getBlogPosts(opts: {
     if (opts.authorSlug) {
       filter += ` && author->slug.current == $authorSlug`
       params.authorSlug = opts.authorSlug
+    }
+    if (opts.tag) {
+      filter += ` && $tag in tags`
+      params.tag = opts.tag
     }
 
     const [rawPosts, total] = await Promise.all([
@@ -1226,8 +1234,18 @@ export async function getBlogPost(slug: string, preview = false): Promise<BlogPo
           ...,
           _type == "blogImage" => {
             ...,
-            "image": image{ "url": asset->url, alt },
-            "secondImage": secondImage{ "url": asset->url }
+            "image": image{
+              "url": asset->url, alt,
+              "lqip": asset->metadata.lqip,
+              "width": asset->metadata.dimensions.width,
+              "height": asset->metadata.dimensions.height
+            },
+            "secondImage": secondImage{
+              "url": asset->url,
+              "lqip": asset->metadata.lqip,
+              "width": asset->metadata.dimensions.width,
+              "height": asset->metadata.dimensions.height
+            }
           }
         },
         seoTitle, seoDescription, noIndex,
@@ -1235,6 +1253,32 @@ export async function getBlogPost(slug: string, preview = false): Promise<BlogPo
         tags,
         "relatedPosts": relatedPosts[]->{
           ${BLOG_POST_CARD_PROJECTION}
+        },
+        "autoRelated": *[_type == "blogPost" && status == "published" && category._ref == ^.category._ref && _id != ^._id] | order(publishedAt desc) [0...6] {
+          ${BLOG_POST_CARD_PROJECTION}
+        },
+        "prevPost": *[_type == "blogPost" && status == "published" && publishedAt < ^.publishedAt] | order(publishedAt desc) [0] {
+          title, "slug": slug.current,
+          "heroImageUrl": heroImage.asset->url,
+          "heroLqip": heroImage.asset->metadata.lqip,
+          "category": category->{ name, "slug": slug.current, color }
+        },
+        "nextPost": *[_type == "blogPost" && status == "published" && publishedAt > ^.publishedAt] | order(publishedAt asc) [0] {
+          title, "slug": slug.current,
+          "heroImageUrl": heroImage.asset->url,
+          "heroLqip": heroImage.asset->metadata.lqip,
+          "category": category->{ name, "slug": slug.current, color }
+        },
+        "extras": *[_type == "blogPostExtras" && post._ref == ^._id][0]{
+          deck,
+          sources[]{ label, url },
+          reviewedNote,
+          seriesOrder,
+          "series": series->{
+            title, "slug": slug.current, kicker,
+            "coverImageUrl": coverImage.asset->url,
+            "postCount": count(posts)
+          }
         }
       }`,
       { slug },
@@ -1243,12 +1287,23 @@ export async function getBlogPost(slug: string, preview = false): Promise<BlogPo
     if (!raw) return null
 
     const readingTime = calculateReadingTime(raw.body ?? [])
-    const relatedPosts = (raw.relatedPosts ?? []).map((rp: any) => ({
+    // Manual related picks first, topped up with same-category latest posts so
+    // every post shows three. Related cards skip body fetch (readingTime 0
+    // hides the "min read" chip).
+    const manual = (raw.relatedPosts ?? []) as any[]
+    const seen = new Set<string>([raw._id, ...manual.map((rp) => rp._id)])
+    const topUp = ((raw.autoRelated ?? []) as any[]).filter((rp) => {
+      if (seen.has(rp._id)) return false
+      seen.add(rp._id)
+      return true
+    })
+    const relatedPosts = [...manual, ...topUp].slice(0, 3).map((rp: any) => ({
       ...rp,
       readingTime: 0, // don't fetch body for related posts
     }))
 
-    const post: BlogPost = { ...raw, readingTime, relatedPosts }
+    const { autoRelated: _autoRelated, ...rest } = raw
+    const post: BlogPost = { ...rest, readingTime, relatedPosts }
     if (!preview) setCachedBlog(cacheKey, post)
     return post
   } catch (err) {
@@ -1296,6 +1351,127 @@ export async function getBlogCategories(): Promise<BlogCategory[]> {
     return data ?? []
   } catch (err) {
     console.error('[sanity] getBlogCategories error:', err)
+    return []
+  }
+}
+
+// ─── Notebook redesign — additive loaders ────────────────────────────────────
+// All of these fall back to null/[] when the additive docs don't exist, so the
+// notebook renders unchanged until content is seeded.
+
+export async function getNotebookSettings(): Promise<NotebookSettings | null> {
+  if (!projectId) return null
+
+  const cacheKey = 'notebookSettings'
+  const cached = getCachedBlog<NotebookSettings>(cacheKey, BLOG_CAT_CACHE_TTL)
+  if (cached) return cached
+
+  try {
+    const client = getClient()
+    if (!client) return null
+    const data = await client.fetch<NotebookSettings | null>(
+      `*[_id == "singleton.notebookSettings"][0]{
+        kicker,
+        "mastheadImageUrl": mastheadImage.asset->url,
+        mastheadImageAlt,
+        newsletterHeading, newsletterBody, newsletterButtonLabel
+      }`,
+    )
+    setCachedBlog(cacheKey, data ?? null)
+    return data ?? null
+  } catch (err) {
+    console.error('[sanity] getNotebookSettings error:', err)
+    return null
+  }
+}
+
+export async function getBlogCategoryExtras(slug: string): Promise<BlogCategoryExtras | null> {
+  if (!projectId) return null
+
+  const cacheKey = `categoryExtras:${slug}`
+  const cached = getCachedBlog<BlogCategoryExtras>(cacheKey, BLOG_CAT_CACHE_TTL)
+  if (cached) return cached
+
+  try {
+    const client = getClient()
+    if (!client) return null
+    const data = await client.fetch<BlogCategoryExtras | null>(
+      `*[_type == "blogCategoryExtras" && category->slug.current == $slug][0]{
+        "headerImageUrl": headerImage.asset->url,
+        headerImageAlt,
+        "headerLqip": headerImage.asset->metadata.lqip,
+        intro, accent
+      }`,
+      { slug },
+    )
+    setCachedBlog(cacheKey, data ?? null)
+    return data ?? null
+  } catch (err) {
+    console.error('[sanity] getBlogCategoryExtras error:', err)
+    return null
+  }
+}
+
+const BLOG_SERIES_PROJECTION = `
+  title, "slug": slug.current, kicker, description,
+  "coverImageUrl": coverImage.asset->url,
+  coverImageAlt,
+  "coverLqip": coverImage.asset->metadata.lqip,
+  "posts": posts[]->{ ${BLOG_POST_CARD_PROJECTION}, status }
+`
+
+export async function getBlogSeries(slug: string): Promise<BlogSeries | null> {
+  if (!projectId) return null
+
+  const cacheKey = `series:${slug}`
+  const cached = getCachedBlog<BlogSeries>(cacheKey, BLOG_CACHE_TTL)
+  if (cached) return cached
+
+  try {
+    const client = getClient()
+    if (!client) return null
+    const raw = await client.fetch<any>(
+      `*[_type == "blogSeries" && slug.current == $slug][0]{ ${BLOG_SERIES_PROJECTION} }`,
+      { slug },
+    )
+    if (!raw) return null
+    const series: BlogSeries = {
+      ...raw,
+      posts: (raw.posts ?? [])
+        .filter((p: any) => p && p.status === 'published')
+        .map(({ status: _s, ...p }: any) => ({ ...p, readingTime: 0 })),
+    }
+    setCachedBlog(cacheKey, series)
+    return series
+  } catch (err) {
+    console.error('[sanity] getBlogSeries error:', err)
+    return null
+  }
+}
+
+export async function getAllBlogSeries(): Promise<BlogSeries[]> {
+  if (!projectId) return []
+
+  const cacheKey = 'allSeries'
+  const cached = getCachedBlog<BlogSeries[]>(cacheKey, BLOG_CAT_CACHE_TTL)
+  if (cached) return cached
+
+  try {
+    const client = getClient()
+    if (!client) return []
+    const raw = await client.fetch<any[]>(
+      `*[_type == "blogSeries" && count(posts) > 0] | order(_createdAt desc) { ${BLOG_SERIES_PROJECTION} }`,
+    )
+    const series: BlogSeries[] = (raw ?? []).map((s: any) => ({
+      ...s,
+      posts: (s.posts ?? [])
+        .filter((p: any) => p && p.status === 'published')
+        .map(({ status: _s, ...p }: any) => ({ ...p, readingTime: 0 })),
+    }))
+    setCachedBlog(cacheKey, series)
+    return series
+  } catch (err) {
+    console.error('[sanity] getAllBlogSeries error:', err)
     return []
   }
 }

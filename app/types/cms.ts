@@ -501,6 +501,9 @@ export interface BlogPostCard {
   featured: boolean
   heroImageUrl?: string
   heroImageAlt?: string
+  heroLqip?: string
+  heroWidth?: number
+  heroHeight?: number
   author?: BlogAuthor
   category?: BlogCategory
   readingTime: number
@@ -515,6 +518,70 @@ export interface BlogPost extends BlogPostCard {
   noIndex?: boolean
   tags?: string[]
   relatedPosts?: BlogPostCard[]
+  // Notebook redesign — additive fields joined at query time (all optional;
+  // legacy posts render fine without any of them).
+  prevPost?: BlogPostLink | null
+  nextPost?: BlogPostLink | null
+  extras?: BlogPostExtras | null
+}
+
+// Notebook redesign — lightweight link target for next/prev navigation.
+export interface BlogPostLink {
+  title: string
+  slug: string
+  heroImageUrl?: string
+  heroLqip?: string
+  category?: { name: string; slug: string; color?: string }
+}
+
+// Notebook redesign — optional per-post extras from the additive
+// blogPostExtras doc type (deck, sources, series membership).
+export interface BlogPostExtras {
+  deck?: string
+  sources?: { label: string; url?: string }[]
+  reviewedNote?: string
+  series?: BlogSeriesRef | null
+  seriesOrder?: number
+}
+
+export interface BlogSeriesRef {
+  title: string
+  slug: string
+  kicker?: string
+  coverImageUrl?: string
+  postCount?: number
+}
+
+// Notebook redesign — full series doc for /notebook/series/:slug.
+export interface BlogSeries {
+  title: string
+  slug: string
+  kicker?: string
+  description?: string
+  coverImageUrl?: string
+  coverImageAlt?: string
+  coverLqip?: string
+  posts: BlogPostCard[]
+}
+
+// Notebook redesign — index-level settings singleton (additive; falls back to
+// blogHomepage / hardcoded copy when absent).
+export interface NotebookSettings {
+  kicker?: string
+  mastheadImageUrl?: string
+  mastheadImageAlt?: string
+  newsletterHeading?: string
+  newsletterBody?: string
+  newsletterButtonLabel?: string
+}
+
+// Notebook redesign — per-category presentation extras.
+export interface BlogCategoryExtras {
+  headerImageUrl?: string
+  headerImageAlt?: string
+  headerLqip?: string
+  intro?: string
+  accent?: string
 }
 
 // ─── Home Config (discovery rebuild) ─────────────────────────────────────────

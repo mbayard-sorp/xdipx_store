@@ -1,12 +1,15 @@
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, Link } from 'react-router'
 import { data } from 'react-router'
-import { getBlogPosts, getBlogCategories } from '~/lib/sanity.server'
+import { getBlogPosts, getBlogCategories, getBlogCategoryExtras } from '~/lib/sanity.server'
 import { BlogPostCard } from '~/components/blog/BlogPostCard'
 import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
+import { SanityImage } from '~/components/common/SanityImage'
+import { Reveal } from '~/components/motion/Reveal'
 import { canonicalUrl } from '~/lib/seo'
 import { buildSocialMeta } from '~/lib/social-meta'
+import { categoryAccent } from '~/lib/blog-style'
 import type { BlogCategory } from '~/types/cms'
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
@@ -19,7 +22,10 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   const category = categories.find((c: BlogCategory) => c.slug === slug)
   if (!category) throw data('Category not found', { status: 404 })
 
-  const { posts, total } = await getBlogPosts({ page, perPage, category: slug })
+  const [{ posts, total }, extras] = await Promise.all([
+    getBlogPosts({ page, perPage, category: slug }),
+    getBlogCategoryExtras(slug),
+  ])
   const totalPages = Math.max(1, Math.ceil(total / perPage))
 
   // Page > 1 is its own document — self-canonical at ?page=N. Page 1 canonicals
@@ -34,7 +40,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
         })
       : canonicalUrl({ path: basePath })
 
-  return { category, posts, total, page, perPage, totalPages, canonical }
+  return { category, extras, posts, total, page, perPage, totalPages, canonical }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
@@ -47,9 +53,9 @@ export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
 
   // Posts are ordered publishedAt desc — the first post on page 1 is the
   // category's most recent, used as the social share image since categories
-  // have no image of their own.
-  const featuredImage = loaderData.posts[0]?.heroImageUrl ?? null
-  const featuredImageAlt = loaderData.posts[0]?.heroImageAlt
+  // have no image of their own (the header artwork wins when present).
+  const featuredImage = loaderData.extras?.headerImageUrl ?? loaderData.posts[0]?.heroImageUrl ?? null
+  const featuredImageAlt = loaderData.extras?.headerImageAlt ?? loaderData.posts[0]?.heroImageAlt
 
   const tags: ReturnType<MetaFunction> = [
     { title },
@@ -81,8 +87,9 @@ export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
 }
 
 export default function NotebookCategoryPage() {
-  const { category, posts, total, page, perPage } = useLoaderData<typeof loader>()
+  const { category, extras, posts, total, page, perPage } = useLoaderData<typeof loader>()
   const totalPages = Math.ceil(total / perPage)
+  const accent = categoryAccent(category.slug, extras?.accent ?? category.color)
 
   const breadcrumbs = [
     { label: 'Home', href: '/' },
@@ -97,33 +104,54 @@ export default function NotebookCategoryPage() {
   ]
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 sm:py-10">
+    <div className="max-w-[75rem] mx-auto px-4 md:px-6 xl:px-8 py-6 sm:py-10">
       <BreadcrumbStructuredData items={breadcrumbSchema} />
       <BreadcrumbNav items={breadcrumbs} />
 
-      <div className="mt-6 mb-8 pb-6 border-b border-line">
-        <p className="text-xs font-mono text-muted uppercase tracking-wider mb-2">Notebook · Category</p>
-        <h1
-          className="text-ink text-3xl sm:text-5xl leading-none"
-          style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}
-        >
-          {category.name}
-        </h1>
-        {category.description && (
-          <p className="text-ink/70 text-base mt-3 max-w-2xl">{category.description}</p>
-        )}
+      {/* Category identity wash header (art direction §5) */}
+      <div className={`mt-6 mb-10 rounded-lg ${accent.wash} overflow-hidden`}>
+        <div className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr] items-center">
+          <div className="p-6 md:p-10">
+            <p className="kicker mb-2">Notebook · Category</p>
+            <h1
+              className={`text-[2rem] md:text-[2.75rem] xl:text-[3.5rem] leading-[1.04] ${accent.heading}`}
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}
+            >
+              {category.name}
+            </h1>
+            {(extras?.intro ?? category.description) && (
+              <p className="text-ink-2 text-base md:text-lg mt-3 max-w-2xl leading-[1.55]">
+                {extras?.intro ?? category.description}
+              </p>
+            )}
+          </div>
+          {extras?.headerImageUrl && (
+            <SanityImage
+              src={extras.headerImageUrl}
+              alt={extras.headerImageAlt ?? category.name}
+              priority
+              sizes="(max-width: 768px) 100vw, 40vw"
+              widths={[640, 828, 1200]}
+              fallbackWidth={828}
+              {...(extras.headerLqip ? { lqip: extras.headerLqip } : {})}
+              className="w-full h-full max-h-64 md:max-h-none object-cover"
+            />
+          )}
+        </div>
       </div>
 
       {posts.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
-          {posts.map(post => (
-            <BlogPostCard key={post._id} post={post} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-7 xl:gap-8 mb-10">
+          {posts.map((post, i) => (
+            <Reveal key={post._id} variant="up" index={i}>
+              <BlogPostCard post={post} />
+            </Reveal>
           ))}
         </div>
       ) : (
-        <div className="text-center py-16 text-ink/50">
-          <p className="text-lg">No posts in this category yet ♥</p>
-          <Link to="/notebook" className="text-coral hover:underline mt-2 inline-block font-mono text-xs uppercase tracking-wider">
+        <div className="text-center py-16 text-ink-3">
+          <p className="text-lg" style={{ fontFamily: 'var(--font-display)' }}>No posts in this category yet ♥</p>
+          <Link to="/notebook" className="link-coral text-coral text-sm font-medium mt-3 inline-block">
             ← Back to the notebook
           </Link>
         </div>
@@ -152,8 +180,8 @@ function PaginationLink({ slug, page, label, active }: { slug: string; page: num
   return (
     <Link
       to={href}
-      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-        active ? 'bg-coral text-white' : 'text-ink/60 hover:bg-cream-2'
+      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors press ${
+        active ? 'bg-ink text-white' : 'text-ink-3 hover:bg-paper-2'
       }`}
     >
       {label}
