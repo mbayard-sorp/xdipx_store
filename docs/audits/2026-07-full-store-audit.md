@@ -191,4 +191,12 @@ Fallback-masking table confirmed: "What it does", box contents, and Emma's take 
 
 ## Appendix B — aeo-geo-auditor pass (repo-source)
 
-_Populated from the agent run in this session; see PR description for run context._
+Live fetches blocked; repo-source pass. **Score: 19/19 checks pass — surface judged deploy-ready.**
+
+Confirmed: 12 `.md` routes with correct `text/markdown` content-type + canonical Link headers; llms.txt generated from the same loaders as the sitemap (no drift possible); HTML advertises every `.md` twin via `rel=alternate`; 410 parity; robots.txt allows all 18 AI crawlers with no auth/age-gate/geo-wall on markdown routes; answer-shaped structure enforced ("## What it is" factual lead, `###` Q&A pairs, plain-list specs, consistent brand facts, no urgency language); on-demand rendering with safe cache types and last-updated footers throughout.
+
+Nuance vs §5.2(5): the auditor judged llms.txt structure spec-compliant and non-bloated *at typical catalog sizes*; whether the full-catalog product enumeration becomes dilutive depends on the live product count (checklist L7). P1-6 stands as a curation/quality improvement (described entries, curated sections, `llms-full.txt`) rather than a defect fix.
+
+Surface-growth recommendations (fold into P1-1/P1-2/P2-1 scoping): comparison/versus guides, standalone category explainers, how-to/care guides, `/brands/{slug}` pages, curated "best for" lists; PDP additions — material certifications section, return/warranty callouts, low-stock signals; collection-level FAQ aggregation in `.md` twins.
+
+Live verification still required (L-checklist companion): curl sample `.md` URLs with AI-crawler user agents, fetch live llms.txt/robots.txt to confirm prod parity.
