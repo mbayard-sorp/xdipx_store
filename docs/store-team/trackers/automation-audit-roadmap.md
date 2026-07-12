@@ -1,0 +1,45 @@
+# Tracker — Automation Audit Roadmap (July 2026)
+
+Program: Close the gaps from the full store audit (automation plumbing, answer layer, product-data coverage, PDP/PLP/discovery conversion)
+Source plan: docs/audits/2026-07-full-store-audit.md §7
+Started: 2026-07-13   Target end: 2026-10-04 (P0 wks 1–2, P1 wks 3–6, P2 wks 7–12)
+Overall: GREEN
+
+Week anchors: W1 = 2026-07-13, W2 = 2026-07-20, W3 = 2026-07-27, W6 = 2026-08-17, W7 = 2026-08-24, W12 = 2026-09-28.
+
+| id | milestone | phase | owner | target week | status | RAG | evidence probe | last verified | notes |
+|---|---|---|---|---|---|---|---|---|---|
+| p0-1-email | Klaviyo campaign execution client + approval-gated send | P0 | rr7-engineer + email-marketing-manager | 2026-07-20 | not-started | GREEN | a Klaviyo campaign client exists in `app/lib/` (`.server.ts`) AND an approval-gated send action is reachable from the admin dashboard AND one approved test send is logged | — | owner approves each campaign; agent briefs become executable |
+| p0-2-restock | Back-in-stock webhook fires Klaviyo events for waitlist signups | P0 | rr7-engineer + shopify-ops | 2026-07-20 | not-started | GREEN | `handleInventoryUpdate` in `server/webhooks.ts` no longer early-returns on restock AND a Klaviyo back-in-stock event path exists | — | pure leakage fix on captured intent |
+| p0-3-enrich | Enrichment batch drained: draft cohort + mood/audience/matters tag coverage | P0 | emma-product-enricher + media-manager | 2026-07-27 | not-started | GREEN | `batch_jobs` rows show completed full-enrichment runs AND draft-with-empty-body product count ≈ 0 (Shopify query, checklist L7 baseline) | — | gates p2-1-pseo; improves discovery rails + PLP facets |
+| p0-4-reviews | Review corpus live: invite flow verified, real approved reviews, `reviews_pdp_enabled` on | P0 | shopify-ops + owner | 2026-07-27 | not-started | GREEN | `pipeline_settings.reviews_pdp_enabled='true'` AND ≥1 approved review row AND aggregateRating present in a live PDP page source | — | valve must not flip before real reviews exist (055 comment / Google policy) |
+| p0-5-content-cron | content-writer moved off desktop scheduling to cloud trigger or Vercel cron | P0 | rr7-engineer + content-writer | 2026-07-20 | not-started | GREEN | `docs/store-team/routine-schedule.md` row 9 carries a cloud trigger id (not the desktop task id) AND ≥2 published posts in a week | — | fixes the zero-posts-published gap |
+| p0-6-alerting | Bidirectional owner alerting + read-only valve-state snapshot endpoint | P0 | rr7-engineer | 2026-07-20 | not-started | GREEN | a push/email digest path exists in code (not just GitHub issues) AND an authenticated read-only valve snapshot route exists | — | fixes §4.6 auditability gap |
+| p0-7-valves | §3 live-state checklist resolved (052 state, GSC env, SEO valves, stock indicator) | P0 | owner + shopify-ops | 2026-07-20 | not-started | GREEN | checklist L1–L9 answers recorded in this tracker's status log AND stock indicator un-commented on the PDP | — | answers may re-scope other milestones |
+| p0-8-links | Legacy homepage For-Him/For-Her carousel links fixed (no 301 hops) | P0 | rr7-engineer | 2026-07-20 | not-started | GREEN | `_layout._index.tsx` contains no links to `/for-him` or `/for-her` | — | also carries the 1-line `dateModified` Product JSON-LD fix from Appendix A |
+| p1-1-guides | Answer-layer sprint: ≥10 guides/FAQ posts published and indexed | P1 | content-writer + seo-curator | 2026-08-17 | not-started | GREEN | ≥10 live notebook posts of kind guide/comparison AND GSC snapshot shows them indexed | — | YMYL-adjacent claims get human review |
+| p1-2-compare | `/compare/x-vs-y` route + Sanity comparison doc type + 3–5 seed comparisons | P1 | rr7-engineer + sanity-content-builder | 2026-08-10 | not-started | GREEN | a compare route exists in `app/routes/` AND ≥3 comparison docs live with ItemList/FAQ schema + `.md` twins | — | Sanity schema additive only |
+| p1-3-plp-copy | Unique intro copy + FAQs on every indexable collection | P1 | emma-copywriter + seo-curator | 2026-08-10 | not-started | GREEN | all live collections have `collectionPage.introCopy` in Sanity (no generic fallback) | — | |
+| p1-4-plp-filter | Server-side PLP filtering across full collections + quick-add | P1 | rr7-engineer + qa-reviewer | 2026-08-17 | not-started | GREEN | collection loader accepts facet params and filters at query level (not client-side over 24 items) AND cards have quick-add | — | wait for p1-7 front-door decision |
+| p1-5-discounts | Discount-code minting, approval-gated, MAP-guarded | P1 | rr7-engineer + promo-manager + pricing-ops | 2026-08-17 | not-started | GREEN | a discount-minting server path exists with a hard MAP check AND codes only mint from owner-approved proposals | — | enables offers inside p0-1 campaigns |
+| p1-6-llms | llms.txt slimmed + llms-full.txt added | P1 | seo-curator + rr7-engineer | 2026-08-10 | not-started | GREEN | `[llms.txt].tsx` emits curated described sections (no bare full-catalog dump) AND an `llms-full.txt` route exists | — | |
+| p1-7-frontdoor | Discovery front-door consolidated (one winner, losers 301, ADR written) | P1 | tech-architect + rr7-engineer | 2026-08-10 | not-started | GREEN | an ADR names the winning variant AND `home-variant.server.ts` reflects it AND losing routes 301 | — | informed by L9 + GA4 |
+| p1-8-pdp | PDP: MAP treatment, editorial links, enrichment-coverage admin dashboard | P1 | rr7-engineer + emma-copywriter | 2026-08-17 | not-started | GREEN | PDP has a MAP-restricted price path AND an admin route reports per-product enrichment coverage | — | dashboard protects p0-3 from regressing |
+| p1-9-monitoring | GSC anomaly alerting + JSON-LD regression check in CI | P1 | rr7-engineer + log-monitor | 2026-08-17 | not-started | GREEN | an alerting job reads `gsc_snapshots` week-over-week AND CI validates structured data on PRs | — | includes Appendix A dateModified + empty-ItemList fixes if not shipped earlier |
+| p2-1-pseo | Programmatic landing pages from mood/audience/matters × product_type_dial | P2 | rr7-engineer + seo-curator | 2026-09-14 | not-started | GREEN | a pSEO route template exists with ItemList/FAQ schema + `.md` twins AND pages index only past the quality bar | — | blocked by p0-3-enrich |
+| p2-2-referral | Referral/loyalty execution: codes, rewards on `referrals` rows | P2 | loyalty-referral-manager + rr7-engineer | 2026-09-21 | not-started | GREEN | code generation + reward issuance paths exist against the `referrals` table | — | |
+| p2-3-social | IG/TikTok posting plumbing (approval-gated, voice-gated) | P2 | social-media-manager + rr7-engineer | 2026-09-21 | not-started | GREEN | posting API clients exist for IG/TikTok, gated like X's double valve | — | |
+| p2-4-support | Inbound support-email loop for customer-service-emma (draft-first) | P2 | customer-service-emma + rr7-engineer | 2026-09-28 | not-started | GREEN | an inbound email pipeline exists routing to the agent, replies draft-only until owner graduates | — | |
+| p2-5-eeat | Human expert reviewer byline + review workflow on health-adjacent content | P2 | owner + content-writer | 2026-09-28 | not-started | GREEN | reviewer identity + workflow documented AND rendered on health-adjacent posts | — | |
+| p2-6-design | Design-elevation Phase 1 kicked off | P2 | homepage team | 2026-09-14 | not-started | GREEN | first milestone in `trackers/design-elevation.md` flips to done | — | tracked in its own tracker; mirrored here for sequencing only |
+| p2-7-cwv | CWV field data (RUM) + automated LLM-citation tracking | P2 | rr7-engineer + aeo-geo-auditor | 2026-09-28 | not-started | GREEN | a RUM beacon reports CWV AND a scheduled citation check replaces the manual 20-query tracker | — | |
+| p2-8-docs | Doc reconciliation: import-monitor runbook Phase-2 drift; routine smoke test recorded | P2 | program-manager + process-optimizer | 2026-09-28 | not-started | GREEN | runbook §6 matches `autoImportPhase2` code thresholds AND routine-schedule.md smoke test marked done | — | docs-only PR |
+
+Program gates (checked by program-manager in the weekly audit):
+W2 — email plumbing live, enrichment queue drained, alerting live. W6 — ≥10 posts indexed, reviews valve on with real reviews, PLP filtering + comparison route shipped. W12 — pSEO indexing, referral MVP live, store-strategist assesses $2k/mo run-rate trajectory.
+
+## Status log
+
+### 2026-07-12 — seeded (baseline)
+
+Overall GREEN. Tracker created from the full store audit (docs/audits/2026-07-full-store-audit.md). All milestones `not-started` by definition; no probes pass yet. First real audit lands with the next Monday weekly strategy run. Note for that run: the §3 live-state checklist (L1–L9) is the first thing to resolve — several milestones re-scope based on its answers.
