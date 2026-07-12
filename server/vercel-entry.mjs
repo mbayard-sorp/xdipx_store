@@ -228,7 +228,16 @@ var init_schema = __esm({
       errorMessage: text("error_message"),
       postedAt: timestamp("posted_at"),
       createdAt: timestamp("created_at").defaultNow().notNull(),
-      createdBy: varchar("created_by", { length: 20 }).default("system")
+      createdBy: varchar("created_by", { length: 20 }).default("system"),
+      // Editorial review lifecycle (migration 058) — layered on top of `status`,
+      // which stays the publication lifecycle. pending_review|approved|needs_changes|rejected.
+      reviewStatus: varchar("review_status", { length: 20 }).default("pending_review").notNull(),
+      feedback: text("feedback"),
+      editedText: text("edited_text"),
+      reviewedBy: varchar("reviewed_by", { length: 60 }),
+      reviewedAt: timestamp("reviewed_at"),
+      scheduledFor: date("scheduled_for"),
+      reworkedFrom: integer("reworked_from")
     });
     adminRoles = pgTable("admin_roles", {
       id: serial("id").primaryKey(),
@@ -12451,6 +12460,7 @@ var twitter_server_exports = {};
 __export(twitter_server_exports, {
   deleteAndLogTweet: () => deleteAndLogTweet,
   deleteTweet: () => deleteTweet,
+  postApprovedDraft: () => postApprovedDraft,
   postDealTweet: () => postDealTweet,
   postManualTweet: () => postManualTweet,
   postTweet: () => postTweet,
@@ -12698,6 +12708,37 @@ async function postManualTweet(text2, imageUrl, dealHistoryId) {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     console.error("[twitter] postManualTweet failed:", errorMessage);
+    return { ok: false, error: errorMessage };
+  }
+}
+async function postApprovedDraft(postId) {
+  const [post] = await db.select().from(socialPosts).where(eq5(socialPosts.id, postId)).limit(1);
+  if (!post || post.status !== "draft" || post.reviewStatus !== "approved") {
+    return { ok: false, error: "Post not found or not an approved draft" };
+  }
+  if (post.platform !== "x") {
+    return { ok: false, error: "Only X has live posting plumbing; post this one manually" };
+  }
+  const text2 = post.editedText?.trim() || post.tweetText;
+  try {
+    let mediaIds;
+    const imageUrl = post.mediaUrls?.[0];
+    if (imageUrl) {
+      const mediaId = await uploadMediaFromUrl(imageUrl);
+      if (mediaId) mediaIds = [mediaId];
+    }
+    const tweet = await postTweet(text2, mediaIds);
+    await db.update(socialPosts).set({
+      externalPostId: tweet.id,
+      mediaIds: mediaIds ?? null,
+      status: "posted",
+      postedAt: /* @__PURE__ */ new Date(),
+      errorMessage: null
+    }).where(eq5(socialPosts.id, postId));
+    return { ok: true, tweetId: tweet.id, tweetText: text2 };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    await db.update(socialPosts).set({ errorMessage }).where(eq5(socialPosts.id, postId));
     return { ok: false, error: errorMessage };
   }
 }
@@ -15672,10 +15713,14 @@ var init_homepage_team_keys = __esm({
 var team_keys_exports = {};
 __export(team_keys_exports, {
   HOMEPAGE_EXTRA_KEYS: () => HOMEPAGE_EXTRA_KEYS,
+  SOCIAL_FREQ_DEFAULTS: () => SOCIAL_FREQ_DEFAULTS,
+  SOCIAL_PLATFORMS: () => SOCIAL_PLATFORMS,
+  SOCIAL_REVIEW_STATUSES: () => SOCIAL_REVIEW_STATUSES,
   TEAM_DEFAULTS: () => TEAM_DEFAULTS,
   TEAM_IDS: () => TEAM_IDS,
   VALVE_KEYS: () => VALVE_KEYS,
   isTeamId: () => isTeamId,
+  socialFreqKey: () => socialFreqKey,
   teamKeys: () => teamKeys
 });
 function isTeamId(v) {
@@ -15688,7 +15733,10 @@ function teamKeys(team) {
     maxRunsPerDay: `${team}_team_max_runs`
   };
 }
-var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, VALVE_KEYS;
+function socialFreqKey(platform) {
+  return `social_freq_${platform}`;
+}
+var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, SOCIAL_REVIEW_STATUSES, VALVE_KEYS;
 var init_team_keys = __esm({
   "app/lib/team-keys.ts"() {
     "use strict";
@@ -15706,6 +15754,14 @@ var init_team_keys = __esm({
       buildCents: "homepage_team_build_cents",
       maxImagesPerDay: "homepage_team_max_images"
     };
+    SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook"];
+    SOCIAL_FREQ_DEFAULTS = {
+      x: 1,
+      instagram: 1,
+      tiktok: 1,
+      facebook: 0
+    };
+    SOCIAL_REVIEW_STATUSES = ["pending_review", "approved", "needs_changes", "rejected"];
     VALVE_KEYS = {
       socialAutopost: "social_team_autopost",
       suggestionApply: "suggestion_apply_enabled",
@@ -15732,6 +15788,7 @@ __export(team_server_exports, {
   expireStaleRuns: () => expireStaleRuns,
   gate: () => gate,
   getActiveBrief: () => getActiveBrief,
+  getSocialFrequencies: () => getSocialFrequencies,
   getTeamConfig: () => getTeamConfig,
   getTodayImageCount: () => getTodayImageCount,
   getTodayRunCount: () => getTodayRunCount,
@@ -15751,6 +15808,8 @@ __export(team_server_exports, {
   proposeCalendarEvent: () => proposeCalendarEvent,
   publishBrief: () => publishBrief,
   recordEvent: () => recordEvent,
+  rescheduleSocialPost: () => rescheduleSocialPost,
+  reviewSocialPost: () => reviewSocialPost,
   startRun: () => startRun,
   teamKeys: () => teamKeys,
   updateRun: () => updateRun
@@ -16004,13 +16063,41 @@ async function createDraftSocialPost(p) {
     mediaUrls: p.mediaUrls ?? null,
     dealHistoryId: p.dealHistoryId ?? null,
     status: "draft",
-    createdBy: "agent"
+    createdBy: "agent",
+    reviewStatus: "pending_review",
+    scheduledFor: p.scheduledFor ?? null,
+    reworkedFrom: p.reworkedFrom ?? null
   }).returning({ id: socialPosts.id });
   return row.id;
 }
-async function listSocialPosts(status, limit = 50) {
+async function listSocialPosts(status, limit = 50, reviewStatus) {
+  const conditions = [];
+  if (status) conditions.push(eq11(socialPosts.status, status));
+  if (reviewStatus) conditions.push(eq11(socialPosts.reviewStatus, reviewStatus));
   const q = db.select().from(socialPosts);
-  return (status ? q.where(eq11(socialPosts.status, status)) : q).orderBy(desc(socialPosts.createdAt)).limit(limit);
+  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(desc(socialPosts.createdAt)).limit(limit);
+}
+async function getSocialFrequencies() {
+  const rows = await db.select().from(pipelineSettings).where(sql6`${pipelineSettings.key} LIKE 'social_freq_%'`);
+  const map = new Map(rows.map((r) => [r.key, r.value]));
+  const out = {};
+  for (const p of SOCIAL_PLATFORMS) {
+    out[p] = num(map.get(socialFreqKey(p)), SOCIAL_FREQ_DEFAULTS[p]);
+  }
+  return out;
+}
+async function reviewSocialPost(id, input) {
+  const result = await db.update(socialPosts).set({
+    reviewStatus: input.reviewStatus,
+    feedback: input.feedback ?? null,
+    editedText: input.editedText ?? null,
+    reviewedBy: input.reviewedBy,
+    reviewedAt: /* @__PURE__ */ new Date()
+  }).where(and3(eq11(socialPosts.id, id), ne2(socialPosts.status, "posted"))).returning({ id: socialPosts.id });
+  return result.length > 0;
+}
+async function rescheduleSocialPost(id, scheduledFor) {
+  await db.update(socialPosts).set({ scheduledFor }).where(eq11(socialPosts.id, id));
 }
 async function listCalendar(from, to) {
   const conditions = [];

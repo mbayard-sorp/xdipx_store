@@ -48,8 +48,26 @@ and **stop**: skip honestly, never work around the gate. If `ok:true`, capture
 
 ## Step 3: Topic selection + slug pre-check
 
-Today's category comes from the weekly rhythm in content-plan.md §2 (Mon/Wed/Fri guides, Tue/Sun
-comparisons, Thu care, Sat wellness-basics). Pick, in order, logging the source as a `step` event:
+Today's category comes from the weekly rhythm in content-plan.md §2 (Mon/Wed guides, Tue/Fri
+real-talk, Thu podcast-notes, Sat care, Sun comparisons/wellness-basics flex).
+
+**Thursday first-check (podcast-notes):** query the pending podcast brief before anything else:
+
+```groq
+*[_type == "podcastReviewBrief" && status == "pending"] | order(publishedDate desc)[0]
+```
+
+Found → today's post is the podcast review (content-plan §7A shape): patch the brief
+`status:'drafted'` immediately (idempotent claim), carry its takeaways, agree/pushback angles,
+`productAngles` (stock-verified before embedding), `suggestedTitle`, and episode URL into Step 4,
+and use category `blogCategory-podcast-notes`. None pending → fall back to a care post and note it
+in the retro.
+
+**Real Talk days (Tue/Fri):** pick the next unwritten topic from content-plan §7B (or a queued
+brief that fits the problem→resolution shape), and write to the §7B structure — problem in the
+reader's words, root cause plainly, resolution with products only in the "What helps" section.
+
+Otherwise pick, in order, logging the source as a `step` event:
 
 1. **Brief queue (primary):**
 
@@ -81,8 +99,10 @@ Create idempotently: doc `_id` is `blogPost-${slug}`, `createIfNotExists` then `
 
 - `title`; `slug` (`{_type:'slug', current}`); `author` (reference to the Emma `blogAuthor` doc,
   `_ref:'blogAuthor-emma'`); `category` (reference to a `blogCategory`: `blogCategory-guides` |
-  `blogCategory-comparisons` | `blogCategory-care` | `blogCategory-wellness-basics`; these docs are
-  seeded and published); `tags[]`; `excerpt` (required); `publishedAt` (required, fresh ISO,
+  `blogCategory-comparisons` | `blogCategory-care` | `blogCategory-wellness-basics` |
+  `blogCategory-podcast-notes` | `blogCategory-real-talk`; the first four are seeded and
+  published — `createIfNotExists` the podcast-notes/real-talk docs on first use, title "Podcast
+  Notes" / "Real Talk"); `tags[]`; `excerpt` (required); `publishedAt` (required, fresh ISO,
   today); `status:'draft'`.
 - `body` (Portable Text): `normal`/`h2`/`h3`/`h4`/`blockquote` blocks plus `blogProductEmbed`
   (`{productHandle, ctaLabel, layout}`), `blogPullQuote`, `blogCta`.
@@ -142,11 +162,13 @@ curl -s -X POST "$BASE_URL/api/revalidate/blog" \
 ```
 
 3. If the topic came from a brief: patch the brief `status` → `'published'` and set
-   `publishedPost` to a reference to the blogPost doc.
+   `publishedPost` to a reference to the blogPost doc. A `podcastReviewBrief` gets
+   `status` → `'published'` and `blogPostRef` set to the post's slug.
 
 Valve off (or verdict not PASS) → leave the post as a Sanity draft, post an event saying exactly
-that, re-queue the brief if one was claimed (`status` → `'queued'`), and finish the run as
-succeeded. Draft-only is a valid, honest outcome, not a failure.
+that, re-queue the brief if one was claimed (`seoContentBrief` → `'queued'`,
+`podcastReviewBrief` → `'pending'`), and finish the run as succeeded. Draft-only is a valid,
+honest outcome, not a failure.
 
 ## Step 7: Retro + finish
 

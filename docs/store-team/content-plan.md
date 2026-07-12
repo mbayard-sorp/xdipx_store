@@ -10,19 +10,19 @@ Cadence ties to the weekly theme calendar so the whole store tells one story. Wh
 
 ## 2. Weekly slot themes
 
-One post per day, seven per week. Guides are weighted heaviest because they carry the ItemList JSON-LD and win the highest-intent queries.
+One post per day, seven per week. Guides remain the anchor format (they carry the ItemList JSON-LD and win the highest-intent queries); the owner added two editorial formats in 2026-07 — the weekly podcast review and the twice-weekly Real Talk problem→resolution narrative (see §7).
 
 | Day | Category | Slot intent |
 |---|---|---|
 | Mon | guides | Anchor guide. Syncs to the marketing-calendar theme week (see rule below). |
-| Tue | comparisons | Type or material head-to-head ("X vs Y"). |
+| Tue | real-talk | Problem → root cause → resolution narrative (§7B). |
 | Wed | guides | Category explainer matching one of the 24 collections. |
-| Thu | care | Cleaning, storage, material safety, sharing. |
-| Fri | guides | Use-case or couples guide (first-timer, long-distance, gifting). |
-| Sat | wellness-basics | Body-safety, anatomy, kegel, aftercare foundations. |
-| Sun | comparisons | Flex head-to-head, or overflow guide if the theme needs two. |
+| Thu | podcast-notes | Weekly podcast review from the pending `podcastReviewBrief` (§7A). No brief pending → fall back to a care post. |
+| Fri | real-talk | Second problem → resolution narrative (§7B). |
+| Sat | care | Cleaning, storage, material safety, sharing. |
+| Sun | comparisons | Head-to-head; alternate with wellness-basics when the comparisons queue is thin, or overflow guide if the theme needs two. |
 
-Weekly mix: 3 guides, 2 comparisons, 1 care, 1 wellness-basics. Guides stay the majority every week.
+Weekly mix: 2 guides, 2 real-talk, 1 podcast-notes, 1 care, 1 comparisons/wellness-basics. When a flex slot opens (no pending podcast brief, thin queues), it reverts to a guide — guides stay the priority format.
 
 **Theme-sync rule.** At Monday run start, read `marketing_calendar` for the active theme. The Monday guides slot must target that theme's product family and its top LLM question. During Air-Pulse 101 week, the Monday guide answers an air-pulsation query (for example "how does a clitoral suction toy work"). If the Sunday flex slot is needed, use it for a second angle on the same theme. Off-theme weeks default to the backlog order below.
 
@@ -101,3 +101,61 @@ Below 300 sessions/week the retro leans on margin math, stock depth, and these h
 - **No prices in body text.** Pricing lives on the PDP and in the embed component, never in prose. No discount framing that would trip MAP rules.
 - **Internal links every post.** At least one collection link and one PDP, using canonical `/products/{slug}` and `/collections/{handle}`.
 - **No em-dashes, no countdowns, no urgency, CTAs from the whitelist only.** Billing descriptor is always XDIPX.
+
+## 7. Editorial formats (owner-added 2026-07)
+
+Both formats live in new `blogCategory` documents (`blogCategory-podcast-notes` "Podcast Notes",
+`blogCategory-real-talk` "Real Talk") — content documents, not schema changes. Seed them once
+before the first post of each type. All §6 standing rules apply unchanged; the notes below are
+additive.
+
+### 7A. Podcast Notes (weekly, Thursday)
+
+The post is written from the week's pending `podcastReviewBrief` (produced Wednesday by the
+`podcast-reviewer` routine, `docs/store-team/routine-podcast-weekly.md`). Shape:
+
+1. **What the episode is** — show, hosts (credentials as stated), episode link, one-paragraph setup.
+2. **What they got right** — the takeaways Emma affirms, in her own words, quoting sparingly.
+3. **Where Emma adds nuance** — the agree/pushback angles from the brief; attributed claims,
+   plain-spoken counterpoints, no medical overreach.
+4. **Products that fit this conversation** — `blogProductEmbed` blocks drawn from the brief's
+   `productAngles`, only where the episode's themes genuinely lead there, in-stock verified.
+5. FAQ section as always.
+
+Rules: review-and-commentary framing (link the episode, quote sparingly, never imply the show
+endorses xdipx); if the brief says `sourceQuality:'show-notes'`, the post says it reviewed the
+episode's published notes; mark the brief `drafted` on claim and `published` + `blogPostRef` when
+live. No pending brief on Thursday → the slot falls back to care and the retro notes it.
+
+### 7B. Real Talk (twice weekly, Tuesday + Friday)
+
+A problem → root cause → resolution narrative that ends, where honest, at products that actually
+help. Structure is plain H2 prose — no custom Sanity block; heading-structured answers are what
+LLM engines lift, and a custom block would add renderer work for nothing:
+
+1. **H2: The problem** — stated in the reader's words, empathetic and specific. "What people tell
+   us / what shows up in questions", never first-person anecdote (Emma has no lived experience —
+   the rule is extra load-bearing in this format).
+2. **H2: What's actually going on** — the root cause explained plainly. No diagnosis language, no
+   medical overreach; include a "worth seeing a clinician if…" line whenever the topic borders on
+   health.
+3. **H2: What helps** — 2-3 concrete approaches (habits, communication, technique), each
+   optionally paired with ONE honest, in-stock `blogProductEmbed` that genuinely serves that
+   approach. **Products appear only in this resolution section, never in the problem framing** —
+   that is the anti-sleaze rule.
+4. FAQ section as always.
+
+Starter topics (pick, reorder, and extend freely):
+
+| Slug | Problem |
+|---|---|
+| what-to-do-when-desire-levels-dont-match | Mismatched libido logistics in a long-term relationship |
+| why-first-toy-shopping-feels-overwhelming | First-toy overwhelm: too many options, no vocabulary |
+| what-helps-with-dryness-during-sex | Dryness and discomfort, and when lube is the whole answer |
+| why-does-my-toy-smell-and-how-do-i-fix-it | Toy-care anxiety: smells, residue, material worries |
+| reconnecting-after-a-baby | Post-partum reconnection, patience, and pressure |
+| what-if-a-toy-is-too-intense | Overstimulation: settings, buffers, and gentler picks |
+| how-do-couples-talk-about-trying-toys | Raising the topic with a partner without it landing wrong |
+| what-size-should-you-actually-start-with | Sizing confusion and the case for starting small |
+| when-vibration-feels-like-too-much-noise | Discretion worries: noise, storage, shared walls |
+| why-cant-i-finish-with-a-partner | Orgasm gap frustrations, pressure, and pacing |

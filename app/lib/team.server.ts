@@ -28,7 +28,12 @@ import {
   teamKeys,
   TEAM_DEFAULTS,
   VALVE_KEYS,
+  SOCIAL_PLATFORMS,
+  SOCIAL_FREQ_DEFAULTS,
+  socialFreqKey,
   type TeamId,
+  type SocialPlatform,
+  type SocialReviewStatus,
 } from '~/lib/team-keys'
 import {
   pipelineSettings,
@@ -531,12 +536,15 @@ export interface DraftSocialPostInput {
   tweetText: string         // the post body (column name is historical)
   mediaUrls?: string[] | undefined
   dealHistoryId?: number | undefined
+  scheduledFor?: string | undefined  // ISO date the agent proposes for the calendar
+  reworkedFrom?: number | undefined  // id of the needs_changes draft this replaces
 }
 
 /**
  * Insert a DRAFT social post for human review in /admin/socials. This is the
  * only write path the social-media-manager stub has — there is intentionally
- * no code path from here to postTweet()/live posting.
+ * no code path from here to postTweet()/live posting. Every draft enters the
+ * review queue as pending_review; only the owner (admin action) moves it.
  */
 export async function createDraftSocialPost(p: DraftSocialPostInput): Promise<number> {
   const [row] = await db
@@ -549,16 +557,71 @@ export async function createDraftSocialPost(p: DraftSocialPostInput): Promise<nu
       dealHistoryId: p.dealHistoryId ?? null,
       status:        'draft',
       createdBy:     'agent',
+      reviewStatus:  'pending_review',
+      scheduledFor:  p.scheduledFor ?? null,
+      reworkedFrom:  p.reworkedFrom ?? null,
     })
     .returning({ id: socialPosts.id })
   return row!.id
 }
 
-export async function listSocialPosts(status?: string, limit = 50) {
+export async function listSocialPosts(status?: string, limit = 50, reviewStatus?: string) {
+  const conditions = []
+  if (status) conditions.push(eq(socialPosts.status, status))
+  if (reviewStatus) conditions.push(eq(socialPosts.reviewStatus, reviewStatus))
   const q = db.select().from(socialPosts)
-  return (status ? q.where(eq(socialPosts.status, status)) : q)
+  return (conditions.length ? q.where(and(...conditions)) : q)
     .orderBy(desc(socialPosts.createdAt))
     .limit(limit)
+}
+
+/** Per-platform posting frequency (posts/day, 0 = off) from pipeline_settings. */
+export async function getSocialFrequencies(): Promise<Record<SocialPlatform, number>> {
+  const rows = await db
+    .select()
+    .from(pipelineSettings)
+    .where(sql`${pipelineSettings.key} LIKE 'social_freq_%'`)
+  const map = new Map(rows.map(r => [r.key, r.value]))
+  const out = {} as Record<SocialPlatform, number>
+  for (const p of SOCIAL_PLATFORMS) {
+    out[p] = num(map.get(socialFreqKey(p)), SOCIAL_FREQ_DEFAULTS[p])
+  }
+  return out
+}
+
+export interface ReviewSocialPostInput {
+  reviewStatus: SocialReviewStatus
+  feedback?: string | undefined
+  editedText?: string | undefined
+  reviewedBy: string
+}
+
+/**
+ * Owner-only review transition for a social draft (admin action; agents have
+ * no write path to review state). Refuses to review already-posted rows —
+ * review is an editorial gate on drafts, not a way to relabel history.
+ */
+export async function reviewSocialPost(id: number, input: ReviewSocialPostInput): Promise<boolean> {
+  const result = await db
+    .update(socialPosts)
+    .set({
+      reviewStatus: input.reviewStatus,
+      feedback:     input.feedback ?? null,
+      editedText:   input.editedText ?? null,
+      reviewedBy:   input.reviewedBy,
+      reviewedAt:   new Date(),
+    })
+    .where(and(eq(socialPosts.id, id), ne(socialPosts.status, 'posted')))
+    .returning({ id: socialPosts.id })
+  return result.length > 0
+}
+
+/** Move a draft's proposed calendar slot. */
+export async function rescheduleSocialPost(id: number, scheduledFor: string | null): Promise<void> {
+  await db
+    .update(socialPosts)
+    .set({ scheduledFor })
+    .where(eq(socialPosts.id, id))
 }
 
 // ── Marketing calendar (read + propose) ─────────────────────────────────────
