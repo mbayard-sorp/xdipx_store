@@ -120,10 +120,19 @@ export default defineConfig({
                       .id('blogHomepage')
                       .icon(() => '🏡')
                       .child(S.document().schemaType('blogHomepage').documentId('singleton.blogHomepage')),
+                    S.listItem()
+                      .title('Notebook Settings')
+                      .id('notebookSettings')
+                      .icon(() => '📓')
+                      .child(S.document().schemaType('notebookSettings').documentId('singleton.notebookSettings')),
                     S.divider(),
                     S.documentTypeListItem('blogPost').title('Posts').icon(() => '✍️'),
                     S.documentTypeListItem('blogCategory').title('Categories').icon(() => '🏷️'),
                     S.documentTypeListItem('blogAuthor').title('Authors').icon(() => '👤'),
+                    S.divider(),
+                    S.documentTypeListItem('blogSeries').title('Series').icon(() => '📚'),
+                    S.documentTypeListItem('blogPostExtras').title('Post Extras').icon(() => '➕'),
+                    S.documentTypeListItem('blogCategoryExtras').title('Category Extras').icon(() => '🎨'),
                   ]),
               ),
           ]),

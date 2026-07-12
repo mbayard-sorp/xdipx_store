@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, Link } from 'react-router'
 import { data } from 'react-router'
-import { getBlogPost, isPreviewRequest } from '~/lib/sanity.server'
+import { getBlogPost, getNotebookSettings, isPreviewRequest } from '~/lib/sanity.server'
 import { getProductsByHandles } from '~/lib/shopify.server'
 import { BlogHero } from '~/components/blog/BlogHero'
 import { BlogBody } from '~/components/blog/BlogBody'
@@ -10,6 +10,12 @@ import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
 import { ShareButtons } from '~/components/common/ShareButtons'
 import { buildSocialMeta } from '~/lib/social-meta'
 import { RelatedPosts } from '~/components/blog/RelatedPosts'
+import { ReadingProgress } from '~/components/blog/ReadingProgress'
+import { PostPagination } from '~/components/blog/PostPagination'
+import { SeriesNav } from '~/components/blog/SeriesNav'
+import { NotebookSubscribe } from '~/components/blog/NotebookSubscribe'
+import { SanityImage } from '~/components/common/SanityImage'
+import { Reveal } from '~/components/motion/Reveal'
 import { BlogStructuredData } from '~/components/seo/BlogStructuredData'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
@@ -18,7 +24,10 @@ import type { Product } from '~/types'
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const slug = params['slug'] ?? ''
   const preview = isPreviewRequest(request)
-  const post = await getBlogPost(slug, preview)
+  const [post, notebookSettings] = await Promise.all([
+    getBlogPost(slug, preview),
+    getNotebookSettings(),
+  ])
 
   if (!post) throw data('Post not found', { status: 404 })
 
@@ -33,7 +42,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     productMap = Object.fromEntries(products.map(p => [p.handle, p]))
   }
 
-  return { post, productMap }
+  return { post, productMap, notebookSettings }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
@@ -59,7 +68,7 @@ export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
 }
 
 export default function NotebookPostPage() {
-  const { post, productMap } = useLoaderData<typeof loader>()
+  const { post, productMap, notebookSettings } = useLoaderData<typeof loader>()
 
   const breadcrumbs = [
     { label: 'Home', href: '/' },
@@ -92,8 +101,11 @@ export default function NotebookPostPage() {
         }))
     : []
 
+  const sources = post.extras?.sources ?? []
+
   return (
-    <article className="max-w-6xl mx-auto px-4 py-6 sm:py-10">
+    <article className="max-w-[75rem] mx-auto px-4 md:px-6 xl:px-8 py-6 sm:py-10">
+      <ReadingProgress />
       <BlogStructuredData post={post} readingTime={post.readingTime} />
       <BreadcrumbStructuredData items={breadcrumbSchema} />
       {guideItems.length > 0 && (
@@ -106,14 +118,47 @@ export default function NotebookPostPage() {
 
       <BreadcrumbNav items={breadcrumbs} />
 
-      <div className="mt-4">
+      <div className="mt-6">
         <BlogHero post={post} readingTime={post.readingTime} />
       </div>
 
-      <div className="mt-10 lg:grid lg:grid-cols-[1fr_260px] lg:gap-10">
+      <div className="mt-10 lg:grid lg:grid-cols-[1fr_260px] lg:gap-12">
         {/* Main content */}
-        <div className="min-w-0 max-w-2xl mx-auto lg:mx-0">
+        <div className="min-w-0 max-w-[65ch] mx-auto lg:mx-0">
           <BlogBody body={post.body ?? []} productMap={productMap} />
+
+          {/* Sources & review — the trust footer (art direction §7) */}
+          {(sources.length > 0 || post.extras?.reviewedNote) && (
+            <Reveal variant="fade" as="section" className="mt-8 bg-paper-2 rounded-lg p-5 md:p-6">
+              <p className="kicker mb-2.5">Sources &amp; review</p>
+              <p className="text-sm text-ink-3 leading-[1.55]">
+                {post.extras?.reviewedNote ??
+                  'Facts in this piece trace to product specs, materials, and patterns in verified reviews.'}
+              </p>
+              {sources.length > 0 && (
+                <ul className="mt-3 space-y-1.5">
+                  {sources.map((s, i) => (
+                    <li key={i} className="text-sm text-ink-2">
+                      {s.url ? (
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-coral underline decoration-1 underline-offset-2 hover:text-coral-2 transition-colors"
+                        >
+                          {s.label}
+                        </a>
+                      ) : (
+                        s.label
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Reveal>
+          )}
+
+          <SeriesNav extras={post.extras} />
 
           <div className="mt-10 pt-8 border-t border-line">
             <ShareButtons
@@ -123,67 +168,80 @@ export default function NotebookPostPage() {
             />
 
             {post.author && (
-              <div className="mt-8 flex items-start gap-4 bg-cream-2 border border-line rounded-2xl p-5">
+              <div className="mt-8 flex items-start gap-4 bg-paper border border-line rounded-lg p-5">
                 {post.author.avatarUrl ? (
-                  <img
+                  <SanityImage
                     src={post.author.avatarUrl}
                     alt={post.author.name}
-                    className="w-14 h-14 rounded-full object-cover shrink-0 border border-line"
+                    widths={[112, 168]}
+                    fallbackWidth={112}
+                    width={56}
+                    height={56}
+                    className="w-14 h-14 rounded-full object-cover shrink-0 bg-paper-3"
                   />
                 ) : (
                   <div
-                    className="w-14 h-14 rounded-full bg-coral text-white flex items-center justify-center text-xl font-bold shrink-0"
-                    style={{ fontFamily: 'var(--font-display)' }}
+                    className="w-14 h-14 rounded-full bg-paper-3 text-ink flex items-center justify-center text-xl shrink-0"
+                    style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}
                   >
                     {post.author.name.charAt(0)}
                   </div>
                 )}
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <Link
                     to={`/notebook/by/${post.author.slug}`}
-                    className="text-ink hover:text-coral transition-colors"
-                    style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
+                    className="text-ink hover:text-coral transition-colors text-lg"
+                    style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}
                   >
                     {post.author.name}
                   </Link>
-                  {post.author.role && (
-                    <p className="text-xs font-mono text-muted uppercase tracking-wider mt-0.5">{post.author.role}</p>
-                  )}
+                  {post.author.role && <p className="kicker mt-0.5">{post.author.role}</p>}
                   {post.author.bio && (
-                    <p className="text-sm text-ink/70 mt-2">{post.author.bio}</p>
+                    <p className="text-sm text-ink-3 mt-2 leading-[1.55]">{post.author.bio}</p>
                   )}
-                  <Link
-                    to={`/notebook/by/${post.author.slug}`}
-                    className="inline-block mt-3 text-xs font-mono text-coral uppercase tracking-wider hover:underline"
-                  >
-                    More from {post.author.name} →
-                  </Link>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3">
+                    <Link
+                      to={`/notebook/by/${post.author.slug}`}
+                      className="link-coral text-coral text-sm font-medium"
+                    >
+                      More from {post.author.name} →
+                    </Link>
+                    {(post.author.socialLinks ?? []).map(s =>
+                      s.url ? (
+                        <a
+                          key={s.url}
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-ink-3 hover:text-coral transition-colors capitalize"
+                        >
+                          {s.platform === 'x' ? 'X' : s.platform}
+                        </a>
+                      ) : null,
+                    )}
+                  </div>
                 </div>
               </div>
             )}
           </div>
         </div>
 
-        {/* Sticky Emma sidebar (desktop only) */}
+        {/* Sticky rail (desktop only) */}
         <aside className="hidden lg:block">
           <div className="sticky top-6 space-y-4">
             <TableOfContents body={post.body ?? []} />
 
-            <div className="bg-coral/10 border border-coral/30 rounded-2xl p-4">
+            <div className="border border-line rounded-lg p-4">
               <p
                 className="text-ink text-base leading-tight"
-                style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
+                style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}
               >
                 Rather just ask Emma?
               </p>
-              <p className="text-xs font-mono text-muted mt-2 leading-relaxed">
-                I'll message back over text or email — no call, no pressure.
+              <p className="text-[13px] text-ink-3 mt-2 leading-[1.5]">
+                She'll message back over text or email. No call, no pressure.
               </p>
-              <Link
-                to="/contact"
-                className="inline-block mt-3 px-3 py-1.5 rounded-full bg-coral hover:bg-coral-deep text-white text-xs font-bold transition-colors"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
+              <Link to="/contact" className="link-coral text-coral text-sm font-medium inline-block mt-3">
                 Ask Emma →
               </Link>
             </div>
@@ -194,6 +252,12 @@ export default function NotebookPostPage() {
       {/* Mobile TOC */}
       <div className="lg:hidden mt-6">
         <TableOfContents body={post.body ?? []} />
+      </div>
+
+      <PostPagination prevPost={post.prevPost} nextPost={post.nextPost} />
+
+      <div className="mt-12">
+        <NotebookSubscribe variant="post" settings={notebookSettings} />
       </div>
 
       <RelatedPosts posts={post.relatedPosts ?? []} />

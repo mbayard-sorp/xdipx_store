@@ -7179,12 +7179,15 @@ __export(sanity_server_exports, {
   archiveHomepageRailsForDeal: () => archiveHomepageRailsForDeal,
   calculateReadingTime: () => calculateReadingTime,
   createEmmaRailDraft: () => createEmmaRailDraft,
+  getAllBlogSeries: () => getAllBlogSeries,
   getBlogAuthor: () => getBlogAuthor,
   getBlogCategories: () => getBlogCategories,
+  getBlogCategoryExtras: () => getBlogCategoryExtras,
   getBlogHomepage: () => getBlogHomepage,
   getBlogPost: () => getBlogPost,
   getBlogPosts: () => getBlogPosts,
   getBlogPostsForSitemap: () => getBlogPostsForSitemap,
+  getBlogSeries: () => getBlogSeries,
   getCollectionPage: () => getCollectionPage,
   getCollectionTypeMap: () => getCollectionTypeMap,
   getCollectionsHub: () => getCollectionsHub,
@@ -7195,6 +7198,7 @@ __export(sanity_server_exports, {
   getHomeConfig: () => getHomeConfig,
   getHomepageDocRaw: () => getHomepageDocRaw,
   getHomepageSections: () => getHomepageSections,
+  getNotebookSettings: () => getNotebookSettings,
   getPage: () => getPage,
   getPageList: () => getPageList,
   getPdpTrustBar: () => getPdpTrustBar,
@@ -7840,7 +7844,7 @@ async function getBlogPosts(opts = {}) {
   const perPage = opts.perPage ?? 12;
   const start = (page - 1) * perPage;
   const end = start + perPage;
-  const cacheKey3 = `posts:${page}:${perPage}:${opts.category ?? ""}:${opts.featured ?? ""}:${opts.authorSlug ?? ""}`;
+  const cacheKey3 = `posts:${page}:${perPage}:${opts.category ?? ""}:${opts.featured ?? ""}:${opts.authorSlug ?? ""}:${opts.tag ?? ""}`;
   const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
   if (cached2) return cached2;
   try {
@@ -7858,6 +7862,10 @@ async function getBlogPosts(opts = {}) {
     if (opts.authorSlug) {
       filter += ` && author->slug.current == $authorSlug`;
       params.authorSlug = opts.authorSlug;
+    }
+    if (opts.tag) {
+      filter += ` && $tag in tags`;
+      params.tag = opts.tag;
     }
     const [rawPosts, total] = await Promise.all([
       client4.fetch(
@@ -7899,8 +7907,18 @@ async function getBlogPost(slug, preview = false) {
           ...,
           _type == "blogImage" => {
             ...,
-            "image": image{ "url": asset->url, alt },
-            "secondImage": secondImage{ "url": asset->url }
+            "image": image{
+              "url": asset->url, alt,
+              "lqip": asset->metadata.lqip,
+              "width": asset->metadata.dimensions.width,
+              "height": asset->metadata.dimensions.height
+            },
+            "secondImage": secondImage{
+              "url": asset->url,
+              "lqip": asset->metadata.lqip,
+              "width": asset->metadata.dimensions.width,
+              "height": asset->metadata.dimensions.height
+            }
           }
         },
         seoTitle, seoDescription, noIndex,
@@ -7908,18 +7926,52 @@ async function getBlogPost(slug, preview = false) {
         tags,
         "relatedPosts": relatedPosts[]->{
           ${BLOG_POST_CARD_PROJECTION}
+        },
+        "autoRelated": *[_type == "blogPost" && status == "published" && category._ref == ^.category._ref && _id != ^._id] | order(publishedAt desc) [0...6] {
+          ${BLOG_POST_CARD_PROJECTION}
+        },
+        "prevPost": *[_type == "blogPost" && status == "published" && publishedAt < ^.publishedAt] | order(publishedAt desc) [0] {
+          title, "slug": slug.current,
+          "heroImageUrl": heroImage.asset->url,
+          "heroLqip": heroImage.asset->metadata.lqip,
+          "category": category->{ name, "slug": slug.current, color }
+        },
+        "nextPost": *[_type == "blogPost" && status == "published" && publishedAt > ^.publishedAt] | order(publishedAt asc) [0] {
+          title, "slug": slug.current,
+          "heroImageUrl": heroImage.asset->url,
+          "heroLqip": heroImage.asset->metadata.lqip,
+          "category": category->{ name, "slug": slug.current, color }
+        },
+        "extras": *[_type == "blogPostExtras" && post._ref == ^._id][0]{
+          deck,
+          sources[]{ label, url },
+          reviewedNote,
+          seriesOrder,
+          "series": series->{
+            title, "slug": slug.current, kicker,
+            "coverImageUrl": coverImage.asset->url,
+            "postCount": count(posts)
+          }
         }
       }`,
       { slug }
     );
     if (!raw) return null;
     const readingTime = calculateReadingTime(raw.body ?? []);
-    const relatedPosts = (raw.relatedPosts ?? []).map((rp) => ({
+    const manual = raw.relatedPosts ?? [];
+    const seen = /* @__PURE__ */ new Set([raw._id, ...manual.map((rp) => rp._id)]);
+    const topUp = (raw.autoRelated ?? []).filter((rp) => {
+      if (seen.has(rp._id)) return false;
+      seen.add(rp._id);
+      return true;
+    });
+    const relatedPosts = [...manual, ...topUp].slice(0, 3).map((rp) => ({
       ...rp,
       readingTime: 0
       // don't fetch body for related posts
     }));
-    const post = { ...raw, readingTime, relatedPosts };
+    const { autoRelated: _autoRelated, ...rest } = raw;
+    const post = { ...rest, readingTime, relatedPosts };
     if (!preview) setCachedBlog(cacheKey3, post);
     return post;
   } catch (err) {
@@ -7963,6 +8015,99 @@ async function getBlogCategories() {
     return data ?? [];
   } catch (err) {
     console.error("[sanity] getBlogCategories error:", err);
+    return [];
+  }
+}
+async function getNotebookSettings() {
+  if (!projectId) return null;
+  const cacheKey3 = "notebookSettings";
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client4 = getClient();
+    if (!client4) return null;
+    const data = await client4.fetch(
+      `*[_id == "singleton.notebookSettings"][0]{
+        kicker,
+        "mastheadImageUrl": mastheadImage.asset->url,
+        mastheadImageAlt,
+        newsletterHeading, newsletterBody, newsletterButtonLabel
+      }`
+    );
+    setCachedBlog(cacheKey3, data ?? null);
+    return data ?? null;
+  } catch (err) {
+    console.error("[sanity] getNotebookSettings error:", err);
+    return null;
+  }
+}
+async function getBlogCategoryExtras(slug) {
+  if (!projectId) return null;
+  const cacheKey3 = `categoryExtras:${slug}`;
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client4 = getClient();
+    if (!client4) return null;
+    const data = await client4.fetch(
+      `*[_type == "blogCategoryExtras" && category->slug.current == $slug][0]{
+        "headerImageUrl": headerImage.asset->url,
+        headerImageAlt,
+        "headerLqip": headerImage.asset->metadata.lqip,
+        intro, accent
+      }`,
+      { slug }
+    );
+    setCachedBlog(cacheKey3, data ?? null);
+    return data ?? null;
+  } catch (err) {
+    console.error("[sanity] getBlogCategoryExtras error:", err);
+    return null;
+  }
+}
+async function getBlogSeries(slug) {
+  if (!projectId) return null;
+  const cacheKey3 = `series:${slug}`;
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client4 = getClient();
+    if (!client4) return null;
+    const raw = await client4.fetch(
+      `*[_type == "blogSeries" && slug.current == $slug][0]{ ${BLOG_SERIES_PROJECTION} }`,
+      { slug }
+    );
+    if (!raw) return null;
+    const series = {
+      ...raw,
+      posts: (raw.posts ?? []).filter((p) => p && p.status === "published").map(({ status: _s, ...p }) => ({ ...p, readingTime: 0 }))
+    };
+    setCachedBlog(cacheKey3, series);
+    return series;
+  } catch (err) {
+    console.error("[sanity] getBlogSeries error:", err);
+    return null;
+  }
+}
+async function getAllBlogSeries() {
+  if (!projectId) return [];
+  const cacheKey3 = "allSeries";
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client4 = getClient();
+    if (!client4) return [];
+    const raw = await client4.fetch(
+      `*[_type == "blogSeries" && count(posts) > 0] | order(_createdAt desc) { ${BLOG_SERIES_PROJECTION} }`
+    );
+    const series = (raw ?? []).map((s) => ({
+      ...s,
+      posts: (s.posts ?? []).filter((p) => p && p.status === "published").map(({ status: _s, ...p }) => ({ ...p, readingTime: 0 }))
+    }));
+    setCachedBlog(cacheKey3, series);
+    return series;
+  } catch (err) {
+    console.error("[sanity] getAllBlogSeries error:", err);
     return [];
   }
 }
@@ -8182,7 +8327,7 @@ async function getHomeConfig() {
     }
   });
 }
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, HOME_CONFIG_GROQ;
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ;
 var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
@@ -8317,8 +8462,18 @@ var init_sanity_server = __esm({
     BLOG_POST_CARD_PROJECTION = `
   _id, title, "slug": slug.current, excerpt, publishedAt, featured,
   "heroImageUrl": heroImage.asset->url, heroImageAlt,
-  "author": author->{ name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role },
+  "heroLqip": heroImage.asset->metadata.lqip,
+  "heroWidth": heroImage.asset->metadata.dimensions.width,
+  "heroHeight": heroImage.asset->metadata.dimensions.height,
+  "author": author->{ name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role, socialLinks },
   "category": category->{ name, "slug": slug.current, color }
+`;
+    BLOG_SERIES_PROJECTION = `
+  title, "slug": slug.current, kicker, description,
+  "coverImageUrl": coverImage.asset->url,
+  coverImageAlt,
+  "coverLqip": coverImage.asset->metadata.lqip,
+  "posts": posts[]->{ ${BLOG_POST_CARD_PROJECTION}, status }
 `;
     HOME_CONFIG_GROQ = `
   *[_id == "singleton.homeConfig"][0]{

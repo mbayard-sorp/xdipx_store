@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Notebook — Hi-Fi Reference (xdipx)</title>
+<!-- Visual north star for the Notebook redesign. Self-contained, inline CSS.
+     Placeholder blocks stand in for generated art (see image-brief.md).
+     On-token to app/app.css v3. Copy is placeholder, charter-conformant. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,500&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    /* v3 tokens (app/app.css) */
+    --paper:#FFFFFF; --paper-2:#FAFAF9; --paper-3:#F4F3F1;
+    --line:rgba(26,20,24,0.08); --line-2:rgba(26,20,24,0.16);
+    --ink:#1A1418; --ink-2:#3D2F3A; --ink-3:#6B5F68; --ink-4:#9A8F97;
+    --coral:#FF5A36; --coral-2:#FF7A5A; --coral-soft:#FFE6DD;
+    --plum:#7A2BB8; --plum-2:#5B1F8A; --plum-soft:#F3E8FB;
+    --sage:#7C8F78; --sage-soft:#ECF0EA;
+    --radius:14px; --radius-lg:22px; --radius-sm:8px;
+    --ease-entrance:cubic-bezier(0.22,1,0.36,1);
+    --font-display:'Newsreader',Georgia,serif;
+    --font-body:'DM Sans',system-ui,sans-serif;
+    --font-mono:'JetBrains Mono',ui-monospace,monospace;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html { scroll-behavior:smooth; }
+  body {
+    font-family:var(--font-body); color:var(--ink); background:var(--paper);
+    -webkit-font-smoothing:antialiased; line-height:1.55;
+  }
+  img, .ph { display:block; }
+
+  /* placeholder art blocks */
+  .ph {
+    position:relative; border-radius:var(--radius); overflow:hidden;
+    background:linear-gradient(135deg,#FFE6DD 0%,#F3E8FB 55%,#ECF0EA 100%);
+    color:var(--ink-2);
+  }
+  .ph--hero  { background:linear-gradient(120deg,#FFDDD2 0%,#FFC9B6 40%,#F3E8FB 100%); }
+  .ph--warm  { background:linear-gradient(135deg,#FFE6DD 0%,#FFD3C4 100%); }
+  .ph--plum  { background:linear-gradient(135deg,#F3E8FB 0%,#E4CDF3 100%); }
+  .ph--sage  { background:linear-gradient(135deg,#ECF0EA 0%,#D6E0D2 100%); }
+  .ph--prod  { background:linear-gradient(135deg,#F4F3F1 0%,#E9E7E4 100%); }
+  .ph__tag {
+    position:absolute; left:12px; bottom:12px;
+    font-family:var(--font-mono); font-size:9px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--ink-3); background:rgba(255,255,255,.72); padding:3px 7px; border-radius:6px;
+  }
+
+  .kicker {
+    font-family:var(--font-mono); font-size:10px; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--ink-3);
+  }
+  .em { font-style:italic; color:var(--plum); }
+  .link-coral {
+    color:var(--coral); text-decoration:none;
+    border-bottom:1px solid var(--coral); padding-bottom:1px; font-weight:500;
+  }
+
+  /* category chip system */
+  .chip {
+    display:inline-flex; align-items:center;
+    font-family:var(--font-body); font-weight:500; font-size:11px;
+    letter-spacing:.06em; text-transform:uppercase;
+    padding:4px 11px; border-radius:999px; white-space:nowrap;
+  }
+  .chip--guides { background:var(--coral-soft); color:var(--coral); }
+  .chip--comparisons { background:var(--plum-soft); color:var(--plum); }
+  .chip--care { background:var(--sage-soft); color:#5F7059; }
+  .chip--wellness { background:var(--paper-3); color:var(--ink-2); border:1px solid var(--line); }
+
+  .shell { max-width:75rem; margin:0 auto; padding:0 16px; }
+  section { position:relative; }
+
+  /* progress bar */
+  .progress { position:fixed; top:0; left:0; height:2px; width:100%; z-index:50; background:transparent; }
+  .progress > span { display:block; height:100%; width:38%; background:var(--coral); transform-origin:left; }
+
+  /* ── MASTHEAD ── */
+  .masthead { text-align:center; padding:36px 0 28px; }
+  .masthead__edition { display:flex; justify-content:center; gap:10px; align-items:center; }
+  .masthead__word {
+    font-family:var(--font-display); font-weight:500; letter-spacing:-.02em;
+    font-size:40px; line-height:.95; margin-top:14px; color:var(--ink);
+  }
+  .tick { display:block; height:2px; background:var(--coral); border-radius:2px; margin:12px auto 0; width:40px; }
+  .masthead__dek {
+    font-family:var(--font-display); color:var(--ink-3); margin-top:14px; font-size:16px;
+  }
+  .rule-2 { border:0; border-top:1px solid var(--line-2); }
+  .rule { border:0; border-top:1px solid var(--line); }
+
+  /* ── FEATURED LOCKUP ── */
+  .featured { display:grid; gap:18px; padding:32px 0; }
+  .featured__media { aspect-ratio:16/9; }
+  .featured__body { }
+  .featured__meta { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .featured__title {
+    font-family:var(--font-display); font-weight:500; line-height:1.03; letter-spacing:-.01em;
+    font-size:30px; color:var(--ink); margin-bottom:12px;
+  }
+  .featured__dek { font-family:var(--font-display); color:var(--ink-2); font-size:18px; line-height:1.45; max-width:34ch; }
+  .byline { display:flex; align-items:center; gap:8px; margin-top:16px; }
+  .avatar { width:28px; height:28px; border-radius:999px; background:var(--paper-3); border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; font-family:var(--font-display); color:var(--plum); font-size:14px; }
+
+  /* ── CHIP RAIL ── */
+  .chiprail { display:flex; gap:8px; align-items:center; overflow-x:auto; padding:16px 0; }
+  .chiprail__count { margin-left:auto; }
+
+  /* ── CARD GRID ── */
+  .grid { display:grid; gap:24px; padding:12px 0 8px; grid-template-columns:1fr; }
+  .card { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; }
+  .card__accent { height:2px; width:32px; margin:16px 0 0 16px; border-radius:2px; }
+  .card--guides .card__accent { background:var(--coral); }
+  .card--comparisons .card__accent { background:var(--plum); }
+  .card--care .card__accent { background:var(--sage); }
+  .card--wellness .card__accent { background:var(--ink-3); }
+  .card__media { aspect-ratio:4/3; margin:12px 16px 0; border-radius:var(--radius); }
+  .card__body { padding:14px 16px 18px; }
+  .card__meta { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .card__title { font-family:var(--font-display); font-weight:600; font-size:20px; line-height:1.12; color:var(--ink); margin-bottom:8px; }
+  .card__excerpt { font-family:var(--font-display); color:var(--ink-2); font-size:15px; line-height:1.5; }
+  .mins { font-family:var(--font-mono); font-size:11px; color:var(--ink-3); }
+
+  /* ── NEWSLETTER BAND ── */
+  .news { background:var(--coral-soft); border-radius:var(--radius-lg); padding:24px; margin:40px 0; }
+  .news__title { font-family:var(--font-display); font-weight:500; font-size:24px; line-height:1.15; color:var(--ink); }
+  .news__dek { color:var(--ink-2); font-size:14px; margin-top:8px; }
+  .news__form { display:flex; flex-direction:column; gap:10px; margin-top:16px; }
+  .news__input { flex:1; border:1px solid var(--line-2); background:var(--paper); border-radius:999px; padding:12px 18px; font-family:var(--font-body); font-size:14px; color:var(--ink); }
+  .btn { border:0; cursor:pointer; font-family:var(--font-body); font-weight:600; font-size:14px; border-radius:999px; padding:12px 22px; }
+  .btn--ink { background:var(--ink); color:#fff; }
+  .btn--coral { background:var(--coral); color:#fff; }
+  .news__aside { font-family:var(--font-display); font-style:italic; color:var(--ink-3); font-size:14px; margin-top:14px; }
+  .heart { color:var(--coral); font-style:normal; }
+
+  /* section divider label */
+  .divider-label { display:flex; align-items:center; gap:14px; margin:36px 0 4px; }
+  .divider-label::after { content:""; flex:1; border-top:1px solid var(--line); }
+
+  /* ══ POST PAGE ══ */
+  .postwrap { background:var(--paper-2); padding-top:8px; }
+  .crumbs { font-size:12px; color:var(--ink-3); padding:20px 0 10px; }
+  .crumbs a { color:var(--ink-3); text-decoration:none; }
+  .post-head { padding:6px 0 18px; }
+  .post-head__meta { display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  .h1 { font-family:var(--font-display); font-weight:500; letter-spacing:-.01em; line-height:1.04;
+    font-size:32px; color:var(--ink); max-width:18ch; }
+  .dek { font-family:var(--font-display); color:var(--ink-3); font-size:18px; line-height:1.45; margin-top:14px; max-width:40ch; }
+
+  .trust { border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:16px 0; margin:22px 0; }
+  .trust__row { display:flex; gap:12px; align-items:flex-start; }
+  .trust__ai { font-size:13px; color:var(--ink-3); line-height:1.5; }
+  .trust__meta { margin-top:10px; }
+
+  .hero { aspect-ratio:3/2; border-radius:var(--radius-lg); margin-bottom:8px; }
+
+  .postgrid { display:block; }
+  .col { max-width:65ch; }
+  .rail { display:none; }
+
+  /* body typography */
+  .body p { font-family:var(--font-display); font-weight:400; font-size:17px; line-height:1.7; color:var(--ink); margin:0 0 16px; }
+  .body p.lead::first-letter, .dropcap::first-letter {
+    font-family:var(--font-display); font-weight:500; color:var(--plum);
+    float:left; font-size:3.4em; line-height:.82; padding:.02em .08em 0 0;
+  }
+  .h2wrap { margin:40px 0 16px; }
+  .h2 { font-family:var(--font-display); font-weight:600; font-size:24px; line-height:1.15; color:var(--ink); }
+  .h2rule { display:block; height:2px; width:32px; background:var(--coral); border-radius:2px; margin-bottom:14px; }
+
+  /* pull quote (inline < 1024, margin aside >= 1024) */
+  .pull { margin:28px 0; padding-left:16px; border-left:2px solid var(--coral); }
+  .pull p { font-family:var(--font-display); font-style:italic; font-weight:500; color:var(--plum);
+    font-size:20px; line-height:1.3; margin:0; }
+
+  /* product embed — editorial, NOT a banner */
+  .embed { position:relative; background:var(--paper); border:1px solid var(--line);
+    border-radius:var(--radius-lg); padding:20px; margin:28px 0; overflow:hidden; }
+  .embed__tick { position:absolute; right:0; top:0; bottom:0; width:2px; background:var(--coral); }
+  .embed__inner { display:flex; gap:16px; align-items:flex-start; }
+  .embed__img { width:88px; height:88px; border-radius:var(--radius); flex:none; }
+  .embed__t { font-family:var(--font-display); font-weight:600; font-size:19px; color:var(--ink); margin:6px 0 6px; }
+  .embed__why { font-family:var(--font-display); font-size:15px; color:var(--ink-2); line-height:1.5; margin-bottom:8px; }
+  .embed__spec { font-size:12px; color:var(--ink-3); margin-bottom:12px; }
+
+  /* FAQ wash */
+  .faq { background:var(--paper-2); border:1px solid var(--line); border-radius:var(--radius-lg); padding:24px; margin:28px 0; }
+  .faq__q { font-family:var(--font-display); font-weight:600; font-size:20px; color:var(--ink); margin-bottom:8px; }
+  .faq__a { font-family:var(--font-display); font-size:16px; color:var(--ink-2); line-height:1.6; }
+  .faq__item + .faq__item { border-top:1px solid var(--line); margin-top:20px; padding-top:20px; }
+
+  /* sources footer */
+  .sources { background:var(--paper-2); border:1px solid var(--line); border-radius:var(--radius-lg); padding:18px 24px; margin:28px 0; }
+  .sources__t { font-size:14px; color:var(--ink-3); line-height:1.6; margin-top:8px; }
+
+  /* next / prev */
+  .keepreading { border-top:1px solid var(--line); margin-top:32px; padding-top:20px; display:grid; gap:20px; }
+  .kr__item .kr__label { display:block; margin-bottom:8px; }
+  .kr__title { font-family:var(--font-display); font-weight:600; font-size:19px; line-height:1.2; color:var(--ink); margin-top:8px; }
+  .kr--next { text-align:left; }
+
+  /* ── responsive: 768 ── */
+  @media (min-width:768px){
+    .shell { padding:0 24px; }
+    .masthead__word { font-size:60px; }
+    .masthead__dek { font-size:18px; }
+    .featured { grid-template-columns:1.5fr 1fr; gap:28px; align-items:center; padding:44px 0; }
+    .featured__title { font-size:42px; }
+    .grid { grid-template-columns:1fr 1fr; gap:28px; }
+    .news { display:flex; align-items:center; justify-content:space-between; gap:28px; padding:28px 32px; }
+    .news__form { flex-direction:row; margin-top:0; min-width:360px; }
+    .h1 { font-size:44px; }
+    .keepreading { grid-template-columns:1fr 1fr; }
+    .kr--next { text-align:right; }
+  }
+  /* ── responsive: 1024 (rail + margin pull-quote) ── */
+  @media (min-width:1024px){
+    .postgrid { display:grid; grid-template-columns:1fr 260px; gap:48px; align-items:start; }
+    .rail { display:block; position:sticky; top:24px; }
+    .pull { float:right; width:220px; margin:6px -240px 18px 24px; padding:0; border-left:0; }
+    .pull .h2rule-mini { display:block; height:2px; width:24px; background:var(--coral); margin-bottom:10px; }
+    .pull p { font-size:22px; }
+  }
+  /* ── responsive: 1440 ── */
+  @media (min-width:1440px){
+    .masthead__word { font-size:80px; }
+    .tick { width:40px; }
+    .featured__title { font-size:54px; }
+    .grid { grid-template-columns:1fr 1fr 1fr; gap:32px; }
+    .card__title { font-size:24px; }
+    .h1 { font-size:56px; }
+    .h2 { font-size:32px; }
+    .body p { font-size:19px; }
+  }
+
+  .toc { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-lg); padding:18px; }
+  .toc__t { margin-bottom:12px; }
+  .toc a { display:block; color:var(--ink-2); text-decoration:none; font-size:14px; padding:6px 0; border-bottom:1px solid var(--line); }
+  .toc a:last-child { border-bottom:0; }
+  .emma-aside { background:var(--coral-soft); border-radius:var(--radius-lg); padding:16px; margin-top:16px; }
+  .emma-aside__t { font-family:var(--font-display); font-weight:500; font-size:16px; color:var(--ink); }
+  .emma-aside__d { font-size:13px; color:var(--ink-3); margin-top:8px; line-height:1.5; }
+
+  .note { max-width:75rem; margin:0 auto; padding:8px 16px 0; }
+  .note .kicker { color:var(--ink-4); }
+  .frame-label { text-align:center; padding:28px 0 4px; }
+</style>
+</head>
+<body>
+
+<div class="progress"><span></span></div>
+
+<!-- ══════════════════════════ FRAME 1: /notebook INDEX (top) ══════════════════════════ -->
+<div class="note frame-label"><span class="kicker">Frame 1 · /notebook index — masthead, featured lockup, chips, grid, newsletter</span></div>
+
+<section class="shell">
+  <div class="masthead">
+    <div class="masthead__edition"><span class="kicker">The Notebook · Nº 12</span></div>
+    <h1 class="masthead__word">The Notebook</h1>
+    <span class="tick"></span>
+    <p class="masthead__dek">Plain answers, <span class="em">worth</span> getting right.</p>
+  </div>
+  <hr class="rule-2" />
+
+  <!-- featured lockup: media is LCP, static, never wrapped -->
+  <div class="featured">
+    <div class="ph ph--hero featured__media"><span class="ph__tag">Featured art · warm, product-in-context · LCP · static</span></div>
+    <div class="featured__body">
+      <div class="featured__meta">
+        <span class="chip chip--guides">Guides</span>
+        <span class="kicker" style="color:var(--coral)">First Times · Part 2 of 5</span>
+      </div>
+      <h2 class="featured__title">How Do You Choose Your <span class="em">First</span> Sex Toy?</h2>
+      <p class="featured__dek">A plain place to start. No experience assumed, no wrong questions.</p>
+      <div class="byline">
+        <span class="avatar">E</span>
+        <span class="mins">Emma, xdipx AI guide · 6 min read</span>
+      </div>
+      <p style="margin-top:16px"><a class="link-coral" href="#">Take a peek →</a></p>
+    </div>
+  </div>
+  <hr class="rule" />
+
+  <!-- category chip rail -->
+  <div class="chiprail">
+    <span class="chip chip--guides">All</span>
+    <span class="chip chip--guides">Guides</span>
+    <span class="chip chip--comparisons">Comparisons</span>
+    <span class="chip chip--care">Care</span>
+    <span class="chip chip--wellness">Wellness Basics</span>
+    <span class="chiprail__count kicker">12 posts</span>
+  </div>
+
+  <!-- card grid (Reveal up, stagger index) -->
+  <div class="grid">
+    <article class="card card--guides">
+      <span class="card__accent"></span>
+      <div class="ph ph--warm card__media"><span class="ph__tag">Guides spot art</span></div>
+      <div class="card__body">
+        <div class="card__meta"><span class="chip chip--guides">Guides</span><span class="mins">4 min</span></div>
+        <h3 class="card__title">How Do You Use a Wand Massager?</h3>
+        <p class="card__excerpt">Where to start, how to hold it, and what the speed settings are really for.</p>
+      </div>
+    </article>
+    <article class="card card--comparisons">
+      <span class="card__accent"></span>
+      <div class="ph ph--plum card__media"><span class="ph__tag">Comparisons spot art</span></div>
+      <div class="card__body">
+        <div class="card__meta"><span class="chip chip--comparisons">Comparisons</span><span class="mins">5 min</span></div>
+        <h3 class="card__title">Air Pulse vs Clitoral Vibrator</h3>
+        <p class="card__excerpt">Two different sensations, side by side, so you can pick the one that fits.</p>
+      </div>
+    </article>
+    <article class="card card--care">
+      <span class="card__accent"></span>
+      <div class="ph ph--sage card__media"><span class="ph__tag">Care spot art</span></div>
+      <div class="card__body">
+        <div class="card__meta"><span class="chip chip--care">Care</span><span class="mins">3 min</span></div>
+        <h3 class="card__title">How Do You Clean a Silicone Toy?</h3>
+        <p class="card__excerpt">A simple routine that keeps body-safe materials body-safe.</p>
+      </div>
+    </article>
+  </div>
+
+  <!-- newsletter band (inline, never a popup) -->
+  <div class="news">
+    <div>
+      <p class="news__title">The Notebook, in your inbox.</p>
+      <p class="news__dek">One send, once-ish a week. Only the ones worth reading. Unsubscribe anytime, we're not needy.</p>
+    </div>
+    <form class="news__form" onsubmit="return false">
+      <input class="news__input" type="email" placeholder="you@email.com" aria-label="Email address" />
+      <button class="btn btn--ink" type="submit">Show me</button>
+    </form>
+  </div>
+  <p class="news__aside" style="text-align:center">Written for every body and every pairing. <span class="heart">♥</span></p>
+</section>
+
+<!-- ══════════════════════════ FRAME 2: /notebook/:slug POST (top + body spread) ══════════════════════════ -->
+<div class="note frame-label"><span class="kicker">Frame 2 · /notebook/:slug post — hero, trust byline, body spread, embed, FAQ, next/prev</span></div>
+
+<div class="postwrap">
+<section class="shell">
+  <div class="crumbs"><a href="#">Home</a> / <a href="#">Notebook</a> / <a href="#">Guides</a> / How Do You Choose…</div>
+
+  <div class="post-head">
+    <div class="post-head__meta">
+      <span class="chip chip--guides">Guides</span>
+      <span class="kicker" style="color:var(--coral)">First Times · Part 2 of 5</span>
+    </div>
+    <h1 class="h1">How Do You Choose Your First Sex Toy?</h1>
+    <p class="dek">A plain place to start, no experience assumed.</p>
+
+    <!-- trust byline -->
+    <div class="trust">
+      <div class="trust__row">
+        <span class="avatar">E</span>
+        <div>
+          <p class="trust__ai">Written by <strong style="color:var(--ink)">Emma</strong>, the xdipx AI guide. She works from specs, materials, and what reviewers report, never personal use. <span class="heart">♥</span></p>
+          <div class="trust__meta"><span class="kicker">Guides · 6 min read · Last reviewed Jul 2026</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- hero: LCP, static, never wrapped -->
+  <div class="ph ph--hero hero"><span class="ph__tag">Post hero · editorial, warm, product-in-context · LCP · static · never wrapped</span></div>
+
+  <div class="postgrid">
+    <!-- reading column (65ch) -->
+    <div class="col">
+      <div class="body">
+        <p class="dropcap">Buying your first one can feel like a confession. It is actually just shopping. The trick is to stop asking which toy is best and start asking what you are curious about, because the honest answer to that question narrows the whole catalog down fast.</p>
+        <p>There are only a few things worth deciding up front: what kind of sensation you want to explore, whether you want something that touches you or works a little differently, and how much you want to spend. Everything else is detail you can learn as you go.</p>
+
+        <div class="h2wrap">
+          <span class="h2rule"></span>
+          <h2 class="h2">What kind of sensation are you curious about?</h2>
+        </div>
+        <p>Most first toys fall into a few families. Vibration is the broadest and the most forgiving to start with. Air pulse is different: it does not touch you, it pulses the air around one spot. That is the trick, and it is the reason people describe it as a completely separate feeling.</p>
+
+        <!-- margin pull-quote (aside >= 1024, inline below) -->
+        <blockquote class="pull">
+          <span class="h2rule-mini"></span>
+          <p>It does not touch you. It pulses the air around one spot. That is the whole trick.</p>
+        </blockquote>
+
+        <p>If you are not sure, start broad. A simple, well-reviewed vibrator teaches you more about your own preferences than any guide can, and it stays useful long after you have figured them out.</p>
+
+        <!-- product embed: editorial "Featured in this piece" -->
+        <div class="embed">
+          <span class="embed__tick"></span>
+          <div class="embed__inner">
+            <div class="ph ph--prod embed__img"><span class="ph__tag" style="left:6px;bottom:6px;font-size:8px">Product</span></div>
+            <div>
+              <span class="kicker">Featured in this piece</span>
+              <p class="embed__t">The Beginner Bullet</p>
+              <p class="embed__why">Reviewers rate this one highest for how quiet it stays on the lowest setting, which is what most first-timers want.</p>
+              <p class="embed__spec">Medical-grade silicone · rechargeable · fully waterproof</p>
+              <a class="link-coral" href="#">Take a peek →</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="h2wrap">
+          <span class="h2rule"></span>
+          <h2 class="h2">How much should you spend on a first toy?</h2>
+        </div>
+        <p>Enough to get body-safe materials and a motor that lasts, and no more than that. The materials worth paying for have names: medical-grade silicone, glass, stainless steel. Those are named on every product page, so you never have to guess.</p>
+
+        <!-- FAQ wash -->
+        <div class="faq">
+          <span class="kicker">Common questions</span>
+          <div class="faq__item" style="margin-top:16px">
+            <p class="faq__q">Is a beginner toy waterproof?</p>
+            <p class="faq__a">Many are, and the spec is listed on each product page. Waterproof toys are also the easiest to clean, which is a real advantage for a first one.</p>
+          </div>
+          <div class="faq__item">
+            <p class="faq__q">Do you need lube with your first toy?</p>
+            <p class="faq__a">It usually makes things more comfortable. Water-based lube works with every material, so it is the safe default to start with.</p>
+          </div>
+        </div>
+
+        <!-- sources / reviewed footer -->
+        <div class="sources">
+          <span class="kicker">Sources &amp; review</span>
+          <p class="sources__t">Facts here trace to product specifications, named materials, and patterns across verified reviews. Emma is an AI guide and writes from that record, not from personal use.</p>
+        </div>
+      </div>
+
+      <!-- next / prev -->
+      <div class="keepreading">
+        <div class="kr__item kr--prev">
+          <span class="kicker kr__label">Previous</span>
+          <span class="chip chip--comparisons">Comparisons</span>
+          <p class="kr__title">Wand vs Bullet Vibrator: How to Pick</p>
+        </div>
+        <div class="kr__item kr--next">
+          <span class="kicker kr__label">Next</span>
+          <span class="chip chip--guides">Guides</span>
+          <p class="kr__title">How Does a Clitoral Suction Toy Work?</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- sticky rail (>=1024) -->
+    <aside class="rail">
+      <div class="toc">
+        <span class="kicker toc__t">On this page</span>
+        <a href="#">What sensation are you curious about?</a>
+        <a href="#">How much should you spend?</a>
+        <a href="#">Common questions</a>
+      </div>
+      <div class="emma-aside">
+        <p class="emma-aside__t">Rather just ask Emma?</p>
+        <p class="emma-aside__d">She'll message back over text or email. No call, no pressure.</p>
+        <p style="margin-top:12px"><a class="link-coral" href="#">Find your fit →</a></p>
+      </div>
+    </aside>
+  </div>
+</section>
+</div>
+
+<div class="note" style="padding:32px 16px 48px;text-align:center">
+  <span class="kicker">End of hi-fi reference · on-token to app/app.css v3 · placeholder copy is charter-conformant</span>
+</div>
+
+</body>
+</html>

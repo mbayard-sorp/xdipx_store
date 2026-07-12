@@ -5,6 +5,8 @@ import { getBlogAuthor, getBlogPosts } from '~/lib/sanity.server'
 import { BlogPostCard } from '~/components/blog/BlogPostCard'
 import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
+import { SanityImage } from '~/components/common/SanityImage'
+import { Reveal } from '~/components/motion/Reveal'
 import { canonicalUrl } from '~/lib/seo'
 import { buildSocialMeta } from '~/lib/social-meta'
 
@@ -69,6 +71,7 @@ export default function NotebookAuthorPage() {
   const { author, posts, total, page, perPage } = useLoaderData<typeof loader>()
   const totalPages = Math.ceil(total / perPage)
   const joined = formatJoinedDate(author.joinedAt)
+  const isEmma = author.name.toLowerCase().includes('emma')
 
   const breadcrumbs = [
     { label: 'Home', href: '/' },
@@ -116,60 +119,80 @@ export default function NotebookAuthorPage() {
       <BreadcrumbNav items={breadcrumbs} />
 
       {/* Hero */}
-      <div className="mt-6 flex flex-col sm:flex-row gap-6 items-start pb-8 border-b-2 border-ink">
+      <div className="mt-6 flex flex-col sm:flex-row gap-6 items-start pb-8 border-b border-line-2">
         {author.avatarUrl ? (
-          <img
+          <SanityImage
             src={author.avatarUrl}
             alt={author.name}
-            className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover border-2 border-ink shrink-0"
+            priority
+            widths={[224, 336]}
+            fallbackWidth={224}
+            width={112}
+            height={112}
+            className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover bg-paper-3 shrink-0"
           />
         ) : (
           <div
-            className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-coral text-white flex items-center justify-center border-2 border-ink shrink-0 text-4xl"
-            style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}
+            className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-paper-3 text-ink flex items-center justify-center shrink-0 text-4xl"
+            style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}
           >
             {author.name.charAt(0)}
           </div>
         )}
         <div className="flex-1">
-          {author.role && (
-            <p className="text-xs font-mono text-coral uppercase tracking-wider">{author.role}</p>
-          )}
+          {author.role && <p className="kicker text-coral">{author.role}</p>}
           <h1
-            className="text-ink text-4xl sm:text-6xl leading-none mt-1"
-            style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}
+            className="text-ink text-4xl sm:text-6xl leading-none mt-1 tracking-[-0.01em]"
+            style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}
           >
             {author.name}
           </h1>
           {author.bio && (
-            <p className="text-ink/70 text-sm sm:text-base mt-3 max-w-xl leading-snug">{author.bio}</p>
+            <p className="text-ink-3 text-sm sm:text-base mt-3 max-w-xl leading-[1.55]">{author.bio}</p>
           )}
-          <div className="mt-4 flex gap-3">
-            <Link
-              to="/contact"
-              className="px-4 py-2 rounded-full bg-coral hover:bg-coral-deep text-white text-xs font-bold transition-colors"
-              style={{ fontFamily: 'var(--font-display)' }}
-            >
+          {isEmma && (
+            <p className="text-[13px] text-ink-4 mt-2 max-w-xl leading-[1.5]">
+              Emma is the xdipx AI guide. She works from specs, materials, and what reviewers
+              report, never personal use.
+            </p>
+          )}
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+            <Link to="/contact" className="link-coral text-coral text-sm font-medium">
               Ask {author.name.split(' ')[0]} →
             </Link>
+            {(author.socialLinks ?? []).map(s =>
+              s.url ? (
+                <a
+                  key={s.url}
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-ink-3 hover:text-coral transition-colors capitalize"
+                >
+                  {s.platform === 'x' ? 'X' : s.platform}
+                </a>
+              ) : null,
+            )}
           </div>
         </div>
-        <div className="hidden sm:flex flex-col items-end text-xs font-mono text-muted space-y-1 shrink-0">
-          <span>{author.postCount ?? total} {(author.postCount ?? total) === 1 ? 'post' : 'posts'}</span>
-          {joined && <span>joined {joined}</span>}
+        <div className="hidden sm:flex flex-col items-end space-y-1 shrink-0">
+          <span className="kicker">{author.postCount ?? total} {(author.postCount ?? total) === 1 ? 'post' : 'posts'}</span>
+          {joined && <span className="kicker">joined {joined}</span>}
         </div>
       </div>
 
       {/* Post list */}
       <div className="mt-8">
         {posts.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {posts.map(post => (
-              <BlogPostCard key={post._id} post={post} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-7 xl:gap-8">
+            {posts.map((post, i) => (
+              <Reveal key={post._id} variant="up" index={i}>
+                <BlogPostCard post={post} />
+              </Reveal>
             ))}
           </div>
         ) : (
-          <p className="text-center text-ink/50 py-16">No posts from {author.name} yet ♥</p>
+          <p className="text-center text-ink-3 py-16">No posts from {author.name} yet. Check back soon.</p>
         )}
       </div>
 
@@ -197,7 +220,7 @@ function PaginationLink({ slug, page, label, active }: { slug: string; page: num
     <Link
       to={href}
       className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-        active ? 'bg-coral text-white' : 'text-ink/60 hover:bg-cream-2'
+        active ? 'bg-ink text-white' : 'text-ink-3 hover:bg-paper-2'
       }`}
     >
       {label}
