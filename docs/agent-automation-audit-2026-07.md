@@ -1,5 +1,7 @@
 # Agent Automation Audit — July 2026
 
+> **SUPERSEDED (2026-07-12)** by `docs/audits/2026-07-full-store-audit.md`. The three verified defects in §3 are fixed in-tree (Vercel cron restoration #236, migration 056 review-invite `send_after`, monthly valve-gated keyword-research via 055), and §2's scorecard predates migration 052. The §5–6 roadmap is carried forward into the new audit's §7 roadmap and tracked in `docs/store-team/trackers/automation-audit-roadmap.md`. Kept for architectural reference.
+
 **Goal audited against:** as close to full automation as possible for all store functions, and winning new customers.
 **Scope:** all agent-plane routines (`.claude/agents/`, `docs/store-team/`, `docs/homepage-team/`), the control plane (`app/lib/team.server.ts`, `/api/team/*`, `/admin/homepage-team`), server-side automation (`server/cron.ts`, `server/webhooks.ts`, schedulers), and every customer-acquisition surface.
 **Method:** four parallel code sweeps (team infra, cron/webhooks, acquisition surfaces, ops/support), with the highest-impact findings verified line-by-line.
