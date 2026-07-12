@@ -89,7 +89,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     : 'The Notebook'
   const pageSuffix = data.page > 1 ? ` — Page ${data.page}` : ''
   const title = `${base}${pageSuffix} | xdipx`
-  const description = data.blogHomepage?.subtext ?? "Things worth knowing. Things worth trying. Things Emma couldn't stop thinking about."
+  const description = data.blogHomepage?.subtext ?? "Things worth knowing. Things worth trying. Things Emma dug up so you don't have to."
 
   const tags: MetaDescriptor[] = [
     { title },
@@ -151,7 +151,7 @@ export default function NotebookIndex() {
         </h1>
         <span className="block w-10 h-0.5 bg-coral mx-auto mt-5" aria-hidden="true" />
         <p className="text-ink-3 text-sm md:text-base mt-4 max-w-xl mx-auto leading-[1.55]">
-          {blogHomepage?.subtext ?? "Things worth knowing. Things worth trying. Things Emma couldn't stop thinking about."}
+          {blogHomepage?.subtext ?? "Things worth knowing. Things worth trying. Things Emma dug up so you don't have to."}
         </p>
       </div>
 

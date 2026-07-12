@@ -192,7 +192,7 @@ export default function NotebookAuthorPage() {
             ))}
           </div>
         ) : (
-          <p className="text-center text-ink-3 py-16">No posts from {author.name} yet ♥</p>
+          <p className="text-center text-ink-3 py-16">No posts from {author.name} yet. Check back soon.</p>
         )}
       </div>
 

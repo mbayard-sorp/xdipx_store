@@ -150,7 +150,7 @@ export default function NotebookCategoryPage() {
         </div>
       ) : (
         <div className="text-center py-16 text-ink-3">
-          <p className="text-lg" style={{ fontFamily: 'var(--font-display)' }}>No posts in this category yet ♥</p>
+          <p className="text-lg" style={{ fontFamily: 'var(--font-display)' }}>No posts in this category yet. Check back soon.</p>
           <Link to="/notebook" className="link-coral text-coral text-sm font-medium mt-3 inline-block">
             ← Back to the notebook
           </Link>

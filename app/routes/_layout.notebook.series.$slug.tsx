@@ -187,7 +187,7 @@ export default function NotebookSeriesPage() {
           ))}
         </ol>
       ) : (
-        <p className="text-center text-ink-3 py-16">This series is still being written ♥</p>
+        <p className="text-center text-ink-3 py-16">This series is still being written. Check back soon.</p>
       )}
 
       <NotebookSubscribe variant="index" settings={notebookSettings} />
