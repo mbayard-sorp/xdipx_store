@@ -80,8 +80,15 @@ function extractJsonLd(html: string): { parsed: number; scripts: number } {
   return { parsed, scripts }
 }
 
-async function checkPageOnce(path: string): Promise<PageCheck> {
-  const url = `${siteOrigin()}${path}`
+async function checkPageOnce(path: string, attempt: number): Promise<PageCheck> {
+  // Cache-bust every attempt. Without this the self-fetch shares a Vercel CDN
+  // cache entry with other non-browser fetchers (cache keys vary on
+  // Accept-Encoding, not User-Agent), so the check can be served a stale — or
+  // worse, truncated — cached copy instead of exercising the origin render it
+  // exists to verify. The unique param forces a CDN MISS per attempt and keeps
+  // an aborted attempt from ever poisoning a cache key anything else reads.
+  const bust = `__healthcheck=${Date.now()}-${attempt}`
+  const url = `${siteOrigin()}${path}${path.includes('?') ? '&' : '?'}${bust}`
   const problems: string[] = []
   let status = 0
   let bodyOk = false
@@ -98,6 +105,7 @@ async function checkPageOnce(path: string): Promise<PageCheck> {
     if (status !== 200) problems.push(`HTTP ${status}`)
     if (html.length < MIN_BODY_BYTES) problems.push(`body too small (${html.length} bytes)`)
     if (!/<img[\s>]/i.test(html)) problems.push('no <img> (hero/LCP image likely missing)')
+    if (!/<\/html>/i.test(html)) problems.push('truncated HTML (no </html> — stream cut off)')
     bodyOk = status === 200 && html.length >= MIN_BODY_BYTES
 
     const { parsed, scripts } = extractJsonLd(html)
@@ -125,7 +133,7 @@ async function checkPageOnce(path: string): Promise<PageCheck> {
 async function checkPage(path: string): Promise<PageCheck> {
   let best: PageCheck | null = null
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const c = await checkPageOnce(path)
+    const c = await checkPageOnce(path, attempt)
     if (c.ok) return c
     if (!best || c.problems.length < best.problems.length) best = c
     if (attempt < MAX_ATTEMPTS) {

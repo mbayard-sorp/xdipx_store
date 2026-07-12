@@ -30,6 +30,9 @@
     { "path": "/cron/import-enrich",           "schedule": "*/30 * * * *" },
     { "path": "/cron/enrichment-batch-poller", "schedule": "*/2 * * * *"  },
     { "path": "/cron/aeo-surface-check",       "schedule": "0 6 * * 0"   },
-    { "path": "/cron/homepage-healthcheck",    "schedule": "*/30 * * * *" }
+    { "path": "/cron/homepage-healthcheck",    "schedule": "*/30 * * * *" },
+    { "path": "/cron/warm",                    "schedule": "*/15 * * * *" },
+    { "path": "/cron/gsc-snapshot",            "schedule": "0 6 * * 1"   },
+    { "path": "/cron/keyword-research",        "schedule": "0 2 1 * *"   }
   ]
 }

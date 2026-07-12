@@ -1,41 +1,24 @@
-name: Scheduled crons
+name: Cron manual dispatch
 
-# External scheduler for the xdipx /cron/* endpoints.
+# Manual trigger for the xdipx /cron/* endpoints.
 #
-# Why this exists: Vercel's native cron scheduler is not invoking this
-# project's jobs (verified June 2026 — config correct on Pro, endpoints
-# return 200 with the Bearer secret, but no invocations ever fire). Until
-# that is resolved with Vercel, GitHub Actions drives the same endpoints on
-# the same UTC schedules defined in vercel.json.
+# History: Vercel's native cron scheduler appeared dead in June 2026, so this
+# workflow carried the schedules for a while. Verified July 2026: Vercel cron
+# IS invoking every configured job on the exact schedule (GET requests,
+# cache=BYPASS, in the runtime logs), which made the schedules here a source
+# of double-firing — deal-activator ran at 23:59 via Vercel and again up to
+# two hours later via a delayed GitHub run. The schedule triggers were
+# therefore removed; vercel.json's `crons` block is authoritative again.
 #
-# vercel.json's `crons` block is NOT authoritative — schedule changes go
-# here. (vercel.json is JSON and can't carry this warning itself.)
+# This workflow remains as a manual escape hatch (workflow_dispatch) for
+# kicking an endpoint on demand — e.g. re-running a missed job or testing.
+# `vercel crons run /cron/<name>` from the Vercel CLI does the same thing.
 #
 # Each endpoint validates `Authorization: Bearer $CRON_SECRET` (see the
-# guard in server/cron.ts). Set CRON_SECRET as a repo Actions secret:
+# guard in server/cron.ts). CRON_SECRET is a repo Actions secret:
 #   gh secret set CRON_SECRET --body "<the production CRON_SECRET>"
-#
-# Caveats vs Vercel cron:
-#   - GitHub Actions minimum granularity is 5 min, so the */2 poller runs */5.
-#   - Scheduled runs can be delayed several minutes under GitHub load and are
-#     best-effort (not guaranteed). Acceptable for these jobs.
-#   - Scheduled workflows only run from the default branch, and GitHub
-#     auto-disables them after 60 days of no repo activity.
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'    # enrichment-batch-poller (Vercel was */2)
-    - cron: '*/15 * * * *'   # inventory-check, log-monitor
-    - cron: '*/30 * * * *'   # import-enrich, homepage-healthcheck
-    - cron: '0 7 * * *'      # pricing-batch-recompute
-    - cron: '0 8 * * *'      # import-monitor
-    - cron: '0 9 * * *'      # review-reminders
-    - cron: '45 23 * * *'    # daily-feed-processor
-    - cron: '59 23 * * *'    # deal-activator
-    - cron: '5 0 * * *'      # profit-summary
-    - cron: '0 6 * * 0'      # aeo-surface-check (Sun)
-    - cron: '0 6 * * 1'      # gsc-snapshot (Mon, before the noon strategy run)
-    - cron: '0 2 1 * *'      # keyword-research (monthly; valve-gated, see #198)
   workflow_dispatch:
     inputs:
       target:
@@ -63,7 +46,7 @@ on:
           - warm-discovery-index
 
 concurrency:
-  group: cron-${{ github.event.schedule || github.event.inputs.target }}
+  group: cron-${{ github.event.inputs.target }}
   cancel-in-progress: false
 
 jobs:
@@ -77,33 +60,16 @@ jobs:
       - name: Resolve endpoints for this trigger
         id: resolve
         run: |
-          case "${{ github.event.schedule }}" in
-            '*/5 * * * *')   paths='enrichment-batch-poller' ;;
-            '*/15 * * * *')  paths='inventory-check log-monitor warm' ;;
-            '*/30 * * * *')  paths='import-enrich homepage-healthcheck' ;;
-            '0 7 * * *')     paths='pricing-batch-recompute' ;;
-            '0 8 * * *')     paths='import-monitor' ;;
-            '0 9 * * *')     paths='review-reminders' ;;
-            '45 23 * * *')   paths='daily-feed-processor' ;;
-            '59 23 * * *')   paths='deal-activator' ;;
-            '5 0 * * *')     paths='profit-summary' ;;
-            '0 6 * * 0')     paths='aeo-surface-check' ;;
-            '0 6 * * 1')     paths='gsc-snapshot' ;;
-            '0 2 1 * *')     paths='keyword-research?maxSeeds=40' ;;
-            *)
-              # Manual workflow_dispatch
-              t='${{ github.event.inputs.target }}'
-              if [ "$t" = "all" ]; then
-                # keyword-research is absent from 'all' on purpose: it runs on
-                # its own monthly schedule, is valve-gated server-side
-                # (keyword_research_enabled), and stays individually
-                # dispatchable via the target dropdown.
-                paths='daily-feed-processor deal-activator profit-summary review-reminders inventory-check log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller homepage-healthcheck aeo-surface-check warm warm-discovery-index'
-              else
-                paths="$t"
-              fi
-              ;;
-          esac
+          t='${{ github.event.inputs.target }}'
+          if [ "$t" = "all" ]; then
+            # keyword-research is absent from 'all' on purpose: it runs on
+            # its own monthly schedule, is valve-gated server-side
+            # (keyword_research_enabled), and stays individually
+            # dispatchable via the target dropdown.
+            paths='daily-feed-processor deal-activator profit-summary review-reminders inventory-check log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller homepage-healthcheck aeo-surface-check warm warm-discovery-index'
+          else
+            paths="$t"
+          fi
           echo "paths=$paths" >> "$GITHUB_OUTPUT"
           echo "Triggering: $paths"
 
