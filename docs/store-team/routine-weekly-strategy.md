@@ -96,6 +96,17 @@ and campaign tie-ins with the marketing calendar; the daily content playbook
 (`docs/store-team/routine-content-daily.md`) tolerates a brief without a content section, so omit
 it honestly rather than padding.
 
+Include a **Catalog Pipeline** section (and mirror its numbers into `metricsJson`), **profit-first**:
+lead with orders/margin attributable to newly-imported SKUs and to price-dropped SKUs (order line
+items; GA4 item-list/PDP only when the week has ≥300 sessions, else flag the number heuristic) —
+that tie-back is the headline. Throughput is the supporting detail, sourced from the product-manager
+and inventory-sentinel events: queue depth (pending/watching); auto-imported A/B + Tier-C and
+product-manager approve/reject/watch this week (and any `skippedDueToCap` days); enrichment stuck
+(`imported AND enriched_at IS NULL`) and quality-gate parks (`enrich_failed_at`); publish stuck
+(`enriched_at set, published_at NULL`) and rough import→live latency; new-arrival products surfaced;
+price drops detected / repriced / routed. Per `mission-brief.md`: throughput is an activity metric,
+never a win — a high import count with zero new-product orders is a **stop-doing** signal.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/team/brief" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
