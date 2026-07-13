@@ -67,6 +67,8 @@ import notebookSettings    from '../schemas/notebookSettings.js'
 import blogCategoryExtras  from '../schemas/blogCategoryExtras.js'
 import blogPostExtras      from '../schemas/blogPostExtras.js'
 import blogSeries          from '../schemas/blogSeries.js'
+// Notebook glossary — living reference at /notebook/glossary (additive).
+import blogGlossaryTerm    from '../schemas/blogGlossaryTerm.js'
 
 // Phase 6c — Knowledge-base doc types for SMS / IVR / chat kbLookup tool.
 // Additive — existing schemas untouched.
@@ -97,6 +99,7 @@ export const schemaTypes = [
   blogCategoryExtras,
   blogPostExtras,
   blogSeries,
+  blogGlossaryTerm,
   // v2 redesign — Emma hero (additive; homepageSections untouched)
   emmaHeroSettings,
   // Hero deep-linking. Primary CTA label/link singleton (additive; emmaHeroSettings untouched)
