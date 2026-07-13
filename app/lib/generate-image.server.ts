@@ -40,6 +40,11 @@ export interface GenerateImageOpts {
   /** Force a provider (testing). Default tries fal then imagen. */
   only?: 'fal' | 'imagen'
   /**
+   * fal image_size enum or explicit {width,height} (fal path only; Imagen
+   * keeps its own default aspect). Defaults to fal's landscape 16:9.
+   */
+  imageSize?: string | { width: number; height: number }
+  /**
    * Whether this call should log its own spend row via logImageCost. Default
    * true. Set false when the caller owns the spend row instead (e.g. the
    * homepage-team CLI posts /api/homepage-team/spend itself — logging here
@@ -80,6 +85,7 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
         prompt: opts.prompt,
         count,
         ...(opts.refImageUrl ? { refImageUrl: opts.refImageUrl } : {}),
+        ...(opts.imageSize ? { imageSize: opts.imageSize } : {}),
       })
       if (buffers.length) {
         if (logCost) void logImageCost({ ...logBase, model: costKey, count: buffers.length })

@@ -70,7 +70,42 @@ Slugs and titles are answer-shaped to match how people phrase questions to an LL
 
 Backlog composition: 16 guides, 8 comparisons, 4 care, 2 wellness-basics. Reorder freely to serve the theme week; keep the guide majority intact.
 
-## 4. Authority-building priorities
+## 4. Series and franchises
+
+The Notebook groups posts into named editorial series (Sanity `blogSeries` docs, surfaced as
+"Part N of M" kickers, series rails, and `/notebook/series/{slug}` landings). Series are a
+franchising layer over the backlog, not a new content type: the daily post is written exactly as
+before, and series membership is an optional `blogPostExtras` doc attached afterward. Franchise
+concepts, names, and cover art direction live in `docs/notebook-team/notebook-art-direction.md`
+(section 8) and `docs/notebook-team/image-brief.md`; this section only governs how the writer
+relates to them.
+
+Launch franchises and their category mapping:
+
+| Series | Slug | Categories it draws from |
+|---|---|---|
+| First Times | `first-times` | guides (beginner "how do you start / choose your first" cluster) |
+| How It Works | `how-it-works` | guides (mechanism explainers, the highest-value LLM-citation shape) |
+| Field Notes | `field-notes` | care + wellness-basics |
+| This or That | `this-or-that` | comparisons (reserved; not seeded at launch) |
+
+Rules:
+
+- **Attachment is optional, never required.** A post publishes on its normal cadence whether or
+  not it joins a series. Nothing in the publish gate checks for series membership.
+- **The writer may flag a fit, a human or the seed script attaches.** When a new post clearly
+  belongs to a launch franchise (its target query sits in that franchise's cluster), note the fit
+  in the run summary. Attachment itself is a `blogPostExtras` doc (`series` reference +
+  `seriesOrder`), created by `scripts/seed-notebook-content.ts`, an editor in Studio, or a future
+  approved instruction to the writer. Do not create series docs ad hoc; new franchises are an
+  editorial decision, not a per-post one.
+- **Order is beginner-first.** Within a series, `posts[]` order (and `seriesOrder`) reads from
+  least to most experience assumed, not by publish date.
+- **Series pages are citable surfaces.** Series landings carry CollectionPage + ordered ItemList
+  JSON-LD, so keeping a franchise's cluster complete (guide + comparison + care angles) compounds
+  the same way the §5 authority clusters do.
+
+## 5. Authority-building priorities
 
 Build topical clusters (guide + comparison + care all linking to the same collection) around these first. Depth on a few collections earns category-query citations faster than one post each across 24.
 
@@ -83,7 +118,7 @@ Build topical clusters (guide + comparison + care all linking to the same collec
 
 Below 300 sessions/week the retro leans on margin math, stock depth, and these heuristics rather than GA4 weighting, and the brief should say so.
 
-## 5. KPIs for the weekly retro
+## 6. KPIs for the weekly retro
 
 - **Publish reliability.** Posts published vs planned (target 7/7). Missed days get a reason, not a silent zero.
 - **Voice-gate pass rate.** Share of posts passing `emma-empathy-reviewer` on first submit. A falling rate is a prompt problem; file an `instructions` suggestion, do not hand-fix.
@@ -91,7 +126,7 @@ Below 300 sessions/week the retro leans on margin math, stock depth, and these h
 - **LLM-citation spot checks.** A fixed 20-query tracker run in ChatGPT, Perplexity, and Claude (for example "how does a clitoral suction toy work", "silicone vs water based lube"). Log whether xdipx is cited and which page.
 - **GA4 referrals.** Sessions and any assisted conversions from `chatgpt.com`, `perplexity.ai`, and `claude.ai` referrers. Weighted only at or above 300 sessions/week; below that, report raw counts and treat as directional.
 
-## 6. Standing rules
+## 7. Standing rules
 
 - **Category maps to JSON-LD.** `guides` posts get ItemList JSON-LD from their product embeds automatically, so any ranked buying guide uses `blogCategory: guides`. Do not put a ranked list in `comparisons`, `care`, or `wellness-basics`.
 - **FAQ section is mandatory** on every post. Use answer-shaped question H2s throughout, not statement headings.

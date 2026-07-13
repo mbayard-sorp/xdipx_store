@@ -48,7 +48,7 @@ and stop. The gate enforces `content_team_enabled`, `content_team_daily_cents`, 
 4. Bank staleness: `*[_type == "seoKeyword"] | order(firstSeenAt desc)[0].firstSeenAt`
 5. Published slugs (for pre-checks): `*[_type == "blogPost"].slug.current`
 6. The strategy brief (`GET /api/team/brief`) and calendar (`GET /api/team/calendar`) for the Monday theme sync.
-7. `docs/store-team/content-plan.md` for the category rhythm and the authority-collection list (§4).
+7. `docs/store-team/content-plan.md` for the category rhythm and the authority-collection list (§5).
 
 ## Step 3: Gray-zone triage (cap 250 decisions)
 
@@ -90,7 +90,7 @@ references it), no queued brief already. Category inference from the cluster's k
 (vs/versus → comparisons; clean/store/care → care; body-safe/material/basics → wellness-basics;
 else guides).
 
-Priority per cluster: `2 × (questions/approved) + ln(approved) + 3 if it maps to a content-plan §4
+Priority per cluster: `2 × (questions/approved) + ln(approved) + 3 if it maps to a content-plan §5
 authority collection + (avgVolume/100 when volume exists)`. Prefer question-shaped beginner
 clusters and comparisons.
 
