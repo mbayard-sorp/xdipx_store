@@ -98,6 +98,7 @@ export async function loader() {
   lines.push('')
   lines.push(`- ${BASE_URL}/ — homepage`)
   lines.push(`- ${BASE_URL}/discover — guided product finder`)
+  lines.push(`- ${BASE_URL}/new — new arrivals, newest first`)
   lines.push(`- ${BASE_URL}/collections — collections hub`)
   lines.push(`- ${BASE_URL}/products/{handle} — canonical product URL`)
   lines.push(`- ${BASE_URL}/faq`)
@@ -116,6 +117,7 @@ export async function loader() {
   lines.push('')
   lines.push(`- ${BASE_URL}/discover — guided product finder (filter by mood, audience, and what matters)`)
   lines.push(`- ${BASE_URL}/discover.md — the finder's catalog grouped by mood, audience, and what matters`)
+  lines.push(`- ${BASE_URL}/new.md — new arrivals, newest first`)
   lines.push(`- ${BASE_URL}/index.md`)
   if (liveDealHandle) {
     lines.push(`- ${BASE_URL}/products/${liveDealHandle}.md`)

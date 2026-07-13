@@ -247,6 +247,11 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
     // 3. Create Shopify product (reuse existing if already in Shopify)
     let numericId: string
     const existingGid = await findProductBySKU(masterSku)
+    // WS2c — createShopifyProductFromFeed / createShopifyProductWithVariants
+    // always create in Shopify `status: 'draft'`. When existingGid is set we're
+    // reusing a product whose current status we haven't checked here, so we
+    // can't assume draft OR active — see the isNewDraftProduct usage below.
+    const isNewDraftProduct = !existingGid
 
     if (existingGid) {
       numericId = existingGid.replace('gid://shopify/Product/', '')
@@ -393,9 +398,10 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
     })
 
     // 8. Create a minimal Sanity productPage doc so search and sitemap surfaces
-    //    pick up the product immediately. Enriched fields (tagline, moodTags,
-    //    productTypeDial, etc.) are written by the batch poller once the
-    //    full-enrichment job completes. Best-effort.
+    //    pick it up the moment the product actually activates (WS2c —
+    //    hiddenUntilLive keeps it out of both surfaces while still draft).
+    //    Enriched fields (tagline, moodTags, productTypeDial, etc.) are written
+    //    by the batch poller once the full-enrichment job completes. Best-effort.
     const warnings: { stage: string; message: string }[] = []
     try {
       const handle = await getProductHandleById(numericId)
@@ -417,6 +423,11 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
           // are written by applyFullEnrichmentWrites once the batch job completes.
         }
         if (images[0]) upsertParams.imageUrl = images[0]
+        // WS2c — only force-hide when this call just created a brand-new
+        // draft. When existingGid was reused, its live/draft status is
+        // unknown here, so leave the flag untouched rather than risk masking
+        // an already-active product (or a real leak that predates this flag).
+        if (isNewDraftProduct) upsertParams.hiddenUntilLive = true
 
         // One retry on transient failure.
         let lastErr: unknown
@@ -505,6 +516,10 @@ export async function importProductGroupRaw(group: MasterProductGroup): Promise<
 
     let numericId: string
     const existingGid = await findProductBySKU(masterSku)
+    // WS2c — see importProductGroup above: creation branches always land as
+    // Shopify `status: 'draft'`; the existingGid reuse branch's status is
+    // unknown here, so it does not force the flag either way.
+    const isNewDraftProduct = !existingGid
 
     if (existingGid) {
       numericId = existingGid.replace('gid://shopify/Product/', '')
@@ -605,6 +620,7 @@ export async function importProductGroupRaw(group: MasterProductGroup): Promise<
 
     // Stub Sanity productPage — title/handle/vendor/raw description only.
     // Enrichment pass will fill tagline, seoTitle, dial, tags, IVR, FAQs.
+    // WS2c — hidden from sitemap/search (when this is a fresh draft) until activation.
     try {
       const handle = await getProductHandleById(numericId)
       if (!handle) {
@@ -621,6 +637,9 @@ export async function importProductGroupRaw(group: MasterProductGroup): Promise<
           category,
         }
         if (images[0]) upsertParams.imageUrl = images[0]
+        // See importProductGroupRaw's isNewDraftProduct comment above for why
+        // the existingGid reuse branch is left untouched.
+        if (isNewDraftProduct) upsertParams.hiddenUntilLive = true
 
         let lastErr: unknown
         for (let attempt = 1; attempt <= 2; attempt++) {
@@ -855,6 +874,11 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
 
   // 7. Upsert minimal Sanity productPage — best-effort with one retry.
   //    Enriched fields are written by applyFullEnrichmentWrites once the job completes.
+  //    WS2c — the only path that reaches this call just created a brand-new
+  //    Shopify draft (createShopifyProductFromFeed above always creates
+  //    status: 'draft'; the duplicate-SKU/existingGid case returns early in
+  //    step 2, before this upsert is ever reached), so hiddenUntilLive is
+  //    unconditionally true here — cleared automatically on activation.
   try {
     const upsertParams: Parameters<typeof upsertProductPage>[0] = {
       handle,
@@ -865,6 +889,7 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
       description:      rawProduct.description,
       seoTitle,
       category,
+      hiddenUntilLive:  true,
     }
     if (rawProduct.images?.[0]) upsertParams.imageUrl = rawProduct.images[0]
     let lastErr: unknown

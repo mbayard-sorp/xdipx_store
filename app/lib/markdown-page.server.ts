@@ -337,10 +337,19 @@ export interface CollectionData {
   introMarkdown?: string | undefined
   faqs?: Array<{ question: string; answer: string }> | undefined
   products: CollectionItem[]
+  /**
+   * Overrides the default `/collections/{handle}` canonical path used in the
+   * footer's `Canonical:` line. For tag-scoped browse surfaces that aren't
+   * backed by a Shopify Collection object (e.g. /new) but still want the
+   * same "title + intro + product list + FAQs + footer" shape.
+   */
+  path?: string | undefined
+  /** Overrides the default "Products in this collection" section heading. */
+  productsHeading?: string | undefined
 }
 
 export function collectionToMarkdown(col: CollectionData): string {
-  const path = `/collections/${col.handle}`
+  const path = col.path ?? `/collections/${col.handle}`
   const lines: string[] = []
 
   lines.push(`# ${col.title}`)
@@ -355,7 +364,7 @@ export function collectionToMarkdown(col: CollectionData): string {
   }
 
   if (col.products.length > 0) {
-    lines.push('## Products in this collection')
+    lines.push(`## ${col.productsHeading ?? 'Products in this collection'}`)
     lines.push('')
     for (const p of col.products) {
       const desc = p.tagline ? `: ${p.tagline}` : p.price ? `: from $${p.price.toFixed(2)}` : ''

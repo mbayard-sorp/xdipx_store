@@ -18,6 +18,7 @@ import { kvGet, kvSet } from '~/lib/kv.server'
 import { fetchAllNalpacFeeds } from '~/lib/nalpac-feeds.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { setPipelineSetting } from '~/lib/pricing-webhook.server'
+import { runNalpacCostSync } from '~/lib/cost-sync.server'
 import { computeTargetPrice } from '~/lib/pricing-engine.server'
 import type { PricingSnapshot } from '~/lib/pricing-engine.server'
 import { isSkuAlreadyImported } from '~/lib/bulk-import.server'
@@ -216,6 +217,30 @@ export async function runImportMonitor(
         .map(r => r.brand?.toLowerCase().trim())
         .filter(Boolean) as string[],
     )
+
+    // 3b. WS3 price-drop / cost-sync loop (ADR-007, v2 engine only). Gated
+    // internally by pricing_costsync_enabled (default off); no-ops entirely
+    // when the switch is off. runNalpacCostSync never throws (best-effort per
+    // SKU/variant internally) but this call is wrapped anyway so a cost-sync
+    // failure never marks the whole import-monitor run as failed.
+    try {
+      const costSyncResult = await runNalpacCostSync({
+        snapshots: feedResult.snapshots,
+        carriedSkus,
+      })
+      if (costSyncResult.enabled) {
+        console.info(
+          `[import-monitor] cost-sync: checked=${costSyncResult.skusChecked} ` +
+          `drops=${costSyncResult.dropsDetected} repriced=${costSyncResult.variantsRepriced} ` +
+          `errors=${costSyncResult.errors.length}`,
+        )
+        if (costSyncResult.errors.length > 0) {
+          console.warn('[import-monitor] cost-sync errors:', costSyncResult.errors)
+        }
+      }
+    } catch (err) {
+      console.error('[import-monitor] cost-sync threw unexpectedly:', err)
+    }
 
     // 4. New-product diff vs prior feed-SKU snapshot in KV.
     const currentFeedSkus = [...feedResult.snapshots.keys()]
@@ -460,6 +485,22 @@ async function autoImportPhase2(
 
   if (maxPerDay <= 0) return 0
 
+  // Tier-C (Nalpac new-products feed) auto-import: a separate, stricter branch
+  // than A/B with its own daily sub-cap. Ships off (monitor_p2_tierC_enabled).
+  // Admits all vendors for now per owner direction (30-day review, see runbook).
+  const [tierCEnabledStr, tierCMinQtyStr, tierCMinGapStr, tierCMinMarkupStr, tierCMaxPerDayStr] = await Promise.all([
+    getPipelineSetting('monitor_p2_tierC_enabled'),
+    getPipelineSetting('monitor_p2_tierC_min_qty'),
+    getPipelineSetting('monitor_p2_tierC_min_gap_score'),
+    getPipelineSetting('monitor_p2_tierC_min_markup_pct'),
+    getPipelineSetting('monitor_p2_tierC_max_per_day'),
+  ])
+  const tierCEnabled   = tierCEnabledStr === 'true'
+  const tierCMinQty    = parseInt(tierCMinQtyStr ?? '60', 10) || 60
+  const tierCMinGap    = parseFloat(tierCMinGapStr ?? '4.5')
+  const tierCMinMarkup = parseFloat(tierCMinMarkupStr ?? '0.15')
+  const tierCMaxPerDay = Math.max(0, parseInt(tierCMaxPerDayStr ?? '3', 10) || 0)
+
   // Daily cap: how many have already been imported today (auto or manual).
   const importedTodayRows = await db
     .select({ cnt: sql<number>`count(*)::int` })
@@ -482,6 +523,7 @@ async function autoImportPhase2(
       totalQty:      importCandidates.totalQty,
       dealScore:     importCandidates.dealScore,
       mapPrice:      importCandidates.mapPrice,
+      msrp:          importCandidates.msrp,
       proposedPrice: importCandidates.proposedPrice,
       needsReview:   importCandidates.needsReview,
     })
@@ -511,7 +553,7 @@ async function autoImportPhase2(
   for (const c of gated) {
     if (imported >= remaining) break
     try {
-      const r = await approveAndImport(c.id)
+      const r = await approveAndImport(c.id, 'phase2-auto')
       if (r.ok && !r.skipped) {
         imported++
         console.info(`[import-monitor] phase 2 auto-imported candidate ${c.id} (tier ${c.tier})`)
@@ -520,6 +562,44 @@ async function autoImportPhase2(
       }
     } catch (err) {
       console.error(`[import-monitor] phase 2 auto-import threw for candidate ${c.id}:`, err)
+    }
+  }
+
+  // Tier-C branch: fresh new-products masters, stricter gates, own sub-cap,
+  // bounded by whatever remains of the overall daily cap. MAP-clean means the
+  // proposed price clears MAP and MAP is a real discount floor (map < msrp).
+  if (tierCEnabled && tierCMaxPerDay > 0 && imported < remaining) {
+    const gatedTierC = pending.filter(c => {
+      if (c.tier !== 'C' || c.needsReview) return false
+      const wholesale = parseFloat(c.wholesaleCost ?? '0')
+      const gap   = parseFloat(c.dealScore ?? '0')
+      const qty   = c.totalQty ?? 0
+      const map   = parseFloat(c.mapPrice ?? '0')
+      const msrp  = parseFloat(c.msrp ?? '0')
+      const price = parseFloat(c.proposedPrice ?? '0')
+      const mapClean = !(map > 0 && (price < map || map >= msrp))
+      const markupOk = wholesale > 0 && price >= wholesale * (1 + tierCMinMarkup)
+      return markupOk && qty >= tierCMinQty && gap >= tierCMinGap && mapClean
+    })
+
+    let importedTierC = 0
+    for (const c of gatedTierC) {
+      if (imported >= remaining || importedTierC >= tierCMaxPerDay) break
+      try {
+        const r = await approveAndImport(c.id, 'phase2-auto')
+        if (r.ok && !r.skipped) {
+          imported++
+          importedTierC++
+          console.info(`[import-monitor] phase 2 tier-C auto-imported candidate ${c.id}`)
+        } else if (!r.ok) {
+          console.warn(`[import-monitor] phase 2 tier-C auto-import failed for candidate ${c.id}: ${r.error}`)
+        }
+      } catch (err) {
+        console.error(`[import-monitor] phase 2 tier-C auto-import threw for candidate ${c.id}:`, err)
+      }
+    }
+    if (importedTierC > 0) {
+      console.info(`[import-monitor] phase 2 tier-C auto-imported ${importedTierC} (sub-cap ${tierCMaxPerDay})`)
     }
   }
 
@@ -795,13 +875,19 @@ export async function updateCandidateStatus(
  * Re-collapses today's feed to get fresh per-variant data (Color/Size/Volume
  * + per-variant pricing + images) before building the MasterProductGroup.
  */
-export async function approveAndImport(id: number): Promise<{
+export async function approveAndImport(id: number, reviewedBy?: string): Promise<{
   ok: boolean
   skipped?: boolean
   shopifyProductId?: string
   dealHistoryId?: number
   error?: string
 }> {
+  // When a caller identifies itself (the product-manager endpoint or the
+  // Phase-2 auto-import path), stamp reviewed_by/reviewed_at so the endpoint's
+  // per-day-per-reviewedBy action cap counts approvals — not just reject/watch.
+  const reviewedStamp = reviewedBy
+    ? { reviewedBy, reviewedAt: new Date() }
+    : {}
   const rows = await db
     .select()
     .from(importCandidates)
@@ -818,7 +904,7 @@ export async function approveAndImport(id: number): Promise<{
   if (await isSkuAlreadyImported(repSku)) {
     await db
       .update(importCandidates)
-      .set({ status: 'imported', updatedAt: new Date() })
+      .set({ status: 'imported', updatedAt: new Date(), ...reviewedStamp })
       .where(eq(importCandidates.id, id))
     return { ok: true, skipped: true }
   }
@@ -921,6 +1007,7 @@ export async function approveAndImport(id: number): Promise<{
       status:        'imported',
       dealHistoryId: dealHistoryId ?? null,
       updatedAt:     new Date(),
+      ...reviewedStamp,
     })
     .where(eq(importCandidates.id, id))
 

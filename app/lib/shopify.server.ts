@@ -1881,6 +1881,68 @@ export async function getCollectionDeals(
   }
 }
 
+/**
+ * Paginated, newest-first product list scoped to a Shopify tag rather than a
+ * Collection object. Powers /new (New Arrivals, tag:new-arrival) and any
+ * future tag-only browse surface. Mirrors getCollectionDeals's KV cursor-skip
+ * pagination (same cache-key builder, same cursor TTL), just querying the
+ * top-level `products(query:)` connection instead of `collection(handle)`.
+ */
+export async function getProductsByTagPaged(
+  tag: string,
+  page = 1,
+  limit = 20,
+): Promise<{ deals: VaultDeal[]; hasNextPage: boolean }> {
+  const query = `tag:${tag}`
+  // Reuse the collection-cursor cache-key builder with a `tag:` prefixed
+  // pseudo-handle so this never collides with a real collection's cursors.
+  const cacheHandle = `tag:${tag}`
+  const cacheSort = 'newest'
+
+  let after: string | null = null
+  if (page > 1) {
+    const cachedCursor = await kvGet<string>(KV_KEYS.collectionCursor(cacheHandle, page, cacheSort))
+    if (cachedCursor) {
+      after = cachedCursor
+    } else {
+      for (let p = 1; p < page; p++) {
+        const skip: { products: { edges: { cursor: string }[] } } = await storefront<{
+          products: { edges: { cursor: string }[] }
+        }>(`
+          query SkipTagPage($query: String!, $first: Int!, $after: String) {
+            products(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+              edges { cursor }
+            }
+          }
+        `, { query, first: limit, after })
+        const edges = skip.products.edges
+        if (!edges.length) return { deals: [], hasNextPage: false }
+        after = edges[edges.length - 1]!.cursor
+        await kvSet(KV_KEYS.collectionCursor(cacheHandle, p + 1, cacheSort), after, COLLECTION_CURSOR_TTL)
+      }
+    }
+  }
+
+  const data = await storefront<{
+    products: {
+      pageInfo: { hasNextPage: boolean }
+      edges: { cursor: string; node: ShopifyProductCardNode }[]
+    }
+  }>(`
+    query GetProductsByTagPaged($query: String!, $first: Int!, $after: String) {
+      products(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+        pageInfo { hasNextPage }
+        edges { cursor node { ${PRODUCT_CARD_FRAGMENT} } }
+      }
+    }
+  `, { query, first: limit, after })
+
+  return {
+    deals: data.products.edges.map(e => nodeToVaultDeal(e.node)),
+    hasNextPage: data.products.pageInfo.hasNextPage,
+  }
+}
+
 // ─── Navigation Menu ─────────────────────────────────────────────────────
 
 export interface ShopifyMenuItem {
@@ -2988,6 +3050,21 @@ export async function activateShopifyProduct(numericId: string): Promise<void> {
 
   // 2. Publish to the curated xdipx channels; unpublish from excluded ones.
   await publishProductToXdipxChannels(id)
+
+  // 3. WS2c — clear the mirrored Sanity productPage's `hiddenUntilLive` import-stub
+  //    flag, if one exists. This function is the universal chokepoint every
+  //    activation path funnels through (import publish, deal-rotator daily
+  //    activation, admin queue force-activate), so wiring the clear here — rather
+  //    than in just one caller — guarantees a draft-stage import stub stops
+  //    leaking into sitemap.xml / on-site search the moment it actually becomes
+  //    purchasable, no matter which path activated it. Best-effort: a Sanity
+  //    hiccup must never unwind the Shopify activation that already succeeded above.
+  try {
+    const { markProductPageLive } = await import('~/lib/sanity.server')
+    await markProductPageLive(id)
+  } catch (err) {
+    console.warn(`[activateShopifyProduct] markProductPageLive failed for ${id} (non-blocking):`, err instanceof Error ? err.message : err)
+  }
 }
 
 // ─── xdipx fulfillment locations + sales channels ─────────────────────────

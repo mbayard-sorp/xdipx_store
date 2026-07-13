@@ -43,6 +43,7 @@ const TEAM_LABELS: Record<TeamId, string> = {
   email:    'Email',
   strategy: 'Strategy',
   content:  'Content',
+  product:  'Product',
 }
 
 interface LoaderData {

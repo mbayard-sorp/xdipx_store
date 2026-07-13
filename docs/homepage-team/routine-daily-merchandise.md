@@ -121,6 +121,21 @@ curl -s -X POST "$BASE_URL/api/homepage-team/event" \
 - **Nalpac top-100** — `fetchAllNalpacFeeds()` → `inTop100Feed` (`app/lib/nalpac-feeds.server.ts`).
   Run `cleanDescription()` for the `ft.`/`in.` encoding (don't strip `in.` after digits — those are
   inches). Cross-reference to Shopify by `nalpacSku`.
+- **Newest imports** — products tagged `new-arrival` (set automatically the moment the import
+  pipeline activates a product; see `publishEnrichedProducts` in `app/lib/import-enrich.server.ts`)
+  are a sourcing signal, not a standing feature. The routine may surface a handful of them in an
+  OPPORTUNISTIC `emmaCuratedRail` ("New Arrivals", Nº06 slot) when the week's slate has room — it
+  must never become a permanent fixture (it still counts against the 4-rail ceiling in Step 5), and
+  its copy goes through the same Emma voice gate as every other rail.
+- **Price drops (now cheaper)** — when `pricing_costsync_enabled` is on, a Nalpac supplier-cost drop
+  auto-reprices carried SKUs via the v2 engine (see `nalpac_price_history.synced_at` for recently
+  synced SKUs; `inventory-sentinel` surfaces the biggest margin gains in the brief). These are also
+  a sourcing signal for an OPPORTUNISTIC "Now cheaper" `emmaCuratedRail` (Nº06, same 4-rail-ceiling
+  and voice-gate rules as New Arrivals). **Hard MAP guard before any such SKU is eligible:** it must
+  pass the same MAP rule below (never a MAP=MSRP product on a discount-styled surface) — check the
+  live price against MAP (`mapAllowsAdvertisedDiscount` in `gmc-metafields.server.ts`) before you
+  frame it as cheaper; and no urgency/countdown framing (voice charter). A real lower price is a
+  fact you may state plainly, not a scarcity play.
 
 ## Step 2b — Yesterday's scoreboard
 

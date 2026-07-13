@@ -276,6 +276,25 @@ export default {
       group: 'product',
       description: 'Set automatically by the archive-discontinued backfill, but writable here for manual override. Archived docs are excluded from search. ✏️ Sanity-only — no Shopify counterpart.',
     },
+    // WS2c — additive. Import-time stub visibility gate: a productPage created
+    // for a not-yet-active (Shopify DRAFT) product is hidden from sitemap.xml
+    // and on-site search until the product actually activates. OPT-OUT
+    // semantics are intentional: unset/false = visible, so the entire existing
+    // live catalog is unaffected with zero backfill. Set true only at stub
+    // creation time for a draft-stage import (app/lib/bulk-import.server.ts);
+    // cleared to false automatically the moment the product activates, via
+    // whichever path calls `activateShopifyProduct` (app/lib/shopify.server.ts
+    // — import publish in app/lib/import-enrich.server.ts, the daily deal
+    // rotator, or an admin force-activate), which patches it via
+    // `markProductPageLive` (app/lib/sanity.server.ts).
+    {
+      name: 'hiddenUntilLive',
+      title: '🔗 Hidden Until Live',
+      type: 'boolean',
+      group: 'product',
+      description: 'True only while the underlying Shopify product is still a DRAFT (not yet purchasable) — hides this page from sitemap.xml and on-site search. Unset/false = visible (the default). Auto-cleared to false when the product activates; safe to flip manually if a stub is ever stuck hidden after going live. 🔗 Auto-managed by the import pipeline.',
+      initialValue: false,
+    },
 
     // ── Emma Discovery (auto-filled by orchestrator on bulk import) ─────────
     // These tags drive Emma's chat / IVR / SMS surfaces — search.server.ts and

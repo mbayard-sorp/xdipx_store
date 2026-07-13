@@ -66,13 +66,28 @@ The caller will provide a product brief in their dispatch prompt. Expect it to c
 <workflow>
 1. Read the brief carefully. Hold all of it in context — every output below should reference the same specific product details.
 
-2. Classify the product type dial first:
-   - `air-pulsation` (clitoral suction / air-pulse / pressure-wave)
-   - `vibrator` (internal/external vibrators, rabbits, bullets, couples vibes)
-   - `wand` (large-format wand massagers)
-   - `lube` (lubricants, gels, oils)
-   - `wear` (lingerie, harnesses, panties, apparel, restraints, edible wear, accessories worn on the body)
-   This drives every conditional below.
+2. Classify the product type dial first — hierarchical taxonomy: `productTypeDial` (closed top-level enum) AND `productSubtypeDial` (closed list scoped to that top-level), in that order:
+   - `vibrator`    — bullet-egg, rabbit, g-spot, finger-clit, wand, air-pulsation, rotating-thrusting, remote, wearable
+   - `dildo`       — realistic, glass-metal, silicone, dual-density, non-phallic, vibrating, packer, large
+   - `anal`        — plug, prostate, beads, vibrating, dilator, douche-enema
+   - `bondage`     — paddle-whip, restraint, blindfold, gag, collar-leash, nipple, body-harness, sensory, electrostim
+   - `cock-ring`   — classic, vibrating, cock-ball-sling, ball-stretcher, set
+   - `stroker`     — vagina, mouth, pocket, non-realistic, vibrating, doll, disposable
+   - `couples`     — game-romance, bedroom-accessory, positioning-aid, swing-sling, wearable
+   - `harness`     — fabric, leather, vegan-leather, o-ring, set-kit
+   - `extender`    — sling, sleeve, vibrating, strap-on
+   - `pump`        — penis
+   - `lube`        — water-based, silicone-based, hybrid, flavored, natural, anal, warming-cooling, toy-cleaner
+   - `massage`     — body-care, candle, perfume-pheromone, hygiene, cbd
+   - `enhancer`    — desensitizer-relaxer, oral, arousal-gel, male-arousal, female-arousal, gummy-edible, pill
+   - `wear`        — mens-underwear, panty, bra-panty-set, bodysuit-teddy, bodystocking, hosiery, pasty, apparel, sock, accessory, plus-queen
+   - `condom`      — glyde, trojan, lifestyles, durex
+   - `wellness`    — kegel, dilator, douche-enema, hygiene, aftercare
+   - `novelty`     — candy-edible, pin-keychain, game, plushie-pillow, novelty-gift, party-supply
+   - `book-media`  — book, coloring-book
+   - `sex-machine` — no subtype; leave `productSubtypeDial` null
+
+   HONEST CLASSIFICATION: pick the dominant top-level type when a product spans two (e.g. an anal vibrator → `anal` parent with subtype `vibrating`, NOT `vibrator` parent). Pick exactly one subtype from the closed list scoped to your chosen type, or leave `productSubtypeDial` null when the type is `sex-machine` or no subtype clearly fits, rather than forcing a bad match. Never invent a type or subtype outside these closed lists. This drives every conditional below.
 
 3. Generate every applicable field in one pass (see <output_schema>). Cross-reference earlier outputs as you go: if your tagline highlights a specific feature, your Emma's take should describe how that feature actually plays, your FAQs should answer common questions about it, your pairing blurbs should extend it.
 
@@ -86,7 +101,10 @@ Return a single JSON object with these fields. Every field is required unless ma
 
 ```
 {
-  "productTypeDial": "air-pulsation" | "vibrator" | "wand" | "lube" | "wear",
+  "productTypeDial": "vibrator" | "dildo" | "anal" | "bondage" | "cock-ring" | "stroker" | "couples" | "harness" | "extender" | "pump" | "lube" | "massage" | "enhancer" | "wear" | "condom" | "wellness" | "novelty" | "book-media" | "sex-machine",
+  "productSubtypeDial": "<subtype from the closed list scoped to productTypeDial — see the classification step above>" | null,
+  // e.g. productTypeDial "vibrator" → one of: bullet-egg | rabbit | g-spot | finger-clit | wand | air-pulsation | rotating-thrusting | remote | wearable.
+  // null ONLY when productTypeDial is "sex-machine" (no subtypes exist) or no subtype in the closed list clearly fits. Never invent a value outside the closed list for the chosen type.
 
   "originalTitle": "<the raw manufacturer title verbatim>",
   "productTitle":  "<rewritten SEO-friendly title — see rules below>",
@@ -180,7 +198,7 @@ If `existingMetafields.xdipx.tagline` is already populated AND the caller's inst
 
 <validation>
 Before returning, self-check:
-- [ ] productTypeDial is one of the 5 valid values
+- [ ] productTypeDial is one of the 19 valid top-level values; productSubtypeDial is either null or one of the closed subtype values scoped to that productTypeDial (see output_schema)
 - [ ] productTitle ≤ 70 chars; brand not prefixed; preserves branded model names
 - [ ] tagline ≤ 12 words
 - [ ] seoMetaDescription is 140–155 chars, contains NO price/dollar amount/discount, and writes the brand as "xdipx.com" (never bare "xdipx")

@@ -813,6 +813,37 @@ export const pricingChanges = pgTable('pricing_changes', {
 }))
 
 // ---------------------------------------------------------------------------
+// Nalpac price history — WS3a cost-sync loop (migration 061, ADR-007)
+// ---------------------------------------------------------------------------
+
+/**
+ * Last-observed Nalpac feed snapshot per CARRIED sku. Upsert-keyed by sku --
+ * NOT an append-per-day history table. cost-sync.server.ts (runNalpacCostSync)
+ * diffs today's feed snapshot against this row to detect a material
+ * wholesale/MAP drop and decide whether to sync + reprice through the v2
+ * pricing engine. Bound to the carried catalog only (never all ~15,500 feed
+ * SKUs). synced_at is the last time a cost-sync actually fired for this sku
+ * (day-scoped idempotency, gated by the pricing_costsync_enabled kill switch).
+ * See docs/adr/ADR-007-pricing-engine-convergence.md.
+ */
+export const nalpacPriceHistory = pgTable('nalpac_price_history', {
+  sku:               varchar('sku', { length: 64 }).primaryKey(),
+  wholesale:         decimal('wholesale', { precision: 10, scale: 2 }),
+  msrp:              decimal('msrp', { precision: 10, scale: 2 }),
+  mapPrice:          decimal('map_price', { precision: 10, scale: 2 }),
+  salePrice:         decimal('sale_price', { precision: 10, scale: 2 }),
+  qty:               integer('qty'),
+  nalpacDiscountPct: decimal('nalpac_discount_pct', { precision: 5, scale: 2 }),
+  inTop100:          boolean('in_top100').notNull().default(false),
+  inNew:             boolean('in_new').notNull().default(false),
+  inSale:            boolean('in_sale').notNull().default(false),
+  observedAt:        timestamp('observed_at', { withTimezone: true }).notNull().defaultNow(),
+  syncedAt:          timestamp('synced_at', { withTimezone: true }),
+}, t => ({
+  syncedIdx: index('nalpac_price_history_synced_idx').on(t.syncedAt),
+}))
+
+// ---------------------------------------------------------------------------
 // Nalpac import automation — daily candidate queue + run audit (migration 038)
 // ---------------------------------------------------------------------------
 
@@ -873,6 +904,11 @@ export const importCandidates = pgTable('import_candidates', {
   enrichedAt:      timestamp('enriched_at'),
   publishedAt:     timestamp('published_at'),
   enrichBatchId:   varchar('enrich_batch_id', { length: 100 }),
+  // Migration 060: bounded-retry quality gate. enrichAttempts counts gate
+  // failures; enrichFailedAt is set once the retry cap (2) is hit, parking the
+  // row (enrichBatchId is left set so it is neither re-submitted nor published).
+  enrichAttempts:  integer('enrich_attempts').notNull().default(0),
+  enrichFailedAt:  timestamp('enrich_failed_at'),
 }, t => ({
   statusRunIdx:   index('idx_import_candidates_status_run').on(t.status, t.runDate),
   tierScoreIdx:   index('idx_import_candidates_tier_score').on(t.tier, t.dealScore),
