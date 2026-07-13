@@ -10,15 +10,15 @@ Cadence ties to the weekly theme calendar so the whole store tells one story. Wh
 
 ## 2. Weekly slot themes
 
-One post per day, seven per week. Guides remain the anchor format (they carry the ItemList JSON-LD and win the highest-intent queries); the owner added two editorial formats in 2026-07 — the weekly podcast review and the twice-weekly Real Talk problem→resolution narrative (see §7).
+One post per day, seven per week. Guides remain the anchor format (they carry the ItemList JSON-LD and win the highest-intent queries); the owner added two editorial formats in 2026-07 — the weekly podcast review and the twice-weekly Real Talk problem→resolution narrative (see §8).
 
 | Day | Category | Slot intent |
 |---|---|---|
 | Mon | guides | Anchor guide. Syncs to the marketing-calendar theme week (see rule below). |
-| Tue | real-talk | Problem → root cause → resolution narrative (§7B). |
+| Tue | real-talk | Problem → root cause → resolution narrative (§8B). |
 | Wed | guides | Category explainer matching one of the 24 collections. |
-| Thu | podcast-notes | Weekly podcast review from the pending `podcastReviewBrief` (§7A). No brief pending → fall back to a care post. |
-| Fri | real-talk | Second problem → resolution narrative (§7B). |
+| Thu | podcast-notes | Weekly podcast review from the pending `podcastReviewBrief` (§8A). No brief pending → fall back to a care post. |
+| Fri | real-talk | Second problem → resolution narrative (§8B). |
 | Sat | care | Cleaning, storage, material safety, sharing. |
 | Sun | comparisons | Head-to-head; alternate with wellness-basics when the comparisons queue is thin, or overflow guide if the theme needs two. |
 
@@ -31,7 +31,7 @@ Weekly mix: 2 guides, 2 real-talk, 1 podcast-notes, 1 care, 1 comparisons/wellne
 **Selection order (since the keyword-bank wiring):** the daily writer picks from the Sanity
 `seoContentBrief` queue first (planned weekly by the seo-curator routine from approved keyword
 clusters); this backlog is the fallback floor when the queue has nothing queued, and the slot
-themes in §2 plus the standing rules in §6 remain binding either way.
+themes in §2 plus the standing rules in §7 remain binding either way.
 
 Slugs and titles are answer-shaped to match how people phrase questions to an LLM. Collection handles are representative of the 24 live collections and must be validated against the live list before linking. No prices in any body copy.
 
@@ -125,6 +125,7 @@ Below 300 sessions/week the retro leans on margin math, stock depth, and these h
 - **Indexed page count.** Notebook URLs and their `.md` twins in the sitemap and `llms.txt`, week over week.
 - **LLM-citation spot checks.** A fixed 20-query tracker run in ChatGPT, Perplexity, and Claude (for example "how does a clitoral suction toy work", "silicone vs water based lube"). Log whether xdipx is cited and which page.
 - **GA4 referrals.** Sessions and any assisted conversions from `chatgpt.com`, `perplexity.ai`, and `claude.ai` referrers. Weighted only at or above 300 sessions/week; below that, report raw counts and treat as directional.
+- **Notebook engagement.** GA4 custom events from the redesign: `notebook_subscribe` (email capture by location), `notebook_embed_click` (post → PDP click-through), `notebook_series_click`, and `notebook_read_depth` (25/50/75/100). Same 300 sessions/week weighting rule; these are the signals that say whether the design earns its keep.
 
 ## 7. Standing rules
 
@@ -137,14 +138,14 @@ Below 300 sessions/week the retro leans on margin math, stock depth, and these h
 - **Internal links every post.** At least one collection link and one PDP, using canonical `/products/{slug}` and `/collections/{handle}`.
 - **No em-dashes, no countdowns, no urgency, CTAs from the whitelist only.** Billing descriptor is always XDIPX.
 
-## 7. Editorial formats (owner-added 2026-07)
+## 8. Editorial formats (owner-added 2026-07)
 
 Both formats live in new `blogCategory` documents (`blogCategory-podcast-notes` "Podcast Notes",
 `blogCategory-real-talk` "Real Talk") — content documents, not schema changes. Seed them once
-before the first post of each type. All §6 standing rules apply unchanged; the notes below are
+before the first post of each type. All §7 standing rules apply unchanged; the notes below are
 additive.
 
-### 7A. Podcast Notes (weekly, Thursday)
+### 8A. Podcast Notes (weekly, Thursday)
 
 The post is written from the week's pending `podcastReviewBrief` (produced Wednesday by the
 `podcast-reviewer` routine, `docs/store-team/routine-podcast-weekly.md`). Shape:
@@ -162,7 +163,7 @@ endorses xdipx); if the brief says `sourceQuality:'show-notes'`, the post says i
 episode's published notes; mark the brief `drafted` on claim and `published` + `blogPostRef` when
 live. No pending brief on Thursday → the slot falls back to care and the retro notes it.
 
-### 7B. Real Talk (twice weekly, Tuesday + Friday)
+### 8B. Real Talk (twice weekly, Tuesday + Friday)
 
 A problem → root cause → resolution narrative that ends, where honest, at products that actually
 help. Structure is plain H2 prose — no custom Sanity block; heading-structured answers are what

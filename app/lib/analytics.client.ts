@@ -217,3 +217,33 @@ export function trackEmmaLineSurface(params: {
 }) {
   gtag('event', 'emma_line_surface', { emma_state: params.state })
 }
+
+// ─── Custom: Notebook engagement ──────────────────────────────────────────────
+// The redesign's outcome metrics: does the blog capture emails, route readers
+// to PDPs, and hold attention? Read in the weekly content retro.
+
+export function trackNotebookSubscribe(location: 'index' | 'post' | 'series' | 'glossary') {
+  gtag('event', 'notebook_subscribe', { subscribe_location: location })
+}
+
+export function trackNotebookEmbedClick(params: { productHandle: string; postPath: string }) {
+  gtag('event', 'notebook_embed_click', {
+    product_handle: params.productHandle,
+    post_path: params.postPath,
+  })
+}
+
+export function trackNotebookSeriesClick(params: { seriesSlug: string; from: 'post' | 'rail' }) {
+  gtag('event', 'notebook_series_click', {
+    series_slug: params.seriesSlug,
+    series_from: params.from,
+  })
+}
+
+/** Fired once per threshold per page view as the reader scrolls a post. */
+export function trackNotebookReadDepth(params: { postPath: string; percent: 25 | 50 | 75 | 100 }) {
+  gtag('event', 'notebook_read_depth', {
+    post_path: params.postPath,
+    read_percent: params.percent,
+  })
+}

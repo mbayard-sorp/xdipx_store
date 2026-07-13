@@ -50,7 +50,9 @@ export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
   const { post } = loaderData
   const title = (post.seoTitle ?? post.title) + ' — The Notebook | xdipx'
   const description = post.seoDescription ?? post.excerpt
-  const image = post.ogImageUrl ?? post.heroImageUrl ?? null
+  // The designed share card is the default og:image; the route itself
+  // redirects to an editor-supplied ogImage when one exists.
+  const image = `https://xdipx.com/og/notebook/${post.slug}.png`
   const canonical = `https://xdipx.com/notebook/${post.slug}`
 
   return [
