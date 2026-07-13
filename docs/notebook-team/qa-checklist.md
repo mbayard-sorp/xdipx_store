@@ -1,5 +1,10 @@
 # Notebook Redesign — Production QA Checklist
 
+> **Precondition — launch runner.** Content and art should be live before this
+> pass: run `bash scripts/notebook-launch.sh` from the repo root (real `.env`
+> required). It seeds the series + glossary, generates the art candidates into
+> `.notebook-art/`, and prints the per-asset upload commands for the keepers.
+
 > One-time acceptance pass for the Notebook redesign on production (plus after any later visual
 > change to the blog surfaces). Run by the owner or qa-reviewer with a real browser / preview
 > access. The recurring render safety net is automated separately at
