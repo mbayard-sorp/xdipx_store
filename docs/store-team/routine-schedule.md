@@ -7,13 +7,14 @@ scheduler and this file disagree, fix one of them — the weekly strategy routin
 expected routine actually ran (the runs table has the data) and file a suggestion when one is
 missing.
 
-Status 2026-07-09: **created** (all 9). Routines 1–8 exist as triggers in Claude's cloud scheduler
-(fresh session per fire, completion notifications off), each firing the exact prompt in this
-manifest. Routine 9 (Daily Content Writer) is scheduled differently: it is a Claude desktop
-scheduled task on the owner's machine (id `xdipx-daily-content-writer`), running from the
-`~/Claude/xdipx-deploy` checkout, and it fires only while the Claude app is open, unlike the cloud
-triggers. It still no-ops at the gate until migration 054 is applied and `content_team_enabled` is
-flipped on (see the enablement runbook appendix in `docs/store-team/routine-content-daily.md`).
+Status 2026-07-13: routines 1–9 and 12 exist as triggers in Claude's cloud scheduler (fresh
+session per fire, completion notifications off), each firing the exact prompt in this manifest.
+Routine 9 (Daily Content Writer) was recreated as a cloud trigger on 2026-07-13, closing the
+known gap where the old desktop scheduled task (`xdipx-daily-content-writer`, fires only while
+the Claude app is open) never ran reliably — **the owner should delete that desktop task** so the
+routine can't double-fire (the gate's run cap would otherwise let a second run write a second
+post). Content runs still no-op at the gate until `content_team_enabled` is flipped on (see the
+enablement runbook appendix in `docs/store-team/routine-content-daily.md`).
 Trigger IDs, for reference when editing or deleting a routine:
 
 | # | Name | Trigger ID |
@@ -26,7 +27,7 @@ Trigger IDs, for reference when editing or deleting a routine:
 | 6 | xdipx — Social Drafts | `trig_01CKe93nZQ1uQqqDZLpQ5GG8` |
 | 7 | xdipx — Daily Merchandiser (Routine A) | `trig_01PEat4JFm4fVmbNQKomSVMS` |
 | 8 | xdipx — Design Cycle (Routine B) | `trig_017s5fsNnWgk7xpXgF8QZccB` |
-| 9 | xdipx — Daily Content Writer | `xdipx-daily-content-writer` (desktop scheduled task, not a cloud trigger) |
+| 9 | xdipx — Daily Content Writer | `trig_01Qf5puo6AZyJqWn9QHN5mxQ` (cloud trigger since 2026-07-13; replaces desktop task `xdipx-daily-content-writer`, which should be deleted) |
 | 12 | xdipx — Weekly Podcast Review | `trig_01AN6PKVghE9AM51R13z2UEu` |
 
 Still outstanding: smoke-test by firing Weekly Strategy manually (`fire_trigger` on
@@ -58,7 +59,7 @@ spend via `POST https://xdipx.com/api/homepage-team/spend` under the team's feat
 | 6 | xdipx — Social Drafts | `0 14 * * *` (daily) | social / `social-drafts` | `docs/store-team/routine-social-daily.md` | DRAFT-ONLY: every draft passes the emma-empathy-reviewer voice gate, then lands as a `social_posts` row with status `draft`. Never post live; never touch `social_team_autopost`. |
 | 7 | xdipx — Daily Merchandiser (Routine A) | `0 10 * * *` (daily) | homepage / `homepage-*` | `docs/homepage-team/routine-daily-merchandise.md` | Entry agent homepage-orchestrator; mission brief is `docs/homepage-team/mission-brief.md`; content auto-publish within the gate/budget/image caps; never code changes. |
 | 8 | xdipx — Design Cycle (Routine B) | `0 14 * * 3` (Wed) | homepage / `homepage-build` | `docs/homepage-team/routine-design-cycle.md` | Build on a branch and open a PR; never auto-merge; stop at the open PR. |
-| 9 | xdipx — Daily Content Writer | `0 8 * * *` local Pacific (approx `0 15 * * *` UTC, daily) | content / `content-blog` | `docs/store-team/routine-content-daily.md` | Entry agent content-writer. Scheduled task id `xdipx-daily-content-writer`: a Claude desktop scheduled task on the owner's machine, running from the `~/Claude/xdipx-deploy` checkout; fires only while the Claude app is open, unlike the cloud triggers for routines 1-8. **Known gap: because it needs the app open it has not fired reliably (zero posts published as of 2026-07-09); the fix is recreating it as a cloud trigger like routines 1-8 and updating this row with the new trigger id.** One post per run; topic from `docs/store-team/content-plan.md`; every draft passes the emma-empathy-reviewer voice gate; publish live only on PASS with the `content_team_autopublish` valve on, otherwise leave the Sanity draft. No-ops at the gate until migration 054 is applied and `content_team_enabled` is on; see the enablement runbook appendix in the playbook. |
+| 9 | xdipx — Daily Content Writer | `0 15 * * *` (daily, approx 8a Pacific) | content / `content-blog` | `docs/store-team/routine-content-daily.md` | Entry agent content-writer. Cloud trigger since 2026-07-13 (`trig_01Qf5puo6AZyJqWn9QHN5mxQ`), replacing the unreliable desktop task `xdipx-daily-content-writer` (delete the desktop task to prevent double-fires). One post per run; topic by the weekly rhythm in `docs/store-team/content-plan.md` (Thursday checks the pending `podcastReviewBrief` first; Tue/Fri are Real Talk per content-plan §8B); every draft passes the emma-empathy-reviewer voice gate; publish live only on PASS with the `content_team_autopublish` valve on, otherwise leave the Sanity draft. No-ops at the gate until migration 054 is applied and `content_team_enabled` is on; see the enablement runbook appendix in the playbook. |
 | 10 | xdipx — Weekly SEO Curation | `0 16 * * 0` (Sun) | content / `content-seo-curation` | `docs/store-team/routine-seo-curation.md` | Entry agent seo-curator. Step 0: if `seo_curation_enabled` is not `'true'`, exit without starting a run. Triage the gray-zone pending keywords (cap 250 decisions); propose cluster merge maps as suggestions (NEVER execute merges); plan up to 7 seoContentBrief docs for the coming week following the content-plan rhythm; file the weekly report suggestion (coverage, queue depth, bank staleness, enrichment coverage). Never write posts, never touch flagged keywords, never delete anything. |
 | 11 | xdipx — Weekly Off-site Scout | `0 16 * * 2` (Tue) | strategy / `strategy-offsite` | `docs/store-team/routine-offsite-weekly.md` | Entry agent offsite-scout. PROPOSE-ONLY: research the roundups/listicles LLM answers cite for sexual-wellness shopping queries, draft pitches + unlinked-mention reclamations + expert-quote prospects as suggestion rows (max 6/run, no duplicates of still-proposed rows), each with a mandatory policy note against `docs/ads-policy.md`. Never send, never post, never spend; the owner executes approved pitches manually from hello@xdipx.com. Tuesday avoids the Monday strategy run (1-run/day cap). Fewer than 5 published notebook posts → file only the summary and recommend waiting. |
 | 12 | xdipx — Weekly Podcast Review | `0 16 * * 3` (Wed) | content / `content-podcast` | `docs/store-team/routine-podcast-weekly.md` | Entry agent podcast-reviewer. RESEARCH-ONLY: pick the most recent unreviewed episode from `docs/store-team/podcast-shortlist.md` (rotation rules binding), review from transcript or show notes with sourceQuality recorded honestly, and write ONE pending `podcastReviewBrief` in Sanity — never a blogPost, never a publish, no images. A pending brief already waiting → skip honestly. Wednesday so Thursday's content run (routine 9, podcast-notes slot) finds a fresh brief. Trigger created 2026-07-13: `trig_01AN6PKVghE9AM51R13z2UEu`. |
