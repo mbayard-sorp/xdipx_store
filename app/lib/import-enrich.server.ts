@@ -440,6 +440,22 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
       failed++
     }
   }
+
+  // Newly-active products auto-join their nav collection (smart collections keyed
+  // on custom.section_tags, written at import), but the discovery index is KV/Neon
+  // cached. Bust + rebuild once per publish batch (never per product) so new
+  // arrivals surface in discovery rails / search near-immediately instead of
+  // waiting for the next unconditional /cron/warm rebuild (<=15 min).
+  if (published > 0) {
+    try {
+      const { invalidateDiscoveryIndex, triggerDiscoveryRebuild } = await import('~/lib/discovery.server')
+      await invalidateDiscoveryIndex()
+      triggerDiscoveryRebuild()
+    } catch (err) {
+      console.warn('[import-enrich] discovery index refresh after publish failed (will self-heal on next /cron/warm):', err)
+    }
+  }
+
   return { published, failed }
 }
 

@@ -10,7 +10,7 @@
  * All keys are <= varchar(50) (pipeline_settings.key constraint).
  */
 
-export const TEAM_IDS = ['homepage', 'social', 'ads', 'email', 'strategy', 'content'] as const
+export const TEAM_IDS = ['homepage', 'social', 'ads', 'email', 'strategy', 'content', 'product'] as const
 export type TeamId = (typeof TEAM_IDS)[number]
 
 export function isTeamId(v: unknown): v is TeamId {
@@ -39,6 +39,7 @@ export const TEAM_DEFAULTS: Record<TeamId, { dailyCents: number; maxRunsPerDay: 
   email:    { dailyCents: 500,  maxRunsPerDay: 1 },
   strategy: { dailyCents: 300,  maxRunsPerDay: 1 },
   content:  { dailyCents: 300,  maxRunsPerDay: 2 }, // 2nd run = one voice-gate retry
+  product:  { dailyCents: 300,  maxRunsPerDay: 1 }, // daily import-queue drain (SQL + curl, ~$0)
 }
 
 /** Homepage-only extras (kept from the original TEAM_KEYS set). */

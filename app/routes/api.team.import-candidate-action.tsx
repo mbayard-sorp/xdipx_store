@@ -26,7 +26,7 @@ async function countProcessedToday(reviewedBy: string): Promise<number> {
 
 async function runIntent(id: number, intent: string, reviewedBy: string, reason?: string) {
   if (intent === 'approve') {
-    return await approveAndImport(id)
+    return await approveAndImport(id, reviewedBy)
   }
   if (intent === 'reject') {
     await updateCandidateStatus(id, 'rejected', {
