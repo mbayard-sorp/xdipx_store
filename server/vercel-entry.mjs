@@ -67,6 +67,7 @@ __export(schema_exports, {
   ivrVoices: () => ivrVoices,
   marketingCalendar: () => marketingCalendar,
   metaCapiFailures: () => metaCapiFailures,
+  nalpacPriceHistory: () => nalpacPriceHistory,
   orderLineItems: () => orderLineItems,
   pdpDialVotes: () => pdpDialVotes,
   pdpProductVotes: () => pdpProductVotes,
@@ -113,7 +114,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, strategyBriefs, adCampaigns, marketingCalendar;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, nalpacPriceHistory, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, strategyBriefs, adCampaigns, marketingCalendar;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -756,6 +757,22 @@ var init_schema = __esm({
       variantIdx: index("pricing_changes_variant_idx").on(t.variantId, t.proposedAt),
       skuIdx: index("pricing_changes_sku_idx").on(t.sku, t.proposedAt)
     }));
+    nalpacPriceHistory = pgTable("nalpac_price_history", {
+      sku: varchar("sku", { length: 64 }).primaryKey(),
+      wholesale: decimal("wholesale", { precision: 10, scale: 2 }),
+      msrp: decimal("msrp", { precision: 10, scale: 2 }),
+      mapPrice: decimal("map_price", { precision: 10, scale: 2 }),
+      salePrice: decimal("sale_price", { precision: 10, scale: 2 }),
+      qty: integer("qty"),
+      nalpacDiscountPct: decimal("nalpac_discount_pct", { precision: 5, scale: 2 }),
+      inTop100: boolean("in_top100").notNull().default(false),
+      inNew: boolean("in_new").notNull().default(false),
+      inSale: boolean("in_sale").notNull().default(false),
+      observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+      syncedAt: timestamp("synced_at", { withTimezone: true })
+    }, (t) => ({
+      syncedIdx: index("nalpac_price_history_synced_idx").on(t.syncedAt)
+    }));
     importCandidates = pgTable("import_candidates", {
       id: serial("id").primaryKey(),
       sku: varchar("sku", { length: 20 }).notNull().unique(),
@@ -807,7 +824,12 @@ var init_schema = __esm({
       // stays terminal; these timestamps track the stages after import.
       enrichedAt: timestamp("enriched_at"),
       publishedAt: timestamp("published_at"),
-      enrichBatchId: varchar("enrich_batch_id", { length: 100 })
+      enrichBatchId: varchar("enrich_batch_id", { length: 100 }),
+      // Migration 060: bounded-retry quality gate. enrichAttempts counts gate
+      // failures; enrichFailedAt is set once the retry cap (2) is hit, parking the
+      // row (enrichBatchId is left set so it is neither re-submitted nor published).
+      enrichAttempts: integer("enrich_attempts").notNull().default(0),
+      enrichFailedAt: timestamp("enrich_failed_at")
     }, (t) => ({
       statusRunIdx: index("idx_import_candidates_status_run").on(t.status, t.runDate),
       tierScoreIdx: index("idx_import_candidates_tier_score").on(t.tier, t.dealScore),
@@ -1986,6 +2008,1384 @@ var init_master_collapse_server = __esm({
   }
 });
 
+// app/lib/sanity.server.ts
+var sanity_server_exports = {};
+__export(sanity_server_exports, {
+  addCmsBlock: () => addCmsBlock,
+  addRailRefToHomepage: () => addRailRefToHomepage,
+  addRailRefToProductPage: () => addRailRefToProductPage,
+  archiveHomepageRailsForDeal: () => archiveHomepageRailsForDeal,
+  calculateReadingTime: () => calculateReadingTime,
+  createEmmaRailDraft: () => createEmmaRailDraft,
+  getAllBlogSeries: () => getAllBlogSeries,
+  getBlogAuthor: () => getBlogAuthor,
+  getBlogCategories: () => getBlogCategories,
+  getBlogCategoryExtras: () => getBlogCategoryExtras,
+  getBlogHomepage: () => getBlogHomepage,
+  getBlogPost: () => getBlogPost,
+  getBlogPosts: () => getBlogPosts,
+  getBlogPostsForSitemap: () => getBlogPostsForSitemap,
+  getBlogSeries: () => getBlogSeries,
+  getCollectionPage: () => getCollectionPage,
+  getCollectionTypeMap: () => getCollectionTypeMap,
+  getCollectionsHub: () => getCollectionsHub,
+  getEditor: () => getEditor,
+  getEmmaHeroSettings: () => getEmmaHeroSettings,
+  getEmmaPersona: () => getEmmaPersona,
+  getEmmaPresets: () => getEmmaPresets,
+  getGlossaryTerms: () => getGlossaryTerms,
+  getHomeConfig: () => getHomeConfig,
+  getHomepageDocRaw: () => getHomepageDocRaw,
+  getHomepageSections: () => getHomepageSections,
+  getNotebookSettings: () => getNotebookSettings,
+  getPage: () => getPage,
+  getPageList: () => getPageList,
+  getPdpTrustBar: () => getPdpTrustBar,
+  getPreviewImagesByHandles: () => getPreviewImagesByHandles,
+  getProductFaqs: () => getProductFaqs,
+  getProductHandlesForSitemap: () => getProductHandlesForSitemap,
+  getProductPageBlocks: () => getProductPageBlocks,
+  getRailDraftsForDeal: () => getRailDraftsForDeal,
+  getRailsByDealId: () => getRailsByDealId,
+  getSiteSettings: () => getSiteSettings,
+  invalidateBlogCache: () => invalidateBlogCache,
+  invalidateCmsCache: () => invalidateCmsCache,
+  isPreviewRequest: () => isPreviewRequest,
+  markProductPageLive: () => markProductPageLive,
+  patchEmmaRail: () => patchEmmaRail,
+  patchProductPageByProductId: () => patchProductPageByProductId,
+  publishEmmaRailDraft: () => publishEmmaRailDraft,
+  removeCmsBlock: () => removeCmsBlock,
+  removeRailRefFromHomepage: () => removeRailRefFromHomepage,
+  restoreHomepageDoc: () => restoreHomepageDoc,
+  sanityImageRef: () => sanityImageRef,
+  searchBlogPosts: () => searchBlogPosts,
+  unarchiveHomepageRailsForDeal: () => unarchiveHomepageRailsForDeal,
+  updateCmsBlock: () => updateCmsBlock,
+  updateCmsPromoImage: () => updateCmsPromoImage,
+  updateCmsTileImage: () => updateCmsTileImage,
+  uploadBufferToSanity: () => uploadBufferToSanity,
+  upsertAnnouncementBar: () => upsertAnnouncementBar,
+  upsertEmmaPick: () => upsertEmmaPick,
+  upsertProductPage: () => upsertProductPage
+});
+import { createClient } from "@sanity/client";
+import { createHash } from "node:crypto";
+import { toHTML } from "@portabletext/to-html";
+function withSanityKey(items, hashOf) {
+  const seen = /* @__PURE__ */ new Set();
+  return items.map((item, i) => {
+    const base = createHash("sha1").update(hashOf(item)).digest("hex").slice(0, 12);
+    let key = base;
+    if (seen.has(key)) key = `${base}${i.toString(36)}`;
+    seen.add(key);
+    return { ...item, _key: key };
+  });
+}
+function getClient(withToken = false, preview = false, perspective) {
+  if (!projectId) return null;
+  const resolvedPerspective = perspective ?? (preview ? "previewDrafts" : "published");
+  return createClient({ projectId, dataset, apiVersion, useCdn: !withToken && !preview, token: process.env["SANITY_API_TOKEN"], perspective: resolvedPerspective });
+}
+function isPreviewRequest(request) {
+  const cookie = request.headers.get("cookie") ?? "";
+  return cookie.includes("__sanity_preview=1");
+}
+async function getEmmaHeroSettings(preview = false) {
+  if (!projectId) return null;
+  const fetcher = async () => {
+    try {
+      const client5 = getClient(false, preview);
+      if (!client5) return null;
+      const raw = await client5.fetch(EMMA_HERO_GROQ);
+      if (!raw?.settings && !raw?.cta) return null;
+      return { ...raw.settings, ...raw.cta };
+    } catch (err) {
+      console.error("[sanity] getEmmaHeroSettings error:", err);
+      return null;
+    }
+  };
+  if (preview) return fetcher();
+  return cached("sanity:emma-hero", 60, fetcher);
+}
+async function getEditor(preview = false) {
+  if (!projectId) return null;
+  const fetcher = async () => {
+    try {
+      const client5 = getClient(false, preview);
+      if (!client5) return null;
+      const raw = await client5.fetch(EDITOR_GROQ);
+      if (!raw?.name) return null;
+      return {
+        name: raw.name,
+        role: raw.role ?? "Editor",
+        photoUrl: raw.photoUrl ?? null,
+        photoAlt: raw.photoAlt ?? null,
+        shortBio: raw.shortBio ?? null,
+        longBio: raw.longBio ?? null,
+        picksSince: raw.picksSince ?? null,
+        instagram: raw.instagram ?? null,
+        email: raw.email ?? null
+      };
+    } catch (err) {
+      console.error("[sanity] getEditor error:", err);
+      return null;
+    }
+  };
+  if (preview) return fetcher();
+  return cached("sanity:editor", 300, fetcher);
+}
+async function getEmmaPresets(preview = false) {
+  if (!projectId) return [];
+  const fetcher = async () => {
+    try {
+      const client5 = getClient(false, preview);
+      if (!client5) return [];
+      return await client5.fetch(EMMA_PRESETS_GROQ) ?? [];
+    } catch (err) {
+      console.error("[sanity] getEmmaPresets error:", err);
+      return [];
+    }
+  };
+  if (preview) return fetcher();
+  return cached("sanity:emma-presets", 300, fetcher);
+}
+async function getHomepageSections(preview = false) {
+  if (!projectId) return null;
+  const fetcher = async () => {
+    try {
+      const client5 = getClient(false, preview);
+      if (!client5) return null;
+      return await client5.fetch(HOMEPAGE_GROQ) ?? null;
+    } catch (err) {
+      console.error("[sanity] getHomepageSections error:", err);
+      return null;
+    }
+  };
+  if (preview) return fetcher();
+  return cached("sanity:homepage", 60, fetcher);
+}
+async function upsertAnnouncementBar(messages) {
+  const client5 = getClient(true);
+  if (!client5) throw new Error("Sanity not configured");
+  await client5.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
+  await client5.patch("singleton.homepage").setIfMissing({ sections: [] }).set({
+    'sections[_type=="announcementBar"].messages': messages
+  }).commit();
+  invalidateCache("sanity:homepage");
+}
+async function addCmsBlock(block) {
+  const client5 = getClient(true);
+  if (!client5) throw new Error("Sanity not configured");
+  const key = `${block._type}-${Date.now()}`;
+  await client5.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
+  await client5.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{ ...block, _key: key }]).commit();
+  invalidateCache("sanity:homepage");
+}
+async function updateCmsBlock(key, patch) {
+  const client5 = getClient(true);
+  if (!client5) throw new Error("Sanity not configured");
+  await client5.patch("singleton.homepage").set(
+    Object.fromEntries(
+      Object.entries(patch).map(([field, value]) => [`sections[_key=="${key}"].${field}`, value])
+    )
+  ).commit();
+  invalidateCache("sanity:homepage");
+}
+async function uploadBufferToSanity(buffer, filename, contentType) {
+  const client5 = getClient(true);
+  if (!client5) throw new Error("Sanity not configured");
+  const asset = await client5.assets.upload("image", buffer, {
+    filename,
+    ...contentType ? { contentType } : {}
+  });
+  return { assetId: asset._id, url: asset.url };
+}
+function sanityImageRef(assetId, alt) {
+  return { _type: "image", asset: { _type: "reference", _ref: assetId }, alt };
+}
+async function updateCmsTileImage(blockKey, tileKey, assetId, alt) {
+  const client5 = getClient(true);
+  if (!client5) throw new Error("Sanity not configured");
+  await client5.patch("singleton.homepage").set({
+    [`sections[_key=="${blockKey}"].tiles[_key=="${tileKey}"].image`]: sanityImageRef(assetId, alt)
+  }).commit();
+  invalidateCache("sanity:homepage");
+}
+async function updateCmsPromoImage(blockKey, assetId, alt) {
+  const client5 = getClient(true);
+  if (!client5) throw new Error("Sanity not configured");
+  await client5.patch("singleton.homepage").set({
+    [`sections[_key=="${blockKey}"].promo.image`]: sanityImageRef(assetId, alt)
+  }).commit();
+  invalidateCache("sanity:homepage");
+}
+async function removeCmsBlock(key) {
+  const client5 = getClient(true);
+  if (!client5) throw new Error("Sanity not configured");
+  await client5.patch("singleton.homepage").unset([`sections[_key=="${key}"]`]).commit();
+  invalidateCache("sanity:homepage");
+}
+function invalidateCmsCache() {
+  invalidateCache("sanity:homepage");
+}
+async function getHomepageDocRaw() {
+  const client5 = getClient(true, false, "raw");
+  if (!client5) return null;
+  const doc = await client5.getDocument(HOMEPAGE_DOC_ID);
+  return doc ?? null;
+}
+async function restoreHomepageDoc(snapshot) {
+  const client5 = getClient(true, false, "raw");
+  if (!client5) throw new Error("Sanity not configured \u2014 cannot restore homepage doc");
+  const rest = {};
+  for (const [k, v] of Object.entries(snapshot)) {
+    if (!k.startsWith("_")) rest[k] = v;
+  }
+  await client5.createOrReplace({ ...rest, _id: HOMEPAGE_DOC_ID, _type: "homepageSections" });
+  invalidateCmsCache();
+}
+function stringToPortableText(text2) {
+  const trimmed = text2.trim();
+  if (!trimmed) return [];
+  return [{
+    _type: "block",
+    _key: `d${Math.random().toString(36).slice(2, 10)}`,
+    style: "normal",
+    markDefs: [],
+    children: [{
+      _type: "span",
+      _key: `s${Math.random().toString(36).slice(2, 10)}`,
+      text: trimmed,
+      marks: []
+    }]
+  }];
+}
+async function uploadImageToSanity(writeClient, imageUrl, filename) {
+  if (!writeClient) return null;
+  const res = await fetch(imageUrl);
+  if (!res.ok) {
+    throw new Error(`image fetch ${res.status} ${imageUrl}`);
+  }
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const asset = await writeClient.assets.upload("image", buffer, { filename });
+  return asset.url ?? null;
+}
+async function upsertProductPage(params) {
+  const writeClient = getClient(true, false, "raw");
+  if (!writeClient) throw new Error("Sanity not configured \u2014 SANITY_API_TOKEN or SANITY_PROJECT_ID missing");
+  const existing = await writeClient.fetch(
+    `*[_type == "productPage" && shopifyHandle == $handle] | order(_id asc)[0]{ _id, previewImageUrl }`,
+    { handle: params.handle }
+  );
+  let docId;
+  let created;
+  if (existing) {
+    docId = existing._id;
+    created = false;
+  } else {
+    if (!params.title) {
+      console.warn(`[upsertProductPage] no productPage doc for handle "${params.handle}" \u2014 skipping (archive/upsert without title)`);
+      return { created: false };
+    }
+    docId = `productPage-${params.handle}`;
+    await writeClient.createIfNotExists({
+      _id: docId,
+      _type: "productPage",
+      shopifyHandle: params.handle,
+      shopifyProductId: params.shopifyProductId,
+      title: params.title
+    });
+    created = true;
+  }
+  const searchFields = {};
+  if (params.title !== void 0) searchFields.title = params.title;
+  if (params.vendor !== void 0) searchFields.vendor = params.vendor;
+  if (params.tags !== void 0) {
+    searchFields.tags = params.tags;
+    searchFields.normalizedTags = normalizeTagList(params.tags);
+  }
+  if (params.tagline !== void 0) searchFields.tagline = params.tagline;
+  if (params.description !== void 0) searchFields.description = stringToPortableText(params.description);
+  if (params.seoDescription !== void 0) searchFields.seoDescription = params.seoDescription;
+  if (params.category !== void 0) searchFields.category = params.category;
+  if (params.seoTitle !== void 0) searchFields.seoTitle = params.seoTitle;
+  if (params.moodImageUrl !== void 0) searchFields.moodImageUrl = params.moodImageUrl;
+  if (params.productTypeDial !== void 0) searchFields.productTypeDial = params.productTypeDial;
+  if (params.moodTags !== void 0) searchFields.moodTags = params.moodTags;
+  if (params.audienceTags !== void 0) searchFields.audienceTags = params.audienceTags;
+  if (params.mattersTags !== void 0) searchFields.mattersTags = params.mattersTags;
+  if (params.ivrExperience !== void 0) searchFields.ivrExperience = params.ivrExperience;
+  if (params.ivrUseCase !== void 0) searchFields.ivrUseCase = params.ivrUseCase;
+  if (params.ivrFeatures !== void 0) searchFields.ivrFeatures = params.ivrFeatures;
+  if (params.productFaqs !== void 0) {
+    searchFields.productFaqs = withSanityKey(params.productFaqs, (f) => `${f.question}|${f.category}`);
+  }
+  if (params.careInstructions !== void 0) searchFields.careInstructions = params.careInstructions;
+  if (params.specifications !== void 0) searchFields.specifications = params.specifications;
+  if (params.boxContents !== void 0) searchFields.boxContents = params.boxContents;
+  if (params.sensationDialV2 !== void 0) {
+    const items = params.sensationDialV2.items ?? [];
+    searchFields.sensationDialV2 = {
+      ...params.sensationDialV2,
+      items: withSanityKey(items, (it) => it.label)
+    };
+  }
+  if (params.productSubtypeDial !== void 0) searchFields.productSubtypeDial = params.productSubtypeDial;
+  if (params.originalTitle !== void 0) searchFields.originalTitle = params.originalTitle;
+  if (params.archived !== void 0) searchFields.archived = params.archived;
+  if (params.hiddenUntilLive !== void 0) searchFields.hiddenUntilLive = params.hiddenUntilLive;
+  if (Object.keys(searchFields).length > 0) {
+    await writeClient.patch(docId).set(searchFields).commit();
+  }
+  if (params.imageUrl) {
+    const publishedId = docId.replace(/^drafts\./, "");
+    const draftId = `drafts.${publishedId}`;
+    const states = await writeClient.fetch(
+      `*[_id in [$pub, $dft]]{ _id, previewImageUrl }`,
+      { pub: publishedId, dft: draftId }
+    );
+    const pub = states.find((s) => !s._id.startsWith("drafts."));
+    const dft = states.find((s) => s._id.startsWith("drafts."));
+    let sanityUrl = null;
+    if (pub?.previewImageUrl?.includes("cdn.sanity.io")) {
+      sanityUrl = pub.previewImageUrl;
+    } else {
+      sanityUrl = await uploadImageToSanity(writeClient, params.imageUrl, `${params.handle}-preview.jpg`);
+    }
+    if (sanityUrl) {
+      if (pub && pub.previewImageUrl !== sanityUrl) {
+        await writeClient.patch(publishedId).set({ previewImageUrl: sanityUrl }).commit();
+      }
+      if (dft && dft.previewImageUrl !== sanityUrl) {
+        await writeClient.patch(draftId).set({ previewImageUrl: sanityUrl }).commit();
+      }
+    }
+  }
+  return { created };
+}
+async function patchProductPageByProductId(numericOrGidProductId, patch) {
+  if (!projectId) return { patched: false };
+  const writeClient = getClient(true, false, "raw");
+  if (!writeClient) return { patched: false };
+  const gid = numericOrGidProductId.startsWith("gid://") ? numericOrGidProductId : `gid://shopify/Product/${numericOrGidProductId}`;
+  const doc = await writeClient.fetch(
+    `*[_type == "productPage" && shopifyProductId == $gid] | order(_id asc)[0]{ _id }`,
+    { gid }
+  );
+  if (!doc) return { patched: false };
+  await writeClient.patch(doc._id).set(patch).commit();
+  return { patched: true };
+}
+async function markProductPageLive(numericOrGidProductId) {
+  return patchProductPageByProductId(numericOrGidProductId, { hiddenUntilLive: false });
+}
+async function upsertEmmaPick(params) {
+  const writeClient = getClient(true);
+  if (!writeClient) throw new Error("Sanity not configured \u2014 SANITY_API_TOKEN or SANITY_PROJECT_ID missing");
+  const doc = {
+    _id: `emmaPick-${params.productHandle}`,
+    _type: "emmaPick",
+    productId: params.productId,
+    productHandle: params.productHandle,
+    dealDate: params.dealDate,
+    variant: params.variant,
+    eyebrow: params.eyebrow,
+    headline: params.headline,
+    body: params.body,
+    aside: params.aside,
+    voiceHash: params.voiceHash,
+    generatedAt: params.generatedAt
+  };
+  if (params.productTitle !== void 0) doc.productTitle = params.productTitle;
+  if (params.brand !== void 0) doc.brand = params.brand;
+  if (params.category !== void 0) doc.category = params.category;
+  if (params.pullQuote !== void 0) doc.pullQuote = params.pullQuote;
+  await writeClient.createOrReplace(doc);
+}
+async function getPdpTrustBar() {
+  if (!projectId) return null;
+  return cached("sanity:pdp-trust-bar", 300, async () => {
+    try {
+      const client5 = getClient();
+      if (!client5) return null;
+      const data = await client5.fetch(
+        `*[_type == "pdpDefaults"] | order(_updatedAt desc)[0].trustBar{
+          _type, _key, active, order, bgStyle,
+          "trustItems": items[]->{ icon, headline, subheadline, active }
+        }`
+      );
+      if (!data) return null;
+      const trustItems = (data.trustItems ?? []).filter(
+        (i) => !!i && i.active !== false
+      );
+      return { ...data, trustItems };
+    } catch (err) {
+      console.error("[sanity] getPdpTrustBar error:", err);
+      return null;
+    }
+  });
+}
+async function getSiteSettings() {
+  if (!projectId) return null;
+  return cached("sanity:site-settings", 300, async () => {
+    try {
+      const client5 = getClient();
+      if (!client5) return null;
+      const data = await client5.fetch(
+        `*[_id == "singleton.siteSettings"][0]{
+          _id,
+          "logoUrl": logo.asset->url,
+          "logoAlt": logo.alt,
+          buyButtonText,
+          "siteBanner": siteBanner{ enabled, link, "imageUrl": image.asset->url, "imageAlt": coalesce(alt, image.alt) },
+          megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
+          socialLinks[],
+          footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
+          footerColumns[] { _key, heading, links[] { _key, label, url } }
+        }`
+      );
+      return data ?? null;
+    } catch (err) {
+      console.error("[sanity] getSiteSettings error:", err);
+      return null;
+    }
+  });
+}
+async function getEmmaPersona() {
+  if (!projectId) return null;
+  return cached("sanity:emma-persona", 300, async () => {
+    try {
+      const client5 = getClient();
+      if (!client5) return null;
+      const data = await client5.fetch(
+        `*[_id == "singleton.editor"][0]{
+          "avatarUrl":   photo.asset->url,
+          "avatarAlt":   coalesce(photo.alt, name, "Emma"),
+          "displayName": coalesce(name, "Emma")
+        }`
+      );
+      return data ?? null;
+    } catch (err) {
+      console.error("[sanity] getEmmaPersona error:", err);
+      return null;
+    }
+  });
+}
+async function getPreviewImagesByHandles(handles) {
+  const out = /* @__PURE__ */ new Map();
+  if (!projectId || handles.length === 0) return out;
+  try {
+    const client5 = getClient();
+    if (!client5) return out;
+    const rows = await client5.fetch(
+      `*[_type == "productPage" && shopifyHandle in $handles]{ shopifyHandle, previewImageUrl }`,
+      { handles }
+    );
+    for (const r of rows ?? []) {
+      if (r?.shopifyHandle && r.previewImageUrl) out.set(r.shopifyHandle, r.previewImageUrl);
+    }
+  } catch (err) {
+    console.error("[sanity] getPreviewImagesByHandles error:", err);
+  }
+  return out;
+}
+async function getProductPageBlocks(handle) {
+  if (!projectId) return [];
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    const data = await client5.fetch(
+      `*[_type == "productPage" && shopifyHandle == $handle][0]{
+        "sections": contentBlocks[]{
+          _key,
+          ...select(
+            _type == "reference" => @->{
+              _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
+              "productHandles": productHandles[]{ handle },
+              layout, bgStyle, ctaLink, ctaLabel
+            },
+            { ${CONTENT_BLOCKS_PROJECTION} }
+          )
+        }[active == true && (status == "live" || !defined(status))]
+      }`,
+      { handle }
+    );
+    return data?.sections ?? [];
+  } catch (err) {
+    console.error("[sanity] getProductPageBlocks error:", err);
+    return [];
+  }
+}
+async function getProductFaqs(handle) {
+  if (!projectId) return [];
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    const data = await client5.fetch(
+      `*[_type == "productPage" && shopifyHandle == $handle][0]{
+        "faqs": productFaqs[]{ question, answer, category }
+      }`,
+      { handle }
+    );
+    return (data?.faqs ?? []).filter((f) => f && f.question && f.answer).map((f) => ({ ...f, category: f.category ?? "general" }));
+  } catch (err) {
+    console.error("[sanity] getProductFaqs error:", err);
+    return [];
+  }
+}
+async function getCollectionPage(handle, preview = false) {
+  if (!projectId) return null;
+  try {
+    const client5 = getClient(false, preview);
+    if (!client5) return null;
+    const data = await client5.fetch(
+      `*[_type == "collectionPage" && shopifyHandle == $handle][0]{
+        shopifyHandle,
+        collectionType,
+        seoTitle,
+        seoDescription,
+        h1,
+        introCopy,
+        "heroImage": heroImageOverride{ "url": asset->url, alt },
+        "faqs": faqs[]{ question, answer },
+        "related": relatedCollections[]{ handle, label }
+      }`,
+      { handle }
+    );
+    if (!data) return null;
+    const introHtml = data.introCopy && data.introCopy.length > 0 ? toHTML(data.introCopy) : null;
+    return {
+      shopifyHandle: data.shopifyHandle,
+      collectionType: data.collectionType ?? "category",
+      seoTitle: data.seoTitle ?? null,
+      seoDescription: data.seoDescription ?? null,
+      h1: data.h1 ?? null,
+      introHtml,
+      heroImageUrl: data.heroImage?.url ?? null,
+      heroImageAlt: data.heroImage?.alt ?? null,
+      faqs: (data.faqs ?? []).filter((f) => f?.question && f?.answer),
+      related: (data.related ?? []).filter((r) => r?.handle && r?.label)
+    };
+  } catch (err) {
+    console.error("[sanity] getCollectionPage error:", err);
+    return null;
+  }
+}
+async function getCollectionTypeMap() {
+  const out = /* @__PURE__ */ new Map();
+  if (!projectId) return out;
+  try {
+    const client5 = getClient();
+    if (!client5) return out;
+    const data = await client5.fetch(
+      `*[_type == "collectionPage"]{ shopifyHandle, collectionType }`
+    );
+    for (const row of data ?? []) {
+      if (row.shopifyHandle) {
+        out.set(row.shopifyHandle, row.collectionType ?? "category");
+      }
+    }
+    return out;
+  } catch (err) {
+    console.error("[sanity] getCollectionTypeMap error:", err);
+    return out;
+  }
+}
+async function getCollectionsHub(preview = false) {
+  if (!projectId) return null;
+  try {
+    const client5 = getClient(false, preview);
+    if (!client5) return null;
+    const data = await client5.fetch(
+      `*[_type == "collectionsHub"][0]{
+        seoTitle,
+        seoDescription,
+        h1,
+        introCopy,
+        "featured": featuredCollectionHandles[]{ handle, blurb },
+        "faqs": faqs[]{ question, answer }
+      }`
+    );
+    if (!data) return null;
+    const introHtml = data.introCopy && data.introCopy.length > 0 ? toHTML(data.introCopy) : null;
+    return {
+      seoTitle: data.seoTitle ?? null,
+      seoDescription: data.seoDescription ?? null,
+      h1: data.h1 ?? null,
+      introHtml,
+      featured: (data.featured ?? []).filter((f) => f?.handle).map((f) => ({ handle: f.handle, blurb: f.blurb ?? null })),
+      faqs: (data.faqs ?? []).filter((f) => f?.question && f?.answer)
+    };
+  } catch (err) {
+    console.error("[sanity] getCollectionsHub error:", err);
+    return null;
+  }
+}
+async function getPage(slug, preview = false) {
+  if (!projectId) {
+    console.warn("[sanity] getPage: no projectId");
+    return null;
+  }
+  try {
+    const client5 = getClient(false, preview);
+    if (!client5) {
+      console.warn("[sanity] getPage: no client");
+      return null;
+    }
+    console.log("[sanity] getPage fetching slug:", slug);
+    const result = await client5.fetch(
+      `*[_type == "page" && slug.current == $slug][0]{
+        _id,
+        title,
+        "slug": slug.current,
+        seoTitle,
+        seoDescription,
+        "sections": sections[] { ${CONTENT_BLOCKS_PROJECTION} }
+      }`,
+      { slug }
+    );
+    console.log("[sanity] getPage result:", result ? `found "${result.title}"` : "null");
+    return result;
+  } catch (err) {
+    console.error("[sanity] getPage error:", err);
+    return null;
+  }
+}
+async function getPageList() {
+  if (!projectId) return [];
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    return await client5.fetch(
+      `*[_type == "page"] | order(title asc) { title, "slug": slug.current }`
+    );
+  } catch (err) {
+    console.error("[sanity] getPageList error:", err);
+    return [];
+  }
+}
+async function getBlogHomepage(preview = false) {
+  if (!projectId) return null;
+  try {
+    const client5 = getClient(false, preview);
+    if (!client5) return null;
+    return await client5.fetch(
+      `*[_id == "singleton.blogHomepage"][0]{
+        heading, subtext,
+        "heroImageUrl": heroImage.asset->url,
+        heroImageAlt
+      }`
+    );
+  } catch (err) {
+    console.error("[sanity] getBlogHomepage error:", err);
+    return null;
+  }
+}
+function getCachedBlog(key, ttl) {
+  const entry = _blogCache.get(key);
+  if (entry && Date.now() - entry.ts < ttl) return entry.data;
+  return null;
+}
+function setCachedBlog(key, data) {
+  _blogCache.set(key, { data, ts: Date.now() });
+}
+function invalidateBlogCache() {
+  _blogCache.clear();
+}
+function calculateReadingTime(body) {
+  const text2 = (body ?? []).filter((b) => b._type === "block").map((b) => (b.children ?? []).map((c) => c.text ?? "").join("")).join(" ");
+  return Math.max(1, Math.ceil(text2.split(/\s+/).filter(Boolean).length / 200));
+}
+async function getBlogPosts(opts = {}) {
+  if (!projectId) return { posts: [], total: 0 };
+  const page = opts.page ?? 1;
+  const perPage = opts.perPage ?? 12;
+  const start = (page - 1) * perPage;
+  const end = start + perPage;
+  const cacheKey3 = `posts:${page}:${perPage}:${opts.category ?? ""}:${opts.featured ?? ""}:${opts.authorSlug ?? ""}:${opts.tag ?? ""}`;
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client5 = getClient();
+    if (!client5) return { posts: [], total: 0 };
+    let filter = `_type == "blogPost" && status == "published"`;
+    const params = {};
+    if (opts.category) {
+      filter += ` && category->slug.current == $category`;
+      params.category = opts.category;
+    }
+    if (opts.featured) {
+      filter += ` && featured == true`;
+    }
+    if (opts.authorSlug) {
+      filter += ` && author->slug.current == $authorSlug`;
+      params.authorSlug = opts.authorSlug;
+    }
+    if (opts.tag) {
+      filter += ` && $tag in tags`;
+      params.tag = opts.tag;
+    }
+    const [rawPosts, total] = await Promise.all([
+      client5.fetch(
+        `*[${filter}] | order(publishedAt desc) [${start}...${end}] { ${BLOG_POST_CARD_PROJECTION}, "bodyText": body[_type == "block"]{ "text": children[].text } }`,
+        params
+      ),
+      client5.fetch(`count(*[${filter}])`, params)
+    ]);
+    const posts = (rawPosts ?? []).map((p) => {
+      const words = (p.bodyText ?? []).flatMap((b) => (b.text ?? []).join("")).join(" ");
+      const readingTime = Math.max(1, Math.ceil(words.split(/\s+/).filter(Boolean).length / 200));
+      const { bodyText: _, ...rest } = p;
+      return { ...rest, readingTime };
+    });
+    const result = { posts, total };
+    setCachedBlog(cacheKey3, result);
+    return result;
+  } catch (err) {
+    console.error("[sanity] getBlogPosts error:", err);
+    return { posts: [], total: 0 };
+  }
+}
+async function getBlogPost(slug, preview = false) {
+  if (!projectId) return null;
+  const cacheKey3 = `post:${slug}`;
+  if (!preview) {
+    const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
+    if (cached2) return cached2;
+  }
+  try {
+    const client5 = getClient(false, preview);
+    if (!client5) return null;
+    const filter = preview ? `_type == "blogPost" && slug.current == $slug` : `_type == "blogPost" && slug.current == $slug && status == "published"`;
+    const raw = await client5.fetch(
+      `*[${filter}][0]{
+        ${BLOG_POST_CARD_PROJECTION},
+        _updatedAt,
+        body[]{
+          ...,
+          _type == "blogImage" => {
+            ...,
+            "image": image{
+              "url": asset->url, alt,
+              "lqip": asset->metadata.lqip,
+              "width": asset->metadata.dimensions.width,
+              "height": asset->metadata.dimensions.height
+            },
+            "secondImage": secondImage{
+              "url": asset->url,
+              "lqip": asset->metadata.lqip,
+              "width": asset->metadata.dimensions.width,
+              "height": asset->metadata.dimensions.height
+            }
+          }
+        },
+        seoTitle, seoDescription, noIndex,
+        "ogImageUrl": ogImage.asset->url,
+        tags,
+        "relatedPosts": relatedPosts[]->{
+          ${BLOG_POST_CARD_PROJECTION}
+        },
+        "autoRelated": *[_type == "blogPost" && status == "published" && category._ref == ^.category._ref && _id != ^._id] | order(publishedAt desc) [0...6] {
+          ${BLOG_POST_CARD_PROJECTION}
+        },
+        "prevPost": *[_type == "blogPost" && status == "published" && publishedAt < ^.publishedAt] | order(publishedAt desc) [0] {
+          title, "slug": slug.current,
+          "heroImageUrl": heroImage.asset->url,
+          "heroLqip": heroImage.asset->metadata.lqip,
+          "category": category->{ name, "slug": slug.current, color }
+        },
+        "nextPost": *[_type == "blogPost" && status == "published" && publishedAt > ^.publishedAt] | order(publishedAt asc) [0] {
+          title, "slug": slug.current,
+          "heroImageUrl": heroImage.asset->url,
+          "heroLqip": heroImage.asset->metadata.lqip,
+          "category": category->{ name, "slug": slug.current, color }
+        },
+        "extras": *[_type == "blogPostExtras" && post._ref == ^._id][0]{
+          deck,
+          sources[]{ label, url },
+          reviewedNote,
+          seriesOrder,
+          "series": series->{
+            title, "slug": slug.current, kicker,
+            "coverImageUrl": coverImage.asset->url,
+            "postCount": count(posts)
+          }
+        }
+      }`,
+      { slug }
+    );
+    if (!raw) return null;
+    const readingTime = calculateReadingTime(raw.body ?? []);
+    const manual = raw.relatedPosts ?? [];
+    const seen = /* @__PURE__ */ new Set([raw._id, ...manual.map((rp) => rp._id)]);
+    const topUp = (raw.autoRelated ?? []).filter((rp) => {
+      if (seen.has(rp._id)) return false;
+      seen.add(rp._id);
+      return true;
+    });
+    const relatedPosts = [...manual, ...topUp].slice(0, 3).map((rp) => ({
+      ...rp,
+      readingTime: 0
+      // don't fetch body for related posts
+    }));
+    const { autoRelated: _autoRelated, ...rest } = raw;
+    const post = { ...rest, readingTime, relatedPosts };
+    if (!preview) setCachedBlog(cacheKey3, post);
+    return post;
+  } catch (err) {
+    console.error("[sanity] getBlogPost error:", err);
+    return null;
+  }
+}
+async function getBlogAuthor(slug) {
+  if (!projectId) return null;
+  try {
+    const client5 = getClient();
+    if (!client5) return null;
+    const data = await client5.fetch(
+      `*[_type == "blogAuthor" && slug.current == $slug][0] {
+        name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role,
+        "joinedAt": coalesce(joinedAt, _createdAt),
+        "postCount": count(*[_type == "blogPost" && status == "published" && author._ref == ^._id])
+      }`,
+      { slug }
+    );
+    return data ?? null;
+  } catch (err) {
+    console.error("[sanity] getBlogAuthor error:", err);
+    return null;
+  }
+}
+async function getBlogCategories() {
+  if (!projectId) return [];
+  const cacheKey3 = "blogCategories";
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    const data = await client5.fetch(
+      `*[_type == "blogCategory"] | order(name asc) {
+        name, "slug": slug.current, description, color, seoTitle, seoDescription
+      }`
+    );
+    if (data) setCachedBlog(cacheKey3, data);
+    return data ?? [];
+  } catch (err) {
+    console.error("[sanity] getBlogCategories error:", err);
+    return [];
+  }
+}
+async function getNotebookSettings() {
+  if (!projectId) return null;
+  const cacheKey3 = "notebookSettings";
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client5 = getClient();
+    if (!client5) return null;
+    const data = await client5.fetch(
+      `*[_id == "singleton.notebookSettings"][0]{
+        kicker,
+        "mastheadImageUrl": mastheadImage.asset->url,
+        mastheadImageAlt,
+        newsletterHeading, newsletterBody, newsletterButtonLabel
+      }`
+    );
+    setCachedBlog(cacheKey3, data ?? null);
+    return data ?? null;
+  } catch (err) {
+    console.error("[sanity] getNotebookSettings error:", err);
+    return null;
+  }
+}
+async function getBlogCategoryExtras(slug) {
+  if (!projectId) return null;
+  const cacheKey3 = `categoryExtras:${slug}`;
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client5 = getClient();
+    if (!client5) return null;
+    const data = await client5.fetch(
+      `*[_type == "blogCategoryExtras" && category->slug.current == $slug][0]{
+        "headerImageUrl": headerImage.asset->url,
+        headerImageAlt,
+        "headerLqip": headerImage.asset->metadata.lqip,
+        intro, accent
+      }`,
+      { slug }
+    );
+    setCachedBlog(cacheKey3, data ?? null);
+    return data ?? null;
+  } catch (err) {
+    console.error("[sanity] getBlogCategoryExtras error:", err);
+    return null;
+  }
+}
+async function getBlogSeries(slug) {
+  if (!projectId) return null;
+  const cacheKey3 = `series:${slug}`;
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client5 = getClient();
+    if (!client5) return null;
+    const raw = await client5.fetch(
+      `*[_type == "blogSeries" && slug.current == $slug][0]{ ${BLOG_SERIES_PROJECTION} }`,
+      { slug }
+    );
+    if (!raw) return null;
+    const series = {
+      ...raw,
+      posts: (raw.posts ?? []).filter((p) => p && p.status === "published").map(({ status: _s, ...p }) => ({ ...p, readingTime: 0 }))
+    };
+    setCachedBlog(cacheKey3, series);
+    return series;
+  } catch (err) {
+    console.error("[sanity] getBlogSeries error:", err);
+    return null;
+  }
+}
+async function getAllBlogSeries() {
+  if (!projectId) return [];
+  const cacheKey3 = "allSeries";
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    const raw = await client5.fetch(
+      `*[_type == "blogSeries" && count(posts) > 0] | order(_createdAt desc) { ${BLOG_SERIES_PROJECTION} }`
+    );
+    const series = (raw ?? []).map((s) => ({
+      ...s,
+      posts: (s.posts ?? []).filter((p) => p && p.status === "published").map(({ status: _s, ...p }) => ({ ...p, readingTime: 0 }))
+    }));
+    setCachedBlog(cacheKey3, series);
+    return series;
+  } catch (err) {
+    console.error("[sanity] getAllBlogSeries error:", err);
+    return [];
+  }
+}
+async function getGlossaryTerms() {
+  if (!projectId) return [];
+  const cacheKey3 = "glossaryTerms";
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    const data = await client5.fetch(
+      `*[_type == "blogGlossaryTerm"] | order(term asc) {
+        term, "slug": slug.current, definition, collectionHandle,
+        "relatedPost": relatedPost->{ title, "slug": slug.current },
+        "seeAlso": seeAlso[]->{ term, "slug": slug.current }
+      }`
+    );
+    if (data) setCachedBlog(cacheKey3, data);
+    return data ?? [];
+  } catch (err) {
+    console.error("[sanity] getGlossaryTerms error:", err);
+    return [];
+  }
+}
+async function searchBlogPosts(q, limit = 24) {
+  if (!projectId) return [];
+  const query = q.trim();
+  if (!query) return [];
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    const rawPosts = await client5.fetch(
+      `*[_type == "blogPost" && status == "published" && (
+        title match $q || excerpt match $q || $plain in tags
+      )] | order(publishedAt desc) [0...${limit}] { ${BLOG_POST_CARD_PROJECTION} }`,
+      { q: `${query}*`, plain: query.toLowerCase() }
+    );
+    return (rawPosts ?? []).map((p) => ({ ...p, readingTime: 0 }));
+  } catch (err) {
+    console.error("[sanity] searchBlogPosts error:", err);
+    return [];
+  }
+}
+async function getBlogPostsForSitemap() {
+  if (!projectId) return [];
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    return await client5.fetch(
+      `*[_type == "blogPost" && status == "published" && noIndex != true] | order(publishedAt desc) {
+        "slug": slug.current, publishedAt, _updatedAt, title,
+        "description": coalesce(seoDescription, excerpt)
+      }`
+    );
+  } catch (err) {
+    console.error("[sanity] getBlogPostsForSitemap error:", err);
+    return [];
+  }
+}
+async function createEmmaRailDraft(input) {
+  const writeClient = getClient(true);
+  if (!writeClient) throw new Error("Sanity not configured");
+  const safeDealId = input.sourceDealId.replace(/^gid:\/\/shopify\/Product\//, "").replace(/[^a-zA-Z0-9_-]/g, "-");
+  const baseId = `emmaRail-${safeDealId}-${input.target}-${Date.now()}`;
+  const draftId = `drafts.${baseId}`;
+  const doc = {
+    _id: draftId,
+    _type: "emmaCuratedRail",
+    active: true,
+    status: "draft",
+    order: input.order ?? 50,
+    heading: input.heading,
+    target: input.target,
+    sourceDealId: input.sourceDealId,
+    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    productHandles: input.productHandles.map((handle, i) => ({
+      _type: "productRef",
+      _key: `ph-${i}-${Math.random().toString(36).slice(2, 8)}`,
+      handle
+    })),
+    layout: input.layout ?? "carousel",
+    bgStyle: input.bgStyle ?? "cream"
+  };
+  if (input.eyebrow !== void 0) doc.eyebrow = input.eyebrow;
+  if (input.emmaAside !== void 0) doc.emmaAside = input.emmaAside;
+  if (input.ctaLink !== void 0) doc.ctaLink = input.ctaLink;
+  if (input.ctaLabel !== void 0) doc.ctaLabel = input.ctaLabel;
+  if (input.rationale !== void 0) doc.rationale = input.rationale;
+  await writeClient.create(doc);
+  return { _id: draftId };
+}
+async function patchEmmaRail(id, patch) {
+  const writeClient = getClient(true);
+  if (!writeClient) throw new Error("Sanity not configured");
+  const set = { ...patch };
+  if (patch.productHandles) {
+    set.productHandles = patch.productHandles.map((handle, i) => ({
+      _type: "productRef",
+      _key: `ph-${i}-${Math.random().toString(36).slice(2, 8)}`,
+      handle
+    }));
+  }
+  await writeClient.patch(id).set(set).commit();
+  invalidateCache("sanity:homepage");
+}
+async function publishEmmaRailDraft(draftId) {
+  const writeClient = getClient(true);
+  if (!writeClient) throw new Error("Sanity not configured");
+  if (!draftId.startsWith("drafts.")) {
+    await writeClient.patch(draftId).set({ status: "live" }).commit();
+    invalidateCache("sanity:homepage");
+    return { _id: draftId };
+  }
+  const publishedId = draftId.slice("drafts.".length);
+  const draft = await writeClient.getDocument(draftId);
+  if (!draft) throw new Error(`Draft not found: ${draftId}`);
+  const { _id: _omit, _rev: _omitRev, ...rest } = draft;
+  await writeClient.transaction().createOrReplace({ ...rest, _id: publishedId, status: "live" }).delete(draftId).commit();
+  invalidateCache("sanity:homepage");
+  return { _id: publishedId };
+}
+async function addRailRefToHomepage(railId) {
+  const writeClient = getClient(true);
+  if (!writeClient) throw new Error("Sanity not configured");
+  await writeClient.createIfNotExists({
+    _id: "singleton.homepage",
+    _type: "homepageSections",
+    sections: []
+  });
+  await writeClient.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{
+    _type: "emmaCuratedRailRef",
+    _key: `rail-${railId}-${Date.now()}`,
+    _ref: railId
+  }]).commit();
+  invalidateCache("sanity:homepage");
+}
+async function addRailRefToProductPage(handle, railId) {
+  const writeClient = getClient(true);
+  if (!writeClient) throw new Error("Sanity not configured");
+  const doc = await writeClient.fetch(
+    `*[_type == "productPage" && shopifyHandle == $handle][0]{ _id }`,
+    { handle }
+  );
+  if (!doc) throw new Error(`No productPage for handle "${handle}"`);
+  await writeClient.patch(doc._id).setIfMissing({ contentBlocks: [] }).append("contentBlocks", [{
+    _type: "emmaCuratedRailRef",
+    _key: `rail-${railId}-${Date.now()}`,
+    _ref: railId
+  }]).commit();
+}
+async function removeRailRefFromHomepage(railId) {
+  const writeClient = getClient(true);
+  if (!writeClient) throw new Error("Sanity not configured");
+  await writeClient.patch("singleton.homepage").unset([`sections[_ref=="${railId}"]`]).commit();
+  invalidateCache("sanity:homepage");
+}
+async function getRailsByDealId(dealId, opts) {
+  if (!projectId) return [];
+  const writeClient = getClient(true);
+  if (!writeClient) return [];
+  let filter = `_type == "emmaCuratedRail" && sourceDealId == $dealId && !(_id in path("drafts.**"))`;
+  if (opts?.target) filter += ` && target == "${opts.target}"`;
+  if (opts?.status) filter += ` && status == "${opts.status}"`;
+  return writeClient.fetch(
+    `*[${filter}]{ _id, target, status }`,
+    { dealId }
+  );
+}
+async function archiveHomepageRailsForDeal(dealId) {
+  const writeClient = getClient(true);
+  if (!writeClient) return { archived: [] };
+  const homepageTargeted = await getRailsByDealId(dealId, { target: "homepage", status: "live" });
+  const allLiveForDeal = await getRailsByDealId(dealId, { status: "live" });
+  const homepageRefIds = await writeClient.fetch(
+    `*[_id == "singleton.homepage"][0].sections[defined(_ref)]._ref`
+  ).catch(() => []);
+  const homepageRefSet = new Set(homepageRefIds);
+  const leaked = allLiveForDeal.filter((r) => homepageRefSet.has(r._id) && !homepageTargeted.find((h) => h._id === r._id));
+  const toArchive = [...homepageTargeted, ...leaked];
+  if (!toArchive.length) return { archived: [] };
+  const archived = [];
+  for (const r of toArchive) {
+    try {
+      await writeClient.patch(r._id).set({ status: "archived", active: false }).commit();
+      await removeRailRefFromHomepage(r._id);
+      archived.push(r._id);
+    } catch (err) {
+      console.error("[sanity] archiveHomepageRailsForDeal failed for", r._id, err);
+    }
+  }
+  invalidateCache("sanity:homepage");
+  return { archived };
+}
+async function unarchiveHomepageRailsForDeal(dealId) {
+  const writeClient = getClient(true);
+  if (!writeClient) return { unarchived: [] };
+  const rails = await getRailsByDealId(dealId, { target: "homepage", status: "archived" });
+  if (!rails.length) return { unarchived: [] };
+  const unarchived = [];
+  for (const r of rails) {
+    try {
+      await writeClient.patch(r._id).set({ status: "live", active: true }).commit();
+      await addRailRefToHomepage(r._id);
+      unarchived.push(r._id);
+    } catch (err) {
+      console.error("[sanity] unarchiveHomepageRailsForDeal failed for", r._id, err);
+    }
+  }
+  invalidateCache("sanity:homepage");
+  return { unarchived };
+}
+async function getRailDraftsForDeal(dealId) {
+  if (!projectId) return [];
+  const writeClient = getClient(true, false, "raw");
+  if (!writeClient) return [];
+  return writeClient.fetch(
+    `*[_type == "emmaCuratedRail" && sourceDealId == $dealId] | order(generatedAt desc){
+      _id, status, active, order, heading, eyebrow, emmaAside, target,
+      "productHandles": productHandles[].handle,
+      layout, bgStyle, ctaLink, ctaLabel, sourceDealId, generatedAt, rationale
+    }`,
+    { dealId }
+  );
+}
+async function getProductHandlesForSitemap() {
+  if (!projectId) return [];
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    return await client5.fetch(
+      `*[_type == "productPage" && defined(shopifyHandle) && (!defined(hiddenUntilLive) || hiddenUntilLive != true)] | order(title asc) {
+        "handle": shopifyHandle, _updatedAt
+      }`
+    );
+  } catch (err) {
+    console.error("[sanity] getProductHandlesForSitemap error:", err);
+    return [];
+  }
+}
+async function getHomeConfig() {
+  if (!projectId) return null;
+  return cached("sanity:home-config", 300, async () => {
+    try {
+      const client5 = getClient();
+      if (!client5) return null;
+      const raw = await client5.fetch(HOME_CONFIG_GROQ);
+      if (!raw) return null;
+      return {
+        activeVariant: raw.activeVariant ?? "off",
+        welcomeBackEnabled: raw.welcomeBackEnabled ?? true,
+        emmaCopyOverrides: raw.emmaCopyOverrides ?? {},
+        analyticsLabel: raw.analyticsLabel ?? ""
+      };
+    } catch (err) {
+      console.error("[sanity] getHomeConfig error:", err);
+      return null;
+    }
+  });
+}
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ;
+var init_sanity_server = __esm({
+  "app/lib/sanity.server.ts"() {
+    "use strict";
+    init_kv_server();
+    init_tag_normalize();
+    CONTENT_BLOCKS_PROJECTION = `
+  _type, _key, active, order,
+  // announcementBar
+  messages, rotationIntervalMs, bgStyle,
+  // promoBanner
+  headline, subtext, ctaLabel, ctaLink, layout,
+  "image": image{ "url": asset->url, alt },
+  // editorialTiles
+  eyebrow, heading,
+  "tiles": tiles[]{
+    label, body, link, linkLabel, emoji,
+    "image": image{ "url": asset->url, alt }
+  },
+  // wayfinderMosaic \u2014 shares eyebrow/heading (above) plus its own emphasis word.
+  // "tiles" above is editorialTiles-shaped (no _key) \u2014 wayfinderMosaic tiles need
+  // _key (the image bridge addresses tiles by _key), so they get their own field
+  // name to avoid colliding with the editorialTiles projection. select() keeps
+  // every other block type null-safe.
+  emphasis,
+  "wayfinderTiles": select(
+    _type == "wayfinderMosaic" => tiles[]{
+      _key, label, link, emmaAside,
+      "image": image{ "url": asset->url, alt }
+    }
+  ),
+  "promo": select(
+    _type == "wayfinderMosaic" => promo{
+      eyebrow, heading, emphasis, body, ctaLabel, ctaLink,
+      "image": image{ "url": asset->url, alt }
+    }
+  ),
+  // categoryGrid + testimonials use inline item objects; trustBar uses references.
+  // Keep them in separate fields \u2014 combining them via select() silently null-derefs
+  // the trustBar references (GROQ quirk). TrustBarBlock reads trustItems.
+  "items": select(
+    _type == "categoryGrid" => items[]{ label, link, emoji, "image": image{ "url": asset->url, alt } },
+    _type == "testimonials" => items[]{ quote, author, rating, verified }
+  ),
+  "trustItems": select(
+    _type == "trustBar" => items[]->{ icon, headline, subheadline, active }
+  ),
+  columns,
+  // productCarousel
+  source, shopifyTag, collectionHandle,
+  "productHandles": productHandles[]{ handle },
+  productLimit, layout,
+  // playTogetherBanner
+  body, imagePosition,
+  // brandLogoWall
+  "logos": logos[]{ brand, emoji, link, "logo": logo{ "url": asset->url, alt } },
+  // richText \u2014 resolve inline image assets; body is also used by playTogetherBanner (plain text)
+  "body": select(
+    _type == "richText" => body[]{ ..., _type == "image" => { ..., "asset": { "url": asset->url } } },
+    body
+  ),
+  bgColor, maxWidth,
+  // editorBio \u2014 dereference the editor singleton at query time so the block
+  // always renders live data without a second round-trip.
+  variant, headingOverride, hideLongBio, hideSocials, showCta,
+  "editor": select(
+    _type == "editorBio" => *[_id == "singleton.editor"][0]{
+      name, role,
+      "photoUrl": photo.asset->url,
+      "photoAlt": photo.alt,
+      shortBio, longBio,
+      "picksSince": picksSince,
+      instagram, email
+    }
+  ),
+`;
+    projectId = process.env["SANITY_PROJECT_ID"];
+    dataset = process.env["SANITY_DATASET"] ?? "production";
+    apiVersion = "2024-10-01";
+    SECTIONS_WITH_REFS_PROJECTION = `
+  sections[]{
+    _key,
+    ...select(
+      // Named reference array items (e.g. emmaCuratedRailRef) store _type as the
+      // custom name, not "reference" \u2014 so match by the presence of _ref instead.
+      defined(_ref) => @->{
+        _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
+        "productHandles": productHandles[]{ handle },
+        layout, bgStyle, ctaLink, ctaLabel
+      },
+      { ${CONTENT_BLOCKS_PROJECTION} }
+    )
+  }[active == true && (status == "live" || !defined(status))]
+`;
+    HOMEPAGE_GROQ = `
+  *[_id == "singleton.homepage"][0]{
+    _id,
+    "sections": ${SECTIONS_WITH_REFS_PROJECTION}
+  }
+`;
+    EMMA_HERO_GROQ = `
+{
+  "settings": *[_id == "singleton.emmaHero"][0]{
+    heroVariant, eyebrow, headline, body, aside, pullQuote, pairProductHandle
+  },
+  "cta": *[_id == "singleton.emmaHeroStorefront"][0]{
+    primaryCtaLabel, primaryCtaLink, featuredProductHandle
+  }
+}
+`;
+    EDITOR_GROQ = `
+  *[_id == "singleton.editor"][0]{
+    name,
+    role,
+    "photoUrl": photo.asset->url,
+    "photoAlt": photo.alt,
+    shortBio,
+    longBio,
+    "picksSince": picksSince,
+    instagram,
+    email
+  }
+`;
+    EMMA_PRESETS_GROQ = `
+  *[_type == "emmaPreset"] | order(order asc, label asc){
+    label, "slug": slug.current, narratorCopy, moodTags, audienceTags, mattersTags, priceMax, featured, order
+  }
+`;
+    HOMEPAGE_DOC_ID = "singleton.homepage";
+    _blogCache = /* @__PURE__ */ new Map();
+    BLOG_CACHE_TTL = 6e4;
+    BLOG_CAT_CACHE_TTL = 3e5;
+    BLOG_POST_CARD_PROJECTION = `
+  _id, title, "slug": slug.current, excerpt, publishedAt, featured,
+  "heroImageUrl": heroImage.asset->url, heroImageAlt,
+  "heroLqip": heroImage.asset->metadata.lqip,
+  "heroWidth": heroImage.asset->metadata.dimensions.width,
+  "heroHeight": heroImage.asset->metadata.dimensions.height,
+  "author": author->{ name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role, socialLinks },
+  "category": category->{ name, "slug": slug.current, color }
+`;
+    BLOG_SERIES_PROJECTION = `
+  title, "slug": slug.current, kicker, description,
+  "coverImageUrl": coverImage.asset->url,
+  coverImageAlt,
+  "coverLqip": coverImage.asset->metadata.lqip,
+  "posts": posts[]->{ ${BLOG_POST_CARD_PROJECTION}, status }
+`;
+    HOME_CONFIG_GROQ = `
+  *[_id == "singleton.homeConfig"][0]{
+    activeVariant,
+    welcomeBackEnabled,
+    emmaCopyOverrides,
+    analyticsLabel
+  }
+`;
+  }
+});
+
 // app/lib/shopify.server.ts
 var shopify_server_exports = {};
 __export(shopify_server_exports, {
@@ -2077,6 +3477,7 @@ __export(shopify_server_exports, {
   getProductsByHandles: () => getProductsByHandles,
   getProductsByIds: () => getProductsByIds,
   getProductsByTag: () => getProductsByTag,
+  getProductsByTagPaged: () => getProductsByTagPaged,
   getProductsByTypesOrTag: () => getProductsByTypesOrTag,
   getProductsForMerge: () => getProductsForMerge,
   getRecentVaultDeals: () => getRecentVaultDeals,
@@ -2122,11 +3523,11 @@ __export(shopify_server_exports, {
   uploadThumbnailToProduct: () => uploadThumbnailToProduct
 });
 import crypto from "node:crypto";
-import { toHTML } from "@portabletext/to-html";
+import { toHTML as toHTML2 } from "@portabletext/to-html";
 function ptToHtml(value) {
   if (!value) return void 0;
   if (typeof value === "string") return value;
-  if (Array.isArray(value) && value.length > 0) return toHTML(value);
+  if (Array.isArray(value) && value.length > 0) return toHTML2(value);
   return void 0;
 }
 async function storefront(query, variables) {
@@ -2704,7 +4105,7 @@ async function getDealByShopifyIdUncached(id) {
 async function getDealByHandle(handle) {
   return cached(`shopify:deal:byhandle:${handle}`, READ_TTL, async () => {
     const timeout = new Promise(
-      (resolve2) => setTimeout(() => resolve2(null), 5e3)
+      (resolve3) => setTimeout(() => resolve3(null), 5e3)
     );
     const fetch2 = storefront(`
       query GetDealByHandle($handle: String!) {
@@ -3209,6 +4610,44 @@ async function getCollectionDeals(handle, page = 1, limit = 20, sort = "manual")
   return {
     deals: data.collection.products.edges.map((e) => nodeToVaultDeal(e.node)),
     hasNextPage: data.collection.products.pageInfo.hasNextPage
+  };
+}
+async function getProductsByTagPaged(tag, page = 1, limit = 20) {
+  const query = `tag:${tag}`;
+  const cacheHandle = `tag:${tag}`;
+  const cacheSort = "newest";
+  let after = null;
+  if (page > 1) {
+    const cachedCursor = await kvGet(KV_KEYS.collectionCursor(cacheHandle, page, cacheSort));
+    if (cachedCursor) {
+      after = cachedCursor;
+    } else {
+      for (let p = 1; p < page; p++) {
+        const skip = await storefront(`
+          query SkipTagPage($query: String!, $first: Int!, $after: String) {
+            products(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+              edges { cursor }
+            }
+          }
+        `, { query, first: limit, after });
+        const edges = skip.products.edges;
+        if (!edges.length) return { deals: [], hasNextPage: false };
+        after = edges[edges.length - 1].cursor;
+        await kvSet(KV_KEYS.collectionCursor(cacheHandle, p + 1, cacheSort), after, COLLECTION_CURSOR_TTL);
+      }
+    }
+  }
+  const data = await storefront(`
+    query GetProductsByTagPaged($query: String!, $first: Int!, $after: String) {
+      products(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+        pageInfo { hasNextPage }
+        edges { cursor node { ${PRODUCT_CARD_FRAGMENT} } }
+      }
+    }
+  `, { query, first: limit, after });
+  return {
+    deals: data.products.edges.map((e) => nodeToVaultDeal(e.node)),
+    hasNextPage: data.products.pageInfo.hasNextPage
   };
 }
 async function getMainMenu() {
@@ -3920,6 +5359,12 @@ async function activateShopifyProduct(numericId) {
     product: { id, status: "active" }
   });
   await publishProductToXdipxChannels(id);
+  try {
+    const { markProductPageLive: markProductPageLive2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
+    await markProductPageLive2(id);
+  } catch (err) {
+    console.warn(`[activateShopifyProduct] markProductPageLive failed for ${id} (non-blocking):`, err instanceof Error ? err.message : err);
+  }
 }
 async function activateProductInventoryAtLocations(numericId) {
   const id = numericId.replace("gid://shopify/Product/", "");
@@ -6654,73 +8099,18 @@ async function getApprovalMode() {
   }
   return "balanced";
 }
-async function recomputeVariant(params) {
-  const { variantId, trigger } = params;
-  let matchData = null;
-  try {
-    const gidNum = variantId.replace(/[^0-9]/g, "");
-    const matches = await findVariantsBySkus([]);
-    const data = await (async () => {
-      const { adminGraphQL: adminGraphQL2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
-      const result = await adminGraphQL2(
-        `query V($id:ID!){productVariant(id:$id){id sku title price compareAtPrice
-          inventoryItem{unitCost{amount}}
-          product{id handle title vendor productType
-            metafields(keys:["xdipx.nalpac_sku","xdipx.wholesale_cost","xdipx.map_price","xdipx.original_price","xdipx.map_restricted","xdipx.discontinued_at"],first:10){nodes{namespace key value}}}}}`,
-        { id: variantId }
-      );
-      return result.productVariant;
-    })();
-    if (!data) return { status: "skipped_no_change", auditId: null, applied: false, error: "variant not found" };
-    if (TEST_SKU_PREFIX.test(data.sku ?? "")) {
-      return { status: "skipped_no_change", auditId: null, applied: false, error: "test SKU excluded" };
-    }
-    const mfMap = {};
-    for (const mf of data.product.metafields.nodes) {
-      mfMap[mf.key] = mf.value;
-    }
-    matchData = {
-      productId: data.product.id.replace("gid://shopify/Product/", ""),
-      productGid: data.product.id,
-      handle: data.product.handle,
-      title: data.product.title,
-      vendor: data.product.vendor,
-      productType: data.product.productType,
-      variant: {
-        variantId,
-        sku: data.sku ?? "",
-        title: data.title,
-        price: parseFloat(data.price),
-        compareAtPrice: data.compareAtPrice != null ? parseFloat(data.compareAtPrice) : null,
-        inventoryItemId: null,
-        unitCost: data.inventoryItem?.unitCost?.amount != null ? parseFloat(data.inventoryItem.unitCost.amount) : null
-      },
-      metafields: {
-        nalpacSku: mfMap["nalpac_sku"] ?? null,
-        wholesaleCost: mfMap["wholesale_cost"] ? parseFloat(mfMap["wholesale_cost"]) : null,
-        mapPrice: mfMap["map_price"] ? parseFloat(mfMap["map_price"]) : null,
-        originalPrice: mfMap["original_price"] ? parseFloat(mfMap["original_price"]) : null,
-        mapRestricted: mfMap["map_restricted"] === "true",
-        discontinuedAt: mfMap["discontinued_at"] ? new Date(mfMap["discontinued_at"]) : null
-      }
-    };
-    void matches;
-    void gidNum;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { status: "skipped_no_change", auditId: null, applied: false, error: `shopify fetch: ${msg}` };
-  }
-  const cost = matchData.variant.unitCost ?? matchData.metafields.wholesaleCost;
-  const map = matchData.metafields.mapPrice;
-  const msrp = matchData.metafields.originalPrice;
-  const oldSell = matchData.variant.price;
-  const oldCompare = matchData.variant.compareAtPrice;
-  const productType = matchData.productType ?? null;
-  const sku = matchData.variant.sku;
+async function recomputeFromData(product, variant, ctx) {
+  const { variantId } = variant;
+  const { trigger, mode, thresholds } = ctx;
+  const cost = variant.unitCost ?? product.metafields.wholesaleCost;
+  const map = product.metafields.mapPrice;
+  const msrp = product.metafields.originalPrice;
+  const oldSell = variant.price;
+  const oldCompare = variant.compareAtPrice;
+  const productType = product.productType;
+  const sku = variant.sku;
   const cfg = await resolvePricingConfig(productType);
   const group = await getGroupForProductType(productType);
-  const mode = await getApprovalMode();
-  const thresholds = await getModeThresholds();
   let velocityBucket;
   let effectiveCfg = cfg;
   if (cfg.velocity_modifier_enabled) {
@@ -6733,7 +8123,7 @@ async function recomputeVariant(params) {
   let newCompare = null;
   let daysDisc;
   if (isDiscontinued2) {
-    const discontinuedAt = matchData.metafields.discontinuedAt ?? null;
+    const discontinuedAt = product.metafields.discontinuedAt ?? null;
     daysDisc = discontinuedAt ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 864e5)) : 0;
     const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg });
     if (result) {
@@ -6836,6 +8226,54 @@ async function recomputeVariant(params) {
     }
   }
   return { status, auditId, applied, ...applyError ? { error: applyError } : {} };
+}
+async function recomputeVariant(params) {
+  const { variantId, trigger } = params;
+  let product = null;
+  let variant = null;
+  try {
+    const data = await (async () => {
+      const { adminGraphQL: adminGraphQL2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+      const result = await adminGraphQL2(
+        `query V($id:ID!){productVariant(id:$id){id sku title price compareAtPrice
+          inventoryItem{unitCost{amount}}
+          product{id handle title vendor productType
+            metafields(keys:["xdipx.nalpac_sku","xdipx.wholesale_cost","xdipx.map_price","xdipx.original_price","xdipx.map_restricted","xdipx.discontinued_at"],first:10){nodes{namespace key value}}}}}`,
+        { id: variantId }
+      );
+      return result.productVariant;
+    })();
+    if (!data) return { status: "skipped_no_change", auditId: null, applied: false, error: "variant not found" };
+    if (TEST_SKU_PREFIX.test(data.sku ?? "")) {
+      return { status: "skipped_no_change", auditId: null, applied: false, error: "test SKU excluded" };
+    }
+    const mfMap = {};
+    for (const mf of data.product.metafields.nodes) {
+      mfMap[mf.key] = mf.value;
+    }
+    product = {
+      productType: data.product.productType,
+      metafields: {
+        wholesaleCost: mfMap["wholesale_cost"] ? parseFloat(mfMap["wholesale_cost"]) : null,
+        mapPrice: mfMap["map_price"] ? parseFloat(mfMap["map_price"]) : null,
+        originalPrice: mfMap["original_price"] ? parseFloat(mfMap["original_price"]) : null,
+        discontinuedAt: mfMap["discontinued_at"] ? new Date(mfMap["discontinued_at"]) : null
+      }
+    };
+    variant = {
+      variantId,
+      sku: data.sku ?? "",
+      price: parseFloat(data.price),
+      compareAtPrice: data.compareAtPrice != null ? parseFloat(data.compareAtPrice) : null,
+      unitCost: data.inventoryItem?.unitCost?.amount != null ? parseFloat(data.inventoryItem.unitCost.amount) : null
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { status: "skipped_no_change", auditId: null, applied: false, error: `shopify fetch: ${msg}` };
+  }
+  const mode = await getApprovalMode();
+  const thresholds = await getModeThresholds();
+  return recomputeFromData(product, variant, { trigger, mode, thresholds });
 }
 async function dryRunRuleChange(opts) {
   const { overrides } = opts;
@@ -6962,15 +8400,15 @@ async function recomputeCatalog(opts) {
     durationMs: 0
   };
   const products = await bulkFetchProductsForPricing2();
+  const mode = await getApprovalMode();
+  const thresholds = await getModeThresholds();
+  const ctx = { trigger: opts.trigger, mode, thresholds };
   for (const product of products) {
     for (const variant of product.variants) {
       if (TEST_SKU_PREFIX.test(variant.sku ?? "")) continue;
       counts.total++;
       try {
-        const result = await recomputeVariant({
-          variantId: variant.variantId,
-          trigger: opts.trigger
-        });
+        const result = await recomputeFromData(product, variant, ctx);
         if (result.error) counts.errors++;
         else if (result.status === "auto_applied") counts.autoApplied++;
         else if (result.status === "pending") counts.pending++;
@@ -7095,12 +8533,12 @@ __export(meta_capi_server_exports, {
   hashPII: () => hashPII,
   sendCapiEvent: () => sendCapiEvent
 });
-import { createHash, randomUUID } from "node:crypto";
+import { createHash as createHash2, randomUUID } from "node:crypto";
 function generateEventId() {
   return randomUUID();
 }
 function hashPII(value) {
-  return createHash("sha256").update(value.trim().toLowerCase()).digest("hex");
+  return createHash2("sha256").update(value.trim().toLowerCase()).digest("hex");
 }
 function fireCapiEvent(request, eventName, opts) {
   const eventId = generateEventId();
@@ -7176,1365 +8614,6 @@ var init_meta_capi_server = __esm({
     "use strict";
     init_consent_server();
     init_attribution_server();
-  }
-});
-
-// app/lib/sanity.server.ts
-var sanity_server_exports = {};
-__export(sanity_server_exports, {
-  addCmsBlock: () => addCmsBlock,
-  addRailRefToHomepage: () => addRailRefToHomepage,
-  addRailRefToProductPage: () => addRailRefToProductPage,
-  archiveHomepageRailsForDeal: () => archiveHomepageRailsForDeal,
-  calculateReadingTime: () => calculateReadingTime,
-  createEmmaRailDraft: () => createEmmaRailDraft,
-  getAllBlogSeries: () => getAllBlogSeries,
-  getBlogAuthor: () => getBlogAuthor,
-  getBlogCategories: () => getBlogCategories,
-  getBlogCategoryExtras: () => getBlogCategoryExtras,
-  getBlogHomepage: () => getBlogHomepage,
-  getBlogPost: () => getBlogPost,
-  getBlogPosts: () => getBlogPosts,
-  getBlogPostsForSitemap: () => getBlogPostsForSitemap,
-  getBlogSeries: () => getBlogSeries,
-  getCollectionPage: () => getCollectionPage,
-  getCollectionTypeMap: () => getCollectionTypeMap,
-  getCollectionsHub: () => getCollectionsHub,
-  getEditor: () => getEditor,
-  getEmmaHeroSettings: () => getEmmaHeroSettings,
-  getEmmaPersona: () => getEmmaPersona,
-  getEmmaPresets: () => getEmmaPresets,
-  getGlossaryTerms: () => getGlossaryTerms,
-  getHomeConfig: () => getHomeConfig,
-  getHomepageDocRaw: () => getHomepageDocRaw,
-  getHomepageSections: () => getHomepageSections,
-  getNotebookSettings: () => getNotebookSettings,
-  getPage: () => getPage,
-  getPageList: () => getPageList,
-  getPdpTrustBar: () => getPdpTrustBar,
-  getPreviewImagesByHandles: () => getPreviewImagesByHandles,
-  getProductFaqs: () => getProductFaqs,
-  getProductHandlesForSitemap: () => getProductHandlesForSitemap,
-  getProductPageBlocks: () => getProductPageBlocks,
-  getRailDraftsForDeal: () => getRailDraftsForDeal,
-  getRailsByDealId: () => getRailsByDealId,
-  getSiteSettings: () => getSiteSettings,
-  invalidateBlogCache: () => invalidateBlogCache,
-  invalidateCmsCache: () => invalidateCmsCache,
-  isPreviewRequest: () => isPreviewRequest,
-  patchEmmaRail: () => patchEmmaRail,
-  publishEmmaRailDraft: () => publishEmmaRailDraft,
-  removeCmsBlock: () => removeCmsBlock,
-  removeRailRefFromHomepage: () => removeRailRefFromHomepage,
-  restoreHomepageDoc: () => restoreHomepageDoc,
-  sanityImageRef: () => sanityImageRef,
-  searchBlogPosts: () => searchBlogPosts,
-  unarchiveHomepageRailsForDeal: () => unarchiveHomepageRailsForDeal,
-  updateCmsBlock: () => updateCmsBlock,
-  updateCmsPromoImage: () => updateCmsPromoImage,
-  updateCmsTileImage: () => updateCmsTileImage,
-  uploadBufferToSanity: () => uploadBufferToSanity,
-  upsertAnnouncementBar: () => upsertAnnouncementBar,
-  upsertEmmaPick: () => upsertEmmaPick,
-  upsertProductPage: () => upsertProductPage
-});
-import { createClient } from "@sanity/client";
-import { createHash as createHash2 } from "node:crypto";
-import { toHTML as toHTML2 } from "@portabletext/to-html";
-function withSanityKey(items, hashOf) {
-  const seen = /* @__PURE__ */ new Set();
-  return items.map((item, i) => {
-    const base = createHash2("sha1").update(hashOf(item)).digest("hex").slice(0, 12);
-    let key = base;
-    if (seen.has(key)) key = `${base}${i.toString(36)}`;
-    seen.add(key);
-    return { ...item, _key: key };
-  });
-}
-function getClient(withToken = false, preview = false, perspective) {
-  if (!projectId) return null;
-  const resolvedPerspective = perspective ?? (preview ? "previewDrafts" : "published");
-  return createClient({ projectId, dataset, apiVersion, useCdn: !withToken && !preview, token: process.env["SANITY_API_TOKEN"], perspective: resolvedPerspective });
-}
-function isPreviewRequest(request) {
-  const cookie = request.headers.get("cookie") ?? "";
-  return cookie.includes("__sanity_preview=1");
-}
-async function getEmmaHeroSettings(preview = false) {
-  if (!projectId) return null;
-  const fetcher = async () => {
-    try {
-      const client4 = getClient(false, preview);
-      if (!client4) return null;
-      const raw = await client4.fetch(EMMA_HERO_GROQ);
-      if (!raw?.settings && !raw?.cta) return null;
-      return { ...raw.settings, ...raw.cta };
-    } catch (err) {
-      console.error("[sanity] getEmmaHeroSettings error:", err);
-      return null;
-    }
-  };
-  if (preview) return fetcher();
-  return cached("sanity:emma-hero", 60, fetcher);
-}
-async function getEditor(preview = false) {
-  if (!projectId) return null;
-  const fetcher = async () => {
-    try {
-      const client4 = getClient(false, preview);
-      if (!client4) return null;
-      const raw = await client4.fetch(EDITOR_GROQ);
-      if (!raw?.name) return null;
-      return {
-        name: raw.name,
-        role: raw.role ?? "Editor",
-        photoUrl: raw.photoUrl ?? null,
-        photoAlt: raw.photoAlt ?? null,
-        shortBio: raw.shortBio ?? null,
-        longBio: raw.longBio ?? null,
-        picksSince: raw.picksSince ?? null,
-        instagram: raw.instagram ?? null,
-        email: raw.email ?? null
-      };
-    } catch (err) {
-      console.error("[sanity] getEditor error:", err);
-      return null;
-    }
-  };
-  if (preview) return fetcher();
-  return cached("sanity:editor", 300, fetcher);
-}
-async function getEmmaPresets(preview = false) {
-  if (!projectId) return [];
-  const fetcher = async () => {
-    try {
-      const client4 = getClient(false, preview);
-      if (!client4) return [];
-      return await client4.fetch(EMMA_PRESETS_GROQ) ?? [];
-    } catch (err) {
-      console.error("[sanity] getEmmaPresets error:", err);
-      return [];
-    }
-  };
-  if (preview) return fetcher();
-  return cached("sanity:emma-presets", 300, fetcher);
-}
-async function getHomepageSections(preview = false) {
-  if (!projectId) return null;
-  const fetcher = async () => {
-    try {
-      const client4 = getClient(false, preview);
-      if (!client4) return null;
-      return await client4.fetch(HOMEPAGE_GROQ) ?? null;
-    } catch (err) {
-      console.error("[sanity] getHomepageSections error:", err);
-      return null;
-    }
-  };
-  if (preview) return fetcher();
-  return cached("sanity:homepage", 60, fetcher);
-}
-async function upsertAnnouncementBar(messages) {
-  const client4 = getClient(true);
-  if (!client4) throw new Error("Sanity not configured");
-  await client4.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
-  await client4.patch("singleton.homepage").setIfMissing({ sections: [] }).set({
-    'sections[_type=="announcementBar"].messages': messages
-  }).commit();
-  invalidateCache("sanity:homepage");
-}
-async function addCmsBlock(block) {
-  const client4 = getClient(true);
-  if (!client4) throw new Error("Sanity not configured");
-  const key = `${block._type}-${Date.now()}`;
-  await client4.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
-  await client4.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{ ...block, _key: key }]).commit();
-  invalidateCache("sanity:homepage");
-}
-async function updateCmsBlock(key, patch) {
-  const client4 = getClient(true);
-  if (!client4) throw new Error("Sanity not configured");
-  await client4.patch("singleton.homepage").set(
-    Object.fromEntries(
-      Object.entries(patch).map(([field, value]) => [`sections[_key=="${key}"].${field}`, value])
-    )
-  ).commit();
-  invalidateCache("sanity:homepage");
-}
-async function uploadBufferToSanity(buffer, filename, contentType) {
-  const client4 = getClient(true);
-  if (!client4) throw new Error("Sanity not configured");
-  const asset = await client4.assets.upload("image", buffer, {
-    filename,
-    ...contentType ? { contentType } : {}
-  });
-  return { assetId: asset._id, url: asset.url };
-}
-function sanityImageRef(assetId, alt) {
-  return { _type: "image", asset: { _type: "reference", _ref: assetId }, alt };
-}
-async function updateCmsTileImage(blockKey, tileKey, assetId, alt) {
-  const client4 = getClient(true);
-  if (!client4) throw new Error("Sanity not configured");
-  await client4.patch("singleton.homepage").set({
-    [`sections[_key=="${blockKey}"].tiles[_key=="${tileKey}"].image`]: sanityImageRef(assetId, alt)
-  }).commit();
-  invalidateCache("sanity:homepage");
-}
-async function updateCmsPromoImage(blockKey, assetId, alt) {
-  const client4 = getClient(true);
-  if (!client4) throw new Error("Sanity not configured");
-  await client4.patch("singleton.homepage").set({
-    [`sections[_key=="${blockKey}"].promo.image`]: sanityImageRef(assetId, alt)
-  }).commit();
-  invalidateCache("sanity:homepage");
-}
-async function removeCmsBlock(key) {
-  const client4 = getClient(true);
-  if (!client4) throw new Error("Sanity not configured");
-  await client4.patch("singleton.homepage").unset([`sections[_key=="${key}"]`]).commit();
-  invalidateCache("sanity:homepage");
-}
-function invalidateCmsCache() {
-  invalidateCache("sanity:homepage");
-}
-async function getHomepageDocRaw() {
-  const client4 = getClient(true, false, "raw");
-  if (!client4) return null;
-  const doc = await client4.getDocument(HOMEPAGE_DOC_ID);
-  return doc ?? null;
-}
-async function restoreHomepageDoc(snapshot) {
-  const client4 = getClient(true, false, "raw");
-  if (!client4) throw new Error("Sanity not configured \u2014 cannot restore homepage doc");
-  const rest = {};
-  for (const [k, v] of Object.entries(snapshot)) {
-    if (!k.startsWith("_")) rest[k] = v;
-  }
-  await client4.createOrReplace({ ...rest, _id: HOMEPAGE_DOC_ID, _type: "homepageSections" });
-  invalidateCmsCache();
-}
-function stringToPortableText(text2) {
-  const trimmed = text2.trim();
-  if (!trimmed) return [];
-  return [{
-    _type: "block",
-    _key: `d${Math.random().toString(36).slice(2, 10)}`,
-    style: "normal",
-    markDefs: [],
-    children: [{
-      _type: "span",
-      _key: `s${Math.random().toString(36).slice(2, 10)}`,
-      text: trimmed,
-      marks: []
-    }]
-  }];
-}
-async function uploadImageToSanity(writeClient, imageUrl, filename) {
-  if (!writeClient) return null;
-  const res = await fetch(imageUrl);
-  if (!res.ok) {
-    throw new Error(`image fetch ${res.status} ${imageUrl}`);
-  }
-  const buffer = Buffer.from(await res.arrayBuffer());
-  const asset = await writeClient.assets.upload("image", buffer, { filename });
-  return asset.url ?? null;
-}
-async function upsertProductPage(params) {
-  const writeClient = getClient(true, false, "raw");
-  if (!writeClient) throw new Error("Sanity not configured \u2014 SANITY_API_TOKEN or SANITY_PROJECT_ID missing");
-  const existing = await writeClient.fetch(
-    `*[_type == "productPage" && shopifyHandle == $handle] | order(_id asc)[0]{ _id, previewImageUrl }`,
-    { handle: params.handle }
-  );
-  let docId;
-  let created;
-  if (existing) {
-    docId = existing._id;
-    created = false;
-  } else {
-    if (!params.title) {
-      console.warn(`[upsertProductPage] no productPage doc for handle "${params.handle}" \u2014 skipping (archive/upsert without title)`);
-      return { created: false };
-    }
-    docId = `productPage-${params.handle}`;
-    await writeClient.createIfNotExists({
-      _id: docId,
-      _type: "productPage",
-      shopifyHandle: params.handle,
-      shopifyProductId: params.shopifyProductId,
-      title: params.title
-    });
-    created = true;
-  }
-  const searchFields = {};
-  if (params.title !== void 0) searchFields.title = params.title;
-  if (params.vendor !== void 0) searchFields.vendor = params.vendor;
-  if (params.tags !== void 0) {
-    searchFields.tags = params.tags;
-    searchFields.normalizedTags = normalizeTagList(params.tags);
-  }
-  if (params.tagline !== void 0) searchFields.tagline = params.tagline;
-  if (params.description !== void 0) searchFields.description = stringToPortableText(params.description);
-  if (params.seoDescription !== void 0) searchFields.seoDescription = params.seoDescription;
-  if (params.category !== void 0) searchFields.category = params.category;
-  if (params.seoTitle !== void 0) searchFields.seoTitle = params.seoTitle;
-  if (params.moodImageUrl !== void 0) searchFields.moodImageUrl = params.moodImageUrl;
-  if (params.productTypeDial !== void 0) searchFields.productTypeDial = params.productTypeDial;
-  if (params.moodTags !== void 0) searchFields.moodTags = params.moodTags;
-  if (params.audienceTags !== void 0) searchFields.audienceTags = params.audienceTags;
-  if (params.mattersTags !== void 0) searchFields.mattersTags = params.mattersTags;
-  if (params.ivrExperience !== void 0) searchFields.ivrExperience = params.ivrExperience;
-  if (params.ivrUseCase !== void 0) searchFields.ivrUseCase = params.ivrUseCase;
-  if (params.ivrFeatures !== void 0) searchFields.ivrFeatures = params.ivrFeatures;
-  if (params.productFaqs !== void 0) {
-    searchFields.productFaqs = withSanityKey(params.productFaqs, (f) => `${f.question}|${f.category}`);
-  }
-  if (params.careInstructions !== void 0) searchFields.careInstructions = params.careInstructions;
-  if (params.specifications !== void 0) searchFields.specifications = params.specifications;
-  if (params.boxContents !== void 0) searchFields.boxContents = params.boxContents;
-  if (params.sensationDialV2 !== void 0) {
-    const items = params.sensationDialV2.items ?? [];
-    searchFields.sensationDialV2 = {
-      ...params.sensationDialV2,
-      items: withSanityKey(items, (it) => it.label)
-    };
-  }
-  if (params.productSubtypeDial !== void 0) searchFields.productSubtypeDial = params.productSubtypeDial;
-  if (params.originalTitle !== void 0) searchFields.originalTitle = params.originalTitle;
-  if (params.archived !== void 0) searchFields.archived = params.archived;
-  if (Object.keys(searchFields).length > 0) {
-    await writeClient.patch(docId).set(searchFields).commit();
-  }
-  if (params.imageUrl) {
-    const publishedId = docId.replace(/^drafts\./, "");
-    const draftId = `drafts.${publishedId}`;
-    const states = await writeClient.fetch(
-      `*[_id in [$pub, $dft]]{ _id, previewImageUrl }`,
-      { pub: publishedId, dft: draftId }
-    );
-    const pub = states.find((s) => !s._id.startsWith("drafts."));
-    const dft = states.find((s) => s._id.startsWith("drafts."));
-    let sanityUrl = null;
-    if (pub?.previewImageUrl?.includes("cdn.sanity.io")) {
-      sanityUrl = pub.previewImageUrl;
-    } else {
-      sanityUrl = await uploadImageToSanity(writeClient, params.imageUrl, `${params.handle}-preview.jpg`);
-    }
-    if (sanityUrl) {
-      if (pub && pub.previewImageUrl !== sanityUrl) {
-        await writeClient.patch(publishedId).set({ previewImageUrl: sanityUrl }).commit();
-      }
-      if (dft && dft.previewImageUrl !== sanityUrl) {
-        await writeClient.patch(draftId).set({ previewImageUrl: sanityUrl }).commit();
-      }
-    }
-  }
-  return { created };
-}
-async function upsertEmmaPick(params) {
-  const writeClient = getClient(true);
-  if (!writeClient) throw new Error("Sanity not configured \u2014 SANITY_API_TOKEN or SANITY_PROJECT_ID missing");
-  const doc = {
-    _id: `emmaPick-${params.productHandle}`,
-    _type: "emmaPick",
-    productId: params.productId,
-    productHandle: params.productHandle,
-    dealDate: params.dealDate,
-    variant: params.variant,
-    eyebrow: params.eyebrow,
-    headline: params.headline,
-    body: params.body,
-    aside: params.aside,
-    voiceHash: params.voiceHash,
-    generatedAt: params.generatedAt
-  };
-  if (params.productTitle !== void 0) doc.productTitle = params.productTitle;
-  if (params.brand !== void 0) doc.brand = params.brand;
-  if (params.category !== void 0) doc.category = params.category;
-  if (params.pullQuote !== void 0) doc.pullQuote = params.pullQuote;
-  await writeClient.createOrReplace(doc);
-}
-async function getPdpTrustBar() {
-  if (!projectId) return null;
-  return cached("sanity:pdp-trust-bar", 300, async () => {
-    try {
-      const client4 = getClient();
-      if (!client4) return null;
-      const data = await client4.fetch(
-        `*[_type == "pdpDefaults"] | order(_updatedAt desc)[0].trustBar{
-          _type, _key, active, order, bgStyle,
-          "trustItems": items[]->{ icon, headline, subheadline, active }
-        }`
-      );
-      if (!data) return null;
-      const trustItems = (data.trustItems ?? []).filter(
-        (i) => !!i && i.active !== false
-      );
-      return { ...data, trustItems };
-    } catch (err) {
-      console.error("[sanity] getPdpTrustBar error:", err);
-      return null;
-    }
-  });
-}
-async function getSiteSettings() {
-  if (!projectId) return null;
-  return cached("sanity:site-settings", 300, async () => {
-    try {
-      const client4 = getClient();
-      if (!client4) return null;
-      const data = await client4.fetch(
-        `*[_id == "singleton.siteSettings"][0]{
-          _id,
-          "logoUrl": logo.asset->url,
-          "logoAlt": logo.alt,
-          buyButtonText,
-          "siteBanner": siteBanner{ enabled, link, "imageUrl": image.asset->url, "imageAlt": coalesce(alt, image.alt) },
-          megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
-          socialLinks[],
-          footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
-          footerColumns[] { _key, heading, links[] { _key, label, url } }
-        }`
-      );
-      return data ?? null;
-    } catch (err) {
-      console.error("[sanity] getSiteSettings error:", err);
-      return null;
-    }
-  });
-}
-async function getEmmaPersona() {
-  if (!projectId) return null;
-  return cached("sanity:emma-persona", 300, async () => {
-    try {
-      const client4 = getClient();
-      if (!client4) return null;
-      const data = await client4.fetch(
-        `*[_id == "singleton.editor"][0]{
-          "avatarUrl":   photo.asset->url,
-          "avatarAlt":   coalesce(photo.alt, name, "Emma"),
-          "displayName": coalesce(name, "Emma")
-        }`
-      );
-      return data ?? null;
-    } catch (err) {
-      console.error("[sanity] getEmmaPersona error:", err);
-      return null;
-    }
-  });
-}
-async function getPreviewImagesByHandles(handles) {
-  const out = /* @__PURE__ */ new Map();
-  if (!projectId || handles.length === 0) return out;
-  try {
-    const client4 = getClient();
-    if (!client4) return out;
-    const rows = await client4.fetch(
-      `*[_type == "productPage" && shopifyHandle in $handles]{ shopifyHandle, previewImageUrl }`,
-      { handles }
-    );
-    for (const r of rows ?? []) {
-      if (r?.shopifyHandle && r.previewImageUrl) out.set(r.shopifyHandle, r.previewImageUrl);
-    }
-  } catch (err) {
-    console.error("[sanity] getPreviewImagesByHandles error:", err);
-  }
-  return out;
-}
-async function getProductPageBlocks(handle) {
-  if (!projectId) return [];
-  try {
-    const client4 = getClient();
-    if (!client4) return [];
-    const data = await client4.fetch(
-      `*[_type == "productPage" && shopifyHandle == $handle][0]{
-        "sections": contentBlocks[]{
-          _key,
-          ...select(
-            _type == "reference" => @->{
-              _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
-              "productHandles": productHandles[]{ handle },
-              layout, bgStyle, ctaLink, ctaLabel
-            },
-            { ${CONTENT_BLOCKS_PROJECTION} }
-          )
-        }[active == true && (status == "live" || !defined(status))]
-      }`,
-      { handle }
-    );
-    return data?.sections ?? [];
-  } catch (err) {
-    console.error("[sanity] getProductPageBlocks error:", err);
-    return [];
-  }
-}
-async function getProductFaqs(handle) {
-  if (!projectId) return [];
-  try {
-    const client4 = getClient();
-    if (!client4) return [];
-    const data = await client4.fetch(
-      `*[_type == "productPage" && shopifyHandle == $handle][0]{
-        "faqs": productFaqs[]{ question, answer, category }
-      }`,
-      { handle }
-    );
-    return (data?.faqs ?? []).filter((f) => f && f.question && f.answer).map((f) => ({ ...f, category: f.category ?? "general" }));
-  } catch (err) {
-    console.error("[sanity] getProductFaqs error:", err);
-    return [];
-  }
-}
-async function getCollectionPage(handle, preview = false) {
-  if (!projectId) return null;
-  try {
-    const client4 = getClient(false, preview);
-    if (!client4) return null;
-    const data = await client4.fetch(
-      `*[_type == "collectionPage" && shopifyHandle == $handle][0]{
-        shopifyHandle,
-        collectionType,
-        seoTitle,
-        seoDescription,
-        h1,
-        introCopy,
-        "heroImage": heroImageOverride{ "url": asset->url, alt },
-        "faqs": faqs[]{ question, answer },
-        "related": relatedCollections[]{ handle, label }
-      }`,
-      { handle }
-    );
-    if (!data) return null;
-    const introHtml = data.introCopy && data.introCopy.length > 0 ? toHTML2(data.introCopy) : null;
-    return {
-      shopifyHandle: data.shopifyHandle,
-      collectionType: data.collectionType ?? "category",
-      seoTitle: data.seoTitle ?? null,
-      seoDescription: data.seoDescription ?? null,
-      h1: data.h1 ?? null,
-      introHtml,
-      heroImageUrl: data.heroImage?.url ?? null,
-      heroImageAlt: data.heroImage?.alt ?? null,
-      faqs: (data.faqs ?? []).filter((f) => f?.question && f?.answer),
-      related: (data.related ?? []).filter((r) => r?.handle && r?.label)
-    };
-  } catch (err) {
-    console.error("[sanity] getCollectionPage error:", err);
-    return null;
-  }
-}
-async function getCollectionTypeMap() {
-  const out = /* @__PURE__ */ new Map();
-  if (!projectId) return out;
-  try {
-    const client4 = getClient();
-    if (!client4) return out;
-    const data = await client4.fetch(
-      `*[_type == "collectionPage"]{ shopifyHandle, collectionType }`
-    );
-    for (const row of data ?? []) {
-      if (row.shopifyHandle) {
-        out.set(row.shopifyHandle, row.collectionType ?? "category");
-      }
-    }
-    return out;
-  } catch (err) {
-    console.error("[sanity] getCollectionTypeMap error:", err);
-    return out;
-  }
-}
-async function getCollectionsHub(preview = false) {
-  if (!projectId) return null;
-  try {
-    const client4 = getClient(false, preview);
-    if (!client4) return null;
-    const data = await client4.fetch(
-      `*[_type == "collectionsHub"][0]{
-        seoTitle,
-        seoDescription,
-        h1,
-        introCopy,
-        "featured": featuredCollectionHandles[]{ handle, blurb },
-        "faqs": faqs[]{ question, answer }
-      }`
-    );
-    if (!data) return null;
-    const introHtml = data.introCopy && data.introCopy.length > 0 ? toHTML2(data.introCopy) : null;
-    return {
-      seoTitle: data.seoTitle ?? null,
-      seoDescription: data.seoDescription ?? null,
-      h1: data.h1 ?? null,
-      introHtml,
-      featured: (data.featured ?? []).filter((f) => f?.handle).map((f) => ({ handle: f.handle, blurb: f.blurb ?? null })),
-      faqs: (data.faqs ?? []).filter((f) => f?.question && f?.answer)
-    };
-  } catch (err) {
-    console.error("[sanity] getCollectionsHub error:", err);
-    return null;
-  }
-}
-async function getPage(slug, preview = false) {
-  if (!projectId) {
-    console.warn("[sanity] getPage: no projectId");
-    return null;
-  }
-  try {
-    const client4 = getClient(false, preview);
-    if (!client4) {
-      console.warn("[sanity] getPage: no client");
-      return null;
-    }
-    console.log("[sanity] getPage fetching slug:", slug);
-    const result = await client4.fetch(
-      `*[_type == "page" && slug.current == $slug][0]{
-        _id,
-        title,
-        "slug": slug.current,
-        seoTitle,
-        seoDescription,
-        "sections": sections[] { ${CONTENT_BLOCKS_PROJECTION} }
-      }`,
-      { slug }
-    );
-    console.log("[sanity] getPage result:", result ? `found "${result.title}"` : "null");
-    return result;
-  } catch (err) {
-    console.error("[sanity] getPage error:", err);
-    return null;
-  }
-}
-async function getPageList() {
-  if (!projectId) return [];
-  try {
-    const client4 = getClient();
-    if (!client4) return [];
-    return await client4.fetch(
-      `*[_type == "page"] | order(title asc) { title, "slug": slug.current }`
-    );
-  } catch (err) {
-    console.error("[sanity] getPageList error:", err);
-    return [];
-  }
-}
-async function getBlogHomepage(preview = false) {
-  if (!projectId) return null;
-  try {
-    const client4 = getClient(false, preview);
-    if (!client4) return null;
-    return await client4.fetch(
-      `*[_id == "singleton.blogHomepage"][0]{
-        heading, subtext,
-        "heroImageUrl": heroImage.asset->url,
-        heroImageAlt
-      }`
-    );
-  } catch (err) {
-    console.error("[sanity] getBlogHomepage error:", err);
-    return null;
-  }
-}
-function getCachedBlog(key, ttl) {
-  const entry = _blogCache.get(key);
-  if (entry && Date.now() - entry.ts < ttl) return entry.data;
-  return null;
-}
-function setCachedBlog(key, data) {
-  _blogCache.set(key, { data, ts: Date.now() });
-}
-function invalidateBlogCache() {
-  _blogCache.clear();
-}
-function calculateReadingTime(body) {
-  const text2 = (body ?? []).filter((b) => b._type === "block").map((b) => (b.children ?? []).map((c) => c.text ?? "").join("")).join(" ");
-  return Math.max(1, Math.ceil(text2.split(/\s+/).filter(Boolean).length / 200));
-}
-async function getBlogPosts(opts = {}) {
-  if (!projectId) return { posts: [], total: 0 };
-  const page = opts.page ?? 1;
-  const perPage = opts.perPage ?? 12;
-  const start = (page - 1) * perPage;
-  const end = start + perPage;
-  const cacheKey3 = `posts:${page}:${perPage}:${opts.category ?? ""}:${opts.featured ?? ""}:${opts.authorSlug ?? ""}:${opts.tag ?? ""}`;
-  const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
-  if (cached2) return cached2;
-  try {
-    const client4 = getClient();
-    if (!client4) return { posts: [], total: 0 };
-    let filter = `_type == "blogPost" && status == "published"`;
-    const params = {};
-    if (opts.category) {
-      filter += ` && category->slug.current == $category`;
-      params.category = opts.category;
-    }
-    if (opts.featured) {
-      filter += ` && featured == true`;
-    }
-    if (opts.authorSlug) {
-      filter += ` && author->slug.current == $authorSlug`;
-      params.authorSlug = opts.authorSlug;
-    }
-    if (opts.tag) {
-      filter += ` && $tag in tags`;
-      params.tag = opts.tag;
-    }
-    const [rawPosts, total] = await Promise.all([
-      client4.fetch(
-        `*[${filter}] | order(publishedAt desc) [${start}...${end}] { ${BLOG_POST_CARD_PROJECTION}, "bodyText": body[_type == "block"]{ "text": children[].text } }`,
-        params
-      ),
-      client4.fetch(`count(*[${filter}])`, params)
-    ]);
-    const posts = (rawPosts ?? []).map((p) => {
-      const words = (p.bodyText ?? []).flatMap((b) => (b.text ?? []).join("")).join(" ");
-      const readingTime = Math.max(1, Math.ceil(words.split(/\s+/).filter(Boolean).length / 200));
-      const { bodyText: _, ...rest } = p;
-      return { ...rest, readingTime };
-    });
-    const result = { posts, total };
-    setCachedBlog(cacheKey3, result);
-    return result;
-  } catch (err) {
-    console.error("[sanity] getBlogPosts error:", err);
-    return { posts: [], total: 0 };
-  }
-}
-async function getBlogPost(slug, preview = false) {
-  if (!projectId) return null;
-  const cacheKey3 = `post:${slug}`;
-  if (!preview) {
-    const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
-    if (cached2) return cached2;
-  }
-  try {
-    const client4 = getClient(false, preview);
-    if (!client4) return null;
-    const filter = preview ? `_type == "blogPost" && slug.current == $slug` : `_type == "blogPost" && slug.current == $slug && status == "published"`;
-    const raw = await client4.fetch(
-      `*[${filter}][0]{
-        ${BLOG_POST_CARD_PROJECTION},
-        _updatedAt,
-        body[]{
-          ...,
-          _type == "blogImage" => {
-            ...,
-            "image": image{
-              "url": asset->url, alt,
-              "lqip": asset->metadata.lqip,
-              "width": asset->metadata.dimensions.width,
-              "height": asset->metadata.dimensions.height
-            },
-            "secondImage": secondImage{
-              "url": asset->url,
-              "lqip": asset->metadata.lqip,
-              "width": asset->metadata.dimensions.width,
-              "height": asset->metadata.dimensions.height
-            }
-          }
-        },
-        seoTitle, seoDescription, noIndex,
-        "ogImageUrl": ogImage.asset->url,
-        tags,
-        "relatedPosts": relatedPosts[]->{
-          ${BLOG_POST_CARD_PROJECTION}
-        },
-        "autoRelated": *[_type == "blogPost" && status == "published" && category._ref == ^.category._ref && _id != ^._id] | order(publishedAt desc) [0...6] {
-          ${BLOG_POST_CARD_PROJECTION}
-        },
-        "prevPost": *[_type == "blogPost" && status == "published" && publishedAt < ^.publishedAt] | order(publishedAt desc) [0] {
-          title, "slug": slug.current,
-          "heroImageUrl": heroImage.asset->url,
-          "heroLqip": heroImage.asset->metadata.lqip,
-          "category": category->{ name, "slug": slug.current, color }
-        },
-        "nextPost": *[_type == "blogPost" && status == "published" && publishedAt > ^.publishedAt] | order(publishedAt asc) [0] {
-          title, "slug": slug.current,
-          "heroImageUrl": heroImage.asset->url,
-          "heroLqip": heroImage.asset->metadata.lqip,
-          "category": category->{ name, "slug": slug.current, color }
-        },
-        "extras": *[_type == "blogPostExtras" && post._ref == ^._id][0]{
-          deck,
-          sources[]{ label, url },
-          reviewedNote,
-          seriesOrder,
-          "series": series->{
-            title, "slug": slug.current, kicker,
-            "coverImageUrl": coverImage.asset->url,
-            "postCount": count(posts)
-          }
-        }
-      }`,
-      { slug }
-    );
-    if (!raw) return null;
-    const readingTime = calculateReadingTime(raw.body ?? []);
-    const manual = raw.relatedPosts ?? [];
-    const seen = /* @__PURE__ */ new Set([raw._id, ...manual.map((rp) => rp._id)]);
-    const topUp = (raw.autoRelated ?? []).filter((rp) => {
-      if (seen.has(rp._id)) return false;
-      seen.add(rp._id);
-      return true;
-    });
-    const relatedPosts = [...manual, ...topUp].slice(0, 3).map((rp) => ({
-      ...rp,
-      readingTime: 0
-      // don't fetch body for related posts
-    }));
-    const { autoRelated: _autoRelated, ...rest } = raw;
-    const post = { ...rest, readingTime, relatedPosts };
-    if (!preview) setCachedBlog(cacheKey3, post);
-    return post;
-  } catch (err) {
-    console.error("[sanity] getBlogPost error:", err);
-    return null;
-  }
-}
-async function getBlogAuthor(slug) {
-  if (!projectId) return null;
-  try {
-    const client4 = getClient();
-    if (!client4) return null;
-    const data = await client4.fetch(
-      `*[_type == "blogAuthor" && slug.current == $slug][0] {
-        name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role,
-        "joinedAt": coalesce(joinedAt, _createdAt),
-        "postCount": count(*[_type == "blogPost" && status == "published" && author._ref == ^._id])
-      }`,
-      { slug }
-    );
-    return data ?? null;
-  } catch (err) {
-    console.error("[sanity] getBlogAuthor error:", err);
-    return null;
-  }
-}
-async function getBlogCategories() {
-  if (!projectId) return [];
-  const cacheKey3 = "blogCategories";
-  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
-  if (cached2) return cached2;
-  try {
-    const client4 = getClient();
-    if (!client4) return [];
-    const data = await client4.fetch(
-      `*[_type == "blogCategory"] | order(name asc) {
-        name, "slug": slug.current, description, color, seoTitle, seoDescription
-      }`
-    );
-    if (data) setCachedBlog(cacheKey3, data);
-    return data ?? [];
-  } catch (err) {
-    console.error("[sanity] getBlogCategories error:", err);
-    return [];
-  }
-}
-async function getNotebookSettings() {
-  if (!projectId) return null;
-  const cacheKey3 = "notebookSettings";
-  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
-  if (cached2) return cached2;
-  try {
-    const client4 = getClient();
-    if (!client4) return null;
-    const data = await client4.fetch(
-      `*[_id == "singleton.notebookSettings"][0]{
-        kicker,
-        "mastheadImageUrl": mastheadImage.asset->url,
-        mastheadImageAlt,
-        newsletterHeading, newsletterBody, newsletterButtonLabel
-      }`
-    );
-    setCachedBlog(cacheKey3, data ?? null);
-    return data ?? null;
-  } catch (err) {
-    console.error("[sanity] getNotebookSettings error:", err);
-    return null;
-  }
-}
-async function getBlogCategoryExtras(slug) {
-  if (!projectId) return null;
-  const cacheKey3 = `categoryExtras:${slug}`;
-  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
-  if (cached2) return cached2;
-  try {
-    const client4 = getClient();
-    if (!client4) return null;
-    const data = await client4.fetch(
-      `*[_type == "blogCategoryExtras" && category->slug.current == $slug][0]{
-        "headerImageUrl": headerImage.asset->url,
-        headerImageAlt,
-        "headerLqip": headerImage.asset->metadata.lqip,
-        intro, accent
-      }`,
-      { slug }
-    );
-    setCachedBlog(cacheKey3, data ?? null);
-    return data ?? null;
-  } catch (err) {
-    console.error("[sanity] getBlogCategoryExtras error:", err);
-    return null;
-  }
-}
-async function getBlogSeries(slug) {
-  if (!projectId) return null;
-  const cacheKey3 = `series:${slug}`;
-  const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
-  if (cached2) return cached2;
-  try {
-    const client4 = getClient();
-    if (!client4) return null;
-    const raw = await client4.fetch(
-      `*[_type == "blogSeries" && slug.current == $slug][0]{ ${BLOG_SERIES_PROJECTION} }`,
-      { slug }
-    );
-    if (!raw) return null;
-    const series = {
-      ...raw,
-      posts: (raw.posts ?? []).filter((p) => p && p.status === "published").map(({ status: _s, ...p }) => ({ ...p, readingTime: 0 }))
-    };
-    setCachedBlog(cacheKey3, series);
-    return series;
-  } catch (err) {
-    console.error("[sanity] getBlogSeries error:", err);
-    return null;
-  }
-}
-async function getAllBlogSeries() {
-  if (!projectId) return [];
-  const cacheKey3 = "allSeries";
-  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
-  if (cached2) return cached2;
-  try {
-    const client4 = getClient();
-    if (!client4) return [];
-    const raw = await client4.fetch(
-      `*[_type == "blogSeries" && count(posts) > 0] | order(_createdAt desc) { ${BLOG_SERIES_PROJECTION} }`
-    );
-    const series = (raw ?? []).map((s) => ({
-      ...s,
-      posts: (s.posts ?? []).filter((p) => p && p.status === "published").map(({ status: _s, ...p }) => ({ ...p, readingTime: 0 }))
-    }));
-    setCachedBlog(cacheKey3, series);
-    return series;
-  } catch (err) {
-    console.error("[sanity] getAllBlogSeries error:", err);
-    return [];
-  }
-}
-async function getGlossaryTerms() {
-  if (!projectId) return [];
-  const cacheKey3 = "glossaryTerms";
-  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
-  if (cached2) return cached2;
-  try {
-    const client4 = getClient();
-    if (!client4) return [];
-    const data = await client4.fetch(
-      `*[_type == "blogGlossaryTerm"] | order(term asc) {
-        term, "slug": slug.current, definition, collectionHandle,
-        "relatedPost": relatedPost->{ title, "slug": slug.current },
-        "seeAlso": seeAlso[]->{ term, "slug": slug.current }
-      }`
-    );
-    if (data) setCachedBlog(cacheKey3, data);
-    return data ?? [];
-  } catch (err) {
-    console.error("[sanity] getGlossaryTerms error:", err);
-    return [];
-  }
-}
-async function searchBlogPosts(q, limit = 24) {
-  if (!projectId) return [];
-  const query = q.trim();
-  if (!query) return [];
-  try {
-    const client4 = getClient();
-    if (!client4) return [];
-    const rawPosts = await client4.fetch(
-      `*[_type == "blogPost" && status == "published" && (
-        title match $q || excerpt match $q || $plain in tags
-      )] | order(publishedAt desc) [0...${limit}] { ${BLOG_POST_CARD_PROJECTION} }`,
-      { q: `${query}*`, plain: query.toLowerCase() }
-    );
-    return (rawPosts ?? []).map((p) => ({ ...p, readingTime: 0 }));
-  } catch (err) {
-    console.error("[sanity] searchBlogPosts error:", err);
-    return [];
-  }
-}
-async function getBlogPostsForSitemap() {
-  if (!projectId) return [];
-  try {
-    const client4 = getClient();
-    if (!client4) return [];
-    return await client4.fetch(
-      `*[_type == "blogPost" && status == "published" && noIndex != true] | order(publishedAt desc) {
-        "slug": slug.current, publishedAt, _updatedAt, title,
-        "description": coalesce(seoDescription, excerpt)
-      }`
-    );
-  } catch (err) {
-    console.error("[sanity] getBlogPostsForSitemap error:", err);
-    return [];
-  }
-}
-async function createEmmaRailDraft(input) {
-  const writeClient = getClient(true);
-  if (!writeClient) throw new Error("Sanity not configured");
-  const safeDealId = input.sourceDealId.replace(/^gid:\/\/shopify\/Product\//, "").replace(/[^a-zA-Z0-9_-]/g, "-");
-  const baseId = `emmaRail-${safeDealId}-${input.target}-${Date.now()}`;
-  const draftId = `drafts.${baseId}`;
-  const doc = {
-    _id: draftId,
-    _type: "emmaCuratedRail",
-    active: true,
-    status: "draft",
-    order: input.order ?? 50,
-    heading: input.heading,
-    target: input.target,
-    sourceDealId: input.sourceDealId,
-    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    productHandles: input.productHandles.map((handle, i) => ({
-      _type: "productRef",
-      _key: `ph-${i}-${Math.random().toString(36).slice(2, 8)}`,
-      handle
-    })),
-    layout: input.layout ?? "carousel",
-    bgStyle: input.bgStyle ?? "cream"
-  };
-  if (input.eyebrow !== void 0) doc.eyebrow = input.eyebrow;
-  if (input.emmaAside !== void 0) doc.emmaAside = input.emmaAside;
-  if (input.ctaLink !== void 0) doc.ctaLink = input.ctaLink;
-  if (input.ctaLabel !== void 0) doc.ctaLabel = input.ctaLabel;
-  if (input.rationale !== void 0) doc.rationale = input.rationale;
-  await writeClient.create(doc);
-  return { _id: draftId };
-}
-async function patchEmmaRail(id, patch) {
-  const writeClient = getClient(true);
-  if (!writeClient) throw new Error("Sanity not configured");
-  const set = { ...patch };
-  if (patch.productHandles) {
-    set.productHandles = patch.productHandles.map((handle, i) => ({
-      _type: "productRef",
-      _key: `ph-${i}-${Math.random().toString(36).slice(2, 8)}`,
-      handle
-    }));
-  }
-  await writeClient.patch(id).set(set).commit();
-  invalidateCache("sanity:homepage");
-}
-async function publishEmmaRailDraft(draftId) {
-  const writeClient = getClient(true);
-  if (!writeClient) throw new Error("Sanity not configured");
-  if (!draftId.startsWith("drafts.")) {
-    await writeClient.patch(draftId).set({ status: "live" }).commit();
-    invalidateCache("sanity:homepage");
-    return { _id: draftId };
-  }
-  const publishedId = draftId.slice("drafts.".length);
-  const draft = await writeClient.getDocument(draftId);
-  if (!draft) throw new Error(`Draft not found: ${draftId}`);
-  const { _id: _omit, _rev: _omitRev, ...rest } = draft;
-  await writeClient.transaction().createOrReplace({ ...rest, _id: publishedId, status: "live" }).delete(draftId).commit();
-  invalidateCache("sanity:homepage");
-  return { _id: publishedId };
-}
-async function addRailRefToHomepage(railId) {
-  const writeClient = getClient(true);
-  if (!writeClient) throw new Error("Sanity not configured");
-  await writeClient.createIfNotExists({
-    _id: "singleton.homepage",
-    _type: "homepageSections",
-    sections: []
-  });
-  await writeClient.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{
-    _type: "emmaCuratedRailRef",
-    _key: `rail-${railId}-${Date.now()}`,
-    _ref: railId
-  }]).commit();
-  invalidateCache("sanity:homepage");
-}
-async function addRailRefToProductPage(handle, railId) {
-  const writeClient = getClient(true);
-  if (!writeClient) throw new Error("Sanity not configured");
-  const doc = await writeClient.fetch(
-    `*[_type == "productPage" && shopifyHandle == $handle][0]{ _id }`,
-    { handle }
-  );
-  if (!doc) throw new Error(`No productPage for handle "${handle}"`);
-  await writeClient.patch(doc._id).setIfMissing({ contentBlocks: [] }).append("contentBlocks", [{
-    _type: "emmaCuratedRailRef",
-    _key: `rail-${railId}-${Date.now()}`,
-    _ref: railId
-  }]).commit();
-}
-async function removeRailRefFromHomepage(railId) {
-  const writeClient = getClient(true);
-  if (!writeClient) throw new Error("Sanity not configured");
-  await writeClient.patch("singleton.homepage").unset([`sections[_ref=="${railId}"]`]).commit();
-  invalidateCache("sanity:homepage");
-}
-async function getRailsByDealId(dealId, opts) {
-  if (!projectId) return [];
-  const writeClient = getClient(true);
-  if (!writeClient) return [];
-  let filter = `_type == "emmaCuratedRail" && sourceDealId == $dealId && !(_id in path("drafts.**"))`;
-  if (opts?.target) filter += ` && target == "${opts.target}"`;
-  if (opts?.status) filter += ` && status == "${opts.status}"`;
-  return writeClient.fetch(
-    `*[${filter}]{ _id, target, status }`,
-    { dealId }
-  );
-}
-async function archiveHomepageRailsForDeal(dealId) {
-  const writeClient = getClient(true);
-  if (!writeClient) return { archived: [] };
-  const homepageTargeted = await getRailsByDealId(dealId, { target: "homepage", status: "live" });
-  const allLiveForDeal = await getRailsByDealId(dealId, { status: "live" });
-  const homepageRefIds = await writeClient.fetch(
-    `*[_id == "singleton.homepage"][0].sections[defined(_ref)]._ref`
-  ).catch(() => []);
-  const homepageRefSet = new Set(homepageRefIds);
-  const leaked = allLiveForDeal.filter((r) => homepageRefSet.has(r._id) && !homepageTargeted.find((h) => h._id === r._id));
-  const toArchive = [...homepageTargeted, ...leaked];
-  if (!toArchive.length) return { archived: [] };
-  const archived = [];
-  for (const r of toArchive) {
-    try {
-      await writeClient.patch(r._id).set({ status: "archived", active: false }).commit();
-      await removeRailRefFromHomepage(r._id);
-      archived.push(r._id);
-    } catch (err) {
-      console.error("[sanity] archiveHomepageRailsForDeal failed for", r._id, err);
-    }
-  }
-  invalidateCache("sanity:homepage");
-  return { archived };
-}
-async function unarchiveHomepageRailsForDeal(dealId) {
-  const writeClient = getClient(true);
-  if (!writeClient) return { unarchived: [] };
-  const rails = await getRailsByDealId(dealId, { target: "homepage", status: "archived" });
-  if (!rails.length) return { unarchived: [] };
-  const unarchived = [];
-  for (const r of rails) {
-    try {
-      await writeClient.patch(r._id).set({ status: "live", active: true }).commit();
-      await addRailRefToHomepage(r._id);
-      unarchived.push(r._id);
-    } catch (err) {
-      console.error("[sanity] unarchiveHomepageRailsForDeal failed for", r._id, err);
-    }
-  }
-  invalidateCache("sanity:homepage");
-  return { unarchived };
-}
-async function getRailDraftsForDeal(dealId) {
-  if (!projectId) return [];
-  const writeClient = getClient(true, false, "raw");
-  if (!writeClient) return [];
-  return writeClient.fetch(
-    `*[_type == "emmaCuratedRail" && sourceDealId == $dealId] | order(generatedAt desc){
-      _id, status, active, order, heading, eyebrow, emmaAside, target,
-      "productHandles": productHandles[].handle,
-      layout, bgStyle, ctaLink, ctaLabel, sourceDealId, generatedAt, rationale
-    }`,
-    { dealId }
-  );
-}
-async function getProductHandlesForSitemap() {
-  if (!projectId) return [];
-  try {
-    const client4 = getClient();
-    if (!client4) return [];
-    return await client4.fetch(
-      `*[_type == "productPage" && defined(shopifyHandle)] | order(title asc) {
-        "handle": shopifyHandle, _updatedAt
-      }`
-    );
-  } catch (err) {
-    console.error("[sanity] getProductHandlesForSitemap error:", err);
-    return [];
-  }
-}
-async function getHomeConfig() {
-  if (!projectId) return null;
-  return cached("sanity:home-config", 300, async () => {
-    try {
-      const client4 = getClient();
-      if (!client4) return null;
-      const raw = await client4.fetch(HOME_CONFIG_GROQ);
-      if (!raw) return null;
-      return {
-        activeVariant: raw.activeVariant ?? "off",
-        welcomeBackEnabled: raw.welcomeBackEnabled ?? true,
-        emmaCopyOverrides: raw.emmaCopyOverrides ?? {},
-        analyticsLabel: raw.analyticsLabel ?? ""
-      };
-    } catch (err) {
-      console.error("[sanity] getHomeConfig error:", err);
-      return null;
-    }
-  });
-}
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ;
-var init_sanity_server = __esm({
-  "app/lib/sanity.server.ts"() {
-    "use strict";
-    init_kv_server();
-    init_tag_normalize();
-    CONTENT_BLOCKS_PROJECTION = `
-  _type, _key, active, order,
-  // announcementBar
-  messages, rotationIntervalMs, bgStyle,
-  // promoBanner
-  headline, subtext, ctaLabel, ctaLink, layout,
-  "image": image{ "url": asset->url, alt },
-  // editorialTiles
-  eyebrow, heading,
-  "tiles": tiles[]{
-    label, body, link, linkLabel, emoji,
-    "image": image{ "url": asset->url, alt }
-  },
-  // wayfinderMosaic \u2014 shares eyebrow/heading (above) plus its own emphasis word.
-  // "tiles" above is editorialTiles-shaped (no _key) \u2014 wayfinderMosaic tiles need
-  // _key (the image bridge addresses tiles by _key), so they get their own field
-  // name to avoid colliding with the editorialTiles projection. select() keeps
-  // every other block type null-safe.
-  emphasis,
-  "wayfinderTiles": select(
-    _type == "wayfinderMosaic" => tiles[]{
-      _key, label, link, emmaAside,
-      "image": image{ "url": asset->url, alt }
-    }
-  ),
-  "promo": select(
-    _type == "wayfinderMosaic" => promo{
-      eyebrow, heading, emphasis, body, ctaLabel, ctaLink,
-      "image": image{ "url": asset->url, alt }
-    }
-  ),
-  // categoryGrid + testimonials use inline item objects; trustBar uses references.
-  // Keep them in separate fields \u2014 combining them via select() silently null-derefs
-  // the trustBar references (GROQ quirk). TrustBarBlock reads trustItems.
-  "items": select(
-    _type == "categoryGrid" => items[]{ label, link, emoji, "image": image{ "url": asset->url, alt } },
-    _type == "testimonials" => items[]{ quote, author, rating, verified }
-  ),
-  "trustItems": select(
-    _type == "trustBar" => items[]->{ icon, headline, subheadline, active }
-  ),
-  columns,
-  // productCarousel
-  source, shopifyTag, collectionHandle,
-  "productHandles": productHandles[]{ handle },
-  productLimit, layout,
-  // playTogetherBanner
-  body, imagePosition,
-  // brandLogoWall
-  "logos": logos[]{ brand, emoji, link, "logo": logo{ "url": asset->url, alt } },
-  // richText \u2014 resolve inline image assets; body is also used by playTogetherBanner (plain text)
-  "body": select(
-    _type == "richText" => body[]{ ..., _type == "image" => { ..., "asset": { "url": asset->url } } },
-    body
-  ),
-  bgColor, maxWidth,
-  // editorBio \u2014 dereference the editor singleton at query time so the block
-  // always renders live data without a second round-trip.
-  variant, headingOverride, hideLongBio, hideSocials, showCta,
-  "editor": select(
-    _type == "editorBio" => *[_id == "singleton.editor"][0]{
-      name, role,
-      "photoUrl": photo.asset->url,
-      "photoAlt": photo.alt,
-      shortBio, longBio,
-      "picksSince": picksSince,
-      instagram, email
-    }
-  ),
-`;
-    projectId = process.env["SANITY_PROJECT_ID"];
-    dataset = process.env["SANITY_DATASET"] ?? "production";
-    apiVersion = "2024-10-01";
-    SECTIONS_WITH_REFS_PROJECTION = `
-  sections[]{
-    _key,
-    ...select(
-      // Named reference array items (e.g. emmaCuratedRailRef) store _type as the
-      // custom name, not "reference" \u2014 so match by the presence of _ref instead.
-      defined(_ref) => @->{
-        _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
-        "productHandles": productHandles[]{ handle },
-        layout, bgStyle, ctaLink, ctaLabel
-      },
-      { ${CONTENT_BLOCKS_PROJECTION} }
-    )
-  }[active == true && (status == "live" || !defined(status))]
-`;
-    HOMEPAGE_GROQ = `
-  *[_id == "singleton.homepage"][0]{
-    _id,
-    "sections": ${SECTIONS_WITH_REFS_PROJECTION}
-  }
-`;
-    EMMA_HERO_GROQ = `
-{
-  "settings": *[_id == "singleton.emmaHero"][0]{
-    heroVariant, eyebrow, headline, body, aside, pullQuote, pairProductHandle
-  },
-  "cta": *[_id == "singleton.emmaHeroStorefront"][0]{
-    primaryCtaLabel, primaryCtaLink, featuredProductHandle
-  }
-}
-`;
-    EDITOR_GROQ = `
-  *[_id == "singleton.editor"][0]{
-    name,
-    role,
-    "photoUrl": photo.asset->url,
-    "photoAlt": photo.alt,
-    shortBio,
-    longBio,
-    "picksSince": picksSince,
-    instagram,
-    email
-  }
-`;
-    EMMA_PRESETS_GROQ = `
-  *[_type == "emmaPreset"] | order(order asc, label asc){
-    label, "slug": slug.current, narratorCopy, moodTags, audienceTags, mattersTags, priceMax, featured, order
-  }
-`;
-    HOMEPAGE_DOC_ID = "singleton.homepage";
-    _blogCache = /* @__PURE__ */ new Map();
-    BLOG_CACHE_TTL = 6e4;
-    BLOG_CAT_CACHE_TTL = 3e5;
-    BLOG_POST_CARD_PROJECTION = `
-  _id, title, "slug": slug.current, excerpt, publishedAt, featured,
-  "heroImageUrl": heroImage.asset->url, heroImageAlt,
-  "heroLqip": heroImage.asset->metadata.lqip,
-  "heroWidth": heroImage.asset->metadata.dimensions.width,
-  "heroHeight": heroImage.asset->metadata.dimensions.height,
-  "author": author->{ name, "slug": slug.current, bio, "avatarUrl": avatar.asset->url, role, socialLinks },
-  "category": category->{ name, "slug": slug.current, color }
-`;
-    BLOG_SERIES_PROJECTION = `
-  title, "slug": slug.current, kicker, description,
-  "coverImageUrl": coverImage.asset->url,
-  coverImageAlt,
-  "coverLqip": coverImage.asset->metadata.lqip,
-  "posts": posts[]->{ ${BLOG_POST_CARD_PROJECTION}, status }
-`;
-    HOME_CONFIG_GROQ = `
-  *[_id == "singleton.homeConfig"][0]{
-    activeVariant,
-    welcomeBackEnabled,
-    emmaCopyOverrides,
-    analyticsLabel
-  }
-`;
   }
 });
 
@@ -9148,8 +9227,8 @@ function score(k) {
   return rel * Math.log(vol + 1) / (1 + diff / 100);
 }
 async function fetchCandidates(input) {
-  const client4 = getReadClient();
-  if (!client4) return [];
+  const client5 = getReadClient();
+  if (!client5) return [];
   const productType = input.productType ?? null;
   const moods = input.moods ?? [];
   const audiences = input.audiences ?? [];
@@ -9179,7 +9258,7 @@ async function fetchCandidates(input) {
     )]{ ${KEYWORD_PROJECTION} }
   `;
   try {
-    return await client4.fetch(groq, {
+    return await client5.fetch(groq, {
       contentType,
       productType,
       moods,
@@ -9192,10 +9271,10 @@ async function fetchCandidates(input) {
   }
 }
 async function fetchAvoidList() {
-  const client4 = getReadClient();
-  if (!client4) return [];
+  const client5 = getReadClient();
+  if (!client5) return [];
   try {
-    const rows = await client4.fetch(
+    const rows = await client5.fetch(
       `*[_type == "seoKeyword" && (status == "rejected" || flagged == true)]{ term }`
     );
     return (rows ?? []).map((r) => r.term).filter(Boolean);
@@ -9333,10 +9412,10 @@ function getReadClient2() {
 async function getEditorialAuthor(slug) {
   if (!slug) return null;
   return cached(`editorial-author:${slug}`, 300, async () => {
-    const client4 = getReadClient2();
-    if (!client4) return null;
+    const client5 = getReadClient2();
+    if (!client5) return null;
     try {
-      const doc = await client4.fetch(
+      const doc = await client5.fetch(
         `*[_type == "editorialAuthor" && slug.current == $slug][0]{
           slug, name, personaSummary, voiceRules, keywordContentTypes, seoMode, active
         }`,
@@ -9730,10 +9809,10 @@ async function logImageCost(entry) {
 }
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql11 } = await import("drizzle-orm");
+  const { sql: sql12 } = await import("drizzle-orm");
   const days = opts.days ?? 30;
   const result = await db2.execute(
-    sql11`SELECT * FROM api_token_daily
+    sql12`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
   );
@@ -9741,11 +9820,11 @@ async function getDailyTokenRollup(opts = {}) {
 }
 async function getTokenCallDetail(opts) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql11 } = await import("drizzle-orm");
+  const { sql: sql12 } = await import("drizzle-orm");
   const model = opts.model ?? null;
   const source = opts.source ?? null;
   const result = await db2.execute(
-    sql11`
+    sql12`
       WITH grouped AS (
         SELECT
           caller, sku, product_id, batch_id,
@@ -12647,9 +12726,31 @@ function categoryToLegacyString(c) {
   if (c.length >= 2 && c.includes("for-him") && c.includes("for-her")) return "both";
   return c[0] ?? "both";
 }
+var PRODUCT_TYPE_DIALS;
 var init_types = __esm({
   "app/types/index.ts"() {
     "use strict";
+    PRODUCT_TYPE_DIALS = [
+      "vibrator",
+      "dildo",
+      "anal",
+      "bondage",
+      "cock-ring",
+      "stroker",
+      "couples",
+      "harness",
+      "extender",
+      "pump",
+      "lube",
+      "massage",
+      "enhancer",
+      "wear",
+      "condom",
+      "wellness",
+      "novelty",
+      "book-media",
+      "sex-machine"
+    ];
   }
 });
 
@@ -13080,10 +13181,10 @@ function toPickCandidate(p, heroHandle) {
 }
 async function listActiveRails() {
   return cached("emma:active-rails", 300, async () => {
-    const client4 = getReadClient3();
-    if (!client4) return [];
+    const client5 = getReadClient3();
+    if (!client5) return [];
     try {
-      const rows = await client4.fetch(RAILS_GROQ);
+      const rows = await client5.fetch(RAILS_GROQ);
       return rows ?? [];
     } catch (err) {
       console.error("[emma-rails] listActiveRails error:", err);
@@ -13092,10 +13193,10 @@ async function listActiveRails() {
   });
 }
 async function getRailById(id) {
-  const client4 = getReadClient3();
-  if (!client4) return null;
+  const client5 = getReadClient3();
+  if (!client5) return null;
   try {
-    return await client4.fetch(
+    return await client5.fetch(
       `*[_type == "emmaContextRail" && _id == $id][0]${RAIL_FIELDS_GROQ}`,
       { id }
     );
@@ -13105,21 +13206,21 @@ async function getRailById(id) {
   }
 }
 async function patchCurrent(railId, current) {
-  const client4 = getWriteClient();
-  if (!client4) throw new Error("sanity_not_configured");
-  await client4.patch(railId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
+  const client5 = getWriteClient();
+  if (!client5) throw new Error("sanity_not_configured");
+  await client5.patch(railId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
   const draftId = railId.startsWith("drafts.") ? railId : `drafts.${railId}`;
   try {
-    await client4.patch(draftId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
+    await client5.patch(draftId).set({ current }).unset(["lastError"]).commit({ autoGenerateArrayKeys: true });
   } catch {
   }
 }
 async function patchLastError(railId, reason, message) {
-  const client4 = getWriteClient();
-  if (!client4) return;
+  const client5 = getWriteClient();
+  if (!client5) return;
   const lastError = { reason, message, at: (/* @__PURE__ */ new Date()).toISOString() };
   try {
-    await client4.patch(railId).set({ lastError }).commit();
+    await client5.patch(railId).set({ lastError }).commit();
   } catch (err) {
     console.error("[emma-rails] patchLastError error:", err);
   }
@@ -13345,10 +13446,10 @@ var init_search_ping_server = __esm({
 // app/lib/with-timeout.server.ts
 async function withTimeout(p, ms, fallback, label = "op") {
   let timer;
-  const timeout = new Promise((resolve2) => {
+  const timeout = new Promise((resolve3) => {
     timer = setTimeout(() => {
       console.warn(`[with-timeout] ${label} timed out after ${ms}ms \u2014 using fallback`);
-      resolve2(fallback);
+      resolve3(fallback);
     }, ms);
   });
   try {
@@ -16137,15 +16238,17 @@ var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_
 var init_team_keys = __esm({
   "app/lib/team-keys.ts"() {
     "use strict";
-    TEAM_IDS = ["homepage", "social", "ads", "email", "strategy", "content"];
+    TEAM_IDS = ["homepage", "social", "ads", "email", "strategy", "content", "product"];
     TEAM_DEFAULTS = {
       homepage: { dailyCents: 1500, maxRunsPerDay: 4 },
       social: { dailyCents: 500, maxRunsPerDay: 2 },
       ads: { dailyCents: 500, maxRunsPerDay: 1 },
       email: { dailyCents: 500, maxRunsPerDay: 1 },
       strategy: { dailyCents: 300, maxRunsPerDay: 1 },
-      content: { dailyCents: 300, maxRunsPerDay: 2 }
+      content: { dailyCents: 300, maxRunsPerDay: 2 },
       // 2nd run = one voice-gate retry
+      product: { dailyCents: 300, maxRunsPerDay: 1 }
+      // daily import-queue drain (SQL + curl, ~$0)
     };
     HOMEPAGE_EXTRA_KEYS = {
       buildCents: "homepage_team_build_cents",
@@ -16675,9 +16778,9 @@ async function dfsRelatedKeywords(seed) {
 }
 async function llmSeedExpansion(seed) {
   if (!ANTHROPIC_KEY) return [];
-  const client4 = new Anthropic2({ apiKey: ANTHROPIC_KEY });
+  const client5 = new Anthropic2({ apiKey: ANTHROPIC_KEY });
   try {
-    const msg = await client4.messages.create({
+    const msg = await client5.messages.create({
       model: MODEL_FAST2,
       max_tokens: 800,
       system: `You expand SEO seed keywords for an editorially-curated sexual-wellness storefront. Return likely real search queries, including long-tail and question forms. Tasteful, never clinical, never sleazy.`,
@@ -16713,17 +16816,17 @@ Return 12 related queries as a JSON array of strings. Mix head terms, long-tail 
   }
 }
 async function gatherSeeds() {
-  const client4 = getWriteClient2();
-  if (!client4) return { approvedHeads: [], pillarTerms: [], productTitles: [] };
+  const client5 = getWriteClient2();
+  if (!client5) return { approvedHeads: [], pillarTerms: [], productTitles: [] };
   try {
     const [approvedHeads, pillarTerms, productTitles] = await Promise.all([
-      client4.fetch(
+      client5.fetch(
         `*[_type == "seoKeyword" && status == "approved" && kind == "head"][].term`
       ).catch(() => []),
-      client4.fetch(
+      client5.fetch(
         `*[_type == "seoCluster" && status != "archived"][].pillarTerm`
       ).catch(() => []),
-      client4.fetch(
+      client5.fetch(
         `*[_type == "productPage" && defined(title)] | order(_updatedAt desc)[0...50][].title`
       ).catch(() => [])
     ]);
@@ -16738,10 +16841,10 @@ async function gatherSeeds() {
   }
 }
 async function fetchExistingTerms() {
-  const client4 = getWriteClient2();
-  if (!client4) return /* @__PURE__ */ new Set();
+  const client5 = getWriteClient2();
+  if (!client5) return /* @__PURE__ */ new Set();
   try {
-    const rows = await client4.fetch(`*[_type == "seoKeyword"][].term`);
+    const rows = await client5.fetch(`*[_type == "seoKeyword"][].term`);
     return new Set((rows ?? []).map((t) => t.toLowerCase()));
   } catch {
     return /* @__PURE__ */ new Set();
@@ -16755,10 +16858,10 @@ async function fetchVocabulary() {
   }
 }
 async function fetchClusterCatalog() {
-  const client4 = getWriteClient2();
-  if (!client4) return [];
+  const client5 = getWriteClient2();
+  if (!client5) return [];
   try {
-    return await client4.fetch(
+    return await client5.fetch(
       `*[_type == "seoCluster" && status != "archived"]{ "slug": slug.current, pillarTerm, title }`
     ) ?? [];
   } catch {
@@ -16780,7 +16883,7 @@ async function classifyBatch(batch, vocab, clusters) {
       flagged: false
     }));
   }
-  const client4 = new Anthropic2({ apiKey: ANTHROPIC_KEY });
+  const client5 = new Anthropic2({ apiKey: ANTHROPIC_KEY });
   const clustersList = clusters.map((c) => `${c.slug} (${c.pillarTerm})`).join(", ");
   const sys = `You classify SEO keyword candidates for an editorially-curated sexual-wellness storefront. Use only the controlled vocabularies provided. Flag conservatively but accurately \u2014 only the three valid policy categories below, never adjacent worries.`;
   const user = `Catalog: ${CATALOG_SUMMARY}
@@ -16827,7 +16930,7 @@ ${batch.map((b, i) => `${i + 1}. ${b.term}`).join("\n")}
 
 Return a JSON array of objects. JSON only \u2014 no prose, no fences.`;
   try {
-    const msg = await client4.messages.create({
+    const msg = await client5.messages.create({
       model: MODEL_FAST2,
       max_tokens: 4096,
       system: sys,
@@ -16858,11 +16961,11 @@ Return a JSON array of objects. JSON only \u2014 no prose, no fences.`;
   }
 }
 async function ensureCluster(slug, pillarTerm, title) {
-  const client4 = getWriteClient2();
-  if (!client4) return null;
+  const client5 = getWriteClient2();
+  if (!client5) return null;
   try {
     const id = `seoCluster.${slugify(slug)}`;
-    await client4.createIfNotExists({
+    await client5.createIfNotExists({
       _id: id,
       _type: "seoCluster",
       slug: { _type: "slug", current: slugify(slug) },
@@ -16877,8 +16980,8 @@ async function ensureCluster(slug, pillarTerm, title) {
   }
 }
 async function writeCandidates(items) {
-  const client4 = getWriteClient2();
-  if (!client4) return { attempted: 0, written: 0, approved: 0, pending: 0, rejected: 0, errors: 0 };
+  const client5 = getWriteClient2();
+  if (!client5) return { attempted: 0, written: 0, approved: 0, pending: 0, rejected: 0, errors: 0 };
   const summary = { attempted: items.length, written: 0, approved: 0, pending: 0, rejected: 0, errors: 0 };
   const now = (/* @__PURE__ */ new Date()).toISOString();
   for (const it of items) {
@@ -16922,7 +17025,7 @@ async function writeCandidates(items) {
     if (it.flagReason) doc.flagReason = it.flagReason;
     if (clusterRef) doc.cluster = clusterRef;
     try {
-      await client4.createIfNotExists(doc);
+      await client5.createIfNotExists(doc);
       summary.written++;
       if (status === "approved") summary.approved++;
       else if (status === "rejected") summary.rejected++;
@@ -17632,6 +17735,181 @@ var init_pricing_webhook_server = __esm({
     init_pricing_engine_server();
     init_pricing_agent_server();
     init_pricing_apply_server();
+  }
+});
+
+// app/lib/cost-sync.server.ts
+import { inArray as inArray3, sql as sql8 } from "drizzle-orm";
+function round23(n) {
+  return Math.round(n * 100) / 100;
+}
+function todayIso() {
+  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+}
+function deriveSalePrice(snap) {
+  if (!snap.inSaleFeed || snap.nalpacDiscountPct == null || snap.msrp <= 0) return null;
+  return round23(snap.msrp * (1 - snap.nalpacDiscountPct));
+}
+async function runNalpacCostSync(opts) {
+  try {
+    const enabledVal = await getPipelineSetting("pricing_costsync_enabled");
+    if (enabledVal !== "true") {
+      console.info("[cost-sync] pricing_costsync_enabled is off; skipping");
+      return DISABLED_RESULT;
+    }
+    const { snapshots, carriedSkus } = opts;
+    const carriedInFeed = [...carriedSkus].filter((sku) => snapshots.has(sku));
+    const result = {
+      enabled: true,
+      skusChecked: carriedInFeed.length,
+      dropsDetected: 0,
+      variantsRepriced: 0,
+      errors: []
+    };
+    if (carriedInFeed.length === 0) return result;
+    const dropPctRaw = await getPipelineSetting("import_monitor_watch_price_drop_pct");
+    const dropPct = parseFloat(dropPctRaw ?? "0.10") || 0.1;
+    const priorRows = await db.select().from(nalpacPriceHistory).where(inArray3(nalpacPriceHistory.sku, carriedInFeed));
+    const priorBySku = new Map(priorRows.map((r) => [r.sku, r]));
+    const today = todayIso();
+    const now = /* @__PURE__ */ new Date();
+    const dropSkus = [];
+    const upsertRows = [];
+    for (const sku of carriedInFeed) {
+      const snap = snapshots.get(sku);
+      if (!snap) continue;
+      const prior = priorBySku.get(sku);
+      let isDrop = false;
+      if (prior) {
+        const priorWholesale = prior.wholesale != null ? parseFloat(prior.wholesale) : 0;
+        const priorMap = prior.mapPrice != null ? parseFloat(prior.mapPrice) : 0;
+        const newWholesale = snap.wholesale;
+        const newMap = snap.mapPrice ?? 0;
+        const wholesaleDrop = priorWholesale > 0 && newWholesale > 0 && newWholesale <= priorWholesale * (1 - dropPct);
+        const mapDrop = priorMap > 0 && newMap > 0 && newMap <= priorMap * (1 - dropPct);
+        isDrop = wholesaleDrop || mapDrop;
+        if (isDrop && prior.syncedAt != null) {
+          const syncedToday = prior.syncedAt.toISOString().slice(0, 10) === today;
+          if (syncedToday) isDrop = false;
+        }
+      }
+      if (isDrop) {
+        dropSkus.push(sku);
+        result.dropsDetected++;
+      }
+      const nalpacDiscountPct = snap.nalpacDiscountPct != null ? round23(snap.nalpacDiscountPct) : null;
+      const salePrice = deriveSalePrice(snap);
+      upsertRows.push({
+        sku,
+        wholesale: snap.wholesale > 0 ? String(snap.wholesale) : null,
+        msrp: snap.msrp > 0 ? String(snap.msrp) : null,
+        mapPrice: snap.mapPrice != null ? String(snap.mapPrice) : null,
+        salePrice: salePrice != null ? String(salePrice) : null,
+        qty: snap.qty,
+        nalpacDiscountPct: nalpacDiscountPct != null ? String(nalpacDiscountPct) : null,
+        inTop100: snap.inTop100Feed,
+        inNew: snap.inNewFeed,
+        inSale: snap.inSaleFeed,
+        observedAt: now,
+        // Sticky across days: only advance synced_at for SKUs that actually
+        // fire a sync this run; otherwise carry forward whatever was there.
+        syncedAt: isDrop ? now : prior?.syncedAt ?? null
+      });
+    }
+    const UPSERT_BATCH = 200;
+    for (let i = 0; i < upsertRows.length; i += UPSERT_BATCH) {
+      const chunk = upsertRows.slice(i, i + UPSERT_BATCH);
+      try {
+        await db.insert(nalpacPriceHistory).values(chunk).onConflictDoUpdate({
+          target: nalpacPriceHistory.sku,
+          set: {
+            wholesale: sql8`excluded.wholesale`,
+            msrp: sql8`excluded.msrp`,
+            mapPrice: sql8`excluded.map_price`,
+            salePrice: sql8`excluded.sale_price`,
+            qty: sql8`excluded.qty`,
+            nalpacDiscountPct: sql8`excluded.nalpac_discount_pct`,
+            inTop100: sql8`excluded.in_top100`,
+            inNew: sql8`excluded.in_new`,
+            inSale: sql8`excluded.in_sale`,
+            observedAt: sql8`excluded.observed_at`,
+            syncedAt: sql8`excluded.synced_at`
+          }
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[cost-sync] price-history upsert batch failed:", msg);
+        result.errors.push(`history upsert batch: ${msg}`);
+      }
+    }
+    if (dropSkus.length === 0) return result;
+    let matches = [];
+    try {
+      matches = await findVariantsBySkus(dropSkus);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[cost-sync] findVariantsBySkus failed:", msg);
+      result.errors.push(`findVariantsBySkus: ${msg}`);
+      return result;
+    }
+    for (const match of matches) {
+      const sku = match.variant.sku;
+      const snap = sku ? snapshots.get(sku) : void 0;
+      if (!snap) continue;
+      try {
+        if (snap.wholesale > 0) {
+          await updateProductMetafield(
+            match.productGid,
+            "wholesale_cost",
+            String(snap.wholesale),
+            "number_decimal"
+          );
+        }
+        if (snap.mapPrice != null && snap.mapPrice > 0) {
+          await updateProductMetafield(
+            match.productGid,
+            "map_price",
+            String(snap.mapPrice),
+            "number_decimal"
+          );
+        }
+        await recomputeVariant({ variantId: match.variant.variantId, trigger: "webhook" });
+        result.variantsRepriced++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[cost-sync] variant sync failed for sku ${sku}:`, msg);
+        result.errors.push(`${sku}: ${msg}`);
+      }
+    }
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[cost-sync] runNalpacCostSync failed:", msg);
+    return {
+      enabled: true,
+      skusChecked: 0,
+      dropsDetected: 0,
+      variantsRepriced: 0,
+      errors: [msg]
+    };
+  }
+}
+var DISABLED_RESULT;
+var init_cost_sync_server = __esm({
+  "app/lib/cost-sync.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_feed_processor_server();
+    init_shopify_server();
+    init_pricing_apply_v2_server();
+    DISABLED_RESULT = {
+      enabled: false,
+      skusChecked: 0,
+      dropsDetected: 0,
+      variantsRepriced: 0,
+      errors: []
+    };
   }
 });
 
@@ -18463,6 +18741,20 @@ async function gatherProductBrief(numericProductId) {
   if (sku) brief.sku = sku;
   return brief;
 }
+async function loadSharedEnrichmentContext() {
+  const [dialRegistry, dialTaxonomy, vocab] = await Promise.all([
+    getDialRegistry(),
+    getDialTaxonomy(),
+    getAskEmmaVocabulary()
+  ]);
+  return {
+    moodVocab: vocab.mood,
+    audienceVocab: vocab.audience,
+    mattersVocab: vocab.matters,
+    dialRegistryByType: dialRegistry,
+    dialTaxonomy
+  };
+}
 var VARIANT_DESC_AGGREGATE_CAP;
 var init_enricher_brief_server = __esm({
   "app/lib/enricher-brief.server.ts"() {
@@ -18476,6 +18768,174 @@ var init_enricher_brief_server = __esm({
   }
 });
 
+// app/lib/batch-enrichment.server.ts
+import { readFile } from "node:fs/promises";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { dirname as dirname2, resolve as resolve2 } from "node:path";
+import Anthropic5 from "@anthropic-ai/sdk";
+function stripFences2(raw) {
+  return raw.replace(/^```(?:html|json)?\n?/i, "").replace(/\n?```$/i, "").trim();
+}
+async function loadEnricherAgentPrompt() {
+  if (_cachedAgentPrompt !== null) return _cachedAgentPrompt;
+  const here = dirname2(fileURLToPath2(import.meta.url));
+  const path = resolve2(here, "..", "..", ".claude", "agents", "emma-product-enricher.md");
+  const raw = await readFile(path, "utf8");
+  const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+  if (!body) throw new Error(`empty agent prompt at ${path}`);
+  _cachedAgentPrompt = body;
+  return body;
+}
+function buildSharedContextBlock(ctx) {
+  const dialReg = Object.entries(ctx.dialRegistryByType).map(([t, labels]) => `  ${t}: ${labels.join(", ")}`).join("\n");
+  const dialTax = Object.entries(ctx.dialTaxonomy).map(([t, items]) => {
+    const lines = items.map((i) => {
+      const scaleParts = [];
+      if (i.scaleLow) scaleParts.push(`1=${i.scaleLow}`);
+      if (i.scaleMid) scaleParts.push(`3=${i.scaleMid}`);
+      if (i.scaleHigh) scaleParts.push(`5=${i.scaleHigh}`);
+      const scaleSuffix = scaleParts.length > 0 ? `  (${scaleParts.join(" | ")})` : "";
+      const def = i.definition ? `: ${i.definition}` : "";
+      return `    - ${i.label}${def}${scaleSuffix}`;
+    }).join("\n");
+    return `  ${t}:
+${lines}`;
+  }).join("\n");
+  return `Shared editorial context for this batch (vocabularies, dial registry, dial taxonomy). Apply per the <inputs> section of your agent prompt.
+
+moodVocab: ${ctx.moodVocab.join(", ")}
+audienceVocab: ${ctx.audienceVocab.join(", ")}
+mattersVocab: ${ctx.mattersVocab.join(", ")}
+
+dialRegistryByType:
+${dialReg}
+
+dialTaxonomy:
+${dialTax}`;
+}
+function buildPerProductUserPrompt(brief) {
+  return `Product brief:
+\`\`\`json
+${JSON.stringify(brief, null, 2)}
+\`\`\`
+
+Return ONLY the ProductWrites JSON object per your <output_schema>. No markdown fences. No commentary. No preamble.`;
+}
+function addUsage(acc, delta) {
+  acc.inputTokens += delta.inputTokens;
+  acc.outputTokens += delta.outputTokens;
+  acc.cacheCreationTokens += delta.cacheCreationTokens;
+  acc.cacheReadTokens += delta.cacheReadTokens;
+}
+async function buildFullEnrichmentRequests(inputs, context, opts = {}) {
+  const emmaBlocks = await buildEmmaSystemBlocks(opts.brandVoice);
+  const agentPrompt = await loadEnricherAgentPrompt();
+  const contextBlock = buildSharedContextBlock(context);
+  const systemParam = [
+    ...emmaBlocks.map((b) => ({
+      type: "text",
+      text: b.text,
+      ...b.cache ? { cache_control: { type: "ephemeral" } } : {}
+    })),
+    { type: "text", text: agentPrompt, cache_control: { type: "ephemeral" } },
+    { type: "text", text: contextBlock, cache_control: { type: "ephemeral" } }
+  ];
+  return inputs.map(({ productId, brief }) => ({
+    custom_id: `${productId}${FULL_ENRICHMENT_SUFFIX}`,
+    params: {
+      model: MODEL_SONNET,
+      max_tokens: opts.maxTokens ?? 4096,
+      system: systemParam,
+      messages: [{ role: "user", content: buildPerProductUserPrompt(brief) }]
+    }
+  }));
+}
+function parseFullEnrichmentEntry(entry) {
+  if (!entry) return { error: "no result for custom_id" };
+  if (entry.result.type !== "succeeded") {
+    const reason = entry.result.type === "errored" ? entry.result.error.error.message : entry.result.type;
+    return { error: `batch ${entry.result.type}: ${reason}` };
+  }
+  const msg = entry.result.message;
+  const u = msg.usage;
+  const usage = {
+    inputTokens: u?.input_tokens ?? 0,
+    outputTokens: u?.output_tokens ?? 0,
+    cacheCreationTokens: u?.cache_creation_input_tokens ?? 0,
+    cacheReadTokens: u?.cache_read_input_tokens ?? 0
+  };
+  const block = msg.content[0];
+  if (block?.type !== "text") return { error: "unexpected non-text response block", usage };
+  const cleaned = stripFences2(block.text).trim();
+  if (!cleaned) return { error: "empty response", usage };
+  try {
+    return { writes: JSON.parse(cleaned), usage };
+  } catch (err) {
+    const preview = cleaned.slice(0, 200).replace(/\n/g, " ");
+    return { error: `JSON parse failed: ${err instanceof Error ? err.message : String(err)} | preview: ${preview}`, usage };
+  }
+}
+async function submitFullEnrichmentBatch(inputs, context, opts = {}) {
+  if (inputs.length === 0) throw new Error("submitFullEnrichmentBatch: no inputs");
+  const requests = await buildFullEnrichmentRequests(inputs, context, opts);
+  const batch = await client4.messages.batches.create({ requests });
+  console.log(`[batch] submitted full-enrichment batch ${batch.id} with ${requests.length} requests (no poll)`);
+  return { batchId: batch.id, productIds: inputs.map((i) => i.productId), submittedCount: requests.length };
+}
+async function collectFullEnrichmentBatch(batchId) {
+  const current = await client4.messages.batches.retrieve(batchId);
+  if (current.processing_status !== "ended") {
+    return { ended: false, status: current.processing_status, succeeded: current.request_counts.succeeded };
+  }
+  const results = /* @__PURE__ */ new Map();
+  const failures = [];
+  const usage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+  const stream = await client4.messages.batches.results(batchId);
+  for await (const entry of stream) {
+    if (!entry.custom_id.endsWith(FULL_ENRICHMENT_SUFFIX)) continue;
+    const productId = entry.custom_id.slice(0, -FULL_ENRICHMENT_SUFFIX.length);
+    const parsed = parseFullEnrichmentEntry(entry);
+    if (parsed.usage) addUsage(usage, parsed.usage);
+    if (parsed.writes) results.set(productId, parsed.writes);
+    else failures.push({ productId, error: parsed.error });
+  }
+  void logApiTokens({
+    feature: "enrichment",
+    model: MODEL_SONNET,
+    source: "batch",
+    batchId,
+    requestCount: results.size + failures.length,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    caller: "collectFullEnrichmentBatch"
+  });
+  return { ended: true, results, failures, usage };
+}
+function checkDialSpread(items) {
+  const values = (items ?? []).map((i) => i.value).filter((v) => typeof v === "number" && Number.isFinite(v));
+  const distinct = new Set(values).size;
+  const fives = values.filter((v) => v === 5).length;
+  const ones = values.filter((v) => v === 1).length;
+  const ok = values.length >= 5 && distinct >= 3 && fives <= 1 && ones <= 1;
+  return { ok, distinct, fives, ones, values };
+}
+var client4, MODEL_SONNET, POLL_TIMEOUT_DEFAULT_MS, _cachedAgentPrompt, FULL_ENRICHMENT_SUFFIX;
+var init_batch_enrichment_server = __esm({
+  "app/lib/batch-enrichment.server.ts"() {
+    "use strict";
+    init_claude_server();
+    init_token_log_server();
+    init_models_server();
+    client4 = new Anthropic5({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
+    MODEL_SONNET = SONNET;
+    POLL_TIMEOUT_DEFAULT_MS = 24 * 60 * 60 * 1e3;
+    _cachedAgentPrompt = null;
+    FULL_ENRICHMENT_SUFFIX = "_fullEnrichment";
+  }
+});
+
 // app/lib/import-enrich.server.ts
 var import_enrich_server_exports = {};
 __export(import_enrich_server_exports, {
@@ -18485,7 +18945,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and4, asc as asc3, eq as eq15, inArray as inArray3, isNull as isNull2, sql as sql8 } from "drizzle-orm";
+import { and as and4, asc as asc3, eq as eq15, inArray as inArray4, isNull as isNull2, sql as sql9 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -18611,15 +19071,27 @@ async function applyFullEnrichmentWrites(numericProductId, writes) {
     console.error(`[import-enrich] sanity mirror error for ${numericProductId}:`, err);
   }
 }
+function passesQualityGate(writes) {
+  if (!writes.descriptionHtml?.trim()) return false;
+  if (!writes.tagline?.trim()) return false;
+  if (!writes.seoMetaDescription || writes.seoMetaDescription.length < 100) return false;
+  if (!writes.productTypeDial || !PRODUCT_TYPE_DIALS.includes(writes.productTypeDial)) return false;
+  if (!writes.moodTags?.length) return false;
+  if (!writes.audienceTags?.length) return false;
+  if (!writes.mattersTags?.length) return false;
+  if (!checkDialSpread(writes.sensationDialV2?.items).ok) return false;
+  return true;
+}
 async function submitEnrichmentBatch(cap) {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId, sku: importCandidates.masterKey }).from(importCandidates).innerJoin(dealHistory, eq15(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq15(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
     eq15(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
-    isNull2(importCandidates.enrichBatchId)
+    isNull2(importCandidates.enrichBatchId),
+    isNull2(importCandidates.enrichFailedAt)
   )).orderBy(asc3(importCandidates.id)).limit(cap);
   const valid = rows.filter((r) => Boolean(r.productId));
   if (valid.length === 0) return { submitted: 0, reason: "no_unenriched" };
-  const products = [];
+  const inputs = [];
   const candidateIds = [];
   for (const r of valid) {
     const brief = await gatherProductBrief(r.productId);
@@ -18627,91 +19099,76 @@ async function submitEnrichmentBatch(cap) {
       console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) -- skipping`);
       continue;
     }
-    const sku = brief.sku ?? r.sku;
-    const product = {
-      title: brief.rawTitle,
-      brand: brief.brand,
-      description: brief.rawDescription,
-      categories: brief.categories,
-      dealPrice: brief.dealPrice,
-      msrp: brief.msrp
-    };
-    const validCategoryValues = /* @__PURE__ */ new Set(["for-him", "for-her", "couples"]);
-    const category = brief.categories.filter(
-      (c) => validCategoryValues.has(c)
-    );
-    const effectiveCategory = category.length > 0 ? category : ["for-him", "for-her"];
-    const pairingCandidates = brief.pairingCandidates.filter((pc) => typeof pc.price === "number").map((pc) => {
-      const candidate = {
-        productId: pc.productId,
-        handle: pc.productId.replace("gid://shopify/Product/", ""),
-        title: pc.title,
-        price: pc.price
-      };
-      if (pc.brand) candidate.brand = pc.brand;
-      if (pc.productTypeDial) candidate.productTypeDial = pc.productTypeDial;
-      return candidate;
-    });
-    const input = pairingCandidates.length > 0 ? {
-      product,
-      // Use rawTitle as seoTitle; the orchestrator's generateProductTitle tool
-      // will augment it if needed (same as the bulk-import path).
-      seoTitle: brief.rawTitle,
-      category: effectiveCategory,
-      pairingCandidates
-    } : {
-      product,
-      seoTitle: brief.rawTitle,
-      category: effectiveCategory
-    };
-    products.push({ productId: `gid://shopify/Product/${r.productId}`, sku, input });
+    brief.pairingCandidates = [];
+    inputs.push({ productId: `gid://shopify/Product/${r.productId}`, brief });
     candidateIds.push(r.id);
   }
-  if (products.length === 0) return { submitted: 0, reason: "no_briefs" };
-  const { jobId } = await enqueueBatchJob({
-    jobType: "full-enrichment",
-    source: "import-product",
-    products
-  });
-  await db.update(importCandidates).set({ enrichBatchId: jobId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray3(importCandidates.id, candidateIds));
-  console.log(`[import-enrich] enqueued orchestrator job ${jobId} for ${products.length} product(s)`);
-  return { submitted: products.length, batchId: jobId };
+  if (inputs.length === 0) return { submitted: 0, reason: "no_briefs" };
+  const sharedContext = await loadSharedEnrichmentContext();
+  const { batchId } = await submitFullEnrichmentBatch(inputs, sharedContext, { brandVoice: EMMA_VOICE_ENRICHMENT });
+  await db.update(importCandidates).set({ enrichBatchId: batchId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray4(importCandidates.id, candidateIds));
+  console.log(`[import-enrich] submitted full-enrichment batch ${batchId} for ${inputs.length} product(s)`);
+  return { submitted: inputs.length, batchId };
 }
 async function collectEnrichmentBatch() {
-  const pendingCandidates = await db.select({
+  const rows = await db.select({
     id: importCandidates.id,
-    jobId: importCandidates.enrichBatchId
-  }).from(importCandidates).where(and4(
+    batchId: importCandidates.enrichBatchId,
+    productId: dealHistory.shopifyProductId,
+    enrichAttempts: importCandidates.enrichAttempts
+  }).from(importCandidates).innerJoin(dealHistory, eq15(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
     eq15(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
-    sql8`${importCandidates.enrichBatchId} IS NOT NULL`
+    isNull2(importCandidates.enrichFailedAt),
+    sql9`${importCandidates.enrichBatchId} IS NOT NULL`
   )).orderBy(asc3(importCandidates.id));
-  if (pendingCandidates.length === 0) {
+  const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
+  if (pending.length === 0) {
     return { enriched: 0, failed: 0, stillPending: 0 };
   }
-  const jobIds = [...new Set(pendingCandidates.map((c) => c.jobId))];
-  const jobRows = await db.select({ jobId: batchJobs.jobId, status: batchJobs.status }).from(batchJobs).where(inArray3(batchJobs.jobId, jobIds));
-  const jobStatus = new Map(jobRows.map((r) => [r.jobId, r.status]));
+  const byBatch = /* @__PURE__ */ new Map();
+  for (const c of pending) {
+    const list = byBatch.get(c.batchId) ?? [];
+    list.push(c);
+    byBatch.set(c.batchId, list);
+  }
   let enrichedTotal = 0;
   let failedTotal = 0;
   let stillPending = 0;
-  for (const candidate of pendingCandidates) {
-    const jobId = candidate.jobId;
-    const status = jobStatus.get(jobId);
-    if (!status || status === "queued" || status === "submitted" || status === "processing" || status === "applying") {
-      stillPending++;
+  for (const [batchId, candidates] of byBatch) {
+    const collected = await collectFullEnrichmentBatch(batchId);
+    if (!collected.ended) {
+      stillPending += candidates.length;
       continue;
     }
-    if (status === "done") {
-      await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, candidate.id));
-      enrichedTotal++;
-      console.log(`[import-enrich] candidate ${candidate.id} job ${jobId} done -- stamped enriched_at`);
-    } else {
-      await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, candidate.id));
+    for (const candidate of candidates) {
+      const gid = `gid://shopify/Product/${candidate.productId}`;
+      const writes = collected.results.get(gid);
+      const batchFailure = collected.failures.find((f) => f.productId === gid);
+      let ok = false;
+      if (writes && !batchFailure && passesQualityGate(writes)) {
+        try {
+          await applyFullEnrichmentWrites(candidate.productId, writes);
+          ok = true;
+        } catch (err) {
+          console.error(`[import-enrich] applyFullEnrichmentWrites failed for candidate ${candidate.id} (product ${candidate.productId}):`, err);
+        }
+      }
+      if (ok) {
+        await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, candidate.id));
+        enrichedTotal++;
+        continue;
+      }
+      const attempts = candidate.enrichAttempts + 1;
+      const reason = batchFailure?.error ?? (!writes ? "no result in batch" : "quality gate failed");
+      if (attempts < ENRICH_MAX_ATTEMPTS) {
+        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, candidate.id));
+        console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- re-queued for retry`);
+      } else {
+        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, candidate.id));
+        console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- parked, needs manual review`);
+      }
       failedTotal++;
-      console.warn(
-        `[import-enrich] candidate ${candidate.id} job ${jobId} failed -- stamping enriched_at to unblock queue (partial writes may apply)`
-      );
     }
   }
   return { enriched: enrichedTotal, failed: failedTotal, stillPending };
@@ -18719,7 +19176,7 @@ async function collectEnrichmentBatch() {
 async function publishEnrichedProducts() {
   const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq15(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
     eq15(importCandidates.status, "imported"),
-    sql8`${importCandidates.enrichedAt} IS NOT NULL`,
+    sql9`${importCandidates.enrichedAt} IS NOT NULL`,
     isNull2(importCandidates.publishedAt)
   ));
   let published = 0;
@@ -18728,11 +19185,25 @@ async function publishEnrichedProducts() {
     if (!r.productId) continue;
     try {
       await activateShopifyProduct(r.productId);
+      try {
+        await appendProductTag(r.productId, "new-arrival");
+      } catch (tagErr) {
+        console.warn(`[import-enrich] appendProductTag('new-arrival') failed for product ${r.productId} (candidate ${r.id}):`, tagErr instanceof Error ? tagErr.message : tagErr);
+      }
       await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, r.id));
       published++;
     } catch (err) {
       console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err);
       failed++;
+    }
+  }
+  if (published > 0) {
+    try {
+      const { invalidateDiscoveryIndex: invalidateDiscoveryIndex2, triggerDiscoveryRebuild: triggerDiscoveryRebuild2 } = await Promise.resolve().then(() => (init_discovery_server(), discovery_server_exports));
+      await invalidateDiscoveryIndex2();
+      triggerDiscoveryRebuild2();
+    } catch (err) {
+      console.warn("[import-enrich] discovery index refresh after publish failed (will self-heal on next /cron/warm):", err);
     }
   }
   return { published, failed };
@@ -18744,33 +19215,28 @@ async function runImportEnrichTick(opts = {}) {
   void opts;
   const collect = await collectEnrichmentBatch();
   const publish = await publishEnrichedProducts();
-  let submit = { submitted: 0, reason: "batch_in_flight" };
-  const inflightRow = await db.select({ c: sql8`count(*)::int` }).from(batchJobs).where(and4(
-    eq15(batchJobs.source, "import-product"),
-    inArray3(batchJobs.status, ["queued", "submitted", "processing", "applying"])
-  ));
-  const inflightCount = Number(inflightRow[0]?.c ?? 0);
-  if (inflightCount === 0) {
-    submit = await submitEnrichmentBatch(await getBatchCap());
-  }
+  const submit = collect.stillPending === 0 ? await submitEnrichmentBatch(await getBatchCap()) : { submitted: 0, reason: "batch_in_flight" };
   return { ok: true, collect, publish, submit };
 }
-var VALID_IVR_EXPERIENCE, DEFAULT_BATCH_CAP, ed, edA;
+var VALID_IVR_EXPERIENCE, DEFAULT_BATCH_CAP, ed, edA, ENRICH_MAX_ATTEMPTS;
 var init_import_enrich_server = __esm({
   "app/lib/import-enrich.server.ts"() {
     "use strict";
     init_db_server();
     init_schema();
     init_enricher_brief_server();
-    init_batch_orchestrator_server();
+    init_batch_enrichment_server();
     init_shopify_server();
     init_sanity_server();
     init_feed_processor_server();
     init_claude_server();
+    init_emma_voice_server();
+    init_types();
     VALID_IVR_EXPERIENCE = new Set(IVR_EXPERIENCE_LEVELS);
     DEFAULT_BATCH_CAP = 10;
     ed = (s) => s == null ? s : stripDashes(s);
     edA = (a) => a?.map(stripDashes);
+    ENRICH_MAX_ATTEMPTS = 2;
   }
 });
 
@@ -18780,18 +19246,18 @@ __export(field_regen_runner_server_exports, {
   advanceFieldRegenJob: () => advanceFieldRegenJob,
   enqueueFieldRegenJob: () => enqueueFieldRegenJob
 });
-import Anthropic5 from "@anthropic-ai/sdk";
+import Anthropic6 from "@anthropic-ai/sdk";
 import { eq as eq16 } from "drizzle-orm";
 function toDbRunnerState(rs) {
   return rs;
 }
 function getClient2() {
-  return new Anthropic5({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
+  return new Anthropic6({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
 }
 function buildCustomId(jobId, fieldKey) {
   return `${jobId}::${fieldKey}`;
 }
-function stripFences2(raw) {
+function stripFences3(raw) {
   return raw.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
 }
 function buildCopyFieldUserPrompt(type, product, keywordBlock) {
@@ -19005,7 +19471,7 @@ async function advanceFieldRegenJob(job) {
         };
       }
       await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(batchJobs.jobId, job.jobId));
-      const client4 = getClient2();
+      const client5 = getClient2();
       const requests = [];
       const systemParam = systemBlocks.map((b) => ({
         type: "text",
@@ -19023,7 +19489,7 @@ async function advanceFieldRegenJob(job) {
           }
         });
       }
-      const batch = await client4.messages.batches.create({ requests });
+      const batch = await client5.messages.batches.create({ requests });
       const batchIds = [batch.id];
       await db.update(batchJobs).set({
         status: "submitted",
@@ -19043,14 +19509,14 @@ async function advanceFieldRegenJob(job) {
         console.error(`[field-regen] job ${job.jobId} in ${job.status} with no currentBatchId`);
         break;
       }
-      const client4 = getClient2();
-      const batch = await client4.messages.batches.retrieve(job.currentBatchId);
+      const client5 = getClient2();
+      const batch = await client5.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
         await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq16(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
-      const stream = await client4.messages.batches.results(job.currentBatchId);
+      const stream = await client5.messages.batches.results(job.currentBatchId);
       for await (const entry of stream) {
         responses.set(entry.custom_id, entry);
       }
@@ -19153,7 +19619,7 @@ async function advanceFieldRegenJob(job) {
   return outcome;
 }
 function parseFieldResult(fieldKey, rawText, ctx) {
-  const stripped = stripFences2(rawText);
+  const stripped = stripFences3(rawText);
   if (ctx.kind === "emma-hero" && fieldKey === "emma-hero") {
     try {
       return JSON.parse(stripped);
@@ -19298,10 +19764,10 @@ __export(batch_orchestrator_server_exports, {
   listRecentBatchJobs: () => listRecentBatchJobs
 });
 import { randomUUID as randomUUID2 } from "node:crypto";
-import Anthropic6 from "@anthropic-ai/sdk";
-import { eq as eq17, inArray as inArray4 } from "drizzle-orm";
+import Anthropic7 from "@anthropic-ai/sdk";
+import { eq as eq17, inArray as inArray5 } from "drizzle-orm";
 function getClient3() {
-  return new Anthropic6({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
+  return new Anthropic7({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
 }
 async function enqueueBatchJob(args) {
   const jobId = randomUUID2();
@@ -19352,7 +19818,7 @@ async function enqueueBatchJob(args) {
 }
 async function advanceInflightJobs(opts = {}) {
   const maxJobs = opts.maxJobs ?? 10;
-  const rows = await db.select().from(batchJobs).where(inArray4(batchJobs.status, ["queued", "submitted", "processing", "applying"])).orderBy(batchJobs.updatedAt).limit(maxJobs);
+  const rows = await db.select().from(batchJobs).where(inArray5(batchJobs.status, ["queued", "submitted", "processing", "applying"])).orderBy(batchJobs.updatedAt).limit(maxJobs);
   const result = { advanced: 0, submitted: 0, applied: 0, done: 0, failed: 0 };
   for (const job of rows) {
     try {
@@ -19400,14 +19866,14 @@ async function advanceJob(job) {
         console.error(`[batch-orchestrator] job ${job.jobId} in ${job.status} with no currentBatchId`);
         break;
       }
-      const client4 = getClient3();
-      const batch = await client4.messages.batches.retrieve(job.currentBatchId);
+      const client5 = getClient3();
+      const batch = await client5.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
         await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
-      const stream = await client4.messages.batches.results(job.currentBatchId);
+      const stream = await client5.messages.batches.results(job.currentBatchId);
       for await (const entry of stream) {
         responses.set(entry.custom_id, entry);
       }
@@ -19745,8 +20211,8 @@ async function submitTurnBatch(job) {
     });
   }
   if (requests.length === 0) return;
-  const client4 = getClient3();
-  const batch = await client4.messages.batches.create({ requests });
+  const client5 = getClient3();
+  const batch = await client5.messages.batches.create({ requests });
   const isFirstSubmit = !job.submittedAt;
   const batchIds = [...Array.isArray(job.batchIds) ? job.batchIds : [], batch.id];
   await db.update(batchJobs).set({
@@ -20006,6 +20472,7 @@ async function importProductGroup(group) {
     const category = inferCategory(categories);
     let numericId;
     const existingGid = await findProductBySKU(masterSku);
+    const isNewDraftProduct = !existingGid;
     if (existingGid) {
       numericId = existingGid.replace("gid://shopify/Product/", "");
     } else if (isSingleVariant) {
@@ -20134,6 +20601,7 @@ async function importProductGroup(group) {
           // are written by applyFullEnrichmentWrites once the batch job completes.
         };
         if (images[0]) upsertParams.imageUrl = images[0];
+        if (isNewDraftProduct) upsertParams.hiddenUntilLive = true;
         let lastErr;
         for (let attempt = 1; attempt <= 2; attempt++) {
           try {
@@ -20200,6 +20668,7 @@ async function importProductGroupRaw(group) {
     const category = inferCategory(categories);
     let numericId;
     const existingGid = await findProductBySKU(masterSku);
+    const isNewDraftProduct = !existingGid;
     if (existingGid) {
       numericId = existingGid.replace("gid://shopify/Product/", "");
     } else if (isSingleVariant) {
@@ -20301,6 +20770,7 @@ async function importProductGroupRaw(group) {
           category
         };
         if (images[0]) upsertParams.imageUrl = images[0];
+        if (isNewDraftProduct) upsertParams.hiddenUntilLive = true;
         let lastErr;
         for (let attempt = 1; attempt <= 2; attempt++) {
           try {
@@ -20446,7 +20916,8 @@ async function importNewProduct(input) {
       tags: editorialTagsFrom(rawProduct.categories),
       description: rawProduct.description,
       seoTitle,
-      category
+      category,
+      hiddenUntilLive: true
     };
     if (rawProduct.images?.[0]) upsertParams.imageUrl = rawProduct.images[0];
     let lastErr;
@@ -20494,7 +20965,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and5, eq as eq19, inArray as inArray5, sql as sql9 } from "drizzle-orm";
+import { and as and5, eq as eq19, inArray as inArray6, sql as sql10 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -20600,6 +21071,22 @@ async function runImportMonitor(opts = {}) {
     const carriedBrands = new Set(
       carriedRows.map((r) => r.brand?.toLowerCase().trim()).filter(Boolean)
     );
+    try {
+      const costSyncResult = await runNalpacCostSync({
+        snapshots: feedResult.snapshots,
+        carriedSkus
+      });
+      if (costSyncResult.enabled) {
+        console.info(
+          `[import-monitor] cost-sync: checked=${costSyncResult.skusChecked} drops=${costSyncResult.dropsDetected} repriced=${costSyncResult.variantsRepriced} errors=${costSyncResult.errors.length}`
+        );
+        if (costSyncResult.errors.length > 0) {
+          console.warn("[import-monitor] cost-sync errors:", costSyncResult.errors);
+        }
+      }
+    } catch (err) {
+      console.error("[import-monitor] cost-sync threw unexpectedly:", err);
+    }
     const currentFeedSkus = [...feedResult.snapshots.keys()];
     const priorFeedSkus = await kvGet(KV_FEED_SKUS);
     const priorSet = new Set(priorFeedSkus ?? []);
@@ -20645,7 +21132,7 @@ async function runImportMonitor(opts = {}) {
       status: importCandidates.status,
       watchScore: importCandidates.watchScore,
       watchPrice: importCandidates.watchPrice
-    }).from(importCandidates).where(inArray5(importCandidates.masterKey, cappedKeys)) : [];
+    }).from(importCandidates).where(inArray6(importCandidates.masterKey, cappedKeys)) : [];
     const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r]));
     let candidatesNew = 0;
     let candidatesResurfaced = 0;
@@ -20738,7 +21225,19 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
   const requireCarried = (requireCarriedStr ?? "true") !== "false";
   const maxPerDay = Math.max(0, parseInt(maxPerDayStr ?? "8", 10) || 0);
   if (maxPerDay <= 0) return 0;
-  const importedTodayRows = await db.select({ cnt: sql9`count(*)::int` }).from(importCandidates).where(and5(eq19(importCandidates.status, "imported"), eq19(importCandidates.runDate, todayStr)));
+  const [tierCEnabledStr, tierCMinQtyStr, tierCMinGapStr, tierCMinMarkupStr, tierCMaxPerDayStr] = await Promise.all([
+    getPipelineSetting("monitor_p2_tierC_enabled"),
+    getPipelineSetting("monitor_p2_tierC_min_qty"),
+    getPipelineSetting("monitor_p2_tierC_min_gap_score"),
+    getPipelineSetting("monitor_p2_tierC_min_markup_pct"),
+    getPipelineSetting("monitor_p2_tierC_max_per_day")
+  ]);
+  const tierCEnabled = tierCEnabledStr === "true";
+  const tierCMinQty = parseInt(tierCMinQtyStr ?? "60", 10) || 60;
+  const tierCMinGap = parseFloat(tierCMinGapStr ?? "4.5");
+  const tierCMinMarkup = parseFloat(tierCMinMarkupStr ?? "0.15");
+  const tierCMaxPerDay = Math.max(0, parseInt(tierCMaxPerDayStr ?? "3", 10) || 0);
+  const importedTodayRows = await db.select({ cnt: sql10`count(*)::int` }).from(importCandidates).where(and5(eq19(importCandidates.status, "imported"), eq19(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -20753,12 +21252,13 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
     totalQty: importCandidates.totalQty,
     dealScore: importCandidates.dealScore,
     mapPrice: importCandidates.mapPrice,
+    msrp: importCandidates.msrp,
     proposedPrice: importCandidates.proposedPrice,
     needsReview: importCandidates.needsReview
   }).from(importCandidates).where(and5(
     eq19(importCandidates.status, "pending"),
-    inArray5(importCandidates.masterKey, cappedKeys)
-  )).orderBy(importCandidates.tier, sql9`${importCandidates.dealScore} DESC NULLS LAST`);
+    inArray6(importCandidates.masterKey, cappedKeys)
+  )).orderBy(importCandidates.tier, sql10`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
     const tierOk = c.tier === "A" || c.tier === "B";
     if (!tierOk || c.needsReview) return false;
@@ -20777,7 +21277,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
   for (const c of gated) {
     if (imported >= remaining) break;
     try {
-      const r = await approveAndImport(c.id);
+      const r = await approveAndImport(c.id, "phase2-auto");
       if (r.ok && !r.skipped) {
         imported++;
         console.info(`[import-monitor] phase 2 auto-imported candidate ${c.id} (tier ${c.tier})`);
@@ -20786,6 +21286,39 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
       }
     } catch (err) {
       console.error(`[import-monitor] phase 2 auto-import threw for candidate ${c.id}:`, err);
+    }
+  }
+  if (tierCEnabled && tierCMaxPerDay > 0 && imported < remaining) {
+    const gatedTierC = pending.filter((c) => {
+      if (c.tier !== "C" || c.needsReview) return false;
+      const wholesale = parseFloat(c.wholesaleCost ?? "0");
+      const gap = parseFloat(c.dealScore ?? "0");
+      const qty = c.totalQty ?? 0;
+      const map = parseFloat(c.mapPrice ?? "0");
+      const msrp = parseFloat(c.msrp ?? "0");
+      const price = parseFloat(c.proposedPrice ?? "0");
+      const mapClean = !(map > 0 && (price < map || map >= msrp));
+      const markupOk = wholesale > 0 && price >= wholesale * (1 + tierCMinMarkup);
+      return markupOk && qty >= tierCMinQty && gap >= tierCMinGap && mapClean;
+    });
+    let importedTierC = 0;
+    for (const c of gatedTierC) {
+      if (imported >= remaining || importedTierC >= tierCMaxPerDay) break;
+      try {
+        const r = await approveAndImport(c.id, "phase2-auto");
+        if (r.ok && !r.skipped) {
+          imported++;
+          importedTierC++;
+          console.info(`[import-monitor] phase 2 tier-C auto-imported candidate ${c.id}`);
+        } else if (!r.ok) {
+          console.warn(`[import-monitor] phase 2 tier-C auto-import failed for candidate ${c.id}: ${r.error}`);
+        }
+      } catch (err) {
+        console.error(`[import-monitor] phase 2 tier-C auto-import threw for candidate ${c.id}:`, err);
+      }
+    }
+    if (importedTierC > 0) {
+      console.info(`[import-monitor] phase 2 tier-C auto-imported ${importedTierC} (sub-cap ${tierCMaxPerDay})`);
     }
   }
   console.info(`[import-monitor] phase 2 auto-imported ${imported} (cap ${maxPerDay}, ${importedToday} prior today)`);
@@ -20820,7 +21353,7 @@ async function stageMasterCandidatesBySkus(skus, opts) {
     }
   }
   const masterKeys = [...mastersToDo];
-  const existingRows = masterKeys.length > 0 ? await db.select({ masterKey: importCandidates.masterKey, status: importCandidates.status }).from(importCandidates).where(inArray5(importCandidates.masterKey, masterKeys)) : [];
+  const existingRows = masterKeys.length > 0 ? await db.select({ masterKey: importCandidates.masterKey, status: importCandidates.status }).from(importCandidates).where(inArray6(importCandidates.masterKey, masterKeys)) : [];
   const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r.status]));
   let staged = 0;
   let skippedCarried = 0;
@@ -20859,22 +21392,22 @@ async function stageMasterCandidatesBySkus(skus, opts) {
 }
 async function getImportCandidatesByStatus(statuses, limit) {
   if (statuses.length === 0) return [];
-  const query = db.select().from(importCandidates).where(inArray5(importCandidates.status, statuses)).orderBy(
+  const query = db.select().from(importCandidates).where(inArray6(importCandidates.status, statuses)).orderBy(
     importCandidates.tier,
-    sql9`${importCandidates.dealScore} DESC NULLS LAST`
+    sql10`${importCandidates.dealScore} DESC NULLS LAST`
   );
   if (limit != null) return query.limit(limit);
   return query;
 }
 async function getCatalogOpportunities() {
-  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql9`${dealHistory.brand} IS NOT NULL`);
+  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql10`${dealHistory.brand} IS NOT NULL`);
   const brandCount = /* @__PURE__ */ new Map();
   for (const r of brandRows) {
     if (!r.brand) continue;
     brandCount.set(r.brand, (brandCount.get(r.brand) ?? 0) + 1);
   }
   const brandCoverage = [...brandCount.entries()].map(([brand, carried]) => ({ brand, carried })).sort((a, b) => b.carried - a.carried);
-  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql9`${dealHistory.categories} IS NOT NULL`);
+  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql10`${dealHistory.categories} IS NOT NULL`);
   const catCount = /* @__PURE__ */ new Map();
   for (const r of catRows) {
     for (const cat of r.categories ?? []) {
@@ -20886,7 +21419,7 @@ async function getCatalogOpportunities() {
     brand: importCandidates.brand,
     tier: importCandidates.tier,
     dealScore: importCandidates.dealScore
-  }).from(importCandidates).where(inArray5(importCandidates.status, ["pending", "watching"]));
+  }).from(importCandidates).where(inArray6(importCandidates.status, ["pending", "watching"]));
   const oppMap = /* @__PURE__ */ new Map();
   for (const r of pendingRows) {
     if (!r.brand) continue;
@@ -20904,7 +21437,7 @@ async function getCatalogOpportunities() {
   return { brandCoverage, categoryCoverage, brandOpportunities };
 }
 async function getRecentImportRuns(limit) {
-  return db.select().from(importMonitorRuns).orderBy(sql9`${importMonitorRuns.startedAt} DESC`).limit(limit);
+  return db.select().from(importMonitorRuns).orderBy(sql10`${importMonitorRuns.startedAt} DESC`).limit(limit);
 }
 async function updateCandidateStatus(id, status, opts = {}) {
   const now = /* @__PURE__ */ new Date();
@@ -20924,7 +21457,8 @@ async function updateCandidateStatus(id, status, opts = {}) {
   }
   await db.update(importCandidates).set(base).where(eq19(importCandidates.id, id));
 }
-async function approveAndImport(id) {
+async function approveAndImport(id, reviewedBy) {
+  const reviewedStamp = reviewedBy ? { reviewedBy, reviewedAt: /* @__PURE__ */ new Date() } : {};
   const rows = await db.select().from(importCandidates).where(eq19(importCandidates.id, id)).limit(1);
   const candidate = rows[0];
   if (!candidate) {
@@ -20932,7 +21466,7 @@ async function approveAndImport(id) {
   }
   const repSku = candidate.sku;
   if (await isSkuAlreadyImported(repSku)) {
-    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date() }).where(eq19(importCandidates.id, id));
+    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date(), ...reviewedStamp }).where(eq19(importCandidates.id, id));
     return { ok: true, skipped: true };
   }
   const feedResult = await fetchAllNalpacFeeds();
@@ -21007,7 +21541,8 @@ async function approveAndImport(id) {
   await db.update(importCandidates).set({
     status: "imported",
     dealHistoryId: dealHistoryId ?? null,
-    updatedAt: /* @__PURE__ */ new Date()
+    updatedAt: /* @__PURE__ */ new Date(),
+    ...reviewedStamp
   }).where(eq19(importCandidates.id, id));
   return {
     ok: true,
@@ -21025,6 +21560,7 @@ var init_import_monitor_server = __esm({
     init_nalpac_feeds_server();
     init_feed_processor_server();
     init_pricing_webhook_server();
+    init_cost_sync_server();
     init_pricing_engine_server();
     init_bulk_import_server();
     init_master_collapse_server();
@@ -21852,7 +22388,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq21, sql as sql10 } from "drizzle-orm";
+import { eq as eq21, sql as sql11 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret) return false;
@@ -21923,7 +22459,7 @@ async function handleOrderCreated(order) {
           await db2.insert(productCopurchase).values({ handleA: a, handleB: b, count: 1 }).onConflictDoUpdate({
             target: [productCopurchase.handleA, productCopurchase.handleB],
             set: {
-              count: sql10`${productCopurchase.count} + 1`,
+              count: sql11`${productCopurchase.count} + 1`,
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });
@@ -22193,10 +22729,10 @@ function jsonResult(value) {
   return textResult(JSON.stringify(value, null, 2));
 }
 async function resolveKeywordId(idOrTerm) {
-  const client4 = getWriteClient3();
-  if (!client4) return null;
+  const client5 = getWriteClient3();
+  if (!client5) return null;
   if (idOrTerm.startsWith("seoKeyword.")) return idOrTerm;
-  const row = await client4.fetch(
+  const row = await client5.fetch(
     `*[_type == "seoKeyword" && lower(term) == lower($term)][0]{ _id }`,
     { term: idOrTerm }
   );
@@ -22223,8 +22759,8 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client4 = getWriteClient3();
-      if (!client4) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const status = args.status ?? "pending";
       const limit = args.limit ?? 50;
       const offset = args.offset ?? 0;
@@ -22264,8 +22800,8 @@ function buildMcpServer() {
         status, flagged, flagReason,
         "cluster": cluster->{ "slug": slug.current, title, pillarTerm }
       }`;
-      const rows = await client4.fetch(groq, params);
-      const total = await client4.fetch(`count(*[${filters.join(" && ")}])`, params);
+      const rows = await client5.fetch(groq, params);
+      const total = await client5.fetch(`count(*[${filters.join(" && ")}])`, params);
       return jsonResult({ total, returned: Array.isArray(rows) ? rows.length : 0, offset, limit, keywords: rows });
     }
   );
@@ -22280,13 +22816,13 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client4 = getWriteClient3();
-      if (!client4) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
       const patch = { status: "approved", flagged: false };
       if (args.reason) patch.notes = args.reason;
-      await client4.patch(id).set(patch).commit();
+      await client5.patch(id).set(patch).commit();
       return textResult(`\u2713 approved (unflagged) \xB7 ${id}`);
     }
   );
@@ -22301,13 +22837,13 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client4 = getWriteClient3();
-      if (!client4) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
       const patch = { status: "rejected" };
       if (args.reason) patch.notes = args.reason;
-      await client4.patch(id).set(patch).commit();
+      await client5.patch(id).set(patch).commit();
       return textResult(`\u2717 rejected \xB7 ${id}`);
     }
   );
@@ -22322,11 +22858,11 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client4 = getWriteClient3();
-      if (!client4) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
-      await client4.patch(id).set({ flagged: true, flagReason: args.reason }).commit();
+      await client5.patch(id).set({ flagged: true, flagReason: args.reason }).commit();
       return textResult(`\u2691 flagged \xB7 ${id} \xB7 ${args.reason}`);
     }
   );
@@ -22341,13 +22877,13 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client4 = getWriteClient3();
-      if (!client4) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const id = await resolveKeywordId(args.idOrTerm);
       if (!id) return textResult(`No keyword found for "${args.idOrTerm}".`);
       const patch = { flagged: false };
       patch.flagReason = args.reason ?? null;
-      await client4.patch(id).set(patch).commit();
+      await client5.patch(id).set(patch).commit();
       return textResult(`\u2713 unflagged \xB7 ${id}`);
     }
   );
@@ -22365,8 +22901,8 @@ function buildMcpServer() {
       }
     },
     async (args) => {
-      const client4 = getWriteClient3();
-      if (!client4) return textResult("Sanity not configured.");
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
       const results = [];
       for (const u of args.updates) {
         try {
@@ -22378,7 +22914,7 @@ function buildMcpServer() {
           const patch = { status: u.status };
           if (u.status === "approved") patch.flagged = false;
           if (u.reason) patch.notes = u.reason;
-          await client4.patch(id).set(patch).commit();
+          await client5.patch(id).set(patch).commit();
           results.push({ idOrTerm: u.idOrTerm, status: u.status, resolvedId: id, ok: true });
         } catch (err) {
           results.push({
@@ -22411,9 +22947,9 @@ function buildMcpServer() {
       inputSchema: {}
     },
     async () => {
-      const client4 = getWriteClient3();
-      if (!client4) return textResult("Sanity not configured.");
-      const stats = await client4.fetch(`{
+      const client5 = getWriteClient3();
+      if (!client5) return textResult("Sanity not configured.");
+      const stats = await client5.fetch(`{
         "total":    count(*[_type == "seoKeyword"]),
         "approved": count(*[_type == "seoKeyword" && status == "approved"]),
         "pending":  count(*[_type == "seoKeyword" && status == "pending"]),

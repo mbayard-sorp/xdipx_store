@@ -113,6 +113,7 @@ export async function loader() {
       }
     }),
     { loc: `${base}/discover`,    lastmod: today, changefreq: 'weekly', priority: '0.7' },
+    { loc: `${base}/new`,         lastmod: today, changefreq: 'daily',  priority: '0.7' },
     { loc: `${base}/collections`, lastmod: collectionsHubLastmod ?? today, changefreq: 'weekly', priority: '0.7' },
     { loc: `${base}/notebook`,    lastmod: today, changefreq: 'weekly', priority: '0.5' },
     { loc: `${base}/notebook/glossary`, lastmod: today, changefreq: 'weekly', priority: '0.5' },
