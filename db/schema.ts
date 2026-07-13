@@ -141,6 +141,15 @@ export const socialPosts = pgTable('social_posts', {
   postedAt:        timestamp('posted_at'),
   createdAt:       timestamp('created_at').defaultNow().notNull(),
   createdBy:       varchar('created_by', { length: 20 }).default('system'),
+  // Editorial review lifecycle (migration 058) — layered on top of `status`,
+  // which stays the publication lifecycle. pending_review|approved|needs_changes|rejected.
+  reviewStatus:    varchar('review_status', { length: 20 }).default('pending_review').notNull(),
+  feedback:        text('feedback'),
+  editedText:      text('edited_text'),
+  reviewedBy:      varchar('reviewed_by', { length: 60 }),
+  reviewedAt:      timestamp('reviewed_at'),
+  scheduledFor:    date('scheduled_for'),
+  reworkedFrom:    integer('reworked_from'),
 })
 
 export const adminRoles = pgTable('admin_roles', {

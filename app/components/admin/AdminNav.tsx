@@ -168,7 +168,7 @@ const NAV_ITEMS = [
   { to: '/admin/voicemails',     label: 'Voicemails',   Icon: PhoneIcon,    badgeKey: 'voicemails' },
   { to: '/admin/calls',          label: 'Calls',        Icon: PhoneIcon     },
   { to: '/admin/phone-orders',   label: 'Phone Orders', Icon: CartUpsellIcon },
-  { to: '/admin/socials',        label: 'Socials',      Icon: SocialsIcon   },
+  { to: '/admin/socials',        label: 'Social Studio', Icon: SocialsIcon  },
   { to: '/admin/search-filters',    label: 'Search Filters',   Icon: SearchFilterIcon },
   { to: '/admin/discovery-rules',   label: 'Discovery Rules',  Icon: SlidersIcon      },
   { to: '/admin/imports',           label: 'Imports',          Icon: ImportsIcon      },

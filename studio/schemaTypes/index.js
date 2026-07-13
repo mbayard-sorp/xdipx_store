@@ -47,6 +47,10 @@ import seoCluster         from '../schemas/seo/seoCluster.js'
 // Editorial queue: planned Notebook posts derived from the keyword bank
 // (seo-curator plans weekly, content-writer consumes daily). Additive.
 import seoContentBrief    from '../schemas/seo/seoContentBrief.js'
+// Weekly podcast review handoff: podcast-reviewer writes one brief per week,
+// content-writer turns the pending brief into the podcast-notes Notebook post.
+// Additive.
+import podcastReviewBrief from '../schemas/podcastReviewBrief.js'
 // Multi-author voice profiles for AI-generated content (Emma + future agents).
 import editorialAuthor    from '../schemas/authors/editorialAuthor.js'
 import collectionPage     from '../schemas/collectionPage.js'
@@ -121,6 +125,8 @@ export const schemaTypes = [
   seoCluster,
   seoKeyword,
   seoContentBrief,
+  // Weekly podcast review brief (podcast-reviewer → content-writer handoff).
+  podcastReviewBrief,
   // Editorial authors — voice profiles for Emma + future AI authors.
   editorialAuthor,
   // PLP SEO — editorial overrides per Shopify collection (intro copy, FAQs,

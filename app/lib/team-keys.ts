@@ -64,6 +64,30 @@ export const HOMEPAGE_EXTRA_KEYS = {
  *    together. They must never be decoupled: emitting ratings that are not
  *    visible on-page violates Google's review-snippet policy.
  */
+/**
+ * Social platforms + per-platform posting frequency keys (posts/day, '0' =
+ * platform off). Owner edits these on /admin/socials; the social routine reads
+ * them via {op:'config'} to size each run's per-platform draft quota. Only x
+ * has live plumbing; instagram/tiktok drafts are posted manually.
+ */
+export const SOCIAL_PLATFORMS = ['x', 'instagram', 'tiktok', 'facebook'] as const
+export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number]
+
+export function socialFreqKey(platform: SocialPlatform): string {
+  return `social_freq_${platform}`
+}
+
+export const SOCIAL_FREQ_DEFAULTS: Record<SocialPlatform, number> = {
+  x: 1,
+  instagram: 1,
+  tiktok: 1,
+  facebook: 0,
+}
+
+/** Review lifecycle for social drafts (social_posts.review_status). */
+export const SOCIAL_REVIEW_STATUSES = ['pending_review', 'approved', 'needs_changes', 'rejected'] as const
+export type SocialReviewStatus = (typeof SOCIAL_REVIEW_STATUSES)[number]
+
 export const VALVE_KEYS = {
   socialAutopost:     'social_team_autopost',
   suggestionApply:    'suggestion_apply_enabled',

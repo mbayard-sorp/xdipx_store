@@ -338,6 +338,61 @@ export async function postManualTweet(
   }
 }
 
+/**
+ * Post an owner-APPROVED X draft from the Social Studio review queue. Guarded
+ * to approved drafts on x only, and reachable only from the /admin/socials
+ * action (owner click) — the agent's team API has no path here. Posts the
+ * owner's edited text when present, then flips the same row to posted so the
+ * review history stays on one row.
+ */
+export async function postApprovedDraft(postId: number): Promise<SocialPostResult> {
+  const [post] = await db
+    .select()
+    .from(socialPosts)
+    .where(eq(socialPosts.id, postId))
+    .limit(1)
+
+  if (!post || post.status !== 'draft' || post.reviewStatus !== 'approved') {
+    return { ok: false, error: 'Post not found or not an approved draft' }
+  }
+  if (post.platform !== 'x') {
+    return { ok: false, error: 'Only X has live posting plumbing; post this one manually' }
+  }
+
+  const text = post.editedText?.trim() || post.tweetText
+
+  try {
+    let mediaIds: string[] | undefined
+    const imageUrl = post.mediaUrls?.[0]
+    if (imageUrl) {
+      const mediaId = await uploadMediaFromUrl(imageUrl)
+      if (mediaId) mediaIds = [mediaId]
+    }
+
+    const tweet = await postTweet(text, mediaIds)
+
+    await db
+      .update(socialPosts)
+      .set({
+        externalPostId: tweet.id,
+        mediaIds: mediaIds ?? null,
+        status: 'posted',
+        postedAt: new Date(),
+        errorMessage: null,
+      })
+      .where(eq(socialPosts.id, postId))
+
+    return { ok: true, tweetId: tweet.id, tweetText: text }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err)
+    await db
+      .update(socialPosts)
+      .set({ errorMessage })
+      .where(eq(socialPosts.id, postId))
+    return { ok: false, error: errorMessage }
+  }
+}
+
 // ─── Delete + Retry Helpers ──────────────────────────────────────────────
 
 export async function deleteAndLogTweet(
