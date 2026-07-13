@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LoaderFunctionArgs, MetaDescriptor, MetaFunction } from 'react-router'
 import { useLoaderData, useSearchParams, Link } from 'react-router'
 import { getCollection, getCollectionDeals, getMainMenu, type CollectionSort } from '~/lib/shopify.server'
-import { getCollectionPage, getEmmaPresets, getBlogPosts } from '~/lib/sanity.server'
+import { getCollectionPage, getEmmaPresets, getBlogPosts, getNotebookPostsForProductHandles } from '~/lib/sanity.server'
 import { canonicalUrl, pageTitle, robotsContent, truncateForMeta } from '~/lib/seo'
 import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
 import { VaultCard } from '~/components/store/VaultCard'
@@ -15,6 +15,7 @@ import { CollectionStructuredData } from '~/components/seo/CollectionStructuredD
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { readRecentHandles } from '~/lib/recent-views.server'
+import { NotebookRail } from '~/components/blog/NotebookRail'
 
 const FACET_PARAMS = ['mood', 'audience', 'matters', 'budgetMax'] as const
 const PAGE_SIZE = 24
@@ -146,6 +147,17 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     throw new Response('Collection not found', { status: 404 })
   }
 
+  // Notebook rail relevance: prefer posts that feature a product from this
+  // collection (reverse lookup on blogProductEmbed.productHandle), falling back
+  // to the latest posts fetched above so a valid collection is never left with
+  // an empty rail. Page-1 only, matching the notebook fetch above.
+  let notebookPosts = notebook.posts
+  if (page === 1) {
+    const collectionHandles = deals.map(d => d.handle).filter(Boolean)
+    const relevant = await getNotebookPostsForProductHandles(collectionHandles, 4)
+    if (relevant.length > 0) notebookPosts = relevant
+  }
+
   // Resolve display + SEO with Sanity > Shopify SEO > Shopify title fallback.
   // Title fallbacks use the live productsCount when available so each
   // collection has a unique, keyword-led title — Google's title rewriter
@@ -229,7 +241,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     faqs: sanity?.faqs ?? [],
     relatedCollections,
     productsCount: collection.productsCount,
-    notebookPosts: notebook.posts,
+    notebookPosts,
   }
 }
 
@@ -517,48 +529,9 @@ export default function CollectionPage() {
       </div>
 
       {/* Notebook section renders only on page 1 to keep deeper paginated
-          pages clearly secondary documents. */}
-      {isCanonicalPage && notebookPosts.length > 0 && (
-        <section className="mt-16" aria-labelledby="notebook-rail-heading">
-          <h2
-            id="notebook-rail-heading"
-            className="text-xl font-bold text-ink mb-4"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            From Emma's notebook
-          </h2>
-          <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-            {notebookPosts.map(post => (
-              <li key={post._id}>
-                <Link
-                  to={`/notebook/${post.slug}`}
-                  className="group block rounded-2xl overflow-hidden border border-line bg-paper hover:shadow-md transition-shadow"
-                >
-                  {post.heroImageUrl && (
-                    <div className="aspect-[4/3] bg-cream-2 overflow-hidden">
-                      <img
-                        src={`${post.heroImageUrl}${post.heroImageUrl.includes('?') ? '&' : '?'}w=600`}
-                        alt={post.heroImageAlt ?? post.title}
-                        loading="lazy"
-                        decoding="async"
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      />
-                    </div>
-                  )}
-                  <div className="p-4">
-                    <h3 className="text-sm font-semibold text-ink line-clamp-2 group-hover:text-coral transition-colors">
-                      {post.title}
-                    </h3>
-                    {post.excerpt && (
-                      <p className="mt-1 text-xs text-ink/60 line-clamp-2">{post.excerpt}</p>
-                    )}
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+          pages clearly secondary documents. Posts featuring a product from this
+          collection are preferred, falling back to the latest posts. */}
+      {isCanonicalPage && <NotebookRail posts={notebookPosts} />}
 
       {/* Side-by-side info boxes (description + FAQ accordion) — page 1 only.
           Both blocks live in the SSR'd DOM so Google reads everything; the

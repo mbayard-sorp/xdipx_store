@@ -127,7 +127,9 @@ Content quality bar (all mandatory, from `.claude/agents/content-writer.md`):
   their blogProductEmbed blocks automatically).
 - Emma authorship with AI-guide honesty (never "I tried/tested/own it"); no medical claims; no
   prices or discount claims in body text (MAP-safe, evergreen); internal links to relevant
-  collections and `/products/{slug}` PDPs; no em dashes; no countdowns or urgency.
+  collections and `/products/{slug}` PDPs (the embedded `productHandle` also drives the inbound
+  PDP/collection backlinks — verify it resolves 200 and is in stock; doctrine in
+  `docs/store-team/internal-linking.md`); no em dashes; no countdowns or urgency.
 
 **Keyword weaving (when the topic came from a brief):** the brief's `primaryKeyword` term shapes
 the title/H1; its 3-5 `secondaryKeywords` land naturally in H2s and body copy (never stuffed);

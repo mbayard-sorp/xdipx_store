@@ -29,6 +29,8 @@ import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { EmailSubscribe } from '~/components/store/EmailSubscribe'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
+import { NotebookRail } from '~/components/blog/NotebookRail'
+import type { BlogPostCard } from '~/types/cms'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { FeaturedProductStructuredData } from '~/components/seo/FeaturedProductStructuredData'
 import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
@@ -859,6 +861,23 @@ const FAQS = [
   },
 ]
 
+/**
+ * Homepage "From the Notebook" fallback — the branded section chrome around the
+ * shared NotebookRail, shown when the team has not published a curated
+ * `editorialTiles` block. Renders nothing when there are no posts.
+ */
+function HomeNotebookRail({ posts }: { posts: BlogPostCard[] }) {
+  if (!posts.length) return null
+  return (
+    <section className="bg-paper py-16 md:py-20">
+      <div className="mx-auto max-w-[1200px] px-6 md:px-16">
+        <SectionNumeral n="09" className="mb-3 block" />
+        <NotebookRail posts={posts} heading="From the Notebook" className="" />
+      </div>
+    </section>
+  )
+}
+
 function FAQ() {
   return (
     <section className="bg-paper-2 py-16 md:py-20">
@@ -896,7 +915,7 @@ function FAQ() {
    Order is the stable shell. The deferred Sanity blocks (the team's
    notebook/promo/editorial surface) stream in between Couples and FAQ. */
 
-export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: StorefrontData) {
+export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, notebookPosts }: StorefrontData) {
   // Nº 03 grid + Nº 06 rail cold-start fallback — the discovery "best of" set
   // sourced straight from the loader payload's `rails[]` (no new Shopify
   // calls). rails[0] promotes to the bright static grid; rails[1] (or the
@@ -1030,13 +1049,18 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero }: Sto
       </Suspense>
       <StillDecidingBand />
 
-      {/* From the Notebook — team's `editorialTiles` blocks (each card also
-          links a product/collection). Renders nothing until the team publishes. */}
-      <Suspense fallback={null}>
-        <Await resolve={contentBlocks} errorElement={null}>
+      {/* From the Notebook — a curated `editorialTiles` block wins when the team
+          publishes one (each card can also link a product/collection); otherwise
+          the section auto-populates with the latest published posts so fresh
+          daily content always reaches the homepage with no merchandiser action. */}
+      <Suspense fallback={<HomeNotebookRail posts={notebookPosts} />}>
+        <Await
+          resolve={contentBlocks}
+          errorElement={<HomeNotebookRail posts={notebookPosts} />}
+        >
           {({ sections, carouselProductMap }) => {
             const notebook = sections.filter(b => b._type === TEAM_NOTEBOOK_TYPE)
-            if (notebook.length === 0) return null
+            if (notebook.length === 0) return <HomeNotebookRail posts={notebookPosts} />
             return (
               <>
                 {notebook.map(block => (

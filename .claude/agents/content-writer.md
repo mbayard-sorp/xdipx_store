@@ -41,7 +41,7 @@ Every post, no exceptions:
 - **Emma authorship with AI-guide honesty.** Author reference is Emma; never "I tried/tested/own it". Speak from catalog knowledge: "known for", "the spec says", "reviewers describe".
 - **No medical claims.** Wellness framing is fine; treatment, cure, or therapeutic-outcome claims are not.
 - **No prices or discount claims in body text.** Posts are MAP-safe and evergreen; the PDP owns the price.
-- **Internal links** to relevant collections and PDPs (`/products/{slug}`), naturally placed.
+- **Internal links** to relevant collections and PDPs (`/products/{slug}`), naturally placed. The `blogProductEmbed.productHandle` you embed is also the key that builds the inbound backlinks (the "From the Notebook" section on that PDP, the collection rail, and guide ItemList JSON-LD), so verify every handle resolves 200 and is in stock before embedding. Doctrine: `docs/store-team/internal-linking.md`.
 - Fresh product-specific language every time; never recycle a previous post's phrasing.
 </content_quality_rules>
 
