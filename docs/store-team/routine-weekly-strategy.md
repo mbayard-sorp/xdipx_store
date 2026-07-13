@@ -1,7 +1,8 @@
 # Routine — Weekly Strategy (store-strategist)
 
 The exact playbook for the scheduled "Weekly Strategy" cloud routine. Entry agent:
-`store-strategist`, with `inventory-sentinel`, `promo-manager`, `loyalty-referral-manager`, and
+`store-strategist`, with `inventory-sentinel`, `promo-manager`, `loyalty-referral-manager`,
+`product-manager` (review-only here — the daily product routine owns queue execution), and
 `program-manager` as sub-steps under the same run. **Advisory only** — this routine publishes a brief and files
 suggestions; it changes nothing itself. Recommended schedule: Monday morning.
 
@@ -67,13 +68,21 @@ curl -s -X POST "$BASE_URL/api/team/event" \
 2. `promo-manager` — MAP-guarded promo designs for the coming window → kind `promo` suggestions +
    calendar proposals.
 3. `loyalty-referral-manager` — retention/referral moves → kind `program` suggestions.
-4. `program-manager` (run last) — audits `docs/store-team/trackers/*.md` against each
+4. `product-manager` (**review-only in the weekly run**) — do NOT call the import-candidate action
+   endpoint here; the daily product routine (`routine-product-daily.md`) owns queue execution.
+   Aggregate the week's daily product/import decisions (its `decision` events), judge whether the
+   catalog mix matches the brief's theme, surface systemic patterns (a brand over-imported, category
+   gaps, a growing needs-review or price-drop backlog), and hand catalog direction into the brief.
+5. `program-manager` (run last) — audits `docs/store-team/trackers/*.md` against each
    milestone's evidence probe, recomputes status + RAG per the trackers README, posts a
    `decision` event per RAG change + an audit scoreboard event, files kind `process`
    suggestions for Red/newly-Amber milestones, opens a docs-only tracker PR
    (`pm/tracker-<date>`, never auto-merged) when rows changed, and hands the strategist a
    **Program Status** section (overall RAG + top risks + owner asks per program) to include
-   verbatim in the brief.
+   verbatim in the brief. It also verifies **routine coverage**: each expected scheduled routine
+   (1–14 in `routine-schedule.md`) posted a run in the last 7 days (`homepage_team_runs`); file a
+   `process` suggestion for any that silently stopped firing (the daily product routine #14 is easy
+   to miss — a stalled drain backs the queue up quietly).
 
 Each posts its own events under `$RUN_ID` with its `agentRole`.
 
