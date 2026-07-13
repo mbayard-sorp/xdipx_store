@@ -29,7 +29,10 @@ curl -s "$BASE_URL/api/team/gate?team=content&excludeRun=$RUN_ID" -H "x-team-sec
 
 If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","finished":true,"summary":"gate refused: <reason>"}}`
 and **stop**: skip honestly, never work around the gate. If `ok:true`, capture
-`valves.autopublish` from the response; it decides Step 6. The gate enforces the
+`valves.autopublish` from the response; it decides Step 6. Also capture
+`contentSlot` (`{weekday, expectedCategory, fallbackCategory}`): the server
+computes today's weekday in PT and the matching category slot; it is
+authoritative for Step 3. Never compute the weekday yourself. The gate enforces the
 `content_team_enabled` kill switch, `content_team_daily_cents` (300), and `content_team_max_runs`
 (2; the second run exists only to retry a voice-gate REVISE, not to write a second post).
 
@@ -48,8 +51,11 @@ and **stop**: skip honestly, never work around the gate. If `ok:true`, capture
 
 ## Step 3: Topic selection + slug pre-check
 
-Today's category comes from the weekly rhythm in content-plan.md §2 (Mon/Wed guides, Tue/Fri
-real-talk, Thu podcast-notes, Sat care, Sun comparisons/wellness-basics flex).
+Today's category is the gate response's `contentSlot.expectedCategory` (server-computed in PT;
+use `contentSlot.fallbackCategory` only per the Thursday/Sunday rules below). The map mirrors
+the weekly rhythm in content-plan.md §2 (Mon/Wed guides, Tue/Fri real-talk, Thu podcast-notes,
+Sat care, Sun comparisons/wellness-basics flex); if the two ever disagree, trust the gate and
+file a suggestion.
 
 **Thursday first-check (podcast-notes):** query the pending podcast brief before anything else:
 
