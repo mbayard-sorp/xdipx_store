@@ -19,7 +19,7 @@ import {
 } from './pricing-rules.server'
 import { getGroupForProductType } from './pricing-rules.server'
 import { computeVelocityBucket } from './pricing-velocity.server'
-import { findVariantsBySkus, updateVariantPricing } from './shopify.server'
+import { updateVariantPricing } from './shopify.server'
 import type { VelocityBucket } from './pricing-engine-v2.server'
 
 // ---------------------------------------------------------------------------
@@ -148,22 +148,205 @@ export interface RecomputeVariantResult {
 
 const TEST_SKU_PREFIX = /^XDX-TEST-/i
 
+// Shared per-run context so batch runs read settings once, not once per variant.
+interface RunContext {
+  trigger:    RecomputeVariantParams['trigger']
+  mode:       ApprovalMode
+  thresholds: Record<ApprovalMode, number>
+}
+
+// Minimal variant/product data the compute core needs. Matches both the
+// bulkFetchProductsForPricing snapshot shape and the single-variant fetch.
+interface VariantInput {
+  variantId:      string
+  sku:            string
+  price:          number
+  compareAtPrice: number | null
+  unitCost:       number | null
+}
+
+interface ProductInput {
+  productType: string | null
+  metafields: {
+    wholesaleCost:  number | null
+    mapPrice:       number | null
+    originalPrice:  number | null
+    discontinuedAt: Date | null
+  }
+}
+
+/**
+ * Compute + audit + apply for one variant from already-fetched data.
+ * No Shopify reads; the only Shopify call is the price mutation on auto_apply.
+ */
+async function recomputeFromData(
+  product: ProductInput,
+  variant: VariantInput,
+  ctx: RunContext,
+): Promise<RecomputeVariantResult> {
+  const { variantId } = variant
+  const { trigger, mode, thresholds } = ctx
+
+  // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
+  // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
+  const cost        = variant.unitCost ?? product.metafields.wholesaleCost
+  const map         = product.metafields.mapPrice
+  const msrp        = product.metafields.originalPrice
+  const oldSell     = variant.price
+  const oldCompare  = variant.compareAtPrice
+  const productType = product.productType
+  const sku         = variant.sku
+
+  const cfg   = await resolvePricingConfig(productType)
+  const group = await getGroupForProductType(productType)
+
+  let velocityBucket: VelocityBucket | undefined
+  let effectiveCfg = cfg
+
+  if (cfg.velocity_modifier_enabled) {
+    velocityBucket = await computeVelocityBucket(variantId)
+    // applyVelocityModifier returns PricingConfig (not ResolvedConfig), so carry
+    // groupId/subGroupId forward manually.
+    const shifted = applyVelocityModifier(cfg, velocityBucket)
+    effectiveCfg = { ...shifted, groupId: cfg.groupId, subGroupId: cfg.subGroupId }
+  }
+
+  const isDiscontinued = group?.usesClearanceLadder === true || productType === 'Discontinued'
+
+  let newSell:    number | null = null
+  let newCompare: number | null = null
+  let daysDisc:   number | undefined
+
+  if (isDiscontinued) {
+    const discontinuedAt = product.metafields.discontinuedAt ?? null
+    daysDisc = discontinuedAt
+      ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 86_400_000))
+      : 0
+    const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg })
+    if (result) { newSell = result.sell; newCompare = result.compare_at }
+  } else {
+    const result = computePrice({ cost, map, msrp, cfg: effectiveCfg })
+    if (result) {
+      newSell = result.sell
+      newCompare = result.compare_at
+      // Absolute price floor: queue instead of auto-applying prices below the floor
+      if (result.belowAbsoluteFloor) {
+        return {
+          status: 'pending',
+          auditId: null,
+          applied: false,
+          error: `sell price $${result.sell.toFixed(2)} is below absolute floor`,
+        }
+      }
+    }
+  }
+
+  if (newSell == null) {
+    return { status: 'skipped_no_change', auditId: null, applied: false, error: 'cannot compute price: missing cost' }
+  }
+
+  const marginAfter  = cost != null && newSell > 0 ? (newSell - cost) / newSell : 0
+  const marginBefore = cost != null && oldSell > 0 ? (oldSell - cost) / oldSell : 0
+
+  const status = decideStatus({
+    oldPrice:    oldSell,
+    newPrice:    newSell,
+    map,
+    mapBehavior: cfg.map_behavior,
+    marginFloor: cfg.margin_floor_pct,
+    marginAfter,
+    mode,
+    threshold: thresholds[mode],
+  })
+
+  const deltaPct = oldSell > 0 ? (newSell - oldSell) / oldSell : null
+  const rationale = buildRationale({
+    oldCost:    cost,
+    newCost:    cost,
+    oldSell,
+    newSell,
+    status,
+    trigger,
+    mapHeld:    map != null && newSell <= map + 0.02,
+    marginAfter,
+    ...(velocityBucket !== undefined ? { velocityBucket }             : {}),
+    ...(daysDisc       !== undefined ? { daysDisc }                  : {}),
+    ...(map            != null       ? { map }                       : {}),
+    ...(deltaPct       != null       ? { deltaPct }                  : {}),
+    approvalThreshold: thresholds[mode],
+  })
+
+  let auditId: number | null = null
+  try {
+    const rows = await db
+      .insert(pricingAuditLog)
+      .values({
+        variantId,
+        sku:          sku || null,
+        productType,
+        groupId:      group?.groupId    ?? null,
+        subGroupId:   group?.subGroupId ?? null,
+        trigger,
+        oldCost:      cost   != null ? String(cost)   : null,
+        newCost:      cost   != null ? String(cost)   : null,
+        oldMap:       map    != null ? String(map)    : null,
+        newMap:       map    != null ? String(map)    : null,
+        oldMsrp:      msrp   != null ? String(msrp)   : null,
+        newMsrp:      msrp   != null ? String(msrp)   : null,
+        oldSell:      String(oldSell),
+        newSell:      String(newSell),
+        oldCompareAt: oldCompare != null ? String(oldCompare) : null,
+        newCompareAt: newCompare != null ? String(newCompare) : null,
+        marginBefore: String(Math.round(marginBefore * 10000) / 10000),
+        marginAfter:  String(Math.round(marginAfter  * 10000) / 10000),
+        status,
+        rationale,
+      })
+      .returning({ id: pricingAuditLog.id })
+    auditId = rows[0]?.id ?? null
+  } catch (err) {
+    console.error('[pricing-apply-v2] audit log write failed:', err)
+  }
+
+  let applied = false
+  let applyError: string | undefined
+
+  if (status === 'auto_applied') {
+    try {
+      await updateVariantPricing(
+        variantId,
+        String(newSell),
+        newCompare != null ? String(newCompare) : String(newSell),
+      )
+      applied = true
+    } catch (err) {
+      applyError = err instanceof Error ? err.message : String(err)
+      console.error('[pricing-apply-v2] Shopify price update failed:', applyError)
+      // Update audit row to reflect apply error.
+      if (auditId != null) {
+        try {
+          await db
+            .update(pricingAuditLog)
+            .set({ status: 'pending', rationale: `${rationale} [apply error: ${applyError}]` })
+            .where(eq(pricingAuditLog.id, auditId))
+        } catch { /* ignore secondary error */ }
+      }
+    }
+  }
+
+  return { status, auditId, applied, ...(applyError ? { error: applyError } : {}) }
+}
+
 export async function recomputeVariant(
   params: RecomputeVariantParams,
 ): Promise<RecomputeVariantResult> {
   const { variantId, trigger } = params
 
-  // 1. Load variant data from Shopify via SKU lookup (reuses existing helper).
-  //    We pass the variantId as a pseudo-SKU query by fetching by GID directly.
-  let matchData: Awaited<ReturnType<typeof findVariantsBySkus>>[number] | null = null
+  let product: ProductInput | null = null
+  let variant: VariantInput | null = null
 
   try {
-    // findVariantsBySkus expects SKUs; for a variantId we need the numeric part.
-    // Use a direct GID-based query approach: look up via variant GID filter.
-    const gidNum = variantId.replace(/[^0-9]/g, '')
-    const matches = await findVariantsBySkus([])
-
-    // Fast path: query by variant GID using admin API directly.
+    // Query by variant GID using the admin API directly.
     const data = await (async () => {
       const { adminGraphQL } = await import('./shopify.server')
       const result = await adminGraphQL<{
@@ -203,197 +386,33 @@ export async function recomputeVariant(
       mfMap[mf.key] = mf.value
     }
 
-    matchData = {
-      productId:   data.product.id.replace('gid://shopify/Product/', ''),
-      productGid:  data.product.id,
-      handle:      data.product.handle,
-      title:       data.product.title,
-      vendor:      data.product.vendor,
+    product = {
       productType: data.product.productType,
-      variant: {
-        variantId,
-        sku:            data.sku ?? '',
-        title:          data.title,
-        price:          parseFloat(data.price),
-        compareAtPrice: data.compareAtPrice != null ? parseFloat(data.compareAtPrice) : null,
-        inventoryItemId: null,
-        unitCost:       data.inventoryItem?.unitCost?.amount != null ? parseFloat(data.inventoryItem.unitCost.amount) : null,
-      },
       metafields: {
-        nalpacSku:      mfMap['nalpac_sku']      ?? null,
         wholesaleCost:  mfMap['wholesale_cost']  ? parseFloat(mfMap['wholesale_cost'])  : null,
         mapPrice:       mfMap['map_price']        ? parseFloat(mfMap['map_price'])       : null,
         originalPrice:  mfMap['original_price']  ? parseFloat(mfMap['original_price'])  : null,
-        mapRestricted:  mfMap['map_restricted']  === 'true',
         discontinuedAt: mfMap['discontinued_at'] ? new Date(mfMap['discontinued_at'])   : null,
       },
     }
-    void matches // suppress unused warning
-    void gidNum
+    variant = {
+      variantId,
+      sku:            data.sku ?? '',
+      price:          parseFloat(data.price),
+      compareAtPrice: data.compareAtPrice != null ? parseFloat(data.compareAtPrice) : null,
+      unitCost:       data.inventoryItem?.unitCost?.amount != null ? parseFloat(data.inventoryItem.unitCost.amount) : null,
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { status: 'skipped_no_change', auditId: null, applied: false, error: `shopify fetch: ${msg}` }
   }
 
-  // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
-  // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
-  const cost       = matchData.variant.unitCost ?? matchData.metafields.wholesaleCost
-  const map        = matchData.metafields.mapPrice
-  const msrp       = matchData.metafields.originalPrice
-  const oldSell    = matchData.variant.price
-  const oldCompare = matchData.variant.compareAtPrice
-  const productType = (matchData as { productType?: string | null }).productType ?? null
-  const sku        = matchData.variant.sku
-
-  // 2. Resolve config.
-  const cfg        = await resolvePricingConfig(productType)
-  const group      = await getGroupForProductType(productType)
   const mode       = await getApprovalMode()
   const thresholds = await getModeThresholds()
 
-  // 3. Velocity modifier.
-  let velocityBucket: VelocityBucket | undefined
-  let effectiveCfg = cfg
-
-  if (cfg.velocity_modifier_enabled) {
-    velocityBucket = await computeVelocityBucket(variantId)
-    // applyVelocityModifier returns PricingConfig (not ResolvedConfig), so carry
-    // groupId/subGroupId forward manually.
-    const shifted = applyVelocityModifier(cfg, velocityBucket)
-    effectiveCfg = { ...shifted, groupId: cfg.groupId, subGroupId: cfg.subGroupId }
-  }
-
-  // 4. Compute price: discontinued or live.
-  const isDiscontinued = group?.usesClearanceLadder === true || productType === 'Discontinued'
-
-  let newSell:    number | null = null
-  let newCompare: number | null = null
-  let daysDisc:   number | undefined
-
-  if (isDiscontinued) {
-    const discontinuedAt = matchData.metafields.discontinuedAt ?? null
-    daysDisc = discontinuedAt
-      ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 86_400_000))
-      : 0
-    const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg })
-    if (result) { newSell = result.sell; newCompare = result.compare_at }
-  } else {
-    const result = computePrice({ cost, map, msrp, cfg: effectiveCfg })
-    if (result) {
-      newSell = result.sell
-      newCompare = result.compare_at
-      // Absolute price floor: queue instead of auto-applying prices below the floor
-      if (result.belowAbsoluteFloor) {
-        return {
-          status: 'pending',
-          auditId: null,
-          applied: false,
-          error: `sell price $${result.sell.toFixed(2)} is below absolute floor`,
-        }
-      }
-    }
-  }
-
-  if (newSell == null) {
-    return { status: 'skipped_no_change', auditId: null, applied: false, error: 'cannot compute price: missing cost' }
-  }
-
-  // 5. Margin after.
-  const marginAfter  = cost != null && newSell > 0 ? (newSell - cost) / newSell : 0
-  const marginBefore = cost != null && oldSell > 0 ? (oldSell - cost) / oldSell : 0
-
-  // 6. Decide status.
-  const status = decideStatus({
-    oldPrice:    oldSell,
-    newPrice:    newSell,
-    map,
-    mapBehavior: cfg.map_behavior,
-    marginFloor: cfg.margin_floor_pct,
-    marginAfter,
-    mode,
-    threshold: thresholds[mode],
-  })
-
-  // 7. Build rationale.
-  const deltaPct = oldSell > 0 ? (newSell - oldSell) / oldSell : null
-  const rationale = buildRationale({
-    oldCost:    cost,
-    newCost:    cost,
-    oldSell,
-    newSell,
-    status,
-    trigger,
-    mapHeld:    map != null && newSell <= map + 0.02,
-    marginAfter,
-    ...(velocityBucket !== undefined ? { velocityBucket }             : {}),
-    ...(daysDisc       !== undefined ? { daysDisc }                  : {}),
-    ...(map            != null       ? { map }                       : {}),
-    ...(deltaPct       != null       ? { deltaPct }                  : {}),
-    approvalThreshold: thresholds[mode],
-  })
-
-  // 8. Write audit log row.
-  let auditId: number | null = null
-  try {
-    const rows = await db
-      .insert(pricingAuditLog)
-      .values({
-        variantId,
-        sku:          sku || null,
-        productType,
-        groupId:      group?.groupId    ?? null,
-        subGroupId:   group?.subGroupId ?? null,
-        trigger,
-        oldCost:      cost   != null ? String(cost)   : null,
-        newCost:      cost   != null ? String(cost)   : null,
-        oldMap:       map    != null ? String(map)    : null,
-        newMap:       map    != null ? String(map)    : null,
-        oldMsrp:      msrp   != null ? String(msrp)   : null,
-        newMsrp:      msrp   != null ? String(msrp)   : null,
-        oldSell:      String(oldSell),
-        newSell:      String(newSell),
-        oldCompareAt: oldCompare != null ? String(oldCompare) : null,
-        newCompareAt: newCompare != null ? String(newCompare) : null,
-        marginBefore: String(Math.round(marginBefore * 10000) / 10000),
-        marginAfter:  String(Math.round(marginAfter  * 10000) / 10000),
-        status,
-        rationale,
-      })
-      .returning({ id: pricingAuditLog.id })
-    auditId = rows[0]?.id ?? null
-  } catch (err) {
-    console.error('[pricing-apply-v2] audit log write failed:', err)
-  }
-
-  // 9. Apply to Shopify if auto_applied.
-  let applied = false
-  let applyError: string | undefined
-
-  if (status === 'auto_applied') {
-    try {
-      await updateVariantPricing(
-        variantId,
-        String(newSell),
-        newCompare != null ? String(newCompare) : String(newSell),
-      )
-      applied = true
-    } catch (err) {
-      applyError = err instanceof Error ? err.message : String(err)
-      console.error('[pricing-apply-v2] Shopify price update failed:', applyError)
-      // Update audit row to reflect apply error.
-      if (auditId != null) {
-        try {
-          await db
-            .update(pricingAuditLog)
-            .set({ status: 'pending', rationale: `${rationale} [apply error: ${applyError}]` })
-            .where(eq(pricingAuditLog.id, auditId))
-        } catch { /* ignore secondary error */ }
-      }
-    }
-  }
-
-  return { status, auditId, applied, ...(applyError ? { error: applyError } : {}) }
+  return recomputeFromData(product, variant, { trigger, mode, thresholds })
 }
+
 
 // ---------------------------------------------------------------------------
 // Dry-run rule change (spec ss9.2 / acceptance criterion 9)
@@ -615,15 +634,20 @@ export async function recomputeCatalog(opts: {
 
   const products = await bulkFetchProductsForPricing()
 
+  // Read settings once per run; recomputeFromData reuses the bulk-fetched
+  // product data so the only per-variant Shopify call is the apply mutation.
+  // (Refetching every variant + settings per variant blew past the 300s
+  // serverless limit on manual runs.)
+  const mode       = await getApprovalMode()
+  const thresholds = await getModeThresholds()
+  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds }
+
   for (const product of products) {
     for (const variant of product.variants) {
       if (TEST_SKU_PREFIX.test(variant.sku ?? '')) continue
       counts.total++
       try {
-        const result = await recomputeVariant({
-          variantId: variant.variantId,
-          trigger: opts.trigger,
-        })
+        const result = await recomputeFromData(product, variant, ctx)
         if (result.error)                            counts.errors++
         else if (result.status === 'auto_applied')   counts.autoApplied++
         else if (result.status === 'pending')        counts.pending++
