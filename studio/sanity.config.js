@@ -131,6 +131,7 @@ export default defineConfig({
                     S.documentTypeListItem('blogAuthor').title('Authors').icon(() => '👤'),
                     S.divider(),
                     S.documentTypeListItem('blogSeries').title('Series').icon(() => '📚'),
+                    S.documentTypeListItem('blogGlossaryTerm').title('Glossary').icon(() => '📖'),
                     S.documentTypeListItem('blogPostExtras').title('Post Extras').icon(() => '➕'),
                     S.documentTypeListItem('blogCategoryExtras').title('Category Extras').icon(() => '🎨'),
                   ]),

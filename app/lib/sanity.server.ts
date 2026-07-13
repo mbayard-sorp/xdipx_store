@@ -2,7 +2,7 @@ import { createClient } from '@sanity/client'
 import type { SanityImageAssetDocument } from '@sanity/client'
 import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
-import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, BlogSeries, BlogCategoryExtras, NotebookSettings, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig } from '~/types/cms'
+import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, BlogSeries, BlogCategoryExtras, NotebookSettings, GlossaryTerm, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig } from '~/types/cms'
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
@@ -1472,6 +1472,57 @@ export async function getAllBlogSeries(): Promise<BlogSeries[]> {
     return series
   } catch (err) {
     console.error('[sanity] getAllBlogSeries error:', err)
+    return []
+  }
+}
+
+export async function getGlossaryTerms(): Promise<GlossaryTerm[]> {
+  if (!projectId) return []
+
+  const cacheKey = 'glossaryTerms'
+  const cached = getCachedBlog<GlossaryTerm[]>(cacheKey, BLOG_CAT_CACHE_TTL)
+  if (cached) return cached
+
+  try {
+    const client = getClient()
+    if (!client) return []
+    const data = await client.fetch<GlossaryTerm[]>(
+      `*[_type == "blogGlossaryTerm"] | order(term asc) {
+        term, "slug": slug.current, definition, collectionHandle,
+        "relatedPost": relatedPost->{ title, "slug": slug.current },
+        "seeAlso": seeAlso[]->{ term, "slug": slug.current }
+      }`,
+    )
+    if (data) setCachedBlog(cacheKey, data)
+    return data ?? []
+  } catch (err) {
+    console.error('[sanity] getGlossaryTerms error:', err)
+    return []
+  }
+}
+
+/**
+ * Notebook search — GROQ match over title/excerpt/tags. The corpus is small
+ * (one post per day), so field-level match beats standing up a search index;
+ * body text is intentionally excluded to keep results precise.
+ */
+export async function searchBlogPosts(q: string, limit = 24): Promise<BlogPostCard[]> {
+  if (!projectId) return []
+  const query = q.trim()
+  if (!query) return []
+
+  try {
+    const client = getClient()
+    if (!client) return []
+    const rawPosts = await client.fetch<any[]>(
+      `*[_type == "blogPost" && status == "published" && (
+        title match $q || excerpt match $q || $plain in tags
+      )] | order(publishedAt desc) [0...${limit}] { ${BLOG_POST_CARD_PROJECTION} }`,
+      { q: `${query}*`, plain: query.toLowerCase() },
+    )
+    return (rawPosts ?? []).map((p: any) => ({ ...p, readingTime: 0 }))
+  } catch (err) {
+    console.error('[sanity] searchBlogPosts error:', err)
     return []
   }
 }

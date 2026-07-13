@@ -148,6 +148,7 @@ export async function loader() {
   lines.push('## Notebook')
   lines.push('')
   lines.push(`- ${BASE_URL}/notebook.md — index of all notebook posts`)
+  lines.push(`- ${BASE_URL}/notebook/glossary.md — plain-language glossary of sexual-wellness shopping terms`)
   for (const c of blogCategories) {
     lines.push(`- ${BASE_URL}/notebook/category/${c.slug}.md — category archive`)
   }

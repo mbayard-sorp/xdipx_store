@@ -183,8 +183,16 @@ export default function NotebookIndex() {
                 active={selectedCategory === cat.slug}
               />
             ))}
-            <span className="shrink-0 kicker ml-auto">
-              {total} {total === 1 ? 'post' : 'posts'}
+            <span className="shrink-0 flex items-center gap-4 ml-auto">
+              <Link to="/notebook/glossary" className="kicker hover:text-coral transition-colors">
+                Glossary
+              </Link>
+              <Link to="/notebook/search" className="kicker hover:text-coral transition-colors">
+                Search
+              </Link>
+              <span className="kicker hidden sm:inline">
+                {total} {total === 1 ? 'post' : 'posts'}
+              </span>
             </span>
           </div>
         </Reveal>

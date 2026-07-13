@@ -564,6 +564,16 @@ export interface BlogSeries {
   posts: BlogPostCard[]
 }
 
+// Notebook glossary — living reference at /notebook/glossary.
+export interface GlossaryTerm {
+  term: string
+  slug: string
+  definition: string
+  collectionHandle?: string
+  relatedPost?: { title: string; slug: string } | null
+  seeAlso?: { term: string; slug: string }[]
+}
+
 // Notebook redesign — index-level settings singleton (additive; falls back to
 // blogHomepage / hardcoded copy when absent).
 export interface NotebookSettings {

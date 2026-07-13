@@ -7204,6 +7204,7 @@ __export(sanity_server_exports, {
   getEmmaHeroSettings: () => getEmmaHeroSettings,
   getEmmaPersona: () => getEmmaPersona,
   getEmmaPresets: () => getEmmaPresets,
+  getGlossaryTerms: () => getGlossaryTerms,
   getHomeConfig: () => getHomeConfig,
   getHomepageDocRaw: () => getHomepageDocRaw,
   getHomepageSections: () => getHomepageSections,
@@ -7227,6 +7228,7 @@ __export(sanity_server_exports, {
   removeRailRefFromHomepage: () => removeRailRefFromHomepage,
   restoreHomepageDoc: () => restoreHomepageDoc,
   sanityImageRef: () => sanityImageRef,
+  searchBlogPosts: () => searchBlogPosts,
   unarchiveHomepageRailsForDeal: () => unarchiveHomepageRailsForDeal,
   updateCmsBlock: () => updateCmsBlock,
   updateCmsPromoImage: () => updateCmsPromoImage,
@@ -8117,6 +8119,47 @@ async function getAllBlogSeries() {
     return series;
   } catch (err) {
     console.error("[sanity] getAllBlogSeries error:", err);
+    return [];
+  }
+}
+async function getGlossaryTerms() {
+  if (!projectId) return [];
+  const cacheKey3 = "glossaryTerms";
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CAT_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client4 = getClient();
+    if (!client4) return [];
+    const data = await client4.fetch(
+      `*[_type == "blogGlossaryTerm"] | order(term asc) {
+        term, "slug": slug.current, definition, collectionHandle,
+        "relatedPost": relatedPost->{ title, "slug": slug.current },
+        "seeAlso": seeAlso[]->{ term, "slug": slug.current }
+      }`
+    );
+    if (data) setCachedBlog(cacheKey3, data);
+    return data ?? [];
+  } catch (err) {
+    console.error("[sanity] getGlossaryTerms error:", err);
+    return [];
+  }
+}
+async function searchBlogPosts(q, limit = 24) {
+  if (!projectId) return [];
+  const query = q.trim();
+  if (!query) return [];
+  try {
+    const client4 = getClient();
+    if (!client4) return [];
+    const rawPosts = await client4.fetch(
+      `*[_type == "blogPost" && status == "published" && (
+        title match $q || excerpt match $q || $plain in tags
+      )] | order(publishedAt desc) [0...${limit}] { ${BLOG_POST_CARD_PROJECTION} }`,
+      { q: `${query}*`, plain: query.toLowerCase() }
+    );
+    return (rawPosts ?? []).map((p) => ({ ...p, readingTime: 0 }));
+  } catch (err) {
+    console.error("[sanity] searchBlogPosts error:", err);
     return [];
   }
 }
