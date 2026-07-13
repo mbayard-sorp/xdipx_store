@@ -873,6 +873,11 @@ export const importCandidates = pgTable('import_candidates', {
   enrichedAt:      timestamp('enriched_at'),
   publishedAt:     timestamp('published_at'),
   enrichBatchId:   varchar('enrich_batch_id', { length: 100 }),
+  // Migration 060: bounded-retry quality gate. enrichAttempts counts gate
+  // failures; enrichFailedAt is set once the retry cap (2) is hit, parking the
+  // row (enrichBatchId is left set so it is neither re-submitted nor published).
+  enrichAttempts:  integer('enrich_attempts').notNull().default(0),
+  enrichFailedAt:  timestamp('enrich_failed_at'),
 }, t => ({
   statusRunIdx:   index('idx_import_candidates_status_run').on(t.status, t.runDate),
   tierScoreIdx:   index('idx_import_candidates_tier_score').on(t.tier, t.dealScore),

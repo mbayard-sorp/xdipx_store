@@ -7,11 +7,15 @@
  *   import -> enrich (Anthropic Batch API, 50% off) -> publish (draft -> active)
  *
  * Vercel functions cap at 60s, so enrichment is split across cron ticks:
- *   - submitEnrichmentBatch:  find unenriched imports, submit one Batch, persist
- *                             the batch id (no poll).
- *   - collectEnrichmentBatch: on a later tick, retrieve finished batches, write
- *                             the generated content back to Shopify + Sanity,
- *                             stamp enriched_at.
+ *   - submitEnrichmentBatch:  find unenriched imports, submit one single-call
+ *                             full-enrichment Batch (one Sonnet request per
+ *                             product), persist the batch id (no poll).
+ *   - collectEnrichmentBatch: on a later tick, retrieve finished batches, run
+ *                             the quality gate (passesQualityGate) on each
+ *                             product, write passing writes back to Shopify +
+ *                             Sanity and stamp enriched_at. Failing products
+ *                             get one bounded retry before being parked
+ *                             (enrich_failed_at) instead of published.
  *   - publishEnrichedProducts: flip enriched drafts to active on curated channels.
  *
  * runImportEnrichTick orchestrates all three and is what the cron calls. It is
@@ -23,14 +27,18 @@
 
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { importCandidates, dealHistory, batchJobs } from '../../db/schema'
+import { importCandidates, dealHistory } from '../../db/schema'
 import {
   fetchProductSnapshot,
   gatherProductBrief,
+  loadSharedEnrichmentContext,
 } from '~/lib/enricher-brief.server'
 import {
-  enqueueBatchJob,
-} from '~/lib/batch-orchestrator.server'
+  submitFullEnrichmentBatch,
+  collectFullEnrichmentBatch,
+  checkDialSpread,
+  type BatchFullEnrichmentInput,
+} from '~/lib/batch-enrichment.server'
 import {
   activateShopifyProduct,
   pushProductToShopify,
@@ -39,8 +47,9 @@ import {
 import { upsertProductPage } from '~/lib/sanity.server'
 import { getPipelineSetting, deriveSection } from '~/lib/feed-processor.server'
 import { IVR_EXPERIENCE_LEVELS } from '~/lib/claude.server'
-import type { OrchestratorInput, OrchestratorProductInput, ProductWrites } from '~/lib/emma-orchestrator.server'
-import type { PairingCandidate } from '~/lib/shopify.server'
+import { EMMA_VOICE_ENRICHMENT } from '~/lib/emma-voice.server'
+import { PRODUCT_TYPE_DIALS } from '~/types'
+import type { ProductWrites } from '~/lib/emma-orchestrator.server'
 
 const VALID_IVR_EXPERIENCE = new Set<string>(IVR_EXPERIENCE_LEVELS as readonly string[])
 
@@ -221,29 +230,58 @@ export async function applyFullEnrichmentWrites(numericProductId: string, writes
 }
 
 /**
- * Find imported-but-unenriched products and enqueue ONE batch_jobs row via the
- * new orchestrator. Stamps each candidate's enrich_batch_id with the jobId so
- * collectEnrichmentBatch can poll the batch_jobs table on a later tick.
- * Does NOT submit an Anthropic batch directly -- the enrichment-batch-poller
- * cron (every 2 min) drives all batch work through advanceInflightJobs().
+ * Gate predicate for the ProductWrites a full-enrichment batch produced for one
+ * product. Run BEFORE applyFullEnrichmentWrites. A previously-empty gate meant
+ * even failed/partial batches got published; the key addition here is the
+ * mood/audience/matters check -- a product can render a perfectly fine PDP
+ * with empty tag arrays and still be invisible to every discovery rail and
+ * Ask Emma filter.
+ */
+function passesQualityGate(writes: ProductWrites): boolean {
+  if (!writes.descriptionHtml?.trim())     return false
+  if (!writes.tagline?.trim())             return false
+  if (!writes.seoMetaDescription || writes.seoMetaDescription.length < 100) return false
+  if (!writes.productTypeDial || !(PRODUCT_TYPE_DIALS as readonly string[]).includes(writes.productTypeDial)) return false
+  if (!writes.moodTags?.length)            return false
+  if (!writes.audienceTags?.length)        return false
+  if (!writes.mattersTags?.length)         return false
+  if (!checkDialSpread(writes.sensationDialV2?.items).ok) return false
+  return true
+}
+
+/** Bounded retry cap: after this many failed enrichment attempts, a candidate
+ *  is parked (enrich_failed_at set) instead of re-submitted. */
+const ENRICH_MAX_ATTEMPTS = 2
+
+/**
+ * Find imported-but-unenriched products and submit ONE Anthropic full-enrichment
+ * batch -- a single Sonnet call per product (50% batch discount, no multi-turn
+ * tool dispatch), replacing the 24-turn orchestrator path for auto-import.
+ * Stamps each candidate's enrich_batch_id with the returned Anthropic batchId so
+ * collectEnrichmentBatch can retrieve it on a later tick.
+ *
+ * The 24-turn poller (batch-orchestrator.server.ts / advanceInflightJobs) needs
+ * no change -- it simply stops receiving 'import-product' jobs and keeps driving
+ * 'field-regen' and other jobType consumers.
  */
 export async function submitEnrichmentBatch(cap: number): Promise<{ submitted: number; batchId?: string; reason?: string }> {
   const rows = await db
-    .select({ id: importCandidates.id, productId: dealHistory.shopifyProductId, sku: importCandidates.masterKey })
+    .select({ id: importCandidates.id, productId: dealHistory.shopifyProductId })
     .from(importCandidates)
     .innerJoin(dealHistory, eq(importCandidates.dealHistoryId, dealHistory.id))
     .where(and(
       eq(importCandidates.status, 'imported'),
       isNull(importCandidates.enrichedAt),
       isNull(importCandidates.enrichBatchId),
+      isNull(importCandidates.enrichFailedAt),
     ))
     .orderBy(asc(importCandidates.id))
     .limit(cap)
 
-  const valid = rows.filter((r): r is { id: number; productId: string; sku: string } => Boolean(r.productId))
+  const valid = rows.filter((r): r is { id: number; productId: string } => Boolean(r.productId))
   if (valid.length === 0) return { submitted: 0, reason: 'no_unenriched' }
 
-  const products: Array<{ productId: string; sku: string; input: OrchestratorInput }> = []
+  const inputs: BatchFullEnrichmentInput[] = []
   const candidateIds: number[] = []
 
   for (const r of valid) {
@@ -252,157 +290,124 @@ export async function submitEnrichmentBatch(cap: number): Promise<{ submitted: n
       console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) -- skipping`)
       continue
     }
-    const sku = brief.sku ?? r.sku
-
-    // Map ProductBrief fields to the OrchestratorInput shape.
-    const product: OrchestratorProductInput = {
-      title:       brief.rawTitle,
-      brand:       brief.brand,
-      description: brief.rawDescription,
-      categories:  brief.categories,
-      dealPrice:   brief.dealPrice,
-      msrp:        brief.msrp,
-    }
-    // Derive category from the brief's categories array using the same
-    // coercion logic as inferCategoryFallback.
-    const validCategoryValues = new Set<string>(['for-him', 'for-her', 'couples'])
-    const category = brief.categories.filter(
-      (c): c is 'for-him' | 'for-her' | 'couples' => validCategoryValues.has(c),
-    )
-    const effectiveCategory: Array<'for-him' | 'for-her' | 'couples'> =
-      category.length > 0 ? category : ['for-him', 'for-her']
-
-    // Map brief pairing candidates to PairingCandidate. Entries without a
-    // numeric price are dropped since PairingCandidate.price is required.
-    // handle is derived from productId (numeric suffix) as a fallback.
-    const pairingCandidates: PairingCandidate[] = brief.pairingCandidates
-      .filter((pc): pc is typeof pc & { price: number } => typeof pc.price === 'number')
-      .map(pc => {
-        const candidate: PairingCandidate = {
-          productId: pc.productId,
-          handle:    pc.productId.replace('gid://shopify/Product/', ''),
-          title:     pc.title,
-          price:     pc.price,
-        }
-        if (pc.brand)           candidate.brand           = pc.brand
-        if (pc.productTypeDial) candidate.productTypeDial = pc.productTypeDial
-        return candidate
-      })
-
-    // Build OrchestratorInput. exactOptionalPropertyTypes: omit pairingCandidates
-    // entirely when the list is empty rather than setting it to undefined.
-    const input: OrchestratorInput = pairingCandidates.length > 0
-      ? {
-          product,
-          // Use rawTitle as seoTitle; the orchestrator's generateProductTitle tool
-          // will augment it if needed (same as the bulk-import path).
-          seoTitle:          brief.rawTitle,
-          category:          effectiveCategory,
-          pairingCandidates,
-        }
-      : {
-          product,
-          seoTitle:  brief.rawTitle,
-          category:  effectiveCategory,
-        }
-    products.push({ productId: `gid://shopify/Product/${r.productId}`, sku, input })
+    // Pairings are a deal-cycle artifact, curated against the freshest catalog
+    // state when a product enters the homepage deal slot. Generating
+    // pairing_why against the candidate list available at import time would be
+    // discarded work -- suppress it here.
+    brief.pairingCandidates = []
+    inputs.push({ productId: `gid://shopify/Product/${r.productId}`, brief })
     candidateIds.push(r.id)
   }
-  if (products.length === 0) return { submitted: 0, reason: 'no_briefs' }
+  if (inputs.length === 0) return { submitted: 0, reason: 'no_briefs' }
 
-  const { jobId } = await enqueueBatchJob({
-    jobType: 'full-enrichment',
-    source:  'import-product',
-    products,
-  })
+  const sharedContext = await loadSharedEnrichmentContext()
+  const { batchId } = await submitFullEnrichmentBatch(inputs, sharedContext, { brandVoice: EMMA_VOICE_ENRICHMENT })
 
-  // Reuse enrich_batch_id column to store the orchestrator jobId so
-  // collectEnrichmentBatch can look up the batch_jobs row by jobId.
   await db.update(importCandidates)
-    .set({ enrichBatchId: jobId, updatedAt: new Date() })
+    .set({ enrichBatchId: batchId, updatedAt: new Date() })
     .where(inArray(importCandidates.id, candidateIds))
 
-  console.log(`[import-enrich] enqueued orchestrator job ${jobId} for ${products.length} product(s)`)
-  return { submitted: products.length, batchId: jobId }
+  console.log(`[import-enrich] submitted full-enrichment batch ${batchId} for ${inputs.length} product(s)`)
+  return { submitted: inputs.length, batchId }
 }
 
 /**
- * Poll batch_jobs for orchestrator jobs enqueued by submitEnrichmentBatch.
- * The orchestrator's applying phase already called applyFullEnrichmentWrites
- * for each product -- this function only stamps enriched_at on candidates
- * whose jobs have reached a terminal state (done or failed).
+ * Collect previously-submitted full-enrichment batches. Candidates sharing a
+ * batchId (the common case -- one submit call batches up to the cap in a
+ * single Anthropic Message Batch) are grouped so collectFullEnrichmentBatch is
+ * called once per unique batch rather than once per candidate.
  *
- * Still-in-flight jobs (queued/submitted/processing/applying) are left for
- * the next tick. The enrichment-batch-poller cron (every 2 min) advances them.
+ * For each candidate whose batch has ended, runs the quality gate (Part 3)
+ * BEFORE calling applyFullEnrichmentWrites. Each product's apply is wrapped in
+ * its own try/catch so one bad product never blocks the rest of the batch.
+ *
+ * On pass: writes are applied and enriched_at is stamped, same as before.
+ * On fail (gate fails, batch returned no result/a failure, or the apply threw):
+ * enriched_at is NOT stamped. enrich_attempts increments; below the retry cap,
+ * enrich_batch_id is cleared so submitEnrichmentBatch re-selects the candidate
+ * for one retry. At the cap, enrich_failed_at is set and enrich_batch_id is
+ * left alone -- the row is parked, neither re-submitted nor published.
  */
 export async function collectEnrichmentBatch(): Promise<{ enriched: number; failed: number; stillPending: number }> {
-  // Find candidates that have an enrich_batch_id (orchestrator jobId)
-  // but are not yet stamped enriched.
-  const pendingCandidates = await db
+  const rows = await db
     .select({
-      id:    importCandidates.id,
-      jobId: importCandidates.enrichBatchId,
+      id:             importCandidates.id,
+      batchId:        importCandidates.enrichBatchId,
+      productId:      dealHistory.shopifyProductId,
+      enrichAttempts: importCandidates.enrichAttempts,
     })
     .from(importCandidates)
+    .innerJoin(dealHistory, eq(importCandidates.dealHistoryId, dealHistory.id))
     .where(and(
       eq(importCandidates.status, 'imported'),
       isNull(importCandidates.enrichedAt),
+      isNull(importCandidates.enrichFailedAt),
       sql`${importCandidates.enrichBatchId} IS NOT NULL`,
     ))
     .orderBy(asc(importCandidates.id))
 
-  if (pendingCandidates.length === 0) {
+  const pending = rows.filter((r): r is { id: number; batchId: string; productId: string; enrichAttempts: number } =>
+    Boolean(r.batchId) && Boolean(r.productId))
+
+  if (pending.length === 0) {
     return { enriched: 0, failed: 0, stillPending: 0 }
   }
 
-  // Collect unique jobIds and fetch matching batch_jobs rows in one query.
-  const jobIds = [...new Set(pendingCandidates.map(c => c.jobId as string))]
-  const jobRows = await db
-    .select({ jobId: batchJobs.jobId, status: batchJobs.status })
-    .from(batchJobs)
-    .where(inArray(batchJobs.jobId, jobIds))
-
-  const jobStatus = new Map(jobRows.map(r => [r.jobId, r.status]))
+  const byBatch = new Map<string, typeof pending>()
+  for (const c of pending) {
+    const list = byBatch.get(c.batchId) ?? []
+    list.push(c)
+    byBatch.set(c.batchId, list)
+  }
 
   let enrichedTotal = 0
   let failedTotal   = 0
   let stillPending  = 0
 
-  for (const candidate of pendingCandidates) {
-    const jobId = candidate.jobId as string
-    const status = jobStatus.get(jobId)
-
-    if (
-      !status ||
-      status === 'queued' ||
-      status === 'submitted' ||
-      status === 'processing' ||
-      status === 'applying'
-    ) {
-      // Still in flight -- poller will advance it. Retry next tick.
-      stillPending++
+  for (const [batchId, candidates] of byBatch) {
+    const collected = await collectFullEnrichmentBatch(batchId)
+    if (!collected.ended) {
+      stillPending += candidates.length
       continue
     }
 
-    // Terminal: done or failed. Writes were already applied by the orchestrator's
-    // applying phase. Stamp enriched_at so publishEnrichedProducts can proceed.
-    if (status === 'done') {
-      await db.update(importCandidates)
-        .set({ enrichedAt: new Date(), updatedAt: new Date() })
-        .where(eq(importCandidates.id, candidate.id))
-      enrichedTotal++
-      console.log(`[import-enrich] candidate ${candidate.id} job ${jobId} done -- stamped enriched_at`)
-    } else {
-      // status === 'failed': enrichment did not complete cleanly. Stamp enriched_at
-      // anyway so this candidate does not block the queue indefinitely -- the
-      // orchestrator may have applied partial writes. Log for ops visibility.
-      await db.update(importCandidates)
-        .set({ enrichedAt: new Date(), updatedAt: new Date() })
-        .where(eq(importCandidates.id, candidate.id))
+    for (const candidate of candidates) {
+      const gid          = `gid://shopify/Product/${candidate.productId}`
+      const writes        = collected.results.get(gid)
+      const batchFailure  = collected.failures.find(f => f.productId === gid)
+
+      let ok = false
+      if (writes && !batchFailure && passesQualityGate(writes)) {
+        try {
+          await applyFullEnrichmentWrites(candidate.productId, writes)
+          ok = true
+        } catch (err) {
+          console.error(`[import-enrich] applyFullEnrichmentWrites failed for candidate ${candidate.id} (product ${candidate.productId}):`, err)
+        }
+      }
+
+      if (ok) {
+        await db.update(importCandidates)
+          .set({ enrichedAt: new Date(), updatedAt: new Date() })
+          .where(eq(importCandidates.id, candidate.id))
+        enrichedTotal++
+        continue
+      }
+
+      const attempts = candidate.enrichAttempts + 1
+      const reason = batchFailure?.error ?? (!writes ? 'no result in batch' : 'quality gate failed')
+      if (attempts < ENRICH_MAX_ATTEMPTS) {
+        await db.update(importCandidates)
+          .set({ enrichAttempts: attempts, enrichBatchId: null, updatedAt: new Date() })
+          .where(eq(importCandidates.id, candidate.id))
+        console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- re-queued for retry`)
+      } else {
+        await db.update(importCandidates)
+          .set({ enrichAttempts: attempts, enrichFailedAt: new Date(), updatedAt: new Date() })
+          .where(eq(importCandidates.id, candidate.id))
+        console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- parked, needs manual review`)
+      }
       failedTotal++
-      console.warn(
-        `[import-enrich] candidate ${candidate.id} job ${jobId} failed -- stamping enriched_at to unblock queue (partial writes may apply)`,
-      )
     }
   }
 
@@ -482,20 +487,14 @@ export async function runImportEnrichTick(opts: { source?: 'cron' | 'manual' } =
   const collect = await collectEnrichmentBatch()
   const publish = await publishEnrichedProducts()
 
-  let submit: Awaited<ReturnType<typeof submitEnrichmentBatch>> = { submitted: 0, reason: 'batch_in_flight' }
-  // Gate: only enqueue a new job when no import-product jobs are still in flight.
-  // This avoids stacking concurrent orchestrator jobs for the same source.
-  const inflightRow = await db
-    .select({ c: sql<number>`count(*)::int` })
-    .from(batchJobs)
-    .where(and(
-      eq(batchJobs.source, 'import-product'),
-      inArray(batchJobs.status, ['queued', 'submitted', 'processing', 'applying']),
-    ))
-  const inflightCount = Number(inflightRow[0]?.c ?? 0)
-  if (inflightCount === 0) {
-    submit = await submitEnrichmentBatch(await getBatchCap())
-  }
+  // Single-call full-enrichment batches create no durable in-flight row of
+  // their own (unlike the old orchestrator's batch_jobs table), so
+  // collect.stillPending IS the in-flight signal: only submit a new batch once
+  // every previously-submitted batch has been collected, so we never stack
+  // concurrent Anthropic batches for the same source.
+  const submit = collect.stillPending === 0
+    ? await submitEnrichmentBatch(await getBatchCap())
+    : { submitted: 0, reason: 'batch_in_flight' }
 
   return { ok: true, collect, publish, submit }
 }
