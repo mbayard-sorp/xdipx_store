@@ -188,6 +188,11 @@ tempt (a specific product with a reason it fits), deepen (education, the
 Notebook), or close (Compass, email capture). A module with no job gets
 better content or gets its slot re-planned via Routine B.
 
+The "From the Notebook" module auto-populates with the latest published posts
+(see `docs/store-team/internal-linking.md`), so it stays current on its own;
+publish a curated `editorialTiles` override only for a deliberate editorial
+pick, not to keep it fresh.
+
 ## 8. Voice on the homepage
 
 The charter (docs/emma-voice.md) is the source of truth. For homepage work,

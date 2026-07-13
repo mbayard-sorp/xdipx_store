@@ -13,10 +13,10 @@
 
 import { getDiscoveryIndex, getDiscoveryRails } from '~/lib/discovery.server'
 import { buildHomeContentBlocks, type HomeContentBlocks } from '~/lib/homepage-payload.server'
-import { getEmmaHeroSettings } from '~/lib/sanity.server'
+import { getEmmaHeroSettings, getBlogPosts } from '~/lib/sanity.server'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { EMPTY_STATE, type DiscoveryProduct, type Rail } from '~/types/discovery'
-import type { EmmaHeroSettings } from '~/types/cms'
+import type { EmmaHeroSettings, BlogPostCard } from '~/types/cms'
 
 const EMMA_HERO_TIMEOUT_MS = 4000
 
@@ -55,6 +55,13 @@ export interface StorefrontData {
    * discovery-derived.
    */
   contentBlocks: Promise<HomeContentBlocks>
+  /**
+   * Latest published Notebook posts, auto-populating the "From the Notebook"
+   * section so fresh daily content reaches the homepage with no merchandiser
+   * action. A curated `editorialTiles` block (in `contentBlocks`) overrides this
+   * when present; otherwise these render.
+   */
+  notebookPosts: BlogPostCard[]
 }
 
 /**
@@ -69,9 +76,10 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
   // home page doesn't always lead with the same products (time bucket, not a
   // per-visitor cookie).
   const railSeed = Math.floor(Date.now() / 60_000)
-  const [railsResult, emmaHero] = await Promise.all([
+  const [railsResult, emmaHero, notebook] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, 'getEmmaHeroSettings(storefront)'),
+    getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [] as BlogPostCard[], total: 0 })),
   ])
 
   const rails = railsResult.rails
@@ -111,5 +119,6 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
     featured,
     total: railsResult.total,
     contentBlocks: buildHomeContentBlocks(), // deferred — team-managed Sanity surface
+    notebookPosts: notebook.posts,
   }
 }

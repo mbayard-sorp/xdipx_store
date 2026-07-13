@@ -1263,6 +1263,63 @@ export async function getBlogPosts(opts: {
   }
 }
 
+// ─── Reverse lookup: posts → product ─────────────────────────────────────────
+// Posts embed products as handle strings (blogProductEmbed.productHandle), so a
+// product can find the posts that feature it without any Sanity reference. These
+// power the inbound links: the PDP "From the Notebook" section and the
+// per-collection notebook rail. Cards carry readingTime 0 (skips the min-read
+// chip) since we don't fetch body text here.
+
+export async function getNotebookPostsForProduct(handle: string, limit = 3): Promise<BlogPostCard[]> {
+  if (!projectId || !handle) return []
+
+  const cacheKey = `notebook-for-product:${handle}:${limit}`
+  const cached = getCachedBlog<BlogPostCard[]>(cacheKey, BLOG_CACHE_TTL)
+  if (cached) return cached
+
+  try {
+    const client = getClient()
+    if (!client) return []
+    const posts = await client.fetch<Omit<BlogPostCard, 'readingTime'>[]>(
+      `*[_type == "blogPost" && status == "published"
+        && count(body[_type == "blogProductEmbed" && productHandle == $handle]) > 0]
+        | order(publishedAt desc) [0...$limit] { ${BLOG_POST_CARD_PROJECTION} }`,
+      { handle, limit },
+    )
+    const result: BlogPostCard[] = (posts ?? []).map((p) => ({ ...p, readingTime: 0 }))
+    setCachedBlog(cacheKey, result)
+    return result
+  } catch (err) {
+    console.error('[sanity] getNotebookPostsForProduct error:', err)
+    return []
+  }
+}
+
+export async function getNotebookPostsForProductHandles(handles: string[], limit = 4): Promise<BlogPostCard[]> {
+  if (!projectId || !handles?.length) return []
+
+  const cacheKey = `notebook-for-handles:${handles.slice().sort().join(',')}:${limit}`
+  const cached = getCachedBlog<BlogPostCard[]>(cacheKey, BLOG_CACHE_TTL)
+  if (cached) return cached
+
+  try {
+    const client = getClient()
+    if (!client) return []
+    const posts = await client.fetch<Omit<BlogPostCard, 'readingTime'>[]>(
+      `*[_type == "blogPost" && status == "published"
+        && count(body[_type == "blogProductEmbed" && productHandle in $handles]) > 0]
+        | order(publishedAt desc) [0...$limit] { ${BLOG_POST_CARD_PROJECTION} }`,
+      { handles, limit },
+    )
+    const result: BlogPostCard[] = (posts ?? []).map((p) => ({ ...p, readingTime: 0 }))
+    setCachedBlog(cacheKey, result)
+    return result
+  } catch (err) {
+    console.error('[sanity] getNotebookPostsForProductHandles error:', err)
+    return []
+  }
+}
+
 export async function getBlogPost(slug: string, preview = false): Promise<BlogPost | null> {
   if (!projectId) return null
 

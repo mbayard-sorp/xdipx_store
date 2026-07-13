@@ -135,7 +135,7 @@ Below 300 sessions/week the retro leans on margin math, stock depth, and these h
 - **Honest Emma.** AI guide with no lived experience per `docs/emma-voice.md`. Speak from specs, materials, and review patterns. Never "I tried / tested / own it".
 - **No medical claims.** Body-safety and material facts only. No treatment, diagnosis, or health-outcome promises. Name materials plainly (medical-grade silicone, glass, stainless steel).
 - **No prices in body text.** Pricing lives on the PDP and in the embed component, never in prose. No discount framing that would trip MAP rules.
-- **Internal links every post.** At least one collection link and one PDP, using canonical `/products/{slug}` and `/collections/{handle}`.
+- **Internal links every post.** At least one collection link and one PDP, using canonical `/products/{slug}` and `/collections/{handle}`. The embedded `blogProductEmbed.productHandle` is also what powers the inbound PDP/collection backlinks — a wrong handle silently breaks them. Full rules: `docs/store-team/internal-linking.md`.
 - **No em-dashes, no countdowns, no urgency, CTAs from the whitelist only.** Billing descriptor is always XDIPX.
 
 ## 8. Editorial formats (owner-added 2026-07)

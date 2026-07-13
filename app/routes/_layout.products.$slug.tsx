@@ -10,7 +10,7 @@ import {
   getProductsByIds, getMainMenu,
 } from '~/lib/shopify.server'
 import { resolveBreadcrumbs, type BreadcrumbCrumb } from '~/lib/breadcrumbs.server'
-import { getProductPageBlocks, getProductFaqs, getPdpTrustBar } from '~/lib/sanity.server'
+import { getProductPageBlocks, getProductFaqs, getPdpTrustBar, getNotebookPostsForProduct } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 // Reviews: UI + aggregateRating JSON-LD flip together behind the
 // reviews_pdp_enabled valve. They must never be decoupled (Google's
@@ -47,6 +47,8 @@ import { HowToStructuredData }    from '~/components/seo/HowToStructuredData'
 import { VideoStructuredData }    from '~/components/seo/VideoStructuredData'
 import { ProductFaqList }         from '~/components/store/ProductFaqList'
 import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
+import { NotebookRail } from '~/components/blog/NotebookRail'
+import type { BlogPostCard } from '~/types/cms'
 // ProductTabs removed — content now lives in the SEO summary grid above.
 import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
 import FrequentlyBoughtWith       from '~/components/store/FrequentlyBoughtWith'
@@ -88,7 +90,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // round-trip. The customer token (cookie read) rides along too. The bundle
   // lookup rides along here as well (cached() so this stays a cheap KV hit) —
   // its result is branched on after the batch resolves, below.
-  const [deal, pdpBlocks, fbtHandles, companionBundle, faqs, mainMenu, pdpTrustBar, customerToken, bundle] = await Promise.all([
+  const [deal, pdpBlocks, fbtHandles, companionBundle, faqs, mainMenu, pdpTrustBar, customerToken, bundle, notebookPosts] = await Promise.all([
     getDealByHandle(slug),
     getProductPageBlocks(slug),
     getFrequentlyBoughtWith(slug, 4),
@@ -98,6 +100,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     getPdpTrustBar(),
     getCustomerToken(request),
     getBundleByHandle(slug),
+    getNotebookPostsForProduct(slug, 3),
   ])
 
   // Bundle fast-path: if Sanity has a bundle doc for this handle, render the
@@ -127,6 +130,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         { label: bundle.title, url: `https://xdipx.com/products/${bundle.handle}`, href: `/products/${bundle.handle}` },
       ] as BreadcrumbCrumb[],
       pdpTrustBar: null as TrustBarBlockType | null,
+      notebookPosts: [] as BlogPostCard[],
     }
   }
 
@@ -367,6 +371,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       reviewPage,
       reviewSort,
       reviewFilter,
+      notebookPosts,
     },
     { headers: { 'Set-Cookie': browseCookieHeader } },
   )
@@ -485,6 +490,7 @@ function ProductPage() {
   const carouselProductMap = loaderData.carouselProductMap
   const fbtProducts = loaderData.fbtProducts
   const pairsWithItems = loaderData.pairsWithItems
+  const notebookPosts = loaderData.notebookPosts
   const productVoteAggregateLoaded = loaderData.productVoteAggregate
   const customerProductVoteLoaded  = loaderData.customerProductVote
   const isLoggedIn                 = loaderData.isLoggedIn
@@ -1074,6 +1080,7 @@ function ProductPage() {
         {companionBundle && (
           <BundleSaveCard bundle={companionBundle} buyButtonText={buyButtonText} />
         )}
+        <NotebookRail posts={notebookPosts} heading="From the Notebook" />
       </div>
 
       {/* CMS content blocks configured in Sanity for this product */}
