@@ -57,14 +57,14 @@ real-talk, Thu podcast-notes, Sat care, Sun comparisons/wellness-basics flex).
 *[_type == "podcastReviewBrief" && status == "pending"] | order(publishedDate desc)[0]
 ```
 
-Found → today's post is the podcast review (content-plan §7A shape): patch the brief
+Found → today's post is the podcast review (content-plan §8A shape): patch the brief
 `status:'drafted'` immediately (idempotent claim), carry its takeaways, agree/pushback angles,
 `productAngles` (stock-verified before embedding), `suggestedTitle`, and episode URL into Step 4,
 and use category `blogCategory-podcast-notes`. None pending → fall back to a care post and note it
 in the retro.
 
-**Real Talk days (Tue/Fri):** pick the next unwritten topic from content-plan §7B (or a queued
-brief that fits the problem→resolution shape), and write to the §7B structure — problem in the
+**Real Talk days (Tue/Fri):** pick the next unwritten topic from content-plan §8B (or a queued
+brief that fits the problem→resolution shape), and write to the §8B structure — problem in the
 reader's words, root cause plainly, resolution with products only in the "What helps" section.
 
 Otherwise pick, in order, logging the source as a `step` event:
