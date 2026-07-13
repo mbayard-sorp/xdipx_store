@@ -266,9 +266,10 @@ devices only) plus `.press`; no new hover choreography.
 Directly under the H1 + dek, above the hero image or immediately below it (build phase picks based
 on measured LCP), a compact trust surface in DM Sans, framed by a top+bottom `line` hairline:
 
-- Emma avatar (32px, `--radius-full`, `paper-3` backing) + name, with an **AI-transparency line**
-  in `ink-3`: "Written by Emma, the xdipx AI guide. She works from specs, materials, and what
-  reviewers report, never personal use." (charter-safe, no lived experience).
+- Emma avatar (32px, `--radius-full`, `paper-3` backing) + name, with a byline in `ink-3`:
+  "the xdipx AI guide. A product expert and a friend to shop with." Do not spell out the
+  no-personal-use rule in UI copy; it reads weird. The charter still binds what Emma writes
+  (no lived experience claims), it just is not surfaced as a disclaimer.
 - A `.kicker` metadata run: category · reading time · last reviewed date. Use "Last reviewed"
   (evergreen framing), never a countdown or "updated X ago" urgency.
 - The heartbeat ♥ lives here, once (§6).

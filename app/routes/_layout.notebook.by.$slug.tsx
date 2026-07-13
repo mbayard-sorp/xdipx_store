@@ -152,8 +152,7 @@ export default function NotebookAuthorPage() {
           )}
           {isEmma && (
             <p className="text-[13px] text-ink-4 mt-2 max-w-xl leading-[1.5]">
-              Emma is the xdipx AI guide. She works from specs, materials, and what reviewers
-              report, never personal use.
+              Emma is the xdipx AI guide, a product expert and a friend to shop with.
             </p>
           )}
           <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">

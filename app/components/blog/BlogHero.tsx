@@ -119,8 +119,7 @@ export function BlogHero({ post, readingTime }: { post: BlogPost; readingTime: n
           <p className="text-sm text-ink-3 leading-snug">
             {isEmma ? (
               <>
-                the xdipx AI guide <HeartbeatMark /> She works from specs, materials, and what
-                reviewers report, never personal use.
+                the xdipx AI guide <HeartbeatMark /> A product expert and a friend to shop with.
               </>
             ) : (
               post.author?.role ?? null
