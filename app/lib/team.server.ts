@@ -23,6 +23,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { and, desc, eq, gte, lt, lte, ne, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
+import { contentSlotForDate, type ContentSlot } from '~/lib/content-slot'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
 import {
   teamKeys,
@@ -215,6 +216,8 @@ export interface GateResult {
   activeBriefId: number | null
   /** Content-only: standalone valves the routine needs (absent for other teams). */
   valves?: { autopublish: boolean }
+  /** Content-only: today's weekday->category slot, computed server-side in PT. */
+  contentSlot?: ContentSlot
 }
 
 /**
@@ -247,6 +250,7 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
     maxImagesPerDay,
     activeBriefId: brief?.id ?? null,
     ...(autopublish !== undefined ? { valves: { autopublish } } : {}),
+    ...(team === 'content' ? { contentSlot: contentSlotForDate(new Date()) } : {}),
   }
   if (!cfg.enabled)                   return { ...base, ok: false, reason: 'disabled' }
   if (inProgress)                     return { ...base, ok: false, reason: 'run_in_progress' }

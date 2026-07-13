@@ -19,6 +19,8 @@ import { Reveal } from '~/components/motion/Reveal'
 import { BlogStructuredData } from '~/components/seo/BlogStructuredData'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
+import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
+import { extractFaqItems } from '~/lib/blog-faq'
 import type { Product } from '~/types'
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
@@ -103,6 +105,10 @@ export default function NotebookPostPage() {
         }))
     : []
 
+  // FAQ sections (H2 "Frequently asked questions" + H3 question/answer pairs)
+  // become FAQPage JSON-LD, built from the same blocks the reader sees.
+  const faqItems = extractFaqItems(post.body ?? [])
+
   const sources = post.extras?.sources ?? []
 
   return (
@@ -117,6 +123,7 @@ export default function NotebookPostPage() {
           items={guideItems}
         />
       )}
+      {faqItems.length > 0 && <FAQStructuredData faqs={faqItems} />}
 
       <BreadcrumbNav items={breadcrumbs} />
 

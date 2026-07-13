@@ -16066,6 +16066,31 @@ var init_gsc_server = __esm({
   }
 });
 
+// app/lib/content-slot.ts
+function contentSlotForDate(d) {
+  const weekday = d.toLocaleDateString("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "long"
+  });
+  const slot = SLOT_BY_WEEKDAY[weekday] ?? ["guides", null];
+  return { weekday, expectedCategory: slot[0], fallbackCategory: slot[1] };
+}
+var SLOT_BY_WEEKDAY;
+var init_content_slot = __esm({
+  "app/lib/content-slot.ts"() {
+    "use strict";
+    SLOT_BY_WEEKDAY = {
+      Monday: ["guides", null],
+      Tuesday: ["real-talk", null],
+      Wednesday: ["guides", null],
+      Thursday: ["podcast-notes", "care"],
+      Friday: ["real-talk", null],
+      Saturday: ["care", null],
+      Sunday: ["comparisons", "wellness-basics"]
+    };
+  }
+});
+
 // app/lib/homepage-team-keys.ts
 var TEAM_KEYS;
 var init_homepage_team_keys = __esm({
@@ -16293,7 +16318,8 @@ async function gate(team, excludeRunId) {
     imagesToday,
     maxImagesPerDay,
     activeBriefId: brief?.id ?? null,
-    ...autopublish !== void 0 ? { valves: { autopublish } } : {}
+    ...autopublish !== void 0 ? { valves: { autopublish } } : {},
+    ...team === "content" ? { contentSlot: contentSlotForDate(/* @__PURE__ */ new Date()) } : {}
   };
   if (!cfg.enabled) return { ...base, ok: false, reason: "disabled" };
   if (inProgress) return { ...base, ok: false, reason: "run_in_progress" };
@@ -16493,6 +16519,7 @@ var init_team_server = __esm({
   "app/lib/team.server.ts"() {
     "use strict";
     init_db_server();
+    init_content_slot();
     init_homepage_team_keys();
     init_team_keys();
     init_schema();
