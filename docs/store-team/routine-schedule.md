@@ -7,7 +7,7 @@ scheduler and this file disagree, fix one of them — the weekly strategy routin
 expected routine actually ran (the runs table has the data) and file a suggestion when one is
 missing.
 
-Status 2026-07-13: routines 1–9 and 12 exist as triggers in Claude's cloud scheduler (fresh
+Status 2026-07-13: routines 1–9, 12, and 13 exist as triggers in Claude's cloud scheduler (fresh
 session per fire, completion notifications off), each firing the exact prompt in this manifest.
 Routine 9 (Daily Content Writer) was recreated as a cloud trigger on 2026-07-13, closing the
 known gap where the old desktop scheduled task (`xdipx-daily-content-writer`, fires only while
@@ -29,6 +29,12 @@ Trigger IDs, for reference when editing or deleting a routine:
 | 8 | xdipx — Design Cycle (Routine B) | `trig_017s5fsNnWgk7xpXgF8QZccB` |
 | 9 | xdipx — Daily Content Writer | `trig_01Qf5puo6AZyJqWn9QHN5mxQ` (cloud trigger since 2026-07-13; replaces desktop task `xdipx-daily-content-writer`, which should be deleted) |
 | 12 | xdipx — Weekly Podcast Review | `trig_01AN6PKVghE9AM51R13z2UEu` |
+| 13 | xdipx — Daily Pricing Sweep | `trig_01AchSCvZnX56hbr7VsTvVSi` (cloud trigger since 2026-07-13; replaces desktop task `pricing-daily-sweep`, deleted the same day) |
+
+On 2026-07-13 the last three desktop scheduled tasks on the owner's machine were deleted:
+`pricing-daily-sweep` (recreated as cloud routine 13), plus `homepage-daily-merchandise` and
+`homepage-design-cycle`, which had been duplicating cloud routines 7 and 8 since 2026-07-09 and
+risked double-fires. All routines now run exclusively in Claude's cloud scheduler.
 
 Still outstanding: smoke-test by firing Weekly Strategy manually (`fire_trigger` on
 `trig_018pSqtCKWC3fxbstN7wQBvs`) and confirm the run row plus gate state on
@@ -63,6 +69,7 @@ spend via `POST https://xdipx.com/api/homepage-team/spend` under the team's feat
 | 10 | xdipx — Weekly SEO Curation | `0 16 * * 0` (Sun) | content / `content-seo-curation` | `docs/store-team/routine-seo-curation.md` | Entry agent seo-curator. Step 0: if `seo_curation_enabled` is not `'true'`, exit without starting a run. Triage the gray-zone pending keywords (cap 250 decisions); propose cluster merge maps as suggestions (NEVER execute merges); plan up to 7 seoContentBrief docs for the coming week following the content-plan rhythm; file the weekly report suggestion (coverage, queue depth, bank staleness, enrichment coverage). Never write posts, never touch flagged keywords, never delete anything. |
 | 11 | xdipx — Weekly Off-site Scout | `0 16 * * 2` (Tue) | strategy / `strategy-offsite` | `docs/store-team/routine-offsite-weekly.md` | Entry agent offsite-scout. PROPOSE-ONLY: research the roundups/listicles LLM answers cite for sexual-wellness shopping queries, draft pitches + unlinked-mention reclamations + expert-quote prospects as suggestion rows (max 6/run, no duplicates of still-proposed rows), each with a mandatory policy note against `docs/ads-policy.md`. Never send, never post, never spend; the owner executes approved pitches manually from hello@xdipx.com. Tuesday avoids the Monday strategy run (1-run/day cap). Fewer than 5 published notebook posts → file only the summary and recommend waiting. |
 | 12 | xdipx — Weekly Podcast Review | `0 16 * * 3` (Wed) | content / `content-podcast` | `docs/store-team/routine-podcast-weekly.md` | Entry agent podcast-reviewer. RESEARCH-ONLY: pick the most recent unreviewed episode from `docs/store-team/podcast-shortlist.md` (rotation rules binding), review from transcript or show notes with sourceQuality recorded honestly, and write ONE pending `podcastReviewBrief` in Sanity — never a blogPost, never a publish, no images. A pending brief already waiting → skip honestly. Wednesday so Thursday's content run (routine 9, podcast-notes slot) finds a fresh brief. Trigger created 2026-07-13: `trig_01AN6PKVghE9AM51R13z2UEu`. |
+| 13 | xdipx — Daily Pricing Sweep | `37 14 * * *` (daily, approx 7:37a Pacific) | ops (no team gate) / n/a | `.claude/agents/pricing-ops.md` | Entry agent pricing-ops. Cloud trigger since 2026-07-13 (`trig_01AchSCvZnX56hbr7VsTvVSi`), replacing the desktop task `pricing-daily-sweep` (deleted). Verify the 07:00 UTC batch recompute ran in the last 26 hours (~1,200+ audit rows), catch up via `POST /cron/pricing-batch-recompute` at most once if missed, triage the pending approval queue, flag error rows and reject spikes. Read-only on the database; never approves/rejects/applies price changes; the catch-up trigger is the only allowed mutation. |
 
 Times chosen for a US-Eastern owner: strategy Monday 8a ET, apply/cost-review Monday afternoon
 after the owner's suggestion review, ads/email Tuesday morning, social daily 10a ET, merchandiser
