@@ -2155,11 +2155,11 @@ async function adminGraphQL(query, variables) {
     },
     body: JSON.stringify({ query, variables })
   });
-  const MAX_ATTEMPTS2 = 4;
+  const MAX_ATTEMPTS3 = 4;
   for (let attempt = 1; ; attempt++) {
     const res = await doFetch();
     if (res.status === 429) {
-      if (attempt >= MAX_ATTEMPTS2) throw new Error("Shopify Admin GraphQL error: 429");
+      if (attempt >= MAX_ATTEMPTS3) throw new Error("Shopify Admin GraphQL error: 429");
       const retryAfter = Number(res.headers.get("retry-after")) || 1;
       await new Promise((r) => setTimeout(r, Math.min(retryAfter * 1e3, 5e3)));
       continue;
@@ -2169,7 +2169,7 @@ async function adminGraphQL(query, variables) {
     const throttled = body.errors?.some(
       (e) => e.extensions?.code === "THROTTLED" || /throttled/i.test(e.message)
     );
-    if (throttled && attempt < MAX_ATTEMPTS2) {
+    if (throttled && attempt < MAX_ATTEMPTS3) {
       const cost = body.extensions?.cost;
       const needed = (cost?.requestedQueryCost ?? 0) - (cost?.throttleStatus?.currentlyAvailable ?? 0);
       const restoreRate = cost?.throttleStatus?.restoreRate ?? 0;
@@ -14968,6 +14968,180 @@ var init_homepage_healthcheck_server = __esm({
   }
 });
 
+// app/lib/notebook-healthcheck.server.ts
+var notebook_healthcheck_server_exports = {};
+__export(notebook_healthcheck_server_exports, {
+  runNotebookHealthcheck: () => runNotebookHealthcheck
+});
+function siteOrigin2() {
+  const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
+  return base.replace(/\/$/, "") || "https://xdipx.com";
+}
+function extractJsonLd2(html) {
+  let parsed = 0;
+  let scripts = 0;
+  const types = [];
+  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    scripts += 1;
+    try {
+      const json2 = JSON.parse((m[1] ?? "").trim());
+      parsed += 1;
+      const t = json2["@type"];
+      if (typeof t === "string") types.push(t);
+      else if (Array.isArray(t)) types.push(...t);
+    } catch {
+    }
+  }
+  return { parsed, scripts, types };
+}
+async function checkPageOnce2(exp, attempt) {
+  const bust = `__healthcheck=${Date.now()}-${attempt}`;
+  const url = `${siteOrigin2()}${exp.path}${exp.path.includes("?") ? "&" : "?"}${bust}`;
+  const problems = [];
+  let status = 0;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS2);
+    const res = await fetch(url, {
+      headers: { "user-agent": "xdipx-notebook-healthcheck" },
+      signal: ctrl.signal
+    }).finally(() => clearTimeout(timer));
+    status = res.status;
+    const body = await res.text();
+    if (status !== 200) problems.push(`HTTP ${status}`);
+    if (exp.markdown) {
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("text/markdown")) problems.push(`content-type "${ct}" is not text/markdown`);
+      if (body.length < 200) problems.push(`markdown body too small (${body.length} bytes)`);
+    } else {
+      if (body.length < MIN_BODY_BYTES2) problems.push(`body too small (${body.length} bytes)`);
+      if (!/<img[\s>]/i.test(body)) problems.push("no <img> (hero/card images likely missing)");
+      if (!/<\/html>/i.test(body)) problems.push("truncated HTML (no </html> \u2014 stream cut off)");
+      const { parsed, scripts, types } = extractJsonLd2(body);
+      if (parsed === 0) problems.push("no valid JSON-LD");
+      else if (parsed < scripts) problems.push(`malformed JSON-LD (${scripts - parsed} unparseable)`);
+      if (exp.expectType && !types.includes(exp.expectType)) {
+        problems.push(`JSON-LD missing @type ${exp.expectType}`);
+      }
+    }
+  } catch (err) {
+    problems.push(`fetch error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return { path: exp.path, status, ok: problems.length === 0, problems, hardFail: status >= 500 };
+}
+async function checkPage2(exp) {
+  let best = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS2; attempt++) {
+    const c = await checkPageOnce2(exp, attempt);
+    if (c.ok) return c;
+    if (!best || c.problems.length < best.problems.length) best = c;
+    if (attempt < MAX_ATTEMPTS2) {
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS2));
+    }
+  }
+  return best;
+}
+async function openHealthcheckIssue2(title, body) {
+  const token = process.env["GITHUB_TOKEN"];
+  const owner = process.env["GITHUB_OWNER"];
+  const repo = process.env["GITHUB_REPO"];
+  if (!token || !owner || !repo) {
+    console.warn("[notebook-healthcheck] GITHUB_TOKEN/OWNER/REPO not set \u2014 skipping issue");
+    return null;
+  }
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json"
+  };
+  try {
+    const q = encodeURIComponent(`repo:${owner}/${repo} is:issue is:open in:title "${title}"`);
+    const search = await fetch(`https://api.github.com/search/issues?q=${q}`, { headers });
+    const existing = search.ok ? ((await search.json()).items ?? [])[0] : void 0;
+    if (existing) {
+      await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${existing.number}/comments`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ body })
+      });
+      return existing.html_url;
+    }
+    const create = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ title, body, labels: ["healthcheck", "P1"] })
+    });
+    if (!create.ok) {
+      console.error(`[notebook-healthcheck] issue create ${create.status}`);
+      return null;
+    }
+    return (await create.json()).html_url;
+  } catch (err) {
+    console.error("[notebook-healthcheck] issue error", err);
+    return null;
+  }
+}
+async function runNotebookHealthcheck() {
+  const [posts, categories] = await Promise.all([
+    getBlogPostsForSitemap().catch(() => []),
+    getBlogCategories().catch(() => [])
+  ]);
+  const latestSlug = posts[0]?.slug;
+  const categorySlug = categories[0]?.slug;
+  const expectations = [
+    { path: "/notebook", expectType: "ItemList" },
+    ...latestSlug ? [
+      { path: `/notebook/${latestSlug}`, expectType: "BlogPosting" },
+      { path: `/notebook/${latestSlug}.md`, markdown: true }
+    ] : [],
+    ...categorySlug ? [{ path: `/notebook/category/${categorySlug}` }] : []
+  ];
+  const checks = await Promise.all(expectations.map(checkPage2));
+  const healthy = checks.every((c) => c.ok);
+  if (healthy) {
+    return { ok: true, checks, alerted: false };
+  }
+  const failed = checks.filter((c) => !c.ok);
+  const summary = failed.map((c) => `${c.path}: ${c.problems.join("; ")}`).join(" | ");
+  const hard = failed.some((c) => c.hardFail);
+  Sentry.captureException(
+    new Error(`Notebook healthcheck ${hard ? "failed" : "soft-degraded"} \u2014 ${summary}`),
+    {
+      tags: { healthcheck: "notebook", severity: hard ? "P1" : "P3" },
+      extra: { checks }
+    }
+  );
+  const result = { ok: false, checks, alerted: true };
+  if (hard) {
+    const issueBody = [
+      `Notebook healthcheck failed against ${siteOrigin2()}.`,
+      "",
+      "**Problems**",
+      summary,
+      "",
+      "_Report-only check (no auto-recovery). Filed automatically by `/cron/notebook-healthcheck`._"
+    ].join("\n");
+    const issueUrl = await openHealthcheckIssue2("[P1] Notebook healthcheck failing", issueBody);
+    if (issueUrl) result.message = `issue: ${issueUrl}`;
+  }
+  return result;
+}
+var FETCH_TIMEOUT_MS2, MIN_BODY_BYTES2, MAX_ATTEMPTS2, RETRY_BACKOFF_MS2;
+var init_notebook_healthcheck_server = __esm({
+  "app/lib/notebook-healthcheck.server.ts"() {
+    "use strict";
+    init_sentry_server();
+    init_sanity_server();
+    FETCH_TIMEOUT_MS2 = 12e3;
+    MIN_BODY_BYTES2 = 1e3;
+    MAX_ATTEMPTS2 = 3;
+    RETRY_BACKOFF_MS2 = 1500;
+  }
+});
+
 // app/lib/profit.server.ts
 var profit_server_exports = {};
 __export(profit_server_exports, {
@@ -21082,13 +21256,13 @@ function safeEqual(a, b) {
   return timingSafeEqual2(ab, bb);
 }
 async function drainMetaCapiFailures() {
-  const MAX_ATTEMPTS2 = 5;
+  const MAX_ATTEMPTS3 = 5;
   try {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
     const { and: and6, eq: eq22, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and6(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS2))).limit(100);
+    const rows = await db2.select().from(metaCapiFailures2).where(and6(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS3))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
@@ -21147,6 +21321,16 @@ function createCronRoutes() {
       res.status(result.ok ? 200 : 503).json(result);
     } catch (err) {
       console.error("[cron:homepage-healthcheck]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  cronRoute("/notebook-healthcheck", async (_req, res) => {
+    try {
+      const { runNotebookHealthcheck: runNotebookHealthcheck2 } = await Promise.resolve().then(() => (init_notebook_healthcheck_server(), notebook_healthcheck_server_exports));
+      const result = await runNotebookHealthcheck2();
+      res.status(result.ok ? 200 : 503).json(result);
+    } catch (err) {
+      console.error("[cron:notebook-healthcheck]", err);
       res.status(500).json({ error: String(err) });
     }
   });

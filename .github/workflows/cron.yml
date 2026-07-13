@@ -40,6 +40,7 @@ on:
           - import-enrich
           - enrichment-batch-poller
           - homepage-healthcheck
+          - notebook-healthcheck
           - aeo-surface-check
           - gsc-snapshot
           - warm
@@ -66,7 +67,7 @@ jobs:
             # its own monthly schedule, is valve-gated server-side
             # (keyword_research_enabled), and stays individually
             # dispatchable via the target dropdown.
-            paths='daily-feed-processor deal-activator profit-summary review-reminders inventory-check log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller homepage-healthcheck aeo-surface-check warm warm-discovery-index'
+            paths='daily-feed-processor deal-activator profit-summary review-reminders inventory-check log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller homepage-healthcheck notebook-healthcheck aeo-surface-check warm warm-discovery-index'
           else
             paths="$t"
           fi

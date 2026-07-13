@@ -134,6 +134,24 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/notebook-healthcheck
+   * Schedule: daily — assert /notebook, the latest post (+ its .md twin), and a
+   * category page render cleanly (200, images, JSON-LD). Report-only: alerts
+   * Sentry, opens a P1 issue on a hard 5xx, never rolls anything back (the
+   * Notebook has no auto-publish path a rollback would undo).
+   */
+  cronRoute('/notebook-healthcheck', async (_req, res) => {
+    try {
+      const { runNotebookHealthcheck } = await import('../app/lib/notebook-healthcheck.server.js')
+      const result = await runNotebookHealthcheck()
+      res.status(result.ok ? 200 : 503).json(result)
+    } catch (err) {
+      console.error('[cron:notebook-healthcheck]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/profit-summary
    * Schedule: 12:05 AM — write daily profit summary to Neon
    */
