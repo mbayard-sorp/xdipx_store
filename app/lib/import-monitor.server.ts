@@ -18,6 +18,7 @@ import { kvGet, kvSet } from '~/lib/kv.server'
 import { fetchAllNalpacFeeds } from '~/lib/nalpac-feeds.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { setPipelineSetting } from '~/lib/pricing-webhook.server'
+import { runNalpacCostSync } from '~/lib/cost-sync.server'
 import { computeTargetPrice } from '~/lib/pricing-engine.server'
 import type { PricingSnapshot } from '~/lib/pricing-engine.server'
 import { isSkuAlreadyImported } from '~/lib/bulk-import.server'
@@ -216,6 +217,30 @@ export async function runImportMonitor(
         .map(r => r.brand?.toLowerCase().trim())
         .filter(Boolean) as string[],
     )
+
+    // 3b. WS3 price-drop / cost-sync loop (ADR-007, v2 engine only). Gated
+    // internally by pricing_costsync_enabled (default off); no-ops entirely
+    // when the switch is off. runNalpacCostSync never throws (best-effort per
+    // SKU/variant internally) but this call is wrapped anyway so a cost-sync
+    // failure never marks the whole import-monitor run as failed.
+    try {
+      const costSyncResult = await runNalpacCostSync({
+        snapshots: feedResult.snapshots,
+        carriedSkus,
+      })
+      if (costSyncResult.enabled) {
+        console.info(
+          `[import-monitor] cost-sync: checked=${costSyncResult.skusChecked} ` +
+          `drops=${costSyncResult.dropsDetected} repriced=${costSyncResult.variantsRepriced} ` +
+          `errors=${costSyncResult.errors.length}`,
+        )
+        if (costSyncResult.errors.length > 0) {
+          console.warn('[import-monitor] cost-sync errors:', costSyncResult.errors)
+        }
+      }
+    } catch (err) {
+      console.error('[import-monitor] cost-sync threw unexpectedly:', err)
+    }
 
     // 4. New-product diff vs prior feed-SKU snapshot in KV.
     const currentFeedSkus = [...feedResult.snapshots.keys()]
