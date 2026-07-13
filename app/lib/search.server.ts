@@ -268,7 +268,9 @@ export async function searchAll(params: {
   // pipeline can rebuild the filter excluding any single dimension. This is
   // what makes "if I added this filter, what would I get?" counts honest.
   type FacetDim = 'tag' | 'vendor' | 'feature' | 'experience' | 'price'
-  const baseClauses: string[] = ['_type == "productPage"', 'archived != true']
+  // WS2c — exclude draft-stage import stubs (opt-out: unset/false is visible,
+  // matching the existing `archived` pattern, so the live catalog needs no backfill).
+  const baseClauses: string[] = ['_type == "productPage"', 'archived != true', '(!defined(hiddenUntilLive) || hiddenUntilLive != true)']
   const textClauses: string[] = []
   const tagClauses: string[] = []
   const vendorClauses: string[] = []

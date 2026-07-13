@@ -545,6 +545,12 @@ export async function upsertProductPage(params: {
   /** Soft-delete flag — search filters drop archived productPages. Set true when
    *  Nalpac flags the product as discontinued, false to un-archive. */
   archived?: boolean | undefined
+  /** WS2c — import-time stub visibility gate. Opt-out semantics: pass `true`
+   *  only when this call just created a stub for a Shopify DRAFT product;
+   *  leave undefined otherwise so existing docs (and their current
+   *  visibility) are untouched. Cleared to `false` by `markProductPageLive`
+   *  when the product activates. See studio/schemas/productPage.js. */
+  hiddenUntilLive?: boolean | undefined
 }): Promise<{ created: boolean }> {
   // Use 'raw' perspective so drafts.* docs come back too — without it, the image block
   // can't see a draft that's masking the published version in Studio.
@@ -633,6 +639,7 @@ export async function upsertProductPage(params: {
   // ivrMood mirror removed — IVR search now reads moodTags directly so there's
   // a single source of truth for mood tags on the productPage doc.
   if (params.archived !== undefined) searchFields.archived = params.archived
+  if (params.hiddenUntilLive !== undefined) searchFields.hiddenUntilLive = params.hiddenUntilLive
 
   if (Object.keys(searchFields).length > 0) {
     await writeClient.patch(docId).set(searchFields).commit()
@@ -669,6 +676,53 @@ export async function upsertProductPage(params: {
   }
 
   return { created }
+}
+
+/**
+ * WS2c — patch a productPage doc found by its Shopify product id, accepting
+ * either the bare numeric id or the full gid (upsertProductPage always stores
+ * the gid form on `shopifyProductId`, but callers like `activateShopifyProduct`
+ * only have the numeric id, so this normalizes before matching). Generic:
+ * callers pass whatever fields they need patched.
+ *
+ * Best-effort by design — returns `{ patched: false }` rather than throwing
+ * when Sanity isn't configured or no matching doc exists, so callers (e.g.
+ * `activateShopifyProduct`) can fire-and-forget without risking the Shopify
+ * write that already happened.
+ */
+export async function patchProductPageByProductId(
+  numericOrGidProductId: string,
+  patch: Record<string, unknown>,
+): Promise<{ patched: boolean }> {
+  if (!projectId) return { patched: false }
+  const writeClient = getClient(true, false, 'raw')
+  if (!writeClient) return { patched: false }
+
+  const gid = numericOrGidProductId.startsWith('gid://')
+    ? numericOrGidProductId
+    : `gid://shopify/Product/${numericOrGidProductId}`
+
+  const doc = await writeClient.fetch<{ _id: string } | null>(
+    `*[_type == "productPage" && shopifyProductId == $gid] | order(_id asc)[0]{ _id }`,
+    { gid },
+  )
+  if (!doc) return { patched: false }
+
+  await writeClient.patch(doc._id).set(patch).commit()
+  return { patched: true }
+}
+
+/**
+ * WS2c — clear the `hiddenUntilLive` import-stub flag the moment a product's
+ * underlying Shopify record activates. Called from `activateShopifyProduct`
+ * (app/lib/shopify.server.ts) — the universal chokepoint every activation
+ * path (import publish, deal-rotator daily activation, admin queue
+ * force-activate) already funnels through — so a draft-stage import stub
+ * stops leaking into sitemap.xml / on-site search the moment it becomes
+ * purchasable, regardless of which path activated it.
+ */
+export async function markProductPageLive(numericOrGidProductId: string): Promise<{ patched: boolean }> {
+  return patchProductPageByProductId(numericOrGidProductId, { hiddenUntilLive: false })
 }
 
 // ─── Emma Picks (generated hero copy) ─────────────────────────────────────────
@@ -1849,8 +1903,10 @@ export async function getProductHandlesForSitemap(): Promise<{ handle: string; _
   try {
     const client = getClient()
     if (!client) return []
+    // WS2c — exclude draft-stage import stubs (opt-out: unset/false is
+    // visible, so the existing live catalog needs no backfill).
     return await client.fetch(
-      `*[_type == "productPage" && defined(shopifyHandle)] | order(title asc) {
+      `*[_type == "productPage" && defined(shopifyHandle) && (!defined(hiddenUntilLive) || hiddenUntilLive != true)] | order(title asc) {
         "handle": shopifyHandle, _updatedAt
       }`,
     )

@@ -42,6 +42,7 @@ import {
 import {
   activateShopifyProduct,
   pushProductToShopify,
+  appendProductTag,
   type ProductPageDoc,
 } from '~/lib/shopify.server'
 import { upsertProductPage } from '~/lib/sanity.server'
@@ -436,6 +437,17 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
     if (!r.productId) continue
     try {
       await activateShopifyProduct(r.productId)
+
+      // WS2b — tag the newly-activated product as a sourcing signal for the
+      // daily merchandiser (opportunistic "New Arrivals" rail) and a future
+      // /new page. Isolated try/catch: a tagging hiccup must never block the
+      // publishedAt stamp below (the activation itself already succeeded).
+      try {
+        await appendProductTag(r.productId, 'new-arrival')
+      } catch (tagErr) {
+        console.warn(`[import-enrich] appendProductTag('new-arrival') failed for product ${r.productId} (candidate ${r.id}):`, tagErr instanceof Error ? tagErr.message : tagErr)
+      }
+
       await db.update(importCandidates)
         .set({ publishedAt: new Date(), updatedAt: new Date() })
         .where(eq(importCandidates.id, r.id))

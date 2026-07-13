@@ -121,6 +121,12 @@ curl -s -X POST "$BASE_URL/api/homepage-team/event" \
 - **Nalpac top-100** — `fetchAllNalpacFeeds()` → `inTop100Feed` (`app/lib/nalpac-feeds.server.ts`).
   Run `cleanDescription()` for the `ft.`/`in.` encoding (don't strip `in.` after digits — those are
   inches). Cross-reference to Shopify by `nalpacSku`.
+- **Newest imports** — products tagged `new-arrival` (set automatically the moment the import
+  pipeline activates a product; see `publishEnrichedProducts` in `app/lib/import-enrich.server.ts`)
+  are a sourcing signal, not a standing feature. The routine may surface a handful of them in an
+  OPPORTUNISTIC `emmaCuratedRail` ("New Arrivals", Nº06 slot) when the week's slate has room — it
+  must never become a permanent fixture (it still counts against the 4-rail ceiling in Step 5), and
+  its copy goes through the same Emma voice gate as every other rail.
 
 ## Step 2b — Yesterday's scoreboard
 

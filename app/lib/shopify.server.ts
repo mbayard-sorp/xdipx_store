@@ -2988,6 +2988,21 @@ export async function activateShopifyProduct(numericId: string): Promise<void> {
 
   // 2. Publish to the curated xdipx channels; unpublish from excluded ones.
   await publishProductToXdipxChannels(id)
+
+  // 3. WS2c — clear the mirrored Sanity productPage's `hiddenUntilLive` import-stub
+  //    flag, if one exists. This function is the universal chokepoint every
+  //    activation path funnels through (import publish, deal-rotator daily
+  //    activation, admin queue force-activate), so wiring the clear here — rather
+  //    than in just one caller — guarantees a draft-stage import stub stops
+  //    leaking into sitemap.xml / on-site search the moment it actually becomes
+  //    purchasable, no matter which path activated it. Best-effort: a Sanity
+  //    hiccup must never unwind the Shopify activation that already succeeded above.
+  try {
+    const { markProductPageLive } = await import('~/lib/sanity.server')
+    await markProductPageLive(id)
+  } catch (err) {
+    console.warn(`[activateShopifyProduct] markProductPageLive failed for ${id} (non-blocking):`, err instanceof Error ? err.message : err)
+  }
 }
 
 // ─── xdipx fulfillment locations + sales channels ─────────────────────────
