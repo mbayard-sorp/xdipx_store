@@ -97,11 +97,15 @@ Threads share `emma_chat_threads`/`emma_chat_messages` via an `agent_type` discr
 
 | Phase | `import_monitor_phase` | Behavior |
 |---|---|---|
-| 1 | `1` (default) | Monitor + manual approval. No auto-import. **Current.** |
-| 2 | `2` | Auto-approve masters clearing strict gates (tier A/B, high `gap_score`, margin ≥ 45%, qty ≥ 100, price ≥ MAP, not `needs_review`), capped per day; rest manual. **Deferred — gate scaffolding + TODO in `runImportMonitor()`.** |
-| 3 | `3` | Relaxed gates incl. tier C, higher cap, per-day revenue guard; exception-only review. **Deferred.** |
+| 1 | `1` | Monitor + manual approval only. No auto-import. |
+| 2 | `2` (set by migration 052) | **Shipped** (`autoImportPhase2()`). Auto-imports masters clearing the deterministic gate below; everything else is worked by the `product-manager` agent (daily routine) or a human at `/admin/imports`. Current in prod once 052 is applied. |
+| 3 | `3` | Relaxed gates + per-day revenue guard, exception-only review. **Deferred (not implemented).** |
 
-Both auto phases require the enabled kill switch + a per-day import cap. Do not enable until Phase 1 is proven in production.
+**Phase-2 gate (`autoImportPhase2`, `import-monitor.server.ts`) — two branches:**
+- **A/B branch** — tier A (top-100) or B (carried brand): `price ≥ wholesale·(1 + monitor_p2_min_markup_pct)` (default `0.08` — covers cost + high-risk processor take; **no margin floor**, per owner direction), `total_qty ≥ monitor_p2_min_qty` (30), `gap_score ≥ monitor_p2_min_gap_score` (3.0), carried brand (`monitor_p2_require_carried_brand`), MAP-clean (`price ≥ map`), not `needs_review`. Daily cap `monitor_p2_max_auto_imports_per_day` (8).
+- **Tier-C branch** — Nalpac new-products-feed masters (fresh releases, any vendor), a **separate, stricter** gate that ships **off** (`monitor_p2_tierC_enabled`): qty ≥ `monitor_p2_tierC_min_qty` (60), gap ≥ `monitor_p2_tierC_min_gap_score` (4.5), markup ≥ `monitor_p2_tierC_min_markup_pct` (0.15), MAP-clean **and** MAP < MSRP, not `needs_review`; own sub-cap `monitor_p2_tierC_max_per_day` (3), all bounded by the overall daily cap. Admits brand-new (never-carried) vendors for now — owner direction, with a 30-day review of adding a carried-brand condition.
+
+The kill switch (`import_monitor_enabled`) gates all auto-import. Migration 052 flips `import_monitor_phase='2'`, `product_manager_enabled='true'`, and `import_enrich_enabled='true'` together — the full unattended discover → import → enrich → publish chain. The `product-manager` agent runs both a daily execution routine (`docs/store-team/routine-product-daily.md`) and a review-only weekly sub-step.
 
 ---
 
@@ -111,10 +115,10 @@ Both auto phases require the enabled kill switch + a per-day import cap. Do not 
 |---|---|---|
 | Daily monitor (fetch, diff, tier, score, price preview) | Pure TS + KV + Neon | ~$0 |
 | Approve → raw import | 1 Shopify mutation + 1 Neon write | ~$0 |
-| Enrichment of approved product | Anthropic Batch API (50% off) | ~$0.05–0.15 ea |
+| Enrichment of approved product | Anthropic **single-call** full-enrichment Batch (50% off) — one Sonnet request/product with cached system blocks | ~$0.02–0.05 ea |
 | PM chat | Sonnet stream, admin-only, propose-only | cents/session |
 
-Never call the synchronous full enrichment orchestrator from the monitor or approve path.
+Enrichment runs through `submitFullEnrichmentBatch` / `collectFullEnrichmentBatch` (`batch-enrichment.server.ts`), driven by `/cron/import-enrich` + the batch poller, behind a quality gate (non-empty copy + discovery tags + valid dial spread; failures get one bounded retry then park at `enrich_failed_at`). Never call synchronous enrichment inline from the monitor or approve path; the older 24-turn tool-use orchestrator is no longer used for auto-import.
 
 ---
 
@@ -129,6 +133,14 @@ Never call the synchronous full enrichment orchestrator from the monitor or appr
 | `import_monitor_watch_score_delta` | `0.10` | Score jump to resurface a watched candidate |
 | `import_monitor_watch_price_drop_pct` | `0.10` | Price drop to resurface a watched candidate |
 | `import_monitor_last_run_at` | — | ISO timestamp, written each run |
+| `import_monitor_phase` | `1` | `2` = Phase-2 auto-import on (set by migration 052) |
+| `monitor_p2_min_markup_pct` / `_min_qty` / `_min_gap_score` | `0.08` / `30` / `3.0` | A/B auto-import floors |
+| `monitor_p2_require_carried_brand` / `_max_auto_imports_per_day` | `true` / `8` | A/B carried-brand gate + daily cap |
+| `monitor_p2_tierC_enabled` | `false` | Tier-C (new-products feed) auto-import on/off (migration 059) |
+| `monitor_p2_tierC_min_qty` / `_min_gap_score` / `_min_markup_pct` / `_max_per_day` | `60` / `4.5` / `0.15` / `3` | Tier-C stricter floors + sub-cap |
+| `product_manager_enabled` / `_max_actions_per_run` | `false`* / `20` | product-manager execute gate + per-day-per-reviewedBy action cap (*`true` after migration 052) |
+| `product_team_enabled` / `_daily_cents` / `_max_runs` | `false` / `300` / `1` | Daily product routine gate/budget (migration 059) |
+| `import_enrich_enabled` / `_batch_cap` | `false`* / `10` | Enrich → publish gate + per-tick batch cap (*`true` after migration 052) |
 
 Env var (not a `pipeline_settings` key): `NALPAC_QTY_FLOOR` (default `20`) — minimum total qty for a master to be eligible.
 
