@@ -2,6 +2,7 @@ import { Link } from 'react-router'
 import type { BlogSeries } from '~/types/cms'
 import { SanityImage } from '~/components/common/SanityImage'
 import { Reveal } from '~/components/motion/Reveal'
+import { trackNotebookSeriesClick } from '~/lib/analytics.client'
 
 /**
  * Horizontal rail of series covers for the index and category pages
@@ -27,7 +28,11 @@ export function SeriesRail({ series }: { series: BlogSeries[] }) {
       <div className="flex gap-4 md:gap-6 overflow-x-auto pb-2 scrollbar-hide">
         {series.map((s, i) => (
           <Reveal key={s.slug} variant="up" index={i} className="shrink-0 w-44 md:w-52">
-            <Link to={`/notebook/series/${s.slug}`} className="group block press">
+            <Link
+              to={`/notebook/series/${s.slug}`}
+              onClick={() => trackNotebookSeriesClick({ seriesSlug: s.slug, from: 'rail' })}
+              className="group block press"
+            >
               {s.coverImageUrl ? (
                 <div className="aspect-[4/5] rounded-lg overflow-hidden bg-paper-3">
                   <SanityImage

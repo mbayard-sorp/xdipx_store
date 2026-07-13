@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import type { BlogPostExtras } from '~/types/cms'
 import { Reveal } from '~/components/motion/Reveal'
+import { trackNotebookSeriesClick } from '~/lib/analytics.client'
 
 /**
  * "Continue the series" card shown at the end of a post that belongs to a
@@ -29,7 +30,11 @@ export function SeriesNav({ extras }: { extras?: BlogPostExtras | null | undefin
       >
         This piece is part of {series.title}.
       </p>
-      <Link to={`/notebook/series/${series.slug}`} className="link-coral text-coral text-sm font-medium inline-block mt-3">
+      <Link
+        to={`/notebook/series/${series.slug}`}
+        onClick={() => trackNotebookSeriesClick({ seriesSlug: series.slug, from: 'post' })}
+        className="link-coral text-coral text-sm font-medium inline-block mt-3"
+      >
         Continue the series →
       </Link>
     </Reveal>

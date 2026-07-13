@@ -1,6 +1,8 @@
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, Form } from 'react-router'
+import { useEffect } from 'react'
 import { searchBlogPosts } from '~/lib/sanity.server'
+import { trackSearch, trackViewSearchResults } from '~/lib/analytics.client'
 import { BlogPostCard } from '~/components/blog/BlogPostCard'
 import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
@@ -35,6 +37,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 
 export default function NotebookSearchPage() {
   const { q, posts } = useLoaderData<typeof loader>()
+
+  useEffect(() => {
+    if (!q) return
+    trackSearch(q)
+    trackViewSearchResults(q, posts.length)
+  }, [q, posts.length])
 
   const breadcrumbs = [
     { label: 'Home', href: '/' },

@@ -5,6 +5,7 @@ import type { Product } from '~/types'
 import { Reveal } from '~/components/motion/Reveal'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { SanityImage } from '~/components/common/SanityImage'
+import { trackNotebookEmbedClick } from '~/lib/analytics.client'
 
 // ── Product context for blogProductEmbed blocks ──────────────────────────
 
@@ -105,11 +106,16 @@ function BlogProductEmbedBlock({ value }: { value: any }) {
   const product = productMap[value.productHandle]
   const ctaLabel = value.ctaLabel ?? 'Take a peek →'
   const href = `/products/${value.productHandle}`
+  const trackClick = () =>
+    trackNotebookEmbedClick({
+      productHandle: value.productHandle,
+      postPath: typeof window !== 'undefined' ? window.location.pathname : '',
+    })
 
   if (!product) {
     return (
       <div className="my-7 p-4 bg-paper-2 rounded-lg text-center text-sm text-ink-3">
-        <Link to={href} className="link-coral text-coral">{ctaLabel}</Link>
+        <Link to={href} onClick={trackClick} className="link-coral text-coral">{ctaLabel}</Link>
       </div>
     )
   }
@@ -141,6 +147,7 @@ function BlogProductEmbedBlock({ value }: { value: any }) {
         <div className="min-w-0">
           <Link
             to={href}
+            onClick={trackClick}
             className="text-ink hover:text-coral transition-colors text-lg md:text-xl leading-snug"
             style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}
           >
@@ -156,7 +163,7 @@ function BlogProductEmbedBlock({ value }: { value: any }) {
           )}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5">
             {specLine && <span className="text-[13px] text-ink-3">{specLine}</span>}
-            <Link to={href} className="link-coral text-coral text-sm font-medium">
+            <Link to={href} onClick={trackClick} className="link-coral text-coral text-sm font-medium">
               {ctaLabel}
             </Link>
           </div>

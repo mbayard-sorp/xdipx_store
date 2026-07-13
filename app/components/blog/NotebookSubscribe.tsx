@@ -1,6 +1,7 @@
-import { useFetcher } from 'react-router'
+import { useFetcher, useLocation } from 'react-router'
 import { useEffect, useState } from 'react'
 import { Reveal } from '~/components/motion/Reveal'
+import { trackNotebookSubscribe } from '~/lib/analytics.client'
 import type { NotebookSettings } from '~/types/cms'
 
 interface NotebookSubscribeProps {
@@ -16,15 +17,27 @@ interface NotebookSubscribeProps {
  */
 export function NotebookSubscribe({ variant = 'index', settings }: NotebookSubscribeProps) {
   const fetcher = useFetcher()
+  const location = useLocation()
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     const data = fetcher.data as { ok?: boolean; error?: string } | undefined
     if (!data) return
-    if (data.ok) setSubmitted(true)
+    if (data.ok && !submitted) {
+      setSubmitted(true)
+      trackNotebookSubscribe(
+        variant === 'post'
+          ? 'post'
+          : location.pathname.startsWith('/notebook/series/')
+            ? 'series'
+            : location.pathname.startsWith('/notebook/glossary')
+              ? 'glossary'
+              : 'index',
+      )
+    }
     if (data.error) setError(data.error)
-  }, [fetcher.data])
+  }, [fetcher.data, submitted, variant, location.pathname])
 
   const isPending = fetcher.state !== 'idle'
   const heading = settings?.newsletterHeading ?? 'The Notebook, in your inbox.'
