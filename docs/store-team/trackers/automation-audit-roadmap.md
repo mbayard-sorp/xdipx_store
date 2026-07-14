@@ -34,11 +34,19 @@ Week anchors: W1 = 2026-07-13, W2 = 2026-07-20, W3 = 2026-07-27, W6 = 2026-08-17
 | p2-6-design | Design-elevation Phase 1 kicked off | P2 | homepage team | 2026-09-14 | not-started | GREEN | first milestone in `trackers/design-elevation.md` flips to done | — | tracked in its own tracker; mirrored here for sequencing only |
 | p2-7-cwv | CWV field data (RUM) + automated LLM-citation tracking | P2 | rr7-engineer + aeo-geo-auditor | 2026-09-28 | not-started | GREEN | a RUM beacon reports CWV AND a scheduled citation check replaces the manual 20-query tracker | — | |
 | p2-8-docs | Doc reconciliation: import-monitor runbook Phase-2 drift; routine smoke test recorded | P2 | program-manager + process-optimizer | 2026-09-28 | not-started | GREEN | runbook §6 matches `autoImportPhase2` code thresholds AND routine-schedule.md smoke test marked done | — | docs-only PR |
+| p2-9-pricing-converge | Pricing-engine v1→v2 convergence (ADR-007 decision 4) | P2 | tech-architect + rr7-engineer + pricing-ops | 2026-09-28 | not-started | GREEN | no `decideAndApply` callers remain AND the Nalpac cost-change webhook calls `recomputeVariant` AND `pricing_changes` is retired/migrated into `pricing_audit_log` | — | ADR-007; product-mgmt bridge shipped "contain now"; tracked in issue #255 |
+| p2-10-tierc-trust-review | Tier-C vendor-trust review (carried-brand/allowlist condition?) | P1 | owner + product-manager | 2026-08-17 | not-started | GREEN | a dated decision is recorded in this status log re: whether to add a carried-brand/allowlist condition to Tier-C `autoImportPhase2` | — | owner accepted "admit all vendors" 2026-07-13; revisit ~+30d (~2026-08-12); issue #255 |
 
 Program gates (checked by program-manager in the weekly audit):
 W2 — email plumbing live, enrichment queue drained, alerting live. W6 — ≥10 posts indexed, reviews valve on with real reviews, PLP filtering + comparison route shipped. W12 — pSEO indexing, referral MVP live, store-strategist assesses $2k/mo run-rate trajectory.
 
 ## Status log
+
+### 2026-07-13 — product-management bridge merged; deferred follow-ups tracked
+
+The product-management bridge landed on `main` (PRs #254/#252/#253): Tier-C new-product auto-import, the daily `product` team routine, cheaper single-call enrichment + a quality gate, the import→storefront surfacing fixes (index refresh, draft-leak fix, New Arrivals rail + `/new` page), and the v2-only Nalpac price-drop cost-sync loop. All new behavior ships OFF (migrations 059/060/061 seed switches false). Two milestones added to track the deliberately-deferred follow-ups, both captured in **issue #255**:
+- **p2-9-pricing-converge** — ADR-007 decision 4. We shipped "contain now" (price-drop loop is v2-only, v1 fenced off + documented); the real v1→v2 convergence remains, so `ADR-007`'s "tracked" pointer now has a real row.
+- **p2-10-tierc-trust-review** — owner accepted "admit all Tier-C vendors" to unblock the summer catalog; revisit ~2026-08-12 whether to add a carried-brand/allowlist condition (regulated-category compliance). Set a reminder for the owner.
 
 ### 2026-07-12 — seeded (baseline)
 
