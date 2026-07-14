@@ -26,7 +26,7 @@ import {
   listSuggestions, decideSuggestion, listBriefs, listAdCampaigns, decideAdCampaign,
   type TeamConfig, type GateResult,
 } from '~/lib/team.server'
-import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, VALVE_KEYS, type TeamId } from '~/lib/team-keys'
+import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VALVE_KEYS, type TeamId } from '~/lib/team-keys'
 
 export const meta: MetaFunction = () => [{ title: 'Agent Teams — xdipx Admin' }]
 
@@ -118,6 +118,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const allowed = new Set<string>([
     ...TEAM_IDS.flatMap(t => Object.values(teamKeys(t))),
     ...Object.values(HOMEPAGE_EXTRA_KEYS),
+    ...Object.values(CONTENT_EXTRA_KEYS),
     ...Object.values(VALVE_KEYS),
   ])
 
@@ -243,6 +244,9 @@ export default function AgentTeamsPage() {
               <SettingField label="Initial-build budget (cents)" settingKey={HOMEPAGE_EXTRA_KEYS.buildCents} value={config.buildCents ?? 10000} asDollars />
               <SettingField label="Max images / day" settingKey={HOMEPAGE_EXTRA_KEYS.maxImagesPerDay} value={config.maxImagesPerDay ?? 12} />
             </>
+          )}
+          {team === 'content' && (
+            <SettingField label="Max images / day" settingKey={CONTENT_EXTRA_KEYS.maxImagesPerDay} value={config.maxImagesPerDay ?? 0} />
           )}
         </div>
 
