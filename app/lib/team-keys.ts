@@ -49,6 +49,20 @@ export const HOMEPAGE_EXTRA_KEYS = {
 } as const
 
 /**
+ * Content-team extra: how many hero/mood images the daily Notebook routine may
+ * generate per day (via media-manager). Advisory cap the content routine
+ * self-limits to; unlike homepage it is not hard-gated (content makes ~1 hero a
+ * day). 0 means the routine ships posts heroless. Owner-editable in the Content
+ * tab of /admin/homepage-team; seeded by migration 055.
+ */
+export const CONTENT_EXTRA_KEYS = {
+  maxImagesPerDay: 'content_team_max_images',
+} as const
+
+/** Default content image cap when the key is unset (conservative; migration seeds 5). */
+export const CONTENT_MAX_IMAGES_DEFAULT = 0
+
+/**
  * Standalone valves outside the per-team key sets:
  *  - social autopost: even with the social team enabled, live posting stays off
  *    until this AND the env-level X_AUTO_POST_ENABLED are both true.

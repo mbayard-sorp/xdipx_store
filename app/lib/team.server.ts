@@ -29,6 +29,8 @@ import {
   teamKeys,
   TEAM_DEFAULTS,
   VALVE_KEYS,
+  CONTENT_EXTRA_KEYS,
+  CONTENT_MAX_IMAGES_DEFAULT,
   SOCIAL_PLATFORMS,
   SOCIAL_FREQ_DEFAULTS,
   socialFreqKey,
@@ -107,6 +109,8 @@ export async function getTeamConfig(team: TeamId): Promise<TeamConfig> {
   if (team === 'homepage') {
     cfg.buildCents = num(map.get(TEAM_KEYS.buildCents), 10000)
     cfg.maxImagesPerDay = num(map.get(TEAM_KEYS.maxImagesPerDay), 12)
+  } else if (team === 'content') {
+    cfg.maxImagesPerDay = num(map.get(CONTENT_EXTRA_KEYS.maxImagesPerDay), CONTENT_MAX_IMAGES_DEFAULT)
   }
   return cfg
 }
