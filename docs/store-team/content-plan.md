@@ -133,6 +133,7 @@ Below 300 sessions/week the retro leans on margin math, stock depth, and these h
 - **FAQ section is mandatory** on every post. Use answer-shaped question H2s throughout, not statement headings.
 - **In-stock embeds only.** At least one honest, currently in-stock product per post. Never embed an out-of-stock or draft product.
 - **Honest Emma.** AI guide with no lived experience per `docs/emma-voice.md`. Speak from specs, materials, and review patterns. Never "I tried / tested / own it".
+- **First person, never third person about Emma.** Emma is the author and writes as "I" or the editorial "we". The copy never refers to her by name or narrates her as a character. No headings or sentences like "Where does Emma add nuance?", "What Emma recommends", or "Emma's take"; name the section by its substance instead ("Where this needs a caveat"). We do not comment on Emma.
 - **No medical claims.** Body-safety and material facts only. No treatment, diagnosis, or health-outcome promises. Name materials plainly (medical-grade silicone, glass, stainless steel).
 - **No prices in body text.** Pricing lives on the PDP and in the embed component, never in prose. No discount framing that would trip MAP rules.
 - **Internal links every post.** At least one collection link and one PDP, using canonical `/products/{slug}` and `/collections/{handle}`. The embedded `blogProductEmbed.productHandle` is also what powers the inbound PDP/collection backlinks — a wrong handle silently breaks them. Full rules: `docs/store-team/internal-linking.md`.
