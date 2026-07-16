@@ -39,6 +39,7 @@ Every post, no exceptions:
 - **Ranked buying guides use category `guides`:** guides posts automatically get ItemList JSON-LD from their blogProductEmbed blocks.
 - **SEO fields filled:** seoTitle (max 70 chars), seoDescription (max 160 chars), fresh `publishedAt` (ISO, today).
 - **Emma authorship with AI-guide honesty.** Author reference is Emma; never "I tried/tested/own it". Speak from catalog knowledge: "known for", "the spec says", "reviewers describe".
+- **First person, never third person about Emma.** Emma is the author and writes as "I" or the editorial "we". Never refer to Emma by name or narrate her as a character in customer-facing copy. Banned: headings or sentences like "Where does Emma add nuance?", "What Emma recommends", "Emma's take". Name the section by its substance instead ("Where this needs a caveat", "What's worth adding"). We do not comment on Emma; she just talks to the reader.
 - **No medical claims.** Wellness framing is fine; treatment, cure, or therapeutic-outcome claims are not.
 - **No prices or discount claims in body text.** Posts are MAP-safe and evergreen; the PDP owns the price.
 - **Internal links** to relevant collections and PDPs (`/products/{slug}`), naturally placed. The `blogProductEmbed.productHandle` you embed is also the key that builds the inbound backlinks (the "From the Notebook" section on that PDP, the collection rail, and guide ItemList JSON-LD), so verify every handle resolves 200 and is in stock before embedding. Doctrine: `docs/store-team/internal-linking.md`.

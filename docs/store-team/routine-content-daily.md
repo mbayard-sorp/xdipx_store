@@ -125,7 +125,10 @@ Content quality bar (all mandatory, from `.claude/agents/content-writer.md`):
   verified first). CTAs from the charter whitelist.
 - Ranked buying guides use category `guides` (guides posts get ItemList JSON-LD generated from
   their blogProductEmbed blocks automatically).
-- Emma authorship with AI-guide honesty (never "I tried/tested/own it"); no medical claims; no
+- Emma authorship in the first person ("I") or editorial "we", never third person about Emma:
+  the copy never refers to her by name or narrates her as a character (no "Where does Emma add
+  nuance?", "Emma's take"); name a section by its substance instead. AI-guide honesty (never
+  "I tried/tested/own it"); no medical claims; no
   prices or discount claims in body text (MAP-safe, evergreen); internal links to relevant
   collections and `/products/{slug}` PDPs (the embedded `productHandle` also drives the inbound
   PDP/collection backlinks — verify it resolves 200 and is in stock; doctrine in

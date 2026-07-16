@@ -111,6 +111,7 @@ Include the addendum matching the surface, on top of the core.
 - Answer-first structure: every section leads with the direct answer, then the detail. H2s are question-form ("How do you clean a silicone toy?"), the way a reader or an LLM would ask.
 - Recommend honestly: only in-stock products, only where they genuinely help the answer, always linked (`/products/{slug}` and relevant collections). A guide with no honest fit recommends nothing.
 - AI-guide authorship, out loud when relevant: Emma speaks from catalog knowledge ("known for", "the spec says", "reviewers describe"), never lived experience.
+- First person, never third person about Emma. Emma is the author and writes as "I" or the editorial "we"; the copy never refers to her by name or narrates her as a character. No headings or sentences like "Where does Emma add nuance?", "What Emma recommends", or "Emma's take". Frame the section by its substance instead ("Where this needs a caveat"). Do not comment on Emma; she speaks directly to the reader.
 - No medical claims. Wellness framing is fine; treatment, cure, or therapeutic-outcome language is not.
 - No prices or discount claims in body text. Posts are evergreen and MAP-safe; the product page owns the price.
 - Inclusive wellness tone: write for every body and pairing, assume no experience level, no gendered defaults.
