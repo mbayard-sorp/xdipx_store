@@ -69,7 +69,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
 
   // pipeline_settings is already migrated, so config always loads.
   const config = await getTeamConfig(team).catch(
-    (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1 }),
+    (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
   const [autopost, suggestionApply, contentAutopublish] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
@@ -252,6 +252,13 @@ export default function AgentTeamsPage() {
           )}
         </div>
 
+        <ValveRow
+          label={`Auto-approve suggestions is ${config.autoApproveSuggestions ? 'ON' : 'OFF'}`}
+          detail={`When ON, suggestions ${TEAM_LABELS[team]} acts on skip your review and land as approved (decided_by 'auto'). Downstream gates still apply: instruction/config rows become agent-editor PRs you merge (needs Suggestion-apply on the Strategy tab); campaign/promo/code rows are still executed by hand.`}
+          settingKey={keys.autoApproveSuggestions}
+          on={config.autoApproveSuggestions}
+        />
+
         {team === 'social' && (
           <ValveRow
             label={`Autopost is ${autopost ? 'ON' : 'OFF'}`}
@@ -350,6 +357,9 @@ export default function AgentTeamsPage() {
                     </span>
                     {Number(s.estSavingsUsd) > 0 && <span>~${Number(s.estSavingsUsd).toFixed(2)} saved</span>}
                     <StatusBadge status={s.status} />
+                    {s.decidedBy === 'auto' && (
+                      <span className="rounded bg-plum-soft px-1.5 py-0.5 font-mono text-plum">auto</span>
+                    )}
                   </div>
                   <p className="mt-1 text-sm text-ink">{s.suggestion}</p>
                   {s.status === 'proposed' && (
@@ -372,7 +382,7 @@ export default function AgentTeamsPage() {
                   )}
                   {s.status === 'approved' && (
                     <p className="mt-1 text-xs text-ink-4">
-                      Queued for agent-editor{s.kind === 'code' ? ' (code kind — route to rr7-engineer manually)' : ''}.
+                      {s.decidedBy === 'auto' ? 'Auto-approved. ' : ''}Queued for agent-editor{s.kind === 'code' ? ' (code kind — route to rr7-engineer manually)' : ''}.
                     </p>
                   )}
                   {s.status === 'pr_open' && s.applyRef && (

@@ -6,11 +6,13 @@
  *   { op: 'list', team?, targetTeam?, status? } -> { suggestions: [...] }
  *   { op: 'mark', id, status: 'pr_open'|'applied', applyRef } -> { ok }
  *
- * Lifecycle: proposed -> approved|dismissed (OWNER ONLY, from the admin
- * dashboard) -> pr_open (agent-editor opened a PR) -> applied (owner merged).
- * 'mark' rejects any transition out of 'proposed' with a 409 — agents can
- * propose and can advance owner-approved rows, but the approval itself is
- * never theirs to make.
+ * Lifecycle: proposed -> approved|dismissed (owner from the admin dashboard, or
+ * auto-approved at creation when the acting team's
+ * `{team}_team_auto_approve_suggestions` valve is on) -> pr_open (agent-editor
+ * opened a PR) -> applied (owner merged). 'mark' rejects any transition out of
+ * 'proposed' with a 409 — agents can propose and can advance approved rows, but
+ * the approval itself is never theirs to make (it is the owner's, or the
+ * owner-controlled auto-approve valve's).
  */
 
 import type { ActionFunctionArgs } from 'react-router'

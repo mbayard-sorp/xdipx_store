@@ -1182,6 +1182,12 @@ export const homepageTeamEvents = pgTable('homepage_team_events', {
  * approves/dismisses from the dashboard; agent-editor turns approved
  * instruction-kind rows into PRs (`pr_open`) which the owner merges (`applied`).
  * `target_team` routes a suggestion at another team; NULL means "own team".
+ *
+ * The proposed->approved triage step can be automated per acting-team via the
+ * `{team}_team_auto_approve_suggestions` valve (062): when on, createSuggestion
+ * writes the row straight to `approved` with `decided_by = 'auto'`. Downstream
+ * execution gates (agent-editor PR merge, manual campaign/promo/code steps) are
+ * unchanged. `decided_by`: 'auto' (valve) | 'owner' (dashboard) | NULL (legacy).
  */
 export const homepageTeamSuggestions = pgTable('homepage_team_suggestions', {
   id:            serial('id').primaryKey(),
@@ -1195,6 +1201,7 @@ export const homepageTeamSuggestions = pgTable('homepage_team_suggestions', {
   cxRisk:        varchar('cx_risk', { length: 8 }).notNull().default('low'), // low|med|high
   status:        varchar('status', { length: 12 }).notNull().default('proposed'), // proposed|approved|pr_open|applied|dismissed
   applyRef:      text('apply_ref'),                                   // PR URL / applied artifact
+  decidedBy:     varchar('decided_by', { length: 24 }),               // auto|owner|NULL — who moved it off 'proposed'
   decidedAt:     timestamp('decided_at'),
   createdAt:     timestamp('created_at').notNull().defaultNow(),
 }, t => ({

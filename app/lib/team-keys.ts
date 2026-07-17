@@ -48,13 +48,22 @@ export interface TeamKeySet {
   enabled: string
   dailyCents: string
   maxRunsPerDay: string
+  /**
+   * When 'true', this team's incoming suggestions skip the owner's triage step
+   * and are written straight to `approved` (062). "This team" = the team that
+   * ACTS on the suggestion (its targetTeam, or the proposer when unrouted).
+   * Auto-approve removes the owner from triage only; downstream execution gates
+   * (agent-editor PR merge, manual campaign/promo/code steps) are unchanged.
+   */
+  autoApproveSuggestions: string
 }
 
 export function teamKeys(team: TeamId): TeamKeySet {
   return {
-    enabled:       `${team}_team_enabled`,
-    dailyCents:    `${team}_team_daily_cents`,
-    maxRunsPerDay: `${team}_team_max_runs`,
+    enabled:                `${team}_team_enabled`,
+    dailyCents:             `${team}_team_daily_cents`,
+    maxRunsPerDay:          `${team}_team_max_runs`,
+    autoApproveSuggestions: `${team}_team_auto_approve_suggestions`,
   }
 }
 

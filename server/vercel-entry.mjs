@@ -1016,6 +1016,8 @@ var init_schema = __esm({
       // proposed|approved|pr_open|applied|dismissed
       applyRef: text("apply_ref"),
       // PR URL / applied artifact
+      decidedBy: varchar("decided_by", { length: 24 }),
+      // auto|owner|NULL — who moved it off 'proposed'
       decidedAt: timestamp("decided_at"),
       createdAt: timestamp("created_at").notNull().defaultNow()
     }, (t) => ({
@@ -9794,7 +9796,8 @@ function teamKeys(team) {
   return {
     enabled: `${team}_team_enabled`,
     dailyCents: `${team}_team_daily_cents`,
-    maxRunsPerDay: `${team}_team_max_runs`
+    maxRunsPerDay: `${team}_team_max_runs`,
+    autoApproveSuggestions: `${team}_team_auto_approve_suggestions`
   };
 }
 function socialFreqKey(platform) {
@@ -16454,7 +16457,8 @@ async function getTeamConfigUncached(team) {
     team,
     enabled: (map.get(keys.enabled) ?? "false") === "true",
     dailyCents: num(map.get(keys.dailyCents), d.dailyCents),
-    maxRunsPerDay: num(map.get(keys.maxRunsPerDay), d.maxRunsPerDay)
+    maxRunsPerDay: num(map.get(keys.maxRunsPerDay), d.maxRunsPerDay),
+    autoApproveSuggestions: (map.get(keys.autoApproveSuggestions) ?? "false") === "true"
   };
   if (team === "homepage") {
     cfg.buildCents = num(map.get(TEAM_KEYS.buildCents), 1e4);
@@ -16630,6 +16634,8 @@ async function listRecentEvents(team, sinceDays = 7, limit = 500) {
   }).from(homepageTeamEvents).innerJoin(homepageTeamRuns, eq11(homepageTeamEvents.runId, homepageTeamRuns.id)).where(and3(...conditions)).orderBy(desc(homepageTeamEvents.ts)).limit(limit);
 }
 async function createSuggestion(s) {
+  const actingTeam = s.targetTeam ?? s.team;
+  const autoApprove = await getTeamConfig(actingTeam).then((c) => c.autoApproveSuggestions).catch(() => false);
   const [row] = await db.insert(homepageTeamSuggestions).values({
     team: s.team,
     targetTeam: s.targetTeam ?? null,
@@ -16639,7 +16645,9 @@ async function createSuggestion(s) {
     suggestion: s.suggestion,
     estSavingsUsd: String(s.estSavingsUsd ?? 0),
     cxRisk: s.cxRisk ?? "low",
-    status: "proposed"
+    status: autoApprove ? "approved" : "proposed",
+    decidedBy: autoApprove ? "auto" : null,
+    decidedAt: autoApprove ? /* @__PURE__ */ new Date() : null
   }).returning({ id: homepageTeamSuggestions.id });
   return row.id;
 }
@@ -16652,7 +16660,7 @@ async function listSuggestions(filter = {}) {
   return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(desc(homepageTeamSuggestions.createdAt)).limit(filter.limit ?? 100);
 }
 async function decideSuggestion(id, status) {
-  await db.update(homepageTeamSuggestions).set({ status, decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "proposed")));
+  await db.update(homepageTeamSuggestions).set({ status, decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "proposed")));
 }
 async function markSuggestion(id, status, applyRef) {
   const allowedFrom = status === "pr_open" ? "approved" : "pr_open";
