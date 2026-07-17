@@ -283,8 +283,9 @@ export function AskEmmaWidget() {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ prompt?: string }>).detail
       const prompt = typeof detail?.prompt === 'string' ? detail.prompt.trim() : ''
-      if (!prompt) return
-      pendingSeededPromptRef.current = prompt
+      // A prompt seeds and auto-sends a starter message; without one we still
+      // open the widget so callers can just pop the chat open for the reader.
+      if (prompt) pendingSeededPromptRef.current = prompt
       setOpen(true)
       setHasUnread(false)
     }

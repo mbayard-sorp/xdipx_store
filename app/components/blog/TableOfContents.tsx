@@ -22,7 +22,18 @@ function extractHeadings(body: unknown[]): TOCItem[] {
     })
 }
 
-export function TableOfContents({ body }: { body: unknown[] }) {
+export function TableOfContents({
+  body,
+  embedded = false,
+}: {
+  body: unknown[]
+  /**
+   * When true, the desktop nav renders without its own sticky/scroll context.
+   * Use this when the TOC sits inside an already-sticky rail so the two sticky
+   * contexts don't fight and overlap sibling content.
+   */
+  embedded?: boolean
+}) {
   const headings = useMemo(() => extractHeadings(body), [body])
   const [activeId, setActiveId] = useState<string>('')
   const [isOpen, setIsOpen] = useState(false)
@@ -74,7 +85,11 @@ export function TableOfContents({ body }: { body: unknown[] }) {
 
       {/* Desktop: sticky sidebar */}
       <nav
-        className="hidden lg:block sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto"
+        className={
+          embedded
+            ? 'hidden lg:block'
+            : 'hidden lg:block sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto'
+        }
         aria-label="Table of contents"
       >
         <p className="kicker mb-3">On this page</p>

@@ -6,6 +6,7 @@ import { getProductsByHandles } from '~/lib/shopify.server'
 import { BlogHero } from '~/components/blog/BlogHero'
 import { BlogBody } from '~/components/blog/BlogBody'
 import { TableOfContents } from '~/components/blog/TableOfContents'
+import { AskEmmaChatLink } from '~/components/blog/AskEmmaChatLink'
 import { BreadcrumbNav } from '~/components/blog/BreadcrumbNav'
 import { ShareButtons } from '~/components/common/ShareButtons'
 import { buildSocialMeta } from '~/lib/social-meta'
@@ -235,10 +236,11 @@ export default function NotebookPostPage() {
           </div>
         </div>
 
-        {/* Sticky rail (desktop only) */}
+        {/* Sticky rail (desktop only) — single sticky/scroll context so the TOC
+            and the Ask Emma card never overlap. */}
         <aside className="hidden lg:block">
-          <div className="sticky top-6 space-y-4">
-            <TableOfContents body={post.body ?? []} />
+          <div className="sticky top-24 space-y-4 max-h-[calc(100vh-7rem)] overflow-y-auto">
+            <TableOfContents body={post.body ?? []} embedded />
 
             <div className="border border-line rounded-lg p-4">
               <p
@@ -250,9 +252,9 @@ export default function NotebookPostPage() {
               <p className="text-[13px] text-ink-3 mt-2 leading-[1.5]">
                 She'll message back over text or email. No call, no pressure.
               </p>
-              <Link to="/contact" className="link-coral text-coral text-sm font-medium inline-block mt-3">
+              <AskEmmaChatLink className="link-coral text-coral text-sm font-medium inline-block mt-3">
                 Ask Emma →
-              </Link>
+              </AskEmmaChatLink>
             </div>
           </div>
         </aside>
