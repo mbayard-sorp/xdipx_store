@@ -22,7 +22,7 @@ import { requireAdmin } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
 import {
-  gate, getTeamConfig, getValve, listRecentRuns, listRunEvents,
+  gate, getTeamConfig, getValve, invalidateTeamSettingsCache, listRecentRuns, listRunEvents,
   listSuggestions, decideSuggestion, listBriefs, listAdCampaigns, decideAdCampaign,
   type TeamConfig, type GateResult,
 } from '~/lib/team.server'
@@ -127,6 +127,8 @@ export async function action({ request }: ActionFunctionArgs) {
       .insert(pipelineSettings)
       .values({ key, value })
       .onConflictDoUpdate({ target: pipelineSettings.key, set: { value, updatedAt: new Date() } })
+    // Bust the 60s config/valve cache so kill-switch flips land immediately.
+    await invalidateTeamSettingsCache()
   }
 
   if (intent === 'save' || intent === 'toggle') {

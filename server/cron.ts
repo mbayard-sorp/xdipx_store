@@ -434,7 +434,15 @@ export function createCronRoutes() {
    * next turn or apply). Bounded work per invocation to fit the 60s budget.
    */
   cronRoute('/enrichment-batch-poller', async (_req, res) => {
-    const { kvSetNX, kvDel } = await import('../app/lib/kv.server.js')
+    const { kvGet, kvSetNX, kvDel, KV_KEYS } = await import('../app/lib/kv.server.js')
+    // Negative cache: when the last pass found zero in-flight jobs, skip the
+    // Neon query entirely so the every-2-min cron doesn't keep DB compute
+    // awake. enqueueBatchJob deletes the flag; the TTL bounds staleness.
+    const idle = await kvGet(KV_KEYS.enrichmentPollerIdle)
+    if (idle != null) {
+      res.json({ ok: true, skipped: 'idle' })
+      return
+    }
     const acquired = await kvSetNX('lock:enrichment-poller', String(Date.now()), 110)
     if (!acquired) {
       res.json({ ok: true, skipped: 'locked' })

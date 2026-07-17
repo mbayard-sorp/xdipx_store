@@ -49,7 +49,7 @@ import { getDialRegistry, getDialTaxonomy } from '~/lib/dial-registry.server'
 import { getAskEmmaVocabulary } from '~/lib/ask-emma-vocab.server'
 import { applyFullEnrichmentWrites } from '~/lib/import-enrich.server'
 import { logApiTokens } from '~/lib/token-log.server'
-import { kvSet, KV_KEYS } from '~/lib/kv.server'
+import { kvSet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import { drainToolTokens } from '~/lib/claude.server'
 import { SONNET } from './models.server'
 
@@ -167,6 +167,11 @@ export async function enqueueBatchJob(args: EnqueueBatchJobArgs): Promise<{ jobI
     console.warn('[batch-orchestrator] KV mirror failed (non-fatal):', err)
   }
 
+  // Wake the poller: clear the idle negative-cache so the next 2-min tick
+  // queries the DB instead of skipping. kvDel never throws (falls back to
+  // in-memory); if the real delete is lost the job waits out the idle TTL.
+  await kvDel(KV_KEYS.enrichmentPollerIdle)
+
   console.log(`[batch-orchestrator] enqueued job ${jobId} type=${args.jobType} skus=[${skuList.join(',')}]`)
   return { jobId }
 }
@@ -177,6 +182,13 @@ export async function enqueueBatchJob(args: EnqueueBatchJobArgs): Promise<{ jobI
  * Select up to maxJobs in-flight batch_jobs and call advanceJob for each.
  * Each advanceJob does ONE retrieve + optionally one submit -- cheap, fits 60s.
  */
+/**
+ * How long the poller may skip DB checks after finding zero in-flight jobs.
+ * Bounds the worst-case delay for a job whose idle-flag delete was lost
+ * (KV outage at enqueue time) to one TTL window.
+ */
+const POLLER_IDLE_TTL_SECONDS = 30 * 60
+
 export async function advanceInflightJobs(opts: {
   maxJobs?:      number
   perJobBudgetMs?: number
@@ -191,6 +203,14 @@ export async function advanceInflightJobs(opts: {
     .limit(maxJobs)
 
   const result: AdvanceInflightResult = { advanced: 0, submitted: 0, applied: 0, done: 0, failed: 0 }
+
+  // Nothing in flight: leave a negative-cache flag so the 2-min cron skips
+  // its Neon query until a job is enqueued (which deletes the flag) or the
+  // TTL lapses. Keeps Neon compute asleep between enrichment runs.
+  if (rows.length === 0) {
+    await kvSet(KV_KEYS.enrichmentPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS)
+    return result
+  }
 
   for (const job of rows) {
     try {

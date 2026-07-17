@@ -1333,6 +1333,7 @@ __export(kv_server_exports, {
   kvDel: () => kvDel,
   kvGet: () => kvGet,
   kvIncr: () => kvIncr,
+  kvIncrBy: () => kvIncrBy,
   kvSet: () => kvSet,
   kvSetNX: () => kvSetNX,
   mdProductCacheKey: () => mdProductCacheKey,
@@ -1435,6 +1436,19 @@ async function kvIncr(key) {
   const current = memStore.get(key) ?? 0;
   memStore.set(key, current + 1);
   return current + 1;
+}
+async function kvIncrBy(key, by) {
+  const kv = await getKV();
+  if (kv) {
+    try {
+      return await kv.incrby(key, by);
+    } catch (err) {
+      warnKvFallback("incrby", err);
+    }
+  }
+  const current = memStore.get(key) ?? 0;
+  memStore.set(key, current + by);
+  return current + by;
 }
 async function kvDel(key) {
   const kv = await getKV();
@@ -1554,7 +1568,12 @@ var init_kv_server = __esm({
       emmaEncouragement: (hash) => `emmaEncouragement:v2:${hash}`,
       emmaEncouragementDailyCount: (utcDate) => `emmaEncouragement:dailyCount:${utcDate}`,
       // Batch enrichment job summary mirrored from DB for fast admin poll surface (24h TTL)
-      enrichmentJob: (jobId) => `batch-job:${jobId}`
+      enrichmentJob: (jobId) => `batch-job:${jobId}`,
+      // Negative cache for the 2-min enrichment poller: present = last DB check
+      // found zero in-flight batch_jobs, so the cron skips Neon entirely. Set with
+      // a TTL by advanceInflightJobs, deleted by enqueueBatchJob, so worst case a
+      // lost delete delays a new job by one TTL window rather than stalling it.
+      enrichmentPollerIdle: "enrichment:poller:idle"
     };
     DEFAULT_VAULT_TABS = [
       { id: "all", label: "All", slug: "all", filter: { type: "all" } },
@@ -2037,6 +2056,8 @@ __export(sanity_server_exports, {
   getHomeConfig: () => getHomeConfig,
   getHomepageDocRaw: () => getHomepageDocRaw,
   getHomepageSections: () => getHomepageSections,
+  getNotebookPostsForProduct: () => getNotebookPostsForProduct,
+  getNotebookPostsForProductHandles: () => getNotebookPostsForProductHandles,
   getNotebookSettings: () => getNotebookSettings,
   getPage: () => getPage,
   getPageList: () => getPageList,
@@ -2745,6 +2766,50 @@ async function getBlogPosts(opts = {}) {
   } catch (err) {
     console.error("[sanity] getBlogPosts error:", err);
     return { posts: [], total: 0 };
+  }
+}
+async function getNotebookPostsForProduct(handle, limit = 3) {
+  if (!projectId || !handle) return [];
+  const cacheKey3 = `notebook-for-product:${handle}:${limit}`;
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    const posts = await client5.fetch(
+      `*[_type == "blogPost" && status == "published"
+        && count(body[_type == "blogProductEmbed" && productHandle == $handle]) > 0]
+        | order(publishedAt desc) [0...$limit] { ${BLOG_POST_CARD_PROJECTION} }`,
+      { handle, limit }
+    );
+    const result = (posts ?? []).map((p) => ({ ...p, readingTime: 0 }));
+    setCachedBlog(cacheKey3, result);
+    return result;
+  } catch (err) {
+    console.error("[sanity] getNotebookPostsForProduct error:", err);
+    return [];
+  }
+}
+async function getNotebookPostsForProductHandles(handles, limit = 4) {
+  if (!projectId || !handles?.length) return [];
+  const cacheKey3 = `notebook-for-handles:${handles.slice().sort().join(",")}:${limit}`;
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    const posts = await client5.fetch(
+      `*[_type == "blogPost" && status == "published"
+        && count(body[_type == "blogProductEmbed" && productHandle in $handles]) > 0]
+        | order(publishedAt desc) [0...$limit] { ${BLOG_POST_CARD_PROJECTION} }`,
+      { handles, limit }
+    );
+    const result = (posts ?? []).map((p) => ({ ...p, readingTime: 0 }));
+    setCachedBlog(cacheKey3, result);
+    return result;
+  } catch (err) {
+    console.error("[sanity] getNotebookPostsForProductHandles error:", err);
+    return [];
   }
 }
 async function getBlogPost(slug, preview = false) {
@@ -9691,6 +9756,93 @@ ${SUPPORT_ADDENDUM}`;
   }
 });
 
+// app/lib/team-keys.ts
+var team_keys_exports = {};
+__export(team_keys_exports, {
+  CONTENT_EXTRA_KEYS: () => CONTENT_EXTRA_KEYS,
+  CONTENT_MAX_IMAGES_DEFAULT: () => CONTENT_MAX_IMAGES_DEFAULT,
+  HOMEPAGE_EXTRA_KEYS: () => HOMEPAGE_EXTRA_KEYS,
+  SOCIAL_FREQ_DEFAULTS: () => SOCIAL_FREQ_DEFAULTS,
+  SOCIAL_PLATFORMS: () => SOCIAL_PLATFORMS,
+  SOCIAL_REVIEW_STATUSES: () => SOCIAL_REVIEW_STATUSES,
+  TEAM_DEFAULTS: () => TEAM_DEFAULTS,
+  TEAM_IDS: () => TEAM_IDS,
+  VALVE_KEYS: () => VALVE_KEYS,
+  isTeamId: () => isTeamId,
+  socialFreqKey: () => socialFreqKey,
+  teamFromFeature: () => teamFromFeature,
+  teamImagesKvKey: () => teamImagesKvKey,
+  teamKeys: () => teamKeys,
+  teamSpendKvKey: () => teamSpendKvKey
+});
+function isTeamId(v) {
+  return typeof v === "string" && TEAM_IDS.includes(v);
+}
+function teamSpendKvKey(team, utcDay2) {
+  return `team:spend:${team}:${utcDay2}`;
+}
+function teamImagesKvKey(utcDay2) {
+  return `team:images:homepage:${utcDay2}`;
+}
+function teamFromFeature(feature) {
+  const i = feature.indexOf("-");
+  if (i <= 0) return null;
+  const prefix = feature.slice(0, i);
+  return isTeamId(prefix) ? prefix : null;
+}
+function teamKeys(team) {
+  return {
+    enabled: `${team}_team_enabled`,
+    dailyCents: `${team}_team_daily_cents`,
+    maxRunsPerDay: `${team}_team_max_runs`
+  };
+}
+function socialFreqKey(platform) {
+  return `social_freq_${platform}`;
+}
+var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, CONTENT_MAX_IMAGES_DEFAULT, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, SOCIAL_REVIEW_STATUSES, VALVE_KEYS;
+var init_team_keys = __esm({
+  "app/lib/team-keys.ts"() {
+    "use strict";
+    TEAM_IDS = ["homepage", "social", "ads", "email", "strategy", "content", "product"];
+    TEAM_DEFAULTS = {
+      homepage: { dailyCents: 1500, maxRunsPerDay: 4 },
+      social: { dailyCents: 500, maxRunsPerDay: 2 },
+      ads: { dailyCents: 500, maxRunsPerDay: 1 },
+      email: { dailyCents: 500, maxRunsPerDay: 1 },
+      strategy: { dailyCents: 300, maxRunsPerDay: 1 },
+      content: { dailyCents: 300, maxRunsPerDay: 2 },
+      // 2nd run = one voice-gate retry
+      product: { dailyCents: 300, maxRunsPerDay: 1 }
+      // daily import-queue drain (SQL + curl, ~$0)
+    };
+    HOMEPAGE_EXTRA_KEYS = {
+      buildCents: "homepage_team_build_cents",
+      maxImagesPerDay: "homepage_team_max_images"
+    };
+    CONTENT_EXTRA_KEYS = {
+      maxImagesPerDay: "content_team_max_images"
+    };
+    CONTENT_MAX_IMAGES_DEFAULT = 0;
+    SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook"];
+    SOCIAL_FREQ_DEFAULTS = {
+      x: 1,
+      instagram: 1,
+      tiktok: 1,
+      facebook: 0
+    };
+    SOCIAL_REVIEW_STATUSES = ["pending_review", "approved", "needs_changes", "rejected"];
+    VALVE_KEYS = {
+      socialAutopost: "social_team_autopost",
+      suggestionApply: "suggestion_apply_enabled",
+      contentAutopublish: "content_team_autopublish",
+      keywordResearch: "keyword_research_enabled",
+      seoCuration: "seo_curation_enabled",
+      reviewsPdp: "reviews_pdp_enabled"
+    };
+  }
+});
+
 // app/lib/model-pricing.server.ts
 var model_pricing_server_exports = {};
 __export(model_pricing_server_exports, {
@@ -9747,6 +9899,27 @@ __export(token_log_server_exports, {
   logApiTokens: () => logApiTokens,
   logImageCost: () => logImageCost
 });
+async function bumpTeamSpendCounters(feature, costUsd, imageCount) {
+  try {
+    const { teamFromFeature: teamFromFeature2, teamSpendKvKey: teamSpendKvKey2, teamImagesKvKey: teamImagesKvKey2 } = await Promise.resolve().then(() => (init_team_keys(), team_keys_exports));
+    const { kvGet: kvGet2, kvIncrBy: kvIncrBy2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+    const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const team = teamFromFeature2(feature);
+    if (team) {
+      const cents = Math.round(costUsd * 100);
+      if (cents > 0) {
+        const key = teamSpendKvKey2(team, day);
+        if (await kvGet2(key) != null) await kvIncrBy2(key, cents);
+      }
+    }
+    if (feature === "homepage-images" && imageCount && imageCount > 0) {
+      const key = teamImagesKvKey2(day);
+      if (await kvGet2(key) != null) await kvIncrBy2(key, imageCount);
+    }
+  } catch (err) {
+    console.error("[token-log] best-effort KV counter bump failed (ignored):", err);
+  }
+}
 async function logApiTokens(entry) {
   try {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
@@ -9777,6 +9950,7 @@ async function logApiTokens(entry) {
       requestCount: entry.requestCount ?? 1,
       estCostUsd: String(cost)
     });
+    await bumpTeamSpendCounters(entry.feature, cost);
   } catch (err) {
     console.error("[token-log] best-effort write failed (ignored):", err);
   }
@@ -9803,6 +9977,7 @@ async function logImageCost(entry) {
       requestCount: entry.count,
       estCostUsd: String(cost)
     });
+    await bumpTeamSpendCounters(entry.feature, cost, entry.count);
   } catch (err) {
     console.error("[token-log] best-effort image-cost write failed (ignored):", err);
   }
@@ -16207,72 +16382,6 @@ var init_homepage_team_keys = __esm({
   }
 });
 
-// app/lib/team-keys.ts
-var team_keys_exports = {};
-__export(team_keys_exports, {
-  HOMEPAGE_EXTRA_KEYS: () => HOMEPAGE_EXTRA_KEYS,
-  SOCIAL_FREQ_DEFAULTS: () => SOCIAL_FREQ_DEFAULTS,
-  SOCIAL_PLATFORMS: () => SOCIAL_PLATFORMS,
-  SOCIAL_REVIEW_STATUSES: () => SOCIAL_REVIEW_STATUSES,
-  TEAM_DEFAULTS: () => TEAM_DEFAULTS,
-  TEAM_IDS: () => TEAM_IDS,
-  VALVE_KEYS: () => VALVE_KEYS,
-  isTeamId: () => isTeamId,
-  socialFreqKey: () => socialFreqKey,
-  teamKeys: () => teamKeys
-});
-function isTeamId(v) {
-  return typeof v === "string" && TEAM_IDS.includes(v);
-}
-function teamKeys(team) {
-  return {
-    enabled: `${team}_team_enabled`,
-    dailyCents: `${team}_team_daily_cents`,
-    maxRunsPerDay: `${team}_team_max_runs`
-  };
-}
-function socialFreqKey(platform) {
-  return `social_freq_${platform}`;
-}
-var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, SOCIAL_REVIEW_STATUSES, VALVE_KEYS;
-var init_team_keys = __esm({
-  "app/lib/team-keys.ts"() {
-    "use strict";
-    TEAM_IDS = ["homepage", "social", "ads", "email", "strategy", "content", "product"];
-    TEAM_DEFAULTS = {
-      homepage: { dailyCents: 1500, maxRunsPerDay: 4 },
-      social: { dailyCents: 500, maxRunsPerDay: 2 },
-      ads: { dailyCents: 500, maxRunsPerDay: 1 },
-      email: { dailyCents: 500, maxRunsPerDay: 1 },
-      strategy: { dailyCents: 300, maxRunsPerDay: 1 },
-      content: { dailyCents: 300, maxRunsPerDay: 2 },
-      // 2nd run = one voice-gate retry
-      product: { dailyCents: 300, maxRunsPerDay: 1 }
-      // daily import-queue drain (SQL + curl, ~$0)
-    };
-    HOMEPAGE_EXTRA_KEYS = {
-      buildCents: "homepage_team_build_cents",
-      maxImagesPerDay: "homepage_team_max_images"
-    };
-    SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook"];
-    SOCIAL_FREQ_DEFAULTS = {
-      x: 1,
-      instagram: 1,
-      tiktok: 1,
-      facebook: 0
-    };
-    SOCIAL_REVIEW_STATUSES = ["pending_review", "approved", "needs_changes", "rejected"];
-    VALVE_KEYS = {
-      socialAutopost: "social_team_autopost",
-      suggestionApply: "suggestion_apply_enabled",
-      contentAutopublish: "content_team_autopublish",
-      keywordResearch: "keyword_research_enabled",
-      seoCuration: "seo_curation_enabled",
-      reviewsPdp: "reviews_pdp_enabled"
-    };
-  }
-});
-
 // app/lib/team.server.ts
 var team_server_exports = {};
 __export(team_server_exports, {
@@ -16294,6 +16403,7 @@ __export(team_server_exports, {
   getTodayRunCount: () => getTodayRunCount,
   getTodaySpendCents: () => getTodaySpendCents,
   getValve: () => getValve,
+  invalidateTeamSettingsCache: () => invalidateTeamSettingsCache,
   isRunInProgress: () => isRunInProgress,
   isTeamId: () => isTeamId,
   listAdCampaigns: () => listAdCampaigns,
@@ -16333,6 +16443,9 @@ function num(v, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 async function getTeamConfig(team) {
+  return cached(`team:cfg:${team}`, SETTINGS_CACHE_TTL_SEC, () => getTeamConfigUncached(team));
+}
+async function getTeamConfigUncached(team) {
   const keys = teamKeys(team);
   const rows = await db.select().from(pipelineSettings).where(sql6`${pipelineSettings.key} LIKE ${team + "_team_%"}`);
   const map = new Map(rows.map((r) => [r.key, r.value]));
@@ -16346,21 +16459,52 @@ async function getTeamConfig(team) {
   if (team === "homepage") {
     cfg.buildCents = num(map.get(TEAM_KEYS.buildCents), 1e4);
     cfg.maxImagesPerDay = num(map.get(TEAM_KEYS.maxImagesPerDay), 12);
+  } else if (team === "content") {
+    cfg.maxImagesPerDay = num(map.get(CONTENT_EXTRA_KEYS.maxImagesPerDay), CONTENT_MAX_IMAGES_DEFAULT);
   }
   return cfg;
 }
 async function getValve(key) {
-  const [row] = await db.select().from(pipelineSettings).where(eq11(pipelineSettings.key, key)).limit(1);
-  return row?.value === "true";
+  return cached(`team:valve:${key}`, SETTINGS_CACHE_TTL_SEC, async () => {
+    const [row] = await db.select().from(pipelineSettings).where(eq11(pipelineSettings.key, key)).limit(1);
+    return row?.value === "true";
+  });
+}
+async function invalidateTeamSettingsCache() {
+  invalidateCache("team:cfg:");
+  invalidateCache("team:valve:");
+  const keys = [
+    ...TEAM_IDS.map((t) => `team:cfg:${t}`),
+    ...Object.values(VALVE_KEYS).map((k) => `team:valve:${k}`)
+  ];
+  await Promise.all(keys.map((k) => kvDel(k)));
+}
+function utcDay() {
+  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+}
+async function counterRead(key, sumFromDb) {
+  const seedKey = `${key}:seededAt`;
+  const [count, seededAt] = await Promise.all([kvGet(key), kvGet(seedKey)]);
+  if (typeof count === "number" && typeof seededAt === "number" && Date.now() - seededAt < SPEND_RESEED_MS) {
+    return count;
+  }
+  const fresh = await sumFromDb();
+  await Promise.all([
+    kvSet(key, fresh, SPEND_KV_TTL_SEC),
+    kvSet(seedKey, Date.now(), SPEND_KV_TTL_SEC)
+  ]);
+  return fresh;
 }
 async function getTodaySpendCents(team) {
-  const res = await db.execute(
-    sql6`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
-        FROM api_token_log
-        WHERE ts >= current_date AND feature LIKE ${team + "-%"}`
-  );
-  const dollars = Number(res.rows?.[0]?.dollars ?? 0);
-  return Math.round(dollars * 100);
+  return counterRead(teamSpendKvKey(team, utcDay()), async () => {
+    const res = await db.execute(
+      sql6`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
+          FROM api_token_log
+          WHERE ts >= current_date AND feature LIKE ${team + "-%"}`
+    );
+    const dollars = Number(res.rows?.[0]?.dollars ?? 0);
+    return Math.round(dollars * 100);
+  });
 }
 async function getTodayRunCount(team, excludeRunId) {
   const res = await db.execute(
@@ -16371,12 +16515,14 @@ async function getTodayRunCount(team, excludeRunId) {
   return Number(res.rows?.[0]?.n ?? 0);
 }
 async function getTodayImageCount() {
-  const res = await db.execute(
-    sql6`SELECT COALESCE(SUM(request_count), 0)::int AS n
-        FROM api_token_log
-        WHERE ts >= current_date AND feature = 'homepage-images'`
-  );
-  return Number(res.rows?.[0]?.n ?? 0);
+  return counterRead(teamImagesKvKey(utcDay()), async () => {
+    const res = await db.execute(
+      sql6`SELECT COALESCE(SUM(request_count), 0)::int AS n
+          FROM api_token_log
+          WHERE ts >= current_date AND feature = 'homepage-images'`
+    );
+    return Number(res.rows?.[0]?.n ?? 0);
+  });
 }
 async function isRunInProgress(team, excludeRunId) {
   const since = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 6e4);
@@ -16398,14 +16544,16 @@ async function expireStaleRuns() {
   }).where(and3(eq11(homepageTeamRuns.status, "running"), lt(homepageTeamRuns.startedAt, cutoff)));
 }
 async function gate(team, excludeRunId) {
-  await expireStaleRuns();
-  const [cfg, spentCents, runsToday, imagesToday, inProgress, brief, autopublish] = await Promise.all([
+  if (await kvSetNX("team:expire-stale:throttle", String(Date.now()), 300)) {
+    await expireStaleRuns();
+  }
+  const [cfg, spentCents, runsToday, imagesToday, inProgress, briefId, autopublish] = await Promise.all([
     getTeamConfig(team),
     getTodaySpendCents(team),
     getTodayRunCount(team, excludeRunId),
     team === "homepage" ? getTodayImageCount() : Promise.resolve(0),
     isRunInProgress(team, excludeRunId),
-    getActiveBrief(),
+    getActiveBriefId(),
     team === "content" ? getValve(VALVE_KEYS.contentAutopublish) : Promise.resolve(void 0)
   ]);
   const remainingCents = Math.max(0, cfg.dailyCents - spentCents);
@@ -16420,7 +16568,7 @@ async function gate(team, excludeRunId) {
     maxRunsPerDay: cfg.maxRunsPerDay,
     imagesToday,
     maxImagesPerDay,
-    activeBriefId: brief?.id ?? null,
+    activeBriefId: briefId,
     ...autopublish !== void 0 ? { valves: { autopublish } } : {},
     ...team === "content" ? { contentSlot: contentSlotForDate(/* @__PURE__ */ new Date()) } : {}
   };
@@ -16520,6 +16668,13 @@ async function getActiveBrief() {
   const [row] = await db.select().from(strategyBriefs).where(eq11(strategyBriefs.status, "active")).orderBy(desc(strategyBriefs.createdAt)).limit(1);
   return row ?? null;
 }
+async function getActiveBriefId() {
+  return cached(
+    "team:brief:active-id",
+    SETTINGS_CACHE_TTL_SEC,
+    async () => (await getActiveBrief())?.id ?? null
+  );
+}
 async function publishBrief(input) {
   await db.update(strategyBriefs).set({ status: "superseded" }).where(eq11(strategyBriefs.status, "active"));
   const [row] = await db.insert(strategyBriefs).values({
@@ -16529,6 +16684,8 @@ async function publishBrief(input) {
     status: "active",
     createdBy: input.createdBy ?? "store-strategist"
   }).returning({ id: strategyBriefs.id });
+  invalidateCache("team:brief:");
+  await kvDel("team:brief:active-id");
   return row.id;
 }
 async function listBriefs(limit = 12) {
@@ -16617,17 +16774,21 @@ async function proposeCalendarEvent(input) {
   }).returning({ id: marketingCalendar.id });
   return row.id;
 }
-var RUN_LOCK_WINDOW_MIN;
+var RUN_LOCK_WINDOW_MIN, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS;
 var init_team_server = __esm({
   "app/lib/team.server.ts"() {
     "use strict";
     init_db_server();
     init_content_slot();
     init_homepage_team_keys();
+    init_kv_server();
     init_team_keys();
     init_schema();
     init_team_keys();
     RUN_LOCK_WINDOW_MIN = 20;
+    SETTINGS_CACHE_TTL_SEC = 60;
+    SPEND_KV_TTL_SEC = 26 * 3600;
+    SPEND_RESEED_MS = 15 * 6e4;
   }
 });
 
@@ -19813,6 +19974,7 @@ async function enqueueBatchJob(args) {
   } catch (err) {
     console.warn("[batch-orchestrator] KV mirror failed (non-fatal):", err);
   }
+  await kvDel(KV_KEYS.enrichmentPollerIdle);
   console.log(`[batch-orchestrator] enqueued job ${jobId} type=${args.jobType} skus=[${skuList.join(",")}]`);
   return { jobId };
 }
@@ -19820,6 +19982,10 @@ async function advanceInflightJobs(opts = {}) {
   const maxJobs = opts.maxJobs ?? 10;
   const rows = await db.select().from(batchJobs).where(inArray5(batchJobs.status, ["queued", "submitted", "processing", "applying"])).orderBy(batchJobs.updatedAt).limit(maxJobs);
   const result = { advanced: 0, submitted: 0, applied: 0, done: 0, failed: 0 };
+  if (rows.length === 0) {
+    await kvSet(KV_KEYS.enrichmentPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS);
+    return result;
+  }
   for (const job of rows) {
     try {
       const outcome = await advanceJob(job);
@@ -20302,7 +20468,7 @@ async function getBatchJobById(jobId) {
 async function listRecentBatchJobs(limit = 50) {
   return db.select().from(batchJobs).orderBy(batchJobs.createdAt).limit(limit);
 }
-var MODEL5, KV_TTL_SECONDS2;
+var MODEL5, KV_TTL_SECONDS2, POLLER_IDLE_TTL_SECONDS;
 var init_batch_orchestrator_server = __esm({
   "app/lib/batch-orchestrator.server.ts"() {
     "use strict";
@@ -20318,6 +20484,7 @@ var init_batch_orchestrator_server = __esm({
     init_models_server();
     MODEL5 = SONNET;
     KV_TTL_SECONDS2 = 24 * 60 * 60;
+    POLLER_IDLE_TTL_SECONDS = 30 * 60;
   }
 });
 
@@ -22205,7 +22372,12 @@ function createCronRoutes() {
     }
   });
   cronRoute("/enrichment-batch-poller", async (_req, res) => {
-    const { kvSetNX: kvSetNX2, kvDel: kvDel2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+    const { kvGet: kvGet2, kvSetNX: kvSetNX2, kvDel: kvDel2, KV_KEYS: KV_KEYS2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+    const idle = await kvGet2(KV_KEYS2.enrichmentPollerIdle);
+    if (idle != null) {
+      res.json({ ok: true, skipped: "idle" });
+      return;
+    }
     const acquired = await kvSetNX2("lock:enrichment-poller", String(Date.now()), 110);
     if (!acquired) {
       res.json({ ok: true, skipped: "locked" });

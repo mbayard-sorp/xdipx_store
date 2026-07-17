@@ -25,8 +25,12 @@ import { and, desc, eq, gte, lt, lte, ne, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { contentSlotForDate, type ContentSlot } from '~/lib/content-slot'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
+import { cached, invalidateCache, kvDel, kvGet, kvSet, kvSetNX } from '~/lib/kv.server'
 import {
   teamKeys,
+  teamSpendKvKey,
+  teamImagesKvKey,
+  TEAM_IDS,
   TEAM_DEFAULTS,
   VALVE_KEYS,
   CONTENT_EXTRA_KEYS,
@@ -92,7 +96,21 @@ function num(v: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback
 }
 
+/**
+ * Config, valves, and the active-brief id are cached ~60s (L1 + KV) so gate()
+ * doesn't re-read pipeline_settings from Neon before every paid agent step.
+ * Admin edits call invalidateTeamSettingsCache(); worst case an un-invalidated
+ * write (e.g. a direct DB edit) takes effect within the TTL. Kill-switch
+ * flips therefore land within a minute, which is well inside the multi-minute
+ * cadence of any team run.
+ */
+const SETTINGS_CACHE_TTL_SEC = 60
+
 export async function getTeamConfig(team: TeamId): Promise<TeamConfig> {
+  return cached(`team:cfg:${team}`, SETTINGS_CACHE_TTL_SEC, () => getTeamConfigUncached(team))
+}
+
+async function getTeamConfigUncached(team: TeamId): Promise<TeamConfig> {
   const keys = teamKeys(team)
   const rows = await db
     .select()
@@ -117,23 +135,76 @@ export async function getTeamConfig(team: TeamId): Promise<TeamConfig> {
 
 /** True when a standalone valve (social autopost, suggestion apply) is on. */
 export async function getValve(key: (typeof VALVE_KEYS)[keyof typeof VALVE_KEYS]): Promise<boolean> {
-  const [row] = await db
-    .select()
-    .from(pipelineSettings)
-    .where(eq(pipelineSettings.key, key))
-    .limit(1)
-  return row?.value === 'true'
+  return cached(`team:valve:${key}`, SETTINGS_CACHE_TTL_SEC, async () => {
+    const [row] = await db
+      .select()
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, key))
+      .limit(1)
+    return row?.value === 'true'
+  })
+}
+
+/**
+ * Bust the team config/valve caches after an admin settings write, both the
+ * per-instance L1 and the shared KV L2, so toggles land immediately instead
+ * of within the TTL.
+ */
+export async function invalidateTeamSettingsCache(): Promise<void> {
+  invalidateCache('team:cfg:')
+  invalidateCache('team:valve:')
+  const keys = [
+    ...TEAM_IDS.map(t => `team:cfg:${t}`),
+    ...Object.values(VALVE_KEYS).map(k => `team:valve:${k}`),
+  ]
+  await Promise.all(keys.map(k => kvDel(k)))
+}
+
+// ── Daily spend/image counters (KV write-through, Neon as source of truth) ──
+//
+// gate() used to re-run a SUM over the ever-growing api_token_log on every
+// call. Instead, today's totals live in a KV counter that token-log.server.ts
+// bumps on each spend write. Neon stays the source of truth: the counter is
+// seeded from a real SUM when missing and re-seeded every RESEED window, so
+// any drift (a lost KV increment, per-row rounding) self-heals within minutes.
+
+const SPEND_KV_TTL_SEC = 26 * 3600      // daily keys; TTL just prevents buildup
+const SPEND_RESEED_MS = 15 * 60_000
+
+function utcDay(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+async function counterRead(
+  key: string,
+  sumFromDb: () => Promise<number>,
+): Promise<number> {
+  const seedKey = `${key}:seededAt`
+  const [count, seededAt] = await Promise.all([kvGet<number>(key), kvGet<number>(seedKey)])
+  if (typeof count === 'number' && typeof seededAt === 'number' && Date.now() - seededAt < SPEND_RESEED_MS) {
+    return count
+  }
+  const fresh = await sumFromDb()
+  // A concurrent bump between the SUM and this SET is dropped from the
+  // counter (never from the DB); the next re-seed picks it up.
+  await Promise.all([
+    kvSet(key, fresh, SPEND_KV_TTL_SEC),
+    kvSet(seedKey, Date.now(), SPEND_KV_TTL_SEC),
+  ])
+  return fresh
 }
 
 /** Today's team spend (USD cents) from api_token_log feature '{team}-%'. */
 export async function getTodaySpendCents(team: TeamId): Promise<number> {
-  const res = await db.execute(
-    sql`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
-        FROM api_token_log
-        WHERE ts >= current_date AND feature LIKE ${team + '-%'}`,
-  )
-  const dollars = Number((res.rows?.[0] as { dollars?: number } | undefined)?.dollars ?? 0)
-  return Math.round(dollars * 100)
+  return counterRead(teamSpendKvKey(team, utcDay()), async () => {
+    const res = await db.execute(
+      sql`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
+          FROM api_token_log
+          WHERE ts >= current_date AND feature LIKE ${team + '-%'}`,
+    )
+    const dollars = Number((res.rows?.[0] as { dollars?: number } | undefined)?.dollars ?? 0)
+    return Math.round(dollars * 100)
+  })
 }
 
 /**
@@ -157,12 +228,14 @@ export async function getTodayRunCount(team: TeamId, excludeRunId?: number): Pro
  * through media-manager, which logs under the homepage feature labels.
  */
 export async function getTodayImageCount(): Promise<number> {
-  const res = await db.execute(
-    sql`SELECT COALESCE(SUM(request_count), 0)::int AS n
-        FROM api_token_log
-        WHERE ts >= current_date AND feature = 'homepage-images'`,
-  )
-  return Number((res.rows?.[0] as { n?: number } | undefined)?.n ?? 0)
+  return counterRead(teamImagesKvKey(utcDay()), async () => {
+    const res = await db.execute(
+      sql`SELECT COALESCE(SUM(request_count), 0)::int AS n
+          FROM api_token_log
+          WHERE ts >= current_date AND feature = 'homepage-images'`,
+    )
+    return Number((res.rows?.[0] as { n?: number } | undefined)?.n ?? 0)
+  })
 }
 
 /**
@@ -230,14 +303,19 @@ export interface GateResult {
  * over the image cap (homepage only), or a same-team run is already in progress.
  */
 export async function gate(team: TeamId, excludeRunId?: number): Promise<GateResult> {
-  await expireStaleRuns()
-  const [cfg, spentCents, runsToday, imagesToday, inProgress, brief, autopublish] = await Promise.all([
+  // Zombie cleanup is time-based housekeeping, not a per-call invariant:
+  // throttle it to once per 5 min store-wide (well inside the 20-min lock
+  // window) instead of an UPDATE on every gate call.
+  if (await kvSetNX('team:expire-stale:throttle', String(Date.now()), 300)) {
+    await expireStaleRuns()
+  }
+  const [cfg, spentCents, runsToday, imagesToday, inProgress, briefId, autopublish] = await Promise.all([
     getTeamConfig(team),
     getTodaySpendCents(team),
     getTodayRunCount(team, excludeRunId),
     team === 'homepage' ? getTodayImageCount() : Promise.resolve(0),
     isRunInProgress(team, excludeRunId),
-    getActiveBrief(),
+    getActiveBriefId(),
     team === 'content' ? getValve(VALVE_KEYS.contentAutopublish) : Promise.resolve(undefined),
   ])
   const remainingCents = Math.max(0, cfg.dailyCents - spentCents)
@@ -252,7 +330,7 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
     maxRunsPerDay: cfg.maxRunsPerDay,
     imagesToday,
     maxImagesPerDay,
-    activeBriefId: brief?.id ?? null,
+    activeBriefId: briefId,
     ...(autopublish !== undefined ? { valves: { autopublish } } : {}),
     ...(team === 'content' ? { contentSlot: contentSlotForDate(new Date()) } : {}),
   }
@@ -460,6 +538,17 @@ export async function getActiveBrief() {
   return row ?? null
 }
 
+/**
+ * Cached id-only variant for gate(). Deliberately NOT a cached getActiveBrief:
+ * the full row carries Date columns, which don't survive the KV JSON
+ * round-trip inside cached() (see the sitemap incident).
+ */
+async function getActiveBriefId(): Promise<number | null> {
+  return cached('team:brief:active-id', SETTINGS_CACHE_TTL_SEC, async () =>
+    (await getActiveBrief())?.id ?? null,
+  )
+}
+
 /** Publish a new active brief, superseding the previous active one. */
 export async function publishBrief(input: {
   weekStart: string
@@ -481,6 +570,8 @@ export async function publishBrief(input: {
       createdBy:   input.createdBy ?? 'store-strategist',
     })
     .returning({ id: strategyBriefs.id })
+  invalidateCache('team:brief:')
+  await kvDel('team:brief:active-id')
   return row!.id
 }
 
