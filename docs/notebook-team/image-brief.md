@@ -2,8 +2,9 @@
 
 > Generation brief for every art surface in the Notebook redesign. Follows the house imagery
 > doctrine and the standing merchandising image rules: bright, warm, editorial, product-led or
-> product-in-context, never clinical, never near-black or moody, never tableware (no tea cups,
-> ceramic bowls, notebooks-as-tile-art, or the July 2026 failure classes). Age gate and content
+> product-in-context, never clinical, never near-black or moody, never domestic metaphor objects
+> (no tea cups, ceramic bowls, mugs, folded blankets or throws, towels, notebooks-as-tile-art, or
+> the July 2026 failure classes — see §0). Age gate and content
 > policy bind every asset: suggestive of use and sensation is fine, explicit or anatomical is not.
 > Reuse-first: check `media-manager`'s existing library and the product's real Shopify photography
 > before generating; ref-image-first for anything product-specific. Every generated asset passes
@@ -32,9 +33,14 @@ color map) and `hifi-reference.html` (placeholder blocks show composition and cr
   cleanly. Leave a quiet zone in the crop where the art-direction doc places a title or chip.
 - **Texture.** Subtle grain acceptable for editorial warmth; keep it light. No heavy filters, no
   vignettes that darken corners toward black, no lens flare.
-- **Banned, restated.** Tableware and kitchenware, notebooks/stationery as literal props, near-
-  black or heavily shadowed frames, clinical white-coat/medical staging, cold minimalism, gradients
-  in the old orange, uncanny hands or warped objects, any readable invented text in the image.
+- **Banned, restated.** Domestic metaphor objects as the subject — tableware and kitchenware
+  (cups, mugs, bowls), household textiles (folded blankets, throws, towels, pillows), candles,
+  flowers-as-subject, notebooks/stationery as literal props, and any other home-goods stand-in for
+  the topic. The test is a class test, not a list test: **if the frame would sit comfortably in a
+  home-goods catalog, it fails**, whatever the object is. Also banned: near-black or heavily
+  shadowed frames, clinical white-coat/medical staging, cold minimalism, gradients in the old
+  orange, uncanny hands or warped objects, any readable invented text in the image. Fabric, light,
+  and bedside surfaces are welcome as *setting* around a product; they are never the subject.
 
 **Prompt scaffold shared prefix** (prepend to every per-surface prompt):
 > Bright warm editorial photograph on a pure white paper background, soft directional daylight,
@@ -45,6 +51,37 @@ color map) and `hifi-reference.html` (placeholder blocks show composition and cr
 Post-process for the surfaces that carry type overlay: light coral/plum wash gradients are
 composed in CSS at build time (see the `.ph--*` blocks in the hi-fi), so generated art should be
 clean imagery, not pre-baked with brand-color overlays unless a surface below says otherwise.
+
+---
+
+## 0. Daily post hero — `~1200 × 900` (one per post; the highest-volume surface)
+
+**Role.** The `heroImage` on every Notebook `blogPost`. The daily content routine requests one of
+these per post, which makes it the single most-generated surface in the system — and the surface
+where every houseware failure to date has shipped (July 2026: tea cups on bedsheets; paired
+folded throw blankets). This section is binding for it.
+
+- **The subject rule (binding, positive).** The hero's subject IS one of the post's own embedded
+  in-stock products (`blogProductEmbed.productHandle`), placed via its **real Shopify product
+  photo passed as the reference image** (FLUX Kontext / `--ref-image` path), shown boldly and
+  large in frame in a warm, plausible use-context. Where a post genuinely has no product embed,
+  the subject is the topic's product family, same treatment. Never an object metaphor.
+- **Sensitive topics are not an exemption.** Real Talk and relational posts get the product the
+  post honestly recommends, in soft human context (bedside, cropped hand, fabric and daylight as
+  setting) — not a domestic still-life standing in for the feeling. If a topic feels too delicate
+  for a product-forward hero, the honest fallback is **publishing heroless**, never a houseware
+  metaphor.
+- **Caller briefs do not override this file.** When a requesting agent's brief suggests a
+  non-product subject (mugs, blankets, "abstract paired forms", any home-goods scene),
+  `media-manager` corrects it against this section and proceeds product-forward, noting the
+  correction in its reply. A caller's scene ideas may shape the *setting*; only this file and the
+  post's embeds decide the *subject*.
+- **Aspect / dimensions.** Landscape ~4:3 (`1200 × 900` class). Inherit all global palette,
+  light, and composition rules; keep a quiet zone for the title per the layout.
+- **Vision-gate notes.** Reject hard if the subject is not an embedded product (or its stated
+  product-family fallback), if the product is small, incidental, or invented rather than
+  ref-image-placed, or if the frame passes the home-goods-catalog test above. Two failures:
+  fall back to the product's real Shopify photo cropped editorially, or publish heroless.
 
 ---
 

@@ -114,8 +114,14 @@ Create idempotently: doc `_id` is `blogPost-${slug}`, `createIfNotExists` then `
   (`{productHandle, ctaLabel, layout}`), `blogPullQuote`, `blogCta`.
 - `seoTitle` (max 70 chars) and `seoDescription` (max 160 chars), both filled.
 - `relatedPosts` (max 3, when relevant); `featured` and `noIndex` default off.
-- `heroImage` + `heroImageAlt`: ask `media-manager` (reuse-first). If imagery fails or nothing
-  fits, **publish without a hero rather than skipping the day**.
+- `heroImage` + `heroImageAlt`: ask `media-manager` (reuse-first). The request MUST (a) name the
+  post's `blogProductEmbed` handles as the mandatory subject pool and (b) point at §0 "Daily post
+  hero" of `docs/notebook-team/image-brief.md`, which is binding: the hero's subject is one of the
+  post's embedded products placed via its real Shopify photo as the ref image — never a domestic
+  metaphor object (mugs, blankets, towels, candles, decor). Do not invent ad-hoc scene subjects in
+  the request; setting ideas are fine, subjects are not. If imagery fails or nothing fits,
+  **publish without a hero rather than skipping the day** — heroless is the fallback, houseware
+  never is.
 
 Content quality bar (all mandatory, from `.claude/agents/content-writer.md`):
 
