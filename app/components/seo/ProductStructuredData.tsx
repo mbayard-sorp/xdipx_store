@@ -14,15 +14,18 @@ const SELLER = {
 } as const
 
 // Matches the stated FAQ policy: unopened items in original packaging within
-// 14 days. returnFees is set to customer-responsibility (the conservative,
-// non-overpromising default); change to FreeReturn only if we actually cover
-// return shipping. Finite-window category requires merchantReturnDays +
-// returnMethod + returnFees to validate in Google Rich Results.
+// 30 days. Keep this in sync with app/lib/faq-content.ts, the brand
+// description in app/lib/brand.ts, and the window enforced in
+// app/routes/_layout.account.returns.new.tsx. returnFees is set to
+// customer-responsibility (the conservative, non-overpromising default);
+// change to FreeReturn only if we actually cover return shipping.
+// Finite-window category requires merchantReturnDays + returnMethod +
+// returnFees to validate in Google Rich Results.
 const MERCHANT_RETURN_POLICY = {
   '@type':              'MerchantReturnPolicy',
   applicableCountry:    'US',
   returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
-  merchantReturnDays:   14,
+  merchantReturnDays:   30,
   returnMethod:         'https://schema.org/ReturnByMail',
   returnFees:           'https://schema.org/ReturnFeesCustomerResponsibility',
   merchantReturnLink:   'https://xdipx.com/faq',
