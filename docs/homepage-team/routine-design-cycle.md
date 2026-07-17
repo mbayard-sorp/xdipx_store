@@ -89,6 +89,10 @@ imagery via `media-manager` (reuse-first), copy via `emma-copywriter`.
   the change is non-trivial.
 - `qa-reviewer` — typecheck, build, tests, and the prototype exercised in the preview MCP at 375px +
   desktop, with a CLS check and proof screenshots.
+- **`design-critic` — mandatory design gate.** Reviews screenshots of every changed surface at
+  375/768/1440 against `docs/design-doctrine.md` and scores its rubric (hierarchy, spacing rhythm,
+  type, color, imagery, motion, overall). The PR does not open on a REVISE or BLOCK; fix and
+  re-review. Record the verdict + scores as an `/event` row (`agentRole:'design-critic'`).
 - **Emma voice gate** — `emma-empathy-reviewer` signs off on all customer-facing copy against
   `docs/emma-voice.md` (the canonical voice charter).
 - `seo-pdp-auditor` + `aeo-geo-auditor` — when the change affects rendering, JSON-LD, canonical, the

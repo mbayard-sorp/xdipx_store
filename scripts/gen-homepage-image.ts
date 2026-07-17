@@ -9,8 +9,14 @@
  *   npx tsx scripts/gen-homepage-image.ts \
  *     --prompt "..." --alt "..." \
  *     --target tile --block-key <blockKey> --tile-key <tileKey> \
+ *     --ref-image <shopify-product-photo-url> \
+ *     [--no-ref --no-ref-reason "abstract mood band, no product target"] \
  *     [--only fal|imagen] [--caller media-manager/wayfinder] \
  *     [--images-so-far 3] [--dry-run]
+ *
+ * --ref-image is REQUIRED (FLUX Kontext places the real product in the scene).
+ * Omitting it needs an explicit --no-ref plus --no-ref-reason; the reason is
+ * echoed in the output manifest so the run log shows why no reference was used.
  *
  * Sequence:
  *   1. Gate re-check — GET /api/homepage-team/gate. Refuses (exit 0, prints
@@ -52,6 +58,8 @@ async function main() {
   const tileKey     = arg('tile-key')
   const only        = arg('only') as 'fal' | 'imagen' | undefined
   const refImage    = arg('ref-image')
+  const noRef       = hasFlag('no-ref')
+  const noRefReason = arg('no-ref-reason')
   const caller      = arg('caller') ?? 'media-manager'
   const imagesSoFar = Number(arg('images-so-far') ?? '0')
   const runId       = arg('run-id')
@@ -63,6 +71,17 @@ async function main() {
   }
   if (targetKind === 'tile' && !tileKey) {
     console.error('--tile-key is required when --target tile')
+    process.exit(1)
+  }
+  // Ref-image-first rule (design-elevation p3-img-gate): a merchandising image
+  // must place the real product via FLUX Kontext. Generating without a
+  // reference photo requires an explicit --no-ref plus a logged reason.
+  if (!refImage && !noRef) {
+    console.error('--ref-image is required. If this surface genuinely has no product target (abstract mood band), pass --no-ref --no-ref-reason "<why>".')
+    process.exit(1)
+  }
+  if (noRef && !noRefReason) {
+    console.error('--no-ref requires --no-ref-reason "<why>" (the reason is logged in the manifest)')
     process.exit(1)
   }
 
@@ -106,7 +125,7 @@ async function main() {
   if (dryRun) {
     console.log(JSON.stringify({
       dryRun: true,
-      plan: { prompt, alt, target, only: only ?? 'fal-then-imagen', caller, ...(refImage ? { refImage } : {}) },
+      plan: { prompt, alt, target, only: only ?? 'fal-then-imagen', caller, ...(refImage ? { refImage } : { noRefReason }) },
     }))
     process.exit(0)
   }
@@ -147,7 +166,7 @@ async function main() {
       ? { url: manifest.url, alt: manifest.alt, assetId: manifest.assetId, kind: 'image' }
       : null,
     target: manifest.target,
-    source: { provider: manifest.provider, model: manifest.model, prompt },
+    source: { provider: manifest.provider, model: manifest.model, prompt, ...(refImage ? { refImage } : { noRefReason }) },
     spend: { posted: spendPosted, model: manifest.model, count: 1 },
     placed: manifest.placed,
   }))
