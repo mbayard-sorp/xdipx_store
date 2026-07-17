@@ -307,6 +307,22 @@ contains **no "daily deal" framing**. If validation fails, do not leave a broken
 it and let the healthcheck/rollback path restore the last-good Sanity revision; record a `failed`
 status with the error.
 
+## Step 7.5 — Post-publish design spot-check (`design-critic`)
+
+After self-validation passes, run `design-critic` once against the live homepage: capture a 375px
+screenshot (768/1440 optional on content-only runs), score the rubric against
+`docs/design-doctrine.md`, and post the verdict + scores as an `/event` row
+(`eventType:'decision'`, `agentRole:'design-critic'`).
+
+- **PASS** — proceed to Step 8.
+- **REVISE** — proceed, but file the defects as a suggestion
+  (`POST /api/team/suggestion {op:'create', team:'homepage', kind:'process', ...}`).
+- **BLOCK** — a doctrine hard rule is broken on the live page: trigger the existing Sanity
+  last-good rollback path (same as a failed Step 7 validation), record status `rolled_back`.
+
+Until the critic's calibration run is recorded (see its agent definition), treat any BLOCK as a
+REVISE + suggestion instead of rolling back.
+
 ## Step 8 — Finish + event trail
 
 Before posting the final update, run the Definition of Done checks from mission brief section 10 and
