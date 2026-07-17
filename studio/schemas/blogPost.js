@@ -28,7 +28,15 @@ const BLOG_RICH_TEXT = {
         title: 'Link',
         type: 'object',
         fields: [
-          { name: 'href', title: 'URL', type: 'url' },
+          {
+            name: 'href',
+            title: 'URL',
+            type: 'url',
+            // Body links are mostly internal (/products/…, /collections/…, /notebook/…);
+            // the default url rule rejects relative paths and gates Studio publishes.
+            validation: (Rule) =>
+              Rule.uri({ allowRelative: true, scheme: ['http', 'https', 'mailto', 'tel'] }),
+          },
           {
             name: 'openInNewTab',
             title: 'Open in new tab',

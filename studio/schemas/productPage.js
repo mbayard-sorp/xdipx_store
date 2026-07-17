@@ -20,7 +20,11 @@ const RICH_TEXT_BLOCK = {
     annotations: [
       {
         name: 'link', title: 'Link', type: 'object',
-        fields: [{ name: 'href', title: 'URL', type: 'url' }],
+        fields: [{
+          name: 'href', title: 'URL', type: 'url',
+          // Allow internal relative links; the default url rule gates publish.
+          validation: (Rule) => Rule.uri({ allowRelative: true, scheme: ['http', 'https', 'mailto', 'tel'] }),
+        }],
       },
     ],
   },
