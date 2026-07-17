@@ -39,7 +39,14 @@ export default {
                 title: 'Link',
                 type: 'object',
                 fields: [
-                  { name: 'href', title: 'URL', type: 'url' },
+                  {
+                    name: 'href',
+                    title: 'URL',
+                    type: 'url',
+                    // Allow internal relative links; the default url rule gates publish.
+                    validation: (Rule) =>
+                      Rule.uri({ allowRelative: true, scheme: ['http', 'https', 'mailto', 'tel'] }),
+                  },
                   {
                     name: 'blank',
                     title: 'Open in new tab',
