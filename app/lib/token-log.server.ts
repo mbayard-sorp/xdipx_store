@@ -24,6 +24,36 @@ export interface TokenLogEntry {
   caller?:              string   // free-form: function / route that originated the call
 }
 
+/**
+ * Write-through bump of the daily KV spend/image counters that back the team
+ * budget gate (team.server.ts), so gate() reads a counter instead of
+ * re-SUMming api_token_log on every call. Only bumps a counter that already
+ * exists: a missing counter means no gate has seeded today's value yet, and
+ * the seeding SUM will include the row this bump belongs to. BEST-EFFORT —
+ * a lost bump undercounts for at most one re-seed window (15 min).
+ */
+async function bumpTeamSpendCounters(feature: string, costUsd: number, imageCount?: number): Promise<void> {
+  try {
+    const { teamFromFeature, teamSpendKvKey, teamImagesKvKey } = await import('./team-keys')
+    const { kvGet, kvIncrBy } = await import('./kv.server')
+    const day = new Date().toISOString().slice(0, 10)
+    const team = teamFromFeature(feature)
+    if (team) {
+      const cents = Math.round(costUsd * 100)
+      if (cents > 0) {
+        const key = teamSpendKvKey(team, day)
+        if ((await kvGet<number>(key)) != null) await kvIncrBy(key, cents)
+      }
+    }
+    if (feature === 'homepage-images' && imageCount && imageCount > 0) {
+      const key = teamImagesKvKey(day)
+      if ((await kvGet<number>(key)) != null) await kvIncrBy(key, imageCount)
+    }
+  } catch (err) {
+    console.error('[token-log] best-effort KV counter bump failed (ignored):', err)
+  }
+}
+
 export async function logApiTokens(entry: TokenLogEntry): Promise<void> {
   try {
     const { db } = await import('./db.server')
@@ -54,6 +84,7 @@ export async function logApiTokens(entry: TokenLogEntry): Promise<void> {
       requestCount:        entry.requestCount        ?? 1,
       estCostUsd:          String(cost),
     })
+    await bumpTeamSpendCounters(entry.feature, cost)
   } catch (err) {
     console.error('[token-log] best-effort write failed (ignored):', err)
   }
@@ -103,6 +134,7 @@ export async function logImageCost(entry: ImageCostEntry): Promise<void> {
       requestCount:        entry.count,
       estCostUsd:          String(cost),
     })
+    await bumpTeamSpendCounters(entry.feature, cost, entry.count)
   } catch (err) {
     console.error('[token-log] best-effort image-cost write failed (ignored):', err)
   }

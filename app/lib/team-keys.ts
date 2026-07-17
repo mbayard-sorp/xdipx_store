@@ -17,6 +17,33 @@ export function isTeamId(v: unknown): v is TeamId {
   return typeof v === 'string' && (TEAM_IDS as readonly string[]).includes(v)
 }
 
+/**
+ * KV keys for the write-through daily spend/image counters that back the
+ * budget gate (team.server.ts). Defined here (client-safe, pure strings) so
+ * token-log.server.ts can bump them without importing team.server.ts.
+ * `utcDay` is an ISO date, e.g. '2026-07-17' — matches the DB's current_date
+ * window (Neon runs UTC).
+ */
+export function teamSpendKvKey(team: TeamId, utcDay: string): string {
+  return `team:spend:${team}:${utcDay}`
+}
+
+export function teamImagesKvKey(utcDay: string): string {
+  return `team:images:homepage:${utcDay}`
+}
+
+/**
+ * Map an api_token_log feature label to its owning team, mirroring the SQL
+ * attribution rule `feature LIKE '{team}-%'`. Returns null for non-team
+ * features ('enrichment', 'sms', ...).
+ */
+export function teamFromFeature(feature: string): TeamId | null {
+  const i = feature.indexOf('-')
+  if (i <= 0) return null
+  const prefix = feature.slice(0, i)
+  return isTeamId(prefix) ? prefix : null
+}
+
 export interface TeamKeySet {
   enabled: string
   dailyCents: string

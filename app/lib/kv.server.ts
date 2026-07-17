@@ -145,6 +145,17 @@ export async function kvIncr(key: string): Promise<number> {
   return current + 1
 }
 
+export async function kvIncrBy(key: string, by: number): Promise<number> {
+  const kv = await getKV()
+  if (kv) {
+    try { return await kv.incrby(key, by) }
+    catch (err) { warnKvFallback('incrby', err) }
+  }
+  const current = (memStore.get(key) as number) ?? 0
+  memStore.set(key, current + by)
+  return current + by
+}
+
 export async function kvDel(key: string): Promise<void> {
   const kv = await getKV()
   if (kv) {
@@ -254,6 +265,11 @@ export const KV_KEYS = {
   emmaEncouragementDailyCount: (utcDate: string) => `emmaEncouragement:dailyCount:${utcDate}`,
   // Batch enrichment job summary mirrored from DB for fast admin poll surface (24h TTL)
   enrichmentJob:               (jobId: string) => `batch-job:${jobId}`,
+  // Negative cache for the 2-min enrichment poller: present = last DB check
+  // found zero in-flight batch_jobs, so the cron skips Neon entirely. Set with
+  // a TTL by advanceInflightJobs, deleted by enqueueBatchJob, so worst case a
+  // lost delete delays a new job by one TTL window rather than stalling it.
+  enrichmentPollerIdle:        'enrichment:poller:idle',
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────
