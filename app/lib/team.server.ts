@@ -85,6 +85,8 @@ export interface TeamConfig {
   enabled: boolean
   dailyCents: number
   maxRunsPerDay: number
+  /** When true, suggestions this team acts on auto-approve at creation (062). */
+  autoApproveSuggestions: boolean
   /** Homepage-only extras (undefined for other teams). */
   buildCents?: number
   maxImagesPerDay?: number
@@ -120,9 +122,10 @@ async function getTeamConfigUncached(team: TeamId): Promise<TeamConfig> {
   const d = TEAM_DEFAULTS[team]
   const cfg: TeamConfig = {
     team,
-    enabled:       (map.get(keys.enabled) ?? 'false') === 'true',
-    dailyCents:    num(map.get(keys.dailyCents), d.dailyCents),
-    maxRunsPerDay: num(map.get(keys.maxRunsPerDay), d.maxRunsPerDay),
+    enabled:                (map.get(keys.enabled) ?? 'false') === 'true',
+    dailyCents:             num(map.get(keys.dailyCents), d.dailyCents),
+    maxRunsPerDay:          num(map.get(keys.maxRunsPerDay), d.maxRunsPerDay),
+    autoApproveSuggestions: (map.get(keys.autoApproveSuggestions) ?? 'false') === 'true',
   }
   if (team === 'homepage') {
     cfg.buildCents = num(map.get(TEAM_KEYS.buildCents), 10000)
@@ -443,11 +446,14 @@ export async function listRecentEvents(team?: TeamId, sinceDays = 7, limit = 500
 
 // ── Improvement bus (suggestions) ────────────────────────────────────────────
 //
-// Lifecycle: proposed -> approved|dismissed (owner, admin UI)
+// Lifecycle: proposed -> approved|dismissed (owner in the admin UI, OR
+//                        auto-approved at creation when the acting team's
+//                        `{team}_team_auto_approve_suggestions` valve is on)
 //                     -> pr_open (agent-editor opens a PR)
 //                     -> applied (owner merges the PR)
-// Agents may only CREATE proposed rows and MARK approved rows pr_open/applied.
-// The proposed->approved|dismissed decision belongs to the owner in the admin UI.
+// Agents may only CREATE proposed rows and MARK approved rows pr_open/applied;
+// they can never flip proposed->approved. That transition is the owner's, or
+// the acting team's auto-approve valve (which the owner controls).
 
 export interface SuggestionInput {
   team: TeamId
@@ -461,6 +467,15 @@ export interface SuggestionInput {
 }
 
 export async function createSuggestion(s: SuggestionInput): Promise<number> {
+  // Owner triage (proposed -> approved) is automated per-team via the
+  // `{team}_team_auto_approve_suggestions` valve. Key it off the team that ACTS
+  // on the suggestion — its targetTeam, or the proposer when unrouted — so a
+  // strategy-proposed row aimed at homepage auto-approves under homepage's
+  // valve. A failed config read falls back to manual review (proposed).
+  const actingTeam = s.targetTeam ?? s.team
+  const autoApprove = await getTeamConfig(actingTeam)
+    .then(c => c.autoApproveSuggestions)
+    .catch(() => false)
   const [row] = await db
     .insert(homepageTeamSuggestions)
     .values({
@@ -472,7 +487,9 @@ export async function createSuggestion(s: SuggestionInput): Promise<number> {
       suggestion:    s.suggestion,
       estSavingsUsd: String(s.estSavingsUsd ?? 0),
       cxRisk:        s.cxRisk ?? 'low',
-      status:        'proposed',
+      status:        autoApprove ? 'approved' : 'proposed',
+      decidedBy:     autoApprove ? 'auto' : null,
+      decidedAt:     autoApprove ? new Date() : null,
     })
     .returning({ id: homepageTeamSuggestions.id })
   return row!.id
@@ -498,7 +515,7 @@ export async function listSuggestions(filter: {
 export async function decideSuggestion(id: number, status: 'approved' | 'dismissed'): Promise<void> {
   await db
     .update(homepageTeamSuggestions)
-    .set({ status, decidedAt: new Date() })
+    .set({ status, decidedBy: 'owner', decidedAt: new Date() })
     .where(and(eq(homepageTeamSuggestions.id, id), eq(homepageTeamSuggestions.status, 'proposed')))
 }
 

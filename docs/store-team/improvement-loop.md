@@ -1,6 +1,9 @@
 # The Self-Improvement Loop
 
-How the store's agent teams get better every week — with the owner holding both decision points.
+How the store's agent teams get better every week. The owner holds the two decision
+points by default; the first (triage) can be delegated to a per-team auto-approve
+valve so the owner isn't the bottleneck. The homepage team runs on auto-approve today
+(see [Auto-approving triage](#auto-approving-triage-per-team)).
 
 ## The loop, end to end
 
@@ -22,9 +25,11 @@ How the store's agent teams get better every week — with the owner holding bot
  └──────────────┬─────────────────────────────────────────────────────────┘
                 ▼
  ┌────────────────────────────────────────────────────────────────────────┐
- │ 3. OWNER DECISION #1 — /admin/homepage-team, Suggestions panel         │
+ │ 3. TRIAGE #1 — /admin/homepage-team, Suggestions panel                 │
  │    proposed → approved  (worth doing)                                  │
  │    proposed → dismissed (not worth it; the dismissal is itself signal) │
+ │    Owner by default. A team's auto-approve valve does this step for it │
+ │    automatically at creation (decided_by='auto'); homepage is ON.      │
  └──────────────┬─────────────────────────────────────────────────────────┘
                 ▼
  ┌────────────────────────────────────────────────────────────────────────┐
@@ -50,9 +55,14 @@ How the store's agent teams get better every week — with the owner holding bot
 | Transition | Who | Where |
 |---|---|---|
 | (new) → `proposed` | any agent | `POST /api/team/suggestion {op:'create'}` |
-| `proposed` → `approved` / `dismissed` | **owner only** | dashboard Approve/Dismiss (writes `decided_at`) |
+| (new) → `approved` | the acting team's auto-approve valve, at creation | `createSuggestion` writes `decided_by='auto'` when `{team}_team_auto_approve_suggestions` is on |
+| `proposed` → `approved` / `dismissed` | owner | dashboard Approve/Dismiss (writes `decided_by='owner'`, `decided_at`) |
 | `approved` → `pr_open` | agent-editor | `{op:'mark'}` with the PR URL — the API 409s any transition out of `proposed` |
 | `pr_open` → `applied` | agent-editor, after observing the merge | `{op:'mark'}` |
+
+Agents still never flip `proposed → approved` themselves — that is either the owner
+or the owner-controlled auto-approve valve. "Acting team" = the suggestion's
+`target_team`, or the proposer when unrouted.
 
 ## The `kind` taxonomy
 
@@ -67,12 +77,35 @@ How the store's agent teams get better every week — with the owner holding bot
 | `promo` | a designed discount/sale (MAP-checked) | owner mints the code in Shopify |
 | `program` | referral/loyalty mechanics | owner decides; code parts become `code` rows |
 
+## Auto-approving triage (per team)
+
+Each team has an independent `{team}_team_auto_approve_suggestions` valve (migration
+062, editable on that team's tab of `/admin/homepage-team`). When on, `createSuggestion`
+writes rows the team will act on straight to `approved` with `decided_by='auto'`,
+skipping the owner's triage click. It changes **only** the first gate — every downstream
+execution path is untouched:
+
+- `instructions` / `agent-def` / `config` → still become an agent-editor **PR the owner
+  merges** (and only when `suggestion_apply_enabled` is also on).
+- `campaign` / `promo` / `code` / `program` → still **executed by hand** by the owner
+  (Klaviyo send, Shopify code, engineering task). Auto-approve just clears them from the
+  triage queue; nothing runs unattended.
+
+**Rollout:** homepage is ON (owner direction, 2026-07-17), paired with
+`suggestion_apply_enabled` ON. Every other team defaults OFF. Auto-approved rows carry an
+`auto` badge on the dashboard so the automated decisions stay auditable. To pull a team
+back to manual triage, flip its valve off — in-flight `approved` rows are unaffected.
+
 ## Safety properties
 
-- **Two human gates on every self-modification:** the approval click and the PR merge. An agent can
-  never change its own instructions on one authorization, and never without a reviewable diff.
+- **The execution gate always remains:** self-modifications still require a PR merge, and
+  money/content actions still require a manual step. Auto-approve can automate the *triage*
+  gate for a team, but an agent can never change its own instructions without a reviewable
+  diff a human merges. (With auto-approve off — the default for all teams but homepage —
+  both the triage click and the merge are the owner's.)
 - **The apply path has a kill switch** (`suggestion_apply_enabled`, default off) independent of any
-  team's enablement.
+  team's enablement, and each team's triage automation has its own
+  (`{team}_team_auto_approve_suggestions`, default off).
 - **agent-editor's file allowlist is hard:** agent defs and team docs only — no app code, schema,
   workflows, settings, or secrets, and it must refuse suggestions that would weaken money valves,
   voice gates, MAP rules, or this loop itself.
