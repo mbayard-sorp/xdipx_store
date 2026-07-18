@@ -3,11 +3,18 @@ import type { BlogPostCard as BlogPostCardType } from '~/types/cms'
 import { BlogPostCard } from './BlogPostCard'
 import { Reveal } from '~/components/motion/Reveal'
 
-export function NotebookTeaser({ posts }: { posts: BlogPostCardType[] }) {
+/**
+ * "The Notebook" editorial teaser — a 3-up grid of the latest posts with the
+ * full BlogPostCard treatment. Standalone by default (owns its `<section>`
+ * width/padding); pass `bare` to render just the heading + grid so a host band
+ * (e.g. the storefront homepage's Nº 09 zone) can own the chrome. Renders
+ * nothing when there are no posts, so callers can drop it in unconditionally.
+ */
+export function NotebookTeaser({ posts, bare = false }: { posts: BlogPostCardType[]; bare?: boolean }) {
   if (!posts.length) return null
 
-  return (
-    <section className="max-w-6xl mx-auto px-4 py-10 sm:py-14">
+  const content = (
+    <>
       <Reveal variant="fade">
         <div className="flex items-end justify-between mb-6 pb-4 border-b border-line-2">
           <div>
@@ -38,6 +45,10 @@ export function NotebookTeaser({ posts }: { posts: BlogPostCardType[] }) {
           See all →
         </Link>
       </div>
-    </section>
+    </>
   )
+
+  if (bare) return content
+
+  return <section className="max-w-6xl mx-auto px-4 py-10 sm:py-14">{content}</section>
 }

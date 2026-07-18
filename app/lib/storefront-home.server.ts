@@ -56,12 +56,14 @@ export interface StorefrontData {
    */
   contentBlocks: Promise<HomeContentBlocks>
   /**
-   * Latest published Notebook posts, auto-populating the "From the Notebook"
-   * section so fresh daily content reaches the homepage with no merchandiser
-   * action. A curated `editorialTiles` block (in `contentBlocks`) overrides this
-   * when present; otherwise these render.
+   * Latest published Notebook posts (DEFERRED — never blocks the shell's TTFB),
+   * auto-populating the "From the Notebook" band so fresh daily content reaches
+   * the homepage with no merchandiser action. A curated `editorialTiles` block
+   * (in `contentBlocks`) overrides this when present; otherwise these render via
+   * `NotebookTeaser`. Degrades to [] so a slow/failed Sanity leg can never sink
+   * the render.
    */
-  notebookPosts: BlogPostCard[]
+  notebookPosts: Promise<BlogPostCard[]>
 }
 
 /**
@@ -76,10 +78,20 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
   // home page doesn't always lead with the same products (time bucket, not a
   // per-visitor cookie).
   const railSeed = Math.floor(Date.now() / 60_000)
-  const [railsResult, emmaHero, notebook] = await Promise.all([
+
+  // Kick off the Notebook fetch up front so it runs concurrently with the
+  // awaited rails/hero legs, but keep it DEFERRED (like `contentBlocks`): the
+  // "From the Notebook" band sits well below the fold, so streaming it in keeps
+  // the blog fetch off the shell's TTFB path. The immediate `.catch` degrades
+  // it to [] so a slow/failed Sanity leg can never sink the render (and never
+  // surfaces as an unhandled rejection while it's held unawaited).
+  const notebookPosts = getBlogPosts({ perPage: 3 })
+    .then(r => r.posts)
+    .catch(() => [] as BlogPostCard[])
+
+  const [railsResult, emmaHero] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, 'getEmmaHeroSettings(storefront)'),
-    getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [] as BlogPostCard[], total: 0 })),
   ])
 
   const rails = railsResult.rails
@@ -119,6 +131,6 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
     featured,
     total: railsResult.total,
     contentBlocks: buildHomeContentBlocks(), // deferred — team-managed Sanity surface
-    notebookPosts: notebook.posts,
+    notebookPosts, // deferred — latest live posts, streamed below the fold
   }
 }
