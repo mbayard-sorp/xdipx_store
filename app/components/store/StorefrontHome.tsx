@@ -29,7 +29,7 @@ import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { EmailSubscribe } from '~/components/store/EmailSubscribe'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
-import { NotebookRail } from '~/components/blog/NotebookRail'
+import { NotebookTeaser } from '~/components/blog/NotebookTeaser'
 import type { BlogPostCard } from '~/types/cms'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
@@ -861,19 +861,39 @@ const FAQS = [
 ]
 
 /**
- * Homepage "From the Notebook" fallback — the branded section chrome around the
- * shared NotebookRail, shown when the team has not published a curated
- * `editorialTiles` block. Renders nothing when there are no posts.
+ * Homepage "From the Notebook" band (Nº 09) — the branded chrome (band bg,
+ * aligned container, section numeral) around the shared `NotebookTeaser`, shown
+ * when the team has not published a curated `editorialTiles` block. `NotebookTeaser`
+ * runs in `bare` mode so this band owns the width/padding; it renders nothing
+ * when there are no posts, so this whole band collapses to null too.
  */
-function HomeNotebookRail({ posts }: { posts: BlogPostCard[] }) {
+function HomeNotebook({ posts }: { posts: BlogPostCard[] }) {
   if (!posts.length) return null
   return (
     <section className="bg-paper py-16 md:py-20">
       <div className="mx-auto max-w-[1200px] px-6 md:px-16">
         <SectionNumeral n="09" className="mb-3 block" />
-        <NotebookRail posts={posts} heading="From the Notebook" className="" />
+        <NotebookTeaser posts={posts} bare />
       </div>
     </section>
+  )
+}
+
+/**
+ * Awaits the DEFERRED latest-posts payload, then renders the homepage Notebook
+ * band. Kept as its own component so it can be dropped into both the pending
+ * fallback and the resolved (no-`editorialTiles`) branch of the zone below. The
+ * band is well below the fold, so a `null` fallback while it streams in is
+ * fine; a failed leg already resolved to [] server-side, so `HomeNotebook`
+ * simply renders nothing.
+ */
+function DeferredHomeNotebook({ posts }: { posts: Promise<BlogPostCard[]> }) {
+  return (
+    <Suspense fallback={null}>
+      <Await resolve={posts} errorElement={null}>
+        {resolved => <HomeNotebook posts={resolved} />}
+      </Await>
+    </Suspense>
   )
 }
 
@@ -1053,16 +1073,19 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, noteb
 
       {/* From the Notebook — a curated `editorialTiles` block wins when the team
           publishes one (each card can also link a product/collection); otherwise
-          the section auto-populates with the latest published posts so fresh
-          daily content always reaches the homepage with no merchandiser action. */}
-      <Suspense fallback={<HomeNotebookRail posts={notebookPosts} />}>
+          the section auto-populates with the latest published posts (via the
+          deferred `notebookPosts`, rendered with `NotebookTeaser`) so fresh
+          daily content always reaches the homepage with no merchandiser action.
+          Both payloads are deferred, so this whole zone streams in below the
+          fold and never blocks the shell's TTFB. */}
+      <Suspense fallback={<DeferredHomeNotebook posts={notebookPosts} />}>
         <Await
           resolve={contentBlocks}
-          errorElement={<HomeNotebookRail posts={notebookPosts} />}
+          errorElement={<DeferredHomeNotebook posts={notebookPosts} />}
         >
           {({ sections, carouselProductMap }) => {
             const notebook = sections.filter(b => b._type === TEAM_NOTEBOOK_TYPE)
-            if (notebook.length === 0) return <HomeNotebookRail posts={notebookPosts} />
+            if (notebook.length === 0) return <DeferredHomeNotebook posts={notebookPosts} />
             return (
               <>
                 {notebook.map(block => (
