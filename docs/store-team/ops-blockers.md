@@ -1,0 +1,26 @@
+# Ops blockers (owner / console actions)
+
+Consolidated from improvement-bus `process`-kind rows that were reports of environment/infrastructure problems, not repo changes. The bus rows were retired after logging here; the full original text remains on the dismissed rows in `homepage_team_suggestions` if needed. **None of these are fixed by editing the codebase** — they are owner actions in the storefront, Klaviyo, GCP, or the Claude cloud-agent / sandbox settings. Ordered by impact.
+
+## P0 — Revenue / storefront (#15)
+**0 orders / $0 revenue for 14 consecutive days** (`daily_profit_summary`, Jun 29–Jul 13) against the $2k/mo goal. Every team optimization is secondary until a stranger can buy something.
+- **Action:** confirm the storefront transacts end-to-end — Segpay/Verotel active, age gate not blocking real buyers, cart → payment → order actually completing, and that any traffic is arriving at all. This is the single gating question for the whole store.
+
+## P1 — Agent routines not firing (cloud triggers)
+The scheduled cloud triggers live in Claude's scheduler (outside the repo). Several teams show 0 runs, so their triggers are not reaching the gate.
+- **#16 Social** — `social_team_enabled=true` but 0 `social_posts` / 0 runs in 7 days. Verify trigger `trig_01CKe93nZQ1uQqqDZLpQ5GG8` fires and reaches the gate; resume the daily draft cadence (still draft-only, still voice-gated).
+- **#17 Ads** — `ads_team_enabled=true` but 0 runs in 7 days. Verify trigger `trig_013PfuKac4rkjPTHuUwXWzRn` fires. When it resumes: propose-only, education/mechanism register, policy note each time, and **HOLD any spend recommendation while conversion is $0 and checkout is unproven** (ties to #15).
+
+## P1 — Content/media environment blocks
+These broke the content/homepage/seo routines specifically (they do **not** affect the agent-editor apply pass, which only needs `xdipx.com` + a GitHub identity). Fixes are in claude.ai → Code sandbox settings and the scheduled-agent setup; see `docs/homepage-team/routine-network-requirements.md` (egress binds when the sandbox starts — re-trigger a fresh run after changing it).
+- **#25 / #31 Sanity MCP connector not attached** to the content trigger's session, though the playbook mandates Sanity MCP for all reads/writes. Runs limped along on the Sanity HTTP API. **Action:** enable the Sanity (and Shopify) connectors on the content routine's environment — or sanction the HTTP API as an explicit fallback in `routine-content-daily.md`.
+- **#30 Write-safety classifier blocks the Sanity `publish` write** even when `content_team_autopublish=true` and the voice gate PASSed, silently degrading autopublish to draft-only. **Action:** authorize the gated Sanity publish write for this routine's environment, or accept manual publish and document it. (This is a session-level safety behavior, not in the repo.)
+- **#35 Notebook hero-image pipeline blocked** — `*.fal.media` (e.g. `v3b.fal.media`) is not in the egress allowlist (download 403 after a successful generate), and the Imagen fallback 403s because **billing is disabled on GCP project `xdipx-store-image-gen`**. Every content post ships heroless. **Action:** allowlist `*.fal.media` for outbound fetch and/or enable Imagen billing. (The reuse-first hero step is being made non-optional in the content playbook via the Phase-2/3 PRs.)
+
+## P2 — Measurement / tooling gaps
+- **#14 GSC snapshots empty** — `gsc_snapshots` has zero rows ever; the Monday 06:00 UTC `/cron/gsc-snapshot` has never written, or the GSC service-account env vars are unset. Organic search is unmeasured, which blocks the SEO/content ROI loop. **Action:** verify the cron is scheduled and the service-account creds exist.
+- **#23 Klaviyo list counts not visible to the team** — the email planner can't right-size send volume; `consent_log.customer_id` is null on every row (only a ~150 session-grant proxy) and `order_line_items` is empty. **Action (API/tooling, owner):** expose per-list subscribed counts (Waitlist / Daily Deal / Notebook), e.g. a read field on `GET /api/team/gate?team=email` or a dedicated endpoint proxying Klaviyo list sizes. Until then briefs must caveat volume (see `email-briefs-parked.md`).
+- **#5 seoContentBrief queue empty** — 0 documents, so the content-writer falls back to the static `content-plan.md` backlog every run and posts carry no primaryKeyword/questionKeyword targeting. The seo-curator routine that should populate it weekly does not appear to be running. **Action:** verify the seo-curator routine is scheduled (valve `seo_curation_enabled`), or plan briefs into the queue manually.
+
+## Scheduled reviews
+- **#41 — content image cap, revisit on/after 2026-08-16 (program-manager, 30-day check).** On 2026-07-17 the owner lifted `content_team_max_images` 0 → 5 (migration 055's intended value; it had never been applied in prod, so every Notebook post shipped heroless). This resolved the fund-a-hero decision (old strategy suggestion #6). In ~30 days, assess whether 5/day is the right standing cap: blog image spend vs `content_team_daily_cents=300`, hero-vs-heroless ratio since the change, and whether media-manager reuse-first is holding generation cost down. Promote to a formal tracker under `docs/store-team/trackers/` if it should become standing policy.

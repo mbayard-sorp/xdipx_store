@@ -16422,6 +16422,7 @@ __export(team_server_exports, {
   publishBrief: () => publishBrief,
   recordEvent: () => recordEvent,
   rescheduleSocialPost: () => rescheduleSocialPost,
+  retireSuggestion: () => retireSuggestion,
   reviewSocialPost: () => reviewSocialPost,
   startRun: () => startRun,
   teamKeys: () => teamKeys,
@@ -16661,6 +16662,9 @@ async function listSuggestions(filter = {}) {
 }
 async function decideSuggestion(id, status) {
   await db.update(homepageTeamSuggestions).set({ status, decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "proposed")));
+}
+async function retireSuggestion(id) {
+  await db.update(homepageTeamSuggestions).set({ status: "dismissed", decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "approved")));
 }
 async function markSuggestion(id, status, applyRef) {
   const allowedFrom = status === "pr_open" ? "approved" : "pr_open";
