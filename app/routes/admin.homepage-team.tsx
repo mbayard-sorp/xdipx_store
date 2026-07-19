@@ -23,7 +23,7 @@ import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
 import {
   gate, getTeamConfig, getValve, invalidateTeamSettingsCache, listRecentRuns, listRunEvents,
-  listSuggestions, decideSuggestion, listBriefs, listAdCampaigns, decideAdCampaign,
+  listSuggestions, decideSuggestion, retireSuggestion, listBriefs, listAdCampaigns, decideAdCampaign,
   type TeamConfig, type GateResult,
 } from '~/lib/team.server'
 import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VALVE_KEYS, type TeamId } from '~/lib/team-keys'
@@ -143,6 +143,13 @@ export async function action({ request }: ActionFunctionArgs) {
     const id = Number(form.get('id'))
     if (!Number.isFinite(id) || id <= 0) return Response.json({ ok: false }, { status: 400 })
     await decideSuggestion(id, intent === 'suggestion-approve' ? 'approved' : 'dismissed')
+    return Response.json({ ok: true })
+  }
+
+  if (intent === 'suggestion-retire') {
+    const id = Number(form.get('id'))
+    if (!Number.isFinite(id) || id <= 0) return Response.json({ ok: false }, { status: 400 })
+    await retireSuggestion(id)
     return Response.json({ ok: true })
   }
 
@@ -381,9 +388,18 @@ export default function AgentTeamsPage() {
                     </div>
                   )}
                   {s.status === 'approved' && (
-                    <p className="mt-1 text-xs text-ink-4">
-                      {s.decidedBy === 'auto' ? 'Auto-approved. ' : ''}Queued for agent-editor{s.kind === 'code' ? ' (code kind — route to rr7-engineer manually)' : ''}.
-                    </p>
+                    <div className="mt-1 flex items-center gap-3">
+                      <p className="text-xs text-ink-4">
+                        {s.decidedBy === 'auto' ? 'Auto-approved. ' : ''}Queued for agent-editor{s.kind === 'code' ? ' (code kind — route to rr7-engineer manually)' : ''}.
+                      </p>
+                      <Form method="post">
+                        <input type="hidden" name="intent" value="suggestion-retire" />
+                        <input type="hidden" name="id" value={s.id} />
+                        <button className="rounded-lg bg-paper-3 px-2.5 py-0.5 text-[11px] font-semibold text-ink-3 hover:bg-coral-soft hover:text-coral" title="Retire this stale/superseded approved suggestion (reversible)">
+                          Retire
+                        </button>
+                      </Form>
+                    </div>
                   )}
                   {s.status === 'pr_open' && s.applyRef && (
                     <a href={s.applyRef} target="_blank" rel="noreferrer" className="link-coral mt-1 inline-block text-xs">

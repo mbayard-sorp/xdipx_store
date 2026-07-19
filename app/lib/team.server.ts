@@ -520,6 +520,21 @@ export async function decideSuggestion(id: number, status: 'approved' | 'dismiss
 }
 
 /**
+ * Owner retires a stale already-approved row: approved -> dismissed. Needed
+ * because auto-approve (and past owner approvals) can leave rows in `approved`
+ * that later ship by other means, get superseded, or turn out not to be the
+ * agent-editor's to apply. Guarded on status='approved' so it is idempotent and
+ * cannot touch pr_open/applied rows (a PR in flight is closed on GitHub, not
+ * here). Reversible: re-approving is a status flip back to 'approved'.
+ */
+export async function retireSuggestion(id: number): Promise<void> {
+  await db
+    .update(homepageTeamSuggestions)
+    .set({ status: 'dismissed', decidedBy: 'owner', decidedAt: new Date() })
+    .where(and(eq(homepageTeamSuggestions.id, id), eq(homepageTeamSuggestions.status, 'approved')))
+}
+
+/**
  * Agent-side transition (agent-editor): approved -> pr_open -> applied, with
  * the PR URL in applyRef. Throws 409 on any other transition — agents can
  * never move a row out of `proposed`; that decision is the owner's.
