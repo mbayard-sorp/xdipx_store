@@ -13,6 +13,7 @@
 
 import { getDiscoveryIndex, getDiscoveryRails } from '~/lib/discovery.server'
 import { buildHomeContentBlocks, type HomeContentBlocks } from '~/lib/homepage-payload.server'
+import { getSensationMapData, type SensationMapData } from '~/lib/sensation-map.server'
 import { getEmmaHeroSettings, getBlogPosts } from '~/lib/sanity.server'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { EMPTY_STATE, type DiscoveryProduct, type Rail } from '~/types/discovery'
@@ -56,14 +57,18 @@ export interface StorefrontData {
    */
   contentBlocks: Promise<HomeContentBlocks>
   /**
-   * Latest published Notebook posts (DEFERRED — never blocks the shell's TTFB),
-   * auto-populating the "From the Notebook" band so fresh daily content reaches
-   * the homepage with no merchandiser action. A curated `editorialTiles` block
-   * (in `contentBlocks`) overrides this when present; otherwise these render via
-   * `NotebookTeaser`. Degrades to [] so a slow/failed Sanity leg can never sink
-   * the render.
+   * Latest published Notebook posts, auto-populating the "From the Notebook"
+   * section so fresh daily content reaches the homepage with no merchandiser
+   * action. A curated `editorialTiles` block (in `contentBlocks`) overrides this
+   * when present; otherwise these render.
    */
-  notebookPosts: Promise<BlogPostCard[]>
+  notebookPosts: BlogPostCard[]
+  /**
+   * Nº 07 Sensation Map instrument data: the Type + Feel dial notches, the SSR
+   * default dial state, and the default matched product set. `defaultState` is
+   * null on a cold/empty index, in which case StorefrontHome skips the band.
+   */
+  sensationMap: SensationMapData
 }
 
 /**
@@ -78,20 +83,10 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
   // home page doesn't always lead with the same products (time bucket, not a
   // per-visitor cookie).
   const railSeed = Math.floor(Date.now() / 60_000)
-
-  // Kick off the Notebook fetch up front so it runs concurrently with the
-  // awaited rails/hero legs, but keep it DEFERRED (like `contentBlocks`): the
-  // "From the Notebook" band sits well below the fold, so streaming it in keeps
-  // the blog fetch off the shell's TTFB path. The immediate `.catch` degrades
-  // it to [] so a slow/failed Sanity leg can never sink the render (and never
-  // surfaces as an unhandled rejection while it's held unawaited).
-  const notebookPosts = getBlogPosts({ perPage: 3 })
-    .then(r => r.posts)
-    .catch(() => [] as BlogPostCard[])
-
-  const [railsResult, emmaHero] = await Promise.all([
+  const [railsResult, emmaHero, notebook] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, 'getEmmaHeroSettings(storefront)'),
+    getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [] as BlogPostCard[], total: 0 })),
   ])
 
   const rails = railsResult.rails
@@ -124,6 +119,12 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
     }
   }
 
+  // Sensation Map (Nº 07). Reads the discovery index, already warmed into the
+  // L1 memo by the getDiscoveryRails call above, so this is an in-memory hit and
+  // never a second KV round-trip. Degrades to an empty payload (band skipped)
+  // on a cold index, same as the rails.
+  const sensationMap = await getSensationMapData()
+
   return {
     variant: 'b',
     rails,
@@ -131,6 +132,7 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
     featured,
     total: railsResult.total,
     contentBlocks: buildHomeContentBlocks(), // deferred — team-managed Sanity surface
-    notebookPosts, // deferred — latest live posts, streamed below the fold
+    notebookPosts: notebook.posts,
+    sensationMap,
   }
 }

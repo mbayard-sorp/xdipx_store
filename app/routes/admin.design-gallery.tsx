@@ -7,13 +7,13 @@
  * `p2-snapshots`) and the `design-critic`'s input. It is `docs/design-doctrine.md`
  * made visible, so the critic has an answer key it can see and score against.
  *
- * v1 scope: tokens + the exported component vocabulary + deep links to the live
- * full-page surfaces. The homepage's section components (Hero, ProductGrid,
- * MeetEmma, ...) are module-private to StorefrontHome.tsx; they are reviewed as
- * full-page screenshots via their real route (`/`), not re-mounted here.
- * Exporting them for an in-gallery mount is a deliberate future (v2 gallery)
- * step, not freelanced now. The Sensation Map instrument is added to this page
- * by its own build (a `#components-sensation-map` section) once that lands.
+ * v1 scope: tokens + the exported component vocabulary + a live mount of the
+ * Sensation Map instrument (the `#components-sensation-map` section) + deep links
+ * to the live full-page surfaces. The homepage's other section components (Hero,
+ * ProductGrid, MeetEmma, ...) are module-private to StorefrontHome.tsx; they are
+ * reviewed as full-page screenshots via their real route (`/`), not re-mounted
+ * here. Exporting them for an in-gallery mount is a deliberate future (v2
+ * gallery) step, not freelanced now.
  *
  * This is a reference sheet, not a customer viewport, so it intentionally shows
  * every token at once (the coral-budget "one per viewport" rule governs shipped
@@ -27,10 +27,12 @@ import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { getDiscoveryIndex } from '~/lib/discovery.server'
+import { getSensationMapData } from '~/lib/sensation-map.server'
 import type { DiscoveryProduct } from '~/types/discovery'
 import type { SensationDialV2 } from '~/types'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { SensationDial } from '~/components/store/SensationDial'
+import { SensationMap } from '~/components/store/SensationMap'
 import { EmailSubscribe } from '~/components/store/EmailSubscribe'
 import { Reveal } from '~/components/motion/Reveal'
 
@@ -59,11 +61,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     .sort((a, b) => a.handle.localeCompare(b.handle))
     .slice(0, 8)
 
+  // Live Sensation Map instrument data so the gallery is an isolated review /
+  // screenshot surface for it too (degrades to null on a cold index).
+  const sensationMap = await getSensationMapData().catch(() => null)
+
   const resolved = specimens.length ? specimens : FIXTURE_SPECIMENS
   return {
     specimens: resolved,
     sampleHandle: resolved[0]?.handle ?? 'best-sellers',
     fromFixture: specimens.length === 0,
+    sensationMap,
   }
 }
 
@@ -190,7 +197,7 @@ function SwatchRow({ label, tokens }: { label: string; tokens: Token[] }) {
 /* ─── Page ─────────────────────────────────────────────────────────────────── */
 
 export default function DesignGalleryPage() {
-  const { specimens, sampleHandle, fromFixture } = useLoaderData<typeof loader>()
+  const { specimens, sampleHandle, fromFixture, sensationMap } = useLoaderData<typeof loader>()
 
   return (
     <div className="mx-auto max-w-[1100px] pb-16">
@@ -215,6 +222,7 @@ export default function DesignGalleryPage() {
           ['components-cards', 'Product cards'],
           ['components-chrome', 'Chrome & CTAs'],
           ['components-sensation-dial', 'Sensation dial'],
+          ['components-sensation-map', 'Sensation Map'],
           ['surfaces', 'Live surfaces'],
         ].map(([id, label]) => (
           <a key={id} href={`#${id}`} className="rounded-full border border-black/10 bg-white px-3 py-1.5 text-[13px] text-ink-3 hover:border-black/20 hover:text-ink" style={BODY}>
@@ -444,6 +452,29 @@ export default function DesignGalleryPage() {
           note="The read-only PDP instrument (SensationDial) that renders the per-dimension sensation rating as coral bars. Distinct from the interactive homepage Sensation Map."
         >
           <SensationDial type="vibrator" valuesV2={DIAL_FIXTURE} />
+        </GallerySection>
+
+        {/* ── Sensation Map (homepage Nº 07) ─────────────────────────────── */}
+        <GallerySection
+          id="components-sensation-map"
+          kicker="Homepage Nº 07 · live"
+          title="The Sensation Map"
+          note="The interactive discovery instrument wired into the storefront homepage. Turn a Type or Feel dial and the result cards cross-fade to real PDPs (via /api/sensation-map). Ground is plum-soft; the selected Type notch is the one coral element."
+        >
+          {sensationMap?.defaultState && sensationMap.defaultMatch ? (
+            <div className="overflow-hidden rounded-[var(--radius-lg)] border border-line">
+              <SensationMap
+                types={sensationMap.types}
+                feels={sensationMap.feels}
+                defaultState={sensationMap.defaultState}
+                defaultMatch={sensationMap.defaultMatch}
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-ink-3" style={BODY}>
+              Discovery index is cold in this environment. Warm it to preview the live instrument.
+            </p>
+          )}
         </GallerySection>
 
         {/* ── Live surfaces ──────────────────────────────────────────────── */}

@@ -28,8 +28,9 @@ import { Await, Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { EmailSubscribe } from '~/components/store/EmailSubscribe'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
+import { SensationMap } from '~/components/store/SensationMap'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
-import { NotebookTeaser } from '~/components/blog/NotebookTeaser'
+import { NotebookRail } from '~/components/blog/NotebookRail'
 import type { BlogPostCard } from '~/types/cms'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
@@ -54,7 +55,7 @@ const BODY = { fontFamily: 'var(--font-body)' } as const
 
 /* The above-the-fold guided entry. All five pills go straight to a matching
    live collection — the redesign v2 spec caps /discover at exactly two links
-   on the page (the Nº 05 mosaic promo tile and the Nº 08 closer band), so
+   on the page (the Nº 05 mosaic promo tile and the Nº 09 closer band), so
    "Surprise me" points at the best-sellers collection instead of the old
    /discover?preset=surprise-me deep link. */
 const MOOD_PILLS = [
@@ -696,7 +697,7 @@ function EmmasEdit({ rails }: { rails: Rail[] }) {
    genuine reviews — wire the Sanity `testimonials` block (Routine B) so the
    team can publish real quotes without a deploy. */
 
-/* ── Nº 07 · Couples — photographic band + rail ────────────────────────────
+/* ── Nº 08 · Couples — photographic band + rail ────────────────────────────
    Today's flat coral-soft box earns no clicks. Rebuilt as a full-bleed
    photographic banner (image + ink scrim + white label + CTA) with a couples
    product rail beneath it. Falls back to the flat banner alone when no
@@ -804,7 +805,7 @@ function Couples({
   )
 }
 
-/* ── Nº 08 · "Still deciding?" dark band — the Compass closer → /discover ─── */
+/* ── Nº 09 · "Still deciding?" dark band — the Compass closer → /discover ─── */
 
 function StillDecidingBand() {
   return (
@@ -835,7 +836,7 @@ function StillDecidingBand() {
   )
 }
 
-/* ── Nº 10 · FAQ (+ FAQPage JSON-LD for AEO) ───────────────────────────────── */
+/* ── Nº 11 · FAQ (+ FAQPage JSON-LD for AEO) ───────────────────────────────── */
 
 const FAQS = [
   {
@@ -861,39 +862,19 @@ const FAQS = [
 ]
 
 /**
- * Homepage "From the Notebook" band (Nº 09) — the branded chrome (band bg,
- * aligned container, section numeral) around the shared `NotebookTeaser`, shown
- * when the team has not published a curated `editorialTiles` block. `NotebookTeaser`
- * runs in `bare` mode so this band owns the width/padding; it renders nothing
- * when there are no posts, so this whole band collapses to null too.
+ * Homepage "From the Notebook" fallback — the branded section chrome around the
+ * shared NotebookRail, shown when the team has not published a curated
+ * `editorialTiles` block. Renders nothing when there are no posts.
  */
-function HomeNotebook({ posts }: { posts: BlogPostCard[] }) {
+function HomeNotebookRail({ posts }: { posts: BlogPostCard[] }) {
   if (!posts.length) return null
   return (
     <section className="bg-paper py-16 md:py-20">
       <div className="mx-auto max-w-[1200px] px-6 md:px-16">
-        <SectionNumeral n="09" className="mb-3 block" />
-        <NotebookTeaser posts={posts} bare />
+        <SectionNumeral n="10" className="mb-3 block" />
+        <NotebookRail posts={posts} heading="From the Notebook" className="" />
       </div>
     </section>
-  )
-}
-
-/**
- * Awaits the DEFERRED latest-posts payload, then renders the homepage Notebook
- * band. Kept as its own component so it can be dropped into both the pending
- * fallback and the resolved (no-`editorialTiles`) branch of the zone below. The
- * band is well below the fold, so a `null` fallback while it streams in is
- * fine; a failed leg already resolved to [] server-side, so `HomeNotebook`
- * simply renders nothing.
- */
-function DeferredHomeNotebook({ posts }: { posts: Promise<BlogPostCard[]> }) {
-  return (
-    <Suspense fallback={null}>
-      <Await resolve={posts} errorElement={null}>
-        {resolved => <HomeNotebook posts={resolved} />}
-      </Await>
-    </Suspense>
   )
 }
 
@@ -902,7 +883,7 @@ function FAQ() {
     <section className="bg-paper-2 py-16 md:py-20">
       <FAQStructuredData faqs={FAQS} />
         <Reveal variant="up" className="mx-auto max-w-[820px] px-6 md:px-16">
-          <SectionNumeral n="10" className="mb-3 block" />
+          <SectionNumeral n="11" className="mb-3 block" />
           <h2
             className="mb-9 text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]"
             style={DISPLAY}
@@ -934,7 +915,7 @@ function FAQ() {
    Order is the stable shell. The deferred Sanity blocks (the team's
    notebook/promo/editorial surface) stream in between Couples and FAQ. */
 
-export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, notebookPosts }: StorefrontData) {
+export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, notebookPosts, sensationMap }: StorefrontData) {
   // Nº 03 grid + Nº 06 rail cold-start fallback — the discovery "best of" set
   // sourced straight from the loader payload's `rails[]` (no new Shopify
   // calls). rails[0] promotes to the bright static grid; rails[1] (or the
@@ -1057,7 +1038,20 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, noteb
         </Await>
       </Suspense>
 
-      {/* Nº 07 · Couples — the `playTogetherBanner` block supplies the band's
+      {/* Nº 07 · The Sensation Map — a plum-soft discovery instrument between the
+          Emma's edit rail (paper-2) and Couples (paper-3) for a tinted beat in
+          the ground rhythm. Skipped entirely on a cold index (no defaultState),
+          so it never renders an empty band. */}
+      {sensationMap.defaultState && sensationMap.defaultMatch && (
+        <SensationMap
+          types={sensationMap.types}
+          feels={sensationMap.feels}
+          defaultState={sensationMap.defaultState}
+          defaultMatch={sensationMap.defaultMatch}
+        />
+      )}
+
+      {/* Nº 08 · Couples — the `playTogetherBanner` block supplies the band's
           photo + copy when published; fallback renders the coral-soft band
           with hardcoded copy (never blank). */}
       <Suspense fallback={<Couples />}>
@@ -1073,19 +1067,16 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, noteb
 
       {/* From the Notebook — a curated `editorialTiles` block wins when the team
           publishes one (each card can also link a product/collection); otherwise
-          the section auto-populates with the latest published posts (via the
-          deferred `notebookPosts`, rendered with `NotebookTeaser`) so fresh
-          daily content always reaches the homepage with no merchandiser action.
-          Both payloads are deferred, so this whole zone streams in below the
-          fold and never blocks the shell's TTFB. */}
-      <Suspense fallback={<DeferredHomeNotebook posts={notebookPosts} />}>
+          the section auto-populates with the latest published posts so fresh
+          daily content always reaches the homepage with no merchandiser action. */}
+      <Suspense fallback={<HomeNotebookRail posts={notebookPosts} />}>
         <Await
           resolve={contentBlocks}
-          errorElement={<DeferredHomeNotebook posts={notebookPosts} />}
+          errorElement={<HomeNotebookRail posts={notebookPosts} />}
         >
           {({ sections, carouselProductMap }) => {
             const notebook = sections.filter(b => b._type === TEAM_NOTEBOOK_TYPE)
-            if (notebook.length === 0) return <DeferredHomeNotebook posts={notebookPosts} />
+            if (notebook.length === 0) return <HomeNotebookRail posts={notebookPosts} />
             return (
               <>
                 {notebook.map(block => (
