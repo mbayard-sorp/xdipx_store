@@ -16,6 +16,9 @@ import blogVideoEmbed     from '../schemas/blocks/blogVideoEmbed.js'
 import richText           from '../schemas/blocks/richText.js'
 import editorBio          from '../schemas/blocks/editorBio.js'
 import productFaq         from '../schemas/blocks/productFaq.js'
+// PDP — editor-curated Related Guides rail (references to blogPost). Additive
+// block on productPage.contentBlocks; reverse product -> guide link for AEO.
+import relatedGuides      from '../schemas/blocks/relatedGuides.js'
 import wayfinderMosaic    from '../schemas/blocks/wayfinderMosaic.js'
 import homepageSections   from '../schemas/homepageSections.js'
 import siteSettings       from '../schemas/siteSettings.js'
@@ -157,6 +160,8 @@ export const schemaTypes = [
   wayfinderMosaic,
   // PDP — per-product FAQ entries (Q&A pairs, additive).
   productFaq,
+  // PDP — editor-curated Related Guides rail (blogPost references, additive).
+  relatedGuides,
   // PDP — rich sensation dial dimension (label + 1/3/5 scale docs).
   // Used inside dialTaxonomy arrays.
   dialDimension,

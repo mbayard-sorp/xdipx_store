@@ -308,6 +308,19 @@ export interface RichTextBlock {
   maxWidth: 'narrow' | 'medium' | 'wide'
 }
 
+// ─── Related Guides (PDP) ────────────────────────────────────────────────
+// Editor-curated Notebook posts for a product page. `guides` is resolved to
+// card shape (published only) at query time in getProductPageBlocks.
+
+export interface RelatedGuidesBlock {
+  _type: 'relatedGuides'
+  _key: string
+  active: boolean
+  order: number
+  heading?: string
+  guides: BlogPostCard[]
+}
+
 // ─── Union ────────────────────────────────────────────────────────────────
 
 export type ContentBlock =
@@ -325,6 +338,7 @@ export type ContentBlock =
   | RichTextBlock
   | EditorBioBlock
   | WayfinderMosaicBlock
+  | RelatedGuidesBlock
 
 export interface HomepageSections {
   _id: string
