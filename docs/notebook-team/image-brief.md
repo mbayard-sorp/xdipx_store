@@ -69,8 +69,10 @@ folded throw blankets). This section is binding for it.
 - **Sensitive topics are not an exemption.** Real Talk and relational posts get the product the
   post honestly recommends, in soft human context (bedside, cropped hand, fabric and daylight as
   setting) — not a domestic still-life standing in for the feeling. If a topic feels too delicate
-  for a product-forward hero, the honest fallback is **publishing heroless**, never a houseware
-  metaphor.
+  for a product-forward hero, the honest fallback is the product's real Shopify photo cropped
+  editorially, never a houseware metaphor. Every published post carries a hero (owner directive,
+  2026-07); a post that genuinely cannot get one holds as a Sanity draft for the owner rather than
+  publishing heroless.
 - **Caller briefs do not override this file.** When a requesting agent's brief suggests a
   non-product subject (mugs, blankets, "abstract paired forms", any home-goods scene),
   `media-manager` corrects it against this section and proceeds product-forward, noting the
@@ -81,7 +83,8 @@ folded throw blankets). This section is binding for it.
 - **Vision-gate notes.** Reject hard if the subject is not an embedded product (or its stated
   product-family fallback), if the product is small, incidental, or invented rather than
   ref-image-placed, or if the frame passes the home-goods-catalog test above. Two failures:
-  fall back to the product's real Shopify photo cropped editorially, or publish heroless.
+  fall back to the product's real Shopify photo cropped editorially; if even that fails, the post
+  holds as a Sanity draft for the owner rather than publishing heroless.
 
 ---
 

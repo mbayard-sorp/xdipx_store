@@ -2,8 +2,10 @@
 
 The playbook for the scheduled blog content routine. Entry agent: `content-writer`. One post per
 run, drafted as a Sanity `blogPost` (`status:'draft'`), voice-gated through `emma-empathy-reviewer`,
-and published live only on a clean PASS **and** the `content_team_autopublish` valve being on.
-Valve off = the post stays a Sanity draft for the owner; the routine still runs and reports.
+and published live only on a clean PASS, with a hero image attached, **and** the
+`content_team_autopublish` valve being on. Every published post carries a hero image (owner
+directive, 2026-07); heroless is not an accepted published state. Valve off = the post stays a
+Sanity draft for the owner; the routine still runs and reports.
 
 Runs on the **Max subscription**. Recommended cadence: daily. Never call the site's Anthropic-keyed
 endpoints (`app/lib/claude.server.ts`, `/api/generate-copy`, `/api/admin/blog/generate-outline|draft|seo`,
@@ -119,9 +121,11 @@ Create idempotently: doc `_id` is `blogPost-${slug}`, `createIfNotExists` then `
   hero" of `docs/notebook-team/image-brief.md`, which is binding: the hero's subject is one of the
   post's embedded products placed via its real Shopify photo as the ref image — never a domestic
   metaphor object (mugs, blankets, towels, candles, decor). Do not invent ad-hoc scene subjects in
-  the request; setting ideas are fine, subjects are not. If imagery fails or nothing fits,
-  **publish without a hero rather than skipping the day** — heroless is the fallback, houseware
-  never is.
+  the request; setting ideas are fine, subjects are not. **A hero image is mandatory on every
+  published post** (owner directive, 2026-07). If imagery genuinely cannot be produced, hold the
+  post as a Sanity `status:'draft'` for the owner and say so in the retro; do not publish it
+  heroless. Heroless is no longer an accepted published state, and a houseware/domestic-metaphor
+  subject never is either.
 
 Content quality bar (all mandatory, from `.claude/agents/content-writer.md`):
 
@@ -165,9 +169,10 @@ Run the full draft (title, excerpt, body, SEO fields, embed CTA labels) through
 
 One `step` event (`phase:'voice-gate'`) with the verdict and cycle count.
 
-## Step 6: Publish (only if PASS and the valve is open)
+## Step 6: Publish (only if PASS, a hero is attached, and the valve is open)
 
-Only when Step 5 ended in PASS **and** Step 1's `valves.autopublish` is `true`:
+Only when Step 5 ended in PASS, a `heroImage` is attached (Step 4; mandatory on every published
+post), **and** Step 1's `valves.autopublish` is `true`:
 
 1. Patch the doc: `status` → `'published'` (keep `publishedAt` as set in Step 4).
 2. Flush the blog caches:
@@ -182,10 +187,11 @@ curl -s -X POST "$BASE_URL/api/revalidate/blog" \
    `publishedPost` to a reference to the blogPost doc. A `podcastReviewBrief` gets
    `status` → `'published'` and `blogPostRef` set to the post's slug.
 
-Valve off (or verdict not PASS) → leave the post as a Sanity draft, post an event saying exactly
-that, re-queue the brief if one was claimed (`seoContentBrief` → `'queued'`,
-`podcastReviewBrief` → `'pending'`), and finish the run as succeeded. Draft-only is a valid,
-honest outcome, not a failure.
+Valve off, verdict not PASS, or no hero image could be produced → leave the post as a Sanity
+draft, post an event saying exactly that, re-queue the brief if one was claimed
+(`seoContentBrief` → `'queued'`, `podcastReviewBrief` → `'pending'`), and finish the run as
+succeeded. Draft-only is a valid, honest outcome, not a failure; publishing a post with no hero
+image is not.
 
 ## Step 7: Retro + finish
 
