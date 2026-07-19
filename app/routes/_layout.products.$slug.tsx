@@ -10,7 +10,7 @@ import {
   getProductsByIds, getMainMenu,
 } from '~/lib/shopify.server'
 import { resolveBreadcrumbs, type BreadcrumbCrumb } from '~/lib/breadcrumbs.server'
-import { getProductPageBlocks, getProductFaqs, getPdpTrustBar, getNotebookPostsForProduct } from '~/lib/sanity.server'
+import { getProductPageBlocks, getProductFaqs, getPdpTrustBar, getNotebookPostsForProduct, getNotebookPostsForProductType } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 // Reviews: UI + aggregateRating JSON-LD flip together behind the
 // reviews_pdp_enabled valve. They must never be decoupled (Google's
@@ -90,7 +90,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // round-trip. The customer token (cookie read) rides along too. The bundle
   // lookup rides along here as well (cached() so this stays a cheap KV hit) —
   // its result is branched on after the batch resolves, below.
-  const [deal, pdpBlocks, fbtHandles, companionBundle, faqs, mainMenu, pdpTrustBar, customerToken, bundle, notebookPosts] = await Promise.all([
+  const [deal, pdpBlocks, fbtHandles, companionBundle, faqs, mainMenu, pdpTrustBar, customerToken, bundle, embedNotebookPosts] = await Promise.all([
     getDealByHandle(slug),
     getProductPageBlocks(slug),
     getFrequentlyBoughtWith(slug, 4),
@@ -136,6 +136,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   if (!deal) throw new Response('Product not found', { status: 404 })
   if (deal.dealStatus === 'archived') throw new Response('This product is no longer available', { status: 410 })
+
+  // Related-guides rail data. Posts that embed THIS product are the strongest
+  // signal, so they win when they exist. Otherwise fall back to the latest
+  // guides sharing this product's type so the product still links out to
+  // editorial (closes the product -> guide loop for AEO). A curated
+  // relatedGuides content block, when present, overrides this rail in the
+  // component. The fallback query only fires when there are no direct posts.
+  let notebookPosts = embedNotebookPosts
+  if (notebookPosts.length === 0 && deal.productTypeDial) {
+    notebookPosts = await getNotebookPostsForProductType(deal.productTypeDial, slug, 3)
+  }
 
   // Resolve current customer (for sticky vote state + gating). Failures here
   // are non-fatal — PDP still renders for anonymous users.
@@ -491,6 +502,12 @@ function ProductPage() {
   const fbtProducts = loaderData.fbtProducts
   const pairsWithItems = loaderData.pairsWithItems
   const notebookPosts = loaderData.notebookPosts
+  // When an editor has curated a relatedGuides block (with published picks),
+  // that block renders the rail at its chosen position — suppress the automatic
+  // fallback rail below to avoid two Notebook rails on one page.
+  const hasCuratedGuides = pdpBlocks.some(
+    b => b._type === 'relatedGuides' && b.guides.length > 0,
+  )
   const productVoteAggregateLoaded = loaderData.productVoteAggregate
   const customerProductVoteLoaded  = loaderData.customerProductVote
   const isLoggedIn                 = loaderData.isLoggedIn
@@ -1080,7 +1097,9 @@ function ProductPage() {
         {companionBundle && (
           <BundleSaveCard bundle={companionBundle} buyButtonText={buyButtonText} />
         )}
-        <NotebookRail posts={notebookPosts} heading="From the Notebook" />
+        {!hasCuratedGuides && (
+          <NotebookRail posts={notebookPosts} heading="From the Notebook" />
+        )}
       </div>
 
       {/* CMS content blocks configured in Sanity for this product */}

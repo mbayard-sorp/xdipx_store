@@ -15,6 +15,7 @@ import { BonusDealSection }   from './BonusDealSection'
 import { RichTextBlock }      from './RichTextBlock'
 import { TrustBarBlock }      from './TrustBarBlock'
 import { EditorBioBlock }     from './EditorBioBlock'
+import { NotebookRail }       from '~/components/blog/NotebookRail'
 
 interface ContentBlockRendererProps {
   block: ContentBlock
@@ -75,6 +76,15 @@ function renderBlock(
       return <RichTextBlock block={block} />
     case 'editorBio':
       return <EditorBioBlock block={block} />
+    case 'relatedGuides':
+      // Curated Notebook picks for a PDP. Blocks render outside the PDP's
+      // content container, so wrap to the same max width. Published-only +
+      // shape normalization happens in getProductPageBlocks.
+      return block.guides.length > 0 ? (
+        <div className="max-w-6xl mx-auto px-4">
+          <NotebookRail posts={block.guides} heading={block.heading || 'Related guides'} />
+        </div>
+      ) : null
     default:
       return null
   }

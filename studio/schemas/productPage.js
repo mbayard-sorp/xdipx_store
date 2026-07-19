@@ -556,6 +556,9 @@ export default {
         { type: 'testimonials'       },
         { type: 'trustBar'           },
         { type: 'editorBio'          },
+        // Additive — editor-curated Notebook guides for this product. Optional;
+        // the PDP falls back to same-product-type guides when absent.
+        { type: 'relatedGuides'      },
       ],
     },
   ],

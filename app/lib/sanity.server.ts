@@ -100,6 +100,15 @@ const CONTENT_BLOCKS_PROJECTION = `
       instagram, email
     }
   ),
+  // relatedGuides — dereference the curated blogPost picks to NotebookRail card
+  // shape at query time. The status field rides along so getProductPageBlocks
+  // can drop unpublished picks before they reach the storefront.
+  "guides": select(
+    _type == "relatedGuides" => guides[]->{
+      _id, title, "slug": slug.current, excerpt, publishedAt, featured,
+      "heroImageUrl": heroImage.asset->url, heroImageAlt, status
+    }
+  ),
 `
 
 const projectId = process.env['SANITY_PROJECT_ID']
@@ -917,7 +926,17 @@ export async function getProductPageBlocks(handle: string): Promise<ContentBlock
       }`,
       { handle }
     )
-    return data?.sections ?? []
+    // relatedGuides blocks carry dereferenced blogPost picks. Keep only
+    // published ones and normalize to BlogPostCard shape (drop the transient
+    // `status`; readingTime is display-only and unused by NotebookRail, so 0
+    // is fine here).
+    return (data?.sections ?? []).map((section: any) => {
+      if (section?._type !== 'relatedGuides') return section
+      const guides = (section.guides ?? [])
+        .filter((g: any) => g && g.status === 'published')
+        .map(({ status, ...card }: any) => ({ ...card, readingTime: 0 }))
+      return { ...section, guides }
+    }) as ContentBlock[]
   } catch (err) {
     console.error('[sanity] getProductPageBlocks error:', err)
     return []
@@ -1316,6 +1335,43 @@ export async function getNotebookPostsForProductHandles(handles: string[], limit
     return result
   } catch (err) {
     console.error('[sanity] getNotebookPostsForProductHandles error:', err)
+    return []
+  }
+}
+
+// Fallback for the PDP Related Guides rail: the latest published posts that
+// embed ANY product sharing this product's type (productTypeDial), excluding
+// the current product. Powers the reverse product -> guide link for products
+// that no post features directly yet. Mirrors getNotebookPostsForProductHandles
+// but resolves the sibling handle set inline by type. readingTime 0 (no body
+// fetched) skips the min-read chip.
+export async function getNotebookPostsForProductType(
+  productType: string,
+  excludeHandle: string,
+  limit = 3,
+): Promise<BlogPostCard[]> {
+  if (!projectId || !productType) return []
+
+  const cacheKey = `notebook-for-type:${productType}:${excludeHandle}:${limit}`
+  const cached = getCachedBlog<BlogPostCard[]>(cacheKey, BLOG_CACHE_TTL)
+  if (cached) return cached
+
+  try {
+    const client = getClient()
+    if (!client) return []
+    const posts = await client.fetch<Omit<BlogPostCard, 'readingTime'>[]>(
+      `*[_type == "blogPost" && status == "published"
+        && count(body[_type == "blogProductEmbed" && productHandle in
+          *[_type == "productPage" && productTypeDial == $type && shopifyHandle != $handle].shopifyHandle
+        ]) > 0]
+        | order(publishedAt desc) [0...$limit] { ${BLOG_POST_CARD_PROJECTION} }`,
+      { type: productType, handle: excludeHandle, limit },
+    )
+    const result: BlogPostCard[] = (posts ?? []).map((p) => ({ ...p, readingTime: 0 }))
+    setCachedBlog(cacheKey, result)
+    return result
+  } catch (err) {
+    console.error('[sanity] getNotebookPostsForProductType error:', err)
     return []
   }
 }
