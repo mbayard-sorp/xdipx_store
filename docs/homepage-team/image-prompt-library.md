@@ -91,6 +91,34 @@ Scaffold (always with `--ref-image` when the promo targets a product or collecti
 **Rejects:** theme props replacing the product as subject; baked-in sale text (all copy lives
 in the markup).
 
+## Notebook — Daily post hero (`docs/notebook-team/image-brief.md` §0, ~1200×900)
+
+Scaffold (always with `--ref-image` = the post's embedded product's real Shopify photo, fal Kontext,
+`imageSize: 'landscape_4_3'`):
+
+> Bright warm editorial magazine photograph on a pure white paper background, warm golden-hour
+> daylight falling softly from one side, calm and unembarrassed mood, tasteful and non-explicit.
+> The {product} standing large and bold in the frame, placed upright on a clean white paper
+> surface, keep the product packaging and label exactly as shown in the reference image, unaltered
+> and legible, do not invent or distort any label text. {one small category-accent prop — e.g. a
+> blurred sage-green plant leaf sprig for `care`, nothing for `guides`/`wellness-basics`, a second
+> product for `comparisons`}, one crisp warm shadow, generous open negative space around the
+> product, editorial magazine still life photography, shot on medium format, shallow depth of
+> field, warm inviting color grade. No towels, no cloth, no washcloth, no folded fabric, no
+> candles, no mugs, no cups, no notebooks, no fruit, no other objects, not clinical, not a
+> lightbox, not dark, not moody, no garbled or illegible label text.
+
+**Keepers:** JO H2O Original Water-Based Lubricant (`jo-h2o-original-water-based-lubricant-4-oz`),
+sage-leaf + water-droplet care accent, warm dappled daylight on cream/white paper →
+`image-e75e55758b2fc4594fd24ec197a561744163c299-1184x880-jpg` (post: `how-do-you-care-for-silicone-toys`).
+
+**Rejects:** first pass on the same post added a folded white washcloth as a "care" prop — the
+brief's §0 banned list explicitly bans towels/cloth; also read as a clinical product-lightbox
+(flat white sweep, drop shadow, no warm daylight) and FLUX Kontext garbled the fine-print label
+text into illegible nonsense. Fix: drop cloth/towel props entirely, ask for warm directional
+daylight (not lightbox), add an explicit "keep the label exactly as shown, do not invent text"
+instruction, and use a category-appropriate small accent prop (leaf for care) instead of fabric.
+
 ---
 
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
