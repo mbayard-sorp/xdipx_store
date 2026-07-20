@@ -13,7 +13,9 @@ function toRelativePath(url: string): string {
   }
 }
 
-// Top-level "Sale" tab gets coral accent treatment to match the desktop
+// Top-level "Sale" tab gets plum accent treatment to match the desktop
+// (plum = emphasis per the doctrine; coral stays reserved for the one
+// primary CTA per viewport)
 // mega-menu (MegaMenu.tsx:17 — ACCENT_LABELS).
 const isAccentLabel = (label: string) => label.trim().toLowerCase() === 'sale'
 
@@ -274,7 +276,7 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
                 color: active
                   ? 'var(--color-coral-deep)'
                   : accent
-                    ? 'var(--color-coral)'
+                    ? 'var(--color-plum)'
                     : 'var(--color-ink)',
               }}
             >

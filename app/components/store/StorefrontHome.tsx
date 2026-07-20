@@ -35,7 +35,14 @@ import type { BlogPostCard } from '~/types/cms'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
 import { Reveal } from '~/components/motion/Reveal'
-import { trackViewItemList, trackSelectItem, type GA4Item } from '~/lib/analytics.client'
+import {
+  trackViewItemList,
+  trackSelectItem,
+  trackCtaClick,
+  trackHomeVariantView,
+  trackHomeScrollDepth,
+  type GA4Item,
+} from '~/lib/analytics.client'
 import type { StorefrontData } from '~/lib/storefront-home.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
 import type { EmmaHeroSettings, WayfinderMosaicBlock, PlayTogetherBannerBlock, EmmaCuratedRailBlock } from '~/types/cms'
@@ -47,6 +54,29 @@ const TEAM_RAIL_TYPE = 'emmaCuratedRail'
 const TEAM_NOTEBOOK_TYPE = 'editorialTiles'
 const TEAM_WAYFINDER_TYPE = 'wayfinderMosaic'
 const MAX_TEAM_RAILS = 4
+
+/** Fires trackHomeScrollDepth once per page view when the band first becomes
+    ~25% visible. Returns a ref for the band's <section>. Client-only effect,
+    SSR renders the band untouched. */
+function useSectionSeen(section: 'meet-emma' | 'couples') {
+  const ref = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof IntersectionObserver === 'undefined') return
+    const io = new IntersectionObserver(
+      entries => {
+        if (entries.some(e => e.isIntersecting)) {
+          trackHomeScrollDepth(section)
+          io.disconnect()
+        }
+      },
+      { threshold: 0.25 },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [section])
+  return ref
+}
 
 const MONO = { fontFamily: 'var(--font-mono)' } as const
 const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 400 } as const
@@ -115,7 +145,9 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
 
   return (
     <section className="bg-paper">
-      <div className="mx-auto grid max-w-[1320px] items-center gap-10 px-6 py-10 md:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] md:gap-16 md:px-16 md:py-16">
+      {/* Tighter vertical rhythm at 375px so the product still enters the first
+          viewport (design-critic finding: the mobile fold was all type). */}
+      <div className="mx-auto grid max-w-[1320px] items-center gap-7 px-6 py-7 md:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] md:gap-16 md:px-16 md:py-16">
         {/* text column — single Reveal group, above the fold */}
         <Reveal variant="up" disabled className="min-w-0">
           <p className="mb-5 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
@@ -138,26 +170,28 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
           )}
 
           {emmaHero?.body ? (
-            <p className="mt-6 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3" style={BODY}>
+            <p className="mt-5 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3 line-clamp-3 md:mt-6 md:line-clamp-none" style={BODY}>
               {emmaHero.body}
             </p>
           ) : (
-            <p className="mt-6 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3" style={BODY}>
+            <p className="mt-5 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3 line-clamp-3 md:mt-6 md:line-clamp-none" style={BODY}>
               A short, checked selection instead of a wall of options. Start with the one below, or
               tell us what you're after.
             </p>
           )}
 
+          {/* Pull quote yields its fold space to the product still on mobile. */}
           {emmaHero?.pullQuote && (
-            <p className="mt-6 text-[1.05rem] italic text-sage" style={DISPLAY}>
+            <p className="mt-6 hidden text-[1.05rem] italic text-sage md:block" style={DISPLAY}>
               ♥ {emmaHero.pullQuote}
             </p>
           )}
 
           {/* CTAs — one primary coral, one clearly-secondary ghost */}
-          <div className="mt-7 flex flex-wrap items-center gap-3">
+          <div className="mt-5 flex flex-wrap items-center gap-3 md:mt-7">
             <Link
               to={primaryHref}
+              onClick={() => trackCtaClick('hero-primary', 'hero')}
               className="inline-flex items-center gap-2 rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white transition-transform hover:-translate-y-0.5"
               style={BODY}
             >
@@ -171,6 +205,7 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
             </Link>
             <Link
               to="/collections"
+              onClick={() => trackCtaClick('hero-secondary', 'hero')}
               className="inline-flex items-center gap-2 rounded-full border border-line-2 px-5 py-3 text-[15px] font-medium text-ink transition-colors hover:border-ink-3"
               style={BODY}
             >
@@ -181,7 +216,7 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
           </div>
 
           {/* guided prompt + horizontal mood pills */}
-          <p className="mt-7 text-[14px] text-ink-3" style={BODY}>
+          <p className="mt-5 text-[14px] text-ink-3 md:mt-7" style={BODY}>
             Where do you want to start?
           </p>
           <div className="-mx-1 mt-3 flex gap-2.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -189,6 +224,7 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
               <Link
                 key={pill.label}
                 to={pill.to}
+                onClick={() => trackCtaClick(`mood-pill:${pill.label}`, 'hero')}
                 className="flex-none whitespace-nowrap rounded-full border border-line bg-paper px-[18px] py-2.5 text-[14px] text-ink transition-colors hover:bg-paper-2"
                 style={BODY}
               >
@@ -388,8 +424,9 @@ function ProductGrid({
    text — with a large coral opening ♥ as a display mark. */
 
 function MeetEmma() {
+  const seenRef = useSectionSeen('meet-emma')
   return (
-    <section id="meet-emma" className="bg-paper-2 py-16 md:py-20">
+    <section id="meet-emma" ref={seenRef} className="bg-paper-2 py-16 md:py-20">
         <div className="mx-auto flex max-w-[1320px] flex-wrap items-center gap-10 px-6 md:gap-16 md:px-16">
           <Reveal variant="scale" className="min-w-[240px] max-w-[420px] flex-1">
             <div className="aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-lg)] bg-paper-3 ring-[6px] ring-sage/15">
@@ -425,6 +462,7 @@ function MeetEmma() {
                 brief caps the page at the closer plus one preset pill). */}
             <Link
               to="#discover"
+              onClick={() => trackCtaClick('find-your-fit', 'meet-emma')}
               className="mt-7 inline-flex items-center gap-2 rounded-full border border-line-2 px-5 py-3 text-[15px] font-medium text-ink transition-colors hover:border-ink-3"
               style={BODY}
             >
@@ -550,6 +588,7 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
           <Reveal variant="scale">
             <Link
               to={promoCtaLink}
+              onClick={() => trackCtaClick('find-your-fit', 'mosaic-promo')}
               className="relative flex flex-wrap items-center justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
             >
               {promo?.image?.url && (
@@ -777,8 +816,9 @@ function Couples({
   block?: PlayTogetherBannerBlock | undefined
   rail?: Rail | undefined
 }) {
+  const seenRef = useSectionSeen('couples')
   return (
-    <section className="bg-paper-3 py-16 md:py-20">
+    <section ref={seenRef} className="bg-paper-3 py-16 md:py-20">
         <div className="mx-auto max-w-[1320px] px-6 md:px-16">
           <PhotoBand block={block} />
         </div>
@@ -826,6 +866,7 @@ function StillDecidingBand() {
           </h2>
           <Link
             to="/discover"
+            onClick={() => trackCtaClick('find-your-fit', 'still-deciding')}
             className="inline-flex items-center gap-2 rounded-full bg-coral px-7 py-4 text-[15px] font-medium text-white transition-transform hover:-translate-y-0.5"
             style={BODY}
           >
@@ -916,6 +957,19 @@ function FAQ() {
    notebook/promo/editorial surface) stream in between Couples and FAQ. */
 
 export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, notebookPosts, sensationMap }: StorefrontData) {
+  // Segment variant-b sessions in GA4 (flip keep/rollback analysis). Fires once
+  // per page view; the localStorage flag distinguishes first-time visitors.
+  useEffect(() => {
+    let hadPriorSession = false
+    try {
+      hadPriorSession = localStorage.getItem('xdipx_home_seen') === '1'
+      localStorage.setItem('xdipx_home_seen', '1')
+    } catch {
+      // Private mode / storage denied — report as a fresh session.
+    }
+    trackHomeVariantView({ variant: 'b', hadPriorSession })
+  }, [])
+
   // Nº 03 grid + Nº 06 rail cold-start fallback — the discovery "best of" set
   // sourced straight from the loader payload's `rails[]` (no new Shopify
   // calls). rails[0] promotes to the bright static grid; rails[1] (or the

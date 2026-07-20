@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import type { EditorialTilesBlock } from '~/types/cms'
 import { bgClass, isDarkBg } from './bgStyle'
+import { OptimizedImage } from '~/components/store/OptimizedImage'
 
 interface EditorialTilesProps {
   block: EditorialTilesBlock
@@ -48,11 +49,11 @@ export function EditorialTiles({ block }: EditorialTilesProps) {
               <article className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg hover:shadow-sage/10 transition-all duration-300 card-lift">
                 {tile.image?.url ? (
                   <div className="aspect-[4/3] overflow-hidden bg-cream-2">
-                    <img
+                    <OptimizedImage
                       src={tile.image.url}
                       alt={tile.image.alt ?? tile.label}
+                      sizes="(max-width: 640px) 100vw, 33vw"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      loading="lazy"
                     />
                   </div>
                 ) : (
@@ -72,7 +73,9 @@ export function EditorialTiles({ block }: EditorialTilesProps) {
                   )}
                   {tile.linkLabel && (
                     <p className="text-sage text-sm font-semibold mt-3">
-                      {tile.linkLabel} →
+                      {/* Whitelist CTA labels may already carry the arrow ("Take a
+                          peek →") — strip it before appending ours or it doubles. */}
+                      {tile.linkLabel.replace(/\s*→\s*$/, '')} →
                     </p>
                   )}
                 </div>

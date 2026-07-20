@@ -13,7 +13,8 @@ function toRelativePath(url: string): string {
   }
 }
 
-// "Sale" top-level item gets accent styling
+// "Sale" top-level item gets accent styling (plum = emphasis; coral is
+// reserved for the one primary CTA per viewport, per the design doctrine)
 const ACCENT_LABELS = new Set(['sale'])
 
 // ─── Desktop Mega Menu ────────────────────────────────────────────────────────
@@ -69,7 +70,7 @@ export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuIte
                 className={[
                   'px-3 py-1.5 rounded-full text-sm font-medium transition-all relative',
                   isAccent
-                    ? 'text-coral hover:text-coral font-semibold'
+                    ? 'text-plum hover:text-plum-2 font-semibold'
                     : activeIndex === idx
                       ? 'text-sage font-semibold'
                       : 'text-ink/70 hover:text-sage',
@@ -91,7 +92,7 @@ export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuIte
                 className={[
                   'px-3 py-1.5 rounded-full text-sm font-medium transition-all',
                   isAccent
-                    ? 'text-coral hover:text-coral font-semibold'
+                    ? 'text-plum hover:text-plum-2 font-semibold'
                     : 'text-ink/70 hover:text-sage',
                 ].join(' ')}
                 style={{ fontFamily: 'var(--font-display)' }}

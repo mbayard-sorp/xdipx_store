@@ -53,9 +53,12 @@ export function StorefrontProductCard({ product, priority = false, onSelect, flu
         ) : (
           <div className="absolute inset-0 grid place-items-center text-sage text-4xl">♥</div>
         )}
+        {/* Ink, not coral: the doctrine's coral budget reserves coral for the
+            one primary CTA per viewport, and a grid of coral % badges reads
+            as a discount wall (design-critic BLOCK finding, 2026-07-20). */}
         {onSale && savePct > 0 && (
           <span
-            className="absolute left-3 top-3 rounded-full bg-coral px-2.5 py-1 text-[11px] font-semibold text-white"
+            className="absolute left-3 top-3 rounded-full bg-ink px-2.5 py-1 text-[11px] font-semibold text-paper"
             style={{ fontFamily: 'var(--font-body)' }}
           >
             {savePct}% off

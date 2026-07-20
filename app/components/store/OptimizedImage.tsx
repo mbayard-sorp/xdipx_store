@@ -4,6 +4,7 @@ import {
   shopifyImageSrcSet,
   shopifyImageSrcSetFmt,
 } from '~/lib/shopify-image'
+import { isSanityCdn, sanityImageUrl, sanityImageSrcSet } from '~/lib/sanity-image'
 
 // Matches the hero-preload srcset widths in the homepage + PDP meta() helpers
 // so a preloaded AVIF candidate is an exact cache hit for what <picture> picks.
@@ -34,11 +35,18 @@ interface OptimizedImageProps {
 }
 
 /**
- * Shared responsive image. For Shopify CDN URLs it emits a <picture> with
- * AVIF + WebP sources, a width-based srcset, and a sized JPG/PNG fallback so
- * mobile never pays for a 1200px+ hero asset. Non-Shopify URLs (Imagen mood
- * images, discovery thumbnails) render a plain <img> unchanged. SSR-safe —
- * no .client suffix, no browser-only APIs.
+ * Shared responsive image, multi-vendor by design: Shopify CDN for product
+ * photography, Sanity CDN for editorial/generated art. All vendor-specific URL
+ * logic stays in ~/lib/shopify-image and ~/lib/sanity-image (the Oxygen
+ * migration swaps those, not this component).
+ *
+ * Shopify URLs emit a <picture> with AVIF + WebP sources, a width-based
+ * srcset, and a sized JPG/PNG fallback so mobile never pays for a 1200px+
+ * hero asset. Sanity URLs emit a width srcset with `auto=format`, which makes
+ * the Sanity CDN negotiate AVIF/WebP via the Accept header — one srcset covers
+ * modern formats, no <source> pair needed. Other URLs (static /public assets)
+ * render a plain <img> unchanged. SSR-safe — no .client suffix, no
+ * browser-only APIs.
  */
 export function OptimizedImage({
   src,
@@ -53,11 +61,23 @@ export function OptimizedImage({
   draggable,
 }: OptimizedImageProps) {
   const shopify = isShopifyCdn(src)
+  const sanity = !shopify && isSanityCdn(src)
+
+  const fallbackSrc = shopify
+    ? shopifyImageUrl(src, fallbackWidth)
+    : sanity
+      ? sanityImageUrl(src, { w: fallbackWidth })
+      : src
+  const srcSet = shopify
+    ? shopifyImageSrcSet(src, widths)
+    : sanity
+      ? sanityImageSrcSet(src, widths)
+      : undefined
 
   const img = (
     <img
-      src={shopify ? shopifyImageUrl(src, fallbackWidth) : src}
-      {...(shopify ? { srcSet: shopifyImageSrcSet(src, widths), sizes } : {})}
+      src={fallbackSrc}
+      {...(srcSet ? { srcSet, sizes } : {})}
       alt={alt}
       {...(width != null ? { width } : {})}
       {...(height != null ? { height } : {})}

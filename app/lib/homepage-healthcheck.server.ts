@@ -16,7 +16,12 @@
  */
 import { Sentry } from '~/lib/sentry.server'
 import { kvGet, kvSet } from '~/lib/kv.server'
-import { getHomepageDocRaw, restoreHomepageDoc } from '~/lib/sanity.server'
+import {
+  getHomepageDocRaw,
+  restoreHomepageDoc,
+  getHomeConfig,
+  invalidateCmsCache,
+} from '~/lib/sanity.server'
 import { warmHomepagePayloadA, invalidateHomepagePayloadA } from '~/lib/homepage-payload.server'
 
 const LAST_GOOD_KEY = 'homepage:healthcheck:lastgood'
@@ -53,6 +58,24 @@ export interface HomepageHealthResult {
   rolledBack: boolean
   alerted: boolean
   message?: string
+}
+
+/**
+ * Which variant `/` is actually serving for anonymous traffic, mirroring
+ * resolveHomeVariant's cookieless fallback chain (Sanity homeConfig wins,
+ * then HOME_VARIANT env, then legacy). The post-rollback rewarm must target
+ * whatever payload the live homepage reads, not assume Variant A.
+ */
+async function activeServedVariant(): Promise<'a' | 'b' | 'legacy'> {
+  try {
+    const cfg = await getHomeConfig()
+    if (cfg?.activeVariant === 'a' || cfg?.activeVariant === 'b') return cfg.activeVariant
+  } catch {
+    /* Sanity down — fall through to env, same as the live resolver. */
+  }
+  const env = process.env['HOME_VARIANT']
+  if (env === 'a' || env === 'b' || env === 'legacy') return env
+  return 'legacy'
 }
 
 function siteOrigin(): string {
@@ -233,15 +256,25 @@ export async function runHomepageHealthcheck(): Promise<HomepageHealthResult> {
         lastGood['_type'] === 'homepageSections' &&
         Array.isArray(lastGood['sections'])
       if (valid) {
-        // Bust the payload cache FIRST so any request during recovery falls back
-        // to live assembly (which reads the rolled-back Sanity doc), then restore
-        // + re-warm the precomputed Variant A payload. (The edge CDN is still
-        // eventually-consistent — ~60s — there's no purge API to force sooner.)
+        // Bust the payload + Sanity KV caches FIRST so any request during
+        // recovery falls back to live assembly (which reads the rolled-back
+        // Sanity doc), then restore and re-warm the payload the live variant
+        // actually serves. (The edge CDN is still eventually-consistent —
+        // ~60s — there's no purge API to force sooner.)
         await invalidateHomepagePayloadA().catch(() => {})
+        invalidateCmsCache()
         await restoreHomepageDoc(lastGood as Record<string, unknown>)
-        await warmHomepagePayloadA({ force: true }).catch((e) =>
-          console.error('[homepage-healthcheck] payload rewarm failed', e),
-        )
+        const servedVariant = await activeServedVariant()
+        if (servedVariant === 'b') {
+          // Variant b has no precomputed payload: it assembles from the
+          // discovery index plus the Sanity reads invalidated above, so the
+          // next request self-warms against the rolled-back doc.
+          invalidateCmsCache()
+        } else {
+          await warmHomepagePayloadA({ force: true }).catch((e) =>
+            console.error('[homepage-healthcheck] payload rewarm failed', e),
+          )
+        }
         result.rolledBack = true
       } else {
         result.message = lastGood
@@ -279,7 +312,7 @@ export async function runHomepageHealthcheck(): Promise<HomepageHealthResult> {
       '',
       `**Auto-recovery:** ${
         result.rolledBack
-          ? 'rolled the Sanity homepage doc back to last-good and re-warmed the Variant A payload.'
+          ? 'rolled the Sanity homepage doc back to last-good and re-warmed the payload for the live variant.'
           : result.message ?? 'none'
       }`,
       '',

@@ -40,6 +40,7 @@ import type { ProductCarouselBlock, TrustBarBlock as TrustBarBlockType } from '~
 import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~/lib/analytics.client'
 import { trackFbViewContent } from '~/lib/meta-pixel.client'
 import { buildSocialMeta } from '~/lib/social-meta'
+import { heroPreloadTag } from '~/lib/image-preload'
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
 import { withTimeout } from '~/lib/with-timeout.server'
 
@@ -316,32 +317,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return isAdmin ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
 }
 
-// LCP preload — mirrors the helper in _layout.products.$slug.tsx so the
-// daily-deal hero image starts fetching during initial parse, before React
-// boots. Same imagesrcset/imagesizes contract as the PDP gallery.
-function preloadHeroImageTag(imageUrl: string | undefined | null) {
-  if (!imageUrl) return null
-  const sep = imageUrl.includes('?') ? '&' : '?'
-  // AVIF-typed so the candidate matches what <OptimizedImage>'s <picture>
-  // selects (its AVIF source). Same widths + imagesizes as the hero's srcset
-  // + sizes → exact cache hit. Browsers without AVIF skip this preload and
-  // fall through to the picture's webp/jpg source — no wasted bytes.
-  return {
-    tagName: 'link',
-    rel: 'preload',
-    as: 'image',
-    type: 'image/avif',
-    href: `${imageUrl}${sep}width=1024&format=avif`,
-    imagesrcset: [
-      `${imageUrl}${sep}width=480&format=avif 480w`,
-      `${imageUrl}${sep}width=768&format=avif 768w`,
-      `${imageUrl}${sep}width=1024&format=avif 1024w`,
-      `${imageUrl}${sep}width=1600&format=avif 1600w`,
-    ].join(', '),
-    imagesizes: '(max-width: 768px) 100vw, 50vw',
-    fetchpriority: 'high',
-  } as const
-}
+// LCP preload now lives in ~/lib/image-preload (heroPreloadTag) and is
+// CDN-aware: the hero may be a Sanity-hosted editorial still once the homepage
+// team publishes generated art, and a Shopify-shaped preload URL against a
+// Sanity asset is silently ignored by the browser.
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const canonical = 'https://xdipx.com/'
@@ -360,7 +339,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   // the legacy/deal home gets for its hero. Guarded for empty featured (cold
   // KV / degraded render).
   if (data.variant === 'b') {
-    const heroPreload = preloadHeroImageTag(data.featured[0]?.imageUrl)
+    const heroPreload = heroPreloadTag(data.featured[0]?.imageUrl)
     return [
       { title: BRAND_TITLE },
       { name: 'description', content: BRAND_DESCRIPTION },
@@ -388,7 +367,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const { deal } = data
   const title = `${deal.seoTitle} | ${BRAND_TITLE}`
   const description = deal.metaDescription || BRAND_DESCRIPTION
-  const heroPreload = preloadHeroImageTag(deal.images[0]?.url)
+  const heroPreload = heroPreloadTag(deal.images[0]?.url)
   return [
     { title },
     { name: 'description', content: description },
