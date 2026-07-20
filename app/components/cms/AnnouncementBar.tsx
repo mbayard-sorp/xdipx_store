@@ -25,9 +25,12 @@ export function AnnouncementBar({ block }: AnnouncementBarProps) {
 
   if (!messages.length) return null
 
+  // The legacy 'gradient' style used to map to coral, which spent the
+  // viewport's entire coral budget on a utility bar and left the hero CTA
+  // fighting it (design-critic BLOCK finding, 2026-07-20). All styles now
+  // resolve to quiet grounds; coral stays reserved for the primary CTA.
   const bgClass =
-    bgStyle === 'gradient' ? 'bg-coral' :
-    bgStyle === 'purple'   ? 'bg-sage' :
+    bgStyle === 'purple' ? 'bg-sage' :
     'bg-ink'
 
   const msg = messages[index]!

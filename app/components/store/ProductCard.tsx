@@ -28,7 +28,7 @@ export function ProductCard({
     <article className="bg-paper rounded-2xl overflow-hidden shadow-sm card-lift group relative">
       {badge && (
         <span
-          className="absolute top-3 left-3 z-10 bg-coral text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full"
+          className="absolute top-3 left-3 z-10 bg-ink text-paper text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           {badge}

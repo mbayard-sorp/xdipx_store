@@ -145,7 +145,9 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
 
   return (
     <section className="bg-paper">
-      <div className="mx-auto grid max-w-[1320px] items-center gap-10 px-6 py-10 md:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] md:gap-16 md:px-16 md:py-16">
+      {/* Tighter vertical rhythm at 375px so the product still enters the first
+          viewport (design-critic finding: the mobile fold was all type). */}
+      <div className="mx-auto grid max-w-[1320px] items-center gap-7 px-6 py-7 md:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] md:gap-16 md:px-16 md:py-16">
         {/* text column — single Reveal group, above the fold */}
         <Reveal variant="up" disabled className="min-w-0">
           <p className="mb-5 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
@@ -168,24 +170,25 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
           )}
 
           {emmaHero?.body ? (
-            <p className="mt-6 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3" style={BODY}>
+            <p className="mt-5 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3 line-clamp-3 md:mt-6 md:line-clamp-none" style={BODY}>
               {emmaHero.body}
             </p>
           ) : (
-            <p className="mt-6 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3" style={BODY}>
+            <p className="mt-5 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3 line-clamp-3 md:mt-6 md:line-clamp-none" style={BODY}>
               A short, checked selection instead of a wall of options. Start with the one below, or
               tell us what you're after.
             </p>
           )}
 
+          {/* Pull quote yields its fold space to the product still on mobile. */}
           {emmaHero?.pullQuote && (
-            <p className="mt-6 text-[1.05rem] italic text-sage" style={DISPLAY}>
+            <p className="mt-6 hidden text-[1.05rem] italic text-sage md:block" style={DISPLAY}>
               ♥ {emmaHero.pullQuote}
             </p>
           )}
 
           {/* CTAs — one primary coral, one clearly-secondary ghost */}
-          <div className="mt-7 flex flex-wrap items-center gap-3">
+          <div className="mt-5 flex flex-wrap items-center gap-3 md:mt-7">
             <Link
               to={primaryHref}
               onClick={() => trackCtaClick('hero-primary', 'hero')}
@@ -213,7 +216,7 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
           </div>
 
           {/* guided prompt + horizontal mood pills */}
-          <p className="mt-7 text-[14px] text-ink-3" style={BODY}>
+          <p className="mt-5 text-[14px] text-ink-3 md:mt-7" style={BODY}>
             Where do you want to start?
           </p>
           <div className="-mx-1 mt-3 flex gap-2.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

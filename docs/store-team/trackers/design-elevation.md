@@ -45,6 +45,19 @@ BLOCK) → PR merge + deploy → set Sanity `homeConfig.activeVariant='b'` AND `
 GA4 baseline capture for the comparison is owed by the next team run with GA4 access
 (this session had none). Rollback is manual: revert both the Sanity flag and the env var.
 
+Pre-flip design-critic gate ran against the LIVE variant-b content state (screenshots of
+`/?variant=b`, 375px first): verdict **BLOCK**, mobile avg 3.2 (type 4.5, spacing 4, hierarchy 3.5,
+color 2, imagery 2). Code fixes landed in this PR: discount/SALE badges coral→ink, Sale nav
+coral→plum, announcement bar can no longer render coral, editorial tile double-arrow dedup, hero
+tightened at 375px so the product still enters the first viewport. **Content-plane fixes owed by
+the merchandising team before the flip (no deploy needed):** (1) hero pick image is the Camtoyz
+Kian retail PACKAGING BOX with baked-in text, swap to the bare-product still; (2) couples band
+photo is candlelit boudoir-gloom, a retired imagery class, swap to a bright high-key for-two shot;
+(3) announcement bar copy carries emojis + exclamations, re-register to calm editorial; (4) prefer
+bare-product over box shots across rails where the Shopify record has them. Re-run the critic
+after those swaps; flip only on PASS. QA checks passed: all five guided-path collections return
+24 products, JSON-LD on variant b is ItemList + FAQPage only.
+
 ### 2026-07-17 — media-manager v3 fix + quality gates PR (owner-directed)
 
 Mike flagged that generated imagery still reads amateur; root causes: media-manager was carrying
