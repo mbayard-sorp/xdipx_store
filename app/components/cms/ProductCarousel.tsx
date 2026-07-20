@@ -187,8 +187,11 @@ function ProductCard({ product, className = '' }: { product: Product; className?
               ♥
             </div>
           )}
+          {/* Ink, not coral: the coral budget reserves coral for the one primary
+              CTA per viewport; stacked coral SALE badges read as a discount wall
+              (design-critic REVISE finding, 2026-07-20). */}
           {onSale && (
-            <span className="absolute top-2 left-2 bg-coral text-white text-xs font-bold px-2 py-0.5 rounded-full z-10">
+            <span className="absolute top-2 left-2 bg-ink text-paper text-xs font-bold px-2 py-0.5 rounded-full z-10">
               SALE
             </span>
           )}
@@ -202,7 +205,7 @@ function ProductCard({ product, className = '' }: { product: Product; className?
             {product.title}
           </p>
           <div className="flex items-center gap-2 mt-2">
-            <span className="text-coral font-bold text-sm">${price.toFixed(2)}</span>
+            <span className="text-ink font-bold text-sm">${price.toFixed(2)}</span>
             {onSale && (
               <span className="text-ink/40 text-xs line-through">${compare!.toFixed(2)}</span>
             )}
