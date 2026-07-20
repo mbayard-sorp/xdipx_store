@@ -2060,7 +2060,6 @@ __export(sanity_server_exports, {
   getHomepageSections: () => getHomepageSections,
   getNotebookPostsForProduct: () => getNotebookPostsForProduct,
   getNotebookPostsForProductHandles: () => getNotebookPostsForProductHandles,
-  getNotebookPostsForProductType: () => getNotebookPostsForProductType,
   getNotebookSettings: () => getNotebookSettings,
   getPage: () => getPage,
   getPageList: () => getPageList,
@@ -2535,11 +2534,7 @@ async function getProductPageBlocks(handle) {
       }`,
       { handle }
     );
-    return (data?.sections ?? []).map((section) => {
-      if (section?._type !== "relatedGuides") return section;
-      const guides = (section.guides ?? []).filter((g) => g && g.status === "published").map(({ status, ...card }) => ({ ...card, readingTime: 0 }));
-      return { ...section, guides };
-    });
+    return data?.sections ?? [];
   } catch (err) {
     console.error("[sanity] getProductPageBlocks error:", err);
     return [];
@@ -2816,30 +2811,6 @@ async function getNotebookPostsForProductHandles(handles, limit = 4) {
     return result;
   } catch (err) {
     console.error("[sanity] getNotebookPostsForProductHandles error:", err);
-    return [];
-  }
-}
-async function getNotebookPostsForProductType(productType, excludeHandle, limit = 3) {
-  if (!projectId || !productType) return [];
-  const cacheKey3 = `notebook-for-type:${productType}:${excludeHandle}:${limit}`;
-  const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
-  if (cached2) return cached2;
-  try {
-    const client5 = getClient();
-    if (!client5) return [];
-    const posts = await client5.fetch(
-      `*[_type == "blogPost" && status == "published"
-        && count(body[_type == "blogProductEmbed" && productHandle in
-          *[_type == "productPage" && productTypeDial == $type && shopifyHandle != $handle].shopifyHandle
-        ]) > 0]
-        | order(publishedAt desc) [0...$limit] { ${BLOG_POST_CARD_PROJECTION} }`,
-      { type: productType, handle: excludeHandle, limit }
-    );
-    const result = (posts ?? []).map((p) => ({ ...p, readingTime: 0 }));
-    setCachedBlog(cacheKey3, result);
-    return result;
-  } catch (err) {
-    console.error("[sanity] getNotebookPostsForProductType error:", err);
     return [];
   }
 }
@@ -3396,15 +3367,6 @@ var init_sanity_server = __esm({
       shortBio, longBio,
       "picksSince": picksSince,
       instagram, email
-    }
-  ),
-  // relatedGuides \u2014 dereference the curated blogPost picks to NotebookRail card
-  // shape at query time. The status field rides along so getProductPageBlocks
-  // can drop unpublished picks before they reach the storefront.
-  "guides": select(
-    _type == "relatedGuides" => guides[]->{
-      _id, title, "slug": slug.current, excerpt, publishedAt, featured,
-      "heroImageUrl": heroImage.asset->url, heroImageAlt, status
     }
   ),
 `;
@@ -15178,16 +15140,6 @@ var homepage_healthcheck_server_exports = {};
 __export(homepage_healthcheck_server_exports, {
   runHomepageHealthcheck: () => runHomepageHealthcheck
 });
-async function activeServedVariant() {
-  try {
-    const cfg = await getHomeConfig();
-    if (cfg?.activeVariant === "a" || cfg?.activeVariant === "b") return cfg.activeVariant;
-  } catch {
-  }
-  const env = process.env["HOME_VARIANT"];
-  if (env === "a" || env === "b" || env === "legacy") return env;
-  return "legacy";
-}
 function siteOrigin() {
   const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
   return base.replace(/\/$/, "") || "https://xdipx.com";
@@ -15321,16 +15273,10 @@ async function runHomepageHealthcheck() {
       if (valid) {
         await invalidateHomepagePayloadA().catch(() => {
         });
-        invalidateCmsCache();
         await restoreHomepageDoc(lastGood);
-        const servedVariant = await activeServedVariant();
-        if (servedVariant === "b") {
-          invalidateCmsCache();
-        } else {
-          await warmHomepagePayloadA({ force: true }).catch(
-            (e) => console.error("[homepage-healthcheck] payload rewarm failed", e)
-          );
-        }
+        await warmHomepagePayloadA({ force: true }).catch(
+          (e) => console.error("[homepage-healthcheck] payload rewarm failed", e)
+        );
         result.rolledBack = true;
       } else {
         result.message = lastGood ? "last-good snapshot is malformed \u2014 skipping rollback" : "no last-good snapshot available to roll back to";
@@ -15359,7 +15305,7 @@ async function runHomepageHealthcheck() {
       "**Problems**",
       summary,
       "",
-      `**Auto-recovery:** ${result.rolledBack ? "rolled the Sanity homepage doc back to last-good and re-warmed the payload for the live variant." : result.message ?? "none"}`,
+      `**Auto-recovery:** ${result.rolledBack ? "rolled the Sanity homepage doc back to last-good and re-warmed the Variant A payload." : result.message ?? "none"}`,
       "",
       "_Filed automatically by `/cron/homepage-healthcheck`._"
     ].join("\n");
