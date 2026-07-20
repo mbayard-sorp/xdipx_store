@@ -29,6 +29,29 @@ monthly prompt-library pruning, quarterly hi-fi refresh + full-site design audit
 
 ## Status log
 
+### 2026-07-20 (later) — post-flip critic re-score: BLOCK 3.2 → REVISE 3.7; polish PR + content worklist
+
+The variant-b flip (#274) and the wayfinder split-caption-card rebuild (#275) are live on `/`, and
+the merchandising run rotated the hero to a real product still. The design-critic re-scored the
+live 375px homepage: **REVISE, avg 3.7** (hierarchy 4, spacing 4, type 4.5, color 3, imagery 3),
+up from the pre-flip BLOCK 3.2 (color 2→3, imagery 2→3). Critic-score series for the p4-retro
+panel: 2026-07-20 pre-flip 3.2 BLOCK → 2026-07-20 post-flip 3.7 REVISE (target PASS ≥ 4.0).
+
+Code fixes toward PASS land in the follow-up polish PR: the missed coral `SALE` badge and the
+always-coral price in `ProductCarousel` (the team-rail card) both go ink, so CTAs are the only
+coral in any rail viewport.
+
+**Content-plane worklist for the merchandising team (no deploy needed):**
+1. **Blocking-class:** two lifestyle photos carry a baked-in `xdipx` wordmark in the pixels
+   (doctrine §4.4 hard rule) — the "No wrong answers" beginner-rail tile and the couples band.
+   Regenerate/replace without the mark.
+2. Announcement bar: drop the 🛍 emojis and tighten the "Guaranteed Authentic Products" line.
+3. Push the dim lamp-lit tiles ("Gentle Everyday Start", beginner rail) to high-key daylight
+   (§4.2/§4.3); swap clinical packaging flat-lays (SONA box + cables, recurring Nixie box+pouch)
+   toward brighter product-large crops.
+4. Hero still is now a real product (improvement) but spec-shot grade; art-direct toward the
+   saturated color-block "hero energy" of §4.2 with the lifted image budget.
+
 ### 2026-07-20 — first real audit: 7 milestones flip to done, 2 foundational REDs found, overall flips to RED
 
 Recomputed all 14 milestones against evidence on `main` + `homepage_team_events`/`_runs` rows. Real
