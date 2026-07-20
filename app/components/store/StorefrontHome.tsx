@@ -79,6 +79,10 @@ function useSectionSeen(section: 'meet-emma' | 'couples') {
 }
 
 const MONO = { fontFamily: 'var(--font-mono)' } as const
+
+/* No-image wayfinder tiles cycle these tints so an unfilled row still has
+   rhythm instead of three grey plates. */
+const TILE_TINTS = ['bg-coral-soft', 'bg-plum-soft', 'bg-paper-3'] as const
 const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 400 } as const
 const DISPLAY_MED = { fontFamily: 'var(--font-display)', fontWeight: 500 } as const
 const BODY = { fontFamily: 'var(--font-body)' } as const
@@ -537,46 +541,50 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
             </h2>
           </Reveal>
 
-          <div className="mb-4 flex flex-wrap gap-4">
+          {/* Split "editorial caption card": the image field never carries type,
+              the label sits on solid paper-2, so legibility no longer depends on
+              whatever photo the team publishes (owner rejection of the old
+              text-over-packshot overlay, homepage-designer spec 2026-07-20). */}
+          <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
             {tiles.map((t, i) => {
               const hasImage = !!t.image?.url
               return (
-                <Reveal key={t._key} variant="up" index={i} className="flex-1 basis-[180px]">
+                <Reveal key={t._key} variant="up" index={i}>
                   <Link
                     to={t.link}
-                    className="relative flex min-h-[200px] w-full items-end overflow-hidden rounded-[var(--radius-lg)] border border-line bg-paper-3 p-5 transition-transform hover:-translate-y-0.5"
+                    onClick={() => trackCtaClick(`wayfinder:${t.label}`, 'mosaic')}
+                    className="group flex h-full flex-col overflow-hidden rounded-[var(--radius-lg)] border border-line bg-paper-2 transition-transform duration-[var(--duration-base)] hover:-translate-y-0.5"
                   >
-                    {hasImage && (
-                      <>
+                    {/* Zone 1 — image field. Fixed aspect = zero CLS; no text ever lands here. */}
+                    <div className={`relative aspect-[4/3] w-full overflow-hidden ${hasImage ? 'bg-paper-3' : TILE_TINTS[i % TILE_TINTS.length]}`}>
+                      {hasImage ? (
                         <OptimizedImage
                           src={t.image!.url!}
                           alt={t.image!.alt ?? t.label}
                           sizes="(max-width: 768px) 100vw, 33vw"
-                          className="absolute inset-0 h-full w-full object-cover"
+                          className="absolute inset-0 h-full w-full object-cover transition-transform duration-[var(--duration-slow)] group-hover:scale-[1.03]"
                         />
-                        {/* Ink gradient scrim so the white label stays legible over any photo */}
-                        <div
-                          className="absolute inset-0"
-                          style={{ background: 'linear-gradient(to top, rgba(26,20,24,0.75), rgba(26,20,24,0.05) 60%)' }}
-                          aria-hidden="true"
-                        />
-                      </>
-                    )}
-                    <div className="relative z-[1]">
-                      <span
-                        className="text-[1.5rem] text-ink"
-                        style={{ ...DISPLAY_MED, ...(hasImage ? { color: 'white' } : {}) }}
-                      >
+                      ) : (
+                        <span className="absolute inset-0 flex items-center justify-center text-[2rem] text-sage/50" aria-hidden="true">♥</span>
+                      )}
+                    </div>
+
+                    {/* Zone 2 — solid caption ground; contrast guaranteed on paper-2. */}
+                    <div className="flex flex-1 flex-col p-5">
+                      <span className="text-[1.5rem] leading-[1.15] text-ink" style={DISPLAY_MED}>
                         {t.label}
                       </span>
                       {t.emmaAside && (
-                        <p
-                          className="mt-1 text-[13.5px] italic text-sage"
-                          style={{ ...DISPLAY, ...(hasImage ? { color: 'white' } : {}) }}
-                        >
-                          ♥ {t.emmaAside}
+                        <p className="mt-1.5 text-[13.5px] italic leading-snug text-ink-3" style={DISPLAY}>
+                          <span className="not-italic text-sage">♥</span> {t.emmaAside}
                         </p>
                       )}
+                      <span
+                        className="mt-auto inline-flex items-center gap-1 pt-4 text-[11px] uppercase tracking-[0.18em] text-ink-4 transition-transform duration-[var(--duration-fast)] group-hover:translate-x-0.5"
+                        style={MONO}
+                      >
+                        Take a peek <span aria-hidden="true">→</span>
+                      </span>
                     </div>
                   </Link>
                 </Reveal>
