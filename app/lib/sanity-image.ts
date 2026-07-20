@@ -7,8 +7,8 @@
 // Matches the card/hero rendering widths across the notebook surfaces.
 export const SANITY_IMAGE_WIDTHS = [400, 640, 828, 1200, 1600]
 
-function isSanityCdn(url: string): boolean {
-  return url.includes('cdn.sanity.io')
+export function isSanityCdn(url: string | null | undefined): boolean {
+  return !!url && url.includes('cdn.sanity.io')
 }
 
 export function sanityImageUrl(

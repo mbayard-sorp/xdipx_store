@@ -19,7 +19,7 @@ Week anchors: W1 = 2026-07-13, W2 = 2026-07-20, W3 = 2026-07-27, W4 = 2026-08-03
 | p3-axe | axe accessibility sweep in the harness (zero serious/critical) | 2 | rr7-engineer (PR) | 2026-07-27 | not-started | GREEN | `@axe-core/playwright` in `package.json` AND referenced from the harness | — | |
 | p3-img-gate | Vision gate on every generated image before upload; ref-image mandatory | 2 | media-manager | 2026-07-27 | in-review | GREEN | `.claude/agents/media-manager.md` documents the gate AND `scripts/gen-homepage-image.ts` refuses missing `--ref-image` without `--no-ref` | 2026-07-17 | both in the design-gates PR (`--no-ref` requires a logged `--no-ref-reason`); kills the tea-cup failure class |
 | p3-prompts | Image prompt library seeded and maintained | 2 | media-manager | 2026-07-27 | in-review | GREEN | `docs/homepage-team/image-prompt-library.md` exists with ≥1 per-surface scaffold | 2026-07-17 | seeded with 5 per-surface scaffolds in the design-gates PR |
-| p3-teardown | Weekly competitor/reference teardown sub-step in Routine B | 3 | homepage-designer | 2026-07-27 | not-started | GREEN | `docs/homepage-team/routine-design-cycle.md` includes the teardown step AND a design run has a teardown event | — | |
+| p3-teardown | Weekly competitor/reference teardown sub-step in Routine B | 3 | homepage-designer | 2026-07-27 | in-review | GREEN | `docs/homepage-team/routine-design-cycle.md` includes the teardown step AND a design run has a teardown event | 2026-07-20 | step 0.5 + first decision doc (`competitor-teardown-2026-07.md`) in the design-performance PR; live-fetch re-run owed by the cloud routine (this session's egress blocked competitor hosts) |
 | p4-events | Per-section GA4 engagement events + per-module PDP click-through | 4 | rr7-engineer (PR) | 2026-08-03 | not-started | GREEN | section-visibility events wired in the analytics layer on main | — | gives the 70% product-link rule an outcome metric |
 | p4-changelog | Design changelog appended by both routines | 4 | homepage-orchestrator | 2026-08-03 | not-started | GREEN | `docs/homepage-team/design-changelog.md` exists and has post-launch entries | — | |
 | p4-retro | First measured design retro + critic-score dashboard panel | 4 | homepage-orchestrator + rr7-engineer | 2026-08-03 | not-started | GREEN | dashboard shows critic scores AND a retro event references them | — | definition of done: critic avg ≥4.5 four straight weeks |
@@ -28,6 +28,22 @@ Ongoing cadences (tracked as health checks once phases close, not milestones): w
 monthly prompt-library pruning, quarterly hi-fi refresh + full-site design audit.
 
 ## Status log
+
+### 2026-07-20 — owner push: flip to variant b, budgets lifted, perf pass (design-performance PR)
+
+Mike called the live homepage cheap-looking, boring, and slow, and directed: competitor-informed
+design narrative, lifted budgets, fastest-possible load. Plan was team-reviewed (orchestrator, IA,
+designer, CRO, tech-architect) before execution. Landing in the `claude/home-page-design-performance`
+PR: competitor teardown decision doc + recurring Routine B step 0.5 (p3-teardown → in-review),
+budget-lift migration 063 (daily $600, 100 images/day, build $500 advisory, 10 runs/day), Sanity CDN
+srcset/AVIF in OptimizedImage, CDN-aware hero preload helper, GA4 flip instrumentation
+(home_variant_view, guided-path cta_click, home_scroll_depth) plus a web-vitals reporter
+(partial p4-events progress), and a variant-aware healthcheck rewarm. Flip sequence (owner-approved):
+fold-first imagery pass → design-critic gate on the real content state (flat photographic band =
+BLOCK) → PR merge + deploy → set Sanity `homeConfig.activeVariant='b'` AND `HOME_VARIANT=b` →
+7-14 day keep/rollback watch on add-to-cart per session, guided-entry rate, engagement rate.
+GA4 baseline capture for the comparison is owed by the next team run with GA4 access
+(this session had none). Rollback is manual: revert both the Sanity flag and the env var.
 
 ### 2026-07-17 — media-manager v3 fix + quality gates PR (owner-directed)
 

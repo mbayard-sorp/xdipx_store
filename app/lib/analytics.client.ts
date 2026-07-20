@@ -200,6 +200,11 @@ export function trackHomeVariantView(params: { variant: 'a' | 'b'; hadPriorSessi
   })
 }
 
+/** Fired once per page view when a deep homepage band first enters the viewport. */
+export function trackHomeScrollDepth(section: 'meet-emma' | 'couples') {
+  gtag('event', 'home_scroll_depth', { home_section: section })
+}
+
 export function trackChipToggle(params: {
   group: 'mood' | 'audience' | 'matters' | 'category'
   value: string

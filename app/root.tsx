@@ -51,6 +51,39 @@ function SentryInit() {
   return null
 }
 
+// Core Web Vitals → GA4, mount-gated like SentryInit so the observer setup
+// never competes with hydration. Events go through the same window.gtag →
+// dataLayer path as every analytics.client event, so the consent-mode default
+// ('analytics_storage: denied' until the banner grants it) gates these
+// identically — no second consent code path. The dynamic import keeps
+// web-vitals out of the entry chunk.
+function WebVitalsReport() {
+  useEffect(() => {
+    const w = window as unknown as { __webVitalsInit?: boolean; gtag?: (...args: unknown[]) => void }
+    if (w.__webVitalsInit) return
+    w.__webVitalsInit = true
+    import('web-vitals').then(({ onLCP, onCLS, onINP, onTTFB }) => {
+      const report = (metric: { name: string; value: number; id: string; rating: string }) => {
+        w.gtag?.('event', 'web_vitals', {
+          metric_name: metric.name,
+          // CLS is a small float; GA4 metrics want integers. Standard trick:
+          // CLS × 1000, everything else rounded ms.
+          metric_value: Math.round(metric.name === 'CLS' ? metric.value * 1000 : metric.value),
+          metric_id: metric.id,
+          metric_rating: metric.rating,
+          page_path: location.pathname,
+          non_interaction: true,
+        })
+      }
+      onLCP(report)
+      onCLS(report)
+      onINP(report)
+      onTTFB(report)
+    })
+  }, [])
+  return null
+}
+
 export const links: LinksFunction = () => [
   // Favicons
   { rel: 'icon', href: '/favicon.ico', sizes: '48x48' },
@@ -208,6 +241,7 @@ export default function App() {
         }}
       />
       <SentryInit />
+      <WebVitalsReport />
     </>
   )
 }

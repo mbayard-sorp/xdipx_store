@@ -59,6 +59,7 @@
     "satori": "^0.26.0",
     "sharp": "^0.34.5",
     "styled-components": "^6.4.2",
+    "web-vitals": "^4.2.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {

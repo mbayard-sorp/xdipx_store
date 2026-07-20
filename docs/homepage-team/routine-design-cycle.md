@@ -55,6 +55,19 @@ one-run-at-a-time lock (`reason:'run_in_progress'`). The lock still blocks any o
 If `gate.ok` is `false`, post a `skipped` status and stop (same as Routine A). Emit `/event` rows
 through every phase below so the dashboard shows the design cycle live.
 
+### 0.5. Weekly competitor/reference teardown (before wireframing)
+
+`homepage-designer` (with `design-critic` as sparring partner) WebFetches 2-3 references from the
+doctrine §7 bench plus any notable competitor launches, and writes a short "what they do better /
+what we do better" note as a run event, logging adopted AND rejected ideas so taste compounds. The
+current decision doc is `docs/homepage-team/competitor-teardown-2026-07.md`; refresh it (or append a
+dated section) rather than starting from scratch. Sourcing honesty is mandatory: only report what
+was actually fetched, tag anything else as prior knowledge, and never quote competitor copy from
+memory. The teardown output must respect the IA fence: proposals stay inside the locked Nº01–Nº11
+shell, new section types need a named spec through IA review + additive Sanity schema before build,
+any pattern implying a new URL/route goes to `tech-architect`, and the two-link cap on `/discover`
+plus the retired-route denylist stand.
+
 ### 1. IA + design — wireframes
 
 - `homepage-ia` defines or revises the section taxonomy and the shell-vs-content split (what's new,
