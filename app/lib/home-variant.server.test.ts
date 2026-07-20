@@ -12,10 +12,10 @@ afterEach(() => {
 })
 
 describe('resolveHomeVariant', () => {
-  it('defaults to legacy when nothing is set', () => {
+  it('defaults to the storefront (b) when nothing is set', () => {
     delete process.env['HOME_VARIANT']
     const r = resolveHomeVariant(req('https://xdipx.com/'))
-    expect(r).toEqual({ variant: 'legacy', source: 'default' })
+    expect(r).toEqual({ variant: 'b', source: 'default' })
   })
 
   it('reads HOME_VARIANT env var', () => {
@@ -43,13 +43,13 @@ describe('resolveHomeVariant', () => {
   it('rejects an invalid variant value', () => {
     delete process.env['HOME_VARIANT']
     const r = resolveHomeVariant(req('https://xdipx.com/?variant=z'))
-    expect(r).toEqual({ variant: 'legacy', source: 'default' })
+    expect(r).toEqual({ variant: 'b', source: 'default' })
   })
 
   it('rejects an invalid env value', () => {
     process.env['HOME_VARIANT'] = 'banana'
     const r = resolveHomeVariant(req('https://xdipx.com/'))
-    expect(r).toEqual({ variant: 'legacy', source: 'default' })
+    expect(r).toEqual({ variant: 'b', source: 'default' })
   })
 
   // Sanity precedence tests

@@ -7,10 +7,14 @@
  *   2. `xdipx_home_variant=a|b`     → cookie pin (set explicitly via UI)
  *   3. Sanity homeConfig.activeVariant ('a' or 'b' only — 'off' falls through)
  *   4. `HOME_VARIANT` env var       → org-wide default (a, b, or unset)
- *   5. fallback `'legacy'`          → render the existing daily-deal home
+ *   5. fallback `'b'`               → the storefront home ("Emma's Edit")
  *
- * `'legacy'` is the safe default until Variant A has clean QA evidence.
- * Flip to Variant A site-wide by setting `HOME_VARIANT=a` in Vercel.
+ * The code-level default IS the flip switch (owner direction 2026-07-20,
+ * design-critic gate + team review in PR #273): baking 'b' in here rather
+ * than only in Sanity/env means a Sanity outage can't silently revert `/`
+ * to the legacy daily-deal home. Editors can still force 'a'/'b' from
+ * Sanity homeConfig without a deploy; rolling back to legacy is a revert
+ * of this commit.
  *
  * No cookie bucketing here — that's a follow-up if/when we want a
  * proper 50/50 split with sticky assignment + analytics tracking.
@@ -73,7 +77,7 @@ export function resolveHomeVariant(
   const env = process.env['HOME_VARIANT']?.trim().toLowerCase()
   if (isValid(env)) return { variant: env, source: 'env' }
 
-  return { variant: 'legacy', source: 'default' }
+  return { variant: 'b', source: 'default' }
 }
 
 /**
