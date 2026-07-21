@@ -9767,15 +9767,15 @@ function slice(text2, startMarker, endMarker) {
   }
   return text2.slice(start + startMarker.length, end).trim();
 }
-var __dirname2, CHARTER_CANDIDATES, charterPath, charter, EMMA_VOICE_CORE, MARKETING_ADDENDUM, ENRICHMENT_ADDENDUM, CONVERSATIONAL_ADDENDUM, SUPPORT_ADDENDUM, EMMA_VOICE_MARKETING, EMMA_VOICE_ENRICHMENT, EMMA_VOICE_CONVERSATIONAL, EMMA_VOICE_SUPPORT;
+var __dirname, CHARTER_CANDIDATES, charterPath, charter, EMMA_VOICE_CORE, MARKETING_ADDENDUM, ENRICHMENT_ADDENDUM, CONVERSATIONAL_ADDENDUM, SUPPORT_ADDENDUM, EMMA_VOICE_MARKETING, EMMA_VOICE_ENRICHMENT, EMMA_VOICE_CONVERSATIONAL, EMMA_VOICE_SUPPORT;
 var init_emma_voice_server = __esm({
   "app/lib/emma-voice.server.ts"() {
     "use strict";
-    __dirname2 = dirname(fileURLToPath(import.meta.url));
+    __dirname = dirname(fileURLToPath(import.meta.url));
     CHARTER_CANDIDATES = [
       resolve(process.cwd(), "docs/emma-voice.md"),
-      resolve(__dirname2, "../../docs/emma-voice.md"),
-      resolve(__dirname2, "../docs/emma-voice.md")
+      resolve(__dirname, "../../docs/emma-voice.md"),
+      resolve(__dirname, "../docs/emma-voice.md")
     ];
     charterPath = CHARTER_CANDIDATES.find((p) => existsSync(p));
     if (!charterPath) {
@@ -10031,10 +10031,10 @@ async function logImageCost(entry) {
 }
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql13 } = await import("drizzle-orm");
+  const { sql: sql14 } = await import("drizzle-orm");
   const days = opts.days ?? 30;
   const result = await db2.execute(
-    sql13`SELECT * FROM api_token_daily
+    sql14`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
   );
@@ -10042,11 +10042,11 @@ async function getDailyTokenRollup(opts = {}) {
 }
 async function getTokenCallDetail(opts) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql13 } = await import("drizzle-orm");
+  const { sql: sql14 } = await import("drizzle-orm");
   const model = opts.model ?? null;
   const source = opts.source ?? null;
   const result = await db2.execute(
-    sql13`
+    sql14`
       WITH grouped AS (
         SELECT
           caller, sku, product_id, batch_id,
@@ -16837,7 +16837,8 @@ var init_team_server = __esm({
 
 // app/lib/tracker.server.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2, readdirSync } from "node:fs";
-import { resolve as resolve2 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { dirname as dirname2, resolve as resolve2 } from "node:path";
 function trackersDir() {
   for (const dir of DIR_CANDIDATES) {
     if (existsSync2(dir)) return dir;
@@ -16926,14 +16927,15 @@ function latestOwnerAsks(tracker) {
   const m = latest.body.match(/\*\*Asks for the owner:?\*\*:?\s*([\s\S]*?)(?:\n\n|$)/);
   return m?.[1]?.trim() ?? null;
 }
-var DIR_CANDIDATES;
+var __dirname2, DIR_CANDIDATES;
 var init_tracker_server = __esm({
   "app/lib/tracker.server.ts"() {
     "use strict";
+    __dirname2 = dirname2(fileURLToPath2(import.meta.url));
     DIR_CANDIDATES = [
       resolve2(process.cwd(), "docs/store-team/trackers"),
-      resolve2(__dirname, "../../docs/store-team/trackers"),
-      resolve2(__dirname, "../docs/store-team/trackers")
+      resolve2(__dirname2, "../../docs/store-team/trackers"),
+      resolve2(__dirname2, "../docs/store-team/trackers")
     ];
   }
 });
@@ -16990,12 +16992,49 @@ async function runOwnerDigest(opts = {}) {
   );
   const trackers = getTrackers();
   const redTrackers = trackers.filter((t) => t.overall === "RED").length;
+  let indexToday = null;
+  let indexWeekAgo = null;
+  let droppedUrls = [];
+  try {
+    const idxRes = await db.execute(sql6`
+      SELECT day::text AS day, sitemap_urls, inspected_urls, indexed_count,
+             crawled_not_indexed, discovered_not_indexed, other_not_indexed,
+             canonical_mismatches, newly_indexed, newly_dropped
+      FROM gsc_index_daily ORDER BY day DESC LIMIT 1`);
+    indexToday = (idxRes.rows ?? [])[0] ?? null;
+    const weekRes = await db.execute(sql6`
+      SELECT day::text AS day, sitemap_urls, inspected_urls, indexed_count,
+             crawled_not_indexed, discovered_not_indexed, other_not_indexed,
+             canonical_mismatches, newly_indexed, newly_dropped
+      FROM gsc_index_daily WHERE day <= now()::date - 7 ORDER BY day DESC LIMIT 1`);
+    indexWeekAgo = (weekRes.rows ?? [])[0] ?? null;
+    const droppedRes = await db.execute(sql6`
+      SELECT url, previous_coverage_state, coverage_state
+      FROM gsc_url_inspections
+      WHERE coverage_changed_at >= now() - interval '24 hours'
+        AND previous_coverage_state IN ('Submitted and indexed', 'Indexed, not submitted in sitemap')
+        AND verdict <> 'PASS'
+      ORDER BY coverage_changed_at DESC LIMIT 5`);
+    droppedUrls = droppedRes.rows ?? [];
+  } catch (err) {
+    console.warn("[owner-digest] index-monitor tables unavailable (migration 064 not applied?):", String(err).slice(0, 200));
+  }
   const ordersY = yesterday?.orders ?? 0;
   const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? "" : "s"}, ${redTrackers} RED tracker${redTrackers === 1 ? "" : "s"}`;
   const profitRows = profit.map((p) => `<tr><td style="padding:2px 10px 2px 0;">${esc(p.day)}</td><td style="padding:2px 10px;">${p.orders}</td><td style="padding:2px 10px;">$${p.revenue.toFixed(2)}</td><td style="padding:2px 10px;">$${p.profit.toFixed(2)}</td><td style="padding:2px 0;">${esc(p.featured_sku ?? "")}</td></tr>`).join("");
   const runRows = runs.map((r) => `<tr><td style="padding:2px 10px 2px 0;">${esc(r.team)}</td><td style="padding:2px 10px;">${esc(r.run_type)}</td><td style="padding:2px 10px;color:${r.status === "failed" ? "#d93a15" : r.status === "succeeded" ? "#1c7c43" : "#6f645c"};">${esc(r.status)}</td><td style="padding:2px 0;">${esc((r.error ?? r.summary ?? "").slice(0, 140))}</td></tr>`).join("");
   const gateRows = gates.map((g) => `<tr><td style="padding:2px 10px 2px 0;">${esc(g.team)}</td><td style="padding:2px 10px;">${g.enabled ? "on" : '<span style="color:#d93a15;">off</span>'}</td><td style="padding:2px 10px;">${g.runsToday}/${g.maxRunsPerDay} runs</td><td style="padding:2px 0;">$${(g.spentCents / 100).toFixed(2)} / $${(g.dailyCents / 100).toFixed(2)}</td></tr>`).join("");
   const valveRows = valveEntries.map(([name, on]) => `<tr><td style="padding:2px 10px 2px 0;">${esc(name)}</td><td style="padding:2px 0;">${on ? "on" : "off"}</td></tr>`).join("");
+  let indexBody = "no sweep data yet (migration 064 + /cron/gsc-index-sweep)";
+  if (indexToday) {
+    const delta = indexWeekAgo ? indexToday.indexed_count - indexWeekAgo.indexed_count : null;
+    const deltaStr = delta === null ? "" : ` (${delta >= 0 ? "+" : ""}${delta} vs ${esc(indexWeekAgo.day)})`;
+    const droppedList = droppedUrls.map((d) => `<li>${esc(d.url)} &mdash; now &ldquo;${esc(d.coverage_state ?? "unknown")}&rdquo;</li>`).join("");
+    indexBody = `<p style="margin:0 0 4px;"><strong>${indexToday.indexed_count}</strong> of ${indexToday.sitemap_urls} sitemap URLs indexed${deltaStr} &middot; ${indexToday.inspected_urls} inspected so far</p>
+      <p style="margin:0 0 4px;">Not indexed: ${indexToday.crawled_not_indexed} crawled-but-rejected &middot; ${indexToday.discovered_not_indexed} discovered-not-crawled &middot; ${indexToday.other_not_indexed} other &middot; ${indexToday.canonical_mismatches} canonical mismatch${indexToday.canonical_mismatches === 1 ? "" : "es"}</p>
+      ${indexToday.newly_dropped > 0 ? `<p style="margin:0 0 2px;color:#d93a15;">${indexToday.newly_dropped} dropped from the index today${droppedList ? `:</p><ul style="margin:0 0 4px;padding-left:18px;">${droppedList}</ul>` : "</p>"}` : ""}
+      ${indexToday.newly_indexed > 0 ? `<p style="margin:0;color:#1c7c43;">${indexToday.newly_indexed} newly indexed today</p>` : ""}`;
+  }
   const trackerBlocks = trackers.map((t) => {
     const asks = latestOwnerAsks(t);
     const latest = t.statusLog[0];
@@ -17012,6 +17051,7 @@ async function runOwnerDigest(opts = {}) {
       ${section(`Team runs, last 24h (${failures.length} failed)`, `<table style="border-collapse:collapse;">${runRows || "<tr><td>no runs</td></tr>"}</table>`)}
       ${section("Team gates", `<table style="border-collapse:collapse;">${gateRows}</table>`)}
       ${section("Valves", `<table style="border-collapse:collapse;">${valveRows}</table>`)}
+      ${section(`Search indexing${indexToday ? ` (as of ${esc(indexToday.day)})` : ""}`, indexBody)}
       ${section(`Suggestions (${proposed?.n ?? 0} awaiting triage${proposed ? `, oldest ${esc(proposed.oldest.slice(0, 10))}` : ""})`, sugg.map((s) => `${esc(s.status)}: ${s.n}`).join(" &middot; ") || "none")}
       ${section("Program trackers", trackerBlocks || "no trackers found")}
       <p style="font-family:Inter,sans-serif;font-size:11px;color:#6f645c;margin-top:18px;">
@@ -17037,6 +17077,7 @@ var init_owner_digest_server = __esm({
 // app/lib/gsc.server.ts
 var gsc_server_exports = {};
 __export(gsc_server_exports, {
+  getGscContext: () => getGscContext,
   runGscSnapshot: () => runGscSnapshot
 });
 import { createSign } from "node:crypto";
@@ -17088,6 +17129,12 @@ async function getAccessToken(creds) {
   const json2 = await res.json();
   if (!json2.access_token) throw new Error("GSC token exchange returned no access_token");
   return json2.access_token;
+}
+async function getGscContext() {
+  const creds = loadCredentials();
+  if (!creds) return null;
+  const token = await getAccessToken(creds);
+  return { token, siteUrl: process.env["GSC_SITE_URL"]?.trim() || DEFAULT_SITE };
 }
 async function searchAnalytics(token, siteUrl, body) {
   const res = await fetch(
@@ -17181,6 +17228,199 @@ var init_gsc_server = __esm({
     SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
     TOKEN_URL = "https://oauth2.googleapis.com/token";
     DEFAULT_SITE = "sc-domain:xdipx.com";
+  }
+});
+
+// app/lib/gsc-index.server.ts
+var gsc_index_server_exports = {};
+__export(gsc_index_server_exports, {
+  classifyCoverage: () => classifyCoverage,
+  parseSitemapUrls: () => parseSitemapUrls,
+  runGscIndexSweep: () => runGscIndexSweep
+});
+import { neon as neon4 } from "@neondatabase/serverless";
+function parseSitemapUrls(xml) {
+  const entries = [];
+  const seen = /* @__PURE__ */ new Set();
+  const blocks = xml.match(/<url>[\s\S]*?<\/url>/g) ?? [];
+  for (const block of blocks) {
+    const loc = block.match(/<loc>\s*([^<]+?)\s*<\/loc>/)?.[1];
+    if (!loc || seen.has(loc)) continue;
+    seen.add(loc);
+    entries.push({
+      url: loc,
+      lastmod: block.match(/<lastmod>\s*([^<]+?)\s*<\/lastmod>/)?.[1] ?? null
+    });
+  }
+  return entries;
+}
+function classifyCoverage(verdict, coverageState) {
+  if (verdict === "PASS") return "indexed";
+  const cs = coverageState ?? "";
+  if (cs.startsWith("Crawled")) return "crawled_not_indexed";
+  if (cs.startsWith("Discovered")) return "discovered_not_indexed";
+  return "other_not_indexed";
+}
+async function inspectUrl(token, siteUrl, url) {
+  const res = await fetch(INSPECT_URL, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ inspectionUrl: url, siteUrl })
+  });
+  if (res.status === 429) throw new QuotaExhaustedError(`429 for ${url}`);
+  if (!res.ok) throw new Error(`inspect failed ${res.status} for ${url}: ${(await res.text()).slice(0, 200)}`);
+  const json2 = await res.json();
+  return json2.inspectionResult?.indexStatusResult ?? {};
+}
+function crawlTimeOrNull(t) {
+  if (!t) return null;
+  const ms = Date.parse(t);
+  if (Number.isNaN(ms) || ms <= 0) return null;
+  return new Date(ms).toISOString();
+}
+async function runGscIndexSweep(opts = {}) {
+  const ctx = await getGscContext();
+  if (!ctx) return { skipped: "no credentials" };
+  const { token, siteUrl } = ctx;
+  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const quotaKey = `gsc-inspect:quota:${day}`;
+  const used = Number(await kvGet(quotaKey) ?? 0);
+  const requested = opts.budget ?? Number(process.env["GSC_INSPECT_BUDGET"] ?? DEFAULT_RUN_BUDGET);
+  const budget = Math.max(0, Math.min(requested, DAILY_QUOTA_CEILING - used));
+  if (budget === 0) return { skipped: `daily inspection quota ceiling reached (${used}/${DAILY_QUOTA_CEILING})` };
+  const sitemapBase = siteUrl.startsWith("http") ? siteUrl : "https://xdipx.com/";
+  const sitemapRes = await fetch(new URL("sitemap.xml", sitemapBase));
+  if (!sitemapRes.ok) throw new Error(`sitemap fetch failed: ${sitemapRes.status}`);
+  const entries = parseSitemapUrls(await sitemapRes.text());
+  if (entries.length === 0) throw new Error("sitemap parsed to zero URLs; refusing to flag everything absent");
+  const urls = entries.map((e) => e.url);
+  const lastmods = entries.map((e) => e.lastmod);
+  await sql8`
+    INSERT INTO gsc_url_inspections (url, sitemap_lastmod)
+    SELECT u, m FROM unnest(${urls}::text[], ${lastmods}::text[]) AS t(u, m)
+    ON CONFLICT (url) DO UPDATE
+      SET in_sitemap = TRUE, sitemap_lastmod = EXCLUDED.sitemap_lastmod`;
+  await sql8`
+    UPDATE gsc_url_inspections SET in_sitemap = FALSE
+    WHERE in_sitemap AND NOT (url = ANY(${urls}::text[]))`;
+  const batch = await sql8`
+    SELECT url, coverage_state, verdict FROM gsc_url_inspections
+    WHERE in_sitemap
+    ORDER BY last_inspected_at ASC NULLS FIRST, first_seen_at ASC
+    LIMIT ${budget}`;
+  let inspected = 0;
+  let errors = 0;
+  let newlyIndexed = 0;
+  let newlyDropped = 0;
+  let quotaHit = false;
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < batch.length && !quotaHit) {
+      const row = batch[cursor++];
+      let r;
+      try {
+        r = await inspectUrl(token, siteUrl, row.url);
+      } catch (err) {
+        if (err instanceof QuotaExhaustedError) {
+          quotaHit = true;
+          return;
+        }
+        errors++;
+        console.warn("[gsc-index]", String(err));
+        continue;
+      }
+      const newCoverage = r.coverageState ?? null;
+      const changed = row.coverage_state !== null && row.coverage_state !== newCoverage;
+      const wasIndexed = row.verdict === "PASS";
+      const isIndexed = r.verdict === "PASS";
+      if (row.verdict !== null && !wasIndexed && isIndexed) newlyIndexed++;
+      if (wasIndexed && !isIndexed) newlyDropped++;
+      await sql8`
+        UPDATE gsc_url_inspections SET
+          verdict = ${r.verdict ?? null},
+          coverage_state = ${newCoverage},
+          indexing_state = ${r.indexingState ?? null},
+          robots_txt_state = ${r.robotsTxtState ?? null},
+          page_fetch_state = ${r.pageFetchState ?? null},
+          last_crawl_time = ${crawlTimeOrNull(r.lastCrawlTime)},
+          google_canonical = ${r.googleCanonical ?? null},
+          user_canonical = ${r.userCanonical ?? null},
+          last_inspected_at = now(),
+          inspect_count = inspect_count + 1,
+          previous_coverage_state = CASE WHEN ${changed} THEN ${row.coverage_state} ELSE previous_coverage_state END,
+          coverage_changed_at     = CASE WHEN ${changed} THEN now() ELSE coverage_changed_at END
+        WHERE url = ${row.url}`;
+      inspected++;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batch.length) }, () => worker()));
+  const quotaUsedToday = inspected > 0 ? await kvIncrBy(quotaKey, inspected) : used;
+  const aggRows = await sql8`
+    SELECT
+      count(*) FILTER (WHERE in_sitemap)::int AS sitemap_urls,
+      count(*) FILTER (WHERE in_sitemap AND last_inspected_at IS NOT NULL)::int AS inspected_urls,
+      count(*) FILTER (WHERE in_sitemap AND verdict = 'PASS')::int AS indexed_count,
+      count(*) FILTER (WHERE in_sitemap AND verdict <> 'PASS' AND coverage_state LIKE 'Crawled%')::int AS crawled_not_indexed,
+      count(*) FILTER (WHERE in_sitemap AND verdict <> 'PASS' AND coverage_state LIKE 'Discovered%')::int AS discovered_not_indexed,
+      count(*) FILTER (WHERE in_sitemap AND last_inspected_at IS NOT NULL AND verdict <> 'PASS'
+                       AND coverage_state NOT LIKE 'Crawled%' AND coverage_state NOT LIKE 'Discovered%')::int AS other_not_indexed,
+      count(*) FILTER (WHERE in_sitemap AND verdict = 'PASS'
+                       AND google_canonical IS NOT NULL AND user_canonical IS NOT NULL
+                       AND google_canonical <> user_canonical)::int AS canonical_mismatches
+    FROM gsc_url_inspections`;
+  const agg = aggRows[0];
+  await sql8`
+    INSERT INTO gsc_index_daily (
+      day, sitemap_urls, inspected_urls, indexed_count, crawled_not_indexed,
+      discovered_not_indexed, other_not_indexed, canonical_mismatches,
+      newly_indexed, newly_dropped
+    ) VALUES (
+      ${day}, ${agg.sitemap_urls}, ${agg.inspected_urls}, ${agg.indexed_count},
+      ${agg.crawled_not_indexed}, ${agg.discovered_not_indexed},
+      ${agg.other_not_indexed}, ${agg.canonical_mismatches},
+      ${newlyIndexed}, ${newlyDropped}
+    )
+    ON CONFLICT (day) DO UPDATE SET
+      sitemap_urls = EXCLUDED.sitemap_urls,
+      inspected_urls = EXCLUDED.inspected_urls,
+      indexed_count = EXCLUDED.indexed_count,
+      crawled_not_indexed = EXCLUDED.crawled_not_indexed,
+      discovered_not_indexed = EXCLUDED.discovered_not_indexed,
+      other_not_indexed = EXCLUDED.other_not_indexed,
+      canonical_mismatches = EXCLUDED.canonical_mismatches,
+      newly_indexed = gsc_index_daily.newly_indexed + ${newlyIndexed},
+      newly_dropped = gsc_index_daily.newly_dropped + ${newlyDropped}`;
+  return {
+    inspected,
+    errors,
+    quotaUsedToday,
+    ...quotaHit ? { skipped: "stopped early: API returned 429" } : {},
+    totals: {
+      sitemapUrls: agg.sitemap_urls,
+      inspectedUrls: agg.inspected_urls,
+      indexed: agg.indexed_count,
+      crawledNotIndexed: agg.crawled_not_indexed,
+      discoveredNotIndexed: agg.discovered_not_indexed,
+      otherNotIndexed: agg.other_not_indexed,
+      canonicalMismatches: agg.canonical_mismatches,
+      newlyIndexed,
+      newlyDropped
+    }
+  };
+}
+var sql8, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
+var init_gsc_index_server = __esm({
+  "app/lib/gsc-index.server.ts"() {
+    "use strict";
+    init_gsc_server();
+    init_kv_server();
+    sql8 = neon4(process.env["DATABASE_URL"]);
+    INSPECT_URL = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
+    DAILY_QUOTA_CEILING = 1900;
+    DEFAULT_RUN_BUDGET = 225;
+    CONCURRENCY = 5;
+    QuotaExhaustedError = class extends Error {
+    };
   }
 });
 
@@ -18283,7 +18523,7 @@ var init_pricing_apply_server = __esm({
 });
 
 // app/lib/pricing-webhook.server.ts
-import { eq as eq13, sql as sql8 } from "drizzle-orm";
+import { eq as eq13, sql as sql9 } from "drizzle-orm";
 async function setPipelineSetting(key, value) {
   await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
     target: pipelineSettings.key,
@@ -18304,7 +18544,7 @@ var init_pricing_webhook_server = __esm({
 });
 
 // app/lib/cost-sync.server.ts
-import { inArray as inArray3, sql as sql9 } from "drizzle-orm";
+import { inArray as inArray3, sql as sql10 } from "drizzle-orm";
 function round23(n) {
   return Math.round(n * 100) / 100;
 }
@@ -18388,17 +18628,17 @@ async function runNalpacCostSync(opts) {
         await db.insert(nalpacPriceHistory).values(chunk).onConflictDoUpdate({
           target: nalpacPriceHistory.sku,
           set: {
-            wholesale: sql9`excluded.wholesale`,
-            msrp: sql9`excluded.msrp`,
-            mapPrice: sql9`excluded.map_price`,
-            salePrice: sql9`excluded.sale_price`,
-            qty: sql9`excluded.qty`,
-            nalpacDiscountPct: sql9`excluded.nalpac_discount_pct`,
-            inTop100: sql9`excluded.in_top100`,
-            inNew: sql9`excluded.in_new`,
-            inSale: sql9`excluded.in_sale`,
-            observedAt: sql9`excluded.observed_at`,
-            syncedAt: sql9`excluded.synced_at`
+            wholesale: sql10`excluded.wholesale`,
+            msrp: sql10`excluded.msrp`,
+            mapPrice: sql10`excluded.map_price`,
+            salePrice: sql10`excluded.sale_price`,
+            qty: sql10`excluded.qty`,
+            nalpacDiscountPct: sql10`excluded.nalpac_discount_pct`,
+            inTop100: sql10`excluded.in_top100`,
+            inNew: sql10`excluded.in_new`,
+            inSale: sql10`excluded.in_sale`,
+            observedAt: sql10`excluded.observed_at`,
+            syncedAt: sql10`excluded.synced_at`
           }
         });
       } catch (err) {
@@ -19335,15 +19575,15 @@ var init_enricher_brief_server = __esm({
 
 // app/lib/batch-enrichment.server.ts
 import { readFile } from "node:fs/promises";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
-import { dirname as dirname2, resolve as resolve3 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+import { dirname as dirname3, resolve as resolve3 } from "node:path";
 import Anthropic5 from "@anthropic-ai/sdk";
 function stripFences2(raw) {
   return raw.replace(/^```(?:html|json)?\n?/i, "").replace(/\n?```$/i, "").trim();
 }
 async function loadEnricherAgentPrompt() {
   if (_cachedAgentPrompt !== null) return _cachedAgentPrompt;
-  const here = dirname2(fileURLToPath2(import.meta.url));
+  const here = dirname3(fileURLToPath3(import.meta.url));
   const path = resolve3(here, "..", "..", ".claude", "agents", "emma-product-enricher.md");
   const raw = await readFile(path, "utf8");
   const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
@@ -19510,7 +19750,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and4, asc as asc3, eq as eq15, inArray as inArray4, isNull as isNull2, sql as sql10 } from "drizzle-orm";
+import { and as and4, asc as asc3, eq as eq15, inArray as inArray4, isNull as isNull2, sql as sql11 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -19685,7 +19925,7 @@ async function collectEnrichmentBatch() {
     eq15(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichFailedAt),
-    sql10`${importCandidates.enrichBatchId} IS NOT NULL`
+    sql11`${importCandidates.enrichBatchId} IS NOT NULL`
   )).orderBy(asc3(importCandidates.id));
   const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
   if (pending.length === 0) {
@@ -19741,7 +19981,7 @@ async function collectEnrichmentBatch() {
 async function publishEnrichedProducts() {
   const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq15(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
     eq15(importCandidates.status, "imported"),
-    sql10`${importCandidates.enrichedAt} IS NOT NULL`,
+    sql11`${importCandidates.enrichedAt} IS NOT NULL`,
     isNull2(importCandidates.publishedAt)
   ));
   let published = 0;
@@ -20328,7 +20568,7 @@ __export(batch_orchestrator_server_exports, {
   getBatchJobById: () => getBatchJobById,
   listRecentBatchJobs: () => listRecentBatchJobs
 });
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { createHash as createHash6, randomUUID as randomUUID2 } from "node:crypto";
 import Anthropic7 from "@anthropic-ai/sdk";
 import { eq as eq17, inArray as inArray5 } from "drizzle-orm";
 function getClient3() {
@@ -20796,7 +21036,10 @@ async function submitTurnBatch(job) {
   console.log(`[batch-orchestrator] job ${job.jobId} turn ${job.turn + 1}: submitted batch ${batch.id} (${requests.length} requests)`);
 }
 function buildCustomId2(jobId, productId) {
-  return `${jobId}__${productId}`;
+  const pid = productId.split("/").pop() || productId;
+  const raw = `${jobId}__${pid}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  if (raw.length <= 64) return raw;
+  return createHash6("sha256").update(`${jobId}__${productId}`).digest("hex").slice(0, 32);
 }
 function freshRunnerState(p, jobId) {
   const input = p.input;
@@ -21536,7 +21779,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and5, eq as eq19, inArray as inArray6, sql as sql11 } from "drizzle-orm";
+import { and as and5, eq as eq19, inArray as inArray6, sql as sql12 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -21808,7 +22051,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
   const tierCMinGap = parseFloat(tierCMinGapStr ?? "4.5");
   const tierCMinMarkup = parseFloat(tierCMinMarkupStr ?? "0.15");
   const tierCMaxPerDay = Math.max(0, parseInt(tierCMaxPerDayStr ?? "3", 10) || 0);
-  const importedTodayRows = await db.select({ cnt: sql11`count(*)::int` }).from(importCandidates).where(and5(eq19(importCandidates.status, "imported"), eq19(importCandidates.runDate, todayStr)));
+  const importedTodayRows = await db.select({ cnt: sql12`count(*)::int` }).from(importCandidates).where(and5(eq19(importCandidates.status, "imported"), eq19(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -21829,7 +22072,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
   }).from(importCandidates).where(and5(
     eq19(importCandidates.status, "pending"),
     inArray6(importCandidates.masterKey, cappedKeys)
-  )).orderBy(importCandidates.tier, sql11`${importCandidates.dealScore} DESC NULLS LAST`);
+  )).orderBy(importCandidates.tier, sql12`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
     const tierOk = c.tier === "A" || c.tier === "B";
     if (!tierOk || c.needsReview) return false;
@@ -21965,20 +22208,20 @@ async function getImportCandidatesByStatus(statuses, limit) {
   if (statuses.length === 0) return [];
   const query = db.select().from(importCandidates).where(inArray6(importCandidates.status, statuses)).orderBy(
     importCandidates.tier,
-    sql11`${importCandidates.dealScore} DESC NULLS LAST`
+    sql12`${importCandidates.dealScore} DESC NULLS LAST`
   );
   if (limit != null) return query.limit(limit);
   return query;
 }
 async function getCatalogOpportunities() {
-  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql11`${dealHistory.brand} IS NOT NULL`);
+  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql12`${dealHistory.brand} IS NOT NULL`);
   const brandCount = /* @__PURE__ */ new Map();
   for (const r of brandRows) {
     if (!r.brand) continue;
     brandCount.set(r.brand, (brandCount.get(r.brand) ?? 0) + 1);
   }
   const brandCoverage = [...brandCount.entries()].map(([brand, carried]) => ({ brand, carried })).sort((a, b) => b.carried - a.carried);
-  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql11`${dealHistory.categories} IS NOT NULL`);
+  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql12`${dealHistory.categories} IS NOT NULL`);
   const catCount = /* @__PURE__ */ new Map();
   for (const r of catRows) {
     for (const cat of r.categories ?? []) {
@@ -22008,7 +22251,7 @@ async function getCatalogOpportunities() {
   return { brandCoverage, categoryCoverage, brandOpportunities };
 }
 async function getRecentImportRuns(limit) {
-  return db.select().from(importMonitorRuns).orderBy(sql11`${importMonitorRuns.startedAt} DESC`).limit(limit);
+  return db.select().from(importMonitorRuns).orderBy(sql12`${importMonitorRuns.startedAt} DESC`).limit(limit);
 }
 async function updateCandidateStatus(id, status, opts = {}) {
   const now = /* @__PURE__ */ new Date();
@@ -22705,6 +22948,19 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
+  cronRoute("/gsc-index-sweep", async (req, res) => {
+    try {
+      const { runGscIndexSweep: runGscIndexSweep2 } = await Promise.resolve().then(() => (init_gsc_index_server(), gsc_index_server_exports));
+      const budgetParam = Number(req.query["budget"]);
+      const result = await runGscIndexSweep2(
+        Number.isFinite(budgetParam) && budgetParam > 0 ? { budget: budgetParam } : {}
+      );
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error("[cron:gsc-index-sweep]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
   cronRoute("/keyword-research", async (req, res) => {
     try {
       const { getValve: getValve2 } = await Promise.resolve().then(() => (init_team_server(), team_server_exports));
@@ -22974,7 +23230,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq21, sql as sql12 } from "drizzle-orm";
+import { eq as eq21, sql as sql13 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret) return false;
@@ -23045,7 +23301,7 @@ async function handleOrderCreated(order) {
           await db2.insert(productCopurchase).values({ handleA: a, handleB: b, count: 1 }).onConflictDoUpdate({
             target: [productCopurchase.handleA, productCopurchase.handleB],
             set: {
-              count: sql12`${productCopurchase.count} + 1`,
+              count: sql13`${productCopurchase.count} + 1`,
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });

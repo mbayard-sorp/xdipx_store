@@ -312,6 +312,28 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/gsc-index-sweep
+   * Schedule: every 3 hours at :15 — rotate through the sitemap with the
+   * URL Inspection API (225 URLs/run, 8 runs/day, KV-capped at 1,900/day
+   * against the 2,000/day property quota) and upsert per-URL index state
+   * plus the gsc_index_daily aggregate. ?budget=N overrides the run budget.
+   * No-ops with a logged skip until the GSC service-account env vars are set.
+   */
+  cronRoute('/gsc-index-sweep', async (req, res) => {
+    try {
+      const { runGscIndexSweep } = await import('../app/lib/gsc-index.server.js')
+      const budgetParam = Number(req.query['budget'])
+      const result = await runGscIndexSweep(
+        Number.isFinite(budgetParam) && budgetParam > 0 ? { budget: budgetParam } : {},
+      )
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:gsc-index-sweep]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/keyword-research
    * Schedule: monthly, 1st 02:00 UTC — discover new SEO keywords via
    * DataForSEO (when creds exist) or LLM-only expansion, classify, and write

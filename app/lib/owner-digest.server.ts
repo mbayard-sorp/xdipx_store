@@ -2,8 +2,9 @@
  * Daily owner digest (p0-6): one email a day that tells the owner what the
  * store and its agent teams actually did, without opening a dashboard.
  * Sections: orders/profit, team runs (failures called out), valve snapshot,
- * suggestion queue, and program-tracker status (overall RAG + the
- * program-manager's "Asks for the owner").
+ * search indexing (gsc_index_daily aggregate + dropped URLs), suggestion
+ * queue, and program-tracker status (overall RAG + the program-manager's
+ * "Asks for the owner").
  *
  * Sent via /cron/owner-digest (13:00 UTC). A KV once-per-day guard prevents
  * double sends from cron double-invocation; pass force=true to re-send while
@@ -33,6 +34,25 @@ interface RunRow {
   started_at: string
   error: string | null
   summary: string | null
+}
+
+interface IndexDailyRow {
+  day: string
+  sitemap_urls: number
+  inspected_urls: number
+  indexed_count: number
+  crawled_not_indexed: number
+  discovered_not_indexed: number
+  other_not_indexed: number
+  canonical_mismatches: number
+  newly_indexed: number
+  newly_dropped: number
+}
+
+interface DroppedUrlRow {
+  url: string
+  previous_coverage_state: string | null
+  coverage_state: string | null
 }
 
 export interface OwnerDigestResult {
@@ -97,6 +117,36 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   const trackers = getTrackers()
   const redTrackers = trackers.filter(t => t.overall === 'RED').length
 
+  // Index-monitor aggregates are best-effort: tables arrive with migration
+  // 064, and a digest must still send if the sweep has never run.
+  let indexToday: IndexDailyRow | null = null
+  let indexWeekAgo: IndexDailyRow | null = null
+  let droppedUrls: DroppedUrlRow[] = []
+  try {
+    const idxRes = await db.execute(sql`
+      SELECT day::text AS day, sitemap_urls, inspected_urls, indexed_count,
+             crawled_not_indexed, discovered_not_indexed, other_not_indexed,
+             canonical_mismatches, newly_indexed, newly_dropped
+      FROM gsc_index_daily ORDER BY day DESC LIMIT 1`)
+    indexToday = ((idxRes.rows ?? [])[0] ?? null) as IndexDailyRow | null
+    const weekRes = await db.execute(sql`
+      SELECT day::text AS day, sitemap_urls, inspected_urls, indexed_count,
+             crawled_not_indexed, discovered_not_indexed, other_not_indexed,
+             canonical_mismatches, newly_indexed, newly_dropped
+      FROM gsc_index_daily WHERE day <= now()::date - 7 ORDER BY day DESC LIMIT 1`)
+    indexWeekAgo = ((weekRes.rows ?? [])[0] ?? null) as IndexDailyRow | null
+    const droppedRes = await db.execute(sql`
+      SELECT url, previous_coverage_state, coverage_state
+      FROM gsc_url_inspections
+      WHERE coverage_changed_at >= now() - interval '24 hours'
+        AND previous_coverage_state IN ('Submitted and indexed', 'Indexed, not submitted in sitemap')
+        AND verdict <> 'PASS'
+      ORDER BY coverage_changed_at DESC LIMIT 5`)
+    droppedUrls = (droppedRes.rows ?? []) as unknown as DroppedUrlRow[]
+  } catch (err) {
+    console.warn('[owner-digest] index-monitor tables unavailable (migration 064 not applied?):', String(err).slice(0, 200))
+  }
+
   // ── Compose ───────────────────────────────────────────────────────────────
   const ordersY = yesterday?.orders ?? 0
   const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? '' : 's'}, ${redTrackers} RED tracker${redTrackers === 1 ? '' : 's'}`
@@ -116,6 +166,19 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   const valveRows = valveEntries
     .map(([name, on]) => `<tr><td style="padding:2px 10px 2px 0;">${esc(name)}</td><td style="padding:2px 0;">${on ? 'on' : 'off'}</td></tr>`)
     .join('')
+
+  let indexBody = 'no sweep data yet (migration 064 + /cron/gsc-index-sweep)'
+  if (indexToday) {
+    const delta = indexWeekAgo ? indexToday.indexed_count - indexWeekAgo.indexed_count : null
+    const deltaStr = delta === null ? '' : ` (${delta >= 0 ? '+' : ''}${delta} vs ${esc(indexWeekAgo!.day)})`
+    const droppedList = droppedUrls
+      .map(d => `<li>${esc(d.url)} &mdash; now &ldquo;${esc(d.coverage_state ?? 'unknown')}&rdquo;</li>`)
+      .join('')
+    indexBody = `<p style="margin:0 0 4px;"><strong>${indexToday.indexed_count}</strong> of ${indexToday.sitemap_urls} sitemap URLs indexed${deltaStr} &middot; ${indexToday.inspected_urls} inspected so far</p>
+      <p style="margin:0 0 4px;">Not indexed: ${indexToday.crawled_not_indexed} crawled-but-rejected &middot; ${indexToday.discovered_not_indexed} discovered-not-crawled &middot; ${indexToday.other_not_indexed} other &middot; ${indexToday.canonical_mismatches} canonical mismatch${indexToday.canonical_mismatches === 1 ? '' : 'es'}</p>
+      ${indexToday.newly_dropped > 0 ? `<p style="margin:0 0 2px;color:#d93a15;">${indexToday.newly_dropped} dropped from the index today${droppedList ? `:</p><ul style="margin:0 0 4px;padding-left:18px;">${droppedList}</ul>` : '</p>'}` : ''}
+      ${indexToday.newly_indexed > 0 ? `<p style="margin:0;color:#1c7c43;">${indexToday.newly_indexed} newly indexed today</p>` : ''}`
+  }
 
   const trackerBlocks = trackers
     .map(t => {
@@ -138,6 +201,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       ${section(`Team runs, last 24h (${failures.length} failed)`, `<table style="border-collapse:collapse;">${runRows || '<tr><td>no runs</td></tr>'}</table>`)}
       ${section('Team gates', `<table style="border-collapse:collapse;">${gateRows}</table>`)}
       ${section('Valves', `<table style="border-collapse:collapse;">${valveRows}</table>`)}
+      ${section(`Search indexing${indexToday ? ` (as of ${esc(indexToday.day)})` : ''}`, indexBody)}
       ${section(`Suggestions (${proposed?.n ?? 0} awaiting triage${proposed ? `, oldest ${esc(proposed.oldest.slice(0, 10))}` : ''})`, sugg.map(s => `${esc(s.status)}: ${s.n}`).join(' &middot; ') || 'none')}
       ${section('Program trackers', trackerBlocks || 'no trackers found')}
       <p style="font-family:Inter,sans-serif;font-size:11px;color:#6f645c;margin-top:18px;">
