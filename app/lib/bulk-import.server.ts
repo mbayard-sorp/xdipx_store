@@ -56,7 +56,9 @@ function editorialTagsFrom(categories: string[]): string[] {
 function computeDealPrice(wholesale: number, msrp: number, map: number): number {
   if (map === 0)    return Math.round(Math.max(wholesale * 1.4, msrp * 0.55) * 100) / 100
   if (map < msrp)   return Math.round(map * 100) / 100
-  return Math.round(msrp * 100) / 100
+  // map >= msrp: no advertised discount; price at MAP (covers the odd feed rows
+  // where MAP sits above MSRP, which pricing at MSRP would violate)
+  return Math.round(map * 100) / 100
 }
 
 // ─── Image extraction ─────────────────────────────────────────────────────────
