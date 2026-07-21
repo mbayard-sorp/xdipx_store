@@ -875,7 +875,7 @@ export async function updateCandidateStatus(
  * Re-collapses today's feed to get fresh per-variant data (Color/Size/Volume
  * + per-variant pricing + images) before building the MasterProductGroup.
  */
-export async function approveAndImport(id: number, reviewedBy?: string): Promise<{
+export async function approveAndImport(id: number, reviewedBy?: string, opts: { preloadedMasters?: MasterRecord[] } = {}): Promise<{
   ok: boolean
   skipped?: boolean
   shopifyProductId?: string
@@ -910,8 +910,10 @@ export async function approveAndImport(id: number, reviewedBy?: string): Promise
   }
 
   // Re-fetch and re-collapse today's feed to get fresh per-variant data.
-  const feedResult = await fetchAllNalpacFeeds()
-  const masters = collapseMasters(feedResult.snapshots)
+  // Bulk callers doing many sequential approvals can pass preloadedMasters to
+  // fetch + collapse once instead of per candidate.
+  const masters = opts.preloadedMasters
+    ?? collapseMasters((await fetchAllNalpacFeeds()).snapshots)
   const master = masters.find(m => m.masterKey === candidate.masterKey)
 
   if (!master) {

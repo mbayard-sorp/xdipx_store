@@ -296,7 +296,9 @@ export async function submitEnrichmentBatch(cap: number): Promise<{ submitted: n
     // pairing_why against the candidate list available at import time would be
     // discarded work -- suppress it here.
     brief.pairingCandidates = []
-    inputs.push({ productId: `gid://shopify/Product/${r.productId}`, brief })
+    // Bare numeric id: the productId becomes the Anthropic batch custom_id,
+    // which must match ^[a-zA-Z0-9_-]{1,64}$ — a gid:// prefix is rejected.
+    inputs.push({ productId: String(r.productId), brief })
     candidateIds.push(r.id)
   }
   if (inputs.length === 0) return { submitted: 0, reason: 'no_briefs' }
@@ -373,9 +375,9 @@ export async function collectEnrichmentBatch(): Promise<{ enriched: number; fail
     }
 
     for (const candidate of candidates) {
-      const gid          = `gid://shopify/Product/${candidate.productId}`
-      const writes        = collected.results.get(gid)
-      const batchFailure  = collected.failures.find(f => f.productId === gid)
+      const resultKey     = String(candidate.productId)
+      const writes        = collected.results.get(resultKey)
+      const batchFailure  = collected.failures.find(f => f.productId === resultKey)
 
       let ok = false
       if (writes && !batchFailure && passesQualityGate(writes)) {
