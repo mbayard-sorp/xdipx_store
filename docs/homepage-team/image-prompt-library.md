@@ -112,6 +112,15 @@ Scaffold (always with `--ref-image` = the post's embedded product's real Shopify
 sage-leaf + water-droplet care accent, warm dappled daylight on cream/white paper →
 `image-e75e55758b2fc4594fd24ec197a561744163c299-1184x880-jpg` (post: `how-do-you-care-for-silicone-toys`).
 
+We-Vibe Tango X Cherry bullet vibrator (`we-vibe-tango-x-rechargeable-silicone-intense-bullet-vibrator-cherry`),
+no accent prop (guides/Real Talk tone, no category chip needed), standing upright and large in frame on
+warm daylight paper with one crisp side shadow, no props at all → shape and color matched the real
+product photo cleanly via Kontext (tapered head, two side buttons, matte cherry-red finish) →
+`image-4f031e89641e484c6f45a3d579c54bed3455fbd0-1184x880-jpg` (post:
+`why-first-toy-shopping-feels-overwhelming`). Confirms the brief's guidance that a small bullet is a
+strong beginner-subject hero even on a Real Talk / overwhelm-themed post — no domestic-metaphor
+fallback was needed.
+
 Sliquid Naturals H2O Intimate Lubricant 8.5oz (`naturals-h2o-intimate-lubricant-8-5-oz`), guides
 category (no accent prop), shot close and tight so the bottle fills most of the frame height with
 only a thin headroom margin, warm golden-hour daylight with a dramatic long shadow →
