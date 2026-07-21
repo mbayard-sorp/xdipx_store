@@ -75,6 +75,18 @@ async function getAccessToken(creds: { email: string; privateKey: string }): Pro
   return json.access_token
 }
 
+/**
+ * Credentials + resolved property for other GSC modules (index monitor).
+ * Null when the service-account env vars are absent, mirroring the
+ * skipped-not-crashed contract of runGscSnapshot().
+ */
+export async function getGscContext(): Promise<{ token: string; siteUrl: string } | null> {
+  const creds = loadCredentials()
+  if (!creds) return null
+  const token = await getAccessToken(creds)
+  return { token, siteUrl: process.env['GSC_SITE_URL']?.trim() || DEFAULT_SITE }
+}
+
 interface SearchAnalyticsRow {
   keys?: string[]
   clicks?: number
