@@ -323,62 +323,13 @@ export function renderPricingReportHTML(report: PricingReport, adminUrl: string)
 // Email send via Zoho SMTP
 // ---------------------------------------------------------------------------
 
-const TO_ADDRESSES = ['mike@xdipx.com', 'mikebayard@me.com']
-
 export async function sendPricingReportEmail(
   report: PricingReport,
   opts: { adminUrl?: string } = {},
 ): Promise<{ sent: boolean; error?: string }> {
   const adminUrl = opts.adminUrl ?? 'https://xdipx.com'
-
-  const host = process.env['ZOHO_SMTP_HOST'] ?? 'smtp.zoho.com'
-  const port = parseInt(process.env['ZOHO_SMTP_PORT'] ?? '465', 10)
-  const user = process.env['ZOHO_SMTP_USER']
-  const pass = process.env['ZOHO_SMTP_PASS']
-  const from = process.env['EMAIL_FROM'] ?? 'hello@xdipx.com'
-
-  if (!user || !pass) {
-    console.warn(
-      '[pricing-report] ZOHO_SMTP_USER or ZOHO_SMTP_PASS not set. Skipping email send.',
-    )
-    return { sent: false, error: 'SMTP credentials not configured' }
-  }
-
-  // Dynamic require so a missing nodemailer does not crash at module load time
-  // and does not require tsc to resolve the package types.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let nm: any = null
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    nm = require('nodemailer')
-  } catch {
-    console.warn('[pricing-report] nodemailer not installed. Skipping email send.')
-    return { sent: false, error: 'nodemailer not installed' }
-  }
-
   const html = renderPricingReportHTML(report, adminUrl)
-
   const subject = `xdipx pricing: ${report.totalChanges} changes, ${report.pending} pending review (${report.runDate})`
-
-  try {
-    const transporter = nm.createTransport({
-      host,
-      port,
-      secure: port === 465,
-      auth: { user, pass },
-    })
-
-    await transporter.sendMail({
-      from: `"xdipx pricing agent" <${from}>`,
-      to: TO_ADDRESSES.join(', '),
-      subject,
-      html,
-    })
-
-    return { sent: true }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error('[pricing-report] SMTP send failed:', msg)
-    return { sent: false, error: msg }
-  }
+  const { sendOwnerEmail } = await import('~/lib/owner-alerts.server')
+  return sendOwnerEmail(subject, html, { fromName: 'xdipx pricing agent' })
 }

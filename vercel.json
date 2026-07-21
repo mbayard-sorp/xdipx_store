@@ -34,6 +34,7 @@
     { "path": "/cron/notebook-healthcheck",    "schedule": "41 7 * * *"   },
     { "path": "/cron/warm",                    "schedule": "*/15 * * * *" },
     { "path": "/cron/gsc-snapshot",            "schedule": "0 6 * * 1"   },
-    { "path": "/cron/keyword-research",        "schedule": "0 2 1 * *"   }
+    { "path": "/cron/keyword-research",        "schedule": "0 2 1 * *"   },
+    { "path": "/cron/owner-digest",            "schedule": "0 13 * * *"  }
   ]
 }

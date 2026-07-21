@@ -168,6 +168,7 @@ const NAV_ITEMS = [
   { to: '/admin',                label: 'Dashboard',    Icon: DashboardIcon },
   { to: '/admin/deals',              label: 'Deals',            Icon: StarIcon       },
   { to: '/admin/homepage-team',      label: 'Homepage Team',    Icon: SlidersIcon    },
+  { to: '/admin/trackers',           label: 'Trackers',         Icon: SlidersIcon    },
   { to: '/admin/design-gallery',     label: 'Design Gallery',   Icon: DesignGalleryIcon },
   { to: '/admin/marketing-calendar', label: 'Marketing Calendar', Icon: SocialsIcon  },
   { to: '/admin/pricing',           label: 'Pricing',          Icon: PricingIcon    },

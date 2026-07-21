@@ -213,7 +213,10 @@ async function classifyLogs(logs: LogLine[]): Promise<LogMonitorReport> {
  * already share the title. Uses the GitHub REST API directly (no Octokit dep)
  * since we only need two endpoints: search + create.
  */
-async function openIssuesForP0(groups: LogGroup[], windowMinutes: number): Promise<string[]> {
+async function openIssuesForP0(
+  groups: LogGroup[],
+  windowMinutes: number,
+): Promise<Array<{ url: string; title: string; created: boolean }>> {
   const p0 = groups.filter((g) => g.priority === 'P0')
   if (p0.length === 0) return []
 
@@ -231,7 +234,7 @@ async function openIssuesForP0(groups: LogGroup[], windowMinutes: number): Promi
     'X-GitHub-Api-Version': '2022-11-28',
     'Content-Type':         'application/json',
   }
-  const opened: string[] = []
+  const opened: Array<{ url: string; title: string; created: boolean }> = []
 
   for (const group of p0) {
     const title = `[P0] ${group.title}`
@@ -257,7 +260,7 @@ async function openIssuesForP0(groups: LogGroup[], windowMinutes: number): Promi
         `https://api.github.com/repos/${owner}/${repo}/issues/${existing.number}/comments`,
         { method: 'POST', headers, body: JSON.stringify({ body: `Recurrence:\n\n${body}` }) },
       )
-      if (comment.ok) opened.push(existing.html_url)
+      if (comment.ok) opened.push({ url: existing.html_url, title, created: false })
       else console.error(`[log-monitor] GitHub comment ${comment.status}: ${await comment.text()}`)
       continue
     }
@@ -269,7 +272,7 @@ async function openIssuesForP0(groups: LogGroup[], windowMinutes: number): Promi
     })
     if (create.ok) {
       const json = await create.json() as { html_url: string }
-      opened.push(json.html_url)
+      opened.push({ url: json.html_url, title, created: true })
     } else {
       console.error(`[log-monitor] GitHub create ${create.status}: ${await create.text()}`)
     }
@@ -282,7 +285,24 @@ export async function runLogMonitor(
 ): Promise<LogMonitorRunResult> {
   const logs   = await fetchRecentLogs({ windowMinutes })
   const report = await classifyLogs(logs)
-  const issuesOpened = await openIssuesForP0(report.groups, windowMinutes)
+  const issues = await openIssuesForP0(report.groups, windowMinutes)
+  const issuesOpened = issues.map((i) => i.url)
+
+  // Owner alert only for newly created issues (first detection). Recurrence
+  // comments on an existing open issue run every 15 min and must not re-page.
+  const created = issues.filter((i) => i.created)
+  if (created.length > 0) {
+    const { sendOwnerSms, sendOwnerEmail, escapeHtml } = await import('~/lib/owner-alerts.server')
+    await sendOwnerSms(
+      `xdipx P0 logs: ${created.length} new issue${created.length === 1 ? '' : 's'}. ${created[0]!.title}`,
+    )
+    await sendOwnerEmail(
+      `[P0] xdipx log-monitor: ${created.length} new issue${created.length === 1 ? '' : 's'}`,
+      created
+        .map((i) => `<p><a href="${i.url}">${escapeHtml(i.title)}</a></p>`)
+        .join(''),
+    )
+  }
 
   return {
     windowMinutes,

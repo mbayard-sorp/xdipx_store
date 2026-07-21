@@ -1,5 +1,11 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
 var __esm = (fn, res, err) => function __init() {
   if (err) throw err[0];
   try {
@@ -2060,6 +2066,7 @@ __export(sanity_server_exports, {
   getHomepageSections: () => getHomepageSections,
   getNotebookPostsForProduct: () => getNotebookPostsForProduct,
   getNotebookPostsForProductHandles: () => getNotebookPostsForProductHandles,
+  getNotebookPostsForProductType: () => getNotebookPostsForProductType,
   getNotebookSettings: () => getNotebookSettings,
   getPage: () => getPage,
   getPageList: () => getPageList,
@@ -2534,7 +2541,11 @@ async function getProductPageBlocks(handle) {
       }`,
       { handle }
     );
-    return data?.sections ?? [];
+    return (data?.sections ?? []).map((section) => {
+      if (section?._type !== "relatedGuides") return section;
+      const guides = (section.guides ?? []).filter((g) => g && g.status === "published").map(({ status, ...card }) => ({ ...card, readingTime: 0 }));
+      return { ...section, guides };
+    });
   } catch (err) {
     console.error("[sanity] getProductPageBlocks error:", err);
     return [];
@@ -2811,6 +2822,30 @@ async function getNotebookPostsForProductHandles(handles, limit = 4) {
     return result;
   } catch (err) {
     console.error("[sanity] getNotebookPostsForProductHandles error:", err);
+    return [];
+  }
+}
+async function getNotebookPostsForProductType(productType, excludeHandle, limit = 3) {
+  if (!projectId || !productType) return [];
+  const cacheKey3 = `notebook-for-type:${productType}:${excludeHandle}:${limit}`;
+  const cached2 = getCachedBlog(cacheKey3, BLOG_CACHE_TTL);
+  if (cached2) return cached2;
+  try {
+    const client5 = getClient();
+    if (!client5) return [];
+    const posts = await client5.fetch(
+      `*[_type == "blogPost" && status == "published"
+        && count(body[_type == "blogProductEmbed" && productHandle in
+          *[_type == "productPage" && productTypeDial == $type && shopifyHandle != $handle].shopifyHandle
+        ]) > 0]
+        | order(publishedAt desc) [0...$limit] { ${BLOG_POST_CARD_PROJECTION} }`,
+      { type: productType, handle: excludeHandle, limit }
+    );
+    const result = (posts ?? []).map((p) => ({ ...p, readingTime: 0 }));
+    setCachedBlog(cacheKey3, result);
+    return result;
+  } catch (err) {
+    console.error("[sanity] getNotebookPostsForProductType error:", err);
     return [];
   }
 }
@@ -3367,6 +3402,15 @@ var init_sanity_server = __esm({
       shortBio, longBio,
       "picksSince": picksSince,
       instagram, email
+    }
+  ),
+  // relatedGuides \u2014 dereference the curated blogPost picks to NotebookRail card
+  // shape at query time. The status field rides along so getProductPageBlocks
+  // can drop unpublished picks before they reach the storefront.
+  "guides": select(
+    _type == "relatedGuides" => guides[]->{
+      _id, title, "slug": slug.current, excerpt, publishedAt, featured,
+      "heroImageUrl": heroImage.asset->url, heroImageAlt, status
     }
   ),
 `;
@@ -4172,7 +4216,7 @@ async function getDealByShopifyIdUncached(id) {
 async function getDealByHandle(handle) {
   return cached(`shopify:deal:byhandle:${handle}`, READ_TTL, async () => {
     const timeout = new Promise(
-      (resolve3) => setTimeout(() => resolve3(null), 5e3)
+      (resolve4) => setTimeout(() => resolve4(null), 5e3)
     );
     const fetch2 = storefront(`
       query GetDealByHandle($handle: String!) {
@@ -9723,15 +9767,15 @@ function slice(text2, startMarker, endMarker) {
   }
   return text2.slice(start + startMarker.length, end).trim();
 }
-var __dirname, CHARTER_CANDIDATES, charterPath, charter, EMMA_VOICE_CORE, MARKETING_ADDENDUM, ENRICHMENT_ADDENDUM, CONVERSATIONAL_ADDENDUM, SUPPORT_ADDENDUM, EMMA_VOICE_MARKETING, EMMA_VOICE_ENRICHMENT, EMMA_VOICE_CONVERSATIONAL, EMMA_VOICE_SUPPORT;
+var __dirname2, CHARTER_CANDIDATES, charterPath, charter, EMMA_VOICE_CORE, MARKETING_ADDENDUM, ENRICHMENT_ADDENDUM, CONVERSATIONAL_ADDENDUM, SUPPORT_ADDENDUM, EMMA_VOICE_MARKETING, EMMA_VOICE_ENRICHMENT, EMMA_VOICE_CONVERSATIONAL, EMMA_VOICE_SUPPORT;
 var init_emma_voice_server = __esm({
   "app/lib/emma-voice.server.ts"() {
     "use strict";
-    __dirname = dirname(fileURLToPath(import.meta.url));
+    __dirname2 = dirname(fileURLToPath(import.meta.url));
     CHARTER_CANDIDATES = [
       resolve(process.cwd(), "docs/emma-voice.md"),
-      resolve(__dirname, "../../docs/emma-voice.md"),
-      resolve(__dirname, "../docs/emma-voice.md")
+      resolve(__dirname2, "../../docs/emma-voice.md"),
+      resolve(__dirname2, "../docs/emma-voice.md")
     ];
     charterPath = CHARTER_CANDIDATES.find((p) => existsSync(p));
     if (!charterPath) {
@@ -9987,10 +10031,10 @@ async function logImageCost(entry) {
 }
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql12 } = await import("drizzle-orm");
+  const { sql: sql13 } = await import("drizzle-orm");
   const days = opts.days ?? 30;
   const result = await db2.execute(
-    sql12`SELECT * FROM api_token_daily
+    sql13`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
   );
@@ -9998,11 +10042,11 @@ async function getDailyTokenRollup(opts = {}) {
 }
 async function getTokenCallDetail(opts) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql12 } = await import("drizzle-orm");
+  const { sql: sql13 } = await import("drizzle-orm");
   const model = opts.model ?? null;
   const source = opts.source ?? null;
   const result = await db2.execute(
-    sql12`
+    sql13`
       WITH grouped AS (
         SELECT
           caller, sku, product_id, batch_id,
@@ -13624,10 +13668,10 @@ var init_search_ping_server = __esm({
 // app/lib/with-timeout.server.ts
 async function withTimeout(p, ms, fallback, label = "op") {
   let timer;
-  const timeout = new Promise((resolve3) => {
+  const timeout = new Promise((resolve4) => {
     timer = setTimeout(() => {
       console.warn(`[with-timeout] ${label} timed out after ${ms}ms \u2014 using fallback`);
-      resolve3(fallback);
+      resolve4(fallback);
     }, ms);
   });
   try {
@@ -15135,11 +15179,127 @@ var init_deal_rotator_server = __esm({
   }
 });
 
+// app/lib/twilio.server.ts
+async function sendSms(to, body) {
+  const sid = process.env["TWILIO_ACCOUNT_SID"];
+  const token = process.env["TWILIO_AUTH_TOKEN"];
+  const from = process.env["TWILIO_PHONE_NUMBER"];
+  if (!sid || !token || !from) throw new Error("Twilio env vars not set");
+  const auth = Buffer.from(`${sid}:${token}`).toString("base64");
+  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({ To: to, From: from, Body: body }).toString()
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`Twilio SMS send failed (${res.status}): ${err}`);
+  }
+  const json2 = await res.json();
+  return json2.sid;
+}
+var init_twilio_server = __esm({
+  "app/lib/twilio.server.ts"() {
+    "use strict";
+  }
+});
+
+// app/lib/owner-alerts.server.ts
+var owner_alerts_server_exports = {};
+__export(owner_alerts_server_exports, {
+  escapeHtml: () => escapeHtml,
+  ownerAlertEmails: () => ownerAlertEmails,
+  sendOwnerEmail: () => sendOwnerEmail,
+  sendOwnerSms: () => sendOwnerSms
+});
+function ownerAlertEmails() {
+  const raw = process.env["OWNER_ALERT_EMAILS"];
+  if (!raw) return DEFAULT_RECIPIENTS;
+  const list = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  return list.length > 0 ? list : DEFAULT_RECIPIENTS;
+}
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+async function sendOwnerEmail(subject, html, opts = {}) {
+  const host = process.env["ZOHO_SMTP_HOST"] ?? "smtp.zoho.com";
+  const port2 = parseInt(process.env["ZOHO_SMTP_PORT"] ?? "465", 10);
+  const user = process.env["ZOHO_SMTP_USER"];
+  const pass = process.env["ZOHO_SMTP_PASS"];
+  const from = process.env["EMAIL_FROM"] ?? "hello@xdipx.com";
+  if (!user || !pass) {
+    console.warn("[owner-alerts] ZOHO_SMTP_USER or ZOHO_SMTP_PASS not set. Skipping email send.");
+    return { sent: false, error: "SMTP credentials not configured" };
+  }
+  let nm = null;
+  try {
+    nm = __require("nodemailer");
+  } catch {
+    console.warn("[owner-alerts] nodemailer not installed. Skipping email send.");
+    return { sent: false, error: "nodemailer not installed" };
+  }
+  try {
+    const transporter = nm.createTransport({
+      host,
+      port: port2,
+      secure: port2 === 465,
+      auth: { user, pass }
+    });
+    await transporter.sendMail({
+      from: `"${opts.fromName ?? "xdipx ops"}" <${from}>`,
+      to: ownerAlertEmails().join(", "),
+      subject,
+      html
+    });
+    return { sent: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[owner-alerts] SMTP send failed:", msg);
+    return { sent: false, error: msg };
+  }
+}
+async function sendOwnerSms(body) {
+  const to = process.env["OWNER_ALERT_PHONE"];
+  if (!to) {
+    console.warn("[owner-alerts] OWNER_ALERT_PHONE not set. Skipping SMS.");
+    return { sent: false, error: "OWNER_ALERT_PHONE not set" };
+  }
+  try {
+    await sendSms(to, body.length > 320 ? `${body.slice(0, 317)}...` : body);
+    return { sent: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[owner-alerts] SMS send failed:", msg);
+    return { sent: false, error: msg };
+  }
+}
+var DEFAULT_RECIPIENTS;
+var init_owner_alerts_server = __esm({
+  "app/lib/owner-alerts.server.ts"() {
+    "use strict";
+    init_twilio_server();
+    DEFAULT_RECIPIENTS = ["mike@xdipx.com", "mikebayard@me.com"];
+  }
+});
+
 // app/lib/homepage-healthcheck.server.ts
 var homepage_healthcheck_server_exports = {};
 __export(homepage_healthcheck_server_exports, {
   runHomepageHealthcheck: () => runHomepageHealthcheck
 });
+async function activeServedVariant() {
+  try {
+    const cfg = await getHomeConfig();
+    if (cfg?.activeVariant === "a" || cfg?.activeVariant === "b") return cfg.activeVariant;
+  } catch {
+  }
+  const env = process.env["HOME_VARIANT"];
+  if (env === "a" || env === "b" || env === "legacy") return env;
+  return "legacy";
+}
 function siteOrigin() {
   const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
   return base.replace(/\/$/, "") || "https://xdipx.com";
@@ -15206,7 +15366,7 @@ async function openHealthcheckIssue(title, body) {
   const repo = process.env["GITHUB_REPO"];
   if (!token || !owner || !repo) {
     console.warn("[homepage-healthcheck] GITHUB_TOKEN/OWNER/REPO not set \u2014 skipping issue");
-    return null;
+    return { url: null, created: false };
   }
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -15224,7 +15384,7 @@ async function openHealthcheckIssue(title, body) {
         headers,
         body: JSON.stringify({ body })
       });
-      return existing.html_url;
+      return { url: existing.html_url, created: false };
     }
     const create = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
       method: "POST",
@@ -15233,12 +15393,12 @@ async function openHealthcheckIssue(title, body) {
     });
     if (!create.ok) {
       console.error(`[homepage-healthcheck] issue create ${create.status}`);
-      return null;
+      return { url: null, created: false };
     }
-    return (await create.json()).html_url;
+    return { url: (await create.json()).html_url, created: true };
   } catch (err) {
     console.error("[homepage-healthcheck] issue error", err);
-    return null;
+    return { url: null, created: false };
   }
 }
 async function runHomepageHealthcheck() {
@@ -15273,10 +15433,16 @@ async function runHomepageHealthcheck() {
       if (valid) {
         await invalidateHomepagePayloadA().catch(() => {
         });
+        invalidateCmsCache();
         await restoreHomepageDoc(lastGood);
-        await warmHomepagePayloadA({ force: true }).catch(
-          (e) => console.error("[homepage-healthcheck] payload rewarm failed", e)
-        );
+        const servedVariant = await activeServedVariant();
+        if (servedVariant === "b") {
+          invalidateCmsCache();
+        } else {
+          await warmHomepagePayloadA({ force: true }).catch(
+            (e) => console.error("[homepage-healthcheck] payload rewarm failed", e)
+          );
+        }
         result.rolledBack = true;
       } else {
         result.message = lastGood ? "last-good snapshot is malformed \u2014 skipping rollback" : "no last-good snapshot available to roll back to";
@@ -15305,12 +15471,20 @@ async function runHomepageHealthcheck() {
       "**Problems**",
       summary,
       "",
-      `**Auto-recovery:** ${result.rolledBack ? "rolled the Sanity homepage doc back to last-good and re-warmed the Variant A payload." : result.message ?? "none"}`,
+      `**Auto-recovery:** ${result.rolledBack ? "rolled the Sanity homepage doc back to last-good and re-warmed the payload for the live variant." : result.message ?? "none"}`,
       "",
       "_Filed automatically by `/cron/homepage-healthcheck`._"
     ].join("\n");
-    const issueUrl = await openHealthcheckIssue("[P0] Homepage healthcheck failing", issueBody);
-    if (issueUrl) result.message = `${result.message ? result.message + " \xB7 " : ""}issue: ${issueUrl}`;
+    const issue = await openHealthcheckIssue("[P0] Homepage healthcheck failing", issueBody);
+    if (issue.url) result.message = `${result.message ? result.message + " \xB7 " : ""}issue: ${issue.url}`;
+    if (issue.created) {
+      const { sendOwnerSms: sendOwnerSms2, sendOwnerEmail: sendOwnerEmail2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
+      await sendOwnerSms2(`xdipx P0: homepage healthcheck failing. ${summary}`);
+      await sendOwnerEmail2(
+        "[P0] xdipx homepage healthcheck failing",
+        `<pre style="font-family:monospace;white-space:pre-wrap;">${escapeHtml2(issueBody)}</pre>${issue.url ? `<p><a href="${issue.url}">${issue.url}</a></p>` : ""}`
+      );
+    }
   }
   return result;
 }
@@ -15412,7 +15586,7 @@ async function openHealthcheckIssue2(title, body) {
   const repo = process.env["GITHUB_REPO"];
   if (!token || !owner || !repo) {
     console.warn("[notebook-healthcheck] GITHUB_TOKEN/OWNER/REPO not set \u2014 skipping issue");
-    return null;
+    return { url: null, created: false };
   }
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -15430,7 +15604,7 @@ async function openHealthcheckIssue2(title, body) {
         headers,
         body: JSON.stringify({ body })
       });
-      return existing.html_url;
+      return { url: existing.html_url, created: false };
     }
     const create = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
       method: "POST",
@@ -15439,12 +15613,12 @@ async function openHealthcheckIssue2(title, body) {
     });
     if (!create.ok) {
       console.error(`[notebook-healthcheck] issue create ${create.status}`);
-      return null;
+      return { url: null, created: false };
     }
-    return (await create.json()).html_url;
+    return { url: (await create.json()).html_url, created: true };
   } catch (err) {
     console.error("[notebook-healthcheck] issue error", err);
-    return null;
+    return { url: null, created: false };
   }
 }
 async function runNotebookHealthcheck() {
@@ -15487,8 +15661,15 @@ async function runNotebookHealthcheck() {
       "",
       "_Report-only check (no auto-recovery). Filed automatically by `/cron/notebook-healthcheck`._"
     ].join("\n");
-    const issueUrl = await openHealthcheckIssue2("[P1] Notebook healthcheck failing", issueBody);
-    if (issueUrl) result.message = `issue: ${issueUrl}`;
+    const issue = await openHealthcheckIssue2("[P1] Notebook healthcheck failing", issueBody);
+    if (issue.url) result.message = `issue: ${issue.url}`;
+    if (issue.created) {
+      const { sendOwnerEmail: sendOwnerEmail2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
+      await sendOwnerEmail2(
+        "[P1] xdipx notebook healthcheck failing",
+        `<pre style="font-family:monospace;white-space:pre-wrap;">${escapeHtml2(issueBody)}</pre>${issue.url ? `<p><a href="${issue.url}">${issue.url}</a></p>` : ""}`
+      );
+    }
   }
   return result;
 }
@@ -16195,156 +16376,6 @@ var init_reviews_server = __esm({
   }
 });
 
-// app/lib/gsc.server.ts
-var gsc_server_exports = {};
-__export(gsc_server_exports, {
-  runGscSnapshot: () => runGscSnapshot
-});
-import { createSign } from "node:crypto";
-import { neon as neon3 } from "@neondatabase/serverless";
-function loadCredentials() {
-  const rawJson = process.env["GSC_SA_JSON"]?.trim();
-  if (rawJson) {
-    try {
-      const parsed = JSON.parse(rawJson);
-      if (parsed.client_email && parsed.private_key) {
-        return { email: parsed.client_email, privateKey: parsed.private_key };
-      }
-    } catch (err) {
-      console.error("[gsc] GSC_SA_JSON is set but not valid JSON:", err);
-      return null;
-    }
-  }
-  const email = process.env["GSC_SA_EMAIL"]?.trim();
-  const privateKey = process.env["GSC_SA_PRIVATE_KEY"]?.replace(/\\n/g, "\n");
-  if (email && privateKey) return { email, privateKey };
-  return null;
-}
-function b64url(input) {
-  return Buffer.from(input).toString("base64url");
-}
-async function getAccessToken(creds) {
-  const now = Math.floor(Date.now() / 1e3);
-  const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const claims = b64url(JSON.stringify({
-    iss: creds.email,
-    scope: SCOPE,
-    aud: TOKEN_URL,
-    iat: now,
-    exp: now + 3600
-  }));
-  const signer = createSign("RSA-SHA256");
-  signer.update(`${header}.${claims}`);
-  const signature = signer.sign(creds.privateKey).toString("base64url");
-  const assertion = `${header}.${claims}.${signature}`;
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion
-    })
-  });
-  if (!res.ok) throw new Error(`GSC token exchange failed: ${res.status} ${await res.text()}`);
-  const json2 = await res.json();
-  if (!json2.access_token) throw new Error("GSC token exchange returned no access_token");
-  return json2.access_token;
-}
-async function searchAnalytics(token, siteUrl, body) {
-  const res = await fetch(
-    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
-    {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    }
-  );
-  if (!res.ok) throw new Error(`GSC searchAnalytics failed: ${res.status} ${await res.text()}`);
-  const json2 = await res.json();
-  return json2.rows ?? [];
-}
-async function runGscSnapshot() {
-  const creds = loadCredentials();
-  if (!creds) {
-    console.log("[gsc] skipped: no service-account credentials (set GSC_SA_JSON or GSC_SA_EMAIL + GSC_SA_PRIVATE_KEY)");
-    return { skipped: "no credentials" };
-  }
-  const siteUrl = process.env["GSC_SITE_URL"]?.trim() || DEFAULT_SITE;
-  const token = await getAccessToken(creds);
-  const end = new Date(Date.now() - 3 * 24 * 60 * 60 * 1e3);
-  const start = new Date(end.getTime() - 28 * 24 * 60 * 60 * 1e3);
-  const periodStart = start.toISOString().split("T")[0];
-  const periodEnd = end.toISOString().split("T")[0];
-  const base = { startDate: periodStart, endDate: periodEnd, rowLimit: 100 };
-  const [totalsRows, queryRows, pageRows, sitemapsRes] = await Promise.all([
-    searchAnalytics(token, siteUrl, { ...base, rowLimit: 1 }),
-    searchAnalytics(token, siteUrl, { ...base, dimensions: ["query"] }),
-    searchAnalytics(token, siteUrl, { ...base, dimensions: ["page"] }),
-    fetch(`https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/sitemaps`, {
-      headers: { "Authorization": `Bearer ${token}` }
-    })
-  ]);
-  const totals = totalsRows[0] ? {
-    clicks: totalsRows[0].clicks ?? 0,
-    impressions: totalsRows[0].impressions ?? 0,
-    ctr: totalsRows[0].ctr ?? 0,
-    position: totalsRows[0].position ?? 0
-  } : { clicks: 0, impressions: 0, ctr: 0, position: 0 };
-  const mapRows = (rows, key) => rows.map((r) => ({
-    [key]: r.keys?.[0] ?? "",
-    clicks: r.clicks ?? 0,
-    impressions: r.impressions ?? 0,
-    ctr: r.ctr ?? 0,
-    position: r.position ?? 0
-  }));
-  let sitemaps = [];
-  if (sitemapsRes.ok) {
-    const json2 = await sitemapsRes.json();
-    sitemaps = (json2.sitemap ?? []).map((s) => ({
-      path: s.path ?? "",
-      lastSubmitted: s.lastSubmitted ?? null,
-      isPending: s.isPending ?? false,
-      errors: s.errors ?? "0",
-      warnings: s.warnings ?? "0"
-    }));
-  } else {
-    console.warn(`[gsc] sitemaps list failed (non-fatal): ${sitemapsRes.status}`);
-  }
-  const topQueries = mapRows(queryRows, "query");
-  const topPages = mapRows(pageRows, "page");
-  await sql5`
-    INSERT INTO gsc_snapshots (period_start, period_end, totals, top_queries, top_pages, sitemaps)
-    VALUES (
-      ${periodStart}, ${periodEnd},
-      ${JSON.stringify(totals)}::jsonb,
-      ${JSON.stringify(topQueries)}::jsonb,
-      ${JSON.stringify(topPages)}::jsonb,
-      ${JSON.stringify(sitemaps)}::jsonb
-    )
-  `;
-  return {
-    captured: {
-      periodStart,
-      periodEnd,
-      totalClicks: totals.clicks,
-      totalImpressions: totals.impressions,
-      queryCount: topQueries.length,
-      pageCount: topPages.length,
-      sitemapCount: sitemaps.length
-    }
-  };
-}
-var sql5, SCOPE, TOKEN_URL, DEFAULT_SITE;
-var init_gsc_server = __esm({
-  "app/lib/gsc.server.ts"() {
-    "use strict";
-    sql5 = neon3(process.env["DATABASE_URL"]);
-    SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
-    TOKEN_URL = "https://oauth2.googleapis.com/token";
-    DEFAULT_SITE = "sc-domain:xdipx.com";
-  }
-});
-
 // app/lib/content-slot.ts
 function contentSlotForDate(d) {
   const weekday = d.toLocaleDateString("en-US", {
@@ -16429,7 +16460,7 @@ __export(team_server_exports, {
   updateRun: () => updateRun
 });
 import { timingSafeEqual } from "node:crypto";
-import { and as and3, desc, eq as eq11, gte, lt, lte, ne as ne2, sql as sql6 } from "drizzle-orm";
+import { and as and3, desc, eq as eq11, gte, lt, lte, ne as ne2, sql as sql5 } from "drizzle-orm";
 function assertTeamAuth(request) {
   const expected = process.env["TEAM_TOKEN"] ?? process.env["HOMEPAGE_TEAM_TOKEN"] ?? process.env["CRON_SECRET"] ?? "";
   const auth = request.headers.get("authorization") ?? "";
@@ -16451,7 +16482,7 @@ async function getTeamConfig(team) {
 }
 async function getTeamConfigUncached(team) {
   const keys = teamKeys(team);
-  const rows = await db.select().from(pipelineSettings).where(sql6`${pipelineSettings.key} LIKE ${team + "_team_%"}`);
+  const rows = await db.select().from(pipelineSettings).where(sql5`${pipelineSettings.key} LIKE ${team + "_team_%"}`);
   const map = new Map(rows.map((r) => [r.key, r.value]));
   const d = TEAM_DEFAULTS[team];
   const cfg = {
@@ -16503,7 +16534,7 @@ async function counterRead(key, sumFromDb) {
 async function getTodaySpendCents(team) {
   return counterRead(teamSpendKvKey(team, utcDay()), async () => {
     const res = await db.execute(
-      sql6`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
+      sql5`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
           FROM api_token_log
           WHERE ts >= current_date AND feature LIKE ${team + "-%"}`
     );
@@ -16513,8 +16544,8 @@ async function getTodaySpendCents(team) {
 }
 async function getTodayRunCount(team, excludeRunId) {
   const res = await db.execute(
-    excludeRunId == null ? sql6`SELECT COUNT(*)::int AS n FROM homepage_team_runs
-            WHERE started_at >= current_date AND team = ${team}` : sql6`SELECT COUNT(*)::int AS n FROM homepage_team_runs
+    excludeRunId == null ? sql5`SELECT COUNT(*)::int AS n FROM homepage_team_runs
+            WHERE started_at >= current_date AND team = ${team}` : sql5`SELECT COUNT(*)::int AS n FROM homepage_team_runs
             WHERE started_at >= current_date AND team = ${team} AND id <> ${excludeRunId}`
   );
   return Number(res.rows?.[0]?.n ?? 0);
@@ -16522,7 +16553,7 @@ async function getTodayRunCount(team, excludeRunId) {
 async function getTodayImageCount() {
   return counterRead(teamImagesKvKey(utcDay()), async () => {
     const res = await db.execute(
-      sql6`SELECT COALESCE(SUM(request_count), 0)::int AS n
+      sql5`SELECT COALESCE(SUM(request_count), 0)::int AS n
           FROM api_token_log
           WHERE ts >= current_date AND feature = 'homepage-images'`
     );
@@ -16598,7 +16629,7 @@ async function updateRun(id, u) {
   if (u.prUrl !== void 0) patch["prUrl"] = u.prUrl;
   if (u.error !== void 0) patch["error"] = u.error;
   if (u.finished) patch["finishedAt"] = /* @__PURE__ */ new Date();
-  if (u.incrementAttempt) patch["attemptCount"] = sql6`${homepageTeamRuns.attemptCount} + 1`;
+  if (u.incrementAttempt) patch["attemptCount"] = sql5`${homepageTeamRuns.attemptCount} + 1`;
   if (Object.keys(patch).length === 0) return;
   await db.update(homepageTeamRuns).set(patch).where(eq11(homepageTeamRuns.id, id));
 }
@@ -16748,7 +16779,7 @@ async function listSocialPosts(status, limit = 50, reviewStatus) {
   return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(desc(socialPosts.createdAt)).limit(limit);
 }
 async function getSocialFrequencies() {
-  const rows = await db.select().from(pipelineSettings).where(sql6`${pipelineSettings.key} LIKE 'social_freq_%'`);
+  const rows = await db.select().from(pipelineSettings).where(sql5`${pipelineSettings.key} LIKE 'social_freq_%'`);
   const map = new Map(rows.map((r) => [r.key, r.value]));
   const out = {};
   for (const p of SOCIAL_PLATFORMS) {
@@ -16801,6 +16832,355 @@ var init_team_server = __esm({
     SETTINGS_CACHE_TTL_SEC = 60;
     SPEND_KV_TTL_SEC = 26 * 3600;
     SPEND_RESEED_MS = 15 * 6e4;
+  }
+});
+
+// app/lib/tracker.server.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2, readdirSync } from "node:fs";
+import { resolve as resolve2 } from "node:path";
+function trackersDir() {
+  for (const dir of DIR_CANDIDATES) {
+    if (existsSync2(dir)) return dir;
+  }
+  return null;
+}
+function parseRag(v) {
+  const up = v.trim().toUpperCase();
+  return up === "GREEN" || up === "AMBER" || up === "RED" ? up : "UNKNOWN";
+}
+function matchLine(md, re) {
+  const m = md.match(re);
+  return m?.[1]?.trim() ?? "";
+}
+function parseMilestones(md) {
+  const rows = [];
+  for (const line of md.split("\n")) {
+    if (!line.trimStart().startsWith("|")) continue;
+    const cells = line.split("|").slice(1, -1).map((c) => c.trim());
+    if (cells.length < 10) continue;
+    if (cells[0] === "id") continue;
+    if (cells.every((c) => /^:?-+:?$/.test(c))) continue;
+    rows.push({
+      id: cells[0],
+      milestone: cells[1],
+      phase: cells[2],
+      owner: cells[3],
+      targetWeek: cells[4],
+      status: cells[5],
+      rag: parseRag(cells[6]),
+      evidenceProbe: cells[7],
+      lastVerified: cells[8],
+      notes: cells[9]
+    });
+  }
+  return rows;
+}
+function parseStatusLog(md) {
+  const idx = md.indexOf("## Status log");
+  if (idx === -1) return [];
+  const section = md.slice(idx + "## Status log".length);
+  const entries = [];
+  const parts = section.split(/^### /m).slice(1);
+  for (const part of parts) {
+    const nl = part.indexOf("\n");
+    const heading = (nl === -1 ? part : part.slice(0, nl)).trim();
+    const body = (nl === -1 ? "" : part.slice(nl + 1)).trim();
+    entries.push({ heading, body });
+  }
+  return entries;
+}
+function parseTracker(slug, md) {
+  return {
+    slug,
+    title: matchLine(md, /^#\s+(.+)$/m),
+    program: matchLine(md, /^Program:\s*(.+)$/m),
+    overall: parseRag(matchLine(md, /^Overall:\s*(\S+)/m)),
+    started: matchLine(md, /Started:\s*([0-9-]+)/),
+    targetEnd: matchLine(md, /Target end:\s*([0-9-]+)/),
+    milestones: parseMilestones(md),
+    statusLog: parseStatusLog(md)
+  };
+}
+function getTrackers() {
+  const dir = trackersDir();
+  if (!dir) return [];
+  const out = [];
+  let files = [];
+  try {
+    files = readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "README.md");
+  } catch {
+    return [];
+  }
+  for (const file of files.sort()) {
+    try {
+      out.push(parseTracker(file.replace(/\.md$/, ""), readFileSync2(resolve2(dir, file), "utf-8")));
+    } catch (err) {
+      console.warn(`[tracker] failed to parse ${file}:`, err);
+    }
+  }
+  return out;
+}
+function latestOwnerAsks(tracker) {
+  const latest = tracker.statusLog[0];
+  if (!latest) return null;
+  const m = latest.body.match(/\*\*Asks for the owner:?\*\*:?\s*([\s\S]*?)(?:\n\n|$)/);
+  return m?.[1]?.trim() ?? null;
+}
+var DIR_CANDIDATES;
+var init_tracker_server = __esm({
+  "app/lib/tracker.server.ts"() {
+    "use strict";
+    DIR_CANDIDATES = [
+      resolve2(process.cwd(), "docs/store-team/trackers"),
+      resolve2(__dirname, "../../docs/store-team/trackers"),
+      resolve2(__dirname, "../docs/store-team/trackers")
+    ];
+  }
+});
+
+// app/lib/owner-digest.server.ts
+var owner_digest_server_exports = {};
+__export(owner_digest_server_exports, {
+  runOwnerDigest: () => runOwnerDigest
+});
+import { sql as sql6 } from "drizzle-orm";
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function ragColor(rag) {
+  if (rag === "GREEN") return "#1c7c43";
+  if (rag === "AMBER") return "#b57d0a";
+  if (rag === "RED") return "#d93a15";
+  return "#6f645c";
+}
+async function runOwnerDigest(opts = {}) {
+  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  if (!opts.force) {
+    const first = await kvSetNX(`owner-digest:sent:${day}`, String(Date.now()), 26 * 3600);
+    if (!first) return { sent: false, skipped: "already sent today (pass force=1 to re-send)" };
+  }
+  const profitRes = await db.execute(sql6`
+    SELECT summary_date::text AS day,
+           COALESCE(total_orders, 0)::int AS orders,
+           COALESCE(total_revenue, 0)::float8 AS revenue,
+           COALESCE(total_profit, 0)::float8 AS profit,
+           featured_sku
+    FROM daily_profit_summary
+    ORDER BY summary_date DESC
+    LIMIT 8`);
+  const profit = profitRes.rows ?? [];
+  const yesterday = profit[0];
+  const runsRes = await db.execute(sql6`
+    SELECT team, run_type, status, started_at::text AS started_at, error, summary
+    FROM homepage_team_runs
+    WHERE started_at >= now() - interval '24 hours'
+    ORDER BY started_at DESC
+    LIMIT 40`);
+  const runs = runsRes.rows ?? [];
+  const failures = runs.filter((r) => r.status === "failed");
+  const suggRes = await db.execute(sql6`
+    SELECT status, COUNT(*)::int AS n, MIN(created_at)::text AS oldest
+    FROM homepage_team_suggestions
+    GROUP BY status`);
+  const sugg = suggRes.rows ?? [];
+  const proposed = sugg.find((s) => s.status === "proposed");
+  const gates = await Promise.all(TEAM_IDS.map((t) => gate(t)));
+  const valveEntries = await Promise.all(
+    Object.entries(VALVE_KEYS).map(async ([name, key]) => [name, await getValve(key)])
+  );
+  const trackers = getTrackers();
+  const redTrackers = trackers.filter((t) => t.overall === "RED").length;
+  const ordersY = yesterday?.orders ?? 0;
+  const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? "" : "s"}, ${redTrackers} RED tracker${redTrackers === 1 ? "" : "s"}`;
+  const profitRows = profit.map((p) => `<tr><td style="padding:2px 10px 2px 0;">${esc(p.day)}</td><td style="padding:2px 10px;">${p.orders}</td><td style="padding:2px 10px;">$${p.revenue.toFixed(2)}</td><td style="padding:2px 10px;">$${p.profit.toFixed(2)}</td><td style="padding:2px 0;">${esc(p.featured_sku ?? "")}</td></tr>`).join("");
+  const runRows = runs.map((r) => `<tr><td style="padding:2px 10px 2px 0;">${esc(r.team)}</td><td style="padding:2px 10px;">${esc(r.run_type)}</td><td style="padding:2px 10px;color:${r.status === "failed" ? "#d93a15" : r.status === "succeeded" ? "#1c7c43" : "#6f645c"};">${esc(r.status)}</td><td style="padding:2px 0;">${esc((r.error ?? r.summary ?? "").slice(0, 140))}</td></tr>`).join("");
+  const gateRows = gates.map((g) => `<tr><td style="padding:2px 10px 2px 0;">${esc(g.team)}</td><td style="padding:2px 10px;">${g.enabled ? "on" : '<span style="color:#d93a15;">off</span>'}</td><td style="padding:2px 10px;">${g.runsToday}/${g.maxRunsPerDay} runs</td><td style="padding:2px 0;">$${(g.spentCents / 100).toFixed(2)} / $${(g.dailyCents / 100).toFixed(2)}</td></tr>`).join("");
+  const valveRows = valveEntries.map(([name, on]) => `<tr><td style="padding:2px 10px 2px 0;">${esc(name)}</td><td style="padding:2px 0;">${on ? "on" : "off"}</td></tr>`).join("");
+  const trackerBlocks = trackers.map((t) => {
+    const asks = latestOwnerAsks(t);
+    const latest = t.statusLog[0];
+    return `<p style="margin:8px 0 2px;"><strong style="color:${ragColor(t.overall)};">${esc(t.overall)}</strong> &middot; ${esc(t.title)}</p>
+        ${latest ? `<p style="margin:0 0 2px;color:#6f645c;">Latest: ${esc(latest.heading)}</p>` : ""}
+        ${asks ? `<p style="margin:0;"><em>Asks for the owner:</em> ${esc(asks)}</p>` : ""}`;
+  }).join("");
+  const section = (title, body) => `<h3 style="font-family:Inter,sans-serif;font-size:14px;margin:18px 0 6px;">${title}</h3>
+     <div style="font-family:Inter,sans-serif;font-size:12px;color:#2b2b2b;">${body}</div>`;
+  const html = `<body style="margin:0;padding:16px;background:#faf7f2;">
+    <div style="max-width:640px;">
+      <h2 style="font-family:Inter,sans-serif;font-size:16px;margin:0 0 4px;">xdipx daily digest &middot; ${day}</h2>
+      ${section("Orders and profit (last 8 days)", `<table style="border-collapse:collapse;">${profitRows || "<tr><td>no rows</td></tr>"}</table>`)}
+      ${section(`Team runs, last 24h (${failures.length} failed)`, `<table style="border-collapse:collapse;">${runRows || "<tr><td>no runs</td></tr>"}</table>`)}
+      ${section("Team gates", `<table style="border-collapse:collapse;">${gateRows}</table>`)}
+      ${section("Valves", `<table style="border-collapse:collapse;">${valveRows}</table>`)}
+      ${section(`Suggestions (${proposed?.n ?? 0} awaiting triage${proposed ? `, oldest ${esc(proposed.oldest.slice(0, 10))}` : ""})`, sugg.map((s) => `${esc(s.status)}: ${s.n}`).join(" &middot; ") || "none")}
+      ${section("Program trackers", trackerBlocks || "no trackers found")}
+      <p style="font-family:Inter,sans-serif;font-size:11px;color:#6f645c;margin-top:18px;">
+        Full detail: xdipx.com/admin/trackers and /admin/homepage-team. Sent by /cron/owner-digest.
+      </p>
+    </div>
+  </body>`;
+  const res = await sendOwnerEmail(subject, html, { fromName: "xdipx daily digest" });
+  return res.sent ? { sent: true, subject } : { sent: false, ...res.error !== void 0 ? { error: res.error } : {} };
+}
+var init_owner_digest_server = __esm({
+  "app/lib/owner-digest.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_team_server();
+    init_team_keys();
+    init_tracker_server();
+    init_owner_alerts_server();
+    init_kv_server();
+  }
+});
+
+// app/lib/gsc.server.ts
+var gsc_server_exports = {};
+__export(gsc_server_exports, {
+  runGscSnapshot: () => runGscSnapshot
+});
+import { createSign } from "node:crypto";
+import { neon as neon3 } from "@neondatabase/serverless";
+function loadCredentials() {
+  const rawJson = process.env["GSC_SA_JSON"]?.trim();
+  if (rawJson) {
+    try {
+      const parsed = JSON.parse(rawJson);
+      if (parsed.client_email && parsed.private_key) {
+        return { email: parsed.client_email, privateKey: parsed.private_key };
+      }
+    } catch (err) {
+      console.error("[gsc] GSC_SA_JSON is set but not valid JSON:", err);
+      return null;
+    }
+  }
+  const email = process.env["GSC_SA_EMAIL"]?.trim();
+  const privateKey = process.env["GSC_SA_PRIVATE_KEY"]?.replace(/\\n/g, "\n");
+  if (email && privateKey) return { email, privateKey };
+  return null;
+}
+function b64url(input) {
+  return Buffer.from(input).toString("base64url");
+}
+async function getAccessToken(creds) {
+  const now = Math.floor(Date.now() / 1e3);
+  const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = b64url(JSON.stringify({
+    iss: creds.email,
+    scope: SCOPE,
+    aud: TOKEN_URL,
+    iat: now,
+    exp: now + 3600
+  }));
+  const signer = createSign("RSA-SHA256");
+  signer.update(`${header}.${claims}`);
+  const signature = signer.sign(creds.privateKey).toString("base64url");
+  const assertion = `${header}.${claims}.${signature}`;
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion
+    })
+  });
+  if (!res.ok) throw new Error(`GSC token exchange failed: ${res.status} ${await res.text()}`);
+  const json2 = await res.json();
+  if (!json2.access_token) throw new Error("GSC token exchange returned no access_token");
+  return json2.access_token;
+}
+async function searchAnalytics(token, siteUrl, body) {
+  const res = await fetch(
+    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+    {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  );
+  if (!res.ok) throw new Error(`GSC searchAnalytics failed: ${res.status} ${await res.text()}`);
+  const json2 = await res.json();
+  return json2.rows ?? [];
+}
+async function runGscSnapshot() {
+  const creds = loadCredentials();
+  if (!creds) {
+    console.log("[gsc] skipped: no service-account credentials (set GSC_SA_JSON or GSC_SA_EMAIL + GSC_SA_PRIVATE_KEY)");
+    return { skipped: "no credentials" };
+  }
+  const siteUrl = process.env["GSC_SITE_URL"]?.trim() || DEFAULT_SITE;
+  const token = await getAccessToken(creds);
+  const end = new Date(Date.now() - 3 * 24 * 60 * 60 * 1e3);
+  const start = new Date(end.getTime() - 28 * 24 * 60 * 60 * 1e3);
+  const periodStart = start.toISOString().split("T")[0];
+  const periodEnd = end.toISOString().split("T")[0];
+  const base = { startDate: periodStart, endDate: periodEnd, rowLimit: 100 };
+  const [totalsRows, queryRows, pageRows, sitemapsRes] = await Promise.all([
+    searchAnalytics(token, siteUrl, { ...base, rowLimit: 1 }),
+    searchAnalytics(token, siteUrl, { ...base, dimensions: ["query"] }),
+    searchAnalytics(token, siteUrl, { ...base, dimensions: ["page"] }),
+    fetch(`https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/sitemaps`, {
+      headers: { "Authorization": `Bearer ${token}` }
+    })
+  ]);
+  const totals = totalsRows[0] ? {
+    clicks: totalsRows[0].clicks ?? 0,
+    impressions: totalsRows[0].impressions ?? 0,
+    ctr: totalsRows[0].ctr ?? 0,
+    position: totalsRows[0].position ?? 0
+  } : { clicks: 0, impressions: 0, ctr: 0, position: 0 };
+  const mapRows = (rows, key) => rows.map((r) => ({
+    [key]: r.keys?.[0] ?? "",
+    clicks: r.clicks ?? 0,
+    impressions: r.impressions ?? 0,
+    ctr: r.ctr ?? 0,
+    position: r.position ?? 0
+  }));
+  let sitemaps = [];
+  if (sitemapsRes.ok) {
+    const json2 = await sitemapsRes.json();
+    sitemaps = (json2.sitemap ?? []).map((s) => ({
+      path: s.path ?? "",
+      lastSubmitted: s.lastSubmitted ?? null,
+      isPending: s.isPending ?? false,
+      errors: s.errors ?? "0",
+      warnings: s.warnings ?? "0"
+    }));
+  } else {
+    console.warn(`[gsc] sitemaps list failed (non-fatal): ${sitemapsRes.status}`);
+  }
+  const topQueries = mapRows(queryRows, "query");
+  const topPages = mapRows(pageRows, "page");
+  await sql7`
+    INSERT INTO gsc_snapshots (period_start, period_end, totals, top_queries, top_pages, sitemaps)
+    VALUES (
+      ${periodStart}, ${periodEnd},
+      ${JSON.stringify(totals)}::jsonb,
+      ${JSON.stringify(topQueries)}::jsonb,
+      ${JSON.stringify(topPages)}::jsonb,
+      ${JSON.stringify(sitemaps)}::jsonb
+    )
+  `;
+  return {
+    captured: {
+      periodStart,
+      periodEnd,
+      totalClicks: totals.clicks,
+      totalImpressions: totals.impressions,
+      queryCount: topQueries.length,
+      pageCount: topPages.length,
+      sitemapCount: sitemaps.length
+    }
+  };
+}
+var sql7, SCOPE, TOKEN_URL, DEFAULT_SITE;
+var init_gsc_server = __esm({
+  "app/lib/gsc.server.ts"() {
+    "use strict";
+    sql7 = neon3(process.env["DATABASE_URL"]);
+    SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
+    TOKEN_URL = "https://oauth2.googleapis.com/token";
+    DEFAULT_SITE = "sc-domain:xdipx.com";
   }
 });
 
@@ -17453,7 +17833,7 @@ async function openIssuesForP0(groups, windowMinutes) {
 
 ${body}` }) }
       );
-      if (comment.ok) opened.push(existing.html_url);
+      if (comment.ok) opened.push({ url: existing.html_url, title, created: false });
       else console.error(`[log-monitor] GitHub comment ${comment.status}: ${await comment.text()}`);
       continue;
     }
@@ -17464,7 +17844,7 @@ ${body}` }) }
     });
     if (create.ok) {
       const json2 = await create.json();
-      opened.push(json2.html_url);
+      opened.push({ url: json2.html_url, title, created: true });
     } else {
       console.error(`[log-monitor] GitHub create ${create.status}: ${await create.text()}`);
     }
@@ -17474,7 +17854,19 @@ ${body}` }) }
 async function runLogMonitor({ windowMinutes = 15 } = {}) {
   const logs = await fetchRecentLogs({ windowMinutes });
   const report = await classifyLogs(logs);
-  const issuesOpened = await openIssuesForP0(report.groups, windowMinutes);
+  const issues = await openIssuesForP0(report.groups, windowMinutes);
+  const issuesOpened = issues.map((i) => i.url);
+  const created = issues.filter((i) => i.created);
+  if (created.length > 0) {
+    const { sendOwnerSms: sendOwnerSms2, sendOwnerEmail: sendOwnerEmail2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
+    await sendOwnerSms2(
+      `xdipx P0 logs: ${created.length} new issue${created.length === 1 ? "" : "s"}. ${created[0].title}`
+    );
+    await sendOwnerEmail2(
+      `[P0] xdipx log-monitor: ${created.length} new issue${created.length === 1 ? "" : "s"}`,
+      created.map((i) => `<p><a href="${i.url}">${escapeHtml2(i.title)}</a></p>`).join("")
+    );
+  }
   return {
     windowMinutes,
     logCount: logs.length,
@@ -17891,7 +18283,7 @@ var init_pricing_apply_server = __esm({
 });
 
 // app/lib/pricing-webhook.server.ts
-import { eq as eq13, sql as sql7 } from "drizzle-orm";
+import { eq as eq13, sql as sql8 } from "drizzle-orm";
 async function setPipelineSetting(key, value) {
   await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
     target: pipelineSettings.key,
@@ -17912,7 +18304,7 @@ var init_pricing_webhook_server = __esm({
 });
 
 // app/lib/cost-sync.server.ts
-import { inArray as inArray3, sql as sql8 } from "drizzle-orm";
+import { inArray as inArray3, sql as sql9 } from "drizzle-orm";
 function round23(n) {
   return Math.round(n * 100) / 100;
 }
@@ -17996,17 +18388,17 @@ async function runNalpacCostSync(opts) {
         await db.insert(nalpacPriceHistory).values(chunk).onConflictDoUpdate({
           target: nalpacPriceHistory.sku,
           set: {
-            wholesale: sql8`excluded.wholesale`,
-            msrp: sql8`excluded.msrp`,
-            mapPrice: sql8`excluded.map_price`,
-            salePrice: sql8`excluded.sale_price`,
-            qty: sql8`excluded.qty`,
-            nalpacDiscountPct: sql8`excluded.nalpac_discount_pct`,
-            inTop100: sql8`excluded.in_top100`,
-            inNew: sql8`excluded.in_new`,
-            inSale: sql8`excluded.in_sale`,
-            observedAt: sql8`excluded.observed_at`,
-            syncedAt: sql8`excluded.synced_at`
+            wholesale: sql9`excluded.wholesale`,
+            msrp: sql9`excluded.msrp`,
+            mapPrice: sql9`excluded.map_price`,
+            salePrice: sql9`excluded.sale_price`,
+            qty: sql9`excluded.qty`,
+            nalpacDiscountPct: sql9`excluded.nalpac_discount_pct`,
+            inTop100: sql9`excluded.in_top100`,
+            inNew: sql9`excluded.in_new`,
+            inSale: sql9`excluded.in_sale`,
+            observedAt: sql9`excluded.observed_at`,
+            syncedAt: sql9`excluded.synced_at`
           }
         });
       } catch (err) {
@@ -18944,7 +19336,7 @@ var init_enricher_brief_server = __esm({
 // app/lib/batch-enrichment.server.ts
 import { readFile } from "node:fs/promises";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-import { dirname as dirname2, resolve as resolve2 } from "node:path";
+import { dirname as dirname2, resolve as resolve3 } from "node:path";
 import Anthropic5 from "@anthropic-ai/sdk";
 function stripFences2(raw) {
   return raw.replace(/^```(?:html|json)?\n?/i, "").replace(/\n?```$/i, "").trim();
@@ -18952,7 +19344,7 @@ function stripFences2(raw) {
 async function loadEnricherAgentPrompt() {
   if (_cachedAgentPrompt !== null) return _cachedAgentPrompt;
   const here = dirname2(fileURLToPath2(import.meta.url));
-  const path = resolve2(here, "..", "..", ".claude", "agents", "emma-product-enricher.md");
+  const path = resolve3(here, "..", "..", ".claude", "agents", "emma-product-enricher.md");
   const raw = await readFile(path, "utf8");
   const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
   if (!body) throw new Error(`empty agent prompt at ${path}`);
@@ -19118,7 +19510,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and4, asc as asc3, eq as eq15, inArray as inArray4, isNull as isNull2, sql as sql9 } from "drizzle-orm";
+import { and as and4, asc as asc3, eq as eq15, inArray as inArray4, isNull as isNull2, sql as sql10 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -19273,7 +19665,7 @@ async function submitEnrichmentBatch(cap) {
       continue;
     }
     brief.pairingCandidates = [];
-    inputs.push({ productId: `gid://shopify/Product/${r.productId}`, brief });
+    inputs.push({ productId: String(r.productId), brief });
     candidateIds.push(r.id);
   }
   if (inputs.length === 0) return { submitted: 0, reason: "no_briefs" };
@@ -19293,7 +19685,7 @@ async function collectEnrichmentBatch() {
     eq15(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichFailedAt),
-    sql9`${importCandidates.enrichBatchId} IS NOT NULL`
+    sql10`${importCandidates.enrichBatchId} IS NOT NULL`
   )).orderBy(asc3(importCandidates.id));
   const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
   if (pending.length === 0) {
@@ -19315,9 +19707,9 @@ async function collectEnrichmentBatch() {
       continue;
     }
     for (const candidate of candidates) {
-      const gid = `gid://shopify/Product/${candidate.productId}`;
-      const writes = collected.results.get(gid);
-      const batchFailure = collected.failures.find((f) => f.productId === gid);
+      const resultKey = String(candidate.productId);
+      const writes = collected.results.get(resultKey);
+      const batchFailure = collected.failures.find((f) => f.productId === resultKey);
       let ok = false;
       if (writes && !batchFailure && passesQualityGate(writes)) {
         try {
@@ -19349,7 +19741,7 @@ async function collectEnrichmentBatch() {
 async function publishEnrichedProducts() {
   const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq15(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
     eq15(importCandidates.status, "imported"),
-    sql9`${importCandidates.enrichedAt} IS NOT NULL`,
+    sql10`${importCandidates.enrichedAt} IS NOT NULL`,
     isNull2(importCandidates.publishedAt)
   ));
   let published = 0;
@@ -21144,7 +21536,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and5, eq as eq19, inArray as inArray6, sql as sql10 } from "drizzle-orm";
+import { and as and5, eq as eq19, inArray as inArray6, sql as sql11 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -21416,7 +21808,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
   const tierCMinGap = parseFloat(tierCMinGapStr ?? "4.5");
   const tierCMinMarkup = parseFloat(tierCMinMarkupStr ?? "0.15");
   const tierCMaxPerDay = Math.max(0, parseInt(tierCMaxPerDayStr ?? "3", 10) || 0);
-  const importedTodayRows = await db.select({ cnt: sql10`count(*)::int` }).from(importCandidates).where(and5(eq19(importCandidates.status, "imported"), eq19(importCandidates.runDate, todayStr)));
+  const importedTodayRows = await db.select({ cnt: sql11`count(*)::int` }).from(importCandidates).where(and5(eq19(importCandidates.status, "imported"), eq19(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -21437,7 +21829,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
   }).from(importCandidates).where(and5(
     eq19(importCandidates.status, "pending"),
     inArray6(importCandidates.masterKey, cappedKeys)
-  )).orderBy(importCandidates.tier, sql10`${importCandidates.dealScore} DESC NULLS LAST`);
+  )).orderBy(importCandidates.tier, sql11`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
     const tierOk = c.tier === "A" || c.tier === "B";
     if (!tierOk || c.needsReview) return false;
@@ -21573,20 +21965,20 @@ async function getImportCandidatesByStatus(statuses, limit) {
   if (statuses.length === 0) return [];
   const query = db.select().from(importCandidates).where(inArray6(importCandidates.status, statuses)).orderBy(
     importCandidates.tier,
-    sql10`${importCandidates.dealScore} DESC NULLS LAST`
+    sql11`${importCandidates.dealScore} DESC NULLS LAST`
   );
   if (limit != null) return query.limit(limit);
   return query;
 }
 async function getCatalogOpportunities() {
-  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql10`${dealHistory.brand} IS NOT NULL`);
+  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql11`${dealHistory.brand} IS NOT NULL`);
   const brandCount = /* @__PURE__ */ new Map();
   for (const r of brandRows) {
     if (!r.brand) continue;
     brandCount.set(r.brand, (brandCount.get(r.brand) ?? 0) + 1);
   }
   const brandCoverage = [...brandCount.entries()].map(([brand, carried]) => ({ brand, carried })).sort((a, b) => b.carried - a.carried);
-  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql10`${dealHistory.categories} IS NOT NULL`);
+  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql11`${dealHistory.categories} IS NOT NULL`);
   const catCount = /* @__PURE__ */ new Map();
   for (const r of catRows) {
     for (const cat of r.categories ?? []) {
@@ -21616,7 +22008,7 @@ async function getCatalogOpportunities() {
   return { brandCoverage, categoryCoverage, brandOpportunities };
 }
 async function getRecentImportRuns(limit) {
-  return db.select().from(importMonitorRuns).orderBy(sql10`${importMonitorRuns.startedAt} DESC`).limit(limit);
+  return db.select().from(importMonitorRuns).orderBy(sql11`${importMonitorRuns.startedAt} DESC`).limit(limit);
 }
 async function updateCandidateStatus(id, status, opts = {}) {
   const now = /* @__PURE__ */ new Date();
@@ -21636,7 +22028,7 @@ async function updateCandidateStatus(id, status, opts = {}) {
   }
   await db.update(importCandidates).set(base).where(eq19(importCandidates.id, id));
 }
-async function approveAndImport(id, reviewedBy) {
+async function approveAndImport(id, reviewedBy, opts = {}) {
   const reviewedStamp = reviewedBy ? { reviewedBy, reviewedAt: /* @__PURE__ */ new Date() } : {};
   const rows = await db.select().from(importCandidates).where(eq19(importCandidates.id, id)).limit(1);
   const candidate = rows[0];
@@ -21648,8 +22040,7 @@ async function approveAndImport(id, reviewedBy) {
     await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date(), ...reviewedStamp }).where(eq19(importCandidates.id, id));
     return { ok: true, skipped: true };
   }
-  const feedResult = await fetchAllNalpacFeeds();
-  const masters = collapseMasters(feedResult.snapshots);
+  const masters = opts.preloadedMasters ?? collapseMasters((await fetchAllNalpacFeeds()).snapshots);
   const master = masters.find((m) => m.masterKey === candidate.masterKey);
   if (!master) {
     return { ok: false, error: "master no longer in feed" };
@@ -22293,6 +22684,17 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
+  cronRoute("/owner-digest", async (req, res) => {
+    try {
+      const { runOwnerDigest: runOwnerDigest2 } = await Promise.resolve().then(() => (init_owner_digest_server(), owner_digest_server_exports));
+      const force = req.query["force"] === "1" || req.body?.force === true;
+      const result = await runOwnerDigest2({ force });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error("[cron:owner-digest]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
   cronRoute("/gsc-snapshot", async (_req, res) => {
     try {
       const { runGscSnapshot: runGscSnapshot2 } = await Promise.resolve().then(() => (init_gsc_server(), gsc_server_exports));
@@ -22572,7 +22974,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq21, sql as sql11 } from "drizzle-orm";
+import { eq as eq21, sql as sql12 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret) return false;
@@ -22643,7 +23045,7 @@ async function handleOrderCreated(order) {
           await db2.insert(productCopurchase).values({ handleA: a, handleB: b, count: 1 }).onConflictDoUpdate({
             target: [productCopurchase.handleA, productCopurchase.handleB],
             set: {
-              count: sql11`${productCopurchase.count} + 1`,
+              count: sql12`${productCopurchase.count} + 1`,
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });

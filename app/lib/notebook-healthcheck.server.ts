@@ -127,14 +127,21 @@ async function checkPage(exp: PageExpectation): Promise<NotebookPageCheck> {
   return best as NotebookPageCheck
 }
 
-/** Open (or comment on an existing) GitHub issue. Self-contained REST call. */
-async function openHealthcheckIssue(title: string, body: string): Promise<string | null> {
+/**
+ * Open (or comment on an existing) GitHub issue. Self-contained REST call.
+ * `created` marks a newly opened issue (vs a recurrence comment) so the
+ * owner-alert hook fires once per incident, not per daily tick.
+ */
+async function openHealthcheckIssue(
+  title: string,
+  body: string,
+): Promise<{ url: string | null; created: boolean }> {
   const token = process.env['GITHUB_TOKEN']
   const owner = process.env['GITHUB_OWNER']
   const repo = process.env['GITHUB_REPO']
   if (!token || !owner || !repo) {
     console.warn('[notebook-healthcheck] GITHUB_TOKEN/OWNER/REPO not set — skipping issue')
-    return null
+    return { url: null, created: false }
   }
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -154,7 +161,7 @@ async function openHealthcheckIssue(title: string, body: string): Promise<string
         headers,
         body: JSON.stringify({ body }),
       })
-      return existing.html_url
+      return { url: existing.html_url, created: false }
     }
     const create = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
       method: 'POST',
@@ -163,12 +170,12 @@ async function openHealthcheckIssue(title: string, body: string): Promise<string
     })
     if (!create.ok) {
       console.error(`[notebook-healthcheck] issue create ${create.status}`)
-      return null
+      return { url: null, created: false }
     }
-    return ((await create.json()) as { html_url: string }).html_url
+    return { url: ((await create.json()) as { html_url: string }).html_url, created: true }
   } catch (err) {
     console.error('[notebook-healthcheck] issue error', err)
-    return null
+    return { url: null, created: false }
   }
 }
 
@@ -220,8 +227,16 @@ export async function runNotebookHealthcheck(): Promise<NotebookHealthResult> {
       '',
       '_Report-only check (no auto-recovery). Filed automatically by `/cron/notebook-healthcheck`._',
     ].join('\n')
-    const issueUrl = await openHealthcheckIssue('[P1] Notebook healthcheck failing', issueBody)
-    if (issueUrl) result.message = `issue: ${issueUrl}`
+    const issue = await openHealthcheckIssue('[P1] Notebook healthcheck failing', issueBody)
+    if (issue.url) result.message = `issue: ${issue.url}`
+    // P1: email the owner on the transition only (new issue). No SMS.
+    if (issue.created) {
+      const { sendOwnerEmail, escapeHtml } = await import('~/lib/owner-alerts.server')
+      await sendOwnerEmail(
+        '[P1] xdipx notebook healthcheck failing',
+        `<pre style="font-family:monospace;white-space:pre-wrap;">${escapeHtml(issueBody)}</pre>${issue.url ? `<p><a href="${issue.url}">${issue.url}</a></p>` : ''}`,
+      )
+    }
   }
   return result
 }
