@@ -26,7 +26,7 @@
  *   - This ensures at most max_turns (24) requests per product, never a 25th.
  */
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import Anthropic from '@anthropic-ai/sdk'
 import { eq, inArray } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
@@ -805,14 +805,22 @@ async function submitTurnBatch(job: BatchJobRow): Promise<void> {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Custom ID scheme: "${jobId}__${productId}" with double-underscore delimiter.
- * productId is a Shopify GID (gid://shopify/Product/12345) which contains both
- * colons and slashes; a colon delimiter + naive split would corrupt the productId.
- * Double-underscore appears in neither jobId (a UUID) nor a Shopify GID.
- * Demux with lastIndexOf('__'): jobId = cid.slice(0, idx), productId = cid.slice(idx + 2).
+ * Custom ID scheme: "${jobId}__${numericProductId}". The Anthropic Batch API
+ * requires custom_id to match ^[a-zA-Z0-9_-]{1,64}$, so the productId segment
+ * is reduced to its trailing numeric id (a full Shopify GID like
+ * gid://shopify/Product/12345 is 35 chars of invalid charset and pushed the
+ * old format to 73 chars, failing every submission at turn 0). A UUID jobId
+ * plus "__" plus a numeric id is ~53 chars. The id is an opaque map key: it is
+ * built identically at submit and retrieve time and never parsed back, so any
+ * deterministic injective rewrite is routing-safe. If a pathological input
+ * ever exceeds 64 chars, fall back to a deterministic sha256 prefix; never
+ * truncate (two ids in one batch could collide).
  */
 function buildCustomId(jobId: string, productId: string): string {
-  return `${jobId}__${productId}`
+  const pid = productId.split('/').pop() || productId
+  const raw = `${jobId}__${pid}`.replace(/[^a-zA-Z0-9_-]/g, '-')
+  if (raw.length <= 64) return raw
+  return createHash('sha256').update(`${jobId}__${productId}`).digest('hex').slice(0, 32)
 }
 
 function freshRunnerState(p: BatchJobProduct, jobId: string): ProductRunnerState {
