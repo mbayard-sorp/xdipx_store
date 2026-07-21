@@ -11,7 +11,13 @@
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
+
+// The server bundle is ESM: __dirname does not exist and referencing it at
+// module scope crashes every invocation at import time (took prod down on
+// 2026-07-21). Same shim as emma-voice.server.ts.
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export type Rag = 'GREEN' | 'AMBER' | 'RED' | 'UNKNOWN'
 
