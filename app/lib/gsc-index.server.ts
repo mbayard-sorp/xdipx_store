@@ -8,8 +8,10 @@
  *
  * Quota: the URL Inspection API allows 2,000 inspections/day per property
  * (600/min). A KV counter caps us at DAILY_QUOTA_CEILING across runs; the
- * cron fires 8x/day with a 225-URL budget (override: GSC_INSPECT_BUDGET),
- * so a ~4,500-URL sitemap gets a full pass roughly every 3 days.
+ * cron fires 8x/day with a 200-URL budget (override: GSC_INSPECT_BUDGET),
+ * so a ~4,500-URL sitemap gets a full pass roughly every 3 days. Budget and
+ * concurrency are sized so a run finishes well inside the function timeout:
+ * inspections average ~6.5s each, so 200 at concurrency 8 is ~165s.
  *
  * Creds/property come from getGscContext() in gsc.server.ts; missing creds
  * is a supported skipped state so the cron merges before setup.
@@ -22,8 +24,8 @@ const sql = neon(process.env['DATABASE_URL']!)
 
 const INSPECT_URL = 'https://searchconsole.googleapis.com/v1/urlInspection/index:inspect'
 const DAILY_QUOTA_CEILING = 1900
-const DEFAULT_RUN_BUDGET = 225
-const CONCURRENCY = 5
+const DEFAULT_RUN_BUDGET = 200
+const CONCURRENCY = 8
 
 export interface SitemapEntry {
   url: string

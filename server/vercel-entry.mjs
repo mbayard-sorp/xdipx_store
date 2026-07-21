@@ -17417,8 +17417,8 @@ var init_gsc_index_server = __esm({
     sql8 = neon4(process.env["DATABASE_URL"]);
     INSPECT_URL = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
     DAILY_QUOTA_CEILING = 1900;
-    DEFAULT_RUN_BUDGET = 225;
-    CONCURRENCY = 5;
+    DEFAULT_RUN_BUDGET = 200;
+    CONCURRENCY = 8;
     QuotaExhaustedError = class extends Error {
     };
   }
