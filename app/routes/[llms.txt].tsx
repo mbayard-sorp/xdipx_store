@@ -2,7 +2,9 @@
  * /llms.txt — machine-readable site index following the llms.txt spec.
  *
  * H1 = site name, blockquote = curatorial summary, free-text brand facts,
- * then H2 link-list sections for every content type. All sources guarded
+ * then H2 link-list sections for every content type. Every list item is a
+ * markdown hyperlink (`- [Name](url): details`) per the spec; bare URLs are
+ * not recognized as links by llms.txt parsers. All sources guarded
  * individually so a single upstream failure omits its section rather than 500.
  *
  * Cache-Control: 1h (deal handle changes at midnight; other lists are stable).
@@ -30,6 +32,14 @@ function truncate(text: string, maxLen: number): string {
   const cut = trimmed.slice(0, maxLen)
   const lastSpace = cut.lastIndexOf(' ')
   return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd()}...`
+}
+
+// Fallback link text when no title is available: "magic-wand-mini" -> "Magic Wand Mini".
+function humanizeHandle(handle: string): string {
+  return handle
+    .split('-')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
 }
 
 // Collection handles that duplicate clean-URL routes or back a retired
@@ -96,16 +106,16 @@ export async function loader() {
   // ── Primary pages ───────────────────────────────────────────────────────────
   lines.push('## Primary pages')
   lines.push('')
-  lines.push(`- ${BASE_URL}/ — homepage`)
-  lines.push(`- ${BASE_URL}/discover — guided product finder`)
-  lines.push(`- ${BASE_URL}/new — new arrivals, newest first`)
-  lines.push(`- ${BASE_URL}/collections — collections hub`)
-  lines.push(`- ${BASE_URL}/products/{handle} — canonical product URL`)
-  lines.push(`- ${BASE_URL}/faq`)
-  lines.push(`- ${BASE_URL}/about`)
-  lines.push(`- ${BASE_URL}/contributors/emma — who Emma is (AI guide, human-edited)`)
+  lines.push(`- [Homepage](${BASE_URL}/)`)
+  lines.push(`- [Discover](${BASE_URL}/discover): guided product finder`)
+  lines.push(`- [New arrivals](${BASE_URL}/new): newest first`)
+  lines.push(`- [Collections](${BASE_URL}/collections): collections hub`)
+  lines.push(`- [FAQ](${BASE_URL}/faq)`)
+  lines.push(`- [About](${BASE_URL}/about)`)
+  lines.push(`- [Emma](${BASE_URL}/contributors/emma): who Emma is (AI guide, human-edited)`)
   lines.push('')
   lines.push(
+    `Canonical product URLs follow ${BASE_URL}/products/{handle}. ` +
     'Cite the canonical URL for any page above; do not construct alternate paths. ' +
     '/vault, /for-him, and /for-her are retired and permanently redirect into /collections ' +
     'or a product-type collection.',
@@ -115,12 +125,12 @@ export async function loader() {
   // ── Discover ──────────────────────────────────────────────────────────────────
   lines.push('## Discover')
   lines.push('')
-  lines.push(`- ${BASE_URL}/discover — guided product finder (filter by mood, audience, and what matters)`)
-  lines.push(`- ${BASE_URL}/discover.md — the finder's catalog grouped by mood, audience, and what matters`)
-  lines.push(`- ${BASE_URL}/new.md — new arrivals, newest first`)
-  lines.push(`- ${BASE_URL}/index.md`)
+  lines.push(`- [Discover](${BASE_URL}/discover): guided product finder (filter by mood, audience, and what matters)`)
+  lines.push(`- [Discover catalog](${BASE_URL}/discover.md): the finder's catalog grouped by mood, audience, and what matters`)
+  lines.push(`- [New arrivals](${BASE_URL}/new.md): newest first`)
+  lines.push(`- [Homepage overview](${BASE_URL}/index.md)`)
   if (liveDealHandle) {
-    lines.push(`- ${BASE_URL}/products/${liveDealHandle}.md`)
+    lines.push(`- [Emma's current pick](${BASE_URL}/products/${liveDealHandle}.md)`)
   }
   lines.push('')
 
@@ -129,7 +139,8 @@ export async function loader() {
     lines.push('## Products')
     lines.push('')
     for (const p of products) {
-      lines.push(`- ${BASE_URL}/products/${p.handle}.md`)
+      const name = (p.title ?? humanizeHandle(p.handle)).replace(/[[\]]/g, '')
+      lines.push(`- [${name}](${BASE_URL}/products/${p.handle}.md)`)
     }
     lines.push('')
   }
@@ -139,9 +150,9 @@ export async function loader() {
   if (filteredCollections.length > 0) {
     lines.push('## Collections')
     lines.push('')
-    lines.push(`- ${BASE_URL}/collections.md — index of all collections, grouped by category, brand, and theme`)
+    lines.push(`- [Collections index](${BASE_URL}/collections.md): all collections, grouped by category, brand, and theme`)
     for (const c of filteredCollections) {
-      lines.push(`- ${BASE_URL}/collections/${c.handle}.md`)
+      lines.push(`- [${humanizeHandle(c.handle)}](${BASE_URL}/collections/${c.handle}.md)`)
     }
     lines.push('')
   }
@@ -149,10 +160,10 @@ export async function loader() {
   // ── Notebook ────────────────────────────────────────────────────────────────
   lines.push('## Notebook')
   lines.push('')
-  lines.push(`- ${BASE_URL}/notebook.md — index of all notebook posts`)
-  lines.push(`- ${BASE_URL}/notebook/glossary.md — plain-language glossary of sexual-wellness shopping terms`)
+  lines.push(`- [Notebook index](${BASE_URL}/notebook.md): all notebook posts`)
+  lines.push(`- [Glossary](${BASE_URL}/notebook/glossary.md): plain-language glossary of sexual-wellness shopping terms`)
   for (const c of blogCategories) {
-    lines.push(`- ${BASE_URL}/notebook/category/${c.slug}.md — category archive`)
+    lines.push(`- [${c.name}](${BASE_URL}/notebook/category/${c.slug}.md): category archive`)
   }
   lines.push('')
 
@@ -168,13 +179,12 @@ export async function loader() {
     lines.push('')
     for (const p of blogPosts) {
       const url = `${BASE_URL}/notebook/${p.slug}.md`
+      const name = (p.title ?? humanizeHandle(p.slug)).replace(/[[\]]/g, '')
       const desc = p.description ? truncate(p.description, 140) : undefined
-      if (p.title && desc) {
-        lines.push(`- ${url} — ${p.title}, ${desc}`)
-      } else if (p.title) {
-        lines.push(`- ${url} — ${p.title}`)
+      if (desc) {
+        lines.push(`- [${name}](${url}): ${desc}`)
       } else {
-        lines.push(`- ${url}`)
+        lines.push(`- [${name}](${url})`)
       }
     }
     lines.push('')
@@ -186,19 +196,20 @@ export async function loader() {
   const filteredPages = pages.filter(p => !PAGE_SLUG_DENYLIST.has(p.slug))
   lines.push('## Pages')
   lines.push('')
-  lines.push(`- ${BASE_URL}/faq.md`)
-  lines.push(`- ${BASE_URL}/about.md`)
-  lines.push(`- ${BASE_URL}/contributors/emma.md`)
+  lines.push(`- [FAQ](${BASE_URL}/faq.md)`)
+  lines.push(`- [About](${BASE_URL}/about.md)`)
+  lines.push(`- [Emma](${BASE_URL}/contributors/emma.md)`)
   for (const p of filteredPages) {
-    lines.push(`- ${BASE_URL}/pages/${p.slug}.md`)
+    const name = (p.title || humanizeHandle(p.slug)).replace(/[[\]]/g, '')
+    lines.push(`- [${name}](${BASE_URL}/pages/${p.slug}.md)`)
   }
   lines.push('')
 
   // ── Optional ────────────────────────────────────────────────────────────────
   lines.push('## Optional')
   lines.push('')
-  lines.push(`- ${BASE_URL}/sitemap.xml`)
-  lines.push(`- ${BASE_URL}/feed.xml`)
+  lines.push(`- [Sitemap](${BASE_URL}/sitemap.xml)`)
+  lines.push(`- [RSS feed](${BASE_URL}/feed.xml)`)
   lines.push('')
 
   return new Response(lines.join('\n'), {

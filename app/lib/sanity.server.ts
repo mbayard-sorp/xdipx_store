@@ -2011,7 +2011,7 @@ export async function getRailDraftsForDeal(dealId: string): Promise<EmmaRailDocu
   )
 }
 
-export async function getProductHandlesForSitemap(): Promise<{ handle: string; _updatedAt: string }[]> {
+export async function getProductHandlesForSitemap(): Promise<{ handle: string; _updatedAt: string; title?: string }[]> {
   if (!projectId) return []
   try {
     const client = getClient()
@@ -2020,7 +2020,7 @@ export async function getProductHandlesForSitemap(): Promise<{ handle: string; _
     // visible, so the existing live catalog needs no backfill).
     return await client.fetch(
       `*[_type == "productPage" && defined(shopifyHandle) && (!defined(hiddenUntilLive) || hiddenUntilLive != true)] | order(title asc) {
-        "handle": shopifyHandle, _updatedAt
+        "handle": shopifyHandle, _updatedAt, title
       }`,
     )
   } catch (err) {
