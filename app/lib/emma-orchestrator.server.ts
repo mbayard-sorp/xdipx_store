@@ -243,7 +243,7 @@ export const TOOLS = [
   },
   {
     name: 'generateEmmaTake',
-    description: "Generate Emma's first-person take (becomes Shopify body_html / Emma's take tab). Always call this.",
+    description: "Generate Emma's first-person editorial take (becomes Shopify body_html / Emma's take tab). Catalog-knowledge voice only, never lived-experience claims. Always call this.",
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
