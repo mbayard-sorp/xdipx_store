@@ -7,6 +7,9 @@ scheduler and this file disagree, fix one of them — the weekly strategy routin
 expected routine actually ran (the runs table has the data) and file a suggestion when one is
 missing.
 
+Status 2026-07-21: routines 1–10 and 12–14 exist as triggers in Claude's cloud scheduler; only
+routine 11 (Off-site Scout) remains uncreated. Triggers 10 and 14 were created 2026-07-21 during
+the automation-audit fix session, alongside the run-cap corrections described below.
 Status 2026-07-13: routines 1–9, 12, and 13 exist as triggers in Claude's cloud scheduler (fresh
 session per fire, completion notifications off), each firing the exact prompt in this manifest.
 Routine 9 (Daily Content Writer) was recreated as a cloud trigger on 2026-07-13, closing the
@@ -28,9 +31,22 @@ Trigger IDs, for reference when editing or deleting a routine:
 | 7 | xdipx — Daily Merchandiser (Routine A) | `trig_01PEat4JFm4fVmbNQKomSVMS` |
 | 8 | xdipx — Design Cycle (Routine B) | `trig_017s5fsNnWgk7xpXgF8QZccB` |
 | 9 | xdipx — Daily Content Writer | `trig_01Qf5puo6AZyJqWn9QHN5mxQ` (cloud trigger since 2026-07-13; replaces desktop task `xdipx-daily-content-writer`, which should be deleted) |
+| 10 | xdipx — Weekly SEO Curation | `trig_01YJJXKSCfKRXPfHH5DAFJ24` (created 2026-07-21 at enablement; `seo_curation_enabled` flipped on the same day after the `seo-bank-triage.ts` backlog drain) |
 | 12 | xdipx — Weekly Podcast Review | `trig_01AN6PKVghE9AM51R13z2UEu` |
 | 13 | xdipx — Daily Pricing Sweep | `trig_01AchSCvZnX56hbr7VsTvVSi` (cloud trigger since 2026-07-13; replaces desktop task `pricing-daily-sweep`, deleted the same day) |
-| 14 | xdipx — Daily Product Manager | _(cloud trigger TBD — create at enablement; see `routine-product-daily.md` appendix)_ |
+| 14 | xdipx — Daily Product Manager | `trig_01M76v95xQkhruMBTGive13o` (created 2026-07-21; a supervised catch-up run worked the queue backlog the same day) |
+
+Routine 11 (Weekly Off-site Scout) still has **no cloud trigger** — it has never fired. Create it
+at enablement the same way.
+
+**Run-cap requirements (2026-07-21):** `strategy_team_max_runs` must be **3** — Weekly Strategy
+(Mon 12:00), Apply Pass (Mon 20:00), and Cost Review (Mon 21:00) all run as `team=strategy` on the
+same day, and the gate's run cap counts per team, not per run type. At cap 1 the noon run consumed
+the only slot and the Apply Pass and Cost Review skipped `over_run_cap` every Monday (runs 28/58),
+which is why no approved suggestion ever became a PR. Cap 3 leaves zero retry headroom on Mondays;
+the Weekly Strategy self-audit is the backstop. Similarly `content_team_max_runs` must be **3**:
+Sundays carry content-writer (15:00) + SEO curation (16:00) and Wednesdays carry content-writer +
+podcast review, and cap 2 left no room for a voice-gate retry run on those days.
 
 On 2026-07-13 the last three desktop scheduled tasks on the owner's machine were deleted:
 `pricing-daily-sweep` (recreated as cloud routine 13), plus `homepage-daily-merchandise` and

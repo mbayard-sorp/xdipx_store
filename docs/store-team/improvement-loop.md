@@ -106,6 +106,11 @@ back to manual triage, flip its valve off — in-flight `approved` rows are unaf
 - **The apply path has a kill switch** (`suggestion_apply_enabled`, default off) independent of any
   team's enablement, and each team's triage automation has its own
   (`{team}_team_auto_approve_suggestions`, default off).
+- **The apply pass needs run-cap headroom:** the Apply Pass and Cost Review share `team=strategy`
+  with Monday's Weekly Strategy run, and the gate's run cap counts per team, not per run type.
+  `strategy_team_max_runs` must stay at **3** or the later two Monday runs skip `over_run_cap`
+  and approved suggestions silently never become PRs (this exact failure hid every apply run
+  from 2026-07-07 to 2026-07-21).
 - **agent-editor's file allowlist is hard:** agent defs and team docs only — no app code, schema,
   workflows, settings, or secrets, and it must refuse suggestions that would weaken money valves,
   voice gates, MAP rules, or this loop itself.
