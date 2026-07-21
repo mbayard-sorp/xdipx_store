@@ -307,6 +307,14 @@ contains **no "daily deal" framing**. If validation fails, do not leave a broken
 it and let the healthcheck/rollback path restore the last-good Sanity revision; record a `failed`
 status with the error.
 
+**Hero check specifically:** confirm the hero against the Sanity source of truth
+(`singleton.emmaHero` / `singleton.emmaHeroStorefront`), not just the rendered page. If Sanity already
+reflects this run's hero copy/pin but the live page still shows the previous hero, that is the known
+post-publish cache lag (route cache s-maxage 60 + SWR 300), not a failed publish — record `succeeded`
+with a summary note such as "published; propagation pending (s-maxage 60 + SWR 300)" rather than
+`failed` (example: run 30, 2026-07-14, confirmed the new hero in Sanity while `/` still served the
+prior headline at run-end).
+
 ## Step 7.5 — Post-publish design spot-check (`design-critic`)
 
 After self-validation passes, run `design-critic` once against the live homepage: capture a 375px
