@@ -59,8 +59,10 @@ curl -sS -X POST "$BASE_URL/api/team/import-candidate-action" \
   -d "intent=approve" -d "ids=<csv>"        # repeat for reject (+reason) and watch
 ```
 
-Read `results` (what ran) and `skippedDueToCap` (hit `product_manager_max_actions_per_run`, default
-20 — leave those for tomorrow, don't retry). A `403 {error:'product_manager disabled'}` means the
+Read `results` (what ran), `skippedDueToCap` (hit `product_manager_max_actions_per_run`, default
+20 — leave those for tomorrow, don't retry), and `deferred` (approve batches are chunked to 10 per
+request so a big batch can't hit the serverless time limit — resubmit the deferred ids in a
+follow-up call until the list comes back empty). A `403 {error:'product_manager disabled'}` means the
 execute switch is off: report your would-be decisions in the event and stop; do not fall back to
 filing suggestions. The cap now counts approvals correctly (approvals stamp `reviewed_by` /
 `reviewed_at`), so it is a real per-day ceiling on your total actions.
