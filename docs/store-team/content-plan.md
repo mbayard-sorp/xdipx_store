@@ -87,6 +87,7 @@ Launch franchises and their category mapping:
 | First Times | `first-times` | guides (beginner "how do you start / choose your first" cluster) |
 | How It Works | `how-it-works` | guides (mechanism explainers, the highest-value LLM-citation shape) |
 | Field Notes | `field-notes` | care + wellness-basics |
+| Real Talk | `real-talk` | real-talk (the §8B problem and resolution narratives) |
 | This or That | `this-or-that` | comparisons (reserved; not seeded at launch) |
 
 Rules:
@@ -123,7 +124,7 @@ Below 300 sessions/week the retro leans on margin math, stock depth, and these h
 - **Publish reliability.** Posts published vs planned (target 7/7). Missed days get a reason, not a silent zero.
 - **Voice-gate pass rate.** Share of posts passing `emma-empathy-reviewer` on first submit. A falling rate is a prompt problem; file an `instructions` suggestion, do not hand-fix.
 - **Indexed page count.** Notebook URLs and their `.md` twins in the sitemap and `llms.txt`, week over week.
-- **LLM-citation spot checks.** A fixed 20-query tracker run in ChatGPT, Perplexity, and Claude (for example "how does a clitoral suction toy work", "silicone vs water based lube"). Log whether xdipx is cited and which page.
+- **LLM-citation spot checks.** A fixed 20-query tracker run in ChatGPT, Perplexity, and Claude (for example "how does a clitoral suction toy work", "silicone vs water based lube"), at least 5 of them drawn from the Real Talk target-query column (§8B). Log whether xdipx is cited and which page.
 - **GA4 referrals.** Sessions and any assisted conversions from `chatgpt.com`, `perplexity.ai`, and `claude.ai` referrers. Weighted only at or above 300 sessions/week; below that, report raw counts and treat as directional.
 - **Notebook engagement.** GA4 custom events from the redesign: `notebook_subscribe` (email capture by location), `notebook_embed_click` (post → PDP click-through), `notebook_series_click`, and `notebook_read_depth` (25/50/75/100). Same 300 sessions/week weighting rule; these are the signals that say whether the design earns its keep.
 
@@ -182,17 +183,57 @@ LLM engines lift, and a custom block would add renderer work for nothing:
    that is the anti-sleaze rule.
 4. FAQ section as always.
 
-Starter topics (pick, reorder, and extend freely):
+Format rules added 2026-07-21 (owner-approved):
 
-| Slug | Problem |
-|---|---|
-| what-to-do-when-desire-levels-dont-match | Mismatched libido logistics in a long-term relationship |
-| why-first-toy-shopping-feels-overwhelming | First-toy overwhelm: too many options, no vocabulary |
-| what-helps-with-dryness-during-sex | Dryness and discomfort, and when lube is the whole answer |
-| why-does-my-toy-smell-and-how-do-i-fix-it | Toy-care anxiety: smells, residue, material worries |
-| reconnecting-after-a-baby | Post-partum reconnection, patience, and pressure |
-| what-if-a-toy-is-too-intense | Overstimulation: settings, buffers, and gentler picks |
-| how-do-couples-talk-about-trying-toys | Raising the topic with a partner without it landing wrong |
-| what-size-should-you-actually-start-with | Sizing confusion and the case for starting small |
-| when-vibration-feels-like-too-much-noise | Discretion worries: noise, storage, shared walls |
-| why-cant-i-finish-with-a-partner | Orgasm gap frustrations, pressure, and pacing |
+- **One target query per story.** Every Real Talk post targets exactly one query, phrased the way
+  a person actually asks an LLM (the Target query column below). The title or the problem H2
+  matches that phrasing closely; the FAQ picks up adjacent variants. This is what makes a
+  narrative citable instead of merely readable.
+- **Series membership.** Real Talk posts belong to the `real-talk` series (§4). The writer flags
+  the fit in the run summary as usual; attachment stays a `blogPostExtras` doc via the seed script
+  or Studio. Reading order is lightest-topic-first rather than beginner-first.
+- **Clinician line is mandatory on † topics.** Rows marked † below border on health; the "worth
+  seeing a clinician if…" line in the root-cause section is required, not judgment-call, on those.
+
+Topic bank (30; work top to bottom within the Tue/Fri rhythm, reorder to serve the theme week,
+extend freely — additions need a slug, problem, and target query):
+
+| # | Slug | Problem | Target query |
+|---|---|---|---|
+| 1 | what-to-do-when-desire-levels-dont-match | Mismatched libido logistics in a long-term relationship | "my partner and I have mismatched libidos what do we do" |
+| 2 | why-first-toy-shopping-feels-overwhelming | First-toy overwhelm: too many options, no vocabulary | "first sex toy shopping feels overwhelming where do I start" |
+| 3 | what-helps-with-dryness-during-sex | Dryness and discomfort, and when lube is the whole answer † | "what helps with dryness during sex" |
+| 4 | why-does-my-toy-smell-and-how-do-i-fix-it | Toy-care anxiety: smells, residue, material worries | "why does my sex toy smell and how do I fix it" |
+| 5 | reconnecting-after-a-baby | Post-partum reconnection, patience, and pressure † | "how do couples reconnect sexually after a baby" |
+| 6 | what-if-a-toy-is-too-intense | Overstimulation: settings, buffers, and gentler picks | "my vibrator is too intense what do I do" |
+| 7 | how-do-couples-talk-about-trying-toys | Raising the topic with a partner without it landing wrong | "how do I bring up sex toys with my partner" |
+| 8 | what-size-should-you-actually-start-with | Sizing confusion and the case for starting small | "what size sex toy should a beginner start with" |
+| 9 | when-vibration-feels-like-too-much-noise | Discretion worries: noise, storage, shared walls | "how loud are vibrators and how do I keep things quiet" |
+| 10 | why-cant-i-finish-with-a-partner | Orgasm gap frustrations, pressure, and pacing | "why can I orgasm alone but not with my partner" |
+| 11 | what-helps-when-menopause-changes-sex | Menopause-era changes: dryness, sensitivity, desire † | "how does menopause change sex and what helps" |
+| 12 | what-helps-when-stress-kills-your-sex-drive | Stress and burnout flattening desire † | "stress has killed my sex drive what helps" |
+| 13 | what-to-do-when-medication-changes-your-libido | Medication side effects on libido and orgasm † | "my antidepressant lowered my libido what can I do" |
+| 14 | why-does-penetration-sometimes-hurt | Discomfort or pain with penetration † | "why does sex sometimes hurt and what helps" |
+| 15 | what-helps-when-you-finish-faster-than-you-want | Finishing sooner than wanted, and the pressure spiral † | "how to last longer in bed" |
+| 16 | what-to-do-when-orgasm-takes-longer-than-it-used-to | Orgasm taking longer with age or medication † | "why does it take longer to orgasm as I get older" |
+| 17 | can-a-vibrator-make-you-less-sensitive | The desensitization worry, and what the research says † | "can using a vibrator too much make you less sensitive" |
+| 18 | how-do-long-distance-couples-stay-intimate | Long-distance intimacy logistics | "how do couples stay intimate long distance" |
+| 19 | what-to-do-when-sex-feels-routine | The long-term relationship rut | "how do we get out of a sexual rut in a long relationship" |
+| 20 | how-do-you-bring-up-a-fantasy-with-a-partner | Naming a fantasy without it landing wrong | "how do I tell my partner about a fantasy" |
+| 21 | what-if-your-partner-doesnt-want-to-use-toys | A reluctant partner who hears toys as criticism | "my partner does not want to use sex toys what do I do" |
+| 22 | what-if-a-partner-feels-replaced-by-a-toy | Partner insecurity about a vibrator | "my partner feels threatened by my vibrator" |
+| 23 | is-scheduling-sex-a-good-idea | The spontaneity myth vs the calendar reality | "does scheduling sex actually work" |
+| 24 | what-if-you-like-different-kinds-of-touch | Mismatched stimulation preferences in one bed | "my partner and I like different kinds of touch" |
+| 25 | what-helps-you-relax-enough-to-enjoy-sex | Staying stuck in your head, unable to be present | "how do I relax and stay present during sex" |
+| 26 | what-if-you-feel-self-conscious-during-sex | Body self-consciousness dimming everything | "how do I stop feeling self conscious in bed" |
+| 27 | how-do-you-restart-after-a-long-dry-spell | Restarting solo or partnered sex after a long break | "how to get back into sex after a long time without it" |
+| 28 | how-do-you-choose-toys-when-mobility-is-limited | Grip, reach, and mobility limits | "sex toys that work with arthritis or limited mobility" |
+| 29 | how-do-you-keep-toys-private-in-a-shared-home | Privacy with roommates or kids in the house | "how do I keep sex toys private at home" |
+| 30 | can-you-travel-with-a-sex-toy | Travel worry: security lines, packing, batteries | "can you bring a sex toy on a plane" |
+
+† = health-adjacent; the "worth seeing a clinician if…" line is mandatory.
+
+Bank composition: roughly a third health-adjacent, a third relationship and communication, a third
+practical confidence. Rows 1-10 are the original launch bank and seed the `real-talk` series in
+lightest-first order; rows 11-30 extend it. High-volume LLM queries (14, 15, 17, 30) are the
+citation bets; treat them with extra care on sourcing and the clinician line.
