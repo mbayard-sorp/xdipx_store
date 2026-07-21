@@ -8,11 +8,13 @@
  *   2. Four blogCategoryExtras docs (guides / comparisons / care /
  *      wellness-basics) with intro lines. `accent` stays unset — the
  *      code-side categoryAccent() map governs until an editor overrides.
- *   3. Three launch blogSeries docs (First Times / How It Works / Field
- *      Notes) with kickers + descriptions from the art-direction doc.
+ *   3. Four launch blogSeries docs (First Times / How It Works / Field
+ *      Notes / Real Talk) with kickers + descriptions from the
+ *      art-direction doc.
  *   4. blogPostExtras docs attaching existing PUBLISHED posts to their
  *      series (createIfNotExists + patch — never clobbers editor edits),
- *      and the series posts[] arrays in beginner-first order.
+ *      and the series posts[] arrays in beginner-first order (Real Talk:
+ *      lightest-topic-first).
  *
  * Idempotent: deterministic _ids (singleton.notebookSettings,
  * blogCategoryExtras.<slug>, blogSeries.<slug>, blogPostExtras.<post-slug>).
@@ -113,6 +115,24 @@ const SERIES: SeriesSeed[] = [
       'is-silicone-body-safe',
       'what-is-a-body-safe-material',
       'do-kegel-exercisers-work',
+    ],
+  },
+  {
+    slug: 'real-talk',
+    title: 'Real Talk',
+    kicker: 'Real Talk',
+    description: "A real problem, what's actually going on underneath, and what honestly helps.",
+    postSlugs: [
+      'why-first-toy-shopping-feels-overwhelming',
+      'what-size-should-you-actually-start-with',
+      'what-if-a-toy-is-too-intense',
+      'when-vibration-feels-like-too-much-noise',
+      'why-does-my-toy-smell-and-how-do-i-fix-it',
+      'what-helps-with-dryness-during-sex',
+      'how-do-couples-talk-about-trying-toys',
+      'what-to-do-when-desire-levels-dont-match',
+      'why-cant-i-finish-with-a-partner',
+      'reconnecting-after-a-baby',
     ],
   },
 ]

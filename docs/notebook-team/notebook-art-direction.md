@@ -280,7 +280,7 @@ on measured LCP), a compact trust surface in DM Sans, framed by a top+bottom `li
 
 ---
 
-## 8. Named editorial franchise / series concepts (3 candidates)
+## 8. Named editorial franchise / series concepts
 
 Franchises are the Glossier-grade lever: a recurring, named series with cover art and a
 "Part N of M" frame turns 30 daily answer posts into a library with spines. All names are
@@ -302,9 +302,16 @@ series landing.
    practical notes on keeping what you own clean, safe, and lasting." Cleaning, storage, sharing,
    body-safe materials, the evergreen maintenance library.
 
-Optional fourth for the comparisons slot, offered for later: **This or That** — "Two honest
-options, side by side, so you can pick the one that fits." Kept in reserve so the first launch ships
-three franchises, not four; add it once the comparisons backlog has depth.
+4. **Real Talk**, the problem and resolution franchise (real-talk; owner-approved 2026-07-21).
+   Pitch: "A real problem, what's actually going on underneath, and what honestly helps." Collects
+   the twice-weekly narratives (content plan §8B): mismatched desire, first-toy overwhelm, dryness,
+   overstimulation. Unlike the other spines, reading order is lightest-topic-first rather than
+   beginner-first, and cover art leans on the warm-human-context subject option in
+   `image-brief.md` (bedside, cropped hands, fabric, soft light) rather than product-forward
+   lockups.
+
+Kept in reserve for the comparisons slot: **This or That**, "Two honest options, side by side, so
+you can pick the one that fits." Add it once the comparisons backlog has depth.
 
 ---
 

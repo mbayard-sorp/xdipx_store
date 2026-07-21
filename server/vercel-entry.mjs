@@ -1840,9 +1840,33 @@ function detectAxes(master) {
   const hasSizeAxis = distinctSizes.size > 1;
   const distinctFlOz = new Set(perSku.map((s) => s.fluidOz).filter((oz) => oz !== ""));
   const hasVolumeAxis = distinctFlOz.size > 1;
+  function titleRemnant(sv) {
+    let t = sv.title;
+    const baseWords = master.baseTitle.split(/\s+/);
+    for (const word of baseWords) {
+      if (!word) continue;
+      t = t.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, "gi"), " ");
+    }
+    if (hasSizeAxis) {
+      for (const sz of [...distinctSizes]) {
+        t = t.replace(new RegExp(`\\b${escapeRegex(sz)}\\b`, "gi"), " ");
+      }
+    }
+    if (hasVolumeAxis) {
+      for (const oz of [...distinctFlOz]) {
+        t = t.replace(new RegExp(`\\b${escapeRegex(oz)}\\b`, "gi"), " ");
+      }
+    }
+    t = t.replace(VOLUME_PACKAGING_PATTERN, " ");
+    return t.replace(/\s+/g, " ").trim().replace(/^[-_/.,\s]+|[-_/.,\s]+$/g, "").trim();
+  }
+  let effectiveColors = primaryColors;
+  if (hasRealColor && primaryColors.some((c) => c === "")) {
+    effectiveColors = primaryColors.map((c, i) => c !== "" ? c : titleRemnant(perSku[i]) || "Default");
+  }
   function buildOptionTuple(idx) {
     const tuple = [];
-    if (hasRealColor) tuple.push(primaryColors[idx] ?? "");
+    if (hasRealColor) tuple.push(effectiveColors[idx] ?? "");
     if (hasSizeAxis) tuple.push(effectiveSizes[idx] ?? "");
     if (hasVolumeAxis) tuple.push(perSku[idx]?.fluidOz ?? "");
     return tuple;
@@ -1853,27 +1877,7 @@ function detectAxes(master) {
   let usesTwistB = false;
   let derivedColors = [];
   if (hasCollision && !hasRealColor) {
-    derivedColors = perSku.map((sv) => {
-      let t = sv.title;
-      const baseWords = master.baseTitle.split(/\s+/);
-      for (const word of baseWords) {
-        if (!word) continue;
-        t = t.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, "gi"), " ");
-      }
-      if (hasSizeAxis) {
-        for (const sz of [...distinctSizes]) {
-          t = t.replace(new RegExp(`\\b${escapeRegex(sz)}\\b`, "gi"), " ");
-        }
-      }
-      if (hasVolumeAxis) {
-        for (const oz of [...distinctFlOz]) {
-          t = t.replace(new RegExp(`\\b${escapeRegex(oz)}\\b`, "gi"), " ");
-        }
-      }
-      t = t.replace(VOLUME_PACKAGING_PATTERN, " ");
-      t = t.replace(/\s+/g, " ").trim().replace(/^[-_/.,\s]+|[-_/.,\s]+$/g, "").trim();
-      return t || "Default";
-    });
+    derivedColors = perSku.map((sv) => titleRemnant(sv) || "Default");
     const distinctDerived = new Set(derivedColors);
     const coverCount = derivedColors.filter((c) => c !== "Default").length;
     if (distinctDerived.size >= 2 && coverCount >= Math.floor(perSku.length / 2)) {
@@ -1888,9 +1892,18 @@ function detectAxes(master) {
       }
     }
   }
+  if (hasCollision && hasRealColor) {
+    const tupleCounts = /* @__PURE__ */ new Map();
+    for (const t of tupleStrings) tupleCounts.set(t, (tupleCounts.get(t) ?? 0) + 1);
+    effectiveColors = effectiveColors.map((c, i) => {
+      if ((tupleCounts.get(tupleStrings[i]) ?? 0) <= 1) return c;
+      const remnant = titleRemnant(perSku[i]);
+      return remnant && remnant.toLowerCase() !== c.toLowerCase() ? remnant : c;
+    });
+  }
   const axes = [];
   if (hasRealColor || usesTwistB) {
-    const vals = usesTwistB ? derivedColors : perSku.map((s) => s.colors[0] ?? "");
+    const vals = usesTwistB ? derivedColors : effectiveColors;
     const dedupedColors = [...new Set(vals.filter((c) => c !== ""))].sort((a, b) => a.localeCompare(b));
     axes.push({ name: "Color", values: dedupedColors });
   }
@@ -1907,7 +1920,7 @@ function detectAxes(master) {
     for (const axis of axes) {
       if (axis.name === "Color") {
         optionValues.push(
-          usesTwistB ? derivedColors[i] ?? "Default" : sv.colors[0] ?? ""
+          usesTwistB ? derivedColors[i] ?? "Default" : effectiveColors[i] ?? ""
         );
       } else if (axis.name === "Size") {
         optionValues.push(effectiveSizes[i] ?? "");
@@ -1937,6 +1950,18 @@ function detectAxes(master) {
       upc: sv.upc
     };
   });
+  if (axes.length > 0) {
+    const winnerByTuple = /* @__PURE__ */ new Map();
+    for (const vr of variantRows) {
+      const k = vr.optionValues.join("|");
+      const prev = winnerByTuple.get(k);
+      if (!prev || vr.qty > prev.qty) winnerByTuple.set(k, vr);
+    }
+    if (winnerByTuple.size !== variantRows.length) {
+      const winners = new Set(winnerByTuple.values());
+      return { axes, variantRows: variantRows.filter((vr) => winners.has(vr)) };
+    }
+  }
   return { axes, variantRows };
 }
 function needsReview(master) {
@@ -2035,6 +2060,45 @@ var init_master_collapse_server = __esm({
   }
 });
 
+// app/lib/sanity-image.ts
+function isSanityCdn(url) {
+  return !!url && url.includes("cdn.sanity.io");
+}
+function sanityImageUrl(url, opts = {}) {
+  if (!url || !isSanityCdn(url)) return url;
+  const params = new URLSearchParams();
+  if (opts.w) params.set("w", String(opts.w));
+  if (opts.h) params.set("h", String(opts.h));
+  params.set("q", String(opts.q ?? 75));
+  params.set("auto", "format");
+  params.set("fit", opts.fit ?? "max");
+  return `${url.split("?")[0]}?${params.toString()}`;
+}
+function optimizeSanityImageUrls(value) {
+  if (typeof value === "string") {
+    if (value.startsWith("https://cdn.sanity.io/images/") && !value.includes("?") && !value.endsWith(".svg")) {
+      return sanityImageUrl(value, { w: SANITY_MAX_IMAGE_WIDTH });
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => optimizeSanityImageUrls(item));
+  }
+  if (value !== null && typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = optimizeSanityImageUrls(v);
+    return out;
+  }
+  return value;
+}
+var SANITY_MAX_IMAGE_WIDTH;
+var init_sanity_image = __esm({
+  "app/lib/sanity-image.ts"() {
+    "use strict";
+    SANITY_MAX_IMAGE_WIDTH = 1600;
+  }
+});
+
 // app/lib/sanity.server.ts
 var sanity_server_exports = {};
 __export(sanity_server_exports, {
@@ -2115,7 +2179,12 @@ function withSanityKey(items, hashOf) {
 function getClient(withToken = false, preview = false, perspective) {
   if (!projectId) return null;
   const resolvedPerspective = perspective ?? (preview ? "previewDrafts" : "published");
-  return createClient({ projectId, dataset, apiVersion, useCdn: !withToken && !preview, token: process.env["SANITY_API_TOKEN"], perspective: resolvedPerspective });
+  const client5 = createClient({ projectId, dataset, apiVersion, useCdn: !withToken && !preview, token: process.env["SANITY_API_TOKEN"], perspective: resolvedPerspective });
+  if (!withToken) {
+    const rawFetch = client5.fetch.bind(client5);
+    client5.fetch = (async (...args) => optimizeSanityImageUrls(await rawFetch(...args)));
+  }
+  return client5;
 }
 function isPreviewRequest(request) {
   const cookie = request.headers.get("cookie") ?? "";
@@ -2484,23 +2553,27 @@ async function getSiteSettings() {
 }
 async function getEmmaPersona() {
   if (!projectId) return null;
-  return cached("sanity:emma-persona", 300, async () => {
+  const data = await cached("sanity:emma-persona", 300, async () => {
     try {
       const client5 = getClient();
       if (!client5) return null;
-      const data = await client5.fetch(
+      return await client5.fetch(
         `*[_id == "singleton.editor"][0]{
           "avatarUrl":   photo.asset->url,
           "avatarAlt":   coalesce(photo.alt, name, "Emma"),
           "displayName": coalesce(name, "Emma")
         }`
       );
-      return data ?? null;
     } catch (err) {
       console.error("[sanity] getEmmaPersona error:", err);
       return null;
     }
   });
+  if (!data) return null;
+  return {
+    ...data,
+    avatarUrl: data.avatarUrl ? sanityImageUrl(data.avatarUrl, { w: 192 }) : null
+  };
 }
 async function getPreviewImagesByHandles(handles) {
   const out = /* @__PURE__ */ new Map();
@@ -3301,7 +3374,7 @@ async function getProductHandlesForSitemap() {
     if (!client5) return [];
     return await client5.fetch(
       `*[_type == "productPage" && defined(shopifyHandle) && (!defined(hiddenUntilLive) || hiddenUntilLive != true)] | order(title asc) {
-        "handle": shopifyHandle, _updatedAt
+        "handle": shopifyHandle, _updatedAt, title
       }`
     );
   } catch (err) {
@@ -3335,6 +3408,7 @@ var init_sanity_server = __esm({
     "use strict";
     init_kv_server();
     init_tag_normalize();
+    init_sanity_image();
     CONTENT_BLOCKS_PROJECTION = `
   _type, _key, active, order,
   // announcementBar
@@ -3664,7 +3738,10 @@ async function shopifyAdmin(path, method = "GET", body) {
     },
     body: body ? JSON.stringify(body) : null
   });
-  if (!res.ok) throw new Error(`Shopify Admin API error: ${res.status} ${path}`);
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
+    throw new Error(`Shopify Admin API error: ${res.status} ${path}${errBody ? ` ${errBody.slice(0, 500)}` : ""}`);
+  }
   return res.json();
 }
 async function adminGraphQL(query, variables) {
@@ -8847,7 +8924,7 @@ function scoreProduct(product, recentSkus, recentCategories, blockedBrands = /* 
     dealScore = Math.min(discountPct / 30, 1);
     mapType = "below-msrp";
   } else {
-    dealPrice = msrp;
+    dealPrice = map;
     discountPct = 0;
     dealScore = 0.05;
     mapType = "equals-msrp";
@@ -11064,7 +11141,7 @@ ${candidatesBlock}
 Rules:
 - Pick 1, 2, or 3 \u2014 only the ones that genuinely complement the primary. Quality over quota.
 - Skip any candidate that doesn't fit. Better to return 1 strong pick than 3 weak ones.
-- Each blurb: ONE short sentence (\u2264120 chars), Emma voice, first-person friend who's tested it. Explains WHY they pair (not what each product does on its own).
+- Each blurb: ONE short sentence (\u2264120 chars), Emma voice, a friend explaining why they click. Emma has NO lived experience: never claim she tried, tested, owns, or keeps either product. Speak from catalog knowledge ("made for each other", "why they click"), not personal use. Explains WHY they pair (not what each product does on its own).
 - Voice: warm, curious, witty. Not clinical, not sleazy.
 - NEVER use em-dashes ("\u2014"). Hyphens in compound words are fine.
 - Don't restate the product titles. Don't name brands.
@@ -11602,6 +11679,7 @@ Constraints:
 - Under 100 words total. One paragraph (or two very short ones, max). The PDP shows this above a "...more" expand fold; staying tight means readers see all three beats without clicking.
 - Return clean HTML \u2014 only <p>, <em>, <strong> tags. No headings, no <ul>, no inline styles, no class attrs.
 - First-person Emma voice throughout. Present tense. No "Buy now". No countdowns. No clinical language.
+- Emma is an AI guide with NO lived experience. She has never used, tested, worn, owned, or kept any product, and she has no nightstand, desk, drawer, shelf, or travel bag. NEVER say "I tried", "I tested", "I've been testing/using/wearing", "I keep mine", "I own", "been living on my nightstand", "I reach for this", "when I use it", or any similar first-person use claim. Speak from catalog knowledge instead: "known for", "designed for", "the spec says", "reviewers describe".
 - Do NOT mention price, MAP, or discounts.
 - Do NOT echo the product title OR tagline in the first sentence.
 - "sex" and "sexy" are allowed where contextually relevant to the product and customer discovery (e.g. "sex toy", "safer sex", "sexy gift"). Default to "intimate"/"pleasure"/"wellness" for general voice \u2014 don't drop "sex" in for SEO bait.
@@ -18186,7 +18264,23 @@ Group identical stack traces into one entry with occurrence count. Do not over-r
 });
 
 // app/lib/nalpac-feeds.server.ts
+import { gzipSync, gunzipSync } from "node:zlib";
 import { parse as parse2 } from "csv-parse/sync";
+function packRows(rows) {
+  return GZ_PREFIX + gzipSync(Buffer.from(JSON.stringify(rows), "utf8")).toString("base64");
+}
+function unpackRows(cached2) {
+  if (Array.isArray(cached2)) return cached2;
+  if (typeof cached2 === "string" && cached2.startsWith(GZ_PREFIX)) {
+    try {
+      const buf = Buffer.from(cached2.slice(GZ_PREFIX.length), "base64");
+      return JSON.parse(gunzipSync(buf).toString("utf8"));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 function feedUrl(name) {
   const envKey = `NALPAC_FEED_${name.toUpperCase()}_URL`;
   const override = process.env[envKey];
@@ -18202,7 +18296,7 @@ function feedUrl(name) {
 async function fetchAndParse(name, force) {
   const cacheKey3 = `pricing:nalpac:feed:${name}`;
   if (!force) {
-    const cached2 = await kvGet(cacheKey3);
+    const cached2 = unpackRows(await kvGet(cacheKey3));
     if (cached2) return cached2;
   }
   const res = await fetch(feedUrl(name));
@@ -18213,7 +18307,7 @@ async function fetchAndParse(name, force) {
     skip_empty_lines: true,
     trim: true
   });
-  await kvSet(cacheKey3, rows, FEED_TTL2);
+  await kvSet(cacheKey3, packRows(rows), FEED_TTL2);
   return rows;
 }
 function parseNum(val) {
@@ -18342,7 +18436,7 @@ async function fetchAllNalpacFeeds(opts = {}) {
     errors
   };
 }
-var BASE_URL, FEED_TTL2;
+var BASE_URL, FEED_TTL2, GZ_PREFIX;
 var init_nalpac_feeds_server = __esm({
   "app/lib/nalpac-feeds.server.ts"() {
     "use strict";
@@ -18350,6 +18444,7 @@ var init_nalpac_feeds_server = __esm({
     init_kv_server();
     BASE_URL = "https://productfeeds.wyomind.com/feeds/1s6o37vbh23";
     FEED_TTL2 = 6 * 60 * 60;
+    GZ_PREFIX = "gz1:";
   }
 });
 
@@ -18421,46 +18516,57 @@ function computeTargetPrice(snapshot, rules) {
   let tier;
   let candidate;
   const flags = [];
+  const mapFloor = mapPrice != null && mapPrice > 0 ? mapPrice : 0;
+  function clampToMap(target) {
+    const preMap = Math.max(target, floor);
+    if (preMap > target) flags.push("below-floor");
+    if (mapFloor > preMap) {
+      flags.push("map-floored");
+      return mapFloor;
+    }
+    return preMap;
+  }
+  function mapNote() {
+    return flags.includes("map-floored") ? ` MAP $${round22(mapFloor)} is the floor, priced at MAP.` : "";
+  }
   if (inSaleFeed && nalpacDiscountPct != null && nalpacDiscountPct > 0) {
     tier = "sale-flow-through";
     const target = msrp * (1 - nalpacDiscountPct - effectiveSaleSweetener);
-    candidate = Math.max(target, floor);
-    if (candidate > target) flags.push("below-floor");
-    const reason2 = `Sale feed at ${Math.round(nalpacDiscountPct * 100)}% off + ${Math.round(effectiveSaleSweetener * 100)}pt sweetener. Target $${round22(target)}, floor $${round22(floor)}.`;
+    candidate = clampToMap(target);
+    const reason2 = `Sale feed at ${Math.round(nalpacDiscountPct * 100)}% off + ${Math.round(effectiveSaleSweetener * 100)}pt sweetener. Target $${round22(target)}, floor $${round22(floor)}.${mapNote()}`;
     const result2 = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason2, flags, effectiveMarginFloor);
-    return applyPostRules(result2, currentPrice, wholesale, msrp, effectiveMarginFloor);
+    return applyPostRules(result2, currentPrice, wholesale, msrp, effectiveMarginFloor, mapFloor);
   }
   if (msrp >= 2 * wholesale) {
     tier = "high-margin";
     const target = msrp * (1 - effectiveHighDiscount);
-    candidate = Math.max(target, floor);
-    if (candidate > target) flags.push("below-floor");
-    const reason2 = `High margin (MSRP/wholesale ratio ${round22(msrp / wholesale)}x). ${Math.round(effectiveHighDiscount * 100)}% off MSRP = $${round22(target)}, floor $${round22(floor)}.`;
+    candidate = clampToMap(target);
+    const reason2 = `High margin (MSRP/wholesale ratio ${round22(msrp / wholesale)}x). ${Math.round(effectiveHighDiscount * 100)}% off MSRP = $${round22(target)}, floor $${round22(floor)}.${mapNote()}`;
     const result2 = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason2, flags, effectiveMarginFloor);
-    return applyPostRules(result2, currentPrice, wholesale, msrp, effectiveMarginFloor);
+    return applyPostRules(result2, currentPrice, wholesale, msrp, effectiveMarginFloor, mapFloor);
   }
   if (msrp >= 1.5 * wholesale) {
     tier = "medium-margin";
     const target = msrp * (1 - effectiveMediumDiscount);
-    candidate = Math.max(target, floor);
-    if (candidate > target) flags.push("below-floor");
-    const reason2 = `Medium margin (MSRP/wholesale ratio ${round22(msrp / wholesale)}x). ${Math.round(effectiveMediumDiscount * 100)}% off MSRP = $${round22(target)}, floor $${round22(floor)}.`;
+    candidate = clampToMap(target);
+    const reason2 = `Medium margin (MSRP/wholesale ratio ${round22(msrp / wholesale)}x). ${Math.round(effectiveMediumDiscount * 100)}% off MSRP = $${round22(target)}, floor $${round22(floor)}.${mapNote()}`;
     const result2 = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason2, flags, effectiveMarginFloor);
-    return applyPostRules(result2, currentPrice, wholesale, msrp, effectiveMarginFloor);
+    return applyPostRules(result2, currentPrice, wholesale, msrp, effectiveMarginFloor, mapFloor);
   }
   tier = "thin-margin";
-  candidate = floor;
+  candidate = Math.max(floor, mapFloor);
+  if (mapFloor > floor) flags.push("map-floored");
   flags.push("thin-margin");
-  const reason = `Thin margin (MSRP/wholesale ratio ${round22(msrp / wholesale)}x). Pricing at floor $${round22(floor)}. Likely not worth carrying as a deal.`;
+  const reason = `Thin margin (MSRP/wholesale ratio ${round22(msrp / wholesale)}x). Pricing at floor $${round22(Math.max(floor, mapFloor))}. Likely not worth carrying as a deal.${mapNote()}`;
   const result = buildResult(tier, candidate, msrp, wholesale, currentPrice, true, reason, flags, effectiveMarginFloor);
-  return applyPostRules(result, currentPrice, wholesale, msrp, effectiveMarginFloor);
+  return applyPostRules(result, currentPrice, wholesale, msrp, effectiveMarginFloor, mapFloor);
 }
-function applyPostRules(result, currentPrice, wholesale, msrp, effectiveMarginFloor) {
+function applyPostRules(result, currentPrice, wholesale, msrp, effectiveMarginFloor, mapFloor = 0) {
   const { newPrice } = result;
   if (Math.abs(newPrice - currentPrice) < 0.01) {
     return { ...result, tier: "no-change-needed", reason: "Already at target." };
   }
-  if (newPrice > currentPrice && result.tier !== "map-locked") {
+  if (newPrice > currentPrice && result.tier !== "map-locked" && currentPrice >= mapFloor) {
     const currentMargin = marginPct(currentPrice, wholesale);
     if (currentMargin >= effectiveMarginFloor) {
       const revertedMargin = marginPct(currentPrice, wholesale);
@@ -19315,7 +19421,7 @@ var init_emma_orchestrator_server = __esm({
       },
       {
         name: "generateEmmaTake",
-        description: "Generate Emma's first-person take (becomes Shopify body_html / Emma's take tab). Always call this.",
+        description: "Generate Emma's first-person editorial take (becomes Shopify body_html / Emma's take tab). Catalog-knowledge voice only, never lived-experience claims. Always call this.",
         input_schema: { type: "object", properties: {}, required: [] }
       },
       {
@@ -20222,6 +20328,7 @@ Constraints:
 - Under 100 words total. One paragraph (or two very short ones, max). The PDP shows this above a "...more" expand fold; staying tight means readers see all three beats without clicking.
 - Return clean HTML \u2014 only <p>, <em>, <strong> tags. No headings, no <ul>, no inline styles, no class attrs.
 - First-person Emma voice throughout. Present tense. No "Buy now". No countdowns. No clinical language.
+- Emma is an AI guide with NO lived experience. She has never used, tested, worn, owned, or kept any product, and she has no nightstand, desk, drawer, shelf, or travel bag. NEVER say "I tried", "I tested", "I've been testing/using/wearing", "I keep mine", "I own", "been living on my nightstand", "I reach for this", "when I use it", or any similar first-person use claim. Speak from catalog knowledge instead: "known for", "designed for", "the spec says", "reviewers describe".
 - Do NOT mention price, MAP, or discounts.
 - Do NOT echo the product title OR tagline in the first sentence.
 - "sex" and "sexy" are allowed where contextually relevant to the product and customer discovery (e.g. "sex toy", "safer sex", "sexy gift"). Default to "intimate"/"pleasure"/"wellness" for general voice.
@@ -21162,7 +21269,7 @@ function editorialTagsFrom(categories) {
 function computeDealPrice(wholesale, msrp, map) {
   if (map === 0) return Math.round(Math.max(wholesale * 1.4, msrp * 0.55) * 100) / 100;
   if (map < msrp) return Math.round(map * 100) / 100;
-  return Math.round(msrp * 100) / 100;
+  return Math.round(map * 100) / 100;
 }
 function getImages2(row) {
   const imgs = [];
@@ -21984,7 +22091,7 @@ async function runImportMonitor(opts = {}) {
     }
     let autoImported = 0;
     if (monitorPhase === "2") {
-      autoImported = await autoImportPhase2(cappedKeys, carriedBrands, todayStr);
+      autoImported = await autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters);
     } else if (monitorPhase !== "1") {
       console.log(`[import-monitor] phase ${monitorPhase} auto-approve not yet implemented; treating as phase 1`);
     }
@@ -22019,7 +22126,7 @@ async function runImportMonitor(opts = {}) {
     };
   }
 }
-async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
+async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters) {
   const enabled = await getPipelineSetting("import_monitor_enabled");
   if (enabled === "false") {
     console.info("[import-monitor] phase 2 auto-import skipped: monitor disabled");
@@ -22091,7 +22198,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
   for (const c of gated) {
     if (imported >= remaining) break;
     try {
-      const r = await approveAndImport(c.id, "phase2-auto");
+      const r = await approveAndImport(c.id, "phase2-auto", { preloadedMasters: allMasters });
       if (r.ok && !r.skipped) {
         imported++;
         console.info(`[import-monitor] phase 2 auto-imported candidate ${c.id} (tier ${c.tier})`);
@@ -22119,7 +22226,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr) {
     for (const c of gatedTierC) {
       if (imported >= remaining || importedTierC >= tierCMaxPerDay) break;
       try {
-        const r = await approveAndImport(c.id, "phase2-auto");
+        const r = await approveAndImport(c.id, "phase2-auto", { preloadedMasters: allMasters });
         if (r.ok && !r.skipped) {
           imported++;
           importedTierC++;
@@ -23924,7 +24031,17 @@ if (!viteDevServer) {
     "/assets",
     express.static("build/client/assets", { immutable: true, maxAge: "1y" })
   );
-  app.use(express.static("build/client", { maxAge: "1h" }));
+  app.use(
+    express.static("build/client", {
+      maxAge: "1d",
+      setHeaders(res) {
+        res.setHeader(
+          "Cache-Control",
+          "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=86400"
+        );
+      }
+    })
+  );
 }
 if (viteDevServer) {
   app.use(viteDevServer.middlewares);

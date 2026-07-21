@@ -198,7 +198,9 @@ export function scoreProduct(
     dealScore   = Math.min(discountPct / 30, 1.0)
     mapType     = 'below-msrp'
   } else {
-    dealPrice   = msrp
+    // map >= msrp: no advertised discount; price at MAP (covers the odd feed
+    // rows where MAP sits above MSRP, which pricing at MSRP would violate)
+    dealPrice   = map
     discountPct = 0
     dealScore   = 0.05  // MAP = MSRP — accessories only
     mapType     = 'equals-msrp'

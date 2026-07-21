@@ -1,9 +1,34 @@
+import { gzipSync, gunzipSync } from 'node:zlib'
 import { parse } from 'csv-parse/sync'
 import { cleanDescription } from './feed-processor.server'
 import { kvGet, kvSet } from './kv.server'
 
 const BASE_URL = 'https://productfeeds.wyomind.com/feeds/1s6o37vbh23'
 const FEED_TTL = 6 * 60 * 60 // 6 hours
+
+// Parsed rows are cached gzipped. The main feed serializes to ~25MB of JSON,
+// past Upstash's 10MB max request size, so storing the array directly made
+// every kvSet fail and every invocation re-download and re-parse the CSV.
+// Column-repetitive row JSON gzips far below the limit.
+const GZ_PREFIX = 'gz1:'
+
+function packRows(rows: RawRow[]): string {
+  return GZ_PREFIX + gzipSync(Buffer.from(JSON.stringify(rows), 'utf8')).toString('base64')
+}
+
+function unpackRows(cached: unknown): RawRow[] | null {
+  // Legacy entries (small feeds that fit under the limit) stored the array as-is.
+  if (Array.isArray(cached)) return cached as RawRow[]
+  if (typeof cached === 'string' && cached.startsWith(GZ_PREFIX)) {
+    try {
+      const buf = Buffer.from(cached.slice(GZ_PREFIX.length), 'base64')
+      return JSON.parse(gunzipSync(buf).toString('utf8')) as RawRow[]
+    } catch {
+      return null
+    }
+  }
+  return null
+}
 
 export interface NalpacPriceSnapshot {
   sku: string
@@ -46,7 +71,7 @@ async function fetchAndParse(name: 'main' | 'sale' | 'new' | 'top100', force: bo
   const cacheKey = `pricing:nalpac:feed:${name}`
 
   if (!force) {
-    const cached = await kvGet<RawRow[]>(cacheKey)
+    const cached = unpackRows(await kvGet<unknown>(cacheKey))
     if (cached) return cached
   }
 
@@ -60,7 +85,7 @@ async function fetchAndParse(name: 'main' | 'sale' | 'new' | 'top100', force: bo
     trim:             true,
   }) as RawRow[]
 
-  await kvSet(cacheKey, rows, FEED_TTL)
+  await kvSet(cacheKey, packRows(rows), FEED_TTL)
   return rows
 }
 

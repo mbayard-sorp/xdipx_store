@@ -38,7 +38,20 @@ if (!viteDevServer) {
     '/assets',
     express.static('build/client/assets', { immutable: true, maxAge: '1y' }),
   )
-  app.use(express.static('build/client', { maxAge: '1h' }))
+  // Public files (emma.png, favicons…) are unhashed, so no immutable — but 1h
+  // forced re-downloads on every visit. 1 day in the browser, 30 days on
+  // Vercel's edge cache (s-maxage), refreshed in the background via SWR.
+  app.use(
+    express.static('build/client', {
+      maxAge: '1d',
+      setHeaders(res) {
+        res.setHeader(
+          'Cache-Control',
+          'public, max-age=86400, s-maxage=2592000, stale-while-revalidate=86400',
+        )
+      },
+    }),
+  )
 }
 
 // ─── Vite dev middleware (HMR + module transforms) ───────────────────────

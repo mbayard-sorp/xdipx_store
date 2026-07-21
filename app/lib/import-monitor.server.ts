@@ -382,7 +382,7 @@ export async function runImportMonitor(
     // 12. Phase gating: auto-import.
     let autoImported = 0
     if (monitorPhase === '2') {
-      autoImported = await autoImportPhase2(cappedKeys, carriedBrands, todayStr)
+      autoImported = await autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
     } else if (monitorPhase !== '1') {
       console.log(`[import-monitor] phase ${monitorPhase} auto-approve not yet implemented; treating as phase 1`)
     }
@@ -460,6 +460,7 @@ async function autoImportPhase2(
   cappedKeys: string[],
   carriedBrands: Set<string>,
   todayStr: string,
+  allMasters: MasterRecord[],
 ): Promise<number> {
   // Kill-switch: defense-in-depth (the cron also gates this; manual runs do not).
   const enabled = await getPipelineSetting('import_monitor_enabled')
@@ -553,7 +554,7 @@ async function autoImportPhase2(
   for (const c of gated) {
     if (imported >= remaining) break
     try {
-      const r = await approveAndImport(c.id, 'phase2-auto')
+      const r = await approveAndImport(c.id, 'phase2-auto', { preloadedMasters: allMasters })
       if (r.ok && !r.skipped) {
         imported++
         console.info(`[import-monitor] phase 2 auto-imported candidate ${c.id} (tier ${c.tier})`)
@@ -586,7 +587,7 @@ async function autoImportPhase2(
     for (const c of gatedTierC) {
       if (imported >= remaining || importedTierC >= tierCMaxPerDay) break
       try {
-        const r = await approveAndImport(c.id, 'phase2-auto')
+        const r = await approveAndImport(c.id, 'phase2-auto', { preloadedMasters: allMasters })
         if (r.ok && !r.skipped) {
           imported++
           importedTierC++

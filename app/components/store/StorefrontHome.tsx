@@ -435,7 +435,7 @@ function MeetEmma() {
           <Reveal variant="scale" className="min-w-[240px] max-w-[420px] flex-1">
             <div className="aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-lg)] bg-paper-3 ring-[6px] ring-sage/15">
               <OptimizedImage
-                src="/emma.png"
+                src="/emma.webp"
                 alt="Emma, the editorial AI guide for xdipx"
                 widths={[420, 840]}
                 fallbackWidth={840}

@@ -6,6 +6,7 @@ import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings,
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
+import { optimizeSanityImageUrls, sanityImageUrl } from '~/lib/sanity-image'
 
 /**
  * Sanity arrays of objects require a unique `_key` per item. Generated from
@@ -123,7 +124,16 @@ function getClient(withToken = false, preview = false, perspective?: 'raw' | 'pu
   // Use CDN for normal reads (fast), bypass CDN for writes + preview (fresh).
   const resolvedPerspective = perspective ?? (preview ? 'previewDrafts' : 'published')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return createClient({ projectId, dataset, apiVersion, useCdn: !withToken && !preview, token: process.env['SANITY_API_TOKEN'], perspective: resolvedPerspective } as any)
+  const client = createClient({ projectId, dataset, apiVersion, useCdn: !withToken && !preview, token: process.env['SANITY_API_TOKEN'], perspective: resolvedPerspective } as any)
+  // Read path only (every write/raw-snapshot caller passes withToken=true):
+  // rewrite bare asset->url strings to CDN-transformed URLs so raw multi-MB
+  // originals never reach a loader. See optimizeSanityImageUrls.
+  if (!withToken) {
+    const rawFetch = client.fetch.bind(client)
+    client.fetch = (async (...args: Parameters<typeof rawFetch>) =>
+      optimizeSanityImageUrls(await rawFetch(...args))) as typeof client.fetch
+  }
+  return client
 }
 
 export function isPreviewRequest(request: Request): boolean {
@@ -856,23 +866,31 @@ export async function getSiteSettings(): Promise<SiteSettings | null> {
 
 export async function getEmmaPersona(): Promise<EmmaPersona | null> {
   if (!projectId) return null
-  return cached('sanity:emma-persona', 300, async () => {
+  const data = await cached('sanity:emma-persona', 300, async () => {
     try {
       const client = getClient()
       if (!client) return null
-      const data = await client.fetch<{ avatarUrl: string | null; avatarAlt: string | null; displayName: string | null } | null>(
+      return await client.fetch<{ avatarUrl: string | null; avatarAlt: string | null; displayName: string | null } | null>(
         `*[_id == "singleton.editor"][0]{
           "avatarUrl":   photo.asset->url,
           "avatarAlt":   coalesce(photo.alt, name, "Emma"),
           "displayName": coalesce(name, "Emma")
         }`
       )
-      return data ?? null
     } catch (err) {
       console.error('[sanity] getEmmaPersona error:', err)
       return null
     }
   })
+  if (!data) return null
+  // Every consumer renders this avatar at 64px or less; w=192 covers 3x
+  // displays. Applied outside cached() (idempotent — sanityImageUrl strips any
+  // existing params) so stale KV entries holding the raw 2.18MB original are
+  // fixed the moment this code deploys, not a TTL later.
+  return {
+    ...data,
+    avatarUrl: data.avatarUrl ? sanityImageUrl(data.avatarUrl, { w: 192 }) : null,
+  }
 }
 
 // ─── Product Page Content ─────────────────────────────────────────────────────
@@ -2011,7 +2029,7 @@ export async function getRailDraftsForDeal(dealId: string): Promise<EmmaRailDocu
   )
 }
 
-export async function getProductHandlesForSitemap(): Promise<{ handle: string; _updatedAt: string }[]> {
+export async function getProductHandlesForSitemap(): Promise<{ handle: string; _updatedAt: string; title?: string }[]> {
   if (!projectId) return []
   try {
     const client = getClient()
@@ -2020,7 +2038,7 @@ export async function getProductHandlesForSitemap(): Promise<{ handle: string; _
     // visible, so the existing live catalog needs no backfill).
     return await client.fetch(
       `*[_type == "productPage" && defined(shopifyHandle) && (!defined(hiddenUntilLive) || hiddenUntilLive != true)] | order(title asc) {
-        "handle": shopifyHandle, _updatedAt
+        "handle": shopifyHandle, _updatedAt, title
       }`,
     )
   } catch (err) {
