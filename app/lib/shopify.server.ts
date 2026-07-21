@@ -50,7 +50,12 @@ export async function shopifyAdmin<T>(path: string, method = 'GET', body?: unkno
     },
     body: body ? JSON.stringify(body) : null,
   })
-  if (!res.ok) throw new Error(`Shopify Admin API error: ${res.status} ${path}`)
+  if (!res.ok) {
+    // 4xx bodies name the invalid field (e.g. {"errors":{"product":[...]}}) —
+    // without them a 422 is undiagnosable from logs.
+    const errBody = await res.text().catch(() => '')
+    throw new Error(`Shopify Admin API error: ${res.status} ${path}${errBody ? ` ${errBody.slice(0, 500)}` : ''}`)
+  }
   return res.json() as Promise<T>
 }
 

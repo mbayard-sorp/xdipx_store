@@ -488,12 +488,47 @@ export function detectAxes(
   const distinctFlOz = new Set(perSku.map(s => s.fluidOz).filter(oz => oz !== ''))
   const hasVolumeAxis = distinctFlOz.size > 1
 
+  // Title remnant after stripping the base title and known size/volume values.
+  // "Doxy Go Travel-Sized Wand Massager Pink" -> "Pink";
+  // "Love Knot Mini Flogger Black with Pink Bow" -> "Black Pink".
+  // Shared by Twist B and the color-axis repairs (Twists A2/B2) below.
+  function titleRemnant(sv: SkuValues): string {
+    let t = sv.title
+    const baseWords = master.baseTitle.split(/\s+/)
+    for (const word of baseWords) {
+      if (!word) continue
+      t = t.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, 'gi'), ' ')
+    }
+    if (hasSizeAxis) {
+      for (const sz of [...distinctSizes]) {
+        t = t.replace(new RegExp(`\\b${escapeRegex(sz)}\\b`, 'gi'), ' ')
+      }
+    }
+    if (hasVolumeAxis) {
+      for (const oz of [...distinctFlOz]) {
+        t = t.replace(new RegExp(`\\b${escapeRegex(oz)}\\b`, 'gi'), ' ')
+      }
+    }
+    t = t.replace(VOLUME_PACKAGING_PATTERN, ' ')
+    return t.replace(/\s+/g, ' ').trim().replace(/^[-_/.,\s]+|[-_/.,\s]+$/g, '').trim()
+  }
+
+  // Twist A2: real Color axis but some SKUs have a blank Color cell (color only
+  // in the title, e.g. Doxy Go "Pink"). Fill blanks from the title remnant —
+  // a blank option value 422s on Shopify ("Product options must have
+  // corresponding variants") because options.values excludes blanks.
+  let effectiveColors = primaryColors
+  if (hasRealColor && primaryColors.some(c => c === '')) {
+    effectiveColors = primaryColors.map((c, i) =>
+      c !== '' ? c : (titleRemnant(perSku[i]!) || 'Default'))
+  }
+
   // ── Collision check + Twist B ─────────────────────────────────────────────
 
   // Build initial option tuples (before Twist B)
   function buildOptionTuple(idx: number): string[] {
     const tuple: string[] = []
-    if (hasRealColor)  tuple.push(primaryColors[idx] ?? '')
+    if (hasRealColor)  tuple.push(effectiveColors[idx] ?? '')
     if (hasSizeAxis)   tuple.push(effectiveSizes[idx] ?? '')
     if (hasVolumeAxis) tuple.push(perSku[idx]?.fluidOz ?? '')
     return tuple
@@ -508,33 +543,7 @@ export function detectAxes(
 
   if (hasCollision && !hasRealColor) {
     // Twist B: try to extract color from title
-    derivedColors = perSku.map(sv => {
-      let t = sv.title
-
-      // Strip base title
-      const baseWords = master.baseTitle.split(/\s+/)
-      for (const word of baseWords) {
-        if (!word) continue
-        t = t.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, 'gi'), ' ')
-      }
-
-      // Strip axis values already known
-      if (hasSizeAxis) {
-        for (const sz of [...distinctSizes]) {
-          t = t.replace(new RegExp(`\\b${escapeRegex(sz)}\\b`, 'gi'), ' ')
-        }
-      }
-      if (hasVolumeAxis) {
-        for (const oz of [...distinctFlOz]) {
-          t = t.replace(new RegExp(`\\b${escapeRegex(oz)}\\b`, 'gi'), ' ')
-        }
-      }
-
-      // Strip oz/ml remnants
-      t = t.replace(VOLUME_PACKAGING_PATTERN, ' ')
-      t = t.replace(/\s+/g, ' ').trim().replace(/^[-_/.,\s]+|[-_/.,\s]+$/g, '').trim()
-      return t || 'Default'
-    })
+    derivedColors = perSku.map(sv => titleRemnant(sv) || 'Default')
 
     const distinctDerived = new Set(derivedColors)
     // Accept Twist B only if: >= 2 distinct colors, covers >= half SKUs, resolves collisions
@@ -554,13 +563,27 @@ export function detectAxes(
     }
   }
 
+  // Twist B2: collision WITH a real Color axis — two SKUs share a primary color
+  // ("Black with Pink Bow" vs "Black with Purple Bow" are both Color=Black).
+  // Shopify rejects duplicate tuples ("The variant 'Black' already exists"), so
+  // disambiguate the colliding SKUs with their title remnant when that helps.
+  if (hasCollision && hasRealColor) {
+    const tupleCounts = new Map<string, number>()
+    for (const t of tupleStrings) tupleCounts.set(t, (tupleCounts.get(t) ?? 0) + 1)
+    effectiveColors = effectiveColors.map((c, i) => {
+      if ((tupleCounts.get(tupleStrings[i]!) ?? 0) <= 1) return c
+      const remnant = titleRemnant(perSku[i]!)
+      return remnant && remnant.toLowerCase() !== c.toLowerCase() ? remnant : c
+    })
+  }
+
   // ── Build final axes ───────────────────────────────────────────────────────
 
   const axes: VariantAxis[] = []
 
   // Color (real or Twist B derived)
   if (hasRealColor || usesTwistB) {
-    const vals = usesTwistB ? derivedColors : perSku.map(s => s.colors[0] ?? '')
+    const vals = usesTwistB ? derivedColors : effectiveColors
     const dedupedColors = [...new Set(vals.filter(c => c !== ''))]
       .sort((a, b) => a.localeCompare(b))
     axes.push({ name: 'Color', values: dedupedColors })
@@ -590,7 +613,7 @@ export function detectAxes(
         optionValues.push(
           usesTwistB
             ? (derivedColors[i] ?? 'Default')
-            : (sv.colors[0] ?? ''),
+            : (effectiveColors[i] ?? ''),
         )
       } else if (axis.name === 'Size') {
         optionValues.push(effectiveSizes[i] ?? '')
@@ -630,6 +653,23 @@ export function detectAxes(
       upc: sv.upc,
     }
   })
+
+  // Last-resort guard: if two variants still share an identical option tuple
+  // after the twists above, keep the highest-qty one per tuple so the Shopify
+  // product create never 422s on a duplicate variant. Skip when there are no
+  // axes — every tuple is empty there and the single-variant path applies.
+  if (axes.length > 0) {
+    const winnerByTuple = new Map<string, VariantBuild>()
+    for (const vr of variantRows) {
+      const k = vr.optionValues.join('|')
+      const prev = winnerByTuple.get(k)
+      if (!prev || vr.qty > prev.qty) winnerByTuple.set(k, vr)
+    }
+    if (winnerByTuple.size !== variantRows.length) {
+      const winners = new Set(winnerByTuple.values())
+      return { axes, variantRows: variantRows.filter(vr => winners.has(vr)) }
+    }
+  }
 
   return { axes, variantRows }
 }

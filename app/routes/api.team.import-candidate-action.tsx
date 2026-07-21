@@ -6,10 +6,20 @@ import {
   approveAndImport,
   updateCandidateStatus,
 } from '~/lib/import-monitor.server'
+import { fetchAllNalpacFeeds } from '~/lib/nalpac-feeds.server'
+import { collapseMasters, type MasterRecord } from '~/lib/master-collapse.server'
 import { db } from '~/lib/db.server'
 import { importCandidates } from '../../db/schema'
 
 const DEFAULT_MAX_ACTIONS_PER_RUN = 20
+
+// Each approve runs ~10-20s of sequential Shopify Admin calls (variant images,
+// inventory items, metafields, all rate-limit-paced). Larger batches in one
+// serverless request risk the 300s maxDuration and die mid-batch with a 500,
+// leaving no response for the ids that DID import. Overflow ids come back in
+// `deferred` for the caller to resubmit. Reject/watch are cheap DB writes and
+// are not clamped.
+const MAX_APPROVALS_PER_REQUEST = 10
 
 async function countProcessedToday(reviewedBy: string): Promise<number> {
   const res = await db
@@ -24,9 +34,15 @@ async function countProcessedToday(reviewedBy: string): Promise<number> {
   return Number(res[0]?.n ?? 0)
 }
 
-async function runIntent(id: number, intent: string, reviewedBy: string, reason?: string) {
+async function runIntent(
+  id: number,
+  intent: string,
+  reviewedBy: string,
+  reason?: string,
+  preloadedMasters?: MasterRecord[],
+) {
   if (intent === 'approve') {
-    return await approveAndImport(id, reviewedBy)
+    return await approveAndImport(id, reviewedBy, preloadedMasters ? { preloadedMasters } : {})
   }
   if (intent === 'reject') {
     await updateCandidateStatus(id, 'rejected', {
@@ -69,14 +85,26 @@ export async function action({ request }: ActionFunctionArgs) {
       .map(s => parseInt(s.trim(), 10))
       .filter(n => !isNaN(n))
 
-    const toProcess = ids.slice(0, remaining)
+    const capAllowed = ids.slice(0, remaining)
     const skippedDueToCap = ids.slice(remaining)
+
+    // Chunk approvals per request; overflow is returned for resubmission.
+    const perRequestLimit = intent === 'approve' ? MAX_APPROVALS_PER_REQUEST : capAllowed.length
+    const toProcess = capAllowed.slice(0, perRequestLimit)
+    const deferred = capAllowed.slice(perRequestLimit)
+
+    // One feed fetch + master collapse shared by the whole batch — without this
+    // every approveAndImport re-fetches and re-collapses the ~17k-SKU feed.
+    let preloadedMasters: MasterRecord[] | undefined
+    if (intent === 'approve' && toProcess.length > 1) {
+      preloadedMasters = collapseMasters((await fetchAllNalpacFeeds()).snapshots)
+    }
 
     const results: unknown[] = []
     for (const id of toProcess) {
-      results.push(await runIntent(id, intent, reviewedBy, reason))
+      results.push(await runIntent(id, intent, reviewedBy, reason, preloadedMasters))
     }
-    return Response.json({ ok: true, results, skippedDueToCap })
+    return Response.json({ ok: true, results, skippedDueToCap, deferred })
   }
 
   // Single path
