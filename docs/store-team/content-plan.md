@@ -168,18 +168,21 @@ live. No pending brief on Thursday → the slot falls back to care and the retro
 
 A problem → root cause → resolution narrative that ends, where honest, at products that actually
 help. Structure is plain H2 prose — no custom Sanity block; heading-structured answers are what
-LLM engines lift, and a custom block would add renderer work for nothing:
+LLM engines lift, and a custom block would add renderer work for nothing. **H2s are question-form
+on first draft**, per the blog addendum's answer-first/question-form rule in `docs/emma-voice.md`
+(statement-style H2s fail the voice gate as a REVISE):
 
-1. **H2: The problem** — stated in the reader's words, empathetic and specific. "What people tell
-   us / what shows up in questions", never first-person anecdote (Emma has no lived experience —
-   the rule is extra load-bearing in this format).
-2. **H2: What's actually going on** — the root cause explained plainly. No diagnosis language, no
-   medical overreach; include a "worth seeing a clinician if…" line whenever the topic borders on
-   health.
-3. **H2: What helps** — 2-3 concrete approaches (habits, communication, technique), each
-   optionally paired with ONE honest, in-stock `blogProductEmbed` that genuinely serves that
-   approach. **Products appear only in this resolution section, never in the problem framing** —
-   that is the anti-sleaze rule.
+1. **H2, question-form, e.g. "What does it mean when sex feels dry?"** — the problem stated in the
+   reader's words, empathetic and specific. "What people tell us / what shows up in questions",
+   never first-person anecdote (Emma has no lived experience — the rule is extra load-bearing in
+   this format).
+2. **H2, question-form, e.g. "Why does this happen?"** — the root cause explained plainly. No
+   diagnosis language, no medical overreach; include a "worth seeing a clinician if…" line
+   whenever the topic borders on health.
+3. **H2, question-form, e.g. "What actually helps?"** — 2-3 concrete approaches (habits,
+   communication, technique), each optionally paired with ONE honest, in-stock `blogProductEmbed`
+   that genuinely serves that approach. **Products appear only in this resolution section, never
+   in the problem framing** — that is the anti-sleaze rule.
 4. FAQ section as always.
 
 Starter topics (pick, reorder, and extend freely):
