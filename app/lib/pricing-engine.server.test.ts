@@ -274,3 +274,78 @@ describe('mapRespected flag on Playground floor override', () => {
     expect(r.newPrice).toBe(80)
   })
 })
+
+describe('universal MAP floor (non-restricted vendors)', () => {
+  // Regression for the 2026-07-21 import-queue incident: 131 tier-B candidates
+  // went to 'watching' because the preview discounted below MAP. MAP must be a
+  // price floor for every vendor, not just the MAP_RESTRICTED_VENDORS list.
+
+  it('MAP == MSRP means no advertised discount: price lands at MAP/MSRP', () => {
+    // high-margin would target $65, but MAP $100 == MSRP $100 forbids any discount
+    const r = computeTargetPrice(base({ msrp: 100, wholesale: 40, mapPrice: 100, currentPrice: 90 }))
+    expect(r.newPrice).toBe(100)
+    expect(r.newPrice).toBeGreaterThanOrEqual(100)
+    expect(r.flags).toContain('map-floored')
+    expect(r.mapRespected).toBe(true)
+  })
+
+  it('MAP == MSRP with currentPrice already at MSRP resolves to no-change-needed', () => {
+    const r = computeTargetPrice(base({ msrp: 100, wholesale: 40, mapPrice: 100, currentPrice: 100 }))
+    expect(r.tier).toBe('no-change-needed')
+    expect(r.newPrice).toBe(100)
+  })
+
+  it('MAP < MSRP acts as the discount floor when the tier target undercuts it', () => {
+    // high-margin target $65, MAP $80 -> clamped to $80
+    const r = computeTargetPrice(base({ msrp: 100, wholesale: 40, mapPrice: 80, currentPrice: 100 }))
+    expect(r.newPrice).toBe(80)
+    expect(r.flags).toContain('map-floored')
+  })
+
+  it('MAP < MSRP does not bind when the tier target already clears it', () => {
+    // high-margin target $65, MAP $60 -> target stands
+    const r = computeTargetPrice(base({ msrp: 100, wholesale: 40, mapPrice: 60, currentPrice: 100 }))
+    expect(r.newPrice).toBe(65)
+    expect(r.flags).not.toContain('map-floored')
+  })
+
+  it('MAP null or 0 leaves tier pricing unchanged', () => {
+    const rNull = computeTargetPrice(base({ msrp: 100, wholesale: 40, mapPrice: null, currentPrice: 100 }))
+    const rZero = computeTargetPrice(base({ msrp: 100, wholesale: 40, mapPrice: 0, currentPrice: 100 }))
+    expect(rNull.newPrice).toBe(65)
+    expect(rZero.newPrice).toBe(65)
+  })
+
+  it('sale flow-through also respects MAP', () => {
+    // sale target = 100 * (1 - 0.30 - 0.05) = $65, MAP $90 -> clamped to $90
+    const r = computeTargetPrice(base({
+      msrp: 100, wholesale: 30, mapPrice: 90, currentPrice: 100,
+      inSaleFeed: true, nalpacDiscountPct: 0.30,
+    }))
+    expect(r.newPrice).toBe(90)
+    expect(r.flags).toContain('map-floored')
+  })
+
+  it('thin-margin respects MAP above the margin floor', () => {
+    // wholesale $80 -> floor $100; MAP $110 -> price $110
+    const r = computeTargetPrice(base({ msrp: 100, wholesale: 80, mapPrice: 110, currentPrice: 120 }))
+    expect(r.newPrice).toBe(110)
+    expect(r.flags).toContain('map-floored')
+  })
+
+  it('a MAP-driven raise is never absorbed back to a below-MAP current price', () => {
+    // currentPrice $70 sits below MAP $100; margin at $70 clears the floor, but
+    // increase-absorbed must not revert to a MAP-violating price
+    const r = computeTargetPrice(base({ msrp: 100, wholesale: 40, mapPrice: 100, currentPrice: 70 }))
+    expect(r.newPrice).toBe(100)
+    expect(r.flags).not.toContain('increase-absorbed')
+  })
+
+  it('a cost-driven raise with no MAP is still absorbed', () => {
+    // unchanged legacy behavior: computed $80 > current $75, margin at $75 is 20% -> absorb
+    const r = computeTargetPrice(base({ msrp: 100, wholesale: 60, currentPrice: 75 }))
+    expect(r.tier).toBe('no-change-needed')
+    expect(r.newPrice).toBe(75)
+    expect(r.flags).toContain('increase-absorbed')
+  })
+})
