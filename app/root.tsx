@@ -15,6 +15,11 @@ import type { LoaderFunctionArgs, LinksFunction } from 'react-router'
 import * as Sentry from '@sentry/react'
 import { BotIdClient } from 'botid/client'
 import stylesheet from './app.css?url'
+// Same physical files app.css's @fontsource @font-face rules reference — Vite
+// dedupes them into one hashed asset, so these ?url imports resolve to the
+// exact URLs the stylesheet will request (preload hits, never a double fetch).
+import newsreaderLatinWoff2 from '@fontsource-variable/newsreader/files/newsreader-latin-wght-normal.woff2?url'
+import dmSansLatinWoff2 from '@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2?url'
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
 import { resolveGa4 } from '~/lib/ga4-config.server'
 
@@ -91,15 +96,24 @@ export const links: LinksFunction = () => [
   { rel: 'icon', type: 'image/png', href: '/favicon-32x32.png', sizes: '32x32' },
   { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
   { rel: 'manifest', href: '/site.webmanifest' },
-  // Preconnect for Google Analytics
-  { rel: 'preconnect', href: 'https://www.googletagmanager.com' },
   // Preconnect for Shopify CDN — the LCP hero image and gallery come from
-  // cdn.shopify.com on every product/homepage view. crossOrigin saves a
-  // round-trip on the cross-origin TCP+TLS handshake.
-  { rel: 'preconnect', href: 'https://cdn.shopify.com', crossOrigin: 'anonymous' },
-  // Fonts (Newsreader / DM Sans / JetBrains Mono / Caveat) are now self-hosted
-  // via @fontsource and bundled into app.css — no cross-origin Google Fonts
+  // cdn.shopify.com on every product/homepage view. No crossOrigin: <img> and
+  // image-preload fetches are no-cors, and a credentialless (anonymous) socket
+  // can't be reused for them — Lighthouse flagged the old anonymous preconnect
+  // as an unused connection. (googletagmanager.com lost its preconnect when
+  // gtm.js moved to idle-time loading; a warm socket that early is wasted.)
+  { rel: 'preconnect', href: 'https://cdn.shopify.com' },
+  // Sanity CDN serves avatars, editorial tiles, and notebook card images.
+  { rel: 'preconnect', href: 'https://cdn.sanity.io' },
+  // Fonts (Newsreader / DM Sans / JetBrains Mono / Caveat) are self-hosted via
+  // @fontsource and bundled into app.css — no cross-origin Google Fonts
   // request, no render-blocking external stylesheet. See app/app.css.
+  // Preload only the two latin subsets that style above-the-fold text
+  // (display + body, ~95KB); without these the browser discovers fonts only
+  // after the stylesheet downloads and parses, putting them at the end of the
+  // critical chain. Font requests are always CORS, hence crossOrigin.
+  { rel: 'preload', as: 'font', type: 'font/woff2', href: newsreaderLatinWoff2, crossOrigin: 'anonymous' },
+  { rel: 'preload', as: 'font', type: 'font/woff2', href: dmSansLatinWoff2, crossOrigin: 'anonymous' },
   { rel: 'stylesheet', href: stylesheet },
 ]
 
@@ -153,6 +167,45 @@ export function Layout({ children }: { children: React.ReactNode }) {
     ? (window as unknown as { ENV?: { META_PIXEL_ID?: string } }).ENV?.META_PIXEL_ID ?? ''
     : rootData?.ENV?.META_PIXEL_ID ?? (process.env['META_PIXEL_ID'] ?? '')
 
+  // Analytics loads in two stages. The bootstrap runs inline before first
+  // paint: consent-mode defaults (denied until the banner grants) plus the
+  // gtag and fbq queue stubs, so every event or consent update fired from app
+  // code is queued from the start. The heavy third-party payloads (gtm.js /
+  // gtag.js / fbevents.js, ~265KB combined) load only on first interaction or
+  // post-load idle — loaded eagerly in <head> they compete with the
+  // render-blocking stylesheet and LCP hero image for bandwidth on throttled
+  // mobile connections. Queued dataLayer/fbq calls replay when the scripts
+  // arrive, so nothing is lost.
+  //
+  // GA4 loads directly only when GTM is NOT present: with a gtmId the GTM
+  // container owns the GA4 config tag, and loading gtag/js here too would pull
+  // GA4 twice and double-fire events.
+  //
+  // The Meta pixel id is public (visible in browser JS regardless); the CAPI
+  // token is server-only and never appears here or in window.ENV.
+  const analyticsBootstrap = [
+    (ga4Id || gtmId)
+      ? `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});`
+      : '',
+    pixelId
+      ? `!function(f){if(f.fbq)return;var n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[]}(window);fbq('consent','revoke');fbq('init','${pixelId}');`
+      : '',
+  ].join('')
+
+  const deferredLoads = [
+    gtmId
+      ? `window.dataLayer.push({'gtm.start':new Date().getTime(),event:'gtm.js'});inject('https://www.googletagmanager.com/gtm.js?id=${gtmId}');`
+      : '',
+    (!gtmId && ga4Id)
+      ? `inject('https://www.googletagmanager.com/gtag/js?id=${ga4Id}');gtag('js',new Date());gtag('config','${ga4Id}',{send_page_view:false});`
+      : '',
+    pixelId ? `inject('https://connect.facebook.net/en_US/fbevents.js');` : '',
+  ].join('')
+
+  const analyticsLoader = deferredLoads
+    ? `(function(){var done=false;function inject(src){var s=document.createElement('script');s.async=true;s.src=src;document.head.appendChild(s)}function go(){if(done)return;done=true;${deferredLoads}}['pointerdown','keydown','touchstart','scroll'].forEach(function(e){addEventListener(e,go,{once:true,passive:true})});function idle(){'requestIdleCallback' in window?requestIdleCallback(go,{timeout:3000}):setTimeout(go,2000)}document.readyState==='complete'?idle():addEventListener('load',idle);setTimeout(go,8000);})();`
+    : ''
+
   return (
     <html lang="en" className="bg-cream">
       <head>
@@ -161,46 +214,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Meta />
         <Links />
         <BotIdMount />
-        {(ga4Id || gtmId) && (
-          <script
-            dangerouslySetInnerHTML={{
-              __html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});`,
-            }}
-          />
+        {analyticsBootstrap && (
+          <script dangerouslySetInnerHTML={{ __html: analyticsBootstrap }} />
         )}
-        {gtmId && (
-          <script
-            dangerouslySetInnerHTML={{
-              __html: `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${gtmId}');`,
-            }}
-          />
-        )}
-        {/* Load GA4 directly only when GTM is NOT present. When gtmId is set the
-            GTM container owns the GA4 config tag, so loading gtag/js here too
-            would pull GA4 twice and double-fire events. The consent-default
-            script above still defines window.gtag (→ dataLayer.push), so
-            analytics.client events flow through GTM either way. */}
-        {ga4Id && !gtmId && (
-          <>
-            <script async src={`https://www.googletagmanager.com/gtag/js?id=${ga4Id}`} />
-            <script
-              dangerouslySetInnerHTML={{
-                __html: `gtag('js',new Date());gtag('config','${ga4Id}',{send_page_view:false});`,
-              }}
-            />
-          </>
-        )}
-        {/* Meta Pixel — consent-revoke-by-default mirrors the GA4 pattern above.
-            fbq('consent','revoke') fires BEFORE fbq('init') so no events are
-            sent until the visitor grants consent via the cookie banner. The
-            pixel id is public (visible in browser JS regardless); the CAPI
-            token is server-only and never appears here or in window.ENV. */}
-        {pixelId && (
-          <script
-            dangerouslySetInnerHTML={{
-              __html: `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('consent','revoke');fbq('init','${pixelId}');`,
-            }}
-          />
+        {analyticsLoader && (
+          <script dangerouslySetInnerHTML={{ __html: analyticsLoader }} />
         )}
       </head>
       <body

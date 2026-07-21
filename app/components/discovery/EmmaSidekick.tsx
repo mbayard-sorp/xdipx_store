@@ -36,7 +36,7 @@ export function EmmaSidekick() {
   const { state } = useDiscovery()
   const layoutData = useRouteLoaderData('routes/_layout') as { emmaPersona?: EmmaPersona | null } | undefined
   const emmaPersona = layoutData?.emmaPersona ?? null
-  const avatarSrc = emmaPersona?.avatarUrl ?? '/emma.png'
+  const avatarSrc = emmaPersona?.avatarUrl ?? '/emma.webp'
   const avatarAlt = emmaPersona?.avatarAlt || emmaPersona?.displayName || 'Emma'
   const displayName = emmaPersona?.displayName || 'Emma'
   const [mobileOpen, setMobileOpen] = useState(false)

@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import type { BlogPostCard } from '~/types/cms'
+import { sanityImageUrl, sanityImageSrcSet } from '~/lib/sanity-image'
 
 /**
  * "From Emma's notebook" rail — a compact grid of post cards linking to
@@ -37,7 +38,9 @@ export function NotebookRail({
               {post.heroImageUrl && (
                 <div className="aspect-[4/3] bg-cream-2 overflow-hidden">
                   <img
-                    src={`${post.heroImageUrl}${post.heroImageUrl.includes('?') ? '&' : '?'}w=600`}
+                    src={sanityImageUrl(post.heroImageUrl, { w: 600 })}
+                    srcSet={sanityImageSrcSet(post.heroImageUrl, [400, 600, 800]) || undefined}
+                    sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, 25vw"
                     alt={post.heroImageAlt ?? post.title}
                     loading="lazy"
                     decoding="async"
