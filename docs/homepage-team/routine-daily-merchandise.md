@@ -302,6 +302,11 @@ Token rows (above) and image rows (from Step 4) both land in `api_token_log` and
 
 ## Step 7 — Self-validate the render
 
+The homepage route caches past the Sanity write (~60s TTL), so a fetch made immediately after Step 5
+can still read the pre-patch HTML. Wait at least 60s after the last Sanity patch before fetching `/`
+for validation (or poll every 15s up to 90s) so a cache-lag read is not mistaken for a publish
+failure.
+
 Fetch `/` and assert: HTTP 200, the LCP hero image is present, and the homepage JSON-LD is valid and
 contains **no "daily deal" framing**. If validation fails, do not leave a broken homepage live — note
 it and let the healthcheck/rollback path restore the last-good Sanity revision; record a `failed`
