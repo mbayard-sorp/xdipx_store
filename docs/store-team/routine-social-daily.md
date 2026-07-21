@@ -79,7 +79,15 @@ curl -s -X POST "$BASE_URL/api/team/social-post" \
   -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>}'
 ```
 
-One `event` per draft (`eventType:'step'`, `phase:'draft'`).
+One `event` per draft (`eventType:'step'`, `phase:'draft'`):
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/event" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"record","runId":'"$RUN_ID"',"summary":"Drafted <platform> post: <one-line summary>","eventType":"step","phase":"draft","agentRole":"social-media-manager"}'
+```
+
+Note the field is `summary`, not `message` — this is `POST /api/team/event`, not an op on `/api/team/run`.
 
 ## Step 7 — Retro (the training loop)
 
