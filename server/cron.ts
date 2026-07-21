@@ -281,6 +281,25 @@ export function createCronRoutes() {
    * service-account env vars are set (GSC_SA_JSON, or GSC_SA_EMAIL +
    * GSC_SA_PRIVATE_KEY; optional GSC_SITE_URL, default sc-domain:xdipx.com).
    */
+  /**
+   * GET|POST /cron/owner-digest
+   * Schedule: daily 13:00 UTC (approx 6a Pacific) — email the owner one
+   * digest: orders/profit, team runs and failures, valve snapshot,
+   * suggestion queue, and program-tracker RAG. KV-guarded to once per day;
+   * pass ?force=1 to re-send while testing.
+   */
+  cronRoute('/owner-digest', async (req, res) => {
+    try {
+      const { runOwnerDigest } = await import('../app/lib/owner-digest.server.js')
+      const force = req.query['force'] === '1' || req.body?.force === true
+      const result = await runOwnerDigest({ force })
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:owner-digest]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
   cronRoute('/gsc-snapshot', async (_req, res) => {
     try {
       const { runGscSnapshot } = await import('../app/lib/gsc.server.js')

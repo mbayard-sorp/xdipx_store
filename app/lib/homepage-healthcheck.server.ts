@@ -167,13 +167,21 @@ async function checkPage(path: string): Promise<PageCheck> {
 }
 
 /** Open (or comment on an existing) P0 GitHub issue. Self-contained REST call. */
-async function openHealthcheckIssue(title: string, body: string): Promise<string | null> {
+/**
+ * Returns the issue URL plus whether it was newly created. `created` is the
+ * transition signal the owner-alert hook keys on: an ongoing outage comments
+ * on the existing open issue every 30 min, and must not SMS every tick.
+ */
+async function openHealthcheckIssue(
+  title: string,
+  body: string,
+): Promise<{ url: string | null; created: boolean }> {
   const token = process.env['GITHUB_TOKEN']
   const owner = process.env['GITHUB_OWNER']
   const repo = process.env['GITHUB_REPO']
   if (!token || !owner || !repo) {
     console.warn('[homepage-healthcheck] GITHUB_TOKEN/OWNER/REPO not set — skipping issue')
-    return null
+    return { url: null, created: false }
   }
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -193,7 +201,7 @@ async function openHealthcheckIssue(title: string, body: string): Promise<string
         headers,
         body: JSON.stringify({ body }),
       })
-      return existing.html_url
+      return { url: existing.html_url, created: false }
     }
     const create = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
       method: 'POST',
@@ -202,12 +210,12 @@ async function openHealthcheckIssue(title: string, body: string): Promise<string
     })
     if (!create.ok) {
       console.error(`[homepage-healthcheck] issue create ${create.status}`)
-      return null
+      return { url: null, created: false }
     }
-    return ((await create.json()) as { html_url: string }).html_url
+    return { url: ((await create.json()) as { html_url: string }).html_url, created: true }
   } catch (err) {
     console.error('[homepage-healthcheck] issue error', err)
-    return null
+    return { url: null, created: false }
   }
 }
 
@@ -318,8 +326,18 @@ export async function runHomepageHealthcheck(): Promise<HomepageHealthResult> {
       '',
       '_Filed automatically by `/cron/homepage-healthcheck`._',
     ].join('\n')
-    const issueUrl = await openHealthcheckIssue('[P0] Homepage healthcheck failing', issueBody)
-    if (issueUrl) result.message = `${result.message ? result.message + ' · ' : ''}issue: ${issueUrl}`
+    const issue = await openHealthcheckIssue('[P0] Homepage healthcheck failing', issueBody)
+    if (issue.url) result.message = `${result.message ? result.message + ' · ' : ''}issue: ${issue.url}`
+    // Owner alert only on the transition (newly created issue), never on the
+    // every-30-min recurrence comments. Both senders are non-throwing.
+    if (issue.created) {
+      const { sendOwnerSms, sendOwnerEmail, escapeHtml } = await import('~/lib/owner-alerts.server')
+      await sendOwnerSms(`xdipx P0: homepage healthcheck failing. ${summary}`)
+      await sendOwnerEmail(
+        '[P0] xdipx homepage healthcheck failing',
+        `<pre style="font-family:monospace;white-space:pre-wrap;">${escapeHtml(issueBody)}</pre>${issue.url ? `<p><a href="${issue.url}">${issue.url}</a></p>` : ''}`,
+      )
+    }
   }
 
   return result
