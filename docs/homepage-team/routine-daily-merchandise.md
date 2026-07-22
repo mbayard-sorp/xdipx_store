@@ -188,11 +188,30 @@ Emit a `decision` event recording the proposed candidates, the scores, and the f
 
 Hand the chosen surfaces to `media-manager`. **Reuse-before-generate:** it checks existing **Sanity**
 assets (homepage art lives in Sanity, not Shopify Files) for a fitting image first; only generates when
-none fits. Imagery follows mission brief section 2: the product is the star — pass the product's real
+none fits.
+
+**Pick the archetype before prompting (doctrine §4, binding).** Every generation declares one
+archetype and starts from that surface's scaffold in `docs/homepage-team/image-prompt-library.md`:
+
+| Surface | Archetype | Scaffold |
+|---|---|---|
+| Hero (block image) | **C** in-situ bright scene of the pinned pick, or **A** hand-on-product | "Hero" |
+| Wayfinder tiles + promo | **B** color-block still for product tiles (one color-rhyme echo); **C** for human-context tiles | "Wayfinder / editorial tile", "Promo image" |
+| Mood / photo / couples band | **C** in-situ bright scene | "Mood band / photo band" |
+| Editorial / Notebook tiles | **D** metaphor macro | "Notebook" scaffold family |
+| PDP macro / in-hand scale | **A** hand-on-product | "PDP macro / in-hand scale" |
+
+Curated rails (`emmaCuratedRail`) have **no image field** — they render each product's real
+Shopify photo; never generate art for them. Grounds only from coral-soft / plum-soft / paper (the
+doctrine ground lock; sage stays an accent, not a ground); `--ref-image` mandatory for every
+product-linked surface; no text in pixels. Full rules: doctrine §4 — do not restate them in
+prompts, follow them.
+
+Imagery follows mission brief section 2: the product is the star — pass the product's real
 Shopify photo as a Kontext reference (`--ref-image`) for every product-linked surface, or use sensual
 human context (lingerie on a body, skin, playful tension) matched to what the surface sells. Housewares
 still-lifes with no product are banned, and so are dark/moody/candlelit scenes: bright daylight or
-high-key studio light, saturated color-block backdrops, the product bold and large in frame. Fun and
+high-key studio light, tinted color-block backdrops from the doctrine ground lock, the product bold and large in frame. Fun and
 curiosity-inspiring is the target; exposed genitalia, nipples, and sex acts are the hard limit.
 
 Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counter:
@@ -229,6 +248,18 @@ spend in Step 6 — the script already posts exactly one `{kind:'image'}` row pe
 | Notebook | The "From the Notebook" section **auto-populates** with the latest 3 published posts (homepage loader `getBlogPosts`), so fresh content reaches the homepage with no action from you. An `editorialTiles` block in `singleton.homepage.sections[]` (`tiles[]`: label/body/link/linkLabel/emoji/image) is an **optional override** — publish one only for a deliberate editorial pick, never just to keep the section current. Doctrine: `docs/store-team/internal-linking.md`. | storefront `/` |
 | Wayfinder mosaic | `wayfinderMosaic` block in `singleton.homepage.sections[]` — the "Find your way in" tiles + "Discover You" promo. `tiles[]` (label/link/emmaAside/image, 3-4) + `promo` (eyebrow/heading/emphasis/body/cta/image). Empty/unset → the storefront renders its hardcoded fallback tiles (never blank). Place tile images via `--target tile --tile-key`, the promo via `--target promo`. | storefront `/` |
 | Announcement ticker | `announcementBar` messages in `singleton.homepage` (the layout pins it site-wide). | all pages |
+
+**Incoming slots (design-elevation P1 — do NOT patch before the shell PR lands).** These surfaces
+are on the Routine B backlog and activate one by one as their reviewed PRs merge; their
+`gen-homepage-image.ts` targets ship with those PRs. Until a slot's block exists in the storefront,
+attempting to place content for it is a defect, not initiative:
+
+| Incoming slot | What it becomes | Status check |
+|---|---|---|
+| "The Ten" ranked franchise | Nº 03 reframed as the finite "The Ten. Most picked right now" with mono numerals | exists once the Nº 03 shell PR merges |
+| PDP macro / in-hand image row | Archetype A macro shots render on PDPs; until then Wave-1 macro generations are pre-staged assets only | exists once the PDP evidence-surfaces PR merges |
+| Reviews pull-quote band | Conditional band between Nº 06 and Nº 07, real reviews only, suppressed below threshold | exists once the reviews-slot PR merges; NEVER seed with placeholder quotes |
+| Committed tinted band | One full-bleed plum-soft/coral-soft band carrying white cards | exists once its shell PR merges |
 
 **Hero rule (updated for PR #190, pin added after run 10):** `singleton.emmaHero` IS the storefront
 hero copy source. The storefront hero renders its `eyebrow`, `headline`, `body`, and `pullQuote`

@@ -22,6 +22,13 @@ and every touchpoint must be comfortable to receive, open, and share.
   not in an ad, not in a social draft. MAP<MSRP uses MAP as the floor.
 - **Ad-platform policy is survival.** `docs/ads-policy.md` binds the ads team and the creative rules
   bind organic social too. One careless campaign can kill the ad account.
+- **The design doctrine gates ALL visual output.** Any run that produces or places imagery,
+  graphics, or visual layout loads `docs/design-doctrine.md` first — its §4 imagery archetypes
+  (with the coral-soft/plum-soft/paper ground lock) and §6 proof & trust components are
+  binding on every team, exactly as the voice charter binds words. Imagery is produced only via
+  `media-manager` (reuse-first); never fabricate proof (reviews, press, testimonials) on any
+  surface. Where the doctrine conflicts with older team framing, the doctrine wins on pixels; the
+  voice charter still outranks it on words.
 - **Consent is sacred.** Email/SMS plans target consented lists only. Referral mechanics never
   expose a customer's purchase to a third party beyond the customer's own share action.
 - **Canonical URLs.** All product links everywhere are `/products/{slug}`, with channel UTMs.

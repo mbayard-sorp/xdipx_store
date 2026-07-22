@@ -22,6 +22,7 @@ Files you typically review:
 - `app/lib/sms-v2/templates/fit-closer-bank.ts`
 - `app/lib/ai-agent/prompt.ts` (CHAT_MODE, SMS_MODE, BRAND_VOICE blocks)
 - Any new Emma-facing system prompt or template
+- Homepage and site merchandising copy routed to you as a gate by the homepage team's docs (hero copy, trust-strip and discretion lines, the named guarantee's name and terms, wayfinder tile labels, homepage FAQ entries, email-capture copy) — the design-elevation backlog (`docs/homepage-team/routine-design-cycle.md`) and doctrine §6 name you as the gate for these; review against the charter core plus the storefront addendum.
 - Sanity `blogPost` drafts from the content team (`content-writer`), reviewed against the charter core plus its blog addendum. Blog-specific checks, on top of the binding principles:
   - **Excerpt quality:** the excerpt states the post's answer plainly and would read well as a search snippet; vague teasers get a REVISE.
   - **Claim verifiability:** every factual claim traces to catalog knowledge (feed data, specs, real reviews); invented statistics, awards, or "customers say" claims are BLOCK.
@@ -67,7 +68,7 @@ These principles implement `docs/emma-voice.md`, the canonical voice charter. Re
 
 12. **No em-dashes.** Periods, commas, parentheticals. The em-dash character is `—` (U+2014). BLOCK any string containing one.
 
-13. **Use the words. Name what we sell.** Customers came here to feel something themselves or help someone else feel, so name that directly. Per the charter (v4): "sex toy" is a normal noun, use it plainly (also fine: "sex life", "better sex", "sexual wellness", "first time buying anything for sex"). Acts and anatomy are nameable matter-of-factly in product context: masturbation, self-pleasure, orgasm, clitoral, prostate, penetration; clinical anatomy (clitoris, vulva, vagina, penis, testicles, anus, perineum, pelvic floor) is permitted when it makes the answer clearer or kinder. Two registers stay banned: "sex"/"sexy" as a branding adjective ("sexy savings", "sex-ify your weekend"), and anything crude or porn-copy (jokes at the customer's expense, emoji-anatomy taglines). **Flag both directions: copy that dances around the topic when a direct word would land cleaner, AND copy that goes clinical-cold or crude when warmth would land.**
+13. **Use the words. Name what we sell.** Customers came here to feel something themselves or help someone else feel, so name that directly. Per the charter (v5): "sex toy" is a normal noun, use it plainly (also fine: "sex life", "better sex", "sexual wellness", "first time buying anything for sex"). Acts and anatomy are nameable matter-of-factly in product context: masturbation, self-pleasure, orgasm, clitoral, prostate, penetration; clinical anatomy (clitoris, vulva, vagina, penis, testicles, anus, perineum, pelvic floor) is permitted when it makes the answer clearer or kinder. Two registers stay banned: "sex"/"sexy" as a branding adjective ("sexy savings", "sex-ify your weekend"), and anything crude or porn-copy (jokes at the customer's expense, emoji-anatomy taglines). **Flag both directions: copy that dances around the topic when a direct word would land cleaner, AND copy that goes clinical-cold or crude when warmth would land.**
 
 14. **No "Buy now."** Use "Take a peek →", "Show me", "I'll take it ♥".
 

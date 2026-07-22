@@ -1,4 +1,4 @@
-# xdipx Design Doctrine (v1)
+# xdipx Design Doctrine (v1.1)
 
 > The single source of truth for how xdipx **looks**, everywhere: homepage, PLP,
 > PDP, discovery, admin. Every design agent (`homepage-designer`, `rr7-engineer`,
@@ -144,9 +144,11 @@ reintroduced orange. No old-cream backgrounds.**
   8% / 16% / 32% ink. Cards get a hairline `border-line`, not a shadow.
 
 ### The ♥ motif
-Reserved for **CTA labels and Emma asides** ("I'll take it ♥"). Do not scatter
-hearts as decoration. One signature "heartbeat" animation per page, maximum
-(see §5).
+Reserved for exactly three uses: **CTA labels** ("I'll take it ♥"), **Emma
+asides**, and the **trust surfaces** (the trust-strip icons and the named
+guarantee's sage ♥ mark, §6). Do not scatter hearts as decoration; at most two
+♥ instances per viewport across all three uses. One signature "heartbeat"
+animation per page, maximum (see §5).
 
 ### Contrast floor
 **WCAG AA is the floor, not the goal.** Body text ≥ 4.5:1, large display ≥ 3:1.
@@ -171,9 +173,9 @@ they outlive any single run. Every merchandising image obeys all of them.
    real Shopify photo as a `--ref-image` Kontext reference) or a sensual human
    context matched to the link target (lingerie on a body, silk on skin, hands,
    playful tension). Props may support a product; they may never replace it.
-2. **Bright, colorful, bold.** Daylight or high-key studio light, saturated
-   color-block backdrops (coral, plum tints), product LARGE in frame. Premium
-   DTC-launch energy.
+2. **Bright, colorful, bold.** Daylight or high-key studio light, tinted
+   color-block backdrops from the ground lock below (coral-soft, plum-soft,
+   paper), product LARGE in frame. Premium DTC-launch energy.
 3. **Banned looks, retired for cause:** tableware (tea cups, mugs, bowls,
    notebooks, candles, fruit, napkins, empty styled tables — the July 2026
    housewares failure); near-black / candlelit / boudoir-gloom (the moody round
@@ -193,6 +195,41 @@ they outlive any single run. Every merchandising image obeys all of them.
 7. **Reuse-first, but only compliant assets.** Name and tag uploads with product
    handle + mood so future runs find them. The July 2026 housewares set stays
    retired.
+
+### The four archetypes (live teardown, July 2026 — binding taxonomy)
+
+Every generated merchandising image declares one archetype before prompting.
+The archetypes come from the live competitor teardown
+(`docs/homepage-team/competitor-teardown-2026-07-live.md`, "AI imagery + video
+program"); prompts start from the matching per-surface scaffold in
+`docs/homepage-team/image-prompt-library.md`.
+
+- **A — hand-on-product.** Real Shopify photo as `--ref-image`, one undistorted
+  hand holding or reaching, silk/linen/skin-adjacent surface. Scale, texture,
+  and normalization in one frame — the cheapest expensive signal in the field.
+  Uses: featured-product second image, PDP in-hand scale + macro detail, card
+  flip frames. Vision-gate hard check: hand anatomy.
+- **B — color-block still.** Product LARGE on one flat tinted field, soft
+  shadow, exactly one styling echo of the product's own color (a prop or
+  manicure that rhymes). Uses: wayfinder tiles, rail cards, ranked-set tiles,
+  promos.
+- **C — in-situ bright scene.** Product in a believable sunlit private space
+  among personal objects, or a cropped human presence (hands, thigh, torso —
+  anonymous scene models are never shown face-on; the approved Emma-likeness
+  carve-out is the one exception, product still the hero; never explicit). Bright, never boudoir-gloom. Uses: hero,
+  photo/couples band, occasion edits, human-context wayfinder tiles.
+- **D — editorial metaphor macro.** One tasteful single-concept scene (silk,
+  water, soft foil, fruit) standing in for sensation. Uses: PDP mood slides,
+  Notebook cover system.
+
+**The ground lock:** backdrops come only from `coral-soft`, `plum-soft`, and
+`paper` tints, high-key daylight (sage is an accent color, never a ground: there
+is no soft sage tint token, and a full-strength sage field fights the high-key
+mandate). This constraint is what makes a
+mixed-vendor catalog read as one funded brand; the teardown's core finding is
+that **consistency, not budget, is the "million dollars" signal** — normalizing
+ground and light behind inconsistent supplier photos is the highest-leverage
+move and needs zero reshoots.
 
 ---
 
@@ -254,13 +291,47 @@ gallery until `/admin/design-gallery` ships (design-elevation p1-gallery).
   "I'll take it ♥"). Never "Buy now." Never duplicate the primary's label on the
   secondary.
 
+### Proof & trust components (live teardown, July 2026 — binding)
+
+The trust architecture every credible competitor runs, adapted to what xdipx can
+deploy honestly (full rationale: `competitor-teardown-2026-07-live.md`, "Trust
+architecture").
+
+- **Never fabricate proof.** No invented review counts, press logos, awards,
+  tenure claims, or named testimonials, ever. Proof surfaces render only when
+  the underlying data is real; otherwise they stay suppressed — an empty slot
+  beats a fake one ((0.0) stars and "1 review" cards actively destroy trust).
+- **Reviews render above a threshold only.** Stars + exact count on cards and
+  PDPs once a product clears a defensible review count; hard-suppressed below
+  it.
+- **The guarantee is a proper noun.** One named, time-boxed guarantee with a
+  sage ♥ mark, seated in the trust strip AND beside the primary CTA at the buy
+  box (trust at the button converts buyers; trust at the top only reassures
+  browsers). Name and terms are owner-approved before first publish.
+- **Discretion copy names the dreaded moments.** The box on the porch, the
+  shipping label, the card statement (canonical phrase: "Your statement reads
+  XDIPX.") — mechanics, not badges. Wording gated by `emma-empathy-reviewer`
+  against `docs/emma-voice.md`.
+- **The footer is a legitimacy document.** Payment marks, returns/privacy/
+  shipping/18+/accessibility links, "reach a human at hello@xdipx.com," a quiet
+  brands-we-carry row. Wary first-timers (and ad-network reviewers) read the
+  footer before trusting the card form.
+- **Borrowed credibility on cards.** The manufacturer brand renders as a mono
+  ink-4 eyebrow on every product card (`p.brand` is already in the payload).
+
 ---
 
 ## 7. What best-in-market looks like — the reference bench
 
 Design agents should keep these in the eye. Not to copy — to steal the *specific*
 thing each does better than anyone. Refresh this list in the weekly teardown
-(design-elevation p3-teardown).
+(design-elevation p3-teardown); the current decision doc is
+`docs/homepage-team/competitor-teardown-2026-07-live.md` (site-by-site findings
+from real July 2026 captures). One advisory note from it: the field runs a
+seven-beat homepage spine (hero → trust strip → wayfinding → finite bestseller
+set → guide moment → proof stack → editorial + email + legitimacy footer);
+useful for judging section order, but the locked Nº01–Nº11 shell remains the
+binding IA — the spine never overrides the routine-design-cycle IA fence.
 
 | Reference | Steal this, specifically |
 |---|---|
@@ -274,6 +345,10 @@ thing each does better than anyone. Refresh this list in the weekly teardown
 | **Arket / COS** | Muted, grown-up color-blocking; how a tinted band carries a section. |
 | **Stripe / Linear** | Interaction craft and reduced-motion respect (for the discovery/finder surfaces, not the storefront gloss). |
 | **Lovehoney / Spectrum (opening grid only)** | The wall-of-product open above the fold. We take the density, we reject their urgency banners and clutter. |
+| **Vush** | Grid consistency as the money signal: one render language for every SKU, one signature material detail, proof printed in the hero (stars + count above the H1 — ours waits for real reviews). |
+| **Honey Play Box (closing act only)** | The pre-footer proof sequence: reviews → community → awards → press → trust icons → payment marks. End on safety. Ours renders only the slots we can fill honestly. |
+| **sextoy.com (card system only)** | Uniform tinted packshot tiles, mono intent kickers ("EASY START"), one dark card per grid row for rhythm, the finite ranked "Top Ten" franchise. |
+| **TooTimid (trust scaffolding only)** | The three-part mechanical discretion promise (box / label / statement) and the PDP macro row (texture, in-hand scale, tip detail). We take the mechanics, we reject everything else on that page. |
 
 ---
 
@@ -296,6 +371,10 @@ thing each does better than anyone. Refresh this list in the weekly teardown
 4. Fixed aspect ratios on all media frames.
 
 ---
+
+*v1.1 — 2026-07-21. Adds the four imagery archetypes, the proof & trust
+components, and the refreshed reference bench from the live competitor teardown
+(`docs/homepage-team/competitor-teardown-2026-07-live.md`).*
 
 *v1 — 2026-07-15. Codifies the shipped v3 token system, the redesign-v2 art
 direction, and the Motion primitives as the binding visual charter. Ongoing
