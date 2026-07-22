@@ -21,6 +21,7 @@ import { getEmmaPersona, getHomepageSections, getSiteSettings, isPreviewRequest 
 import { getAccessoryProducts, getMainMenu } from '~/lib/shopify.server'
 import type { ShopifyMenuItem } from '~/lib/shopify.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
+import { getFeaturedBrandNames } from '~/lib/discovery.server'
 import { SessionProvider } from '~/lib/session-context'
 import { withTimeout } from '~/lib/with-timeout.server'
 import type { Product } from '~/types'
@@ -36,7 +37,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // pinnedIds live in KV and resolve in ~1–5ms — fetch them outside the main
   // Promise.all so we can fan accessories in parallel with everything else.
   const pinnedIds = (await getPinnedAccessoryIds()) ?? []
-  const [cms, settings, menuItems, upsells, emmaPersona] = await Promise.all([
+  const [cms, settings, menuItems, upsells, emmaPersona, footerBrands] = await Promise.all([
     withTimeout(getHomepageSections(preview), LAYOUT_TIMEOUT_MS, null, 'getHomepageSections(layout)'),
     withTimeout(getSiteSettings(), LAYOUT_TIMEOUT_MS, null, 'getSiteSettings'),
     withTimeout(getMainMenu(), LAYOUT_TIMEOUT_MS, [] as ShopifyMenuItem[], 'getMainMenu'),
@@ -44,6 +45,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? withTimeout(getAccessoryProducts(pinnedIds.slice(0, 4)), LAYOUT_TIMEOUT_MS, [] as Product[], 'getAccessoryProducts')
       : Promise.resolve<Product[]>([]),
     withTimeout(getEmmaPersona(), LAYOUT_TIMEOUT_MS, null, 'getEmmaPersona'),
+    // Footer "brands we carry" row — reads the already-cached discovery
+    // index (no extra Shopify round-trip on a warm instance).
+    withTimeout(getFeaturedBrandNames(8), LAYOUT_TIMEOUT_MS, [] as string[], 'getFeaturedBrandNames'),
   ])
 
   const announcementBar = cms?.sections.find(
@@ -61,11 +65,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const footerDisclaimer = settings?.footerDisclaimer ?? null
   const buyButtonText = settings?.buyButtonText || "I'll take it ♥"
   const siteBanner: SiteBannerData | null = settings?.siteBanner ?? null
-  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona }
+  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona, footerBrands }
 }
 
 export default function StoreLayout() {
-  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona } = useLoaderData<typeof loader>()
+  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona, footerBrands } = useLoaderData<typeof loader>()
   const { pathname } = useLocation()
   const rootData = useRouteLoaderData<{ ENV?: { GA4_ID?: string; AGE_GATE_LEVEL?: string } }>('root')
   const ga4Id = rootData?.ENV?.GA4_ID ?? ''
@@ -101,7 +105,7 @@ export default function StoreLayout() {
           <main className={`flex-1 ${showMobileShell ? 'pb-20 md:pb-0' : ''}`}>
             <Outlet context={{ buyButtonText }} />
           </main>
-          <Footer socialLinks={socialLinks} footerColumns={footerColumns} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} />
+          <Footer socialLinks={socialLinks} footerColumns={footerColumns} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} brands={footerBrands} />
           {showMobileShell && <MobileExploreMenu menuItems={menuItems} />}
           <AskEmmaWidget />
           <CookieConsent />

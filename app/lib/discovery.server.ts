@@ -137,6 +137,7 @@ interface AdminProductNode {
   title:        string
   status:       string
   productType:  string | null   // Shopify's native "Product organization → Type"
+  vendor:       string | null   // Shopify's native manufacturer/vendor field — card brand eyebrow
   featuredImage: { url: string; altText: string | null } | null
   variants: { nodes: Array<{ id: string }> } | null
   priceRangeV2: {
@@ -221,6 +222,7 @@ const PRODUCTS_PAGE_QUERY = /* GraphQL */ `
         title
         status
         productType
+        vendor
         featuredImage { url altText }
         variants(first: 1) { nodes { id } }
         priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
@@ -236,6 +238,12 @@ const PRODUCTS_PAGE_QUERY = /* GraphQL */ `
     }
   }
 `
+
+/** Trims a Shopify `vendor` string to a display brand name, null if blank. */
+function cleanVendor(vendor: string | null | undefined): string | null {
+  const v = (vendor ?? '').trim()
+  return v || null
+}
 
 function parseListMetafield(value: string | null | undefined): string[] {
   if (!value) return []
@@ -300,6 +308,7 @@ function nodeToDiscoveryProduct(
     totalInventory: n.totalInventory ?? null,
     productType,
     productTypeDial,
+    brand: cleanVendor(n.vendor),
   }
 }
 
@@ -405,6 +414,7 @@ const NODES_BY_IDS_QUERY = /* GraphQL */ `
         title
         status
         productType
+        vendor
         featuredImage { url altText }
         variants(first: 1) { nodes { id } }
         priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
@@ -477,6 +487,7 @@ export async function fetchHonoraryProducts(
         totalInventory: node.totalInventory ?? null,
         productType,
         productTypeDial: dial || null,
+        brand: cleanVendor(node.vendor),
       })
     }
   }
@@ -786,6 +797,28 @@ export function computeVocab(index: DiscoveryProduct[]): DiscoveryVocab {
     audiences: tally('audience'),
     matters:   tally('matters'),
   }
+}
+
+/**
+ * Frequency-sorted distinct `brand` (Shopify vendor) values actually present
+ * on the active catalog — powers the footer's quiet "brands we carry" row
+ * (design-doctrine §6 borrowed-credibility). Reads the already-cached
+ * discovery index (L1 memo / KV / Neon), so this never triggers a fresh
+ * Shopify round-trip on its own. Real names only — never a hardcoded list —
+ * so the row can never claim a brand xdipx doesn't actually stock. Degrades
+ * to `[]` (footer omits the row) on a cold index rather than blocking.
+ */
+export async function getFeaturedBrandNames(limit = 8): Promise<string[]> {
+  const index = await getDiscoveryIndex()
+  const counts = new Map<string, number>()
+  for (const p of index) {
+    const b = p.brand?.trim()
+    if (b) counts.set(b, (counts.get(b) ?? 0) + 1)
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([v]) => v)
 }
 
 /**

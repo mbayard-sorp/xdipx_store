@@ -67,12 +67,28 @@ export function StorefrontProductCard({ product, priority = false, onSelect, flu
       </div>
 
       <div className="mt-3">
-        <p
-          className="text-[13px] uppercase tracking-[0.12em] text-ink-3"
-          style={{ fontFamily: 'var(--font-mono)' }}
-        >
-          {product.subcategory || product.category}
-        </p>
+        {/* Borrowed-credibility eyebrow — the manufacturer name, when Shopify's
+            vendor field is populated (design-doctrine §6 kicker/eyebrow spec).
+            Older cached discovery-index entries may lack `brand`; the row is
+            simply omitted rather than showing a placeholder. */}
+        {product.brand ? (
+          <p
+            className="text-[11px] uppercase tracking-[0.18em] text-ink-4"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          >
+            {product.brand}
+          </p>
+        ) : (
+          /* Category line is the fallback eyebrow only when there is no brand —
+             stacking a bold category label under the brand eyebrow doubles the
+             signal and dilutes it (design-doctrine §6). */
+          <p
+            className="text-[13px] uppercase tracking-[0.12em] text-ink-3"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          >
+            {product.subcategory || product.category}
+          </p>
+        )}
         <h3
           className="mt-1 line-clamp-2 text-[15px] leading-snug text-ink group-hover:text-plum transition-colors"
           style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}

@@ -155,6 +155,16 @@ export interface DiscoveryProduct {
    * exclusion rules match against. Null when the dial is unset or empty.
    */
   productTypeDial: string | null
+  /**
+   * Shopify's native `vendor` field (manufacturer name, e.g. "We-Vibe"),
+   * rendered as the borrowed-credibility eyebrow on `StorefrontProductCard`
+   * (design-doctrine §6). Optional: pre-existing cached index entries built
+   * before this field was added lack it and simply render no eyebrow rather
+   * than a version-bump reindex (display-only, never used for filtering/
+   * scoring, so a stale-shape read is not "corrupt" the way v5–v7 fields
+   * were). Null when Shopify's vendor is blank.
+   */
+  brand?: string | null
 }
 
 export interface ScoredProduct {

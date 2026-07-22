@@ -7,6 +7,12 @@ interface EditorialTilesProps {
   block: EditorialTilesBlock
 }
 
+/* Coverless tiles cycle a quiet tinted ground instead of a heart placeholder —
+   three ♥ marks on empty plates blew the design-doctrine §3 motif cap (max two
+   ♥ per viewport) and read as broken content. The caption below still carries
+   the label, so the tile stays title-forward. */
+const COVERLESS_TINTS = ['bg-coral-soft', 'bg-plum-soft', 'bg-paper-3'] as const
+
 export function EditorialTiles({ block }: EditorialTilesProps) {
   const { eyebrow, heading, tiles } = block
 
@@ -57,9 +63,7 @@ export function EditorialTiles({ block }: EditorialTilesProps) {
                     />
                   </div>
                 ) : (
-                  <div className="aspect-[4/3] bg-cream-2 flex items-center justify-center text-5xl">
-                    {tile.emoji ?? '♥'}
-                  </div>
+                  <div className={`aspect-[4/3] ${COVERLESS_TINTS[i % COVERLESS_TINTS.length]}`} />
                 )}
                 <div className="p-5">
                   <p

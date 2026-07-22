@@ -11,11 +11,26 @@ interface FooterProps {
   discreetBody?: string | null
   copyright?: string | null
   disclaimer?: string | null
+  /** Frequency-sorted real vendor names from the live catalog (design-doctrine
+   *  §6 borrowed credibility). Never hardcoded — see `getFeaturedBrandNames()`.
+   *  Row is omitted below a meaningful count rather than showing 1-2 names. */
+  brands?: string[]
 }
 
 const currentYear = new Date().getFullYear()
 
-export function Footer({ socialLinks = [], footerColumns = [], logoUrl, logoAlt = 'xdipx', tagline, discreetHeading, discreetBody, copyright, disclaimer }: FooterProps) {
+/** Real, existing Sanity `page` docs (verified live) — never point a
+ *  legitimacy link at a slug that doesn't resolve. */
+const POLICY_LINKS = [
+  { label: 'Returns', to: '/pages/return-policy' },
+  { label: 'Privacy', to: '/pages/privacy-policy' },
+  { label: 'Shipping', to: '/pages/shipping-and-taxes' },
+  // TODO(homepage-team): no dedicated accessibility statement page exists
+  // yet (checked live Sanity `page` docs 2026-07-21). Add one via
+  // sanity-content-builder, then link it here — do not fabricate the slug.
+]
+
+export function Footer({ socialLinks = [], footerColumns = [], logoUrl, logoAlt = 'xdipx', tagline, discreetHeading, discreetBody, copyright, disclaimer, brands = [] }: FooterProps) {
   return (
     <footer className="bg-ink text-white/80 pt-12 pb-8 px-4">
       <div className="max-w-6xl mx-auto">
@@ -105,6 +120,37 @@ export function Footer({ socialLinks = [], footerColumns = [], logoUrl, logoAlt 
           ))}
 
         </div>
+
+        {/* Legitimacy strip — policy links, human contact, quiet brands row.
+            Wary first-timers (and ad-network reviewers) read the footer
+            before trusting the card form (design-doctrine §6). */}
+        <div className="border-t border-white/10 pt-6 pb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs text-white/50">
+          <ul className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {POLICY_LINKS.map(link => (
+              <li key={link.to}>
+                <Link to={link.to} className="hover:text-white transition-colors">
+                  {link.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <a href="mailto:hello@xdipx.com" className="hover:text-white transition-colors">
+            Reach a human at hello@xdipx.com
+          </a>
+        </div>
+
+        {/* Quiet brands-we-carry row — real vendor names only, omitted below
+            a meaningful count rather than padded with placeholders. */}
+        {brands.length >= 5 && (
+          <p className="pb-6 text-xs text-white/30 leading-relaxed">
+            Brands we carry: {brands.join(', ')}
+          </p>
+        )}
+
+        {/* TODO(homepage-team): payment marks (Segpay/Verotel-supported card
+            networks) — no mark assets exist in the repo yet. Owner to supply
+            greyscale SVG/PNG assets, then render them here (never fabricate
+            a payment network logo). */}
 
         {/* Divider */}
         <div className="border-t border-white/10 pt-6">

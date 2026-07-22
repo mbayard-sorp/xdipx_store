@@ -14,12 +14,13 @@
 import { getDiscoveryIndex, getDiscoveryRails } from '~/lib/discovery.server'
 import { buildHomeContentBlocks, type HomeContentBlocks } from '~/lib/homepage-payload.server'
 import { getSensationMapData, type SensationMapData } from '~/lib/sensation-map.server'
-import { getEmmaHeroSettings, getBlogPosts } from '~/lib/sanity.server'
+import { getEmmaHeroSettings, getEditor, getBlogPosts } from '~/lib/sanity.server'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { EMPTY_STATE, type DiscoveryProduct, type Rail } from '~/types/discovery'
 import type { EmmaHeroSettings, BlogPostCard } from '~/types/cms'
 
 const EMMA_HERO_TIMEOUT_MS = 4000
+const EDITOR_PHOTO_TIMEOUT_MS = 4000
 
 export interface StorefrontData {
   variant: 'b'
@@ -40,6 +41,16 @@ export interface StorefrontData {
    * rotating out from under the hero copy. Unset = rotating behavior.
    */
   emmaHero: EmmaHeroSettings | null
+  /**
+   * The canonical, full-size `singleton.editor.photo` (photorealistic Emma
+   * portrait), for the Meet Emma section (Nº 04). `getEditor()`'s projection
+   * is un-cropped/un-capped (unlike `emmaPersona.avatarUrl`, which is capped
+   * at w=192 — too small for the 420px 4/5 slot). Bounded by its own short
+   * timeout and degrades to null (MeetEmma falls back to `/emma.webp`) so a
+   * slow/cold Sanity leg can never sink the render.
+   */
+  emmaPhotoUrl: string | null
+  emmaPhotoAlt: string | null
   /**
    * Team-managed Sanity homepage blocks (DEFERRED — never blocks the shell's
    * TTFB). The autonomous merchandising team writes `singleton.homepage`; the
@@ -83,9 +94,10 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
   // home page doesn't always lead with the same products (time bucket, not a
   // per-visitor cookie).
   const railSeed = Math.floor(Date.now() / 60_000)
-  const [railsResult, emmaHero, notebook] = await Promise.all([
+  const [railsResult, emmaHero, editor, notebook] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, 'getEmmaHeroSettings(storefront)'),
+    withTimeout(getEditor(), EDITOR_PHOTO_TIMEOUT_MS, null, 'getEditor(storefront)'),
     getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [] as BlogPostCard[], total: 0 })),
   ])
 
@@ -129,6 +141,8 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
     variant: 'b',
     rails,
     emmaHero,
+    emmaPhotoUrl: editor?.photoUrl ?? null,
+    emmaPhotoAlt: editor?.photoAlt ?? null,
     featured,
     total: railsResult.total,
     contentBlocks: buildHomeContentBlocks(), // deferred — team-managed Sanity surface
