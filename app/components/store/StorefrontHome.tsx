@@ -427,16 +427,23 @@ function ProductGrid({
    headline is set as an oversized pull-quote — typographic art, not caption
    text — with a large coral opening ♥ as a display mark. */
 
-function MeetEmma() {
+function MeetEmma({ photoUrl, photoAlt }: { photoUrl?: string | null; photoAlt?: string | null } = {}) {
   const seenRef = useSectionSeen('meet-emma')
+  // Canonical photorealistic portrait from Sanity (`singleton.editor.photo`),
+  // the same asset `/about` uses. `/emma.webp` (the Compass-era illustration)
+  // stays only as the Sanity-outage/cold-leg fallback. OptimizedImage handles
+  // the Sanity CDN srcset when src is a Sanity URL and a plain <img> for the
+  // bundled fallback.
+  const src = photoUrl || '/emma.webp'
+  const alt = photoAlt || 'Emma, the editorial AI guide for xdipx'
   return (
     <section id="meet-emma" ref={seenRef} className="bg-paper-2 py-16 md:py-20">
         <div className="mx-auto flex max-w-[1320px] flex-wrap items-center gap-10 px-6 md:gap-16 md:px-16">
           <Reveal variant="scale" className="min-w-[240px] max-w-[420px] flex-1">
             <div className="aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-lg)] bg-paper-3 ring-[6px] ring-sage/15">
               <OptimizedImage
-                src="/emma.webp"
-                alt="Emma, the editorial AI guide for xdipx"
+                src={src}
+                alt={alt}
                 widths={[420, 840]}
                 fallbackWidth={840}
                 sizes="(max-width: 768px) 100vw, 420px"
@@ -964,7 +971,7 @@ function FAQ() {
    Order is the stable shell. The deferred Sanity blocks (the team's
    notebook/promo/editorial surface) stream in between Couples and FAQ. */
 
-export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, notebookPosts, sensationMap }: StorefrontData) {
+export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap }: StorefrontData) {
   // Segment variant-b sessions in GA4 (flip keep/rollback analysis). Fires once
   // per page view; the localStorage flag distinguishes first-time visitors.
   useEffect(() => {
@@ -1057,7 +1064,7 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, noteb
         </Await>
       </Suspense>
 
-      <MeetEmma />
+      <MeetEmma photoUrl={emmaPhotoUrl} photoAlt={emmaPhotoAlt} />
 
       {/* Find your way in — the team's `wayfinderMosaic` block when published,
           otherwise the hardcoded fallback (unset block, pending promise, AND
