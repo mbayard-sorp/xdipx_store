@@ -64,6 +64,10 @@ import mfgProductSpecs    from '../schemas/mfgProductSpecs.js'
 // Discovery home page rebuild — variant toggle + Emma copy overrides (additive).
 import homeConfig          from '../schemas/homeConfig.js'
 
+// Homepage SERP snippet — team-editable title/description "update strategy"
+// (additive; falls back to app/lib/brand.ts defaults when blank). Singleton.
+import homeSeo             from '../schemas/homeSeo.js'
+
 // Notebook redesign — index settings, category/post extras, and series docs
 // (additive; blogPost/blogCategory/blogAuthor/blogHomepage untouched).
 import notebookSettings    from '../schemas/notebookSettings.js'
@@ -174,6 +178,8 @@ export const schemaTypes = [
   richText,
   // Discovery home page rebuild — variant toggle + Emma copy overrides. Singleton.
   homeConfig,
+  // Homepage SERP snippet — team-editable title/description. Singleton.
+  homeSeo,
   // Phase 6c — Knowledge-base doc types (additive; existing schemas untouched)
   kbShippingPolicy,
   kbReturnsPolicy,

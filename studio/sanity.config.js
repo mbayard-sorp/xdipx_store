@@ -40,6 +40,11 @@ export default defineConfig({
               .icon(() => '🧭')
               .child(S.document().schemaType('homeConfig').documentId('singleton.homeConfig')),
             S.listItem()
+              .title('Home SEO (search snippet)')
+              .id('homeSeo')
+              .icon(() => '🔍')
+              .child(S.document().schemaType('homeSeo').documentId('singleton.homeSeo')),
+            S.listItem()
               .title('Sensation dial labels')
               .id('dialRegistry')
               .icon(() => '🎚️')

@@ -112,7 +112,7 @@ export function Footer({ socialLinks = [], footerColumns = [], logoUrl, logoAlt 
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-white/40">
             <p>© {currentYear} {copyright || 'XD Inc. All rights reserved.'}</p>
             <p className="text-center sm:text-right max-w-sm leading-relaxed">
-              {disclaimer || 'xdipx.com is an adult-oriented site. You must be 18 or older to purchase. All products ship discreetly. We do not sell to minors.'}
+              {disclaimer || 'Age restricted. You must be 18 or older to purchase. All orders ship discreetly, and we do not sell to minors.'}
             </p>
           </div>
         </div>

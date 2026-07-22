@@ -2,7 +2,7 @@ import { createClient } from '@sanity/client'
 import type { SanityImageAssetDocument } from '@sanity/client'
 import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
-import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, BlogSeries, BlogCategoryExtras, NotebookSettings, GlossaryTerm, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig } from '~/types/cms'
+import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, BlogSeries, BlogCategoryExtras, NotebookSettings, GlossaryTerm, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig, HomeSeo } from '~/types/cms'
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
@@ -2076,6 +2076,42 @@ export async function getHomeConfig(): Promise<HomeConfig | null> {
       }
     } catch (err) {
       console.error('[sanity] getHomeConfig error:', err)
+      return null
+    }
+  })
+}
+
+// ─── Home SEO (SERP snippet) ─────────────────────────────────────────────────
+// Singleton: singleton.homeSeo — team-editable homepage title + meta
+// description. 5-minute TTL so a rotation propagates without a redeploy.
+// Blank fields fall back to the brand defaults at the meta-export layer.
+
+const HOME_SEO_GROQ = `
+  *[_id == "singleton.homeSeo"][0]{
+    seoTitle,
+    seoDescription,
+    ogImageUrl
+  }
+`
+
+export async function getHomeSeo(): Promise<HomeSeo | null> {
+  if (!projectId) return null
+  return cached('sanity:home-seo', 300, async () => {
+    try {
+      const client = getClient()
+      if (!client) return null
+      const raw = await client.fetch<Partial<HomeSeo> | null>(HOME_SEO_GROQ)
+      if (!raw) return null
+      const title = raw.seoTitle?.trim()
+      const description = raw.seoDescription?.trim()
+      const ogImageUrl = raw.ogImageUrl?.trim()
+      return {
+        ...(title ? { seoTitle: title } : {}),
+        ...(description ? { seoDescription: description } : {}),
+        ...(ogImageUrl ? { ogImageUrl } : {}),
+      }
+    } catch (err) {
+      console.error('[sanity] getHomeSeo error:', err)
       return null
     }
   })
