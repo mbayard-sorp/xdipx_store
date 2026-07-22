@@ -158,3 +158,59 @@ This is the operational spec for the elevation plan's fal.ai Kontext pipeline (r
 5. Housekeeping: `/about` already uses `getEditor().photoUrl` correctly; `EmmaHeroIntro.tsx:40` and `EmmaSidekick.tsx:39` fall back to the illustration only on persona-fetch failure (acceptable, but they inherit the art on cold KV, the known KV-cold-start issue); `public/emma.png` is dead weight, delete in the same PR.
 
 **Verification:** `qa-reviewer` confirms the photorealistic portrait renders at 375px, the hero LCP remains unwrapped, and zero CLS holds.
+---
+
+## Delta — 2026-07-22 (Routine B design cycle, run #76)
+
+**Sourcing honesty (mandatory).** One live capture this run: `https://xdipx.com/`
+(our own homepage, WebFetch 200 OK). One reference-bench fetch attempted,
+`maude.com` (doctrine §7 bench, our closest register match): the origin returned
+**403 Forbidden** to the automated fetch (a site-level bot block, not our egress
+policy. Agent-proxy `recentRelayFailures: []` confirms no `connect_rejected`, so
+egress is open. many DTC commerce origins simply refuse non-browser user-agents).
+No competitor homepage was re-captured this run. Everything below about
+competitors is **prior knowledge from the July 21 base teardown above**, tagged
+as such. no competitor copy is quoted from memory, and no new site was reviewed.
+Because today is Wednesday, the mission-brief §4 Monday five-site recon is not due;
+this is Routine B's own step 0.5 lightweight delta.
+
+**Live self-capture — what our own homepage shows today (verified this run):**
+- Hero renders a real product (Intense Wand Vibrator) with copy "Slow nights in.
+  Go slow, let the rumble carry you to release." Hero is product-forward and 200 OK.
+  This confirms **backlog item 1 (hero deep-link CTA) is shipped**: the
+  `primaryCtaLink`/`primaryCtaLabel` fields are present in `app/types/cms.ts`,
+  projected by `getEmmaHeroSettings()` in `app/lib/sanity.server.ts`, and read by
+  `StorefrontHome`. Pointing the CTA at the featured product's PDP is a Routine A
+  content action, not a Routine B code change. No shell work owed here.
+- **The Meet Emma section (Nº 04) renders the ILLUSTRATION, not the photorealistic
+  portrait** — the exact bug the base teardown root-caused ("Emma section fix"
+  above). Confirmed live, not just in code. This promotes that fix from "documented"
+  to "verified-live-broken," and it is this cycle's shell PR.
+
+**Decision this delta forces (recon that changes nothing is a wasted step):**
+1. **Ship the Emma-image fix now.** The base teardown specified the exact fix; the
+   live capture confirms it is still broken in production. This cycle builds it
+   (see run #76 PR). Highest cohesion-per-line-of-diff item on the board.
+2. **Correct the base teardown's "near-zero build" claim on the brand eyebrow
+   (backlog #6).** Investigated this run: the homepage cards render
+   `DiscoveryProduct` (the lean discovery-index shape in `app/types/discovery.ts`),
+   which **carries no `brand` field**. `p.brand` exists on the heavier `Product`
+   shape, not on what `StorefrontProductCard` consumes. So the eyebrow is not a
+   near-zero card-render tweak. it first needs `brand` added to the discovery-index
+   projection + an index rebuild/backfill. Re-scoped as a two-step item (index
+   schema first, then card render) and **deferred out of this cycle** to keep the
+   PR clean and testable. Filed as a process note for the backlog.
+
+**Adopted this cycle:** the Emma-fix (P0 #2). **Rejected/deferred this cycle (logged
+so ambition compounds):** brand eyebrow (#6, blocked on discovery-index `brand`
+field, re-scoped above); imagery wave 1 (#3) and hero art-directed frame (#4),
+both gated on `media-manager` fal.ai generation whose spend/quality risk is not
+worth taking in the same PR as a like-for-like image-source swap. they want their
+own asset-generation cycle. The ambition-mandate concept carried this cycle is a
+**design doc + wire only** (see `docs/homepage-team/concepts/`), shipping-disciplined
+per mission brief §9.
+
+**IA fence respected:** no new section type, no new route, no `/discover` link added,
+no Sanity schema modified. The Emma fix is a content-source swap inside the locked
+Nº01–Nº11 shell; the ambition concept stays a proposal pending IA review + additive
+schema before any build.
