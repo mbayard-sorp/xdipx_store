@@ -91,11 +91,36 @@ export interface StorefrontData {
  * short timeout and degrades to null (Hero falls back to discovery-derived
  * copy) so a slow/cold Sanity leg can never sink the render.
  */
+/**
+ * Time-bucket used to reshuffle the empty-state rails on each edge-cache
+ * revalidation, so the home page doesn't always lead with the same products.
+ * A time bucket, not a per-visitor cookie, since this feeds a shared cached
+ * render. The bucket width must match the edge cache window (see
+ * `STOREFRONT_EDGE_CACHE_HEADERS` below) — 300s, widened from 60s in the
+ * homepage performance plan's PR-4 so the shuffle cadence stays aligned with
+ * how often anonymous visitors actually get a fresh SSR render.
+ */
+export function railSeedBucket(now = Date.now()): number {
+  return Math.floor(now / 300_000)
+}
+
+/**
+ * Edge-cache headers for the storefront (variant b) anonymous, non-degraded
+ * render. Widened from 60s to 300s (homepage performance plan, PR-4): lab
+ * metrics are unaffected, but field visitors were hitting an edge cache MISS
+ * on effectively every request at 60s and paying full SSR TTFB. The tradeoff
+ * is merch edits and inventory sellouts now take up to 5 minutes to reach
+ * anonymous visitors. Admins keep `ADMIN_BYPASS_HEADERS` (always fresh) and a
+ * degraded/cold-KV render keeps `DEGRADED_NO_STORE_HEADERS` (never cached),
+ * both defined in the route file — unaffected by this change.
+ */
+export const STOREFRONT_EDGE_CACHE_HEADERS = {
+  'Cache-Control': 'public, max-age=0, s-maxage=300, stale-while-revalidate=600',
+  'Vercel-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=900',
+} as const
+
 export async function assembleStorefrontHome(): Promise<StorefrontData> {
-  // Reshuffle the empty-state rails on each 60s edge-cache revalidation so the
-  // home page doesn't always lead with the same products (time bucket, not a
-  // per-visitor cookie).
-  const railSeed = Math.floor(Date.now() / 60_000)
+  const railSeed = railSeedBucket()
   const [railsResult, emmaHero, notebook, editor] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, 'getEmmaHeroSettings(storefront)'),
