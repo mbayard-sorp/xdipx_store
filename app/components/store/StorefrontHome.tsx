@@ -46,7 +46,7 @@ import {
 import type { StorefrontData } from '~/lib/storefront-home.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
 import type { EmmaHeroSettings, WayfinderMosaicBlock, PlayTogetherBannerBlock, EmmaCuratedRailBlock } from '~/types/cms'
-import type { Product } from '~/types'
+import type { LeanCardProduct } from '~/types'
 
 /* Team-controlled Sanity block types the storefront renders (everything else
    in `singleton.homepage` is shell-owned or legacy and intentionally ignored). */
@@ -306,7 +306,7 @@ function EmphasizedHeading({ text }: { text: string }) {
 
 /** Adapt a full Shopify product (team-rail fetch) to the lean grid-card shape.
     Only the fields StorefrontProductCard reads matter; the rest are inert. */
-function shopifyToDiscovery(p: Product): DiscoveryProduct {
+function shopifyToDiscovery(p: LeanCardProduct): DiscoveryProduct {
   return {
     id: p.id,
     handle: p.handle,
@@ -335,7 +335,7 @@ function shopifyToDiscovery(p: Product): DiscoveryProduct {
 /** Wrap a team `emmaCuratedRail` block's fetched products in the Rail shape
     the Nº 03 grid renders, so the day's slate gets grid density instead of a
     horizontal scroller. */
-function teamRailToGridRail(products: Product[]): Rail {
+function teamRailToGridRail(products: LeanCardProduct[]): Rail {
   return {
     category: 'Pleasure',
     score: 0,

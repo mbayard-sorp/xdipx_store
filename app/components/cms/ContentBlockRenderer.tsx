@@ -1,5 +1,5 @@
 import type { ContentBlock } from '~/types/cms'
-import type { Product } from '~/types'
+import type { Product, LeanCardProduct } from '~/types'
 import { Reveal } from '~/components/motion/Reveal'
 import type { RevealVariant } from '~/components/motion/variants'
 import { AnnouncementBar }    from './AnnouncementBar'
@@ -19,7 +19,7 @@ import { NotebookRail }       from '~/components/blog/NotebookRail'
 
 interface ContentBlockRendererProps {
   block: ContentBlock
-  carouselProductMap: Record<string, Product[]>
+  carouselProductMap: Record<string, LeanCardProduct[]>
   bonusDealProduct?: Product | null
 }
 
@@ -36,7 +36,7 @@ const FADE_BLOCKS: ReadonlySet<ContentBlock['_type']> = new Set([
 
 function renderBlock(
   block: ContentBlock,
-  carouselProductMap: Record<string, Product[]>,
+  carouselProductMap: Record<string, LeanCardProduct[]>,
   bonusDealProduct?: Product | null,
 ) {
   switch (block._type) {

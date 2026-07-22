@@ -3,11 +3,11 @@
 // (defensive — admin can add/remove handles between generation and publish).
 import { ProductCarousel } from './ProductCarousel'
 import type { EmmaCuratedRailBlock } from '~/types/cms'
-import type { Product } from '~/types'
+import type { LeanCardProduct } from '~/types'
 
 interface EmmaCuratedRailProps {
   block: EmmaCuratedRailBlock
-  products: Product[]
+  products: LeanCardProduct[]
 }
 
 export function EmmaCuratedRail({ block, products }: EmmaCuratedRailProps) {
