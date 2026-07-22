@@ -314,7 +314,7 @@ export function createCronRoutes() {
   /**
    * GET|POST /cron/gsc-index-sweep
    * Schedule: every 3 hours at :15 — rotate through the sitemap with the
-   * URL Inspection API (225 URLs/run, 8 runs/day, KV-capped at 1,900/day
+   * URL Inspection API (200 URLs/run, 8 runs/day, KV-capped at 1,900/day
    * against the 2,000/day property quota) and upsert per-URL index state
    * plus the gsc_index_daily aggregate. ?budget=N overrides the run budget.
    * No-ops with a logged skip until the GSC service-account env vars are set.
