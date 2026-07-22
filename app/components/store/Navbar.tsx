@@ -147,6 +147,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
                 alt={logoAlt}
                 width={140}
                 height={32}
+                fetchPriority="low"
                 className="h-8 w-auto max-w-[140px] object-contain"
               />
             ) : (
@@ -349,7 +350,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
             {/* Drawer header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-cream-2">
               {logoUrl ? (
-                <img src={logoUrl} alt={logoAlt} className="h-7 w-auto object-contain" />
+                <img src={logoUrl} alt={logoAlt} fetchPriority="low" className="h-7 w-auto object-contain" />
               ) : (
                 <span
                   className="text-xl font-black"

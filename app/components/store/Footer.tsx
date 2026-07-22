@@ -32,6 +32,7 @@ export function Footer({ socialLinks = [], footerColumns = [], logoUrl, logoAlt 
                   alt={logoAlt}
                   width={160}
                   height={36}
+                  fetchPriority="low"
                   className="h-9 w-auto max-w-[160px] object-contain brightness-0 invert"
                 />
               ) : (
