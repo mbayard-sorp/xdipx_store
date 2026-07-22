@@ -12,7 +12,6 @@ import {
 } from 'react-router'
 import type { LoaderFunctionArgs, LinksFunction } from 'react-router'
 
-import * as Sentry from '@sentry/react'
 import { BotIdClient } from 'botid/client'
 import stylesheet from './app.css?url'
 // Same physical files app.css's @fontsource @font-face rules reference — Vite
@@ -40,17 +39,32 @@ function BotIdMount() {
   return <BotIdClient protect={BOTID_PROTECTED_ROUTES} />
 }
 
-// Initialize Sentry after hydration rather than at module-eval time. Running
-// Sentry.init() synchronously while the client bundle evaluates competes with
-// React hydration for the main thread and hurts INP; deferring to a mount
-// effect keeps the critical path clear. window.ENV is set by the inline script
-// in <App>, which has run by the time this effect fires.
+// Initialize Sentry after hydration rather than at module-eval time, and load
+// the SDK itself via a dynamic import rather than a static one. A static
+// `import * as Sentry from '@sentry/react'` pulls the ~30KB gz Sentry chunk
+// into the root module's modulepreload list, where it competes with the LCP
+// hero image for bandwidth (this was ~66% of mobile LCP resource-load-delay).
+// The dynamic import removes the chunk from that graph entirely; idle
+// scheduling then keeps the fetch off the hydration-critical path too.
+// window.ENV is set by the inline script in <App>, which has run by the time
+// this effect fires.
 function SentryInit() {
   useEffect(() => {
     const dsn = (window as unknown as { ENV?: { SENTRY_DSN?: string } }).ENV?.SENTRY_DSN
-    if (dsn && !(window as unknown as { __sentryInit?: boolean }).__sentryInit) {
-      Sentry.init({ dsn, environment: import.meta.env.MODE, tracesSampleRate: 0.1 })
-      ;(window as unknown as { __sentryInit: boolean }).__sentryInit = true
+    if (!dsn || (window as unknown as { __sentryInit?: boolean }).__sentryInit) return
+    // Set the guard before the dynamic import resolves so a StrictMode
+    // double-mount can't race two Sentry.init() calls.
+    ;(window as unknown as { __sentryInit: boolean }).__sentryInit = true
+    const run = () => {
+      import('@sentry/react').then((Sentry) => {
+        Sentry.init({ dsn, environment: import.meta.env.MODE, tracesSampleRate: 0.1 })
+      })
+    }
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
+    if (ric) {
+      ric(run)
+    } else {
+      setTimeout(run, 2000)
     }
   }, [])
   return null
