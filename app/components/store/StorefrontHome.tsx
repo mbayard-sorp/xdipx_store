@@ -162,7 +162,7 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
               className="text-[2.7rem] leading-[1.04] tracking-[-0.015em] text-ink md:text-[4.4rem]"
               style={{ fontFamily: 'var(--font-display)', fontWeight: 450 }}
             >
-              {emmaHero.headline}
+              <EmphasizedHeading text={emmaHero.headline} />
             </h1>
           ) : (
             <h1
@@ -269,10 +269,10 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
       <Reveal variant="fade" as="div" className="border-t border-line">
         <div className="mx-auto grid max-w-[1320px] grid-cols-2 gap-x-6 gap-y-3.5 px-6 py-[18px] md:flex md:flex-nowrap md:items-center md:justify-between md:gap-x-8 md:px-16">
           {[
-            'Ships in plain packaging',
-            'Billed as XDIPX',
-            '30-day returns',
-            'Hand-checked, not auto-listed',
+            'Plain box. No logo, no guessing.',
+            'Return address just says XD Inc.',
+            'Your statement reads XDIPX.',
+            "Something's off, we make it right.",
           ].map(item => (
             <div key={item} className="flex items-center gap-2.5 text-[13.5px] text-ink-3" style={BODY}>
               <span className="text-sage" aria-hidden="true">♥</span> {item}
@@ -322,13 +322,14 @@ function shopifyToDiscovery(p: Product): DiscoveryProduct {
     imageUrl: p.images[0]?.url ?? null,
     imageAlt: p.images[0]?.altText ?? null,
     category: 'Pleasure',
-    subcategory: p.brand ?? '',
+    subcategory: p.category ?? '',
     mood: [],
     audience: [],
     matters: [],
     totalInventory: null,
     productType: null,
     productTypeDial: null,
+    brand: p.brand ?? null,
   }
 }
 
@@ -427,16 +428,20 @@ function ProductGrid({
    headline is set as an oversized pull-quote — typographic art, not caption
    text — with a large coral opening ♥ as a display mark. */
 
-function MeetEmma() {
+function MeetEmma({ photoUrl, photoAlt }: { photoUrl?: string | null; photoAlt?: string | null }) {
   const seenRef = useSectionSeen('meet-emma')
+  // Canonical photorealistic `singleton.editor.photo` when Sanity has it;
+  // `/emma.webp` (the illustrated art) is only the outage/unset fallback.
+  const src = photoUrl || '/emma.webp'
+  const alt = photoAlt || 'Emma, the editorial AI guide for xdipx'
   return (
     <section id="meet-emma" ref={seenRef} className="bg-paper-2 py-16 md:py-20">
         <div className="mx-auto flex max-w-[1320px] flex-wrap items-center gap-10 px-6 md:gap-16 md:px-16">
           <Reveal variant="scale" className="min-w-[240px] max-w-[420px] flex-1">
             <div className="aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-lg)] bg-paper-3 ring-[6px] ring-sage/15">
               <OptimizedImage
-                src="/emma.webp"
-                alt="Emma, the editorial AI guide for xdipx"
+                src={src}
+                alt={alt}
                 widths={[420, 840]}
                 fallbackWidth={840}
                 sizes="(max-width: 768px) 100vw, 420px"
@@ -592,40 +597,70 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
             })}
           </div>
 
-          {/* Discover You — larger plum-soft tile (or promo.image when set) */}
-          <Reveal variant="scale">
-            <Link
-              to={promoCtaLink}
-              onClick={() => trackCtaClick('find-your-fit', 'mosaic-promo')}
-              className="relative flex flex-wrap items-center justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
-            >
-              {promo?.image?.url && (
-                <OptimizedImage
-                  src={promo.image.url}
-                  alt={promo.image.alt ?? promoHeading}
-                  sizes="100vw"
-                  className="absolute inset-0 h-full w-full object-cover"
-                />
-              )}
-              <div className="relative z-[1] flex-1 basis-[320px]">
-                <p className="mb-3.5 text-[11px] uppercase tracking-[0.18em] text-plum" style={MONO}>
-                  {promoEyebrow}
-                </p>
-                <h3 className="mb-3 text-[1.7rem] leading-[1.1] text-ink md:text-[2.5rem]" style={DISPLAY}>
-                  {promoHeadingParts[0]}<em className="em">{promoEmphasis}</em>{promoHeadingParts[1]}
-                </h3>
-                <p className="max-w-[46ch] text-[16px] leading-relaxed text-ink-3" style={BODY}>
-                  {promoBody}
-                </p>
-              </div>
-              <span
-                className="relative z-[1] whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white"
-                style={BODY}
-              >
-                {promoCtaLabel}
-              </span>
-            </Link>
-          </Reveal>
+          {/* Discover You — larger plum-soft tile (or promo.image when set).
+              With an image, the copy needs the standard PhotoBand ink-scrim
+              idiom underneath it (design-doctrine §3/§6 editorial band =
+              tint or photo + ink scrim + label) — a bare photo behind dark
+              plum/ink text fails the contrast floor. */}
+          {(() => {
+            const promoHasImage = !!promo?.image?.url
+            return (
+              <Reveal variant="scale">
+                <Link
+                  to={promoCtaLink}
+                  onClick={() => trackCtaClick('find-your-fit', 'mosaic-promo')}
+                  className={`relative flex flex-wrap justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11 ${
+                    // With a photo, the copy anchors to the bottom where the
+                    // scrim is strongest (matches PhotoBand's items-end
+                    // idiom); the flat plum-soft ground can stay centered.
+                    promoHasImage ? 'items-end' : 'items-center'
+                  }`}
+                >
+                  {promoHasImage && (
+                    <>
+                      <OptimizedImage
+                        src={promo!.image!.url!}
+                        alt={promo!.image!.alt ?? promoHeading}
+                        sizes="100vw"
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                      <div
+                        className="absolute inset-0"
+                        style={{ background: 'linear-gradient(to top, rgba(26,20,24,0.72), rgba(26,20,24,0.05) 55%)' }}
+                        aria-hidden="true"
+                      />
+                    </>
+                  )}
+                  <div className="relative z-[1] flex-1 basis-[320px]">
+                    <p
+                      className="mb-3.5 text-[11px] uppercase tracking-[0.18em]"
+                      style={{ ...MONO, color: promoHasImage ? 'white' : 'var(--color-plum)' }}
+                    >
+                      {promoEyebrow}
+                    </p>
+                    <h3
+                      className="mb-3 text-[1.7rem] leading-[1.1] md:text-[2.5rem]"
+                      style={{ ...DISPLAY, color: promoHasImage ? 'white' : 'var(--color-ink)' }}
+                    >
+                      {promoHeadingParts[0]}<em className="em">{promoEmphasis}</em>{promoHeadingParts[1]}
+                    </h3>
+                    <p
+                      className="max-w-[46ch] text-[16px] leading-relaxed"
+                      style={{ ...BODY, color: promoHasImage ? 'rgba(255,255,255,0.85)' : 'var(--color-ink-3)' }}
+                    >
+                      {promoBody}
+                    </p>
+                  </div>
+                  <span
+                    className="relative z-[1] whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white"
+                    style={BODY}
+                  >
+                    {promoCtaLabel}
+                  </span>
+                </Link>
+              </Reveal>
+            )
+          })()}
         </div>
     </section>
   )
@@ -780,8 +815,16 @@ function PhotoBand({
               sizes="100vw"
               className="absolute inset-0 h-full w-full object-cover"
             />
+            {/* Mobile scrim runs deeper/higher so the kicker + heading clear the
+                contrast floor over bright sheets at 375px (design-critic
+                finding); desktop keeps the original lighter idiom unchanged. */}
             <div
-              className="absolute inset-0"
+              className="absolute inset-0 md:hidden"
+              style={{ background: 'linear-gradient(to top, rgba(26,20,24,0.8), rgba(26,20,24,0.4) 42%, rgba(26,20,24,0.05) 78%)' }}
+              aria-hidden="true"
+            />
+            <div
+              className="absolute inset-0 hidden md:block"
               style={{ background: 'linear-gradient(to top, rgba(26,20,24,0.72), rgba(26,20,24,0.05) 55%)' }}
               aria-hidden="true"
             />
@@ -859,7 +902,9 @@ function StillDecidingBand() {
   return (
     <section id="discover" className="bg-ink text-paper">
         <Reveal variant="up" className="mx-auto max-w-[1320px] px-6 py-20 text-center md:px-16 md:py-32">
-          <p className="mb-6 text-[11px] uppercase tracking-[0.18em] text-coral" style={MONO}>
+          {/* Kicker demoted off coral so the primary CTA stays the single coral
+              pull per viewport (design-doctrine §3 coral budget). */}
+          <p className="mb-6 text-[11px] uppercase tracking-[0.18em] text-sage" style={MONO}>
             Still deciding?
           </p>
           <h2
@@ -867,10 +912,13 @@ function StillDecidingBand() {
             style={DISPLAY}
           >
             Tell me what you're into, or what you're{' '}
-            <em className="not-italic" style={{ fontStyle: 'italic', color: 'var(--color-coral-2)' }}>
-              curious
-            </em>{' '}
-            about. Same thing.
+            {/* Not the flat `.em` class here: its hardcoded plum is 2.48:1 on
+                this ink ground, under the doctrine's 3:1 large-text floor.
+                coral-2 (secondary/hover coral, 7.07:1 on ink) keeps the band
+                at 2 coral elements total (this + the CTA) — the doctrine's
+                stated ceiling for a full-bleed band, not a third coral pull. */}
+            <em style={{ fontStyle: 'italic', color: 'var(--color-coral-2)' }}>curious</em> about.
+            Same thing.
           </h2>
           <Link
             to="/discover"
@@ -964,7 +1012,7 @@ function FAQ() {
    Order is the stable shell. The deferred Sanity blocks (the team's
    notebook/promo/editorial surface) stream in between Couples and FAQ. */
 
-export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, notebookPosts, sensationMap }: StorefrontData) {
+export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap }: StorefrontData) {
   // Segment variant-b sessions in GA4 (flip keep/rollback analysis). Fires once
   // per page view; the localStorage flag distinguishes first-time visitors.
   useEffect(() => {
@@ -1057,7 +1105,7 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, noteb
         </Await>
       </Suspense>
 
-      <MeetEmma />
+      <MeetEmma photoUrl={emmaPhotoUrl} photoAlt={emmaPhotoAlt} />
 
       {/* Find your way in — the team's `wayfinderMosaic` block when published,
           otherwise the hardcoded fallback (unset block, pending promise, AND
