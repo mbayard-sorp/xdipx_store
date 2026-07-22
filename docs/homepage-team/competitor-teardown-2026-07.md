@@ -1,5 +1,10 @@
 # Competitor Teardown — July 2026 (design-elevation p3-teardown)
 
+> **SUPERSEDED (2026-07-21).** The live re-run this doc's §0 called for has
+> happened: `competitor-teardown-2026-07-live.md` is now the current decision
+> doc for Routine B step 0.5, built from real captures. This file stays as the
+> historical record of the blind pass; do not refresh or extend it.
+
 > Owner: `homepage-designer` (art director). Routine B design deliverable.
 > Binds to `docs/design-doctrine.md` (visual charter) and `docs/emma-voice.md`
 > (voice). Where this doc and the doctrine disagree on pixels, the doctrine wins.

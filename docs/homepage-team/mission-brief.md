@@ -50,6 +50,13 @@ shipped tea cups, ceramic bowls, and notebooks as tile art. No one comes to
 a sex toy store to shop for tableware. Standing rules (Mike's directive,
 2026-07-05):
 
+**Archetypes are binding (2026-07-21).** Every generated image declares one of
+the four doctrine archetypes — A hand-on-product, B color-block still, C
+in-situ bright scene, D metaphor macro — and starts from that surface's
+scaffold in `docs/homepage-team/image-prompt-library.md`. Canonical rules:
+`docs/design-doctrine.md` §4, including the coral-soft/plum-soft/paper
+ground lock. The rules below stand; the doctrine wins where they drift.
+
 - **Every merchandising image shows what we sell.** Either the actual
   product (its real Shopify photo submitted to fal as a Kontext reference
   image via `--ref-image` on `scripts/gen-homepage-image.ts`), or a sensual
@@ -58,8 +65,9 @@ a sex toy store to shop for tableware. Standing rules (Mike's directive,
 - **Bright, colorful, bold** (Mike, 2026-07-05, second directive). No dark,
   moody, candlelit scenes — the first product-forward round shipped
   near-black images and those are retired too. Default to daylight or
-  high-key studio light, saturated color-block backdrops (coral, plum
-  tints), the product LARGE in frame and unapologetic. Fun and
+  high-key studio light, tinted color-block backdrops from the doctrine
+  ground lock (coral-soft, plum-soft, paper), the product LARGE in frame
+  and unapologetic. Fun and
   curiosity-inspiring, premium-DTC-launch energy, not boudoir gloom.
 - **Banned as the subject:** tea cups, mugs, ceramic bowls, notebooks,
   candles, fruit, napkins, empty styled tables — any still life a homewares
@@ -104,7 +112,12 @@ The homepage must be visibly different week over week. Sameness is a defect.
 
 ## 4. Competitor recon: weekly, and it must produce decisions
 
-Monday run, before theme setting:
+Monday run, before theme setting. **Baseline first (2026-07-21):** the standing
+reference is the live teardown at
+`docs/homepage-team/competitor-teardown-2026-07-live.md` (16 real captures,
+July 2026). Recon reports *deltas against it* — what changed on each site since
+the teardown — and appends a dated delta section to that doc rather than
+re-deriving the field from scratch.
 
 - WebFetch the homepages of Lovehoney, Spectrum Boutique, In The Groove, and
   Too Timid, plus one new competitor you have not reviewed before.

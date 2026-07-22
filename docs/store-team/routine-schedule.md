@@ -63,7 +63,9 @@ forward.
 
 Every prompt below follows the same shape: work in the xdipx_store repo; read the binding mission
 brief (`docs/store-team/mission-brief.md`, or `docs/homepage-team/mission-brief.md` for the
-homepage team) and `docs/emma-voice.md`; follow the named playbook exactly; start the run via
+homepage team) and `docs/emma-voice.md`; runs that produce or place imagery, graphics, or visual
+layout additionally read `docs/design-doctrine.md` (binding on pixels); follow the named playbook
+exactly; start the run via
 `POST https://xdipx.com/api/team/run` (header `x-team-secret: $TEAM_TOKEN`, falling back to
 `$HOMEPAGE_TEAM_TOKEN` / `$CRON_SECRET`); **gate first** via
 `GET https://xdipx.com/api/team/gate?team=<team>&excludeRun=<run id>` and on `ok:false` post a

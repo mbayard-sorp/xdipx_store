@@ -12,6 +12,11 @@ compound; this file is where they stop evaporating.
 - All scaffolds inherit `docs/design-doctrine.md` §4: real product via `--ref-image` (FLUX
   Kontext) wherever a product is featured or linked; bright/high-key light; v3 palette; nothing
   a premium lingerie campaign could not run.
+- **Declare the archetype first.** Every generation names one doctrine §4 archetype before
+  prompting — A hand-on-product, B color-block still, C in-situ bright scene, D metaphor
+  macro — and uses the scaffold tagged with it below. **Ground lock:** backdrops only from
+  coral-soft, plum-soft, and paper tints (doctrine §4; sage is an accent, never a ground); a
+  scaffold's color slots resolve within that set.
 - **Mandatory negative prompt on every generation:** `no text, no words, no letters, no
   watermark, no logo, no caption, no gradient backgrounds, no plastic or clinical look, no
   housewares still-life, no tableware, no candles, no dim or candlelit scene, no distorted
@@ -21,12 +26,12 @@ compound; this file is where they stop evaporating.
 
 ---
 
-## Hero (block image, 4:5 or wide per block)
+## Hero (block image, 4:5 or wide per block) — Archetype C (in-situ scene) or A (hand-on-product)
 
 Scaffold (always with `--ref-image` = the hero product's Shopify photo):
 
-> The {product} standing large and centered on a {coral | soft plum | saturated color-block}
-> seamless studio backdrop, bright high-key lighting, crisp single shadow, premium DTC launch
+> The {product} standing large and centered on a {coral-soft | plum-soft | paper} seamless
+> studio backdrop, bright high-key lighting, crisp single shadow, premium DTC launch
 > campaign photography, editorial and confident, product fills most of the frame, shallow
 > depth of field, shot on medium format
 
@@ -38,11 +43,11 @@ plinth with one ♥-shaped physical object nearby (small, never overlaid).
 **Rejects:** dim boudoir scenes (retired July 2026); product tiny in frame on an empty styled
 table (reads housewares).
 
-## Rail card / Emma's edit (1:1)
+## Rail card / Emma's edit (1:1) — Archetype B (color-block still)
 
 Scaffold (always with `--ref-image`):
 
-> The {product} bold and centered on a {plum-soft | coral-soft | white paper} seamless
+> The {product} bold and centered on a {plum-soft | coral-soft | paper} seamless
 > backdrop, bright studio light, crisp shadow, square crop, product large in frame, premium
 > sexual-wellness brand catalog photography, playful and confident
 
@@ -50,7 +55,7 @@ Scaffold (always with `--ref-image`):
 
 **Rejects:** multiple invented lookalike products in one frame; props larger than the product.
 
-## Wayfinder / editorial tile (1:1 or 4:5)
+## Wayfinder / editorial tile (1:1 or 4:5) — Archetype B (product tiles) or C (human-context tiles)
 
 Scaffold — product tiles use `--ref-image`; human-context tiles may use `--no-ref` with reason:
 
@@ -63,7 +68,7 @@ Scaffold — product tiles use `--ref-image`; human-context tiles may use `--no-
 **Rejects:** tea cups / mugs / bowls / notebooks / fruit / candles as the subject (the July
 2026 housewares failure class); empty styled surfaces with no product and no human presence.
 
-## Mood band / photo band (16:9 or wide)
+## Mood band / photo band (16:9 or wide) — Archetype C (in-situ bright scene)
 
 Scaffold (`--no-ref` allowed with reason "abstract mood band, no product target"):
 
@@ -78,12 +83,12 @@ Scaffold (`--no-ref` allowed with reason "abstract mood band, no product target"
 **Rejects:** candlelit gloom; clinical white-on-white; any scene a homewares brand could run
 unchanged.
 
-## Promo image (per promo block aspect)
+## Promo image (per promo block aspect) — Archetype B (color-block still)
 
 Scaffold (always with `--ref-image` when the promo targets a product or collection):
 
-> The {product} on a saturated {seasonal/theme color} seamless backdrop with {theme prop, small
-> and supporting}, bright pop-art studio light, bold and celebratory, product is the
+> The {product} on a {coral-soft | plum-soft | paper} seamless backdrop with {theme prop, small
+> and supporting, its color echoing the theme}, bright pop-art studio light, bold and celebratory, product is the
 > unmistakable star, premium campaign photography
 
 **Keepers:**
@@ -91,7 +96,23 @@ Scaffold (always with `--ref-image` when the promo targets a product or collecti
 **Rejects:** theme props replacing the product as subject; baked-in sale text (all copy lives
 in the markup).
 
-## Notebook — Daily post hero (`docs/notebook-team/image-brief.md` §0, ~1200×900)
+## PDP macro / in-hand scale (1:1 or 4:5) — Archetype A (hand-on-product)
+
+The TooTimid steal from the live teardown: a texture close-up, an in-hand scale shot, and a tip/
+detail frame per product. Scaffold (always with `--ref-image` = the product's Shopify photo):
+
+> {Extreme macro of the {product}'s surface texture filling the frame | one relaxed, undistorted
+> hand holding the {product} to show true size | close detail of the {product}'s tip and contour},
+> on a {coral-soft | plum-soft | paper} seamless ground, silk or linen surface beneath, bright
+> high-key daylight, crisp focus on the product, skin tones natural and warm, premium
+> sexual-wellness catalog photography, keep the product's shape, color, and finish exactly as the
+> reference image
+
+**Keepers:**
+
+**Rejects:** (hand-anatomy failures go here; the vision gate hard-checks hands per doctrine §4)
+
+## Notebook — Daily post hero — Archetype D (metaphor macro) or B (`docs/notebook-team/image-brief.md` §0, ~1200×900)
 
 Scaffold (always with `--ref-image` = the post's embedded product's real Shopify photo, fal Kontext,
 `imageSize: 'landscape_4_3'`):

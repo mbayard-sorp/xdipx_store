@@ -60,8 +60,9 @@ through every phase below so the dashboard shows the design cycle live.
 `homepage-designer` (with `design-critic` as sparring partner) WebFetches 2-3 references from the
 doctrine §7 bench plus any notable competitor launches, and writes a short "what they do better /
 what we do better" note as a run event, logging adopted AND rejected ideas so taste compounds. The
-current decision doc is `docs/homepage-team/competitor-teardown-2026-07.md`; refresh it (or append a
-dated section) rather than starting from scratch. Sourcing honesty is mandatory: only report what
+current decision doc is `docs/homepage-team/competitor-teardown-2026-07-live.md` (the July 2026
+live-capture teardown; it supersedes `competitor-teardown-2026-07.md`); append a dated delta
+section to it rather than starting from scratch. Sourcing honesty is mandatory: only report what
 was actually fetched, tag anything else as prior knowledge, and never quote competitor copy from
 memory. The teardown output must respect the IA fence: proposals stay inside the locked Nº01–Nº11
 shell, new section types need a named spec through IA review + additive Sanity schema before build,
@@ -136,12 +137,84 @@ The design cycle's allowance is `homepage_team_build_cents`, not the daily merch
 
 ## Prioritized backlog
 
+Items 2 onward index the live teardown's elevation plan; the full spec for each is that doc's
+"The plan" section (`competitor-teardown-2026-07-live.md`) — where this list and the teardown
+disagree, the teardown wins. **That tiebreaker never applies to the IA fence in §0.5 above**
+(locked Nº01–Nº11 shell, two-link `/discover` cap, retired-route denylist, additive-only Sanity):
+the fence governs regardless of what the teardown says or omits, since the teardown does not
+restate it. All copy quoted in the items below is illustrative only and must clear
+`emma-empathy-reviewer` before ship, like every other customer-facing string. Tags: `[shell-PR]`
+reviewed PR required; `[content-only]` team auto-publish authority; `[asset-generation]`
+media-manager pipeline. Work them in order.
+
 1. **Hero deep-link CTA: verify shipped, then use.** `primaryCtaLink` + `primaryCtaLabel` support
    on the storefront hero, so the hero CTA can deep-link to `/products/{handle}` (mission brief
    section 1). Implementation is landing in the same PR as this playbook edit, so the job here is
    to verify it is live in production, then have Routine A point the hero CTA at the featured
    product's page every run. If it turns out not to be live, finishing it is this routine's top
    item.
+
+**P0 (first-impression fixes)**
+
+2. **Meet Emma photo fix** — render `singleton.editor.photo` (photorealistic) through
+   `assembleStorefrontHome()`, `/emma.webp` becomes the outage fallback; delete `public/emma.png`;
+   set `photo.alt`. `[shell-PR]` `rr7-engineer` + `[content-only]` `sanity-content-builder`.
+3. **Imagery Wave 1: kill every placeholder** — ~20 gated images per the teardown shot list.
+   Generate-and-place only where a placement path exists today (`gen-homepage-image.ts` targets
+   `block|tile|promo`): wayfinder tiles (B), hero (C/A), photo-band block images (C). The 3 PDP
+   macro shots (A) and any surface without a live target are **pre-staged assets** (uploaded and
+   tagged, not placed) that go live with their owning shell PR (items 4 and 9) — a run must not
+   report them as visible surfaces. `[asset-generation]` `media-manager`.
+4. **Hero as an art-directed frame** — replace the coral-soft box around a bare packshot with an
+   Archetype C/A treatment of the pinned pick; LCP stays unwrapped, fixed 4/5.
+   `[asset-generation]` + `[shell-PR]` if frame markup changes.
+5. **Discretion rewrite + named guarantee** — dreaded-moments trust-strip copy; guarantee coined
+   as a proper noun with sage ♥ mark (trust strip + FAQ now, buy box in P1). **Owner approves the
+   name and terms before publish.** `[content-only]` `emma-copywriter`, gated by
+   `emma-empathy-reviewer`.
+6. **Brand eyebrow on cards** — render `p.brand` as mono ink-4 eyebrow on `StorefrontProductCard`
+   everywhere. `[shell-PR]` `rr7-engineer`.
+7. **Footer legitimacy pass** — payment marks, policy links (returns/privacy/shipping/18+/
+   accessibility), "reach a human at hello@xdipx.com," quiet brands-we-carry row. `[shell-PR]`
+   `rr7-engineer`; owner supplies processor mark assets.
+
+**P1 (trust architecture that converts bought traffic)**
+
+8. **Reviews slot, real data only** — card stars+count above threshold, hard-suppressed below;
+   conditional pull-quote band between Nº 06 and Nº 07, each quote deep-linking its PDP; additive
+   Sanity block. `[shell-PR]` + `sanity-content-builder`.
+9. **PDP evidence surfaces** — buy-box trust duo (guarantee + discretion beside the CTA);
+   "How it Feels" from existing `sensation_dial`/`feature_bullets`; macro detail row (A).
+   `[shell-PR]` + `[asset-generation]`.
+10. **Wayfinder intent tiles + "The Ten"** — 5-6 tiles labeled by intent/anxiety ("First toy,"
+    "Quiet ones," "Small & discreet," "For two"; Archetype B for product tiles, C for
+    human-context tiles), one ink tile per row; Nº 03 becomes the finite ranked "The Ten. Most
+    picked right now." `[content-only]` labels + `[asset-generation]` tiles + `[shell-PR]`
+    structure (IA confirms taxonomy).
+11. **Compass to nav-level billing** — persistent header entry for `/discover` ("Find your fit →").
+    `[shell-PR]` (respects the two-link cap: nav entry replaces one of the existing links if needed;
+    IA rules).
+12. **Benefit line on cards** — one Emma-voice sentence from the `tagline` metafield between name
+    and price. `[content-only]` + `[shell-PR]` card render.
+13. **One committed tinted band** — a single full-bleed plum-soft/coral-soft band carrying white
+    cards, within the coral budget. `[shell-PR]` + `homepage-designer`.
+14. **Homepage FAQ: scary questions first** — discretion and billing lead, phrased in the
+    customer's words; guarantee entry added. `[content-only]` `emma-copywriter`.
+
+**P2 (depth)**
+
+15. **Per-PDP motion loops** — 3-5s image-to-video from the gated still into the `hero_video`
+    metafield, top 5 picks first; never the homepage hero. `[asset-generation]`.
+16. **Two-frame card image flip** — still → Archetype A frame on hover/swipe, transform/opacity
+    only, LCP frame never wrapped. `[shell-PR]`.
+17. **Closing proof act** — once reviews/brands/guarantee/payment marks exist, sequence them as a
+    pre-exit band before email capture. `[shell-PR]` after `homepage-ia`.
+18. **Membership-framed email capture** — curiosity-framed Emma list copy + one privacy line at
+    the capture moment. `[content-only]`.
+19. **Shoppable flat-lay hotspots + real-packaging texture band.** `[asset-generation]` +
+    `[shell-PR]`.
+20. **Press logo slot, built empty** — renders only when offsite/PR earns a real placement.
+    `[shell-PR]`.
 
 ---
 
