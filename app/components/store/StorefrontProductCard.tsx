@@ -46,7 +46,7 @@ export function StorefrontProductCard({ product, priority = false, onSelect, flu
             alt={product.imageAlt ?? product.title}
             priority={priority}
             sizes="(max-width: 640px) 45vw, 240px"
-            widths={[240, 480, 640]}
+            widths={[240, 360, 480, 640]}
             fallbackWidth={480}
             className="absolute inset-0 h-full w-full object-cover transition-transform duration-[var(--duration-slow)] ease-[var(--ease-standard)] group-hover:scale-[1.04]"
           />
