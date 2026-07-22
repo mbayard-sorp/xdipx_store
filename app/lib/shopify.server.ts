@@ -4,6 +4,7 @@ import { toHTML } from '@portabletext/to-html'
 import { cached, invalidateCache, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
 import { isOperationalTag, editorialTagsOnly } from '~/lib/tag-normalize'
 import { UNCATEGORIZED_SENTINEL } from '~/lib/master-collapse.server'
+import { deriveProductType } from '~/lib/product-type-derive'
 
 // Short TTL for read-through product caches — long enough to dedupe burst
 // traffic, short enough for admin edits to appear on the next page load.
@@ -3238,12 +3239,20 @@ export function slugifyHandle(s: string): string {
 export async function createShopifyProductFromFeed(product: ProductScore, handle: string): Promise<string> {
   const tags = buildProductTags(product)
 
+  // Pricing engine v2 resolves margin rules by product_type — a product created
+  // without one prices on the global fallback rule (the 2026-07-21 incident).
+  const derived = deriveProductType({ categories: product.categories, title: product.title })
+  if (!derived.productType) {
+    console.warn(`[product-type] ${product.sku} created without a derivable product_type (categories=${JSON.stringify(product.categories)}) — pricing falls through to the global rule until one is set`)
+  }
+
   const res = await shopifyAdmin<{ product: { id: string; variants: { id: string; inventory_item_id: string }[] } }>('/products.json', 'POST', {
     product: {
       title:   product.title,
       handle,
       vendor:  product.brand,
       tags:    tags.join(', '),
+      ...(derived.productType ? { product_type: derived.productType } : {}),
       status:  'draft',
       variants: [{
         sku:                  product.sku,
@@ -3265,6 +3274,23 @@ export async function createShopifyProductFromFeed(product: ProductScore, handle
   }
 
   return String(res.product.id)
+}
+
+/** Read a product's Shopify product_type. Returns null when unset. */
+export async function getShopifyProductType(numericProductId: string): Promise<string | null> {
+  const res = await shopifyAdmin<{ product: { id: number; product_type: string } }>(
+    `/products/${numericProductId}.json?fields=id,product_type`, 'GET',
+  )
+  const pt = res.product.product_type?.trim()
+  return pt ? pt : null
+}
+
+/** Set a product's Shopify product_type (pricing engine v2 resolves margin
+ *  rules by this field via pricing_product_type_map). */
+export async function setShopifyProductType(numericProductId: string, productType: string): Promise<void> {
+  await shopifyAdmin(`/products/${numericProductId}.json`, 'PUT', {
+    product: { id: Number(numericProductId), product_type: productType },
+  })
 }
 
 /**
@@ -3304,6 +3330,12 @@ export async function createShopifyProductWithVariants(
     ...master.categories.map(c => `cat:${c.toLowerCase().replace(/\s+/g, '-')}`),
   ]
 
+  // See createShopifyProductFromFeed — product_type drives pricing rule resolution.
+  const derived = deriveProductType({ categories: master.categories, title: master.title })
+  if (!derived.productType) {
+    console.warn(`[product-type] ${master.sku} created without a derivable product_type (categories=${JSON.stringify(master.categories)}) — pricing falls through to the global rule until one is set`)
+  }
+
   const res = await shopifyAdmin<{
     product: {
       id: string
@@ -3316,6 +3348,7 @@ export async function createShopifyProductWithVariants(
       handle,
       vendor:  master.brand,
       tags:    tags.join(', '),
+      ...(derived.productType ? { product_type: derived.productType } : {}),
       status:  'draft',
       options: optionNames.map((name, i) => ({
         name,

@@ -46,6 +46,7 @@ import {
   type ProductPageDoc,
 } from '~/lib/shopify.server'
 import { upsertProductPage } from '~/lib/sanity.server'
+import { ensureProductTypeForPublish } from '~/lib/product-type.server'
 import { getPipelineSetting, deriveSection } from '~/lib/feed-processor.server'
 import { IVR_EXPERIENCE_LEVELS } from '~/lib/claude.server'
 import { EMMA_VOICE_ENRICHMENT } from '~/lib/emma-voice.server'
@@ -131,6 +132,19 @@ export async function applyFullEnrichmentWrites(numericProductId: string, writes
   const editorialTags = (histRows[0]?.categories ?? []).filter(
     (c): c is string => !!c && c !== '(uncategorized)',
   )
+
+  // Pricing engine v2 keys margin rules on Shopify product_type. Imports since
+  // the 2026-07-22 fix set it at creation; this backfills any product that
+  // reached enrichment without one (reused drafts, pre-fix imports). Guard
+  // logging happens inside — never blocks the enrichment write.
+  if (!snap.product_type?.trim()) {
+    await ensureProductTypeForPublish({
+      numericProductId: numericProductId,
+      categories:       editorialTags,
+      title:            snap.title,
+      currentType:      null,
+    })
+  }
 
   // Em-dash-sanitized copy (house rule) — computed once, used for Shopify + Sanity.
   const sTagline = ed(writes.tagline)
@@ -424,7 +438,13 @@ export async function collectEnrichmentBatch(): Promise<{ enriched: number; fail
  */
 export async function publishEnrichedProducts(): Promise<{ published: number; failed: number }> {
   const rows = await db
-    .select({ id: importCandidates.id, productId: dealHistory.shopifyProductId })
+    .select({
+      id:         importCandidates.id,
+      productId:  dealHistory.shopifyProductId,
+      sku:        dealHistory.sku,
+      title:      dealHistory.seoTitle,
+      categories: dealHistory.categories,
+    })
     .from(importCandidates)
     .innerJoin(dealHistory, eq(importCandidates.dealHistoryId, dealHistory.id))
     .where(and(
@@ -438,6 +458,17 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
   for (const r of rows) {
     if (!r.productId) continue
     try {
+      // Last-line guard: never flip a draft live without a product_type the
+      // pricing engine can resolve. Backfills by derivation when missing and
+      // error-logs (without blocking publish) when unresolvable — a typeless
+      // live product prices on the global fallback rule.
+      await ensureProductTypeForPublish({
+        numericProductId: r.productId,
+        sku:              r.sku,
+        title:            r.title ?? '',
+        categories:       (r.categories ?? []).filter((c): c is string => !!c && c !== '(uncategorized)'),
+      })
+
       await activateShopifyProduct(r.productId)
 
       // WS2b — tag the newly-activated product as a sourcing signal for the
