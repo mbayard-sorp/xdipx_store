@@ -13,7 +13,7 @@ import { kvGet, KV_KEYS } from '~/lib/kv.server'
 import { getHomepageSections, getEmmaHeroSettings, getHomeConfig } from '~/lib/sanity.server'
 import { resolveHomeVariant } from '~/lib/home-variant.server'
 import { loadVariantAData } from '~/lib/home-discover.server'
-import { assembleStorefrontHome } from '~/lib/storefront-home.server'
+import { assembleStorefrontHome, STOREFRONT_EDGE_CACHE_HEADERS } from '~/lib/storefront-home.server'
 import { HomeA } from '~/components/discovery/HomeA'
 import { StorefrontHome } from '~/components/store/StorefrontHome'
 import { getBundleByHandle }                    from '~/lib/bundles.server'
@@ -137,9 +137,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const value = await assembleStorefrontHome()
     if (adminUser) return data(value, { headers: ADMIN_BYPASS_HEADERS })
     // Cold KV / degraded assembly (no rails, no featured product) — never let
-    // the edge cache pin a blank storefront for the next 60s+SWR window.
+    // the edge cache pin a blank storefront for the next window.
     const isDegraded = value.rails.length === 0 && value.featured.length === 0
-    return isDegraded ? data(value, { headers: DEGRADED_NO_STORE_HEADERS }) : value
+    if (isDegraded) return data(value, { headers: DEGRADED_NO_STORE_HEADERS })
+    // Anonymous, non-degraded render: edge-cache for 300s (see
+    // STOREFRONT_EDGE_CACHE_HEADERS) so real visitors hit the CDN instead of
+    // paying full SSR TTFB on every request. `headers` (below) forwards both
+    // Cache-Control and Vercel-CDN-Cache-Control from these loader headers.
+    return data(value, { headers: STOREFRONT_EDGE_CACHE_HEADERS })
   }
 
   // ── Legacy path (unchanged) ───────────────────────────────────────────────
