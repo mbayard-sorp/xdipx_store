@@ -220,6 +220,13 @@ the notes that matter most:
 - "Fit" is our word. People are here to find something that fits them; hero,
   rails, and closers should use fit language naturally, not as a slogan
   stamped everywhere.
+- **The hero runs the full v5 register, dial 9.** Owner direction 2026-07-21
+  (after rejecting an under-dialed hero as "not the v5 we worked on"): the
+  charter's optional first-touch pullback to 5-7 does NOT apply to
+  `singleton.emmaHero` copy. Hero headline, body, and pull-quote are
+  desire-forward at 9: act-anchored, embodied, temptation closer. Cozy
+  lifestyle copy that never names what the reader will feel is a defect the
+  voice gate should flag as under-dialed, not a safe default.
 - Fresh, product-specific language on every run. Retire every coined phrase
   after one use. Whitelist CTAs only.
 
