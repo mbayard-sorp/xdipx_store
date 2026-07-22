@@ -323,6 +323,33 @@ export interface Product {
 }
 
 /**
+ * Structural subset of `Product` for homepage variant-b's deferred
+ * `contentBlocks` stream (PR-3 hydration payload diet). Any `Product` is
+ * assignable to `LeanCardProduct` (field-compatible, just narrower), so
+ * variant A / legacy callers that still pass full `Product[]` maps into
+ * shared card components need zero changes.
+ *
+ * Field list is the exact set the variant-b client consumers read:
+ * `shopifyToDiscovery()` / `teamRailToGridRail()` in StorefrontHome.tsx and
+ * the `ProductCard` in ProductCarousel.tsx (rendered via EmmaCuratedRail).
+ * The server truncates `images`/`videos` to their first entry before this
+ * type is ever populated — see `toLeanCardProduct()` in
+ * homepage-payload.server.ts.
+ */
+export interface LeanCardProduct {
+  id: string
+  handle: string
+  title: string
+  price: number
+  compareAtPrice?: number
+  brand?: string
+  /** Server truncates to the first entry (or []). */
+  images: ProductImage[]
+  /** Server truncates to the first entry when present. */
+  videos?: ProductVideo[]
+}
+
+/**
  * Legacy single-value category. The canonical `Deal.category` is now an array
  * (Phase 2 multi-select), but several legacy sinks — analytics events
  * (`item_category`), social posts, video gen prompts, Sanity emmaCuratedRail —

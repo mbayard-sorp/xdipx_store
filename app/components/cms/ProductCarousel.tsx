@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { Link } from 'react-router'
-import type { Product } from '~/types'
+import type { LeanCardProduct } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
 import ProductTileMedia from '~/components/store/ProductTileMedia'
 import { Reveal } from '~/components/motion/Reveal'
@@ -14,7 +14,7 @@ interface ProductCarouselProps {
   ctaLabel?: string
   bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
   layout?: 'carousel' | 'grid' | 'grid-3'
-  products: Product[]
+  products: LeanCardProduct[]
 }
 
 const BG_CLASSES: Record<string, string> = {
@@ -158,7 +158,7 @@ export function ProductCarousel({
   )
 }
 
-function ProductCard({ product, className = '' }: { product: Product; className?: string }) {
+function ProductCard({ product, className = '' }: { product: LeanCardProduct; className?: string }) {
   const price   = product.price
   const compare = product.compareAtPrice
   const onSale  = compare != null && compare > price

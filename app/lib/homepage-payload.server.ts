@@ -27,7 +27,7 @@ import type { Rail } from '~/types/discovery'
 import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
 import { getHomepageSections } from '~/lib/sanity.server'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
-import type { Product } from '~/types'
+import type { Product, LeanCardProduct } from '~/types'
 import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock } from '~/types/cms'
 
 /**
@@ -126,6 +126,81 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
   emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = emmaRailResults[i] ?? [] })
 
   return { sections, carouselProductMap }
+}
+
+/**
+ * `_type`s the variant-b StorefrontHome `<Await>` sites actually read out of
+ * `contentBlocks.sections` (verified against app/components/store/
+ * StorefrontHome.tsx): `emmaCuratedRail` feeds the Nº 03/06 team-rail slots,
+ * `editorialTiles` feeds "From the Notebook", `wayfinderMosaic` feeds "Find
+ * your way in", and `playTogetherBanner` feeds the Couples band. Every other
+ * section type in `singleton.homepage` (trustBar/categoryGrid/productCarousel/
+ * promoBanner/etc.) is shell-owned or legacy and variant b never reads it —
+ * shipping them to the client is pure dead weight. Exported so the lean
+ * builder, its tests, and (if ever needed) the component can share one list.
+ */
+export const VARIANT_B_SECTION_TYPES = [
+  'emmaCuratedRail',
+  'editorialTiles',
+  'wayfinderMosaic',
+  'playTogetherBanner',
+] as const satisfies readonly ContentBlock['_type'][]
+
+/** Lean resolved content-blocks shape streamed to variant b only. */
+export interface HomeContentBlocksLean {
+  sections: ContentBlock[]
+  carouselProductMap: Record<string, LeanCardProduct[]>
+}
+
+/**
+ * Explicit whitelist copy — never spread + delete. Truncates `images`/
+ * `videos` to their first entry (the only one any variant-b card consumer
+ * reads) so the multi-image/every-variant Shopify `Product` doesn't ride
+ * along in the hydration payload.
+ */
+function toLeanCardProduct(p: Product): LeanCardProduct {
+  const lean: LeanCardProduct = {
+    id: p.id,
+    handle: p.handle,
+    title: p.title,
+    price: p.price,
+    images: p.images.length > 0 ? [p.images[0]!] : [],
+  }
+  if (p.compareAtPrice !== undefined) lean.compareAtPrice = p.compareAtPrice
+  if (p.brand !== undefined) lean.brand = p.brand
+  if (p.videos && p.videos.length > 0) lean.videos = [p.videos[0]!]
+  return lean
+}
+
+/**
+ * Variant-b-only slim of `buildHomeContentBlocks()`: filters `sections` down
+ * to `VARIANT_B_SECTION_TYPES`, prunes `carouselProductMap` to only the
+ * surviving `emmaCuratedRail` blocks' keys (the only surviving section type
+ * that reads the map — `productCarousel`, the map's other historical
+ * producer, is filtered out above), and slims every product to
+ * `LeanCardProduct`. `buildHomeContentBlocks()` itself is untouched — it
+ * stays shared with `buildHomepagePayloadA()` and the variant-A live/admin
+ * fallback, both of which need the full `Product[]` shape.
+ */
+export async function buildHomeContentBlocksLean(): Promise<HomeContentBlocksLean> {
+  const { sections, carouselProductMap } = await buildHomeContentBlocks()
+
+  const leanSections = sections.filter(s =>
+    (VARIANT_B_SECTION_TYPES as readonly string[]).includes(s._type),
+  )
+
+  const survivingRailKeys = new Set(
+    leanSections
+      .filter((s): s is EmmaCuratedRailBlock => s._type === 'emmaCuratedRail')
+      .map(s => s._key),
+  )
+
+  const leanCarouselProductMap: Record<string, LeanCardProduct[]> = {}
+  for (const key of survivingRailKeys) {
+    leanCarouselProductMap[key] = (carouselProductMap[key] ?? []).map(toLeanCardProduct)
+  }
+
+  return { sections: leanSections, carouselProductMap: leanCarouselProductMap }
 }
 
 /**

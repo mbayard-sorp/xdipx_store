@@ -12,7 +12,7 @@
  */
 
 import { getDiscoveryIndex, getDiscoveryRails } from '~/lib/discovery.server'
-import { buildHomeContentBlocks, type HomeContentBlocks } from '~/lib/homepage-payload.server'
+import { buildHomeContentBlocksLean, type HomeContentBlocksLean } from '~/lib/homepage-payload.server'
 import { getSensationMapData, type SensationMapData } from '~/lib/sensation-map.server'
 import { getEmmaHeroSettings, getBlogPosts, getEditor } from '~/lib/sanity.server'
 import { withTimeout } from '~/lib/with-timeout.server'
@@ -68,7 +68,7 @@ export interface StorefrontData {
    * the team can edit it without a deploy; the LCP product image stays
    * discovery-derived.
    */
-  contentBlocks: Promise<HomeContentBlocks>
+  contentBlocks: Promise<HomeContentBlocksLean>
   /**
    * Latest published Notebook posts, auto-populating the "From the Notebook"
    * section so fresh daily content reaches the homepage with no merchandiser
@@ -151,7 +151,7 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
     emmaPhotoAlt: editor?.photoAlt ?? null,
     featured,
     total: railsResult.total,
-    contentBlocks: buildHomeContentBlocks(), // deferred — team-managed Sanity surface
+    contentBlocks: buildHomeContentBlocksLean(), // deferred — team-managed Sanity surface, lean/slimmed for variant b
     notebookPosts: notebook.posts,
     sensationMap,
   }
