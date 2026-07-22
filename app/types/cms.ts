@@ -628,3 +628,14 @@ export interface HomeConfig {
   }
   analyticsLabel: string
 }
+
+// ─── Home SEO (SERP snippet) ─────────────────────────────────────────────────
+// Singleton: singleton.homeSeo
+// Team-editable homepage <title> + meta description. Blank fields fall back to
+// the brand defaults in app/lib/brand.ts. This is the "update strategy" surface
+// the strategy/merchandising team rotates against the marketing calendar.
+export interface HomeSeo {
+  seoTitle?: string
+  seoDescription?: string
+  ogImageUrl?: string
+}

@@ -10,7 +10,7 @@ import { db } from '~/lib/db.server'
 import { dealHistory, pipelineSettings } from '../../db/schema'
 import { eq, inArray } from 'drizzle-orm'
 import { kvGet, KV_KEYS } from '~/lib/kv.server'
-import { getHomepageSections, getEmmaHeroSettings, getHomeConfig } from '~/lib/sanity.server'
+import { getHomepageSections, getEmmaHeroSettings, getHomeConfig, getHomeSeo } from '~/lib/sanity.server'
 import { resolveHomeVariant } from '~/lib/home-variant.server'
 import { loadVariantAData } from '~/lib/home-discover.server'
 import { assembleStorefrontHome, STOREFRONT_EDGE_CACHE_HEADERS } from '~/lib/storefront-home.server'
@@ -116,15 +116,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Resolve variant before the heavy legacy fan-out so variant A skips all
   // Shopify/Sanity calls it doesn't need. Variant A has its own loader branch
   // that runs a lightweight getDiscoveryRails() instead.
-  const homeConfig = await getHomeConfig().catch(() => null)
+  const [homeConfig, homeSeo] = await Promise.all([
+    getHomeConfig().catch(() => null),
+    getHomeSeo().catch(() => null),
+  ])
   const { variant } = resolveHomeVariant(request, homeConfig?.activeVariant ?? null)
+
+  // Team-editable SERP snippet (singleton.homeSeo), with brand-default fallback.
+  // Attached to every loader return so the `meta` export can read `data.seo`
+  // without an async fetch of its own. This is the homepage "update strategy":
+  // the strategy/merch team rotates title/description in Studio, no deploy.
+  const seo = {
+    title: homeSeo?.seoTitle || BRAND_TITLE,
+    description: homeSeo?.seoDescription || BRAND_DESCRIPTION,
+    ogImageUrl: homeSeo?.ogImageUrl ?? null,
+  }
 
   if (variant === 'a') {
     // "The Compass" discovery home. Assembly (admin / precompute / cold-miss /
     // bot-fallback) lives in loadVariantAData so `/discover` reuses it verbatim.
     const welcomeBackEnabled = homeConfig?.welcomeBackEnabled ?? true
     const adminUser = await getAdminUser(request).catch(() => null)
-    const value = await loadVariantAData(request, { welcomeBackEnabled, isAdmin: !!adminUser })
+    const value = { ...await loadVariantAData(request, { welcomeBackEnabled, isAdmin: !!adminUser }), seo }
     return adminUser ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
   }
 
@@ -134,7 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // 'legacy'/'a' until HOME_VARIANT=b (or Sanity activeVariant='b') flips it on.
   if (variant === 'b') {
     const adminUser = await getAdminUser(request).catch(() => null)
-    const value = await assembleStorefrontHome()
+    const value = { ...await assembleStorefrontHome(), seo }
     if (adminUser) return data(value, { headers: ADMIN_BYPASS_HEADERS })
     // Cold KV / degraded assembly (no rails, no featured product) — never let
     // the edge cache pin a blank storefront for the next window.
@@ -298,6 +311,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       emmaHero: null, pairDeal: null, homepageSettings, pairBundleDeal: null,
       emmaContextRows: [], pairSwatches: {} as Record<string, string>,
       viewContentEventId: null as string | null,
+      seo,
     }
     return isAdmin ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
   }
@@ -318,6 +332,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     emmaHero, pairDeal, homepageSettings, pairBundleDeal,
     emmaContextRows, pairSwatches,
     viewContentEventId,
+    seo,
   }
   return isAdmin ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
 }
@@ -329,49 +344,59 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const canonical = 'https://xdipx.com/'
-  // Variant A uses generic brand meta -- no deal-specific fields available.
+  // Team-editable homepage title/description resolved in the loader
+  // (singleton.homeSeo → brand-default fallback). `data.seo` is present on
+  // every non-null loader return; the `!data` fallback keeps the hard-coded
+  // brand defaults for the error/empty case.
+  const seoTitle = data?.seo?.title ?? BRAND_TITLE
+  const seoDescription = data?.seo?.description ?? BRAND_DESCRIPTION
+  const seoOgImage = data?.seo?.ogImageUrl ?? null
+  // Variant A uses the team-editable brand-level snippet -- no deal fields.
   if (!data || data.variant === 'a') {
     return [
-      { title: BRAND_TITLE },
-      { name: 'description', content: BRAND_DESCRIPTION },
+      { title: seoTitle },
+      { name: 'description', content: seoDescription },
       { tagName: 'link', rel: 'canonical', href: canonical },
       { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: 'https://xdipx.com/index.md' },
-      ...buildSocialMeta({ title: BRAND_TITLE, description: BRAND_DESCRIPTION, url: canonical, image: null, type: 'website' }),
+      ...buildSocialMeta({ title: seoTitle, description: seoDescription, url: canonical, image: seoOgImage, type: 'website' }),
     ]
   }
-  // Variant B (storefront): generic brand meta, but preload the LCP hero image
-  // — the first featured product's image — same AVIF responsive preload as
-  // the legacy/deal home gets for its hero. Guarded for empty featured (cold
-  // KV / degraded render).
+  // Variant B (storefront): team-editable brand-level snippet, but preload the
+  // LCP hero image — the first featured product's image — same AVIF responsive
+  // preload as the legacy/deal home gets for its hero. Guarded for empty
+  // featured (cold KV / degraded render). An explicit homeSeo OG image wins;
+  // otherwise the featured hero image is the social card.
   if (data.variant === 'b') {
     const heroPreload = heroPreloadTag(data.featured[0]?.imageUrl)
     return [
-      { title: BRAND_TITLE },
-      { name: 'description', content: BRAND_DESCRIPTION },
+      { title: seoTitle },
+      { name: 'description', content: seoDescription },
       { tagName: 'link', rel: 'canonical', href: canonical },
       { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: 'https://xdipx.com/index.md' },
       ...(heroPreload ? [heroPreload] : []),
       ...buildSocialMeta({
-        title: BRAND_TITLE,
-        description: BRAND_DESCRIPTION,
+        title: seoTitle,
+        description: seoDescription,
         url: canonical,
-        image: data.featured[0]?.imageUrl ?? null,
+        image: seoOgImage ?? data.featured[0]?.imageUrl ?? null,
         type: 'website',
       }),
     ]
   }
   if (!('deal' in data) || !data.deal || !('seoTitle' in data.deal)) {
     return [
-      { title: BRAND_TITLE },
-      { name: 'description', content: BRAND_DESCRIPTION },
+      { title: seoTitle },
+      { name: 'description', content: seoDescription },
       { tagName: 'link', rel: 'canonical', href: canonical },
       { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: 'https://xdipx.com/index.md' },
-      ...buildSocialMeta({ title: BRAND_TITLE, description: BRAND_DESCRIPTION, url: canonical, image: null, type: 'website' }),
+      ...buildSocialMeta({ title: seoTitle, description: seoDescription, url: canonical, image: seoOgImage, type: 'website' }),
     ]
   }
+  // Legacy daily-deal home: the product-specific SEO title stays the strongest
+  // signal; homeSeo's description is the fallback when the deal has none.
   const { deal } = data
   const title = `${deal.seoTitle} | ${BRAND_TITLE}`
-  const description = deal.metaDescription || BRAND_DESCRIPTION
+  const description = deal.metaDescription || seoDescription
   const heroPreload = heroPreloadTag(deal.images[0]?.url)
   return [
     { title },
