@@ -35,6 +35,8 @@ import {
   VALVE_KEYS,
   CONTENT_EXTRA_KEYS,
   CONTENT_MAX_IMAGES_DEFAULT,
+  VIDEO_EXTRA_KEYS,
+  VIDEO_MAX_COST_CENTS_DEFAULT,
   SOCIAL_PLATFORMS,
   SOCIAL_FREQ_DEFAULTS,
   socialFreqKey,
@@ -90,6 +92,8 @@ export interface TeamConfig {
   /** Homepage-only extras (undefined for other teams). */
   buildCents?: number
   maxImagesPerDay?: number
+  /** Video-only extra (065): hard per-video cost ceiling in cents. */
+  maxCostCents?: number
 }
 
 function num(v: string | undefined, fallback: number): number {
@@ -132,6 +136,8 @@ async function getTeamConfigUncached(team: TeamId): Promise<TeamConfig> {
     cfg.maxImagesPerDay = num(map.get(TEAM_KEYS.maxImagesPerDay), 12)
   } else if (team === 'content') {
     cfg.maxImagesPerDay = num(map.get(CONTENT_EXTRA_KEYS.maxImagesPerDay), CONTENT_MAX_IMAGES_DEFAULT)
+  } else if (team === 'video') {
+    cfg.maxCostCents = num(map.get(VIDEO_EXTRA_KEYS.maxCostCents), VIDEO_MAX_COST_CENTS_DEFAULT)
   }
   return cfg
 }

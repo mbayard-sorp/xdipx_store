@@ -59,3 +59,29 @@ export function estimateImageCostUsd(model: string, count: number): number {
   const cost = per * Math.max(0, count)
   return Math.round(cost * 1e5) / 1e5
 }
+
+// ---------------------------------------------------------------------------
+// Video generation pricing — USD per SECOND of generated video, by cost key.
+// Video is the store's most expensive media type; these rates back the per-video
+// cost estimate shown in admin before generation, the hard per-video ceiling
+// valve, and the video team's daily budget gate. Approximate list prices as of
+// 2026-07; adjust here when fal reprices. Keys match VIDEO_MODELS[*].costKey in
+// fal-video.server.ts.
+// ---------------------------------------------------------------------------
+
+const VIDEO_RATES: Record<string, number> = {
+  'fal/veo3.1':       0.40, // native audio, 1080p
+  'fal/veo3.1-fast':  0.15, // native audio
+  'fal/kling-2.5-pro': 0.07, // no native audio
+  'fal/seedance-2.0': 0.31, // audio included, 720p
+  'fal/sync-lipsync': 0.05, // lipsync billed ~$3/min of output video
+}
+
+const DEFAULT_VIDEO_RATE = 0.40 // unknown model -> assume premium tier so estimates never lowball
+
+/** Estimated USD for `seconds` of video from `model`. Never negative. */
+export function estimateVideoCostUsd(model: string, seconds: number): number {
+  const per = VIDEO_RATES[model] ?? DEFAULT_VIDEO_RATE
+  const cost = per * Math.max(0, seconds)
+  return Math.round(cost * 1e5) / 1e5
+}

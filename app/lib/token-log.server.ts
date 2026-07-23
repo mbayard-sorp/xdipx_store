@@ -141,6 +141,58 @@ export async function logImageCost(entry: ImageCostEntry): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Video-generation spend logger
+// ---------------------------------------------------------------------------
+
+export interface VideoCostEntry {
+  /** Feature label, e.g. 'video-clip', 'video-spike'. 'video-*' attributes to the video team's budget gate. */
+  feature:    string
+  /** Cost key from model-pricing VIDEO_RATES, e.g. 'fal/veo3.1'. */
+  model:      string
+  /** Seconds of video generated in this call. */
+  seconds:    number
+  caller?:    string
+  productId?: string
+  sku?:       string
+  /** Correlation id (video_jobs.job_id or an ad batch id) -> api_token_log.ref_id. */
+  refId?:     string
+}
+
+/**
+ * Log video-generation spend into api_token_log so it shows on /admin/usage
+ * alongside token and image costs. Priced per second of output from VIDEO_RATES
+ * (estimateVideoCostUsd). BEST-EFFORT: never throws into the caller.
+ */
+export async function logVideoCost(entry: VideoCostEntry): Promise<void> {
+  try {
+    if (!entry.seconds || entry.seconds <= 0) return
+    const { db } = await import('./db.server')
+    const { apiTokenLog } = await import('../../db/schema')
+    const { estimateVideoCostUsd } = await import('./model-pricing.server')
+    const cost = estimateVideoCostUsd(entry.model, entry.seconds)
+    await db.insert(apiTokenLog).values({
+      feature:             entry.feature,
+      model:               entry.model,
+      source:              'sync',
+      batchId:             null,
+      productId:           entry.productId ?? null,
+      sku:                 entry.sku       ?? null,
+      caller:              entry.caller    ?? null,
+      refId:               entry.refId     ?? null,
+      inputTokens:         0,
+      outputTokens:        0,
+      cacheCreationTokens: 0,
+      cacheReadTokens:     0,
+      requestCount:        1,
+      estCostUsd:          String(cost),
+    })
+    await bumpTeamSpendCounters(entry.feature, cost)
+  } catch (err) {
+    console.error('[token-log] best-effort video-cost write failed (ignored):', err)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Daily rollup read for /admin/usage
 // ---------------------------------------------------------------------------
 

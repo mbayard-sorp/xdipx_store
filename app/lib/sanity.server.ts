@@ -254,6 +254,16 @@ export async function getEditor(preview = false): Promise<Editor | null> {
   return cached('sanity:editor', 300, fetcher)
 }
 
+/**
+ * Canonical Emma likeness for the video pipeline's scene-frame composition.
+ * Always fetched uncached so a photo swap in Sanity propagates to the very next
+ * generation (likeness policy: singleton.editor is the single source of truth).
+ */
+export async function getEditorPhotoUrl(): Promise<string | null> {
+  const editor = await getEditor(true)
+  return editor?.photoUrl ?? null
+}
+
 // v2 redesign — Emma presets for Ask Emma rail
 const EMMA_PRESETS_GROQ = `
   *[_type == "emmaPreset"] | order(order asc, label asc){
