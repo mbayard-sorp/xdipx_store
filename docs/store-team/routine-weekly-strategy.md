@@ -96,6 +96,23 @@ and campaign tie-ins with the marketing calendar; the daily content playbook
 (`docs/store-team/routine-content-daily.md`) tolerates a brief without a content section, so omit
 it honestly rather than padding.
 
+Include a **Video Plan** section when the video team is enabled (`video_team_enabled`), and omit it
+honestly when it is not. The Video Plan is a spend allocation, not a wish list: video generation is
+metered fal.ai spend, unlike your Max-billed reasoning. It contains: (a) the week's volume and tier
+split (e.g. "3 videos: 1 premium presenter + 2 standard"), (b) a slate table with one row per video
+(product handle, formula from the library in `.claude/agents/video-producer.md`, tier, target
+platforms, source tie-in such as the anchor blog post or calendar theme, and the metric that
+justifies the pick), and (c) the selection reasoning. Selection rubric, hard gates first: in stock,
+published, has real Shopify product photography, MAP status known, concept passes voice and
+doctrine. Then weights: hero/theme alignment 30 (the week's headliner is auto-included as the
+premium video; video commits to the headliner and does NOT chase homepage rotations), realized
+margin x order velocity 25, PDP-video-gap conversion opportunity 15, blog tie-in 15 (name the
+source post slug; its answers become the script), new-import freshness 5 (standard tier only,
+never premium), promo/calendar window fit 5. Mirror the slate into `metricsJson.videoPlan`, and in
+the retro read `video_jobs` outcomes (approval rate, cost per approved video, regen rate; owner
+metrics_json once posts go out). Approval rate under ~40% sustained is a stop-doing signal: pause
+the slate and fix the formula via an instructions suggestion before spending more.
+
 Include a **Catalog Pipeline** section (and mirror its numbers into `metricsJson`), **profit-first**:
 lead with orders/margin attributable to newly-imported SKUs and to price-dropped SKUs (order line
 items; GA4 item-list/PDP only when the week has ≥300 sessions, else flag the number heuristic) —
