@@ -65,11 +65,12 @@ OFF / conservative.
 | Setting key | Default | Purpose |
 |---|---|---|
 | `{team}_team_enabled` | `false` | Per-team kill switch (homepage keeps `homepage_team_enabled`). |
-| `{team}_team_daily_cents` | social/ads/email 500, strategy/content 300, homepage 1500 | Daily metered cap per team. |
-| `{team}_team_max_runs` | social 2, content 2 (second run = one voice-gate retry only), others 1, homepage 4 | Max-quota guard (runs/day). |
+| `{team}_team_daily_cents` | social/ads/email/content 500, strategy 300, homepage 1500 | Daily metered cap per team. Content moved 300 to 500 in migration 068 (accuracy-gate web verification + Saturday trend-scout run). |
+| `{team}_team_max_runs` | social 2, content 3 (extra runs = gate-retry headroom on double days: Sat trend-scout, Sun SEO curation, Wed podcast review), others 1, homepage 4 | Max-quota guard (runs/day). |
 | `homepage_team_build_cents`, `homepage_team_max_images` | 10000 / 12 | Homepage-only extras. |
 | `social_team_autopost` | `false` | **Draft-mode valve.** Live posting also requires `X_AUTO_POST_ENABLED`, and only X has plumbing. |
-| `content_team_autopublish` | `false` | **Publish valve (content).** On = a voice-gate PASS publishes the blog post live; off = posts stay Sanity drafts. The routine keeps running either way. |
+| `content_team_autopublish` | `false` | **Publish valve (content).** On = a dual-gate PASS (voice + accuracy) publishes the blog post live; off = posts stay Sanity drafts. The routine keeps running either way. |
+| `trend_scout_enabled` | `false` | **Trend-scout kill switch.** Gates the weekly Saturday trend-scout routine (proposes trendTopicBrief docs for Sunday SEO curation). Seeded by migration 068. |
 | `suggestion_apply_enabled` | `false` | **Apply-path valve.** When on, agent-editor turns approved instruction-suggestions into PRs. |
 
 The import-automation valves (`product_manager_enabled`, `product_manager_max_actions_per_run`,

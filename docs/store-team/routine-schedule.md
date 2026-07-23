@@ -57,9 +57,9 @@ which is why no approved suggestion ever became a PR. Cap 3 leaves zero retry he
 the Weekly Strategy self-audit is the backstop. Similarly `content_team_max_runs` must be **3**:
 Saturdays carry content-writer (15:00) + trend-scout (16:00), Sundays carry content-writer +
 SEO curation (16:00), and Wednesdays carry content-writer + podcast review, and cap 2 left no
-room for a gate-retry run on those days. Migration 068 versions the cap at 3 (previously a
-2026-07-21 prod hand-edit) alongside `content_team_daily_cents` at 500, sized for the
-sex-wellness-reviewer accuracy gate's web verification plus the Saturday trend-scout run.
+room for a gate-retry run on those days. Migration 068 versions the cap at 3 (previously an
+unversioned 2026-07-21 prod hand-edit) alongside `content_team_daily_cents` at 500, sized for
+the sex-wellness-reviewer accuracy gate's web verification plus the Saturday trend-scout run.
 
 On 2026-07-13 the last three desktop scheduled tasks on the owner's machine were deleted:
 `pricing-daily-sweep` (recreated as cloud routine 13), plus `homepage-daily-merchandise` and

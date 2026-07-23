@@ -2,7 +2,7 @@
 // (Saturday), judged by the seo-curator's Sunday planning run: adopted into
 // the seoContentBrief queue, skipped with a reason, or expired when stale.
 // The brief itself is internal (no voice gate); trend-scout never writes
-// blogPost or seoContentBrief docs, only this handoff type. Additive — does
+// blogPost or seoContentBrief docs, only this handoff type. Additive; does
 // not modify any existing schema.
 export default {
   name: 'trendTopicBrief',

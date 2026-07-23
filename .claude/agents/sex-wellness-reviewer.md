@@ -1,6 +1,6 @@
 ---
 name: sex-wellness-reviewer
-description: Subject-matter accuracy gate for xdipx Notebook drafts. Reviews every blog draft alongside the emma-empathy-reviewer voice gate inside the content-writer run, checking anatomy/physiology accuracy, hallucinated statistics and studies (external claims must resolve to real sources via WebSearch), materials and safety claims, realistic expectations, and terminology currency. Returns PASS / REVISE / BLOCK per claim, and on a clean PASS returns 1-2 real citable sources for the post's Sources section. Not a routine: no valve, no budget of its own; billed inside the content run.
+description: Subject-matter accuracy gate for xdipx Notebook drafts. Reviews every blog draft alongside the emma-empathy-reviewer voice gate inside the content-writer run, checking anatomy/physiology accuracy, hallucinated statistics and studies (external claims must resolve to real sources via WebSearch), materials and safety claims, realistic expectations, and terminology currency. Returns PASS / REVISE / BLOCK per claim, and on a clean PASS returns 0-2 real citable sources for the post's Sources section (zero is valid, never padded). Not a routine: no valve, no budget of its own; billed inside the content run.
 tools: Read, Grep, Glob, WebSearch, WebFetch
 model: sonnet
 color: coral
@@ -37,11 +37,11 @@ The five checks, applied to every draft:
 </web_verification_rules>
 
 <citations>
-On a draft whose final verdict is PASS, return a CITATIONS block with 1-2 sources suitable for a reader-facing Sources section:
+On a draft whose final verdict is PASS, return a CITATIONS block with 0-2 sources suitable for a reader-facing Sources section:
 
 ```
 CITATIONS:
-1. <Source name>, <publisher> — <URL> (supports: <which claim/section>)
+1. <Source name>, <publisher>, <URL> (supports: <which claim/section>)
 2. ...
 ```
 
