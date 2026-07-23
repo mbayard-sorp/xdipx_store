@@ -111,6 +111,18 @@ export const pipelineSettings = pgTable('pipeline_settings', {
   updatedAt: timestamp('updated_at').defaultNow(),
 })
 
+// Migration 066: synthetic checkout probe results. One row per probe run.
+export const checkoutProbeRuns = pgTable('checkout_probe_runs', {
+  id:         bigserial('id', { mode: 'number' }).primaryKey(),
+  ranAt:      timestamp('ran_at', { withTimezone: true }).notNull().defaultNow(),
+  tier:       text('tier').notNull(),           // 'http' | 'browser'
+  ok:         boolean('ok').notNull(),
+  failedStep: text('failed_step'),
+  steps:      jsonb('steps').$type<{ step: string; ok: boolean; status?: number; ms: number; detail?: string }[]>().notNull().default([]),
+  durationMs: integer('duration_ms'),
+  alerted:    boolean('alerted').notNull().default(false),
+})
+
 export const customerProfileExtras = pgTable('customer_profile_extras', {
   customerGid:        varchar('customer_gid', { length: 60 }).primaryKey(),
   genderIdentity:     varchar('gender_identity', { length: 30 }),

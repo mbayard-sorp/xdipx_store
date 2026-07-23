@@ -28,6 +28,7 @@
     { "path": "/cron/pricing-batch-recompute", "schedule": "0 7 * * *"  },
     { "path": "/cron/import-monitor",          "schedule": "0 8 * * *"  },
     { "path": "/cron/import-enrich",           "schedule": "*/30 * * * *" },
+    { "path": "/cron/checkout-probe",          "schedule": "0 */6 * * *"  },
     { "path": "/cron/enrichment-batch-poller", "schedule": "*/2 * * * *"  },
     { "path": "/cron/video-job-poller",        "schedule": "*/2 * * * *"  },
     { "path": "/cron/aeo-surface-check",       "schedule": "0 6 * * 0"   },
