@@ -74,7 +74,7 @@ export const TEAM_DEFAULTS: Record<TeamId, { dailyCents: number; maxRunsPerDay: 
   ads:      { dailyCents: 500,  maxRunsPerDay: 1 },
   email:    { dailyCents: 500,  maxRunsPerDay: 1 },
   strategy: { dailyCents: 300,  maxRunsPerDay: 1 },
-  content:  { dailyCents: 300,  maxRunsPerDay: 2 }, // 2nd run = one voice-gate retry
+  content:  { dailyCents: 500,  maxRunsPerDay: 3 }, // 3rd run = gate-retry headroom on double days (Sat trend-scout, Sun SEO curation, Wed podcast); budget covers the accuracy gate's web verification (068)
   product:  { dailyCents: 300,  maxRunsPerDay: 1 }, // daily import-queue drain (SQL + curl, ~$0)
   video:    { dailyCents: 2000, maxRunsPerDay: 1 }, // fal video generation is metered; $20/day ceiling, ~3 videos/week planned
 }
@@ -180,6 +180,10 @@ export const VALVE_KEYS = {
   contentAutopublish: 'content_team_autopublish',
   keywordResearch:    'keyword_research_enabled',
   seoCuration:        'seo_curation_enabled',
+  // Trend scout: kill switch for the weekly Saturday trend-scout routine
+  // (community-discourse research that proposes trendTopicBrief docs for the
+  // seo-curator's Sunday planning; research-only, never writes posts).
+  trendScout:         'trend_scout_enabled',
   reviewsPdp:         'reviews_pdp_enabled',
   // Video autopublish: even with the video team enabled, platform posting stays
   // manual until this AND the per-platform publisher env keys are both set.

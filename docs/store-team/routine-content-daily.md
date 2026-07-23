@@ -1,8 +1,9 @@
 # Routine: Daily Content Writer (content-writer)
 
 The playbook for the scheduled blog content routine. Entry agent: `content-writer`. One post per
-run, drafted as a Sanity `blogPost` (`status:'draft'`), voice-gated through `emma-empathy-reviewer`,
-and published live only on a clean PASS, with a hero image attached, **and** the
+run, drafted as a Sanity `blogPost` (`status:'draft'`), dual-gated through `emma-empathy-reviewer`
+(voice) and `sex-wellness-reviewer` (subject-matter accuracy), and published live only on a clean
+PASS from both, with a hero image attached, **and** the
 `content_team_autopublish` valve being on. Every published post carries a hero image (owner
 directive, 2026-07); heroless is not an accepted published state. Valve off = the post stays a
 Sanity draft for the owner; the routine still runs and reports.
@@ -35,8 +36,9 @@ and **stop**: skip honestly, never work around the gate. If `ok:true`, capture
 `contentSlot` (`{weekday, expectedCategory, fallbackCategory}`): the server
 computes today's weekday in PT and the matching category slot; it is
 authoritative for Step 3. Never compute the weekday yourself. The gate enforces the
-`content_team_enabled` kill switch, `content_team_daily_cents` (300), and `content_team_max_runs`
-(2; the second run exists only to retry a voice-gate REVISE, not to write a second post).
+`content_team_enabled` kill switch, `content_team_daily_cents` (500), and `content_team_max_runs`
+(3; the extra runs are gate-retry headroom on double days — Sat trend-scout, Sun SEO curation,
+Wed podcast review — never a second post; migration 068 versions both values).
 
 ## Step 2: Load doctrine + context (data only)
 
@@ -157,22 +159,34 @@ Use `embedHints` only after verifying the handles are in stock; use `internalLin
 
 One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
-## Step 5: Voice gate (mandatory, no publish path without it)
+## Step 5: Dual gate (voice + accuracy; mandatory, no publish path without both)
 
-Run the full draft (title, excerpt, body, SEO fields, embed CTA labels) through
-`emma-empathy-reviewer` against the charter + blog addendum.
+Two reviewers, both binding, sequenced so a cheap voice failure never spends the accuracy pass:
 
-- **PASS** → proceed to Step 6.
-- **REVISE** → exactly one rewrite cycle, then re-review. A second non-PASS is treated as BLOCK.
-- **BLOCK** → the post stays `status:'draft'`, and you file a suggestion row
-  (`team:'content'`, kind `process`) with the reviewer's reasons.
+1. **Voice gate first.** Run the full draft (title, excerpt, body, SEO fields, embed CTA labels)
+   through `emma-empathy-reviewer` against the charter + blog addendum. A voice **BLOCK** on
+   sight → the post stays `status:'draft'`, file the suggestion row, skip the accuracy gate
+   entirely, and go to Step 7.
+2. **Accuracy gate.** Otherwise run the same draft through `sex-wellness-reviewer` (it
+   web-verifies external claims: anatomy/physiology, "research shows" statistics, materials and
+   safety, realistic expectations, terminology).
+3. **One shared rewrite cycle.** Merge BOTH gates' REVISE feedback into exactly one rewrite,
+   then re-run both gates once. A second non-PASS from either is treated as BLOCK.
+4. **BLOCK** (from either gate, either cycle) → the post stays `status:'draft'`, and you file a
+   suggestion row (`team:'content'`, kind `process`) with the reviewer's reasons.
+5. **Sources insertion (mechanical, after the final PASS).** The accuracy gate returns 0-2
+   citations it actually resolved. Append them as a `## Sources` section (source name + link,
+   no new prose claims). This insertion is exempt from re-gating. If the gate reported
+   `[web: degraded]`, follow its strip/soften instructions and ship without a Sources section;
+   zero citations is a valid outcome.
 
-One `step` event (`phase:'voice-gate'`) with the verdict and cycle count.
+Two `step` events: `phase:'voice-gate'` and `phase:'accuracy-gate'`, each with the verdict and
+cycle count (the accuracy event also records citation count and `web: ok|degraded`).
 
-## Step 6: Publish (only if PASS, a hero is attached, and the valve is open)
+## Step 6: Publish (only if both gates PASS, a hero is attached, and the valve is open)
 
-Only when Step 5 ended in PASS, a `heroImage` is attached (Step 4; mandatory on every published
-post), **and** Step 1's `valves.autopublish` is `true`:
+Only when Step 5 ended in PASS from BOTH gates, a `heroImage` is attached (Step 4; mandatory on
+every published post), **and** Step 1's `valves.autopublish` is `true`:
 
 1. Patch the doc: `status` → `'published'` (keep `publishedAt` as set in Step 4).
 2. Flush the blog caches:
@@ -187,7 +201,7 @@ curl -s -X POST "$BASE_URL/api/revalidate/blog" \
    `publishedPost` to a reference to the blogPost doc. A `podcastReviewBrief` gets
    `status` → `'published'` and `blogPostRef` set to the post's slug.
 
-Valve off, verdict not PASS, or no hero image could be produced → leave the post as a Sanity
+Valve off, either verdict not PASS, or no hero image could be produced → leave the post as a Sanity
 draft, post an event saying exactly that, re-queue the brief if one was claimed
 (`seoContentBrief` → `'queued'`, `podcastReviewBrief` → `'pending'`), and finish the run as
 succeeded. Draft-only is a valid, honest outcome, not a failure; publishing a post with no hero

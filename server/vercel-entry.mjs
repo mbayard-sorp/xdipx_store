@@ -50,6 +50,7 @@ __export(schema_exports, {
   apiTokenLog: () => apiTokenLog,
   batchJobs: () => batchJobs,
   callLog: () => callLog,
+  checkoutProbeRuns: () => checkoutProbeRuns,
   colorSwatchCache: () => colorSwatchCache,
   consentLog: () => consentLog,
   customerAnniversaries: () => customerAnniversaries,
@@ -65,6 +66,7 @@ __export(schema_exports, {
   emmaChatThreads: () => emmaChatThreads,
   emmaChatTurns: () => emmaChatTurns,
   enrichmentBatches: () => enrichmentBatches,
+  ga4PurchaseFailures: () => ga4PurchaseFailures,
   homepagePayload: () => homepagePayload,
   homepageTeamEvents: () => homepageTeamEvents,
   homepageTeamRuns: () => homepageTeamRuns,
@@ -123,7 +125,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, nalpacPriceHistory, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, strategyBriefs, adCampaigns, marketingCalendar, mediaAssets, videoJobs, adCreatives;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, checkoutProbeRuns, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, nalpacPriceHistory, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, ga4PurchaseFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, strategyBriefs, adCampaigns, marketingCalendar, mediaAssets, videoJobs, adCreatives;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -209,6 +211,17 @@ var init_schema = __esm({
       key: varchar("key", { length: 50 }).primaryKey(),
       value: text("value").notNull(),
       updatedAt: timestamp("updated_at").defaultNow()
+    });
+    checkoutProbeRuns = pgTable("checkout_probe_runs", {
+      id: bigserial("id", { mode: "number" }).primaryKey(),
+      ranAt: timestamp("ran_at", { withTimezone: true }).notNull().defaultNow(),
+      tier: text("tier").notNull(),
+      // 'http' | 'browser'
+      ok: boolean("ok").notNull(),
+      failedStep: text("failed_step"),
+      steps: jsonb("steps").$type().notNull().default([]),
+      durationMs: integer("duration_ms"),
+      alerted: boolean("alerted").notNull().default(false)
     });
     customerProfileExtras = pgTable("customer_profile_extras", {
       customerGid: varchar("customer_gid", { length: 60 }).primaryKey(),
@@ -957,6 +970,17 @@ var init_schema = __esm({
       resolvedAt: timestamp("resolved_at")
     }, (t) => ({
       unresolvedIdx: index("idx_meta_capi_failures_unresolved").on(t.createdAt)
+    }));
+    ga4PurchaseFailures = pgTable("ga4_purchase_failures", {
+      id: serial("id").primaryKey(),
+      orderId: varchar("order_id", { length: 64 }).notNull().unique(),
+      payload: jsonb("payload").notNull(),
+      attempts: integer("attempts").notNull().default(0),
+      lastError: text("last_error"),
+      createdAt: timestamp("created_at").notNull().defaultNow(),
+      resolvedAt: timestamp("resolved_at")
+    }, (t) => ({
+      unresolvedIdx: index("idx_ga4_purchase_failures_unresolved").on(t.createdAt)
     }));
     homepagePayload = pgTable("homepage_payload", {
       id: serial("id").primaryKey(),
@@ -9384,6 +9408,77 @@ var init_meta_capi_server = __esm({
   }
 });
 
+// app/lib/ga4-config.server.ts
+import { eq as eq4 } from "drizzle-orm";
+async function fetchFromDb() {
+  const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq4(pipelineSettings.key, "ga4MeasurementId")).limit(1);
+  return rows[0]?.value?.trim() ?? "";
+}
+async function resolveGa4() {
+  const envId = (process.env["GA4_MEASUREMENT_ID"] ?? "").trim();
+  if (envId) return { id: envId, source: "env" };
+  try {
+    const dbId = await cached(KV_KEY, TTL_SECONDS, fetchFromDb);
+    if (dbId) return { id: dbId, source: "db" };
+  } catch (err) {
+    console.warn("[ga4] resolution failed, disabling GA4 for this render:", err instanceof Error ? err.message : err);
+  }
+  return { id: "", source: "none" };
+}
+var KV_KEY, TTL_SECONDS;
+var init_ga4_config_server = __esm({
+  "app/lib/ga4-config.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_kv_server();
+    KV_KEY = "ga4:measurementId";
+    TTL_SECONDS = 300;
+  }
+});
+
+// app/lib/ga4-mp.server.ts
+var ga4_mp_server_exports = {};
+__export(ga4_mp_server_exports, {
+  sendGa4Purchase: () => sendGa4Purchase
+});
+async function sendGa4Purchase(e) {
+  const { id: measurementId } = await resolveGa4();
+  const apiSecret = (process.env["GA4_API_SECRET"] ?? "").trim();
+  if (!measurementId) return { ok: false, skipped: "no GA4 measurement id" };
+  if (!apiSecret) return { ok: false, skipped: "no GA4_API_SECRET" };
+  const clientId = e.clientId && e.clientId.length > 0 ? e.clientId : `srv.${e.transactionId}`;
+  const body = {
+    client_id: clientId,
+    // Non-personalized server event; no user-id, no ad-consent implied.
+    events: [{
+      name: "purchase",
+      params: {
+        transaction_id: e.transactionId,
+        value: e.value,
+        currency: e.currency,
+        items: e.items
+      }
+    }]
+  };
+  try {
+    const res = await fetch(
+      `https://www.google-analytics.com/mp/collect?measurement_id=${encodeURIComponent(measurementId)}&api_secret=${encodeURIComponent(apiSecret)}`,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+    );
+    if (res.status >= 200 && res.status < 300) return { ok: true };
+    return { ok: false, error: `GA4 MP HTTP ${res.status}` };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+var init_ga4_mp_server = __esm({
+  "app/lib/ga4-mp.server.ts"() {
+    "use strict";
+    init_ga4_config_server();
+  }
+});
+
 // app/lib/feed-processor.server.ts
 var feed_processor_server_exports = {};
 __export(feed_processor_server_exports, {
@@ -9401,10 +9496,10 @@ __export(feed_processor_server_exports, {
   scoreProduct: () => scoreProduct
 });
 import { parse } from "csv-parse/sync";
-import { sql as sql2, eq as eq4 } from "drizzle-orm";
+import { sql as sql2, eq as eq5 } from "drizzle-orm";
 async function getPipelineSetting(key) {
   try {
-    const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq4(pipelineSettings.key, key)).limit(1);
+    const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq5(pipelineSettings.key, key)).limit(1);
     return rows[0]?.value ?? null;
   } catch {
     return null;
@@ -9587,7 +9682,7 @@ async function archiveDiscontinuedProducts(skus) {
       const rows = await db.select({
         shopifyProductId: dealHistory.shopifyProductId,
         status: dealHistory.status
-      }).from(dealHistory).where(eq4(dealHistory.sku, sku)).limit(1);
+      }).from(dealHistory).where(eq5(dealHistory.sku, sku)).limit(1);
       const row = rows[0];
       if (!row) {
         result.notImported++;
@@ -9602,7 +9697,7 @@ async function archiveDiscontinuedProducts(skus) {
         continue;
       }
       const archived = await archiveShopifyProduct2(row.shopifyProductId, "discontinued by manufacturer");
-      await db.update(dealHistory).set({ status: "archived" }).where(eq4(dealHistory.sku, sku));
+      await db.update(dealHistory).set({ status: "archived" }).where(eq5(dealHistory.sku, sku));
       if (upsertProductPage2 && archived?.handle) {
         try {
           await upsertProductPage2({
@@ -9665,11 +9760,14 @@ __export(klaviyo_server_exports, {
   subscribeToList: () => subscribeToList,
   subscribeToWaitlist: () => subscribeToWaitlist,
   syncWishlistProfileProperty: () => syncWishlistProfileProperty,
+  trackAddedToCart: () => trackAddedToCart,
   trackEvent: () => trackEvent,
+  trackPlacedOrder: () => trackPlacedOrder,
   trackReviewApproved: () => trackReviewApproved,
   trackReviewInviteSent: () => trackReviewInviteSent,
   trackReviewReminderSent: () => trackReviewReminderSent,
   trackReviewSubmitted: () => trackReviewSubmitted,
+  trackStartedCheckout: () => trackStartedCheckout,
   trackWishlistAdded: () => trackWishlistAdded,
   trackWishlistRemoved: () => trackWishlistRemoved,
   triggerDailyDealEmail: () => triggerDailyDealEmail,
@@ -9750,17 +9848,41 @@ async function subscribeToWaitlist(email, productHandle) {
   });
   await trackEvent(email, "Waitlist Signup", { product_handle: productHandle });
 }
-async function trackEvent(email, eventName, properties) {
-  await klaviyoFetch("/events/", "POST", {
-    data: {
-      type: "event",
-      attributes: {
-        metric: { data: { type: "metric", attributes: { name: eventName } } },
-        profile: { data: { type: "profile", attributes: { email } } },
-        properties
-      }
-    }
-  });
+async function trackEvent(email, eventName, properties, opts = {}) {
+  const attributes = {
+    metric: { data: { type: "metric", attributes: { name: eventName } } },
+    profile: { data: { type: "profile", attributes: { email } } },
+    properties
+  };
+  if (opts.uniqueId) attributes["unique_id"] = opts.uniqueId;
+  await klaviyoFetch("/events/", "POST", { data: { type: "event", attributes } });
+}
+async function trackAddedToCart(email, item) {
+  try {
+    await trackEvent(email, "Added to Cart", { ...item });
+  } catch (err) {
+    console.error("[klaviyo] trackAddedToCart failed:", err instanceof Error ? err.message : err);
+  }
+}
+async function trackStartedCheckout(email, params) {
+  try {
+    const opts = params.uniqueId ? { uniqueId: params.uniqueId } : {};
+    await trackEvent(email, "Started Checkout", { cartId: params.cartId, value: params.value, currency: params.currency, items: params.items }, opts);
+  } catch (err) {
+    console.error("[klaviyo] trackStartedCheckout failed:", err instanceof Error ? err.message : err);
+  }
+}
+async function trackPlacedOrder(email, params) {
+  try {
+    await trackEvent(
+      email,
+      "Placed Order",
+      { orderId: params.orderId, orderNumber: params.orderNumber, value: params.value, currency: params.currency, items: params.items },
+      { uniqueId: `placed_order_${params.orderId}` }
+    );
+  } catch (err) {
+    console.error("[klaviyo] trackPlacedOrder failed:", err instanceof Error ? err.message : err);
+  }
 }
 async function trackReviewSubmitted(params) {
   await trackEvent(params.email, "Review Submitted", {
@@ -10517,8 +10639,8 @@ var init_team_keys = __esm({
       ads: { dailyCents: 500, maxRunsPerDay: 1 },
       email: { dailyCents: 500, maxRunsPerDay: 1 },
       strategy: { dailyCents: 300, maxRunsPerDay: 1 },
-      content: { dailyCents: 300, maxRunsPerDay: 2 },
-      // 2nd run = one voice-gate retry
+      content: { dailyCents: 500, maxRunsPerDay: 3 },
+      // 3rd run = gate-retry headroom on double days (Sat trend-scout, Sun SEO curation, Wed podcast); budget covers the accuracy gate's web verification (068)
       product: { dailyCents: 300, maxRunsPerDay: 1 },
       // daily import-queue drain (SQL + curl, ~$0)
       video: { dailyCents: 2e3, maxRunsPerDay: 1 }
@@ -10562,6 +10684,10 @@ var init_team_keys = __esm({
       contentAutopublish: "content_team_autopublish",
       keywordResearch: "keyword_research_enabled",
       seoCuration: "seo_curation_enabled",
+      // Trend scout: kill switch for the weekly Saturday trend-scout routine
+      // (community-discourse research that proposes trendTopicBrief docs for the
+      // seo-curator's Sunday planning; research-only, never writes posts).
+      trendScout: "trend_scout_enabled",
       reviewsPdp: "reviews_pdp_enabled",
       // Video autopublish: even with the video team enabled, platform posting stays
       // manual until this AND the per-platform publisher env keys are both set.
@@ -13722,7 +13848,7 @@ __export(twitter_server_exports, {
 });
 import OAuth from "oauth-1.0a";
 import crypto2 from "node:crypto";
-import { eq as eq5 } from "drizzle-orm";
+import { eq as eq6 } from "drizzle-orm";
 function getOAuth() {
   return new OAuth({
     consumer: {
@@ -13963,7 +14089,7 @@ async function postManualTweet(text2, imageUrl, dealHistoryId) {
   }
 }
 async function postApprovedDraft(postId) {
-  const [post] = await db.select().from(socialPosts).where(eq5(socialPosts.id, postId)).limit(1);
+  const [post] = await db.select().from(socialPosts).where(eq6(socialPosts.id, postId)).limit(1);
   if (!post || post.status !== "draft" || post.reviewStatus !== "approved") {
     return { ok: false, error: "Post not found or not an approved draft" };
   }
@@ -13985,18 +14111,18 @@ async function postApprovedDraft(postId) {
       status: "posted",
       postedAt: /* @__PURE__ */ new Date(),
       errorMessage: null
-    }).where(eq5(socialPosts.id, postId));
+    }).where(eq6(socialPosts.id, postId));
     return { ok: true, tweetId: tweet.id, tweetText: text2 };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    await db.update(socialPosts).set({ errorMessage }).where(eq5(socialPosts.id, postId));
+    await db.update(socialPosts).set({ errorMessage }).where(eq6(socialPosts.id, postId));
     return { ok: false, error: errorMessage };
   }
 }
 async function deleteAndLogTweet(postId, externalPostId) {
   try {
     await deleteTweet(externalPostId);
-    await db.update(socialPosts).set({ status: "deleted" }).where(eq5(socialPosts.id, postId));
+    await db.update(socialPosts).set({ status: "deleted" }).where(eq6(socialPosts.id, postId));
     return { ok: true };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -14004,7 +14130,7 @@ async function deleteAndLogTweet(postId, externalPostId) {
   }
 }
 async function retryFailedPost(postId) {
-  const [post] = await db.select().from(socialPosts).where(eq5(socialPosts.id, postId)).limit(1);
+  const [post] = await db.select().from(socialPosts).where(eq6(socialPosts.id, postId)).limit(1);
   if (!post || post.status !== "failed") {
     return { ok: false, error: "Post not found or not in failed state" };
   }
@@ -14015,11 +14141,11 @@ async function retryFailedPost(postId) {
       status: "posted",
       postedAt: /* @__PURE__ */ new Date(),
       errorMessage: null
-    }).where(eq5(socialPosts.id, postId));
+    }).where(eq6(socialPosts.id, postId));
     return { ok: true, tweetId: tweet.id, tweetText: post.tweetText };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    await db.update(socialPosts).set({ errorMessage }).where(eq5(socialPosts.id, postId));
+    await db.update(socialPosts).set({ errorMessage }).where(eq6(socialPosts.id, postId));
     return { ok: false, error: errorMessage };
   }
 }
@@ -14593,11 +14719,11 @@ var init_discovery_tags = __esm({
 });
 
 // app/lib/discovery-rules.server.ts
-import { eq as eq6, and, asc } from "drizzle-orm";
+import { eq as eq7, and, asc } from "drizzle-orm";
 async function getActiveDiscoveryRules() {
   const cached2 = await kvGet(RULES_CACHE_KEY);
   if (cached2 && Array.isArray(cached2)) return cached2;
-  const rows = await db.select().from(discoveryRules).where(eq6(discoveryRules.active, true)).orderBy(asc(discoveryRules.ruleType), asc(discoveryRules.sortOrder), asc(discoveryRules.id));
+  const rows = await db.select().from(discoveryRules).where(eq7(discoveryRules.active, true)).orderBy(asc(discoveryRules.ruleType), asc(discoveryRules.sortOrder), asc(discoveryRules.id));
   const rules = rows.map(rowToRule);
   await kvSet(RULES_CACHE_KEY, rules, RULES_TTL_SECONDS);
   return rules;
@@ -14605,7 +14731,7 @@ async function getActiveDiscoveryRules() {
 async function getInventoryMin() {
   const cached2 = await kvGet(INVENTORY_MIN_CACHE_KEY);
   if (typeof cached2 === "number") return cached2;
-  const row = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq6(pipelineSettings.key, "discovery_inventory_min")).limit(1);
+  const row = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq7(pipelineSettings.key, "discovery_inventory_min")).limit(1);
   const parsed = row.length && row[0] ? parseInt(row[0].value, 10) : 0;
   const value = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
   await kvSet(INVENTORY_MIN_CACHE_KEY, value, INVENTORY_MIN_CACHE_TTL);
@@ -14815,7 +14941,7 @@ __export(discovery_server_exports, {
   triggerDiscoveryRebuild: () => triggerDiscoveryRebuild,
   writeDiscoveryIndexDurable: () => writeDiscoveryIndexDurable
 });
-import { eq as eq7 } from "drizzle-orm";
+import { eq as eq8 } from "drizzle-orm";
 function dialToSubcategory(dial) {
   switch (dial) {
     case "vibrator":
@@ -15065,10 +15191,10 @@ async function buildDiscoveryIndex() {
   return out;
 }
 function triggerDiscoveryRebuild() {
-  const baseUrl = process.env["BASE_URL"];
+  const baseUrl2 = process.env["BASE_URL"];
   const cronSecret = process.env["CRON_SECRET"];
-  if (!baseUrl || !cronSecret) return;
-  void fetch(`${baseUrl}/cron/warm-discovery-index`, {
+  if (!baseUrl2 || !cronSecret) return;
+  void fetch(`${baseUrl2}/cron/warm-discovery-index`, {
     method: "POST",
     headers: { "Authorization": `Bearer ${cronSecret}` }
   }).catch(() => {
@@ -15085,7 +15211,7 @@ function writeL1Memo(index2, vocab) {
 }
 async function readDiscoveryIndexDurable() {
   try {
-    const [row] = await db.select().from(discoveryIndexPayload).where(eq7(discoveryIndexPayload.version, INDEX_VERSION)).limit(1);
+    const [row] = await db.select().from(discoveryIndexPayload).where(eq8(discoveryIndexPayload.version, INDEX_VERSION)).limit(1);
     if (!row) return null;
     const index2 = row.indexJson;
     const vocab = row.vocabJson;
@@ -15407,7 +15533,7 @@ __export(homepage_payload_server_exports, {
   warmHomepagePayloadA: () => warmHomepagePayloadA,
   writeHomepagePayloadA: () => writeHomepagePayloadA
 });
-import { eq as eq8 } from "drizzle-orm";
+import { eq as eq9 } from "drizzle-orm";
 async function buildHomeContentBlocks() {
   const cmsData = await withTimeout(
     getHomepageSections(),
@@ -15524,7 +15650,7 @@ async function readHomepagePayloadA() {
     console.warn("[homepage-payload] KV read failed, trying Neon:", err);
   }
   try {
-    const [row] = await db.select().from(homepagePayload).where(eq8(homepagePayload.variant, "a")).limit(1);
+    const [row] = await db.select().from(homepagePayload).where(eq9(homepagePayload.variant, "a")).limit(1);
     if (row && row.version === HOMEPAGE_PAYLOAD_VERSION && row.payload) {
       const payload = row.payload;
       void kvSet(HOMEPAGE_PAYLOAD_KV_KEY, payload, KV_TTL_SECONDS).catch(() => {
@@ -15574,10 +15700,10 @@ async function invalidateHomepagePayloadA() {
   await kvDel(HOMEPAGE_PAYLOAD_KV_KEY);
 }
 function triggerHomepageWarm() {
-  const baseUrl = process.env["BASE_URL"];
+  const baseUrl2 = process.env["BASE_URL"];
   const cronSecret = process.env["CRON_SECRET"];
-  if (!baseUrl || !cronSecret) return;
-  void fetch(`${baseUrl}/cron/warm-homepage`, {
+  if (!baseUrl2 || !cronSecret) return;
+  void fetch(`${baseUrl2}/cron/warm-homepage`, {
     method: "POST",
     headers: { "Authorization": `Bearer ${cronSecret}` }
   }).catch(() => {
@@ -15641,7 +15767,7 @@ __export(deal_rotator_server_exports, {
   rotateDeal: () => rotateDeal,
   transitionToVaultPricing: () => transitionToVaultPricing
 });
-import { eq as eq9, ne, and as and2, isNull, asc as asc2, inArray as inArray2 } from "drizzle-orm";
+import { eq as eq10, ne, and as and2, isNull, asc as asc2, inArray as inArray2 } from "drizzle-orm";
 function estDate(offsetDays = 0) {
   const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1e3);
   return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -15654,7 +15780,7 @@ function pastDealTag(dealDate) {
   return `past-daily-deal-${mm}-${yyyy.slice(2)}`;
 }
 async function getVaultDiscountPct() {
-  const [row] = await db.select().from(pipelineSettings).where(eq9(pipelineSettings.key, "vaultDiscountPct")).limit(1);
+  const [row] = await db.select().from(pipelineSettings).where(eq10(pipelineSettings.key, "vaultDiscountPct")).limit(1);
   const pct = parseFloat(row?.value ?? "25");
   return isNaN(pct) ? 25 : Math.max(5, Math.min(60, pct));
 }
@@ -15710,7 +15836,7 @@ async function transitionToVaultPricing(deal) {
     status: "archived",
     completedAt: /* @__PURE__ */ new Date(),
     vaultPrice: vaultPrice > 0 ? vaultPrice.toFixed(2) : null
-  }).where(and2(eq9(dealHistory.id, deal.id), eq9(dealHistory.status, "live")));
+  }).where(and2(eq10(dealHistory.id, deal.id), eq10(dealHistory.status, "live")));
   try {
     const { archiveHomepageRailsForDeal: archiveHomepageRailsForDeal2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
     const { archived } = await archiveHomepageRailsForDeal2(deal.shopifyProductId);
@@ -15724,23 +15850,23 @@ async function transitionToVaultPricing(deal) {
 async function activateDeal(deal) {
   if (!deal.shopifyProductId) return;
   const blockingJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and2(
-    eq9(batchJobs.gatesDealId, deal.id),
+    eq10(batchJobs.gatesDealId, deal.id),
     inArray2(batchJobs.status, ["queued", "submitted", "processing", "applying"])
   ));
   if (blockingJobs.length > 0) {
     console.log(`[deal-rotator] enrichment in flight for deal ${deal.id} \u2014 deferring activation (${blockingJobs.length} blocking job(s))`);
     return;
   }
-  const failedJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and2(eq9(batchJobs.gatesDealId, deal.id), eq9(batchJobs.status, "failed")));
+  const failedJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and2(eq10(batchJobs.gatesDealId, deal.id), eq10(batchJobs.status, "failed")));
   if (failedJobs.length > 0) {
     console.warn(`[deal-rotator] WARN gated enrichment failed for deal ${deal.id}; activating with stale/partial copy (degraded-enrichment path)`);
   }
-  const claimed = await db.update(dealHistory).set({ status: "live" }).where(and2(eq9(dealHistory.id, deal.id), ne(dealHistory.status, "live"))).returning({ id: dealHistory.id });
+  const claimed = await db.update(dealHistory).set({ status: "live" }).where(and2(eq10(dealHistory.id, deal.id), ne(dealHistory.status, "live"))).returning({ id: dealHistory.id });
   if (claimed.length === 0) {
     console.log(`[deal-rotator] deal ${deal.id} already live \u2014 skipping duplicate activation`);
     return;
   }
-  const anyGatingJob = await db.select({ id: batchJobs.id, status: batchJobs.status }).from(batchJobs).where(eq9(batchJobs.gatesDealId, deal.id)).limit(1);
+  const anyGatingJob = await db.select({ id: batchJobs.id, status: batchJobs.status }).from(batchJobs).where(eq10(batchJobs.gatesDealId, deal.id)).limit(1);
   const skipInlineHero = anyGatingJob.length > 0;
   const numericId = deal.shopifyProductId.replace("gid://shopify/Product/", "");
   await activateShopifyProduct(numericId);
@@ -15830,7 +15956,7 @@ async function activateDeal(deal) {
   await db.update(dealHistory).set({
     activatedAt: /* @__PURE__ */ new Date(),
     dealDate: estDate(0)
-  }).where(eq9(dealHistory.id, deal.id));
+  }).where(eq10(dealHistory.id, deal.id));
   await kvSet(KV_KEYS.dealOfDay, {
     sku: deal.sku,
     title: deal.seoTitle,
@@ -15867,13 +15993,13 @@ async function activateDeal(deal) {
   }
 }
 async function rotateDeal() {
-  const [liveDeal] = await db.select().from(dealHistory).where(eq9(dealHistory.status, "live")).limit(1);
+  const [liveDeal] = await db.select().from(dealHistory).where(eq10(dealHistory.status, "live")).limit(1);
   if (liveDeal) {
     await transitionToVaultPricing(liveDeal);
   }
   const [nextDeal] = await db.select().from(dealHistory).where(
     and2(
-      eq9(dealHistory.status, "queued"),
+      eq10(dealHistory.status, "queued"),
       isNull(dealHistory.completedAt)
     )
   ).orderBy(asc2(dealHistory.sortOrder)).limit(1);
@@ -15912,7 +16038,7 @@ async function rotateDeal() {
   };
 }
 async function isLiveDealSoldOut() {
-  const [liveDeal] = await db.select().from(dealHistory).where(eq9(dealHistory.status, "live")).limit(1);
+  const [liveDeal] = await db.select().from(dealHistory).where(eq10(dealHistory.status, "live")).limit(1);
   if (!liveDeal?.shopifyProductId) return { soldOut: false, dealId: null };
   const numericId = liveDeal.shopifyProductId.replace("gid://shopify/Product/", "");
   let product;
@@ -16457,10 +16583,10 @@ __export(profit_server_exports, {
   getDashboardStats: () => getDashboardStats,
   writeProfitSummary: () => writeProfitSummary
 });
-import { eq as eq10, sql as sql3 } from "drizzle-orm";
+import { eq as eq11, sql as sql3 } from "drizzle-orm";
 async function writeProfitSummary() {
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-  const [todayDeal] = await db.select().from(dealHistory).where(eq10(dealHistory.dealDate, today)).limit(1);
+  const [todayDeal] = await db.select().from(dealHistory).where(eq11(dealHistory.dealDate, today)).limit(1);
   if (!todayDeal) return;
   const { shopifyAdmin: shopifyAdmin2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
   const ordersData = await shopifyAdmin2(`/orders.json?status=paid&created_at_min=${today}T00:00:00-00:00`);
@@ -16499,7 +16625,7 @@ async function writeProfitSummary() {
     unitsSold: totalOrders,
     totalRevenue: totalRevenue.toFixed(2),
     totalProfit: totalProfit.toFixed(2)
-  }).where(eq10(dealHistory.dealDate, today));
+  }).where(eq11(dealHistory.dealDate, today));
 }
 async function getDashboardStats(days = 30) {
   const rows = await db.select().from(dailyProfitSummary).orderBy(sql3`${dailyProfitSummary.summaryDate} DESC`).limit(days);
@@ -17225,7 +17351,7 @@ __export(team_server_exports, {
   updateRun: () => updateRun
 });
 import { timingSafeEqual } from "node:crypto";
-import { and as and3, desc, eq as eq11, gte, lt, lte, ne as ne2, sql as sql5 } from "drizzle-orm";
+import { and as and3, desc, eq as eq12, gte, lt, lte, ne as ne2, sql as sql5 } from "drizzle-orm";
 function assertTeamAuth(request) {
   const expected = process.env["TEAM_TOKEN"] ?? process.env["HOMEPAGE_TEAM_TOKEN"] ?? process.env["CRON_SECRET"] ?? "";
   const auth = request.headers.get("authorization") ?? "";
@@ -17269,7 +17395,7 @@ async function getTeamConfigUncached(team) {
 }
 async function getValve(key) {
   return cached(`team:valve:${key}`, SETTINGS_CACHE_TTL_SEC, async () => {
-    const [row] = await db.select().from(pipelineSettings).where(eq11(pipelineSettings.key, key)).limit(1);
+    const [row] = await db.select().from(pipelineSettings).where(eq12(pipelineSettings.key, key)).limit(1);
     return row?.value === "true";
   });
 }
@@ -17330,8 +17456,8 @@ async function getTodayImageCount() {
 async function isRunInProgress(team, excludeRunId) {
   const since = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 6e4);
   const conditions = [
-    eq11(homepageTeamRuns.team, team),
-    eq11(homepageTeamRuns.status, "running"),
+    eq12(homepageTeamRuns.team, team),
+    eq12(homepageTeamRuns.status, "running"),
     gte(homepageTeamRuns.startedAt, since)
   ];
   if (excludeRunId !== void 0) conditions.push(ne2(homepageTeamRuns.id, excludeRunId));
@@ -17344,7 +17470,7 @@ async function expireStaleRuns() {
     status: "failed",
     error: `auto-expired: still 'running' past the ${RUN_LOCK_WINDOW_MIN}-minute lock window`,
     finishedAt: /* @__PURE__ */ new Date()
-  }).where(and3(eq11(homepageTeamRuns.status, "running"), lt(homepageTeamRuns.startedAt, cutoff)));
+  }).where(and3(eq12(homepageTeamRuns.status, "running"), lt(homepageTeamRuns.startedAt, cutoff)));
 }
 async function gate(team, excludeRunId) {
   if (await kvSetNX("team:expire-stale:throttle", String(Date.now()), 300)) {
@@ -17398,7 +17524,7 @@ async function updateRun(id, u) {
   if (u.finished) patch["finishedAt"] = /* @__PURE__ */ new Date();
   if (u.incrementAttempt) patch["attemptCount"] = sql5`${homepageTeamRuns.attemptCount} + 1`;
   if (Object.keys(patch).length === 0) return;
-  await db.update(homepageTeamRuns).set(patch).where(eq11(homepageTeamRuns.id, id));
+  await db.update(homepageTeamRuns).set(patch).where(eq12(homepageTeamRuns.id, id));
 }
 async function recordEvent(e) {
   await db.insert(homepageTeamEvents).values({
@@ -17412,15 +17538,15 @@ async function recordEvent(e) {
 }
 async function listRecentRuns(team, limit = 25) {
   const q = db.select().from(homepageTeamRuns);
-  return (team ? q.where(eq11(homepageTeamRuns.team, team)) : q).orderBy(desc(homepageTeamRuns.startedAt)).limit(limit);
+  return (team ? q.where(eq12(homepageTeamRuns.team, team)) : q).orderBy(desc(homepageTeamRuns.startedAt)).limit(limit);
 }
 async function listRunEvents(runId) {
-  return db.select().from(homepageTeamEvents).where(eq11(homepageTeamEvents.runId, runId)).orderBy(homepageTeamEvents.ts);
+  return db.select().from(homepageTeamEvents).where(eq12(homepageTeamEvents.runId, runId)).orderBy(homepageTeamEvents.ts);
 }
 async function listRecentEvents(team, sinceDays = 7, limit = 500) {
   const since = new Date(Date.now() - sinceDays * 24 * 60 * 6e4);
   const conditions = [gte(homepageTeamEvents.ts, since)];
-  if (team) conditions.push(eq11(homepageTeamRuns.team, team));
+  if (team) conditions.push(eq12(homepageTeamRuns.team, team));
   return db.select({
     id: homepageTeamEvents.id,
     runId: homepageTeamEvents.runId,
@@ -17430,7 +17556,7 @@ async function listRecentEvents(team, sinceDays = 7, limit = 500) {
     phase: homepageTeamEvents.phase,
     eventType: homepageTeamEvents.eventType,
     summary: homepageTeamEvents.summary
-  }).from(homepageTeamEvents).innerJoin(homepageTeamRuns, eq11(homepageTeamEvents.runId, homepageTeamRuns.id)).where(and3(...conditions)).orderBy(desc(homepageTeamEvents.ts)).limit(limit);
+  }).from(homepageTeamEvents).innerJoin(homepageTeamRuns, eq12(homepageTeamEvents.runId, homepageTeamRuns.id)).where(and3(...conditions)).orderBy(desc(homepageTeamEvents.ts)).limit(limit);
 }
 async function createSuggestion(s) {
   const actingTeam = s.targetTeam ?? s.team;
@@ -17452,21 +17578,21 @@ async function createSuggestion(s) {
 }
 async function listSuggestions(filter = {}) {
   const conditions = [];
-  if (filter.team) conditions.push(eq11(homepageTeamSuggestions.team, filter.team));
-  if (filter.targetTeam) conditions.push(eq11(homepageTeamSuggestions.targetTeam, filter.targetTeam));
-  if (filter.status) conditions.push(eq11(homepageTeamSuggestions.status, filter.status));
+  if (filter.team) conditions.push(eq12(homepageTeamSuggestions.team, filter.team));
+  if (filter.targetTeam) conditions.push(eq12(homepageTeamSuggestions.targetTeam, filter.targetTeam));
+  if (filter.status) conditions.push(eq12(homepageTeamSuggestions.status, filter.status));
   const q = db.select().from(homepageTeamSuggestions);
   return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(desc(homepageTeamSuggestions.createdAt)).limit(filter.limit ?? 100);
 }
 async function decideSuggestion(id, status) {
-  await db.update(homepageTeamSuggestions).set({ status, decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "proposed")));
+  await db.update(homepageTeamSuggestions).set({ status, decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq12(homepageTeamSuggestions.id, id), eq12(homepageTeamSuggestions.status, "proposed")));
 }
 async function retireSuggestion(id) {
-  await db.update(homepageTeamSuggestions).set({ status: "dismissed", decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "approved")));
+  await db.update(homepageTeamSuggestions).set({ status: "dismissed", decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq12(homepageTeamSuggestions.id, id), eq12(homepageTeamSuggestions.status, "approved")));
 }
 async function markSuggestion(id, status, applyRef) {
   const allowedFrom = status === "pr_open" ? "approved" : "pr_open";
-  const res = await db.update(homepageTeamSuggestions).set({ status, applyRef }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, allowedFrom))).returning({ id: homepageTeamSuggestions.id });
+  const res = await db.update(homepageTeamSuggestions).set({ status, applyRef }).where(and3(eq12(homepageTeamSuggestions.id, id), eq12(homepageTeamSuggestions.status, allowedFrom))).returning({ id: homepageTeamSuggestions.id });
   if (res.length === 0) {
     throw new Response(
       `Conflict: suggestion ${id} is not in '${allowedFrom}' (agents cannot move rows out of 'proposed')`,
@@ -17475,7 +17601,7 @@ async function markSuggestion(id, status, applyRef) {
   }
 }
 async function getActiveBrief() {
-  const [row] = await db.select().from(strategyBriefs).where(eq11(strategyBriefs.status, "active")).orderBy(desc(strategyBriefs.createdAt)).limit(1);
+  const [row] = await db.select().from(strategyBriefs).where(eq12(strategyBriefs.status, "active")).orderBy(desc(strategyBriefs.createdAt)).limit(1);
   return row ?? null;
 }
 async function getActiveBriefId() {
@@ -17486,7 +17612,7 @@ async function getActiveBriefId() {
   );
 }
 async function publishBrief(input) {
-  await db.update(strategyBriefs).set({ status: "superseded" }).where(eq11(strategyBriefs.status, "active"));
+  await db.update(strategyBriefs).set({ status: "superseded" }).where(eq12(strategyBriefs.status, "active"));
   const [row] = await db.insert(strategyBriefs).values({
     weekStart: input.weekStart,
     brief: input.brief,
@@ -17518,10 +17644,10 @@ async function createAdCampaign(c) {
 }
 async function listAdCampaigns(status, limit = 50) {
   const q = db.select().from(adCampaigns);
-  return (status ? q.where(eq11(adCampaigns.status, status)) : q).orderBy(desc(adCampaigns.createdAt)).limit(limit);
+  return (status ? q.where(eq12(adCampaigns.status, status)) : q).orderBy(desc(adCampaigns.createdAt)).limit(limit);
 }
 async function decideAdCampaign(id, status) {
-  await db.update(adCampaigns).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(adCampaigns.id, id), eq11(adCampaigns.status, "proposed")));
+  await db.update(adCampaigns).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where(and3(eq12(adCampaigns.id, id), eq12(adCampaigns.status, "proposed")));
 }
 async function createDraftSocialPost(p) {
   const [row] = await db.insert(socialPosts).values({
@@ -17542,8 +17668,8 @@ async function createDraftSocialPost(p) {
 }
 async function listSocialPosts(status, limit = 50, reviewStatus) {
   const conditions = [];
-  if (status) conditions.push(eq11(socialPosts.status, status));
-  if (reviewStatus) conditions.push(eq11(socialPosts.reviewStatus, reviewStatus));
+  if (status) conditions.push(eq12(socialPosts.status, status));
+  if (reviewStatus) conditions.push(eq12(socialPosts.reviewStatus, reviewStatus));
   const q = db.select().from(socialPosts);
   return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(desc(socialPosts.createdAt)).limit(limit);
 }
@@ -17563,11 +17689,11 @@ async function reviewSocialPost(id, input) {
     editedText: input.editedText ?? null,
     reviewedBy: input.reviewedBy,
     reviewedAt: /* @__PURE__ */ new Date()
-  }).where(and3(eq11(socialPosts.id, id), ne2(socialPosts.status, "posted"))).returning({ id: socialPosts.id });
+  }).where(and3(eq12(socialPosts.id, id), ne2(socialPosts.status, "posted"))).returning({ id: socialPosts.id });
   return result.length > 0;
 }
 async function rescheduleSocialPost(id, scheduledFor) {
-  await db.update(socialPosts).set({ scheduledFor }).where(eq11(socialPosts.id, id));
+  await db.update(socialPosts).set({ scheduledFor }).where(eq12(socialPosts.id, id));
 }
 async function listCalendar(from, to) {
   const conditions = [];
@@ -19297,7 +19423,7 @@ var init_pricing_report_server = __esm({
 });
 
 // app/lib/pricing-agent.server.ts
-import { eq as eq12 } from "drizzle-orm";
+import { eq as eq13 } from "drizzle-orm";
 var init_pricing_agent_server = __esm({
   "app/lib/pricing-agent.server.ts"() {
     "use strict";
@@ -19320,7 +19446,7 @@ var init_pricing_apply_server = __esm({
 });
 
 // app/lib/pricing-webhook.server.ts
-import { eq as eq13, sql as sql9 } from "drizzle-orm";
+import { eq as eq14, sql as sql9 } from "drizzle-orm";
 async function setPipelineSetting(key, value) {
   await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
     target: pipelineSettings.key,
@@ -20199,7 +20325,7 @@ Be efficient. Each tool is a single call. Do NOT call the same tool twice.`;
 });
 
 // app/lib/enricher-brief.server.ts
-import { eq as eq14 } from "drizzle-orm";
+import { eq as eq15 } from "drizzle-orm";
 async function adminGraphQLWithRetry(query, variables, attempt = 0) {
   try {
     return await adminGraphQL(query, variables);
@@ -20307,7 +20433,7 @@ async function gatherProductBrief(numericProductId) {
     sku: dealHistory.sku,
     brand: dealHistory.brand,
     categories: dealHistory.categories
-  }).from(dealHistory).where(eq14(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  }).from(dealHistory).where(eq15(dealHistory.shopifyProductId, numericProductId)).limit(1);
   const hist = histRows[0];
   const sku = hist?.sku;
   const brand = hist?.brand ?? snap.vendor ?? "";
@@ -20608,11 +20734,12 @@ var import_enrich_server_exports = {};
 __export(import_enrich_server_exports, {
   applyFullEnrichmentWrites: () => applyFullEnrichmentWrites,
   collectEnrichmentBatch: () => collectEnrichmentBatch,
+  detectImportEnrichStall: () => detectImportEnrichStall,
   publishEnrichedProducts: () => publishEnrichedProducts,
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and4, asc as asc3, eq as eq15, inArray as inArray4, isNull as isNull2, sql as sql11 } from "drizzle-orm";
+import { and as and4, asc as asc3, eq as eq16, inArray as inArray4, isNull as isNull2, sql as sql11 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -20648,7 +20775,7 @@ async function applyFullEnrichmentWrites(numericProductId, writes) {
   const snap = await fetchProductSnapshot(numericProductId);
   if (!snap) throw new Error(`fetchProductSnapshot returned null for ${numericProductId}`);
   const category = inferCategoryFallback(snap.metafields["xdipx.category"]);
-  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq15(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq16(dealHistory.shopifyProductId, numericProductId)).limit(1);
   const editorialTags = (histRows[0]?.categories ?? []).filter(
     (c) => !!c && c !== "(uncategorized)"
   );
@@ -20757,33 +20884,77 @@ function passesQualityGate(writes) {
   if (!checkDialSpread(writes.sensationDialV2?.items).ok) return false;
   return true;
 }
-async function submitEnrichmentBatch(cap) {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq15(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
-    eq15(importCandidates.status, "imported"),
+async function submitEnrichmentBatch(cap, opts = {}) {
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
+    eq16(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichBatchId),
     isNull2(importCandidates.enrichFailedAt)
   )).orderBy(asc3(importCandidates.id)).limit(cap);
   const valid = rows.filter((r) => Boolean(r.productId));
-  if (valid.length === 0) return { submitted: 0, reason: "no_unenriched" };
-  const inputs = [];
-  const candidateIds = [];
-  for (const r of valid) {
-    const brief = await gatherProductBrief(r.productId);
-    if (!brief) {
-      console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) -- skipping`);
-      continue;
-    }
-    brief.pairingCandidates = [];
-    inputs.push({ productId: String(r.productId), brief });
-    candidateIds.push(r.id);
-  }
-  if (inputs.length === 0) return { submitted: 0, reason: "no_briefs" };
+  if (valid.length === 0) return { submitted: 0, batchIds: [], reason: "no_unenriched" };
   const sharedContext = await loadSharedEnrichmentContext();
-  const { batchId } = await submitFullEnrichmentBatch(inputs, sharedContext, { brandVoice: EMMA_VOICE_ENRICHMENT });
-  await db.update(importCandidates).set({ enrichBatchId: batchId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray4(importCandidates.id, candidateIds));
-  console.log(`[import-enrich] submitted full-enrichment batch ${batchId} for ${inputs.length} product(s)`);
-  return { submitted: inputs.length, batchId };
+  const batchIds = [];
+  let submittedTotal = 0;
+  for (let i = 0; i < valid.length; i += BRIEF_CHUNK_SIZE) {
+    if (opts.deadline && Date.now() >= opts.deadline) {
+      console.warn(`[import-enrich] tick deadline reached after ${submittedTotal} submitted; ${valid.length - i} product(s) deferred to next tick`);
+      break;
+    }
+    const chunk = valid.slice(i, i + BRIEF_CHUNK_SIZE);
+    const inputs = [];
+    const candidateIds = [];
+    for (const r of chunk) {
+      const brief = await gatherProductBrief(r.productId);
+      if (!brief) {
+        console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) -- skipping`);
+        continue;
+      }
+      brief.pairingCandidates = [];
+      inputs.push({ productId: String(r.productId), brief });
+      candidateIds.push(r.id);
+    }
+    if (inputs.length === 0) continue;
+    const { batchId } = await submitFullEnrichmentBatch(inputs, sharedContext, { brandVoice: EMMA_VOICE_ENRICHMENT });
+    await db.update(importCandidates).set({ enrichBatchId: batchId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray4(importCandidates.id, candidateIds));
+    batchIds.push(batchId);
+    submittedTotal += inputs.length;
+    console.log(`[import-enrich] submitted full-enrichment batch ${batchId} for ${inputs.length} product(s)`);
+  }
+  if (submittedTotal === 0) return { submitted: 0, batchIds: [], reason: "no_briefs" };
+  return { submitted: submittedTotal, batchIds };
+}
+async function detectImportEnrichStall(enabled) {
+  try {
+    const cutoff = new Date(Date.now() - STALL_AGE_HOURS * 3600 * 1e3);
+    const rows = await db.select({
+      anchor: sql11`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
+    }).from(importCandidates).where(and4(
+      eq16(importCandidates.status, "imported"),
+      isNull2(importCandidates.enrichedAt),
+      isNull2(importCandidates.enrichBatchId),
+      isNull2(importCandidates.enrichFailedAt)
+    ));
+    const anchors = rows.map((r) => new Date(r.anchor)).filter((d) => !Number.isNaN(d.getTime()) && d < cutoff);
+    const stuck = anchors.length;
+    const oldest = anchors.reduce((min, d) => min === null || d < min ? d : min, null);
+    const oldestHours = oldest ? Math.round((Date.now() - oldest.getTime()) / 36e5) : null;
+    if (stuck <= STALL_COUNT_THRESHOLD) return { stuck, oldestHours, alerted: false };
+    const { kvSetNX: kvSetNX2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+    const fresh = await kvSetNX2("alert:import-enrich-stall", String(Date.now()), 24 * 3600);
+    if (!fresh) return { stuck, oldestHours, alerted: false };
+    const { sendOwnerEmail: sendOwnerEmail2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
+    const state = enabled ? "enabled" : "DISABLED";
+    await sendOwnerEmail2(
+      `xdipx import-enrich stall: ${stuck} products stuck`,
+      `<p>${escapeHtml2(String(stuck))} imported products have sat unclaimed by enrichment for over ${STALL_AGE_HOURS}h (oldest ${escapeHtml2(String(oldestHours ?? "?"))}h). The import_enrich pipeline is <strong>${state}</strong>.</p><p>If disabled, this is an expected backlog. If enabled, the submit step is failing to stamp enrich_batch_id; check the /cron/import-enrich logs and the import_enrich_batch_cap setting.</p>`
+    );
+    console.warn(`[import-enrich] STALL: ${stuck} stuck (oldest ${oldestHours}h), pipeline ${state}; owner alerted`);
+    return { stuck, oldestHours, alerted: true };
+  } catch (err) {
+    console.error("[import-enrich] stall detector error (non-fatal):", err);
+    return { stuck: 0, oldestHours: null, alerted: false };
+  }
 }
 async function collectEnrichmentBatch() {
   const rows = await db.select({
@@ -20791,8 +20962,8 @@ async function collectEnrichmentBatch() {
     batchId: importCandidates.enrichBatchId,
     productId: dealHistory.shopifyProductId,
     enrichAttempts: importCandidates.enrichAttempts
-  }).from(importCandidates).innerJoin(dealHistory, eq15(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
-    eq15(importCandidates.status, "imported"),
+  }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
+    eq16(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichFailedAt),
     sql11`${importCandidates.enrichBatchId} IS NOT NULL`
@@ -20830,17 +21001,17 @@ async function collectEnrichmentBatch() {
         }
       }
       if (ok) {
-        await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, candidate.id));
+        await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
         enrichedTotal++;
         continue;
       }
       const attempts = candidate.enrichAttempts + 1;
       const reason = batchFailure?.error ?? (!writes ? "no result in batch" : "quality gate failed");
       if (attempts < ENRICH_MAX_ATTEMPTS) {
-        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, candidate.id));
+        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
         console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- re-queued for retry`);
       } else {
-        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, candidate.id));
+        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
         console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- parked, needs manual review`);
       }
       failedTotal++;
@@ -20855,8 +21026,8 @@ async function publishEnrichedProducts() {
     sku: dealHistory.sku,
     title: dealHistory.seoTitle,
     categories: dealHistory.categories
-  }).from(importCandidates).innerJoin(dealHistory, eq15(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
-    eq15(importCandidates.status, "imported"),
+  }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
+    eq16(importCandidates.status, "imported"),
     sql11`${importCandidates.enrichedAt} IS NOT NULL`,
     isNull2(importCandidates.publishedAt)
   ));
@@ -20877,7 +21048,7 @@ async function publishEnrichedProducts() {
       } catch (tagErr) {
         console.warn(`[import-enrich] appendProductTag('new-arrival') failed for product ${r.productId} (candidate ${r.id}):`, tagErr instanceof Error ? tagErr.message : tagErr);
       }
-      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq15(importCandidates.id, r.id));
+      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, r.id));
       published++;
     } catch (err) {
       console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err);
@@ -20896,16 +21067,19 @@ async function publishEnrichedProducts() {
   return { published, failed };
 }
 async function runImportEnrichTick(opts = {}) {
-  if (!await isEnrichEnabled()) {
-    return { ok: true, skipped: true, reason: "disabled" };
-  }
   void opts;
+  const deadline = Date.now() + TICK_BUDGET_MS;
+  const enabled = await isEnrichEnabled();
+  const stall = await detectImportEnrichStall(enabled);
+  if (!enabled) {
+    return { ok: true, skipped: true, reason: "disabled", stall };
+  }
   const collect = await collectEnrichmentBatch();
   const publish = await publishEnrichedProducts();
-  const submit = collect.stillPending === 0 ? await submitEnrichmentBatch(await getBatchCap()) : { submitted: 0, reason: "batch_in_flight" };
-  return { ok: true, collect, publish, submit };
+  const submit = collect.stillPending === 0 ? await submitEnrichmentBatch(await getBatchCap(), { deadline }) : { submitted: 0, batchIds: [], reason: "batch_in_flight" };
+  return { ok: true, stall, collect, publish, submit };
 }
-var VALID_IVR_EXPERIENCE, DEFAULT_BATCH_CAP, ed, edA, ENRICH_MAX_ATTEMPTS;
+var VALID_IVR_EXPERIENCE, DEFAULT_BATCH_CAP, BRIEF_CHUNK_SIZE, TICK_BUDGET_MS, STALL_COUNT_THRESHOLD, STALL_AGE_HOURS, ed, edA, ENRICH_MAX_ATTEMPTS;
 var init_import_enrich_server = __esm({
   "app/lib/import-enrich.server.ts"() {
     "use strict";
@@ -20922,6 +21096,10 @@ var init_import_enrich_server = __esm({
     init_types();
     VALID_IVR_EXPERIENCE = new Set(IVR_EXPERIENCE_LEVELS);
     DEFAULT_BATCH_CAP = 10;
+    BRIEF_CHUNK_SIZE = 5;
+    TICK_BUDGET_MS = 24e4;
+    STALL_COUNT_THRESHOLD = 25;
+    STALL_AGE_HOURS = 6;
     ed = (s) => s == null ? s : stripDashes(s);
     edA = (a) => a?.map(stripDashes);
     ENRICH_MAX_ATTEMPTS = 2;
@@ -20935,7 +21113,7 @@ __export(field_regen_runner_server_exports, {
   enqueueFieldRegenJob: () => enqueueFieldRegenJob
 });
 import Anthropic6 from "@anthropic-ai/sdk";
-import { eq as eq16 } from "drizzle-orm";
+import { eq as eq17 } from "drizzle-orm";
 function toDbRunnerState(rs) {
   return rs;
 }
@@ -21159,7 +21337,7 @@ async function advanceFieldRegenJob(job) {
           maxTokens: f.maxTokens
         };
       }
-      await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
       const client5 = getClient2();
       const requests = [];
       const systemParam = systemBlocks.map((b) => ({
@@ -21187,7 +21365,7 @@ async function advanceFieldRegenJob(job) {
         runnerState: toDbRunnerState(newRunnerState),
         submittedAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq16(batchJobs.jobId, job.jobId));
+      }).where(eq17(batchJobs.jobId, job.jobId));
       outcome.submitted = true;
       console.log(`[field-regen] job ${job.jobId} submitted batch ${batch.id} (${requests.length} requests)`);
       break;
@@ -21201,7 +21379,7 @@ async function advanceFieldRegenJob(job) {
       const client5 = getClient2();
       const batch = await client5.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
-        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq16(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
@@ -21252,7 +21430,7 @@ async function advanceFieldRegenJob(job) {
         currentBatchId: null,
         runnerState: toDbRunnerState(updatedRs),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq16(batchJobs.jobId, job.jobId));
+      }).where(eq17(batchJobs.jobId, job.jobId));
       break;
     }
     case "applying": {
@@ -21293,11 +21471,11 @@ async function advanceFieldRegenJob(job) {
           runnerState: toDbRunnerState(updatedRs),
           completedAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq16(batchJobs.jobId, job.jobId));
+        }).where(eq17(batchJobs.jobId, job.jobId));
         if (finalStatus === "done") outcome.done = true;
         else outcome.failed = true;
       } else {
-        await db.update(batchJobs).set({ runnerState: toDbRunnerState(updatedRs), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ runnerState: toDbRunnerState(updatedRs), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
       }
       break;
     }
@@ -21425,7 +21603,7 @@ async function enqueueFieldRegenJob(context) {
   const fields = context.kind === "copy-fields" ? context.fields.map((f) => f) : context.kind === "emma-hero" ? ["emma-hero"] : ["emma-take"];
   const meta = { jobKind: "field-regen", context, systemBlocks, fields };
   const runnerState = { "__meta": meta };
-  await db.update(batchJobs).set({ runnerState: toDbRunnerState(runnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(batchJobs.jobId, result.jobId));
+  await db.update(batchJobs).set({ runnerState: toDbRunnerState(runnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, result.jobId));
   return result;
 }
 var MODEL4, MODEL_FAST3;
@@ -21454,7 +21632,7 @@ __export(batch_orchestrator_server_exports, {
 });
 import { createHash as createHash6, randomUUID as randomUUID2 } from "node:crypto";
 import Anthropic7 from "@anthropic-ai/sdk";
-import { eq as eq17, inArray as inArray5 } from "drizzle-orm";
+import { eq as eq18, inArray as inArray5 } from "drizzle-orm";
 function getClient3() {
   return new Anthropic7({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
 }
@@ -21524,7 +21702,7 @@ async function advanceInflightJobs(opts = {}) {
       if (outcome.failed) result.failed++;
     } catch (err) {
       console.error(`[batch-orchestrator] advanceJob ${job.jobId} threw:`, err);
-      await db.update(batchJobs).set({ status: "failed", error: String(err), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ status: "failed", error: String(err), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
       result.failed++;
     }
   }
@@ -21548,7 +21726,7 @@ async function advanceJob(job) {
       for (const p of job.products) {
         runnerState[p.productId] = freshRunnerState(p, job.jobId);
       }
-      await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
       const updatedJob = { ...job, runnerState };
       await submitTurnBatch(updatedJob);
       outcome.submitted = true;
@@ -21563,7 +21741,7 @@ async function advanceJob(job) {
       const client5 = getClient3();
       const batch = await client5.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
-        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
@@ -21623,7 +21801,7 @@ async function advanceJob(job) {
               lastProcessedBatchId: job.currentBatchId
             };
           }
-          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
           continue;
         }
         const msg = entry.result.message;
@@ -21643,7 +21821,7 @@ async function advanceJob(job) {
             status: "done",
             lastProcessedBatchId: job.currentBatchId
           };
-          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
           continue;
         }
         const state = stateFor(ps, p, {
@@ -21716,7 +21894,7 @@ async function advanceJob(job) {
           messages: finalMessages,
           lastProcessedBatchId: job.currentBatchId
         };
-        await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
       }
       if (turnCount > 0) {
         void logApiTokens({
@@ -21749,7 +21927,7 @@ async function advanceJob(job) {
           turn: nowTurn,
           runnerState,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq17(batchJobs.jobId, job.jobId));
+        }).where(eq18(batchJobs.jobId, job.jobId));
       } else {
         const updatedJob = {
           ...job,
@@ -21786,7 +21964,7 @@ async function advanceJob(job) {
           if (idx >= 0) results[idx] = resultEntry;
           else results.push(resultEntry);
           runnerState[p.productId] = { ...ps, applyRetries: 0 };
-          await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
         } catch (err) {
           const applyRetries = (ps.applyRetries ?? 0) + 1;
           const errMsg = err instanceof Error ? err.message : String(err);
@@ -21809,7 +21987,7 @@ async function advanceJob(job) {
               error: `apply-permafail: ${errMsg}`
             };
           }
-          await db.update(batchJobs).set({ results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
         }
       }
       outcome.applied = appliedThisTick;
@@ -21832,7 +22010,7 @@ async function advanceJob(job) {
           appliedSkus,
           completedAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq17(batchJobs.jobId, job.jobId));
+        }).where(eq18(batchJobs.jobId, job.jobId));
         if (finalStatus === "done") outcome.done = true;
         else outcome.failed = true;
       }
@@ -21843,7 +22021,7 @@ async function advanceJob(job) {
       break;
   }
   try {
-    const fresh = await db.select().from(batchJobs).where(eq17(batchJobs.jobId, job.jobId)).limit(1);
+    const fresh = await db.select().from(batchJobs).where(eq18(batchJobs.jobId, job.jobId)).limit(1);
     const row = fresh[0];
     if (row) {
       const productStatuses = {};
@@ -21916,7 +22094,7 @@ async function submitTurnBatch(job) {
     runnerState,
     updatedAt: /* @__PURE__ */ new Date(),
     ...isFirstSubmit ? { submittedAt: /* @__PURE__ */ new Date() } : {}
-  }).where(eq17(batchJobs.jobId, job.jobId));
+  }).where(eq18(batchJobs.jobId, job.jobId));
   console.log(`[batch-orchestrator] job ${job.jobId} turn ${job.turn + 1}: submitted batch ${batch.id} (${requests.length} requests)`);
 }
 function buildCustomId2(jobId, productId) {
@@ -21967,8 +22145,8 @@ function stateFor(ps, p, taxonomy) {
 async function maybeActivateGatedDeal(jobId, gatesDealId) {
   try {
     const { dealHistory: dealHistory2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    const { eq: eq23 } = await import("drizzle-orm");
-    const rows = await db.select().from(dealHistory2).where(eq23(dealHistory2.id, gatesDealId)).limit(1);
+    const { eq: eq24 } = await import("drizzle-orm");
+    const rows = await db.select().from(dealHistory2).where(eq24(dealHistory2.id, gatesDealId)).limit(1);
     const deal = rows[0];
     if (!deal) {
       console.warn(`[batch-orchestrator] maybeActivateGatedDeal: deal ${gatesDealId} not found`);
@@ -21993,7 +22171,7 @@ async function maybeActivateGatedDeal(jobId, gatesDealId) {
   }
 }
 async function getBatchJobById(jobId) {
-  const rows = await db.select().from(batchJobs).where(eq17(batchJobs.jobId, jobId)).limit(1);
+  const rows = await db.select().from(batchJobs).where(eq18(batchJobs.jobId, jobId)).limit(1);
   return rows[0] ?? null;
 }
 async function listRecentBatchJobs(limit = 50) {
@@ -22029,7 +22207,7 @@ __export(bulk_import_server_exports, {
   parseBulkImportCSV: () => parseBulkImportCSV
 });
 import { parse as parse3 } from "csv-parse/sync";
-import { eq as eq18, max } from "drizzle-orm";
+import { eq as eq19, max } from "drizzle-orm";
 function inferCategory(categories) {
   const forHimCats = ["Vagina Strokers", "Body Molds", "Prostate Toys", "Masturbators", "Hands-Free Masturbators"];
   const forHerCats = ["Dual Action and Rabbits", "Finger and Clit", "Air Pulse and Suction", "Bullets and Eggs"];
@@ -22139,7 +22317,7 @@ function parseBulkImportCSV(csvText) {
   return { groups, parseErrors };
 }
 async function isSkuAlreadyImported(sku) {
-  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq18(dealHistory.sku, sku)).limit(1);
+  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq19(dealHistory.sku, sku)).limit(1);
   return rows.length > 0;
 }
 async function importProductGroup(group) {
@@ -22663,7 +22841,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and5, eq as eq19, inArray as inArray6, sql as sql12 } from "drizzle-orm";
+import { and as and5, eq as eq20, inArray as inArray6, sql as sql12 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -22848,21 +23026,21 @@ async function runImportMonitor(opts = {}) {
         candidatesNew++;
         candidatesFound++;
       } else if (existing.status === "rejected" || existing.status === "imported") {
-        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq19(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq20(importCandidates.masterKey, masterKey));
       } else if (existing.status === "watching") {
         const priorScore = parseFloat(existing.watchScore ?? "0");
         const priorPrice = parseFloat(existing.watchPrice ?? "0");
         const scoreImproved = score2 >= priorScore + watchScoreDelta;
         const priceDropped = priorPrice > 0 && proposedPrice <= priorPrice * (1 - watchPriceDropPct);
         if (scoreImproved || priceDropped) {
-          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq19(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq20(importCandidates.masterKey, masterKey));
           candidatesResurfaced++;
           candidatesFound++;
         } else {
-          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq19(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq20(importCandidates.masterKey, masterKey));
         }
       } else {
-        await db.update(importCandidates).set(upsertPayload).where(eq19(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set(upsertPayload).where(eq20(importCandidates.masterKey, masterKey));
         candidatesFound++;
       }
     }
@@ -22879,7 +23057,7 @@ async function runImportMonitor(opts = {}) {
       candidatesNew,
       candidatesResurfaced,
       autoImported
-    }).where(eq19(importMonitorRuns.id, runId));
+    }).where(eq20(importMonitorRuns.id, runId));
     await setPipelineSetting("import_monitor_last_run_at", (/* @__PURE__ */ new Date()).toISOString());
     console.info(
       `[import-monitor] done: feedsOk=${feedsOk} found=${candidatesFound} new=${candidatesNew} resurfaced=${candidatesResurfaced}`
@@ -22892,7 +23070,7 @@ async function runImportMonitor(opts = {}) {
       finishedAt: /* @__PURE__ */ new Date(),
       feedsOk: false,
       errorMessage
-    }).where(eq19(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
+    }).where(eq20(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
     return {
       feedsOk: false,
       candidatesFound: 0,
@@ -22935,7 +23113,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
   const tierCMinGap = parseFloat(tierCMinGapStr ?? "4.5");
   const tierCMinMarkup = parseFloat(tierCMinMarkupStr ?? "0.15");
   const tierCMaxPerDay = Math.max(0, parseInt(tierCMaxPerDayStr ?? "3", 10) || 0);
-  const importedTodayRows = await db.select({ cnt: sql12`count(*)::int` }).from(importCandidates).where(and5(eq19(importCandidates.status, "imported"), eq19(importCandidates.runDate, todayStr)));
+  const importedTodayRows = await db.select({ cnt: sql12`count(*)::int` }).from(importCandidates).where(and5(eq20(importCandidates.status, "imported"), eq20(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -22954,7 +23132,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
     proposedPrice: importCandidates.proposedPrice,
     needsReview: importCandidates.needsReview
   }).from(importCandidates).where(and5(
-    eq19(importCandidates.status, "pending"),
+    eq20(importCandidates.status, "pending"),
     inArray6(importCandidates.masterKey, cappedKeys)
   )).orderBy(importCandidates.tier, sql12`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
@@ -23079,10 +23257,10 @@ async function stageMasterCandidatesBySkus(skus, opts) {
       }).onConflictDoNothing();
       staged++;
     } else if (existingStatus === "watching") {
-      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq19(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq20(importCandidates.masterKey, masterKey));
       staged++;
     } else {
-      await db.update(importCandidates).set(upsertPayload).where(eq19(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set(upsertPayload).where(eq20(importCandidates.masterKey, masterKey));
       staged++;
     }
   }
@@ -23147,24 +23325,24 @@ async function updateCandidateStatus(id, status, opts = {}) {
     updatedAt: now
   };
   if (status === "watching") {
-    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq19(importCandidates.id, id)).limit(1);
+    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq20(importCandidates.id, id)).limit(1);
     if (rows[0]) {
       base.watchScore = rows[0].dealScore;
       base.watchPrice = rows[0].proposedPrice;
     }
   }
-  await db.update(importCandidates).set(base).where(eq19(importCandidates.id, id));
+  await db.update(importCandidates).set(base).where(eq20(importCandidates.id, id));
 }
 async function approveAndImport(id, reviewedBy, opts = {}) {
   const reviewedStamp = reviewedBy ? { reviewedBy, reviewedAt: /* @__PURE__ */ new Date() } : {};
-  const rows = await db.select().from(importCandidates).where(eq19(importCandidates.id, id)).limit(1);
+  const rows = await db.select().from(importCandidates).where(eq20(importCandidates.id, id)).limit(1);
   const candidate = rows[0];
   if (!candidate) {
     return { ok: false, error: `candidate ${id} not found` };
   }
   const repSku = candidate.sku;
   if (await isSkuAlreadyImported(repSku)) {
-    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date(), ...reviewedStamp }).where(eq19(importCandidates.id, id));
+    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date(), ...reviewedStamp }).where(eq20(importCandidates.id, id));
     return { ok: true, skipped: true };
   }
   const masters = opts.preloadedMasters ?? collapseMasters((await fetchAllNalpacFeeds()).snapshots);
@@ -23233,14 +23411,14 @@ async function approveAndImport(id, reviewedBy, opts = {}) {
   if (!result.success && !result.skipped) {
     return { ok: false, error: result.error ?? "importProductGroupRaw failed" };
   }
-  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq19(dealHistory.sku, repSku)).limit(1);
+  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq20(dealHistory.sku, repSku)).limit(1);
   const dealHistoryId = dhRows[0]?.id;
   await db.update(importCandidates).set({
     status: "imported",
     dealHistoryId: dealHistoryId ?? null,
     updatedAt: /* @__PURE__ */ new Date(),
     ...reviewedStamp
-  }).where(eq19(importCandidates.id, id));
+  }).where(eq20(importCandidates.id, id));
   return {
     ok: true,
     ...result.shopifyProductId !== void 0 ? { shopifyProductId: result.shopifyProductId } : {},
@@ -23262,6 +23440,188 @@ var init_import_monitor_server = __esm({
     init_bulk_import_server();
     init_master_collapse_server();
     KV_FEED_SKUS = "monitor:feed-skus";
+  }
+});
+
+// app/lib/checkout-probe.server.ts
+var checkout_probe_server_exports = {};
+__export(checkout_probe_server_exports, {
+  recordAndAlertProbe: () => recordAndAlertProbe,
+  runCheckoutProbe: () => runCheckoutProbe
+});
+function mkStep(step, ok, ms, extra = {}) {
+  const s = { step, ok, ms };
+  if (extra.status !== void 0) s.status = extra.status;
+  if (extra.detail !== void 0) s.detail = extra.detail;
+  return s;
+}
+function baseUrl() {
+  return (process.env["BASE_URL"] || "https://xdipx.com").replace(/\/+$/, "");
+}
+async function checkUrl(url, opts = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS3);
+  try {
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: { "user-agent": PROBE_UA }
+    });
+    const body = await res.text();
+    if (res.status !== 200) return { status: res.status, ok: false, detail: `HTTP ${res.status}` };
+    const minBytes = opts.minBytes ?? MIN_BODY_BYTES3;
+    if (body.length < minBytes) return { status: res.status, ok: false, detail: `body ${body.length} < ${minBytes} bytes` };
+    for (const marker of opts.markers ?? []) {
+      if (!body.toLowerCase().includes(marker.toLowerCase())) {
+        return { status: res.status, ok: false, detail: `missing marker "${marker}"` };
+      }
+    }
+    return { status: res.status, ok: true };
+  } catch (err) {
+    return { status: 0, ok: false, detail: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function followWithCookies(startUrl, maxHops = 12) {
+  const jar = /* @__PURE__ */ new Map();
+  let url = startUrl;
+  for (let hop = 0; hop < maxHops; hop++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS3);
+    let res;
+    try {
+      const cookie = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+      res = await fetch(url, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: { "user-agent": PROBE_UA, ...cookie ? { cookie } : {} }
+      });
+    } catch (err) {
+      return { status: 0, finalUrl: url, body: "", hops: hop, detail: err instanceof Error ? err.message : String(err) };
+    } finally {
+      clearTimeout(timer);
+    }
+    const getSetCookie = res.headers.getSetCookie;
+    for (const sc of getSetCookie ? getSetCookie.call(res.headers) : []) {
+      const pair = sc.split(";")[0] ?? "";
+      const eq24 = pair.indexOf("=");
+      if (eq24 > 0) jar.set(pair.slice(0, eq24).trim(), pair.slice(eq24 + 1).trim());
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      if (!loc) return { status: res.status, finalUrl: url, body: "", hops: hop, detail: "redirect without Location" };
+      url = new URL(loc, url).toString();
+      continue;
+    }
+    const body = await res.text();
+    return { status: res.status, finalUrl: url, body, hops: hop };
+  }
+  return { status: 0, finalUrl: url, body: "", hops: maxHops, detail: "too many redirects" };
+}
+async function checkCheckout(url) {
+  const r = await followWithCookies(url);
+  if (r.status === 0 && r.detail) return { status: 0, ok: false, detail: r.detail };
+  if (r.status === 404) return { status: 404, ok: false, detail: `404 at ${r.finalUrl.split("?")[0]} (checkout URL dead)` };
+  const onCheckout = /\/checkouts?\//i.test(r.finalUrl);
+  if (!onCheckout) {
+    return { status: r.status, ok: false, detail: `checkout did not route to a Shopify checkout page (landed ${r.finalUrl.split("?")[0]}, status ${r.status})` };
+  }
+  const rendered = r.status === 200 && /order summary|payment|contact information/i.test(r.body);
+  if (rendered) return { status: r.status, ok: true };
+  return { status: r.status, ok: true, detail: `reached checkout endpoint (status ${r.status}; full render verified by browser tier)` };
+}
+async function runCheckoutProbe() {
+  const start = Date.now();
+  const steps = [];
+  const base = baseUrl();
+  const record = (step, r, t0) => {
+    steps.push(mkStep(step, r.ok, Date.now() - t0, { status: r.status, detail: r.detail }));
+    return r.ok;
+  };
+  const finish = () => {
+    const failed = steps.find((s) => !s.ok);
+    return { ok: !failed, failedStep: failed?.step ?? null, steps, durationMs: Date.now() - start };
+  };
+  let t = Date.now();
+  if (!record("homepage", await checkUrl(`${base}/`), t)) return finish();
+  t = Date.now();
+  const handle = process.env["PROBE_PRODUCT_HANDLE"] || await kvGet(KV_KEYS.liveDealHandle);
+  if (!handle) {
+    steps.push(mkStep("resolve-handle", false, Date.now() - t, { detail: "no PROBE_PRODUCT_HANDLE and no live deal handle in KV" }));
+    return finish();
+  }
+  steps.push(mkStep("resolve-handle", true, Date.now() - t, { detail: handle }));
+  t = Date.now();
+  if (!record("pdp", await checkUrl(`${base}/products/${handle}`, { markers: ['name="variantId"'] }), t)) return finish();
+  t = Date.now();
+  let checkoutUrl = "";
+  try {
+    const deal = await getDealByHandle(handle);
+    const variantId = deal?.variantId;
+    if (!variantId) {
+      steps.push(mkStep("cart", false, Date.now() - t, { detail: `no variantId for handle ${handle}` }));
+      return finish();
+    }
+    const cart = await createCart();
+    const withLine = await addToCart(cart.id, variantId, 1);
+    try {
+      await setCartAttributes(cart.id, [{ key: "_probe", value: "1" }]);
+    } catch {
+    }
+    const ok = Boolean(withLine.checkoutUrl) && withLine.totalQuantity === 1;
+    checkoutUrl = withLine.checkoutUrl;
+    steps.push(mkStep("cart", ok, Date.now() - t, ok ? {} : { detail: `checkoutUrl=${Boolean(withLine.checkoutUrl)} qty=${withLine.totalQuantity}` }));
+    if (!ok) return finish();
+  } catch (err) {
+    steps.push(mkStep("cart", false, Date.now() - t, { detail: err instanceof Error ? err.message : String(err) }));
+    return finish();
+  }
+  t = Date.now();
+  record("checkout-page", await checkCheckout(checkoutUrl), t);
+  return finish();
+}
+async function recordAndAlertProbe(tier, result) {
+  let alerted = false;
+  if (!result.ok) {
+    const failedStep = result.failedStep ?? "unknown";
+    const detail = result.steps.find((s) => !s.ok)?.detail ?? "";
+    Sentry.captureMessage(`[checkout-probe:${tier}] failed at ${failedStep}: ${detail}`, "error");
+    const fresh = await kvSetNX(`probe:alert:${tier}:${failedStep}`, String(Date.now()), ALERT_THROTTLE_SECONDS);
+    if (fresh) {
+      const stepList = result.steps.map((s) => `${s.ok ? "ok" : "FAIL"} ${escapeHtml(s.step)}${s.detail ? ` (${escapeHtml(s.detail)})` : ""}`).join("<br>");
+      await sendOwnerEmail(
+        `xdipx checkout probe FAILED at ${failedStep} (${tier})`,
+        `<p>The ${escapeHtml(tier)} checkout probe failed at step <strong>${escapeHtml(failedStep)}</strong>.</p><p>${stepList}</p><p>The purchase path is broken up to at least this step. Check the storefront and the Shopify checkout.</p>`
+      );
+      await sendOwnerSms(`xdipx checkout probe FAILED at ${failedStep} (${tier}). Purchase path broken.`);
+      alerted = true;
+    }
+  }
+  const inserted = await db.insert(checkoutProbeRuns).values({
+    tier,
+    ok: result.ok,
+    failedStep: result.failedStep,
+    steps: result.steps,
+    durationMs: result.durationMs,
+    alerted
+  }).returning({ id: checkoutProbeRuns.id });
+  return { rowId: inserted[0]?.id ?? 0, alerted };
+}
+var FETCH_TIMEOUT_MS3, MIN_BODY_BYTES3, ALERT_THROTTLE_SECONDS, PROBE_UA;
+var init_checkout_probe_server = __esm({
+  "app/lib/checkout-probe.server.ts"() {
+    "use strict";
+    init_sentry_server();
+    init_db_server();
+    init_schema();
+    init_kv_server();
+    init_shopify_server();
+    init_owner_alerts_server();
+    FETCH_TIMEOUT_MS3 = 12e3;
+    MIN_BODY_BYTES3 = 1e3;
+    ALERT_THROTTLE_SECONDS = 6 * 3600;
+    PROBE_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
   }
 });
 
@@ -23591,7 +23951,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq20, inArray as inArray7, desc as desc2 } from "drizzle-orm";
+import { eq as eq21, inArray as inArray7, desc as desc2 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -23646,14 +24006,14 @@ async function advanceInflightVideoJobs(opts = {}) {
       if (outcome === "parked") result.parked++;
     } catch (err) {
       console.error(`[video-pipeline] advanceJob ${job.jobId} threw:`, err);
-      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err), updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.jobId, job.jobId));
+      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err), updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.jobId, job.jobId));
       result.failed++;
     }
   }
   return result;
 }
 async function touch(job, set) {
-  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.id, job.id));
+  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.id, job.id));
 }
 async function advanceJob2(job) {
   switch (job.stage) {
@@ -23768,7 +24128,7 @@ async function advanceClip(job) {
     if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
       throw new Error(`Accrued + clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq20(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq21(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const handle = await submitVideoRequest(job.modelTier, {
       prompt: motionPrompt,
@@ -23816,7 +24176,7 @@ async function advanceLipsync(job) {
   return "progressed";
 }
 async function latestAssetByPurpose(jobRowId, purpose) {
-  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq20(mediaAssets.videoJobId, jobRowId)).orderBy(desc2(mediaAssets.createdAt));
+  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq21(mediaAssets.videoJobId, jobRowId)).orderBy(desc2(mediaAssets.createdAt));
   const hit = rows.find((r) => r.purpose === purpose);
   return hit ? { id: hit.id, blobUrl: hit.blobUrl } : null;
 }
@@ -23838,7 +24198,7 @@ async function advanceAssembly(job) {
 }
 async function advancePoster(job) {
   if (!job.finalAssetId) throw new Error("No final asset for poster extraction");
-  const [finalAsset] = await db.select().from(mediaAssets).where(eq20(mediaAssets.id, job.finalAssetId)).limit(1);
+  const [finalAsset] = await db.select().from(mediaAssets).where(eq21(mediaAssets.id, job.finalAssetId)).limit(1);
   if (!finalAsset) throw new Error("Final asset row missing");
   const video = await blobFetchToBuffer(finalAsset.blobUrl);
   const poster = await extractPoster(video, 1);
@@ -23852,7 +24212,7 @@ async function advancePoster(job) {
     videoJobId: job.id
   }).returning({ id: mediaAssets.id });
   if (duration > 0) {
-    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq20(mediaAssets.id, finalAsset.id));
+    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq21(mediaAssets.id, finalAsset.id));
   }
   await touch(job, {
     stage: "done",
@@ -23864,29 +24224,29 @@ async function advancePoster(job) {
   return "done";
 }
 async function approveSceneFrame(jobRowId, frameAssetId) {
-  const [asset] = await db.select().from(mediaAssets).where(eq20(mediaAssets.id, frameAssetId)).limit(1);
+  const [asset] = await db.select().from(mediaAssets).where(eq21(mediaAssets.id, frameAssetId)).limit(1);
   if (!asset || asset.videoJobId !== jobRowId || asset.purpose !== "scene_frame") {
     throw new Error("Frame does not belong to this job");
   }
-  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function retrySceneFrames(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq20(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq21(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.frameFeedback) ? script.frameFeedback : [];
   script.frameFeedback = [...prior, feedback];
   const basePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : "";
   script["framePrompt"] = feedback ? `${basePrompt} ${feedback}`.trim() : basePrompt;
-  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function rejectVideoJob(jobRowId, reason) {
-  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.id, jobRowId));
 }
 async function regenerateVideoJob(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq20(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq21(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.regenFeedback) ? script.regenFeedback : [];
@@ -23906,12 +24266,12 @@ async function regenerateVideoJob(jobRowId, feedback) {
   });
 }
 async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
-  const [job] = await db.select().from(videoJobs).where(eq20(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq21(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   if (job.stage !== "done") throw new Error("Job is not finished");
-  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq20(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
+  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq21(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
   if (!finalAsset) throw new Error("No final video asset");
-  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq20(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
+  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq21(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
   const captions = job.scriptJson.captions ?? {};
   const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(" ");
   const ids = [];
@@ -23936,10 +24296,10 @@ async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
   return ids;
 }
 async function recordVideoMetrics(jobRowId, platform, metrics) {
-  const [job] = await db.select().from(videoJobs).where(eq20(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq21(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const merged = { ...job.metricsJson ?? {}, [platform]: metrics };
-  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.id, jobRowId));
 }
 async function listVideoJobs(limit = 40) {
   const jobs = await db.select().from(videoJobs).orderBy(desc2(videoJobs.createdAt)).limit(limit);
@@ -24108,7 +24468,7 @@ __export(returns_server_exports, {
   recordLabelTracking: () => recordLabelTracking,
   rmaNumber: () => rmaNumber
 });
-import { eq as eq21 } from "drizzle-orm";
+import { eq as eq22 } from "drizzle-orm";
 function rmaNumber(shopifyReturnId) {
   const m = shopifyReturnId.match(/\/(\d+)$/);
   return m ? `RMA-${m[1]}` : shopifyReturnId;
@@ -24229,7 +24589,7 @@ async function createCustomerReturn(input) {
       status: "label_sent",
       labelPurchasedAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq21(returns.id, row.id)).returning();
+    }).where(eq22(returns.id, row.id)).returning();
     console.log("[returns] db update ok", { rowId: updated?.id ?? row.id });
   } catch (err) {
     console.error("[returns] db update threw", err);
@@ -24237,7 +24597,7 @@ async function createCustomerReturn(input) {
   return { ok: true, returnRow: updated ?? row };
 }
 async function markReceivedAndRefund(shopifyReturnId, opts) {
-  const [row] = await db.select().from(returns).where(eq21(returns.shopifyReturnId, shopifyReturnId)).limit(1);
+  const [row] = await db.select().from(returns).where(eq22(returns.shopifyReturnId, shopifyReturnId)).limit(1);
   if (!row) return { ok: false, error: `Unknown return: ${shopifyReturnId}` };
   if (row.status === "refunded" || row.status === "closed") return { ok: true };
   if (!row.lineItems) return { ok: false, error: "Return row has no line items snapshot" };
@@ -24268,7 +24628,7 @@ async function markReceivedAndRefund(shopifyReturnId, opts) {
     refundedAt: /* @__PURE__ */ new Date(),
     closedAt: /* @__PURE__ */ new Date(),
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq21(returns.id, row.id));
+  }).where(eq22(returns.id, row.id));
   return { ok: true };
 }
 async function recordLabelTracking(shopifyReturnId, update) {
@@ -24277,13 +24637,13 @@ async function recordLabelTracking(shopifyReturnId, update) {
     ...update.trackingNumber ? { trackingNumber: update.trackingNumber } : {},
     status: "in_transit",
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq21(returns.shopifyReturnId, shopifyReturnId));
+  }).where(eq22(returns.shopifyReturnId, shopifyReturnId));
 }
 async function listCustomerReturns(customerGid) {
-  return db.select().from(returns).where(eq21(returns.customerGid, customerGid)).orderBy(returns.createdAt);
+  return db.select().from(returns).where(eq22(returns.customerGid, customerGid)).orderBy(returns.createdAt);
 }
 async function getCustomerReturn(id, customerGid) {
-  const [row] = await db.select().from(returns).where(eq21(returns.id, id)).limit(1);
+  const [row] = await db.select().from(returns).where(eq22(returns.id, id)).limit(1);
   if (!row) {
     console.error("[returns] getCustomerReturn: no row for id", { id });
     return null;
@@ -24369,21 +24729,45 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and6, eq: eq23, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
+    const { and: and6, eq: eq24, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
     const rows = await db2.select().from(metaCapiFailures2).where(and6(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS3))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq23(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq24(metaCapiFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq23(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq24(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
   } catch (err) {
     console.error("[cron:profit-summary] CAPI drain error:", err);
+    return 0;
+  }
+}
+async function drainGa4Failures() {
+  const MAX_ATTEMPTS3 = 5;
+  try {
+    const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
+    const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+    const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
+    const { and: and6, eq: eq24, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and6(isNull3(ga4PurchaseFailures2.resolvedAt), lt2(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS3))).limit(100);
+    let resolved = 0;
+    for (const row of rows) {
+      const result = await sendGa4Purchase2(row.payload);
+      if (result.ok) {
+        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq24(ga4PurchaseFailures2.id, row.id));
+        resolved++;
+      } else {
+        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq24(ga4PurchaseFailures2.id, row.id));
+      }
+    }
+    return resolved;
+  } catch (err) {
+    console.error("[cron:profit-summary] GA4 drain error:", err);
     return 0;
   }
 }
@@ -24447,7 +24831,8 @@ function createCronRoutes() {
       const { writeProfitSummary: writeProfitSummary2 } = await Promise.resolve().then(() => (init_profit_server(), profit_server_exports));
       await writeProfitSummary2();
       const capiRetried = await drainMetaCapiFailures();
-      res.json({ ok: true, capiRetried });
+      const ga4Retried = await drainGa4Failures();
+      res.json({ ok: true, capiRetried, ga4Retried });
     } catch (err) {
       console.error("[cron:profit-summary]", err);
       res.status(500).json({ error: String(err) });
@@ -24627,7 +25012,7 @@ function createCronRoutes() {
   });
   cronRoute("/import-enrich", async (_req, res) => {
     const { kvSetNX: kvSetNX2, kvDel: kvDel2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
-    const acquired = await kvSetNX2("lock:import-enrich", String(Date.now()), 110);
+    const acquired = await kvSetNX2("lock:import-enrich", String(Date.now()), 290);
     if (!acquired) {
       res.json({ ok: true, skipped: "locked" });
       return;
@@ -24641,6 +25026,38 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     } finally {
       await kvDel2("lock:import-enrich");
+    }
+  });
+  cronRoute("/checkout-probe", async (_req, res) => {
+    try {
+      const { runCheckoutProbe: runCheckoutProbe2, recordAndAlertProbe: recordAndAlertProbe2 } = await Promise.resolve().then(() => (init_checkout_probe_server(), checkout_probe_server_exports));
+      const result = await runCheckoutProbe2();
+      await recordAndAlertProbe2("http", result);
+      res.status(result.ok ? 200 : 503).json(result);
+    } catch (err) {
+      console.error("[cron:checkout-probe]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  cronRoute("/checkout-probe-report", async (req, res) => {
+    try {
+      const body = req.body;
+      if (!body || typeof body.ok !== "boolean" || !Array.isArray(body.steps)) {
+        res.status(400).json({ error: "expected a ProbeResult body { ok, failedStep, steps[], durationMs }" });
+        return;
+      }
+      const result = {
+        ok: body.ok,
+        failedStep: typeof body.failedStep === "string" ? body.failedStep : null,
+        steps: body.steps,
+        durationMs: typeof body.durationMs === "number" ? body.durationMs : 0
+      };
+      const { recordAndAlertProbe: recordAndAlertProbe2 } = await Promise.resolve().then(() => (init_checkout_probe_server(), checkout_probe_server_exports));
+      const out = await recordAndAlertProbe2("browser", result);
+      res.json({ ok: true, ...out });
+    } catch (err) {
+      console.error("[cron:checkout-probe-report]", err);
+      res.status(500).json({ error: String(err) });
     }
   });
   cronRoute("/enrichment-batch-poller", async (_req, res) => {
@@ -24790,12 +25207,12 @@ function createCronRoutes() {
   });
   cronRoute("/warm", async (_req, res) => {
     try {
-      const baseUrl = process.env["BASE_URL"] ?? "";
+      const baseUrl2 = process.env["BASE_URL"] ?? "";
       const cronSecret = process.env["CRON_SECRET"] ?? "";
       let discoveryCount = 0;
-      if (baseUrl && cronSecret) {
+      if (baseUrl2 && cronSecret) {
         try {
-          const r = await fetch(`${baseUrl}/cron/warm-discovery-index`, {
+          const r = await fetch(`${baseUrl2}/cron/warm-discovery-index`, {
             method: "POST",
             headers: { "Authorization": `Bearer ${cronSecret}` }
           });
@@ -24825,11 +25242,11 @@ function createCronRoutes() {
         console.warn("[cron:warm] could not resolve live deal handle:", err);
       }
       const pagesWarmed = [];
-      if (baseUrl) {
+      if (baseUrl2) {
         const targets = ["/", liveHandle ? `/products/${liveHandle}` : null].filter(Boolean);
         await Promise.allSettled(
           targets.map(async (path) => {
-            const url = `${baseUrl}${path}`;
+            const url = `${baseUrl2}${path}`;
             try {
               const r = await fetch(url, {
                 headers: { "Cache-Control": "no-cache" }
@@ -24855,7 +25272,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq22, sql as sql13 } from "drizzle-orm";
+import { eq as eq23, sql as sql13 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret) return false;
@@ -24895,10 +25312,10 @@ async function handleOrderCreated(order) {
       }
     }).catch((err) => console.error("[webhook] metafield write failed:", err));
     const dealHistoryUpdate = db2.update(dealHistory).set({
-      unitsSold: db2.$count(dealHistory, eq22(dealHistory.sku, lineItem.sku)),
+      unitsSold: db2.$count(dealHistory, eq23(dealHistory.sku, lineItem.sku)),
       totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
       totalProfit: String(profit * lineItem.quantity)
-    }).where(eq22(dealHistory.sku, lineItem.sku)).catch(() => {
+    }).where(eq23(dealHistory.sku, lineItem.sku)).catch(() => {
     });
     await Promise.all([metafieldWrite, dealHistoryUpdate]);
   }));
@@ -24994,6 +25411,48 @@ async function handleOrderCreated(order) {
   } catch (err) {
     console.error("[webhook:order-created] Meta CAPI Purchase block error:", err);
   }
+  try {
+    const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
+    const gaCid = order.note_attributes?.find((a) => a.name === "_ga_cid")?.value || null;
+    const gaEvent = {
+      transactionId: String(order.id),
+      value: parseFloat(order.total_price) || 0,
+      currency: order.currency || "USD",
+      items: order.line_items.map((li) => ({
+        item_id: li.product_id ? String(li.product_id) : li.sku || String(li.variant_id ?? ""),
+        item_name: li.title,
+        price: parseFloat(li.price) || 0,
+        quantity: li.quantity || 0
+      })),
+      clientId: gaCid
+    };
+    const gaResult = await sendGa4Purchase2(gaEvent);
+    if (!gaResult.ok && !gaResult.skipped) {
+      await db2.insert(ga4PurchaseFailures).values({ orderId: String(order.id), payload: gaEvent, attempts: 1, lastError: gaResult.error ?? "unknown" }).onConflictDoNothing({ target: ga4PurchaseFailures.orderId });
+      console.error("[webhook:order-created] GA4 purchase failed, queued for retry:", gaResult.error);
+    }
+  } catch (err) {
+    console.error("[webhook:order-created] GA4 purchase block error:", err);
+  }
+  try {
+    if (order.email) {
+      const { trackPlacedOrder: trackPlacedOrder2 } = await Promise.resolve().then(() => (init_klaviyo_server(), klaviyo_server_exports));
+      await trackPlacedOrder2(order.email, {
+        orderId: String(order.id),
+        orderNumber: order.order_number,
+        value: parseFloat(order.total_price) || 0,
+        currency: order.currency || "USD",
+        items: order.line_items.map((li) => ({
+          productTitle: li.title,
+          ...li.variant_id ? { variantId: String(li.variant_id) } : {},
+          price: parseFloat(li.price) || 0,
+          quantity: li.quantity || 0
+        }))
+      });
+    }
+  } catch (err) {
+    console.error("[webhook:order-created] Klaviyo Placed Order block error:", err);
+  }
 }
 async function handleOrderFulfilled(order) {
   if (!order.email || order.line_items.length === 0) return;
@@ -25076,7 +25535,7 @@ async function handleReturnsUpdate(payload) {
   if (status === "DECLINED" || status === "CANCELED") {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { returns: returns2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq22(returns2.shopifyReturnId, returnGid));
+    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq23(returns2.shopifyReturnId, returnGid));
     return;
   }
   const terminalSignals = ["CLOSED", "RECEIVED", "PROCESSED"];
@@ -25441,13 +25900,13 @@ function buildMcpServer() {
     },
     async (args) => {
       const cronSecret = process.env["CRON_SECRET"];
-      const baseUrl = process.env["MCP_CRON_BASE_URL"] ?? `http://localhost:${process.env["PORT"] ?? 3e3}`;
+      const baseUrl2 = process.env["MCP_CRON_BASE_URL"] ?? `http://localhost:${process.env["PORT"] ?? 3e3}`;
       if (!cronSecret) return textResult("CRON_SECRET not set \u2014 cannot trigger research.");
       const body = {};
       if (args.manualSeeds?.length) body.manualSeeds = args.manualSeeds;
       if (typeof args.maxSeeds === "number") body.maxSeeds = args.maxSeeds;
       try {
-        const res = await fetch(`${baseUrl}/cron/keyword-research`, {
+        const res = await fetch(`${baseUrl2}/cron/keyword-research`, {
           method: "POST",
           headers: { "x-cron-secret": cronSecret, "Content-Type": "application/json" },
           body: JSON.stringify(body)

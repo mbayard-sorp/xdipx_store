@@ -61,6 +61,8 @@ interface LoaderData {
   autopost: boolean
   suggestionApply: boolean
   contentAutopublish: boolean
+  seoCuration: boolean
+  trendScout: boolean
   videoAutopublish: boolean
   videoFrameReview: boolean
 }
@@ -75,10 +77,12 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, suggestionApply, contentAutopublish, videoAutopublish, videoFrameReview] = await Promise.all([
+  const [autopost, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.suggestionApply).catch(() => false),
     getValve(VALVE_KEYS.contentAutopublish).catch(() => false),
+    getValve(VALVE_KEYS.seoCuration).catch(() => false),
+    getValve(VALVE_KEYS.trendScout).catch(() => false),
     getValve(VALVE_KEYS.videoAutopublish).catch(() => false),
     // Frame review is not a VALVE_KEYS member (it defaults ON, unlike the
     // ship-OFF valves) — read it directly from pipeline_settings.
@@ -116,7 +120,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     }
   }
 
-  return { team, config, migrated, gateResult, runs, selectedRun, suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish, videoAutopublish, videoFrameReview }
+  return { team, config, migrated, gateResult, runs, selectedRun, suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -196,7 +200,7 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
 export default function AgentTeamsPage() {
   const {
     team, config, migrated, gateResult, runs, selectedRun,
-    suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish, videoAutopublish, videoFrameReview,
+    suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
   const activeBrief = briefs.find(b => b.status === 'active')
@@ -289,12 +293,26 @@ export default function AgentTeamsPage() {
           />
         )}
         {team === 'content' && (
-          <ValveRow
-            label={`Autopublish is ${contentAutopublish ? 'ON' : 'OFF'}`}
-            detail="When ON, voice-gate-passed posts publish live on the Notebook with no human step. OFF degrades the daily routine to Sanity drafts you publish by hand."
-            settingKey={VALVE_KEYS.contentAutopublish}
-            on={contentAutopublish}
-          />
+          <>
+            <ValveRow
+              label={`Autopublish is ${contentAutopublish ? 'ON' : 'OFF'}`}
+              detail="When ON, gate-passed posts publish live on the Notebook with no human step (every draft passes both the voice gate and the accuracy gate first). OFF degrades the daily routine to Sanity drafts you publish by hand."
+              settingKey={VALVE_KEYS.contentAutopublish}
+              on={contentAutopublish}
+            />
+            <ValveRow
+              label={`SEO curation is ${seoCuration ? 'ON' : 'OFF'}`}
+              detail="Kill switch for the weekly Sunday seo-curator routine: gray-zone keyword triage, cluster merge proposals, and the coming week's seoContentBrief queue. OFF exits before a run starts; the daily writer falls back to the static content plan."
+              settingKey={VALVE_KEYS.seoCuration}
+              on={seoCuration}
+            />
+            <ValveRow
+              label={`Trend scout is ${trendScout ? 'ON' : 'OFF'}`}
+              detail="Kill switch for the weekly Saturday trend-scout routine: community-discourse research that proposes 3-5 trendTopicBrief docs (in Sanity Studio) for the Sunday SEO curation to adopt or skip. Research-only, never writes posts or briefs into the queue itself."
+              settingKey={VALVE_KEYS.trendScout}
+              on={trendScout}
+            />
+          </>
         )}
         {team === 'video' && (
           <>
