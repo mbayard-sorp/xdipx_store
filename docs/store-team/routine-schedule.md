@@ -7,9 +7,18 @@ scheduler and this file disagree, fix one of them — the weekly strategy routin
 expected routine actually ran (the runs table has the data) and file a suggestion when one is
 missing.
 
-Status 2026-07-21: routines 1–10 and 12–14 exist as triggers in Claude's cloud scheduler; only
-routine 11 (Off-site Scout) remains uncreated. Triggers 10 and 14 were created 2026-07-21 during
-the automation-audit fix session, alongside the run-cap corrections described below.
+Status 2026-07-23 (automation-drift audit fixes): all 14 routines now exist as triggers. Routine 11
+(Off-site Scout) was created this day (`trig_0131NQ3PLTRpcgdMU4wdoxh8`, Tue 16:00 UTC). Routine 12
+(Podcast Review) had drifted to a daily cron and was corrected back to Wednesday (`5 16 * * 3`, the
+:05 minute chosen so it can never collide with routine 10's Sun 16:00 fire). Routine 1 (Weekly
+Strategy) had its prompt re-issued to add the program-manager sub-step and the routines 2-14
+coverage check that had been dropped. Note: the scheduler API attaches a default personal-connector
+set on trigger create and does not clear it via an empty array, so stripping the unrelated
+connectors from routines 10, 11, 13, and 14 (and attaching GA4 to 1/3/7/8, Meta Ads to 4) remains an
+owner action in the claude.ai scheduler UI.
+Status 2026-07-21: routines 1–10 and 12–14 existed as triggers; routine 11 remained uncreated.
+Triggers 10 and 14 were created 2026-07-21 during the automation-audit fix session, alongside the
+run-cap corrections described below.
 Status 2026-07-13: routines 1–9, 12, and 13 exist as triggers in Claude's cloud scheduler (fresh
 session per fire, completion notifications off), each firing the exact prompt in this manifest.
 Routine 9 (Daily Content Writer) was recreated as a cloud trigger on 2026-07-13, closing the
@@ -32,12 +41,13 @@ Trigger IDs, for reference when editing or deleting a routine:
 | 8 | xdipx — Design Cycle (Routine B) | `trig_017s5fsNnWgk7xpXgF8QZccB` |
 | 9 | xdipx — Daily Content Writer | `trig_01Qf5puo6AZyJqWn9QHN5mxQ` (cloud trigger since 2026-07-13; replaces desktop task `xdipx-daily-content-writer`, which should be deleted) |
 | 10 | xdipx — Weekly SEO Curation | `trig_01YJJXKSCfKRXPfHH5DAFJ24` (created 2026-07-21 at enablement; `seo_curation_enabled` flipped on the same day after the `seo-bank-triage.ts` backlog drain) |
-| 12 | xdipx — Weekly Podcast Review | `trig_01AN6PKVghE9AM51R13z2UEu` |
+| 11 | xdipx — Weekly Off-site Scout | `trig_0131NQ3PLTRpcgdMU4wdoxh8` (created 2026-07-23; Tue 16:00 UTC, strategy team, propose-only) |
+| 12 | xdipx — Weekly Podcast Review | `trig_01AN6PKVghE9AM51R13z2UEu` (cron corrected 2026-07-23 from daily `0 16 * * *` back to `5 16 * * 3`; the daily drift was burning a content run-cap slot every day and set up a Sunday collision with routine 10) |
 | 13 | xdipx — Daily Pricing Sweep | `trig_01AchSCvZnX56hbr7VsTvVSi` (cloud trigger since 2026-07-13; replaces desktop task `pricing-daily-sweep`, deleted the same day) |
 | 14 | xdipx — Daily Product Manager | `trig_01M76v95xQkhruMBTGive13o` (created 2026-07-21; a supervised catch-up run worked the queue backlog the same day) |
 
-Routine 11 (Weekly Off-site Scout) still has **no cloud trigger** — it has never fired. Create it
-at enablement the same way.
+Routine 11 (Weekly Off-site Scout) was created 2026-07-23 as `trig_0131NQ3PLTRpcgdMU4wdoxh8` (Tue
+16:00 UTC). Its first fire is 2026-07-28. It is propose-only by construction, so no valve gates it.
 
 **Run-cap requirements (2026-07-21):** `strategy_team_max_runs` must be **3** — Weekly Strategy
 (Mon 12:00), Apply Pass (Mon 20:00), and Cost Review (Mon 21:00) all run as `team=strategy` on the

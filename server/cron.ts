@@ -451,7 +451,10 @@ export function createCronRoutes() {
    */
   cronRoute('/import-enrich', async (_req, res) => {
     const { kvSetNX, kvDel } = await import('../app/lib/kv.server.js')
-    const acquired = await kvSetNX('lock:import-enrich', String(Date.now()), 110)
+    // Lock TTL must exceed the tick's wall-clock budget (240s submit deadline
+    // inside a 300s function) so a legitimately long tick never loses its lock
+    // and lets a second, overlapping tick start.
+    const acquired = await kvSetNX('lock:import-enrich', String(Date.now()), 290)
     if (!acquired) {
       res.json({ ok: true, skipped: 'locked' })
       return
