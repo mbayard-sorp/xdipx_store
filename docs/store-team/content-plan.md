@@ -31,7 +31,10 @@ Weekly mix: 2 guides, 2 real-talk, 1 podcast-notes, 1 care, 1 comparisons/wellne
 **Selection order (since the keyword-bank wiring):** the daily writer picks from the Sanity
 `seoContentBrief` queue first (planned weekly by the seo-curator routine from approved keyword
 clusters); this backlog is the fallback floor when the queue has nothing queued, and the slot
-themes in §2 plus the standing rules in §7 remain binding either way.
+themes in §2 plus the standing rules in §7 remain binding either way. Sunday planning also
+considers the Saturday trend-scout's pending `trendTopicBrief` proposals (adopt/skip/expire rules
+in `docs/store-team/routine-seo-curation.md` Step 4b), so live community discourse can shape the
+queue without bypassing it.
 
 Slugs and titles are answer-shaped to match how people phrase questions to an LLM. Collection handles are representative of the 24 live collections and must be validated against the live list before linking. No prices in any body copy.
 
@@ -122,7 +125,7 @@ Below 300 sessions/week the retro leans on margin math, stock depth, and these h
 ## 6. KPIs for the weekly retro
 
 - **Publish reliability.** Posts published vs planned (target 7/7). Missed days get a reason, not a silent zero.
-- **Voice-gate pass rate.** Share of posts passing `emma-empathy-reviewer` on first submit. A falling rate is a prompt problem; file an `instructions` suggestion, do not hand-fix.
+- **Gate pass rates.** Share of posts passing `emma-empathy-reviewer` (voice) and `sex-wellness-reviewer` (accuracy) on first submit, tracked separately. A falling rate is a prompt problem; file an `instructions` suggestion, do not hand-fix.
 - **Indexed page count.** Notebook URLs and their `.md` twins in the sitemap and `llms.txt`, week over week.
 - **LLM-citation spot checks.** A fixed 20-query tracker run in ChatGPT, Perplexity, and Claude (for example "how does a clitoral suction toy work", "silicone vs water based lube"), at least 5 of them drawn from the Real Talk target-query column (§8B). Log whether xdipx is cited and which page.
 - **GA4 referrals.** Sessions and any assisted conversions from `chatgpt.com`, `perplexity.ai`, and `claude.ai` referrers. Weighted only at or above 300 sessions/week; below that, report raw counts and treat as directional.
@@ -134,6 +137,7 @@ Below 300 sessions/week the retro leans on margin math, stock depth, and these h
 - **FAQ section is mandatory** on every post. Use answer-shaped question H2s throughout, not statement headings.
 - **In-stock embeds only.** At least one honest, currently in-stock product per post. Never embed an out-of-stock or draft product.
 - **Honest Emma.** AI guide with no lived experience per `docs/emma-voice.md`. Speak from specs, materials, and review patterns. Never "I tried / tested / own it".
+- **Accuracy-gated, with real sources.** Every draft passes the `sex-wellness-reviewer` accuracy gate alongside the voice gate (anatomy/physiology, verifiable statistics, materials safety, realistic expectations). When the gate returns citations on PASS, the post carries a `## Sources` section with 1-2 real named sources (mechanically appended, never invented); zero citations means no Sources section, never padding. No backfill: published posts are not retro-edited to add sources.
 - **First person, never third person about Emma.** Emma is the author and writes as "I" or the editorial "we". The copy never refers to her by name or narrates her as a character. No headings or sentences like "Where does Emma add nuance?", "What Emma recommends", or "Emma's take"; name the section by its substance instead ("Where this needs a caveat"). We do not comment on Emma.
 - **No medical claims.** Body-safety and material facts only. No treatment, diagnosis, or health-outcome promises. Name materials plainly (medical-grade silicone, glass, stainless steel).
 - **No prices in body text.** Pricing lives on the PDP and in the embed component, never in prose. No discount framing that would trip MAP rules.

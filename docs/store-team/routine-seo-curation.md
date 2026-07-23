@@ -1,8 +1,9 @@
 # Routine: Weekly SEO Curation (seo-curator)
 
 The playbook for the weekly keyword-bank and editorial-queue routine. Entry agent: `seo-curator`.
-Three jobs per run: triage the gray-zone pending keywords (cap 250), keep the cluster catalog
-consolidated (merge maps are PROPOSED as suggestions, never executed here), and plan the coming
+Four jobs per run: triage the gray-zone pending keywords (cap 250), keep the cluster catalog
+consolidated (merge maps are PROPOSED as suggestions, never executed here), review the Saturday
+trend-scout's pending `trendTopicBrief` proposals (adopt/skip/expire), and plan the coming
 week's `seoContentBrief` queue (up to 7) that the daily content-writer consumes.
 
 Runs on the **Max subscription**. Recommended cadence: weekly, Sunday 16:00 UTC (before Monday's
@@ -49,6 +50,8 @@ and stop. The gate enforces `content_team_enabled`, `content_team_daily_cents`, 
 5. Published slugs (for pre-checks): `*[_type == "blogPost"].slug.current`
 6. The strategy brief (`GET /api/team/brief`) and calendar (`GET /api/team/calendar`) for the Monday theme sync.
 7. `docs/store-team/content-plan.md` for the category rhythm and the authority-collection list (§5).
+8. Pending trend proposals from Saturday's trend-scout run (routine 16):
+   `*[_type == "trendTopicBrief" && status == "pending"]{_id, topic, angle, evidence, suggestedCategory, suggestedTerms, expiresAt}`
 
 ## Step 3: Gray-zone triage (cap 250 decisions)
 
@@ -78,6 +81,24 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
 
 Never repoint refs or archive clusters yourself. If last week's map is still `proposed`, do not
 file a duplicate; note it in the report instead. One `step` event (`phase:'clusters'`).
+
+## Step 4b: Trend review (adopt / skip / expire, before planning)
+
+First expire: any pending `trendTopicBrief` past its `expiresAt` → patch `status:'expired'`.
+Judge the rest on one question: can the catalog honestly serve this topic?
+
+- **Adopt, cluster path (preferred):** the trend maps to an eligible cluster → boost that
+  cluster's priority for Step 5, let the trend shape the brief's working title and `targetQuery`,
+  and patch the trend `{status:'adopted', adoptedBrief: <ref to the seoContentBrief>}`.
+- **Adopt, clusterless path (max 1-2 per week, INSIDE the 7-brief cap):** no cluster fits but the
+  topic is strong and evidence-backed → mint a trend-sourced `seoContentBrief` without
+  cluster/primaryKeyword refs (the schema allows it), category from `suggestedCategory`, and note
+  the trend in `createdBy`. Patch the trend `adopted` + `adoptedBrief` as above.
+- **Skip:** everything else → patch `{status:'skipped', skipReason:'<one line>'}`.
+
+Trend `suggestedTerms` missing from the keyword bank go into the Step 6 report (they feed the
+`keyword_research_enabled` conversation), never directly into `seoKeyword` docs. One `step` event
+(`phase:'trend-review'`) with adopted/skipped/expired counts and per-id outcomes.
 
 ## Step 5: Plan the week's briefs (cap 7)
 
@@ -111,6 +132,8 @@ backlog); say so in the event. One `step` event (`phase:'planning'`) listing slu
 Compute and post the weekly report as ONE suggestion row (kind `process`, team `content`):
 
 - Triage: approved / rejected / left pending counts.
+- Trend review: adopted / skipped / expired counts, plus trend `suggestedTerms` missing from the
+  keyword bank.
 - Clusters: covered / total active; merge map proposed or pending approval.
 - Queue depth after planning (**flag if < 7**).
 - Bank staleness: days since newest `firstSeenAt`; note if `keyword_research_enabled` is off and

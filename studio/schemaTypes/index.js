@@ -55,6 +55,9 @@ import seoContentBrief    from '../schemas/seo/seoContentBrief.js'
 // content-writer turns the pending brief into the podcast-notes Notebook post.
 // Additive.
 import podcastReviewBrief from '../schemas/podcastReviewBrief.js'
+// Weekly trend handoff: trend-scout proposes topics on Saturday, seo-curator
+// adopts/skips/expires them in Sunday planning. Additive.
+import trendTopicBrief    from '../schemas/trendTopicBrief.js'
 // Multi-author voice profiles for AI-generated content (Emma + future agents).
 import editorialAuthor    from '../schemas/authors/editorialAuthor.js'
 import collectionPage     from '../schemas/collectionPage.js'
@@ -141,6 +144,8 @@ export const schemaTypes = [
   seoContentBrief,
   // Weekly podcast review brief (podcast-reviewer → content-writer handoff).
   podcastReviewBrief,
+  // Weekly trend topic brief (trend-scout → seo-curator handoff).
+  trendTopicBrief,
   // Editorial authors — voice profiles for Emma + future AI authors.
   editorialAuthor,
   // PLP SEO — editorial overrides per Shopify collection (intro copy, FAQs,
