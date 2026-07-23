@@ -502,6 +502,38 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/video-job-poller
+   * Schedule: every 2 minutes. Advances every in-flight video_jobs row by one
+   * stage pass (compose frames / submit fal / poll fal / assemble / poster).
+   * Jobs parked at awaiting_frame_approval are outside the in-flight set and
+   * cost nothing here. Same idle-flag + lock discipline as the enrichment
+   * poller above.
+   */
+  cronRoute('/video-job-poller', async (_req, res) => {
+    const { kvGet, kvSetNX, kvDel, KV_KEYS } = await import('../app/lib/kv.server.js')
+    const idle = await kvGet(KV_KEYS.videoPollerIdle)
+    if (idle != null) {
+      res.json({ ok: true, skipped: 'idle' })
+      return
+    }
+    const acquired = await kvSetNX('lock:video-poller', String(Date.now()), 110)
+    if (!acquired) {
+      res.json({ ok: true, skipped: 'locked' })
+      return
+    }
+    try {
+      const { advanceInflightVideoJobs } = await import('../app/lib/video-pipeline.server.js')
+      const result = await advanceInflightVideoJobs({ maxJobs: 5 })
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:video-job-poller]', err)
+      res.status(500).json({ error: String(err) })
+    } finally {
+      await kvDel('lock:video-poller')
+    }
+  })
+
+  /**
    * POST /cron/aeo-surface-check
    * Schedule: weekly Sunday 06:00 UTC — spot-check that AEO markdown surfaces
    * are reachable. Parses /llms.txt, fetches 3-5 .md URLs cold, logs errors so

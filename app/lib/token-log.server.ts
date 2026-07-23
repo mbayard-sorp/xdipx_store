@@ -104,6 +104,8 @@ export interface ImageCostEntry {
   caller?:    string
   productId?: string
   sku?:       string
+  /** Correlation id (video_jobs.job_id, ad batch id) -> api_token_log.ref_id. */
+  refId?:     string
 }
 
 /**
@@ -127,6 +129,7 @@ export async function logImageCost(entry: ImageCostEntry): Promise<void> {
       productId:           entry.productId ?? null,
       sku:                 entry.sku       ?? null,
       caller:              entry.caller    ?? null,
+      refId:               entry.refId     ?? null,
       inputTokens:         0,
       outputTokens:        0,
       cacheCreationTokens: 0,

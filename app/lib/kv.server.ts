@@ -270,6 +270,10 @@ export const KV_KEYS = {
   // a TTL by advanceInflightJobs, deleted by enqueueBatchJob, so worst case a
   // lost delete delays a new job by one TTL window rather than stalling it.
   enrichmentPollerIdle:        'enrichment:poller:idle',
+  // Video pipeline (065): per-job KV mirror + the poller's idle negative-cache
+  // (same semantics as enrichmentPollerIdle, owned by video-pipeline.server.ts).
+  videoJob:                    (jobId: string) => `video-job:${jobId}`,
+  videoPollerIdle:             'video:poller:idle',
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────
