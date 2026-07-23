@@ -21,7 +21,7 @@
 import { randomUUID } from 'node:crypto'
 import { eq, inArray, desc } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { videoJobs, mediaAssets, type VideoScriptJson } from '../../db/schema'
+import { videoJobs, mediaAssets, socialPosts, type VideoScriptJson } from '../../db/schema'
 import { kvSet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import {
   VIDEO_MODELS,
@@ -477,6 +477,64 @@ export async function regenerateVideoJob(jobRowId: number, feedback: string): Pr
     aiDisclosure: job.aiDisclosure,
     ...(job.runId != null ? { runId: job.runId } : {}),
   })
+}
+
+// ─── One-approval-fans-out (Video Studio approve action) ─────────────────────
+
+/**
+ * Fan a finished, owner-approved video out to one social_posts row per target
+ * platform. Rows land status='draft' + reviewStatus='approved': the Video
+ * Studio approval IS the editorial review; the Social Studio Approved tab is
+ * the posting surface (copy caption / download / stubbed Post now), not a
+ * second review queue. Nothing here posts anywhere.
+ */
+export async function fanOutVideoToSocialDrafts(jobRowId: number, reviewedBy: string): Promise<number[]> {
+  const [job] = await db.select().from(videoJobs).where(eq(videoJobs.id, jobRowId)).limit(1)
+  if (!job) throw new Error('Job not found')
+  if (job.stage !== 'done') throw new Error('Job is not finished')
+  const finalAsset = job.finalAssetId
+    ? (await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.finalAssetId)).limit(1))[0]
+    : undefined
+  if (!finalAsset) throw new Error('No final video asset')
+  const posterAsset = job.posterAssetId
+    ? (await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.posterAssetId)).limit(1))[0]
+    : undefined
+
+  const captions = (job.scriptJson.captions ?? {}) as Record<string, string>
+  const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(' ')
+
+  const ids: number[] = []
+  for (const platform of job.targetPlatforms) {
+    const caption = captions[platform] ?? captions['default'] ?? fallbackCaption
+    if (!caption) continue
+    const [row] = await db.insert(socialPosts).values({
+      platform,
+      postType: platform === 'youtube' ? 'video_short' : 'video_reel',
+      tweetText: caption,
+      mediaUrls: [finalAsset.blobUrl],
+      posterUrl: posterAsset?.blobUrl ?? null,
+      videoJobId: job.id,
+      status: 'draft',
+      createdBy: 'agent',
+      reviewStatus: 'approved',
+      reviewedBy,
+      reviewedAt: new Date(),
+    }).returning({ id: socialPosts.id })
+    if (row) ids.push(row.id)
+  }
+  return ids
+}
+
+/** Merge an owner metrics self-report for one platform into metrics_json. */
+export async function recordVideoMetrics(
+  jobRowId: number,
+  platform: string,
+  metrics: Record<string, number>,
+): Promise<void> {
+  const [job] = await db.select().from(videoJobs).where(eq(videoJobs.id, jobRowId)).limit(1)
+  if (!job) throw new Error('Job not found')
+  const merged = { ...(job.metricsJson ?? {}), [platform]: metrics }
+  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: new Date() }).where(eq(videoJobs.id, jobRowId))
 }
 
 // ─── Reads (Video Studio + team API) ─────────────────────────────────────────

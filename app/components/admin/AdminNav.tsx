@@ -182,6 +182,8 @@ const NAV_ITEMS = [
   { to: '/admin/calls',          label: 'Calls',        Icon: PhoneIcon     },
   { to: '/admin/phone-orders',   label: 'Phone Orders', Icon: CartUpsellIcon },
   { to: '/admin/socials',        label: 'Social Studio', Icon: SocialsIcon  },
+  { to: '/admin/video-studio',   label: 'Video Studio',  Icon: SocialsIcon  },
+  { to: '/admin/ad-studio',      label: 'Ad Studio',     Icon: SocialsIcon  },
   { to: '/admin/search-filters',    label: 'Search Filters',   Icon: SearchFilterIcon },
   { to: '/admin/discovery-rules',   label: 'Discovery Rules',  Icon: SlidersIcon      },
   { to: '/admin/imports',           label: 'Imports',          Icon: ImportsIcon      },

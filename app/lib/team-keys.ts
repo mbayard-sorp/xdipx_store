@@ -116,6 +116,23 @@ export const VIDEO_EXTRA_KEYS = {
 export const VIDEO_MAX_COST_CENTS_DEFAULT = 600
 
 /**
+ * The video formula library (client-safe). Ranked by platform-safety and
+ * production cost by the social team consult; POV-testimonial ships last and
+ * only with per-script owner review. Definitions live in
+ * .claude/agents/video-producer.md; this list is the validation whitelist.
+ */
+export const VIDEO_FORMULAS = [
+  'myth-busting',
+  'unboxing',
+  'before-after',
+  'hook-problem-payoff',
+  'three-things',
+  'grwm',
+  'pov-testimonial',
+] as const
+export type VideoFormula = (typeof VIDEO_FORMULAS)[number]
+
+/**
  * Standalone valves outside the per-team key sets:
  *  - social autopost: even with the social team enabled, live posting stays off
  *    until this AND the env-level X_AUTO_POST_ENABLED are both true.
