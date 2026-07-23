@@ -254,6 +254,63 @@ export async function getEditor(preview = false): Promise<Editor | null> {
   return cached('sanity:editor', 300, fetcher)
 }
 
+/**
+ * Canonical Emma likeness for the video pipeline's scene-frame composition.
+ * Always fetched uncached so a photo swap in Sanity propagates to the very next
+ * generation (likeness policy: singleton.editor is the single source of truth).
+ */
+export async function getEditorPhotoUrl(): Promise<string | null> {
+  const editor = await getEditor(true)
+  return editor?.photoUrl ?? null
+}
+
+// Friends of Emma — the recurring cast (castMember doc type, additive schema).
+// Only members BOTH active AND approvedForUse are usable as presenters; the
+// video pipeline fails fast on anything else rather than substituting Emma.
+
+export interface CastMember {
+  slug: string
+  name: string
+  role: string | null
+  photoUrl: string
+  photoAlt: string | null
+  shortBio: string | null
+  personaNotes: string | null
+}
+
+export async function getApprovedCastMembers(): Promise<CastMember[]> {
+  if (!projectId) return []
+  try {
+    const client = getClient(false, true)
+    if (!client) return []
+    const raw = await client.fetch<Array<Partial<CastMember>>>(
+      `*[_type == "castMember" && active == true && approvedForUse == true]{
+        "slug": slug.current,
+        name,
+        role,
+        "photoUrl": referencePhoto.asset->url,
+        "photoAlt": photoAlt,
+        shortBio,
+        personaNotes
+      }`,
+    )
+    return (raw ?? [])
+      .filter((m): m is typeof m & { name: string; photoUrl: string } => !!m?.name && !!m.photoUrl)
+      .map(m => ({
+        slug:         m.slug ?? m.name.toLowerCase(),
+        name:         m.name,
+        role:         m.role ?? null,
+        photoUrl:     m.photoUrl as string,
+        photoAlt:     m.photoAlt ?? null,
+        shortBio:     m.shortBio ?? null,
+        personaNotes: m.personaNotes ?? null,
+      }))
+  } catch (err) {
+    console.error('[sanity] getApprovedCastMembers error:', err)
+    return []
+  }
+}
+
 // v2 redesign — Emma presets for Ask Emma rail
 const EMMA_PRESETS_GROQ = `
   *[_type == "emmaPreset"] | order(order asc, label asc){

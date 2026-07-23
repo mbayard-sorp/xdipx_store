@@ -20,13 +20,14 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react
 import { Form, Link, useLoaderData } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
+import { eq } from 'drizzle-orm'
 import { pipelineSettings } from '../../db/schema'
 import {
   gate, getTeamConfig, getValve, invalidateTeamSettingsCache, listRecentRuns, listRunEvents,
   listSuggestions, decideSuggestion, retireSuggestion, listBriefs, listAdCampaigns, decideAdCampaign,
   type TeamConfig, type GateResult,
 } from '~/lib/team.server'
-import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VALVE_KEYS, type TeamId } from '~/lib/team-keys'
+import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, type TeamId } from '~/lib/team-keys'
 
 export const meta: MetaFunction = () => [{ title: 'Agent Teams — xdipx Admin' }]
 
@@ -44,6 +45,7 @@ const TEAM_LABELS: Record<TeamId, string> = {
   strategy: 'Strategy',
   content:  'Content',
   product:  'Product',
+  video:    'Video',
 }
 
 interface LoaderData {
@@ -59,6 +61,8 @@ interface LoaderData {
   autopost: boolean
   suggestionApply: boolean
   contentAutopublish: boolean
+  videoAutopublish: boolean
+  videoFrameReview: boolean
 }
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
@@ -71,10 +75,16 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, suggestionApply, contentAutopublish] = await Promise.all([
+  const [autopost, suggestionApply, contentAutopublish, videoAutopublish, videoFrameReview] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.suggestionApply).catch(() => false),
     getValve(VALVE_KEYS.contentAutopublish).catch(() => false),
+    getValve(VALVE_KEYS.videoAutopublish).catch(() => false),
+    // Frame review is not a VALVE_KEYS member (it defaults ON, unlike the
+    // ship-OFF valves) — read it directly from pipeline_settings.
+    db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.frameReview)).limit(1)
+      .then(rows => rows[0]?.value !== 'false')
+      .catch(() => true),
   ])
 
   // The team tables (049/051) may not be applied yet — degrade cleanly.
@@ -106,7 +116,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     }
   }
 
-  return { team, config, migrated, gateResult, runs, selectedRun, suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish }
+  return { team, config, migrated, gateResult, runs, selectedRun, suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish, videoAutopublish, videoFrameReview }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -119,6 +129,7 @@ export async function action({ request }: ActionFunctionArgs) {
     ...TEAM_IDS.flatMap(t => Object.values(teamKeys(t))),
     ...Object.values(HOMEPAGE_EXTRA_KEYS),
     ...Object.values(CONTENT_EXTRA_KEYS),
+    ...Object.values(VIDEO_EXTRA_KEYS),
     ...Object.values(VALVE_KEYS),
   ])
 
@@ -185,7 +196,7 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
 export default function AgentTeamsPage() {
   const {
     team, config, migrated, gateResult, runs, selectedRun,
-    suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish,
+    suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish, videoAutopublish, videoFrameReview,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
   const activeBrief = briefs.find(b => b.status === 'active')
@@ -257,6 +268,9 @@ export default function AgentTeamsPage() {
           {team === 'content' && (
             <SettingField label="Max images / day" settingKey={CONTENT_EXTRA_KEYS.maxImagesPerDay} value={config.maxImagesPerDay ?? 0} />
           )}
+          {team === 'video' && (
+            <SettingField label="Max cost / video (cents)" settingKey={VIDEO_EXTRA_KEYS.maxCostCents} value={config.maxCostCents ?? 600} asDollars />
+          )}
         </div>
 
         <ValveRow
@@ -281,6 +295,22 @@ export default function AgentTeamsPage() {
             settingKey={VALVE_KEYS.contentAutopublish}
             on={contentAutopublish}
           />
+        )}
+        {team === 'video' && (
+          <>
+            <ValveRow
+              label={`Frame review is ${videoFrameReview ? 'ON' : 'OFF'}`}
+              detail="When ON, every video job parks after scene-frame composition so you pick the frame in /admin/video-studio before the expensive clip generation. OFF lets auto-QC choose the frame. Keep ON until frame quality has earned trust."
+              settingKey={VIDEO_EXTRA_KEYS.frameReview}
+              on={videoFrameReview}
+            />
+            <ValveRow
+              label={`Autopublish is ${videoAutopublish ? 'ON' : 'OFF'}`}
+              detail="Even when ON, platform posting also requires per-platform publisher keys (all unset today; publishers are stubs). Keep OFF while videos are review-first."
+              settingKey={VALVE_KEYS.videoAutopublish}
+              on={videoAutopublish}
+            />
+          </>
         )}
         {team === 'strategy' && (
           <ValveRow

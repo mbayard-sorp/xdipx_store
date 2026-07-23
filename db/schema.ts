@@ -15,6 +15,7 @@ import {
   uniqueIndex,
   uuid,
   varchar,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 // Type-only import — fully erased at build, so no runtime coupling / cycle
 // despite homepage-payload.server.ts importing the `homepagePayload` table back.
@@ -150,6 +151,10 @@ export const socialPosts = pgTable('social_posts', {
   reviewedAt:      timestamp('reviewed_at'),
   scheduledFor:    date('scheduled_for'),
   reworkedFrom:    integer('reworked_from'),
+  // Video pipeline linkage (migration 065). A finished video_jobs row fans out
+  // to one social_posts row per target platform; posterUrl renders before playback.
+  videoJobId:      integer('video_job_id'),
+  posterUrl:       text('poster_url'),
 })
 
 export const adminRoles = pgTable('admin_roles', {
@@ -1067,6 +1072,7 @@ export const apiTokenLog = pgTable('api_token_log', {
   requestCount:         integer('request_count').default(1).notNull(),  // >1 when one row aggregates a batch turn
   estCostUsd:           decimal('est_cost_usd', { precision: 10, scale: 5 }).default('0').notNull(),
   requestId:            varchar('request_id', { length: 64 }),          // IVR idempotency key (option B); null otherwise
+  refId:                varchar('ref_id', { length: 64 }),              // correlation key (video_jobs.job_id, ad batch id); null otherwise (065)
 }, t => ({
   tsIdx:        index('idx_api_token_log_ts').on(t.ts),
   featureTsIdx: index('idx_api_token_log_feature_ts').on(t.feature, t.ts),
@@ -1264,5 +1270,103 @@ export const marketingCalendar = pgTable('marketing_calendar', {
   updatedAt:  timestamp('updated_at').notNull().defaultNow(),
 }, t => ({
   dateIdx: index('idx_marketing_calendar_date').on(t.eventDate),
+}))
+
+// ---------------------------------------------------------------------------
+// Social video pipeline (065) — fal.ai influencer product videos + ad studio.
+// ---------------------------------------------------------------------------
+
+/**
+ * Shared byte/URL/cost ledger for everything the video pipeline and ad studio
+ * generate. Bytes live in Vercel Blob (blob.server.ts); approved product videos
+ * graduate to Shopify via the existing staged-upload path as a second hop.
+ */
+export const mediaAssets = pgTable('media_assets', {
+  id:              serial('id').primaryKey(),
+  kind:            varchar('kind', { length: 12 }).notNull(),   // video|image|audio
+  purpose:         varchar('purpose', { length: 24 }).notNull(), // scene_frame|clip|final|poster|ad_static|ad_video
+  blobUrl:         text('blob_url').notNull(),
+  contentType:     varchar('content_type', { length: 64 }).notNull(),
+  durationSeconds: decimal('duration_seconds', { precision: 6, scale: 2 }),
+  width:           integer('width'),
+  height:          integer('height'),
+  costUsd:         decimal('cost_usd', { precision: 10, scale: 5 }).notNull().default('0'),
+  sourceModel:     varchar('source_model', { length: 64 }),
+  videoJobId:      integer('video_job_id').references((): AnyPgColumn => videoJobs.id, { onDelete: 'set null' }),
+  createdAt:       timestamp('created_at').notNull().defaultNow(),
+}, t => ({
+  jobIdx: index('idx_media_assets_job').on(t.videoJobId),
+}))
+
+/** Per-scene script beat, plus per-platform captions, produced by video-producer. */
+export interface VideoScriptJson {
+  hook?: string
+  beats?: { line: string; direction?: string }[]
+  cta?: string
+  captions?: Record<string, string>       // platform -> caption text
+  frameFeedback?: string[]                // owner feedback from retry-frames rounds
+  regenFeedback?: string[]                // owner feedback from regenerate rounds
+  [key: string]: unknown
+}
+
+/**
+ * One row per video: brief metadata (what/who/why) + the stage machine the
+ * /cron/video-job-poller advances. Stage flow:
+ *   scene_frame -> clip -> lipsync -> assembly -> poster -> done
+ * `awaiting_frame_approval` (video_frame_review valve ON) parks the job for the
+ * owner's frame pick in /admin/video-studio before any video spend.
+ */
+export const videoJobs = pgTable('video_jobs', {
+  id:                serial('id').primaryKey(),
+  jobId:             varchar('job_id', { length: 36 }).notNull(),
+  productHandle:     varchar('product_handle', { length: 255 }).notNull(),
+  shopifyProductGid: varchar('shopify_product_gid', { length: 64 }),
+  formula:           varchar('formula', { length: 32 }).notNull(),
+  presenter:         varchar('presenter', { length: 64 }).notNull().default('none'), // none|emma|friend:{slug}
+  scriptJson:        jsonb('script_json').$type<VideoScriptJson>().notNull(),
+  aiDisclosure:      boolean('ai_disclosure').notNull().default(true),
+  modelTier:         varchar('model_tier', { length: 16 }).notNull(),                // VideoModelId
+  targetPlatforms:   jsonb('target_platforms').$type<string[]>().notNull().default([]),
+  stage:             varchar('stage', { length: 16 }).notNull().default('scene_frame'), // scene_frame|clip|lipsync|assembly|poster|done|failed
+  status:            varchar('status', { length: 24 }).notNull().default('queued'),  // queued|running|awaiting_provider|awaiting_frame_approval|applying|done|failed
+  providerRequestIds: jsonb('provider_request_ids').$type<Record<string, { requestId: string; statusUrl: string; responseUrl: string }>>().notNull().default({}),
+  sceneFrameAssetId: integer('scene_frame_asset_id').references(() => mediaAssets.id, { onDelete: 'set null' }),
+  finalAssetId:      integer('final_asset_id').references(() => mediaAssets.id, { onDelete: 'set null' }),
+  posterAssetId:     integer('poster_asset_id').references(() => mediaAssets.id, { onDelete: 'set null' }),
+  costUsd:           decimal('cost_usd', { precision: 10, scale: 5 }).notNull().default('0'),
+  metricsJson:       jsonb('metrics_json').$type<Record<string, Record<string, number>>>(), // platform -> {views, likes, ...} owner self-report
+  error:             text('error'),
+  team:              varchar('team', { length: 24 }).notNull().default('video'),
+  runId:             integer('run_id').references(() => homepageTeamRuns.id, { onDelete: 'set null' }),
+  createdAt:         timestamp('created_at').notNull().defaultNow(),
+  updatedAt:         timestamp('updated_at').notNull().defaultNow(),
+  completedAt:       timestamp('completed_at'),
+}, t => ({
+  jobIdIdx:  uniqueIndex('uq_video_jobs_job_id').on(t.jobId),
+  statusIdx: index('idx_video_jobs_status').on(t.status, t.createdAt),
+  // Partial in-flight index (idx_video_jobs_inflight) covering the poller drain
+  // query is created in the SQL migration — Drizzle cannot express partial
+  // indexes. `awaiting_frame_approval` is deliberately EXCLUDED from it so
+  // parked jobs do not spin the poller.
+}))
+
+/**
+ * Ad studio creative variants (065) — batches generated under an ad_campaigns
+ * proposal. policy_check is required per creative, mirroring ad_campaigns:
+ * docs/ads-policy.md prohibits Meta/TikTok paid for the pleasure catalog, so
+ * the push stubs hard-block those platforms outside the health carve-out.
+ */
+export const adCreatives = pgTable('ad_creatives', {
+  id:           serial('id').primaryKey(),
+  adCampaignId: integer('ad_campaign_id').notNull().references(() => adCampaigns.id, { onDelete: 'cascade' }),
+  format:       varchar('format', { length: 8 }).notNull(),      // 1:1|4:5|9:16
+  assetId:      integer('asset_id').notNull().references(() => mediaAssets.id, { onDelete: 'cascade' }),
+  hookCopy:     text('hook_copy'),
+  status:       varchar('status', { length: 16 }).notNull().default('draft'), // draft|approved|rejected|pushed
+  policyCheck:  text('policy_check').notNull(),
+  createdAt:    timestamp('created_at').notNull().defaultNow(),
+  updatedAt:    timestamp('updated_at').notNull().defaultNow(),
+}, t => ({
+  campaignIdx: index('idx_ad_creatives_campaign').on(t.adCampaignId, t.status),
 }))
 

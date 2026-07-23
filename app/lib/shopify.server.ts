@@ -3771,6 +3771,88 @@ export async function uploadMoodImageToShopifyFiles(
   return url
 }
 
+/**
+ * Upload a finished social/ad video as a Shopify FILE (not product media): a
+ * stable public CDN URL for admin preview + manual download, WITHOUT touching
+ * the product's customer-facing gallery. Reserve attachVideoToProduct for
+ * clips that genuinely belong on the PDP.
+ *
+ * FileCreateInput carries no tags field; reuse metadata rides the structured
+ * FILENAME (social-{handle}-{persona}-{platform}-{yyyymmdd}.mp4) + alt text.
+ */
+export async function uploadVideoToShopifyFiles(
+  videoBuffer: Buffer,
+  filename: string,
+  opts: { alt?: string } = {},
+): Promise<string> {
+  const staged = await createStagedVideoUpload(filename, videoBuffer.length)
+
+  const form = new FormData()
+  for (const param of staged.parameters) form.append(param.name, param.value)
+  form.append('file', new Blob([new Uint8Array(videoBuffer)], { type: 'video/mp4' }), filename)
+  const uploadRes = await fetch(staged.url, { method: 'POST', body: form })
+  if (!uploadRes.ok) {
+    throw new Error(`Staged video-file upload failed: ${uploadRes.status} ${await uploadRes.text()}`)
+  }
+
+  const created = await adminGraphQL<{
+    fileCreate: {
+      files: { id: string; fileStatus: string }[]
+      userErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation FileCreate($files: [FileCreateInput!]!) {
+      fileCreate(files: $files) {
+        files { id fileStatus }
+        userErrors { field message }
+      }
+    }
+  `, {
+    files: [{
+      originalSource: staged.resourceUrl,
+      contentType:    'VIDEO',
+      alt:            opts.alt ?? filename,
+    }],
+  })
+  if (created.fileCreate.userErrors.length > 0) {
+    const errs = created.fileCreate.userErrors.map(e => e.message).join('; ')
+    throw new Error(`Shopify fileCreate (video) error: ${errs}`)
+  }
+  const fileId = created.fileCreate.files[0]?.id
+  if (!fileId) throw new Error('Shopify fileCreate (video) returned no file id')
+
+  // Video files process asynchronously; poll for the CDN source URL.
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 2000))
+    const polled = await adminGraphQL<{
+      node: { id: string; fileStatus?: string; sources?: { url: string; format?: string }[] } | null
+    }>(`
+      query PollVideoFile($id: ID!) {
+        node(id: $id) {
+          ... on Video { id fileStatus sources { url format } }
+        }
+      }
+    `, { id: fileId })
+    const sources = polled.node?.sources ?? []
+    const mp4 = sources.find(s => s.format === 'mp4') ?? sources[0]
+    if (polled.node?.fileStatus === 'READY' && mp4?.url) return mp4.url
+    if (polled.node?.fileStatus === 'FAILED') throw new Error('Shopify video file processing FAILED')
+  }
+  throw new Error('Shopify video file: no CDN URL after 60s of polling')
+}
+
+/**
+ * Write the xdipx.hero_video metafield ({ src, poster, duration } JSON) that
+ * ProductCard/CardMediaCarousel autoplay and the PDP gallery read. This is the
+ * ONLY writer — until now the metafield was set by hand in Shopify admin.
+ */
+export async function setHeroVideoMetafield(
+  productGid: string,
+  video: { src: string; poster?: string; duration?: number },
+): Promise<void> {
+  await setMetafield(productGid, 'xdipx', 'hero_video', 'json', JSON.stringify(video))
+}
+
 // ─── Admin Image Management ───────────────────────────────────────────────────
 
 export interface AdminProductImage {

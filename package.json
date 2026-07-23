@@ -38,6 +38,7 @@
     "@sentry/react": "^10.48.0",
     "@types/compression": "^1.8.1",
     "@types/jsdom": "^28.0.1",
+    "@vercel/blob": "^2.6.1",
     "@vercel/kv": "^3.0.0",
     "botid": "^1.5.11",
     "compression": "^1.8.1",

@@ -10,7 +10,7 @@
  * All keys are <= varchar(50) (pipeline_settings.key constraint).
  */
 
-export const TEAM_IDS = ['homepage', 'social', 'ads', 'email', 'strategy', 'content', 'product'] as const
+export const TEAM_IDS = ['homepage', 'social', 'ads', 'email', 'strategy', 'content', 'product', 'video'] as const
 export type TeamId = (typeof TEAM_IDS)[number]
 
 export function isTeamId(v: unknown): v is TeamId {
@@ -76,6 +76,7 @@ export const TEAM_DEFAULTS: Record<TeamId, { dailyCents: number; maxRunsPerDay: 
   strategy: { dailyCents: 300,  maxRunsPerDay: 1 },
   content:  { dailyCents: 300,  maxRunsPerDay: 2 }, // 2nd run = one voice-gate retry
   product:  { dailyCents: 300,  maxRunsPerDay: 1 }, // daily import-queue drain (SQL + curl, ~$0)
+  video:    { dailyCents: 2000, maxRunsPerDay: 1 }, // fal video generation is metered; $20/day ceiling, ~3 videos/week planned
 }
 
 /** Homepage-only extras (kept from the original TEAM_KEYS set). */
@@ -97,6 +98,39 @@ export const CONTENT_EXTRA_KEYS = {
 
 /** Default content image cap when the key is unset (conservative; migration seeds 5). */
 export const CONTENT_MAX_IMAGES_DEFAULT = 0
+
+/**
+ * Video-team extras (065). max_cost_cents is the HARD per-video ceiling: the
+ * pipeline refuses to enqueue (and re-checks mid-job) any video whose estimated
+ * cost exceeds it, so a model-tier misconfig cannot drain the daily budget in
+ * one loop. frame_review parks every job at awaiting_frame_approval so the
+ * owner picks the scene frame in /admin/video-studio BEFORE the expensive clip
+ * generation; flipping it off lets auto-QC choose the frame.
+ */
+export const VIDEO_EXTRA_KEYS = {
+  maxCostCents: 'video_team_max_cost_cents',
+  frameReview:  'video_frame_review',
+} as const
+
+/** Default per-video ceiling when the key is unset (cents; migration seeds 600). */
+export const VIDEO_MAX_COST_CENTS_DEFAULT = 600
+
+/**
+ * The video formula library (client-safe). Ranked by platform-safety and
+ * production cost by the social team consult; POV-testimonial ships last and
+ * only with per-script owner review. Definitions live in
+ * .claude/agents/video-producer.md; this list is the validation whitelist.
+ */
+export const VIDEO_FORMULAS = [
+  'myth-busting',
+  'unboxing',
+  'before-after',
+  'hook-problem-payoff',
+  'three-things',
+  'grwm',
+  'pov-testimonial',
+] as const
+export type VideoFormula = (typeof VIDEO_FORMULAS)[number]
 
 /**
  * Standalone valves outside the per-team key sets:
@@ -121,7 +155,7 @@ export const CONTENT_MAX_IMAGES_DEFAULT = 0
  * them via {op:'config'} to size each run's per-platform draft quota. Only x
  * has live plumbing; instagram/tiktok drafts are posted manually.
  */
-export const SOCIAL_PLATFORMS = ['x', 'instagram', 'tiktok', 'facebook'] as const
+export const SOCIAL_PLATFORMS = ['x', 'instagram', 'tiktok', 'facebook', 'youtube'] as const
 export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number]
 
 export function socialFreqKey(platform: SocialPlatform): string {
@@ -133,6 +167,7 @@ export const SOCIAL_FREQ_DEFAULTS: Record<SocialPlatform, number> = {
   instagram: 1,
   tiktok: 1,
   facebook: 0,
+  youtube: 0, // video-only platform; drafts come from the video pipeline, not the daily text routine
 }
 
 /** Review lifecycle for social drafts (social_posts.review_status). */
@@ -146,4 +181,7 @@ export const VALVE_KEYS = {
   keywordResearch:    'keyword_research_enabled',
   seoCuration:        'seo_curation_enabled',
   reviewsPdp:         'reviews_pdp_enabled',
+  // Video autopublish: even with the video team enabled, platform posting stays
+  // manual until this AND the per-platform publisher env keys are both set.
+  videoAutopublish:   'video_team_autopublish',
 } as const

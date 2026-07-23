@@ -11,6 +11,7 @@ import { useLoaderData, useFetcher } from 'react-router'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { requireAdmin } from '~/lib/session.server'
 import { getProductAdminImages, type AdminProductImage } from '~/lib/shopify.server'
+import { FalVideoLab } from '~/components/admin/FalVideoLab'
 
 export const meta: MetaFunction = () => [{ title: 'Labs — xdipx Admin' }]
 
@@ -1069,6 +1070,11 @@ export default function AdminLabsPage() {
           )}
         </CollapsibleSection>
       )}
+
+      <FalVideoLab
+        product={selectedProduct ? { id: selectedProduct.id, title: selectedProduct.title, handle: selectedProduct.handle } : null}
+        productImages={images.map(img => ({ src: img.src }))}
+      />
     </div>
   )
 }

@@ -58,6 +58,8 @@ export async function action({ request }: ActionFunctionArgs) {
       dealHistoryId: typeof b['dealHistoryId'] === 'number' ? b['dealHistoryId'] : undefined,
       scheduledFor:  typeof b['scheduledFor'] === 'string' ? b['scheduledFor'] : undefined,
       reworkedFrom:  typeof b['reworkedFrom'] === 'number' ? b['reworkedFrom'] : undefined,
+      videoJobId:    typeof b['videoJobId'] === 'number' ? b['videoJobId'] : undefined,
+      posterUrl:     typeof b['posterUrl'] === 'string' ? b['posterUrl'] : undefined,
     })
     return Response.json({ id })
   }

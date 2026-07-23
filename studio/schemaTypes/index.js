@@ -39,6 +39,7 @@ import emmaPick           from '../schemas/emmaPick.js'
 import emmaContextRail    from '../schemas/emmaContextRail.js'
 import emmaCuratedRail    from '../schemas/blocks/emmaCuratedRail.js'
 import editor             from '../schemas/editor.js'
+import castMember         from '../schemas/castMember.js'
 import dialRegistry       from '../schemas/dialRegistry.js'
 import dialTaxonomy       from '../schemas/dialTaxonomy.js'
 import dialDimension      from '../schemas/dialDimension.js'
@@ -122,6 +123,9 @@ export const schemaTypes = [
   // Editor (Emma) singleton — avatar + name + bio. Powers cart drawer avatar,
   // hero byline, /about E-E-A-T, and editor bio cards. Single source of truth.
   editor,
+  // Friends of Emma — recurring AI presenter cast for the video pipeline
+  // (additive; usable only when active AND approvedForUse).
+  castMember,
   // PDP redesign — sensation dial label registry (singleton)
   dialRegistry,
   // PDP redesign — rich dial taxonomy (singleton, additive — companion to

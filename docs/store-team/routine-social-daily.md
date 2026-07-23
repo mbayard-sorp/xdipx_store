@@ -68,8 +68,12 @@ image and caption together; a caption alone is an incomplete draft. Ask `media-m
 an existing Shopify Files / Sanity asset (reuse-first); when nothing genuinely fits, request one
 generation (1:1 for Instagram feed, 9:16 for TikTok), re-checking the gate before each generation.
 If the gate has no image budget left, ship the draft with the best reusable asset available and
-note the ideal asset in the run summary. TikTok is a static 9:16 image + caption for now; video
-production is a future capability, not yours to improvise.
+note the ideal asset in the run summary. Video is produced by the video team (video-producer +
+the video_jobs pipeline), never improvised here: approved videos arrive in your world as
+pre-approved `social_posts` rows (postType `video_reel`/`video_short`, `video_job_id` set) fanned
+out from `/admin/video-studio`. Do not draft over them, count them against your text/image
+quotas, or reschedule them; your daily drafts stay additive to the video slate. If a video draft's
+caption reads off-voice, file a suggestion targeting the video team rather than editing it.
 
 ## Step 6 — Write drafts
 

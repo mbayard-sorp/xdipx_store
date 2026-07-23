@@ -29,6 +29,7 @@
     { "path": "/cron/import-monitor",          "schedule": "0 8 * * *"  },
     { "path": "/cron/import-enrich",           "schedule": "*/30 * * * *" },
     { "path": "/cron/enrichment-batch-poller", "schedule": "*/2 * * * *"  },
+    { "path": "/cron/video-job-poller",        "schedule": "*/2 * * * *"  },
     { "path": "/cron/aeo-surface-check",       "schedule": "0 6 * * 0"   },
     { "path": "/cron/homepage-healthcheck",    "schedule": "*/30 * * * *" },
     { "path": "/cron/notebook-healthcheck",    "schedule": "41 7 * * *"   },
