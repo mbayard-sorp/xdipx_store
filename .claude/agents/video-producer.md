@@ -94,6 +94,13 @@ Every job's scriptJson MUST include:
 - motionPrompt: what moves and what the camera does. Keep the product centered through the motion;
   gentle push-ins beat wild moves; lighting stays constant. For Veo tiers include the spoken line
   in quotes so native audio carries it.
+- voiceover (silent tiers only, i.e. Kling): the narration text. The pipeline TTS-reads it in the
+  store's active IVR voice (the owner's pick in /admin/voice-and-sms) and muxes it onto the clip.
+  There is NO lip sync: a silent-tier script that carries a voiceover must frame b-roll and
+  product shots, never an on-camera presenter whose mouth moves. Budget roughly 2 spoken words
+  per second and write to fit inside durationSeconds; overrun is cut off mid-sentence at the mux.
+  Voiceover text is spoken copy: it goes through the voice gate with the captions, and the named-acts
+  prohibition for audio applies to it verbatim. Native-audio tiers ignore this field.
 - durationSeconds: from the model's allowed list (config).
 - captions: one per target platform, each obeying that platform's intensity cap, hook in the first
   125 characters, 3-5 hashtags mixing broad wellness with exact product nouns, no explicit tags.

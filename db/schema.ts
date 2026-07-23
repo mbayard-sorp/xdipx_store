@@ -1303,6 +1303,8 @@ export interface VideoScriptJson {
   hook?: string
   beats?: { line: string; direction?: string }[]
   cta?: string
+  /** Narration text for silent tiers (Kling): TTS'd in the active IVR voice and muxed at the lipsync stage. Ignored on native-audio tiers. */
+  voiceover?: string
   captions?: Record<string, string>       // platform -> caption text
   frameFeedback?: string[]                // owner feedback from retry-frames rounds
   regenFeedback?: string[]                // owner feedback from regenerate rounds
