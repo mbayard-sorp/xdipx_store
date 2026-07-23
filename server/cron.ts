@@ -472,6 +472,52 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/checkout-probe
+   * Schedule: every 6h — HTTP-tier synthetic probe of the purchase path up to
+   * the Shopify checkout page. Writes a row and alerts the owner on failure.
+   * 503 on failure so Vercel cron monitoring surfaces it.
+   */
+  cronRoute('/checkout-probe', async (_req, res) => {
+    try {
+      const { runCheckoutProbe, recordAndAlertProbe } = await import('../app/lib/checkout-probe.server.js')
+      const result = await runCheckoutProbe()
+      await recordAndAlertProbe('http', result)
+      res.status(result.ok ? 200 : 503).json(result)
+    } catch (err) {
+      console.error('[cron:checkout-probe]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
+   * POST /cron/checkout-probe-report
+   * Ingests the browser-tier Playwright result (a ProbeResult JSON body) from
+   * the GitHub Action and records + alerts through the same path as the HTTP
+   * tier. Guarded by CRON_SECRET like every cron route.
+   */
+  cronRoute('/checkout-probe-report', async (req, res) => {
+    try {
+      const body = req.body as { ok?: unknown; failedStep?: unknown; steps?: unknown; durationMs?: unknown } | undefined
+      if (!body || typeof body.ok !== 'boolean' || !Array.isArray(body.steps)) {
+        res.status(400).json({ error: 'expected a ProbeResult body { ok, failedStep, steps[], durationMs }' })
+        return
+      }
+      const result = {
+        ok: body.ok,
+        failedStep: typeof body.failedStep === 'string' ? body.failedStep : null,
+        steps: body.steps as { step: string; ok: boolean; status?: number; ms: number; detail?: string }[],
+        durationMs: typeof body.durationMs === 'number' ? body.durationMs : 0,
+      }
+      const { recordAndAlertProbe } = await import('../app/lib/checkout-probe.server.js')
+      const out = await recordAndAlertProbe('browser', result)
+      res.json({ ok: true, ...out })
+    } catch (err) {
+      console.error('[cron:checkout-probe-report]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/enrichment-batch-poller
    * Schedule: every 2 minutes. Advances every in-flight batch_job by one pass
    * (retrieve current turn's batch; if ended, distribute + run tools + submit

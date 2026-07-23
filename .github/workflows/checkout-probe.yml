@@ -1,0 +1,44 @@
+name: Checkout probe (browser tier)
+
+# Daily Playwright walk of the real purchase UI against production. Catches
+# client-only breaks the server-side HTTP probe (/cron/checkout-probe, every 6h)
+# cannot see: an age-gate hydration bug, a broken cart drawer, a dead checkout
+# button. Posts its result to /cron/checkout-probe-report, which records it and
+# alerts the owner through the same path as the HTTP tier.
+#
+# CRON_SECRET is a repo Actions secret. PROBE_PRODUCT_HANDLE is an optional repo
+# variable; without it the script clicks the first product link on the homepage.
+
+on:
+  schedule:
+    - cron: '30 7 * * *'   # daily, offset from the HTTP tier's 6-hourly runs
+  workflow_dispatch: {}
+
+concurrency:
+  group: checkout-probe-browser
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      BASE_URL: https://xdipx.com
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      PROBE_PRODUCT_HANDLE: ${{ vars.PROBE_PRODUCT_HANDLE }}
+      PLAYWRIGHT_MODULE: /tmp/probe/node_modules/playwright/index.js
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Install Playwright in an isolated dir so the repo's package.json and
+      # lockfile are never touched; the script imports it via PLAYWRIGHT_MODULE.
+      - name: Install Playwright (isolated)
+        run: |
+          mkdir -p /tmp/probe && cd /tmp/probe
+          npm init -y >/dev/null 2>&1
+          npm i playwright@1.48.2 >/dev/null 2>&1
+          npx --prefix /tmp/probe playwright install --with-deps chromium
+      - name: Run browser checkout probe
+        run: node scripts/checkout-probe-browser.mjs
