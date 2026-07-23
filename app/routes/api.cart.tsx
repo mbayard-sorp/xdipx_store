@@ -6,8 +6,10 @@ import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import { getCustomerToken } from '~/lib/customer-session.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { deriveEmmaCartContext } from '~/lib/emma-cart.server'
-import { getFbCookies } from '~/lib/attribution.server'
+import { getFbCookies, getGaClientId } from '~/lib/attribution.server'
 import { fireCapiEvent } from '~/lib/meta-capi.server'
+import { getMarketingConsent } from '~/lib/consent.server'
+import { trackAddedToCart } from '~/lib/klaviyo.server'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const cartId = getCartIdFromCookie(request)
@@ -69,9 +71,11 @@ export async function action({ request }: ActionFunctionArgs) {
     // Write _fbp/_fbc as cart attributes so they flow to order.note_attributes
     // and the Purchase webhook can include them in the CAPI event.
     const { fbp, fbc } = getFbCookies(request)
+    const gaCid = getGaClientId(request)
     const fbAttrs: { key: string; value: string }[] = []
     if (fbp) fbAttrs.push({ key: '_fbp', value: fbp })
     if (fbc) fbAttrs.push({ key: '_fbc', value: fbc })
+    if (gaCid) fbAttrs.push({ key: '_ga_cid', value: gaCid })
     if (fbAttrs.length > 0) {
       try { await setCartAttributes(cartId, fbAttrs) } catch { /* non-fatal */ }
     }
@@ -81,6 +85,19 @@ export async function action({ request }: ActionFunctionArgs) {
       value:      price * quantity,
       numItems:   quantity,
     })
+    // Klaviyo Added to Cart (abandoned-cart trigger), fire-and-forget like CAPI.
+    // Needs a known profile + marketing consent, so anonymous carts send nothing.
+    const cartIdForEvent = cartId
+    void (async () => {
+      try {
+        if (!getMarketingConsent(request)) return
+        const token = await getCustomerToken(request)
+        if (token?.tokenType !== 'storefront') return
+        const profile = await getCustomerProfile(token.token).catch(() => null)
+        if (!profile?.email) return
+        await trackAddedToCart(profile.email, { variantId, price, quantity, cartId: cartIdForEvent })
+      } catch { /* analytics never breaks the cart */ }
+    })()
     return Response.json({ ok: true, addToCartEventId }, { headers })
   }
 
@@ -118,10 +135,12 @@ export async function action({ request }: ActionFunctionArgs) {
     // Write _fbp/_fbc as cart attributes alongside any cartTag so they reach
     // order.note_attributes for the Purchase CAPI event.
     const { fbp, fbc } = getFbCookies(request)
+    const gaCid = getGaClientId(request)
     const extraAttrs: { key: string; value: string }[] = []
     if (cartTag) extraAttrs.push({ key: cartTag, value: 'live' })
     if (fbp) extraAttrs.push({ key: '_fbp', value: fbp })
     if (fbc) extraAttrs.push({ key: '_fbc', value: fbc })
+    if (gaCid) extraAttrs.push({ key: '_ga_cid', value: gaCid })
     if (extraAttrs.length > 0 && cartId) {
       try {
         await setCartAttributes(cartId, extraAttrs)
