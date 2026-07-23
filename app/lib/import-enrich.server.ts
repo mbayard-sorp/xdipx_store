@@ -6,10 +6,16 @@
  *
  *   import -> enrich (Anthropic Batch API, 50% off) -> publish (draft -> active)
  *
- * Vercel functions cap at 60s, so enrichment is split across cron ticks:
- *   - submitEnrichmentBatch:  find unenriched imports, submit one single-call
- *                             full-enrichment Batch (one Sonnet request per
- *                             product), persist the batch id (no poll).
+ * The Vercel function budget (300s) is split across cron ticks, and within a
+ * tick the submit step is chunked so a mid-loop timeout can never lose gathered
+ * work:
+ *   - submitEnrichmentBatch:  find unenriched imports, then in small chunks
+ *                             gather briefs, submit one full-enrichment Batch per
+ *                             chunk (one Sonnet request per product), and persist
+ *                             that chunk's batch id immediately (no poll) before
+ *                             starting the next chunk. A tick deadline stops the
+ *                             loop before the function budget so already-submitted
+ *                             chunks are always durably stamped.
  *   - collectEnrichmentBatch: on a later tick, retrieve finished batches, run
  *                             the quality gate (passesQualityGate) on each
  *                             product, write passing writes back to Shopify +
@@ -66,6 +72,27 @@ function normalizeIvrExperience(raw: unknown): string[] {
 }
 
 const DEFAULT_BATCH_CAP = 10
+
+/**
+ * How many products' briefs to gather + submit as one Anthropic batch before
+ * stamping their enrich_batch_id. Small so each chunk is a durable unit of work:
+ * a timeout after chunk N still leaves chunks 1..N stamped and collectable.
+ */
+const BRIEF_CHUNK_SIZE = 5
+
+/**
+ * Wall-clock budget for one tick's submit loop. The Vercel function budget is
+ * 300s; stop gathering new chunks well before that so an in-progress chunk can
+ * finish and stamp. Collect + publish run before submit, so this is a ceiling on
+ * the whole tick, not just submit.
+ */
+const TICK_BUDGET_MS = 240_000
+
+/** Stall detector: alert when this many imported rows sit unclaimed (null
+ *  enrich_batch_id) past the age threshold, a signal the submit step is failing
+ *  to make progress. */
+const STALL_COUNT_THRESHOLD = 25
+const STALL_AGE_HOURS = 6
 
 async function isEnrichEnabled(): Promise<boolean> {
   return (await getPipelineSetting('import_enrich_enabled')) === 'true'
@@ -279,7 +306,10 @@ const ENRICH_MAX_ATTEMPTS = 2
  * no change -- it simply stops receiving 'import-product' jobs and keeps driving
  * 'field-regen' and other jobType consumers.
  */
-export async function submitEnrichmentBatch(cap: number): Promise<{ submitted: number; batchId?: string; reason?: string }> {
+export async function submitEnrichmentBatch(
+  cap: number,
+  opts: { deadline?: number } = {},
+): Promise<{ submitted: number; batchIds: string[]; reason?: string }> {
   const rows = await db
     .select({ id: importCandidates.id, productId: dealHistory.shopifyProductId })
     .from(importCandidates)
@@ -294,38 +324,116 @@ export async function submitEnrichmentBatch(cap: number): Promise<{ submitted: n
     .limit(cap)
 
   const valid = rows.filter((r): r is { id: number; productId: string } => Boolean(r.productId))
-  if (valid.length === 0) return { submitted: 0, reason: 'no_unenriched' }
+  if (valid.length === 0) return { submitted: 0, batchIds: [], reason: 'no_unenriched' }
 
-  const inputs: BatchFullEnrichmentInput[] = []
-  const candidateIds: number[] = []
-
-  for (const r of valid) {
-    const brief = await gatherProductBrief(r.productId)
-    if (!brief) {
-      console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) -- skipping`)
-      continue
-    }
-    // Pairings are a deal-cycle artifact, curated against the freshest catalog
-    // state when a product enters the homepage deal slot. Generating
-    // pairing_why against the candidate list available at import time would be
-    // discarded work -- suppress it here.
-    brief.pairingCandidates = []
-    // Bare numeric id: the productId becomes the Anthropic batch custom_id,
-    // which must match ^[a-zA-Z0-9_-]{1,64}$ — a gid:// prefix is rejected.
-    inputs.push({ productId: String(r.productId), brief })
-    candidateIds.push(r.id)
-  }
-  if (inputs.length === 0) return { submitted: 0, reason: 'no_briefs' }
-
+  // Load the shared enrichment context once; it is reused across every chunk.
   const sharedContext = await loadSharedEnrichmentContext()
-  const { batchId } = await submitFullEnrichmentBatch(inputs, sharedContext, { brandVoice: EMMA_VOICE_ENRICHMENT })
 
-  await db.update(importCandidates)
-    .set({ enrichBatchId: batchId, updatedAt: new Date() })
-    .where(inArray(importCandidates.id, candidateIds))
+  const batchIds: string[] = []
+  let submittedTotal = 0
 
-  console.log(`[import-enrich] submitted full-enrichment batch ${batchId} for ${inputs.length} product(s)`)
-  return { submitted: inputs.length, batchId }
+  // Chunk the brief-gather + submit + stamp cycle. Stamping each chunk's
+  // enrich_batch_id right after its batch is created means a timeout later in
+  // the loop can never orphan already-gathered work: those products are already
+  // claimed and collectEnrichmentBatch picks them up on the next tick. This is
+  // the fix for the stall where a full cap-sized serial gather timed out before
+  // stamping anything and every subsequent tick repeated the same doomed loop.
+  for (let i = 0; i < valid.length; i += BRIEF_CHUNK_SIZE) {
+    if (opts.deadline && Date.now() >= opts.deadline) {
+      console.warn(`[import-enrich] tick deadline reached after ${submittedTotal} submitted; ${valid.length - i} product(s) deferred to next tick`)
+      break
+    }
+
+    const chunk = valid.slice(i, i + BRIEF_CHUNK_SIZE)
+    const inputs: BatchFullEnrichmentInput[] = []
+    const candidateIds: number[] = []
+
+    for (const r of chunk) {
+      const brief = await gatherProductBrief(r.productId)
+      if (!brief) {
+        console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) -- skipping`)
+        continue
+      }
+      // Pairings are a deal-cycle artifact, curated against the freshest catalog
+      // state when a product enters the homepage deal slot. Generating
+      // pairing_why against the candidate list available at import time would be
+      // discarded work -- suppress it here.
+      brief.pairingCandidates = []
+      // Bare numeric id: the productId becomes the Anthropic batch custom_id,
+      // which must match ^[a-zA-Z0-9_-]{1,64}$; a gid:// prefix is rejected.
+      inputs.push({ productId: String(r.productId), brief })
+      candidateIds.push(r.id)
+    }
+    if (inputs.length === 0) continue
+
+    const { batchId } = await submitFullEnrichmentBatch(inputs, sharedContext, { brandVoice: EMMA_VOICE_ENRICHMENT })
+
+    // Stamp THIS chunk immediately, before gathering the next one.
+    await db.update(importCandidates)
+      .set({ enrichBatchId: batchId, updatedAt: new Date() })
+      .where(inArray(importCandidates.id, candidateIds))
+
+    batchIds.push(batchId)
+    submittedTotal += inputs.length
+    console.log(`[import-enrich] submitted full-enrichment batch ${batchId} for ${inputs.length} product(s)`)
+  }
+
+  if (submittedTotal === 0) return { submitted: 0, batchIds: [], reason: 'no_briefs' }
+  return { submitted: submittedTotal, batchIds }
+}
+
+/**
+ * Stall watchdog. Counts imported products that are still unclaimed by the
+ * enrichment step (null enrich_batch_id, not yet enriched or parked) and whose
+ * eligibility anchor (approval time, falling back to last update) is older than
+ * STALL_AGE_HOURS. When more than STALL_COUNT_THRESHOLD are stuck, emails the
+ * owner at most once per 24h. Runs every tick, including when the pipeline is
+ * disabled, so a backlog that built up behind a flipped-off valve is still
+ * surfaced. Never throws into the tick; failures are logged and swallowed.
+ */
+export async function detectImportEnrichStall(enabled: boolean): Promise<{ stuck: number; oldestHours: number | null; alerted: boolean }> {
+  try {
+    const cutoff = new Date(Date.now() - STALL_AGE_HOURS * 3600 * 1000)
+    const rows = await db
+      .select({
+        anchor: sql<string>`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`,
+      })
+      .from(importCandidates)
+      .where(and(
+        eq(importCandidates.status, 'imported'),
+        isNull(importCandidates.enrichedAt),
+        isNull(importCandidates.enrichBatchId),
+        isNull(importCandidates.enrichFailedAt),
+      ))
+
+    const anchors = rows
+      .map(r => new Date(r.anchor))
+      .filter(d => !Number.isNaN(d.getTime()) && d < cutoff)
+    const stuck = anchors.length
+    const oldest = anchors.reduce<Date | null>((min, d) => (min === null || d < min ? d : min), null)
+    const oldestHours = oldest ? Math.round((Date.now() - oldest.getTime()) / 3600_000) : null
+
+    if (stuck <= STALL_COUNT_THRESHOLD) return { stuck, oldestHours, alerted: false }
+
+    const { kvSetNX } = await import('~/lib/kv.server')
+    const fresh = await kvSetNX('alert:import-enrich-stall', String(Date.now()), 24 * 3600)
+    if (!fresh) return { stuck, oldestHours, alerted: false }
+
+    const { sendOwnerEmail, escapeHtml } = await import('~/lib/owner-alerts.server')
+    const state = enabled ? 'enabled' : 'DISABLED'
+    await sendOwnerEmail(
+      `xdipx import-enrich stall: ${stuck} products stuck`,
+      `<p>${escapeHtml(String(stuck))} imported products have sat unclaimed by enrichment for over ${STALL_AGE_HOURS}h `
+        + `(oldest ${escapeHtml(String(oldestHours ?? '?'))}h). The import_enrich pipeline is <strong>${state}</strong>.</p>`
+        + `<p>If disabled, this is an expected backlog. If enabled, the submit step is failing to stamp enrich_batch_id; `
+        + `check the /cron/import-enrich logs and the import_enrich_batch_cap setting.</p>`,
+    )
+    console.warn(`[import-enrich] STALL: ${stuck} stuck (oldest ${oldestHours}h), pipeline ${state}; owner alerted`)
+    return { stuck, oldestHours, alerted: true }
+  } catch (err) {
+    console.error('[import-enrich] stall detector error (non-fatal):', err)
+    return { stuck: 0, oldestHours: null, alerted: false }
+  }
 }
 
 /**
@@ -513,6 +621,7 @@ export interface ImportEnrichTickResult {
   ok:       boolean
   skipped?: boolean
   reason?:  string
+  stall?:   Awaited<ReturnType<typeof detectImportEnrichStall>>
   collect?: Awaited<ReturnType<typeof collectEnrichmentBatch>>
   publish?: Awaited<ReturnType<typeof publishEnrichedProducts>>
   submit?:  Awaited<ReturnType<typeof submitEnrichmentBatch>>
@@ -521,13 +630,19 @@ export interface ImportEnrichTickResult {
 /**
  * One self-draining tick: collect finished batches, publish ready products,
  * then submit a new batch only if none is still in flight (avoids stacking
- * concurrent batches). Gated by `import_enrich_enabled`.
+ * concurrent batches). Gated by `import_enrich_enabled`. The stall watchdog runs
+ * before the gate so a backlog behind a flipped-off valve is still surfaced.
  */
 export async function runImportEnrichTick(opts: { source?: 'cron' | 'manual' } = {}): Promise<ImportEnrichTickResult> {
-  if (!(await isEnrichEnabled())) {
-    return { ok: true, skipped: true, reason: 'disabled' }
-  }
   void opts
+  const deadline = Date.now() + TICK_BUDGET_MS
+
+  const enabled = await isEnrichEnabled()
+  const stall = await detectImportEnrichStall(enabled)
+
+  if (!enabled) {
+    return { ok: true, skipped: true, reason: 'disabled', stall }
+  }
 
   const collect = await collectEnrichmentBatch()
   const publish = await publishEnrichedProducts()
@@ -538,8 +653,8 @@ export async function runImportEnrichTick(opts: { source?: 'cron' | 'manual' } =
   // every previously-submitted batch has been collected, so we never stack
   // concurrent Anthropic batches for the same source.
   const submit = collect.stillPending === 0
-    ? await submitEnrichmentBatch(await getBatchCap())
-    : { submitted: 0, reason: 'batch_in_flight' }
+    ? await submitEnrichmentBatch(await getBatchCap(), { deadline })
+    : { submitted: 0, batchIds: [], reason: 'batch_in_flight' }
 
-  return { ok: true, collect, publish, submit }
+  return { ok: true, stall, collect, publish, submit }
 }
