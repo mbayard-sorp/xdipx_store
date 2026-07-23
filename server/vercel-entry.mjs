@@ -45,6 +45,7 @@ var init_sentry_server = __esm({
 var schema_exports = {};
 __export(schema_exports, {
   adCampaigns: () => adCampaigns,
+  adCreatives: () => adCreatives,
   adminRoles: () => adminRoles,
   apiTokenLog: () => apiTokenLog,
   batchJobs: () => batchJobs,
@@ -72,6 +73,7 @@ __export(schema_exports, {
   importMonitorRuns: () => importMonitorRuns,
   ivrVoices: () => ivrVoices,
   marketingCalendar: () => marketingCalendar,
+  mediaAssets: () => mediaAssets,
   metaCapiFailures: () => metaCapiFailures,
   nalpacPriceHistory: () => nalpacPriceHistory,
   orderLineItems: () => orderLineItems,
@@ -97,6 +99,7 @@ __export(schema_exports, {
   strategyBriefs: () => strategyBriefs,
   tosAcceptance: () => tosAcceptance,
   tosVersions: () => tosVersions,
+  videoJobs: () => videoJobs,
   voicemails: () => voicemails,
   webConversations: () => webConversations,
   wishlistItems: () => wishlistItems,
@@ -120,7 +123,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, nalpacPriceHistory, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, strategyBriefs, adCampaigns, marketingCalendar;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, nalpacPriceHistory, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, strategyBriefs, adCampaigns, marketingCalendar, mediaAssets, videoJobs, adCreatives;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -244,7 +247,11 @@ var init_schema = __esm({
       reviewedBy: varchar("reviewed_by", { length: 60 }),
       reviewedAt: timestamp("reviewed_at"),
       scheduledFor: date("scheduled_for"),
-      reworkedFrom: integer("reworked_from")
+      reworkedFrom: integer("reworked_from"),
+      // Video pipeline linkage (migration 065). A finished video_jobs row fans out
+      // to one social_posts row per target platform; posterUrl renders before playback.
+      videoJobId: integer("video_job_id"),
+      posterUrl: text("poster_url")
     });
     adminRoles = pgTable("admin_roles", {
       id: serial("id").primaryKey(),
@@ -928,8 +935,10 @@ var init_schema = __esm({
       requestCount: integer("request_count").default(1).notNull(),
       // >1 when one row aggregates a batch turn
       estCostUsd: decimal("est_cost_usd", { precision: 10, scale: 5 }).default("0").notNull(),
-      requestId: varchar("request_id", { length: 64 })
+      requestId: varchar("request_id", { length: 64 }),
       // IVR idempotency key (option B); null otherwise
+      refId: varchar("ref_id", { length: 64 })
+      // correlation key (video_jobs.job_id, ad batch id); null otherwise (065)
     }, (t) => ({
       tsIdx: index("idx_api_token_log_ts").on(t.ts),
       featureTsIdx: index("idx_api_token_log_feature_ts").on(t.feature, t.ts)
@@ -1081,6 +1090,77 @@ var init_schema = __esm({
       updatedAt: timestamp("updated_at").notNull().defaultNow()
     }, (t) => ({
       dateIdx: index("idx_marketing_calendar_date").on(t.eventDate)
+    }));
+    mediaAssets = pgTable("media_assets", {
+      id: serial("id").primaryKey(),
+      kind: varchar("kind", { length: 12 }).notNull(),
+      // video|image|audio
+      purpose: varchar("purpose", { length: 24 }).notNull(),
+      // scene_frame|clip|final|poster|ad_static|ad_video
+      blobUrl: text("blob_url").notNull(),
+      contentType: varchar("content_type", { length: 64 }).notNull(),
+      durationSeconds: decimal("duration_seconds", { precision: 6, scale: 2 }),
+      width: integer("width"),
+      height: integer("height"),
+      costUsd: decimal("cost_usd", { precision: 10, scale: 5 }).notNull().default("0"),
+      sourceModel: varchar("source_model", { length: 64 }),
+      videoJobId: integer("video_job_id").references(() => videoJobs.id, { onDelete: "set null" }),
+      createdAt: timestamp("created_at").notNull().defaultNow()
+    }, (t) => ({
+      jobIdx: index("idx_media_assets_job").on(t.videoJobId)
+    }));
+    videoJobs = pgTable("video_jobs", {
+      id: serial("id").primaryKey(),
+      jobId: varchar("job_id", { length: 36 }).notNull(),
+      productHandle: varchar("product_handle", { length: 255 }).notNull(),
+      shopifyProductGid: varchar("shopify_product_gid", { length: 64 }),
+      formula: varchar("formula", { length: 32 }).notNull(),
+      presenter: varchar("presenter", { length: 64 }).notNull().default("none"),
+      // none|emma|friend:{slug}
+      scriptJson: jsonb("script_json").$type().notNull(),
+      aiDisclosure: boolean("ai_disclosure").notNull().default(true),
+      modelTier: varchar("model_tier", { length: 16 }).notNull(),
+      // VideoModelId
+      targetPlatforms: jsonb("target_platforms").$type().notNull().default([]),
+      stage: varchar("stage", { length: 16 }).notNull().default("scene_frame"),
+      // scene_frame|clip|lipsync|assembly|poster|done|failed
+      status: varchar("status", { length: 24 }).notNull().default("queued"),
+      // queued|running|awaiting_provider|awaiting_frame_approval|applying|done|failed
+      providerRequestIds: jsonb("provider_request_ids").$type().notNull().default({}),
+      sceneFrameAssetId: integer("scene_frame_asset_id").references(() => mediaAssets.id, { onDelete: "set null" }),
+      finalAssetId: integer("final_asset_id").references(() => mediaAssets.id, { onDelete: "set null" }),
+      posterAssetId: integer("poster_asset_id").references(() => mediaAssets.id, { onDelete: "set null" }),
+      costUsd: decimal("cost_usd", { precision: 10, scale: 5 }).notNull().default("0"),
+      metricsJson: jsonb("metrics_json").$type(),
+      // platform -> {views, likes, ...} owner self-report
+      error: text("error"),
+      team: varchar("team", { length: 24 }).notNull().default("video"),
+      runId: integer("run_id").references(() => homepageTeamRuns.id, { onDelete: "set null" }),
+      createdAt: timestamp("created_at").notNull().defaultNow(),
+      updatedAt: timestamp("updated_at").notNull().defaultNow(),
+      completedAt: timestamp("completed_at")
+    }, (t) => ({
+      jobIdIdx: uniqueIndex("uq_video_jobs_job_id").on(t.jobId),
+      statusIdx: index("idx_video_jobs_status").on(t.status, t.createdAt)
+      // Partial in-flight index (idx_video_jobs_inflight) covering the poller drain
+      // query is created in the SQL migration — Drizzle cannot express partial
+      // indexes. `awaiting_frame_approval` is deliberately EXCLUDED from it so
+      // parked jobs do not spin the poller.
+    }));
+    adCreatives = pgTable("ad_creatives", {
+      id: serial("id").primaryKey(),
+      adCampaignId: integer("ad_campaign_id").notNull().references(() => adCampaigns.id, { onDelete: "cascade" }),
+      format: varchar("format", { length: 8 }).notNull(),
+      // 1:1|4:5|9:16
+      assetId: integer("asset_id").notNull().references(() => mediaAssets.id, { onDelete: "cascade" }),
+      hookCopy: text("hook_copy"),
+      status: varchar("status", { length: 16 }).notNull().default("draft"),
+      // draft|approved|rejected|pushed
+      policyCheck: text("policy_check").notNull(),
+      createdAt: timestamp("created_at").notNull().defaultNow(),
+      updatedAt: timestamp("updated_at").notNull().defaultNow()
+    }, (t) => ({
+      campaignIdx: index("idx_ad_creatives_campaign").on(t.adCampaignId, t.status)
     }));
   }
 });
@@ -1581,7 +1661,11 @@ var init_kv_server = __esm({
       // found zero in-flight batch_jobs, so the cron skips Neon entirely. Set with
       // a TTL by advanceInflightJobs, deleted by enqueueBatchJob, so worst case a
       // lost delete delays a new job by one TTL window rather than stalling it.
-      enrichmentPollerIdle: "enrichment:poller:idle"
+      enrichmentPollerIdle: "enrichment:poller:idle",
+      // Video pipeline (065): per-job KV mirror + the poller's idle negative-cache
+      // (same semantics as enrichmentPollerIdle, owned by video-pipeline.server.ts).
+      videoJob: (jobId) => `video-job:${jobId}`,
+      videoPollerIdle: "video:poller:idle"
     };
     DEFAULT_VAULT_TABS = [
       { id: "all", label: "All", slug: "all", filter: { type: "all" } },
@@ -2060,6 +2144,359 @@ var init_master_collapse_server = __esm({
   }
 });
 
+// app/lib/product-type-derive.ts
+function norm(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+function deriveProductType(input) {
+  const cats = new Set(
+    input.categories.flatMap((c) => c.split(",")).map(norm).filter(Boolean)
+  );
+  if (cats.size > 0) {
+    for (const rule of CATEGORY_RULES) {
+      if (rule.aliases.some((a) => cats.has(a))) {
+        return { productType: rule.type, matchedBy: "category" };
+      }
+    }
+  }
+  const title = norm(input.title);
+  if (title) {
+    for (const rule of TITLE_RULES) {
+      if (rule.pattern.test(title)) {
+        return { productType: rule.type, matchedBy: "title" };
+      }
+    }
+  }
+  return { productType: null, matchedBy: null };
+}
+var CANONICAL_PRODUCT_TYPES, CANONICAL_SET, CATEGORY_RULES, TITLE_RULES;
+var init_product_type_derive = __esm({
+  "app/lib/product-type-derive.ts"() {
+    "use strict";
+    CANONICAL_PRODUCT_TYPES = [
+      // anal
+      "Anal Beads",
+      "Anal Plug",
+      "Anal Toy",
+      "Anal Training Kit",
+      "Prostate Massager",
+      "Vibrating Anal Toy",
+      // arousal_performance
+      "Arousal Gel",
+      "Desensitizer",
+      "Enhancer",
+      "Oral Enhancer",
+      // cock_rings
+      "Cock Ring",
+      // couples
+      "Couples Toy",
+      "Couples Vibrator",
+      // dildos
+      "Dildo",
+      "Fantasy Dildo",
+      "Realistic Dildo",
+      "Silicone Dildo",
+      "Strap-On Dildo",
+      // discontinued
+      "Discontinued",
+      // extenders_supplements
+      "Enhancement Supplement",
+      "Penis Extender",
+      "Penis Sleeve",
+      "Supplement / Pill",
+      // external_clitoral
+      "Bullet Vibrator",
+      "Clitoral Vibrator",
+      "Suction Vibrator",
+      "Vibrator",
+      // fetish_wear
+      "Body Harness",
+      "Cage / Chastity",
+      "Fetish Wear",
+      "Fetishwear",
+      "Mask",
+      // gift_card
+      "Gift Card",
+      // harnesses
+      "Strap-On Harness",
+      // hosiery
+      "Hosiery",
+      // hygiene_care
+      "Bath & Body",
+      "Body Care",
+      "Douche / Enema",
+      "Intimate Hygiene",
+      "Toy Cleaner",
+      "Wipe / Hygiene",
+      // impact_sensory
+      "Ball Gag",
+      "Blindfold",
+      "Electrostim Kit",
+      "Gag",
+      "Paddle",
+      // internal
+      "G-Spot Vibrator",
+      "Rabbit Vibrator",
+      // lingerie
+      "Apparel",
+      "Babydoll / Chemise",
+      "Bodystocking",
+      "Bodysuit",
+      "Bra & Panty Set",
+      "Dress",
+      "Lingerie Set",
+      "Panty",
+      "Pasties",
+      // lubricants
+      "Lubricant",
+      "Vaginal Moisturizer",
+      // mens
+      "Men's Underwear",
+      // novelty_games
+      "Adult Game",
+      "Erotic Books",
+      "Novelty Gift",
+      // oils_fragrance
+      "Massage Candle",
+      "Massage Oil",
+      "Pheromone",
+      "Pheromone Fragrance",
+      // other_accessory
+      "Accessory",
+      "Sex Furniture",
+      // protection
+      "Condom",
+      // pumps
+      "Enhancement Pump",
+      "Penis Pump",
+      "Pussy Pump",
+      // restraints_collars
+      "Bondage Kit",
+      "Collar",
+      "Restraints",
+      // sex_machines
+      "Sex Machine",
+      // stimulators
+      "Kegel Exerciser",
+      "Kegel Trainer",
+      "Nipple Clamps",
+      "Nipple Toy",
+      // strokers
+      "Sex Doll",
+      "Stroker",
+      // vibrating_dildos
+      "Thrusting Vibrator",
+      "Vibrating Dildo",
+      // wands
+      "Wand Massager"
+    ];
+    CANONICAL_SET = new Set(CANONICAL_PRODUCT_TYPES);
+    CATEGORY_RULES = [
+      // Gift card first — unambiguous.
+      { type: "Gift Card", aliases: ["gift card", "gift cards"] },
+      // Strokers / masturbators — before dildo rules ("Non-Realistic" co-occurs).
+      { type: "Stroker", aliases: [
+        "vagina strokers",
+        "butt strokers",
+        "mouth strokers",
+        "pocket strokers",
+        "vibrating masturbators and strokers",
+        "hands free masturbators and strokers",
+        "hands free masturbators",
+        "celebrity molded masturbators and strokers",
+        "masturbators",
+        "masturbators and strokers",
+        "disposable strokers",
+        "vibrating strokers",
+        "body molds"
+      ] },
+      { type: "Sex Doll", aliases: ["dolls"] },
+      // Machines before generic vibrator rules ("Rotating and Thrusting" co-occurs).
+      { type: "Sex Machine", aliases: ["sex machines"] },
+      // Electrostim before rabbit/anal (co-occurs with both).
+      { type: "Electrostim Kit", aliases: ["electrostim"] },
+      // Cock rings — before couples categories they co-occur with.
+      { type: "Cock Ring", aliases: [
+        "vibrating cockrings",
+        "cockring sets",
+        "cock rings",
+        "straps and adjustable cockrings",
+        "cock and ball slings",
+        "ball stretchers",
+        "slings",
+        // "Classic" is Nalpac's Cockrings > Classic subcategory — it never
+        // co-occurs with non-ring categories in the live feed data.
+        "classic"
+      ] },
+      // Anal — specific before generic.
+      { type: "Prostate Massager", aliases: ["prostate toys", "prostate"] },
+      { type: "Anal Beads", aliases: ["beads and balls", "anal beads"] },
+      { type: "Vibrating Anal Toy", aliases: ["vibrating anal toys"] },
+      { type: "Anal Toy", aliases: ["asslocks"] },
+      { type: "Anal Plug", aliases: ["plugs and probes", "tails"] },
+      // Kegel before bullets ("Bullets and Eggs,Kegel Toys,Remote" is a kegel egg).
+      { type: "Kegel Exerciser", aliases: ["kegel toys"] },
+      // Wands before g-spot (wand attachments get co-tagged g-spot).
+      { type: "Wand Massager", aliases: ["wands"] },
+      // Vibrators — specific shapes before the generic bucket.
+      { type: "Rabbit Vibrator", aliases: ["dual action and rabbits"] },
+      { type: "Thrusting Vibrator", aliases: ["rotating and thrusting vibrators"] },
+      { type: "Suction Vibrator", aliases: ["air pulse and suction", "air pulsation toys"] },
+      { type: "G-Spot Vibrator", aliases: ["g spot and classic slimline", "g spot vibrators"] },
+      { type: "Clitoral Vibrator", aliases: ["finger and clit", "clit and vulva"] },
+      { type: "Bullet Vibrator", aliases: ["bullets and eggs"] },
+      { type: "Couples Vibrator", aliases: ["couples and wearable", "couples vibrators", "top couples toys"] },
+      // Dildos — vibrating > strapless/double > fantasy > realistic > silicone > generic.
+      { type: "Vibrating Dildo", aliases: ["vibrating dildos and dongs", "realistic vibrators"] },
+      { type: "Strap-On Dildo", aliases: ["strapless strap ons and double dildos"] },
+      { type: "Fantasy Dildo", aliases: ["fantasy dildos"] },
+      { type: "Realistic Dildo", aliases: ["realistic", "celebrity molded dildos and dongs", "dual density", "triple density"] },
+      { type: "Silicone Dildo", aliases: ["silicone dildos and dongs"] },
+      { type: "Dildo", aliases: ["non realistic", "non phallic", "glass and metal", "jelly", "ejaculating", "packers", "packing"] },
+      // Remaining generic vibrator buckets — after every specific shape.
+      { type: "Vibrator", aliases: ["vibrator kits", "vibrators and massagers", "humping and grinding toys"] },
+      // Strap-on harnesses (bare "Strap-on" category; "Strap-on Compatible" is a
+      // modifier and intentionally NOT an alias here).
+      { type: "Strap-On Harness", aliases: ["strap on"] },
+      // Male enhancement.
+      { type: "Penis Sleeve", aliases: ["sleeves"] },
+      { type: "Penis Extender", aliases: ["penis extenders", "vibrating penis extenders"] },
+      { type: "Penis Pump", aliases: ["penis"] },
+      { type: "Supplement / Pill", aliases: ["pills", "shots honeys and nectars", "gummies and edibles"] },
+      { type: "Enhancer", aliases: ["male arousal"] },
+      // Bondage / fetish — before apparel (fetish wear co-occurs with costumes).
+      { type: "Restraints", aliases: ["restraints"] },
+      { type: "Collar", aliases: ["collars and leashes"] },
+      { type: "Paddle", aliases: ["paddles whips and ticklers"] },
+      { type: "Gag", aliases: ["gags"] },
+      { type: "Blindfold", aliases: ["blindfolds"] },
+      { type: "Mask", aliases: ["masks"] },
+      { type: "Cage / Chastity", aliases: ["chastity", "cages"] },
+      { type: "Body Harness", aliases: ["body harnesses"] },
+      { type: "Fetish Wear", aliases: ["fetish and roleplay"] },
+      { type: "Bondage Kit", aliases: ["bondage accessories"] },
+      { type: "Sex Furniture", aliases: ["swings slings and door jams", "positioning aids"] },
+      // Lubes & topicals — actives before carrier bases.
+      { type: "Desensitizer", aliases: ["desensitizers and relaxers"] },
+      { type: "Arousal Gel", aliases: ["arousal gels creams and balms", "female arousal"] },
+      { type: "Oral Enhancer", aliases: ["oral"] },
+      { type: "Lubricant", aliases: [
+        "water based",
+        "silicone based",
+        "hybrid",
+        "oil based",
+        "flavored",
+        "natural",
+        "anal lubes",
+        "warming cooling and stimulating",
+        "lubricants",
+        "lubricant sets and kits",
+        "masturbation creams"
+      ] },
+      { type: "Massage Candle", aliases: ["candles", "drip candles"] },
+      { type: "Massage Oil", aliases: ["massage", "cbd products"] },
+      { type: "Pheromone Fragrance", aliases: ["perfumes colognes and pheromone fragrances"] },
+      // Lingerie & apparel — specific garments before the generic bucket.
+      { type: "Lingerie Set", aliases: ["lingerie sets"] },
+      { type: "Bra & Panty Set", aliases: ["bra and panty sets"] },
+      { type: "Bodysuit", aliases: ["bodysuits and teddies"] },
+      { type: "Babydoll / Chemise", aliases: ["babydolls and chemises"] },
+      { type: "Bodystocking", aliases: ["bodystockings"] },
+      { type: "Dress", aliases: ["dresses"] },
+      { type: "Panty", aliases: ["panties"] },
+      { type: "Pasties", aliases: ["pasties"] },
+      { type: "Hosiery", aliases: ["hosiery", "socks"] },
+      { type: "Men's Underwear", aliases: ["men s underwear"] },
+      { type: "Apparel", aliases: [
+        "apparel",
+        "costumes",
+        "corsets and bustiers",
+        "lingerie plus queen size",
+        "lingerie hanging",
+        "sleepwear and pj s"
+      ] },
+      // Stimulators.
+      { type: "Nipple Toy", aliases: ["nipples", "nipple"] },
+      // Hygiene & care.
+      { type: "Toy Cleaner", aliases: ["toy cleaners"] },
+      { type: "Douche / Enema", aliases: ["douches and enemas"] },
+      { type: "Wipe / Hygiene", aliases: ["cleansers and body wipes"] },
+      { type: "Intimate Hygiene", aliases: ["hygiene"] },
+      { type: "Body Care", aliases: ["body care", "aftercare", "wellness"] },
+      // Protection — Nalpac files condoms under brand-name categories.
+      { type: "Condom", aliases: ["condoms", "trojan", "lifestyles", "magnum", "trustex", "glyde"] },
+      // Novelty & games.
+      { type: "Adult Game", aliases: ["games", "games and party supplies"] },
+      { type: "Erotic Books", aliases: ["books", "coloring books"] },
+      { type: "Novelty Gift", aliases: [
+        "novelty gifts",
+        "candy and edible novelties",
+        "party supplies",
+        "pins and keychains",
+        "tiaras sashes and hats",
+        "plushies and pillows",
+        "romance and accessories",
+        "gift sets and kits"
+      ] },
+      // Accessory catch-alls — last so anything more specific wins.
+      { type: "Accessory", aliases: [
+        "accessories",
+        "accessories and attachments",
+        "batteries and chargers",
+        "toy storage",
+        "pump accessories",
+        "masturbator and stroker accessories",
+        "lubricant applicators",
+        "o rings and cushions",
+        "bedroom accessories"
+      ] }
+    ];
+    TITLE_RULES = [
+      { type: "Gift Card", pattern: /\bgift card\b/ },
+      { type: "Wand Massager", pattern: /\bwand\b/ },
+      { type: "Rabbit Vibrator", pattern: /\brabbit\b/ },
+      { type: "Suction Vibrator", pattern: /\b(air pulse|suction)\b/ },
+      { type: "Bullet Vibrator", pattern: /\bbullet\b/ },
+      { type: "Anal Beads", pattern: /\banal beads?\b/ },
+      { type: "Prostate Massager", pattern: /\bprostate\b/ },
+      { type: "Anal Plug", pattern: /\bplug\b/ },
+      { type: "Penis Sleeve", pattern: /\b(penis|cock) sleeve\b/ },
+      { type: "Stroker", pattern: /\b(stroker|masturbator)\b/ },
+      { type: "Cock Ring", pattern: /\b(cock ?ring|c ring|love ring)\b/ },
+      { type: "Strap-On Harness", pattern: /\bharness\b/ },
+      { type: "Babydoll / Chemise", pattern: /\b(babydoll|chemise)\b/ },
+      { type: "Sex Doll", pattern: /\bdoll\b/ },
+      { type: "Sex Machine", pattern: /\b(sex|thrusting) machine\b/ },
+      { type: "Vibrating Dildo", pattern: /\bvibrating (dildo|dong)\b/ },
+      { type: "Dildo", pattern: /\b(dildo|dong)\b/ },
+      { type: "Kegel Exerciser", pattern: /\bkegel\b/ },
+      { type: "Nipple Clamps", pattern: /\bnipple clamps?\b/ },
+      { type: "Nipple Toy", pattern: /\bnipple\b/ },
+      { type: "Penis Pump", pattern: /\bpump\b/ },
+      { type: "Massage Oil", pattern: /\bmassage oil\b/ },
+      { type: "Massage Candle", pattern: /\bcandle\b/ },
+      { type: "Lubricant", pattern: /\b(lube|lubricant)\b/ },
+      { type: "Condom", pattern: /\bcondoms?\b/ },
+      { type: "Toy Cleaner", pattern: /\b(toy )?cleaner\b/ },
+      { type: "Douche / Enema", pattern: /\b(douche|enema)\b/ },
+      { type: "Pheromone Fragrance", pattern: /\bpheromone\b/ },
+      { type: "Blindfold", pattern: /\bblindfold\b/ },
+      { type: "Paddle", pattern: /\b(paddle|flogger|crop|whip)\b/ },
+      { type: "Gag", pattern: /\bgag\b/ },
+      { type: "Collar", pattern: /\bcollar\b/ },
+      { type: "Restraints", pattern: /\b(restraint|cuffs?|hogtie)\b/ },
+      { type: "Bodystocking", pattern: /\bbodystocking\b/ },
+      { type: "Bodysuit", pattern: /\b(bodysuit|teddy)\b/ },
+      { type: "Panty", pattern: /\b(panty|panties|thong)\b/ },
+      { type: "Hosiery", pattern: /\b(hosiery|stockings?|pantyhose)\b/ },
+      { type: "Adult Game", pattern: /\bgame\b/ },
+      // Generic vibrator last among toys — nearly every toy title mentions "vibe"
+      // when it vibrates, so this must not shadow the shapes above.
+      { type: "Vibrator", pattern: /\b(vibrator|vibe|massager)\b/ }
+    ];
+  }
+});
+
 // app/lib/sanity-image.ts
 function isSanityCdn(url) {
   return !!url && url.includes("cdn.sanity.io");
@@ -2109,6 +2546,7 @@ __export(sanity_server_exports, {
   calculateReadingTime: () => calculateReadingTime,
   createEmmaRailDraft: () => createEmmaRailDraft,
   getAllBlogSeries: () => getAllBlogSeries,
+  getApprovedCastMembers: () => getApprovedCastMembers,
   getBlogAuthor: () => getBlogAuthor,
   getBlogCategories: () => getBlogCategories,
   getBlogCategoryExtras: () => getBlogCategoryExtras,
@@ -2121,11 +2559,13 @@ __export(sanity_server_exports, {
   getCollectionTypeMap: () => getCollectionTypeMap,
   getCollectionsHub: () => getCollectionsHub,
   getEditor: () => getEditor,
+  getEditorPhotoUrl: () => getEditorPhotoUrl,
   getEmmaHeroSettings: () => getEmmaHeroSettings,
   getEmmaPersona: () => getEmmaPersona,
   getEmmaPresets: () => getEmmaPresets,
   getGlossaryTerms: () => getGlossaryTerms,
   getHomeConfig: () => getHomeConfig,
+  getHomeSeo: () => getHomeSeo,
   getHomepageDocRaw: () => getHomepageDocRaw,
   getHomepageSections: () => getHomepageSections,
   getNotebookPostsForProduct: () => getNotebookPostsForProduct,
@@ -2233,6 +2673,40 @@ async function getEditor(preview = false) {
   };
   if (preview) return fetcher();
   return cached("sanity:editor", 300, fetcher);
+}
+async function getEditorPhotoUrl() {
+  const editor = await getEditor(true);
+  return editor?.photoUrl ?? null;
+}
+async function getApprovedCastMembers() {
+  if (!projectId) return [];
+  try {
+    const client5 = getClient(false, true);
+    if (!client5) return [];
+    const raw = await client5.fetch(
+      `*[_type == "castMember" && active == true && approvedForUse == true]{
+        "slug": slug.current,
+        name,
+        role,
+        "photoUrl": referencePhoto.asset->url,
+        "photoAlt": photoAlt,
+        shortBio,
+        personaNotes
+      }`
+    );
+    return (raw ?? []).filter((m) => !!m?.name && !!m.photoUrl).map((m) => ({
+      slug: m.slug ?? m.name.toLowerCase(),
+      name: m.name,
+      role: m.role ?? null,
+      photoUrl: m.photoUrl,
+      photoAlt: m.photoAlt ?? null,
+      shortBio: m.shortBio ?? null,
+      personaNotes: m.personaNotes ?? null
+    }));
+  } catch (err) {
+    console.error("[sanity] getApprovedCastMembers error:", err);
+    return [];
+  }
 }
 async function getEmmaPresets(preview = false) {
   if (!projectId) return [];
@@ -3402,7 +3876,29 @@ async function getHomeConfig() {
     }
   });
 }
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ;
+async function getHomeSeo() {
+  if (!projectId) return null;
+  return cached("sanity:home-seo", 300, async () => {
+    try {
+      const client5 = getClient();
+      if (!client5) return null;
+      const raw = await client5.fetch(HOME_SEO_GROQ);
+      if (!raw) return null;
+      const title = raw.seoTitle?.trim();
+      const description = raw.seoDescription?.trim();
+      const ogImageUrl = raw.ogImageUrl?.trim();
+      return {
+        ...title ? { seoTitle: title } : {},
+        ...description ? { seoDescription: description } : {},
+        ...ogImageUrl ? { ogImageUrl } : {}
+      };
+    } catch (err) {
+      console.error("[sanity] getHomeSeo error:", err);
+      return null;
+    }
+  });
+}
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ, HOME_SEO_GROQ;
 var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
@@ -3568,6 +4064,13 @@ var init_sanity_server = __esm({
     analyticsLabel
   }
 `;
+    HOME_SEO_GROQ = `
+  *[_id == "singleton.homeSeo"][0]{
+    seoTitle,
+    seoDescription,
+    ogImageUrl
+  }
+`;
   }
 });
 
@@ -3669,6 +4172,7 @@ __export(shopify_server_exports, {
   getReturn: () => getReturn,
   getReturnableFulfillments: () => getReturnableFulfillments,
   getShopifyCollections: () => getShopifyCollections,
+  getShopifyProductType: () => getShopifyProductType,
   getStorefrontCollections: () => getStorefrontCollections,
   getStorefrontCustomer: () => getStorefrontCustomer,
   getVariantCost: () => getVariantCost,
@@ -3691,9 +4195,11 @@ __export(shopify_server_exports, {
   sendDraftOrderInvoice: () => sendDraftOrderInvoice,
   setCartAttributes: () => setCartAttributes,
   setDealStatus: () => setDealStatus,
+  setHeroVideoMetafield: () => setHeroVideoMetafield,
   setMediaAsPrimary: () => setMediaAsPrimary,
   setMetafield: () => setMetafield,
   setPairingWhy: () => setPairingWhy,
+  setShopifyProductType: () => setShopifyProductType,
   shopifyAdmin: () => shopifyAdmin,
   slugifyHandle: () => slugifyHandle,
   updateCartLine: () => updateCartLine,
@@ -3705,7 +4211,8 @@ __export(shopify_server_exports, {
   updateProductTitle: () => updateProductTitle,
   updateVariantPricing: () => updateVariantPricing,
   uploadMoodImageToShopifyFiles: () => uploadMoodImageToShopifyFiles,
-  uploadThumbnailToProduct: () => uploadThumbnailToProduct
+  uploadThumbnailToProduct: () => uploadThumbnailToProduct,
+  uploadVideoToShopifyFiles: () => uploadVideoToShopifyFiles
 });
 import crypto from "node:crypto";
 import { toHTML as toHTML2 } from "@portabletext/to-html";
@@ -5627,12 +6134,17 @@ function slugifyHandle(s) {
 }
 async function createShopifyProductFromFeed(product, handle) {
   const tags = buildProductTags(product);
+  const derived = deriveProductType({ categories: product.categories, title: product.title });
+  if (!derived.productType) {
+    console.warn(`[product-type] ${product.sku} created without a derivable product_type (categories=${JSON.stringify(product.categories)}) \u2014 pricing falls through to the global rule until one is set`);
+  }
   const res = await shopifyAdmin("/products.json", "POST", {
     product: {
       title: product.title,
       handle,
       vendor: product.brand,
       tags: tags.join(", "),
+      ...derived.productType ? { product_type: derived.productType } : {},
       status: "draft",
       variants: [{
         sku: product.sku,
@@ -5652,6 +6164,19 @@ async function createShopifyProductFromFeed(product, handle) {
   }
   return String(res.product.id);
 }
+async function getShopifyProductType(numericProductId) {
+  const res = await shopifyAdmin(
+    `/products/${numericProductId}.json?fields=id,product_type`,
+    "GET"
+  );
+  const pt = res.product.product_type?.trim();
+  return pt ? pt : null;
+}
+async function setShopifyProductType(numericProductId, productType) {
+  await shopifyAdmin(`/products/${numericProductId}.json`, "PUT", {
+    product: { id: Number(numericProductId), product_type: productType }
+  });
+}
 async function createShopifyProductWithVariants(master, variants, optionNames, handle) {
   if (optionNames.length === 0 || optionNames.length > 2) {
     throw new Error(`createShopifyProductWithVariants: optionNames must have 1 or 2 entries, got ${optionNames.length}`);
@@ -5663,12 +6188,17 @@ async function createShopifyProductWithVariants(master, variants, optionNames, h
     ...master.msrp < 25 ? ["price:under-25"] : master.msrp < 50 ? ["price:25-50"] : master.msrp < 100 ? ["price:50-100"] : ["price:100-plus"],
     ...master.categories.map((c) => `cat:${c.toLowerCase().replace(/\s+/g, "-")}`)
   ];
+  const derived = deriveProductType({ categories: master.categories, title: master.title });
+  if (!derived.productType) {
+    console.warn(`[product-type] ${master.sku} created without a derivable product_type (categories=${JSON.stringify(master.categories)}) \u2014 pricing falls through to the global rule until one is set`);
+  }
   const res = await shopifyAdmin("/products.json", "POST", {
     product: {
       title: master.title,
       handle,
       vendor: master.brand,
       tags: tags.join(", "),
+      ...derived.productType ? { product_type: derived.productType } : {},
       status: "draft",
       options: optionNames.map((name, i) => ({
         name,
@@ -5951,6 +6481,54 @@ async function uploadMoodImageToShopifyFiles(imageBuffer, filename) {
     throw new Error("Shopify fileCreate: no URL after polling");
   }
   return url;
+}
+async function uploadVideoToShopifyFiles(videoBuffer, filename, opts = {}) {
+  const staged = await createStagedVideoUpload(filename, videoBuffer.length);
+  const form = new FormData();
+  for (const param of staged.parameters) form.append(param.name, param.value);
+  form.append("file", new Blob([new Uint8Array(videoBuffer)], { type: "video/mp4" }), filename);
+  const uploadRes = await fetch(staged.url, { method: "POST", body: form });
+  if (!uploadRes.ok) {
+    throw new Error(`Staged video-file upload failed: ${uploadRes.status} ${await uploadRes.text()}`);
+  }
+  const created = await adminGraphQL(`
+    mutation FileCreate($files: [FileCreateInput!]!) {
+      fileCreate(files: $files) {
+        files { id fileStatus }
+        userErrors { field message }
+      }
+    }
+  `, {
+    files: [{
+      originalSource: staged.resourceUrl,
+      contentType: "VIDEO",
+      alt: opts.alt ?? filename
+    }]
+  });
+  if (created.fileCreate.userErrors.length > 0) {
+    const errs = created.fileCreate.userErrors.map((e) => e.message).join("; ");
+    throw new Error(`Shopify fileCreate (video) error: ${errs}`);
+  }
+  const fileId = created.fileCreate.files[0]?.id;
+  if (!fileId) throw new Error("Shopify fileCreate (video) returned no file id");
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 2e3));
+    const polled = await adminGraphQL(`
+      query PollVideoFile($id: ID!) {
+        node(id: $id) {
+          ... on Video { id fileStatus sources { url format } }
+        }
+      }
+    `, { id: fileId });
+    const sources = polled.node?.sources ?? [];
+    const mp4 = sources.find((s) => s.format === "mp4") ?? sources[0];
+    if (polled.node?.fileStatus === "READY" && mp4?.url) return mp4.url;
+    if (polled.node?.fileStatus === "FAILED") throw new Error("Shopify video file processing FAILED");
+  }
+  throw new Error("Shopify video file: no CDN URL after 60s of polling");
+}
+async function setHeroVideoMetafield(productGid, video) {
+  await setMetafield(productGid, "xdipx", "hero_video", "json", JSON.stringify(video));
 }
 async function getProductAdminImages(numericId) {
   const id = numericId.replace("gid://shopify/Product/", "");
@@ -7690,6 +8268,7 @@ var init_shopify_server = __esm({
     init_kv_server();
     init_tag_normalize();
     init_master_collapse_server();
+    init_product_type_derive();
     READ_TTL = 60;
     COLLECTION_CURSOR_TTL = 300;
     STOREFRONT_ENDPOINT = `https://${process.env["SHOPIFY_STORE_DOMAIN"]}/api/2024-10/graphql.json`;
@@ -8862,9 +9441,9 @@ function isDiscontinued(product) {
     if (/\bdiscontinued\b/i.test(f)) return true;
     if (/\b(DISC|DC)\b/.test(f)) return true;
   }
-  const desc2 = product["Product Description"] ?? "";
-  if (/\bdiscontinued by manufacturer\b/i.test(desc2)) return true;
-  if (/\bproduct (?:has been |is )?discontinued\b/i.test(desc2)) return true;
+  const desc3 = product["Product Description"] ?? "";
+  if (/\bdiscontinued by manufacturer\b/i.test(desc3)) return true;
+  if (/\bproduct (?:has been |is )?discontinued\b/i.test(desc3)) return true;
   return false;
 }
 function parseCategories(raw) {
@@ -9891,6 +10470,9 @@ __export(team_keys_exports, {
   TEAM_DEFAULTS: () => TEAM_DEFAULTS,
   TEAM_IDS: () => TEAM_IDS,
   VALVE_KEYS: () => VALVE_KEYS,
+  VIDEO_EXTRA_KEYS: () => VIDEO_EXTRA_KEYS,
+  VIDEO_FORMULAS: () => VIDEO_FORMULAS,
+  VIDEO_MAX_COST_CENTS_DEFAULT: () => VIDEO_MAX_COST_CENTS_DEFAULT,
   isTeamId: () => isTeamId,
   socialFreqKey: () => socialFreqKey,
   teamFromFeature: () => teamFromFeature,
@@ -9924,11 +10506,11 @@ function teamKeys(team) {
 function socialFreqKey(platform) {
   return `social_freq_${platform}`;
 }
-var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, CONTENT_MAX_IMAGES_DEFAULT, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, SOCIAL_REVIEW_STATUSES, VALVE_KEYS;
+var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, CONTENT_MAX_IMAGES_DEFAULT, VIDEO_EXTRA_KEYS, VIDEO_MAX_COST_CENTS_DEFAULT, VIDEO_FORMULAS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, SOCIAL_REVIEW_STATUSES, VALVE_KEYS;
 var init_team_keys = __esm({
   "app/lib/team-keys.ts"() {
     "use strict";
-    TEAM_IDS = ["homepage", "social", "ads", "email", "strategy", "content", "product"];
+    TEAM_IDS = ["homepage", "social", "ads", "email", "strategy", "content", "product", "video"];
     TEAM_DEFAULTS = {
       homepage: { dailyCents: 1500, maxRunsPerDay: 4 },
       social: { dailyCents: 500, maxRunsPerDay: 2 },
@@ -9937,8 +10519,10 @@ var init_team_keys = __esm({
       strategy: { dailyCents: 300, maxRunsPerDay: 1 },
       content: { dailyCents: 300, maxRunsPerDay: 2 },
       // 2nd run = one voice-gate retry
-      product: { dailyCents: 300, maxRunsPerDay: 1 }
+      product: { dailyCents: 300, maxRunsPerDay: 1 },
       // daily import-queue drain (SQL + curl, ~$0)
+      video: { dailyCents: 2e3, maxRunsPerDay: 1 }
+      // fal video generation is metered; $20/day ceiling, ~3 videos/week planned
     };
     HOMEPAGE_EXTRA_KEYS = {
       buildCents: "homepage_team_build_cents",
@@ -9948,12 +10532,28 @@ var init_team_keys = __esm({
       maxImagesPerDay: "content_team_max_images"
     };
     CONTENT_MAX_IMAGES_DEFAULT = 0;
-    SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook"];
+    VIDEO_EXTRA_KEYS = {
+      maxCostCents: "video_team_max_cost_cents",
+      frameReview: "video_frame_review"
+    };
+    VIDEO_MAX_COST_CENTS_DEFAULT = 600;
+    VIDEO_FORMULAS = [
+      "myth-busting",
+      "unboxing",
+      "before-after",
+      "hook-problem-payoff",
+      "three-things",
+      "grwm",
+      "pov-testimonial"
+    ];
+    SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook", "youtube"];
     SOCIAL_FREQ_DEFAULTS = {
       x: 1,
       instagram: 1,
       tiktok: 1,
-      facebook: 0
+      facebook: 0,
+      youtube: 0
+      // video-only platform; drafts come from the video pipeline, not the daily text routine
     };
     SOCIAL_REVIEW_STATUSES = ["pending_review", "approved", "needs_changes", "rejected"];
     VALVE_KEYS = {
@@ -9962,7 +10562,10 @@ var init_team_keys = __esm({
       contentAutopublish: "content_team_autopublish",
       keywordResearch: "keyword_research_enabled",
       seoCuration: "seo_curation_enabled",
-      reviewsPdp: "reviews_pdp_enabled"
+      reviewsPdp: "reviews_pdp_enabled",
+      // Video autopublish: even with the video team enabled, platform posting stays
+      // manual until this AND the per-platform publisher env keys are both set.
+      videoAutopublish: "video_team_autopublish"
     };
   }
 });
@@ -9971,7 +10574,8 @@ var init_team_keys = __esm({
 var model_pricing_server_exports = {};
 __export(model_pricing_server_exports, {
   estimateCostUsd: () => estimateCostUsd,
-  estimateImageCostUsd: () => estimateImageCostUsd
+  estimateImageCostUsd: () => estimateImageCostUsd,
+  estimateVideoCostUsd: () => estimateVideoCostUsd
 });
 function estimateCostUsd(args) {
   if (args.source === "agent-sdk") return 0;
@@ -9986,7 +10590,12 @@ function estimateImageCostUsd(model, count) {
   const cost = per * Math.max(0, count);
   return Math.round(cost * 1e5) / 1e5;
 }
-var RATES, DEFAULT_RATE, IMAGE_RATES, DEFAULT_IMAGE_RATE;
+function estimateVideoCostUsd(model, seconds) {
+  const per = VIDEO_RATES[model] ?? DEFAULT_VIDEO_RATE;
+  const cost = per * Math.max(0, seconds);
+  return Math.round(cost * 1e5) / 1e5;
+}
+var RATES, DEFAULT_RATE, IMAGE_RATES, DEFAULT_IMAGE_RATE, VIDEO_RATES, DEFAULT_VIDEO_RATE;
 var init_model_pricing_server = __esm({
   "app/lib/model-pricing.server.ts"() {
     "use strict";
@@ -10012,6 +10621,19 @@ var init_model_pricing_server = __esm({
       "imagen-3": 0.04
     };
     DEFAULT_IMAGE_RATE = 0.04;
+    VIDEO_RATES = {
+      "fal/veo3.1": 0.4,
+      // native audio, 1080p
+      "fal/veo3.1-fast": 0.15,
+      // native audio
+      "fal/kling-2.5-pro": 0.07,
+      // no native audio
+      "fal/seedance-2.0": 0.31,
+      // audio included, 720p
+      "fal/sync-lipsync": 0.05
+      // lipsync billed ~$3/min of output video
+    };
+    DEFAULT_VIDEO_RATE = 0.4;
   }
 });
 
@@ -10021,7 +10643,8 @@ __export(token_log_server_exports, {
   getDailyTokenRollup: () => getDailyTokenRollup,
   getTokenCallDetail: () => getTokenCallDetail,
   logApiTokens: () => logApiTokens,
-  logImageCost: () => logImageCost
+  logImageCost: () => logImageCost,
+  logVideoCost: () => logVideoCost
 });
 async function bumpTeamSpendCounters(feature, costUsd, imageCount) {
   try {
@@ -10094,6 +10717,7 @@ async function logImageCost(entry) {
       productId: entry.productId ?? null,
       sku: entry.sku ?? null,
       caller: entry.caller ?? null,
+      refId: entry.refId ?? null,
       inputTokens: 0,
       outputTokens: 0,
       cacheCreationTokens: 0,
@@ -10104,6 +10728,34 @@ async function logImageCost(entry) {
     await bumpTeamSpendCounters(entry.feature, cost, entry.count);
   } catch (err) {
     console.error("[token-log] best-effort image-cost write failed (ignored):", err);
+  }
+}
+async function logVideoCost(entry) {
+  try {
+    if (!entry.seconds || entry.seconds <= 0) return;
+    const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
+    const { apiTokenLog: apiTokenLog2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+    const { estimateVideoCostUsd: estimateVideoCostUsd2 } = await Promise.resolve().then(() => (init_model_pricing_server(), model_pricing_server_exports));
+    const cost = estimateVideoCostUsd2(entry.model, entry.seconds);
+    await db2.insert(apiTokenLog2).values({
+      feature: entry.feature,
+      model: entry.model,
+      source: "sync",
+      batchId: null,
+      productId: entry.productId ?? null,
+      sku: entry.sku ?? null,
+      caller: entry.caller ?? null,
+      refId: entry.refId ?? null,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      requestCount: 1,
+      estCostUsd: String(cost)
+    });
+    await bumpTeamSpendCounters(entry.feature, cost);
+  } catch (err) {
+    console.error("[token-log] best-effort video-cost write failed (ignored):", err);
   }
 }
 async function getDailyTokenRollup(opts = {}) {
@@ -13432,9 +14084,9 @@ function seededShuffle(items, seed) {
   const arr = items.slice();
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
-    const tmp = arr[i];
+    const tmp2 = arr[i];
     arr[i] = arr[j];
-    arr[j] = tmp;
+    arr[j] = tmp2;
   }
   return arr;
 }
@@ -13856,9 +14508,9 @@ function seededShuffle2(arr, seed) {
   const rand = mulberry322(seed);
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
-    const tmp = arr[i];
+    const tmp2 = arr[i];
     arr[i] = arr[j];
-    arr[j] = tmp;
+    arr[j] = tmp2;
   }
 }
 function rankRails(products, state, opts = {}) {
@@ -14743,8 +15395,10 @@ __export(homepage_payload_server_exports, {
   HOMEPAGE_PAYLOAD_KV_KEY: () => HOMEPAGE_PAYLOAD_KV_KEY,
   HOMEPAGE_PAYLOAD_KV_PREFIX: () => HOMEPAGE_PAYLOAD_KV_PREFIX,
   HOMEPAGE_PAYLOAD_VERSION: () => HOMEPAGE_PAYLOAD_VERSION,
+  VARIANT_B_SECTION_TYPES: () => VARIANT_B_SECTION_TYPES,
   assertJsonSafe: () => assertJsonSafe,
   buildHomeContentBlocks: () => buildHomeContentBlocks,
+  buildHomeContentBlocksLean: () => buildHomeContentBlocksLean,
   buildHomepagePayloadA: () => buildHomepagePayloadA,
   invalidateHomepagePayloadA: () => invalidateHomepagePayloadA,
   readHomepagePayloadA: () => readHomepagePayloadA,
@@ -14792,6 +15446,33 @@ async function buildHomeContentBlocks() {
     carouselProductMap[b._key] = emmaRailResults[i] ?? [];
   });
   return { sections, carouselProductMap };
+}
+function toLeanCardProduct(p) {
+  const lean = {
+    id: p.id,
+    handle: p.handle,
+    title: p.title,
+    price: p.price,
+    images: p.images.length > 0 ? [p.images[0]] : []
+  };
+  if (p.compareAtPrice !== void 0) lean.compareAtPrice = p.compareAtPrice;
+  if (p.brand !== void 0) lean.brand = p.brand;
+  if (p.videos && p.videos.length > 0) lean.videos = [p.videos[0]];
+  return lean;
+}
+async function buildHomeContentBlocksLean() {
+  const { sections, carouselProductMap } = await buildHomeContentBlocks();
+  const leanSections = sections.filter(
+    (s) => VARIANT_B_SECTION_TYPES.includes(s._type)
+  );
+  const survivingRailKeys = new Set(
+    leanSections.filter((s) => s._type === "emmaCuratedRail").map((s) => s._key)
+  );
+  const leanCarouselProductMap = {};
+  for (const key of survivingRailKeys) {
+    leanCarouselProductMap[key] = (carouselProductMap[key] ?? []).map(toLeanCardProduct);
+  }
+  return { sections: leanSections, carouselProductMap: leanCarouselProductMap };
 }
 async function buildHomepagePayloadA() {
   const [railsResult, vocab, content] = await Promise.all([
@@ -14919,14 +15600,14 @@ function reshuffleRailsWithSeed(rails, seed) {
     const rand = mulberry323(seed + railIdx * 2654435761);
     for (let i = items.length - 1; i > 0; i--) {
       const j = Math.floor(rand() * (i + 1));
-      const tmp = items[i];
+      const tmp2 = items[i];
       items[i] = items[j];
-      items[j] = tmp;
+      items[j] = tmp2;
     }
     return { ...rail, items };
   });
 }
-var HOMEPAGE_PAYLOAD_VERSION, HOMEPAGE_PAYLOAD_KV_KEY, HOMEPAGE_PAYLOAD_KV_PREFIX, KV_TTL_SECONDS, BUILD_TIMEOUT_MS;
+var HOMEPAGE_PAYLOAD_VERSION, HOMEPAGE_PAYLOAD_KV_KEY, HOMEPAGE_PAYLOAD_KV_PREFIX, KV_TTL_SECONDS, BUILD_TIMEOUT_MS, VARIANT_B_SECTION_TYPES;
 var init_homepage_payload_server = __esm({
   "app/lib/homepage-payload.server.ts"() {
     "use strict";
@@ -14943,6 +15624,12 @@ var init_homepage_payload_server = __esm({
     HOMEPAGE_PAYLOAD_KV_PREFIX = "homepage:payload";
     KV_TTL_SECONDS = 6 * 60 * 60;
     BUILD_TIMEOUT_MS = 8e3;
+    VARIANT_B_SECTION_TYPES = [
+      "emmaCuratedRail",
+      "editorialTiles",
+      "wayfinderMosaic",
+      "playTogetherBanner"
+    ];
   }
 });
 
@@ -16575,6 +17262,8 @@ async function getTeamConfigUncached(team) {
     cfg.maxImagesPerDay = num(map.get(TEAM_KEYS.maxImagesPerDay), 12);
   } else if (team === "content") {
     cfg.maxImagesPerDay = num(map.get(CONTENT_EXTRA_KEYS.maxImagesPerDay), CONTENT_MAX_IMAGES_DEFAULT);
+  } else if (team === "video") {
+    cfg.maxCostCents = num(map.get(VIDEO_EXTRA_KEYS.maxCostCents), VIDEO_MAX_COST_CENTS_DEFAULT);
   }
   return cfg;
 }
@@ -16845,7 +17534,9 @@ async function createDraftSocialPost(p) {
     createdBy: "agent",
     reviewStatus: "pending_review",
     scheduledFor: p.scheduledFor ?? null,
-    reworkedFrom: p.reworkedFrom ?? null
+    reworkedFrom: p.reworkedFrom ?? null,
+    videoJobId: p.videoJobId ?? null,
+    posterUrl: p.posterUrl ?? null
   }).returning({ id: socialPosts.id });
   return row.id;
 }
@@ -19596,9 +20287,9 @@ function aggregateVariantDescriptions(variants) {
   for (const v of variants) {
     const value = v.metafield?.value?.trim();
     if (!value) continue;
-    const norm = value.toLowerCase().replace(/\s+/g, " ").slice(0, 200);
-    if (seen.has(norm)) continue;
-    seen.add(norm);
+    const norm2 = value.toLowerCase().replace(/\s+/g, " ").slice(0, 200);
+    if (seen.has(norm2)) continue;
+    seen.add(norm2);
     const piece = v.title && v.title !== "Default Title" ? `[${v.title}] ${value}` : value;
     pieces.push(piece);
   }
@@ -19847,6 +20538,71 @@ var init_batch_enrichment_server = __esm({
   }
 });
 
+// app/lib/product-type.server.ts
+async function getCanonicalProductTypes() {
+  const now = Date.now();
+  if (vocabCache && now - vocabCache.fetchedAt < VOCAB_TTL_MS) return vocabCache.types;
+  try {
+    const rows = await db.select({ productType: pricingProductTypeMap.productType }).from(pricingProductTypeMap);
+    vocabCache = { types: new Set(rows.map((r) => r.productType)), fetchedAt: now };
+  } catch (err) {
+    console.warn("[product-type] pricing_product_type_map read failed, using stale/empty vocabulary:", err instanceof Error ? err.message : err);
+    if (!vocabCache) vocabCache = { types: /* @__PURE__ */ new Set(), fetchedAt: now };
+  }
+  return vocabCache.types;
+}
+async function ensureProductTypeForPublish(input) {
+  const { numericProductId, sku, categories, title } = input;
+  const label = sku ? `${sku} (product ${numericProductId})` : `product ${numericProductId}`;
+  let current = null;
+  if (input.currentType !== void 0) {
+    current = input.currentType?.trim() ? input.currentType.trim() : null;
+  } else {
+    try {
+      current = await getShopifyProductType(numericProductId);
+    } catch (err) {
+      console.warn(`[product-type] could not read product_type for ${label}:`, err instanceof Error ? err.message : err);
+      return null;
+    }
+  }
+  const vocab = await getCanonicalProductTypes();
+  if (current) {
+    if (vocab.size > 0 && !vocab.has(current)) {
+      console.error(`[product-type-guard] ${label} publishing with product_type "${current}" that is NOT in pricing_product_type_map \u2014 pricing will fall through to the global rule`);
+    }
+    return current;
+  }
+  const derived = deriveProductType({ categories, title });
+  if (!derived.productType) {
+    console.error(`[product-type-guard] ${label} would publish WITHOUT a product_type and none is derivable (categories=${JSON.stringify(categories)}, title=${JSON.stringify(title)}) \u2014 pricing will fall through to the global rule; set it manually`);
+    return null;
+  }
+  if (vocab.size > 0 && !vocab.has(derived.productType)) {
+    console.error(`[product-type-guard] ${label} derived product_type "${derived.productType}" is not in pricing_product_type_map \u2014 vocabulary drift; not writing it`);
+    return null;
+  }
+  try {
+    await setShopifyProductType(numericProductId, derived.productType);
+    console.info(`[product-type] ${label} backfilled product_type "${derived.productType}" (matched by ${derived.matchedBy}) before publish`);
+    return derived.productType;
+  } catch (err) {
+    console.error(`[product-type-guard] ${label} failed to write derived product_type "${derived.productType}":`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+var VOCAB_TTL_MS, vocabCache;
+var init_product_type_server = __esm({
+  "app/lib/product-type.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_product_type_derive();
+    init_shopify_server();
+    VOCAB_TTL_MS = 10 * 60 * 1e3;
+    vocabCache = null;
+  }
+});
+
 // app/lib/import-enrich.server.ts
 var import_enrich_server_exports = {};
 __export(import_enrich_server_exports, {
@@ -19896,6 +20652,14 @@ async function applyFullEnrichmentWrites(numericProductId, writes) {
   const editorialTags = (histRows[0]?.categories ?? []).filter(
     (c) => !!c && c !== "(uncategorized)"
   );
+  if (!snap.product_type?.trim()) {
+    await ensureProductTypeForPublish({
+      numericProductId,
+      categories: editorialTags,
+      title: snap.title,
+      currentType: null
+    });
+  }
   const sTagline = ed(writes.tagline);
   const sSeo = ed(writes.seoMetaDescription);
   const sDesc = ed(writes.descriptionHtml);
@@ -20085,7 +20849,13 @@ async function collectEnrichmentBatch() {
   return { enriched: enrichedTotal, failed: failedTotal, stillPending };
 }
 async function publishEnrichedProducts() {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq15(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
+  const rows = await db.select({
+    id: importCandidates.id,
+    productId: dealHistory.shopifyProductId,
+    sku: dealHistory.sku,
+    title: dealHistory.seoTitle,
+    categories: dealHistory.categories
+  }).from(importCandidates).innerJoin(dealHistory, eq15(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
     eq15(importCandidates.status, "imported"),
     sql11`${importCandidates.enrichedAt} IS NOT NULL`,
     isNull2(importCandidates.publishedAt)
@@ -20095,6 +20865,12 @@ async function publishEnrichedProducts() {
   for (const r of rows) {
     if (!r.productId) continue;
     try {
+      await ensureProductTypeForPublish({
+        numericProductId: r.productId,
+        sku: r.sku,
+        title: r.title ?? "",
+        categories: (r.categories ?? []).filter((c) => !!c && c !== "(uncategorized)")
+      });
       await activateShopifyProduct(r.productId);
       try {
         await appendProductTag(r.productId, "new-arrival");
@@ -20139,6 +20915,7 @@ var init_import_enrich_server = __esm({
     init_batch_enrichment_server();
     init_shopify_server();
     init_sanity_server();
+    init_product_type_server();
     init_feed_processor_server();
     init_claude_server();
     init_emma_voice_server();
@@ -21190,8 +21967,8 @@ function stateFor(ps, p, taxonomy) {
 async function maybeActivateGatedDeal(jobId, gatesDealId) {
   try {
     const { dealHistory: dealHistory2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    const { eq: eq22 } = await import("drizzle-orm");
-    const rows = await db.select().from(dealHistory2).where(eq22(dealHistory2.id, gatesDealId)).limit(1);
+    const { eq: eq23 } = await import("drizzle-orm");
+    const rows = await db.select().from(dealHistory2).where(eq23(dealHistory2.id, gatesDealId)).limit(1);
     const deal = rows[0];
     if (!deal) {
       console.warn(`[batch-orchestrator] maybeActivateGatedDeal: deal ${gatesDealId} not found`);
@@ -22488,6 +23265,724 @@ var init_import_monitor_server = __esm({
   }
 });
 
+// app/lib/fal-video.server.ts
+function requireKey() {
+  const key = process.env["FAL_KEY"];
+  if (!key) throw new Error("FAL_KEY env var is required for fal.ai calls");
+  return key;
+}
+function isVideoModelId(v) {
+  return typeof v === "string" && v in VIDEO_MODELS;
+}
+function buildInput(model, input) {
+  const aspect = input.aspect ?? "9:16";
+  switch (model) {
+    case "veo31":
+    case "veo31-fast":
+      return {
+        prompt: input.prompt,
+        image_url: input.imageUrl,
+        duration: `${input.durationSeconds}s`,
+        aspect_ratio: aspect,
+        resolution: "1080p",
+        generate_audio: input.generateAudio ?? true,
+        ...input.negativePrompt ? { negative_prompt: input.negativePrompt } : {}
+      };
+    case "kling25-pro":
+      return {
+        prompt: input.prompt,
+        image_url: input.imageUrl,
+        duration: String(input.durationSeconds),
+        ...input.negativePrompt ? { negative_prompt: input.negativePrompt } : {}
+      };
+    case "seedance2":
+      return {
+        prompt: input.prompt,
+        image_url: input.imageUrl,
+        duration: input.durationSeconds,
+        aspect_ratio: aspect,
+        resolution: "720p",
+        ...input.negativePrompt ? { negative_prompt: input.negativePrompt } : {}
+      };
+  }
+}
+async function submitVideoRequest(model, input) {
+  const key = requireKey();
+  const spec = VIDEO_MODELS[model];
+  if (!spec.allowedDurations.includes(input.durationSeconds)) {
+    throw new Error(`${model} does not support duration ${input.durationSeconds}s (allowed: ${spec.allowedDurations.join(", ")})`);
+  }
+  const res = await fetch(`${FAL_QUEUE_ENDPOINT}/${spec.falModel}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Key ${key}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(buildInput(model, input))
+  });
+  if (!res.ok) {
+    const text2 = await res.text().catch(() => "");
+    throw new Error(`fal queue submit ${spec.falModel} error: ${res.status} ${text2.slice(0, 400)}`);
+  }
+  const json2 = await res.json();
+  if (!json2.request_id || !json2.status_url || !json2.response_url) {
+    throw new Error(`fal queue submit ${spec.falModel} response missing request_id/status_url/response_url`);
+  }
+  return { requestId: json2.request_id, statusUrl: json2.status_url, responseUrl: json2.response_url };
+}
+async function getVideoRequestStatus(handle) {
+  const key = requireKey();
+  const res = await fetch(handle.statusUrl, { headers: { "Authorization": `Key ${key}` } });
+  if (!res.ok) {
+    const text2 = await res.text().catch(() => "");
+    throw new Error(`fal queue status error: ${res.status} ${text2.slice(0, 400)}`);
+  }
+  const json2 = await res.json();
+  const status = json2.status;
+  if (status === "IN_QUEUE" || status === "IN_PROGRESS" || status === "COMPLETED") return { status };
+  return { status: "FAILED" };
+}
+async function getVideoRequestResult(handle) {
+  const key = requireKey();
+  const res = await fetch(handle.responseUrl, { headers: { "Authorization": `Key ${key}` } });
+  if (!res.ok) {
+    const text2 = await res.text().catch(() => "");
+    throw new Error(`fal queue result error: ${res.status} ${text2.slice(0, 400)}`);
+  }
+  const json2 = await res.json();
+  const url = json2.video?.url;
+  if (!url) throw new Error("fal queue result missing video.url");
+  return { videoUrl: url, contentType: json2.video?.content_type ?? "video/mp4" };
+}
+async function downloadFalAsset(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`fal asset download failed: ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+async function composeSceneFrame(opts) {
+  const key = requireKey();
+  const count = Math.min(Math.max(1, opts.count ?? 3), 4);
+  const res = await fetch(`${FAL_SYNC_ENDPOINT}/${SCENE_FRAME_MODEL}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Key ${key}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      prompt: opts.prompt,
+      image_urls: [opts.presenterImageUrl, opts.productImageUrl],
+      num_images: count,
+      aspect_ratio: "9:16",
+      output_format: "jpeg"
+    })
+  });
+  if (!res.ok) {
+    const text2 = await res.text().catch(() => "");
+    throw new Error(`fal.ai ${SCENE_FRAME_MODEL} error: ${res.status} ${text2.slice(0, 400)}`);
+  }
+  const json2 = await res.json();
+  const urls = (json2.images ?? []).map((i) => i.url).filter((u) => !!u);
+  if (!urls.length) throw new Error(`fal.ai ${SCENE_FRAME_MODEL} returned no images`);
+  return { urls, costKey: SCENE_FRAME_COST_KEY };
+}
+var FAL_QUEUE_ENDPOINT, FAL_SYNC_ENDPOINT, VIDEO_MODELS, SCENE_FRAME_MODEL, SCENE_FRAME_COST_KEY;
+var init_fal_video_server = __esm({
+  "app/lib/fal-video.server.ts"() {
+    "use strict";
+    FAL_QUEUE_ENDPOINT = "https://queue.fal.run";
+    FAL_SYNC_ENDPOINT = "https://fal.run";
+    VIDEO_MODELS = {
+      "veo31": {
+        falModel: "fal-ai/veo3.1/image-to-video",
+        label: "Veo 3.1 (native audio)",
+        tier: "premium",
+        costKey: "fal/veo3.1",
+        ratePerSecondUsd: 0.4,
+        nativeAudio: true,
+        allowedDurations: [4, 6, 8]
+      },
+      "veo31-fast": {
+        falModel: "fal-ai/veo3.1/fast/image-to-video",
+        label: "Veo 3.1 Fast (native audio)",
+        tier: "premium-fast",
+        costKey: "fal/veo3.1-fast",
+        ratePerSecondUsd: 0.15,
+        nativeAudio: true,
+        allowedDurations: [4, 6, 8]
+      },
+      "kling25-pro": {
+        falModel: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
+        label: "Kling 2.5 Turbo Pro",
+        tier: "standard",
+        costKey: "fal/kling-2.5-pro",
+        ratePerSecondUsd: 0.07,
+        nativeAudio: false,
+        allowedDurations: [5, 10]
+      },
+      "seedance2": {
+        falModel: "bytedance/seedance-2.0/image-to-video",
+        label: "Seedance 2.0 (audio included)",
+        tier: "standard",
+        costKey: "fal/seedance-2.0",
+        ratePerSecondUsd: 0.31,
+        nativeAudio: true,
+        allowedDurations: [4, 5, 6, 8, 10, 12]
+      }
+    };
+    SCENE_FRAME_MODEL = "fal-ai/nano-banana/edit";
+    SCENE_FRAME_COST_KEY = "fal/nano-banana";
+  }
+});
+
+// app/lib/blob.server.ts
+function requireToken() {
+  const token = process.env["BLOB_READ_WRITE_TOKEN"];
+  if (!token) throw new Error("BLOB_READ_WRITE_TOKEN env var is required for Blob storage");
+  return token;
+}
+async function blobPut(pathname, data, opts) {
+  const token = requireToken();
+  const { put } = await import("@vercel/blob");
+  const result = await put(pathname, data, {
+    access: "public",
+    contentType: opts.contentType,
+    token,
+    addRandomSuffix: true
+  });
+  return { url: result.url };
+}
+async function blobFetchToBuffer(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`blob fetch failed: ${res.status} ${url.slice(0, 120)}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+var init_blob_server = __esm({
+  "app/lib/blob.server.ts"() {
+    "use strict";
+  }
+});
+
+// app/lib/video-assembly.server.ts
+import { readFileSync as readFileSync3, writeFileSync, existsSync as existsSync3, unlinkSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import ffmpegPath from "ffmpeg-static";
+import sharp from "sharp";
+function tmp(name) {
+  return `/tmp/va-${randomBytes(6).toString("hex")}-${name}`;
+}
+function cleanup(paths) {
+  for (const p of paths) {
+    try {
+      if (existsSync3(p)) unlinkSync(p);
+    } catch {
+    }
+  }
+}
+async function extractPoster(video, atSeconds = 1) {
+  const input = tmp("poster-in.mp4");
+  const output = tmp("poster.jpg");
+  try {
+    writeFileSync(input, video);
+    execFileSync(ffmpegPath, [
+      "-y",
+      "-ss",
+      String(atSeconds),
+      "-i",
+      input,
+      "-frames:v",
+      "1",
+      "-q:v",
+      "3",
+      output
+    ], { timeout: 3e4 });
+    return readFileSync3(output);
+  } finally {
+    cleanup([input, output]);
+  }
+}
+async function probeDurationSeconds(video) {
+  const input = tmp("probe.mp4");
+  try {
+    writeFileSync(input, video);
+    let stderr = "";
+    try {
+      execFileSync(ffmpegPath, ["-i", input, "-f", "null", "-"], { timeout: 3e4 });
+    } catch (err) {
+      stderr = err instanceof Error && "stderr" in err ? String(err.stderr ?? "") : "";
+    }
+    const m = /Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/.exec(stderr);
+    if (!m) return 0;
+    return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 100;
+  } finally {
+    cleanup([input]);
+  }
+}
+async function fetchLogoPng() {
+  if (logoCache && Date.now() - logoCache.ts < LOGO_CACHE_TTL) return logoCache.buffer;
+  const settings = await getSiteSettings();
+  if (!settings?.logoUrl) return null;
+  const res = await fetch(settings.logoUrl);
+  if (!res.ok) return null;
+  const buffer = Buffer.from(await res.arrayBuffer());
+  logoCache = { buffer, ts: Date.now() };
+  return buffer;
+}
+async function applyWatermark(video) {
+  const input = tmp("wm-in.mp4");
+  const overlay = tmp("wm-logo.png");
+  const output = tmp("wm-out.mp4");
+  try {
+    const logo = await fetchLogoPng();
+    if (!logo) return video;
+    const preparedLogo = await sharp(logo).resize(160).ensureAlpha().composite([{
+      input: Buffer.from([255, 255, 255, Math.round(255 * 0.35)]),
+      raw: { width: 1, height: 1, channels: 4 },
+      tile: true,
+      blend: "dest-in"
+    }]).png().toBuffer();
+    writeFileSync(input, video);
+    writeFileSync(overlay, preparedLogo);
+    execFileSync(ffmpegPath, [
+      "-y",
+      "-i",
+      input,
+      "-i",
+      overlay,
+      "-filter_complex",
+      "overlay=W-w-20:H-h-20",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      output
+    ], { timeout: 6e4 });
+    return existsSync3(output) ? readFileSync3(output) : video;
+  } catch (err) {
+    console.warn("[video-assembly] watermark failed, returning original:", err instanceof Error ? err.message : err);
+    return video;
+  } finally {
+    cleanup([input, overlay, output]);
+  }
+}
+var logoCache, LOGO_CACHE_TTL;
+var init_video_assembly_server = __esm({
+  "app/lib/video-assembly.server.ts"() {
+    "use strict";
+    init_sanity_server();
+    logoCache = null;
+    LOGO_CACHE_TTL = 1e3 * 60 * 60;
+  }
+});
+
+// app/lib/video-pipeline.server.ts
+var video_pipeline_server_exports = {};
+__export(video_pipeline_server_exports, {
+  advanceInflightVideoJobs: () => advanceInflightVideoJobs,
+  approveSceneFrame: () => approveSceneFrame,
+  enqueueVideoJob: () => enqueueVideoJob,
+  estimateJobCostUsd: () => estimateJobCostUsd,
+  fanOutVideoToSocialDrafts: () => fanOutVideoToSocialDrafts,
+  hasActiveVideoJobs: () => hasActiveVideoJobs,
+  listVideoJobs: () => listVideoJobs,
+  recordVideoMetrics: () => recordVideoMetrics,
+  regenerateVideoJob: () => regenerateVideoJob,
+  rejectVideoJob: () => rejectVideoJob,
+  retrySceneFrames: () => retrySceneFrames
+});
+import { randomUUID as randomUUID3 } from "node:crypto";
+import { eq as eq20, inArray as inArray7, desc as desc2 } from "drizzle-orm";
+async function getMaxCostCents() {
+  const cfg = await getTeamConfig("video").catch(() => null);
+  return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
+}
+function estimateJobCostUsd(modelTier, durationSeconds) {
+  const spec = VIDEO_MODELS[modelTier];
+  const frames = estimateImageCostUsd(SCENE_FRAME_COST_KEY, SCENE_FRAME_CANDIDATES);
+  const clip = estimateVideoCostUsd(spec.costKey, durationSeconds);
+  return Math.round((frames + clip) * 1e5) / 1e5;
+}
+async function enqueueVideoJob(args) {
+  if (!isVideoModelId(args.modelTier)) throw new Error(`Unknown model tier: ${args.modelTier}`);
+  const spec = VIDEO_MODELS[args.modelTier];
+  if (!spec.allowedDurations.includes(args.durationSeconds)) {
+    throw new Error(`${args.modelTier} does not support ${args.durationSeconds}s (allowed: ${spec.allowedDurations.join(", ")})`);
+  }
+  const estCostUsd = estimateJobCostUsd(args.modelTier, args.durationSeconds);
+  const maxCents = await getMaxCostCents();
+  if (estCostUsd * 100 > maxCents) {
+    throw new Error(`Estimated cost $${estCostUsd.toFixed(2)} exceeds the per-video ceiling of $${(maxCents / 100).toFixed(2)} (video_team_max_cost_cents)`);
+  }
+  const jobId = randomUUID3();
+  await db.insert(videoJobs).values({
+    jobId,
+    productHandle: args.productHandle,
+    shopifyProductGid: args.shopifyProductGid ?? null,
+    formula: args.formula,
+    presenter: args.presenter,
+    scriptJson: args.scriptJson,
+    aiDisclosure: args.aiDisclosure ?? true,
+    modelTier: args.modelTier,
+    targetPlatforms: args.targetPlatforms,
+    runId: args.runId ?? null
+  });
+  await kvDel(KV_KEYS.videoPollerIdle);
+  console.log(`[video-pipeline] enqueued job ${jobId} product=${args.productHandle} formula=${args.formula} tier=${args.modelTier}`);
+  return { jobId, estCostUsd };
+}
+async function advanceInflightVideoJobs(opts = {}) {
+  const maxJobs = opts.maxJobs ?? 5;
+  const rows = await db.select().from(videoJobs).where(inArray7(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
+  const result = { advanced: 0, done: 0, failed: 0, parked: 0 };
+  if (rows.length === 0) {
+    await kvSet(KV_KEYS.videoPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS2);
+    return result;
+  }
+  for (const job of rows) {
+    try {
+      const outcome = await advanceJob2(job);
+      result.advanced++;
+      if (outcome === "done") result.done++;
+      if (outcome === "parked") result.parked++;
+    } catch (err) {
+      console.error(`[video-pipeline] advanceJob ${job.jobId} threw:`, err);
+      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err), updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.jobId, job.jobId));
+      result.failed++;
+    }
+  }
+  return result;
+}
+async function touch(job, set) {
+  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.id, job.id));
+}
+async function advanceJob2(job) {
+  switch (job.stage) {
+    case "scene_frame":
+      return advanceSceneFrame(job);
+    case "clip":
+      return advanceClip(job);
+    case "lipsync":
+      return advanceLipsync(job);
+    case "assembly":
+      return advanceAssembly(job);
+    case "poster":
+      return advancePoster(job);
+    default:
+      throw new Error(`Unknown stage ${job.stage}`);
+  }
+}
+async function resolvePresenterPhotoUrl(presenter) {
+  if (presenter === "none") return null;
+  if (presenter === "emma") {
+    const url = await getEditorPhotoUrl();
+    if (!url) throw new Error("Emma canonical photo not found in Sanity (singleton.editor)");
+    return url;
+  }
+  if (presenter.startsWith("friend:")) {
+    const slug = presenter.slice("friend:".length);
+    const cast = await getApprovedCastMembers();
+    const member = cast.find((m) => m.slug === slug);
+    if (!member) throw new Error(`Cast member '${slug}' not found or not approved for use (castMember.approvedForUse)`);
+    return member.photoUrl;
+  }
+  throw new Error(`Unknown presenter '${presenter}' (expected none | emma | friend:{slug})`);
+}
+async function resolveProductImageUrl(handle) {
+  const product = await getProductByHandle(handle);
+  const url = product?.images?.[0]?.url;
+  if (!url) throw new Error(`Product '${handle}' has no image to reference (hard gate: real photography required)`);
+  return url;
+}
+async function frameReviewEnabled() {
+  const v = await getPipelineSetting(VIDEO_EXTRA_KEYS.frameReview).catch(() => null);
+  return v !== "false";
+}
+async function advanceSceneFrame(job) {
+  const script = job.scriptJson;
+  const framePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : null;
+  if (!framePrompt) throw new Error("scriptJson.framePrompt is required for the scene_frame stage");
+  const presenterUrl = await resolvePresenterPhotoUrl(job.presenter);
+  const productUrl = await resolveProductImageUrl(job.productHandle);
+  const { urls, costKey } = await composeSceneFrame({
+    prompt: framePrompt,
+    presenterImageUrl: presenterUrl ?? productUrl,
+    productImageUrl: productUrl,
+    count: SCENE_FRAME_CANDIDATES
+  });
+  const assetIds = [];
+  for (let i = 0; i < urls.length; i++) {
+    const buf = await downloadFalAsset(urls[i]);
+    const { url } = await blobPut(`video/${job.jobId}/frame-${i}.jpg`, buf, { contentType: "image/jpeg" });
+    const [row] = await db.insert(mediaAssets).values({
+      kind: "image",
+      purpose: "scene_frame",
+      blobUrl: url,
+      contentType: "image/jpeg",
+      sourceModel: costKey,
+      costUsd: String(estimateImageCostUsd(costKey, 1)),
+      videoJobId: job.id
+    }).returning({ id: mediaAssets.id });
+    if (row) assetIds.push(row.id);
+  }
+  if (!assetIds.length) throw new Error("Scene-frame composition produced no candidates");
+  void logImageCost({
+    feature: "video-frames",
+    model: costKey,
+    count: assetIds.length,
+    caller: "video-pipeline",
+    sku: job.productHandle,
+    refId: job.jobId
+  });
+  const frameCost = estimateImageCostUsd(costKey, assetIds.length);
+  const newCost = Number(job.costUsd) + frameCost;
+  const chosen = assetIds[0];
+  if (await frameReviewEnabled()) {
+    await touch(job, {
+      status: "awaiting_frame_approval",
+      sceneFrameAssetId: chosen,
+      costUsd: String(newCost)
+    });
+    return "parked";
+  }
+  await touch(job, {
+    stage: "clip",
+    status: "queued",
+    sceneFrameAssetId: chosen,
+    costUsd: String(newCost)
+  });
+  return "progressed";
+}
+async function advanceClip(job) {
+  const handles = job.providerRequestIds;
+  const existing = handles["clip"];
+  if (!existing) {
+    const spec = VIDEO_MODELS[job.modelTier];
+    if (!spec) throw new Error(`Unknown model tier ${job.modelTier}`);
+    const script = job.scriptJson;
+    const motionPrompt = typeof script["motionPrompt"] === "string" ? script["motionPrompt"] : null;
+    const durationSeconds = typeof script["durationSeconds"] === "number" ? script["durationSeconds"] : spec.allowedDurations[0];
+    if (!motionPrompt) throw new Error("scriptJson.motionPrompt is required for the clip stage");
+    if (!job.sceneFrameAssetId) throw new Error("No approved scene frame to animate");
+    const clipCost = estimateVideoCostUsd(spec.costKey, durationSeconds);
+    const maxCents = await getMaxCostCents();
+    if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
+      throw new Error(`Accrued + clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
+    }
+    const [frame] = await db.select().from(mediaAssets).where(eq20(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    if (!frame) throw new Error("Approved scene-frame asset not found");
+    const handle = await submitVideoRequest(job.modelTier, {
+      prompt: motionPrompt,
+      imageUrl: frame.blobUrl,
+      durationSeconds,
+      aspect: "9:16"
+    });
+    void logVideoCost({
+      feature: "video-clip",
+      model: spec.costKey,
+      seconds: durationSeconds,
+      caller: "video-pipeline",
+      sku: job.productHandle,
+      refId: job.jobId
+    });
+    await touch(job, {
+      status: "awaiting_provider",
+      providerRequestIds: { ...handles, clip: handle },
+      costUsd: String(Number(job.costUsd) + clipCost)
+    });
+    return "progressed";
+  }
+  const { status } = await getVideoRequestStatus(existing);
+  if (status === "IN_QUEUE" || status === "IN_PROGRESS") {
+    await touch(job, {});
+    return "waiting";
+  }
+  if (status === "FAILED") throw new Error("fal video generation failed");
+  const result = await getVideoRequestResult(existing);
+  const buf = await downloadFalAsset(result.videoUrl);
+  const { url } = await blobPut(`video/${job.jobId}/clip.mp4`, buf, { contentType: "video/mp4" });
+  await db.insert(mediaAssets).values({
+    kind: "video",
+    purpose: "clip",
+    blobUrl: url,
+    contentType: "video/mp4",
+    sourceModel: VIDEO_MODELS[job.modelTier]?.costKey ?? job.modelTier,
+    videoJobId: job.id
+  });
+  await touch(job, { stage: "lipsync", status: "queued" });
+  return "progressed";
+}
+async function advanceLipsync(job) {
+  await touch(job, { stage: "assembly", status: "queued" });
+  return "progressed";
+}
+async function latestAssetByPurpose(jobRowId, purpose) {
+  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq20(mediaAssets.videoJobId, jobRowId)).orderBy(desc2(mediaAssets.createdAt));
+  const hit = rows.find((r) => r.purpose === purpose);
+  return hit ? { id: hit.id, blobUrl: hit.blobUrl } : null;
+}
+async function advanceAssembly(job) {
+  const clip = await latestAssetByPurpose(job.id, "clip");
+  if (!clip) throw new Error("No clip asset to assemble");
+  const raw = await blobFetchToBuffer(clip.blobUrl);
+  const watermarked = await applyWatermark(raw);
+  const { url } = await blobPut(`video/${job.jobId}/final.mp4`, watermarked, { contentType: "video/mp4" });
+  const [finalRow] = await db.insert(mediaAssets).values({
+    kind: "video",
+    purpose: "final",
+    blobUrl: url,
+    contentType: "video/mp4",
+    videoJobId: job.id
+  }).returning({ id: mediaAssets.id });
+  await touch(job, { stage: "poster", status: "queued", finalAssetId: finalRow?.id ?? null });
+  return "progressed";
+}
+async function advancePoster(job) {
+  if (!job.finalAssetId) throw new Error("No final asset for poster extraction");
+  const [finalAsset] = await db.select().from(mediaAssets).where(eq20(mediaAssets.id, job.finalAssetId)).limit(1);
+  if (!finalAsset) throw new Error("Final asset row missing");
+  const video = await blobFetchToBuffer(finalAsset.blobUrl);
+  const poster = await extractPoster(video, 1);
+  const duration = await probeDurationSeconds(video);
+  const { url } = await blobPut(`video/${job.jobId}/poster.jpg`, poster, { contentType: "image/jpeg" });
+  const [posterRow] = await db.insert(mediaAssets).values({
+    kind: "image",
+    purpose: "poster",
+    blobUrl: url,
+    contentType: "image/jpeg",
+    videoJobId: job.id
+  }).returning({ id: mediaAssets.id });
+  if (duration > 0) {
+    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq20(mediaAssets.id, finalAsset.id));
+  }
+  await touch(job, {
+    stage: "done",
+    status: "done",
+    posterAssetId: posterRow?.id ?? null,
+    completedAt: /* @__PURE__ */ new Date()
+  });
+  console.log(`[video-pipeline] job ${job.jobId} complete (${duration.toFixed(1)}s, $${Number(job.costUsd).toFixed(2)})`);
+  return "done";
+}
+async function approveSceneFrame(jobRowId, frameAssetId) {
+  const [asset] = await db.select().from(mediaAssets).where(eq20(mediaAssets.id, frameAssetId)).limit(1);
+  if (!asset || asset.videoJobId !== jobRowId || asset.purpose !== "scene_frame") {
+    throw new Error("Frame does not belong to this job");
+  }
+  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.id, jobRowId));
+  await kvDel(KV_KEYS.videoPollerIdle);
+}
+async function retrySceneFrames(jobRowId, feedback) {
+  const [job] = await db.select().from(videoJobs).where(eq20(videoJobs.id, jobRowId)).limit(1);
+  if (!job) throw new Error("Job not found");
+  const script = { ...job.scriptJson };
+  const prior = Array.isArray(script.frameFeedback) ? script.frameFeedback : [];
+  script.frameFeedback = [...prior, feedback];
+  const basePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : "";
+  script["framePrompt"] = feedback ? `${basePrompt} ${feedback}`.trim() : basePrompt;
+  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.id, jobRowId));
+  await kvDel(KV_KEYS.videoPollerIdle);
+}
+async function rejectVideoJob(jobRowId, reason) {
+  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.id, jobRowId));
+}
+async function regenerateVideoJob(jobRowId, feedback) {
+  const [job] = await db.select().from(videoJobs).where(eq20(videoJobs.id, jobRowId)).limit(1);
+  if (!job) throw new Error("Job not found");
+  const script = { ...job.scriptJson };
+  const prior = Array.isArray(script.regenFeedback) ? script.regenFeedback : [];
+  if (feedback) script.regenFeedback = [...prior, feedback];
+  const durationSeconds = typeof script["durationSeconds"] === "number" ? script["durationSeconds"] : VIDEO_MODELS[job.modelTier]?.allowedDurations[0] ?? 5;
+  return enqueueVideoJob({
+    productHandle: job.productHandle,
+    ...job.shopifyProductGid ? { shopifyProductGid: job.shopifyProductGid } : {},
+    formula: job.formula,
+    presenter: job.presenter,
+    scriptJson: script,
+    modelTier: job.modelTier,
+    durationSeconds,
+    targetPlatforms: job.targetPlatforms,
+    aiDisclosure: job.aiDisclosure,
+    ...job.runId != null ? { runId: job.runId } : {}
+  });
+}
+async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
+  const [job] = await db.select().from(videoJobs).where(eq20(videoJobs.id, jobRowId)).limit(1);
+  if (!job) throw new Error("Job not found");
+  if (job.stage !== "done") throw new Error("Job is not finished");
+  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq20(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
+  if (!finalAsset) throw new Error("No final video asset");
+  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq20(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
+  const captions = job.scriptJson.captions ?? {};
+  const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(" ");
+  const ids = [];
+  for (const platform of job.targetPlatforms) {
+    const caption = captions[platform] ?? captions["default"] ?? fallbackCaption;
+    if (!caption) continue;
+    const [row] = await db.insert(socialPosts).values({
+      platform,
+      postType: platform === "youtube" ? "video_short" : "video_reel",
+      tweetText: caption,
+      mediaUrls: [finalAsset.blobUrl],
+      posterUrl: posterAsset?.blobUrl ?? null,
+      videoJobId: job.id,
+      status: "draft",
+      createdBy: "agent",
+      reviewStatus: "approved",
+      reviewedBy,
+      reviewedAt: /* @__PURE__ */ new Date()
+    }).returning({ id: socialPosts.id });
+    if (row) ids.push(row.id);
+  }
+  return ids;
+}
+async function recordVideoMetrics(jobRowId, platform, metrics) {
+  const [job] = await db.select().from(videoJobs).where(eq20(videoJobs.id, jobRowId)).limit(1);
+  if (!job) throw new Error("Job not found");
+  const merged = { ...job.metricsJson ?? {}, [platform]: metrics };
+  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(videoJobs.id, jobRowId));
+}
+async function listVideoJobs(limit = 40) {
+  const jobs = await db.select().from(videoJobs).orderBy(desc2(videoJobs.createdAt)).limit(limit);
+  if (!jobs.length) return [];
+  const jobIds = jobs.map((j) => j.id);
+  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray7(mediaAssets.videoJobId, jobIds));
+  return jobs.map((job) => {
+    const own = assets.filter((a) => a.videoJobId === job.id);
+    const finalAsset = own.find((a) => a.id === job.finalAssetId) ?? null;
+    const posterAsset = own.find((a) => a.id === job.posterAssetId) ?? null;
+    return {
+      job,
+      frames: own.filter((a) => a.purpose === "scene_frame").map((a) => ({ id: a.id, blobUrl: a.blobUrl })),
+      finalUrl: finalAsset?.blobUrl ?? null,
+      posterUrl: posterAsset?.blobUrl ?? null
+    };
+  });
+}
+function hasActiveVideoJobs(rows) {
+  return rows.some((r) => ["queued", "running", "awaiting_provider", "applying"].includes(r.job.status));
+}
+var SCENE_FRAME_CANDIDATES, POLLER_IDLE_TTL_SECONDS2;
+var init_video_pipeline_server = __esm({
+  "app/lib/video-pipeline.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_kv_server();
+    init_fal_video_server();
+    init_blob_server();
+    init_model_pricing_server();
+    init_token_log_server();
+    init_sanity_server();
+    init_shopify_server();
+    init_team_server();
+    init_team_keys();
+    init_feed_processor_server();
+    init_video_assembly_server();
+    SCENE_FRAME_CANDIDATES = 3;
+    POLLER_IDLE_TTL_SECONDS2 = 30 * 60;
+  }
+});
+
 // app/lib/easypost.server.ts
 function authHeader() {
   const key = process.env["EASYPOST_API_KEY"];
@@ -22613,7 +24108,7 @@ __export(returns_server_exports, {
   recordLabelTracking: () => recordLabelTracking,
   rmaNumber: () => rmaNumber
 });
-import { eq as eq20 } from "drizzle-orm";
+import { eq as eq21 } from "drizzle-orm";
 function rmaNumber(shopifyReturnId) {
   const m = shopifyReturnId.match(/\/(\d+)$/);
   return m ? `RMA-${m[1]}` : shopifyReturnId;
@@ -22734,7 +24229,7 @@ async function createCustomerReturn(input) {
       status: "label_sent",
       labelPurchasedAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq20(returns.id, row.id)).returning();
+    }).where(eq21(returns.id, row.id)).returning();
     console.log("[returns] db update ok", { rowId: updated?.id ?? row.id });
   } catch (err) {
     console.error("[returns] db update threw", err);
@@ -22742,7 +24237,7 @@ async function createCustomerReturn(input) {
   return { ok: true, returnRow: updated ?? row };
 }
 async function markReceivedAndRefund(shopifyReturnId, opts) {
-  const [row] = await db.select().from(returns).where(eq20(returns.shopifyReturnId, shopifyReturnId)).limit(1);
+  const [row] = await db.select().from(returns).where(eq21(returns.shopifyReturnId, shopifyReturnId)).limit(1);
   if (!row) return { ok: false, error: `Unknown return: ${shopifyReturnId}` };
   if (row.status === "refunded" || row.status === "closed") return { ok: true };
   if (!row.lineItems) return { ok: false, error: "Return row has no line items snapshot" };
@@ -22773,7 +24268,7 @@ async function markReceivedAndRefund(shopifyReturnId, opts) {
     refundedAt: /* @__PURE__ */ new Date(),
     closedAt: /* @__PURE__ */ new Date(),
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq20(returns.id, row.id));
+  }).where(eq21(returns.id, row.id));
   return { ok: true };
 }
 async function recordLabelTracking(shopifyReturnId, update) {
@@ -22782,13 +24277,13 @@ async function recordLabelTracking(shopifyReturnId, update) {
     ...update.trackingNumber ? { trackingNumber: update.trackingNumber } : {},
     status: "in_transit",
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq20(returns.shopifyReturnId, shopifyReturnId));
+  }).where(eq21(returns.shopifyReturnId, shopifyReturnId));
 }
 async function listCustomerReturns(customerGid) {
-  return db.select().from(returns).where(eq20(returns.customerGid, customerGid)).orderBy(returns.createdAt);
+  return db.select().from(returns).where(eq21(returns.customerGid, customerGid)).orderBy(returns.createdAt);
 }
 async function getCustomerReturn(id, customerGid) {
-  const [row] = await db.select().from(returns).where(eq20(returns.id, id)).limit(1);
+  const [row] = await db.select().from(returns).where(eq21(returns.id, id)).limit(1);
   if (!row) {
     console.error("[returns] getCustomerReturn: no row for id", { id });
     return null;
@@ -22874,16 +24369,16 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and6, eq: eq22, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
+    const { and: and6, eq: eq23, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
     const rows = await db2.select().from(metaCapiFailures2).where(and6(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS3))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq22(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq23(metaCapiFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq22(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq23(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
@@ -23171,6 +24666,29 @@ function createCronRoutes() {
       await kvDel2("lock:enrichment-poller");
     }
   });
+  cronRoute("/video-job-poller", async (_req, res) => {
+    const { kvGet: kvGet2, kvSetNX: kvSetNX2, kvDel: kvDel2, KV_KEYS: KV_KEYS2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+    const idle = await kvGet2(KV_KEYS2.videoPollerIdle);
+    if (idle != null) {
+      res.json({ ok: true, skipped: "idle" });
+      return;
+    }
+    const acquired = await kvSetNX2("lock:video-poller", String(Date.now()), 110);
+    if (!acquired) {
+      res.json({ ok: true, skipped: "locked" });
+      return;
+    }
+    try {
+      const { advanceInflightVideoJobs: advanceInflightVideoJobs2 } = await Promise.resolve().then(() => (init_video_pipeline_server(), video_pipeline_server_exports));
+      const result = await advanceInflightVideoJobs2({ maxJobs: 5 });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error("[cron:video-job-poller]", err);
+      res.status(500).json({ error: String(err) });
+    } finally {
+      await kvDel2("lock:video-poller");
+    }
+  });
   cronRoute("/aeo-surface-check", async (_req, res) => {
     const siteUrl = process.env["BASE_URL"] ?? process.env["SITE_URL"] ?? "";
     if (!siteUrl) {
@@ -23337,7 +24855,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq21, sql as sql13 } from "drizzle-orm";
+import { eq as eq22, sql as sql13 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret) return false;
@@ -23377,10 +24895,10 @@ async function handleOrderCreated(order) {
       }
     }).catch((err) => console.error("[webhook] metafield write failed:", err));
     const dealHistoryUpdate = db2.update(dealHistory).set({
-      unitsSold: db2.$count(dealHistory, eq21(dealHistory.sku, lineItem.sku)),
+      unitsSold: db2.$count(dealHistory, eq22(dealHistory.sku, lineItem.sku)),
       totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
       totalProfit: String(profit * lineItem.quantity)
-    }).where(eq21(dealHistory.sku, lineItem.sku)).catch(() => {
+    }).where(eq22(dealHistory.sku, lineItem.sku)).catch(() => {
     });
     await Promise.all([metafieldWrite, dealHistoryUpdate]);
   }));
@@ -23558,7 +25076,7 @@ async function handleReturnsUpdate(payload) {
   if (status === "DECLINED" || status === "CANCELED") {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { returns: returns2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq21(returns2.shopifyReturnId, returnGid));
+    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq22(returns2.shopifyReturnId, returnGid));
     return;
   }
   const terminalSignals = ["CLOSED", "RECEIVED", "PROCESSED"];
