@@ -17,13 +17,26 @@
  *   cast/{slug}/portrait-{n}.jpg    casting-call candidates
  */
 
+// Accept either the SDK default name or a custom store-prefix name. Vercel
+// names the token BLOB_READ_WRITE_TOKEN by default, or {PREFIX}_READ_WRITE_TOKEN
+// when the store connection uses a custom prefix (this project uses XDIPX).
+const TOKEN_ENV_CANDIDATES = ['BLOB_READ_WRITE_TOKEN', 'XDIPX_READ_WRITE_TOKEN'] as const
+
+function resolveToken(): string | undefined {
+  for (const key of TOKEN_ENV_CANDIDATES) {
+    const v = process.env[key]?.trim()
+    if (v) return v
+  }
+  return undefined
+}
+
 export function blobConfigured(): boolean {
-  return !!process.env['BLOB_READ_WRITE_TOKEN']?.trim()
+  return !!resolveToken()
 }
 
 function requireToken(): string {
-  const token = process.env['BLOB_READ_WRITE_TOKEN']
-  if (!token) throw new Error('BLOB_READ_WRITE_TOKEN env var is required for Blob storage')
+  const token = resolveToken()
+  if (!token) throw new Error(`Blob token env var is required (one of: ${TOKEN_ENV_CANDIDATES.join(', ')})`)
   return token
 }
 
