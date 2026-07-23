@@ -3,7 +3,7 @@ import { PostPreviewCard, PlatformChip } from './PostPreviewCard'
 import { CalendarStrip } from './CalendarStrip'
 import type { SocialPostRow } from './types'
 
-const PLATFORM_FILTERS = ['all', 'x', 'instagram', 'tiktok'] as const
+const PLATFORM_FILTERS = ['all', 'x', 'instagram', 'tiktok', 'youtube'] as const
 const STATUS_FILTERS = [
   { key: 'all', label: 'All pending' },
   { key: 'pending_review', label: 'New' },

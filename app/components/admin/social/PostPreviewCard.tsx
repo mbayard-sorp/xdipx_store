@@ -1,6 +1,24 @@
 import { useState } from 'react'
 import { useFetcher } from 'react-router'
-import { PLATFORM_LABELS, type SocialPostRow } from './types'
+import { PLATFORM_LABELS, isVideoPost, type SocialPostRow } from './types'
+
+/** Image or muted-preview video, same box either way. */
+interface MediaRef { url: string; video: boolean; poster: string | null }
+
+function MediaBox({ media, className }: { media: MediaRef; className: string }) {
+  if (!media.video) return <img src={media.url} alt="" className={className} />
+  return (
+    <video
+      src={media.url}
+      poster={media.poster ?? undefined}
+      controls
+      playsInline
+      muted
+      preload="metadata"
+      className={className}
+    />
+  )
+}
 
 /**
  * One draft in the review queue: a platform-native preview mock (X card /
@@ -16,7 +34,10 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
   const [feedbackError, setFeedbackError] = useState(false)
 
   const isSubmitting = fetcher.state !== 'idle'
-  const media = post.mediaUrls?.[0] ?? null
+  const mediaUrl = post.mediaUrls?.[0] ?? null
+  const media: MediaRef | null = mediaUrl
+    ? { url: mediaUrl, video: isVideoPost(post), poster: post.posterUrl ?? null }
+    : null
   const edited = caption.trim() !== post.tweetText.trim()
 
   function submit(decision: 'approved' | 'needs_changes' | 'rejected') {
@@ -75,7 +96,7 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
         {/* Platform-native mock */}
         <div className="shrink-0">
           {post.platform === 'instagram' && <InstagramMock media={media} caption={caption} />}
-          {post.platform === 'tiktok' && <TikTokMock media={media} caption={caption} />}
+          {(post.platform === 'tiktok' || post.platform === 'youtube') && <TikTokMock media={media} caption={caption} youtube={post.platform === 'youtube'} />}
           {(post.platform === 'x' || post.platform === 'facebook') && <XMock media={media} caption={caption} />}
         </div>
 
@@ -174,16 +195,16 @@ function MissingMedia({ label }: { label: string }) {
   )
 }
 
-function InstagramMock({ media, caption }: { media: string | null; caption: string }) {
+function InstagramMock({ media, caption }: { media: MediaRef | null; caption: string }) {
   return (
     <div className="w-[240px] rounded-xl border border-line overflow-hidden bg-white">
       <div className="flex items-center gap-2 px-3 py-2">
         <span className="w-6 h-6 rounded-full bg-coral-soft flex items-center justify-center text-[10px] font-bold text-coral">x</span>
         <span className="text-xs font-semibold text-ink">xdipx</span>
       </div>
-      <div className="aspect-square bg-paper-3">
+      <div className={media?.video ? 'aspect-[9/16] bg-paper-3' : 'aspect-square bg-paper-3'}>
         {media ? (
-          <img src={media} alt="" className="w-full h-full object-cover" />
+          <MediaBox media={media} className="w-full h-full object-cover" />
         ) : (
           <MissingMedia label="Square 1:1 image needed" />
         )}
@@ -197,16 +218,19 @@ function InstagramMock({ media, caption }: { media: string | null; caption: stri
   )
 }
 
-function TikTokMock({ media, caption }: { media: string | null; caption: string }) {
+function TikTokMock({ media, caption, youtube }: { media: MediaRef | null; caption: string; youtube?: boolean }) {
   return (
     <div className="w-[180px]">
+      {youtube && (
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-4">YouTube Short</p>
+      )}
       <div className="relative aspect-[9/16] rounded-xl overflow-hidden border border-line bg-ink">
         {media ? (
-          <img src={media} alt="" className="w-full h-full object-cover" />
+          <MediaBox media={media} className="w-full h-full object-cover" />
         ) : (
           <MissingMedia label="9:16 vertical asset needed" />
         )}
-        {media && (
+        {media && !media.video && (
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pt-8">
             <p className="text-[10px] font-semibold text-white">@xdipx</p>
             <p className="text-[10px] text-white/90 leading-snug">
@@ -215,6 +239,11 @@ function TikTokMock({ media, caption }: { media: string | null; caption: string 
           </div>
         )}
       </div>
+      {media?.video && (
+        <p className="mt-1 text-[10px] text-ink-4 leading-snug">
+          {caption.length > 90 ? `${caption.slice(0, 90)}…` : caption}
+        </p>
+      )}
       {!media && (
         <p className="mt-1 text-[10px] text-ink-4 leading-snug">
           {caption.length > 90 ? `${caption.slice(0, 90)}…` : caption}
@@ -224,7 +253,7 @@ function TikTokMock({ media, caption }: { media: string | null; caption: string 
   )
 }
 
-function XMock({ media, caption }: { media: string | null; caption: string }) {
+function XMock({ media, caption }: { media: MediaRef | null; caption: string }) {
   return (
     <div className="w-[260px] rounded-xl border border-line bg-white p-3">
       <div className="flex items-center gap-2">
@@ -237,7 +266,7 @@ function XMock({ media, caption }: { media: string | null; caption: string }) {
       <p className="mt-2 text-sm text-ink whitespace-pre-wrap break-words leading-snug">{caption}</p>
       {media && (
         <div className="mt-2 rounded-lg overflow-hidden border border-line">
-          <img src={media} alt="" className="w-full max-h-[160px] object-cover" />
+          <MediaBox media={media} className={media.video ? 'w-full max-h-[280px] object-cover' : 'w-full max-h-[160px] object-cover'} />
         </div>
       )}
     </div>

@@ -26,7 +26,7 @@ import { categoryToLegacyString } from '~/types'
 import { ReviewQueue } from '~/components/admin/social/ReviewQueue'
 import { FrequencyPanel } from '~/components/admin/social/FrequencyPanel'
 import { PlatformChip } from '~/components/admin/social/PostPreviewCard'
-import type { SocialPostRow } from '~/components/admin/social/types'
+import { isVideoPost, type SocialPostRow } from '~/components/admin/social/types'
 
 export const meta: MetaFunction = () => [{ title: 'Social Studio — xdipx Admin' }]
 
@@ -139,6 +139,46 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
     const result = await postApprovedDraft(postId)
     return { ok: result.ok, intent: 'post-approved-draft', tweetId: result.tweetId, error: result.error }
+  }
+
+  // ── Video posting via platform publishers — double-gated (valve + env).
+  // Today every adapter is a stub, so this reports the manual path; when keys
+  // land, the same click goes live with zero UI change.
+  if (intent === 'post-video') {
+    const postId = parseInt(form.get('postId') as string)
+    if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
+    const [post] = await db.select().from(socialPosts).where(eq(socialPosts.id, postId)).limit(1)
+    if (!post || post.status !== 'draft' || post.reviewStatus !== 'approved') {
+      return { ok: false, error: 'Post must be an approved draft' }
+    }
+    const valveOn = await getValve(VALVE_KEYS.videoAutopublish)
+    if (!valveOn) {
+      return { ok: false, stub: true, error: 'Autopublish valve is OFF (Homepage Team > Video tab). Copy the caption and download the video to post manually.' }
+    }
+    const { getPublisher } = await import('~/lib/social-publish/registry.server')
+    const publisher = getPublisher(post.platform)
+    if (!publisher) return { ok: false, stub: true, error: `No publisher for ${post.platform}` }
+    const videoUrl = post.mediaUrls?.[0]
+    if (!videoUrl) return { ok: false, error: 'Draft has no video URL' }
+    const result = await publisher.publish({
+      postId,
+      videoUrl,
+      ...(post.posterUrl ? { posterUrl: post.posterUrl } : {}),
+      caption: post.editedText?.trim() || post.tweetText,
+    })
+    if (!result.ok) {
+      return {
+        ok: false,
+        stub: result.reason === 'not_configured',
+        error: result.reason === 'not_configured'
+          ? `${post.platform} API keys are not configured yet. Copy the caption and download the video to post manually.`
+          : result.detail ?? 'Publish failed',
+      }
+    }
+    await db.update(socialPosts)
+      .set({ status: 'posted', externalPostId: result.externalPostId, postedAt: new Date() })
+      .where(eq(socialPosts.id, postId))
+    return { ok: true }
   }
 
   if (intent === 'generate-tweet') {
@@ -304,10 +344,11 @@ function ApprovedList({ posts }: { posts: SocialPostRow[] }) {
 }
 
 function ApprovedRow({ post }: { post: SocialPostRow }) {
-  const fetcher = useFetcher<{ ok: boolean; error?: string; tweetId?: string }>()
+  const fetcher = useFetcher<{ ok: boolean; error?: string; tweetId?: string; stub?: boolean }>()
   const [copied, setCopied] = useState(false)
   const text = post.editedText?.trim() || post.tweetText
   const media = post.mediaUrls?.[0] ?? null
+  const video = isVideoPost(post)
   const isSubmitting = fetcher.state !== 'idle'
 
   async function copyCaption() {
@@ -318,7 +359,14 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
 
   return (
     <div className="rounded-2xl border border-line bg-white p-4 flex flex-col md:flex-row gap-3 md:items-center">
-      {media && <img src={media} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />}
+      {media && (video ? (
+        <div className="relative shrink-0">
+          <img src={post.posterUrl ?? undefined} alt="" className="w-14 h-14 rounded-lg object-cover bg-ink" />
+          <span className="absolute inset-0 flex items-center justify-center text-white text-lg drop-shadow">▶</span>
+        </div>
+      ) : (
+        <img src={media} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />
+      ))}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           <PlatformChip platform={post.platform} />
@@ -334,7 +382,7 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
           <p className="text-xs text-green-600 mt-1">Posted — tweet {fetcher.data.tweetId}</p>
         )}
       </div>
-      <div className="flex gap-2 shrink-0">
+      <div className="flex flex-wrap gap-2 shrink-0">
         {post.platform === 'x' ? (
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="post-approved-draft" />
@@ -349,6 +397,20 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
           </fetcher.Form>
         ) : (
           <>
+            {video && (
+              <fetcher.Form method="post">
+                <input type="hidden" name="intent" value="post-video" />
+                <input type="hidden" name="postId" value={post.id} />
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 bg-coral text-white rounded-full text-sm font-semibold hover:bg-coral-2 transition-colors disabled:opacity-50"
+                  title="Publishes via the platform API once keys + the autopublish valve are set; until then this reports the manual path."
+                >
+                  {isSubmitting ? 'Trying…' : 'Post now'}
+                </button>
+              </fetcher.Form>
+            )}
             <button
               onClick={copyCaption}
               className="px-4 py-2 bg-paper-2 text-ink rounded-full text-sm font-medium border border-line hover:border-ink-4 transition-colors"
@@ -360,12 +422,18 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
                 href={media}
                 target="_blank"
                 rel="noopener noreferrer"
+                download={video || undefined}
                 className="px-4 py-2 bg-paper-2 text-ink-3 rounded-full text-sm font-medium border border-line hover:border-ink-4 transition-colors"
               >
-                Open media
+                {video ? 'Download video' : 'Open media'}
               </a>
             )}
           </>
+        )}
+        {fetcher.data?.stub && (
+          <p className="w-full text-xs text-ink-4">
+            {fetcher.data.error ?? 'Platform posting is not configured yet. Copy the caption and download the video to post manually.'}
+          </p>
         )}
       </div>
     </div>

@@ -17,6 +17,14 @@ export interface SocialPostRow {
   reviewedAt: string | Date | null
   scheduledFor: string | null
   reworkedFrom: number | null
+  /** Video pipeline linkage (065): set when this draft is a fanned-out video. */
+  videoJobId: number | null
+  posterUrl: string | null
+}
+
+/** True when the draft's media is a video (fanned out from the video pipeline). */
+export function isVideoPost(post: Pick<SocialPostRow, 'videoJobId' | 'mediaUrls'>): boolean {
+  return post.videoJobId != null || !!post.mediaUrls?.[0]?.split('?')[0]?.endsWith('.mp4')
 }
 
 export const PLATFORM_LABELS: Record<string, string> = {

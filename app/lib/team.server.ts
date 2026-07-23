@@ -668,13 +668,15 @@ export async function decideAdCampaign(id: number, status: 'approved' | 'rejecte
 // ── Draft-only social posts ──────────────────────────────────────────────────
 
 export interface DraftSocialPostInput {
-  platform: string          // x|instagram|tiktok|facebook — only x has live plumbing
-  postType: string          // auto_deal|thread_reply|manual|campaign
+  platform: string          // x|instagram|tiktok|facebook|youtube — only x has live plumbing
+  postType: string          // auto_deal|thread_reply|manual|campaign|video_reel|video_short
   tweetText: string         // the post body (column name is historical)
   mediaUrls?: string[] | undefined
   dealHistoryId?: number | undefined
   scheduledFor?: string | undefined  // ISO date the agent proposes for the calendar
   reworkedFrom?: number | undefined  // id of the needs_changes draft this replaces
+  videoJobId?: number | undefined    // video pipeline linkage (065)
+  posterUrl?: string | undefined
 }
 
 /**
@@ -697,6 +699,8 @@ export async function createDraftSocialPost(p: DraftSocialPostInput): Promise<nu
       reviewStatus:  'pending_review',
       scheduledFor:  p.scheduledFor ?? null,
       reworkedFrom:  p.reworkedFrom ?? null,
+      videoJobId:    p.videoJobId ?? null,
+      posterUrl:     p.posterUrl ?? null,
     })
     .returning({ id: socialPosts.id })
   return row!.id
