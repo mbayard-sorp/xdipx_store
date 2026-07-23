@@ -45,7 +45,9 @@ curl -s "$BASE_URL/api/team/gate?team=video&excludeRun=$RUN_ID" -H "x-team-secre
 
 For each slate item build `scriptJson`: `framePrompt` (archetype declared first, ground lock,
 product-dominant blocking, no-text clause), `motionPrompt` (camera holds the product; spoken line
-in quotes for native-audio tiers), `durationSeconds`, per-platform `captions`, `hook`, `cta`.
+in quotes for native-audio tiers), `voiceover` (silent tiers only: narration TTS'd in the active
+IVR voice and muxed at the lipsync stage; b-roll framing only since there is no lip sync; ~2 words
+per second, fit inside `durationSeconds`), `durationSeconds`, per-platform `captions`, `hook`, `cta`.
 
 Route EVERY script (spoken lines + all captions together) through `emma-empathy-reviewer`:
 PASS -> proceed. REVISE -> apply and re-gate once. BLOCK -> drop the item and record why. Also

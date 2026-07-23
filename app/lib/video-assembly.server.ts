@@ -128,7 +128,11 @@ export async function applyWatermark(video: Buffer): Promise<Buffer> {
   }
 }
 
-/** Mux an audio track onto a video (video stream copied, shortest wins). */
+/**
+ * Mux an audio track onto a video (video stream copied). The video's duration
+ * always wins: shorter audio is padded with silence (apad + -shortest ends at
+ * the video), longer audio is cut at the video's end.
+ */
 export async function muxAudio(video: Buffer, audio: Buffer): Promise<Buffer> {
   const videoIn = tmp('mux-v.mp4')
   const audioIn = tmp('mux-a.mp3')
@@ -142,6 +146,7 @@ export async function muxAudio(video: Buffer, audio: Buffer): Promise<Buffer> {
       '-i', audioIn,
       '-map', '0:v', '-map', '1:a',
       '-c:v', 'copy',
+      '-af', 'apad',
       '-c:a', 'aac',
       '-shortest',
       '-movflags', '+faststart',

@@ -43,7 +43,9 @@ import { getProductByHandle } from '~/lib/shopify.server'
 import { getTeamConfig } from '~/lib/team.server'
 import { VIDEO_EXTRA_KEYS, VIDEO_MAX_COST_CENTS_DEFAULT } from '~/lib/team-keys'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
-import { extractPoster, applyWatermark, probeDurationSeconds } from '~/lib/video-assembly.server'
+import { extractPoster, applyWatermark, probeDurationSeconds, muxAudio } from '~/lib/video-assembly.server'
+import { generateVoiceover } from '~/lib/elevenlabs.server'
+import { getActiveIvrVoiceId } from '~/lib/ivr-voice.server'
 
 const SCENE_FRAME_CANDIDATES = 3
 const POLLER_IDLE_TTL_SECONDS = 30 * 60
@@ -348,13 +350,60 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
   return 'progressed'
 }
 
-// ─── Stage: lipsync (MVP passthrough) ────────────────────────────────────────
+// ─── Stage: lipsync ──────────────────────────────────────────────────────────
+
+/** Rough speech rate for cost estimation: ~15 chars of script per spoken second. */
+const TTS_CHARS_PER_SECOND = 15
+const TTS_COST_KEY = 'elevenlabs/tts'
 
 async function advanceLipsync(job: VideoJobRow): Promise<AdvanceOutcome> {
-  // Premium tiers (Veo) generate native dialogue; standard tiers ship
-  // captions-first with no VO in the MVP. TTS + sync-lipsync is the designed
-  // fast-follow and slots in here as a queue submit/poll pair like advanceClip.
-  await touch(job, { stage: 'assembly', status: 'queued' })
+  // Premium tiers (Veo, Seedance) generate their own audio; muxing over them
+  // would stomp it. Silent tiers (Kling) get an ElevenLabs voiceover in the
+  // active IVR voice (the owner's pick in /admin/voice-and-sms) muxed here.
+  // Scripts must frame these as b-roll/product shots: there is no lip sync,
+  // so an on-camera speaking presenter would read as dubbed. sync-lipsync is
+  // the designed fast-follow and slots in as a submit/poll pair like advanceClip.
+  const spec = VIDEO_MODELS[job.modelTier as VideoModelId]
+  const voiceover = typeof job.scriptJson['voiceover'] === 'string' ? (job.scriptJson['voiceover'] as string).trim() : ''
+  if (spec?.nativeAudio || !voiceover) {
+    await touch(job, { stage: 'assembly', status: 'queued' })
+    return 'progressed'
+  }
+
+  const clip = await latestAssetByPurpose(job.id, 'clip')
+  if (!clip) throw new Error('No clip asset to voice over')
+  const clipBuf = await blobFetchToBuffer(clip.blobUrl)
+
+  const voiceId = await getActiveIvrVoiceId()
+  const audio = await generateVoiceover({ text: voiceover, ...(voiceId ? { voiceId } : {}) })
+  const voiced = await muxAudio(clipBuf, audio)
+
+  const { url } = await blobPut(`video/${job.jobId}/clip-vo.mp4`, voiced, { contentType: 'video/mp4' })
+  // Same purpose as the silent clip: assembly picks the newest 'clip' asset.
+  await db.insert(mediaAssets).values({
+    kind: 'video',
+    purpose: 'clip',
+    blobUrl: url,
+    contentType: 'video/mp4',
+    sourceModel: TTS_COST_KEY,
+    videoJobId: job.id,
+  })
+
+  const speechSeconds = Math.ceil(voiceover.length / TTS_CHARS_PER_SECOND)
+  void logVideoCost({
+    feature: 'video-tts',
+    model: TTS_COST_KEY,
+    seconds: speechSeconds,
+    caller: 'video-pipeline',
+    sku: job.productHandle,
+    refId: job.jobId,
+  })
+
+  await touch(job, {
+    stage: 'assembly',
+    status: 'queued',
+    costUsd: String(Number(job.costUsd) + estimateVideoCostUsd(TTS_COST_KEY, speechSeconds)),
+  })
   return 'progressed'
 }
 
