@@ -66,6 +66,7 @@ export default defineConfig({
               .id('editor')
               .icon(() => '👩')
               .child(S.document().schemaType('editor').documentId('singleton.editor')),
+            S.documentTypeListItem('castMember').title('Friends of Emma (video cast)').icon(() => '🎬'),
             S.listItem()
               .title('Site Settings')
               .id('siteSettings')
