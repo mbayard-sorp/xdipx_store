@@ -157,6 +157,21 @@ text into illegible nonsense. Fix: drop cloth/towel props entirely, ask for warm
 daylight (not lightbox), add an explicit "keep the label exactly as shown, do not invent text"
 instruction, and use a category-appropriate small accent prop (leaf for care) instead of fabric.
 
+100 Questions About Sex conversation card game (`100-questions-about-sex`), archetype B
+(color-block still), no category chip (Podcast Notes / Real Talk tone), box standing large and
+bold on a flat solid white paper ground with a few cards fanned beside it, soft neutral daylight,
+one crisp shadow →
+`image-9a1f44b3b32fe95371d6741dab6b71a156e82b5d-1184x880-jpg` (post: "What Is a 'Sexual History,'
+and How Does Knowing Yours Improve Your Sex Life?"). First pass with "warm golden-hour daylight
+falling softly from one side" produced a saturated amber/orange gradient wall behind the box —
+rejected for the retired-orange + no-gradient-backdrop rule even though the product itself
+rendered cleanly via Kontext. Fix: drop "golden-hour" language entirely, state the backdrop must
+be FLAT SOLID WHITE with no colored wash/wall/gradient in all-caps emphasis, keep "soft neutral
+daylight" only as the light description (not the wall color), and add "no orange background, no
+amber background, no gradient wall, no colored backdrop" to the negative prompt explicitly (the
+shared negative list's "no gradient backgrounds" alone was not enough to stop the model reading
+"golden-hour" as a colored wall wash).
+
 **Tooling gotcha (not a prompt reject, a call-site bug):** on the `naturals-h2o` run, calling
 `generateImage()` directly (not through `gen-notebook-art.ts`, which has no `hero` surface) with
 `imageSize: { width: 1200, height: 900 }` silently produced a 16:9-ish 1392×752 frame — the
