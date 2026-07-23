@@ -1113,6 +1113,20 @@ export const metaCapiFailures = pgTable('meta_capi_failures', {
   unresolvedIdx: index('idx_meta_capi_failures_unresolved').on(t.createdAt),
 }))
 
+// Migration 067: GA4 Measurement Protocol purchase-send failure queue, drained
+// by the profit-summary cron. Mirrors meta_capi_failures.
+export const ga4PurchaseFailures = pgTable('ga4_purchase_failures', {
+  id:         serial('id').primaryKey(),
+  orderId:    varchar('order_id', { length: 64 }).notNull().unique(),
+  payload:    jsonb('payload').notNull(),
+  attempts:   integer('attempts').notNull().default(0),
+  lastError:  text('last_error'),
+  createdAt:  timestamp('created_at').notNull().defaultNow(),
+  resolvedAt: timestamp('resolved_at'),
+}, t => ({
+  unresolvedIdx: index('idx_ga4_purchase_failures_unresolved').on(t.createdAt),
+}))
+
 /**
  * Durable backstop for the precomputed Variant A homepage payload. KV is the
  * fast path; this table survives KV eviction so a Googlebot crawl on a cold

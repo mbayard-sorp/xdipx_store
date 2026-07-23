@@ -89,17 +89,56 @@ export async function trackEvent(
   email: string,
   eventName: string,
   properties: Record<string, unknown>,
+  opts: { uniqueId?: string } = {},
 ): Promise<void> {
-  await klaviyoFetch('/events/', 'POST', {
-    data: {
-      type: 'event',
-      attributes: {
-        metric:  { data: { type: 'metric', attributes: { name: eventName } } },
-        profile: { data: { type: 'profile', attributes: { email } } },
-        properties,
-      },
-    },
-  })
+  const attributes: Record<string, unknown> = {
+    metric:  { data: { type: 'metric', attributes: { name: eventName } } },
+    profile: { data: { type: 'profile', attributes: { email } } },
+    properties,
+  }
+  // Klaviyo dedupes events sharing a unique_id, so a retried webhook or a repeat
+  // checkout click does not double-count.
+  if (opts.uniqueId) attributes['unique_id'] = opts.uniqueId
+  await klaviyoFetch('/events/', 'POST', { data: { type: 'event', attributes } })
+}
+
+interface LineItemInfo { productHandle?: string; productTitle?: string; variantId?: string; price?: number; quantity?: number }
+
+/**
+ * Cart/checkout/order lifecycle events. These are the trigger metrics for
+ * abandoned-cart, browse-abandonment, and post-purchase Klaviyo flows, which
+ * could not fire before because the headless storefront never sent them. All
+ * swallow-and-log: analytics must never break a cart action or an order webhook.
+ * Events need a profile identifier, so anonymous carts produce no event.
+ */
+export async function trackAddedToCart(email: string, item: LineItemInfo & { cartId?: string }): Promise<void> {
+  try {
+    await trackEvent(email, 'Added to Cart', { ...item })
+  } catch (err) {
+    console.error('[klaviyo] trackAddedToCart failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+export async function trackStartedCheckout(email: string, params: { cartId: string; value: number; currency: string; items: LineItemInfo[]; uniqueId?: string }): Promise<void> {
+  try {
+    const opts = params.uniqueId ? { uniqueId: params.uniqueId } : {}
+    await trackEvent(email, 'Started Checkout', { cartId: params.cartId, value: params.value, currency: params.currency, items: params.items }, opts)
+  } catch (err) {
+    console.error('[klaviyo] trackStartedCheckout failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+export async function trackPlacedOrder(email: string, params: { orderId: string; orderNumber?: string | number; value: number; currency: string; items: LineItemInfo[] }): Promise<void> {
+  try {
+    await trackEvent(
+      email,
+      'Placed Order',
+      { orderId: params.orderId, orderNumber: params.orderNumber, value: params.value, currency: params.currency, items: params.items },
+      { uniqueId: `placed_order_${params.orderId}` },
+    )
+  } catch (err) {
+    console.error('[klaviyo] trackPlacedOrder failed:', err instanceof Error ? err.message : err)
+  }
 }
 
 // ─── Review events ─────────────────────────────────────────────────────────

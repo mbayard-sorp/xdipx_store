@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
-import { dealHistory, metaCapiFailures, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
+import { dealHistory, ga4PurchaseFailures, metaCapiFailures, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
 import { eq, sql } from 'drizzle-orm'
 
 // ─── HMAC verification ────────────────────────────────────────────────────
@@ -212,6 +212,61 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
     }
   } catch (err) {
     console.error('[webhook:order-created] Meta CAPI Purchase block error:', err)
+  }
+
+  // ─── GA4 Measurement Protocol Purchase ─────────────────────────────────────
+  // GA4 is the stack's analytics of record for strategy/ads decisions, but the
+  // client funnel ends at begin_checkout (checkout is on Shopify's domain), so
+  // the conversion is sent server-side here alongside the CAPI event. GA4
+  // dedupes ecommerce on transaction_id, so this is idempotent on webhook
+  // retries. On failure we enqueue for the profit-summary cron drain.
+  try {
+    const { sendGa4Purchase } = await import('../app/lib/ga4-mp.server.js')
+    const gaCid = order.note_attributes?.find(a => a.name === '_ga_cid')?.value || null
+    const gaEvent = {
+      transactionId: String(order.id),
+      value:         parseFloat(order.total_price) || 0,
+      currency:      order.currency || 'USD',
+      items: order.line_items.map(li => ({
+        item_id:   li.product_id ? String(li.product_id) : (li.sku || String(li.variant_id ?? '')),
+        item_name: li.title,
+        price:     parseFloat(li.price) || 0,
+        quantity:  li.quantity || 0,
+      })),
+      clientId: gaCid,
+    }
+    const gaResult = await sendGa4Purchase(gaEvent)
+    if (!gaResult.ok && !gaResult.skipped) {
+      await db.insert(ga4PurchaseFailures)
+        .values({ orderId: String(order.id), payload: gaEvent, attempts: 1, lastError: gaResult.error ?? 'unknown' })
+        .onConflictDoNothing({ target: ga4PurchaseFailures.orderId })
+      console.error('[webhook:order-created] GA4 purchase failed, queued for retry:', gaResult.error)
+    }
+  } catch (err) {
+    console.error('[webhook:order-created] GA4 purchase block error:', err)
+  }
+
+  // ─── Klaviyo Placed Order ──────────────────────────────────────────────────
+  // Post-purchase flow trigger. The headless storefront never sent order events;
+  // trackPlacedOrder dedupes on the order id so a retried webhook is safe.
+  try {
+    if (order.email) {
+      const { trackPlacedOrder } = await import('../app/lib/klaviyo.server.js')
+      await trackPlacedOrder(order.email, {
+        orderId:     String(order.id),
+        orderNumber: order.order_number,
+        value:       parseFloat(order.total_price) || 0,
+        currency:    order.currency || 'USD',
+        items: order.line_items.map(li => ({
+          productTitle: li.title,
+          ...(li.variant_id ? { variantId: String(li.variant_id) } : {}),
+          price:        parseFloat(li.price) || 0,
+          quantity:     li.quantity || 0,
+        })),
+      })
+    }
+  } catch (err) {
+    console.error('[webhook:order-created] Klaviyo Placed Order block error:', err)
   }
 }
 

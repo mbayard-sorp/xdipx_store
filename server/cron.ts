@@ -49,6 +49,44 @@ async function drainMetaCapiFailures(): Promise<number> {
   }
 }
 
+/**
+ * Drain unresolved GA4 Measurement Protocol purchase failures. Mirrors the CAPI
+ * drain: re-send each queued purchase (idempotent on transaction_id), mark
+ * resolved on success. Runs piggybacked on the nightly profit-summary cron.
+ */
+async function drainGa4Failures(): Promise<number> {
+  const MAX_ATTEMPTS = 5
+  try {
+    const { db } = await import('../app/lib/db.server.js')
+    const { ga4PurchaseFailures } = await import('../db/schema.js')
+    const { sendGa4Purchase } = await import('../app/lib/ga4-mp.server.js')
+    const { and, eq, isNull, lt } = await import('drizzle-orm')
+
+    const rows = await db.select().from(ga4PurchaseFailures)
+      .where(and(isNull(ga4PurchaseFailures.resolvedAt), lt(ga4PurchaseFailures.attempts, MAX_ATTEMPTS)))
+      .limit(100)
+
+    let resolved = 0
+    for (const row of rows) {
+      const result = await sendGa4Purchase(row.payload as Parameters<typeof sendGa4Purchase>[0])
+      if (result.ok) {
+        await db.update(ga4PurchaseFailures)
+          .set({ resolvedAt: new Date(), attempts: row.attempts + 1 })
+          .where(eq(ga4PurchaseFailures.id, row.id))
+        resolved++
+      } else {
+        await db.update(ga4PurchaseFailures)
+          .set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? 'unknown' })
+          .where(eq(ga4PurchaseFailures.id, row.id))
+      }
+    }
+    return resolved
+  } catch (err) {
+    console.error('[cron:profit-summary] GA4 drain error:', err)
+    return 0
+  }
+}
+
 export function createCronRoutes() {
   const router = Router()
 
@@ -160,7 +198,8 @@ export function createCronRoutes() {
       const { writeProfitSummary } = await import('../app/lib/profit.server.js')
       await writeProfitSummary()
       const capiRetried = await drainMetaCapiFailures()
-      res.json({ ok: true, capiRetried })
+      const ga4Retried = await drainGa4Failures()
+      res.json({ ok: true, capiRetried, ga4Retried })
     } catch (err) {
       console.error('[cron:profit-summary]', err)
       res.status(500).json({ error: String(err) })

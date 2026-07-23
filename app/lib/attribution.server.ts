@@ -76,6 +76,22 @@ export function getFbCookies(request: Request): { fbp: string | null; fbc: strin
   }
 }
 
+/**
+ * Read the GA4 client id from the `_ga` cookie so a server-side purchase event
+ * can be attributed to the same GA4 client that browsed. The cookie is
+ * `GA1.1.<clientId1>.<clientId2>`; the client_id GA4 expects is the last two
+ * dot-parts joined, e.g. `1234567890.1712345678`. Returns null when absent.
+ * Written as the `_ga_cid` cart attribute by the api.cart action so it reaches
+ * the order webhook.
+ */
+export function getGaClientId(request: Request): string | null {
+  const raw = parseCookie(request.headers.get('Cookie') ?? '')['_ga']
+  if (!raw) return null
+  const parts = raw.split('.')
+  if (parts.length < 4) return null
+  return `${parts[2]}.${parts[3]}`
+}
+
 export function getClientIP(request: Request): string {
   return (
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
