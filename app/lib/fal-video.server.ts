@@ -32,19 +32,30 @@ export function falVideoConfigured(): boolean {
 // fal reprices. costKey must have a matching entry in model-pricing VIDEO_RATES.
 // ---------------------------------------------------------------------------
 
-export type VideoModelId = 'veo31' | 'veo31-fast' | 'kling25-pro' | 'seedance2'
+export type VideoModelId = 'veo31' | 'veo31-fast' | 'kling25-pro' | 'seedance2' | 'omnihuman'
 
 export interface VideoModelSpec {
   /** fal queue endpoint path. */
   falModel: string
   label: string
-  tier: 'premium' | 'premium-fast' | 'standard'
+  tier: 'premium' | 'premium-fast' | 'standard' | 'avatar'
   /** Cost key understood by model-pricing VIDEO_RATES. */
   costKey: string
   ratePerSecondUsd: number
-  /** Whether the model generates its own audio (dialogue/ambient). */
+  /**
+   * Whether the OUTPUT carries audio without a mux step. For generative models
+   * that means the model invents dialogue/ambient; for audio-driven models it
+   * means the input speech track is already embedded. Either way the lipsync
+   * stage must not stomp it.
+   */
   nativeAudio: boolean
-  /** Durations the model accepts, seconds. */
+  /**
+   * Audio-first model: consumes a speech track (audio_url) plus ONE identity
+   * frame and performs it. Video length = audio length, so allowedDurations
+   * does not apply (kept empty) and duration validation is skipped.
+   */
+  audioDriven?: boolean
+  /** Durations the model accepts, seconds. Empty for audio-driven models. */
   allowedDurations: number[]
 }
 
@@ -85,6 +96,20 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     nativeAudio: true,
     allowedDurations: [4, 5, 6, 8, 10, 12],
   },
+  // Talking heads are AUDIO-FIRST (proven 2026-07-24): TTS speech track + one
+  // approved identity frame -> performed video. Never route talking heads
+  // through Kling/LTX + sync-lipsync. 30s input-audio cap per render; longer
+  // scripts split at beat boundaries and both halves render from the SAME frame.
+  'omnihuman': {
+    falModel: 'fal-ai/bytedance/omnihuman/v1.5',
+    label: 'OmniHuman 1.5 (audio-driven avatar)',
+    tier: 'avatar',
+    costKey: 'fal/omnihuman-1.5',
+    ratePerSecondUsd: 0.16,
+    nativeAudio: true,
+    audioDriven: true,
+    allowedDurations: [],
+  },
 }
 
 export function isVideoModelId(v: unknown): v is VideoModelId {
@@ -112,6 +137,8 @@ export interface VideoRequestInput {
   aspect?: '9:16' | '16:9'
   generateAudio?: boolean
   negativePrompt?: string
+  /** Speech track URL for audio-driven models (fal storage or other fetchable URL). */
+  audioUrl?: string
 }
 
 /** Build the per-model input body. Each model family names params differently. */
@@ -145,13 +172,21 @@ function buildInput(model: VideoModelId, input: VideoRequestInput): Record<strin
         resolution: '720p',
         ...(input.negativePrompt ? { negative_prompt: input.negativePrompt } : {}),
       }
+    case 'omnihuman':
+      // Audio-first: no prompt, no duration. Video length = audio length.
+      return {
+        image_url: input.imageUrl,
+        audio_url: input.audioUrl,
+      }
   }
 }
 
 export async function submitVideoRequest(model: VideoModelId, input: VideoRequestInput): Promise<QueueHandle> {
   const key = requireKey()
   const spec = VIDEO_MODELS[model]
-  if (!spec.allowedDurations.includes(input.durationSeconds)) {
+  if (spec.audioDriven) {
+    if (!input.audioUrl) throw new Error(`${model} is audio-driven and requires audioUrl`)
+  } else if (!spec.allowedDurations.includes(input.durationSeconds)) {
     throw new Error(`${model} does not support duration ${input.durationSeconds}s (allowed: ${spec.allowedDurations.join(', ')})`)
   }
   const res = await fetch(`${FAL_QUEUE_ENDPOINT}/${spec.falModel}`, {
@@ -212,6 +247,33 @@ export async function downloadFalAsset(url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer())
 }
 
+/**
+ * Upload a buffer to fal storage (initiate -> PUT -> file_url). Audio-driven
+ * models need their speech track on a fal-fetchable URL; Blob URLs work too,
+ * but fal storage keeps the input in-house and avoids public exposure.
+ */
+export async function uploadToFalStorage(buf: Buffer, contentType: string, fileName: string): Promise<string> {
+  const key = requireKey()
+  const init = await fetch('https://rest.alpha.fal.ai/storage/upload/initiate', {
+    method: 'POST',
+    headers: { 'Authorization': `Key ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content_type: contentType, file_name: fileName }),
+  })
+  if (!init.ok) {
+    const text = await init.text().catch(() => '')
+    throw new Error(`fal storage initiate error: ${init.status} ${text.slice(0, 200)}`)
+  }
+  const j = await init.json() as { upload_url?: string; file_url?: string }
+  if (!j.upload_url || !j.file_url) throw new Error('fal storage initiate response missing upload_url/file_url')
+  const put = await fetch(j.upload_url, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: new Uint8Array(buf),
+  })
+  if (!put.ok) throw new Error(`fal storage PUT error: ${put.status}`)
+  return j.file_url
+}
+
 // ---------------------------------------------------------------------------
 // Scene-frame composition — the drift guard. Composes the presenter (Emma or a
 // cast member reference photo) together with the REAL product photo into one
@@ -228,8 +290,8 @@ export interface ComposeSceneFrameOpts {
   prompt: string
   /** Canonical presenter reference photo (Emma or castMember), publicly fetchable. */
   presenterImageUrl: string
-  /** Real Shopify product photo, publicly fetchable. */
-  productImageUrl: string
+  /** Real Shopify product photo, publicly fetchable. Omitted for talking-head frames, which never include the product. */
+  productImageUrl?: string
   /** Candidate count (default 3, capped 4). */
   count?: number
 }
@@ -251,7 +313,7 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
     },
     body: JSON.stringify({
       prompt: opts.prompt,
-      image_urls: [opts.presenterImageUrl, opts.productImageUrl],
+      image_urls: [opts.presenterImageUrl, ...(opts.productImageUrl ? [opts.productImageUrl] : [])],
       num_images: count,
       aspect_ratio: '9:16',
       output_format: 'jpeg',

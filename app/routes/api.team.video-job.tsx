@@ -17,8 +17,8 @@
 
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth, gate, getTeamConfig, getValve, VALVE_KEYS } from '~/lib/team.server'
-import { SOCIAL_PLATFORMS, VIDEO_FORMULAS, VIDEO_MAX_COST_CENTS_DEFAULT } from '~/lib/team-keys'
-import { enqueueVideoJob, listVideoJobs, estimateJobCostUsd } from '~/lib/video-pipeline.server'
+import { SOCIAL_PLATFORMS, VIDEO_FORMULAS, VIDEO_MAX_COST_CENTS_DEFAULT, SCENE_KIT } from '~/lib/team-keys'
+import { enqueueVideoJob, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame } from '~/lib/video-pipeline.server'
 import { VIDEO_MODELS, isVideoModelId } from '~/lib/fal-video.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
 import { db } from '~/lib/db.server'
@@ -49,12 +49,23 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!isVideoModelId(b['modelTier'])) {
         return new Response(`Bad Request: modelTier must be one of ${Object.keys(VIDEO_MODELS).join('|')}`, { status: 400 })
       }
-      if (typeof b['durationSeconds'] !== 'number') {
-        return new Response('Bad Request: durationSeconds required', { status: 400 })
-      }
+      const spec = VIDEO_MODELS[b['modelTier']]
       const script = b['scriptJson']
       if (!script || typeof script !== 'object' || Array.isArray(script)) {
         return new Response('Bad Request: scriptJson object required (framePrompt, motionPrompt, captions)', { status: 400 })
+      }
+      if (spec.audioDriven) {
+        // Avatar tier: duration derives from speech length, so durationSeconds
+        // is not required; the spoken line and an on-camera presenter are.
+        const line = (script as VideoScriptJson).presenterLine
+        if (typeof line !== 'string' || !line.trim()) {
+          return new Response('Bad Request: avatar tier requires scriptJson.presenterLine', { status: 400 })
+        }
+        if (presenter === 'none') {
+          return new Response('Bad Request: avatar tier requires a presenter (emma or friend:{slug})', { status: 400 })
+        }
+      } else if (typeof b['durationSeconds'] !== 'number') {
+        return new Response('Bad Request: durationSeconds required', { status: 400 })
       }
       const platforms = Array.isArray(b['targetPlatforms'])
         ? (b['targetPlatforms'] as unknown[]).filter((p): p is string => typeof p === 'string' && (SOCIAL_PLATFORMS as readonly string[]).includes(p))
@@ -78,7 +89,7 @@ export async function action({ request }: ActionFunctionArgs) {
         presenter,
         scriptJson: script as VideoScriptJson,
         modelTier: b['modelTier'],
-        durationSeconds: b['durationSeconds'],
+        durationSeconds: spec.audioDriven ? 0 : b['durationSeconds'] as number,
         targetPlatforms: platforms,
         ...(typeof b['aiDisclosure'] === 'boolean' ? { aiDisclosure: b['aiDisclosure'] } : {}),
         ...(typeof b['runId'] === 'number' ? { runId: b['runId'] } : {}),
@@ -114,6 +125,8 @@ export async function action({ request }: ActionFunctionArgs) {
         stage: r.job.stage,
         status: r.job.status,
         costUsd: r.job.costUsd,
+        sceneFrameAssetId: r.job.sceneFrameAssetId,
+        sceneSlug: typeof r.job.scriptJson?.sceneSlug === 'string' ? r.job.scriptJson.sceneSlug : null,
         error: r.job.error,
         targetPlatforms: r.job.targetPlatforms,
         metricsJson: r.job.metricsJson,
@@ -132,15 +145,31 @@ export async function action({ request }: ActionFunctionArgs) {
         getApprovedCastMembers(),
       ])
       const models = Object.fromEntries(
-        Object.entries(VIDEO_MODELS).map(([id, spec]) => [id, {
-          label: spec.label,
-          tier: spec.tier,
-          ratePerSecondUsd: spec.ratePerSecondUsd,
-          nativeAudio: spec.nativeAudio,
-          allowedDurations: spec.allowedDurations,
-          example8sCostUsd: estimateJobCostUsd(id as keyof typeof VIDEO_MODELS, spec.allowedDurations.includes(8) ? 8 : spec.allowedDurations[0]!),
-        }]),
+        Object.entries(VIDEO_MODELS).map(([id, spec]) => {
+          // Avatar models derive duration from speech; example a 30s script.
+          const exampleSeconds = spec.audioDriven ? 30 : (spec.allowedDurations.includes(8) ? 8 : spec.allowedDurations[0] ?? 5)
+          return [id, {
+            label: spec.label,
+            tier: spec.tier,
+            ratePerSecondUsd: spec.ratePerSecondUsd,
+            nativeAudio: spec.nativeAudio,
+            audioDriven: !!spec.audioDriven,
+            allowedDurations: spec.allowedDurations,
+            example8sCostUsd: estimateJobCostUsd(
+              id as keyof typeof VIDEO_MODELS,
+              exampleSeconds,
+              spec.audioDriven ? { speechSeconds: exampleSeconds } : {},
+            ),
+          }]
+        }),
       )
+      // Per-scene reusable frame availability for presenter 'emma': the same
+      // lookup the pipeline runs when a job carries sceneSlug. Non-null means
+      // enqueueing that scene reuses the approved frame with no new composition.
+      const sceneKit = await Promise.all(SCENE_KIT.map(async scene => ({
+        ...scene,
+        approvedFrameAssetId: await findReusableSceneFrame(scene.slug, 'emma').catch(() => null),
+      })))
       return Response.json({
         enabled: config.enabled,
         dailyCents: config.dailyCents,
@@ -149,6 +178,7 @@ export async function action({ request }: ActionFunctionArgs) {
         formulas: VIDEO_FORMULAS,
         platforms: SOCIAL_PLATFORMS,
         models,
+        sceneKit,
         cast: cast.map(m => ({ slug: m.slug, name: m.name, role: m.role })),
       })
     }

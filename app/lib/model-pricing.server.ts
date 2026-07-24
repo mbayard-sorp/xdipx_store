@@ -74,6 +74,7 @@ const VIDEO_RATES: Record<string, number> = {
   'fal/veo3.1-fast':  0.15, // native audio
   'fal/kling-2.5-pro': 0.07, // no native audio
   'fal/seedance-2.0': 0.31, // audio included, 720p
+  'fal/omnihuman-1.5': 0.16, // audio-driven avatar performance (image + audio -> talking video)
   'fal/sync-lipsync': 0.05, // lipsync billed ~$3/min of output video
   'elevenlabs/tts':   0.003, // voiceover, ~$0.20/min of speech at Creator-plan credit rates
 }
