@@ -284,6 +284,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             price:            p.price,
             compareAtPrice:   p.compareAtPrice ?? null,
             variantId,
+            hasMultipleVariants: p.variants.length > 1,
             ...(why ? { why } : {}),
           } satisfies PairsWithItem
         })

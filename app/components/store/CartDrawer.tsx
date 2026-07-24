@@ -318,6 +318,10 @@ function EmmaRecommendRow({ product }: { product: Product }) {
   const variant = product.variants[0]
   const image   = product.images[0]
   if (!variant) return null
+  // Multi-variant (color/size) upsells can't be quick-added — `variant` is only
+  // the first variant, so adding it blindly would drop the wrong SKU. Send the
+  // shopper to the PDP to pick instead.
+  const hasMultipleVariants = product.variants.length > 1
 
   return (
     <div className="flex items-center gap-3">
@@ -343,26 +347,36 @@ function EmmaRecommendRow({ product }: { product: Product }) {
           <p className="text-sm font-bold text-coral mt-0.5">${product.price.toFixed(2)}</p>
         </div>
       </Link>
-      <fetcher.Form method="post" action="/api/cart">
-        <input type="hidden" name="intent"    value="add-item" />
-        <input type="hidden" name="variantId" value={variant.id} />
-        <button
-          type="submit"
-          disabled={isPending || added}
-          onClick={() => setFailed(false)}
-          className={[
-            'shrink-0 text-xs font-bold px-3.5 py-2.5 rounded-full transition-all',
-            added
-              ? 'bg-sage/20 text-sage'
-              : failed
-                ? 'bg-red-100 text-red-500'
-                : 'bg-coral text-white hover:bg-coral-deep disabled:opacity-50',
-          ].join(' ')}
+      {hasMultipleVariants ? (
+        <Link
+          to={`/products/${product.handle}`}
+          className="shrink-0 text-xs font-bold px-3.5 py-2.5 rounded-full transition-all bg-coral text-white hover:bg-coral-deep"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          {added ? 'Added ♥' : isPending ? '…' : failed ? 'Retry' : '+ add'}
-        </button>
-      </fetcher.Form>
+          Pick options →
+        </Link>
+      ) : (
+        <fetcher.Form method="post" action="/api/cart">
+          <input type="hidden" name="intent"    value="add-item" />
+          <input type="hidden" name="variantId" value={variant.id} />
+          <button
+            type="submit"
+            disabled={isPending || added}
+            onClick={() => setFailed(false)}
+            className={[
+              'shrink-0 text-xs font-bold px-3.5 py-2.5 rounded-full transition-all',
+              added
+                ? 'bg-sage/20 text-sage'
+                : failed
+                  ? 'bg-red-100 text-red-500'
+                  : 'bg-coral text-white hover:bg-coral-deep disabled:opacity-50',
+            ].join(' ')}
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            {added ? 'Added ♥' : isPending ? '…' : failed ? 'Retry' : '+ add'}
+          </button>
+        </fetcher.Form>
+      )}
     </div>
   )
 }
