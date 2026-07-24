@@ -30,7 +30,7 @@ Brand tentpoles (the dream-job intro and its follow-ups) drop between series epi
 
 ## 4. Platform playbook (operating rules)
 
-- **Accounts:** brand-first handle (@xdipx family) on IG + TikTok + YT, identical everywhere; never "Emma's personal account." YouTube Shorts launches third, after 2+ clean weeks on IG/TikTok. Bio stays euphemistic ("Sexual wellness, no shame attached. Emma picks, you shop. 18+"); one link straight to a dedicated `xdipx.com/social` landing route (age gate + chat-with-Emma above the fold + swappable product module), never a Linktree.
+- **Accounts:** brand-first handle @hello_xdipx on IG + TikTok + YT, identical everywhere and matching the existing X account; never "Emma's personal account." YouTube Shorts launches third, after 2+ clean weeks on IG/TikTok. Bio stays euphemistic ("Sexual wellness, no shame attached. Emma picks, you shop. 18+"); one link straight to a dedicated `xdipx.com/social` landing route (age gate + chat-with-Emma above the fold + swappable product module), never a Linktree.
 - **Warming from zero:** week 1 = 3 posts/platform total, safest formats only (b-roll, no presenter); step to 4-5/week by week 3-4 only with zero strikes. Format mix shifts 60/30/10 b-roll/talking-head/other → 40/40/20 as trust builds. TikTok always runs the lowest cadence and strictest register.
 - **Survival rules:** never product-on-body or simulated use; judge by most revealing frame; AI-content labels always on; no trending audio with flagged lyrics ever (trending formats and instrumentals are fine); explicit nouns allowed in caption prose per platform caps but never in hashtags or bio; log every posted caption + thumbnail for appeal readiness.
 - **DM routing:** "my DMs" always means site chat, never platform DMs. Comment questions get a public in-voice answer + bio-link pointer. Owner's 15-min/day playbook: 3 min safety triage, 5 min real answers, 4 min good-faith engagement, 3 min proactive.
@@ -76,7 +76,7 @@ Recommend adding **one** now, deferring two, and solving one with code:
 
 1. Approve/adjust the three show names and the launch-slate order.
 2. Approve scene kit concepts (frames get composed and come to you for review before any use).
-3. Claim handles (@xdipx family) on IG/TikTok/YT.
+3. ~~Claim handles on IG/TikTok/YT.~~ Resolved 2026-07-24: all handles are @hello_xdipx.
 4. Greenlight the `xdipx.com/social` landing route + UTM wiring (small build, prerequisite for all decide-metrics).
 5. Budget knobs: keep $20/day video budget and raise the per-video ceiling to $8 for avatar renders, or cap avatar scripts at 35s.
 6. trend-scout agent: yes/no.
@@ -94,7 +94,7 @@ Shipped by the approved build (code PR + docs/charter PR):
 
 Remains owner-only:
 
-1. Claim the @xdipx handles on IG/TikTok/YT.
+1. ~~Claim handles on IG/TikTok/YT.~~ Resolved: all social handles are @hello_xdipx (owner, 2026-07-24). YouTube Shorts still launches third per the warming rules.
 2. Compose and approve the scene-kit frames (nothing renders a talking head until then).
 3. Flip `social_trend_scout_enabled` and create its cloud routine (runbook appendix).
 4. Review the reconstructed checklist and correct any rule that does not match the lost memo.
