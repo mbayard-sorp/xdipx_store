@@ -18,12 +18,12 @@
  */
 
 export function blobConfigured(): boolean {
-  return !!process.env['BLOB_READ_WRITE_TOKEN']?.trim()
+  return !!process.env['XDIPX_READ_WRITE_TOKEN']?.trim()
 }
 
 function requireToken(): string {
-  const token = process.env['BLOB_READ_WRITE_TOKEN']
-  if (!token) throw new Error('BLOB_READ_WRITE_TOKEN env var is required for Blob storage')
+  const token = process.env['XDIPX_READ_WRITE_TOKEN']
+  if (!token) throw new Error('XDIPX_READ_WRITE_TOKEN env var is required for Blob storage')
   return token
 }
 

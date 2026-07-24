@@ -90,7 +90,7 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 ## Enablement runbook (owner)
 
 1. Apply migration 065 (`npx tsx scripts/apply-migrations.ts --from 065`).
-2. Provision `BLOB_READ_WRITE_TOKEN` (Vercel Blob store) and confirm `FAL_KEY`.
+2. Provision `XDIPX_READ_WRITE_TOKEN` (Vercel Blob store, XDIPX env prefix) and confirm `FAL_KEY`.
 3. Review the Phase 0 spike output in `/admin/labs` (frame quality + tier ladder) and the casting
    call portraits; approve cast members in Sanity (`approvedForUse`).
 4. Flip `video_team_enabled` on the Video tab of `/admin/homepage-team`. Leave
