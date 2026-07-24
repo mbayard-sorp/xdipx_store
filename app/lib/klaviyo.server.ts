@@ -26,7 +26,17 @@ async function klaviyoFetch<T>(
   return JSON.parse(text) as T
 }
 
-export async function subscribeToList(listId: string, email: string, firstName?: string): Promise<void> {
+/**
+ * Subscribe a profile to a list. Optional `properties` are custom profile
+ * properties (e.g. signup_source, utm_source) set via the bulk-subscribe
+ * payload's profile attributes, so attribution lands in the same call.
+ */
+export async function subscribeToList(
+  listId: string,
+  email: string,
+  firstName?: string,
+  properties?: Record<string, unknown>,
+): Promise<void> {
   const profileAttrs: Record<string, unknown> = {
     email,
     subscriptions: {
@@ -34,6 +44,7 @@ export async function subscribeToList(listId: string, email: string, firstName?:
     },
   }
   if (firstName) profileAttrs.first_name = firstName
+  if (properties && Object.keys(properties).length > 0) profileAttrs.properties = properties
 
   await klaviyoFetch('/profile-subscription-bulk-create-jobs/', 'POST', {
     data: {
@@ -50,9 +61,13 @@ export async function subscribeToList(listId: string, email: string, firstName?:
   })
 }
 
-export async function subscribeToDailyDeal(email: string, firstName?: string): Promise<void> {
+export async function subscribeToDailyDeal(
+  email: string,
+  firstName?: string,
+  properties?: Record<string, unknown>,
+): Promise<void> {
   const listId = process.env['KLAVIYO_LIST_ID_DAILY_DEAL']!
-  await subscribeToList(listId, email, firstName)
+  await subscribeToList(listId, email, firstName, properties)
 }
 
 export async function subscribeToWaitlist(email: string, productHandle: string): Promise<void> {
@@ -128,12 +143,14 @@ export async function trackStartedCheckout(email: string, params: { cartId: stri
   }
 }
 
-export async function trackPlacedOrder(email: string, params: { orderId: string; orderNumber?: string | number; value: number; currency: string; items: LineItemInfo[] }): Promise<void> {
+export async function trackPlacedOrder(email: string, params: { orderId: string; orderNumber?: string | number; value: number; currency: string; items: LineItemInfo[]; attribution?: Record<string, string> }): Promise<void> {
   try {
     await trackEvent(
       email,
       'Placed Order',
-      { orderId: params.orderId, orderNumber: params.orderNumber, value: params.value, currency: params.currency, items: params.items },
+      // Optional attribution props (utm_source etc., extracted from the order's
+      // note_attributes by the webhook) ride along on the event.
+      { orderId: params.orderId, orderNumber: params.orderNumber, value: params.value, currency: params.currency, items: params.items, ...(params.attribution ?? {}) },
       { uniqueId: `placed_order_${params.orderId}` },
     )
   } catch (err) {

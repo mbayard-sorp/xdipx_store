@@ -6,10 +6,30 @@ import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import { getCustomerToken } from '~/lib/customer-session.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { deriveEmmaCartContext } from '~/lib/emma-cart.server'
-import { getFbCookies, getGaClientId } from '~/lib/attribution.server'
+import { getFbCookies, getGaClientId, getStoredRefCode, getStoredUTM } from '~/lib/attribution.server'
 import { fireCapiEvent } from '~/lib/meta-capi.server'
 import { getMarketingConsent } from '~/lib/consent.server'
 import { trackAddedToCart } from '~/lib/klaviyo.server'
+
+// Attribution cart attributes (_fbp/_fbc/_ga_cid/_utm_*/_ref_code). Written on
+// every add so they survive into order.note_attributes for the order webhook
+// (CAPI, GA4 MP, Klaviyo UTM properties). Only present cookies are written.
+function attributionCartAttrs(request: Request): { key: string; value: string }[] {
+  const { fbp, fbc } = getFbCookies(request)
+  const gaCid = getGaClientId(request)
+  const utm = getStoredUTM(request)
+  const refCode = getStoredRefCode(request)
+  const attrs: { key: string; value: string }[] = []
+  if (fbp) attrs.push({ key: '_fbp', value: fbp })
+  if (fbc) attrs.push({ key: '_fbc', value: fbc })
+  if (gaCid) attrs.push({ key: '_ga_cid', value: gaCid })
+  if (utm?.source)   attrs.push({ key: '_utm_source',   value: utm.source })
+  if (utm?.medium)   attrs.push({ key: '_utm_medium',   value: utm.medium })
+  if (utm?.campaign) attrs.push({ key: '_utm_campaign', value: utm.campaign })
+  if (utm?.content)  attrs.push({ key: '_utm_content',  value: utm.content })
+  if (refCode) attrs.push({ key: '_ref_code', value: refCode })
+  return attrs
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const cartId = getCartIdFromCookie(request)
@@ -68,14 +88,9 @@ export async function action({ request }: ActionFunctionArgs) {
         return Response.json({ ok: false, error: 'Could not add item' }, { status: 400, headers })
       }
     }
-    // Write _fbp/_fbc as cart attributes so they flow to order.note_attributes
-    // and the Purchase webhook can include them in the CAPI event.
-    const { fbp, fbc } = getFbCookies(request)
-    const gaCid = getGaClientId(request)
-    const fbAttrs: { key: string; value: string }[] = []
-    if (fbp) fbAttrs.push({ key: '_fbp', value: fbp })
-    if (fbc) fbAttrs.push({ key: '_fbc', value: fbc })
-    if (gaCid) fbAttrs.push({ key: '_ga_cid', value: gaCid })
+    // Write attribution cookies (_fbp/_fbc/_ga_cid/_utm_*/_ref_code) as cart
+    // attributes so they flow to order.note_attributes for the order webhook.
+    const fbAttrs = attributionCartAttrs(request)
     if (fbAttrs.length > 0) {
       try { await setCartAttributes(cartId, fbAttrs) } catch { /* non-fatal */ }
     }
@@ -132,15 +147,11 @@ export async function action({ request }: ActionFunctionArgs) {
     // Optional: tag the cart with a custom attribute so a pre-configured
     // Shopify Automatic Discount rule can target it (e.g. pair_bundle=live).
     const cartTag = (form.get('cartTag') as string | null)?.trim()
-    // Write _fbp/_fbc as cart attributes alongside any cartTag so they reach
-    // order.note_attributes for the Purchase CAPI event.
-    const { fbp, fbc } = getFbCookies(request)
-    const gaCid = getGaClientId(request)
+    // Write attribution cookies as cart attributes alongside any cartTag so
+    // they reach order.note_attributes for the order webhook.
     const extraAttrs: { key: string; value: string }[] = []
     if (cartTag) extraAttrs.push({ key: cartTag, value: 'live' })
-    if (fbp) extraAttrs.push({ key: '_fbp', value: fbp })
-    if (fbc) extraAttrs.push({ key: '_fbc', value: fbc })
-    if (gaCid) extraAttrs.push({ key: '_ga_cid', value: gaCid })
+    extraAttrs.push(...attributionCartAttrs(request))
     if (extraAttrs.length > 0 && cartId) {
       try {
         await setCartAttributes(cartId, extraAttrs)

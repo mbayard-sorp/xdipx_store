@@ -122,6 +122,8 @@ export async function loader() {
     { loc: `${base}/faq`,         lastmod: today, changefreq: 'monthly', priority: '0.5' },
     { loc: `${base}/about`,       lastmod: today, changefreq: 'monthly', priority: '0.5' },
     { loc: `${base}/contributors/emma`, lastmod: today, changefreq: 'monthly', priority: '0.4' },
+    // Social bio-link landing, arrival surface for IG/TikTok/YT traffic.
+    { loc: `${base}/social`,      lastmod: today, changefreq: 'monthly', priority: '0.4' },
     // /vault, /for-him, /for-her are retired (301 → /collections or a
     // product-type collection) — intentionally not listed as sitemap entries.
 

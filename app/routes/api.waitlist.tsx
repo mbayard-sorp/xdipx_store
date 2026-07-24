@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from 'react-router'
 import { subscribeToDailyDeal, subscribeToWaitlist } from '~/lib/klaviyo.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import { rejectIfBot } from '~/lib/botid.server'
+import { getStoredUTM } from '~/lib/attribution.server'
 
 // Loader required so fetcher revalidation doesn't 404
 export async function loader() {
@@ -20,8 +21,20 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'subscribe') {
     if (!email) return Response.json({ error: 'Email required' }, { status: 400 })
+    // Attribution profile properties: `source` names the capture surface
+    // (e.g. social-landing); the UTM cookie carries the acquisition channel.
+    // Only present values are sent so existing untagged signups are unchanged.
+    const source = (form.get('source') as string | null)?.trim().slice(0, 64)
+    const utm = getStoredUTM(request)
+    const properties: Record<string, unknown> = {
+      ...(source ? { signup_source: source } : {}),
+      ...(utm?.source   ? { utm_source:   utm.source }   : {}),
+      ...(utm?.medium   ? { utm_medium:   utm.medium }   : {}),
+      ...(utm?.campaign ? { utm_campaign: utm.campaign } : {}),
+      ...(utm?.content  ? { utm_content:  utm.content }  : {}),
+    }
     try {
-      await subscribeToDailyDeal(email)
+      await subscribeToDailyDeal(email, undefined, properties)
     } catch (err) {
       console.error('Daily deal subscribe error:', err)
       return Response.json({ error: 'Something went wrong. Please try again.' }, { status: 500 })
