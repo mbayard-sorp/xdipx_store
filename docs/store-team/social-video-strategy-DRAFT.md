@@ -80,3 +80,22 @@ Recommend adding **one** now, deferring two, and solving one with code:
 4. Greenlight the `xdipx.com/social` landing route + UTM wiring (small build, prerequisite for all decide-metrics).
 5. Budget knobs: keep $20/day video budget and raise the per-video ceiling to $8 for avatar renders, or cap avatar scripts at 35s.
 6. trend-scout agent: yes/no.
+
+## 10. Build status (2026-07-24)
+
+Shipped by the approved build (code PR + docs/charter PR):
+
+- `xdipx.com/social` landing route with end-to-end UTM wiring (video → bio link → site → email tag), unblocking every §2 decide-metric.
+- Avatar tier codified: OmniHuman audio-first as the premium presenter path, `presenterLine` field, duration derived from speech length, 35s speech cap with automatic sentence-boundary splitting under the per-render cap, mandatory post pass; Kling stays the b-roll tier (LTX exists in the repo but is not wired into the video_jobs model registry).
+- Charter updates landed in `.claude/agents/video-producer.md` (scene-frame reuse exception, talking-head no-product framePrompt variant, the four series as formulas 8-11, sceneKit in the config op) and `.claude/agents/emma-empathy-reviewer.md` (video scripts in scope, principles 17-18, per-rule checklist verdicts).
+- The 20-item viral checklist RECONSTRUCTED at `docs/store-team/social-video-viral-checklist.md` (the original formula memo was lost; see that file's provenance note) and wired in as a pre-enqueue gate in `docs/store-team/routine-video-weekly.md`.
+- §8's ADD delivered as `social-trend-scout` (named to stay disjoint from the content team's trend-scout): weekly, propose-only, valve seeded OFF by migration 069, runbook at `docs/store-team/routine-social-trend-scout.md`.
+- §4's per-video scorecard fields added to `metrics_json` (owner self-reported, never estimated).
+
+Remains owner-only:
+
+1. Claim the @xdipx handles on IG/TikTok/YT.
+2. Compose and approve the scene-kit frames (nothing renders a talking head until then).
+3. Flip `social_trend_scout_enabled` and create its cloud routine (runbook appendix).
+4. Review the reconstructed checklist and correct any rule that does not match the lost memo.
+5. Budget knob resolved as the 35s speech cap with the per-video ceiling unchanged; raiseable in admin anytime.
