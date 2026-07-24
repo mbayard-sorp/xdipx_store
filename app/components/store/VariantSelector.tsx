@@ -61,8 +61,21 @@ export function resolveVariant(
   optionNames?: string[],
 ): ProductVariant | undefined {
   const names = optionNames ?? Object.keys(selection)
+  // No axes at all, or any axis still unchosen → this is not yet a concrete
+  // variant. Without the length guard an empty selection would fall through to
+  // `matches(v, {})`, which is vacuously true for EVERY variant and would
+  // silently resolve to variants[0] — i.e. add the wrong SKU to the cart.
+  if (names.length === 0) return undefined
   if (names.some(n => !selection[n])) return undefined
-  return variants.find(v => matches(v, selection))
+  // Require an EXACT match, not just a subset: the variant must satisfy every
+  // chosen axis (matches) AND the selection must account for every one of the
+  // variant's own option axes. This guarantees a loose selection can never
+  // point at an arbitrary variant even if `optionNames` fails to list an axis
+  // the variants actually carry.
+  return variants.find(v =>
+    matches(v, selection) &&
+    v.selectedOptions.every(o => selection[o.name] === o.value),
+  )
 }
 
 /**

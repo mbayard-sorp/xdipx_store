@@ -9,6 +9,10 @@ export interface PairsWithItem {
   price:            number
   compareAtPrice:   number | null
   variantId:        string
+  /** True when the product has >1 variant (color/size). Such items can't be
+   *  quick-added — `variantId` is only the FIRST variant, so adding it blindly
+   *  would drop the wrong SKU in the cart. They route to the PDP to choose. */
+  hasMultipleVariants: boolean
   /** Emma's first-person "why" copy for this pairing. Optional. */
   why?:             string
 }
@@ -24,10 +28,15 @@ export function PairsWith({ items, bundleTotal }: PairsWithProps) {
   if (items.length === 0) return null
   const adding = fetcher.state !== 'idle'
 
+  // Only single-variant items can be added without a choice. Multi-variant
+  // items expose only their first variant here, so quick-adding them would put
+  // the wrong SKU in the cart — they're excluded from "Add all".
+  const addable = items.filter(it => !it.hasMultipleVariants)
+
   const addAll = () => {
     const formData = new FormData()
     formData.set('intent', 'addMany')
-    items.forEach((it, i) => {
+    addable.forEach((it, i) => {
       formData.set(`variantId_${i}`,  it.variantId)
       formData.set(`quantity_${i}`,   '1')
     })
@@ -37,7 +46,7 @@ export function PairsWith({ items, bundleTotal }: PairsWithProps) {
     }
   }
 
-  const total = bundleTotal ?? items.reduce((sum, it) => sum + it.price, 0)
+  const total = bundleTotal ?? addable.reduce((sum, it) => sum + it.price, 0)
 
   return (
     <section className="mt-12 mb-6">
@@ -56,7 +65,7 @@ export function PairsWith({ items, bundleTotal }: PairsWithProps) {
         ))}
       </ul>
 
-      {items.length > 1 && (
+      {addable.length > 1 && (
         <div className="mt-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-cream-2 rounded-[var(--radius-lg)] px-5 py-4">
           <div>
             <p
@@ -66,7 +75,7 @@ export function PairsWith({ items, bundleTotal }: PairsWithProps) {
               Grab the pairing →
             </p>
             <p className="text-[13px] text-muted mt-0.5">
-              All {items.length} in the cart · ${total.toFixed(2)}
+              All {addable.length} in the cart · ${total.toFixed(2)}
             </p>
           </div>
           <button
@@ -140,16 +149,30 @@ function PairCard({ item }: { item: PairsWithItem }) {
               <span className="text-ink/40 text-xs line-through">${item.compareAtPrice.toFixed(2)}</span>
             )}
           </div>
-          <button
-            type="button"
-            onClick={addOne}
-            disabled={adding}
-            className="inline-flex items-center gap-1 text-xs font-bold text-coral hover:text-coral-deep border border-coral hover:border-coral-deep rounded-full px-3 py-1.5 transition-colors disabled:opacity-60"
-            style={{ fontFamily: 'var(--font-display)' }}
-            aria-label={`Add ${item.title} to cart`}
-          >
-            {adding ? '…' : '+ add'}
-          </button>
+          {item.hasMultipleVariants ? (
+            // Color/size product — send them to the PDP to choose the exact
+            // SKU. `variantId` here is only the first variant, so a quick-add
+            // would drop the wrong one in the cart.
+            <Link
+              to={`/products/${item.handle}`}
+              className="inline-flex items-center gap-1 text-xs font-bold text-coral hover:text-coral-deep border border-coral hover:border-coral-deep rounded-full px-3 py-1.5 transition-colors"
+              style={{ fontFamily: 'var(--font-display)' }}
+              aria-label={`Choose options for ${item.title}`}
+            >
+              Pick options →
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={addOne}
+              disabled={adding}
+              className="inline-flex items-center gap-1 text-xs font-bold text-coral hover:text-coral-deep border border-coral hover:border-coral-deep rounded-full px-3 py-1.5 transition-colors disabled:opacity-60"
+              style={{ fontFamily: 'var(--font-display)' }}
+              aria-label={`Add ${item.title} to cart`}
+            >
+              {adding ? '…' : '+ add'}
+            </button>
+          )}
         </div>
       </div>
     </li>
