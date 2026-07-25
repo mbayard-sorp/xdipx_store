@@ -150,6 +150,21 @@ only a thin headroom margin, warm golden-hour daylight with a dramatic long shad
 "shot close and tight so the bottle fills most of the frame height with only a thin margin of
 headroom above the cap ... quiet negative space beside the product (not above it)".
 
+Sliquid Shine Organic Intimate Toy Cleaner (`sliquid-shine-organic-toy-cleaner`), care category,
+water-droplet + blurred sage-leaf-sprig accent (no cloth/towel), bottle large and bold on white
+paper, one crisp warm shadow →
+`image-7529800bbcc4ff64fd93ad5f44e10291f9e7dfba-1184x880-jpg` (post:
+`how-often-should-you-clean-your-vibrator`). Note: the reference product for this post's other
+embed, `bloom-curve-g`, has a **broken Shopify photo set** (all three product images resolve to
+unrelated stock photos — a desk flatlay and two landscape shots, not the vibrator) — flagging for
+`product-manager`/data-hygiene; do not pass that handle's images as a `--ref-image` until fixed.
+Sliquid Shine was the stronger and correctly-referenced subject anyway (most on-topic for a
+cleaning-cadence post). Of the 2-image batch, one candidate legibly reproduced all main label text
+(brand mark, "shine", "sliquid", "95% organic", "naturally unscented", "intimate toy cleaner");
+the other candidate garbled the fine-print sub-lines into illegible nonsense text and was
+rejected — keep asking for 2 candidates per hero call so a garbled-label reject doesn't require a
+full regenerate round.
+
 **Rejects:** first pass on the same post added a folded white washcloth as a "care" prop — the
 brief's §0 banned list explicitly bans towels/cloth; also read as a clinical product-lightbox
 (flat white sweep, drop shadow, no warm daylight) and FLUX Kontext garbled the fine-print label
