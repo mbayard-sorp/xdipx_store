@@ -129,8 +129,53 @@ export const VIDEO_FORMULAS = [
   'three-things',
   'grwm',
   'pov-testimonial',
+  // Named shows from the social-video strategy (docs/store-team/
+  // social-video-strategy-DRAFT.md §3) plus the between-episodes tentpole slot.
+  'ten-second-fix',
+  'the-one-thing',
+  'translate-the-feeling',
+  'brand-tentpole',
 ] as const
 export type VideoFormula = (typeof VIDEO_FORMULAS)[number]
+
+/**
+ * Weekly per-video scorecard fields the owner self-reports in Video Studio
+ * (strategy §4 measurement). Stored per platform in video_jobs.metrics_json;
+ * unreported videos display "not yet reported", never an estimate.
+ */
+export const VIDEO_METRIC_FIELDS = ['hookRetentionPct', 'saves', 'shares', 'profileTaps', 'utmClicks'] as const
+export type VideoMetricField = (typeof VIDEO_METRIC_FIELDS)[number]
+
+/**
+ * Talking-head scene kit (strategy §5): scenes are composed ONCE, owner
+ * frame-reviewed, then reused automatically. Scripts set scriptJson.sceneSlug
+ * to a slug from this kit; the pipeline looks up the scene's latest approved
+ * frame (same presenter) and reuses it, so a first use composes and parks for
+ * approval and every later use is free. reuseFrameAssetId stays as an explicit
+ * per-job override. The team API's {op:'config'} decorates each entry with the
+ * computed `approvedFrameAssetId` for presenter 'emma' (null = not composed or
+ * not yet approved); this static list carries no asset ids itself.
+ */
+export interface SceneKitScene {
+  slug: string
+  label: string
+  status: 'core' | 'stretch'
+  note: string
+}
+
+const SCENE_KIT_NOTE =
+  'All scenes are doctrine archetype C and ground-locked (coral-soft/plum-soft/paper). ' +
+  'No product ever appears in a talking-head frame; product visuals are b-roll cutaways or post-composited stills. ' +
+  'The identity source is Emma\'s canonical photo, resolved fresh from the Sanity editor singleton by the pipeline; scene frames are per-scene compositions from it, owner-approved once, then reused.'
+
+export const SCENE_KIT: SceneKitScene[] = [
+  { slug: 'couch-cozy',             label: 'Couch Cozy',             status: 'core',    note: SCENE_KIT_NOTE },
+  { slug: 'vanity-bright',          label: 'Vanity Bright',          status: 'core',    note: SCENE_KIT_NOTE },
+  { slug: 'kitchen-counter-casual', label: 'Kitchen Counter Casual', status: 'core',    note: SCENE_KIT_NOTE },
+  { slug: 'closet-edit',            label: 'Closet Edit',            status: 'stretch', note: SCENE_KIT_NOTE },
+  { slug: 'out-and-about-stoop',    label: 'Out-and-About Stoop',    status: 'stretch', note: SCENE_KIT_NOTE },
+  { slug: 'reading-nook',           label: 'Reading Nook',           status: 'stretch', note: SCENE_KIT_NOTE },
+]
 
 /**
  * Standalone valves outside the per-team key sets:
@@ -184,6 +229,11 @@ export const VALVE_KEYS = {
   // (community-discourse research that proposes trendTopicBrief docs for the
   // seo-curator's Sunday planning; research-only, never writes posts).
   trendScout:         'trend_scout_enabled',
+  // Social trend scout: kill switch for the weekly social-format trend-scout
+  // routine (TikTok/IG format + sound research that files trend briefs the
+  // video-producer can act on; propose-only, never posts). Mirrors trendScout;
+  // migration seeding lives with the agent-side rollout.
+  socialTrendScout:   'social_trend_scout_enabled',
   reviewsPdp:         'reviews_pdp_enabled',
   // Video autopublish: even with the video team enabled, platform posting stays
   // manual until this AND the per-platform publisher env keys are both set.

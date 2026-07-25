@@ -2173,3 +2173,44 @@ export async function getHomeSeo(): Promise<HomeSeo | null> {
     }
   })
 }
+
+// ─── Social landing (/social) ────────────────────────────────────────────────
+// Singleton: singleton.socialLanding, swappable product module for the
+// bio-link landing route. 5-minute TTL, one KV key (prod KV quota is tight).
+
+export interface SocialLandingSettings {
+  heading?: string
+  emmaBlurb?: string
+  featuredProductHandle?: string
+}
+
+const SOCIAL_LANDING_GROQ = `
+  *[_id == "singleton.socialLanding"][0]{
+    heading,
+    emmaBlurb,
+    featuredProductHandle
+  }
+`
+
+export async function getSocialLandingSettings(): Promise<SocialLandingSettings | null> {
+  if (!projectId) return null
+  return cached('sanity:social-landing', 300, async () => {
+    try {
+      const client = getClient()
+      if (!client) return null
+      const raw = await client.fetch<Partial<SocialLandingSettings> | null>(SOCIAL_LANDING_GROQ)
+      if (!raw) return null
+      const heading = raw.heading?.trim()
+      const emmaBlurb = raw.emmaBlurb?.trim()
+      const featuredProductHandle = raw.featuredProductHandle?.trim()
+      return {
+        ...(heading ? { heading } : {}),
+        ...(emmaBlurb ? { emmaBlurb } : {}),
+        ...(featuredProductHandle ? { featuredProductHandle } : {}),
+      }
+    } catch (err) {
+      console.error('[sanity] getSocialLandingSettings error:', err)
+      return null
+    }
+  })
+}

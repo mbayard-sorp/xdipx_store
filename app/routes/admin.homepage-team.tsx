@@ -59,6 +59,7 @@ interface LoaderData {
   briefs: BriefRow[]
   campaigns: CampaignRow[]
   autopost: boolean
+  socialTrendScout: boolean
   suggestionApply: boolean
   contentAutopublish: boolean
   seoCuration: boolean
@@ -77,8 +78,9 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview] = await Promise.all([
+  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
+    getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.suggestionApply).catch(() => false),
     getValve(VALVE_KEYS.contentAutopublish).catch(() => false),
     getValve(VALVE_KEYS.seoCuration).catch(() => false),
@@ -120,7 +122,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     }
   }
 
-  return { team, config, migrated, gateResult, runs, selectedRun, suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview }
+  return { team, config, migrated, gateResult, runs, selectedRun, suggestions, briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -200,7 +202,7 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
 export default function AgentTeamsPage() {
   const {
     team, config, migrated, gateResult, runs, selectedRun,
-    suggestions, briefs, campaigns, autopost, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview,
+    suggestions, briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
   const activeBrief = briefs.find(b => b.status === 'active')
@@ -285,12 +287,20 @@ export default function AgentTeamsPage() {
         />
 
         {team === 'social' && (
-          <ValveRow
-            label={`Autopost is ${autopost ? 'ON' : 'OFF'}`}
-            detail="Even when ON, live posting also requires X_AUTO_POST_ENABLED and only X has plumbing. Keep OFF while the team is draft-only."
-            settingKey={VALVE_KEYS.socialAutopost}
-            on={autopost}
-          />
+          <>
+            <ValveRow
+              label={`Autopost is ${autopost ? 'ON' : 'OFF'}`}
+              detail="Even when ON, live posting also requires X_AUTO_POST_ENABLED and only X has plumbing. Keep OFF while the team is draft-only."
+              settingKey={VALVE_KEYS.socialAutopost}
+              on={autopost}
+            />
+            <ValveRow
+              label={`Social trend scout is ${socialTrendScout ? 'ON' : 'OFF'}`}
+              detail="Weekly social-trend-scout research run (propose-only)."
+              settingKey={VALVE_KEYS.socialTrendScout}
+              on={socialTrendScout}
+            />
+          </>
         )}
         {team === 'content' && (
           <>

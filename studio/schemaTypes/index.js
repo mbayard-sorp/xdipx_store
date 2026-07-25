@@ -89,6 +89,10 @@ import kbCompatibilityRule from '../schemas/kbCompatibilityRule.js'
 import kbTroubleshooting   from '../schemas/kbTroubleshooting.js'
 import kbBrandFaq          from '../schemas/kbBrandFaq.js'
 
+// Social bio-link landing (/social), swappable product module singleton
+// (additive; existing schemas untouched).
+import socialLanding       from '../schemas/socialLanding.js'
+
 export const schemaTypes = [
   // Documents (singletons)
   homepageSections,
@@ -195,4 +199,6 @@ export const schemaTypes = [
   kbCompatibilityRule,
   kbTroubleshooting,
   kbBrandFaq,
+  // Social bio-link landing (/social), featured product + Emma blurb. Singleton.
+  socialLanding,
 ]

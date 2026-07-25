@@ -10,6 +10,7 @@ import {
   useRouteError,
   useRouteLoaderData,
 } from 'react-router'
+import { data } from 'react-router'
 import type { LoaderFunctionArgs, LinksFunction } from 'react-router'
 
 import { BotIdClient } from 'botid/client'
@@ -20,6 +21,7 @@ import stylesheet from './app.css?url'
 import newsreaderLatinWoff2 from '@fontsource-variable/newsreader/files/newsreader-latin-wght-normal.woff2?url'
 import dmSansLatinWoff2 from '@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2?url'
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
+import { captureUTM } from '~/lib/attribution.server'
 import { resolveGa4 } from '~/lib/ga4-config.server'
 
 const BOTID_PROTECTED_ROUTES = [
@@ -132,20 +134,18 @@ export const links: LinksFunction = () => [
 ]
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const url = new URL(request.url)
-
-  // Capture UTM params on every request
-  const utm = {
-    source:   url.searchParams.get('utm_source'),
-    medium:   url.searchParams.get('utm_medium'),
-    campaign: url.searchParams.get('utm_campaign'),
-    content:  url.searchParams.get('utm_content'),
-  }
-  const refCode = url.searchParams.get('ref')
+  // Capture UTM + ref params into the __xdipx_utm / __xdipx_ref cookies (30d)
+  // so api.cart can stamp them onto cart attributes and api.waitlist onto
+  // Klaviyo profiles. Cookies are only written when params are present, so
+  // most requests stay Set-Cookie-free (and edge-cacheable).
+  const { utm, refCode, cookies: utmCookies } = captureUTM(request)
 
   const ga4 = await resolveGa4()
 
-  return {
+  const headers = new Headers()
+  for (const cookie of utmCookies) headers.append('Set-Cookie', cookie)
+
+  return data({
     utm,
     refCode,
     ENV: {
@@ -159,7 +159,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // META_CAPI_TOKEN must NEVER be included here.
       META_PIXEL_ID:     process.env['META_PIXEL_ID']      ?? '',
     },
-  }
+  }, { headers })
 }
 
 export function Layout({ children }: { children: React.ReactNode }) {

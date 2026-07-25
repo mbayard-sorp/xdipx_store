@@ -27,7 +27,9 @@ import {
   fanOutVideoToSocialDrafts,
   recordVideoMetrics,
   type VideoJobWithAssets,
+  type VideoMetricsReport,
 } from '~/lib/video-pipeline.server'
+import { VIDEO_METRIC_FIELDS } from '~/lib/team-keys'
 import {
   getProductByHandle,
   createStagedVideoUpload,
@@ -107,12 +109,18 @@ export async function action({ request }: ActionFunctionArgs) {
       }
       case 'metrics': {
         const platform = String(form.get('platform') ?? '')
-        const metrics: Record<string, number> = {}
-        for (const k of ['views', 'likes', 'comments', 'shares', 'saves'] as const) {
-          const v = Number(form.get(k))
+        if (!platform) return Response.json({ error: 'Missing platform' }, { status: 400 })
+        // Owner self-report only: blank fields stay absent (never zero-filled,
+        // never estimated); the UI shows "not yet reported" for absent data.
+        const metrics: VideoMetricsReport = {}
+        for (const k of VIDEO_METRIC_FIELDS) {
+          const raw = form.get(k)
+          if (raw == null || String(raw).trim() === '') continue
+          const v = Number(raw)
           if (Number.isFinite(v) && v >= 0) metrics[k] = v
         }
-        if (!platform) return Response.json({ error: 'Missing platform' }, { status: 400 })
+        const notes = String(form.get('notes') ?? '').trim()
+        if (notes) metrics.notes = notes
         await recordVideoMetrics(jobRowId, platform, metrics)
         return Response.json({ ok: true })
       }
@@ -390,11 +398,11 @@ export default function VideoStudioPage() {
                     {job.error && <p className="mt-1 max-w-[26ch] text-xs text-ink-4">{job.error.slice(0, 140)}</p>}
                   </td>
                   <td className="py-2 pr-3 text-ink-3">${Number(job.costUsd).toFixed(2)}</td>
-                  <td className="py-2 pr-3">
+                  <td className="min-w-[280px] py-2 pr-3">
                     {job.status === 'done' ? (
                       <MetricsForm job={job} busy={busy} />
                     ) : (
-                      <span className="text-xs text-ink-4">—</span>
+                      <span className="text-xs text-ink-4">n/a</span>
                     )}
                   </td>
                 </tr>
@@ -451,22 +459,64 @@ function RejectForm({ jobRowId, busy }: { jobRowId: number; busy: boolean }) {
   )
 }
 
+const METRIC_LABELS: Record<(typeof VIDEO_METRIC_FIELDS)[number], string> = {
+  hookRetentionPct: 'hook %',
+  saves: 'saves',
+  shares: 'shares',
+  profileTaps: 'taps',
+  utmClicks: 'utm',
+}
+
+/** One platform's reported scorecard, or null when nothing was reported. */
+function reportedSummary(metrics: Record<string, number | string> | undefined): string | null {
+  if (!metrics) return null
+  const parts = VIDEO_METRIC_FIELDS
+    .filter(f => typeof metrics[f] === 'number')
+    .map(f => `${METRIC_LABELS[f]} ${metrics[f]}${f === 'hookRetentionPct' ? '%' : ''}`)
+  if (!parts.length) return null
+  return parts.join(' · ')
+}
+
 function MetricsForm({ job, busy }: { job: Row; busy: boolean }) {
   const platform = job.targetPlatforms[0] ?? 'instagram'
-  const existing = job.metricsJson?.[platform]
+  const metricsJson = (job.metricsJson ?? {}) as Record<string, Record<string, number | string>>
   return (
-    <Form method="post" className="flex flex-wrap items-center gap-1">
-      <input type="hidden" name="intent" value="metrics" />
-      <input type="hidden" name="jobRowId" value={job.id} />
-      <select name="platform" defaultValue={platform} className="rounded border border-line bg-paper px-1 py-0.5 text-xs">
-        {job.targetPlatforms.map(p => <option key={p} value={p}>{p}</option>)}
-      </select>
-      <input name="views" type="number" min="0" placeholder={existing?.['views'] != null ? String(existing['views']) : 'views'} className="w-16 rounded border border-line bg-paper px-1 py-0.5 text-xs" />
-      <input name="likes" type="number" min="0" placeholder="likes" className="w-14 rounded border border-line bg-paper px-1 py-0.5 text-xs" />
-      <input name="saves" type="number" min="0" placeholder="saves" className="w-14 rounded border border-line bg-paper px-1 py-0.5 text-xs" />
-      <button type="submit" disabled={busy} className="rounded border border-line px-2 py-0.5 text-xs text-ink-3 hover:text-ink disabled:opacity-40">
-        Save
-      </button>
-    </Form>
+    <div className="space-y-1">
+      {/* Reported state per platform. Absent = "not yet reported", never an estimate. */}
+      {job.targetPlatforms.map(p => {
+        const summary = reportedSummary(metricsJson[p])
+        const notes = typeof metricsJson[p]?.['notes'] === 'string' ? String(metricsJson[p]['notes']) : null
+        return (
+          <p key={p} className="text-xs text-ink-3">
+            <span className="font-medium text-ink">{p}:</span>{' '}
+            {summary ?? <span className="text-ink-4">not yet reported</span>}
+            {notes && <span className="text-ink-4"> · {notes.slice(0, 60)}</span>}
+          </p>
+        )
+      })}
+      <Form method="post" className="flex flex-wrap items-center gap-1">
+        <input type="hidden" name="intent" value="metrics" />
+        <input type="hidden" name="jobRowId" value={job.id} />
+        <select name="platform" defaultValue={platform} className="rounded border border-line bg-paper px-1 py-0.5 text-xs">
+          {job.targetPlatforms.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        {VIDEO_METRIC_FIELDS.map(f => (
+          <input
+            key={f}
+            name={f}
+            type="number"
+            min="0"
+            step={f === 'hookRetentionPct' ? '0.1' : '1'}
+            placeholder={METRIC_LABELS[f]}
+            className="w-16 rounded border border-line bg-paper px-1 py-0.5 text-xs"
+          />
+        ))}
+        <input name="notes" placeholder="notes" className="w-28 rounded border border-line bg-paper px-1 py-0.5 text-xs" />
+        <button type="submit" disabled={busy} className="rounded border border-line px-2 py-0.5 text-xs text-ink-3 hover:text-ink disabled:opacity-40">
+          Save
+        </button>
+        <span className="w-full text-[10px] text-ink-4">Blank fields keep their reported value.</span>
+      </Form>
+    </div>
   )
 }

@@ -252,11 +252,26 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
   try {
     if (order.email) {
       const { trackPlacedOrder } = await import('../app/lib/klaviyo.server.js')
+      // UTM + ref attribution stamped onto the cart by api.cart survives here
+      // as note_attributes; forward whatever is present as event properties.
+      const attribution: Record<string, string> = {}
+      const attrMap: Record<string, string> = {
+        _utm_source:   'utm_source',
+        _utm_medium:   'utm_medium',
+        _utm_campaign: 'utm_campaign',
+        _utm_content:  'utm_content',
+        _ref_code:     'ref_code',
+      }
+      for (const attr of order.note_attributes ?? []) {
+        const prop = attrMap[attr.name]
+        if (prop && attr.value) attribution[prop] = attr.value
+      }
       await trackPlacedOrder(order.email, {
         orderId:     String(order.id),
         orderNumber: order.order_number,
         value:       parseFloat(order.total_price) || 0,
         currency:    order.currency || 'USD',
+        ...(Object.keys(attribution).length > 0 ? { attribution } : {}),
         items: order.line_items.map(li => ({
           productTitle: li.title,
           ...(li.variant_id ? { variantId: String(li.variant_id) } : {}),

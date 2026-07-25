@@ -36,7 +36,15 @@ curl -s "$BASE_URL/api/team/gate?team=video&excludeRun=$RUN_ID" -H "x-team-secre
    an enabled week -> build the slate yourself by the charter rubric and note that in the retro.
 4. Calendar: `GET /api/team/calendar` for the active theme/promo window (MAP-safe framing).
 5. Config: `POST /api/team/video-job {"op":"config"}` -> valves, model tiers with rates and
-   allowed durations, formula whitelist, approved cast members.
+   allowed durations (b-roll tier Kling; the avatar tier, OmniHuman, is the premium
+   presenter path with duration derived from speech, not listed), the formula whitelist
+   (including the four named series: ten-second-fix, the-one-thing, translate-the-feeling,
+   brand-tentpole, each with its fixed verbal cold-open per the charter), approved cast members,
+   and `sceneKit` (the scene inventory, each entry carrying `approvedFrameAssetId`: non-null
+   means that scene already has an owner-approved Emma frame the pipeline will reuse).
+   Talking-head scenes come from sceneKit only.
+5b. The viral checklist: `docs/store-team/social-video-viral-checklist.md` (binding, all 20
+   rules; loaded again by the voice gate).
 6. Training data: `POST /api/team/video-job {"op":"list"}` -> prior jobs with frame-retry
    feedback, regenerate notes, rejections, and owner caption edits on fanned-out drafts. Read the
    feedback verbatim and let it change this week's scripts before drafting anything new.
@@ -44,15 +52,27 @@ curl -s "$BASE_URL/api/team/gate?team=video&excludeRun=$RUN_ID" -H "x-team-secre
 ## Step 3 — Script + voice gate (mandatory, before any spend)
 
 For each slate item build `scriptJson`: `framePrompt` (archetype declared first, ground lock,
-product-dominant blocking, no-text clause), `motionPrompt` (camera holds the product; spoken line
-in quotes for native-audio tiers), `voiceover` (silent tiers only: narration TTS'd in the active
-IVR voice and muxed at the lipsync stage; b-roll framing only since there is no lip sync; ~2 words
-per second, fit inside `durationSeconds`), `durationSeconds`, per-platform `captions`, `hook`, `cta`.
+no-text clause; product-dominant blocking on b-roll/product frames, and for talking heads NO
+product in frame), `sceneSlug` (talking heads: the sceneKit slug; the pipeline automatically
+reuses that scene's owner-approved frame for the same presenter, so a first use composes and
+parks for approval and every later use skips composition; `reuseFrameAssetId` stays as an
+explicit override), `motionPrompt` (camera holds the product on b-roll; spoken line in quotes
+for native-audio tiers), `voiceover` (silent tiers only: narration TTS'd in the active IVR
+voice and muxed at the lipsync stage; b-roll framing only since there is no lip sync; ~2 words
+per second, fit inside `durationSeconds`), `presenterLine` (avatar tier only: the spoken
+on-camera line; speech capped at 35 seconds, longer-than-one-render scripts split automatically
+at sentence/clause boundaries rendering from the same scene frame and joining at punch-in
+cuts), `durationSeconds` (from the tier's allowed list for b-roll; DERIVED from presenterLine
+speech length on the avatar tier, so omit choosing one), per-platform `captions`, `hook`,
+`cta`.
 
-Route EVERY script (spoken lines + all captions together) through `emma-empathy-reviewer`:
-PASS -> proceed. REVISE -> apply and re-gate once. BLOCK -> drop the item and record why. Also
-self-check the video-specific hard rules: no lived-experience claims, no named acts in
-audio/on-screen text, no device-on-body depiction, judge wardrobe by the most revealing frame.
+Pre-enqueue gate, in order: (1) self-check every script against all 20 rules of
+`docs/store-team/social-video-viral-checklist.md`; a script that cannot PASS all 20 does not go
+forward. (2) Route EVERY script (spoken lines, presenterLine, and all captions together) through
+`emma-empathy-reviewer`, which also verdicts the checklist rule by rule: PASS -> proceed.
+REVISE -> apply and re-gate once. BLOCK -> drop the item and record why. Also self-check the
+video-specific hard rules: no lived-experience claims, no named acts in audio/on-screen text, no
+device-on-body depiction, judge wardrobe by the most revealing frame.
 
 ## Step 4 — Enqueue
 
@@ -67,8 +87,11 @@ curl -s -X POST "$BASE_URL/api/team/video-job" \
 ```
 
 Volume comes from the Video Plan (launch default: 3/week, 1 premium presenter + 2 standard
-b-roll). A `gated` response or a per-video-ceiling refusal is a valid outcome; report it, never
-shrink quality to squeeze under, never split a concept across jobs to dodge the ceiling.
+b-roll). Avatar-tier (OmniHuman) jobs omit `durationSeconds`; the pipeline derives it from the
+`presenterLine` speech length (35s speech cap; the per-video cost ceiling is unchanged). A
+`gated` response or a per-video-ceiling refusal is a valid outcome; report it, never shrink
+quality to squeeze under, never split a concept across jobs to dodge the ceiling (the automatic
+sentence-boundary split inside one avatar job is pipeline mechanics, not a ceiling dodge).
 
 The pipeline takes it from here: `/cron/video-job-poller` advances stages every 2 minutes; frames
 park for the owner while `video_frame_review` is on; finished videos wait in `/admin/video-studio`

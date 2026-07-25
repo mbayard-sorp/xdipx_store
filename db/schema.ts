@@ -1331,6 +1331,14 @@ export interface VideoScriptJson {
   cta?: string
   /** Narration text for silent tiers (Kling): TTS'd in the active IVR voice and muxed at the lipsync stage. Ignored on native-audio tiers. */
   voiceover?: string
+  /** Spoken on-camera line for the avatar tier (OmniHuman): TTS'd first, then performed. Distinct from voiceover, which stays the silent-tier narration field. */
+  presenterLine?: string
+  /** Talking-head job: the scene frame is composed WITHOUT the product image (no product ever appears in a talking-head frame). */
+  talkingHead?: boolean
+  /** Scene-kit slug (team-keys SCENE_KIT). Avatar/talking-head jobs with a sceneSlug automatically reuse the latest approved frame from a prior same-presenter job for that scene; first use composes fresh. */
+  sceneSlug?: string
+  /** media_assets id of an already-approved scene frame to REUSE instead of composing, as an explicit override of the sceneSlug lookup (avatar/talking-head jobs only, same presenter; skips composition and re-approval since recomposition causes identity drift). */
+  reuseFrameAssetId?: number
   captions?: Record<string, string>       // platform -> caption text
   frameFeedback?: string[]                // owner feedback from retry-frames rounds
   regenFeedback?: string[]                // owner feedback from regenerate rounds
