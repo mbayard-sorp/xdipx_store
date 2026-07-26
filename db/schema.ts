@@ -19,7 +19,7 @@ import {
 } from 'drizzle-orm/pg-core'
 // Type-only import — fully erased at build, so no runtime coupling / cycle
 // despite homepage-payload.server.ts importing the `homepagePayload` table back.
-import type { HomepagePayloadA } from '~/lib/homepage-payload.server'
+import type { HomepagePayloadA, HomepagePayloadB } from '~/lib/homepage-payload.server'
 
 export const dealHistory = pgTable('deal_history', {
   id:               serial('id').primaryKey(),
@@ -1138,9 +1138,10 @@ export const ga4PurchaseFailures = pgTable('ga4_purchase_failures', {
  */
 export const homepagePayload = pgTable('homepage_payload', {
   id:        serial('id').primaryKey(),
-  variant:   varchar('variant', { length: 8 }).notNull(),   // 'a' (room for 'b'/'legacy')
-  version:   varchar('version', { length: 16 }).notNull(),  // HOMEPAGE_PAYLOAD_VERSION
-  payload:   json('payload').$type<HomepagePayloadA>().notNull(),
+  variant:   varchar('variant', { length: 8 }).notNull(),   // 'a' | 'b' (room for 'legacy')
+  version:   varchar('version', { length: 16 }).notNull(),  // HOMEPAGE_PAYLOAD_VERSION / _B_VERSION
+  // Discriminated by `variant` — readers narrow on the row's variant column.
+  payload:   json('payload').$type<HomepagePayloadA | HomepagePayloadB>().notNull(),
   degraded:  boolean('degraded').notNull().default(false),
   builtAt:   timestamp('built_at').notNull().defaultNow(),
 }, t => ({

@@ -20,6 +20,11 @@ var __export = (target, all) => {
 };
 
 // app/lib/sentry.server.ts
+var sentry_server_exports = {};
+__export(sentry_server_exports, {
+  Sentry: () => Sentry,
+  initSentryServer: () => initSentryServer
+});
 import * as Sentry from "@sentry/node";
 function initSentryServer() {
   if (initialized) return;
@@ -985,9 +990,10 @@ var init_schema = __esm({
     homepagePayload = pgTable("homepage_payload", {
       id: serial("id").primaryKey(),
       variant: varchar("variant", { length: 8 }).notNull(),
-      // 'a' (room for 'b'/'legacy')
+      // 'a' | 'b' (room for 'legacy')
       version: varchar("version", { length: 16 }).notNull(),
-      // HOMEPAGE_PAYLOAD_VERSION
+      // HOMEPAGE_PAYLOAD_VERSION / _B_VERSION
+      // Discriminated by `variant` — readers narrow on the row's variant column.
       payload: json("payload").$type().notNull(),
       degraded: boolean("degraded").notNull().default(false),
       builtAt: timestamp("built_at").notNull().defaultNow()
@@ -1442,13 +1448,16 @@ __export(kv_server_exports, {
   getVaultFilterTabs: () => getVaultFilterTabs,
   invalidateCache: () => invalidateCache,
   isKvConfigured: () => isKvConfigured,
+  kvDegradationSnapshot: () => kvDegradationSnapshot,
   kvDel: () => kvDel,
   kvGet: () => kvGet,
+  kvGetMemo: () => kvGetMemo,
   kvIncr: () => kvIncr,
   kvIncrBy: () => kvIncrBy,
   kvSet: () => kvSet,
   kvSetNX: () => kvSetNX,
   mdProductCacheKey: () => mdProductCacheKey,
+  primeKvMemo: () => primeKvMemo,
   purgeMarkdownCache: () => purgeMarkdownCache,
   setPinnedAccessoryIds: () => setPinnedAccessoryIds
 });
@@ -1478,11 +1487,49 @@ async function getKV() {
 function isKvConfigured() {
   return resolveKvCreds() !== null;
 }
+function isQuotaExhausted(err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /max (?:requests|daily requests|request size) limit exceeded|quota/i.test(msg);
+}
 function warnKvFallback(op, err) {
   const now = Date.now();
-  if (now - _lastKvWarn < 6e4) return;
-  _lastKvWarn = now;
-  console.warn(`[kv] ${op} failed, falling back to in-memory:`, err instanceof Error ? err.message : err);
+  const quota = isQuotaExhausted(err);
+  degradeCounts.set(op, (degradeCounts.get(op) ?? 0) + 1);
+  _sinceLastReport += 1;
+  _lastQuotaExhausted = quota;
+  if (now - _lastKvWarn >= CONSOLE_THROTTLE_MS) {
+    _lastKvWarn = now;
+    console.warn(`[kv] ${op} failed, falling back to in-memory:`, err instanceof Error ? err.message : err);
+  }
+  if (now - _lastKvSentry >= SENTRY_THROTTLE_MS) {
+    const batched = _sinceLastReport;
+    _lastKvSentry = now;
+    _sinceLastReport = 0;
+    void (async () => {
+      try {
+        const { Sentry: Sentry2 } = await Promise.resolve().then(() => (init_sentry_server(), sentry_server_exports));
+        Sentry2.captureException(err instanceof Error ? err : new Error(String(err)), {
+          level: quota ? "error" : "warning",
+          tags: {
+            subsystem: "kv",
+            kv_op: op,
+            kv_quota_exhausted: String(quota)
+          },
+          extra: {
+            degradationsSinceLastReport: batched,
+            degradationsByOpSinceBoot: Object.fromEntries(degradeCounts),
+            note: quota ? "Upstash is rejecting every command against the plan limit. The cache will NOT recover on its own \u2014 upgrade the plan. Every consumer is silently running on a cold per-instance Map until then." : "KV op failed and degraded to the per-instance in-memory store. Callers see a cold cache, not an error."
+          }
+        });
+      } catch {
+      }
+    })();
+  }
+}
+function kvDegradationSnapshot() {
+  let total = 0;
+  for (const n of degradeCounts.values()) total += n;
+  return { total, byOp: Object.fromEntries(degradeCounts), quotaExhausted: _lastQuotaExhausted };
 }
 function memGet(key) {
   return memStore.get(key) ?? null;
@@ -1604,6 +1651,17 @@ async function cached(key, ttlSeconds, fn) {
   await kvSet(key, entry, ttlSeconds + 60);
   return data;
 }
+async function kvGetMemo(key, l1TtlSeconds) {
+  const now = Date.now();
+  const hit = readCache.get(key);
+  if (hit && now - hit.ts < l1TtlSeconds * 1e3) return hit.data;
+  const data = await kvGet(key);
+  readCache.set(key, { data, ts: now });
+  return data;
+}
+function primeKvMemo(key, value) {
+  readCache.set(key, { data: value, ts: Date.now() });
+}
 function invalidateCache(prefix) {
   for (const k of readCache.keys()) {
     if (k.startsWith(prefix)) readCache.delete(k);
@@ -1614,11 +1672,12 @@ async function getVaultFilterTabs() {
   return stored ?? DEFAULT_VAULT_TABS;
 }
 async function getPinnedAccessoryIds() {
-  const ids = await kvGet(KV_KEYS.pinnedAccessoryIds);
+  const ids = await kvGetMemo(KV_KEYS.pinnedAccessoryIds, 60);
   return Array.isArray(ids) ? ids : [];
 }
 async function setPinnedAccessoryIds(ids) {
   await kvSet(KV_KEYS.pinnedAccessoryIds, ids);
+  primeKvMemo(KV_KEYS.pinnedAccessoryIds, ids);
 }
 function mdProductCacheKey(handle) {
   return `md:product:${handle}`;
@@ -1632,7 +1691,7 @@ async function purgeMarkdownCache(handle) {
   for (const key of keys) readCache.delete(key);
   await Promise.all(keys.map((key) => kvDel(key)));
 }
-var _kv, _g, memStore, _g3, memTimers, _lastKvWarn, _g2, readCache, KV_KEYS, DEFAULT_VAULT_TABS;
+var _kv, _g, memStore, _g3, memTimers, CONSOLE_THROTTLE_MS, SENTRY_THROTTLE_MS, _gCounts, degradeCounts, _lastKvWarn, _lastKvSentry, _sinceLastReport, _lastQuotaExhausted, _g2, readCache, KV_KEYS, DEFAULT_VAULT_TABS;
 var init_kv_server = __esm({
   "app/lib/kv.server.ts"() {
     "use strict";
@@ -1643,7 +1702,15 @@ var init_kv_server = __esm({
     _g3 = globalThis;
     if (!_g3.__kvMemTimers) _g3.__kvMemTimers = /* @__PURE__ */ new Map();
     memTimers = _g3.__kvMemTimers;
+    CONSOLE_THROTTLE_MS = 6e4;
+    SENTRY_THROTTLE_MS = 3e5;
+    _gCounts = globalThis;
+    if (!_gCounts.__kvDegradeCounts) _gCounts.__kvDegradeCounts = /* @__PURE__ */ new Map();
+    degradeCounts = _gCounts.__kvDegradeCounts;
     _lastKvWarn = 0;
+    _lastKvSentry = 0;
+    _sinceLastReport = 0;
+    _lastQuotaExhausted = false;
     _g2 = globalThis;
     if (!_g2.__readCache) _g2.__readCache = /* @__PURE__ */ new Map();
     readCache = _g2.__readCache;
@@ -2521,6 +2588,22 @@ var init_product_type_derive = __esm({
   }
 });
 
+// app/lib/product-handles.ts
+function normalizeProductHandles(entries) {
+  if (!Array.isArray(entries)) return [];
+  const handles = [];
+  for (const entry of entries) {
+    const raw = typeof entry === "string" ? entry : entry?.handle;
+    if (typeof raw === "string" && raw.trim().length > 0) handles.push(raw.trim());
+  }
+  return handles;
+}
+var init_product_handles = __esm({
+  "app/lib/product-handles.ts"() {
+    "use strict";
+  }
+});
+
 // app/lib/sanity-image.ts
 function isSanityCdn(url) {
   return !!url && url.includes("cdn.sanity.io");
@@ -2606,6 +2689,7 @@ __export(sanity_server_exports, {
   getRailDraftsForDeal: () => getRailDraftsForDeal,
   getRailsByDealId: () => getRailsByDealId,
   getSiteSettings: () => getSiteSettings,
+  getSocialLandingSettings: () => getSocialLandingSettings,
   invalidateBlogCache: () => invalidateBlogCache,
   invalidateCmsCache: () => invalidateCmsCache,
   isPreviewRequest: () => isPreviewRequest,
@@ -3103,7 +3187,7 @@ async function getProductPageBlocks(handle) {
           ...select(
             _type == "reference" => @->{
               _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
-              "productHandles": productHandles[]{ handle },
+              "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
               layout, bgStyle, ctaLink, ctaLabel
             },
             { ${CONTENT_BLOCKS_PROJECTION} }
@@ -3856,14 +3940,15 @@ async function getRailDraftsForDeal(dealId) {
   if (!projectId) return [];
   const writeClient = getClient(true, false, "raw");
   if (!writeClient) return [];
-  return writeClient.fetch(
+  const rows = await writeClient.fetch(
     `*[_type == "emmaCuratedRail" && sourceDealId == $dealId] | order(generatedAt desc){
       _id, status, active, order, heading, eyebrow, emmaAside, target,
-      "productHandles": productHandles[].handle,
+      "productHandles": productHandles,
       layout, bgStyle, ctaLink, ctaLabel, sourceDealId, generatedAt, rationale
     }`,
     { dealId }
   );
+  return rows.map((row) => ({ ...row, productHandles: normalizeProductHandles(row.productHandles) }));
 }
 async function getProductHandlesForSitemap() {
   if (!projectId) return [];
@@ -3922,12 +4007,35 @@ async function getHomeSeo() {
     }
   });
 }
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ, HOME_SEO_GROQ;
+async function getSocialLandingSettings() {
+  if (!projectId) return null;
+  return cached("sanity:social-landing", 300, async () => {
+    try {
+      const client5 = getClient();
+      if (!client5) return null;
+      const raw = await client5.fetch(SOCIAL_LANDING_GROQ);
+      if (!raw) return null;
+      const heading = raw.heading?.trim();
+      const emmaBlurb = raw.emmaBlurb?.trim();
+      const featuredProductHandle = raw.featuredProductHandle?.trim();
+      return {
+        ...heading ? { heading } : {},
+        ...emmaBlurb ? { emmaBlurb } : {},
+        ...featuredProductHandle ? { featuredProductHandle } : {}
+      };
+    } catch (err) {
+      console.error("[sanity] getSocialLandingSettings error:", err);
+      return null;
+    }
+  });
+}
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ, HOME_SEO_GROQ, SOCIAL_LANDING_GROQ;
 var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
     init_kv_server();
     init_tag_normalize();
+    init_product_handles();
     init_sanity_image();
     CONTENT_BLOCKS_PROJECTION = `
   _type, _key, active, order,
@@ -3973,7 +4081,7 @@ var init_sanity_server = __esm({
   columns,
   // productCarousel
   source, shopifyTag, collectionHandle,
-  "productHandles": productHandles[]{ handle },
+  "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
   productLimit, layout,
   // playTogetherBanner
   body, imagePosition,
@@ -4019,7 +4127,7 @@ var init_sanity_server = __esm({
       // custom name, not "reference" \u2014 so match by the presence of _ref instead.
       defined(_ref) => @->{
         _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
-        "productHandles": productHandles[]{ handle },
+        "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
         layout, bgStyle, ctaLink, ctaLabel
       },
       { ${CONTENT_BLOCKS_PROJECTION} }
@@ -4093,6 +4201,13 @@ var init_sanity_server = __esm({
     seoTitle,
     seoDescription,
     ogImageUrl
+  }
+`;
+    SOCIAL_LANDING_GROQ = `
+  *[_id == "singleton.socialLanding"][0]{
+    heading,
+    emmaBlurb,
+    featuredProductHandle
   }
 `;
   }
@@ -9797,7 +9912,7 @@ async function klaviyoFetch(path, method = "GET", body) {
   if (!text2) return {};
   return JSON.parse(text2);
 }
-async function subscribeToList(listId, email, firstName) {
+async function subscribeToList(listId, email, firstName, properties) {
   const profileAttrs = {
     email,
     subscriptions: {
@@ -9805,6 +9920,7 @@ async function subscribeToList(listId, email, firstName) {
     }
   };
   if (firstName) profileAttrs.first_name = firstName;
+  if (properties && Object.keys(properties).length > 0) profileAttrs.properties = properties;
   await klaviyoFetch("/profile-subscription-bulk-create-jobs/", "POST", {
     data: {
       type: "profile-subscription-bulk-create-job",
@@ -9819,9 +9935,9 @@ async function subscribeToList(listId, email, firstName) {
     }
   });
 }
-async function subscribeToDailyDeal(email, firstName) {
+async function subscribeToDailyDeal(email, firstName, properties) {
   const listId = process.env["KLAVIYO_LIST_ID_DAILY_DEAL"];
-  await subscribeToList(listId, email, firstName);
+  await subscribeToList(listId, email, firstName, properties);
 }
 async function subscribeToWaitlist(email, productHandle) {
   const listId = process.env["KLAVIYO_LIST_ID_WAITLIST"];
@@ -9877,7 +9993,9 @@ async function trackPlacedOrder(email, params) {
     await trackEvent(
       email,
       "Placed Order",
-      { orderId: params.orderId, orderNumber: params.orderNumber, value: params.value, currency: params.currency, items: params.items },
+      // Optional attribution props (utm_source etc., extracted from the order's
+      // note_attributes by the webhook) ride along on the event.
+      { orderId: params.orderId, orderNumber: params.orderNumber, value: params.value, currency: params.currency, items: params.items, ...params.attribution ?? {} },
       { uniqueId: `placed_order_${params.orderId}` }
     );
   } catch (err) {
@@ -10586,6 +10704,7 @@ __export(team_keys_exports, {
   CONTENT_EXTRA_KEYS: () => CONTENT_EXTRA_KEYS,
   CONTENT_MAX_IMAGES_DEFAULT: () => CONTENT_MAX_IMAGES_DEFAULT,
   HOMEPAGE_EXTRA_KEYS: () => HOMEPAGE_EXTRA_KEYS,
+  SCENE_KIT: () => SCENE_KIT,
   SOCIAL_FREQ_DEFAULTS: () => SOCIAL_FREQ_DEFAULTS,
   SOCIAL_PLATFORMS: () => SOCIAL_PLATFORMS,
   SOCIAL_REVIEW_STATUSES: () => SOCIAL_REVIEW_STATUSES,
@@ -10595,6 +10714,7 @@ __export(team_keys_exports, {
   VIDEO_EXTRA_KEYS: () => VIDEO_EXTRA_KEYS,
   VIDEO_FORMULAS: () => VIDEO_FORMULAS,
   VIDEO_MAX_COST_CENTS_DEFAULT: () => VIDEO_MAX_COST_CENTS_DEFAULT,
+  VIDEO_METRIC_FIELDS: () => VIDEO_METRIC_FIELDS,
   isTeamId: () => isTeamId,
   socialFreqKey: () => socialFreqKey,
   teamFromFeature: () => teamFromFeature,
@@ -10628,7 +10748,7 @@ function teamKeys(team) {
 function socialFreqKey(platform) {
   return `social_freq_${platform}`;
 }
-var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, CONTENT_MAX_IMAGES_DEFAULT, VIDEO_EXTRA_KEYS, VIDEO_MAX_COST_CENTS_DEFAULT, VIDEO_FORMULAS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, SOCIAL_REVIEW_STATUSES, VALVE_KEYS;
+var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, CONTENT_MAX_IMAGES_DEFAULT, VIDEO_EXTRA_KEYS, VIDEO_MAX_COST_CENTS_DEFAULT, VIDEO_FORMULAS, VIDEO_METRIC_FIELDS, SCENE_KIT_NOTE, SCENE_KIT, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, SOCIAL_REVIEW_STATUSES, VALVE_KEYS;
 var init_team_keys = __esm({
   "app/lib/team-keys.ts"() {
     "use strict";
@@ -10666,7 +10786,23 @@ var init_team_keys = __esm({
       "hook-problem-payoff",
       "three-things",
       "grwm",
-      "pov-testimonial"
+      "pov-testimonial",
+      // Named shows from the social-video strategy (docs/store-team/
+      // social-video-strategy-DRAFT.md §3) plus the between-episodes tentpole slot.
+      "ten-second-fix",
+      "the-one-thing",
+      "translate-the-feeling",
+      "brand-tentpole"
+    ];
+    VIDEO_METRIC_FIELDS = ["hookRetentionPct", "saves", "shares", "profileTaps", "utmClicks"];
+    SCENE_KIT_NOTE = "All scenes are doctrine archetype C and ground-locked (coral-soft/plum-soft/paper). No product ever appears in a talking-head frame; product visuals are b-roll cutaways or post-composited stills. The identity source is Emma's canonical photo, resolved fresh from the Sanity editor singleton by the pipeline; scene frames are per-scene compositions from it, owner-approved once, then reused.";
+    SCENE_KIT = [
+      { slug: "couch-cozy", label: "Couch Cozy", status: "core", note: SCENE_KIT_NOTE },
+      { slug: "vanity-bright", label: "Vanity Bright", status: "core", note: SCENE_KIT_NOTE },
+      { slug: "kitchen-counter-casual", label: "Kitchen Counter Casual", status: "core", note: SCENE_KIT_NOTE },
+      { slug: "closet-edit", label: "Closet Edit", status: "stretch", note: SCENE_KIT_NOTE },
+      { slug: "out-and-about-stoop", label: "Out-and-About Stoop", status: "stretch", note: SCENE_KIT_NOTE },
+      { slug: "reading-nook", label: "Reading Nook", status: "stretch", note: SCENE_KIT_NOTE }
     ];
     SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook", "youtube"];
     SOCIAL_FREQ_DEFAULTS = {
@@ -10688,6 +10824,11 @@ var init_team_keys = __esm({
       // (community-discourse research that proposes trendTopicBrief docs for the
       // seo-curator's Sunday planning; research-only, never writes posts).
       trendScout: "trend_scout_enabled",
+      // Social trend scout: kill switch for the weekly social-format trend-scout
+      // routine (TikTok/IG format + sound research that files trend briefs the
+      // video-producer can act on; propose-only, never posts). Mirrors trendScout;
+      // migration seeding lives with the agent-side rollout.
+      socialTrendScout: "social_trend_scout_enabled",
       reviewsPdp: "reviews_pdp_enabled",
       // Video autopublish: even with the video team enabled, platform posting stays
       // manual until this AND the per-platform publisher env keys are both set.
@@ -10756,8 +10897,12 @@ var init_model_pricing_server = __esm({
       // no native audio
       "fal/seedance-2.0": 0.31,
       // audio included, 720p
-      "fal/sync-lipsync": 0.05
+      "fal/omnihuman-1.5": 0.16,
+      // audio-driven avatar performance (image + audio -> talking video)
+      "fal/sync-lipsync": 0.05,
       // lipsync billed ~$3/min of output video
+      "elevenlabs/tts": 3e-3
+      // voiceover, ~$0.20/min of speech at Creator-plan credit rates
     };
     DEFAULT_VIDEO_RATE = 0.4;
   }
@@ -10886,10 +11031,10 @@ async function logVideoCost(entry) {
 }
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql14 } = await import("drizzle-orm");
+  const { sql: sql15 } = await import("drizzle-orm");
   const days = opts.days ?? 30;
   const result = await db2.execute(
-    sql14`SELECT * FROM api_token_daily
+    sql15`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
   );
@@ -10897,11 +11042,11 @@ async function getDailyTokenRollup(opts = {}) {
 }
 async function getTokenCallDetail(opts) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql14 } = await import("drizzle-orm");
+  const { sql: sql15 } = await import("drizzle-orm");
   const model = opts.model ?? null;
   const source = opts.source ?? null;
   const result = await db2.execute(
-    sql14`
+    sql15`
       WITH grouped AS (
         SELECT
           caller, sku, product_id, batch_id,
@@ -14210,9 +14355,9 @@ function seededShuffle(items, seed) {
   const arr = items.slice();
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
-    const tmp2 = arr[i];
+    const tmp3 = arr[i];
     arr[i] = arr[j];
-    arr[j] = tmp2;
+    arr[j] = tmp3;
   }
   return arr;
 }
@@ -14634,9 +14779,9 @@ function seededShuffle2(arr, seed) {
   const rand = mulberry322(seed);
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
-    const tmp2 = arr[i];
+    const tmp3 = arr[i];
     arr[i] = arr[j];
-    arr[j] = tmp2;
+    arr[j] = tmp3;
   }
 }
 function rankRails(products, state, opts = {}) {
@@ -15509,7 +15654,7 @@ var init_discovery_server = __esm({
 `;
     HONORARY_CACHE_TTL = 30 * 60;
     honoraryCacheKey = (cat, handle) => `discovery:honorary:${INDEX_VERSION}:${cat}:${handle}`;
-    L1_TTL_MS = 12e4;
+    L1_TTL_MS = 6e5;
     _g4 = globalThis;
     if (_g4.__discoveryIndexMemo === void 0) _g4.__discoveryIndexMemo = null;
   }
@@ -15518,20 +15663,27 @@ var init_discovery_server = __esm({
 // app/lib/homepage-payload.server.ts
 var homepage_payload_server_exports = {};
 __export(homepage_payload_server_exports, {
+  HOMEPAGE_PAYLOAD_B_KV_KEY: () => HOMEPAGE_PAYLOAD_B_KV_KEY,
+  HOMEPAGE_PAYLOAD_B_VERSION: () => HOMEPAGE_PAYLOAD_B_VERSION,
   HOMEPAGE_PAYLOAD_KV_KEY: () => HOMEPAGE_PAYLOAD_KV_KEY,
   HOMEPAGE_PAYLOAD_KV_PREFIX: () => HOMEPAGE_PAYLOAD_KV_PREFIX,
   HOMEPAGE_PAYLOAD_VERSION: () => HOMEPAGE_PAYLOAD_VERSION,
   VARIANT_B_SECTION_TYPES: () => VARIANT_B_SECTION_TYPES,
   assertJsonSafe: () => assertJsonSafe,
+  assertJsonSafeB: () => assertJsonSafeB,
   buildHomeContentBlocks: () => buildHomeContentBlocks,
   buildHomeContentBlocksLean: () => buildHomeContentBlocksLean,
   buildHomepagePayloadA: () => buildHomepagePayloadA,
   invalidateHomepagePayloadA: () => invalidateHomepagePayloadA,
+  invalidateHomepagePayloadB: () => invalidateHomepagePayloadB,
   readHomepagePayloadA: () => readHomepagePayloadA,
+  readHomepagePayloadB: () => readHomepagePayloadB,
   reshuffleRailsWithSeed: () => reshuffleRailsWithSeed,
   triggerHomepageWarm: () => triggerHomepageWarm,
+  triggerHomepageWarmB: () => triggerHomepageWarmB,
   warmHomepagePayloadA: () => warmHomepagePayloadA,
-  writeHomepagePayloadA: () => writeHomepagePayloadA
+  writeHomepagePayloadA: () => writeHomepagePayloadA,
+  writeHomepagePayloadB: () => writeHomepagePayloadB
 });
 import { eq as eq9 } from "drizzle-orm";
 async function buildHomeContentBlocks() {
@@ -15556,12 +15708,12 @@ async function buildHomeContentBlocks() {
         return getCollectionProducts(b.collectionHandle, limit);
       }
       if (source === "manual" && b.productHandles?.length) {
-        return getProductsByHandles(b.productHandles.map((p) => p.handle));
+        return getProductsByHandles(normalizeProductHandles(b.productHandles));
       }
       return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([]);
     })), BUILD_TIMEOUT_MS, [], "carouselResults(payloadA)") : Promise.resolve([]),
     emmaRailBlocks.length > 0 ? withTimeout(Promise.all(emmaRailBlocks.map(
-      (b) => b.productHandles?.length ? getProductsByHandles(b.productHandles.map((p) => p.handle)) : Promise.resolve([])
+      (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)) : Promise.resolve([])
     )), BUILD_TIMEOUT_MS, [], "emmaRailResults(payloadA)") : Promise.resolve([])
   ]);
   const carouselProductMap = {};
@@ -15726,14 +15878,81 @@ function reshuffleRailsWithSeed(rails, seed) {
     const rand = mulberry323(seed + railIdx * 2654435761);
     for (let i = items.length - 1; i > 0; i--) {
       const j = Math.floor(rand() * (i + 1));
-      const tmp2 = items[i];
+      const tmp3 = items[i];
       items[i] = items[j];
-      items[j] = tmp2;
+      items[j] = tmp3;
     }
     return { ...rail, items };
   });
 }
-var HOMEPAGE_PAYLOAD_VERSION, HOMEPAGE_PAYLOAD_KV_KEY, HOMEPAGE_PAYLOAD_KV_PREFIX, KV_TTL_SECONDS, BUILD_TIMEOUT_MS, VARIANT_B_SECTION_TYPES;
+function assertJsonSafeB(payload) {
+  const round = JSON.parse(JSON.stringify(payload));
+  if (!Array.isArray(round.rails)) throw new Error("payloadB.rails not array after JSON round-trip");
+  if (typeof round.builtAt !== "number") throw new Error("payloadB.builtAt not number after JSON round-trip");
+  if (round.version !== HOMEPAGE_PAYLOAD_B_VERSION) throw new Error("payloadB.version mismatch after JSON round-trip");
+}
+async function readHomepagePayloadB() {
+  try {
+    const kv = await kvGet(HOMEPAGE_PAYLOAD_B_KV_KEY);
+    if (kv && kv.version === HOMEPAGE_PAYLOAD_B_VERSION) return kv;
+  } catch (err) {
+    console.warn("[homepage-payload:b] KV read failed, trying Neon:", err);
+  }
+  try {
+    const [row] = await db.select().from(homepagePayload).where(eq9(homepagePayload.variant, "b")).limit(1);
+    if (row && row.version === HOMEPAGE_PAYLOAD_B_VERSION && row.payload) {
+      const payload = row.payload;
+      void kvSet(HOMEPAGE_PAYLOAD_B_KV_KEY, payload, KV_TTL_SECONDS).catch(() => {
+      });
+      return payload;
+    }
+  } catch (err) {
+    console.warn("[homepage-payload:b] Neon read failed:", err);
+  }
+  return null;
+}
+async function writeHomepagePayloadB(payload, opts = {}) {
+  assertJsonSafeB(payload);
+  if (payload.degraded && !opts.force) {
+    const existing = await readHomepagePayloadB();
+    if (existing && !existing.degraded) {
+      console.warn("[homepage-payload:b] skipping degraded write over a good blob (use force to override)");
+      return;
+    }
+  }
+  await kvSet(HOMEPAGE_PAYLOAD_B_KV_KEY, payload, KV_TTL_SECONDS);
+  try {
+    await db.insert(homepagePayload).values({
+      variant: "b",
+      version: HOMEPAGE_PAYLOAD_B_VERSION,
+      payload,
+      degraded: payload.degraded
+    }).onConflictDoUpdate({
+      target: [homepagePayload.variant, homepagePayload.version],
+      set: {
+        payload,
+        degraded: payload.degraded,
+        builtAt: /* @__PURE__ */ new Date()
+      }
+    });
+  } catch (err) {
+    console.error("[homepage-payload:b] Neon upsert failed (KV still written):", err);
+  }
+}
+async function invalidateHomepagePayloadB() {
+  await kvDel(HOMEPAGE_PAYLOAD_B_KV_KEY);
+}
+function triggerHomepageWarmB() {
+  const baseUrl2 = process.env["BASE_URL"];
+  const cronSecret = process.env["CRON_SECRET"];
+  if (!baseUrl2 || !cronSecret) return;
+  void fetch(`${baseUrl2}/cron/warm-homepage-b`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${cronSecret}` }
+  }).catch(() => {
+  });
+}
+var HOMEPAGE_PAYLOAD_VERSION, HOMEPAGE_PAYLOAD_KV_KEY, HOMEPAGE_PAYLOAD_KV_PREFIX, KV_TTL_SECONDS, BUILD_TIMEOUT_MS, VARIANT_B_SECTION_TYPES, HOMEPAGE_PAYLOAD_B_VERSION, HOMEPAGE_PAYLOAD_B_KV_KEY;
 var init_homepage_payload_server = __esm({
   "app/lib/homepage-payload.server.ts"() {
     "use strict";
@@ -15744,6 +15963,7 @@ var init_homepage_payload_server = __esm({
     init_discovery_server();
     init_discovery();
     init_sanity_server();
+    init_product_handles();
     init_shopify_server();
     HOMEPAGE_PAYLOAD_VERSION = "v1";
     HOMEPAGE_PAYLOAD_KV_KEY = `homepage:payload:${HOMEPAGE_PAYLOAD_VERSION}`;
@@ -15756,6 +15976,8 @@ var init_homepage_payload_server = __esm({
       "wayfinderMosaic",
       "playTogetherBanner"
     ];
+    HOMEPAGE_PAYLOAD_B_VERSION = "b2";
+    HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`;
   }
 });
 
@@ -16070,6 +16292,269 @@ var init_deal_rotator_server = __esm({
   }
 });
 
+// app/lib/sensation-map.ts
+function labelForType(v) {
+  return TYPE_LABELS[v] ?? v.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function savings(p) {
+  return p.compareAtPrice && p.compareAtPrice > p.price ? p.compareAtPrice - p.price : 0;
+}
+function qualityCompare(a, b) {
+  const ai = a.imageUrl ? 0 : 1;
+  const bi = b.imageUrl ? 0 : 1;
+  if (ai !== bi) return ai - bi;
+  const s = savings(b) - savings(a);
+  if (s !== 0) return s;
+  if (a.price !== b.price) return a.price - b.price;
+  return a.handle.localeCompare(b.handle);
+}
+function deriveTypeNotches(index2, max2 = MAX_TYPE_NOTCHES) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const p of index2) {
+    const t = p.productTypeDial;
+    if (!t) continue;
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, Math.max(0, max2)).map(([value, count]) => ({ value, label: labelForType(value), count }));
+}
+function deriveFeelNotches(moods, max2 = MAX_FEEL_NOTCHES) {
+  return moods.slice(0, Math.max(0, max2));
+}
+function defaultSensationState(types, feels) {
+  const type = types[0]?.value;
+  if (!type) return null;
+  return { type, feel: feels[0] ?? null };
+}
+function matchSensationMap(index2, state, count = SENSATION_RESULT_COUNT) {
+  const ofType = index2.filter((p) => p.productTypeDial === state.type);
+  if (state.feel) {
+    const scoreState = { ...EMPTY_STATE, mood: [state.feel] };
+    const scored = ofType.map((p) => ({ p, s: scoreProduct2(p, scoreState) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s || qualityCompare(a.p, b.p));
+    if (scored.length >= MIN_RESULTS) {
+      return {
+        items: scored.slice(0, count).map((x) => x.p),
+        relaxed: false,
+        relaxedReason: null,
+        resolved: state
+      };
+    }
+  }
+  if (ofType.length >= MIN_RESULTS) {
+    return {
+      items: [...ofType].sort(qualityCompare).slice(0, count),
+      relaxed: !!state.feel,
+      // dropping "any feel" is not a relaxation
+      relaxedReason: state.feel ? "Closest fit" : null,
+      resolved: { type: state.type, feel: null }
+    };
+  }
+  const [topNotch] = deriveTypeNotches(index2, 1);
+  const fallbackType = topNotch?.value ?? state.type;
+  const pool = index2.filter((p) => p.productTypeDial === fallbackType);
+  const source = pool.length ? pool : [...index2];
+  return {
+    items: [...source].sort(qualityCompare).slice(0, count),
+    relaxed: true,
+    relaxedReason: "Closest fit",
+    resolved: { type: fallbackType, feel: null }
+  };
+}
+var TYPE_LABELS, MAX_TYPE_NOTCHES, MAX_FEEL_NOTCHES, SENSATION_RESULT_COUNT, MIN_RESULTS;
+var init_sensation_map = __esm({
+  "app/lib/sensation-map.ts"() {
+    "use strict";
+    init_discovery();
+    init_discovery_emma();
+    TYPE_LABELS = {
+      vibrator: "Vibrator",
+      dildo: "Dildo",
+      anal: "Anal",
+      bondage: "Bondage",
+      "cock-ring": "Cock ring",
+      stroker: "Stroker",
+      couples: "For two",
+      harness: "Harness",
+      extender: "Extender",
+      pump: "Pump",
+      lube: "Lube",
+      massage: "Massage",
+      enhancer: "Enhancer",
+      wear: "To wear",
+      condom: "Condom",
+      wellness: "Wellness",
+      novelty: "Novelty",
+      "book-media": "Books",
+      "sex-machine": "Sex machine"
+    };
+    MAX_TYPE_NOTCHES = 5;
+    MAX_FEEL_NOTCHES = 4;
+    SENSATION_RESULT_COUNT = 3;
+    MIN_RESULTS = 2;
+  }
+});
+
+// app/lib/sensation-map.server.ts
+async function getSensationMapData() {
+  const index2 = await getDiscoveryIndex();
+  if (index2.length === 0) {
+    return { types: [], feels: [], defaultState: null, defaultMatch: null };
+  }
+  const types = deriveTypeNotches(index2);
+  const feels = deriveFeelNotches(computeVocab(index2).moods);
+  const defaultState = defaultSensationState(types, feels);
+  const defaultMatch = defaultState ? matchSensationMap(index2, defaultState) : null;
+  return { types, feels, defaultState, defaultMatch };
+}
+var init_sensation_map_server = __esm({
+  "app/lib/sensation-map.server.ts"() {
+    "use strict";
+    init_discovery_server();
+    init_sensation_map();
+  }
+});
+
+// app/lib/storefront-home.server.ts
+var storefront_home_server_exports = {};
+__export(storefront_home_server_exports, {
+  RAIL_SEED_BUCKET_MS: () => RAIL_SEED_BUCKET_MS,
+  STOREFRONT_EDGE_CACHE_HEADERS: () => STOREFRONT_EDGE_CACHE_HEADERS,
+  assembleStorefrontHome: () => assembleStorefrontHome,
+  buildHomepagePayloadB: () => buildHomepagePayloadB,
+  hydrateStorefrontPayloadB: () => hydrateStorefrontPayloadB,
+  railSeedBucket: () => railSeedBucket,
+  warmHomepagePayloadB: () => warmHomepagePayloadB
+});
+function railSeedBucket(now = Date.now()) {
+  return Math.floor(now / RAIL_SEED_BUCKET_MS);
+}
+async function assembleStorefrontHome(opts = {}) {
+  if (opts.fresh) return hydrateStorefrontPayloadB(await buildHomepagePayloadB());
+  const payload = await readHomepagePayloadB();
+  if (payload) {
+    if (payload.degraded) triggerHomepageWarmB();
+    return hydrateStorefrontPayloadB(payload);
+  }
+  const fresh = await buildHomepagePayloadB();
+  void writeHomepagePayloadB(fresh).catch((err) => {
+    console.warn("[storefront-home] payload write after cold build failed:", err);
+  });
+  return hydrateStorefrontPayloadB(fresh);
+}
+function hydrateStorefrontPayloadB(payload) {
+  const rails = reshuffleRailsWithSeed(payload.rails, railSeedBucket());
+  let featured = rails.map((r) => r.items[0]?.product).filter((p) => !!p);
+  const pinned = payload.pinnedProduct;
+  if (pinned) {
+    featured = [pinned, ...featured.filter((p) => p.handle !== pinned.handle)];
+  }
+  return {
+    variant: "b",
+    rails,
+    emmaHero: payload.emmaHero,
+    emmaPhotoUrl: payload.emmaPhotoUrl,
+    emmaPhotoAlt: payload.emmaPhotoAlt,
+    featured,
+    total: payload.total,
+    // Already resolved at build time. PR #322 established that this must be a
+    // RESOLVED value rather than a streamed promise (a deferred one never
+    // survives the edge cache, so team merchandising reached nobody); reading
+    // it off the precomputed blob satisfies that contract by construction and
+    // removes the Sanity round-trip from the request path entirely.
+    contentBlocks: payload.contentBlocks,
+    notebookPosts: payload.notebookPosts,
+    sensationMap: payload.sensationMap
+  };
+}
+async function buildHomepagePayloadB() {
+  const railSeed = 0;
+  const [railsResult, emmaHero, notebook, editor, contentBlocks] = await Promise.all([
+    getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
+    withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, "getEmmaHeroSettings(storefront)"),
+    getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [], total: 0 })),
+    // Meet Emma portrait (Nº 04). Own short timeout + degrade-to-null so a slow
+    // or cold Sanity leg can never sink the render; MeetEmma falls back to the
+    // bundled illustration when this is null. getEditor() is already cached 300s
+    // and swallows its own errors, so this is belt-and-suspenders with emmaHero.
+    withTimeout(getEditor(), EDITOR_TIMEOUT_MS, null, "getEditor(storefront)"),
+    // Team merchandising surface — resolved here rather than deferred, so it
+    // survives the edge cache and reaches crawlers (see the `contentBlocks`
+    // field doc). Resolving it at BUILD time rather than per-request also takes
+    // the Sanity round-trip off the request path completely. `withTimeout` only
+    // guards a slow upstream; the `.catch` is what replaces the old
+    // `<Await errorElement>`, so a rejected leg degrades to shell fallbacks
+    // instead of failing the build.
+    withTimeout(
+      buildHomeContentBlocksLean(),
+      CONTENT_BLOCKS_TIMEOUT_MS,
+      EMPTY_CONTENT_BLOCKS,
+      "buildHomeContentBlocksLean(storefront)"
+    ).catch((err) => {
+      console.error("[storefront-home] contentBlocks failed, using shell fallbacks:", err);
+      return EMPTY_CONTENT_BLOCKS;
+    })
+  ]);
+  const rails = railsResult.rails;
+  const pinnedHandle = emmaHero?.featuredProductHandle?.trim();
+  let pinnedProduct = null;
+  if (pinnedHandle) {
+    pinnedProduct = rails.flatMap((r) => r.items).find((i) => i.product.handle === pinnedHandle)?.product ?? // Not surfaced by today's rails: pull it from the discovery index. The
+    // rails call above already warmed the L1 memo, so this is an in-memory
+    // lookup, not a second KV round-trip.
+    (await getDiscoveryIndex()).find((p) => p.handle === pinnedHandle) ?? null;
+    if (!pinnedProduct) {
+      console.warn(
+        `[storefront-home] featuredProductHandle "${pinnedHandle}" not in discovery index, hero stays rotating`
+      );
+    }
+  }
+  const sensationMap = await getSensationMapData();
+  return {
+    version: HOMEPAGE_PAYLOAD_B_VERSION,
+    variant: "b",
+    rails,
+    total: railsResult.total,
+    pinnedProduct,
+    emmaHero,
+    emmaPhotoUrl: editor?.photoUrl ?? null,
+    emmaPhotoAlt: editor?.photoAlt ?? null,
+    contentBlocks,
+    // resolved above — team-managed Sanity surface, lean/slimmed for variant b
+    notebookPosts: notebook.posts,
+    sensationMap,
+    builtAt: Date.now(),
+    // Empty rails == the discovery index was cold during the build. The write
+    // guard refuses to clobber a good blob with this unless forced.
+    degraded: rails.length === 0
+  };
+}
+async function warmHomepagePayloadB(opts = {}) {
+  const force = opts.force ?? true;
+  const payload = await buildHomepagePayloadB();
+  await writeHomepagePayloadB(payload, { force });
+  return payload;
+}
+var EMMA_HERO_TIMEOUT_MS, EDITOR_TIMEOUT_MS, CONTENT_BLOCKS_TIMEOUT_MS, EMPTY_CONTENT_BLOCKS, RAIL_SEED_BUCKET_MS, STOREFRONT_EDGE_CACHE_HEADERS;
+var init_storefront_home_server = __esm({
+  "app/lib/storefront-home.server.ts"() {
+    "use strict";
+    init_discovery_server();
+    init_homepage_payload_server();
+    init_sensation_map_server();
+    init_sanity_server();
+    init_with_timeout_server();
+    init_discovery();
+    EMMA_HERO_TIMEOUT_MS = 4e3;
+    EDITOR_TIMEOUT_MS = 4e3;
+    CONTENT_BLOCKS_TIMEOUT_MS = 6e3;
+    EMPTY_CONTENT_BLOCKS = { sections: [], carouselProductMap: {} };
+    RAIL_SEED_BUCKET_MS = 9e5;
+    STOREFRONT_EDGE_CACHE_HEADERS = {
+      "Cache-Control": "public, max-age=0, s-maxage=900, stale-while-revalidate=3600",
+      "Vercel-CDN-Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600"
+    };
+  }
+});
+
 // app/lib/twilio.server.ts
 async function sendSms(to, body) {
   const sid = process.env["TWILIO_ACCOUNT_SID"];
@@ -16322,13 +16807,20 @@ async function runHomepageHealthcheck() {
       const lastGood = await kvGet(LAST_GOOD_KEY);
       const valid = !!lastGood && lastGood["_type"] === "homepageSections" && Array.isArray(lastGood["sections"]);
       if (valid) {
-        await invalidateHomepagePayloadA().catch(() => {
-        });
+        await Promise.all([
+          invalidateHomepagePayloadA().catch(() => {
+          }),
+          invalidateHomepagePayloadB().catch(() => {
+          })
+        ]);
         invalidateCmsCache();
         await restoreHomepageDoc(lastGood);
         const servedVariant = await activeServedVariant();
         if (servedVariant === "b") {
-          invalidateCmsCache();
+          const { warmHomepagePayloadB: warmHomepagePayloadB2 } = await Promise.resolve().then(() => (init_storefront_home_server(), storefront_home_server_exports));
+          await warmHomepagePayloadB2({ force: true }).catch(
+            (e) => console.error("[homepage-healthcheck] storefront payload rewarm failed", e)
+          );
         } else {
           await warmHomepagePayloadA({ force: true }).catch(
             (e) => console.error("[homepage-healthcheck] payload rewarm failed", e)
@@ -16771,9 +17263,9 @@ async function getProductReviews(shopifyProductId, opts = {}) {
     page = 1,
     perPage = 10
   } = opts;
+  const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`;
   if (status === "approved") {
-    const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`;
-    const hit = await kvGet(ck);
+    const hit = await kvGetMemo(ck, 60);
     if (hit) return hit;
   }
   const offset = (page - 1) * perPage;
@@ -16796,7 +17288,11 @@ async function getProductReviews(shopifyProductId, opts = {}) {
     sql4(reviewQ, [shopifyProductId, status, perPage, offset]),
     sql4(countQ, [shopifyProductId, status])
   ]);
-  if (rows.length === 0) return { reviews: [], total: 0 };
+  if (rows.length === 0) {
+    const empty = { reviews: [], total: 0 };
+    if (status === "approved") primeKvMemo(ck, empty);
+    return empty;
+  }
   const reviewIds = rows.map((r) => r["id"]);
   const [mediaRows, attrRows] = await Promise.all([
     sql4`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`,
@@ -16823,15 +17319,15 @@ async function getProductReviews(shopifyProductId, opts = {}) {
   const total = parseInt(countRows[0]?.["total"] ?? "0", 10);
   const result = { reviews, total };
   if (status === "approved") {
-    const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`;
     kvSet(ck, result, 300).catch(() => {
     });
+    primeKvMemo(ck, result);
   }
   return result;
 }
 async function getProductAggregate(shopifyProductId) {
   const ck = `aggregate:v1:${shopifyProductId}`;
-  const hit = await kvGet(ck);
+  const hit = await kvGetMemo(ck, 60);
   if (hit) return hit;
   const rows = await sql4`
     SELECT * FROM review_aggregates WHERE shopify_product_id = ${shopifyProductId}
@@ -16840,6 +17336,7 @@ async function getProductAggregate(shopifyProductId) {
   const agg = rowToAggregate(rows[0]);
   kvSet(ck, agg, 300).catch(() => {
   });
+  primeKvMemo(ck, agg);
   return agg;
 }
 async function getAdminReviewQueue(filters = {}) {
@@ -22145,8 +22642,8 @@ function stateFor(ps, p, taxonomy) {
 async function maybeActivateGatedDeal(jobId, gatesDealId) {
   try {
     const { dealHistory: dealHistory2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    const { eq: eq24 } = await import("drizzle-orm");
-    const rows = await db.select().from(dealHistory2).where(eq24(dealHistory2.id, gatesDealId)).limit(1);
+    const { eq: eq25 } = await import("drizzle-orm");
+    const rows = await db.select().from(dealHistory2).where(eq25(dealHistory2.id, gatesDealId)).limit(1);
     const deal = rows[0];
     if (!deal) {
       console.warn(`[batch-orchestrator] maybeActivateGatedDeal: deal ${gatesDealId} not found`);
@@ -23505,8 +24002,8 @@ async function followWithCookies(startUrl, maxHops = 12) {
     const getSetCookie = res.headers.getSetCookie;
     for (const sc of getSetCookie ? getSetCookie.call(res.headers) : []) {
       const pair = sc.split(";")[0] ?? "";
-      const eq24 = pair.indexOf("=");
-      if (eq24 > 0) jar.set(pair.slice(0, eq24).trim(), pair.slice(eq24 + 1).trim());
+      const eq25 = pair.indexOf("=");
+      if (eq25 > 0) jar.set(pair.slice(0, eq25).trim(), pair.slice(eq25 + 1).trim());
     }
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
@@ -23664,12 +24161,19 @@ function buildInput(model, input) {
         resolution: "720p",
         ...input.negativePrompt ? { negative_prompt: input.negativePrompt } : {}
       };
+    case "omnihuman":
+      return {
+        image_url: input.imageUrl,
+        audio_url: input.audioUrl
+      };
   }
 }
 async function submitVideoRequest(model, input) {
   const key = requireKey();
   const spec = VIDEO_MODELS[model];
-  if (!spec.allowedDurations.includes(input.durationSeconds)) {
+  if (spec.audioDriven) {
+    if (!input.audioUrl) throw new Error(`${model} is audio-driven and requires audioUrl`);
+  } else if (!spec.allowedDurations.includes(input.durationSeconds)) {
     throw new Error(`${model} does not support duration ${input.durationSeconds}s (allowed: ${spec.allowedDurations.join(", ")})`);
   }
   const res = await fetch(`${FAL_QUEUE_ENDPOINT}/${spec.falModel}`, {
@@ -23719,6 +24223,27 @@ async function downloadFalAsset(url) {
   if (!res.ok) throw new Error(`fal asset download failed: ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }
+async function uploadToFalStorage(buf, contentType, fileName) {
+  const key = requireKey();
+  const init2 = await fetch("https://rest.alpha.fal.ai/storage/upload/initiate", {
+    method: "POST",
+    headers: { "Authorization": `Key ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ content_type: contentType, file_name: fileName })
+  });
+  if (!init2.ok) {
+    const text2 = await init2.text().catch(() => "");
+    throw new Error(`fal storage initiate error: ${init2.status} ${text2.slice(0, 200)}`);
+  }
+  const j = await init2.json();
+  if (!j.upload_url || !j.file_url) throw new Error("fal storage initiate response missing upload_url/file_url");
+  const put = await fetch(j.upload_url, {
+    method: "PUT",
+    headers: { "Content-Type": contentType },
+    body: new Uint8Array(buf)
+  });
+  if (!put.ok) throw new Error(`fal storage PUT error: ${put.status}`);
+  return j.file_url;
+}
 async function composeSceneFrame(opts) {
   const key = requireKey();
   const count = Math.min(Math.max(1, opts.count ?? 3), 4);
@@ -23730,7 +24255,7 @@ async function composeSceneFrame(opts) {
     },
     body: JSON.stringify({
       prompt: opts.prompt,
-      image_urls: [opts.presenterImageUrl, opts.productImageUrl],
+      image_urls: [opts.presenterImageUrl, ...opts.productImageUrl ? [opts.productImageUrl] : []],
       num_images: count,
       aspect_ratio: "9:16",
       output_format: "jpeg"
@@ -23787,6 +24312,20 @@ var init_fal_video_server = __esm({
         ratePerSecondUsd: 0.31,
         nativeAudio: true,
         allowedDurations: [4, 5, 6, 8, 10, 12]
+      },
+      // Talking heads are AUDIO-FIRST (proven 2026-07-24): TTS speech track + one
+      // approved identity frame -> performed video. Never route talking heads
+      // through Kling/LTX + sync-lipsync. 30s input-audio cap per render; longer
+      // scripts split at beat boundaries and both halves render from the SAME frame.
+      "omnihuman": {
+        falModel: "fal-ai/bytedance/omnihuman/v1.5",
+        label: "OmniHuman 1.5 (audio-driven avatar)",
+        tier: "avatar",
+        costKey: "fal/omnihuman-1.5",
+        ratePerSecondUsd: 0.16,
+        nativeAudio: true,
+        audioDriven: true,
+        allowedDurations: []
       }
     };
     SCENE_FRAME_MODEL = "fal-ai/nano-banana/edit";
@@ -23925,6 +24464,39 @@ async function applyWatermark(video) {
     cleanup([input, overlay, output]);
   }
 }
+async function muxAudio(video, audio) {
+  const videoIn = tmp("mux-v.mp4");
+  const audioIn = tmp("mux-a.mp3");
+  const output = tmp("mux-out.mp4");
+  try {
+    writeFileSync(videoIn, video);
+    writeFileSync(audioIn, audio);
+    execFileSync(ffmpegPath, [
+      "-y",
+      "-i",
+      videoIn,
+      "-i",
+      audioIn,
+      "-map",
+      "0:v",
+      "-map",
+      "1:a",
+      "-c:v",
+      "copy",
+      "-af",
+      "apad",
+      "-c:a",
+      "aac",
+      "-shortest",
+      "-movflags",
+      "+faststart",
+      output
+    ], { timeout: 6e4 });
+    return readFileSync3(output);
+  } finally {
+    cleanup([videoIn, audioIn, output]);
+  }
+}
 var logoCache, LOGO_CACHE_TTL;
 var init_video_assembly_server = __esm({
   "app/lib/video-assembly.server.ts"() {
@@ -23932,6 +24504,413 @@ var init_video_assembly_server = __esm({
     init_sanity_server();
     logoCache = null;
     LOGO_CACHE_TTL = 1e3 * 60 * 60;
+  }
+});
+
+// app/lib/elevenlabs.server.ts
+function getApiKey() {
+  const key = process.env["ELEVENLABS_API_KEY"];
+  if (!key) throw new Error("ELEVENLABS_API_KEY environment variable is not set");
+  return key;
+}
+function getVoiceId() {
+  return process.env["ELEVENLABS_VOICE_ID"] || DEFAULT_VOICE_ID;
+}
+async function parseElevenLabsError(res) {
+  try {
+    const data = await res.json();
+    const detail = data.detail;
+    if (typeof detail === "string") return detail;
+    if (detail && typeof detail === "object") {
+      const d = detail;
+      return d.message ?? d.status ?? JSON.stringify(detail);
+    }
+    return data.message ?? JSON.stringify(data);
+  } catch {
+    return `ElevenLabs API error ${res.status}`;
+  }
+}
+async function generateVoiceover(opts) {
+  const voiceId = opts.voiceId || getVoiceId();
+  const res = await fetch(`${API_BASE}/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+    method: "POST",
+    headers: {
+      "xi-api-key": getApiKey(),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      text: opts.text,
+      model_id: "eleven_multilingual_v2"
+    })
+  });
+  if (!res.ok) throw new Error(await parseElevenLabsError(res));
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength === 0) throw new Error("ElevenLabs TTS returned empty audio");
+  return Buffer.from(buf);
+}
+async function generateMusic(opts) {
+  const res = await fetch(`${API_BASE}/music?output_format=mp3_44100_128`, {
+    method: "POST",
+    headers: {
+      "xi-api-key": getApiKey(),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      prompt: opts.prompt,
+      music_length_ms: opts.durationMs,
+      model_id: "music_v1",
+      force_instrumental: opts.instrumental ?? true
+    })
+  });
+  if (!res.ok) throw new Error(await parseElevenLabsError(res));
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength === 0) throw new Error("ElevenLabs Music returned empty audio");
+  return Buffer.from(buf);
+}
+var API_BASE, DEFAULT_VOICE_ID;
+var init_elevenlabs_server = __esm({
+  "app/lib/elevenlabs.server.ts"() {
+    "use strict";
+    API_BASE = "https://api.elevenlabs.io/v1";
+    DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
+  }
+});
+
+// app/lib/video-postpass.server.ts
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, existsSync as existsSync4, unlinkSync as unlinkSync2 } from "node:fs";
+import { execFileSync as execFileSync2, spawnSync } from "node:child_process";
+import { randomBytes as randomBytes2 } from "node:crypto";
+import { createRequire } from "node:module";
+import ffmpegPath2 from "ffmpeg-static";
+function tmp2(name) {
+  return `/tmp/vpp-${randomBytes2(6).toString("hex")}-${name}`;
+}
+function cleanup2(paths) {
+  for (const p of paths) {
+    try {
+      if (existsSync4(p)) unlinkSync2(p);
+    } catch {
+    }
+  }
+}
+function ff(args, timeout = 3e5) {
+  execFileSync2(ffmpegPath2, args, { timeout, stdio: "pipe" });
+}
+function probeMediaDurationSeconds(path) {
+  const r = spawnSync(ffmpegPath2, ["-i", path, "-f", "null", "-"], { timeout: 3e4, encoding: "utf8" });
+  const m = (r.stderr ?? "").match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/);
+  if (!m) return 0;
+  return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 100;
+}
+async function concatWithAudio(clips) {
+  if (!clips.length) throw new Error("concatWithAudio: no clips");
+  if (clips.length === 1) return clips[0];
+  const inputs = clips.map((_, i) => tmp2(`cat-${i}.mp4`));
+  const output = tmp2("cat-out.mp4");
+  try {
+    clips.forEach((c, i) => writeFileSync2(inputs[i], c));
+    const norm2 = clips.map((_, i) => `[${i}:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1[v${i}]`).join(";");
+    const pairs = clips.map((_, i) => `[v${i}][${i}:a]`).join("");
+    ff([
+      "-y",
+      ...inputs.flatMap((p) => ["-i", p]),
+      "-filter_complex",
+      `${norm2};${pairs}concat=n=${clips.length}:v=1:a=1[outv][outa]`,
+      "-map",
+      "[outv]",
+      "-map",
+      "[outa]",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "fast",
+      "-crf",
+      "19",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-movflags",
+      "+faststart",
+      output
+    ]);
+    return readFileSync4(output);
+  } finally {
+    cleanup2([...inputs, output]);
+  }
+}
+function applyPunchIns(inPath, outPath, durationSeconds, work) {
+  const n = Math.ceil(durationSeconds / PUNCH_SEGMENT_SECONDS);
+  if (n < 2) {
+    ff(["-y", "-i", inPath, "-c", "copy", outPath]);
+    return;
+  }
+  const parts = [];
+  for (let i = 0; i < n; i++) {
+    const start = i * PUNCH_SEGMENT_SECONDS;
+    const len = Math.min(PUNCH_SEGMENT_SECONDS, durationSeconds - start);
+    if (len <= 0.2) break;
+    const part = tmp2(`seg-${i}.mp4`);
+    work.push(part);
+    parts.push(part);
+    const z2 = PUNCH_ZOOM;
+    const vf = i % 2 === 1 ? `crop=iw/${z2}:ih/${z2}:(iw-iw/${z2})/2:(ih-ih/${z2})*0.35,scale=1080:1920,setsar=1` : "scale=1080:1920,setsar=1";
+    ff(["-y", "-ss", start.toFixed(2), "-t", len.toFixed(2), "-i", inPath, "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "19", "-c:a", "aac", "-b:a", "160k", part]);
+  }
+  const listFile = tmp2("concat.txt");
+  work.push(listFile);
+  writeFileSync2(listFile, parts.map((p) => `file '${p}'`).join("\n"));
+  ff(["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", outPath]);
+}
+function resolveCaptionFontFile() {
+  try {
+    const req = createRequire(import.meta.url);
+    const p = req.resolve("@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2");
+    return existsSync4(p) ? p : null;
+  } catch {
+    return null;
+  }
+}
+function burnCaptions(inPath, outPath, phrases, durationSeconds, work) {
+  const totalChars = phrases.reduce((s, p) => s + p.length, 0);
+  if (!totalChars) throw new Error("burnCaptions: no phrase text");
+  const buildFilters = (fontFile2) => {
+    let t = 0;
+    const filters = [];
+    phrases.forEach((p, i) => {
+      const w = p.length / totalChars * durationSeconds;
+      const file = tmp2(`cap-${i}.txt`);
+      work.push(file);
+      writeFileSync2(file, p);
+      const fontArg = fontFile2 ? `fontfile=${fontFile2}:` : "";
+      filters.push(
+        `drawtext=${fontArg}textfile=${file}:fontsize=52:fontcolor=white:borderw=3:bordercolor=black@0.65:x=(w-text_w)/2:y=h*0.78:enable='between(t,${t.toFixed(2)},${(t + w).toFixed(2)})'`
+      );
+      t += w;
+    });
+    return filters.join(",");
+  };
+  const fontFile = resolveCaptionFontFile();
+  try {
+    ff(["-y", "-i", inPath, "-vf", buildFilters(fontFile), "-c:v", "libx264", "-preset", "fast", "-crf", "19", "-c:a", "copy", outPath]);
+  } catch (err) {
+    if (!fontFile) throw err;
+    console.warn("[video-postpass] DM Sans fontfile failed, retrying with fontconfig default:", err instanceof Error ? err.message.slice(0, 200) : err);
+    ff(["-y", "-i", inPath, "-vf", buildFilters(null), "-c:v", "libx264", "-preset", "fast", "-crf", "19", "-c:a", "copy", outPath]);
+  }
+}
+async function addMusicAndLoudnorm(inPath, outPath, durationSeconds, work) {
+  let musicPath = null;
+  try {
+    const music = await generateMusic({
+      prompt: MUSIC_BED_PROMPT,
+      durationMs: Math.ceil(durationSeconds * 1e3),
+      instrumental: true
+    });
+    musicPath = tmp2("bed.mp3");
+    work.push(musicPath);
+    writeFileSync2(musicPath, music);
+  } catch (err) {
+    console.warn("[video-postpass] music bed generation failed, loudnorm only:", err instanceof Error ? err.message.slice(0, 200) : err);
+  }
+  if (musicPath) {
+    ff([
+      "-y",
+      "-i",
+      inPath,
+      "-i",
+      musicPath,
+      "-filter_complex",
+      `[1:a]volume=0.10,afade=t=in:d=1,afade=t=out:st=${Math.max(0, durationSeconds - 1.5).toFixed(2)}:d=1.5[bed];[0:a][bed]amix=inputs=2:duration=first:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=11[out]`,
+      "-map",
+      "0:v",
+      "-map",
+      "[out]",
+      "-c:v",
+      "copy",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-movflags",
+      "+faststart",
+      outPath
+    ]);
+  } else {
+    ff([
+      "-y",
+      "-i",
+      inPath,
+      "-af",
+      "loudnorm=I=-14:TP=-1.5:LRA=11",
+      "-c:v",
+      "copy",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-movflags",
+      "+faststart",
+      outPath
+    ]);
+  }
+}
+async function runPostPass(video, opts) {
+  const work = [];
+  const inPath = tmp2("in.mp4");
+  work.push(inPath);
+  try {
+    writeFileSync2(inPath, video);
+    const durationSeconds = probeMediaDurationSeconds(inPath);
+    if (durationSeconds <= 0) {
+      console.warn("[video-postpass] could not probe duration, skipping post pass");
+      return video;
+    }
+    let current = inPath;
+    try {
+      const punched = tmp2("punched.mp4");
+      work.push(punched);
+      applyPunchIns(current, punched, durationSeconds, work);
+      current = punched;
+    } catch (err) {
+      console.warn("[video-postpass] punch-ins failed, continuing without:", err instanceof Error ? err.message.slice(0, 200) : err);
+    }
+    if (opts.phrases.length) {
+      try {
+        const captioned = tmp2("captioned.mp4");
+        work.push(captioned);
+        burnCaptions(current, captioned, opts.phrases, durationSeconds, work);
+        current = captioned;
+      } catch (err) {
+        console.warn("[video-postpass] captions failed, continuing without:", err instanceof Error ? err.message.slice(0, 200) : err);
+      }
+    }
+    try {
+      const out = tmp2("out.mp4");
+      work.push(out);
+      await addMusicAndLoudnorm(current, out, durationSeconds, work);
+      return readFileSync4(out);
+    } catch (err) {
+      console.warn("[video-postpass] loudness stage failed, shipping previous step:", err instanceof Error ? err.message.slice(0, 200) : err);
+      return current === inPath ? video : readFileSync4(current);
+    }
+  } finally {
+    cleanup2(work);
+  }
+}
+var PUNCH_SEGMENT_SECONDS, PUNCH_ZOOM, MUSIC_BED_PROMPT;
+var init_video_postpass_server = __esm({
+  "app/lib/video-postpass.server.ts"() {
+    "use strict";
+    init_elevenlabs_server();
+    PUNCH_SEGMENT_SECONDS = 3.5;
+    PUNCH_ZOOM = 1.12;
+    MUSIC_BED_PROMPT = "Warm playful minimal indie pop background bed, light soft percussion, gentle upbeat energy, cozy and confident, instrumental only";
+  }
+});
+
+// app/lib/avatar-script.ts
+function estimateAvatarSpeechSeconds(text2) {
+  return Math.ceil(text2.trim().length / AVATAR_TTS_CHARS_PER_SECOND);
+}
+function splitSentences(text2) {
+  return text2.split(/(?<=[.!?…])\s+/).map((s) => s.trim()).filter(Boolean);
+}
+function splitPresenterLine(text2, maxPartSeconds = AVATAR_PART_MAX_SECONDS) {
+  const trimmed = text2.trim();
+  if (!trimmed) return [];
+  const budgetChars = maxPartSeconds * AVATAR_TTS_CHARS_PER_SECOND;
+  if (trimmed.length <= budgetChars) return [trimmed];
+  const atoms = [];
+  const pushAtom = (atom) => {
+    let rest = atom;
+    while (rest.length > budgetChars) {
+      atoms.push(rest.slice(0, budgetChars));
+      rest = rest.slice(budgetChars);
+    }
+    if (rest) atoms.push(rest);
+  };
+  for (const sentence of splitSentences(trimmed)) {
+    if (sentence.length <= budgetChars) {
+      atoms.push(sentence);
+      continue;
+    }
+    for (const clause of sentence.split(/(?<=,)\s+/).map((c) => c.trim()).filter(Boolean)) {
+      if (clause.length <= budgetChars) {
+        atoms.push(clause);
+        continue;
+      }
+      for (const word of clause.split(/\s+/)) pushAtom(word);
+    }
+  }
+  const parts = [];
+  let current = "";
+  for (const atom of atoms) {
+    const joined = current ? `${current} ${atom}` : atom;
+    if (joined.length <= budgetChars) {
+      current = joined;
+      continue;
+    }
+    if (current) parts.push(current);
+    current = atom;
+  }
+  if (current) parts.push(current);
+  return parts;
+}
+function captionPhrases(text2, maxChars = 42) {
+  const out = [];
+  for (const sentence of splitSentences(text2)) {
+    if (sentence.length <= maxChars) {
+      out.push(sentence);
+      continue;
+    }
+    for (const clause of sentence.split(/(?<=,)\s+/).map((c) => c.trim()).filter(Boolean)) {
+      if (clause.length <= maxChars) {
+        out.push(clause);
+        continue;
+      }
+      let current = "";
+      for (const word of clause.split(/\s+/)) {
+        if (current && current.length + 1 + word.length > maxChars) {
+          out.push(current);
+          current = word;
+        } else {
+          current = current ? `${current} ${word}` : word;
+        }
+      }
+      if (current) out.push(current);
+    }
+  }
+  return out;
+}
+var TTS_CHARS_PER_SECOND, AVATAR_TTS_CHARS_PER_SECOND, OMNIHUMAN_MAX_RENDER_SECONDS, AVATAR_PART_MAX_SECONDS, AVATAR_MAX_SPEECH_SECONDS;
+var init_avatar_script = __esm({
+  "app/lib/avatar-script.ts"() {
+    "use strict";
+    TTS_CHARS_PER_SECOND = 15;
+    AVATAR_TTS_CHARS_PER_SECOND = 12;
+    OMNIHUMAN_MAX_RENDER_SECONDS = 30;
+    AVATAR_PART_MAX_SECONDS = 24;
+    AVATAR_MAX_SPEECH_SECONDS = 35;
+  }
+});
+
+// app/lib/ivr-voice.server.ts
+import { eq as eq21 } from "drizzle-orm";
+async function getActiveIvrVoiceId() {
+  try {
+    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq21(ivrVoices.active, true)).limit(1);
+    if (rows[0]?.voiceId) return rows[0].voiceId;
+  } catch (err) {
+    console.error("[ivr-voice] DB lookup failed \u2014 falling back to env", err);
+  }
+  return process.env["ELEVENLABS_VOICE_ID_IVR"] ?? "";
+}
+var init_ivr_voice_server = __esm({
+  "app/lib/ivr-voice.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
   }
 });
 
@@ -23943,6 +24922,7 @@ __export(video_pipeline_server_exports, {
   enqueueVideoJob: () => enqueueVideoJob,
   estimateJobCostUsd: () => estimateJobCostUsd,
   fanOutVideoToSocialDrafts: () => fanOutVideoToSocialDrafts,
+  findReusableSceneFrame: () => findReusableSceneFrame,
   hasActiveVideoJobs: () => hasActiveVideoJobs,
   listVideoJobs: () => listVideoJobs,
   recordVideoMetrics: () => recordVideoMetrics,
@@ -23951,24 +24931,43 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq21, inArray as inArray7, desc as desc2 } from "drizzle-orm";
+import { eq as eq22, and as and6, inArray as inArray7, desc as desc2, isNotNull, ne as ne3, sql as sql13 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
 }
-function estimateJobCostUsd(modelTier, durationSeconds) {
+function estimateJobCostUsd(modelTier, durationSeconds, opts = {}) {
   const spec = VIDEO_MODELS[modelTier];
-  const frames = estimateImageCostUsd(SCENE_FRAME_COST_KEY, SCENE_FRAME_CANDIDATES);
+  const frames = opts.reuseFrame ? 0 : estimateImageCostUsd(SCENE_FRAME_COST_KEY, SCENE_FRAME_CANDIDATES);
+  if (spec.audioDriven) {
+    const seconds = opts.speechSeconds ?? durationSeconds;
+    const clip2 = estimateVideoCostUsd(spec.costKey, seconds);
+    const tts = estimateVideoCostUsd(TTS_COST_KEY, seconds);
+    return Math.round((frames + clip2 + tts) * 1e5) / 1e5;
+  }
   const clip = estimateVideoCostUsd(spec.costKey, durationSeconds);
   return Math.round((frames + clip) * 1e5) / 1e5;
 }
 async function enqueueVideoJob(args) {
   if (!isVideoModelId(args.modelTier)) throw new Error(`Unknown model tier: ${args.modelTier}`);
   const spec = VIDEO_MODELS[args.modelTier];
-  if (!spec.allowedDurations.includes(args.durationSeconds)) {
+  const script = args.scriptJson;
+  const reuseFrame = typeof script.reuseFrameAssetId === "number";
+  let speechSeconds = 0;
+  if (spec.audioDriven) {
+    const line = typeof script.presenterLine === "string" ? script.presenterLine.trim() : "";
+    if (!line) throw new Error("scriptJson.presenterLine is required for the avatar tier");
+    speechSeconds = estimateAvatarSpeechSeconds(line);
+    if (speechSeconds > AVATAR_MAX_SPEECH_SECONDS) {
+      throw new Error(`presenterLine estimates ${speechSeconds}s of speech, over the ${AVATAR_MAX_SPEECH_SECONDS}s avatar cap. Trim the script.`);
+    }
+  } else if (!spec.allowedDurations.includes(args.durationSeconds)) {
     throw new Error(`${args.modelTier} does not support ${args.durationSeconds}s (allowed: ${spec.allowedDurations.join(", ")})`);
   }
-  const estCostUsd = estimateJobCostUsd(args.modelTier, args.durationSeconds);
+  const estCostUsd = estimateJobCostUsd(args.modelTier, args.durationSeconds, {
+    ...spec.audioDriven ? { speechSeconds } : {},
+    reuseFrame
+  });
   const maxCents = await getMaxCostCents();
   if (estCostUsd * 100 > maxCents) {
     throw new Error(`Estimated cost $${estCostUsd.toFixed(2)} exceeds the per-video ceiling of $${(maxCents / 100).toFixed(2)} (video_team_max_cost_cents)`);
@@ -24006,14 +25005,14 @@ async function advanceInflightVideoJobs(opts = {}) {
       if (outcome === "parked") result.parked++;
     } catch (err) {
       console.error(`[video-pipeline] advanceJob ${job.jobId} threw:`, err);
-      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err), updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.jobId, job.jobId));
+      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err), updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.jobId, job.jobId));
       result.failed++;
     }
   }
   return result;
 }
 async function touch(job, set) {
-  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.id, job.id));
+  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.id, job.id));
 }
 async function advanceJob2(job) {
   switch (job.stage) {
@@ -24057,16 +25056,60 @@ async function frameReviewEnabled() {
   const v = await getPipelineSetting(VIDEO_EXTRA_KEYS.frameReview).catch(() => null);
   return v !== "false";
 }
+async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
+  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and6(
+    sql13`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
+    eq22(videoJobs.presenter, presenter),
+    isNotNull(videoJobs.sceneFrameAssetId),
+    inArray7(videoJobs.stage, FRAME_APPROVED_STAGES),
+    ...excludeJobRowId != null ? [ne3(videoJobs.id, excludeJobRowId)] : []
+  )).orderBy(desc2(videoJobs.createdAt)).limit(1);
+  return row?.frameId ?? null;
+}
 async function advanceSceneFrame(job) {
   const script = job.scriptJson;
+  const spec = VIDEO_MODELS[job.modelTier];
+  const talkingHead = script["talkingHead"] === true;
+  const reusableJob = talkingHead || !!spec?.audioDriven;
+  const reuseId = typeof script["reuseFrameAssetId"] === "number" ? script["reuseFrameAssetId"] : null;
+  if (reuseId != null) {
+    if (!reusableJob) {
+      throw new Error("reuseFrameAssetId applies only to avatar/talking-head jobs");
+    }
+    const [asset] = await db.select().from(mediaAssets).where(eq22(mediaAssets.id, reuseId)).limit(1);
+    if (!asset || asset.purpose !== "scene_frame") {
+      throw new Error(`reuseFrameAssetId ${reuseId} does not reference a scene-frame asset`);
+    }
+    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and6(
+      eq22(videoJobs.sceneFrameAssetId, reuseId),
+      eq22(videoJobs.presenter, job.presenter),
+      inArray7(videoJobs.stage, FRAME_APPROVED_STAGES)
+    )).limit(1);
+    if (!approvedBy) {
+      throw new Error(`reuseFrameAssetId ${reuseId} has never been approved for presenter '${job.presenter}' (no matching job carried it past the frame gate)`);
+    }
+    await touch(job, { stage: "clip", status: "queued", sceneFrameAssetId: reuseId });
+    return "progressed";
+  }
+  const sceneSlug = typeof script["sceneSlug"] === "string" ? script["sceneSlug"] : null;
+  if (reusableJob && sceneSlug) {
+    const frameId = await findReusableSceneFrame(sceneSlug, job.presenter, job.id);
+    if (frameId != null) {
+      await touch(job, { stage: "clip", status: "queued", sceneFrameAssetId: frameId });
+      return "progressed";
+    }
+  }
   const framePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : null;
   if (!framePrompt) throw new Error("scriptJson.framePrompt is required for the scene_frame stage");
   const presenterUrl = await resolvePresenterPhotoUrl(job.presenter);
-  const productUrl = await resolveProductImageUrl(job.productHandle);
+  if (talkingHead && !presenterUrl) throw new Error("talkingHead requires a presenter (emma or friend:{slug})");
+  const productUrl = talkingHead ? null : await resolveProductImageUrl(job.productHandle);
+  const baseImageUrl = presenterUrl ?? productUrl;
+  if (!baseImageUrl) throw new Error("No reference image available for scene-frame composition");
   const { urls, costKey } = await composeSceneFrame({
     prompt: framePrompt,
-    presenterImageUrl: presenterUrl ?? productUrl,
-    productImageUrl: productUrl,
+    presenterImageUrl: baseImageUrl,
+    ...productUrl ? { productImageUrl: productUrl } : {},
     count: SCENE_FRAME_CANDIDATES
   });
   const assetIds = [];
@@ -24113,11 +25156,12 @@ async function advanceSceneFrame(job) {
   return "progressed";
 }
 async function advanceClip(job) {
+  const spec = VIDEO_MODELS[job.modelTier];
+  if (!spec) throw new Error(`Unknown model tier ${job.modelTier}`);
+  if (spec.audioDriven) return advanceClipAvatar(job, spec);
   const handles = job.providerRequestIds;
   const existing = handles["clip"];
   if (!existing) {
-    const spec = VIDEO_MODELS[job.modelTier];
-    if (!spec) throw new Error(`Unknown model tier ${job.modelTier}`);
     const script = job.scriptJson;
     const motionPrompt = typeof script["motionPrompt"] === "string" ? script["motionPrompt"] : null;
     const durationSeconds = typeof script["durationSeconds"] === "number" ? script["durationSeconds"] : spec.allowedDurations[0];
@@ -24128,7 +25172,7 @@ async function advanceClip(job) {
     if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
       throw new Error(`Accrued + clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq21(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq22(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const handle = await submitVideoRequest(job.modelTier, {
       prompt: motionPrompt,
@@ -24171,19 +25215,176 @@ async function advanceClip(job) {
   await touch(job, { stage: "lipsync", status: "queued" });
   return "progressed";
 }
+function avatarPartKey(i) {
+  return i === 0 ? "clip" : `clip_${String.fromCharCode(97 + i)}`;
+}
+function avatarPartKeys(handles) {
+  return Object.keys(handles).filter((k) => k === "clip" || /^clip_[a-z]$/.test(k)).sort();
+}
+async function advanceClipAvatar(job, spec) {
+  const handles = job.providerRequestIds;
+  if (!handles["clip"]) {
+    const line = typeof job.scriptJson["presenterLine"] === "string" ? job.scriptJson["presenterLine"].trim() : "";
+    if (!line) throw new Error("scriptJson.presenterLine is required for the avatar tier");
+    if (!job.sceneFrameAssetId) throw new Error("No approved scene frame for the avatar render");
+    const parts = splitPresenterLine(line);
+    if (!parts.length) throw new Error("presenterLine produced no speakable parts");
+    const voiceId = await getActiveIvrVoiceId();
+    const audios = [];
+    let totalSpeechSeconds = 0;
+    for (const part of parts) {
+      const audio = await generateVoiceover({ text: part, ...voiceId ? { voiceId } : {} });
+      const seconds = await probeDurationSeconds(audio);
+      if (seconds <= 0) throw new Error("Could not probe TTS audio duration");
+      if (seconds > OMNIHUMAN_MAX_RENDER_SECONDS - 0.5) {
+        throw new Error(`TTS part runs ${seconds.toFixed(1)}s, over OmniHuman's ${OMNIHUMAN_MAX_RENDER_SECONDS}s per-render cap. Shorten presenterLine (or break long sentences up so the splitter can work) and re-enqueue.`);
+      }
+      audios.push(audio);
+      totalSpeechSeconds += seconds;
+    }
+    const billedSeconds = Math.ceil(totalSpeechSeconds);
+    void logVideoCost({
+      feature: "video-tts",
+      model: TTS_COST_KEY,
+      seconds: billedSeconds,
+      caller: "video-pipeline",
+      sku: job.productHandle,
+      refId: job.jobId
+    });
+    const clipCost = estimateVideoCostUsd(spec.costKey, billedSeconds);
+    const ttsCost = estimateVideoCostUsd(TTS_COST_KEY, billedSeconds);
+    const maxCents = await getMaxCostCents();
+    if ((Number(job.costUsd) + clipCost + ttsCost) * 100 > maxCents) {
+      throw new Error(`Accrued + avatar render cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
+    }
+    const [frame] = await db.select().from(mediaAssets).where(eq22(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    if (!frame) throw new Error("Approved scene-frame asset not found");
+    const frameBuf = await blobFetchToBuffer(frame.blobUrl);
+    const imageUrl = await uploadToFalStorage(frameBuf, "image/jpeg", `frame-${job.jobId}.jpg`);
+    const newHandles = {};
+    for (let i = 0; i < audios.length; i++) {
+      const audioUrl = await uploadToFalStorage(audios[i], "audio/mpeg", `speech-${job.jobId}-${i}.mp3`);
+      newHandles[avatarPartKey(i)] = await submitVideoRequest("omnihuman", {
+        prompt: "",
+        imageUrl,
+        audioUrl,
+        durationSeconds: 0,
+        aspect: "9:16"
+      });
+    }
+    void logVideoCost({
+      feature: "video-avatar",
+      model: spec.costKey,
+      seconds: billedSeconds,
+      caller: "video-pipeline",
+      sku: job.productHandle,
+      refId: job.jobId
+    });
+    await touch(job, {
+      status: "awaiting_provider",
+      providerRequestIds: { ...handles, ...newHandles },
+      costUsd: String(Number(job.costUsd) + clipCost + ttsCost)
+    });
+    return "progressed";
+  }
+  const activeKeys = avatarPartKeys(handles);
+  for (const key of activeKeys) {
+    const { status } = await getVideoRequestStatus(handles[key]);
+    if (status === "FAILED") throw new Error(`fal avatar render failed (${key})`);
+    if (status === "IN_QUEUE" || status === "IN_PROGRESS") {
+      await touch(job, {});
+      return "waiting";
+    }
+  }
+  for (const key of activeKeys) {
+    const result = await getVideoRequestResult(handles[key]);
+    const buf = await downloadFalAsset(result.videoUrl);
+    const { url } = await blobPut(`video/${job.jobId}/${key}.mp4`, buf, { contentType: "video/mp4" });
+    await db.insert(mediaAssets).values({
+      kind: "video",
+      purpose: key,
+      blobUrl: url,
+      contentType: "video/mp4",
+      sourceModel: spec.costKey,
+      videoJobId: job.id
+    });
+  }
+  await touch(job, { stage: "lipsync", status: "queued" });
+  return "progressed";
+}
 async function advanceLipsync(job) {
-  await touch(job, { stage: "assembly", status: "queued" });
+  const spec = VIDEO_MODELS[job.modelTier];
+  const voiceover = typeof job.scriptJson["voiceover"] === "string" ? job.scriptJson["voiceover"].trim() : "";
+  if (spec?.nativeAudio || !voiceover) {
+    await touch(job, { stage: "assembly", status: "queued" });
+    return "progressed";
+  }
+  const clip = await latestAssetByPurpose(job.id, "clip");
+  if (!clip) throw new Error("No clip asset to voice over");
+  const clipBuf = await blobFetchToBuffer(clip.blobUrl);
+  const voiceId = await getActiveIvrVoiceId();
+  const audio = await generateVoiceover({ text: voiceover, ...voiceId ? { voiceId } : {} });
+  const voiced = await muxAudio(clipBuf, audio);
+  const { url } = await blobPut(`video/${job.jobId}/clip-vo.mp4`, voiced, { contentType: "video/mp4" });
+  await db.insert(mediaAssets).values({
+    kind: "video",
+    purpose: "clip",
+    blobUrl: url,
+    contentType: "video/mp4",
+    sourceModel: TTS_COST_KEY,
+    videoJobId: job.id
+  });
+  const speechSeconds = Math.ceil(voiceover.length / TTS_CHARS_PER_SECOND);
+  void logVideoCost({
+    feature: "video-tts",
+    model: TTS_COST_KEY,
+    seconds: speechSeconds,
+    caller: "video-pipeline",
+    sku: job.productHandle,
+    refId: job.jobId
+  });
+  await touch(job, {
+    stage: "assembly",
+    status: "queued",
+    costUsd: String(Number(job.costUsd) + estimateVideoCostUsd(TTS_COST_KEY, speechSeconds))
+  });
   return "progressed";
 }
 async function latestAssetByPurpose(jobRowId, purpose) {
-  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq21(mediaAssets.videoJobId, jobRowId)).orderBy(desc2(mediaAssets.createdAt));
+  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq22(mediaAssets.videoJobId, jobRowId)).orderBy(desc2(mediaAssets.createdAt));
   const hit = rows.find((r) => r.purpose === purpose);
   return hit ? { id: hit.id, blobUrl: hit.blobUrl } : null;
 }
 async function advanceAssembly(job) {
+  const spec = VIDEO_MODELS[job.modelTier];
   const clip = await latestAssetByPurpose(job.id, "clip");
   if (!clip) throw new Error("No clip asset to assemble");
-  const raw = await blobFetchToBuffer(clip.blobUrl);
+  let raw = await blobFetchToBuffer(clip.blobUrl);
+  if (spec?.audioDriven) {
+    const handles = job.providerRequestIds;
+    const attempts = (typeof handles["assembly_attempts"] === "number" ? handles["assembly_attempts"] : 0) + 1;
+    await touch(job, {
+      providerRequestIds: { ...handles, assembly_attempts: attempts }
+    });
+    const partKeys = avatarPartKeys(handles);
+    if (partKeys.length > 1) {
+      const bufs = [];
+      for (const key of partKeys) {
+        const part = await latestAssetByPurpose(job.id, key);
+        if (!part) throw new Error(`Missing avatar part asset '${key}' for assembly`);
+        bufs.push(await blobFetchToBuffer(part.blobUrl));
+      }
+      raw = await concatWithAudio(bufs);
+    }
+    if (attempts <= ASSEMBLY_MAX_FULL_ATTEMPTS) {
+      const line = typeof job.scriptJson["presenterLine"] === "string" ? job.scriptJson["presenterLine"].trim() : "";
+      raw = await runPostPass(raw, { phrases: line ? captionPhrases(line) : [] });
+    } else {
+      const warn = `assembly degraded on attempt ${attempts}: concat + watermark only, post pass skipped`;
+      console.warn(`[video-pipeline] job ${job.jobId} ${warn}`);
+      await touch(job, { error: warn });
+    }
+  }
   const watermarked = await applyWatermark(raw);
   const { url } = await blobPut(`video/${job.jobId}/final.mp4`, watermarked, { contentType: "video/mp4" });
   const [finalRow] = await db.insert(mediaAssets).values({
@@ -24198,7 +25399,7 @@ async function advanceAssembly(job) {
 }
 async function advancePoster(job) {
   if (!job.finalAssetId) throw new Error("No final asset for poster extraction");
-  const [finalAsset] = await db.select().from(mediaAssets).where(eq21(mediaAssets.id, job.finalAssetId)).limit(1);
+  const [finalAsset] = await db.select().from(mediaAssets).where(eq22(mediaAssets.id, job.finalAssetId)).limit(1);
   if (!finalAsset) throw new Error("Final asset row missing");
   const video = await blobFetchToBuffer(finalAsset.blobUrl);
   const poster = await extractPoster(video, 1);
@@ -24212,7 +25413,7 @@ async function advancePoster(job) {
     videoJobId: job.id
   }).returning({ id: mediaAssets.id });
   if (duration > 0) {
-    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq21(mediaAssets.id, finalAsset.id));
+    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq22(mediaAssets.id, finalAsset.id));
   }
   await touch(job, {
     stage: "done",
@@ -24224,29 +25425,29 @@ async function advancePoster(job) {
   return "done";
 }
 async function approveSceneFrame(jobRowId, frameAssetId) {
-  const [asset] = await db.select().from(mediaAssets).where(eq21(mediaAssets.id, frameAssetId)).limit(1);
+  const [asset] = await db.select().from(mediaAssets).where(eq22(mediaAssets.id, frameAssetId)).limit(1);
   if (!asset || asset.videoJobId !== jobRowId || asset.purpose !== "scene_frame") {
     throw new Error("Frame does not belong to this job");
   }
-  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function retrySceneFrames(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq21(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq22(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.frameFeedback) ? script.frameFeedback : [];
   script.frameFeedback = [...prior, feedback];
   const basePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : "";
   script["framePrompt"] = feedback ? `${basePrompt} ${feedback}`.trim() : basePrompt;
-  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function rejectVideoJob(jobRowId, reason) {
-  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.id, jobRowId));
 }
 async function regenerateVideoJob(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq21(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq22(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.regenFeedback) ? script.regenFeedback : [];
@@ -24266,12 +25467,12 @@ async function regenerateVideoJob(jobRowId, feedback) {
   });
 }
 async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
-  const [job] = await db.select().from(videoJobs).where(eq21(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq22(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   if (job.stage !== "done") throw new Error("Job is not finished");
-  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq21(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
+  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq22(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
   if (!finalAsset) throw new Error("No final video asset");
-  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq21(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
+  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq22(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
   const captions = job.scriptJson.captions ?? {};
   const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(" ");
   const ids = [];
@@ -24296,10 +25497,13 @@ async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
   return ids;
 }
 async function recordVideoMetrics(jobRowId, platform, metrics) {
-  const [job] = await db.select().from(videoJobs).where(eq21(videoJobs.id, jobRowId)).limit(1);
+  const submitted = Object.fromEntries(Object.entries(metrics).filter(([, v]) => v !== void 0));
+  if (!Object.keys(submitted).length) return;
+  const [job] = await db.select().from(videoJobs).where(eq22(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
-  const merged = { ...job.metricsJson ?? {}, [platform]: metrics };
-  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq21(videoJobs.id, jobRowId));
+  const existing = (job.metricsJson ?? {})[platform] ?? {};
+  const merged = { ...job.metricsJson ?? {}, [platform]: { ...existing, ...submitted } };
+  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.id, jobRowId));
 }
 async function listVideoJobs(limit = 40) {
   const jobs = await db.select().from(videoJobs).orderBy(desc2(videoJobs.createdAt)).limit(limit);
@@ -24321,7 +25525,7 @@ async function listVideoJobs(limit = 40) {
 function hasActiveVideoJobs(rows) {
   return rows.some((r) => ["queued", "running", "awaiting_provider", "applying"].includes(r.job.status));
 }
-var SCENE_FRAME_CANDIDATES, POLLER_IDLE_TTL_SECONDS2;
+var SCENE_FRAME_CANDIDATES, POLLER_IDLE_TTL_SECONDS2, FRAME_APPROVED_STAGES, TTS_COST_KEY, ASSEMBLY_MAX_FULL_ATTEMPTS;
 var init_video_pipeline_server = __esm({
   "app/lib/video-pipeline.server.ts"() {
     "use strict";
@@ -24338,8 +25542,15 @@ var init_video_pipeline_server = __esm({
     init_team_keys();
     init_feed_processor_server();
     init_video_assembly_server();
+    init_video_postpass_server();
+    init_avatar_script();
+    init_elevenlabs_server();
+    init_ivr_voice_server();
     SCENE_FRAME_CANDIDATES = 3;
     POLLER_IDLE_TTL_SECONDS2 = 30 * 60;
+    FRAME_APPROVED_STAGES = ["clip", "lipsync", "assembly", "poster", "done"];
+    TTS_COST_KEY = "elevenlabs/tts";
+    ASSEMBLY_MAX_FULL_ATTEMPTS = 2;
   }
 });
 
@@ -24468,7 +25679,7 @@ __export(returns_server_exports, {
   recordLabelTracking: () => recordLabelTracking,
   rmaNumber: () => rmaNumber
 });
-import { eq as eq22 } from "drizzle-orm";
+import { eq as eq23 } from "drizzle-orm";
 function rmaNumber(shopifyReturnId) {
   const m = shopifyReturnId.match(/\/(\d+)$/);
   return m ? `RMA-${m[1]}` : shopifyReturnId;
@@ -24589,7 +25800,7 @@ async function createCustomerReturn(input) {
       status: "label_sent",
       labelPurchasedAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq22(returns.id, row.id)).returning();
+    }).where(eq23(returns.id, row.id)).returning();
     console.log("[returns] db update ok", { rowId: updated?.id ?? row.id });
   } catch (err) {
     console.error("[returns] db update threw", err);
@@ -24597,7 +25808,7 @@ async function createCustomerReturn(input) {
   return { ok: true, returnRow: updated ?? row };
 }
 async function markReceivedAndRefund(shopifyReturnId, opts) {
-  const [row] = await db.select().from(returns).where(eq22(returns.shopifyReturnId, shopifyReturnId)).limit(1);
+  const [row] = await db.select().from(returns).where(eq23(returns.shopifyReturnId, shopifyReturnId)).limit(1);
   if (!row) return { ok: false, error: `Unknown return: ${shopifyReturnId}` };
   if (row.status === "refunded" || row.status === "closed") return { ok: true };
   if (!row.lineItems) return { ok: false, error: "Return row has no line items snapshot" };
@@ -24628,7 +25839,7 @@ async function markReceivedAndRefund(shopifyReturnId, opts) {
     refundedAt: /* @__PURE__ */ new Date(),
     closedAt: /* @__PURE__ */ new Date(),
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq22(returns.id, row.id));
+  }).where(eq23(returns.id, row.id));
   return { ok: true };
 }
 async function recordLabelTracking(shopifyReturnId, update) {
@@ -24637,13 +25848,13 @@ async function recordLabelTracking(shopifyReturnId, update) {
     ...update.trackingNumber ? { trackingNumber: update.trackingNumber } : {},
     status: "in_transit",
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq22(returns.shopifyReturnId, shopifyReturnId));
+  }).where(eq23(returns.shopifyReturnId, shopifyReturnId));
 }
 async function listCustomerReturns(customerGid) {
-  return db.select().from(returns).where(eq22(returns.customerGid, customerGid)).orderBy(returns.createdAt);
+  return db.select().from(returns).where(eq23(returns.customerGid, customerGid)).orderBy(returns.createdAt);
 }
 async function getCustomerReturn(id, customerGid) {
-  const [row] = await db.select().from(returns).where(eq22(returns.id, id)).limit(1);
+  const [row] = await db.select().from(returns).where(eq23(returns.id, id)).limit(1);
   if (!row) {
     console.error("[returns] getCustomerReturn: no row for id", { id });
     return null;
@@ -24729,16 +25940,16 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and6, eq: eq24, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and6(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS3))).limit(100);
+    const { and: and7, eq: eq25, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and7(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS3))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq24(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq25(metaCapiFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq24(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq25(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
@@ -24753,16 +25964,16 @@ async function drainGa4Failures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and6, eq: eq24, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and6(isNull3(ga4PurchaseFailures2.resolvedAt), lt2(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS3))).limit(100);
+    const { and: and7, eq: eq25, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and7(isNull3(ga4PurchaseFailures2.resolvedAt), lt2(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS3))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
       if (result.ok) {
-        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq24(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq25(ga4PurchaseFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq24(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq25(ga4PurchaseFailures2.id, row.id));
       }
     }
     return resolved;
@@ -25205,6 +26416,22 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err) });
     }
   });
+  cronRoute("/warm-homepage-b", async (_req, res) => {
+    try {
+      const { warmHomepagePayloadB: warmHomepagePayloadB2 } = await Promise.resolve().then(() => (init_storefront_home_server(), storefront_home_server_exports));
+      const p = await warmHomepagePayloadB2({ force: true });
+      res.json({
+        ok: true,
+        degraded: p.degraded,
+        bytes: JSON.stringify(p).length,
+        rails: p.rails.length,
+        total: p.total
+      });
+    } catch (err) {
+      console.error("[cron:warm-homepage-b]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
   cronRoute("/warm", async (_req, res) => {
     try {
       const baseUrl2 = process.env["BASE_URL"] ?? "";
@@ -25234,6 +26461,16 @@ function createCronRoutes() {
       } catch (err) {
         console.warn("[cron:warm] homepage payload warm failed:", err);
       }
+      let storefrontBytes = 0;
+      let storefrontRails = 0;
+      try {
+        const { warmHomepagePayloadB: warmHomepagePayloadB2 } = await Promise.resolve().then(() => (init_storefront_home_server(), storefront_home_server_exports));
+        const p = await warmHomepagePayloadB2({ force: false });
+        storefrontBytes = JSON.stringify(p).length;
+        storefrontRails = p.rails.length;
+      } catch (err) {
+        console.warn("[cron:warm] storefront payload warm failed:", err);
+      }
       let liveHandle = null;
       try {
         const { kvGet: kvGet2, KV_KEYS: KV_KEYS2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
@@ -25259,7 +26496,15 @@ function createCronRoutes() {
           })
         );
       }
-      res.json({ ok: true, discoveryProducts: discoveryCount, pagesWarmed, homepageBytes, homepageRails });
+      res.json({
+        ok: true,
+        discoveryProducts: discoveryCount,
+        pagesWarmed,
+        homepageBytes,
+        homepageRails,
+        storefrontBytes,
+        storefrontRails
+      });
     } catch (err) {
       console.error("[cron:warm]", err);
       res.status(500).json({ error: String(err) });
@@ -25272,7 +26517,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq23, sql as sql13 } from "drizzle-orm";
+import { eq as eq24, sql as sql14 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret) return false;
@@ -25312,10 +26557,10 @@ async function handleOrderCreated(order) {
       }
     }).catch((err) => console.error("[webhook] metafield write failed:", err));
     const dealHistoryUpdate = db2.update(dealHistory).set({
-      unitsSold: db2.$count(dealHistory, eq23(dealHistory.sku, lineItem.sku)),
+      unitsSold: db2.$count(dealHistory, eq24(dealHistory.sku, lineItem.sku)),
       totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
       totalProfit: String(profit * lineItem.quantity)
-    }).where(eq23(dealHistory.sku, lineItem.sku)).catch(() => {
+    }).where(eq24(dealHistory.sku, lineItem.sku)).catch(() => {
     });
     await Promise.all([metafieldWrite, dealHistoryUpdate]);
   }));
@@ -25343,7 +26588,7 @@ async function handleOrderCreated(order) {
           await db2.insert(productCopurchase).values({ handleA: a, handleB: b, count: 1 }).onConflictDoUpdate({
             target: [productCopurchase.handleA, productCopurchase.handleB],
             set: {
-              count: sql13`${productCopurchase.count} + 1`,
+              count: sql14`${productCopurchase.count} + 1`,
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });
@@ -25437,11 +26682,24 @@ async function handleOrderCreated(order) {
   try {
     if (order.email) {
       const { trackPlacedOrder: trackPlacedOrder2 } = await Promise.resolve().then(() => (init_klaviyo_server(), klaviyo_server_exports));
+      const attribution = {};
+      const attrMap = {
+        _utm_source: "utm_source",
+        _utm_medium: "utm_medium",
+        _utm_campaign: "utm_campaign",
+        _utm_content: "utm_content",
+        _ref_code: "ref_code"
+      };
+      for (const attr of order.note_attributes ?? []) {
+        const prop = attrMap[attr.name];
+        if (prop && attr.value) attribution[prop] = attr.value;
+      }
       await trackPlacedOrder2(order.email, {
         orderId: String(order.id),
         orderNumber: order.order_number,
         value: parseFloat(order.total_price) || 0,
         currency: order.currency || "USD",
+        ...Object.keys(attribution).length > 0 ? { attribution } : {},
         items: order.line_items.map((li) => ({
           productTitle: li.title,
           ...li.variant_id ? { variantId: String(li.variant_id) } : {},
@@ -25535,7 +26793,7 @@ async function handleReturnsUpdate(payload) {
   if (status === "DECLINED" || status === "CANCELED") {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { returns: returns2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq23(returns2.shopifyReturnId, returnGid));
+    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq24(returns2.shopifyReturnId, returnGid));
     return;
   }
   const terminalSignals = ["CLOSED", "RECEIVED", "PROCESSED"];

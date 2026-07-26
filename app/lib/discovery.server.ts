@@ -601,10 +601,15 @@ interface IndexMemoEntry {
   ts:      number
 }
 
-// L1 TTL — short. This only exists to cut redundant Upstash round-trips of
-// the ~3K-SKU blob within a single warm instance's request burst; KV (24h)
-// and Neon remain the source of truth.
-const L1_TTL_MS = 120_000 // 2 minutes
+// L1 TTL. This cuts redundant round-trips of the ~4K-SKU / ~2.7 MB blob within
+// a warm instance; KV (24h) and Neon remain the source of truth.
+//
+// Was 120s, which was far shorter than an instance's actual lifetime: every two
+// minutes a live instance re-paid a multi-megabyte KV read (or, on a KV miss,
+// a multi-megabyte Neon read) for an index that only ever changes when the
+// 15-minute rebuild cron runs. 10 minutes keeps worst-case staleness inside a
+// single rebuild cycle while removing ~80% of those re-reads.
+const L1_TTL_MS = 600_000 // 10 minutes — under the 15-min rebuild cadence
 
 // Stored on globalThis so it survives Vite HMR module re-evaluation in dev,
 // matching the pattern used by the in-memory KV fallback in kv.server.ts.

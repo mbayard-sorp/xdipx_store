@@ -69,15 +69,99 @@ const _g3 = globalThis as unknown as { __kvMemTimers?: Map<string, ReturnType<ty
 if (!_g3.__kvMemTimers) _g3.__kvMemTimers = new Map()
 const memTimers = _g3.__kvMemTimers
 
-// Throttled warning when a real KV op fails and we degrade to in-memory, so a
-// flaky/unreachable KV degrades gracefully instead of throwing and 500ing the
-// loader that called us. Throttled to avoid flooding logs on a hot path.
+// ─── Degradation reporting ────────────────────────────────────────────────
+// A real KV op that fails degrades to the per-instance in-memory store rather
+// than throwing and 500ing the loader that called us. That graceful fallback
+// is correct, but for a long time it was also *invisible*: the only signal was
+// a throttled console.warn, and handleError swallows server console output in
+// production (see docs — prod errors are only readable in Sentry). The result
+// was a fully quota-exhausted Upstash going unnoticed for weeks while every
+// homepage render silently fell through to the multi-MB Neon backstop.
+//
+// So: still never throw, but always report. Console stays throttled to 60s to
+// avoid flooding a hot path; Sentry gets a rolled-up event every 5 minutes
+// carrying the counts accumulated since the last report, so one event tells
+// you both that KV is degraded and how hard it's being hit.
+
+const CONSOLE_THROTTLE_MS = 60_000
+const SENTRY_THROTTLE_MS = 300_000
+
+/**
+ * Upstash rejects every command once the plan's monthly request limit is hit,
+ * and returns a 400 rather than a network error — indistinguishable from a
+ * transient blip unless you read the message. This is the failure that means
+ * "the cache is not coming back on its own, go upgrade the plan", so it gets
+ * escalated to Sentry `error` while everything else stays `warning`.
+ */
+function isQuotaExhausted(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /max (?:requests|daily requests|request size) limit exceeded|quota/i.test(msg)
+}
+
+/** Degradation counts since process start, by op. Read by /cron/kv-health. */
+const _gCounts = globalThis as unknown as { __kvDegradeCounts?: Map<string, number> }
+if (!_gCounts.__kvDegradeCounts) _gCounts.__kvDegradeCounts = new Map()
+const degradeCounts = _gCounts.__kvDegradeCounts
+
 let _lastKvWarn = 0
+let _lastKvSentry = 0
+/** Counts accumulated since the last Sentry report, cleared on each report. */
+let _sinceLastReport = 0
+let _lastQuotaExhausted = false
+
 function warnKvFallback(op: string, err: unknown): void {
   const now = Date.now()
-  if (now - _lastKvWarn < 60_000) return
-  _lastKvWarn = now
-  console.warn(`[kv] ${op} failed, falling back to in-memory:`, err instanceof Error ? err.message : err)
+  const quota = isQuotaExhausted(err)
+
+  degradeCounts.set(op, (degradeCounts.get(op) ?? 0) + 1)
+  _sinceLastReport += 1
+  _lastQuotaExhausted = quota
+
+  if (now - _lastKvWarn >= CONSOLE_THROTTLE_MS) {
+    _lastKvWarn = now
+    console.warn(`[kv] ${op} failed, falling back to in-memory:`, err instanceof Error ? err.message : err)
+  }
+
+  if (now - _lastKvSentry >= SENTRY_THROTTLE_MS) {
+    const batched = _sinceLastReport
+    _lastKvSentry = now
+    _sinceLastReport = 0
+    // Sentry is imported lazily and fire-and-forget: a static import would pull
+    // @sentry/node (and OpenTelemetry) into the module graph of everything that
+    // touches KV, which is most of the server. Cost is irrelevant here — this
+    // branch runs at most once per 5 minutes.
+    void (async () => {
+      try {
+        const { Sentry } = await import('~/lib/sentry.server')
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+          level: quota ? 'error' : 'warning',
+          tags: {
+            subsystem: 'kv',
+            kv_op: op,
+            kv_quota_exhausted: String(quota),
+          },
+          extra: {
+            degradationsSinceLastReport: batched,
+            degradationsByOpSinceBoot: Object.fromEntries(degradeCounts),
+            note: quota
+              ? 'Upstash is rejecting every command against the plan limit. The cache will NOT recover on its own — upgrade the plan. Every consumer is silently running on a cold per-instance Map until then.'
+              : 'KV op failed and degraded to the per-instance in-memory store. Callers see a cold cache, not an error.',
+          },
+        })
+      } catch { /* reporting must never take down the caller */ }
+    })()
+  }
+}
+
+/**
+ * Snapshot of KV degradation since this instance booted. Empty map = healthy.
+ * Exposed so a healthcheck / admin surface can assert on it instead of relying
+ * on someone noticing the site got slow.
+ */
+export function kvDegradationSnapshot(): { total: number; byOp: Record<string, number>; quotaExhausted: boolean } {
+  let total = 0
+  for (const n of degradeCounts.values()) total += n
+  return { total, byOp: Object.fromEntries(degradeCounts), quotaExhausted: _lastQuotaExhausted }
 }
 
 // ─── In-memory primitives (also the fallback when real KV throws) ─────────

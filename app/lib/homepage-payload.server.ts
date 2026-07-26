@@ -29,7 +29,9 @@ import { getHomepageSections } from '~/lib/sanity.server'
 import { normalizeProductHandles } from '~/lib/product-handles'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
 import type { Product, LeanCardProduct } from '~/types'
-import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock } from '~/types/cms'
+import type { DiscoveryProduct } from '~/types/discovery'
+import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock, EmmaHeroSettings, BlogPostCard } from '~/types/cms'
+import type { SensationMapData } from '~/lib/sensation-map.server'
 
 /**
  * Bump on ANY shape change to `HomepagePayloadA` (mirrors INDEX_VERSION in
@@ -416,4 +418,180 @@ export function reshuffleRailsWithSeed(rails: Rail[], seed: number): Rail[] {
     }
     return { ...rail, items }
   })
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * Variant B — the storefront homepage ("/" once HOME_VARIANT=b).
+ *
+ * Same precompute contract as Variant A above, for the same reason but a
+ * sharper one. `assembleStorefrontHome` used to call `getDiscoveryRails`, which
+ * pulls the ENTIRE discovery index — 4,094 products / ~2.7 MB of JSON — through
+ * KV (or, on a KV miss, out of a Neon JSON column) on every render whose 2-min
+ * in-process memo had expired, purely to rank it down to the ~50 products the
+ * page actually shows. Measured origin TTFB for that path was 2–12s.
+ *
+ * The blob below carries only what the page renders (rails + hero + notebook +
+ * sensation map), which is ~50–100 KB rather than 2.7 MB. The read path never
+ * touches the full index at all.
+ *
+ * The per-bucket rail rotation is NOT baked in: rails are stored at seed 0 and
+ * `hydrateStorefrontPayloadB` (in storefront-home.server.ts) applies the
+ * reshuffle at read time, exactly as Variant A does.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Bump on ANY shape change to `HomepagePayloadB`. See HOMEPAGE_PAYLOAD_VERSION.
+ * b2: added `contentBlocks` (the team's Sanity merchandising surface, folded in
+ *     from PR #322's resolved-not-deferred fix). A b1 blob has no such field, so
+ *     serving one would silently render shell fallbacks everywhere — exactly
+ *     the P0 #322 fixed. The version bump makes every b1 blob a miss.
+ */
+export const HOMEPAGE_PAYLOAD_B_VERSION = 'b2'
+
+/** KV key for the precomputed storefront blob. Versioned. */
+export const HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`
+
+/**
+ * JSON-safe — no Map/Set/Date/undefined anywhere. Stored verbatim in KV and a
+ * Neon JSON column, so the same round-trip invariant as `HomepagePayloadA`
+ * applies.
+ */
+export interface HomepagePayloadB {
+  version: typeof HOMEPAGE_PAYLOAD_B_VERSION
+  variant: 'b'
+  /** Stored at seed 0; the per-bucket reshuffle is applied at read time. */
+  rails: Rail[]
+  total: number
+  /**
+   * The team's `featuredProductHandle` pin, resolved to a full product AT BUILD
+   * TIME. Stored rather than re-resolved because the live path's fallback for an
+   * unrailed handle was `(await getDiscoveryIndex()).find(...)` — the exact
+   * full-index read this precompute exists to eliminate. Null = rotating hero.
+   */
+  pinnedProduct: DiscoveryProduct | null
+  emmaHero: EmmaHeroSettings | null
+  emmaPhotoUrl: string | null
+  emmaPhotoAlt: string | null
+  /**
+   * The team's published Sanity merchandising surface (curated rails, wayfinder
+   * mosaic, Notebook override, couples band), RESOLVED at build time.
+   *
+   * PR #322 established the invariant that this must never reach the component
+   * as an un-awaited promise: a deferred value is streamed after the shell, and
+   * the CDN can only store the bytes flushed with the shell, so published
+   * merchandising reached neither visitors nor crawlers. Storing it on the blob
+   * satisfies that by construction — a precomputed field cannot be pending —
+   * and additionally takes the Sanity round-trip off the request path.
+   *
+   * Freshness is therefore bounded by the warm cadence (~15 min) rather than
+   * per-request, same as `emmaHero`. Admin saves bust both tiers immediately,
+   * and admin sessions bypass the blob entirely via `{ fresh: true }`.
+   */
+  contentBlocks: HomeContentBlocksLean
+  notebookPosts: BlogPostCard[]
+  sensationMap: SensationMapData
+  builtAt: number // epoch ms (number, NOT Date)
+  degraded: boolean // true if discovery rails came back empty during build
+}
+
+/** Throws if the payload would not survive a JSON round-trip. See assertJsonSafe. */
+export function assertJsonSafeB(payload: HomepagePayloadB): void {
+  const round = JSON.parse(JSON.stringify(payload)) as HomepagePayloadB
+  if (!Array.isArray(round.rails)) throw new Error('payloadB.rails not array after JSON round-trip')
+  if (typeof round.builtAt !== 'number') throw new Error('payloadB.builtAt not number after JSON round-trip')
+  if (round.version !== HOMEPAGE_PAYLOAD_B_VERSION) throw new Error('payloadB.version mismatch after JSON round-trip')
+}
+
+/**
+ * Read precedence: KV (L1/L2) -> Neon durable row -> null (caller falls back to
+ * live assembly). Stale versions are treated as a miss. Mirrors
+ * `readHomepagePayloadA`.
+ */
+export async function readHomepagePayloadB(): Promise<HomepagePayloadB | null> {
+  try {
+    const kv = await kvGet<HomepagePayloadB>(HOMEPAGE_PAYLOAD_B_KV_KEY)
+    if (kv && kv.version === HOMEPAGE_PAYLOAD_B_VERSION) return kv
+  } catch (err) {
+    console.warn('[homepage-payload:b] KV read failed, trying Neon:', err)
+  }
+
+  try {
+    const [row] = await db
+      .select()
+      .from(homepagePayload)
+      .where(eq(homepagePayload.variant, 'b'))
+      .limit(1)
+    if (row && row.version === HOMEPAGE_PAYLOAD_B_VERSION && row.payload) {
+      const payload = row.payload as HomepagePayloadB
+      // Re-seed KV so the next read is L2-hot. Fire-and-forget.
+      void kvSet(HOMEPAGE_PAYLOAD_B_KV_KEY, payload, KV_TTL_SECONDS).catch(() => {})
+      return payload
+    }
+  } catch (err) {
+    console.warn('[homepage-payload:b] Neon read failed:', err)
+  }
+
+  return null
+}
+
+/**
+ * Write to BOTH KV and Neon, with the same degraded-clobber guard as Variant A:
+ * a non-forced warm must never replace a good blob with an empty-rails one.
+ */
+export async function writeHomepagePayloadB(
+  payload: HomepagePayloadB,
+  opts: { force?: boolean } = {},
+): Promise<void> {
+  assertJsonSafeB(payload)
+
+  if (payload.degraded && !opts.force) {
+    const existing = await readHomepagePayloadB()
+    if (existing && !existing.degraded) {
+      console.warn('[homepage-payload:b] skipping degraded write over a good blob (use force to override)')
+      return
+    }
+  }
+
+  await kvSet(HOMEPAGE_PAYLOAD_B_KV_KEY, payload, KV_TTL_SECONDS)
+
+  try {
+    await db
+      .insert(homepagePayload)
+      .values({
+        variant: 'b',
+        version: HOMEPAGE_PAYLOAD_B_VERSION,
+        payload,
+        degraded: payload.degraded,
+      })
+      .onConflictDoUpdate({
+        target: [homepagePayload.variant, homepagePayload.version],
+        set: {
+          payload,
+          degraded: payload.degraded,
+          builtAt: new Date(),
+        },
+      })
+  } catch (err) {
+    console.error('[homepage-payload:b] Neon upsert failed (KV still written):', err)
+  }
+}
+
+/** Bust both cache tiers (admin invalidation path). */
+export async function invalidateHomepagePayloadB(): Promise<void> {
+  await kvDel(HOMEPAGE_PAYLOAD_B_KV_KEY)
+}
+
+/**
+ * Fire-and-forget background warm for variant B. Mirrors `triggerHomepageWarm`.
+ * Returns immediately so a cold-miss SSR render is never blocked by the rebuild
+ * it just kicked off.
+ */
+export function triggerHomepageWarmB(): void {
+  const baseUrl = process.env['BASE_URL']
+  const cronSecret = process.env['CRON_SECRET']
+  if (!baseUrl || !cronSecret) return
+  void fetch(`${baseUrl}/cron/warm-homepage-b`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${cronSecret}` },
+  }).catch(() => {})
 }

@@ -770,6 +770,30 @@ export function createCronRoutes() {
     }
   })
 
+  /**
+   * GET|POST /cron/warm-homepage-b
+   * Variant B (storefront) equivalent of /warm-homepage. Rebuilds the
+   * precomputed storefront blob so `assembleStorefrontHome` reads ~50–100 KB
+   * instead of pulling the full 4K-SKU / 2.7 MB discovery index on every render.
+   * Standalone for on-demand / admin use; also folded into /warm Step 1.6.
+   */
+  cronRoute('/warm-homepage-b', async (_req, res) => {
+    try {
+      const { warmHomepagePayloadB } = await import('../app/lib/storefront-home.server.js')
+      const p = await warmHomepagePayloadB({ force: true })
+      res.json({
+        ok: true,
+        degraded: p.degraded,
+        bytes: JSON.stringify(p).length,
+        rails: p.rails.length,
+        total: p.total,
+      })
+    } catch (err) {
+      console.error('[cron:warm-homepage-b]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
   cronRoute('/warm', async (_req, res) => {
     try {
       const baseUrl = process.env['BASE_URL'] ?? ''
@@ -808,6 +832,20 @@ export function createCronRoutes() {
         console.warn('[cron:warm] homepage payload warm failed:', err)
       }
 
+      // Step 1.6: same for the storefront (variant B) blob — the one `/` serves
+      // once HOME_VARIANT=b. Without this the storefront falls back to a full
+      // live assembly, which reads the entire 2.7 MB discovery index.
+      let storefrontBytes = 0
+      let storefrontRails = 0
+      try {
+        const { warmHomepagePayloadB } = await import('../app/lib/storefront-home.server.js')
+        const p = await warmHomepagePayloadB({ force: false })
+        storefrontBytes = JSON.stringify(p).length
+        storefrontRails = p.rails.length
+      } catch (err) {
+        console.warn('[cron:warm] storefront payload warm failed:', err)
+      }
+
       // Step 2: resolve the current live deal handle from KV (the rotator
       // maintains KV_KEYS.liveDealHandle; deal_history has no handle column).
       let liveHandle: string | null = null
@@ -844,7 +882,13 @@ export function createCronRoutes() {
         )
       }
 
-      res.json({ ok: true, discoveryProducts: discoveryCount, pagesWarmed, homepageBytes, homepageRails })
+      res.json({
+        ok: true,
+        discoveryProducts: discoveryCount,
+        pagesWarmed,
+        homepageBytes, homepageRails,
+        storefrontBytes, storefrontRails,
+      })
     } catch (err) {
       console.error('[cron:warm]', err)
       res.status(500).json({ error: String(err) })

@@ -1,6 +1,7 @@
 {
   "version": 2,
   "buildCommand": "npm run build",
+  "fluid": true,
   "builds": [
     {
       "src": "server/vercel-entry.mjs",

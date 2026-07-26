@@ -17,7 +17,10 @@ import type { AdminProductImage } from '~/lib/shopify.server'
 import { getRailDraftsForDeal } from '~/lib/sanity.server'
 import { enqueueFieldRegenJob } from '~/lib/field-regen-runner.server'
 import { getPinnedAccessoryIds, setPinnedAccessoryIds } from '~/lib/kv.server'
-import { invalidateHomepagePayloadA, triggerHomepageWarm } from '~/lib/homepage-payload.server'
+import {
+  invalidateHomepagePayloadA, triggerHomepageWarm,
+  invalidateHomepagePayloadB, triggerHomepageWarmB,
+} from '~/lib/homepage-payload.server'
 import { ImageManager } from '~/components/admin/ImageManager'
 import { PricingPanel } from '~/components/admin/PricingPanel'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
@@ -225,15 +228,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // ─── Action ──────────────────────────────────────────────────────────────
 
 /**
- * Bust the precomputed Variant A homepage payload (KV L2) and kick a
- * fire-and-forget rebuild so anonymous / bot visitors see fresh content within
- * seconds. Admins already get the live no-store homepage path regardless. The
- * 15-min /cron/warm is the eventual floor if the async warm doesn't land.
+ * Bust the precomputed homepage payloads (KV L2) and kick fire-and-forget
+ * rebuilds so anonymous / bot visitors see fresh content within seconds.
+ * Admins already get the live no-store homepage path regardless. The 15-min
+ * /cron/warm is the eventual floor if the async warms don't land.
+ *
+ * Both variants are busted rather than just the served one: which variant `/`
+ * resolves to is a runtime decision (env + Sanity), and leaving the other
+ * variant's blob stale means a variant flip serves pre-edit content.
  */
 async function bustHomepagePayload(): Promise<void> {
   try {
-    await invalidateHomepagePayloadA()
+    await Promise.all([
+      invalidateHomepagePayloadA(),
+      invalidateHomepagePayloadB(),
+    ])
     triggerHomepageWarm()
+    triggerHomepageWarmB()
   } catch (err) {
     console.error('[admin.deals] homepage payload bust failed (non-blocking):', err)
   }
