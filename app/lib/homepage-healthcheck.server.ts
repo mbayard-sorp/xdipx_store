@@ -22,7 +22,9 @@ import {
   getHomeConfig,
   invalidateCmsCache,
 } from '~/lib/sanity.server'
-import { warmHomepagePayloadA, invalidateHomepagePayloadA } from '~/lib/homepage-payload.server'
+import {
+  warmHomepagePayloadA, invalidateHomepagePayloadA, invalidateHomepagePayloadB,
+} from '~/lib/homepage-payload.server'
 
 const LAST_GOOD_KEY = 'homepage:healthcheck:lastgood'
 const PATHS = ['/', '/discover']
@@ -269,15 +271,22 @@ export async function runHomepageHealthcheck(): Promise<HomepageHealthResult> {
         // Sanity doc), then restore and re-warm the payload the live variant
         // actually serves. (The edge CDN is still eventually-consistent —
         // ~60s — there's no purge API to force sooner.)
-        await invalidateHomepagePayloadA().catch(() => {})
+        await Promise.all([
+          invalidateHomepagePayloadA().catch(() => {}),
+          invalidateHomepagePayloadB().catch(() => {}),
+        ])
         invalidateCmsCache()
         await restoreHomepageDoc(lastGood as Record<string, unknown>)
         const servedVariant = await activeServedVariant()
         if (servedVariant === 'b') {
-          // Variant b has no precomputed payload: it assembles from the
-          // discovery index plus the Sanity reads invalidated above, so the
-          // next request self-warms against the rolled-back doc.
-          invalidateCmsCache()
+          // Variant b is precomputed too now, so a rollback has to rebuild its
+          // blob against the restored doc. Without this the storefront would
+          // keep serving the bad content out of KV/Neon until the next warm,
+          // which is exactly the window the rollback exists to close.
+          const { warmHomepagePayloadB } = await import('~/lib/storefront-home.server')
+          await warmHomepagePayloadB({ force: true }).catch((e) =>
+            console.error('[homepage-healthcheck] storefront payload rewarm failed', e),
+          )
         } else {
           await warmHomepagePayloadA({ force: true }).catch((e) =>
             console.error('[homepage-healthcheck] payload rewarm failed', e),

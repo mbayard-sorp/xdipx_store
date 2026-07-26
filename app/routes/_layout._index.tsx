@@ -147,13 +147,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // 'legacy'/'a' until HOME_VARIANT=b (or Sanity activeVariant='b') flips it on.
   if (variant === 'b') {
     const adminUser = await getAdminUser(request).catch(() => null)
-    const value = { ...await assembleStorefrontHome(), seo }
+    // Admins bypass the precomputed blob entirely and pay the full live
+    // assembly, so a Sanity/settings edit is visible on the next reload rather
+    // than after the blob's next warm. This is the data-freshness half of the
+    // same contract ADMIN_BYPASS_HEADERS enforces at the cache layer — without
+    // it an admin would get no-store HTML built from a blob up to 15 min old.
+    const value = { ...await assembleStorefrontHome({ fresh: !!adminUser }), seo }
     if (adminUser) return data(value, { headers: ADMIN_BYPASS_HEADERS })
     // Cold KV / degraded assembly (no rails, no featured product) — never let
     // the edge cache pin a blank storefront for the next window.
     const isDegraded = value.rails.length === 0 && value.featured.length === 0
     if (isDegraded) return data(value, { headers: DEGRADED_NO_STORE_HEADERS })
-    // Anonymous, non-degraded render: edge-cache for 300s (see
+    // Anonymous, non-degraded render: edge-cache (see
     // STOREFRONT_EDGE_CACHE_HEADERS) so real visitors hit the CDN instead of
     // paying full SSR TTFB on every request. `headers` (below) forwards both
     // Cache-Control and Vercel-CDN-Cache-Control from these loader headers.
