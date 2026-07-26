@@ -46,6 +46,31 @@ export function floorLastmod(lastmod: string | undefined, floor: string): string
   return !lastmod || lastmod < floor ? floor : lastmod
 }
 
+/**
+ * Whether a "this URL is dead" verdict is solid enough to drop the URL from
+ * the sitemap. Only if Google saw it *after* RECRAWL_EPOCH.
+ *
+ * Checked against the live site: of the URLs holding a pre-fix dead verdict,
+ * every Soft 404 (11/11) and every Server error (6/6) returns 200 today. They
+ * are artifacts of the same May outage that produced the bogus noindex
+ * verdicts, not dead pages. Only hard 404s crawled after the fix were
+ * uniformly dead (12/12), so that is the one combination we trust; everything
+ * else is stale evidence and gets the recrawl lastmod floor instead.
+ *
+ * Erring this way is deliberate. Submitting a handful of stale 404s costs a
+ * little crawl budget; dropping a live category page from the sitemap costs it
+ * its only submission path. Pre-fix verdicts self-correct — the next sweep
+ * re-inspects them, and a genuinely dead URL earns a post-fix verdict and is
+ * suppressed on the following build.
+ */
+export function isTrustworthyDeadVerdict(coverageState: string, lastCrawl: Date | string | null): boolean {
+  if (coverageState !== 'Not found (404)' || !lastCrawl) return false
+  const crawled = lastCrawl instanceof Date
+    ? lastCrawl.toISOString().slice(0, 10)
+    : String(lastCrawl).slice(0, 10)
+  return crawled >= RECRAWL_EPOCH
+}
+
 /** Drop dead URLs and floor the lastmod of URLs holding a stale verdict. */
 export function applyHealth(urls: SitemapUrl[], health: UrlHealth): SitemapUrl[] {
   const out: SitemapUrl[] = []

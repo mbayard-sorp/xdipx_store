@@ -18626,7 +18626,7 @@ var init_gsc_server = __esm({
 // app/lib/gsc-index.server.ts
 var gsc_index_server_exports = {};
 __export(gsc_index_server_exports, {
-  SUPPRESSED_STATES: () => SUPPRESSED_STATES,
+  DEAD_VERDICT_STATES: () => DEAD_VERDICT_STATES,
   classifyCoverage: () => classifyCoverage,
   fetchSitemapEntries: () => fetchSitemapEntries,
   parseSitemapIndex: () => parseSitemapIndex,
@@ -18729,7 +18729,7 @@ async function runGscIndexSweep(opts = {}) {
     WHERE in_sitemap AND NOT (url = ANY(${urls}::text[]))`;
   const batch = await sql8`
     SELECT url, coverage_state, verdict FROM gsc_url_inspections
-    WHERE in_sitemap OR coverage_state = ANY(${SUPPRESSED_STATES}::text[])
+    WHERE in_sitemap OR coverage_state = ANY(${DEAD_VERDICT_STATES}::text[])
     ORDER BY last_inspected_at ASC NULLS FIRST, first_seen_at ASC
     LIMIT ${budget}`;
   let inspected = 0;
@@ -18832,14 +18832,14 @@ async function runGscIndexSweep(opts = {}) {
     }
   };
 }
-var sql8, SUPPRESSED_STATES, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
+var sql8, DEAD_VERDICT_STATES, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
 var init_gsc_index_server = __esm({
   "app/lib/gsc-index.server.ts"() {
     "use strict";
     init_gsc_server();
     init_kv_server();
     sql8 = neon4(process.env["DATABASE_URL"]);
-    SUPPRESSED_STATES = ["Not found (404)", "Soft 404", "Server error (5xx)"];
+    DEAD_VERDICT_STATES = ["Not found (404)", "Soft 404", "Server error (5xx)"];
     INSPECT_URL = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
     DAILY_QUOTA_CEILING = 1900;
     DEFAULT_RUN_BUDGET = 200;
