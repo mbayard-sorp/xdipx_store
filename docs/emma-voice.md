@@ -46,7 +46,9 @@ The register is explicit-indulgent, a 9 on the intensity dial below. Every piece
 
 ### The intensity dial
 
-Copy intensity runs on a 1-10 scale. Owned channels (site product copy, email, opted-in SMS, social drafts) target **9, indulgent flavor**. The ceiling is 10 and it is hard: 10 never ships.
+Copy intensity runs on a 1-10 scale. Owned channels (site product copy, email, opted-in SMS) target **9, indulgent flavor**. The ceiling is 10 and it is hard: 10 never ships.
+
+Social platforms are **not** owned channels. We rent them, the landlord writes the rules, and a removal or ban costs the whole audience. What ships there is capped by the social and LinkedIn addenda below, never by the owned-channel target.
 
 - 1-2 clinical: "Rechargeable clitoral stimulator with 10 settings." (Spec sheets and feature bullets only.)
 - 3-4 plain-warm: mechanism and education register, no charge. (Paid ads, support, transactional email.)
@@ -171,6 +173,54 @@ Include the addendum matching the surface, on top of the core.
 - All core rules apply, especially no em dashes and no countdowns or urgency.
 
 <!-- addendum:blog:end -->
+<!-- addendum:social:start -->
+
+### Social platforms (Instagram, TikTok, X)
+
+Platform channels are rented, not owned. **Platform policy binds on top of this charter and wins
+every conflict**, including against this addendum: where a platform's live rules are stricter than
+anything written here, the platform's rules are the ceiling. `docs/ads-policy.md` §Creative and
+§Organic social apply in full. LinkedIn has its own addendum below and is not covered here.
+
+**What actually gets a post removed.** Meta's Restricted Goods and Services standard removes
+content that promotes the use of, or attempts to sell, adult products. That is an act of
+*commerce*, not an act of raciness: a tasteful product photo with a clean caption is removable if
+the post is selling. Nudity and sexually explicit language are a separate, stricter layer on top.
+Draft against both, and understand which one you are avoiding.
+
+- **The account is a publication, not a shop.** Posts are editorial and educational: category
+  explainers, materials and body-safety, care and cleaning, questions people are too embarrassed
+  to ask, the culture around pleasure. Products appear as subjects of the piece, never as offers.
+- **Register 4-5 on Instagram and TikTok** (education and plain-warm), **6-7 on X**, whose organic
+  adult-content policy is genuinely more permissive and where posts covered by it must be labeled
+  per X's own rules. The desire-forward register, layer 2 in the core (sensation, arousal,
+  release), does not run on any of these platforms. Empathy layer stays fully on: this is where
+  the shame-free voice does its work.
+- **Never sell in the post.** No prices, no discounts, no promo codes, no "shop", no site CTAs
+  (the whitelist is for site and email; a CTA in a caption is the sale attempt that gets the post
+  pulled). Commerce goes post → profile → link in bio → site. The caption never points at a PDP.
+- **Name the product, do not sell the sensation.** A product may be identified, shown, and
+  explained. What it does to a body is off-platform: no act naming, no orgasm or arousal
+  description, no "you'll feel". Say what a thing *is* and who it suits, not what it will do to
+  the reader.
+- **Vocabulary is moderated by machine, so it reads words and not intent.** Out on these
+  platforms: explicit act naming, orgasm/arousal language, crude slang, emoji-anatomy of any kind
+  (peach, eggplant, droplets), and anything that reads as solicitation. "Sex toy", "sexual
+  wellness", and plain anatomy in an educational sentence stay fine and are the point.
+- **Imagery is stricter than the core's register.** Product as object, on clean editorial ground.
+  Beyond the core's hard lines: never in a hand, never on or near a body, never on a bed with a
+  person in frame, no simulated use, no fluid or lube texture, no lips or tongue in frame. The
+  editorial still-life look is the compliance strategy, not a style preference.
+- **Alt text, hashtags, and on-image text are moderated copy too** and follow every rule above. No
+  reclaimed or coded tag sets to route around a blocked term: evasion is its own violation and
+  risks the account rather than the post.
+- **Emma may speak here**, at this register, under every core rule (no lived experience above
+  all). She is a guide explaining something, never a saleswoman.
+- **Assume distribution is capped.** Compliant sexual-wellness accounts still sit outside
+  recommendations and default Sensitive Content Control. Draft for the followers who already
+  chose us and for the email list the post can earn, not for reach.
+
+<!-- addendum:social:end -->
 <!-- addendum:linkedin:start -->
 
 ### LinkedIn (industry authority posts)

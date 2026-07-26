@@ -26,14 +26,17 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 
 ## Step 2 — Load doctrine + context (data only)
 
-1. `docs/emma-voice.md` + social addendum (mandatory, before any words). Missing → STOP and report.
-2. `docs/store-team/mission-brief.md`; the strategy brief (`GET /api/team/brief`).
-3. Calendar (`GET /api/team/calendar`), current featured products/deals.
-4. Today's quota: `POST /api/team/social-post {"op":"config"}` → per-platform posts/day
+1. `docs/emma-voice.md` + the **social addendum** (mandatory, before any words), or the LinkedIn
+   addendum for that lane. Missing → STOP and report.
+2. `docs/ads-policy.md` §Organic social + §Creative (mandatory). These bind organic drafts, not
+   just paid, and the platform's live rules outrank both when they are stricter.
+3. `docs/store-team/mission-brief.md`; the strategy brief (`GET /api/team/brief`).
+4. Calendar (`GET /api/team/calendar`), current featured products/deals.
+5. Today's quota: `POST /api/team/social-post {"op":"config"}` → per-platform posts/day
    (`social_freq_*`; 0 = skip that platform entirely).
-5. Review outcomes: `POST /api/team/social-post {"op":"list"}` — `reviewStatus`, `feedback`, and
+6. Review outcomes: `POST /api/team/social-post {"op":"list"}` — `reviewStatus`, `feedback`, and
    `editedText` per row are the owner's verdicts on your last drafts.
-6. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
+7. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
    `*[_type=="researchBrief" && status=="pending" && targetPlatform=="linkedin"]` — the weekly
    adult-business-researcher fills this queue (`docs/store-team/routine-research-weekly.md`).
 
@@ -54,8 +57,9 @@ have) → say so honestly in the run summary, never silently drop it.
 ## Step 3 — Draft (≤6 per run, reworks included)
 
 Draft counts come from the Step 2 config — up to `social_freq_<platform>` new posts per platform,
-minus any reworks already written for that platform today. Platform-appropriate, product-first,
-fresh language every time. X drafts fit 280 chars; Instagram and TikTok drafts are posted manually
+minus any reworks already written for that platform today. Platform-appropriate, **editorial-first**
+(not product-first: on Instagram and TikTok a post that reads as an offer is removable under Meta's
+Restricted Goods standard regardless of how clean the image is), fresh language every time. X drafts fit 280 chars; Instagram and TikTok drafts are posted manually
 by the owner once approved. At most one promo-angle post per run, and only referencing
 owner-approved promo codes. Propose a `scheduledFor` date for every draft (default: tomorrow) so
 the Studio's calendar strip populates.
@@ -71,11 +75,33 @@ the Studio's calendar strip populates.
   `social_posts` id. One post per brief.
 - LinkedIn drafts count toward the ≤6 run cap like any other platform.
 
-## Step 4 — Voice gate (mandatory)
+## Step 4 — Two gates, both mandatory
 
-Every draft through `emma-empathy-reviewer` to a clean PASS. BLOCK = drop the draft. LinkedIn
-drafts are gated against the charter's LinkedIn addendum (brand byline, industry-first,
-professional register), not the product-copy register.
+A draft must clear **both**. They ask different questions and a draft can sail through one while
+failing the other: a flawless register-9 Emma line is exactly the caption that gets an Instagram
+post pulled.
+
+**4a — Voice gate.** Every draft through `emma-empathy-reviewer` to a clean PASS. BLOCK = drop the
+draft. Gate Instagram/TikTok/X drafts against the **social addendum**, LinkedIn drafts against the
+**LinkedIn addendum** (brand byline, industry-first, professional register). Neither lane is gated
+against the owned-channel product-copy register.
+
+**4b — Platform-policy gate.** Self-check every draft against `docs/ads-policy.md` §Organic social
+and §Creative, and record the verdict in the draft's event summary. Any single "yes" is a BLOCK,
+and a blocked draft is rewritten or dropped, never softened until it squeaks past:
+
+1. Does the post attempt a sale? Price, discount, promo code, shop CTA, or a caption pointing at a
+   PDP. (This is the one that removed our first Instagram post's category of content.)
+2. Does it describe what the product does to a body? Act naming, arousal, orgasm, "you'll feel".
+3. Does the image show product in a hand, on or near a body, in use, on a bed with a person, or
+   with fluid/lube texture?
+4. Does the caption, alt text, on-image text, or any hashtag carry explicit vocabulary, crude
+   slang, or emoji-anatomy?
+5. Is anything in it coded to slip past a filter? Algospeak, character substitution, reclaimed
+   tags. Evasion risks the account, not just the post.
+
+A draft that only survives by disguising what it is fails this gate by definition. When a call is
+genuinely close, drop it and say so in the run summary: one post is never worth the account.
 
 ## Step 5 — Imagery (every visual platform draft ships with a real asset)
 
@@ -83,6 +109,9 @@ An Instagram or TikTok draft **must carry at least one `mediaUrls` entry** — t
 image and caption together; a caption alone is an incomplete draft. Ask `media-manager` first for
 an existing Shopify Files / Sanity asset (reuse-first); when nothing genuinely fits, request one
 generation (1:1 for Instagram feed, 9:16 for TikTok), re-checking the gate before each generation.
+Every asset on an Instagram or TikTok draft is **product-as-object on clean editorial ground** and
+must clear Step 4b question 3 before it ships: the core charter's imagery register is the floor
+here, and the social addendum's extra hard lines are the ceiling.
 If the gate has no image budget left, ship the draft with the best reusable asset available and
 note the ideal asset in the run summary. Video is produced by the video team (video-producer +
 the video_jobs pipeline), never improvised here: approved videos arrive in your world as
