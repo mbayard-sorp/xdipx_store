@@ -187,6 +187,39 @@ amber background, no gradient wall, no colored backdrop" to the negative prompt 
 shared negative list's "no gradient backgrounds" alone was not enough to stop the model reading
 "golden-hour" as a colored wall wash).
 
+Womanizer Classic 2 (`womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator`),
+comparisons category, archetype B (color-block still) single-product fallback for a two-product
+comparison post — the pipeline's Kontext path only accepts one `--ref-image`/`image_url`, so a true
+side-by-side with the FemmeFunn Ultra Bullet (the post's other embed) was not feasible without
+inventing a fake lookalike second product; per the brief's explicit fallback ("If a two-product
+frame is not feasible, feature the Womanizer Classic 2 alone") went single-subject. Flat solid
+plum-soft (#F3E8FB) seamless backdrop (the comparisons-category accent, doubling as ground-lock
+compliance), product large and centered/left-of-center for a title quiet-zone, bright even studio
+light →
+`image-c0c5b043c9eec7f11cbdb971aca5f6d0a026568c-1184x880-jpg` (post:
+`air-pulse-toy-vs-vibrator-difference`). First pass with "warm high-key daylight falling softly
+from one side" + a plain color-slot mention produced a **gradient/two-tone wash** background on
+both candidates (magenta-to-pink vertical gradient on one; a graphic diagonal-triangle color-block
+pattern on the other) — same reject class as the "100 Questions" gradient-wall failure below, just
+in plum/pink instead of orange. Fix (repeats the documented pattern): drop directional "daylight
+falling from one side" language entirely, replace with "soft even studio light, no strong
+directional beam, no dramatic shadow shapes," and state the backdrop requirement in ALL CAPS as
+"ONE FLAT SOLID UNIFORM color FILLING THE ENTIRE BACKDROP... NO GRADIENT, NO COLOR WASH, NO
+DIAGONAL SHAPES, NO TRIANGLES, NO TWO-TONE SPLIT, NO DARKER PATCH." Second pass with that fix
+produced two clean flat-backdrop candidates; both passed the vision gate (undistorted curved
+product shape matching the reference, no hand-anatomy risk since no hand in frame, high contrast
+at thumbnail size) — picked the one with more negative space to one side for the headline quiet
+zone.
+
+**Rejects (this run, round 1):** "high-key daylight falling softly from one side" as a light
+descriptor, even with an explicit backdrop color slot, reliably invites FLUX Kontext to render a
+directional gradient or a graphic color-block pattern instead of a flat seamless tint — treat this
+as a standing rule for this scaffold, not a one-off: always pair a named ground-lock color with
+"soft EVEN studio light" + the explicit flat-solid-backdrop ALL-CAPS clause above, never
+"daylight falling from one side" when the ask is a flat tinted ground (reserve directional daylight
+language for archetype C in-situ scenes where a gradient/shadow reads as natural, not for B
+color-block stills).
+
 **Tooling gotcha (not a prompt reject, a call-site bug):** on the `naturals-h2o` run, calling
 `generateImage()` directly (not through `gen-notebook-art.ts`, which has no `hero` surface) with
 `imageSize: { width: 1200, height: 900 }` silently produced a 16:9-ish 1392×752 frame — the
