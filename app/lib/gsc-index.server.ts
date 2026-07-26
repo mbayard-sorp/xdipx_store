@@ -22,6 +22,14 @@ import { kvGet, kvIncrBy } from '~/lib/kv.server'
 
 const sql = neon(process.env['DATABASE_URL']!)
 
+/**
+ * Coverage states that mean "Google could not fetch a real page here". The
+ * sitemap builder drops these URLs (submitting known-dead URLs burns crawl
+ * budget and erodes sitemap trust) and this sweep keeps re-inspecting them so
+ * the suppression can lift itself when a URL recovers.
+ */
+export const SUPPRESSED_STATES = ['Not found (404)', 'Soft 404', 'Server error (5xx)']
+
 const INSPECT_URL = 'https://searchconsole.googleapis.com/v1/urlInspection/index:inspect'
 const DAILY_QUOTA_CEILING = 1900
 const DEFAULT_RUN_BUDGET = 200
@@ -45,6 +53,48 @@ export function parseSitemapUrls(xml: string): SitemapEntry[] {
       url: loc,
       lastmod: block.match(/<lastmod>\s*([^<]+?)\s*<\/lastmod>/)?.[1] ?? null,
     })
+  }
+  return entries
+}
+
+/** Extract child sitemap URLs from a <sitemapindex> document. */
+export function parseSitemapIndex(xml: string): string[] {
+  const locs: string[] = []
+  const seen = new Set<string>()
+  const blocks = xml.match(/<sitemap>[\s\S]*?<\/sitemap>/g) ?? []
+  for (const block of blocks) {
+    const loc = block.match(/<loc>\s*([^<]+?)\s*<\/loc>/)?.[1]
+    if (!loc || seen.has(loc)) continue
+    seen.add(loc)
+    locs.push(loc)
+  }
+  return locs
+}
+
+/**
+ * Fetch the sitemap and, when it is an index, every segment it points at.
+ * /sitemap.xml became an index when the flat urlset was split by section, so
+ * the sweep has to follow one level down or it would see ~6 URLs and mark the
+ * entire catalog absent.
+ */
+export async function fetchSitemapEntries(sitemapUrl: string | URL): Promise<SitemapEntry[]> {
+  const res = await fetch(sitemapUrl)
+  if (!res.ok) throw new Error(`sitemap fetch failed: ${res.status}`)
+  const xml = await res.text()
+
+  const children = parseSitemapIndex(xml)
+  if (children.length === 0) return parseSitemapUrls(xml)
+
+  const entries: SitemapEntry[] = []
+  const seen = new Set<string>()
+  for (const child of children) {
+    const childRes = await fetch(child)
+    if (!childRes.ok) throw new Error(`sitemap segment fetch failed (${child}): ${childRes.status}`)
+    for (const entry of parseSitemapUrls(await childRes.text())) {
+      if (seen.has(entry.url)) continue
+      seen.add(entry.url)
+      entries.push(entry)
+    }
   }
   return entries
 }
@@ -140,9 +190,7 @@ export async function runGscIndexSweep(opts: { budget?: number } = {}): Promise<
 
   // ── Refresh the sitemap URL set ───────────────────────────────────────────
   const sitemapBase = siteUrl.startsWith('http') ? siteUrl : 'https://xdipx.com/'
-  const sitemapRes = await fetch(new URL('sitemap.xml', sitemapBase))
-  if (!sitemapRes.ok) throw new Error(`sitemap fetch failed: ${sitemapRes.status}`)
-  const entries = parseSitemapUrls(await sitemapRes.text())
+  const entries = await fetchSitemapEntries(new URL('sitemap.xml', sitemapBase))
   if (entries.length === 0) throw new Error('sitemap parsed to zero URLs; refusing to flag everything absent')
 
   const urls = entries.map(e => e.url)
@@ -157,9 +205,14 @@ export async function runGscIndexSweep(opts: { budget?: number } = {}): Promise<
     WHERE in_sitemap AND NOT (url = ANY(${urls}::text[]))`
 
   // ── Pick the batch: never-inspected first, then stalest ───────────────────
+  // Dead-state URLs are deliberately kept in the rotation even though the
+  // sitemap builder suppresses them (see sitemap.server.ts). Without this,
+  // suppression would be one-way: a suppressed URL leaves the sitemap, stops
+  // being inspected, and its 404 verdict freezes forever — so a product that
+  // comes back could never re-enter the sitemap.
   const batch = await sql`
     SELECT url, coverage_state, verdict FROM gsc_url_inspections
-    WHERE in_sitemap
+    WHERE in_sitemap OR coverage_state = ANY(${SUPPRESSED_STATES}::text[])
     ORDER BY last_inspected_at ASC NULLS FIRST, first_seen_at ASC
     LIMIT ${budget}` as unknown as BatchRow[]
 

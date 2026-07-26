@@ -18626,7 +18626,10 @@ var init_gsc_server = __esm({
 // app/lib/gsc-index.server.ts
 var gsc_index_server_exports = {};
 __export(gsc_index_server_exports, {
+  SUPPRESSED_STATES: () => SUPPRESSED_STATES,
   classifyCoverage: () => classifyCoverage,
+  fetchSitemapEntries: () => fetchSitemapEntries,
+  parseSitemapIndex: () => parseSitemapIndex,
   parseSitemapUrls: () => parseSitemapUrls,
   runGscIndexSweep: () => runGscIndexSweep
 });
@@ -18643,6 +18646,37 @@ function parseSitemapUrls(xml) {
       url: loc,
       lastmod: block.match(/<lastmod>\s*([^<]+?)\s*<\/lastmod>/)?.[1] ?? null
     });
+  }
+  return entries;
+}
+function parseSitemapIndex(xml) {
+  const locs = [];
+  const seen = /* @__PURE__ */ new Set();
+  const blocks = xml.match(/<sitemap>[\s\S]*?<\/sitemap>/g) ?? [];
+  for (const block of blocks) {
+    const loc = block.match(/<loc>\s*([^<]+?)\s*<\/loc>/)?.[1];
+    if (!loc || seen.has(loc)) continue;
+    seen.add(loc);
+    locs.push(loc);
+  }
+  return locs;
+}
+async function fetchSitemapEntries(sitemapUrl) {
+  const res = await fetch(sitemapUrl);
+  if (!res.ok) throw new Error(`sitemap fetch failed: ${res.status}`);
+  const xml = await res.text();
+  const children = parseSitemapIndex(xml);
+  if (children.length === 0) return parseSitemapUrls(xml);
+  const entries = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const child of children) {
+    const childRes = await fetch(child);
+    if (!childRes.ok) throw new Error(`sitemap segment fetch failed (${child}): ${childRes.status}`);
+    for (const entry of parseSitemapUrls(await childRes.text())) {
+      if (seen.has(entry.url)) continue;
+      seen.add(entry.url);
+      entries.push(entry);
+    }
   }
   return entries;
 }
@@ -18681,9 +18715,7 @@ async function runGscIndexSweep(opts = {}) {
   const budget = Math.max(0, Math.min(requested, DAILY_QUOTA_CEILING - used));
   if (budget === 0) return { skipped: `daily inspection quota ceiling reached (${used}/${DAILY_QUOTA_CEILING})` };
   const sitemapBase = siteUrl.startsWith("http") ? siteUrl : "https://xdipx.com/";
-  const sitemapRes = await fetch(new URL("sitemap.xml", sitemapBase));
-  if (!sitemapRes.ok) throw new Error(`sitemap fetch failed: ${sitemapRes.status}`);
-  const entries = parseSitemapUrls(await sitemapRes.text());
+  const entries = await fetchSitemapEntries(new URL("sitemap.xml", sitemapBase));
   if (entries.length === 0) throw new Error("sitemap parsed to zero URLs; refusing to flag everything absent");
   const urls = entries.map((e) => e.url);
   const lastmods = entries.map((e) => e.lastmod);
@@ -18697,7 +18729,7 @@ async function runGscIndexSweep(opts = {}) {
     WHERE in_sitemap AND NOT (url = ANY(${urls}::text[]))`;
   const batch = await sql8`
     SELECT url, coverage_state, verdict FROM gsc_url_inspections
-    WHERE in_sitemap
+    WHERE in_sitemap OR coverage_state = ANY(${SUPPRESSED_STATES}::text[])
     ORDER BY last_inspected_at ASC NULLS FIRST, first_seen_at ASC
     LIMIT ${budget}`;
   let inspected = 0;
@@ -18800,13 +18832,14 @@ async function runGscIndexSweep(opts = {}) {
     }
   };
 }
-var sql8, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
+var sql8, SUPPRESSED_STATES, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
 var init_gsc_index_server = __esm({
   "app/lib/gsc-index.server.ts"() {
     "use strict";
     init_gsc_server();
     init_kv_server();
     sql8 = neon4(process.env["DATABASE_URL"]);
+    SUPPRESSED_STATES = ["Not found (404)", "Soft 404", "Server error (5xx)"];
     INSPECT_URL = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
     DAILY_QUOTA_CEILING = 1900;
     DEFAULT_RUN_BUDGET = 200;
