@@ -200,7 +200,7 @@ export const SCENE_KIT: SceneKitScene[] = [
  * them via {op:'config'} to size each run's per-platform draft quota. Only x
  * has live plumbing; instagram/tiktok drafts are posted manually.
  */
-export const SOCIAL_PLATFORMS = ['x', 'instagram', 'tiktok', 'facebook', 'youtube'] as const
+export const SOCIAL_PLATFORMS = ['x', 'instagram', 'tiktok', 'facebook', 'youtube', 'linkedin'] as const
 export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number]
 
 export function socialFreqKey(platform: SocialPlatform): string {
@@ -213,6 +213,7 @@ export const SOCIAL_FREQ_DEFAULTS: Record<SocialPlatform, number> = {
   tiktok: 1,
   facebook: 0,
   youtube: 0, // video-only platform; drafts come from the video pipeline, not the daily text routine
+  linkedin: 0, // authority posts drafted only from pending researchBrief docs (brand voice, not Emma); owner opts in
 }
 
 /** Review lifecycle for social drafts (social_posts.review_status). */

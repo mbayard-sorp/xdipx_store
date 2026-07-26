@@ -33,6 +33,9 @@ curl -s -X POST "$BASE_URL/api/team/run" \
    (`social_freq_*`; 0 = skip that platform entirely).
 5. Review outcomes: `POST /api/team/social-post {"op":"list"}` — `reviewStatus`, `feedback`, and
    `editedText` per row are the owner's verdicts on your last drafts.
+6. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
+   `*[_type=="researchBrief" && status=="pending" && targetPlatform=="linkedin"]` — the weekly
+   adult-business-researcher fills this queue (`docs/store-team/routine-research-weekly.md`).
 
 ## Step 2.5 — Rework pass (before any new drafting)
 
@@ -57,9 +60,22 @@ by the owner once approved. At most one promo-angle post per run, and only refer
 owner-approved promo codes. Propose a `scheduledFor` date for every draft (default: tomorrow) so
 the Studio's calendar strip populates.
 
+**LinkedIn is a different lane** (`postType:"authority"`, quota `social_freq_linkedin`):
+
+- Drafted ONLY from a `pending` researchBrief. No pending brief → skip LinkedIn honestly this run;
+  never draft an authority post from memory or general knowledge.
+- Voice: the **LinkedIn addendum** in `docs/emma-voice.md`, not the product register. Brand byline
+  ("we"), never Emma. Industry-first: no product links, no promo codes, no store CTAs. Every stat
+  is attributed in the post and comes from a brief claim; hedge or drop `low`-confidence claims.
+- After the draft row is written, patch the brief: `status:'used'`, `usedByPostId` = the new
+  `social_posts` id. One post per brief.
+- LinkedIn drafts count toward the ≤6 run cap like any other platform.
+
 ## Step 4 — Voice gate (mandatory)
 
-Every draft through `emma-empathy-reviewer` to a clean PASS. BLOCK = drop the draft.
+Every draft through `emma-empathy-reviewer` to a clean PASS. BLOCK = drop the draft. LinkedIn
+drafts are gated against the charter's LinkedIn addendum (brand byline, industry-first,
+professional register), not the product-copy register.
 
 ## Step 5 — Imagery (every visual platform draft ships with a real asset)
 
@@ -74,6 +90,10 @@ pre-approved `social_posts` rows (postType `video_reel`/`video_short`, `video_jo
 out from `/admin/video-studio`. Do not draft over them, count them against your text/image
 quotas, or reschedule them; your daily drafts stay additive to the video slate. If a video draft's
 caption reads off-voice, file a suggestion targeting the video team rather than editing it.
+
+LinkedIn drafts are **text-only by default** — no `mediaUrls` required, and product photography is
+banned on this platform (LinkedIn addendum). A simple data/chart graphic is the only imagery worth
+requesting, and only when the brief's numbers genuinely benefit from one.
 
 ## Step 6 — Write drafts
 

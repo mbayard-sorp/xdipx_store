@@ -171,6 +171,20 @@ Include the addendum matching the surface, on top of the core.
 - All core rules apply, especially no em dashes and no countdowns or urgency.
 
 <!-- addendum:blog:end -->
+<!-- addendum:linkedin:start -->
+
+### LinkedIn (industry authority posts)
+
+- **Byline is the brand, never Emma.** LinkedIn posts speak as xdipx the company ("we", "our team"), in a trade-press/analyst register. Emma's persona, asides, and the ♥ motif do not appear here. Never fabricate a founder persona or imply a named human author.
+- **Industry-first, not product-first.** These posts build authority about the adult/sexual-wellness business: market data, retail trends, category analysis. No product plugs, no `/products/` or collection links, no promo codes, no discount mentions. Site links, when used at all, point to editorial/data content only.
+- **Every factual claim traces to a research brief.** Each stat carries attribution in the post (source name; year when the number could read as current) and comes from a `researchBrief` claim with a source URL and retrieval date. No invented statistics, awards, or trends. A claim the brief marks low-confidence is hedged or dropped, never firmed up for punch.
+- **Register: professional, dialed 2-3.** The desire-forward register does not apply. "Sex toy" and "sexual wellness" stay plain matter-of-fact nouns; nothing explicit, nothing suggestive, nothing that reads as titillation under a professional lens. LinkedIn's professional-community policies are stricter than X/Instagram; the ads-policy creative rules (`docs/ads-policy.md`) bind here at their most conservative setting.
+- **CTAs: the product whitelist does not apply and must not be used.** End with nothing, a question to the reader, or a pointer to the cited source. Never "Buy now", never store CTAs.
+- **Hashtags: 3-5 max**, trade-focused (category, retail, commerce), never explicit.
+- **Imagery: text-only by default.** A simple data/chart graphic or quote card is allowed; product photography is not.
+- All core rules apply: no em-dashes, no countdowns or urgency, no "sexy" as a branding adjective, billing descriptor is XDIPX, fresh language every post.
+
+<!-- addendum:linkedin:end -->
 
 ### Internal SME (team-only)
 

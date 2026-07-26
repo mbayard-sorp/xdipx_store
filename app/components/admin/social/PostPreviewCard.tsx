@@ -98,6 +98,7 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
           {post.platform === 'instagram' && <InstagramMock media={media} caption={caption} />}
           {(post.platform === 'tiktok' || post.platform === 'youtube') && <TikTokMock media={media} caption={caption} youtube={post.platform === 'youtube'} />}
           {(post.platform === 'x' || post.platform === 'facebook') && <XMock media={media} caption={caption} />}
+          {post.platform === 'linkedin' && <LinkedInMock media={media} caption={caption} />}
         </div>
 
         {/* Review controls */}
@@ -114,6 +115,10 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
               {post.platform === 'x' ? (
                 <span className={`text-xs font-medium ${caption.length > 280 ? 'text-red-500' : 'text-ink-4'}`}>
                   {caption.length}/280
+                </span>
+              ) : post.platform === 'linkedin' ? (
+                <span className={`text-xs font-medium ${caption.length > 3000 ? 'text-red-500' : 'text-ink-4'}`}>
+                  {caption.length}/3000
                 </span>
               ) : (
                 <span className="text-xs text-ink-4">{caption.length} chars</span>
@@ -141,7 +146,7 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
           <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => submit('approved')}
-              disabled={isSubmitting || (post.platform === 'x' && caption.length > 280)}
+              disabled={isSubmitting || (post.platform === 'x' && caption.length > 280) || (post.platform === 'linkedin' && caption.length > 3000)}
               className="px-4 py-2 bg-coral text-white rounded-full text-sm font-semibold hover:bg-coral-2 transition-colors disabled:opacity-50"
             >
               {isSubmitting ? 'Saving…' : 'Approve'}
@@ -176,6 +181,7 @@ export function PlatformChip({ platform }: { platform: string }) {
     instagram: 'bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-500 text-white',
     tiktok: 'bg-ink text-white',
     facebook: 'bg-blue-600 text-white',
+    linkedin: 'bg-[#0A66C2] text-white',
   }
   return (
     <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wide ${styles[platform] ?? 'bg-paper-3 text-ink-3'}`}>
@@ -248,6 +254,31 @@ function TikTokMock({ media, caption, youtube }: { media: MediaRef | null; capti
         <p className="mt-1 text-[10px] text-ink-4 leading-snug">
           {caption.length > 90 ? `${caption.slice(0, 90)}…` : caption}
         </p>
+      )}
+    </div>
+  )
+}
+
+function LinkedInMock({ media, caption }: { media: MediaRef | null; caption: string }) {
+  // LinkedIn's feed truncates around 210 chars behind "…see more".
+  const truncated = caption.length > 210
+  return (
+    <div className="w-[280px] rounded-xl border border-line bg-white p-3">
+      <div className="flex items-center gap-2">
+        <span className="w-9 h-9 rounded bg-[#0A66C2] flex items-center justify-center text-xs font-bold text-white">x</span>
+        <div className="leading-tight">
+          <p className="text-xs font-bold text-ink">xdipx</p>
+          <p className="text-[10px] text-ink-4">Sexual wellness retail · Company page</p>
+        </div>
+      </div>
+      <p className="mt-2 text-sm text-ink whitespace-pre-wrap break-words leading-snug">
+        {truncated ? `${caption.slice(0, 210)}` : caption}
+        {truncated && <span className="text-ink-4"> …see more</span>}
+      </p>
+      {media && (
+        <div className="mt-2 rounded-lg overflow-hidden border border-line">
+          <MediaBox media={media} className={media.video ? 'w-full max-h-[280px] object-cover' : 'w-full max-h-[160px] object-cover'} />
+        </div>
       )}
     </div>
   )
