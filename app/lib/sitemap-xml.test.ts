@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  RECRAWL_EPOCH, applyHealth, chunkSegments, floorLastmod, isTrustworthyDeadVerdict,
-  newestLastmod, renderSitemapIndex, renderUrlset, type SitemapUrl, type UrlHealth,
+  RECRAWL_EPOCH, SITEMAP_CACHE_CONTROL, applyHealth, chunkSegments, floorLastmod,
+  isTrustworthyDeadVerdict, newestLastmod, renderSitemapIndex, renderUrlset,
+  type SitemapUrl, type UrlHealth,
 } from '~/lib/sitemap-xml'
 
 const url = (loc: string, lastmod?: string): SitemapUrl => ({
@@ -23,6 +24,23 @@ describe('floorLastmod', () => {
 
   it('supplies the floor when there is no lastmod at all', () => {
     expect(floorLastmod(undefined, RECRAWL_EPOCH)).toBe(RECRAWL_EPOCH)
+  })
+})
+
+describe('SITEMAP_CACHE_CONTROL', () => {
+  // Regression guard: without stale-while-revalidate the edge entry simply
+  // expires, and every expiry sends a crawler to a possibly-cold function that
+  // has to assemble the whole catalog before it can answer. That is what made
+  // 6 of 8 segments fail to fetch on first submission to Search Console.
+  it('lets the CDN answer from stale while it refreshes in the background', () => {
+    expect(SITEMAP_CACHE_CONTROL).toMatch(/stale-while-revalidate=\d+/)
+    expect(SITEMAP_CACHE_CONTROL).toMatch(/s-maxage=\d+/)
+    expect(SITEMAP_CACHE_CONTROL).toContain('public')
+  })
+
+  it('keeps s-maxage short enough that a new post lands the same day', () => {
+    const sMaxAge = Number(/s-maxage=(\d+)/.exec(SITEMAP_CACHE_CONTROL)![1])
+    expect(sMaxAge).toBeLessThanOrEqual(3600)
   })
 })
 
