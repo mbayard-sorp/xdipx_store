@@ -112,17 +112,28 @@ const COLLECTION_DENYLIST = new Set([
  * Build every sitemap segment.
  *
  * Memoized in-process (not through KV — the assembled set is ~1.5MB and would
- * be a poor KV citizen; the underlying Sanity/Shopify reads have their own
- * caches). The index and each segment route share one build per TTL window.
+ * be a poor KV citizen; the underlying Shopify reads have their own caches).
+ * One build serves the index and all 8 segment routes.
+ *
+ * The memo holds the *promise*, not the resolved value, so concurrent
+ * requests share one assembly. That matters because splitting the sitemap
+ * turned one crawler fetch into eight: without single-flight, Googlebot
+ * pulling all 8 segments at once made a cold instance start 8 full catalog
+ * assemblies in parallel (each one an uncached ~4,300-document Sanity query),
+ * which is what made 6 of 8 segments fail to fetch on first submission.
+ *
+ * A rejected build is not cached — the next request retries rather than
+ * serving an error for the rest of the TTL window.
  */
-let memo: { segments: SitemapSegment[]; ts: number } | null = null
-const MEMO_TTL_MS = 600_000 // 10 min, matches the served Cache-Control
+let memo: { segments: Promise<SitemapSegment[]>; ts: number } | null = null
+const MEMO_TTL_MS = 3_600_000 // 1h; the CDN is the front line, this is the backstop
 
-export async function buildSitemapSegments(): Promise<SitemapSegment[]> {
+export function buildSitemapSegments(): Promise<SitemapSegment[]> {
   if (memo && Date.now() - memo.ts < MEMO_TTL_MS) return memo.segments
-  const segments = await assembleSegments()
-  memo = { segments, ts: Date.now() }
-  return segments
+  const entry = { segments: assembleSegments(), ts: Date.now() }
+  memo = entry
+  entry.segments.catch(() => { if (memo === entry) memo = null })
+  return entry.segments
 }
 
 /** Test seam: drop the in-process memo. */

@@ -1,5 +1,5 @@
 import { buildSitemapSegments } from '~/lib/sitemap.server'
-import { renderSitemapIndex } from '~/lib/sitemap-xml'
+import { SITEMAP_CACHE_CONTROL, renderSitemapIndex } from '~/lib/sitemap-xml'
 
 /**
  * Sitemap index. The URL sets themselves live at /sitemaps/{name}.xml — see
@@ -12,9 +12,7 @@ export async function loader() {
   return new Response(renderSitemapIndex(segments), {
     headers: {
       'Content-Type': 'application/xml',
-      // 10 min so a midnight deal rotation's new `lastmod` surfaces to crawlers
-      // promptly (was 1h, which could delay discovery of the rotated deal).
-      'Cache-Control': 'public, max-age=600',
+      'Cache-Control': SITEMAP_CACHE_CONTROL,
     },
   })
 }

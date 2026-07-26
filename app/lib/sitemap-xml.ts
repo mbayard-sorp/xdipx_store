@@ -101,6 +101,22 @@ export function chunkSegments(prefix: string, urls: SitemapUrl[], size: number):
   return segments
 }
 
+/**
+ * Cache policy for /sitemap.xml and every /sitemaps/*.xml segment.
+ *
+ * `stale-while-revalidate` is the important part. Assembling the sitemap is
+ * expensive (a full catalog read), and under the old `max-age=600` the edge
+ * entry simply expired, so every 10 minutes a crawler fetch went to a
+ * possibly-cold function and waited out the whole assembly. With SWR the CDN
+ * answers instantly from the stale copy and refreshes in the background, so a
+ * crawler never blocks on an assembly after the first successful fetch.
+ *
+ * s-maxage is an hour rather than a day so a newly published Notebook post
+ * still reaches the sitemap the same morning.
+ */
+export const SITEMAP_CACHE_CONTROL =
+  'public, max-age=600, s-maxage=3600, stale-while-revalidate=86400'
+
 export function escapeXml(s: string | null | undefined): string {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }

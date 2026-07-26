@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from 'react-router'
 import { buildSitemapSegments } from '~/lib/sitemap.server'
-import { renderUrlset } from '~/lib/sitemap-xml'
+import { SITEMAP_CACHE_CONTROL, renderUrlset } from '~/lib/sitemap-xml'
 
 /**
  * One sitemap segment, e.g. /sitemaps/products-1.xml. The `.xml` suffix is
@@ -19,7 +19,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
   return new Response(renderUrlset(segment.urls), {
     headers: {
       'Content-Type': 'application/xml',
-      'Cache-Control': 'public, max-age=600',
+      'Cache-Control': SITEMAP_CACHE_CONTROL,
     },
   })
 }
