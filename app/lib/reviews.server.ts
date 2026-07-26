@@ -3,7 +3,7 @@
  * Uses raw SQL via neon for complex join queries.
  */
 import { neon } from '@neondatabase/serverless'
-import { kvGet, kvSet } from '~/lib/kv.server'
+import { kvGetMemo, kvSet, primeKvMemo } from '~/lib/kv.server'
 import type {
   Review,
   ReviewMedia,
@@ -137,9 +137,9 @@ export async function getProductReviews(
 
   // Only cache public approved-review queries. Admin queries (pending, spam, etc.)
   // must always be fresh so moderators see the latest state.
+  const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`
   if (status === 'approved') {
-    const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`
-    const hit = await kvGet<{ reviews: Review[]; total: number }>(ck)
+    const hit = await kvGetMemo<{ reviews: Review[]; total: number }>(ck, 60)
     if (hit) return hit
   }
 
@@ -168,7 +168,13 @@ export async function getProductReviews(
     sql(countQ,  [shopifyProductId, status]),
   ])
 
-  if (rows.length === 0) return { reviews: [], total: 0 }
+  if (rows.length === 0) {
+    const empty = { reviews: [], total: 0 }
+    // Most products have zero reviews and KV never stores an entry for them,
+    // so memoize the empty result to stop the per-view kvGet miss.
+    if (status === 'approved') primeKvMemo(ck, empty)
+    return empty
+  }
 
   const reviewIds = rows.map(r => r['id'] as string)
   const [mediaRows, attrRows] = await Promise.all([
@@ -202,8 +208,8 @@ export async function getProductReviews(
 
   // Populate KV cache for approved queries so repeat homepage SSR hits are ~2ms.
   if (status === 'approved') {
-    const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`
     kvSet(ck, result, 300).catch(() => {})
+    primeKvMemo(ck, result)
   }
 
   return result
@@ -213,7 +219,7 @@ export async function getProductReviews(
 
 export async function getProductAggregate(shopifyProductId: string): Promise<ReviewAggregate | null> {
   const ck = `aggregate:v1:${shopifyProductId}`
-  const hit = await kvGet<ReviewAggregate>(ck)
+  const hit = await kvGetMemo<ReviewAggregate>(ck, 60)
   if (hit) return hit
 
   const rows = await sql`
@@ -222,6 +228,7 @@ export async function getProductAggregate(shopifyProductId: string): Promise<Rev
   if (!rows[0]) return null
   const agg = rowToAggregate(rows[0] as Record<string, unknown>)
   kvSet(ck, agg, 300).catch(() => {})
+  primeKvMemo(ck, agg)
   return agg
 }
 

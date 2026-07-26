@@ -1,14 +1,14 @@
 import { or, eq, desc, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { productCopurchase } from '../../db/schema'
-import { kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+import { kvGetMemo, kvSet, primeKvMemo, KV_KEYS } from '~/lib/kv.server'
 import { getProductByHandle, getProductsByTag } from '~/lib/shopify.server'
 
 const TTL_SECONDS = 60 * 60
 
 export async function getFrequentlyBoughtWith(handle: string, limit = 4): Promise<string[]> {
   const cacheKey = KV_KEYS.fbt(handle)
-  const cached = await kvGet<string[]>(cacheKey)
+  const cached = await kvGetMemo<string[]>(cacheKey, 300)
   if (cached) return cached.slice(0, limit)
 
   let fromCopurchase: string[] = []
@@ -36,6 +36,7 @@ export async function getFrequentlyBoughtWith(handle: string, limit = 4): Promis
 
   if (handles.length > 0) {
     await kvSet(cacheKey, handles, TTL_SECONDS).catch(() => {})
+    primeKvMemo(cacheKey, handles)
   }
 
   return handles

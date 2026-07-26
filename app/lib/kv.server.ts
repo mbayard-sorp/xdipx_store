@@ -219,6 +219,30 @@ export async function cached<T>(
   return data
 }
 
+/**
+ * kvGet with a short per-instance L1 memo on top, for hot request paths where
+ * a raw kvGet costs one Upstash command per page view (the root-layout pin
+ * read and the PDP review/fbt reads burned most of the 500k/month free-tier
+ * quota this way). Negative results are memoized too, so keys that don't
+ * exist in KV stop costing a command per request. l1TtlSeconds bounds
+ * cross-instance staleness; writers on the same instance should call
+ * primeKvMemo after kvSet so their own reads stay fresh.
+ */
+export async function kvGetMemo<T>(key: string, l1TtlSeconds: number): Promise<T | null> {
+  const now = Date.now()
+  const hit = readCache.get(key) as CacheEntry<T | null> | undefined
+  if (hit && now - hit.ts < l1TtlSeconds * 1000) return hit.data
+  const data = await kvGet<T>(key)
+  readCache.set(key, { data, ts: now })
+  return data
+}
+
+/** Seed the L1 memo after writing the underlying key, or after computing a
+ * result worth serving from memory (e.g. an empty review list). */
+export function primeKvMemo(key: string, value: unknown): void {
+  readCache.set(key, { data: value, ts: Date.now() })
+}
+
 export function invalidateCache(prefix: string): void {
   for (const k of readCache.keys()) {
     if (k.startsWith(prefix)) readCache.delete(k)
@@ -297,7 +321,8 @@ export async function getVaultFilterTabs(): Promise<VaultFilterTab[]> {
 // ─── Pinned accessory IDs (KV-backed for hot vault-load path) ─────────────
 
 export async function getPinnedAccessoryIds(): Promise<string[]> {
-  const ids = await kvGet<string[]>(KV_KEYS.pinnedAccessoryIds)
+  // L1-memoized: this runs in the root layout loader on every page view.
+  const ids = await kvGetMemo<string[]>(KV_KEYS.pinnedAccessoryIds, 60)
   return Array.isArray(ids) ? ids : []
 }
 
@@ -305,6 +330,7 @@ export async function setPinnedAccessoryIds(ids: string[]): Promise<void> {
   // Persistent admin config — no TTL. Previous 24h TTL silently dropped upsells
   // from the cart drawer one day after being set.
   await kvSet(KV_KEYS.pinnedAccessoryIds, ids)
+  primeKvMemo(KV_KEYS.pinnedAccessoryIds, ids)
 }
 
 // ─── Product markdown twin cache purge (webhook-driven invalidation) ─────
