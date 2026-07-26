@@ -9,6 +9,7 @@ import {
   getCollectionProducts, getProductsByHandles,
   getProductsByIds, getMainMenu,
 } from '~/lib/shopify.server'
+import { normalizeProductHandles } from '~/lib/product-handles'
 import { resolveBreadcrumbs, type BreadcrumbCrumb } from '~/lib/breadcrumbs.server'
 import { getProductPageBlocks, getProductFaqs, getPdpTrustBar, getNotebookPostsForProduct, getNotebookPostsForProductType } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
@@ -204,7 +205,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             return getCollectionProducts(b.collectionHandle, limit)
           }
           if (source === 'manual' && b.productHandles?.length) {
-            return getProductsByHandles(b.productHandles.map(p => p.handle))
+            return getProductsByHandles(normalizeProductHandles(b.productHandles))
           }
           return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([] as Product[])
         }))
@@ -212,7 +213,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     emmaRailBlocks.length > 0
       ? Promise.all(emmaRailBlocks.map(b =>
           b.productHandles?.length
-            ? getProductsByHandles(b.productHandles.map(p => p.handle))
+            ? getProductsByHandles(normalizeProductHandles(b.productHandles))
             : Promise.resolve([] as Product[]),
         ))
       : Promise.resolve([] as Product[][]),

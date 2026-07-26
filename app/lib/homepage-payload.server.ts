@@ -26,6 +26,7 @@ import { EMPTY_STATE } from '~/types/discovery'
 import type { Rail } from '~/types/discovery'
 import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
 import { getHomepageSections } from '~/lib/sanity.server'
+import { normalizeProductHandles } from '~/lib/product-handles'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
 import type { Product, LeanCardProduct } from '~/types'
 import type { DiscoveryProduct } from '~/types/discovery'
@@ -87,25 +88,6 @@ export interface HomeContentBlocks {
  * announcementBar is dropped (the layout renders it pinned from the same
  * singleton; rendering it in-page would duplicate it).
  */
-/**
- * Pull the usable handles out of a Sanity `productHandles` array.
- *
- * A dereferenced entry comes back as `null` when the referenced product doc has
- * been deleted or unpublished, so the array is `({handle} | null)[]` in practice
- * even though the type says otherwise. The old `.map(p => p.handle)` threw on
- * the first such entry, which rejected the whole `buildHomeContentBlocks`
- * promise — and because every `<Await>` on the storefront has an `errorElement`,
- * that failure was invisible: one dangling reference silently replaced the
- * team's ENTIRE merchandising surface (curated rails, wayfinder, editorial
- * tiles) with the hardcoded fallbacks, with nothing in the UI to say so.
- * Drop the dead entries and render the rest.
- */
-function resolvableHandles(entries: { handle: string }[] | undefined): string[] {
-  return (entries ?? [])
-    .map(p => (p as { handle?: string } | null)?.handle)
-    .filter((h): h is string => typeof h === 'string' && h.length > 0)
-}
-
 export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
   const cmsData = await withTimeout(
     getHomepageSections(), BUILD_TIMEOUT_MS, null, 'getHomepageSections(payloadA)',
@@ -127,20 +109,18 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
           if (source === 'collection' && b.collectionHandle) {
             return getCollectionProducts(b.collectionHandle, limit)
           }
-          const handles = resolvableHandles(b.productHandles)
-          if (source === 'manual' && handles.length > 0) {
-            return getProductsByHandles(handles)
+          if (source === 'manual' && b.productHandles?.length) {
+            return getProductsByHandles(normalizeProductHandles(b.productHandles))
           }
           return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([] as Product[])
         })), BUILD_TIMEOUT_MS, [] as Product[][], 'carouselResults(payloadA)')
       : Promise.resolve([] as Product[][]),
     emmaRailBlocks.length > 0
-      ? withTimeout(Promise.all(emmaRailBlocks.map(b => {
-          const handles = resolvableHandles(b.productHandles)
-          return handles.length > 0
-            ? getProductsByHandles(handles)
-            : Promise.resolve([] as Product[])
-        })), BUILD_TIMEOUT_MS, [] as Product[][], 'emmaRailResults(payloadA)')
+      ? withTimeout(Promise.all(emmaRailBlocks.map(b =>
+          b.productHandles?.length
+            ? getProductsByHandles(normalizeProductHandles(b.productHandles))
+            : Promise.resolve([] as Product[]),
+        )), BUILD_TIMEOUT_MS, [] as Product[][], 'emmaRailResults(payloadA)')
       : Promise.resolve([] as Product[][]),
   ])
 
@@ -459,8 +439,14 @@ export function reshuffleRailsWithSeed(rails: Rail[], seed: number): Rail[] {
  * reshuffle at read time, exactly as Variant A does.
  * ─────────────────────────────────────────────────────────────────────────── */
 
-/** Bump on ANY shape change to `HomepagePayloadB`. See HOMEPAGE_PAYLOAD_VERSION. */
-export const HOMEPAGE_PAYLOAD_B_VERSION = 'b1'
+/**
+ * Bump on ANY shape change to `HomepagePayloadB`. See HOMEPAGE_PAYLOAD_VERSION.
+ * b2: added `contentBlocks` (the team's Sanity merchandising surface, folded in
+ *     from PR #322's resolved-not-deferred fix). A b1 blob has no such field, so
+ *     serving one would silently render shell fallbacks everywhere — exactly
+ *     the P0 #322 fixed. The version bump makes every b1 blob a miss.
+ */
+export const HOMEPAGE_PAYLOAD_B_VERSION = 'b2'
 
 /** KV key for the precomputed storefront blob. Versioned. */
 export const HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`
@@ -468,8 +454,7 @@ export const HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_
 /**
  * JSON-safe — no Map/Set/Date/undefined anywhere. Stored verbatim in KV and a
  * Neon JSON column, so the same round-trip invariant as `HomepagePayloadA`
- * applies. Note there is deliberately NO `contentBlocks` field: that surface
- * stays a deferred promise resolved per-request, never blocking the shell.
+ * applies.
  */
 export interface HomepagePayloadB {
   version: typeof HOMEPAGE_PAYLOAD_B_VERSION
@@ -487,6 +472,22 @@ export interface HomepagePayloadB {
   emmaHero: EmmaHeroSettings | null
   emmaPhotoUrl: string | null
   emmaPhotoAlt: string | null
+  /**
+   * The team's published Sanity merchandising surface (curated rails, wayfinder
+   * mosaic, Notebook override, couples band), RESOLVED at build time.
+   *
+   * PR #322 established the invariant that this must never reach the component
+   * as an un-awaited promise: a deferred value is streamed after the shell, and
+   * the CDN can only store the bytes flushed with the shell, so published
+   * merchandising reached neither visitors nor crawlers. Storing it on the blob
+   * satisfies that by construction — a precomputed field cannot be pending —
+   * and additionally takes the Sanity round-trip off the request path.
+   *
+   * Freshness is therefore bounded by the warm cadence (~15 min) rather than
+   * per-request, same as `emmaHero`. Admin saves bust both tiers immediately,
+   * and admin sessions bypass the blob entirely via `{ fresh: true }`.
+   */
+  contentBlocks: HomeContentBlocksLean
   notebookPosts: BlogPostCard[]
   sensationMap: SensationMapData
   builtAt: number // epoch ms (number, NOT Date)

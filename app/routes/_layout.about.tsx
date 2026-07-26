@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData } from 'react-router'
 import { getEditor, getPage, isPreviewRequest } from '~/lib/sanity.server'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
+import { normalizeProductHandles } from '~/lib/product-handles'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import type { Product } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
@@ -29,7 +30,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           return getCollectionProducts(b.collectionHandle, limit)
         }
         if (source === 'manual' && b.productHandles?.length) {
-          return getProductsByHandles(b.productHandles.map(p => p.handle))
+          return getProductsByHandles(normalizeProductHandles(b.productHandles))
         }
         return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([])
       }),

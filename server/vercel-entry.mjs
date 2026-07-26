@@ -2588,6 +2588,22 @@ var init_product_type_derive = __esm({
   }
 });
 
+// app/lib/product-handles.ts
+function normalizeProductHandles(entries) {
+  if (!Array.isArray(entries)) return [];
+  const handles = [];
+  for (const entry of entries) {
+    const raw = typeof entry === "string" ? entry : entry?.handle;
+    if (typeof raw === "string" && raw.trim().length > 0) handles.push(raw.trim());
+  }
+  return handles;
+}
+var init_product_handles = __esm({
+  "app/lib/product-handles.ts"() {
+    "use strict";
+  }
+});
+
 // app/lib/sanity-image.ts
 function isSanityCdn(url) {
   return !!url && url.includes("cdn.sanity.io");
@@ -3171,7 +3187,7 @@ async function getProductPageBlocks(handle) {
           ...select(
             _type == "reference" => @->{
               _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
-              "productHandles": productHandles[]{ handle },
+              "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
               layout, bgStyle, ctaLink, ctaLabel
             },
             { ${CONTENT_BLOCKS_PROJECTION} }
@@ -3924,14 +3940,15 @@ async function getRailDraftsForDeal(dealId) {
   if (!projectId) return [];
   const writeClient = getClient(true, false, "raw");
   if (!writeClient) return [];
-  return writeClient.fetch(
+  const rows = await writeClient.fetch(
     `*[_type == "emmaCuratedRail" && sourceDealId == $dealId] | order(generatedAt desc){
       _id, status, active, order, heading, eyebrow, emmaAside, target,
-      "productHandles": productHandles[].handle,
+      "productHandles": productHandles,
       layout, bgStyle, ctaLink, ctaLabel, sourceDealId, generatedAt, rationale
     }`,
     { dealId }
   );
+  return rows.map((row) => ({ ...row, productHandles: normalizeProductHandles(row.productHandles) }));
 }
 async function getProductHandlesForSitemap() {
   if (!projectId) return [];
@@ -4018,6 +4035,7 @@ var init_sanity_server = __esm({
     "use strict";
     init_kv_server();
     init_tag_normalize();
+    init_product_handles();
     init_sanity_image();
     CONTENT_BLOCKS_PROJECTION = `
   _type, _key, active, order,
@@ -4063,7 +4081,7 @@ var init_sanity_server = __esm({
   columns,
   // productCarousel
   source, shopifyTag, collectionHandle,
-  "productHandles": productHandles[]{ handle },
+  "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
   productLimit, layout,
   // playTogetherBanner
   body, imagePosition,
@@ -4109,7 +4127,7 @@ var init_sanity_server = __esm({
       // custom name, not "reference" \u2014 so match by the presence of _ref instead.
       defined(_ref) => @->{
         _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
-        "productHandles": productHandles[]{ handle },
+        "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
         layout, bgStyle, ctaLink, ctaLabel
       },
       { ${CONTENT_BLOCKS_PROJECTION} }
@@ -15668,9 +15686,6 @@ __export(homepage_payload_server_exports, {
   writeHomepagePayloadB: () => writeHomepagePayloadB
 });
 import { eq as eq9 } from "drizzle-orm";
-function resolvableHandles(entries) {
-  return (entries ?? []).map((p) => p?.handle).filter((h) => typeof h === "string" && h.length > 0);
-}
 async function buildHomeContentBlocks() {
   const cmsData = await withTimeout(
     getHomepageSections(),
@@ -15692,16 +15707,14 @@ async function buildHomeContentBlocks() {
       if (source === "collection" && b.collectionHandle) {
         return getCollectionProducts(b.collectionHandle, limit);
       }
-      const handles = resolvableHandles(b.productHandles);
-      if (source === "manual" && handles.length > 0) {
-        return getProductsByHandles(handles);
+      if (source === "manual" && b.productHandles?.length) {
+        return getProductsByHandles(normalizeProductHandles(b.productHandles));
       }
       return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([]);
     })), BUILD_TIMEOUT_MS, [], "carouselResults(payloadA)") : Promise.resolve([]),
-    emmaRailBlocks.length > 0 ? withTimeout(Promise.all(emmaRailBlocks.map((b) => {
-      const handles = resolvableHandles(b.productHandles);
-      return handles.length > 0 ? getProductsByHandles(handles) : Promise.resolve([]);
-    })), BUILD_TIMEOUT_MS, [], "emmaRailResults(payloadA)") : Promise.resolve([])
+    emmaRailBlocks.length > 0 ? withTimeout(Promise.all(emmaRailBlocks.map(
+      (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)) : Promise.resolve([])
+    )), BUILD_TIMEOUT_MS, [], "emmaRailResults(payloadA)") : Promise.resolve([])
   ]);
   const carouselProductMap = {};
   carouselBlocks.forEach((b, i) => {
@@ -15950,6 +15963,7 @@ var init_homepage_payload_server = __esm({
     init_discovery_server();
     init_discovery();
     init_sanity_server();
+    init_product_handles();
     init_shopify_server();
     HOMEPAGE_PAYLOAD_VERSION = "v1";
     HOMEPAGE_PAYLOAD_KV_KEY = `homepage:payload:${HOMEPAGE_PAYLOAD_VERSION}`;
@@ -15962,7 +15976,7 @@ var init_homepage_payload_server = __esm({
       "wayfinderMosaic",
       "playTogetherBanner"
     ];
-    HOMEPAGE_PAYLOAD_B_VERSION = "b1";
+    HOMEPAGE_PAYLOAD_B_VERSION = "b2";
     HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`;
   }
 });
@@ -16441,15 +16455,19 @@ function hydrateStorefrontPayloadB(payload) {
     emmaPhotoAlt: payload.emmaPhotoAlt,
     featured,
     total: payload.total,
-    contentBlocks: buildHomeContentBlocksLean(),
-    // deferred — never blocks the shell
+    // Already resolved at build time. PR #322 established that this must be a
+    // RESOLVED value rather than a streamed promise (a deferred one never
+    // survives the edge cache, so team merchandising reached nobody); reading
+    // it off the precomputed blob satisfies that contract by construction and
+    // removes the Sanity round-trip from the request path entirely.
+    contentBlocks: payload.contentBlocks,
     notebookPosts: payload.notebookPosts,
     sensationMap: payload.sensationMap
   };
 }
 async function buildHomepagePayloadB() {
   const railSeed = 0;
-  const [railsResult, emmaHero, notebook, editor] = await Promise.all([
+  const [railsResult, emmaHero, notebook, editor, contentBlocks] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, "getEmmaHeroSettings(storefront)"),
     getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [], total: 0 })),
@@ -16457,7 +16475,23 @@ async function buildHomepagePayloadB() {
     // or cold Sanity leg can never sink the render; MeetEmma falls back to the
     // bundled illustration when this is null. getEditor() is already cached 300s
     // and swallows its own errors, so this is belt-and-suspenders with emmaHero.
-    withTimeout(getEditor(), EDITOR_TIMEOUT_MS, null, "getEditor(storefront)")
+    withTimeout(getEditor(), EDITOR_TIMEOUT_MS, null, "getEditor(storefront)"),
+    // Team merchandising surface — resolved here rather than deferred, so it
+    // survives the edge cache and reaches crawlers (see the `contentBlocks`
+    // field doc). Resolving it at BUILD time rather than per-request also takes
+    // the Sanity round-trip off the request path completely. `withTimeout` only
+    // guards a slow upstream; the `.catch` is what replaces the old
+    // `<Await errorElement>`, so a rejected leg degrades to shell fallbacks
+    // instead of failing the build.
+    withTimeout(
+      buildHomeContentBlocksLean(),
+      CONTENT_BLOCKS_TIMEOUT_MS,
+      EMPTY_CONTENT_BLOCKS,
+      "buildHomeContentBlocksLean(storefront)"
+    ).catch((err) => {
+      console.error("[storefront-home] contentBlocks failed, using shell fallbacks:", err);
+      return EMPTY_CONTENT_BLOCKS;
+    })
   ]);
   const rails = railsResult.rails;
   const pinnedHandle = emmaHero?.featuredProductHandle?.trim();
@@ -16483,6 +16517,8 @@ async function buildHomepagePayloadB() {
     emmaHero,
     emmaPhotoUrl: editor?.photoUrl ?? null,
     emmaPhotoAlt: editor?.photoAlt ?? null,
+    contentBlocks,
+    // resolved above — team-managed Sanity surface, lean/slimmed for variant b
     notebookPosts: notebook.posts,
     sensationMap,
     builtAt: Date.now(),
@@ -16497,7 +16533,7 @@ async function warmHomepagePayloadB(opts = {}) {
   await writeHomepagePayloadB(payload, { force });
   return payload;
 }
-var EMMA_HERO_TIMEOUT_MS, EDITOR_TIMEOUT_MS, RAIL_SEED_BUCKET_MS, STOREFRONT_EDGE_CACHE_HEADERS;
+var EMMA_HERO_TIMEOUT_MS, EDITOR_TIMEOUT_MS, CONTENT_BLOCKS_TIMEOUT_MS, EMPTY_CONTENT_BLOCKS, RAIL_SEED_BUCKET_MS, STOREFRONT_EDGE_CACHE_HEADERS;
 var init_storefront_home_server = __esm({
   "app/lib/storefront-home.server.ts"() {
     "use strict";
@@ -16509,6 +16545,8 @@ var init_storefront_home_server = __esm({
     init_discovery();
     EMMA_HERO_TIMEOUT_MS = 4e3;
     EDITOR_TIMEOUT_MS = 4e3;
+    CONTENT_BLOCKS_TIMEOUT_MS = 6e3;
+    EMPTY_CONTENT_BLOCKS = { sections: [], carouselProductMap: {} };
     RAIL_SEED_BUCKET_MS = 9e5;
     STOREFRONT_EDGE_CACHE_HEADERS = {
       "Cache-Control": "public, max-age=0, s-maxage=900, stale-while-revalidate=3600",

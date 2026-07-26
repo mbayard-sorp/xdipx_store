@@ -1,11 +1,12 @@
-// Unit tests for the homepage-performance cache-window widening
-// (60s -> 300s -> 900s edge cache for variant b) and the precomputed
-// storefront payload's read-time hydration. storefront-home.server.ts pulls in
-// several server modules with real upstreams (discovery index, Sanity,
-// sensation map), so those are mocked out — these tests exercise the pure
-// railSeedBucket helper, the STOREFRONT_EDGE_CACHE_HEADERS constant, and
-// hydrateStorefrontPayloadB, none of which touch an upstream.
-import { describe, it, expect, vi } from 'vitest'
+// Unit tests for the variant-b storefront payload assembly:
+//   - the homepage-performance cache-window widening (60s -> 300s -> 900s edge
+//     cache): the pure railSeedBucket helper + STOREFRONT_EDGE_CACHE_HEADERS
+//   - the contentBlocks resolution contract (regression cover for the P0 where
+//     team-published sections rendered as shell fallbacks in production)
+//   - the precomputed payload's read-time hydration
+// storefront-home.server.ts pulls in several server modules with real upstreams
+// (discovery index, Sanity, sensation map), so those are mocked out.
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('~/lib/discovery.server', () => ({
   getDiscoveryIndex: vi.fn(),
@@ -22,8 +23,10 @@ vi.mock('~/lib/homepage-payload.server', async () => {
     reshuffleRailsWithSeed: actual.reshuffleRailsWithSeed,
     HOMEPAGE_PAYLOAD_B_VERSION: actual.HOMEPAGE_PAYLOAD_B_VERSION,
     buildHomeContentBlocksLean: vi.fn(() => Promise.resolve({ sections: [], carouselProductMap: {} })),
-    readHomepagePayloadB: vi.fn(),
-    writeHomepagePayloadB: vi.fn(),
+    // Default to a blob MISS so assembleStorefrontHome takes the live-build
+    // path and the upstream stubs below are the thing under test.
+    readHomepagePayloadB: vi.fn(() => Promise.resolve(null)),
+    writeHomepagePayloadB: vi.fn(() => Promise.resolve()),
     triggerHomepageWarmB: vi.fn(),
   }
 })
@@ -39,12 +42,21 @@ vi.mock('~/lib/sanity.server', () => ({
 }))
 
 import {
+  assembleStorefrontHome,
   railSeedBucket,
   RAIL_SEED_BUCKET_MS,
   STOREFRONT_EDGE_CACHE_HEADERS,
   hydrateStorefrontPayloadB,
 } from './storefront-home.server'
-import { HOMEPAGE_PAYLOAD_B_VERSION, type HomepagePayloadB } from './homepage-payload.server'
+import { getDiscoveryRails } from '~/lib/discovery.server'
+import {
+  buildHomeContentBlocksLean,
+  readHomepagePayloadB,
+  HOMEPAGE_PAYLOAD_B_VERSION,
+  type HomepagePayloadB,
+} from '~/lib/homepage-payload.server'
+import { getSensationMapData } from '~/lib/sensation-map.server'
+import { getEmmaHeroSettings, getBlogPosts, getEditor } from '~/lib/sanity.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
 
 describe('railSeedBucket', () => {
@@ -75,6 +87,69 @@ describe('railSeedBucket', () => {
     // re-order inside a single cached render's lifetime for no visible benefit.
     const sMaxAge = /s-maxage=(\d+)/.exec(STOREFRONT_EDGE_CACHE_HEADERS['Vercel-CDN-Cache-Control'])?.[1]
     expect(Number(sMaxAge) * 1000).toBe(RAIL_SEED_BUCKET_MS)
+  })
+})
+
+/**
+ * Regression cover for the P0 where every team-published homepage section
+ * rendered as a hardcoded shell fallback in production. `contentBlocks` used to
+ * be handed to the component as an un-awaited promise and streamed in after the
+ * shell, which never survived the storefront's edge cache — so published rails,
+ * the wayfinder mosaic, the Notebook override and the couples band were
+ * invisible to visitors and crawlers alike. It must now be a RESOLVED value on
+ * the payload, and it must degrade to the empty payload (== the same shell
+ * fallbacks) rather than reject the render.
+ */
+describe('assembleStorefrontHome — contentBlocks resolution', () => {
+  const TEAM_SECTIONS = [
+    { _type: 'emmaCuratedRail', _key: 'rail-1', heading: 'Fills you slow.' },
+    { _type: 'wayfinderMosaic', _key: 'way-1' },
+  ]
+
+  function stubUpstreams() {
+    // Blob miss -> live build, so the upstream stubs below are what's exercised.
+    vi.mocked(readHomepagePayloadB).mockResolvedValue(null)
+    vi.mocked(getDiscoveryRails).mockResolvedValue({
+      rails: [], total: 0, available: { moods: [], audiences: [], matters: [] },
+    } as unknown as Awaited<ReturnType<typeof getDiscoveryRails>>)
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue(null)
+    vi.mocked(getBlogPosts).mockResolvedValue({ posts: [], total: 0 })
+    vi.mocked(getEditor).mockResolvedValue(null)
+    vi.mocked(getSensationMapData).mockResolvedValue({
+      types: [], feels: [], defaultState: null, defaultMatch: null,
+    } as unknown as Awaited<ReturnType<typeof getSensationMapData>>)
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    stubUpstreams()
+  })
+
+  it('returns team sections as a resolved value, not a promise', async () => {
+    vi.mocked(buildHomeContentBlocksLean).mockResolvedValue({
+      sections: TEAM_SECTIONS, carouselProductMap: { 'rail-1': [] },
+    } as unknown as Awaited<ReturnType<typeof buildHomeContentBlocksLean>>)
+
+    const payload = await assembleStorefrontHome()
+
+    // The load-bearing assertion: a promise here is the original defect.
+    expect(payload.contentBlocks).not.toBeInstanceOf(Promise)
+    expect(payload.contentBlocks.sections).toHaveLength(2)
+    expect(payload.contentBlocks.sections.map(s => s._type)).toEqual([
+      'emmaCuratedRail', 'wayfinderMosaic',
+    ])
+    expect(payload.contentBlocks.carouselProductMap).toHaveProperty('rail-1')
+  })
+
+  it('degrades to the empty payload when the team-content upstream rejects', async () => {
+    vi.mocked(buildHomeContentBlocksLean).mockRejectedValue(new Error('sanity down'))
+
+    // Must not reject: a failed merchandising leg falls back to shell content,
+    // it never takes the homepage down.
+    const payload = await assembleStorefrontHome()
+
+    expect(payload.contentBlocks).toEqual({ sections: [], carouselProductMap: {} })
+    expect(payload.variant).toBe('b')
   })
 })
 
@@ -123,6 +198,7 @@ function payload(over: Partial<HomepagePayloadB> = {}): HomepagePayloadB {
     emmaHero: null,
     emmaPhotoUrl: null,
     emmaPhotoAlt: null,
+    contentBlocks: { sections: [], carouselProductMap: {} },
     notebookPosts: [],
     sensationMap: { types: [], feels: [], defaultState: null, defaultMatch: null },
     builtAt: 0,
@@ -175,5 +251,20 @@ describe('hydrateStorefrontPayloadB', () => {
     const data = hydrateStorefrontPayloadB(payload({ rails: [], total: 0, degraded: true }))
     expect(data.rails).toEqual([])
     expect(data.featured).toEqual([])
+  })
+
+  it('serves contentBlocks off the blob as a resolved value, never a promise', () => {
+    // The blob-read path has to honour the same invariant PR #322 established
+    // for the live path: an un-awaited promise here never survives the edge
+    // cache, which is how team-published merchandising went invisible.
+    const contentBlocks = {
+      sections: [{ _type: 'emmaCuratedRail', _key: 'rail-1' }],
+      carouselProductMap: { 'rail-1': [] },
+    } as unknown as HomepagePayloadB['contentBlocks']
+    const data = hydrateStorefrontPayloadB(payload({ contentBlocks }))
+
+    expect(data.contentBlocks).not.toBeInstanceOf(Promise)
+    expect(data.contentBlocks.sections).toHaveLength(1)
+    expect(data.contentBlocks.sections[0]!._type).toBe('emmaCuratedRail')
   })
 })
