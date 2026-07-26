@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  RECRAWL_EPOCH, applyHealth, chunkSegments, floorLastmod, newestLastmod,
-  renderSitemapIndex, renderUrlset, type SitemapUrl, type UrlHealth,
+  RECRAWL_EPOCH, applyHealth, chunkSegments, floorLastmod, isTrustworthyDeadVerdict,
+  newestLastmod, renderSitemapIndex, renderUrlset, type SitemapUrl, type UrlHealth,
 } from '~/lib/sitemap-xml'
 
 const url = (loc: string, lastmod?: string): SitemapUrl => ({
@@ -23,6 +23,26 @@ describe('floorLastmod', () => {
 
   it('supplies the floor when there is no lastmod at all', () => {
     expect(floorLastmod(undefined, RECRAWL_EPOCH)).toBe(RECRAWL_EPOCH)
+  })
+})
+
+describe('isTrustworthyDeadVerdict', () => {
+  it('trusts a hard 404 Google crawled after the fix', () => {
+    expect(isTrustworthyDeadVerdict('Not found (404)', '2026-07-20T00:00:00Z')).toBe(true)
+    expect(isTrustworthyDeadVerdict('Not found (404)', new Date('2026-06-13T12:00:00Z'))).toBe(true)
+  })
+
+  it('does not trust a hard 404 from before the fix', () => {
+    expect(isTrustworthyDeadVerdict('Not found (404)', '2026-05-06T15:18:46Z')).toBe(false)
+  })
+
+  it('never trusts Soft 404 or 5xx — every pre-fix one of those is live today', () => {
+    expect(isTrustworthyDeadVerdict('Soft 404', '2026-07-20T00:00:00Z')).toBe(false)
+    expect(isTrustworthyDeadVerdict('Server error (5xx)', '2026-07-20T00:00:00Z')).toBe(false)
+  })
+
+  it('does not trust a verdict with no crawl date', () => {
+    expect(isTrustworthyDeadVerdict('Not found (404)', null)).toBe(false)
   })
 })
 

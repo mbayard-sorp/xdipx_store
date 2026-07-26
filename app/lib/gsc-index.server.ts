@@ -24,11 +24,12 @@ const sql = neon(process.env['DATABASE_URL']!)
 
 /**
  * Coverage states that mean "Google could not fetch a real page here". The
- * sitemap builder drops these URLs (submitting known-dead URLs burns crawl
- * budget and erodes sitemap trust) and this sweep keeps re-inspecting them so
- * the suppression can lift itself when a URL recovers.
+ * sitemap builder treats a subset of these as grounds for dropping a URL (see
+ * isTrustworthyDeadVerdict in sitemap.server.ts — a pre-fix verdict is stale
+ * evidence, not proof), and this sweep keeps re-inspecting all of them so a
+ * suppression can lift itself when a URL recovers.
  */
-export const SUPPRESSED_STATES = ['Not found (404)', 'Soft 404', 'Server error (5xx)']
+export const DEAD_VERDICT_STATES = ['Not found (404)', 'Soft 404', 'Server error (5xx)']
 
 const INSPECT_URL = 'https://searchconsole.googleapis.com/v1/urlInspection/index:inspect'
 const DAILY_QUOTA_CEILING = 1900
@@ -212,7 +213,7 @@ export async function runGscIndexSweep(opts: { budget?: number } = {}): Promise<
   // comes back could never re-enter the sitemap.
   const batch = await sql`
     SELECT url, coverage_state, verdict FROM gsc_url_inspections
-    WHERE in_sitemap OR coverage_state = ANY(${SUPPRESSED_STATES}::text[])
+    WHERE in_sitemap OR coverage_state = ANY(${DEAD_VERDICT_STATES}::text[])
     ORDER BY last_inspected_at ASC NULLS FIRST, first_seen_at ASC
     LIMIT ${budget}` as unknown as BatchRow[]
 

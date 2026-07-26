@@ -30,9 +30,9 @@ import { neon } from '@neondatabase/serverless'
 import { getBlogPostsForSitemap, getBlogCategories, getAllBlogSeries, getPageList, getProductHandlesForSitemap } from '~/lib/sanity.server'
 import { getProductImagesForSitemap, getCollectionsForSitemap, getMainMenu, type SitemapProductImages, type SitemapCollection } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
-import { SUPPRESSED_STATES } from '~/lib/gsc-index.server'
+import { DEAD_VERDICT_STATES } from '~/lib/gsc-index.server'
 import {
-  BASE, applyHealth, chunkSegments, newestLastmod,
+  BASE, applyHealth, chunkSegments, isTrustworthyDeadVerdict, newestLastmod,
   type SitemapImage, type SitemapSegment, type SitemapUrl, type UrlHealth,
 } from '~/lib/sitemap-xml'
 import { dealHistory } from '../../db/schema'
@@ -40,15 +40,16 @@ import { eq } from 'drizzle-orm'
 
 const sql = neon(process.env['DATABASE_URL']!)
 
-/** Coverage states that mean "Google's cached verdict predates the fix". */
-const STALE_VERDICT_STATES = [
+/**
+ * Every coverage state that means "Google's cached verdict is bad news".
+ * Whether a given row is *dead* or merely *stale* depends on when Google last
+ * crawled it — see isTrustworthyDeadVerdict.
+ */
+const BAD_VERDICT_STATES = [
   'Excluded by ‘noindex’ tag',
   'Duplicate without user-selected canonical',
+  ...DEAD_VERDICT_STATES,
 ]
-
-/** Coverage states that mean "this URL is dead, stop submitting it". Owned by
- *  the index monitor, which keeps re-inspecting them so suppression can lift. */
-const DEAD_STATES = SUPPRESSED_STATES
 
 /** Products per segment file. Well under the 50,000-URL protocol cap; sized
  *  so each segment stays a few hundred KB with image entries attached. */
@@ -62,13 +63,13 @@ const PRODUCTS_PER_SEGMENT = 1000
 export async function getUrlHealth(): Promise<UrlHealth> {
   try {
     const rows = await sql`
-      SELECT url, coverage_state FROM gsc_url_inspections
-      WHERE coverage_state = ANY(${[...DEAD_STATES, ...STALE_VERDICT_STATES]}::text[])
-    ` as unknown as Array<{ url: string; coverage_state: string }>
+      SELECT url, coverage_state, last_crawl_time FROM gsc_url_inspections
+      WHERE coverage_state = ANY(${BAD_VERDICT_STATES}::text[])
+    ` as unknown as Array<{ url: string; coverage_state: string; last_crawl_time: Date | string | null }>
     const dead  = new Set<string>()
     const stale = new Set<string>()
     for (const row of rows) {
-      if (DEAD_STATES.includes(row.coverage_state)) dead.add(row.url)
+      if (isTrustworthyDeadVerdict(row.coverage_state, row.last_crawl_time)) dead.add(row.url)
       else stale.add(row.url)
     }
     return { dead, stale }
