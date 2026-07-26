@@ -1,3 +1,5 @@
+import type { ProductHandleEntry } from '~/lib/product-handles'
+
 // ─── Sanity CMS Block Types ────────────────────────────────────────────────
 
 export interface SanityImageAsset {
@@ -95,7 +97,9 @@ export interface ProductCarouselBlock {
   source?: 'tag' | 'collection' | 'manual'
   shopifyTag?: string
   collectionHandle?: string
-  productHandles?: { handle: string }[]
+  /** RAW from Sanity: productRef objects OR bare strings. Flatten with
+   *  `normalizeProductHandles()` (~/lib/product-handles) before use. */
+  productHandles?: ProductHandleEntry[]
   productLimit: number
   layout?: 'carousel' | 'grid' | 'grid-3'
   ctaLink?: string
@@ -114,7 +118,9 @@ export interface EmmaCuratedRailBlock {
   heading: string
   eyebrow?: string
   emmaAside?: string
-  productHandles?: { handle: string }[]
+  /** RAW from Sanity: productRef objects OR bare strings. Flatten with
+   *  `normalizeProductHandles()` (~/lib/product-handles) before use. */
+  productHandles?: ProductHandleEntry[]
   layout?: 'carousel' | 'grid' | 'grid-3'
   bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
   ctaLink?: string

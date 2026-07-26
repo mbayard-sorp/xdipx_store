@@ -23,8 +23,8 @@
  * hero image (zero CLS).
  */
 
-import { Suspense, useEffect, useRef } from 'react'
-import { Await, Link } from 'react-router'
+import { useEffect, useRef } from 'react'
+import { Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { EmailSubscribe } from '~/components/store/EmailSubscribe'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
@@ -968,8 +968,14 @@ function FAQ() {
 }
 
 /* ── Composition ───────────────────────────────────────────────────────────
-   Order is the stable shell. The deferred Sanity blocks (the team's
-   notebook/promo/editorial surface) stream in between Couples and FAQ. */
+   Order is the stable shell. The team's Sanity blocks (rails, wayfinder,
+   Notebook override, couples band) arrive already resolved on `contentBlocks`
+   and render inline. They used to stream in as a deferred promise behind
+   <Suspense>/<Await>, which never survived the storefront's edge cache, so
+   every slot rendered its fallback forever (see storefront-home.server.ts).
+   Each slot still degrades to the same shell fallback when the team has
+   published nothing or the upstream failed — `contentBlocks` is then simply
+   the empty payload. */
 
 export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap }: StorefrontData) {
   // Segment variant-b sessions in GA4 (flip keep/rollback analysis). Fires once
@@ -993,6 +999,24 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
   const populatedRails = rails.filter(r => r.items.length > 0)
   const gridRail = populatedRails[0]
   const editRails = populatedRails.length > 1 ? populatedRails.slice(1) : populatedRails
+
+  // Team-published Sanity surfaces, already resolved by the loader. An empty
+  // payload (nothing published, or a degraded upstream) leaves every lookup
+  // below undefined/empty, which is what selects the shell fallbacks.
+  const { sections: teamSections, carouselProductMap } = contentBlocks
+  const teamRails = teamSections
+    .filter(b => b._type === TEAM_RAIL_TYPE)
+    .slice(0, MAX_TEAM_RAILS) as EmmaCuratedRailBlock[]
+  const firstTeamRail = teamRails[0]
+  const restTeamRails = teamRails.slice(1)
+  const firstTeamRailProducts = firstTeamRail ? carouselProductMap[firstTeamRail._key] ?? [] : []
+  const wayfinderBlock = teamSections.find(b => b._type === TEAM_WAYFINDER_TYPE) as
+    | WayfinderMosaicBlock
+    | undefined
+  const couplesBlock = teamSections.find(b => b._type === 'playTogetherBanner') as
+    | PlayTogetherBannerBlock
+    | undefined
+  const notebookBlocks = teamSections.filter(b => b._type === TEAM_NOTEBOOK_TYPE)
 
   return (
     <>
@@ -1024,88 +1048,48 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
           static grid. Never blank: gridRail is undefined only when every
           discovery rail is empty (cold KV), in which case nothing renders
           here and the page still reads complete. */}
-      <Suspense fallback={gridRail ? <ProductGrid rail={gridRail} /> : null}>
-        <Await
-          resolve={contentBlocks}
-          errorElement={gridRail ? <ProductGrid rail={gridRail} /> : null}
-        >
-          {({ sections, carouselProductMap }) => {
-            const teamRails = sections
-              .filter(b => b._type === TEAM_RAIL_TYPE)
-              .slice(0, MAX_TEAM_RAILS)
-            const firstTeamRail = teamRails[0] as EmmaCuratedRailBlock | undefined
-            if (firstTeamRail) {
-              const products = carouselProductMap[firstTeamRail._key] ?? []
-              if (products.length > 0) {
-                // The day's slate gets the dense grid treatment (spec Nº 03),
-                // not a horizontal scroller — heading/eyebrow come from the
-                // team's Sanity block so merchandising still owns the words.
-                return (
-                  <ProductGrid
-                    rail={teamRailToGridRail(products)}
-                    eyebrow={firstTeamRail.eyebrow || "What's working"}
-                    heading={firstTeamRail.heading}
-                    seeAllHref={firstTeamRail.ctaLink || '/collections/best-sellers'}
-                    seeAllLabel={firstTeamRail.ctaLabel || 'See all →'}
-                  />
-                )
-              }
-              // Product fetch failed/empty — fall back to the carousel path
-              // rather than an empty grid.
-              return (
-                <ContentBlockRenderer
-                  block={firstTeamRail}
-                  carouselProductMap={carouselProductMap}
-                />
-              )
-            }
-            return gridRail ? <ProductGrid rail={gridRail} /> : null
-          }}
-        </Await>
-      </Suspense>
+      {firstTeamRail ? (
+        firstTeamRailProducts.length > 0 ? (
+          // The day's slate gets the dense grid treatment (spec Nº 03), not a
+          // horizontal scroller — heading/eyebrow come from the team's Sanity
+          // block so merchandising still owns the words.
+          <ProductGrid
+            rail={teamRailToGridRail(firstTeamRailProducts)}
+            eyebrow={firstTeamRail.eyebrow || "What's working"}
+            heading={firstTeamRail.heading}
+            seeAllHref={firstTeamRail.ctaLink || '/collections/best-sellers'}
+            seeAllLabel={firstTeamRail.ctaLabel || 'See all →'}
+          />
+        ) : (
+          // Product fetch failed/empty — fall back to the carousel path rather
+          // than an empty grid.
+          <ContentBlockRenderer block={firstTeamRail} carouselProductMap={carouselProductMap} />
+        )
+      ) : gridRail ? (
+        <ProductGrid rail={gridRail} />
+      ) : null}
 
       <MeetEmma photoUrl={emmaPhotoUrl} photoAlt={emmaPhotoAlt} />
 
       {/* Find your way in — the team's `wayfinderMosaic` block when published,
-          otherwise the hardcoded fallback (unset block, pending promise, AND
-          rejected promise all render the same fallback — never empty boxes). */}
-      <Suspense fallback={<FindYourWayIn />}>
-        <Await resolve={contentBlocks} errorElement={<FindYourWayIn />}>
-          {({ sections }) => {
-            const block = sections.find(b => b._type === TEAM_WAYFINDER_TYPE) as WayfinderMosaicBlock | undefined
-            return <FindYourWayIn block={block} />
-          }}
-        </Await>
-      </Suspense>
+          otherwise the hardcoded fallback (an unset block and a degraded
+          upstream both leave this undefined — never empty boxes). */}
+      <FindYourWayIn block={wayfinderBlock} />
 
       {/* Nº 06 · Emma's edit — the team's remaining `emmaCuratedRail` blocks
           (2nd..Nth) when published, otherwise the discovery rails not already
           used by the Nº 03 grid, rendered as the calm horizontal scroller. */}
-      <Suspense fallback={<EmmasEdit rails={editRails} />}>
-        <Await resolve={contentBlocks} errorElement={<EmmasEdit rails={editRails} />}>
-          {({ sections, carouselProductMap }) => {
-            const teamRails = sections
-              .filter(b => b._type === TEAM_RAIL_TYPE)
-              .slice(0, MAX_TEAM_RAILS)
-            const restTeamRails = teamRails.slice(1)
-            if (restTeamRails.length > 0) {
-              return (
-                <>
-                  {restTeamRails.map(block => (
-                    <ContentBlockRenderer
-                      key={block._key}
-                      block={block}
-                      carouselProductMap={carouselProductMap}
-                    />
-                  ))}
-                </>
-              )
-            }
-            if (teamRails.length === 1) return null // the one team rail already fed the Nº 03 grid
-            return <EmmasEdit rails={editRails} />
-          }}
-        </Await>
-      </Suspense>
+      {restTeamRails.length > 0 ? (
+        restTeamRails.map(block => (
+          <ContentBlockRenderer
+            key={block._key}
+            block={block}
+            carouselProductMap={carouselProductMap}
+          />
+        ))
+      ) : teamRails.length === 1 ? null /* the one team rail already fed the Nº 03 grid */ : (
+        <EmmasEdit rails={editRails} />
+      )}
 
       {/* Nº 07 · The Sensation Map — a plum-soft discovery instrument between the
           Emma's edit rail (paper-2) and Couples (paper-3) for a tinted beat in
@@ -1123,43 +1107,24 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
       {/* Nº 08 · Couples — the `playTogetherBanner` block supplies the band's
           photo + copy when published; fallback renders the coral-soft band
           with hardcoded copy (never blank). */}
-      <Suspense fallback={<Couples />}>
-        <Await resolve={contentBlocks} errorElement={<Couples />}>
-          {({ sections }) => (
-            <Couples
-              block={sections.find(b => b._type === 'playTogetherBanner') as PlayTogetherBannerBlock | undefined}
-            />
-          )}
-        </Await>
-      </Suspense>
+      <Couples block={couplesBlock} />
       <StillDecidingBand />
 
       {/* From the Notebook — a curated `editorialTiles` block wins when the team
           publishes one (each card can also link a product/collection); otherwise
           the section auto-populates with the latest published posts so fresh
           daily content always reaches the homepage with no merchandiser action. */}
-      <Suspense fallback={<HomeNotebookRail posts={notebookPosts} />}>
-        <Await
-          resolve={contentBlocks}
-          errorElement={<HomeNotebookRail posts={notebookPosts} />}
-        >
-          {({ sections, carouselProductMap }) => {
-            const notebook = sections.filter(b => b._type === TEAM_NOTEBOOK_TYPE)
-            if (notebook.length === 0) return <HomeNotebookRail posts={notebookPosts} />
-            return (
-              <>
-                {notebook.map(block => (
-                  <ContentBlockRenderer
-                    key={block._key}
-                    block={block}
-                    carouselProductMap={carouselProductMap}
-                  />
-                ))}
-              </>
-            )
-          }}
-        </Await>
-      </Suspense>
+      {notebookBlocks.length === 0 ? (
+        <HomeNotebookRail posts={notebookPosts} />
+      ) : (
+        notebookBlocks.map(block => (
+          <ContentBlockRenderer
+            key={block._key}
+            block={block}
+            carouselProductMap={carouselProductMap}
+          />
+        ))
+      )}
 
       <FAQ />
       <EmailSubscribe

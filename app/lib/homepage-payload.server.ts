@@ -26,6 +26,7 @@ import { EMPTY_STATE } from '~/types/discovery'
 import type { Rail } from '~/types/discovery'
 import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
 import { getHomepageSections } from '~/lib/sanity.server'
+import { normalizeProductHandles } from '~/lib/product-handles'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
 import type { Product, LeanCardProduct } from '~/types'
 import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock } from '~/types/cms'
@@ -107,7 +108,7 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
             return getCollectionProducts(b.collectionHandle, limit)
           }
           if (source === 'manual' && b.productHandles?.length) {
-            return getProductsByHandles(b.productHandles.map(p => p.handle))
+            return getProductsByHandles(normalizeProductHandles(b.productHandles))
           }
           return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([] as Product[])
         })), BUILD_TIMEOUT_MS, [] as Product[][], 'carouselResults(payloadA)')
@@ -115,7 +116,7 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
     emmaRailBlocks.length > 0
       ? withTimeout(Promise.all(emmaRailBlocks.map(b =>
           b.productHandles?.length
-            ? getProductsByHandles(b.productHandles.map(p => p.handle))
+            ? getProductsByHandles(normalizeProductHandles(b.productHandles))
             : Promise.resolve([] as Product[]),
         )), BUILD_TIMEOUT_MS, [] as Product[][], 'emmaRailResults(payloadA)')
       : Promise.resolve([] as Product[][]),

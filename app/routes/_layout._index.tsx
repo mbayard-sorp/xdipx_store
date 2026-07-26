@@ -43,6 +43,7 @@ import { buildSocialMeta } from '~/lib/social-meta'
 import { heroPreloadTag } from '~/lib/image-preload'
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
 import { withTimeout } from '~/lib/with-timeout.server'
+import { normalizeProductHandles } from '~/lib/product-handles'
 
 // Per-fetch wall-clock budgets. Any single upstream that exceeds its budget
 // resolves to a safe fallback so the homepage always returns 200 SSR HTML well
@@ -253,7 +254,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           return getCollectionProducts(b.collectionHandle, limit)
         }
         if (source === 'manual' && b.productHandles?.length) {
-          return getProductsByHandles(b.productHandles.map(p => p.handle))
+          return getProductsByHandles(normalizeProductHandles(b.productHandles))
         }
         return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([] as Product[])
       })), LOADER_TIMEOUT_MS, [] as Product[][], 'carouselResults')
@@ -262,7 +263,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const emmaRailResultsP = emmaRailBlocks.length > 0
     ? withTimeout(Promise.all(emmaRailBlocks.map(b =>
         b.productHandles?.length
-          ? getProductsByHandles(b.productHandles.map(p => p.handle))
+          ? getProductsByHandles(normalizeProductHandles(b.productHandles))
           : Promise.resolve([] as Product[]),
       )), LOADER_TIMEOUT_MS, [] as Product[][], 'emmaRailResults')
     : Promise.resolve([] as Product[][])

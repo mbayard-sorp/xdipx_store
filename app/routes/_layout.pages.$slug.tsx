@@ -3,6 +3,7 @@ import { useLoaderData } from 'react-router'
 import { data } from 'react-router'
 import { getPage, isPreviewRequest } from '~/lib/sanity.server'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
+import { normalizeProductHandles } from '~/lib/product-handles'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
 import { canonicalUrl } from '~/lib/seo'
@@ -31,7 +32,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
           return getCollectionProducts(b.collectionHandle, limit)
         }
         if (source === 'manual' && b.productHandles?.length) {
-          return getProductsByHandles(b.productHandles.map(p => p.handle))
+          return getProductsByHandles(normalizeProductHandles(b.productHandles))
         }
         return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([])
       }),
