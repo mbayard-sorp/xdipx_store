@@ -21,6 +21,19 @@ import type { EmmaHeroSettings, BlogPostCard } from '~/types/cms'
 
 const EMMA_HERO_TIMEOUT_MS = 4000
 const EDITOR_TIMEOUT_MS = 4000
+/**
+ * Wall-clock ceiling for the team's Sanity merchandising surface. This leg is
+ * now resolved BEFORE the response is sent (see `contentBlocks` below), so it
+ * is on the critical path and needs its own hard bound: on timeout it degrades
+ * to the empty payload, which renders exactly the same shell fallbacks the page
+ * showed while the promise was deferred. Worst case is therefore today's
+ * behaviour, never a slower page. It runs in parallel with the discovery rails
+ * (the longest leg), so in practice it adds no wall-clock at all.
+ */
+const CONTENT_BLOCKS_TIMEOUT_MS = 6000
+
+/** Degraded team-content payload: every consumer falls back to shell defaults. */
+const EMPTY_CONTENT_BLOCKS: HomeContentBlocksLean = { sections: [], carouselProductMap: {} }
 
 export interface StorefrontData {
   variant: 'b'
@@ -54,8 +67,24 @@ export interface StorefrontData {
   emmaPhotoUrl: string | null
   emmaPhotoAlt: string | null
   /**
-   * Team-managed Sanity homepage blocks (DEFERRED — never blocks the shell's
-   * TTFB). The autonomous merchandising team writes `singleton.homepage`; the
+   * Team-managed Sanity homepage blocks, RESOLVED server-side before the
+   * response is sent.
+   *
+   * This used to be a deferred `Promise` streamed in after the shell. That
+   * never reached real visitors: the storefront is served as an edge-cached
+   * document (`STOREFRONT_EDGE_CACHE_HEADERS`, s-maxage 300 + SWR), and a CDN
+   * can only store the bytes flushed with the shell — the post-shell streamed
+   * resolution is not part of the cacheable document. React Router also aborts
+   * still-pending deferred promises at `entry.server.tsx`'s `streamTimeout`.
+   * The net effect was that every consumer below rendered its hardcoded
+   * fallback permanently, so published merchandising (rails, wayfinder,
+   * Notebook override, couples band) was invisible to visitors AND to crawlers.
+   * Resolving it here removes the streaming dependency entirely; the leg is
+   * bounded by `CONTENT_BLOCKS_TIMEOUT_MS` and degrades to
+   * `EMPTY_CONTENT_BLOCKS` (== the old fallback rendering) on a slow or failed
+   * upstream.
+   *
+   * The autonomous merchandising team writes `singleton.homepage`; the
    * storefront renders only the team's merchandising surfaces from it:
    *   - `emmaCuratedRail` → the rotating-rails zone (discovery rails are the
    *     cold-start / no-team-content fallback)
@@ -68,7 +97,7 @@ export interface StorefrontData {
    * the team can edit it without a deploy; the LCP product image stays
    * discovery-derived.
    */
-  contentBlocks: Promise<HomeContentBlocksLean>
+  contentBlocks: HomeContentBlocksLean
   /**
    * Latest published Notebook posts, auto-populating the "From the Notebook"
    * section so fresh daily content reaches the homepage with no merchandiser
@@ -121,7 +150,7 @@ export const STOREFRONT_EDGE_CACHE_HEADERS = {
 
 export async function assembleStorefrontHome(): Promise<StorefrontData> {
   const railSeed = railSeedBucket()
-  const [railsResult, emmaHero, notebook, editor] = await Promise.all([
+  const [railsResult, emmaHero, notebook, editor, contentBlocks] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, 'getEmmaHeroSettings(storefront)'),
     getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [] as BlogPostCard[], total: 0 })),
@@ -130,6 +159,20 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
     // bundled illustration when this is null. getEditor() is already cached 300s
     // and swallows its own errors, so this is belt-and-suspenders with emmaHero.
     withTimeout(getEditor(), EDITOR_TIMEOUT_MS, null, 'getEditor(storefront)'),
+    // Team merchandising surface — resolved here rather than deferred, so it
+    // survives the edge cache and reaches crawlers (see the `contentBlocks`
+    // field doc). `withTimeout` only guards a slow upstream; the `.catch` is
+    // what replaces the old `<Await errorElement>`, so a rejected leg degrades
+    // to shell fallbacks instead of failing the render.
+    withTimeout(
+      buildHomeContentBlocksLean(),
+      CONTENT_BLOCKS_TIMEOUT_MS,
+      EMPTY_CONTENT_BLOCKS,
+      'buildHomeContentBlocksLean(storefront)',
+    ).catch((err: unknown) => {
+      console.error('[storefront-home] contentBlocks failed, using shell fallbacks:', err)
+      return EMPTY_CONTENT_BLOCKS
+    }),
   ])
 
   const rails = railsResult.rails
@@ -176,7 +219,7 @@ export async function assembleStorefrontHome(): Promise<StorefrontData> {
     emmaPhotoAlt: editor?.photoAlt ?? null,
     featured,
     total: railsResult.total,
-    contentBlocks: buildHomeContentBlocksLean(), // deferred — team-managed Sanity surface, lean/slimmed for variant b
+    contentBlocks, // resolved above — team-managed Sanity surface, lean/slimmed for variant b
     notebookPosts: notebook.posts,
     sensationMap,
   }

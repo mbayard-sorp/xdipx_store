@@ -6,6 +6,7 @@ import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings,
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
+import { normalizeProductHandles, type ProductHandleEntry } from '~/lib/product-handles'
 import { optimizeSanityImageUrls, sanityImageUrl } from '~/lib/sanity-image'
 
 /**
@@ -76,7 +77,7 @@ const CONTENT_BLOCKS_PROJECTION = `
   columns,
   // productCarousel
   source, shopifyTag, collectionHandle,
-  "productHandles": productHandles[]{ handle },
+  "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
   productLimit, layout,
   // playTogetherBanner
   body, imagePosition,
@@ -156,7 +157,7 @@ const SECTIONS_WITH_REFS_PROJECTION = `
       // custom name, not "reference" — so match by the presence of _ref instead.
       defined(_ref) => @->{
         _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
-        "productHandles": productHandles[]{ handle },
+        "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
         layout, bgStyle, ctaLink, ctaLabel
       },
       { ${CONTENT_BLOCKS_PROJECTION} }
@@ -992,7 +993,7 @@ export async function getProductPageBlocks(handle: string): Promise<ContentBlock
           ...select(
             _type == "reference" => @->{
               _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
-              "productHandles": productHandles[]{ handle },
+              "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
               layout, bgStyle, ctaLink, ctaLabel
             },
             { ${CONTENT_BLOCKS_PROJECTION} }
@@ -2076,14 +2077,20 @@ export async function getRailDraftsForDeal(dealId: string): Promise<EmmaRailDocu
   // Need raw perspective so drafts.* documents come back too.
   const writeClient = getClient(true, false, 'raw')
   if (!writeClient) return []
-  return writeClient.fetch<EmmaRailDocument[]>(
+  // Select productHandles RAW (both the productRef-object and bare-string
+  // shapes live in this dataset) and flatten in TS — `productHandles[].handle`
+  // returned a null per entry for the string-shaped docs.
+  const rows = await writeClient.fetch<(Omit<EmmaRailDocument, 'productHandles'> & {
+    productHandles?: ProductHandleEntry[]
+  })[]>(
     `*[_type == "emmaCuratedRail" && sourceDealId == $dealId] | order(generatedAt desc){
       _id, status, active, order, heading, eyebrow, emmaAside, target,
-      "productHandles": productHandles[].handle,
+      "productHandles": productHandles,
       layout, bgStyle, ctaLink, ctaLabel, sourceDealId, generatedAt, rationale
     }`,
     { dealId },
   )
+  return rows.map(row => ({ ...row, productHandles: normalizeProductHandles(row.productHandles) }))
 }
 
 export async function getProductHandlesForSitemap(): Promise<{ handle: string; _updatedAt: string; title?: string }[]> {
