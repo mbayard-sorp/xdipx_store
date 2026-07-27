@@ -31,6 +31,34 @@ the `policyCheck`.
 (3) vetted adult networks and newsletter/creator sponsorships, (4) Meta only for genuinely
 health-framed SKUs that pass the carve-out honestly. Never TikTok; never X paid.
 
+## Organic social
+
+Organic posting is a different policy surface from ads and is governed by each platform's
+**community standards**, not its ad standards. `social-media-manager` reads this section and the
+social addendum in `docs/emma-voice.md` at the start of every run.
+
+The rule that catches storefronts like ours is not nudity. Meta's Restricted Goods and Services
+standard removes organic content that **promotes the use of, or attempts to sell, adult products**.
+A tasteful product photo with a clean caption is removable when the post is selling. Sex education
+and health discussion is a real carve-out: allowed, but explicitly not recommended, which means no
+Explore or Reels distribution and invisibility under default Sensitive Content Control.
+
+| Platform | Organic posture | Hard limits | Risk |
+|---|---|---|---|
+| **Instagram / Facebook** | Editorial and educational only. The account is a publication; commerce lives at post → profile → link in bio → site. Adult products are barred from Instagram Shopping and in-app commerce entirely. | No sale attempt in the post (no price, discount, promo code, or shop CTA), no describing what a product does to a body, no product in hand or on a body. | **High.** Enforcement is account-level and retroactive; repeat strikes disable the account with little recourse. Appeal every removal. |
+| **TikTok** | Same posture as Instagram, applied harder — TikTok moderates the category more aggressively than Meta. | As above. Treat any borderline draft as a no. | **High.** |
+| **X** | The one genuinely permissive organic surface. X's adult-content policy allows the category; posts it covers must be labeled per X's own rules. | Still no explicit creative and no porn-adjacent aesthetics per §Creative. Paid remains prohibited. | **Medium.** |
+| **LinkedIn** | Industry authority only, no products (LinkedIn addendum, `docs/emma-voice.md`). | No product imagery, no store links, no promo codes. | **Low** when the addendum is followed. |
+| **Reddit** | Organic participation where subreddit rules allow. Rules are per-subreddit and enforced by humans; read them before posting. | Never post promotionally in a subreddit that bans it. | **Low** (per-community bans, not account loss). |
+
+**Never route around a filter.** Coded vocabulary, character substitution, reclaimed hashtags, and
+"algospeak" to get a blocked term past moderation are policy evasion in their own right and
+escalate from post removal to account action. If a draft only survives by disguising itself, kill
+the draft.
+
+**Account hygiene.** Assume the account is loseable: push followers to email and SMS relentlessly,
+keep the audience somewhere we own, and never make platform reach load-bearing for revenue.
+
 ## Creative rules (paid AND organic)
 
 - No nudity, no explicit imagery, no depiction or simulation of product use on a body.
@@ -56,6 +84,11 @@ killed. "It'll probably slip through review" is never a compliance case.
 - Policy ambiguity or a carve-out judgment call → flag in the proposal, owner decides.
 - A rejected ad or any platform policy notice on a live account → stop proposing for that platform,
   record an `error` event, surface to the owner immediately (account health outranks the campaign).
+- An organic post removed or an account restricted → `social-media-manager` records an `error`
+  event and surfaces it to the owner the same run, with the offending draft quoted. Pause that
+  platform's drafts until the owner has appealed and decided. One removal is a signal about the
+  rules; a second on the same pattern is a signal about our instructions, and gets a suggestion
+  (kind `instructions`, target `social`) proposing the fix.
 - Material policy changes spotted during a run → file a suggestion to update this document
   (kind `instructions`, target `ads`), citing the source.
 
@@ -65,3 +98,9 @@ killed. "It'll probably slip through review" is never a compliance case.
 - TikTok: [Adult content ad policy](https://ads.tiktok.com/help/article/tiktok-ads-policy-adult-content)
 - X: [Adult or sexual products and services ads policy](https://business.twitter.com/en/help/ads-policies/ads-content-policies/adult-or-sexual-products-and-services), [Shopping policies](https://help.x.com/en/rules-and-policies/shopping-policies)
 - Google: [Sexual content ad policy](https://support.google.com/adspolicy/answer/6023699)
+
+Organic (community standards, not ad standards):
+
+- Meta: [Restricted Goods and Services](https://transparency.meta.com/policies/community-standards/restricted-goods-services/), [Adult Sexual Solicitation and Sexually Explicit Language](https://transparency.meta.com/policies/community-standards/sexual-solicitation/), [Adult Nudity and Sexual Activity](https://transparency.meta.com/policies/community-standards/adult-nudity-sexual-activity/)
+- Instagram: [Sensitive Content Control](https://help.instagram.com/251027992727268), [Branded Content Policies](https://help.instagram.com/1695974997209192)
+- Meta: [Helping teens see age-appropriate content](https://transparency.meta.com/policies/age-appropriate-content/) (why the category is recommendation-ineligible)
