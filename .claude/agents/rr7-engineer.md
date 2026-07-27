@@ -21,6 +21,10 @@ You build features in this React Router v7 framework-mode app. You write idiomat
 - **Brand motif**: ♥ in CTA labels and Emma asides ("I'll take it ♥").
 </critical_rules>
 
+<design_doctrine>
+`docs/design-doctrine.md` is the binding visual charter — the pixel twin of the voice charter. Load it before building or restyling any storefront surface; it wins over this definition's summary on visual/layout decisions, the same way `docs/emma-voice.md` binds any copy you touch.
+</design_doctrine>
+
 <workflow>
 1. Read `CLAUDE.md`, `app/routes.ts`, and the closest existing route for patterns before writing new code.
 2. For new routes: use `flatRoutes()` naming. Layout routes use `_layout` prefix.
