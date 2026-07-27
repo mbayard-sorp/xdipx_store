@@ -171,7 +171,14 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    web-verifies external claims: anatomy/physiology, "research shows" statistics, materials and
    safety, realistic expectations, terminology).
 3. **One shared rewrite cycle.** Merge BOTH gates' REVISE feedback into exactly one rewrite,
-   then re-run both gates once. A second non-PASS from either is treated as BLOCK.
+   then re-run both gates once. A second non-PASS from either is treated as BLOCK. **Change only
+   the strings a gate actually flagged** — no cosmetic edits ride along. Any string carrying a
+   safety enumeration ("no motor, battery, or electronics inside"), a material limit, or a
+   never/only instruction is **frozen** unless the ACCURACY gate asked for that exact change: a
+   battery-plus-switch DC-motor toy is arguably not "electronic", so a purely cosmetic reword can
+   flip an accuracy PASS to BLOCK and cost the whole post (run 92). The fresh-language rule
+   (content-plan §7) does **not** apply to safety enumerations — an exact repeated safety phrase
+   across posts is correct and preferable to a fresh but looser paraphrase.
 4. **BLOCK** (from either gate, either cycle) → the post stays `status:'draft'`, and you file a
    suggestion row (`team:'content'`, kind `process`) with the reviewer's reasons.
 5. **Sources insertion (mechanical, after the final PASS).** The accuracy gate returns 0-2
