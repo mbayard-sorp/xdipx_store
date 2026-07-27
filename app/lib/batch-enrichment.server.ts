@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
@@ -317,9 +318,24 @@ let _cachedAgentPrompt: string | null = null
  */
 async function loadEnricherAgentPrompt(): Promise<string> {
   if (_cachedAgentPrompt !== null) return _cachedAgentPrompt
-  // app/lib/batch-enrichment.server.ts → repo root is two levels up.
+  // The bundle location varies by build: app/lib/ in source and the Vite SSR
+  // build, server/ in the standalone esbuild vercel-entry bundle (where a
+  // __dirname-relative '../../.claude' escapes /var/task and lands on the
+  // nonexistent /var/.claude — the ENOENT that stalled the enrich pipeline).
+  // process.cwd() is the repo root locally and /var/task on Vercel, where
+  // vercel.json includeFiles places .claude/agents/ — so it goes first.
+  // Mirrors app/lib/emma-voice.server.ts.
   const here = dirname(fileURLToPath(import.meta.url))
-  const path = resolve(here, '..', '..', '.claude', 'agents', 'emma-product-enricher.md')
+  const rel = ['.claude', 'agents', 'emma-product-enricher.md'] as const
+  const candidates = [
+    resolve(process.cwd(), ...rel),
+    resolve(here, '..', '..', ...rel),
+    resolve(here, '..', ...rel),
+  ]
+  const path = candidates.find(p => existsSync(p))
+  if (!path) {
+    throw new Error(`enricher agent prompt not found; tried ${candidates.join(', ')}`)
+  }
   const raw  = await readFile(path, 'utf8')
   const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
   if (!body) throw new Error(`empty agent prompt at ${path}`)
