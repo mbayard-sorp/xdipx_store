@@ -64,6 +64,16 @@ by the owner once approved. At most one promo-angle post per run, and only refer
 owner-approved promo codes. Propose a `scheduledFor` date for every draft (default: tomorrow) so
 the Studio's calendar strip populates.
 
+**Plain nouns first.** Name the product category and anatomy with the charter's plain nouns
+(`docs/emma-voice.md`, "Say the word, drop the wink") — vibrator, clitoral, prostate, penetration —
+not euphemistic stand-ins ("internal massager", "external contact"). The plain word is warmer and
+clearer and clears the voice gate on the first pass; softening it drew an avoidable REVISE on 2 of
+3 drafts in run 41. This is a clarity rule, **not** a licence to cross the Step 4b platform-policy
+gate: naming a category or anatomy matter-of-factly is not describing what the product does to a
+body, and 4b's arousal/act-description lines still bind on Instagram/TikTok/X. Reserve softer,
+mechanism-only phrasing for surfaces where the charter actually requires restraint (paid-ad
+creative).
+
 **LinkedIn is a different lane** (`postType:"authority"`, quota `social_freq_linkedin`):
 
 - Drafted ONLY from a `pending` researchBrief. No pending brief → skip LinkedIn honestly this run;
