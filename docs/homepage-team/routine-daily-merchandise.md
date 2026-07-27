@@ -93,12 +93,17 @@ merchandising blind.
 
 Skip this step Tuesday through Sunday. On Mondays, run both of these in order before Step 2:
 
-1. **Competitor recon.** WebFetch the homepages of Lovehoney, Spectrum Boutique, In The Groove, and
-   Too Timid, plus one new competitor you have not reviewed before. Write a short recon memo into
-   the run log (an `/event` row) per mission brief section 4: what each leads with, what they do
-   badly, one idea worth adapting, and one thing we will do this week that none of them do. The
-   memo must change something concrete this week (the theme, a rail concept, a tile, or a Routine B
-   backlog item). Recon that changes nothing is a wasted step.
+1. **Competitor recon.** Gather positioning intel on Lovehoney, Spectrum Boutique, In The Groove,
+   and Too Timid, plus one new competitor you have not reviewed before. **Default to `WebSearch`**
+   and label the memo as search-sourced (not live-observed). DTC competitor homepages are typically
+   bot-blocked: a `WebFetch` of a competitor homepage usually returns HTTP 403 (Lovehoney, Spectrum
+   Boutique, Too Timid, Dame all 403'd run 53) or a DNS failure (inthegroove.co NXDOMAIN'd), so try
+   a live fetch at most once per source and fall back to search immediately rather than burning
+   turns retrying blocked fetches. Use any reachable source. Write a short recon memo into the run
+   log (an `/event` row) per mission brief section 4: what each leads with, what they do badly, one
+   idea worth adapting, and one thing we will do this week that none of them do. The memo must
+   change something concrete this week (the theme, a rail concept, a tile, or a Routine B backlog
+   item). Recon that changes nothing is a wasted step.
 2. **Set the week's theme.** Invoke `merch-calendar` to set or confirm this week's theme in
    `marketing_calendar` per mission brief section 3. Themes are editorial curricula, not sales
    events; the recon memo from the previous step feeds this decision.
