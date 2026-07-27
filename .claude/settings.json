@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "permissions": {
+    "allow": [
+      "mcp__Sanity__query_documents",
+      "mcp__Sanity__get_document",
+      "mcp__Sanity__get_schema",
+      "mcp__Sanity__list_workspace_schemas",
+      "mcp__Sanity__semantic_search",
+      "mcp__Sanity__list_sanity_rules",
+      "mcp__Sanity__get_sanity_rules",
+      "mcp__Sanity__search_docs",
+      "mcp__Sanity__read_docs",
+      "mcp__Sanity__whoami",
+      "mcp__Sanity__list_datasets",
+      "mcp__Sanity__create_documents",
+      "mcp__Sanity__patch_documents",
+      "mcp__Sanity__publish_documents",
+      "mcp__Sanity__create_version",
+      "mcp__Sanity__generate_image",
+      "mcp__Sanity__transform_image"
+    ],
+    "ask": [
+      "mcp__Sanity__unpublish_documents",
+      "mcp__Sanity__discard_drafts",
+      "mcp__Sanity__version_discard",
+      "mcp__Sanity__create_release",
+      "mcp__Sanity__list_releases"
+    ],
+    "deny": [
+      "mcp__Sanity__deploy_schema",
+      "mcp__Sanity__deploy_studio",
+      "mcp__Sanity__create_dataset",
+      "mcp__Sanity__update_dataset",
+      "mcp__Sanity__create_project",
+      "mcp__Sanity__add_cors_origin"
+    ]
+  }
+}
