@@ -25,6 +25,11 @@
  *     and erodes sitemap trust. Suppression stays self-healing because the
  *     sweep keeps re-inspecting suppressed URLs (see gsc-index.server.ts), so
  *     a URL that comes back to life re-enters the sitemap on its own.
+ *
+ * Priority and changefreq come from the shared constants in sitemap-xml.ts.
+ * They encode a hierarchy (homepage > nav > /new > PLPs > products) rather
+ * than the flat "everything is 0.9, daily" the file used to emit, which told
+ * a crawler nothing and was demonstrably false for 4,400 PDPs.
  */
 import { neon } from '@neondatabase/serverless'
 import { getBlogPostsForSitemap, getBlogCategories, getAllBlogSeries, getPageList, getProductHandlesForSitemap } from '~/lib/sanity.server'
@@ -33,6 +38,8 @@ import { db } from '~/lib/db.server'
 import { DEAD_VERDICT_STATES } from '~/lib/gsc-index.server'
 import {
   BASE, applyHealth, chunkSegments, isTrustworthyDeadVerdict, newestLastmod,
+  HOMEPAGE_PRIORITY, NAV_PRIORITY, NEW_ARRIVALS_PRIORITY,
+  PRODUCT_PRIORITY, PRODUCT_CHANGEFREQ,
   type SitemapImage, type SitemapSegment, type SitemapUrl, type UrlHealth,
 } from '~/lib/sitemap-xml'
 import { dealHistory } from '../../db/schema'
@@ -197,7 +204,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
   // ── pages: homepage, nav, evergreen routes, generic pages ────────────────
   const pageUrls: SitemapUrl[] = [
     // Homepage — always first, highest priority
-    { loc: `${BASE}/`, lastmod: homepageLastmod ?? today, changefreq: 'daily', priority: '1.0' },
+    { loc: `${BASE}/`, lastmod: homepageLastmod ?? today, changefreq: 'daily', priority: HOMEPAGE_PRIORITY },
     // Top-level nav destinations — Google's sitelink candidates.
     // Priority 0.9, just below the homepage and above generic PLPs.
     ...navItems.map(path => {
@@ -209,13 +216,16 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
         loc: `${BASE}${path}`,
         lastmod: c?.updatedAt?.split('T')[0] ?? today,
         changefreq: 'daily',
-        priority: '0.9',
+        priority: NAV_PRIORITY,
       }
     }),
+    // /new: the catalog's only freshness surface, and one of the few pages
+    // whose changefreq=daily claim is true. It self-noindexes ONLY when it has
+    // zero products (thin content); the rest of the time it is a fully
+    // indexable page, so omitting it left it with no submission path and
+    // almost no inbound links. Listed above generic PLPs, below the nav.
+    { loc: `${BASE}/new`,         lastmod: today, changefreq: 'daily',  priority: NEW_ARRIVALS_PRIORITY },
     { loc: `${BASE}/discover`,    lastmod: today, changefreq: 'weekly', priority: '0.7' },
-    // /new is deliberately noindex (churning daily inventory); listing it in
-    // the sitemap contradicts that and shows up in GSC as "Excluded by
-    // 'noindex' tag" on a submitted URL.
     { loc: `${BASE}/collections`, lastmod: collectionsHubLastmod ?? today, changefreq: 'weekly', priority: '0.7' },
     { loc: `${BASE}/notebook`,    lastmod: today, changefreq: 'weekly', priority: '0.5' },
     { loc: `${BASE}/notebook/glossary`, lastmod: today, changefreq: 'weekly', priority: '0.5' },
@@ -297,8 +307,8 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
     return {
       loc: `${BASE}/products/${p.handle}`,
       lastmod: p._updatedAt?.split('T')[0],
-      changefreq: 'daily',
-      priority: '0.9',
+      changefreq: PRODUCT_CHANGEFREQ,
+      priority: PRODUCT_PRIORITY,
       ...(images.length > 0 ? { images } : {}),
     }
   })

@@ -470,8 +470,23 @@ export interface SuggestionInput {
   suggestion: string
   estSavingsUsd?: number | undefined
   cxRisk?: 'low' | 'med' | 'high' | undefined
+  /** Ticket priority, 1 (highest) .. 5 (lowest). Defaults to 3 (070). */
+  priority?: number | undefined
+  /**
+   * Stable identity for a recurring signal (070). While a ticket carrying this
+   * key is still live (status not in applied|dismissed) a second insert with
+   * the same key is a no-op, so a metric that trips every day reopens the
+   * conversation on one ticket instead of flooding the queue.
+   */
+  dedupeKey?: string | undefined
 }
 
+/**
+ * File a suggestion. Returns the new row's id, or 0 when the insert was
+ * absorbed by the dedupe_key partial-unique index (a live ticket for this
+ * signal already exists). Callers that only care "is it filed" can ignore the
+ * distinction; callers reporting counts should treat 0 as "already open".
+ */
 export async function createSuggestion(s: SuggestionInput): Promise<number> {
   // Owner triage (proposed -> approved) is automated per-team via the
   // `{team}_team_auto_approve_suggestions` valve. Key it off the team that ACTS
@@ -496,9 +511,14 @@ export async function createSuggestion(s: SuggestionInput): Promise<number> {
       status:        autoApprove ? 'approved' : 'proposed',
       decidedBy:     autoApprove ? 'auto' : null,
       decidedAt:     autoApprove ? new Date() : null,
+      priority:      s.priority ?? 3,
+      dedupeKey:     s.dedupeKey ?? null,
     })
+    // Untargeted DO NOTHING so the dedupe_key partial-unique index (070)
+    // swallows a repeat filing instead of throwing inside a cron handler.
+    .onConflictDoNothing()
     .returning({ id: homepageTeamSuggestions.id })
-  return row!.id
+  return row?.id ?? 0
 }
 
 export async function listSuggestions(filter: {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  HOMEPAGE_PRIORITY, NAV_PRIORITY, NEW_ARRIVALS_PRIORITY,
+  PRODUCT_CHANGEFREQ, PRODUCT_PRIORITY,
   RECRAWL_EPOCH, SITEMAP_CACHE_CONTROL, applyHealth, chunkSegments, floorLastmod,
   isTrustworthyDeadVerdict, newestLastmod, renderSitemapIndex, renderUrlset,
   type SitemapUrl, type UrlHealth,
@@ -41,6 +43,37 @@ describe('SITEMAP_CACHE_CONTROL', () => {
   it('keeps s-maxage short enough that a new post lands the same day', () => {
     const sMaxAge = Number(/s-maxage=(\d+)/.exec(SITEMAP_CACHE_CONTROL)![1])
     expect(sMaxAge).toBeLessThanOrEqual(3600)
+  })
+})
+
+describe('sitemap hierarchy', () => {
+  const p = (s: string) => Number(s)
+
+  it('ranks homepage above nav above /new above products', () => {
+    // The whole point of priority is the ordering. A flat catalog (every URL
+    // at 0.9, which is what this file used to emit) communicates nothing.
+    expect(p(HOMEPAGE_PRIORITY)).toBeGreaterThan(p(NAV_PRIORITY))
+    expect(p(NAV_PRIORITY)).toBeGreaterThan(p(NEW_ARRIVALS_PRIORITY))
+    expect(p(NEW_ARRIVALS_PRIORITY)).toBeGreaterThan(p(PRODUCT_PRIORITY))
+  })
+
+  it('keeps the homepage at the protocol maximum and nav at 0.9', () => {
+    expect(HOMEPAGE_PRIORITY).toBe('1.0')
+    expect(NAV_PRIORITY).toBe('0.9')
+  })
+
+  it('does not claim products change daily', () => {
+    // 4,400 PDPs claiming changefreq=daily is a promise a crawler disproves on
+    // its second fetch, and a sitemap that overstates gets discounted whole.
+    expect(PRODUCT_CHANGEFREQ).toBe('weekly')
+    expect(p(PRODUCT_PRIORITY)).toBeLessThan(p(NAV_PRIORITY))
+  })
+
+  it('keeps every priority inside the sitemap protocol range', () => {
+    for (const v of [HOMEPAGE_PRIORITY, NAV_PRIORITY, NEW_ARRIVALS_PRIORITY, PRODUCT_PRIORITY]) {
+      expect(p(v)).toBeGreaterThanOrEqual(0)
+      expect(p(v)).toBeLessThanOrEqual(1)
+    }
   })
 })
 

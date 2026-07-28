@@ -17,6 +17,13 @@ function toRelativePath(url: string): string {
 // reserved for the one primary CTA per viewport, per the design doctrine)
 const ACCENT_LABELS = new Set(['sale'])
 
+// /new is a code route, not a Shopify menu item, so it never appeared in the
+// nav even though it is an indexable page. That left the catalog's only
+// freshness surface with essentially no inbound links. Rendered as a static
+// leading entry rather than pushed into the Shopify menu, so merchandising
+// edits in Shopify can't silently drop it.
+const NEW_ARRIVALS = { title: 'New', path: '/new' } as const
+
 // ─── Desktop Mega Menu ────────────────────────────────────────────────────────
 
 export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuItem[]; banners?: MegaMenuBanner[] }) {
@@ -56,6 +63,14 @@ export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuIte
 
   return (
     <div className="hidden md:flex items-center gap-1 flex-1 justify-center">
+      <Link
+        to={NEW_ARRIVALS.path}
+        prefetch="intent"
+        className="px-3 py-1.5 rounded-full text-sm font-medium text-ink/70 hover:text-sage transition-all"
+        style={{ fontFamily: 'var(--font-display)' }}
+      >
+        {NEW_ARRIVALS.title}
+      </Link>
       {items.map((item, idx) => {
         const isAccent = ACCENT_LABELS.has(item.title.toLowerCase())
         const hasChildren = item.items.length > 0
@@ -259,6 +274,16 @@ export function MobileMegaMenu({ items, onNavigate }: { items: ShopifyMenuItem[]
 
   return (
     <ul className="space-y-0.5 px-3">
+      <li>
+        <Link
+          to={NEW_ARRIVALS.path}
+          onClick={onNavigate}
+          className="w-full flex items-center px-4 py-3 rounded-xl text-base font-medium text-ink hover:bg-cream-2 hover:text-sage transition-all"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          {NEW_ARRIVALS.title}
+        </Link>
+      </li>
       {items.map((item, idx) => {
         const isOpen = expandedIndex === idx
         const isAccent = ACCENT_LABELS.has(item.title.toLowerCase())

@@ -46,14 +46,25 @@ function baseUrl(): string {
   return (process.env['BASE_URL'] || 'https://xdipx.com').replace(/\/+$/, '')
 }
 
-interface FetchCheck { status: number; ok: boolean; detail?: string }
+export interface FetchCheck {
+  status: number
+  ok: boolean
+  detail?: string
+  /** Response body when one was read. Callers that need to inspect the HTML
+   *  (the daily SEO tripwire checks canonical + robots directives) read this
+   *  instead of re-fetching the page. */
+  body?: string
+}
 
 /**
  * GET a URL with a timeout and assert status 200, a minimum body size, and that
  * the body contains every required marker. Returns a structured result rather
  * than throwing so the caller can record a clean failed step.
+ *
+ * Exported so seo-daily.server.ts reuses the same fetch discipline (timeout,
+ * realistic UA, redirect handling) rather than growing a parallel one.
  */
-async function checkUrl(url: string, opts: { markers?: string[]; minBytes?: number } = {}): Promise<FetchCheck> {
+export async function checkUrl(url: string, opts: { markers?: string[]; minBytes?: number } = {}): Promise<FetchCheck> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
@@ -63,15 +74,15 @@ async function checkUrl(url: string, opts: { markers?: string[]; minBytes?: numb
       headers: { 'user-agent': PROBE_UA },
     })
     const body = await res.text()
-    if (res.status !== 200) return { status: res.status, ok: false, detail: `HTTP ${res.status}` }
+    if (res.status !== 200) return { status: res.status, ok: false, detail: `HTTP ${res.status}`, body }
     const minBytes = opts.minBytes ?? MIN_BODY_BYTES
-    if (body.length < minBytes) return { status: res.status, ok: false, detail: `body ${body.length} < ${minBytes} bytes` }
+    if (body.length < minBytes) return { status: res.status, ok: false, detail: `body ${body.length} < ${minBytes} bytes`, body }
     for (const marker of opts.markers ?? []) {
       if (!body.toLowerCase().includes(marker.toLowerCase())) {
-        return { status: res.status, ok: false, detail: `missing marker "${marker}"` }
+        return { status: res.status, ok: false, detail: `missing marker "${marker}"`, body }
       }
     }
-    return { status: res.status, ok: true }
+    return { status: res.status, ok: true, body }
   } catch (err) {
     return { status: 0, ok: false, detail: err instanceof Error ? err.message : String(err) }
   } finally {
