@@ -244,6 +244,10 @@ const RENDER_TRUTH_RETRY_BACKOFF_MS = 2000
 /** Only the first N `emmaCuratedRail` blocks render (StorefrontHome MAX_TEAM_RAILS). */
 const RENDERED_TEAM_RAILS = 4
 const FINGERPRINT_KEY_PREFIX = 'homepage:render-truth:fingerprint'
+/** Latest full verdict, read by the owner digest's "Homepage now" section.
+ *  The fingerprint key above only carries slot hashes for the sameness
+ *  check, which is not enough for a human-readable report. */
+export const RENDER_TRUTH_LATEST_KEY = 'homepage:render-truth:latest'
 
 /**
  * The hardcoded shell copy each slot falls back to when nothing is published.
@@ -595,6 +599,18 @@ async function fetchHomeHtml(): Promise<string | null> {
  * @param opts.fileTickets  Off for the release-engine smoke, which reports into
  *                     its own PR flow rather than the ticket queue.
  */
+/**
+ * Snapshot the latest verdict for the owner digest. Never throws: the digest
+ * losing a section must not fail the healthcheck that produced it.
+ */
+async function persistLatestRenderTruth(result: RenderTruthResult): Promise<void> {
+  try {
+    await kvSet(RENDER_TRUTH_LATEST_KEY, { ...result, at: new Date().toISOString() })
+  } catch (err) {
+    console.warn('[render-truth] latest snapshot failed', err)
+  }
+}
+
 export async function renderTruth(
   opts: { html?: string | undefined; now?: number; fileTickets?: boolean } = {},
 ): Promise<RenderTruthResult> {
@@ -709,12 +725,14 @@ export async function renderTruth(
       result.message =
         `${failed.length} assertion(s) failing but the Sanity doc changed `
         + `${Math.round((now - updatedAt) / 60_000)} min ago, inside the propagation window, so not reporting`
+      await persistLatestRenderTruth(result)
       return result
     }
 
     if (fileTickets) {
       result.ticketIds = await fileRenderTruthTickets(failed, sameSlots, today, slate)
     }
+    await persistLatestRenderTruth(result)
     return result
   } catch (err) {
     // A broken gate must never take down the healthcheck that hosts it.
