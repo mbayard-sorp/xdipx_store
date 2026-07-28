@@ -223,7 +223,9 @@ rules below were owner-codified 2026-07-28.
   **Final audit, run before delivering:** count (a) antithesis constructions, (b) paragraphs
   ending on a landed line, (c) fragments; trim to quota; name each section's addressee and fix
   drift; confirm clinical criteria are lists; diff the FAQ against the body for repeated
-  phrasing. Report counts (a), (b), (c) with the draft.
+  phrasing. Report counts (a), (b), (c) with the draft. The `cadence-auditor` gate independently
+  verifies these counts on every post in clean context and additionally hunts emergent
+  repetition the fixed rules do not name yet.
 - Vary sentence length; at least one short standalone sentence per section.
 
 **Structure.**

@@ -179,19 +179,24 @@ Use `embedHints` only after verifying the handles are in stock; use `internalLin
 
 One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
-## Step 5: Dual gate (voice + accuracy; mandatory, no publish path without both)
+## Step 5: Triple gate (voice + accuracy + cadence; mandatory, no publish path without all three)
 
-Two reviewers, both binding, sequenced so a cheap voice failure never spends the accuracy pass:
+Three reviewers, all binding, sequenced so a cheap voice failure never spends the other passes:
 
 1. **Voice gate first.** Run the full draft (title, excerpt, body, SEO fields, embed CTA labels)
    through `emma-empathy-reviewer` against the charter + blog addendum. A voice **BLOCK** on
-   sight → the post stays `status:'draft'`, file the suggestion row, skip the accuracy gate
+   sight → the post stays `status:'draft'`, file the suggestion row, skip the other gates
    entirely, and go to Step 7.
-2. **Accuracy gate.** Otherwise run the same draft through `sex-wellness-reviewer` (it
-   web-verifies external claims: anatomy/physiology, "research shows" statistics, materials and
-   safety, realistic expectations, terminology).
-3. **One shared rewrite cycle.** Merge BOTH gates' REVISE feedback into exactly one rewrite,
-   then re-run both gates once. A second non-PASS from either is treated as BLOCK. **Change only
+2. **Accuracy gate and cadence audit, in parallel.** Run the same draft through
+   `sex-wellness-reviewer` (it web-verifies external claims: anatomy/physiology, "research
+   shows" statistics, materials and safety, realistic expectations, terminology) and through
+   `cadence-auditor` (clean context: hand it ONLY the finished draft, nothing else — no brief,
+   no outline, no intent; it reports counts, rule violations, emergent patterns, and a
+   PASS/REVISE/ESCALATE verdict, and it owns the house-style count verification).
+3. **One shared rewrite cycle.** Merge ALL gates' REVISE feedback into exactly one rewrite,
+   then re-run the non-PASS gates once. A second non-PASS from any gate is treated as BLOCK. A
+   cadence **ESCALATE** at any point → the post stays `status:'draft'` for the owner with the
+   escalation items in the run summary. **Change only
    the strings a gate actually flagged** — no cosmetic edits ride along. Any string carrying a
    safety enumeration ("no motor, battery, or electronics inside"), a material limit, or a
    never/only instruction is **frozen** unless the ACCURACY gate asked for that exact change: a
@@ -207,13 +212,14 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    `[web: degraded]`, follow its strip/soften instructions and ship without a Sources section;
    zero citations is a valid outcome.
 
-Two `step` events: `phase:'voice-gate'` and `phase:'accuracy-gate'`, each with the verdict and
-cycle count (the accuracy event also records citation count and `web: ok|degraded`).
+Three `step` events: `phase:'voice-gate'`, `phase:'accuracy-gate'`, and `phase:'cadence-audit'`,
+each with the verdict and cycle count (the accuracy event also records citation count and
+`web: ok|degraded`; the cadence event records the reported counts a/b/c).
 
-## Step 6: Publish (only if both gates PASS, a hero is attached, and the valve is open)
+## Step 6: Publish (only if all three gates PASS, a hero is attached, and the valve is open)
 
-Only when Step 5 ended in PASS from BOTH gates, a `heroImage` is attached (Step 4; mandatory on
-every published post), **and** Step 1's `valves.autopublish` is `true`:
+Only when Step 5 ended in PASS from ALL THREE gates, a `heroImage` is attached (Step 4; mandatory
+on every published post), **and** Step 1's `valves.autopublish` is `true`:
 
 1. Patch the doc: `status` → `'published'` (keep `publishedAt` as set in Step 4).
 2. Flush the blog caches:
