@@ -233,6 +233,20 @@ program"); prompts start from the matching per-surface scaffold in
 - **D — editorial metaphor macro.** One tasteful single-concept scene (silk,
   water, soft foil, fruit) standing in for sensation. Uses: PDP mood slides,
   Notebook cover system.
+- **E — surreal brand art / visual wit** (owner license 2026-07-28, full).
+  Blended forms, product-fantasy hybrids, and sexually euphemistic still
+  lifes rendered with editorial craft: a dildo cactus in bloom, an
+  air-pulsation dolphin surfacing through silk, an eggplant in a puddle, a
+  rabbit vibrator nested in an anatomically-suggestive orchid, a "bouquet"
+  of toys arranged as tulips in a vase, a wand as a lighthouse sweeping
+  light across a silk sea. Invent freely; the goal is the image nobody has
+  thought of, shareable enough to travel. Humor licensed. Fences: witty
+  never crude, no literal explicit anatomy; ground lock and high-key
+  daylight still bind (craft is what separates art from a shitpost); owned
+  surfaces only (social imagery rules unchanged); never on health-heavy or
+  emotionally raw surfaces — those keep sincere art. Uses: homepage
+  editorial tiles, product-article blog heroes (§0-P surreal option), PDP
+  mood slides, OG/share images, campaign moments.
 
 **The ground lock:** backdrops come only from `coral-soft`, `plum-soft`, and
 `paper` tints, high-key daylight (sage is an accent color, never a ground: there

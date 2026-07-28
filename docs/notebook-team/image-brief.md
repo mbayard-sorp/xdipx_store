@@ -88,6 +88,11 @@ serves, with the product as the unmistakable subject.
   warm light, the moment before), capped at the charter's visual 6-7. Never product-in-use,
   never bodies in sexual context. Where a post genuinely has no product embed the subject is the
   topic's product family, same treatment. Never an object metaphor.
+- **Surreal option (doctrine archetype E, owner license 2026-07-28).** A product-article hero MAY
+  go surreal/witty instead of straight staging: blended forms, euphemistic still lifes, visual
+  puns built around the post's product category (see the archetype E scaffold in the prompt
+  library). Witty never crude; ground lock and warm light still bind; never on † health-adjacent
+  topics, which keep sincere staging.
 - **Fallback.** The product's real Shopify photo cropped editorially.
 
 ### §0-H. Human hero (human-experience articles)

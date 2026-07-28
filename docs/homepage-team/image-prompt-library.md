@@ -156,6 +156,39 @@ detail frame per product. Scaffold (always with `--ref-image` = the product's Sh
 Vision gate for §0-H: hard reject on youthful ambiguity (reject on ambiguity, not intent),
 uncanny faces, moody or dark grading, sexualized bodies, or no identifiable human presence.
 
+### Archetype E scaffold — surreal brand art / visual wit (doctrine §4-E, owner license 2026-07-28)
+
+For owned surfaces only: homepage editorial tiles, §0-P surreal-option blog heroes (never on †
+health-adjacent topics), PDP mood slides, OG/share images, campaign moments. Witty never crude;
+no literal explicit anatomy; ground lock and high-key daylight bind — the craft is what makes it
+art instead of a shitpost. Invent fresh concepts every time; never reuse a joke.
+
+> Bright high-key editorial art photograph, soft directional daylight, {coral-soft / plum-soft /
+> paper} ground, surreal but meticulously crafted, shot like a luxury still-life campaign,
+> playful and confident, tasteful and non-explicit. {The concept — one clear visual idea, e.g.
+> "a saguaro cactus whose arms are smooth matte-coral silicone, one arm budding a tiny pink
+> flower, potted in a plain terracotta pot" / "a sleek dolphin arcing out of rippling plum silk,
+> its blowhole a soft air-pulsation aperture" / "a glossy eggplant sitting in a shallow puddle
+> of clear water, one slow ripple" / "a rabbit vibrator nested in the throat of a large orchid
+> whose petal folds echo it" / "five assorted pastel toys arranged stem-up in a glass vase like
+> a tulip bouquet" / "a white wand standing as a tiny lighthouse on a rock, sweeping warm light
+> across a sea of grey silk"}. One idea per frame, generous negative space, crisp warm shadow,
+> hyper-real material rendering. No text, no words, no logos, no human bodies, no explicit
+> anatomy, no crude framing, not dark, not moody, no clinical lightbox, no orange, no gradient
+> wall.
+
+Concept seeds beyond the owner's examples (rotate, never repeat a shipped one): a bullet vibe as
+the lipstick in an open compact; a plug as the queen on a chessboard mid-game; an ice-cream cone
+whose swirl is soft matte silicone with a cherry; a Newton's cradle where one sphere is a kegel
+ball; a cocktail glass "garnished" with a bullet where the olive pick goes; a topiary garden
+where one hedge is trimmed into a wand silhouette; a vinyl record player whose tonearm is a slim
+external vibe; a snow globe containing a tiny bedside scene.
+
+**Keepers:**
+
+**Rejects:** anything a viewer would read as crude rather than clever, literal anatomy, dim or
+moody grading, concept salad (two jokes in one frame).
+
 **Keepers:** JO H2O Original Water-Based Lubricant (`jo-h2o-original-water-based-lubricant-4-oz`),
 sage-leaf + water-droplet care accent, warm dappled daylight on cream/white paper →
 `image-e75e55758b2fc4594fd24ec197a561744163c299-1184x880-jpg` (post: `how-do-you-care-for-silicone-toys`).

@@ -71,10 +71,11 @@ The authorship test, which is what actually degrades from 9 to 10: at 9 the copy
 Visuals stay suggestive-editorial (a visual 6-7; imagery does not follow copy to a 9). Sensory, elegant, charged:
 
 - **Sensory anticipation:** tension, softness, warmth, the moment before. A hand hovering just above a petal, silk pulled taut, condensation, a finger denting ripe fruit, dripping honey. Feeling over joke.
-- **Shape and texture rhyme:** the product beside a form that echoes it (orchid, halved peach, fig). Composed as editorial still life; if the pairing reads as a sight gag or would embarrass out of context, it is over-dialed.
+- **Shape and texture rhyme:** the product beside a form that echoes it (orchid, halved peach, fig), composed as editorial still life.
+- **Visual wit and surreal brand art (owner license, 2026-07-28, full).** Fun, artistic, blended-shape images are licensed and encouraged on owned surfaces: form hybrids (a dildo cactus, an air-pulsation dolphin), sexually euphemistic still lifes (an eggplant in a puddle, a rabbit vibrator nested in an orchid whose forms echo anatomy), and inventions nobody has seen. Humor in imagery is welcome; the deliberate sight gag is now a licensed register, not an over-dial. Boring makes customers bounce; a shareable image is a growth asset. Three fences: (1) witty never crude — the joke is clever euphemism and craft, never porn-adjacent, never explicit anatomy rendered literally; (2) **owned channels only** — the social addendum's stricter imagery rules still govern social (euphemistic sexual imagery is exactly what platform moderation removes; make these shareable via OG images and let readers carry them there); (3) wit follows the same clinical-beat fence as written humor — never on a surface carrying a health-heavy or emotionally raw topic (a §0-H human-hero post keeps a sincere hero).
 - Lighting: warm, low, skin-toned palettes, shallow depth of field. Bedroom-adjacent without a bed as the subject.
 
-Hard lines: the product is always the hero; never product-in-use; never bodies in sexual context; no text baked into generated images; every image should pass as editorial still-life photography to someone scrolling past.
+Hard lines: on merchandising surfaces the product is the hero (brand-art pieces may star the invented hybrid instead); never product-in-use; never bodies in sexual context; no text baked into generated images.
 
 ## Emma
 
