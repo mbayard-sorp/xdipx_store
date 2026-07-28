@@ -6,12 +6,12 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
   if (typeof require !== "undefined") return require.apply(this, arguments);
   throw Error('Dynamic require of "' + x + '" is not supported');
 });
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
+var __esm = (fn, res, err2) => function __init() {
+  if (err2) throw err2[0];
   try {
     return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
   } catch (e) {
-    throw err = [e], e;
+    throw err2 = [e], e;
   }
 };
 var __export = (target, all) => {
@@ -1541,19 +1541,19 @@ async function getKV() {
 function isKvConfigured() {
   return resolveKvCreds() !== null;
 }
-function isQuotaExhausted(err) {
-  const msg = err instanceof Error ? err.message : String(err);
+function isQuotaExhausted(err2) {
+  const msg = err2 instanceof Error ? err2.message : String(err2);
   return /max (?:requests|daily requests|request size) limit exceeded|quota/i.test(msg);
 }
-function warnKvFallback(op, err) {
+function warnKvFallback(op, err2) {
   const now = Date.now();
-  const quota = isQuotaExhausted(err);
+  const quota = isQuotaExhausted(err2);
   degradeCounts.set(op, (degradeCounts.get(op) ?? 0) + 1);
   _sinceLastReport += 1;
   _lastQuotaExhausted = quota;
   if (now - _lastKvWarn >= CONSOLE_THROTTLE_MS) {
     _lastKvWarn = now;
-    console.warn(`[kv] ${op} failed, falling back to in-memory:`, err instanceof Error ? err.message : err);
+    console.warn(`[kv] ${op} failed, falling back to in-memory:`, err2 instanceof Error ? err2.message : err2);
   }
   if (now - _lastKvSentry >= SENTRY_THROTTLE_MS) {
     const batched = _sinceLastReport;
@@ -1562,7 +1562,7 @@ function warnKvFallback(op, err) {
     void (async () => {
       try {
         const { Sentry: Sentry2 } = await Promise.resolve().then(() => (init_sentry_server(), sentry_server_exports));
-        Sentry2.captureException(err instanceof Error ? err : new Error(String(err)), {
+        Sentry2.captureException(err2 instanceof Error ? err2 : new Error(String(err2)), {
           level: quota ? "error" : "warning",
           tags: {
             subsystem: "kv",
@@ -1618,8 +1618,8 @@ async function kvGet(key) {
   if (kv) {
     try {
       return await kv.get(key);
-    } catch (err) {
-      warnKvFallback("get", err);
+    } catch (err2) {
+      warnKvFallback("get", err2);
     }
   }
   return memGet(key);
@@ -1631,8 +1631,8 @@ async function kvSet(key, value, _exSeconds) {
       if (_exSeconds) await kv.set(key, value, { ex: _exSeconds });
       else await kv.set(key, value);
       return;
-    } catch (err) {
-      warnKvFallback("set", err);
+    } catch (err2) {
+      warnKvFallback("set", err2);
     }
   }
   memSet(key, value, _exSeconds);
@@ -1642,8 +1642,8 @@ async function kvIncr(key) {
   if (kv) {
     try {
       return await kv.incr(key);
-    } catch (err) {
-      warnKvFallback("incr", err);
+    } catch (err2) {
+      warnKvFallback("incr", err2);
     }
   }
   const current = memStore.get(key) ?? 0;
@@ -1655,8 +1655,8 @@ async function kvIncrBy(key, by) {
   if (kv) {
     try {
       return await kv.incrby(key, by);
-    } catch (err) {
-      warnKvFallback("incrby", err);
+    } catch (err2) {
+      warnKvFallback("incrby", err2);
     }
   }
   const current = memStore.get(key) ?? 0;
@@ -1669,8 +1669,8 @@ async function kvDel(key) {
     try {
       await kv.del(key);
       return;
-    } catch (err) {
-      warnKvFallback("del", err);
+    } catch (err2) {
+      warnKvFallback("del", err2);
     }
   }
   memDel(key);
@@ -1681,8 +1681,8 @@ async function kvSetNX(key, value, exSeconds) {
     try {
       const result = await kv.set(key, value, { nx: true, ex: exSeconds });
       return result === "OK";
-    } catch (err) {
-      warnKvFallback("setNX", err);
+    } catch (err2) {
+      warnKvFallback("setNX", err2);
     }
   }
   if (memGet(key) !== null) return false;
@@ -2801,8 +2801,8 @@ async function getEmmaHeroSettings(preview = false) {
       const raw = await client5.fetch(EMMA_HERO_GROQ);
       if (!raw?.settings && !raw?.cta) return null;
       return { ...raw.settings, ...raw.cta };
-    } catch (err) {
-      console.error("[sanity] getEmmaHeroSettings error:", err);
+    } catch (err2) {
+      console.error("[sanity] getEmmaHeroSettings error:", err2);
       return null;
     }
   };
@@ -2828,8 +2828,8 @@ async function getEditor(preview = false) {
         instagram: raw.instagram ?? null,
         email: raw.email ?? null
       };
-    } catch (err) {
-      console.error("[sanity] getEditor error:", err);
+    } catch (err2) {
+      console.error("[sanity] getEditor error:", err2);
       return null;
     }
   };
@@ -2865,8 +2865,8 @@ async function getApprovedCastMembers() {
       shortBio: m.shortBio ?? null,
       personaNotes: m.personaNotes ?? null
     }));
-  } catch (err) {
-    console.error("[sanity] getApprovedCastMembers error:", err);
+  } catch (err2) {
+    console.error("[sanity] getApprovedCastMembers error:", err2);
     return [];
   }
 }
@@ -2877,8 +2877,8 @@ async function getEmmaPresets(preview = false) {
       const client5 = getClient(false, preview);
       if (!client5) return [];
       return await client5.fetch(EMMA_PRESETS_GROQ) ?? [];
-    } catch (err) {
-      console.error("[sanity] getEmmaPresets error:", err);
+    } catch (err2) {
+      console.error("[sanity] getEmmaPresets error:", err2);
       return [];
     }
   };
@@ -2892,8 +2892,8 @@ async function getHomepageSections(preview = false) {
       const client5 = getClient(false, preview);
       if (!client5) return null;
       return await client5.fetch(HOMEPAGE_GROQ) ?? null;
-    } catch (err) {
-      console.error("[sanity] getHomepageSections error:", err);
+    } catch (err2) {
+      console.error("[sanity] getHomepageSections error:", err2);
       return null;
     }
   };
@@ -3155,8 +3155,8 @@ async function getPdpTrustBar() {
         (i) => !!i && i.active !== false
       );
       return { ...data, trustItems };
-    } catch (err) {
-      console.error("[sanity] getPdpTrustBar error:", err);
+    } catch (err2) {
+      console.error("[sanity] getPdpTrustBar error:", err2);
       return null;
     }
   });
@@ -3183,8 +3183,8 @@ async function getSiteSettings() {
         }`
       );
       return data ?? null;
-    } catch (err) {
-      console.error("[sanity] getSiteSettings error:", err);
+    } catch (err2) {
+      console.error("[sanity] getSiteSettings error:", err2);
       return null;
     }
   });
@@ -3202,8 +3202,8 @@ async function getEmmaPersona() {
           "displayName": coalesce(name, "Emma")
         }`
       );
-    } catch (err) {
-      console.error("[sanity] getEmmaPersona error:", err);
+    } catch (err2) {
+      console.error("[sanity] getEmmaPersona error:", err2);
       return null;
     }
   });
@@ -3226,8 +3226,8 @@ async function getPreviewImagesByHandles(handles) {
     for (const r of rows ?? []) {
       if (r?.shopifyHandle && r.previewImageUrl) out.set(r.shopifyHandle, r.previewImageUrl);
     }
-  } catch (err) {
-    console.error("[sanity] getPreviewImagesByHandles error:", err);
+  } catch (err2) {
+    console.error("[sanity] getPreviewImagesByHandles error:", err2);
   }
   return out;
 }
@@ -3257,8 +3257,8 @@ async function getProductPageBlocks(handle) {
       const guides = (section.guides ?? []).filter((g) => g && g.status === "published").map(({ status, ...card }) => ({ ...card, readingTime: 0 }));
       return { ...section, guides };
     });
-  } catch (err) {
-    console.error("[sanity] getProductPageBlocks error:", err);
+  } catch (err2) {
+    console.error("[sanity] getProductPageBlocks error:", err2);
     return [];
   }
 }
@@ -3274,8 +3274,8 @@ async function getProductFaqs(handle) {
       { handle }
     );
     return (data?.faqs ?? []).filter((f) => f && f.question && f.answer).map((f) => ({ ...f, category: f.category ?? "general" }));
-  } catch (err) {
-    console.error("[sanity] getProductFaqs error:", err);
+  } catch (err2) {
+    console.error("[sanity] getProductFaqs error:", err2);
     return [];
   }
 }
@@ -3312,8 +3312,8 @@ async function getCollectionPage(handle, preview = false) {
       faqs: (data.faqs ?? []).filter((f) => f?.question && f?.answer),
       related: (data.related ?? []).filter((r) => r?.handle && r?.label)
     };
-  } catch (err) {
-    console.error("[sanity] getCollectionPage error:", err);
+  } catch (err2) {
+    console.error("[sanity] getCollectionPage error:", err2);
     return null;
   }
 }
@@ -3332,8 +3332,8 @@ async function getCollectionTypeMap() {
       }
     }
     return out;
-  } catch (err) {
-    console.error("[sanity] getCollectionTypeMap error:", err);
+  } catch (err2) {
+    console.error("[sanity] getCollectionTypeMap error:", err2);
     return out;
   }
 }
@@ -3362,8 +3362,8 @@ async function getCollectionsHub(preview = false) {
       featured: (data.featured ?? []).filter((f) => f?.handle).map((f) => ({ handle: f.handle, blurb: f.blurb ?? null })),
       faqs: (data.faqs ?? []).filter((f) => f?.question && f?.answer)
     };
-  } catch (err) {
-    console.error("[sanity] getCollectionsHub error:", err);
+  } catch (err2) {
+    console.error("[sanity] getCollectionsHub error:", err2);
     return null;
   }
 }
@@ -3392,8 +3392,8 @@ async function getPage(slug, preview = false) {
     );
     console.log("[sanity] getPage result:", result ? `found "${result.title}"` : "null");
     return result;
-  } catch (err) {
-    console.error("[sanity] getPage error:", err);
+  } catch (err2) {
+    console.error("[sanity] getPage error:", err2);
     return null;
   }
 }
@@ -3405,8 +3405,8 @@ async function getPageList() {
     return await client5.fetch(
       `*[_type == "page"] | order(title asc) { title, "slug": slug.current }`
     );
-  } catch (err) {
-    console.error("[sanity] getPageList error:", err);
+  } catch (err2) {
+    console.error("[sanity] getPageList error:", err2);
     return [];
   }
 }
@@ -3422,8 +3422,8 @@ async function getBlogHomepage(preview = false) {
         heroImageAlt
       }`
     );
-  } catch (err) {
-    console.error("[sanity] getBlogHomepage error:", err);
+  } catch (err2) {
+    console.error("[sanity] getBlogHomepage error:", err2);
     return null;
   }
 }
@@ -3490,8 +3490,8 @@ async function getBlogPosts(opts = {}) {
     const result = { posts, total };
     setCachedBlog(cacheKey3, result);
     return result;
-  } catch (err) {
-    console.error("[sanity] getBlogPosts error:", err);
+  } catch (err2) {
+    console.error("[sanity] getBlogPosts error:", err2);
     return { posts: [], total: 0 };
   }
 }
@@ -3512,8 +3512,8 @@ async function getNotebookPostsForProduct(handle, limit = 3) {
     const result = (posts ?? []).map((p) => ({ ...p, readingTime: 0 }));
     setCachedBlog(cacheKey3, result);
     return result;
-  } catch (err) {
-    console.error("[sanity] getNotebookPostsForProduct error:", err);
+  } catch (err2) {
+    console.error("[sanity] getNotebookPostsForProduct error:", err2);
     return [];
   }
 }
@@ -3534,8 +3534,8 @@ async function getNotebookPostsForProductHandles(handles, limit = 4) {
     const result = (posts ?? []).map((p) => ({ ...p, readingTime: 0 }));
     setCachedBlog(cacheKey3, result);
     return result;
-  } catch (err) {
-    console.error("[sanity] getNotebookPostsForProductHandles error:", err);
+  } catch (err2) {
+    console.error("[sanity] getNotebookPostsForProductHandles error:", err2);
     return [];
   }
 }
@@ -3558,8 +3558,8 @@ async function getNotebookPostsForProductType(productType, excludeHandle, limit 
     const result = (posts ?? []).map((p) => ({ ...p, readingTime: 0 }));
     setCachedBlog(cacheKey3, result);
     return result;
-  } catch (err) {
-    console.error("[sanity] getNotebookPostsForProductType error:", err);
+  } catch (err2) {
+    console.error("[sanity] getNotebookPostsForProductType error:", err2);
     return [];
   }
 }
@@ -3649,8 +3649,8 @@ async function getBlogPost(slug, preview = false) {
     const post = { ...rest, readingTime, relatedPosts };
     if (!preview) setCachedBlog(cacheKey3, post);
     return post;
-  } catch (err) {
-    console.error("[sanity] getBlogPost error:", err);
+  } catch (err2) {
+    console.error("[sanity] getBlogPost error:", err2);
     return null;
   }
 }
@@ -3668,8 +3668,8 @@ async function getBlogAuthor(slug) {
       { slug }
     );
     return data ?? null;
-  } catch (err) {
-    console.error("[sanity] getBlogAuthor error:", err);
+  } catch (err2) {
+    console.error("[sanity] getBlogAuthor error:", err2);
     return null;
   }
 }
@@ -3688,8 +3688,8 @@ async function getBlogCategories() {
     );
     if (data) setCachedBlog(cacheKey3, data);
     return data ?? [];
-  } catch (err) {
-    console.error("[sanity] getBlogCategories error:", err);
+  } catch (err2) {
+    console.error("[sanity] getBlogCategories error:", err2);
     return [];
   }
 }
@@ -3711,8 +3711,8 @@ async function getNotebookSettings() {
     );
     setCachedBlog(cacheKey3, data ?? null);
     return data ?? null;
-  } catch (err) {
-    console.error("[sanity] getNotebookSettings error:", err);
+  } catch (err2) {
+    console.error("[sanity] getNotebookSettings error:", err2);
     return null;
   }
 }
@@ -3735,8 +3735,8 @@ async function getBlogCategoryExtras(slug) {
     );
     setCachedBlog(cacheKey3, data ?? null);
     return data ?? null;
-  } catch (err) {
-    console.error("[sanity] getBlogCategoryExtras error:", err);
+  } catch (err2) {
+    console.error("[sanity] getBlogCategoryExtras error:", err2);
     return null;
   }
 }
@@ -3759,8 +3759,8 @@ async function getBlogSeries(slug) {
     };
     setCachedBlog(cacheKey3, series);
     return series;
-  } catch (err) {
-    console.error("[sanity] getBlogSeries error:", err);
+  } catch (err2) {
+    console.error("[sanity] getBlogSeries error:", err2);
     return null;
   }
 }
@@ -3781,8 +3781,8 @@ async function getAllBlogSeries() {
     }));
     setCachedBlog(cacheKey3, series);
     return series;
-  } catch (err) {
-    console.error("[sanity] getAllBlogSeries error:", err);
+  } catch (err2) {
+    console.error("[sanity] getAllBlogSeries error:", err2);
     return [];
   }
 }
@@ -3803,8 +3803,8 @@ async function getGlossaryTerms() {
     );
     if (data) setCachedBlog(cacheKey3, data);
     return data ?? [];
-  } catch (err) {
-    console.error("[sanity] getGlossaryTerms error:", err);
+  } catch (err2) {
+    console.error("[sanity] getGlossaryTerms error:", err2);
     return [];
   }
 }
@@ -3822,8 +3822,8 @@ async function searchBlogPosts(q, limit = 24) {
       { q: `${query}*`, plain: query.toLowerCase() }
     );
     return (rawPosts ?? []).map((p) => ({ ...p, readingTime: 0 }));
-  } catch (err) {
-    console.error("[sanity] searchBlogPosts error:", err);
+  } catch (err2) {
+    console.error("[sanity] searchBlogPosts error:", err2);
     return [];
   }
 }
@@ -3838,8 +3838,8 @@ async function getBlogPostsForSitemap() {
         "description": coalesce(seoDescription, excerpt)
       }`
     );
-  } catch (err) {
-    console.error("[sanity] getBlogPostsForSitemap error:", err);
+  } catch (err2) {
+    console.error("[sanity] getBlogPostsForSitemap error:", err2);
     return [];
   }
 }
@@ -3970,8 +3970,8 @@ async function archiveHomepageRailsForDeal(dealId) {
       await writeClient.patch(r._id).set({ status: "archived", active: false }).commit();
       await removeRailRefFromHomepage(r._id);
       archived.push(r._id);
-    } catch (err) {
-      console.error("[sanity] archiveHomepageRailsForDeal failed for", r._id, err);
+    } catch (err2) {
+      console.error("[sanity] archiveHomepageRailsForDeal failed for", r._id, err2);
     }
   }
   invalidateCache("sanity:homepage");
@@ -3988,8 +3988,8 @@ async function unarchiveHomepageRailsForDeal(dealId) {
       await writeClient.patch(r._id).set({ status: "live", active: true }).commit();
       await addRailRefToHomepage(r._id);
       unarchived.push(r._id);
-    } catch (err) {
-      console.error("[sanity] unarchiveHomepageRailsForDeal failed for", r._id, err);
+    } catch (err2) {
+      console.error("[sanity] unarchiveHomepageRailsForDeal failed for", r._id, err2);
     }
   }
   invalidateCache("sanity:homepage");
@@ -4019,8 +4019,8 @@ async function getProductHandlesForSitemap() {
         "handle": shopifyHandle, _updatedAt, title
       }`
     );
-  } catch (err) {
-    console.error("[sanity] getProductHandlesForSitemap error:", err);
+  } catch (err2) {
+    console.error("[sanity] getProductHandlesForSitemap error:", err2);
     return [];
   }
 }
@@ -4038,8 +4038,8 @@ async function getHomeConfig() {
         emmaCopyOverrides: raw.emmaCopyOverrides ?? {},
         analyticsLabel: raw.analyticsLabel ?? ""
       };
-    } catch (err) {
-      console.error("[sanity] getHomeConfig error:", err);
+    } catch (err2) {
+      console.error("[sanity] getHomeConfig error:", err2);
       return null;
     }
   });
@@ -4060,8 +4060,8 @@ async function getHomeSeo() {
         ...description ? { seoDescription: description } : {},
         ...ogImageUrl ? { ogImageUrl } : {}
       };
-    } catch (err) {
-      console.error("[sanity] getHomeSeo error:", err);
+    } catch (err2) {
+      console.error("[sanity] getHomeSeo error:", err2);
       return null;
     }
   });
@@ -4082,8 +4082,8 @@ async function getSocialLandingSettings() {
         ...emmaBlurb ? { emmaBlurb } : {},
         ...featuredProductHandle ? { featuredProductHandle } : {}
       };
-    } catch (err) {
-      console.error("[sanity] getSocialLandingSettings error:", err);
+    } catch (err2) {
+      console.error("[sanity] getSocialLandingSettings error:", err2);
       return null;
     }
   });
@@ -6278,8 +6278,8 @@ async function activateShopifyProduct(numericId) {
   try {
     const { markProductPageLive: markProductPageLive2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
     await markProductPageLive2(id);
-  } catch (err) {
-    console.warn(`[activateShopifyProduct] markProductPageLive failed for ${id} (non-blocking):`, err instanceof Error ? err.message : err);
+  } catch (err2) {
+    console.warn(`[activateShopifyProduct] markProductPageLive failed for ${id} (non-blocking):`, err2 instanceof Error ? err2.message : err2);
   }
 }
 async function activateProductInventoryAtLocations(numericId) {
@@ -6459,8 +6459,8 @@ async function createShopifyProductWithVariants(master, variants, optionNames, h
         );
         galleryByUrl.set(firstImage, imgRes.image.id);
       }
-    } catch (err) {
-      console.warn(`[shopify] variant image linkage failed for ${bv.sku}:`, err instanceof Error ? err.message : err);
+    } catch (err2) {
+      console.warn(`[shopify] variant image linkage failed for ${bv.sku}:`, err2 instanceof Error ? err2.message : err2);
     }
     await new Promise((r) => setTimeout(r, 250));
   }
@@ -7097,8 +7097,8 @@ async function customerRecover(email) {
     if (data.customerRecover.customerUserErrors.length > 0) {
       console.error("[customerRecover] user errors:", data.customerRecover.customerUserErrors);
     }
-  } catch (err) {
-    console.error("[customerRecover] request failed:", err);
+  } catch (err2) {
+    console.error("[customerRecover] request failed:", err2);
   }
   return { ok: true };
 }
@@ -7274,8 +7274,8 @@ async function cartBuyerIdentityUpdate(cartId, identity) {
       return await getCart(cartId);
     }
     return cart ? rawCartToCart(cart) : await getCart(cartId);
-  } catch (err) {
-    console.error("[cartBuyerIdentityUpdate] request failed:", err);
+  } catch (err2) {
+    console.error("[cartBuyerIdentityUpdate] request failed:", err2);
     return await getCart(cartId);
   }
 }
@@ -7341,8 +7341,8 @@ async function adminGetCustomerSubscriptions(customerGid) {
     return data.customer.subscriptionContracts.edges.map(
       (e) => mapSubscriptionContract(e.node)
     );
-  } catch (err) {
-    console.error("[adminGetCustomerSubscriptions] failed:", err);
+  } catch (err2) {
+    console.error("[adminGetCustomerSubscriptions] failed:", err2);
     return [];
   }
 }
@@ -7358,8 +7358,8 @@ async function adminGetSubscriptionContract(contractGid) {
     );
     if (!data.subscriptionContract) return null;
     return mapSubscriptionContract(data.subscriptionContract);
-  } catch (err) {
-    console.error("[adminGetSubscriptionContract] failed:", err);
+  } catch (err2) {
+    console.error("[adminGetSubscriptionContract] failed:", err2);
     return null;
   }
 }
@@ -7650,8 +7650,8 @@ async function createReturn(input) {
       notifyCustomer: input.notifyCustomer ?? false
     }
   });
-  const err = data.returnCreate.userErrors[0];
-  if (err) return { ok: false, error: err.message };
+  const err2 = data.returnCreate.userErrors[0];
+  if (err2) return { ok: false, error: err2.message };
   if (!data.returnCreate.return) return { ok: false, error: "returnCreate returned no return" };
   const rfoNode = data.returnCreate.return.reverseFulfillmentOrders.edges[0]?.node;
   const fliToRfoLineItemId = {};
@@ -7701,8 +7701,8 @@ async function registerReverseDelivery(input) {
     },
     notifyCustomer: input.notifyCustomer ?? false
   });
-  const err = data.reverseDeliveryCreateWithShipping.userErrors[0];
-  if (err) return { ok: false, error: err.message };
+  const err2 = data.reverseDeliveryCreateWithShipping.userErrors[0];
+  if (err2) return { ok: false, error: err2.message };
   const rd = data.reverseDeliveryCreateWithShipping.reverseDelivery;
   if (!rd) return { ok: false, error: "reverseDeliveryCreateWithShipping returned no delivery" };
   return { ok: true, data: { reverseDeliveryId: rd.id } };
@@ -7730,8 +7730,8 @@ async function createRefund(input) {
       ...input.shippingAmount != null ? { shipping: { amount: input.shippingAmount.toFixed(2) } } : {}
     }
   });
-  const err = data.refundCreate.userErrors[0];
-  if (err) return { ok: false, error: err.message };
+  const err2 = data.refundCreate.userErrors[0];
+  if (err2) return { ok: false, error: err2.message };
   if (!data.refundCreate.refund) return { ok: false, error: "refundCreate returned no refund" };
   return { ok: true, refundId: data.refundCreate.refund.id };
 }
@@ -7744,8 +7744,8 @@ async function closeReturn(returnId) {
       }
     }
   `, { id: returnId });
-  const err = data.returnClose.userErrors[0];
-  if (err) return { ok: false, error: err.message };
+  const err2 = data.returnClose.userErrors[0];
+  if (err2) return { ok: false, error: err2.message };
   return { ok: true };
 }
 async function getReturn(returnId) {
@@ -8473,7 +8473,7 @@ async function paginateAllProductsForSanity(onBatch) {
 async function getProductMetafieldDebug(numericProductId) {
   const result = await shopifyAdmin(
     `/products/${numericProductId}/metafields.json?namespace=xdipx`
-  ).catch((err) => ({ error: err.message }));
+  ).catch((err2) => ({ error: err2.message }));
   if ("error" in result) {
     return { allKeys: [], emmaHero: null };
   }
@@ -8963,8 +8963,8 @@ async function writeCache(variantId, bucket, units60d) {
       target: pipelineSettings.key,
       set: { value: JSON.stringify(payload), updatedAt: /* @__PURE__ */ new Date() }
     });
-  } catch (err) {
-    console.warn("[pricing-velocity] cache write failed:", err);
+  } catch (err2) {
+    console.warn("[pricing-velocity] cache write failed:", err2);
   }
 }
 async function computeVelocityBucket(variantGid) {
@@ -8991,8 +8991,8 @@ async function computeVelocityBucket(variantGid) {
     }
     await writeCache(variantGid, bucket, units60d);
     return bucket;
-  } catch (err) {
-    console.warn("[pricing-velocity] Shopify query failed, defaulting to normal:", err);
+  } catch (err2) {
+    console.warn("[pricing-velocity] Shopify query failed, defaulting to normal:", err2);
     return "normal";
   }
 }
@@ -9189,8 +9189,8 @@ async function recomputeFromData(product, variant, ctx) {
       rationale
     }).returning({ id: pricingAuditLog.id });
     auditId = rows[0]?.id ?? null;
-  } catch (err) {
-    console.error("[pricing-apply-v2] audit log write failed:", err);
+  } catch (err2) {
+    console.error("[pricing-apply-v2] audit log write failed:", err2);
   }
   let applied = false;
   let applyError;
@@ -9202,8 +9202,8 @@ async function recomputeFromData(product, variant, ctx) {
         newCompare != null ? String(newCompare) : String(newSell)
       );
       applied = true;
-    } catch (err) {
-      applyError = err instanceof Error ? err.message : String(err);
+    } catch (err2) {
+      applyError = err2 instanceof Error ? err2.message : String(err2);
       console.error("[pricing-apply-v2] Shopify price update failed:", applyError);
       if (auditId != null) {
         try {
@@ -9255,8 +9255,8 @@ async function recomputeVariant(params) {
       compareAtPrice: data.compareAtPrice != null ? parseFloat(data.compareAtPrice) : null,
       unitCost: data.inventoryItem?.unitCost?.amount != null ? parseFloat(data.inventoryItem.unitCost.amount) : null
     };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const msg = err2 instanceof Error ? err2.message : String(err2);
     return { status: "skipped_no_change", auditId: null, applied: false, error: `shopify fetch: ${msg}` };
   }
   const mode = await getApprovalMode();
@@ -9402,9 +9402,9 @@ async function recomputeCatalog(opts) {
         else if (result.status === "pending") counts.pending++;
         else if (result.status === "rejected") counts.rejected++;
         else counts.skipped++;
-      } catch (err) {
+      } catch (err2) {
         counts.errors++;
-        console.error("[pricing-batch] variant error", variant.variantId, err);
+        console.error("[pricing-batch] variant error", variant.variantId, err2);
       }
     }
   }
@@ -9593,8 +9593,8 @@ async function sendCapiEvent(event, opts) {
       return { ok: false, error: `Meta CAPI ${res.status}: ${text2}` };
     }
     return { ok: true };
-  } catch (err) {
-    return { ok: false, error: String(err) };
+  } catch (err2) {
+    return { ok: false, error: String(err2) };
   }
 }
 var init_meta_capi_server = __esm({
@@ -9617,8 +9617,8 @@ async function resolveGa4() {
   try {
     const dbId = await cached(KV_KEY, TTL_SECONDS, fetchFromDb);
     if (dbId) return { id: dbId, source: "db" };
-  } catch (err) {
-    console.warn("[ga4] resolution failed, disabling GA4 for this render:", err instanceof Error ? err.message : err);
+  } catch (err2) {
+    console.warn("[ga4] resolution failed, disabling GA4 for this render:", err2 instanceof Error ? err2.message : err2);
   }
   return { id: "", source: "none" };
 }
@@ -9665,8 +9665,8 @@ async function sendGa4Purchase(e) {
     );
     if (res.status >= 200 && res.status < 300) return { ok: true };
     return { ok: false, error: `GA4 MP HTTP ${res.status}` };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } catch (err2) {
+    return { ok: false, error: err2 instanceof Error ? err2.message : String(err2) };
   }
 }
 var init_ga4_mp_server = __esm({
@@ -9733,9 +9733,9 @@ function isDiscontinued(product) {
     if (/\bdiscontinued\b/i.test(f)) return true;
     if (/\b(DISC|DC)\b/.test(f)) return true;
   }
-  const desc3 = product["Product Description"] ?? "";
-  if (/\bdiscontinued by manufacturer\b/i.test(desc3)) return true;
-  if (/\bproduct (?:has been |is )?discontinued\b/i.test(desc3)) return true;
+  const desc4 = product["Product Description"] ?? "";
+  if (/\bdiscontinued by manufacturer\b/i.test(desc4)) return true;
+  if (/\bproduct (?:has been |is )?discontinued\b/i.test(desc4)) return true;
   return false;
 }
 function parseCategories(raw) {
@@ -9902,13 +9902,13 @@ async function archiveDiscontinuedProducts(skus) {
             shopifyProductId: `gid://shopify/Product/${row.shopifyProductId}`,
             archived: true
           });
-        } catch (err) {
-          console.warn(`[feed-processor] archive-discontinued: sanity sync ${sku} failed:`, err instanceof Error ? err.message : err);
+        } catch (err2) {
+          console.warn(`[feed-processor] archive-discontinued: sanity sync ${sku} failed:`, err2 instanceof Error ? err2.message : err2);
         }
       }
       result.archived++;
-    } catch (err) {
-      result.errors.push({ sku, message: err instanceof Error ? err.message : String(err) });
+    } catch (err2) {
+      result.errors.push({ sku, message: err2 instanceof Error ? err2.message : String(err2) });
     }
   }
   return result;
@@ -10058,16 +10058,16 @@ async function trackEvent(email, eventName, properties, opts = {}) {
 async function trackAddedToCart(email, item) {
   try {
     await trackEvent(email, "Added to Cart", { ...item });
-  } catch (err) {
-    console.error("[klaviyo] trackAddedToCart failed:", err instanceof Error ? err.message : err);
+  } catch (err2) {
+    console.error("[klaviyo] trackAddedToCart failed:", err2 instanceof Error ? err2.message : err2);
   }
 }
 async function trackStartedCheckout(email, params) {
   try {
     const opts = params.uniqueId ? { uniqueId: params.uniqueId } : {};
     await trackEvent(email, "Started Checkout", { cartId: params.cartId, value: params.value, currency: params.currency, items: params.items }, opts);
-  } catch (err) {
-    console.error("[klaviyo] trackStartedCheckout failed:", err instanceof Error ? err.message : err);
+  } catch (err2) {
+    console.error("[klaviyo] trackStartedCheckout failed:", err2 instanceof Error ? err2.message : err2);
   }
 }
 async function trackPlacedOrder(email, params) {
@@ -10080,8 +10080,8 @@ async function trackPlacedOrder(email, params) {
       { orderId: params.orderId, orderNumber: params.orderNumber, value: params.value, currency: params.currency, items: params.items, ...params.attribution ?? {} },
       { uniqueId: `placed_order_${params.orderId}` }
     );
-  } catch (err) {
-    console.error("[klaviyo] trackPlacedOrder failed:", err instanceof Error ? err.message : err);
+  } catch (err2) {
+    console.error("[klaviyo] trackPlacedOrder failed:", err2 instanceof Error ? err2.message : err2);
   }
 }
 async function trackReviewSubmitted(params) {
@@ -10147,8 +10147,8 @@ async function getProfileByEmail(email) {
     const res = await klaviyoFetch(path, "GET");
     const first = res.data?.[0];
     return first ? { id: first.id } : null;
-  } catch (err) {
-    console.error("[klaviyo.getProfileByEmail] failed:", err);
+  } catch (err2) {
+    console.error("[klaviyo.getProfileByEmail] failed:", err2);
     return null;
   }
 }
@@ -10166,8 +10166,8 @@ async function getProfileSubscriptions(email) {
       listId,
       subscribed: memberships.has(listId)
     }));
-  } catch (err) {
-    console.error("[klaviyo.getProfileSubscriptions] failed:", err);
+  } catch (err2) {
+    console.error("[klaviyo.getProfileSubscriptions] failed:", err2);
     return known.map((listId) => ({ listId, subscribed: false }));
   }
 }
@@ -10194,10 +10194,10 @@ async function updatePreferences(email, updates) {
       } else {
         await unsubscribeFromList(listId, email);
       }
-    } catch (err) {
+    } catch (err2) {
       console.error(
         `[klaviyo.updatePreferences] failed for list=${listId} subscribed=${subscribed}:`,
-        err
+        err2
       );
     }
   }
@@ -10206,10 +10206,10 @@ async function unsubscribeAll(email) {
   for (const listId of knownListIds()) {
     try {
       await unsubscribeFromList(listId, email);
-    } catch (err) {
+    } catch (err2) {
       console.error(
         `[klaviyo.unsubscribeAll] failed for list=${listId}:`,
-        err
+        err2
       );
     }
   }
@@ -10228,8 +10228,8 @@ async function updateProfileProperties(email, properties) {
         attributes: { properties }
       }
     });
-  } catch (err) {
-    console.error("[klaviyo.updateProfileProperties] failed:", err);
+  } catch (err2) {
+    console.error("[klaviyo.updateProfileProperties] failed:", err2);
   }
 }
 async function trackWishlistAdded(email, item) {
@@ -10241,8 +10241,8 @@ async function trackWishlistAdded(email, item) {
       list_name: item.listName ?? null,
       added_at: (/* @__PURE__ */ new Date()).toISOString()
     });
-  } catch (err) {
-    console.error("[klaviyo.trackWishlistAdded] failed:", err);
+  } catch (err2) {
+    console.error("[klaviyo.trackWishlistAdded] failed:", err2);
   }
 }
 async function trackWishlistRemoved(email, item) {
@@ -10252,8 +10252,8 @@ async function trackWishlistRemoved(email, item) {
       list_name: item.listName ?? null,
       removed_at: (/* @__PURE__ */ new Date()).toISOString()
     });
-  } catch (err) {
-    console.error("[klaviyo.trackWishlistRemoved] failed:", err);
+  } catch (err2) {
+    console.error("[klaviyo.trackWishlistRemoved] failed:", err2);
   }
 }
 async function syncWishlistProfileProperty(email, handles) {
@@ -10275,8 +10275,8 @@ async function syncWishlistProfileProperty(email, handles) {
         }
       }
     });
-  } catch (err) {
-    console.error("[klaviyo.syncWishlistProfileProperty] failed:", err);
+  } catch (err2) {
+    console.error("[klaviyo.syncWishlistProfileProperty] failed:", err2);
   }
 }
 var BASE;
@@ -10354,8 +10354,8 @@ async function fetchCandidates(input) {
       audiences,
       matters
     }) ?? [];
-  } catch (err) {
-    console.error("[seo-keywords] fetchCandidates error:", err);
+  } catch (err2) {
+    console.error("[seo-keywords] fetchCandidates error:", err2);
     return [];
   }
 }
@@ -10522,8 +10522,8 @@ async function getEditorialAuthor(slug) {
         seoMode: doc.seoMode ?? "natural",
         active: isActive
       };
-    } catch (err) {
-      console.error("[editorial-author] fetch error:", err);
+    } catch (err2) {
+      console.error("[editorial-author] fetch error:", err2);
       return null;
     }
   });
@@ -10807,11 +10807,11 @@ __export(team_keys_exports, {
 function isTeamId(v) {
   return typeof v === "string" && TEAM_IDS.includes(v);
 }
-function teamSpendKvKey(team, utcDay3) {
-  return `team:spend:${team}:${utcDay3}`;
+function teamSpendKvKey(team, utcDay4) {
+  return `team:spend:${team}:${utcDay4}`;
 }
-function teamImagesKvKey(utcDay3) {
-  return `team:images:homepage:${utcDay3}`;
+function teamImagesKvKey(utcDay4) {
+  return `team:images:homepage:${utcDay4}`;
 }
 function teamFromFeature(feature) {
   const i = feature.indexOf("-");
@@ -11018,8 +11018,8 @@ async function bumpTeamSpendCounters(feature, costUsd, imageCount) {
       const key = teamImagesKvKey2(day);
       if (await kvGet2(key) != null) await kvIncrBy2(key, imageCount);
     }
-  } catch (err) {
-    console.error("[token-log] best-effort KV counter bump failed (ignored):", err);
+  } catch (err2) {
+    console.error("[token-log] best-effort KV counter bump failed (ignored):", err2);
   }
 }
 async function logApiTokens(entry) {
@@ -11053,8 +11053,8 @@ async function logApiTokens(entry) {
       estCostUsd: String(cost)
     });
     await bumpTeamSpendCounters(entry.feature, cost);
-  } catch (err) {
-    console.error("[token-log] best-effort write failed (ignored):", err);
+  } catch (err2) {
+    console.error("[token-log] best-effort write failed (ignored):", err2);
   }
 }
 async function logImageCost(entry) {
@@ -11081,8 +11081,8 @@ async function logImageCost(entry) {
       estCostUsd: String(cost)
     });
     await bumpTeamSpendCounters(entry.feature, cost, entry.count);
-  } catch (err) {
-    console.error("[token-log] best-effort image-cost write failed (ignored):", err);
+  } catch (err2) {
+    console.error("[token-log] best-effort image-cost write failed (ignored):", err2);
   }
 }
 async function logVideoCost(entry) {
@@ -11109,8 +11109,8 @@ async function logVideoCost(entry) {
       estCostUsd: String(cost)
     });
     await bumpTeamSpendCounters(entry.feature, cost);
-  } catch (err) {
-    console.error("[token-log] best-effort video-cost write failed (ignored):", err);
+  } catch (err2) {
+    console.error("[token-log] best-effort video-cost write failed (ignored):", err2);
   }
 }
 async function getDailyTokenRollup(opts = {}) {
@@ -11255,7 +11255,7 @@ async function callClaude(opts) {
     };
     if (opts.caller) entry.caller = opts.caller;
     return logApiTokens2(entry);
-  }).catch((err) => console.error("[claude] callClaude token-log failed (ignored):", err));
+  }).catch((err2) => console.error("[claude] callClaude token-log failed (ignored):", err2));
   return result;
 }
 async function buildEmmaSystemBlocks(brandVoiceOverride) {
@@ -11314,7 +11314,7 @@ async function generateWithSystem(opts) {
     if (opts.sku) entry.sku = opts.sku;
     if (opts.productId) entry.productId = opts.productId;
     return logApiTokens2(entry);
-  }).catch((err) => console.error("[claude] generateWithSystem token-log failed (ignored):", err));
+  }).catch((err2) => console.error("[claude] generateWithSystem token-log failed (ignored):", err2));
   return block.text;
 }
 function stripFences(raw) {
@@ -11343,8 +11343,8 @@ async function generateCopy(req, llmClient) {
     contentType: resolveSeoContentType(type),
     topic: req.topic,
     seoMode
-  }).catch((err) => {
-    console.error("[claude] buildKeywordBlock failed (continuing without):", err);
+  }).catch((err2) => {
+    console.error("[claude] buildKeywordBlock failed (continuing without):", err2);
     return "";
   });
   const productContextBase = `Product: ${product.title}
@@ -11844,8 +11844,8 @@ async function generateProductCopyBundle(req) {
     matters: product.mattersTags,
     contentType: "pdp",
     seoMode
-  }).catch((err) => {
-    console.error("[generateProductCopyBundle] buildKeywordBlock failed (continuing without):", err);
+  }).catch((err2) => {
+    console.error("[generateProductCopyBundle] buildKeywordBlock failed (continuing without):", err2);
     return "";
   });
   const productContextBase = `Product: ${product.title}
@@ -11889,8 +11889,8 @@ ${productContext}`;
       userPrompt: prompt
     });
     parsed = JSON.parse(stripFences(text2));
-  } catch (err) {
-    console.error("[generateProductCopyBundle] consolidated call failed, falling back to per-field:", err);
+  } catch (err2) {
+    console.error("[generateProductCopyBundle] consolidated call failed, falling back to per-field:", err2);
   }
   const taglineOk = (s) => typeof s === "string" && s.trim().length > 0 && s.trim().split(/\s+/).length <= 12 && !looksLikeMetaCommentary(s) && !s.includes("\u2014") && !s.includes("\u2013");
   const seoMetaOk = (s) => typeof s === "string" && s.trim().length >= 50 && !looksLikeMetaCommentary(s) && !containsPrice(s);
@@ -12000,8 +12000,8 @@ ${ctxBlock}`;
       model: MODEL,
       maxTokens: 4096
     });
-  } catch (err) {
-    console.error("[claude] generateBlogArticle Claude call failed:", err);
+  } catch (err2) {
+    console.error("[claude] generateBlogArticle Claude call failed:", err2);
     return fallback();
   }
   try {
@@ -12020,8 +12020,8 @@ ${ctxBlock}`;
       seoDescription,
       body: bodyMd ? markdownToPortableText(bodyMd) : markdownToPortableText(`A short note on ${topic}.`)
     };
-  } catch (err) {
-    console.error("[claude] generateBlogArticle JSON parse failed:", err);
+  } catch (err2) {
+    console.error("[claude] generateBlogArticle JSON parse failed:", err2);
     return fallback();
   }
 }
@@ -12096,8 +12096,8 @@ Return ONLY raw JSON (no markdown):
   let raw;
   try {
     raw = await generate(userPrompt, 256, MODEL, input.llmClient);
-  } catch (err) {
-    console.warn("[generateProductTitle] Claude call failed, falling back to raw title:", err instanceof Error ? err.message : err);
+  } catch (err2) {
+    console.warn("[generateProductTitle] Claude call failed, falling back to raw title:", err2 instanceof Error ? err2.message : err2);
     return {
       title: original.slice(0, 70),
       augmented: false,
@@ -12159,8 +12159,8 @@ Return ONLY raw JSON (no markdown):
   let raw;
   try {
     raw = await generate(userPrompt, 800, MODEL, input.llmClient);
-  } catch (err) {
-    console.warn("[generatePairingWhy] Claude call failed:", err instanceof Error ? err.message : err);
+  } catch (err2) {
+    console.warn("[generatePairingWhy] Claude call failed:", err2 instanceof Error ? err2.message : err2);
     return { accessoryProductIds: [], pairingWhy: {} };
   }
   let parsed = {};
@@ -12389,7 +12389,7 @@ Return ONLY the enhanced prompt as one flowing paragraph. No labels, no markdown
       cacheCreationTokens: uVeo.cache_creation_input_tokens ?? 0,
       cacheReadTokens: uVeo.cache_read_input_tokens ?? 0
     })
-  ).catch((err) => console.error("[claude] enhanceVeoPrompt token-log failed (ignored):", err));
+  ).catch((err2) => console.error("[claude] enhanceVeoPrompt token-log failed (ignored):", err2));
   return block.text.trim();
 }
 async function enhanceLtxPrompt(opts) {
@@ -12433,7 +12433,7 @@ Return ONLY the enhanced prompt as one flowing paragraph. No labels, no markdown
       cacheCreationTokens: uLtx.cache_creation_input_tokens ?? 0,
       cacheReadTokens: uLtx.cache_read_input_tokens ?? 0
     })
-  ).catch((err) => console.error("[claude] enhanceLtxPrompt token-log failed (ignored):", err));
+  ).catch((err2) => console.error("[claude] enhanceLtxPrompt token-log failed (ignored):", err2));
   return block.text.trim();
 }
 async function selectAccessories(mainProduct, candidates, count = 3) {
@@ -12582,16 +12582,16 @@ Return ONLY this JSON (no markdown):
           if (variant === "quote" && parsed.pullQuote) out.pullQuote = parsed.pullQuote;
           return out;
         }
-      } catch (err) {
-        if (i === tries - 1) throw err;
+      } catch (err2) {
+        if (i === tries - 1) throw err2;
       }
     }
     throw new Error("unreachable");
   }
   try {
     return await attempt(2);
-  } catch (err) {
-    console.error("[generateEmmaHero] falling back to hardcoded copy:", err);
+  } catch (err2) {
+    console.error("[generateEmmaHero] falling back to hardcoded copy:", err2);
     return emmaHeroFallback(opts.deal, variant, voiceHash);
   }
 }
@@ -12632,12 +12632,12 @@ Return ONLY the tagline text, nothing else.`;
         cacheCreationTokens: uTagline.cache_creation_input_tokens ?? 0,
         cacheReadTokens: uTagline.cache_read_input_tokens ?? 0
       })
-    ).catch((err) => console.error("[claude] generateEmmaTagline token-log failed (ignored):", err));
+    ).catch((err2) => console.error("[claude] generateEmmaTagline token-log failed (ignored):", err2));
     const line = block.text.trim().replace(/^["'`]|["'`]$/g, "").replace(/\s+/g, " ").split("\n")[0]?.trim();
     if (line && line.length > 4 && line.length <= 80 && line.includes("\u2665")) return line;
     if (line && line.length > 4 && line.length <= 80) return `${line} \u2665`;
-  } catch (err) {
-    console.error("[generateEmmaTagline] falling back:", err);
+  } catch (err2) {
+    console.error("[generateEmmaTagline] falling back:", err2);
   }
   return EMMA_TAGLINE_FALLBACKS[Math.floor(Math.random() * EMMA_TAGLINE_FALLBACKS.length)];
 }
@@ -12702,9 +12702,9 @@ Return ONLY the HTML \u2014 no markdown, no fences, no preamble.`;
       userPrompt: user
     });
     return stripFences(text2).trim();
-  } catch (err) {
-    console.error("[generateEmmaTake] failed:", err);
-    throw err;
+  } catch (err2) {
+    console.error("[generateEmmaTake] failed:", err2);
+    throw err2;
   }
 }
 async function generateCareInstructions(opts) {
@@ -12761,9 +12761,9 @@ No markdown, no fences, no commentary.`;
     const minRequired = isConsumable ? 2 : 3;
     if (bullets.length < minRequired) throw new Error(`only ${bullets.length} valid bullets returned (needed ${minRequired})`);
     return bullets;
-  } catch (err) {
-    console.error("[generateCareInstructions] failed:", err);
-    throw err;
+  } catch (err2) {
+    console.error("[generateCareInstructions] failed:", err2);
+    throw err2;
   }
 }
 async function generateProductFaqs(opts) {
@@ -12913,8 +12913,8 @@ ${careInstructionsText ? `- Care card already covers (do NOT restate): ${careIns
           faqs.push(e);
           seen.add(e.question.toLowerCase());
         }
-      } catch (err) {
-        console.warn("[generateProductFaqs] care top-up failed (continuing with primary batch):", err instanceof Error ? err.message : err);
+      } catch (err2) {
+        console.warn("[generateProductFaqs] care top-up failed (continuing with primary batch):", err2 instanceof Error ? err2.message : err2);
       }
     }
     const trimmed = trimWithCoverage(faqs);
@@ -12925,9 +12925,9 @@ ${careInstructionsText ? `- Care card already covers (do NOT restate): ${careIns
       console.warn(`[generateProductFaqs] only 1 care FAQ after retry \u2014 below the SEO target of 2-3`);
     }
     return trimmed;
-  } catch (err) {
-    console.error("[generateProductFaqs] failed:", err);
-    throw err;
+  } catch (err2) {
+    console.error("[generateProductFaqs] failed:", err2);
+    throw err2;
   }
 }
 async function generateSensationDialV2(opts) {
@@ -13056,8 +13056,8 @@ No markdown. No commentary.`;
       const mapped = mapLegacyDialBucket(t);
       if (mapped) return mapped;
     }
-  } catch (err) {
-    console.error("[inferProductTypeDial] failed, defaulting to vibrator:", err);
+  } catch (err2) {
+    console.error("[inferProductTypeDial] failed, defaulting to vibrator:", err2);
   }
   return "vibrator";
 }
@@ -13110,8 +13110,8 @@ or { "type": "sex-machine", "subtype": null }`;
       }
     }
     return { type, subtype };
-  } catch (err) {
-    console.error("[inferProductTaxonomy] failed, defaulting to vibrator:", err);
+  } catch (err2) {
+    console.error("[inferProductTaxonomy] failed, defaulting to vibrator:", err2);
     return { type: "vibrator", subtype: null };
   }
 }
@@ -13176,8 +13176,8 @@ Return ONLY this JSON (no markdown): { "tags": ["Soft Touch", "First-Time Friend
     const parsed = JSON.parse(stripFences(text2));
     if (!Array.isArray(parsed.tags)) return [];
     return validateAskEmmaTagBatch(parsed.tags, preferredLabels, allowProposed);
-  } catch (err) {
-    console.error(`[generateAskEmmaTags:${axis}] failed:`, err);
+  } catch (err2) {
+    console.error(`[generateAskEmmaTags:${axis}] failed:`, err2);
     return [];
   }
 }
@@ -13233,8 +13233,8 @@ Return ONLY this JSON (no markdown):
       audienceTags: Array.isArray(parsed.audience) ? validateAskEmmaTagBatch(parsed.audience, vocabularies.audience, allowProposed) : [],
       mattersTags: Array.isArray(parsed.matters) ? validateAskEmmaTagBatch(parsed.matters, vocabularies.matters, allowProposed) : []
     };
-  } catch (err) {
-    console.error("[generateAskEmmaTagsAll] failed:", err);
+  } catch (err2) {
+    console.error("[generateAskEmmaTagsAll] failed:", err2);
     return { moodTags: [], audienceTags: [], mattersTags: [] };
   }
 }
@@ -13285,8 +13285,8 @@ Return ONLY this JSON (no markdown): { "levels": ["first-time", "curious"] }`;
       }
       return out;
     }
-  } catch (err) {
-    console.error("[generateIvrExperience] failed:", err);
+  } catch (err2) {
+    console.error("[generateIvrExperience] failed:", err2);
   }
   return [];
 }
@@ -13336,8 +13336,8 @@ Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`;
       if (out.length >= 5) break;
     }
     return out;
-  } catch (err) {
-    console.error("[generateIvrUseCase] failed:", err);
+  } catch (err2) {
+    console.error("[generateIvrUseCase] failed:", err2);
     return [];
   }
 }
@@ -13385,8 +13385,8 @@ Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`;
       if (out.length >= 8) break;
     }
     return out;
-  } catch (err) {
-    console.error("[generateIvrFeatures] failed:", err);
+  } catch (err2) {
+    console.error("[generateIvrFeatures] failed:", err2);
     return [];
   }
 }
@@ -13459,8 +13459,8 @@ Return ONLY this JSON shape (no markdown, no preamble):
         console.error("[generateIvrAll] could not extract JSON from response:", cleaned.slice(0, 300));
       }
     }
-  } catch (err) {
-    console.error("[generateIvrAll] failed:", err);
+  } catch (err2) {
+    console.error("[generateIvrAll] failed:", err2);
   }
   if (!parsed) parsed = {};
   const experience = Array.isArray(parsed.experience) ? (() => {
@@ -13602,7 +13602,7 @@ Return exactly ${input.maxPicks} picks, ordered best\u2192worst. Use only ids fr
       cacheCreationTokens: usage?.cache_creation_input_tokens ?? 0,
       cacheReadTokens: usage?.cache_read_input_tokens ?? 0
     })
-  ).catch((err) => console.error("[claude] pickForContextGroup token-log failed (ignored):", err));
+  ).catch((err2) => console.error("[claude] pickForContextGroup token-log failed (ignored):", err2));
   return {
     picks,
     tokens: {
@@ -13682,7 +13682,7 @@ Start by inspecting list_candidate_pool, then propose 2 PDP rails + 1 homepage r
           cacheCreationTokens: uRail.cache_creation_input_tokens ?? 0,
           cacheReadTokens: uRail.cache_read_input_tokens ?? 0
         })
-      ).catch((err) => console.error("[claude] generateRails token-log failed (ignored):", err));
+      ).catch((err2) => console.error("[claude] generateRails token-log failed (ignored):", err2));
     }
     const textParts = response.content.filter((b) => b.type === "text");
     const toolUses = response.content.filter((b) => b.type === "tool_use");
@@ -13701,12 +13701,12 @@ Start by inspecting list_candidate_pool, then propose 2 PDP rails + 1 homepage r
             tool_use_id: tu.id,
             content: JSON.stringify(result)
           };
-        } catch (err) {
+        } catch (err2) {
           return {
             type: "tool_result",
             tool_use_id: tu.id,
             is_error: true,
-            content: `Tool error: ${err instanceof Error ? err.message : String(err)}`
+            content: `Tool error: ${err2 instanceof Error ? err2.message : String(err2)}`
           };
         }
       })
@@ -14113,9 +14113,9 @@ async function xFetch(url, method, body, contentType = "application/json") {
   const res = await fetch(url, init2);
   if (!res.ok) {
     const text2 = await res.text();
-    const err = new Error(`X API ${method} ${url} \u2192 ${res.status}: ${text2}`);
-    err.status = res.status;
-    throw err;
+    const err2 = new Error(`X API ${method} ${url} \u2192 ${res.status}: ${text2}`);
+    err2.status = res.status;
+    throw err2;
   }
   if (res.status === 204) return {};
   return await res.json();
@@ -14196,8 +14196,8 @@ async function uploadMediaFromUrl(imageUrl) {
     const buffer = Buffer.from(await res.arrayBuffer());
     const mimeType = res.headers.get("content-type") ?? "image/jpeg";
     return await uploadMedia(buffer, mimeType);
-  } catch (err) {
-    console.error("[twitter] Media upload from URL failed:", err);
+  } catch (err2) {
+    console.error("[twitter] Media upload from URL failed:", err2);
     return null;
   }
 }
@@ -14268,8 +14268,8 @@ async function postDealTweet(deal) {
       }
     }
     return { ok: true, tweetId: tweet.id, tweetText: copy.mainTweet };
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const errorMessage = err2 instanceof Error ? err2.message : String(err2);
     console.error("[twitter] postDealTweet failed:", errorMessage);
     try {
       await db.insert(socialPosts).values({
@@ -14311,8 +14311,8 @@ async function postManualTweet(text2, imageUrl, dealHistoryId) {
       createdBy: "admin"
     });
     return { ok: true, tweetId: tweet.id, tweetText: text2 };
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const errorMessage = err2 instanceof Error ? err2.message : String(err2);
     console.error("[twitter] postManualTweet failed:", errorMessage);
     return { ok: false, error: errorMessage };
   }
@@ -14342,8 +14342,8 @@ async function postApprovedDraft(postId) {
       errorMessage: null
     }).where(eq6(socialPosts.id, postId));
     return { ok: true, tweetId: tweet.id, tweetText: text2 };
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const errorMessage = err2 instanceof Error ? err2.message : String(err2);
     await db.update(socialPosts).set({ errorMessage }).where(eq6(socialPosts.id, postId));
     return { ok: false, error: errorMessage };
   }
@@ -14353,8 +14353,8 @@ async function deleteAndLogTweet(postId, externalPostId) {
     await deleteTweet(externalPostId);
     await db.update(socialPosts).set({ status: "deleted" }).where(eq6(socialPosts.id, postId));
     return { ok: true };
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const errorMessage = err2 instanceof Error ? err2.message : String(err2);
     return { ok: false, error: errorMessage };
   }
 }
@@ -14372,8 +14372,8 @@ async function retryFailedPost(postId) {
       errorMessage: null
     }).where(eq6(socialPosts.id, postId));
     return { ok: true, tweetId: tweet.id, tweetText: post.tweetText };
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const errorMessage = err2 instanceof Error ? err2.message : String(err2);
     await db.update(socialPosts).set({ errorMessage }).where(eq6(socialPosts.id, postId));
     return { ok: false, error: errorMessage };
   }
@@ -14493,8 +14493,8 @@ async function listActiveRails() {
     try {
       const rows = await client5.fetch(RAILS_GROQ);
       return rows ?? [];
-    } catch (err) {
-      console.error("[emma-rails] listActiveRails error:", err);
+    } catch (err2) {
+      console.error("[emma-rails] listActiveRails error:", err2);
       return [];
     }
   });
@@ -14507,8 +14507,8 @@ async function getRailById(id) {
       `*[_type == "emmaContextRail" && _id == $id][0]${RAIL_FIELDS_GROQ}`,
       { id }
     );
-  } catch (err) {
-    console.error("[emma-rails] getRailById error:", err);
+  } catch (err2) {
+    console.error("[emma-rails] getRailById error:", err2);
     return null;
   }
 }
@@ -14528,8 +14528,8 @@ async function patchLastError(railId, reason, message) {
   const lastError = { reason, message, at: (/* @__PURE__ */ new Date()).toISOString() };
   try {
     await client5.patch(railId).set({ lastError }).commit();
-  } catch (err) {
-    console.error("[emma-rails] patchLastError error:", err);
+  } catch (err2) {
+    console.error("[emma-rails] patchLastError error:", err2);
   }
 }
 async function regenerateRail(rail, dealHandle, trigger) {
@@ -14592,11 +14592,11 @@ async function regenerateRail(rail, dealHandle, trigger) {
     await kvDel(`emma:rails:hydrated:${dealHandle}`);
     invalidateCache("emma:active-rails");
     return { ok: true, count: picks.length };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "internal_error";
+  } catch (err2) {
+    const msg = err2 instanceof Error ? err2.message : "internal_error";
     await patchLastError(rail._id, "internal_error", msg).catch(() => {
     });
-    throw err;
+    throw err2;
   }
 }
 async function regenerateActiveRails(dealHandle, trigger = "midnight") {
@@ -14607,8 +14607,8 @@ async function regenerateActiveRails(dealHandle, trigger = "midnight") {
       const res = await regenerateRail(rail, dealHandle, trigger);
       if (res.ok) ok++;
       else failed++;
-    } catch (err) {
-      console.error("[emma-rails] regenerate failed for", rail.slug, err);
+    } catch (err2) {
+      console.error("[emma-rails] regenerate failed for", rail.slug, err2);
       failed++;
     }
   }
@@ -14651,8 +14651,8 @@ async function getEmmaContextRows(opts) {
     void (async () => {
       try {
         await regenerateRail(rail, dealHandle, "lazy");
-      } catch (err) {
-        console.error("[emma-rails] lazy regen failed for", rail.slug, err);
+      } catch (err2) {
+        console.error("[emma-rails] lazy regen failed for", rail.slug, err2);
       } finally {
         await kvDel(lockKey).catch(() => {
         });
@@ -14772,8 +14772,8 @@ async function submitIndexNowChunk(urls, opts) {
       });
       last = { urls, status: res.status, ok: res.ok };
       if (res.ok || !isRetryableStatus(res.status)) return last;
-    } catch (err) {
-      last = { urls, status: 0, ok: false, error: err instanceof Error ? err.message : String(err) };
+    } catch (err2) {
+      last = { urls, status: 0, ok: false, error: err2 instanceof Error ? err2.message : String(err2) };
     } finally {
       clearTimeout(timer);
     }
@@ -14807,8 +14807,8 @@ async function submitIndexNow(paths, opts = {}) {
 async function pingSearchEngines(paths) {
   try {
     await submitIndexNow(paths);
-  } catch (err) {
-    console.error("[search-ping] IndexNow ping failed (non-blocking):", err);
+  } catch (err2) {
+    console.error("[search-ping] IndexNow ping failed (non-blocking):", err2);
   }
 }
 var SITE_ORIGIN, INDEXNOW_MAX_URLS_PER_REQUEST, INDEXNOW_ENDPOINT, REQUEST_TIMEOUT_MS, MAX_ATTEMPTS, RETRY_BACKOFF_MS;
@@ -15391,8 +15391,8 @@ async function getProductIdsByCollectionHandle(handle) {
       const set = await fetchCollectionProductIds(gid);
       ids = Array.from(set);
     }
-  } catch (err) {
-    console.error("[discovery] getProductIdsByCollectionHandle error for", key, err);
+  } catch (err2) {
+    console.error("[discovery] getProductIdsByCollectionHandle error for", key, err2);
     return [];
   }
   await kvSet(cacheKey3, ids, COLLECTION_HANDLE_CACHE_TTL);
@@ -15406,8 +15406,8 @@ async function fetchHonoraryProducts(ids, category) {
     let resp;
     try {
       resp = await adminGraphQL(NODES_BY_IDS_QUERY, { ids: batch });
-    } catch (err) {
-      console.error("[discovery] fetchHonoraryProducts batch failed:", err);
+    } catch (err2) {
+      console.error("[discovery] fetchHonoraryProducts batch failed:", err2);
       continue;
     }
     for (const node of resp.nodes) {
@@ -15524,8 +15524,8 @@ async function readDiscoveryIndexDurable() {
     void kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS).catch(() => {
     });
     return { index: index2, vocab };
-  } catch (err) {
-    console.warn("[discovery] Neon durable read failed:", err);
+  } catch (err2) {
+    console.warn("[discovery] Neon durable read failed:", err2);
     return null;
   }
 }
@@ -15549,8 +15549,8 @@ async function writeDiscoveryIndexDurable(index2, vocab) {
         builtAt: /* @__PURE__ */ new Date()
       }
     });
-  } catch (err) {
-    console.error("[discovery] Neon durable upsert failed (KV still written):", err);
+  } catch (err2) {
+    console.error("[discovery] Neon durable upsert failed (KV still written):", err2);
   }
 }
 async function getDiscoveryIndex(opts = {}) {
@@ -15885,8 +15885,8 @@ async function buildHomeContentBlocks() {
     // section on the page (the three-day outage PR #322 fixed). A bad couples
     // block must cost only its own strip.
     couplesBlocks.length > 0 ? withTimeout(Promise.all(couplesBlocks.map(
-      (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)).catch((err) => {
-        console.error("[homepage-payload] couples rail resolve failed:", err);
+      (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)).catch((err2) => {
+        console.error("[homepage-payload] couples rail resolve failed:", err2);
         return [];
       }) : Promise.resolve([])
     )), BUILD_TIMEOUT_MS, [], "couplesResults(payloadA)") : Promise.resolve([])
@@ -15976,8 +15976,8 @@ async function readHomepagePayloadA() {
   try {
     const kv = await kvGet(HOMEPAGE_PAYLOAD_KV_KEY);
     if (kv && kv.version === HOMEPAGE_PAYLOAD_VERSION) return kv;
-  } catch (err) {
-    console.warn("[homepage-payload] KV read failed, trying Neon:", err);
+  } catch (err2) {
+    console.warn("[homepage-payload] KV read failed, trying Neon:", err2);
   }
   try {
     const [row] = await db.select().from(homepagePayload).where(eq9(homepagePayload.variant, "a")).limit(1);
@@ -15987,8 +15987,8 @@ async function readHomepagePayloadA() {
       });
       return payload;
     }
-  } catch (err) {
-    console.warn("[homepage-payload] Neon read failed:", err);
+  } catch (err2) {
+    console.warn("[homepage-payload] Neon read failed:", err2);
   }
   return null;
 }
@@ -16016,8 +16016,8 @@ async function writeHomepagePayloadA(payload, opts = {}) {
         builtAt: /* @__PURE__ */ new Date()
       }
     });
-  } catch (err) {
-    console.error("[homepage-payload] Neon upsert failed (KV still written):", err);
+  } catch (err2) {
+    console.error("[homepage-payload] Neon upsert failed (KV still written):", err2);
   }
 }
 async function warmHomepagePayloadA(opts = {}) {
@@ -16073,8 +16073,8 @@ async function readHomepagePayloadB() {
   try {
     const kv = await kvGet(HOMEPAGE_PAYLOAD_B_KV_KEY);
     if (kv && kv.version === HOMEPAGE_PAYLOAD_B_VERSION) return kv;
-  } catch (err) {
-    console.warn("[homepage-payload:b] KV read failed, trying Neon:", err);
+  } catch (err2) {
+    console.warn("[homepage-payload:b] KV read failed, trying Neon:", err2);
   }
   try {
     const [row] = await db.select().from(homepagePayload).where(eq9(homepagePayload.variant, "b")).limit(1);
@@ -16084,8 +16084,8 @@ async function readHomepagePayloadB() {
       });
       return payload;
     }
-  } catch (err) {
-    console.warn("[homepage-payload:b] Neon read failed:", err);
+  } catch (err2) {
+    console.warn("[homepage-payload:b] Neon read failed:", err2);
   }
   return null;
 }
@@ -16113,8 +16113,8 @@ async function writeHomepagePayloadB(payload, opts = {}) {
         builtAt: /* @__PURE__ */ new Date()
       }
     });
-  } catch (err) {
-    console.error("[homepage-payload:b] Neon upsert failed (KV still written):", err);
+  } catch (err2) {
+    console.error("[homepage-payload:b] Neon upsert failed (KV still written):", err2);
   }
 }
 async function invalidateHomepagePayloadB() {
@@ -16199,8 +16199,8 @@ async function getFirstVariantGid(shopifyProductId) {
   try {
     ;
     ({ product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`));
-  } catch (err) {
-    console.error(`[deal-rotator] product ${numericId} lookup failed \u2014 treating as missing:`, err);
+  } catch (err2) {
+    console.error(`[deal-rotator] product ${numericId} lookup failed \u2014 treating as missing:`, err2);
     return null;
   }
   const v = product?.variants?.[0];
@@ -16235,10 +16235,10 @@ async function transitionToVaultPricing(deal) {
     await setDealStatus(deal.shopifyProductId, "vault");
     const tag = pastDealTag(deal.dealDate);
     if (tag) await appendProductTag(deal.shopifyProductId, tag);
-  } catch (err) {
+  } catch (err2) {
     console.error(
       `[deal-rotator] Shopify-side vaulting failed for deal ${deal.id} (product ${deal.shopifyProductId}) \u2014 product may no longer exist; archiving in DB only:`,
-      err
+      err2
     );
   }
   await db.update(dealHistory).set({
@@ -16252,8 +16252,8 @@ async function transitionToVaultPricing(deal) {
     if (archived.length) {
       console.log("[deal-rotator] Archived homepage rails:", archived.length);
     }
-  } catch (err) {
-    console.error("[deal-rotator] Rail archive failed (non-blocking):", err);
+  } catch (err2) {
+    console.error("[deal-rotator] Rail archive failed (non-blocking):", err2);
   }
 }
 async function activateDeal(deal) {
@@ -16299,8 +16299,8 @@ async function activateDeal(deal) {
     if (unarchived.length) {
       console.log("[deal-rotator] Un-archived homepage rails:", unarchived.length);
     }
-  } catch (err) {
-    console.error("[deal-rotator] Rail un-archive failed (non-blocking):", err);
+  } catch (err2) {
+    console.error("[deal-rotator] Rail un-archive failed (non-blocking):", err2);
   }
   if (!skipInlineHero) {
     try {
@@ -16356,8 +16356,8 @@ async function activateDeal(deal) {
           console.error("[deal-rotator] Emma pick Sanity index failed (non-blocking):", sanityErr);
         }
       }
-    } catch (err) {
-      console.error("[deal-rotator] Emma hero generation failed (non-blocking):", err);
+    } catch (err2) {
+      console.error("[deal-rotator] Emma hero generation failed (non-blocking):", err2);
     }
   } else {
     console.log(`[deal-rotator] Skipping inline Emma hero for deal ${deal.id} \u2014 gated enrichment job already wrote copy`);
@@ -16396,8 +16396,8 @@ async function activateDeal(deal) {
         shopifyProductId: deal.shopifyProductId ?? void 0
       });
       console.log("[deal-rotator] Auto-tweet:", result.ok ? result.tweetId : result.error);
-    } catch (err) {
-      console.error("[deal-rotator] Auto-tweet failed (non-blocking):", err);
+    } catch (err2) {
+      console.error("[deal-rotator] Auto-tweet failed (non-blocking):", err2);
     }
   }
 }
@@ -16424,21 +16424,21 @@ async function rotateDeal() {
         const res = await regenerateActiveRails2(liveHandle, "midnight");
         console.log("[deal-rotator] emma rails precomputed:", res);
       }
-    } catch (err) {
-      console.error("[deal-rotator] emma rails precompute failed (non-blocking):", err);
+    } catch (err2) {
+      console.error("[deal-rotator] emma rails precompute failed (non-blocking):", err2);
     }
     try {
       const { pingSearchEngines: pingSearchEngines2 } = await Promise.resolve().then(() => (init_search_ping_server(), search_ping_server_exports));
       await pingSearchEngines2(["/", ...liveHandle ? [`/products/${liveHandle}`] : []]);
-    } catch (err) {
-      console.error("[deal-rotator] search ping failed (non-blocking):", err);
+    } catch (err2) {
+      console.error("[deal-rotator] search ping failed (non-blocking):", err2);
     }
     try {
       const { warmHomepagePayloadA: warmHomepagePayloadA2 } = await Promise.resolve().then(() => (init_homepage_payload_server(), homepage_payload_server_exports));
       const p = await warmHomepagePayloadA2({ force: true });
       console.log(`[deal-rotator] homepage payload precomputed (rails=${p.rails.length}, sections=${p.sections.length}, degraded=${p.degraded})`);
-    } catch (err) {
-      console.error("[deal-rotator] homepage precompute failed (non-blocking):", err);
+    } catch (err2) {
+      console.error("[deal-rotator] homepage precompute failed (non-blocking):", err2);
     }
   }
   return {
@@ -16454,10 +16454,10 @@ async function isLiveDealSoldOut() {
   try {
     ;
     ({ product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`));
-  } catch (err) {
+  } catch (err2) {
     console.error(
       `[deal-rotator] live deal ${liveDeal.id} product ${numericId} lookup failed \u2014 treating as sold out:`,
-      err
+      err2
     );
     return { soldOut: true, dealId: liveDeal.id };
   }
@@ -17264,8 +17264,8 @@ async function fileDetectionTicket(input) {
     }
     console.info(`[${input.detector}] filed ticket #${id} (${input.dedupeKey}, P${input.priority})`);
     return id;
-  } catch (err) {
-    console.error(`[${input.detector}] filing ticket "${input.dedupeKey}" failed (ignored):`, err);
+  } catch (err2) {
+    console.error(`[${input.detector}] filing ticket "${input.dedupeKey}" failed (ignored):`, err2);
     return 0;
   }
 }
@@ -17431,8 +17431,8 @@ async function assembleStorefrontHome(opts = {}) {
     return hydrateStorefrontPayloadB(payload);
   }
   const fresh = await buildHomepagePayloadB();
-  void writeHomepagePayloadB(fresh).catch((err) => {
-    console.warn("[storefront-home] payload write after cold build failed:", err);
+  void writeHomepagePayloadB(fresh).catch((err2) => {
+    console.warn("[storefront-home] payload write after cold build failed:", err2);
   });
   return hydrateStorefrontPayloadB(fresh);
 }
@@ -17487,8 +17487,8 @@ async function buildHomepagePayloadB() {
       CONTENT_BLOCKS_TIMEOUT_MS,
       EMPTY_CONTENT_BLOCKS,
       "buildHomeContentBlocksLean(storefront)"
-    ).catch((err) => {
-      console.error("[storefront-home] contentBlocks failed, using shell fallbacks:", err);
+    ).catch((err2) => {
+      console.error("[storefront-home] contentBlocks failed, using shell fallbacks:", err2);
       return EMPTY_CONTENT_BLOCKS;
     })
   ]);
@@ -17570,8 +17570,8 @@ async function sendSms(to, body) {
     body: new URLSearchParams({ To: to, From: from, Body: body }).toString()
   });
   if (!res.ok) {
-    const err = await res.text().catch(() => "");
-    throw new Error(`Twilio SMS send failed (${res.status}): ${err}`);
+    const err2 = await res.text().catch(() => "");
+    throw new Error(`Twilio SMS send failed (${res.status}): ${err2}`);
   }
   const json2 = await res.json();
   return json2.sid;
@@ -17630,8 +17630,8 @@ async function sendOwnerEmail(subject, html, opts = {}) {
       html
     });
     return { sent: true };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const msg = err2 instanceof Error ? err2.message : String(err2);
     console.error("[owner-alerts] SMTP send failed:", msg);
     return { sent: false, error: msg };
   }
@@ -17645,8 +17645,8 @@ async function sendOwnerSms(body) {
   try {
     await sendSms(to, body.length > 320 ? `${body.slice(0, 317)}...` : body);
     return { sent: true };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const msg = err2 instanceof Error ? err2.message : String(err2);
     console.error("[owner-alerts] SMS send failed:", msg);
     return { sent: false, error: msg };
   }
@@ -17732,8 +17732,8 @@ async function checkPageOnce(path, attempt, opts = {}) {
     const { parsed, scripts } = extractJsonLd(html);
     if (parsed === 0) problems.push("no valid JSON-LD");
     else if (parsed < scripts) problems.push(`malformed JSON-LD (${scripts - parsed} unparseable)`);
-  } catch (err) {
-    problems.push(`fetch error: ${err instanceof Error ? err.message : String(err)}`);
+  } catch (err2) {
+    problems.push(`fetch error: ${err2 instanceof Error ? err2.message : String(err2)}`);
   }
   const hardFail = status >= 500;
   const check = { path, status, ok: problems.length === 0, problems, bodyOk, hardFail };
@@ -17968,8 +17968,8 @@ async function renderTruth(opts = {}) {
       const prior = await kvGet(fingerprintKey(yesterday));
       sameSlots = compareFingerprints(fingerprint, prior);
       await kvSet(fingerprintKey(today), fingerprint);
-    } catch (err) {
-      console.warn("[render-truth] fingerprint snapshot failed", err);
+    } catch (err2) {
+      console.warn("[render-truth] fingerprint snapshot failed", err2);
     }
     const failed = assertions.filter((a) => !a.ok);
     const missing = failed.map((a) => a.expected);
@@ -17994,9 +17994,9 @@ async function renderTruth(opts = {}) {
       result.ticketIds = await fileRenderTruthTickets(failed, sameSlots, today, slate);
     }
     return result;
-  } catch (err) {
-    console.error("[render-truth] check failed (ignored)", err);
-    return { ...base, message: `render-truth error: ${err instanceof Error ? err.message : String(err)}` };
+  } catch (err2) {
+    console.error("[render-truth] check failed (ignored)", err2);
+    return { ...base, message: `render-truth error: ${err2 instanceof Error ? err2.message : String(err2)}` };
   }
 }
 async function fileRenderTruthTickets(failed, sameSlots, day, slate) {
@@ -18080,8 +18080,8 @@ async function openHealthcheckIssue(title, body) {
       return { url: null, created: false };
     }
     return { url: (await create.json()).html_url, created: true };
-  } catch (err) {
-    console.error("[homepage-healthcheck] issue error", err);
+  } catch (err2) {
+    console.error("[homepage-healthcheck] issue error", err2);
     return { url: null, created: false };
   }
 }
@@ -18112,8 +18112,8 @@ async function runHomepageHealthcheck() {
     try {
       const doc = await getHomepageDocRaw();
       if (doc) await kvSet(LAST_GOOD_KEY, doc);
-    } catch (err) {
-      console.warn("[homepage-healthcheck] last-good snapshot failed", err);
+    } catch (err2) {
+      console.warn("[homepage-healthcheck] last-good snapshot failed", err2);
     }
   }
   if (healthy) {
@@ -18166,8 +18166,8 @@ async function runHomepageHealthcheck() {
       } else {
         result.message = lastGood ? "last-good snapshot is malformed \u2014 skipping rollback" : "no last-good snapshot available to roll back to";
       }
-    } catch (err) {
-      result.message = `rollback failed: ${err instanceof Error ? err.message : String(err)}`;
+    } catch (err2) {
+      result.message = `rollback failed: ${err2 instanceof Error ? err2.message : String(err2)}`;
     }
   } else if (home && !home.ok) {
     result.message = "homepage returned 200 but tripped render heuristics \u2014 not a Sanity-content failure; alerting without rollback";
@@ -18304,8 +18304,8 @@ async function checkPageOnce2(exp, attempt) {
         problems.push(`JSON-LD missing @type ${exp.expectType}`);
       }
     }
-  } catch (err) {
-    problems.push(`fetch error: ${err instanceof Error ? err.message : String(err)}`);
+  } catch (err2) {
+    problems.push(`fetch error: ${err2 instanceof Error ? err2.message : String(err2)}`);
   }
   return { path: exp.path, status, ok: problems.length === 0, problems, hardFail: status >= 500 };
 }
@@ -18357,8 +18357,8 @@ async function openHealthcheckIssue2(title, body) {
       return { url: null, created: false };
     }
     return { url: (await create.json()).html_url, created: true };
-  } catch (err) {
-    console.error("[notebook-healthcheck] issue error", err);
+  } catch (err2) {
+    console.error("[notebook-healthcheck] issue error", err2);
     return { url: null, created: false };
   }
 }
@@ -18414,8 +18414,8 @@ Detected by /cron/notebook-healthcheck against ${siteOrigin2()}. Fix the page, t
         })
       );
     }
-  } catch (err) {
-    console.error("[notebook-healthcheck] ticket filing failed (ignored):", err);
+  } catch (err2) {
+    console.error("[notebook-healthcheck] ticket filing failed (ignored):", err2);
   }
   if (hard) {
     const issueBody = [
@@ -19226,8 +19226,8 @@ function getTrackers() {
   for (const file of files.sort()) {
     try {
       out.push(parseTracker(file.replace(/\.md$/, ""), readFileSync2(resolve2(dir, file), "utf-8")));
-    } catch (err) {
-      console.warn(`[tracker] failed to parse ${file}:`, err);
+    } catch (err2) {
+      console.warn(`[tracker] failed to parse ${file}:`, err2);
     }
   }
   return out;
@@ -19286,8 +19286,8 @@ async function checkUrl(url, opts = {}) {
       }
     }
     return { status: res.status, ok: true, body };
-  } catch (err) {
-    return { status: 0, ok: false, detail: err instanceof Error ? err.message : String(err) };
+  } catch (err2) {
+    return { status: 0, ok: false, detail: err2 instanceof Error ? err2.message : String(err2) };
   } finally {
     clearTimeout(timer);
   }
@@ -19306,16 +19306,16 @@ async function followWithCookies(startUrl, maxHops = 12) {
         signal: controller.signal,
         headers: { "user-agent": PROBE_UA, ...cookie ? { cookie } : {} }
       });
-    } catch (err) {
-      return { status: 0, finalUrl: url, body: "", hops: hop, detail: err instanceof Error ? err.message : String(err) };
+    } catch (err2) {
+      return { status: 0, finalUrl: url, body: "", hops: hop, detail: err2 instanceof Error ? err2.message : String(err2) };
     } finally {
       clearTimeout(timer);
     }
     const getSetCookie = res.headers.getSetCookie;
     for (const sc of getSetCookie ? getSetCookie.call(res.headers) : []) {
       const pair = sc.split(";")[0] ?? "";
-      const eq26 = pair.indexOf("=");
-      if (eq26 > 0) jar.set(pair.slice(0, eq26).trim(), pair.slice(eq26 + 1).trim());
+      const eq27 = pair.indexOf("=");
+      if (eq27 > 0) jar.set(pair.slice(0, eq27).trim(), pair.slice(eq27 + 1).trim());
     }
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
@@ -19382,8 +19382,8 @@ async function runCheckoutProbe() {
     checkoutUrl = withLine.checkoutUrl;
     steps.push(mkStep("cart", ok, Date.now() - t, ok ? {} : { detail: `checkoutUrl=${Boolean(withLine.checkoutUrl)} qty=${withLine.totalQuantity}` }));
     if (!ok) return finish();
-  } catch (err) {
-    steps.push(mkStep("cart", false, Date.now() - t, { detail: err instanceof Error ? err.message : String(err) }));
+  } catch (err2) {
+    steps.push(mkStep("cart", false, Date.now() - t, { detail: err2 instanceof Error ? err2.message : String(err2) }));
     return finish();
   }
   t = Date.now();
@@ -19424,8 +19424,8 @@ ${stepLines}
 
 PROTECTED PATH: checkout, payment, and cart are owner-only. Do not open an automated fix PR against them. This ticket is the incident record; the owner has already been paged by email and SMS.`
       });
-    } catch (err) {
-      console.error("[checkout-probe] ticket filing failed (ignored):", err);
+    } catch (err2) {
+      console.error("[checkout-probe] ticket filing failed (ignored):", err2);
     }
   }
   const inserted = await db.insert(checkoutProbeRuns).values({
@@ -19471,8 +19471,8 @@ function loadCredentials() {
       if (parsed.client_email && parsed.private_key) {
         return { email: parsed.client_email, privateKey: parsed.private_key };
       }
-    } catch (err) {
-      console.error("[gsc] GSC_SA_JSON is set but not valid JSON:", err);
+    } catch (err2) {
+      console.error("[gsc] GSC_SA_JSON is set but not valid JSON:", err2);
       return null;
     }
   }
@@ -19733,13 +19733,13 @@ async function runGscIndexSweep(opts = {}) {
       let r;
       try {
         r = await inspectUrl(token, siteUrl, row.url);
-      } catch (err) {
-        if (err instanceof QuotaExhaustedError) {
+      } catch (err2) {
+        if (err2 instanceof QuotaExhaustedError) {
           quotaHit = true;
           return;
         }
         errors++;
-        console.warn("[gsc-index]", String(err));
+        console.warn("[gsc-index]", String(err2));
         continue;
       }
       const newCoverage = r.coverageState ?? null;
@@ -19913,8 +19913,8 @@ async function sampleUrls() {
     const collections = entries.map((e) => e.url).filter((u) => /\/collections\/[^/]+$/.test(u));
     const products = entries.map((e) => e.url).filter((u) => u.includes("/products/"));
     urls.push(...pick(collections, PLP_SAMPLE), ...pick(products, PDP_SAMPLE));
-  } catch (err) {
-    console.warn("[seo-daily] sitemap sample failed, probing homepage only:", String(err).slice(0, 200));
+  } catch (err2) {
+    console.warn("[seo-daily] sitemap sample failed, probing homepage only:", String(err2).slice(0, 200));
   }
   return urls;
 }
@@ -19948,8 +19948,8 @@ async function coverageCounters() {
       hasImage: row ? num2(row["has_image"]) : null,
       enrichedDistinctProducts: enriched ? num2(enriched["n"]) : null
     };
-  } catch (err) {
-    console.warn("[seo-daily] coverage counters failed:", String(err).slice(0, 200));
+  } catch (err2) {
+    console.warn("[seo-daily] coverage counters failed:", String(err2).slice(0, 200));
     return empty;
   }
 }
@@ -19959,8 +19959,8 @@ async function runSeoDaily() {
   const guard = async (label, fn, fallback) => {
     try {
       return await fn();
-    } catch (err) {
-      const msg = `${label}: ${err instanceof Error ? err.message : String(err)}`;
+    } catch (err2) {
+      const msg = `${label}: ${err2 instanceof Error ? err2.message : String(err2)}`;
       console.warn("[seo-daily]", msg);
       errors.push(msg);
       return fallback;
@@ -20139,8 +20139,8 @@ async function getLatestSeoDaily() {
     const row = (r.rows ?? [])[0];
     if (!row) return null;
     return { day: String(row.day), notes: row.notes ?? null };
-  } catch (err) {
-    console.warn("[seo-daily] getLatestSeoDaily failed:", String(err).slice(0, 200));
+  } catch (err2) {
+    console.warn("[seo-daily] getLatestSeoDaily failed:", String(err2).slice(0, 200));
     return null;
   }
 }
@@ -20229,8 +20229,8 @@ async function runOwnerDigest(opts = {}) {
       seo = latest.notes;
       seoDay = latest.day;
     }
-  } catch (err) {
-    console.warn("[owner-digest] seo-daily unavailable:", String(err).slice(0, 200));
+  } catch (err2) {
+    console.warn("[owner-digest] seo-daily unavailable:", String(err2).slice(0, 200));
   }
   try {
     const droppedRes = await db.execute(sql9`
@@ -20241,8 +20241,8 @@ async function runOwnerDigest(opts = {}) {
         AND verdict <> 'PASS'
       ORDER BY coverage_changed_at DESC LIMIT 5`);
     droppedUrls = droppedRes.rows ?? [];
-  } catch (err) {
-    console.warn("[owner-digest] index-monitor tables unavailable (migration 064 not applied?):", String(err).slice(0, 200));
+  } catch (err2) {
+    console.warn("[owner-digest] index-monitor tables unavailable (migration 064 not applied?):", String(err2).slice(0, 200));
   }
   try {
     const ticketRes = await db.execute(sql9`
@@ -20251,8 +20251,8 @@ async function runOwnerDigest(opts = {}) {
       WHERE created_at >= now() - interval '24 hours' AND dedupe_key LIKE 'seo:%'
       ORDER BY priority ASC, created_at DESC LIMIT 10`);
     seoTickets = ticketRes.rows ?? [];
-  } catch (err) {
-    console.warn("[owner-digest] ticket columns unavailable (migration 070 not applied?):", String(err).slice(0, 200));
+  } catch (err2) {
+    console.warn("[owner-digest] ticket columns unavailable (migration 070 not applied?):", String(err2).slice(0, 200));
   }
   const ordersY = yesterday?.orders ?? 0;
   const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? "" : "s"}, ${redTrackers} RED tracker${redTrackers === 1 ? "" : "s"}`;
@@ -20393,8 +20393,8 @@ async function getUrlHealth() {
       else stale.add(row.url);
     }
     return { dead, stale };
-  } catch (err) {
-    console.error("[sitemap] getUrlHealth failed:", err);
+  } catch (err2) {
+    console.error("[sitemap] getUrlHealth failed:", err2);
     return { dead: /* @__PURE__ */ new Set(), stale: /* @__PURE__ */ new Set() };
   }
 }
@@ -20419,8 +20419,8 @@ function clearSitemapMemo() {
   memo = null;
 }
 async function assembleSegments() {
-  const guard = (p, fallback, name) => p.catch((err) => {
-    console.error(`[sitemap] ${name} failed:`, err);
+  const guard = (p, fallback, name) => p.catch((err2) => {
+    console.error(`[sitemap] ${name} failed:`, err2);
     return fallback;
   });
   const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health] = await Promise.all([
@@ -20642,9 +20642,9 @@ async function recentlyPinged(urls) {
         AND pinged_at >= now() - (${PING_SUPPRESSION_DAYS} * interval '1 day')
     `;
     return new Set(rows.map((r) => String(r.url)));
-  } catch (err) {
-    console.error("[indexnow-bulk] ledger read failed, refusing to push:", err);
-    throw err;
+  } catch (err2) {
+    console.error("[indexnow-bulk] ledger read failed, refusing to push:", err2);
+    throw err2;
   }
 }
 async function recordPushed(urls, batchId, statusCode) {
@@ -20711,8 +20711,8 @@ async function runIndexNowBulkPush(opts = {}) {
       chunks,
       ...stoppedAtStatus !== void 0 ? { stoppedAtStatus } : {}
     };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const message = err2 instanceof Error ? err2.message : String(err2);
     console.error("[indexnow-bulk] run failed (non-blocking):", message);
     return { ...base, error: message };
   }
@@ -20761,8 +20761,8 @@ async function getAskEmmaVocabulary() {
       audience: doc?.["audience"]?.length ? doc["audience"] : FALLBACK.audience,
       matters: activeMattersVocab()
     };
-  } catch (err) {
-    console.error("[ask-emma-vocab] fetch failed, using fallback:", err);
+  } catch (err2) {
+    console.error("[ask-emma-vocab] fetch failed, using fallback:", err2);
     return {
       mood: FALLBACK.mood,
       audience: FALLBACK.audience,
@@ -20867,8 +20867,8 @@ async function dfsRelatedKeywords(seed) {
       out.push(r);
     }
     return out;
-  } catch (err) {
-    console.error(`[seo-research] DataForSEO related error for "${seed}":`, err);
+  } catch (err2) {
+    console.error(`[seo-research] DataForSEO related error for "${seed}":`, err2);
     return [];
   }
 }
@@ -20901,13 +20901,13 @@ Return 12 related queries as a JSON array of strings. Mix head terms, long-tail 
         cacheCreationTokens: uSeed.cache_creation_input_tokens ?? 0,
         cacheReadTokens: uSeed.cache_read_input_tokens ?? 0
       })
-    ).catch((err) => console.error("[seo-research] llmSeedExpansion token-log failed (ignored):", err));
+    ).catch((err2) => console.error("[seo-research] llmSeedExpansion token-log failed (ignored):", err2));
     const raw = block.text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return [];
     return arr.filter((t) => typeof t === "string" && t.trim().length > 1).map((t) => ({ term: t.trim(), source: `llm-expansion:${seed}` }));
-  } catch (err) {
-    console.error(`[seo-research] llmSeedExpansion error for "${seed}":`, err);
+  } catch (err2) {
+    console.error(`[seo-research] llmSeedExpansion error for "${seed}":`, err2);
     return [];
   }
 }
@@ -20931,8 +20931,8 @@ async function gatherSeeds() {
       pillarTerms: (pillarTerms ?? []).filter(Boolean),
       productTitles: (productTitles ?? []).filter(Boolean)
     };
-  } catch (err) {
-    console.error("[seo-research] gatherSeeds error:", err);
+  } catch (err2) {
+    console.error("[seo-research] gatherSeeds error:", err2);
     return { approvedHeads: [], pillarTerms: [], productTitles: [] };
   }
 }
@@ -21046,13 +21046,13 @@ Return a JSON array of objects. JSON only \u2014 no prose, no fences.`;
         cacheCreationTokens: uClass.cache_creation_input_tokens ?? 0,
         cacheReadTokens: uClass.cache_read_input_tokens ?? 0
       })
-    ).catch((err) => console.error("[seo-research] classifyBatch token-log failed (ignored):", err));
+    ).catch((err2) => console.error("[seo-research] classifyBatch token-log failed (ignored):", err2));
     const raw = block.text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return [];
     return arr.filter((x) => !!x && typeof x === "object" && typeof x.term === "string");
-  } catch (err) {
-    console.error("[seo-research] classifyBatch error:", err);
+  } catch (err2) {
+    console.error("[seo-research] classifyBatch error:", err2);
     return [];
   }
 }
@@ -21070,8 +21070,8 @@ async function ensureCluster(slug, pillarTerm, title) {
       status: "active"
     });
     return id;
-  } catch (err) {
-    console.error(`[seo-research] ensureCluster failed for ${slug}:`, err);
+  } catch (err2) {
+    console.error(`[seo-research] ensureCluster failed for ${slug}:`, err2);
     return null;
   }
 }
@@ -21126,9 +21126,9 @@ async function writeCandidates(items) {
       if (status === "approved") summary.approved++;
       else if (status === "rejected") summary.rejected++;
       else summary.pending++;
-    } catch (err) {
+    } catch (err2) {
       summary.errors++;
-      console.error(`[seo-research] write failed for "${it.term}":`, err);
+      console.error(`[seo-research] write failed for "${it.term}":`, err2);
     }
   }
   return summary;
@@ -21332,7 +21332,7 @@ Total lines: ${logs.length}
       cacheCreationTokens: uMon.cache_creation_input_tokens ?? 0,
       cacheReadTokens: uMon.cache_read_input_tokens ?? 0
     })
-  ).catch((err) => console.error("[log-monitor] token-log failed (ignored):", err));
+  ).catch((err2) => console.error("[log-monitor] token-log failed (ignored):", err2));
   return block.input;
 }
 async function openIssuesForP0(groups, windowMinutes) {
@@ -21429,8 +21429,8 @@ async function runLogMonitor({ windowMinutes = 15 } = {}) {
   let ticketsFiled = [];
   try {
     ticketsFiled = await fileTicketsForGroups(report.groups, issues, windowMinutes);
-  } catch (err) {
-    console.error("[log-monitor] ticket filing failed (ignored):", err);
+  } catch (err2) {
+    console.error("[log-monitor] ticket filing failed (ignored):", err2);
   }
   const created = issues.filter((i) => i.created);
   if (created.length > 0) {
@@ -22006,8 +22006,8 @@ async function runNalpacCostSync(opts) {
             syncedAt: sql12`excluded.synced_at`
           }
         });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+      } catch (err2) {
+        const msg = err2 instanceof Error ? err2.message : String(err2);
         console.error("[cost-sync] price-history upsert batch failed:", msg);
         result.errors.push(`history upsert batch: ${msg}`);
       }
@@ -22016,8 +22016,8 @@ async function runNalpacCostSync(opts) {
     let matches = [];
     try {
       matches = await findVariantsBySkus(dropSkus);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+    } catch (err2) {
+      const msg = err2 instanceof Error ? err2.message : String(err2);
       console.error("[cost-sync] findVariantsBySkus failed:", msg);
       result.errors.push(`findVariantsBySkus: ${msg}`);
       return result;
@@ -22045,15 +22045,15 @@ async function runNalpacCostSync(opts) {
         }
         await recomputeVariant({ variantId: match.variant.variantId, trigger: "webhook" });
         result.variantsRepriced++;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+      } catch (err2) {
+        const msg = err2 instanceof Error ? err2.message : String(err2);
         console.error(`[cost-sync] variant sync failed for sku ${sku}:`, msg);
         result.errors.push(`${sku}: ${msg}`);
       }
     }
     return result;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const msg = err2 instanceof Error ? err2.message : String(err2);
     console.error("[cost-sync] runNalpacCostSync failed:", msg);
     return {
       enabled: true,
@@ -22124,8 +22124,8 @@ async function getDialRegistry() {
       }
     }
     return out;
-  } catch (err) {
-    console.error("[dial-registry] fetch failed, using fallback:", err);
+  } catch (err2) {
+    console.error("[dial-registry] fetch failed, using fallback:", err2);
     return { ...FALLBACK2 };
   }
 }
@@ -22165,8 +22165,8 @@ async function getDialTaxonomy() {
       if (entries.length > 0) out[type] = entries;
     }
     return out;
-  } catch (err) {
-    console.error("[dial-registry] taxonomy fetch failed, returning empty:", err);
+  } catch (err2) {
+    console.error("[dial-registry] taxonomy fetch failed, returning empty:", err2);
     return empty;
   }
 }
@@ -22460,8 +22460,8 @@ async function executeTool(name, state) {
           return { ok: true, summary: `pairings=${result.accessoryProductIds.length}` };
         }
         return { ok: true, summary: "no pairings strong enough \u2014 skipped" };
-      } catch (err) {
-        return { ok: false, summary: `pairings skipped: ${err instanceof Error ? err.message : "error"}` };
+      } catch (err2) {
+        return { ok: false, summary: `pairings skipped: ${err2 instanceof Error ? err2.message : "error"}` };
       }
     }
     case "generateProductCopyBundle": {
@@ -22487,8 +22487,8 @@ async function executeTool(name, state) {
         const bullets = await generateCareInstructions({ deal: dealCtx, ...state.input.llmClient ? { llmClient: state.input.llmClient } : {} });
         state.writes.careInstructions = bullets;
         return { ok: true, summary: `care=${bullets.length}` };
-      } catch (err) {
-        return { ok: false, summary: `care skipped: ${err instanceof Error ? err.message : "error"}` };
+      } catch (err2) {
+        return { ok: false, summary: `care skipped: ${err2 instanceof Error ? err2.message : "error"}` };
       }
     }
     case "generateSensationDialV2": {
@@ -22511,8 +22511,8 @@ async function executeTool(name, state) {
             state.dialRegistry[type] = next;
             appended++;
           }
-        } catch (err) {
-          console.warn(`[emma-orchestrator] appendDialLabel(${type}, "${item.label}") failed:`, err instanceof Error ? err.message : err);
+        } catch (err2) {
+          console.warn(`[emma-orchestrator] appendDialLabel(${type}, "${item.label}") failed:`, err2 instanceof Error ? err2.message : err2);
         }
       }
       return { ok: true, summary: `dial items=${dial.items.length}${appended > 0 ? ` appended=${appended}` : ""}` };
@@ -22573,8 +22573,8 @@ async function executeTool(name, state) {
         const url = await uploadMoodImageToShopifyFiles(buf, `mood-${slug}-${Date.now()}.jpg`);
         state.writes.moodImageUrl = url;
         return { ok: true, summary: `moodImage url=${url.slice(0, 80)}` };
-      } catch (err) {
-        return { ok: false, summary: `moodImage skipped: ${err instanceof Error ? err.message : "error"}` };
+      } catch (err2) {
+        return { ok: false, summary: `moodImage skipped: ${err2 instanceof Error ? err2.message : "error"}` };
       }
     }
     case "generateIvrAll": {
@@ -22771,10 +22771,10 @@ import { eq as eq16 } from "drizzle-orm";
 async function adminGraphQLWithRetry(query, variables, attempt = 0) {
   try {
     return await adminGraphQL(query, variables);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const msg = err2 instanceof Error ? err2.message : String(err2);
     const isRateLimit = msg.includes("429") || msg.toLowerCase().includes("throttled");
-    if (!isRateLimit || attempt >= 4) throw err;
+    if (!isRateLimit || attempt >= 4) throw err2;
     const delayMs = 1500 * Math.pow(2, attempt);
     console.warn(`[enricher-brief] rate-limited; backing off ${delayMs}ms (attempt ${attempt + 1}/5)`);
     await new Promise((r) => setTimeout(r, delayMs));
@@ -22843,8 +22843,8 @@ async function fetchProductSnapshot(numericId) {
     const aggregatedDescription = aggregated ?? metafields["custom.original_description"] ?? void 0;
     if (aggregatedDescription) snap.aggregatedDescription = aggregatedDescription;
     return snap;
-  } catch (err) {
-    console.warn(`[enricher-brief] fetchProductSnapshot ${numericId} failed:`, err instanceof Error ? err.message : err);
+  } catch (err2) {
+    console.warn(`[enricher-brief] fetchProductSnapshot ${numericId} failed:`, err2 instanceof Error ? err2.message : err2);
     return null;
   }
 }
@@ -23050,9 +23050,9 @@ function parseFullEnrichmentEntry(entry) {
   if (!cleaned) return { error: "empty response", usage };
   try {
     return { writes: JSON.parse(cleaned), usage };
-  } catch (err) {
+  } catch (err2) {
     const preview = cleaned.slice(0, 200).replace(/\n/g, " ");
-    return { error: `JSON parse failed: ${err instanceof Error ? err.message : String(err)} | preview: ${preview}`, usage };
+    return { error: `JSON parse failed: ${err2 instanceof Error ? err2.message : String(err2)} | preview: ${preview}`, usage };
   }
 }
 async function submitFullEnrichmentBatch(inputs, context, opts = {}) {
@@ -23123,8 +23123,8 @@ async function getCanonicalProductTypes() {
   try {
     const rows = await db.select({ productType: pricingProductTypeMap.productType }).from(pricingProductTypeMap);
     vocabCache = { types: new Set(rows.map((r) => r.productType)), fetchedAt: now };
-  } catch (err) {
-    console.warn("[product-type] pricing_product_type_map read failed, using stale/empty vocabulary:", err instanceof Error ? err.message : err);
+  } catch (err2) {
+    console.warn("[product-type] pricing_product_type_map read failed, using stale/empty vocabulary:", err2 instanceof Error ? err2.message : err2);
     if (!vocabCache) vocabCache = { types: /* @__PURE__ */ new Set(), fetchedAt: now };
   }
   return vocabCache.types;
@@ -23138,8 +23138,8 @@ async function ensureProductTypeForPublish(input) {
   } else {
     try {
       current = await getShopifyProductType(numericProductId);
-    } catch (err) {
-      console.warn(`[product-type] could not read product_type for ${label}:`, err instanceof Error ? err.message : err);
+    } catch (err2) {
+      console.warn(`[product-type] could not read product_type for ${label}:`, err2 instanceof Error ? err2.message : err2);
       return null;
     }
   }
@@ -23163,8 +23163,8 @@ async function ensureProductTypeForPublish(input) {
     await setShopifyProductType(numericProductId, derived.productType);
     console.info(`[product-type] ${label} backfilled product_type "${derived.productType}" (matched by ${derived.matchedBy}) before publish`);
     return derived.productType;
-  } catch (err) {
-    console.error(`[product-type-guard] ${label} failed to write derived product_type "${derived.productType}":`, err instanceof Error ? err.message : err);
+  } catch (err2) {
+    console.error(`[product-type-guard] ${label} failed to write derived product_type "${derived.productType}":`, err2 instanceof Error ? err2.message : err2);
     return null;
   }
 }
@@ -23313,16 +23313,16 @@ async function applyFullEnrichmentWrites(numericProductId, writes) {
         await upsertProductPage(upsertParams);
         lastErr = null;
         break;
-      } catch (err) {
-        lastErr = err;
+      } catch (err2) {
+        lastErr = err2;
         if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
       }
     }
     if (lastErr) {
       console.error(`[import-enrich] sanity upsert failed for ${numericProductId}:`, lastErr);
     }
-  } catch (err) {
-    console.error(`[import-enrich] sanity mirror error for ${numericProductId}:`, err);
+  } catch (err2) {
+    console.error(`[import-enrich] sanity mirror error for ${numericProductId}:`, err2);
   }
 }
 function passesQualityGate(writes) {
@@ -23403,8 +23403,8 @@ async function detectImportEnrichStall(enabled) {
     );
     console.warn(`[import-enrich] STALL: ${stuck} stuck (oldest ${oldestHours}h), pipeline ${state}; owner alerted`);
     return { stuck, oldestHours, alerted: true };
-  } catch (err) {
-    console.error("[import-enrich] stall detector error (non-fatal):", err);
+  } catch (err2) {
+    console.error("[import-enrich] stall detector error (non-fatal):", err2);
     return { stuck: 0, oldestHours: null, alerted: false };
   }
 }
@@ -23448,8 +23448,8 @@ async function collectEnrichmentBatch() {
         try {
           await applyFullEnrichmentWrites(candidate.productId, writes);
           ok = true;
-        } catch (err) {
-          console.error(`[import-enrich] applyFullEnrichmentWrites failed for candidate ${candidate.id} (product ${candidate.productId}):`, err);
+        } catch (err2) {
+          console.error(`[import-enrich] applyFullEnrichmentWrites failed for candidate ${candidate.id} (product ${candidate.productId}):`, err2);
         }
       }
       if (ok) {
@@ -23502,8 +23502,8 @@ async function publishEnrichedProducts() {
       }
       await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.id, r.id));
       published++;
-    } catch (err) {
-      console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err);
+    } catch (err2) {
+      console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err2);
       failed++;
     }
   }
@@ -23512,8 +23512,8 @@ async function publishEnrichedProducts() {
       const { invalidateDiscoveryIndex: invalidateDiscoveryIndex2, triggerDiscoveryRebuild: triggerDiscoveryRebuild2 } = await Promise.resolve().then(() => (init_discovery_server(), discovery_server_exports));
       await invalidateDiscoveryIndex2();
       triggerDiscoveryRebuild2();
-    } catch (err) {
-      console.warn("[import-enrich] discovery index refresh after publish failed (will self-heal on next /cron/warm):", err);
+    } catch (err2) {
+      console.warn("[import-enrich] discovery index refresh after publish failed (will self-heal on next /cron/warm):", err2);
     }
   }
   return { published, failed };
@@ -23905,8 +23905,8 @@ async function advanceFieldRegenJob(job) {
           await applyFieldResult(fieldKey, fs.result, ctx);
           updatedRs[fieldKey] = { ...fs, applied: true };
           appliedCount++;
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : String(err);
+        } catch (err2) {
+          const errMsg = err2 instanceof Error ? err2.message : String(err2);
           updatedRs[fieldKey] = { ...fs, error: `apply failed: ${errMsg}` };
           anyError = true;
         }
@@ -24129,8 +24129,8 @@ async function enqueueBatchJob(args) {
       productStatuses: Object.fromEntries(products.map((p) => [p.sku, "running"]))
     };
     await kvSet(KV_KEYS.enrichmentJob(jobId), summary, KV_TTL_SECONDS2);
-  } catch (err) {
-    console.warn("[batch-orchestrator] KV mirror failed (non-fatal):", err);
+  } catch (err2) {
+    console.warn("[batch-orchestrator] KV mirror failed (non-fatal):", err2);
   }
   await kvDel(KV_KEYS.enrichmentPollerIdle);
   console.log(`[batch-orchestrator] enqueued job ${jobId} type=${args.jobType} skus=[${skuList.join(",")}]`);
@@ -24152,9 +24152,9 @@ async function advanceInflightJobs(opts = {}) {
       if (outcome.applied) result.applied += outcome.applied;
       if (outcome.done) result.done++;
       if (outcome.failed) result.failed++;
-    } catch (err) {
-      console.error(`[batch-orchestrator] advanceJob ${job.jobId} threw:`, err);
-      await db.update(batchJobs).set({ status: "failed", error: String(err), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
+    } catch (err2) {
+      console.error(`[batch-orchestrator] advanceJob ${job.jobId} threw:`, err2);
+      await db.update(batchJobs).set({ status: "failed", error: String(err2), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
       result.failed++;
     }
   }
@@ -24301,8 +24301,8 @@ async function advanceJob(job) {
             const r = await executeTool(tu.name, state);
             ok = r.ok;
             summary = r.summary;
-          } catch (err) {
-            errorMsg = err instanceof Error ? err.message : String(err);
+          } catch (err2) {
+            errorMsg = err2 instanceof Error ? err2.message : String(err2);
             summary = `tool error: ${errorMsg}`;
           } finally {
             const tt = drainToolTokens();
@@ -24417,9 +24417,9 @@ async function advanceJob(job) {
           else results.push(resultEntry);
           runnerState[p.productId] = { ...ps, applyRetries: 0 };
           await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
-        } catch (err) {
+        } catch (err2) {
           const applyRetries = (ps.applyRetries ?? 0) + 1;
-          const errMsg = err instanceof Error ? err.message : String(err);
+          const errMsg = err2 instanceof Error ? err2.message : String(err2);
           runnerState[p.productId] = { ...ps, applyRetries };
           const idx = results.findIndex((r) => r.productId === p.productId);
           const resultEntry = {
@@ -24502,8 +24502,8 @@ async function advanceJob(job) {
       };
       await kvSet(KV_KEYS.enrichmentJob(job.jobId), summary, KV_TTL_SECONDS2);
     }
-  } catch (err) {
-    console.warn("[batch-orchestrator] KV mirror update failed (non-fatal):", err);
+  } catch (err2) {
+    console.warn("[batch-orchestrator] KV mirror update failed (non-fatal):", err2);
   }
   return outcome;
 }
@@ -24597,8 +24597,8 @@ function stateFor(ps, p, taxonomy) {
 async function maybeActivateGatedDeal(jobId, gatesDealId) {
   try {
     const { dealHistory: dealHistory2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    const { eq: eq26 } = await import("drizzle-orm");
-    const rows = await db.select().from(dealHistory2).where(eq26(dealHistory2.id, gatesDealId)).limit(1);
+    const { eq: eq27 } = await import("drizzle-orm");
+    const rows = await db.select().from(dealHistory2).where(eq27(dealHistory2.id, gatesDealId)).limit(1);
     const deal = rows[0];
     if (!deal) {
       console.warn(`[batch-orchestrator] maybeActivateGatedDeal: deal ${gatesDealId} not found`);
@@ -24618,8 +24618,8 @@ async function maybeActivateGatedDeal(jobId, gatesDealId) {
       wholesaleCost: deal.wholesaleCost ?? null
     });
     console.log(`[batch-orchestrator] job ${jobId} gated deal ${gatesDealId} activated`);
-  } catch (err) {
-    console.error(`[batch-orchestrator] maybeActivateGatedDeal for job ${jobId} deal ${gatesDealId} failed:`, err);
+  } catch (err2) {
+    console.error(`[batch-orchestrator] maybeActivateGatedDeal for job ${jobId} deal ${gatesDealId} failed:`, err2);
   }
 }
 async function getBatchJobById(jobId) {
@@ -24847,8 +24847,8 @@ async function importProductGroup(group) {
       shopifyProductId: numericId,
       category,
       subCategories: categories
-    }).catch((err) => {
-      console.warn(`[bulk-import] ${masterSku} pairing-candidates lookup failed:`, err instanceof Error ? err.message : err);
+    }).catch((err2) => {
+      console.warn(`[bulk-import] ${masterSku} pairing-candidates lookup failed:`, err2 instanceof Error ? err2.message : err2);
       return [];
     });
     const [{ maxSort = 0 } = {}] = await db.select({ maxSort: max(dealHistory.sortOrder) }).from(dealHistory);
@@ -24937,10 +24937,10 @@ async function importProductGroup(group) {
             console.info(`[bulk-import] ${masterSku} sanity: ${created ? "created" : "updated"} productPage-${handle}`);
             lastErr = null;
             break;
-          } catch (err) {
-            lastErr = err;
+          } catch (err2) {
+            lastErr = err2;
             if (attempt === 1) {
-              console.warn(`[bulk-import] ${masterSku} sanity sync attempt 1 failed, retrying in 500ms:`, err instanceof Error ? err.message : err);
+              console.warn(`[bulk-import] ${masterSku} sanity sync attempt 1 failed, retrying in 500ms:`, err2 instanceof Error ? err2.message : err2);
               await new Promise((r) => setTimeout(r, 500));
             }
           }
@@ -24951,8 +24951,8 @@ async function importProductGroup(group) {
           warnings.push({ stage: "sanity", message: msg });
         }
       }
-    } catch (err) {
-      const msg = `sanity sync threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`;
+    } catch (err2) {
+      const msg = `sanity sync threw unexpectedly: ${err2 instanceof Error ? err2.message : String(err2)}`;
       console.error(`[bulk-import] ${masterSku} ${msg}`);
       warnings.push({ stage: "sanity", message: msg });
     }
@@ -24963,8 +24963,8 @@ async function importProductGroup(group) {
       jobId,
       ...warnings.length > 0 ? { warnings } : {}
     };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const message = err2 instanceof Error ? err2.message : String(err2);
     console.error(`[bulk-import] Failed SKU ${masterSku}:`, message);
     return { success: false, sku: masterSku, error: message };
   }
@@ -25074,13 +25074,13 @@ async function importProductGroupRaw(group) {
     const warnings = [];
     try {
       await activateProductInventoryAtLocations(numericId);
-    } catch (err) {
-      warnings.push({ stage: "inventory-locations", message: err instanceof Error ? err.message : String(err) });
+    } catch (err2) {
+      warnings.push({ stage: "inventory-locations", message: err2 instanceof Error ? err2.message : String(err2) });
     }
     try {
       await publishProductToXdipxChannels(numericId);
-    } catch (err) {
-      warnings.push({ stage: "publish-channels", message: err instanceof Error ? err.message : String(err) });
+    } catch (err2) {
+      warnings.push({ stage: "publish-channels", message: err2 instanceof Error ? err2.message : String(err2) });
     }
     try {
       const handle = await getProductHandleById(numericId);
@@ -25105,8 +25105,8 @@ async function importProductGroupRaw(group) {
             await upsertProductPage(upsertParams);
             lastErr = null;
             break;
-          } catch (err) {
-            lastErr = err;
+          } catch (err2) {
+            lastErr = err2;
             if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
           }
         }
@@ -25114,8 +25114,8 @@ async function importProductGroupRaw(group) {
           warnings.push({ stage: "sanity", message: `sanity sync failed after retry: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}` });
         }
       }
-    } catch (err) {
-      warnings.push({ stage: "sanity", message: err instanceof Error ? err.message : String(err) });
+    } catch (err2) {
+      warnings.push({ stage: "sanity", message: err2 instanceof Error ? err2.message : String(err2) });
     }
     return {
       success: true,
@@ -25123,8 +25123,8 @@ async function importProductGroupRaw(group) {
       shopifyProductId: numericId,
       ...warnings.length > 0 ? { warnings } : {}
     };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const message = err2 instanceof Error ? err2.message : String(err2);
     console.error(`[bulk-import-raw] Failed SKU ${masterSku}:`, message);
     return { success: false, sku: masterSku, error: message };
   }
@@ -25176,8 +25176,8 @@ async function importNewProduct(input) {
     shopifyProductId: numericId,
     category,
     subCategories: rawProduct.categories
-  }).catch((err) => {
-    console.warn(`[importNewProduct] ${sku} pairing-candidates lookup failed:`, err instanceof Error ? err.message : err);
+  }).catch((err2) => {
+    console.warn(`[importNewProduct] ${sku} pairing-candidates lookup failed:`, err2 instanceof Error ? err2.message : err2);
     return [];
   });
   await pushProductToShopify({
@@ -25254,8 +25254,8 @@ async function importNewProduct(input) {
         await upsertProductPage(upsertParams);
         lastErr = null;
         break;
-      } catch (err) {
-        lastErr = err;
+      } catch (err2) {
+        lastErr = err2;
         if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
       }
     }
@@ -25263,8 +25263,8 @@ async function importNewProduct(input) {
       const msg = `sanity sync failed after retry: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`;
       warnings.push({ stage: "sanity", message: msg });
     }
-  } catch (err) {
-    warnings.push({ stage: "sanity", message: err instanceof Error ? err.message : String(err) });
+  } catch (err2) {
+    warnings.push({ stage: "sanity", message: err2 instanceof Error ? err2.message : String(err2) });
   }
   return { shopifyProductId: numericId, gid, handle, jobId, status: "enriching", warnings };
 }
@@ -25412,8 +25412,8 @@ async function runImportMonitor(opts = {}) {
           console.warn("[import-monitor] cost-sync errors:", costSyncResult.errors);
         }
       }
-    } catch (err) {
-      console.error("[import-monitor] cost-sync threw unexpectedly:", err);
+    } catch (err2) {
+      console.error("[import-monitor] cost-sync threw unexpectedly:", err2);
     }
     const currentFeedSkus = [...feedResult.snapshots.keys()];
     const priorFeedSkus = await kvGet(KV_FEED_SKUS);
@@ -25515,8 +25515,8 @@ async function runImportMonitor(opts = {}) {
       `[import-monitor] done: feedsOk=${feedsOk} found=${candidatesFound} new=${candidatesNew} resurfaced=${candidatesResurfaced}`
     );
     return { feedsOk, candidatesFound, candidatesNew, candidatesResurfaced, autoImported };
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
+  } catch (err2) {
+    const errorMessage = err2 instanceof Error ? err2.message : String(err2);
     console.error("[import-monitor] run failed:", errorMessage);
     await db.update(importMonitorRuns).set({
       finishedAt: /* @__PURE__ */ new Date(),
@@ -25612,8 +25612,8 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
       } else if (!r.ok) {
         console.warn(`[import-monitor] phase 2 auto-import failed for candidate ${c.id}: ${r.error}`);
       }
-    } catch (err) {
-      console.error(`[import-monitor] phase 2 auto-import threw for candidate ${c.id}:`, err);
+    } catch (err2) {
+      console.error(`[import-monitor] phase 2 auto-import threw for candidate ${c.id}:`, err2);
     }
   }
   if (tierCEnabled && tierCMaxPerDay > 0 && imported < remaining) {
@@ -25641,8 +25641,8 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
         } else if (!r.ok) {
           console.warn(`[import-monitor] phase 2 tier-C auto-import failed for candidate ${c.id}: ${r.error}`);
         }
-      } catch (err) {
-        console.error(`[import-monitor] phase 2 tier-C auto-import threw for candidate ${c.id}:`, err);
+      } catch (err2) {
+        console.error(`[import-monitor] phase 2 tier-C auto-import threw for candidate ${c.id}:`, err2);
       }
     }
     if (importedTierC > 0) {
@@ -25892,6 +25892,1308 @@ var init_import_monitor_server = __esm({
     init_bulk_import_server();
     init_master_collapse_server();
     KV_FEED_SKUS = "monitor:feed-skus";
+  }
+});
+
+// app/lib/github.server.ts
+function err(status, error, skipped = false) {
+  return { ok: false, status, data: null, error, skipped };
+}
+function getGithubConfig(context = "github") {
+  const token = process.env["GITHUB_TOKEN"];
+  const owner = process.env["GITHUB_OWNER"];
+  const repo = process.env["GITHUB_REPO"];
+  if (!token || !owner || !repo) {
+    console.warn(`[${context}] GITHUB_TOKEN/OWNER/REPO not set, skipping GitHub call`);
+    return null;
+  }
+  return { token, owner, repo };
+}
+function isGithubConfigured() {
+  return Boolean(process.env["GITHUB_TOKEN"] && process.env["GITHUB_OWNER"] && process.env["GITHUB_REPO"]);
+}
+function githubHeaders(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json",
+    "User-Agent": "xdipx-release-engine"
+  };
+}
+async function githubRequest(path, opts = {}) {
+  const cfg = getGithubConfig(opts.context ?? "github");
+  if (!cfg) return err(0, "GITHUB_TOKEN/OWNER/REPO not set", true);
+  const resolved = path.replace("{owner}", cfg.owner).replace("{repo}", cfg.repo);
+  const url = resolved.startsWith("http") ? resolved : `${API_BASE}${resolved.startsWith("/") ? "" : "/"}${resolved}`;
+  try {
+    const res = await fetch(url, {
+      method: opts.method ?? "GET",
+      headers: githubHeaders(cfg.token),
+      ...opts.body === void 0 ? {} : { body: JSON.stringify(opts.body) },
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+    const text2 = await res.text();
+    if (!res.ok) {
+      return err(res.status, `GitHub ${opts.method ?? "GET"} ${resolved} -> ${res.status}: ${text2.slice(0, 400)}`);
+    }
+    const data = text2.length === 0 ? {} : JSON.parse(text2);
+    return { ok: true, status: res.status, data };
+  } catch (e) {
+    return err(0, `GitHub ${resolved} failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+function toSummary(p) {
+  return {
+    number: p.number,
+    title: p.title,
+    state: p.state,
+    draft: p.draft ?? false,
+    merged: p.merged ?? false,
+    mergeable: p.mergeable ?? null,
+    mergeableState: p.mergeable_state ?? "unknown",
+    headSha: p.head.sha,
+    headRef: p.head.ref,
+    baseRef: p.base.ref,
+    htmlUrl: p.html_url,
+    labels: (p.labels ?? []).map((l) => l.name),
+    body: p.body ?? "",
+    user: p.user?.login ?? "",
+    updatedAt: p.updated_at ?? ""
+  };
+}
+async function getPullRequest(number, context = "github") {
+  const res = await githubRequest(`/repos/{owner}/{repo}/pulls/${number}`, { context });
+  if (!res.ok) return res;
+  return { ok: true, status: res.status, data: toSummary(res.data) };
+}
+async function listOpenPullRequests(opts = {}) {
+  const res = await githubRequest(
+    "/repos/{owner}/{repo}/pulls?state=open&per_page=100&sort=created&direction=asc",
+    { context: opts.context ?? "github" }
+  );
+  if (!res.ok) return res;
+  const all = res.data.map(toSummary);
+  const prefixes = opts.headPrefixes;
+  const data = prefixes && prefixes.length > 0 ? all.filter((p) => prefixes.some((pre) => p.headRef.startsWith(pre))) : all;
+  return { ok: true, status: res.status, data };
+}
+async function listPullRequestFiles(number, context = "github") {
+  const out = [];
+  let status = 200;
+  for (let page = 1; page <= MAX_FILE_PAGES; page++) {
+    const res = await githubRequest(`/repos/{owner}/{repo}/pulls/${number}/files?per_page=100&page=${page}`, { context });
+    if (!res.ok) return res;
+    status = res.status;
+    for (const f of res.data) {
+      out.push({
+        filename: f.filename,
+        status: f.status,
+        additions: f.additions ?? 0,
+        deletions: f.deletions ?? 0,
+        ...f.previous_filename ? { previousFilename: f.previous_filename } : {}
+      });
+    }
+    if (res.data.length < 100) break;
+  }
+  return { ok: true, status, data: out };
+}
+async function getChecksForRef(sha, context = "github") {
+  const runs = await githubRequest(`/repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`, { context });
+  if (!runs.ok) return runs;
+  const statuses = await githubRequest(`/repos/{owner}/{repo}/commits/${sha}/status?per_page=100`, { context });
+  if (!statuses.ok) return statuses;
+  const byName = /* @__PURE__ */ new Map();
+  const put = (at, check) => {
+    const prev = byName.get(check.name);
+    if (!prev || prev.at <= at) byName.set(check.name, { at, check });
+  };
+  for (const r of runs.data.check_runs ?? []) {
+    put(r.completed_at ?? r.started_at ?? "", {
+      name: r.name,
+      source: "check_run",
+      status: r.status,
+      conclusion: r.conclusion,
+      url: r.html_url ?? null
+    });
+  }
+  for (const s of statuses.data.statuses ?? []) {
+    const pending2 = s.state === "pending";
+    put(s.updated_at ?? "", {
+      name: s.context,
+      source: "status",
+      status: pending2 ? "in_progress" : "completed",
+      conclusion: pending2 ? null : s.state === "success" ? "success" : "failure",
+      url: s.target_url ?? null
+    });
+  }
+  const checks = [...byName.values()].map((v) => v.check).sort((a, b) => a.name.localeCompare(b.name));
+  const pending = checks.filter((c) => c.status !== "completed" || c.conclusion === null).map((c) => c.name);
+  const failing = checks.filter((c) => c.conclusion !== null && FAILING_CONCLUSIONS.has(c.conclusion)).map((c) => c.name);
+  const succeeded = checks.filter((c) => c.conclusion === "success").map((c) => c.name);
+  return {
+    ok: true,
+    status: 200,
+    data: {
+      ref: sha,
+      checks,
+      pending,
+      failing,
+      succeeded,
+      allGreen: checks.length > 0 && pending.length === 0 && failing.length === 0
+    }
+  };
+}
+async function squashMergePullRequest(number, opts = {}) {
+  return githubRequest(
+    `/repos/{owner}/{repo}/pulls/${number}/merge`,
+    {
+      method: "PUT",
+      context: opts.context ?? "github",
+      body: {
+        merge_method: "squash",
+        ...opts.title ? { commit_title: opts.title } : {},
+        ...opts.message ? { commit_message: opts.message } : {},
+        ...opts.expectedHeadSha ? { sha: opts.expectedHeadSha } : {}
+      }
+    }
+  );
+}
+async function addLabels(number, labels, context = "github") {
+  const res = await githubRequest(`/repos/{owner}/{repo}/issues/${number}/labels`, {
+    method: "POST",
+    body: { labels },
+    context
+  });
+  if (!res.ok) return res;
+  return { ok: true, status: res.status, data: res.data.map((l) => l.name) };
+}
+async function openPullRequest(input) {
+  const res = await githubRequest("/repos/{owner}/{repo}/pulls", {
+    method: "POST",
+    context: input.context ?? "github",
+    body: { title: input.title, head: input.head, base: input.base, body: input.body ?? "" }
+  });
+  if (!res.ok) return res;
+  return { ok: true, status: res.status, data: toSummary(res.data) };
+}
+async function getRef(ref, context = "github") {
+  const res = await githubRequest(
+    `/repos/{owner}/{repo}/git/ref/${ref.replace(/^refs\//, "")}`,
+    { context }
+  );
+  if (!res.ok) return res;
+  return { ok: true, status: res.status, data: { sha: res.data.object.sha, ref: res.data.ref } };
+}
+async function getCommit(sha, context = "github") {
+  const res = await githubRequest(`/repos/{owner}/{repo}/git/commits/${sha}`, { context });
+  if (!res.ok) return res;
+  return {
+    ok: true,
+    status: res.status,
+    data: {
+      sha: res.data.sha,
+      treeSha: res.data.tree.sha,
+      parents: (res.data.parents ?? []).map((p) => p.sha),
+      message: res.data.message
+    }
+  };
+}
+async function createCommit(input) {
+  return githubRequest("/repos/{owner}/{repo}/git/commits", {
+    method: "POST",
+    context: input.context ?? "github",
+    body: { message: input.message, tree: input.tree, parents: input.parents }
+  });
+}
+async function createRef(input) {
+  const ref = input.ref.startsWith("refs/") ? input.ref : `refs/heads/${input.ref}`;
+  return githubRequest("/repos/{owner}/{repo}/git/refs", {
+    method: "POST",
+    context: input.context ?? "github",
+    body: { ref, sha: input.sha }
+  });
+}
+async function createRevertBranch(input) {
+  const context = input.context ?? "github";
+  const base = input.base ?? "main";
+  const bad = await getCommit(input.badSha, context);
+  if (!bad.ok) return bad;
+  const parent = bad.data.parents[0];
+  if (!parent) return err(0, `commit ${input.badSha} has no parent, cannot revert`);
+  const parentCommit = await getCommit(parent, context);
+  if (!parentCommit.ok) return parentCommit;
+  const tip = await getRef(`heads/${base}`, context);
+  if (!tip.ok) return tip;
+  const commit = await createCommit({
+    message: input.message ?? `revert: restore tree of ${parent.slice(0, 7)} (bad commit ${input.badSha.slice(0, 7)})`,
+    tree: parentCommit.data.treeSha,
+    parents: [tip.data.sha],
+    context
+  });
+  if (!commit.ok) return commit;
+  const ref = await createRef({ ref: `refs/heads/${input.branch}`, sha: commit.data.sha, context });
+  if (!ref.ok) return ref;
+  return {
+    ok: true,
+    status: 201,
+    data: { branch: input.branch, sha: commit.data.sha, restoredTree: parentCommit.data.treeSha }
+  };
+}
+function escapeRe(s) {
+  return s.replace(RE_SPECIALS, "\\$&");
+}
+function globToRegExp(glob) {
+  const parts = glob.split("/");
+  let source = "^";
+  parts.forEach((part, i) => {
+    const last = i === parts.length - 1;
+    if (part === "**") {
+      source += last ? ".*" : "(?:[^/]*/)*";
+      return;
+    }
+    source += part.split("*").map(escapeRe).join("[^/]*");
+    if (!last) source += "/";
+  });
+  return new RegExp(`${source}$`, "i");
+}
+function normalizeChangedPath(raw) {
+  const out = [];
+  for (const seg of raw.trim().replace(/\\/g, "/").split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.join("/");
+}
+function matchProtectedGlobs(path) {
+  const normalized = normalizeChangedPath(path);
+  if (normalized === "") return [];
+  return COMPILED.filter((c) => c.re.test(normalized)).map((c) => c.glob);
+}
+function classifyChangedFiles(files) {
+  const matches = [];
+  const seen = /* @__PURE__ */ new Set();
+  let fileCount = 0;
+  const consider = (path) => {
+    fileCount += 1;
+    const globs2 = matchProtectedGlobs(path);
+    if (globs2.length === 0) return;
+    const key = normalizeChangedPath(path);
+    if (seen.has(key)) return;
+    seen.add(key);
+    matches.push({ file: key, globs: globs2 });
+  };
+  for (const entry of files ?? []) {
+    if (typeof entry === "string") {
+      consider(entry);
+      continue;
+    }
+    const name = entry && typeof entry === "object" ? entry.filename : void 0;
+    if (typeof name === "string" && name.trim() !== "") {
+      consider(name);
+      const prevRaw = entry.previous_filename ?? entry.previousFilename;
+      if (typeof prevRaw === "string" && prevRaw.trim() !== "") consider(prevRaw);
+      continue;
+    }
+    fileCount += 1;
+    if (!seen.has(UNRESOLVED_PATH_GLOB)) {
+      seen.add(UNRESOLVED_PATH_GLOB);
+      matches.push({ file: UNRESOLVED_PATH_GLOB, globs: [UNRESOLVED_PATH_GLOB] });
+    }
+  }
+  matches.sort((a, b) => a.file.localeCompare(b.file));
+  const globs = [...new Set(matches.flatMap((m) => m.globs))].sort();
+  return {
+    protected: matches.length > 0,
+    fileCount,
+    files: matches.map((m) => m.file),
+    globs,
+    matches
+  };
+}
+var API_BASE, TIMEOUT_MS, MAX_FILE_PAGES, FAILING_CONCLUSIONS, PROTECTED_GLOBS, RE_SPECIALS, COMPILED, UNRESOLVED_PATH_GLOB;
+var init_github_server = __esm({
+  "app/lib/github.server.ts"() {
+    "use strict";
+    API_BASE = "https://api.github.com";
+    TIMEOUT_MS = 2e4;
+    MAX_FILE_PAGES = 30;
+    FAILING_CONCLUSIONS = /* @__PURE__ */ new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale"]);
+    PROTECTED_GLOBS = [
+      // --- policy list ---
+      "**/checkout*",
+      "app/lib/emma-cart.server.ts",
+      "app/components/store/CartDrawer.tsx",
+      "app/lib/checkout-probe*",
+      "db/migrations/**",
+      "db/schema.ts",
+      "app/lib/*auth*",
+      "app/lib/*session*",
+      "app/lib/team.server.ts",
+      "app/lib/team-keys.ts",
+      ".github/**",
+      "vercel.json",
+      ".env*",
+      "package.json",
+      "app/lib/release-engine.server.ts",
+      "app/lib/github.server.ts",
+      // --- widenings (same intent, this repo's real filenames) ---
+      // Any file whose name mentions checkout or cart, at any depth: catches
+      // app/routes/_layout.checkout-extras.tsx, app/routes/api.cart.tsx,
+      // app/lib/cart.server.ts, and future money-path files nobody remembers to add.
+      "**/*checkout*",
+      "**/*cart*",
+      // Valve and spend definitions beyond the two named files.
+      "app/lib/homepage-team.server.ts",
+      "app/lib/homepage-team-keys.ts",
+      // The cron auth block lives here; a change to it is a change to who can
+      // trigger every scheduled job.
+      "server/cron.ts",
+      // Lockfile is the other half of package.json for supply chain.
+      "package-lock.json",
+      "**/package.json",
+      "**/package-lock.json",
+      // Nested env files, not just repo root.
+      "**/.env*"
+    ];
+    RE_SPECIALS = /[.+?^${}()|[\]\\]/g;
+    COMPILED = PROTECTED_GLOBS.map((glob) => ({ glob, re: globToRegExp(glob) }));
+    UNRESOLVED_PATH_GLOB = "<unresolved-path>";
+  }
+});
+
+// app/lib/release-engine.server.ts
+var release_engine_server_exports = {};
+__export(release_engine_server_exports, {
+  AGENT_BRANCH_PREFIXES: () => AGENT_BRANCH_PREFIXES,
+  AGENT_EDITOR_ALLOWLIST_RE: () => AGENT_EDITOR_ALLOWLIST_RE,
+  ALLOWLIST_CHECK_NAMES: () => ALLOWLIST_CHECK_NAMES,
+  DEFAULT_MAX_MERGES_PER_DAY: () => DEFAULT_MAX_MERGES_PER_DAY,
+  DEPLOY_TIMEOUT_MS: () => DEPLOY_TIMEOUT_MS,
+  MAX_TICKET_ATTEMPTS: () => MAX_TICKET_ATTEMPTS,
+  NEEDS_OWNER_LABEL: () => NEEDS_OWNER_LABEL,
+  REQUIRED_CHECK: () => REQUIRED_CHECK,
+  REVERT_BRANCH_PREFIX: () => REVERT_BRANCH_PREFIX,
+  ROLLBACK_CIRCUIT_LIMIT: () => ROLLBACK_CIRCUIT_LIMIT,
+  checkState: () => checkState,
+  dailyCapReached: () => dailyCapReached,
+  evaluatePullRequest: () => evaluatePullRequest,
+  findDeploymentBySha: () => findDeploymentBySha,
+  findPreviousReadyDeployment: () => findPreviousReadyDeployment,
+  isAgentBranch: () => isAgentBranch,
+  isDocsOnly: () => isDocsOnly,
+  isEligibleBranch: () => isEligibleBranch,
+  isRevertBranch: () => isRevertBranch,
+  listProductionDeployments: () => listProductionDeployments,
+  parseDailyCap: () => parseDailyCap,
+  parseTicketRefFromTitle: () => parseTicketRefFromTitle,
+  prNumberFromRef: () => prNumberFromRef,
+  promoteDeployment: () => promoteDeployment,
+  requiresAllowlistCheck: () => requiresAllowlistCheck,
+  resolveTicketForPr: () => resolveTicketForPr,
+  runReleaseEngineCycle: () => runReleaseEngineCycle,
+  runReleaseSmoke: () => runReleaseSmoke,
+  runSelfCheck: () => runSelfCheck,
+  shouldBlockForAttempts: () => shouldBlockForAttempts,
+  shouldTripCircuit: () => shouldTripCircuit,
+  summarizeSmoke: () => summarizeSmoke,
+  utcDay: () => utcDay3
+});
+import { and as and6, desc as desc2, eq as eq22 } from "drizzle-orm";
+function utcDay3(now = Date.now()) {
+  return new Date(now).toISOString().slice(0, 10);
+}
+function isAgentBranch(headRef) {
+  return AGENT_BRANCH_PREFIXES.some((p) => headRef.startsWith(p));
+}
+function isRevertBranch(headRef) {
+  return headRef.startsWith(REVERT_BRANCH_PREFIX);
+}
+function isEligibleBranch(headRef) {
+  return isAgentBranch(headRef) || isRevertBranch(headRef);
+}
+function requiresAllowlistCheck(headRef) {
+  return headRef.startsWith("agents/");
+}
+function isDocsOnly(paths) {
+  if (paths.length === 0) return false;
+  return paths.every((p) => AGENT_EDITOR_ALLOWLIST_RE.test(normalizeChangedPath(p)));
+}
+function checkState(checks, names) {
+  let seen = "absent";
+  for (const name of names) {
+    if (!(name in checks)) continue;
+    const conclusion = checks[name];
+    if (conclusion === null || conclusion === void 0) {
+      if (seen === "absent") seen = "pending";
+      continue;
+    }
+    if (FAILING_CONCLUSIONS2.has(conclusion)) return "failing";
+    if (conclusion === "success") seen = "success";
+    else if (seen === "absent" || seen === "pending") seen = "pending";
+  }
+  return seen;
+}
+function parseTicketRefFromTitle(title) {
+  const m = /#(\d{1,9})\b/.exec(title);
+  if (!m || !m[1]) return null;
+  const id = Number(m[1]);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+function prNumberFromRef(ref) {
+  const m = /(?:\/pull\/|#)(\d{1,9})\b/.exec(ref);
+  if (!m || !m[1]) return null;
+  const n = Number(m[1]);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+function evaluatePullRequest(facts) {
+  const revert = isRevertBranch(facts.headRef);
+  const docsOnly = isDocsOnly(facts.changedPaths);
+  const base = {
+    prNumber: facts.number,
+    headRef: facts.headRef,
+    ticketId: facts.ticket?.id ?? null,
+    isRevert: revert,
+    docsOnly
+  };
+  if (facts.classification.protected) {
+    return {
+      ...base,
+      action: "escalate-protected",
+      code: "protected",
+      reason: `touches ${facts.classification.files.length} protected path(s): ` + facts.classification.files.slice(0, 6).join(", "),
+      protectedFiles: facts.classification.files,
+      protectedGlobs: facts.classification.globs
+    };
+  }
+  if (facts.labels.includes(NEEDS_OWNER_LABEL)) {
+    return { ...base, action: "skip", code: "needs-owner-label", reason: `labelled ${NEEDS_OWNER_LABEL}` };
+  }
+  if (facts.draft) {
+    return { ...base, action: "skip", code: "draft", reason: "draft PR" };
+  }
+  if (facts.mergeableState === "dirty") {
+    return { ...base, action: "skip", code: "conflict", reason: "merge conflict with the base branch" };
+  }
+  const ci = checkState(facts.checks, [REQUIRED_CHECK]);
+  if (ci === "failing") {
+    const lastError = `CI check "${REQUIRED_CHECK}" failed on PR #${facts.number} (${facts.headRef})`;
+    if (facts.ticket?.status === "verified") {
+      return { ...base, action: "bounce", code: "ci-red", reason: lastError, lastError };
+    }
+    return { ...base, action: "skip", code: "ci-red", reason: lastError };
+  }
+  const allowlistRequired = requiresAllowlistCheck(facts.headRef);
+  const allowlist = allowlistRequired ? checkState(facts.checks, ALLOWLIST_CHECK_NAMES) : "success";
+  if (allowlist === "failing") {
+    const lastError = `agent-allowlist failed on PR #${facts.number}: a changed file is outside the docs allowlist`;
+    if (facts.ticket?.status === "verified") {
+      return { ...base, action: "bounce", code: "allowlist-red", reason: lastError, lastError };
+    }
+    return { ...base, action: "skip", code: "allowlist-red", reason: lastError };
+  }
+  if (allowlist === "pending" || allowlist === "absent") {
+    return {
+      ...base,
+      action: "wait",
+      code: "allowlist-pending",
+      reason: `agent-allowlist has not reported success yet (${allowlist})`
+    };
+  }
+  const docsCarveOut = docsOnly && allowlistRequired;
+  if (ci !== "success" && !docsCarveOut) {
+    return {
+      ...base,
+      action: "wait",
+      code: "ci-pending",
+      reason: `required check "${REQUIRED_CHECK}" has not reported success yet (${ci})`
+    };
+  }
+  if (!revert && !docsCarveOut) {
+    if (!facts.ticket) {
+      return { ...base, action: "skip", code: "no-ticket", reason: "no linked ticket to authorise the merge" };
+    }
+    if (facts.ticket.status !== "verified") {
+      return {
+        ...base,
+        action: "skip",
+        code: "ticket-not-verified",
+        reason: `ticket #${facts.ticket.id} is '${facts.ticket.status}', not 'verified'`
+      };
+    }
+  }
+  if (facts.mergeable === false) {
+    return {
+      ...base,
+      action: "skip",
+      code: "not-mergeable",
+      reason: `GitHub reports the PR is not mergeable (state '${facts.mergeableState}')`
+    };
+  }
+  if (facts.mergeable === null) {
+    return {
+      ...base,
+      action: "wait",
+      code: "mergeability-unknown",
+      reason: "GitHub is still computing mergeability"
+    };
+  }
+  return {
+    ...base,
+    action: "merge",
+    code: "ready",
+    reason: revert ? "revert PR with green CI" : docsCarveOut ? "docs-only agent PR with a green allowlist check" : `ticket #${facts.ticket?.id} verified and CI green`
+  };
+}
+function shouldBlockForAttempts(attemptCountAfterBounce) {
+  return attemptCountAfterBounce >= MAX_TICKET_ATTEMPTS;
+}
+function shouldTripCircuit(rollbacksToday) {
+  return rollbacksToday >= ROLLBACK_CIRCUIT_LIMIT;
+}
+function parseDailyCap(raw) {
+  if (raw === null || raw === void 0) return DEFAULT_MAX_MERGES_PER_DAY;
+  const trimmed = String(raw).trim();
+  if (trimmed === "") return DEFAULT_MAX_MERGES_PER_DAY;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_MERGES_PER_DAY;
+  const floored = Math.floor(n);
+  if (floored < 0) return DEFAULT_MAX_MERGES_PER_DAY;
+  return Math.min(floored, 100);
+}
+function dailyCapReached(mergesToday, cap) {
+  return mergesToday >= cap;
+}
+function summarizeSmoke(checks) {
+  const failed = checks.filter((c) => !c.ok);
+  return {
+    ok: failed.length === 0,
+    checks: [...checks],
+    evidence: failed.length === 0 ? `smoke passed: ${checks.map((c) => c.name).join(", ")}` : `smoke failed: ${failed.map((c) => `${c.name} (${c.detail ?? "no detail"})`).join("; ")}`
+  };
+}
+async function runReleaseSmoke() {
+  const checks = [];
+  const home = await checkPageOnce("/", 1, { captureHtml: true });
+  checks.push({
+    name: "home",
+    ok: home.ok,
+    ...home.ok ? {} : { detail: `HTTP ${home.status}: ${home.problems.join(", ")}` }
+  });
+  const discover = await checkPageOnce("/discover", 1);
+  checks.push({
+    name: "discover",
+    ok: discover.ok,
+    ...discover.ok ? {} : { detail: `HTTP ${discover.status}: ${discover.problems.join(", ")}` }
+  });
+  const truth = await renderTruth({ html: home.html, fileTickets: false });
+  checks.push({
+    name: "render-truth",
+    ok: truth.ok,
+    ...truth.ok ? truth.skipped ? { detail: `skipped: ${truth.skipped}` } : {} : { detail: `missing: ${truth.missing.slice(0, 4).join(" | ")}${truth.fallbacks.length > 0 ? ` (fallbacks: ${truth.fallbacks.join(", ")})` : ""}` }
+  });
+  const handle = await resolveSmokeHandle(truth.slate?.heroHandle ?? null);
+  if (handle) {
+    const pdp = await checkUrl(`${siteOrigin3()}/products/${handle}`, { markers: ['name="variantId"'] });
+    checks.push({
+      name: `pdp:${handle}`,
+      ok: pdp.ok,
+      ...pdp.ok ? {} : { detail: pdp.detail ?? `HTTP ${pdp.status}` }
+    });
+  } else {
+    checks.push({ name: "pdp", ok: true, detail: "no product handle resolvable, PDP step skipped" });
+  }
+  const probe2 = await runCheckoutProbe();
+  checks.push({
+    name: "checkout-probe",
+    ok: probe2.ok,
+    ...probe2.ok ? {} : { detail: `failed at step "${probe2.failedStep}"` }
+  });
+  return summarizeSmoke(checks);
+}
+function siteOrigin3() {
+  const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
+  return base.replace(/\/+$/, "") || "https://xdipx.com";
+}
+async function resolveSmokeHandle(heroHandle) {
+  const explicit = process.env["PROBE_PRODUCT_HANDLE"];
+  if (explicit) return explicit;
+  if (heroHandle) return heroHandle;
+  try {
+    return await kvGet(KV_KEYS.liveDealHandle);
+  } catch {
+    return null;
+  }
+}
+function vercelConfig() {
+  const token = process.env["VERCEL_TOKEN"];
+  const projectId9 = process.env["VERCEL_PROJECT_ID"];
+  if (!token || !projectId9) return null;
+  const teamId = process.env["VERCEL_TEAM_ID"];
+  return { token, projectId: projectId9, teamQs: teamId ? `&teamId=${encodeURIComponent(teamId)}` : "" };
+}
+async function vercelFetch(path, init2 = {}) {
+  const cfg = vercelConfig();
+  if (!cfg) return { ok: false, status: 0, data: null, error: "VERCEL_TOKEN/VERCEL_PROJECT_ID not set" };
+  try {
+    const res = await fetch(`https://api.vercel.com${path}`, {
+      ...init2,
+      headers: { Authorization: `Bearer ${cfg.token}`, "Content-Type": "application/json", ...init2.headers ?? {} },
+      signal: AbortSignal.timeout(2e4)
+    });
+    const text2 = await res.text();
+    if (!res.ok) return { ok: false, status: res.status, data: null, error: `${res.status}: ${text2.slice(0, 300)}` };
+    return { ok: true, status: res.status, data: text2 ? JSON.parse(text2) : {} };
+  } catch (err2) {
+    return { ok: false, status: 0, data: null, error: err2 instanceof Error ? err2.message : String(err2) };
+  }
+}
+function toDeployment(d) {
+  return {
+    uid: d.uid ?? d.id ?? "",
+    readyState: d.readyState ?? d.state ?? "UNKNOWN",
+    url: d.url ?? "",
+    sha: d.meta?.githubCommitSha ?? null,
+    createdAt: d.created ?? d.createdAt ?? 0
+  };
+}
+async function listProductionDeployments(limit = 20) {
+  const cfg = vercelConfig();
+  if (!cfg) return [];
+  const res = await vercelFetch(
+    `/v6/deployments?projectId=${encodeURIComponent(cfg.projectId)}&target=production&limit=${limit}${cfg.teamQs}`
+  );
+  if (!res.ok || !res.data) {
+    console.warn(`${LOG} vercel deployments fetch failed: ${res.error}`);
+    return [];
+  }
+  return (res.data.deployments ?? []).map(toDeployment);
+}
+async function findDeploymentBySha(sha) {
+  const list = await listProductionDeployments(20);
+  return list.find((d) => d.sha && d.sha.toLowerCase() === sha.toLowerCase()) ?? null;
+}
+async function findPreviousReadyDeployment(badSha) {
+  const list = await listProductionDeployments(20);
+  return list.find(
+    (d) => d.readyState === "READY" && (!d.sha || d.sha.toLowerCase() !== badSha.toLowerCase())
+  ) ?? null;
+}
+async function promoteDeployment(deploymentId) {
+  const cfg = vercelConfig();
+  if (!cfg) return { ok: false, via: "none", error: "VERCEL_TOKEN/VERCEL_PROJECT_ID not set" };
+  const promote = await vercelFetch(
+    `/v10/projects/${encodeURIComponent(cfg.projectId)}/promote/${encodeURIComponent(deploymentId)}?${cfg.teamQs.replace(/^&/, "")}`,
+    { method: "POST" }
+  );
+  if (promote.ok) return { ok: true, via: "v10-promote" };
+  const rollback = await vercelFetch(
+    `/v9/projects/${encodeURIComponent(cfg.projectId)}/rollback/${encodeURIComponent(deploymentId)}?${cfg.teamQs.replace(/^&/, "")}`,
+    { method: "POST" }
+  );
+  if (rollback.ok) return { ok: true, via: "v9-rollback" };
+  return { ok: false, via: "none", error: `promote: ${promote.error}; rollback: ${rollback.error}` };
+}
+async function runSelfCheck(opts = {}) {
+  if (!opts.force) {
+    const cached2 = await kvGet(KEYS.selfCheck);
+    if (cached2?.ok) return { ok: true, problems: [] };
+  }
+  const problems = [];
+  if (!isGithubConfigured()) {
+    problems.push("GITHUB_TOKEN / GITHUB_OWNER / GITHUB_REPO are not all set");
+    return { ok: false, problems };
+  }
+  if (!vercelConfig()) {
+    problems.push("VERCEL_TOKEN / VERCEL_PROJECT_ID are not set, so the deploy poll cannot run");
+  }
+  const repo = await githubRequest(
+    "/repos/{owner}/{repo}",
+    { context: "release-engine" }
+  );
+  if (!repo.ok) {
+    problems.push(`cannot read the repository: ${repo.error}`);
+  } else {
+    if (repo.data.allow_squash_merge === false) {
+      problems.push("squash merging is disabled on the repository, so the engine cannot merge at all");
+    }
+    if (repo.data.permissions && repo.data.permissions.push === false) {
+      problems.push("the token has no push permission, so it cannot merge");
+    }
+  }
+  const branch = repo.ok ? repo.data.default_branch ?? "main" : "main";
+  const ref = await githubRequest(`/repos/{owner}/{repo}/git/ref/heads/${branch}`, {
+    context: "release-engine"
+  });
+  if (!ref.ok) {
+    problems.push(`cannot read refs/heads/${branch}: ${ref.error}`);
+  } else {
+    const checks = await getChecksForRef(ref.data.object.sha, "release-engine");
+    if (!checks.ok) problems.push(`the token cannot read check runs: ${checks.error}`);
+  }
+  if (problems.length === 0) {
+    await kvSet(KEYS.selfCheck, { ok: true, at: Date.now() }, 3600);
+    return { ok: true, problems: [] };
+  }
+  console.error(`${LOG} CONFIG ERROR, refusing to run:
+  - ${problems.join("\n  - ")}`);
+  return { ok: false, problems };
+}
+async function resolveTicketForPr(pr) {
+  const linked = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(eq22(suggestionLinks.kind, "pr")).orderBy(desc2(suggestionLinks.createdAt)).limit(500);
+  const match = linked.find((l) => prNumberFromRef(l.ref) === pr.number);
+  if (match) return loadTicketFacts(match.suggestionId);
+  const titleId = parseTicketRefFromTitle(pr.title);
+  if (titleId === null) return null;
+  const otherPr = linked.find((l) => l.suggestionId === titleId && prNumberFromRef(l.ref) !== pr.number);
+  if (otherPr) {
+    console.warn(
+      `${LOG} PR #${pr.number} title claims ticket #${titleId}, but that ticket links PR ${otherPr.ref}. Refusing the title reference.`
+    );
+    return null;
+  }
+  return loadTicketFacts(titleId);
+}
+async function loadTicketFacts(id) {
+  const [row] = await db.select({
+    id: homepageTeamSuggestions.id,
+    status: homepageTeamSuggestions.status,
+    kind: homepageTeamSuggestions.kind,
+    attemptCount: homepageTeamSuggestions.attemptCount
+  }).from(homepageTeamSuggestions).where(eq22(homepageTeamSuggestions.id, id)).limit(1);
+  if (!row) return null;
+  return { id: row.id, status: row.status, kind: row.kind, attemptCount: row.attemptCount };
+}
+async function escalate(kind, dedupeKey, subject, html, dryRun) {
+  if (dryRun) {
+    console.log(`${LOG} [dry-run] would escalate (${kind}) ${dedupeKey}: ${subject}`);
+    return false;
+  }
+  const first = await kvSetNX(`${dedupeKey}:${kind}`, String(Date.now()), 7 * 24 * 3600);
+  if (!first) {
+    console.log(`${LOG} escalation (${kind}) already sent for ${dedupeKey}, not re-sending`);
+    return false;
+  }
+  const res = await sendOwnerEmail(subject, html, { fromName: "xdipx release engine" });
+  if (!res.sent) console.warn(`${LOG} escalation email not sent: ${res.error}`);
+  return res.sent;
+}
+function emailShell(title, rows, body) {
+  const table = rows.map(
+    ([k, v]) => `<tr><td style="padding:4px 12px 4px 0;color:#6B5F68;">${escapeHtml(k)}</td><td style="padding:4px 0;"><strong>${escapeHtml(v)}</strong></td></tr>`
+  ).join("");
+  return `<div style="font-family:system-ui,sans-serif;color:#1A1418;max-width:640px;">
+<h2 style="margin:0 0 12px;">${escapeHtml(title)}</h2>
+<table style="border-collapse:collapse;font-size:14px;">${table}</table>
+<div style="margin-top:16px;font-size:14px;line-height:1.5;">${body}</div>
+</div>`;
+}
+function baseResult(dryRun) {
+  return { ok: true, dryRun, phase: "idle", message: "", decisions: [], errors: [] };
+}
+async function runReleaseEngineCycle(opts = {}) {
+  const dryRun = opts.dryRun ?? false;
+  const result = baseResult(dryRun);
+  const enabled = await getPipelineSetting("release_engine_enabled");
+  if (enabled !== "true") {
+    return { ...result, phase: "disabled", message: "release_engine_enabled is not true, doing nothing" };
+  }
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const acquired = await kvSetNX(KEYS.lock, token, LOCK_TTL_SEC);
+  if (!acquired) {
+    return { ...result, phase: "locked", message: "another cycle holds release-engine:lock" };
+  }
+  try {
+    return await cycleBody(dryRun);
+  } catch (err2) {
+    const msg = err2 instanceof Error ? err2.message : String(err2);
+    console.error(`${LOG} cycle threw`, err2);
+    return { ...result, ok: false, message: `cycle error: ${msg}`, errors: [msg] };
+  } finally {
+    const held = await kvGet(KEYS.lock);
+    if (held === token) await kvDel(KEYS.lock);
+  }
+}
+async function cycleBody(dryRun) {
+  const result = baseResult(dryRun);
+  const self = await runSelfCheck();
+  if (!self.ok) {
+    return {
+      ...result,
+      ok: false,
+      phase: "config-error",
+      message: `config error: ${self.problems.join("; ")}`,
+      errors: self.problems
+    };
+  }
+  const pending = await kvGet(KEYS.pending);
+  if (pending) return resolvePending(pending, dryRun);
+  const day = utcDay3();
+  const rollbacks = Number(await kvGet(KEYS.rollbacks(day)) ?? 0);
+  if (shouldTripCircuit(rollbacks)) {
+    return {
+      ...result,
+      phase: "circuit-open",
+      message: `${rollbacks} rollback(s) today, circuit breaker is open`
+    };
+  }
+  const cap = parseDailyCap(await getPipelineSetting("release_engine_max_merges_per_day"));
+  const mergesToday = Number(await kvGet(KEYS.merges(day)) ?? 0);
+  if (dailyCapReached(mergesToday, cap)) {
+    return { ...result, phase: "daily-cap", message: `daily cap reached (${mergesToday}/${cap})` };
+  }
+  const open = await listOpenPullRequests({
+    headPrefixes: [...AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX],
+    context: "release-engine"
+  });
+  if (!open.ok) {
+    return { ...result, ok: false, message: `cannot list PRs: ${open.error}`, errors: [open.error] };
+  }
+  const candidates = [...open.data].sort((a, b) => {
+    const ra = isRevertBranch(a.headRef) ? 0 : 1;
+    const rb = isRevertBranch(b.headRef) ? 0 : 1;
+    return ra !== rb ? ra - rb : a.number - b.number;
+  });
+  const decisions = [];
+  for (const summary of candidates) {
+    const facts = await gatherFacts(summary);
+    if (!facts) continue;
+    const decision = evaluatePullRequest(facts);
+    decisions.push(decision);
+    console.log(
+      `${LOG}${dryRun ? " [dry-run]" : ""} PR #${decision.prNumber} (${decision.headRef}) -> ${decision.action} [${decision.code}]: ${decision.reason}`
+    );
+    if (decision.action === "escalate-protected") {
+      await handleProtected(summary, decision, dryRun);
+      continue;
+    }
+    if (decision.code === "ci-red" && decision.isRevert) {
+      await escalateRevertCiFailure(summary, dryRun);
+    }
+    if (decision.action === "bounce") {
+      await bounceTicket(decision.ticketId, decision.lastError ?? decision.reason, summary, dryRun);
+      continue;
+    }
+    if (decision.action !== "merge") continue;
+    if (dryRun) {
+      return {
+        ...result,
+        phase: "idle",
+        decisions,
+        message: `[dry-run] would squash-merge PR #${summary.number} (${summary.headRef})`
+      };
+    }
+    return mergeOne(summary, decision, decisions, day);
+  }
+  return { ...result, decisions, message: `${decisions.length} open PR(s) evaluated, nothing merged` };
+}
+async function gatherFacts(summary) {
+  const full = await getPullRequest(summary.number, "release-engine");
+  const pr = full.ok ? full.data : summary;
+  const files = await listPullRequestFiles(pr.number, "release-engine");
+  if (!files.ok) {
+    console.warn(`${LOG} cannot read changed files for PR #${pr.number}, skipping: ${files.error}`);
+    return null;
+  }
+  const classification = classifyChangedFiles(files.data);
+  const changedPaths = files.data.flatMap(
+    (f) => f.previousFilename ? [f.filename, f.previousFilename] : [f.filename]
+  );
+  const checksRes = await getChecksForRef(pr.headSha, "release-engine");
+  if (!checksRes.ok) {
+    console.warn(`${LOG} cannot read checks for PR #${pr.number}, skipping: ${checksRes.error}`);
+    return null;
+  }
+  const checks = {};
+  for (const c of checksRes.data.checks) checks[c.name] = c.status === "completed" ? c.conclusion : null;
+  let ticket = null;
+  try {
+    ticket = await resolveTicketForPr(pr);
+  } catch (err2) {
+    console.warn(`${LOG} ticket resolution failed for PR #${pr.number}`, err2);
+  }
+  return {
+    number: pr.number,
+    headRef: pr.headRef,
+    draft: pr.draft,
+    mergeable: pr.mergeable,
+    mergeableState: pr.mergeableState,
+    labels: pr.labels,
+    classification,
+    changedPaths,
+    checks,
+    ticket
+  };
+}
+async function handleProtected(pr, decision, dryRun) {
+  if (!dryRun && !pr.labels.includes(NEEDS_OWNER_LABEL)) {
+    const labelled = await addLabels(pr.number, [NEEDS_OWNER_LABEL], "release-engine");
+    if (!labelled.ok) console.warn(`${LOG} could not label PR #${pr.number}: ${labelled.error}`);
+  }
+  await escalate(
+    "protected",
+    KEYS.escalated(pr.number),
+    `[xdipx] PR #${pr.number} needs you: protected path`,
+    emailShell(
+      "A PR touches a protected path, so the release engine stopped",
+      [
+        ["PR", `#${pr.number} ${pr.title}`],
+        ["Branch", pr.headRef],
+        ["Protected files", (decision.protectedFiles ?? []).join(", ") || "unknown"],
+        ["Matched rules", (decision.protectedGlobs ?? []).join(", ") || "unknown"]
+      ],
+      `<p>The engine will never merge this one. Review and merge it yourself if it is right: <a href="${escapeHtml(pr.htmlUrl)}">${escapeHtml(pr.htmlUrl)}</a></p>
+<p>The classification comes only from the GitHub changed-file list. Nothing in the PR title, body, or the linked ticket was consulted.</p>`
+    ),
+    dryRun
+  );
+}
+async function escalateRevertCiFailure(pr, dryRun) {
+  await escalate(
+    "revert-ci",
+    KEYS.escalated(pr.number),
+    `[xdipx] revert PR #${pr.number} is failing CI`,
+    emailShell(
+      "A revert PR opened by the release engine cannot pass CI",
+      [
+        ["PR", `#${pr.number} ${pr.title}`],
+        ["Branch", pr.headRef]
+      ],
+      `<p>Production was already re-promoted to the previous READY deployment, so the site should be healthy. The durable revert is stuck: <a href="${escapeHtml(pr.htmlUrl)}">${escapeHtml(pr.htmlUrl)}</a></p>`
+    ),
+    dryRun
+  );
+}
+async function mergeOne(pr, decision, decisions, day) {
+  const result = baseResult(false);
+  const merged = await squashMergePullRequest(pr.number, {
+    title: `${pr.title} (#${pr.number})`,
+    message: `Merged by the xdipx release engine.
+
+Gate: ${decision.reason}`,
+    expectedHeadSha: pr.headSha,
+    context: "release-engine"
+  });
+  if (!merged.ok) {
+    console.error(`${LOG} merge of PR #${pr.number} failed: ${merged.error}`);
+    return {
+      ...result,
+      ok: false,
+      decisions,
+      message: `merge failed for PR #${pr.number}: ${merged.error}`,
+      errors: [merged.error]
+    };
+  }
+  await kvIncr(KEYS.merges(day));
+  const pending = {
+    prNumber: pr.number,
+    prUrl: pr.htmlUrl,
+    headRef: pr.headRef,
+    mergeSha: merged.data.sha,
+    mergedAt: Date.now(),
+    ticketId: decision.ticketId
+  };
+  await kvSet(KEYS.pending, pending);
+  console.log(`${LOG} merged PR #${pr.number} as ${merged.data.sha}, awaiting production deploy`);
+  if (decision.ticketId !== null) {
+    await addTicketLink(decision.ticketId, { kind: "commit", ref: merged.data.sha, state: "merged" });
+  }
+  return {
+    ...result,
+    phase: "merged",
+    decisions,
+    merged: { prNumber: pr.number, sha: merged.data.sha, ticketId: decision.ticketId },
+    message: `merged PR #${pr.number} as ${merged.data.sha.slice(0, 7)}`
+  };
+}
+async function resolvePending(pending, dryRun) {
+  const result = baseResult(dryRun);
+  const deadline = Date.now() + POLL_BUDGET_MS;
+  let deployment = await findDeploymentBySha(pending.mergeSha);
+  while (Date.now() < deadline && (!deployment || deployment.readyState !== "READY" && !isTerminalFailure(deployment.readyState))) {
+    await sleep(POLL_INTERVAL_MS);
+    deployment = await findDeploymentBySha(pending.mergeSha);
+  }
+  if (deployment?.readyState === "READY") {
+    if (pending.ticketId !== null && !dryRun) {
+      await addTicketLink(pending.ticketId, {
+        kind: "deploy",
+        ref: deployment.url ? `https://${deployment.url}` : deployment.uid,
+        state: "ready"
+      });
+    }
+    const smoke = await runReleaseSmoke();
+    console.log(`${LOG} smoke for PR #${pending.prNumber}: ${smoke.evidence}`);
+    if (smoke.ok) return applySuccess(pending, smoke, dryRun);
+    return failAndRollback(pending, smoke.evidence, dryRun);
+  }
+  if (deployment && isTerminalFailure(deployment.readyState)) {
+    return failAndRollback(pending, `production deployment ${deployment.uid} is ${deployment.readyState}`, dryRun);
+  }
+  if (Date.now() - pending.mergedAt > DEPLOY_TIMEOUT_MS) {
+    return failAndRollback(
+      pending,
+      `no READY production deployment for ${pending.mergeSha.slice(0, 7)} within ${Math.round(DEPLOY_TIMEOUT_MS / 6e4)} min`,
+      dryRun
+    );
+  }
+  return {
+    ...result,
+    phase: "awaiting-deploy",
+    resolved: { prNumber: pending.prNumber, outcome: "waiting" },
+    message: `PR #${pending.prNumber} merged ${Math.round((Date.now() - pending.mergedAt) / 6e4)} min ago, deployment ${deployment?.readyState ?? "not found yet"}`
+  };
+}
+function isTerminalFailure(state) {
+  return state === "ERROR" || state === "CANCELED" || state === "DELETED";
+}
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+async function applySuccess(pending, smoke, dryRun) {
+  const result = baseResult(dryRun);
+  const errors = [];
+  if (!dryRun && pending.ticketId !== null) {
+    try {
+      await transitionSuggestion(pending.ticketId, "applied", "system", {
+        note: smoke.evidence,
+        links: [{ kind: "pr", ref: pending.prUrl, state: "merged" }]
+      });
+    } catch (err2) {
+      const msg = err2 instanceof Response ? `${err2.status} ${await err2.text()}` : String(err2);
+      console.warn(`${LOG} could not apply ticket #${pending.ticketId}: ${msg}`);
+      errors.push(msg);
+    }
+  }
+  if (!dryRun) {
+    await markPrLinksMerged(pending);
+    await kvDel(KEYS.pending);
+  }
+  return {
+    ...result,
+    phase: "applied",
+    resolved: { prNumber: pending.prNumber, outcome: "applied", evidence: smoke.evidence },
+    message: `PR #${pending.prNumber} deployed and smoke-clean`,
+    errors
+  };
+}
+async function failAndRollback(pending, evidence, dryRun) {
+  const result = baseResult(dryRun);
+  const errors = [];
+  console.error(`${LOG} release of PR #${pending.prNumber} FAILED: ${evidence}`);
+  if (dryRun) {
+    return {
+      ...result,
+      phase: "rolled-back",
+      resolved: { prNumber: pending.prNumber, outcome: "rolled-back", evidence },
+      message: `[dry-run] would re-promote and open ${REVERT_BRANCH_PREFIX}${pending.prNumber}`
+    };
+  }
+  let promotedTo = "none";
+  const previous = await findPreviousReadyDeployment(pending.mergeSha);
+  if (previous) {
+    const promoted = await promoteDeployment(previous.uid);
+    promotedTo = promoted.ok ? `${previous.uid} (${promoted.via})` : `failed: ${promoted.error}`;
+    if (!promoted.ok) errors.push(`re-promote failed: ${promoted.error}`);
+  } else {
+    errors.push("no previous READY production deployment to re-promote");
+  }
+  const day = utcDay3();
+  const rollbacks = await kvIncr(KEYS.rollbacks(day));
+  const branch = `${REVERT_BRANCH_PREFIX}${pending.prNumber}`;
+  let revertUrl = "";
+  const revert = await createRevertBranch({
+    badSha: pending.mergeSha,
+    branch,
+    base: "main",
+    message: `revert: PR #${pending.prNumber} failed post-deploy smoke
+
+${evidence}`,
+    context: "release-engine"
+  });
+  if (revert.ok) {
+    const opened = await openPullRequest({
+      title: `revert: PR #${pending.prNumber} failed post-deploy smoke`,
+      head: branch,
+      base: "main",
+      body: `The release engine merged #${pending.prNumber}, the production deploy went out, and the post-deploy smoke failed.
+
+Evidence:
+
+> ${evidence}
+
+Production was already re-promoted to ${promotedTo}. This PR restores the tree from before the bad squash and will be merged by the engine once CI is green. It skips the QA verdict, never CI and never the protected-path classifier.`,
+      context: "release-engine"
+    });
+    if (opened.ok) revertUrl = opened.data.htmlUrl;
+    else errors.push(`could not open the revert PR: ${opened.error}`);
+  } else {
+    errors.push(`could not create the revert branch: ${revert.error}`);
+  }
+  await bounceTicket(pending.ticketId, evidence, null, false);
+  if (shouldTripCircuit(rollbacks)) {
+    await setReleaseEngineEnabled(false);
+    await escalate(
+      "circuit",
+      `release-engine:circuit:${day}`,
+      "[xdipx] release engine circuit breaker tripped, auto-merge is OFF",
+      emailShell(
+        "Two rollbacks in one day, so the release engine turned itself off",
+        [
+          ["Rollbacks today", String(rollbacks)],
+          ["Last PR", `#${pending.prNumber}`],
+          ["Evidence", evidence.slice(0, 400)]
+        ],
+        `<p><code>release_engine_enabled</code> is now <strong>false</strong>. Agent PRs wait for you exactly as they did before the engine existed. Flip it back on in /admin once you know what broke.</p>`
+      ),
+      false
+    );
+  }
+  await markPrLinksState(pending, "reverted");
+  await kvDel(KEYS.pending);
+  return {
+    ...result,
+    ok: false,
+    phase: "rolled-back",
+    resolved: { prNumber: pending.prNumber, outcome: "rolled-back", evidence },
+    message: `PR #${pending.prNumber} rolled back (promoted ${promotedTo}${revertUrl ? `, revert ${revertUrl}` : ""})`,
+    errors
+  };
+}
+async function bounceTicket(ticketId, lastError, pr, dryRun) {
+  if (ticketId === null) return;
+  if (dryRun) {
+    console.log(`${LOG} [dry-run] would bounce ticket #${ticketId}: ${lastError}`);
+    return;
+  }
+  let attemptCount = 0;
+  try {
+    const row = await transitionSuggestion(ticketId, "in_progress", "system", {
+      lastError: lastError.slice(0, 2e3),
+      ...pr ? { links: [{ kind: "pr", ref: pr.htmlUrl, state: "open" }] } : {}
+    });
+    attemptCount = row.attemptCount;
+  } catch (err2) {
+    const msg = err2 instanceof Response ? `${err2.status}` : String(err2);
+    console.warn(`${LOG} could not bounce ticket #${ticketId} (${msg})`);
+    return;
+  }
+  if (!shouldBlockForAttempts(attemptCount)) return;
+  try {
+    await transitionSuggestion(ticketId, "blocked", "system", {
+      note: `blocked after ${attemptCount} fix attempts`,
+      lastError: lastError.slice(0, 2e3)
+    });
+  } catch (err2) {
+    console.warn(`${LOG} could not block ticket #${ticketId}`, err2);
+  }
+  const ticket = await getTicket(ticketId).catch(() => null);
+  const recentErrors = (ticket?.links ?? []).filter((l) => l.kind === "note").slice(0, 3).map((l) => l.ref);
+  await escalate(
+    "attempts",
+    `release-engine:ticket:${ticketId}`,
+    `[xdipx] ticket #${ticketId} is blocked after ${attemptCount} attempts`,
+    emailShell(
+      "A ticket burned every fix attempt and is now blocked",
+      [
+        ["Ticket", `#${ticketId}`],
+        ["Attempts", String(attemptCount)],
+        ["Summary", (ticket?.suggestion.suggestion ?? "").slice(0, 200)]
+      ],
+      `<p>Latest error:</p><pre style="white-space:pre-wrap;font-size:13px;">${escapeHtml(lastError.slice(0, 800))}</pre>
+${recentErrors.length > 0 ? `<p>Recent notes:</p><ul>${recentErrors.map((e) => `<li>${escapeHtml(e.slice(0, 200))}</li>`).join("")}</ul>` : ""}
+<p>Unblock it in /admin when you have decided what to do.</p>`
+    ),
+    false
+  );
+}
+async function addTicketLink(ticketId, link) {
+  try {
+    await db.insert(suggestionLinks).values({
+      suggestionId: ticketId,
+      kind: link.kind.slice(0, 12),
+      ref: link.ref,
+      state: link.state ? link.state.slice(0, 16) : null
+    });
+  } catch (err2) {
+    console.warn(`${LOG} could not add ${link.kind} link to ticket #${ticketId}`, err2);
+  }
+}
+async function markPrLinksMerged(pending) {
+  await markPrLinksState(pending, "merged");
+}
+async function markPrLinksState(pending, state) {
+  if (pending.ticketId === null) return;
+  try {
+    await db.update(suggestionLinks).set({ state: state.slice(0, 16), updatedAt: /* @__PURE__ */ new Date() }).where(
+      and6(
+        eq22(suggestionLinks.suggestionId, pending.ticketId),
+        eq22(suggestionLinks.kind, "pr"),
+        eq22(suggestionLinks.ref, pending.prUrl)
+      )
+    );
+  } catch (err2) {
+    console.warn(`${LOG} could not update link state for ticket #${pending.ticketId}`, err2);
+  }
+}
+async function setReleaseEngineEnabled(value) {
+  try {
+    await db.insert(pipelineSettings).values({ key: "release_engine_enabled", value: String(value) }).onConflictDoUpdate({
+      target: pipelineSettings.key,
+      set: { value: String(value), updatedAt: /* @__PURE__ */ new Date() }
+    });
+    console.error(`${LOG} circuit breaker: release_engine_enabled set to false`);
+  } catch (err2) {
+    console.error(`${LOG} could not flip release_engine_enabled off`, err2);
+  }
+}
+var LOG, AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX, REQUIRED_CHECK, ALLOWLIST_CHECK_NAMES, NEEDS_OWNER_LABEL, AGENT_EDITOR_ALLOWLIST_RE, FAILING_CONCLUSIONS2, MAX_TICKET_ATTEMPTS, ROLLBACK_CIRCUIT_LIMIT, DEFAULT_MAX_MERGES_PER_DAY, DEPLOY_TIMEOUT_MS, POLL_BUDGET_MS, POLL_INTERVAL_MS, LOCK_TTL_SEC, KEYS;
+var init_release_engine_server = __esm({
+  "app/lib/release-engine.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_github_server();
+    init_homepage_healthcheck_server();
+    init_checkout_probe_server();
+    init_feed_processor_server();
+    init_kv_server();
+    init_owner_alerts_server();
+    init_team_server();
+    LOG = "[release-engine]";
+    AGENT_BRANCH_PREFIXES = ["agents/", "claude/", "phase1/", "tonight/"];
+    REVERT_BRANCH_PREFIX = "revert/pr-";
+    REQUIRED_CHECK = "check";
+    ALLOWLIST_CHECK_NAMES = ["allowlist", "agent-allowlist"];
+    NEEDS_OWNER_LABEL = "needs-owner";
+    AGENT_EDITOR_ALLOWLIST_RE = /^(\.claude\/agents\/[^/]+\.md|docs\/store-team\/[^/]+\.md|docs\/homepage-team\/[^/]+\.md)$/;
+    FAILING_CONCLUSIONS2 = /* @__PURE__ */ new Set([
+      "failure",
+      "timed_out",
+      "cancelled",
+      "action_required",
+      "startup_failure",
+      "stale"
+    ]);
+    MAX_TICKET_ATTEMPTS = 3;
+    ROLLBACK_CIRCUIT_LIMIT = 2;
+    DEFAULT_MAX_MERGES_PER_DAY = 6;
+    DEPLOY_TIMEOUT_MS = 15 * 6e4;
+    POLL_BUDGET_MS = 6e4;
+    POLL_INTERVAL_MS = 6e3;
+    LOCK_TTL_SEC = 300;
+    KEYS = {
+      lock: "release-engine:lock",
+      pending: "release-engine:pending",
+      selfCheck: "release-engine:self-check-ok",
+      merges: (day) => `release-engine:merges:${day}`,
+      rollbacks: (day) => `release-engine:rollbacks:${day}`,
+      escalated: (pr) => `release-engine:escalated:pr-${pr}`
+    };
   }
 });
 
@@ -26180,8 +27482,8 @@ async function probeDurationSeconds(video) {
     let stderr = "";
     try {
       execFileSync(ffmpegPath, ["-i", input, "-f", "null", "-"], { timeout: 3e4 });
-    } catch (err) {
-      stderr = err instanceof Error && "stderr" in err ? String(err.stderr ?? "") : "";
+    } catch (err2) {
+      stderr = err2 instanceof Error && "stderr" in err2 ? String(err2.stderr ?? "") : "";
     }
     const m = /Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/.exec(stderr);
     if (!m) return 0;
@@ -26230,8 +27532,8 @@ async function applyWatermark(video) {
       output
     ], { timeout: 6e4 });
     return existsSync4(output) ? readFileSync3(output) : video;
-  } catch (err) {
-    console.warn("[video-assembly] watermark failed, returning original:", err instanceof Error ? err.message : err);
+  } catch (err2) {
+    console.warn("[video-assembly] watermark failed, returning original:", err2 instanceof Error ? err2.message : err2);
     return video;
   } finally {
     cleanup([input, overlay, output]);
@@ -26305,7 +27607,7 @@ async function parseElevenLabsError(res) {
 }
 async function generateVoiceover(opts) {
   const voiceId = opts.voiceId || getVoiceId();
-  const res = await fetch(`${API_BASE}/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+  const res = await fetch(`${API_BASE2}/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
     method: "POST",
     headers: {
       "xi-api-key": getApiKey(),
@@ -26322,7 +27624,7 @@ async function generateVoiceover(opts) {
   return Buffer.from(buf);
 }
 async function generateMusic(opts) {
-  const res = await fetch(`${API_BASE}/music?output_format=mp3_44100_128`, {
+  const res = await fetch(`${API_BASE2}/music?output_format=mp3_44100_128`, {
     method: "POST",
     headers: {
       "xi-api-key": getApiKey(),
@@ -26340,11 +27642,11 @@ async function generateMusic(opts) {
   if (buf.byteLength === 0) throw new Error("ElevenLabs Music returned empty audio");
   return Buffer.from(buf);
 }
-var API_BASE, DEFAULT_VOICE_ID;
+var API_BASE2, DEFAULT_VOICE_ID;
 var init_elevenlabs_server = __esm({
   "app/lib/elevenlabs.server.ts"() {
     "use strict";
-    API_BASE = "https://api.elevenlabs.io/v1";
+    API_BASE2 = "https://api.elevenlabs.io/v1";
     DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
   }
 });
@@ -26466,9 +27768,9 @@ function burnCaptions(inPath, outPath, phrases, durationSeconds, work) {
   const fontFile = resolveCaptionFontFile();
   try {
     ff(["-y", "-i", inPath, "-vf", buildFilters(fontFile), "-c:v", "libx264", "-preset", "fast", "-crf", "19", "-c:a", "copy", outPath]);
-  } catch (err) {
-    if (!fontFile) throw err;
-    console.warn("[video-postpass] DM Sans fontfile failed, retrying with fontconfig default:", err instanceof Error ? err.message.slice(0, 200) : err);
+  } catch (err2) {
+    if (!fontFile) throw err2;
+    console.warn("[video-postpass] DM Sans fontfile failed, retrying with fontconfig default:", err2 instanceof Error ? err2.message.slice(0, 200) : err2);
     ff(["-y", "-i", inPath, "-vf", buildFilters(null), "-c:v", "libx264", "-preset", "fast", "-crf", "19", "-c:a", "copy", outPath]);
   }
 }
@@ -26483,8 +27785,8 @@ async function addMusicAndLoudnorm(inPath, outPath, durationSeconds, work) {
     musicPath = tmp2("bed.mp3");
     work.push(musicPath);
     writeFileSync2(musicPath, music);
-  } catch (err) {
-    console.warn("[video-postpass] music bed generation failed, loudnorm only:", err instanceof Error ? err.message.slice(0, 200) : err);
+  } catch (err2) {
+    console.warn("[video-postpass] music bed generation failed, loudnorm only:", err2 instanceof Error ? err2.message.slice(0, 200) : err2);
   }
   if (musicPath) {
     ff([
@@ -26545,8 +27847,8 @@ async function runPostPass(video, opts) {
       work.push(punched);
       applyPunchIns(current, punched, durationSeconds, work);
       current = punched;
-    } catch (err) {
-      console.warn("[video-postpass] punch-ins failed, continuing without:", err instanceof Error ? err.message.slice(0, 200) : err);
+    } catch (err2) {
+      console.warn("[video-postpass] punch-ins failed, continuing without:", err2 instanceof Error ? err2.message.slice(0, 200) : err2);
     }
     if (opts.phrases.length) {
       try {
@@ -26554,8 +27856,8 @@ async function runPostPass(video, opts) {
         work.push(captioned);
         burnCaptions(current, captioned, opts.phrases, durationSeconds, work);
         current = captioned;
-      } catch (err) {
-        console.warn("[video-postpass] captions failed, continuing without:", err instanceof Error ? err.message.slice(0, 200) : err);
+      } catch (err2) {
+        console.warn("[video-postpass] captions failed, continuing without:", err2 instanceof Error ? err2.message.slice(0, 200) : err2);
       }
     }
     try {
@@ -26563,8 +27865,8 @@ async function runPostPass(video, opts) {
       work.push(out);
       await addMusicAndLoudnorm(current, out, durationSeconds, work);
       return readFileSync4(out);
-    } catch (err) {
-      console.warn("[video-postpass] loudness stage failed, shipping previous step:", err instanceof Error ? err.message.slice(0, 200) : err);
+    } catch (err2) {
+      console.warn("[video-postpass] loudness stage failed, shipping previous step:", err2 instanceof Error ? err2.message.slice(0, 200) : err2);
       return current === inPath ? video : readFileSync4(current);
     }
   } finally {
@@ -26669,13 +27971,13 @@ var init_avatar_script = __esm({
 });
 
 // app/lib/ivr-voice.server.ts
-import { eq as eq22 } from "drizzle-orm";
+import { eq as eq23 } from "drizzle-orm";
 async function getActiveIvrVoiceId() {
   try {
-    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq22(ivrVoices.active, true)).limit(1);
+    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq23(ivrVoices.active, true)).limit(1);
     if (rows[0]?.voiceId) return rows[0].voiceId;
-  } catch (err) {
-    console.error("[ivr-voice] DB lookup failed \u2014 falling back to env", err);
+  } catch (err2) {
+    console.error("[ivr-voice] DB lookup failed \u2014 falling back to env", err2);
   }
   return process.env["ELEVENLABS_VOICE_ID_IVR"] ?? "";
 }
@@ -26704,7 +28006,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq23, and as and6, inArray as inArray8, desc as desc2, isNotNull, ne as ne3, sql as sql15 } from "drizzle-orm";
+import { eq as eq24, and as and7, inArray as inArray8, desc as desc3, isNotNull, ne as ne3, sql as sql15 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -26776,16 +28078,16 @@ async function advanceInflightVideoJobs(opts = {}) {
       result.advanced++;
       if (outcome === "done") result.done++;
       if (outcome === "parked") result.parked++;
-    } catch (err) {
-      console.error(`[video-pipeline] advanceJob ${job.jobId} threw:`, err);
-      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err), updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.jobId, job.jobId));
+    } catch (err2) {
+      console.error(`[video-pipeline] advanceJob ${job.jobId} threw:`, err2);
+      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err2), updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.jobId, job.jobId));
       result.failed++;
     }
   }
   return result;
 }
 async function touch(job, set) {
-  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.id, job.id));
+  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.id, job.id));
 }
 async function advanceJob2(job) {
   switch (job.stage) {
@@ -26830,13 +28132,13 @@ async function frameReviewEnabled() {
   return v !== "false";
 }
 async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
-  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and6(
+  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and7(
     sql15`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
-    eq23(videoJobs.presenter, presenter),
+    eq24(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
     inArray8(videoJobs.stage, FRAME_APPROVED_STAGES),
     ...excludeJobRowId != null ? [ne3(videoJobs.id, excludeJobRowId)] : []
-  )).orderBy(desc2(videoJobs.createdAt)).limit(1);
+  )).orderBy(desc3(videoJobs.createdAt)).limit(1);
   return row?.frameId ?? null;
 }
 async function advanceSceneFrame(job) {
@@ -26849,13 +28151,13 @@ async function advanceSceneFrame(job) {
     if (!reusableJob) {
       throw new Error("reuseFrameAssetId applies only to avatar/talking-head jobs");
     }
-    const [asset] = await db.select().from(mediaAssets).where(eq23(mediaAssets.id, reuseId)).limit(1);
+    const [asset] = await db.select().from(mediaAssets).where(eq24(mediaAssets.id, reuseId)).limit(1);
     if (!asset || asset.purpose !== "scene_frame") {
       throw new Error(`reuseFrameAssetId ${reuseId} does not reference a scene-frame asset`);
     }
-    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and6(
-      eq23(videoJobs.sceneFrameAssetId, reuseId),
-      eq23(videoJobs.presenter, job.presenter),
+    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and7(
+      eq24(videoJobs.sceneFrameAssetId, reuseId),
+      eq24(videoJobs.presenter, job.presenter),
       inArray8(videoJobs.stage, FRAME_APPROVED_STAGES)
     )).limit(1);
     if (!approvedBy) {
@@ -26945,7 +28247,7 @@ async function advanceClip(job) {
     if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
       throw new Error(`Accrued + clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq23(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq24(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const handle = await submitVideoRequest(job.modelTier, {
       prompt: motionPrompt,
@@ -27030,7 +28332,7 @@ async function advanceClipAvatar(job, spec) {
     if ((Number(job.costUsd) + clipCost + ttsCost) * 100 > maxCents) {
       throw new Error(`Accrued + avatar render cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq23(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq24(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const frameBuf = await blobFetchToBuffer(frame.blobUrl);
     const imageUrl = await uploadToFalStorage(frameBuf, "image/jpeg", `frame-${job.jobId}.jpg`);
@@ -27124,7 +28426,7 @@ async function advanceLipsync(job) {
   return "progressed";
 }
 async function latestAssetByPurpose(jobRowId, purpose) {
-  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq23(mediaAssets.videoJobId, jobRowId)).orderBy(desc2(mediaAssets.createdAt));
+  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq24(mediaAssets.videoJobId, jobRowId)).orderBy(desc3(mediaAssets.createdAt));
   const hit = rows.find((r) => r.purpose === purpose);
   return hit ? { id: hit.id, blobUrl: hit.blobUrl } : null;
 }
@@ -27172,7 +28474,7 @@ async function advanceAssembly(job) {
 }
 async function advancePoster(job) {
   if (!job.finalAssetId) throw new Error("No final asset for poster extraction");
-  const [finalAsset] = await db.select().from(mediaAssets).where(eq23(mediaAssets.id, job.finalAssetId)).limit(1);
+  const [finalAsset] = await db.select().from(mediaAssets).where(eq24(mediaAssets.id, job.finalAssetId)).limit(1);
   if (!finalAsset) throw new Error("Final asset row missing");
   const video = await blobFetchToBuffer(finalAsset.blobUrl);
   const poster = await extractPoster(video, 1);
@@ -27186,7 +28488,7 @@ async function advancePoster(job) {
     videoJobId: job.id
   }).returning({ id: mediaAssets.id });
   if (duration > 0) {
-    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq23(mediaAssets.id, finalAsset.id));
+    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq24(mediaAssets.id, finalAsset.id));
   }
   await touch(job, {
     stage: "done",
@@ -27198,29 +28500,29 @@ async function advancePoster(job) {
   return "done";
 }
 async function approveSceneFrame(jobRowId, frameAssetId) {
-  const [asset] = await db.select().from(mediaAssets).where(eq23(mediaAssets.id, frameAssetId)).limit(1);
+  const [asset] = await db.select().from(mediaAssets).where(eq24(mediaAssets.id, frameAssetId)).limit(1);
   if (!asset || asset.videoJobId !== jobRowId || asset.purpose !== "scene_frame") {
     throw new Error("Frame does not belong to this job");
   }
-  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function retrySceneFrames(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq23(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq24(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.frameFeedback) ? script.frameFeedback : [];
   script.frameFeedback = [...prior, feedback];
   const basePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : "";
   script["framePrompt"] = feedback ? `${basePrompt} ${feedback}`.trim() : basePrompt;
-  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function rejectVideoJob(jobRowId, reason) {
-  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.id, jobRowId));
 }
 async function regenerateVideoJob(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq23(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq24(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.regenFeedback) ? script.regenFeedback : [];
@@ -27240,12 +28542,12 @@ async function regenerateVideoJob(jobRowId, feedback) {
   });
 }
 async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
-  const [job] = await db.select().from(videoJobs).where(eq23(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq24(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   if (job.stage !== "done") throw new Error("Job is not finished");
-  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq23(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
+  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq24(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
   if (!finalAsset) throw new Error("No final video asset");
-  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq23(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
+  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq24(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
   const captions = job.scriptJson.captions ?? {};
   const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(" ");
   const ids = [];
@@ -27272,14 +28574,14 @@ async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
 async function recordVideoMetrics(jobRowId, platform, metrics) {
   const submitted = Object.fromEntries(Object.entries(metrics).filter(([, v]) => v !== void 0));
   if (!Object.keys(submitted).length) return;
-  const [job] = await db.select().from(videoJobs).where(eq23(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq24(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const existing = (job.metricsJson ?? {})[platform] ?? {};
   const merged = { ...job.metricsJson ?? {}, [platform]: { ...existing, ...submitted } };
-  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.id, jobRowId));
 }
 async function listVideoJobs(limit = 40) {
-  const jobs = await db.select().from(videoJobs).orderBy(desc2(videoJobs.createdAt)).limit(limit);
+  const jobs = await db.select().from(videoJobs).orderBy(desc3(videoJobs.createdAt)).limit(limit);
   if (!jobs.length) return [];
   const jobIds = jobs.map((j) => j.id);
   const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray8(mediaAssets.videoJobId, jobIds));
@@ -27350,9 +28652,9 @@ async function easypostFetch(path, init2 = {}) {
     parsed = body;
   }
   if (!res.ok) {
-    const err = parsed && typeof parsed === "object" && "error" in parsed ? parsed.error : null;
-    const details = err?.errors ? ` \u2014 ${JSON.stringify(err.errors)}` : "";
-    throw new Error(`EasyPost ${res.status}: ${err?.message ?? body.slice(0, 200)}${details}`);
+    const err2 = parsed && typeof parsed === "object" && "error" in parsed ? parsed.error : null;
+    const details = err2?.errors ? ` \u2014 ${JSON.stringify(err2.errors)}` : "";
+    throw new Error(`EasyPost ${res.status}: ${err2?.message ?? body.slice(0, 200)}${details}`);
   }
   return parsed;
 }
@@ -27452,7 +28754,7 @@ __export(returns_server_exports, {
   recordLabelTracking: () => recordLabelTracking,
   rmaNumber: () => rmaNumber
 });
-import { eq as eq24 } from "drizzle-orm";
+import { eq as eq25 } from "drizzle-orm";
 function rmaNumber(shopifyReturnId) {
   const m = shopifyReturnId.match(/\/(\d+)$/);
   return m ? `RMA-${m[1]}` : shopifyReturnId;
@@ -27524,8 +28826,8 @@ async function createCustomerReturn(input) {
         weight: input.parcel.weightOz
       }
     });
-  } catch (err) {
-    console.error("[returns] easypost buyReturnLabel failed", err);
+  } catch (err2) {
+    console.error("[returns] easypost buyReturnLabel failed", err2);
     return { ok: true, returnRow: row };
   }
   console.log("[returns] easypost buyReturnLabel ok", {
@@ -27557,8 +28859,8 @@ async function createCustomerReturn(input) {
         } else {
           console.error("[returns] registerReverseDelivery failed", regResult.error);
         }
-      } catch (err) {
-        console.error("[returns] registerReverseDelivery threw", err);
+      } catch (err2) {
+        console.error("[returns] registerReverseDelivery threw", err2);
       }
     }
   }
@@ -27573,15 +28875,15 @@ async function createCustomerReturn(input) {
       status: "label_sent",
       labelPurchasedAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq24(returns.id, row.id)).returning();
+    }).where(eq25(returns.id, row.id)).returning();
     console.log("[returns] db update ok", { rowId: updated?.id ?? row.id });
-  } catch (err) {
-    console.error("[returns] db update threw", err);
+  } catch (err2) {
+    console.error("[returns] db update threw", err2);
   }
   return { ok: true, returnRow: updated ?? row };
 }
 async function markReceivedAndRefund(shopifyReturnId, opts) {
-  const [row] = await db.select().from(returns).where(eq24(returns.shopifyReturnId, shopifyReturnId)).limit(1);
+  const [row] = await db.select().from(returns).where(eq25(returns.shopifyReturnId, shopifyReturnId)).limit(1);
   if (!row) return { ok: false, error: `Unknown return: ${shopifyReturnId}` };
   if (row.status === "refunded" || row.status === "closed") return { ok: true };
   if (!row.lineItems) return { ok: false, error: "Return row has no line items snapshot" };
@@ -27612,7 +28914,7 @@ async function markReceivedAndRefund(shopifyReturnId, opts) {
     refundedAt: /* @__PURE__ */ new Date(),
     closedAt: /* @__PURE__ */ new Date(),
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq24(returns.id, row.id));
+  }).where(eq25(returns.id, row.id));
   return { ok: true };
 }
 async function recordLabelTracking(shopifyReturnId, update) {
@@ -27621,13 +28923,13 @@ async function recordLabelTracking(shopifyReturnId, update) {
     ...update.trackingNumber ? { trackingNumber: update.trackingNumber } : {},
     status: "in_transit",
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq24(returns.shopifyReturnId, shopifyReturnId));
+  }).where(eq25(returns.shopifyReturnId, shopifyReturnId));
 }
 async function listCustomerReturns(customerGid) {
-  return db.select().from(returns).where(eq24(returns.customerGid, customerGid)).orderBy(returns.createdAt);
+  return db.select().from(returns).where(eq25(returns.customerGid, customerGid)).orderBy(returns.createdAt);
 }
 async function getCustomerReturn(id, customerGid) {
-  const [row] = await db.select().from(returns).where(eq24(returns.id, id)).limit(1);
+  const [row] = await db.select().from(returns).where(eq25(returns.id, id)).limit(1);
   if (!row) {
     console.error("[returns] getCustomerReturn: no row for id", { id });
     return null;
@@ -27694,9 +28996,9 @@ async function handlePricingBatchRecompute(_req, res) {
     const { recomputeCatalog: recomputeCatalog2 } = await Promise.resolve().then(() => (init_pricing_apply_v2_server(), pricing_apply_v2_server_exports));
     const result = await recomputeCatalog2({ trigger: "batch" });
     res.json({ ok: true, ...result });
-  } catch (err) {
-    console.error("[cron:pricing-batch-recompute]", err);
-    res.status(500).json({ error: String(err) });
+  } catch (err2) {
+    console.error("[cron:pricing-batch-recompute]", err2);
+    res.status(500).json({ error: String(err2) });
   }
 }
 
@@ -27713,21 +29015,21 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and7, eq: eq26, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and7(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS4))).limit(100);
+    const { and: and8, eq: eq27, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and8(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS4))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq26(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq27(metaCapiFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq26(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq27(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
-  } catch (err) {
-    console.error("[cron:profit-summary] CAPI drain error:", err);
+  } catch (err2) {
+    console.error("[cron:profit-summary] CAPI drain error:", err2);
     return 0;
   }
 }
@@ -27737,21 +29039,21 @@ async function drainGa4Failures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and7, eq: eq26, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and7(isNull3(ga4PurchaseFailures2.resolvedAt), lt2(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS4))).limit(100);
+    const { and: and8, eq: eq27, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and8(isNull3(ga4PurchaseFailures2.resolvedAt), lt2(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS4))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
       if (result.ok) {
-        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq26(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq27(ga4PurchaseFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq26(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq27(ga4PurchaseFailures2.id, row.id));
       }
     }
     return resolved;
-  } catch (err) {
-    console.error("[cron:profit-summary] GA4 drain error:", err);
+  } catch (err2) {
+    console.error("[cron:profit-summary] GA4 drain error:", err2);
     return 0;
   }
 }
@@ -27775,9 +29077,9 @@ function createCronRoutes() {
       const { dailyFeedProcessor: dailyFeedProcessor2 } = await Promise.resolve().then(() => (init_feed_processor_server(), feed_processor_server_exports));
       const result = await dailyFeedProcessor2();
       res.json({ ok: true, topCandidates: result.topCandidates.length, needsImagen: result.needsImagen.length });
-    } catch (err) {
-      console.error("[cron:daily-feed-processor]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:daily-feed-processor]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/deal-activator", async (_req, res) => {
@@ -27785,9 +29087,9 @@ function createCronRoutes() {
       const { rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
       const result = await rotateDeal2();
       res.json({ ok: true, ...result });
-    } catch (err) {
-      console.error("[cron:deal-activator]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:deal-activator]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/homepage-healthcheck", async (_req, res) => {
@@ -27795,9 +29097,9 @@ function createCronRoutes() {
       const { runHomepageHealthcheck: runHomepageHealthcheck2 } = await Promise.resolve().then(() => (init_homepage_healthcheck_server(), homepage_healthcheck_server_exports));
       const result = await runHomepageHealthcheck2();
       res.status(result.ok ? 200 : 503).json(result);
-    } catch (err) {
-      console.error("[cron:homepage-healthcheck]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:homepage-healthcheck]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/notebook-healthcheck", async (_req, res) => {
@@ -27805,9 +29107,9 @@ function createCronRoutes() {
       const { runNotebookHealthcheck: runNotebookHealthcheck2 } = await Promise.resolve().then(() => (init_notebook_healthcheck_server(), notebook_healthcheck_server_exports));
       const result = await runNotebookHealthcheck2();
       res.status(result.ok ? 200 : 503).json(result);
-    } catch (err) {
-      console.error("[cron:notebook-healthcheck]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:notebook-healthcheck]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/profit-summary", async (_req, res) => {
@@ -27817,9 +29119,9 @@ function createCronRoutes() {
       const capiRetried = await drainMetaCapiFailures();
       const ga4Retried = await drainGa4Failures();
       res.json({ ok: true, capiRetried, ga4Retried });
-    } catch (err) {
-      console.error("[cron:profit-summary]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:profit-summary]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/review-reminders", async (_req, res) => {
@@ -27840,8 +29142,8 @@ function createCronRoutes() {
           });
           await markInviteSent2(invite.id);
           invitesSent++;
-        } catch (err) {
-          console.error("[cron:review-reminders] invite send failed", invite.id, err);
+        } catch (err2) {
+          console.error("[cron:review-reminders] invite send failed", invite.id, err2);
         }
       }
       if (!settings.remindersEnabled) {
@@ -27862,14 +29164,14 @@ function createCronRoutes() {
           });
           await markReminderSent2(invite.id);
           sent++;
-        } catch (err) {
-          console.error("[cron:review-reminders] Failed for invite", invite.id, err);
+        } catch (err2) {
+          console.error("[cron:review-reminders] Failed for invite", invite.id, err2);
         }
       }
       res.json({ ok: true, invitesDue: due.length, invitesSent, reminderTotal: invites.length, remindersSent: sent });
-    } catch (err) {
-      console.error("[cron:review-reminders]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:review-reminders]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   router.post("/regenerate-emma-rail", guard, async (req, res) => {
@@ -27893,9 +29195,9 @@ function createCronRoutes() {
       const { regenerateRailById: regenerateRailById2 } = await Promise.resolve().then(() => (init_emma_rails_server(), emma_rails_server_exports));
       const result = await regenerateRailById2(railId, dealHandle, trigger);
       res.json({ ok: result.ok, ...result });
-    } catch (err) {
-      console.error("[cron:regenerate-emma-rail]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:regenerate-emma-rail]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/owner-digest", async (req, res) => {
@@ -27904,9 +29206,9 @@ function createCronRoutes() {
       const force = req.query["force"] === "1" || req.body?.force === true;
       const result = await runOwnerDigest2({ force });
       res.json({ ok: true, ...result });
-    } catch (err) {
-      console.error("[cron:owner-digest]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:owner-digest]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/gsc-snapshot", async (_req, res) => {
@@ -27914,9 +29216,9 @@ function createCronRoutes() {
       const { runGscSnapshot: runGscSnapshot2 } = await Promise.resolve().then(() => (init_gsc_server(), gsc_server_exports));
       const result = await runGscSnapshot2();
       res.json({ ok: true, ...result });
-    } catch (err) {
-      console.error("[cron:gsc-snapshot]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:gsc-snapshot]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/gsc-index-sweep", async (req, res) => {
@@ -27927,9 +29229,9 @@ function createCronRoutes() {
         Number.isFinite(budgetParam) && budgetParam > 0 ? { budget: budgetParam } : {}
       );
       res.json({ ok: true, ...result });
-    } catch (err) {
-      console.error("[cron:gsc-index-sweep]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:gsc-index-sweep]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/indexnow-push", async (req, res) => {
@@ -27943,9 +29245,9 @@ function createCronRoutes() {
         ...Number.isFinite(limitParam) && limitParam > 0 ? { limit: limitParam } : {}
       });
       res.json({ ok: !result.error, ...result });
-    } catch (err) {
-      console.error("[cron:indexnow-push]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:indexnow-push]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/seo-daily", async (_req, res) => {
@@ -27953,9 +29255,9 @@ function createCronRoutes() {
       const { runSeoDaily: runSeoDaily2 } = await Promise.resolve().then(() => (init_seo_daily_server(), seo_daily_server_exports));
       const result = await runSeoDaily2();
       res.status(result.probeFailures > 0 ? 503 : 200).json({ ok: result.probeFailures === 0, ...result });
-    } catch (err) {
-      console.error("[cron:seo-daily]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:seo-daily]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/keyword-research", async (req, res) => {
@@ -27979,9 +29281,9 @@ function createCronRoutes() {
       }
       const result = await runKeywordResearch2(opts);
       res.json({ ok: true, ...result });
-    } catch (err) {
-      console.error("[cron:keyword-research]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:keyword-research]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/log-monitor", async (req, res) => {
@@ -27991,9 +29293,9 @@ function createCronRoutes() {
       const windowMinutes = typeof rawWindow === "number" && !isNaN(rawWindow) ? rawWindow : 15;
       const result = await runLogMonitor2({ windowMinutes });
       res.json({ ok: true, ...result });
-    } catch (err) {
-      console.error("[cron:log-monitor]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:log-monitor]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/pricing-batch-recompute", handlePricingBatchRecompute);
@@ -28015,9 +29317,9 @@ function createCronRoutes() {
       const { runImportMonitor: runImportMonitor2 } = await Promise.resolve().then(() => (init_import_monitor_server(), import_monitor_server_exports));
       const result = await runImportMonitor2({ source: "cron" });
       res.json({ ok: true, ...result });
-    } catch (err) {
-      console.error("[cron:import-monitor]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:import-monitor]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/import-enrich", async (_req, res) => {
@@ -28031,9 +29333,9 @@ function createCronRoutes() {
       const { runImportEnrichTick: runImportEnrichTick2 } = await Promise.resolve().then(() => (init_import_enrich_server(), import_enrich_server_exports));
       const result = await runImportEnrichTick2({ source: "cron" });
       res.json(result);
-    } catch (err) {
-      console.error("[cron:import-enrich]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:import-enrich]", err2);
+      res.status(500).json({ error: String(err2) });
     } finally {
       await kvDel2("lock:import-enrich");
     }
@@ -28044,9 +29346,22 @@ function createCronRoutes() {
       const result = await runCheckoutProbe2();
       await recordAndAlertProbe2("http", result);
       res.status(result.ok ? 200 : 503).json(result);
-    } catch (err) {
-      console.error("[cron:checkout-probe]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:checkout-probe]", err2);
+      res.status(500).json({ error: String(err2) });
+    }
+  });
+  cronRoute("/release-engine", async (req, res) => {
+    try {
+      const q = req.query;
+      const flag = (v) => v === "1" || v === "true";
+      const dryRun = flag(q["dryRun"]) || flag(q["dry"]);
+      const { runReleaseEngineCycle: runReleaseEngineCycle2 } = await Promise.resolve().then(() => (init_release_engine_server(), release_engine_server_exports));
+      const result = await runReleaseEngineCycle2({ dryRun });
+      res.status(result.ok ? 200 : 503).json(result);
+    } catch (err2) {
+      console.error("[cron:release-engine]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/checkout-probe-report", async (req, res) => {
@@ -28065,9 +29380,9 @@ function createCronRoutes() {
       const { recordAndAlertProbe: recordAndAlertProbe2 } = await Promise.resolve().then(() => (init_checkout_probe_server(), checkout_probe_server_exports));
       const out = await recordAndAlertProbe2("browser", result);
       res.json({ ok: true, ...out });
-    } catch (err) {
-      console.error("[cron:checkout-probe-report]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:checkout-probe-report]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/enrichment-batch-poller", async (_req, res) => {
@@ -28086,9 +29401,9 @@ function createCronRoutes() {
       const { advanceInflightJobs: advanceInflightJobs2 } = await Promise.resolve().then(() => (init_batch_orchestrator_server(), batch_orchestrator_server_exports));
       const result = await advanceInflightJobs2({ maxJobs: 10, perJobBudgetMs: 8e3 });
       res.json({ ok: true, ...result });
-    } catch (err) {
-      console.error("[cron:enrichment-batch-poller]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:enrichment-batch-poller]", err2);
+      res.status(500).json({ error: String(err2) });
     } finally {
       await kvDel2("lock:enrichment-poller");
     }
@@ -28109,9 +29424,9 @@ function createCronRoutes() {
       const { advanceInflightVideoJobs: advanceInflightVideoJobs2 } = await Promise.resolve().then(() => (init_video_pipeline_server(), video_pipeline_server_exports));
       const result = await advanceInflightVideoJobs2({ maxJobs: 5 });
       res.json({ ok: true, ...result });
-    } catch (err) {
-      console.error("[cron:video-job-poller]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:video-job-poller]", err2);
+      res.status(500).json({ error: String(err2) });
     } finally {
       await kvDel2("lock:video-poller");
     }
@@ -28145,9 +29460,9 @@ function createCronRoutes() {
               );
             }
             results.push({ url, status: r.status, ok });
-          } catch (err) {
-            console.error(`[cron:aeo-surface-check] fetch failed for ${url}:`, err);
-            results.push({ url, status: 0, ok: false, error: String(err) });
+          } catch (err2) {
+            console.error(`[cron:aeo-surface-check] fetch failed for ${url}:`, err2);
+            results.push({ url, status: 0, ok: false, error: String(err2) });
           }
         })
       );
@@ -28159,9 +29474,9 @@ function createCronRoutes() {
         );
       }
       res.json({ ok: failures.length === 0, checked: results.length, failures: failures.length, results });
-    } catch (err) {
-      console.error("[cron:aeo-surface-check]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:aeo-surface-check]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/inventory-check", async (_req, res) => {
@@ -28175,9 +29490,9 @@ function createCronRoutes() {
       } else {
         res.json({ ok: true, rotated: false });
       }
-    } catch (err) {
-      console.error("[cron:inventory-check]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:inventory-check]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   router.post("/warm-discovery-index", guard, async (_req, res) => {
@@ -28194,9 +29509,9 @@ function createCronRoutes() {
         console.log(`[cron:warm-discovery-index] wrote ${fresh.length} products to KV + Neon`);
       }
       res.json({ ok: true, count: fresh.length });
-    } catch (err) {
-      console.error("[cron:warm-discovery-index]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:warm-discovery-index]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/warm-homepage", async (_req, res) => {
@@ -28210,9 +29525,9 @@ function createCronRoutes() {
         sections: p.sections.length,
         rails: p.rails.length
       });
-    } catch (err) {
-      console.error("[cron:warm-homepage]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:warm-homepage]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/warm-homepage-b", async (_req, res) => {
@@ -28226,9 +29541,9 @@ function createCronRoutes() {
         rails: p.rails.length,
         total: p.total
       });
-    } catch (err) {
-      console.error("[cron:warm-homepage-b]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:warm-homepage-b]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   cronRoute("/warm", async (_req, res) => {
@@ -28246,8 +29561,8 @@ function createCronRoutes() {
             const body = await r.json();
             discoveryCount = body.count ?? 0;
           }
-        } catch (err) {
-          console.warn("[cron:warm] discovery rebuild fetch failed:", err);
+        } catch (err2) {
+          console.warn("[cron:warm] discovery rebuild fetch failed:", err2);
         }
       }
       let homepageBytes = 0;
@@ -28257,8 +29572,8 @@ function createCronRoutes() {
         const p = await warmHomepagePayloadA2({ force: false });
         homepageBytes = JSON.stringify(p).length;
         homepageRails = p.rails.length;
-      } catch (err) {
-        console.warn("[cron:warm] homepage payload warm failed:", err);
+      } catch (err2) {
+        console.warn("[cron:warm] homepage payload warm failed:", err2);
       }
       let storefrontBytes = 0;
       let storefrontRails = 0;
@@ -28267,15 +29582,15 @@ function createCronRoutes() {
         const p = await warmHomepagePayloadB2({ force: false });
         storefrontBytes = JSON.stringify(p).length;
         storefrontRails = p.rails.length;
-      } catch (err) {
-        console.warn("[cron:warm] storefront payload warm failed:", err);
+      } catch (err2) {
+        console.warn("[cron:warm] storefront payload warm failed:", err2);
       }
       let liveHandle = null;
       try {
         const { kvGet: kvGet2, KV_KEYS: KV_KEYS2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
         liveHandle = await kvGet2(KV_KEYS2.liveDealHandle) ?? null;
-      } catch (err) {
-        console.warn("[cron:warm] could not resolve live deal handle:", err);
+      } catch (err2) {
+        console.warn("[cron:warm] could not resolve live deal handle:", err2);
       }
       const pagesWarmed = [];
       if (baseUrl2) {
@@ -28289,8 +29604,8 @@ function createCronRoutes() {
               });
               await r.text();
               pagesWarmed.push(url);
-            } catch (err) {
-              console.warn(`[cron:warm] CDN warm failed for ${url}:`, err);
+            } catch (err2) {
+              console.warn(`[cron:warm] CDN warm failed for ${url}:`, err2);
             }
           })
         );
@@ -28304,9 +29619,9 @@ function createCronRoutes() {
         storefrontBytes,
         storefrontRails
       });
-    } catch (err) {
-      console.error("[cron:warm]", err);
-      res.status(500).json({ error: String(err) });
+    } catch (err2) {
+      console.error("[cron:warm]", err2);
+      res.status(500).json({ error: String(err2) });
     }
   });
   return router;
@@ -28316,7 +29631,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq25, sql as sql16 } from "drizzle-orm";
+import { eq as eq26, sql as sql16 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret) return false;
@@ -28354,12 +29669,12 @@ async function handleOrderCreated(order) {
         }),
         type: "json"
       }
-    }).catch((err) => console.error("[webhook] metafield write failed:", err));
+    }).catch((err2) => console.error("[webhook] metafield write failed:", err2));
     const dealHistoryUpdate = db2.update(dealHistory).set({
-      unitsSold: db2.$count(dealHistory, eq25(dealHistory.sku, lineItem.sku)),
+      unitsSold: db2.$count(dealHistory, eq26(dealHistory.sku, lineItem.sku)),
       totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
       totalProfit: String(profit * lineItem.quantity)
-    }).where(eq25(dealHistory.sku, lineItem.sku)).catch(() => {
+    }).where(eq26(dealHistory.sku, lineItem.sku)).catch(() => {
     });
     await Promise.all([metafieldWrite, dealHistoryUpdate]);
   }));
@@ -28373,8 +29688,8 @@ async function handleOrderCreated(order) {
       unitPrice: li.price
     }));
     if (rows.length > 0) await db2.insert(orderLineItems).values(rows);
-  } catch (err) {
-    console.error("[webhook:order-created] line items insert failed:", err);
+  } catch (err2) {
+    console.error("[webhook:order-created] line items insert failed:", err2);
   }
   const uniqueHandles = Array.from(
     new Set(resolvedHandles.filter((h) => !!h))
@@ -28391,8 +29706,8 @@ async function handleOrderCreated(order) {
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });
-        } catch (err) {
-          console.error("[webhook:order-created] copurchase upsert failed:", err);
+        } catch (err2) {
+          console.error("[webhook:order-created] copurchase upsert failed:", err2);
         }
       }
     }
@@ -28452,8 +29767,8 @@ async function handleOrderCreated(order) {
       }).onConflictDoNothing({ target: metaCapiFailures.orderId });
       console.error("[webhook:order-created] Meta CAPI Purchase failed, queued for retry:", result.error);
     }
-  } catch (err) {
-    console.error("[webhook:order-created] Meta CAPI Purchase block error:", err);
+  } catch (err2) {
+    console.error("[webhook:order-created] Meta CAPI Purchase block error:", err2);
   }
   try {
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
@@ -28475,8 +29790,8 @@ async function handleOrderCreated(order) {
       await db2.insert(ga4PurchaseFailures).values({ orderId: String(order.id), payload: gaEvent, attempts: 1, lastError: gaResult.error ?? "unknown" }).onConflictDoNothing({ target: ga4PurchaseFailures.orderId });
       console.error("[webhook:order-created] GA4 purchase failed, queued for retry:", gaResult.error);
     }
-  } catch (err) {
-    console.error("[webhook:order-created] GA4 purchase block error:", err);
+  } catch (err2) {
+    console.error("[webhook:order-created] GA4 purchase block error:", err2);
   }
   try {
     if (order.email) {
@@ -28507,8 +29822,8 @@ async function handleOrderCreated(order) {
         }))
       });
     }
-  } catch (err) {
-    console.error("[webhook:order-created] Klaviyo Placed Order block error:", err);
+  } catch (err2) {
+    console.error("[webhook:order-created] Klaviyo Placed Order block error:", err2);
   }
 }
 async function handleOrderFulfilled(order) {
@@ -28537,7 +29852,7 @@ async function handleOrderFulfilled(order) {
       reviewerEmail: order.email,
       reviewerName,
       sendAfter
-    }).catch((err) => console.error("[webhook:invite-create]", err));
+    }).catch((err2) => console.error("[webhook:invite-create]", err2));
   }
 }
 async function handleProductCreated(product) {
@@ -28586,13 +29901,13 @@ async function handleReturnsUpdate(payload) {
       // Shopify's Return query doesn't expose granular tracking states;
       // we just flip status → in_transit. Actual delivery triggers refund below.
       trackingStatus: "in_transit"
-    }).catch((err) => console.error("[webhook:returns-update] tracking update failed:", err));
+    }).catch((err2) => console.error("[webhook:returns-update] tracking update failed:", err2));
   }
   const status = (current.status ?? "").toUpperCase();
   if (status === "DECLINED" || status === "CANCELED") {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { returns: returns2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq25(returns2.shopifyReturnId, returnGid));
+    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq26(returns2.shopifyReturnId, returnGid));
     return;
   }
   const terminalSignals = ["CLOSED", "RECEIVED", "PROCESSED"];
@@ -28614,7 +29929,7 @@ function createWebhookRoutes() {
     const order = JSON.parse(req.body.toString());
     res.json({ ok: true });
     handleOrderCreated(order).catch(
-      (err) => console.error("[webhook:order-created]", err)
+      (err2) => console.error("[webhook:order-created]", err2)
     );
   });
   router.post("/order-fulfilled", async (req, res) => {
@@ -28625,7 +29940,7 @@ function createWebhookRoutes() {
     const order = JSON.parse(req.body.toString());
     res.json({ ok: true });
     handleOrderFulfilled(order).catch(
-      (err) => console.error("[webhook:order-fulfilled]", err)
+      (err2) => console.error("[webhook:order-fulfilled]", err2)
     );
   });
   router.post("/product-created", async (req, res) => {
@@ -28636,7 +29951,7 @@ function createWebhookRoutes() {
     const product = JSON.parse(req.body.toString());
     res.json({ ok: true });
     handleProductCreated(product).catch(
-      (err) => console.error("[webhook:product-created]", err)
+      (err2) => console.error("[webhook:product-created]", err2)
     );
   });
   router.post("/product-updated", async (req, res) => {
@@ -28647,13 +29962,13 @@ function createWebhookRoutes() {
     let product = null;
     try {
       product = JSON.parse(req.body.toString());
-    } catch (err) {
-      console.error("[webhook:product-updated] malformed payload, skipping:", err);
+    } catch (err2) {
+      console.error("[webhook:product-updated] malformed payload, skipping:", err2);
     }
     res.json({ ok: true });
     if (product) {
       handleProductUpdated(product).catch(
-        (err) => console.error("[webhook:product-updated]", err)
+        (err2) => console.error("[webhook:product-updated]", err2)
       );
     }
   });
@@ -28665,7 +29980,7 @@ function createWebhookRoutes() {
     const level = JSON.parse(req.body.toString());
     res.json({ ok: true });
     handleInventoryUpdate(level).catch(
-      (err) => console.error("[webhook:inventory-update]", err)
+      (err2) => console.error("[webhook:inventory-update]", err2)
     );
   });
   router.post("/returns-update", async (req, res) => {
@@ -28676,7 +29991,7 @@ function createWebhookRoutes() {
     const payload = JSON.parse(req.body.toString());
     res.json({ ok: true });
     handleReturnsUpdate(payload).catch(
-      (err) => console.error("[webhook:returns-update]", err)
+      (err2) => console.error("[webhook:returns-update]", err2)
     );
   });
   return router;
@@ -28899,13 +30214,13 @@ function buildMcpServer() {
           if (u.reason) patch.notes = u.reason;
           await client5.patch(id).set(patch).commit();
           results.push({ idOrTerm: u.idOrTerm, status: u.status, resolvedId: id, ok: true });
-        } catch (err) {
+        } catch (err2) {
           results.push({
             idOrTerm: u.idOrTerm,
             status: u.status,
             resolvedId: null,
             ok: false,
-            error: err instanceof Error ? err.message : String(err)
+            error: err2 instanceof Error ? err2.message : String(err2)
           });
         }
       }
@@ -28971,8 +30286,8 @@ function buildMcpServer() {
         const data = await res.json().catch(() => ({ raw: "unparseable response" }));
         if (!res.ok) return jsonResult({ ok: false, status: res.status, ...data });
         return jsonResult(data);
-      } catch (err) {
-        return textResult(`Research call failed: ${err instanceof Error ? err.message : String(err)}`);
+      } catch (err2) {
+        return textResult(`Research call failed: ${err2 instanceof Error ? err2.message : String(err2)}`);
       }
     }
   );
@@ -29009,10 +30324,10 @@ function createMcpRoutes() {
       const server = buildMcpServer();
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
-    } catch (err) {
-      console.error("[mcp:seo-bank]", err);
+    } catch (err2) {
+      console.error("[mcp:seo-bank]", err2);
       if (!res.headersSent) {
-        res.status(500).json({ error: String(err) });
+        res.status(500).json({ error: String(err2) });
       }
     }
   });
