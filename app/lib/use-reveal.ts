@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
-import { useReducedMotion } from 'motion/react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 export interface UseRevealOptions {
   /** Animate one time then stop observing. Default true. */
@@ -22,13 +21,32 @@ export interface UseRevealResult {
   mounted: boolean
   /** prefers-reduced-motion. When true, callers render the final state. */
   reduced: boolean
+  /** True only for an element that was below the fold at first paint, so it
+      can be hidden and animated in without the user ever seeing it visible.
+      Above-the-fold content is never armed: hiding what has already painted
+      costs FCP/LCP and buys nothing the reader can see. */
+  armed: boolean
+}
+
+/** SSR-safe: useLayoutEffect warns on the server, and there is no layout to read there. */
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
 /**
- * SSR-safe scroll-reveal signal. Server and first client render report
- * mounted=false so callers paint the visible/final state; only after mount
- * does the reveal arm. IntersectionObserver is skipped under reduced motion
- * or when disabled (in which case the element is treated as in view).
+ * SSR-safe scroll-reveal signal, CSS-driven.
+ *
+ * Server and first client render report mounted=false and armed=false, so
+ * callers paint the visible/final state and hydration matches. Before the
+ * browser's first paint, a layout effect measures the element: only content
+ * BELOW the fold is armed (hidden, then animated in when scrolled to).
+ * Anything already on screen stays visible and never animates, which is why
+ * there is no hide-then-reshow flash and why the hero costs nothing.
+ *
+ * Reduced motion arms nothing at all.
  */
 export function useReveal(opts: UseRevealOptions = {}): UseRevealResult {
   const {
@@ -38,17 +56,23 @@ export function useReveal(opts: UseRevealOptions = {}): UseRevealResult {
     disabled = false,
   } = opts
 
-  const reduced = useReducedMotion() ?? false
   const ref = useRef<HTMLElement | null>(null)
   const [mounted, setMounted] = useState(false)
   const [inView, setInView] = useState(false)
+  const [armed, setArmed] = useState(false)
+  const [reduced, setReduced] = useState(false)
 
-  useEffect(() => {
+  // Runs before the browser paints, so arming never flashes.
+  useIsomorphicLayoutEffect(() => {
     setMounted(true)
-  }, [])
 
-  useEffect(() => {
-    if (disabled || reduced) {
+    if (prefersReducedMotion()) {
+      setReduced(true)
+      setInView(true)
+      return
+    }
+    // `disabled` marks above-the-fold content, which is never armed.
+    if (disabled) {
       setInView(true)
       return
     }
@@ -57,6 +81,27 @@ export function useReveal(opts: UseRevealOptions = {}): UseRevealResult {
       setInView(true)
       return
     }
+    // A hidden document (background tab, prerender) delivers no IntersectionObserver
+    // callbacks, so arming there would hide content with nothing to bring it back.
+    // Never arm what cannot be observed.
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      setInView(true)
+      return
+    }
+    // Below the fold at first paint? Only then is it safe to hide it.
+    const belowFold = el.getBoundingClientRect().top >= window.innerHeight
+    if (!belowFold) {
+      setInView(true)
+      return
+    }
+    setArmed(true)
+  }, [disabled])
+
+  useEffect(() => {
+    if (!armed) return
+    const el = ref.current
+    if (!el) return
+
     const io = new IntersectionObserver(
       ([entry]) => {
         if (!entry) return
@@ -71,7 +116,7 @@ export function useReveal(opts: UseRevealOptions = {}): UseRevealResult {
     )
     io.observe(el)
     return () => io.disconnect()
-  }, [disabled, reduced, once, amount, rootMargin])
+  }, [armed, once, amount, rootMargin])
 
-  return { ref, inView, mounted, reduced }
+  return { ref, inView, mounted, reduced, armed }
 }

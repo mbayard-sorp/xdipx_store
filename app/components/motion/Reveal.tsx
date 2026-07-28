@@ -1,14 +1,6 @@
-import { motion, type MotionStyle } from 'motion/react'
-import type { ElementType, ReactNode } from 'react'
+import type { CSSProperties, ElementType, ReactNode } from 'react'
 import { useReveal } from '~/lib/use-reveal'
-import {
-  REVEAL_DISTANCE,
-  STAGGER_CLAMP,
-  STAGGER_STEP,
-  revealVariants,
-  springEntrance,
-  type RevealVariant,
-} from './variants'
+import { REVEAL_DISTANCE, STAGGER_CLAMP, STAGGER_STEP, type RevealVariant } from './variants'
 
 interface RevealProps {
   /** fade | up (default) | scale */
@@ -19,24 +11,27 @@ interface RevealProps {
   index?: number
   /** Animate once then stop. Default true. */
   once?: boolean
-  /** Skip IntersectionObserver and reveal on a time delay (above-the-fold). */
+  /** Above-the-fold: render visible, never animate. */
   disabled?: boolean
   /** Rendered element. Default 'div'. */
   as?: ElementType
   className?: string
-  style?: MotionStyle
+  style?: CSSProperties
   children: ReactNode
 }
 
 /**
- * SSR-safe scroll-reveal wrapper.
+ * SSR-safe scroll-reveal wrapper. CSS transitions, no JS animation runtime.
  *
- * Server + first client paint render the FINAL (visible) state, so there is
- * never a flash of hidden content if JS is slow/disabled and hydration always
- * matches. Only after mount does the element re-render with a hidden initial
- * state and animate to visible when it scrolls into view. Reduced-motion users
- * always get the final state with no transform. Reveals are transform/opacity
- * only — zero layout shift.
+ * The server and the browser's first paint render the FINAL (visible) state,
+ * so there is never a flash of hidden content if JS is slow or disabled, and
+ * hydration always matches. Before the first paint, `useReveal` arms only the
+ * elements that are BELOW the fold; those get hidden and transition in when
+ * scrolled to. Anything already on screen is left alone, so an entrance
+ * animation can never delay FCP or LCP.
+ *
+ * Reveals are transform/opacity only — zero layout shift. Reduced motion
+ * renders the final state with no transform.
  */
 export function Reveal({
   variant = 'up',
@@ -44,29 +39,30 @@ export function Reveal({
   index = 0,
   once = true,
   disabled = false,
-  as = 'div',
+  as: Tag = 'div',
   className,
   style,
   children,
 }: RevealProps) {
-  const { ref, inView, mounted, reduced } = useReveal({ once, disabled })
-  const MotionTag = motion[as as keyof typeof motion] as typeof motion.div
+  const { ref, inView, armed } = useReveal({ once, disabled })
 
-  const animateIn = mounted && !reduced
   const staggerDelay = Math.min(index, STAGGER_CLAMP) * STAGGER_STEP
+  const classes = ['reveal', `reveal-${variant}`]
+  if (armed) classes.push('reveal-armed')
+  if (armed && inView) classes.push('reveal-in')
+  if (className) classes.push(className)
+
+  const delaySeconds = delay + staggerDelay
+  // A CSS custom property is not in CSSProperties; the cast is the standard escape.
+  const resolvedStyle =
+    delaySeconds > 0
+      ? ({ ...style, '--reveal-delay': `${delaySeconds}s` } as CSSProperties)
+      : style
 
   return (
-    <MotionTag
-      ref={ref as never}
-      {...(className ? { className } : {})}
-      {...(style ? { style } : {})}
-      initial={animateIn ? 'hidden' : 'visible'}
-      animate={animateIn ? (inView ? 'visible' : 'hidden') : 'visible'}
-      variants={revealVariants[variant]}
-      transition={{ ...springEntrance, delay: delay + staggerDelay }}
-    >
+    <Tag ref={ref} className={classes.join(' ')} style={resolvedStyle}>
       {children}
-    </MotionTag>
+    </Tag>
   )
 }
 

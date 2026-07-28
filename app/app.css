@@ -176,6 +176,31 @@ em.brand {
 .slide-in-right { animation: slide-in-right 0.28s var(--ease-entrance) forwards; }
 .slide-in-left  { animation: slide-in-left  0.28s var(--ease-entrance) forwards; }
 
+/* Editorial scroll reveal — the CSS half of <Reveal> (app/components/motion/Reveal.tsx).
+   The base class is deliberately empty: server-rendered and above-the-fold
+   elements carry only `.reveal` and are fully visible, so an entrance can never
+   cost FCP or LCP. `.reveal-armed` is added before the first paint, and only to
+   elements below the fold; `.reveal-in` transitions them back when scrolled to.
+   Transform/opacity only — zero layout shift. */
+.reveal {
+  /* visible: no rules needed. */
+}
+
+.reveal-armed {
+  opacity: 0;
+  will-change: opacity, transform;
+}
+.reveal-armed.reveal-up    { transform: translateY(var(--reveal-distance)); }
+.reveal-armed.reveal-scale { transform: scale(0.97); }
+
+.reveal-armed.reveal-in {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity   var(--duration-slow) var(--ease-entrance) var(--reveal-delay, 0s),
+    transform var(--duration-slow) var(--ease-entrance) var(--reveal-delay, 0s);
+}
+
 /* TrustBar mobile marquee */
 @keyframes marquee {
   0%   { transform: translateX(0); }
@@ -193,6 +218,14 @@ em.brand {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  /* useReveal never arms under reduced motion, so this should be unreachable.
+     It exists so a future caller cannot strand content at opacity 0: with
+     transitions disabled above, an armed element would otherwise never fade in. */
+  .reveal-armed {
+    opacity: 1 !important;
+    transform: none !important;
   }
 }
 
