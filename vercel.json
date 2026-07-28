@@ -7,7 +7,15 @@
       "src": "server/vercel-entry.mjs",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["build/**", "docs/**", ".claude/agents/**", "node_modules/@react-router/**", "node_modules/react-router/**", "node_modules/react-router-dom/**"],
+        "includeFiles": [
+          "build/**",
+          "docs/**",
+          ".claude/agents/**",
+          "node_modules/@react-router/**",
+          "node_modules/react-router/**",
+          "node_modules/react-router-dom/**",
+          "node_modules/nodemailer/**"
+        ],
         "maxDuration": 300,
         "memory": 1024
       }
@@ -20,28 +28,97 @@
     }
   ],
   "crons": [
-    { "path": "/cron/daily-feed-processor", "schedule": "45 23 * * *" },
-    { "path": "/cron/deal-activator",       "schedule": "59 23 * * *" },
-    { "path": "/cron/profit-summary",       "schedule": "5 0 * * *"  },
-    { "path": "/cron/review-reminders",     "schedule": "0 9 * * *"  },
-    { "path": "/cron/inventory-check",      "schedule": "*/15 * * * *" },
-    { "path": "/cron/log-monitor",          "schedule": "*/15 * * * *" },
-    { "path": "/cron/pricing-batch-recompute", "schedule": "0 7 * * *"  },
-    { "path": "/cron/import-monitor",          "schedule": "0 8 * * *"  },
-    { "path": "/cron/import-enrich",           "schedule": "*/30 * * * *" },
-    { "path": "/cron/checkout-probe",          "schedule": "0 */6 * * *"  },
-    { "path": "/cron/enrichment-batch-poller", "schedule": "*/2 * * * *"  },
-    { "path": "/cron/video-job-poller",        "schedule": "*/2 * * * *"  },
-    { "path": "/cron/aeo-surface-check",       "schedule": "0 6 * * 0"   },
-    { "path": "/cron/homepage-healthcheck",    "schedule": "*/30 * * * *" },
-    { "path": "/cron/notebook-healthcheck",    "schedule": "41 7 * * *"   },
-    { "path": "/cron/warm",                    "schedule": "*/15 * * * *" },
-    { "path": "/cron/gsc-snapshot",            "schedule": "0 6 * * 1"   },
-    { "path": "/cron/gsc-index-sweep",         "schedule": "15 */3 * * *" },
-    { "path": "/cron/keyword-research",        "schedule": "0 2 1 * *"   },
-    { "path": "/cron/indexnow-push",           "schedule": "40 4 * * *"  },
-    { "path": "/cron/seo-daily",               "schedule": "30 12 * * *" },
-    { "path": "/cron/owner-digest",            "schedule": "0 13 * * *"  },
-    { "path": "/cron/release-engine",          "schedule": "*/10 * * * *" }
+    {
+      "path": "/cron/daily-feed-processor",
+      "schedule": "45 23 * * *"
+    },
+    {
+      "path": "/cron/deal-activator",
+      "schedule": "59 23 * * *"
+    },
+    {
+      "path": "/cron/profit-summary",
+      "schedule": "5 0 * * *"
+    },
+    {
+      "path": "/cron/review-reminders",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/cron/inventory-check",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/cron/log-monitor",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/cron/pricing-batch-recompute",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/cron/import-monitor",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/cron/import-enrich",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/cron/checkout-probe",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/cron/enrichment-batch-poller",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/cron/video-job-poller",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/cron/aeo-surface-check",
+      "schedule": "0 6 * * 0"
+    },
+    {
+      "path": "/cron/homepage-healthcheck",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/cron/notebook-healthcheck",
+      "schedule": "41 7 * * *"
+    },
+    {
+      "path": "/cron/warm",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/cron/gsc-snapshot",
+      "schedule": "0 6 * * 1"
+    },
+    {
+      "path": "/cron/gsc-index-sweep",
+      "schedule": "15 */3 * * *"
+    },
+    {
+      "path": "/cron/keyword-research",
+      "schedule": "0 2 1 * *"
+    },
+    {
+      "path": "/cron/indexnow-push",
+      "schedule": "40 4 * * *"
+    },
+    {
+      "path": "/cron/seo-daily",
+      "schedule": "30 12 * * *"
+    },
+    {
+      "path": "/cron/owner-digest",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/cron/release-engine",
+      "schedule": "*/10 * * * *"
+    }
   ]
 }
