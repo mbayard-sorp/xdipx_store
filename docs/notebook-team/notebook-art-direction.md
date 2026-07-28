@@ -306,9 +306,10 @@ series landing.
    Pitch: "A real problem, what's actually going on underneath, and what honestly helps." Collects
    the twice-weekly narratives (content plan §8B): mismatched desire, first-toy overwhelm, dryness,
    overstimulation. Unlike the other spines, reading order is lightest-topic-first rather than
-   beginner-first, and cover art leans on the warm-human-context subject option in
-   `image-brief.md` (bedside, cropped hands, fabric, soft light) rather than product-forward
-   lockups.
+   beginner-first, and cover art takes the **§0-H human hero** archetype in `image-brief.md`
+   (expressive adult figures, faces visible, warm light — owner-codified 2026-07-28, and the
+   governing clause for Real Talk art; product-forward lockups are for product-article
+   categories only).
 
 Kept in reserve for the comparisons slot: **This or That**, "Two honest options, side by side, so
 you can pick the one that fits." Add it once the comparisons backlog has depth.

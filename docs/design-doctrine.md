@@ -214,13 +214,39 @@ program"); prompts start from the matching per-surface scaffold in
   manicure that rhymes). Uses: wayfinder tiles, rail cards, ranked-set tiles,
   promos.
 - **C — in-situ bright scene.** Product in a believable sunlit private space
-  among personal objects, or a cropped human presence (hands, thigh, torso —
-  anonymous scene models are never shown face-on; the approved Emma-likeness
-  carve-out is the one exception, product still the hero; never explicit). Bright, never boudoir-gloom. Uses: hero,
-  photo/couples band, occasion edits, human-context wayfinder tiles.
+  among personal objects, or a human presence (hands, thigh, torso, or full
+  figure with face visible — the former never-face-on rule is withdrawn, owner
+  directive 2026-07-28: more faces help customers feel seen; never explicit).
+  Bright, never boudoir-gloom. Uses: hero, photo/couples band, occasion edits,
+  human-context wayfinder tiles, Notebook human heroes (per
+  `docs/notebook-team/image-brief.md` §0-H).
+- **Depicted-people hard rules (bind every archetype that shows a person):**
+  **no images of children, ever** — and because generation drifts young without
+  being asked to, the rule is enforced as *unambiguous adulthood*: prompts state
+  adult age markers, and the vision gate hard-rejects any face or body with
+  youthful ambiguity, on ambiguity rather than intent. Uncanny faces (dead eyes,
+  warped features, wrong teeth) are an automatic reject. Vary age, body type,
+  and skin tone deliberately across assets. Emma's likeness follows the approved
+  Emma-likeness policy; expressive/emotional depictions of Emma and her fictional
+  friends are licensed on Notebook human-hero surfaces (they are openly
+  hyperbolic fiction, not lived-experience claims).
 - **D — editorial metaphor macro.** One tasteful single-concept scene (silk,
   water, soft foil, fruit) standing in for sensation. Uses: PDP mood slides,
   Notebook cover system.
+- **E — surreal brand art / visual wit** (owner license 2026-07-28, full).
+  Blended forms, product-fantasy hybrids, and sexually euphemistic still
+  lifes rendered with editorial craft: a dildo cactus in bloom, an
+  air-pulsation dolphin surfacing through silk, an eggplant in a puddle, a
+  rabbit vibrator nested in an anatomically-suggestive orchid, a "bouquet"
+  of toys arranged as tulips in a vase, a wand as a lighthouse sweeping
+  light across a silk sea. Invent freely; the goal is the image nobody has
+  thought of, shareable enough to travel. Humor licensed. Fences: witty
+  never crude, no literal explicit anatomy; ground lock and high-key
+  daylight still bind (craft is what separates art from a shitpost); owned
+  surfaces only (social imagery rules unchanged); never on health-heavy or
+  emotionally raw surfaces — those keep sincere art. Uses: homepage
+  editorial tiles, product-article blog heroes (§0-P surreal option), PDP
+  mood slides, OG/share images, campaign moments.
 
 **The ground lock:** backdrops come only from `coral-soft`, `plum-soft`, and
 `paper` tints, high-key daylight (sage is an accent color, never a ground: there
