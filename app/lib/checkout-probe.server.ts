@@ -235,8 +235,9 @@ export async function runCheckoutProbe(): Promise<ProbeResult> {
  * throttled per failed step so a persistent break pages at most once every 6h.
  * Used by both the HTTP cron tier and the browser report endpoint.
  */
-export async function recordAndAlertProbe(tier: 'http' | 'browser', result: ProbeResult): Promise<{ rowId: number; alerted: boolean }> {
+export async function recordAndAlertProbe(tier: 'http' | 'browser', result: ProbeResult): Promise<{ rowId: number; alerted: boolean; ticketId: number }> {
   let alerted = false
+  let ticketId = 0
 
   if (!result.ok) {
     const failedStep = result.failedStep ?? 'unknown'
@@ -258,6 +259,38 @@ export async function recordAndAlertProbe(tier: 'http' | 'browser', result: Prob
       await sendOwnerSms(`xdipx checkout probe FAILED at ${failedStep} (${tier}). Purchase path broken.`)
       alerted = true
     }
+
+    // Ticket the failure onto the improvement bus at top priority. This is an
+    // ADDITION to the Sentry capture and the owner email/SMS above, never a
+    // replacement: checkout is a protected path, so a human is always paged and
+    // a human always fixes it. No automated fix path may touch checkout, which
+    // is why the ticket exists purely as the visible, trackable record of an
+    // incident rather than as work for an agent to claim and merge.
+    //
+    // Note the deliberate ordering: the alerting has already run by the time we
+    // get here, so nothing about ticket filing can delay or suppress a page.
+    try {
+      const { fileDetectionTicket, makeDedupeKey } = await import('~/lib/detection-tickets.server')
+      const stepLines = result.steps
+        .map(s => `${s.ok ? 'ok  ' : 'FAIL'} ${s.step}${s.detail ? ` (${s.detail})` : ''}`)
+        .join('\n')
+      ticketId = await fileDetectionTicket({
+        detector: 'checkout-probe',
+        dedupeKey: makeDedupeKey('probe', tier, failedStep),
+        priority: 1,
+        category: 'other',
+        kind: 'code',
+        suggestion:
+          `P0 checkout probe FAILED at "${failedStep}" (${tier} tier).\n\n`
+          + `The purchase path is broken up to at least this step, so the store may be taking $0.\n\n`
+          + `${stepLines}\n\n`
+          + 'PROTECTED PATH: checkout, payment, and cart are owner-only. Do not open an automated '
+          + 'fix PR against them. This ticket is the incident record; the owner has already been '
+          + 'paged by email and SMS.',
+      })
+    } catch (err) {
+      console.error('[checkout-probe] ticket filing failed (ignored):', err)
+    }
   }
 
   const inserted = await db.insert(checkoutProbeRuns).values({
@@ -269,5 +302,5 @@ export async function recordAndAlertProbe(tier: 'http' | 'browser', result: Prob
     alerted,
   }).returning({ id: checkoutProbeRuns.id })
 
-  return { rowId: inserted[0]?.id ?? 0, alerted }
+  return { rowId: inserted[0]?.id ?? 0, alerted, ticketId }
 }
