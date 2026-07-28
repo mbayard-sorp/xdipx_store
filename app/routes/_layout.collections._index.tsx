@@ -9,10 +9,11 @@ import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredD
 import { CollectionStructuredData } from '~/components/seo/CollectionStructuredData'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { NotebookRail } from '~/components/blog/NotebookRail'
+import { FREE_SHIPPING_THRESHOLD } from '~/lib/shipping'
 
 const HUB_TITLE_DEFAULT = 'Shop Intimate-Wellness Collections — Curated by Emma'
 const HUB_DESCRIPTION_DEFAULT =
-  "Every category xdipx covers — wands, vibrators, lubes, wear, couples picks. Editorially curated by Emma, ships discreet, free US shipping over $59."
+  `Every category xdipx covers — wands, vibrators, lubes, wear, couples picks. Editorially curated by Emma, ships discreet, free US shipping over $${FREE_SHIPPING_THRESHOLD}.`
 const HUB_H1_DEFAULT = 'Browse collections'
 const HUB_INTRO_DEFAULT = "Every category Emma covers — wands, vibrators, lubes, wear, couples picks. Pick a shelf and start browsing, or let Emma's pick guide you on the home page."
 

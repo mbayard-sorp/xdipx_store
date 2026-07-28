@@ -390,6 +390,13 @@ export interface SiteBanner {
   link?: string
 }
 
+/** Compact sitewide footer link (brand row / category row). */
+export interface FooterQuickLink {
+  _key: string
+  label: string
+  href: string
+}
+
 export interface SiteSettings {
   _id: string
   logoUrl?: string
@@ -404,6 +411,8 @@ export interface SiteSettings {
   footerCopyright?: string
   footerDisclaimer?: string
   footerColumns?: FooterColumn[]
+  footerBrandLinks?: FooterQuickLink[]
+  footerCategoryLinks?: FooterQuickLink[]
 }
 
 // ─── Generic Page ─────────────────────────────────────────────────────────────

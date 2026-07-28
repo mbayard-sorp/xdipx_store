@@ -24,7 +24,7 @@ import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { SessionProvider } from '~/lib/session-context'
 import { withTimeout } from '~/lib/with-timeout.server'
 import type { Product } from '~/types'
-import type { AnnouncementBarBlock, MegaMenuBanner, SocialLink, FooterColumn, SiteBanner as SiteBannerData } from '~/types/cms'
+import type { AnnouncementBarBlock, MegaMenuBanner, SocialLink, FooterColumn, FooterQuickLink, SiteBanner as SiteBannerData } from '~/types/cms'
 
 // Every storefront page routes through this layout loader, so a hung upstream
 // here sinks every page, not just the homepage. Bound each leg the same way
@@ -54,6 +54,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const logoUrl  = settings?.logoUrl  ?? null
   const logoAlt  = settings?.logoAlt  ?? 'xdipx'
   const footerColumns: FooterColumn[] = settings?.footerColumns ?? []
+  const footerBrandLinks: FooterQuickLink[] = settings?.footerBrandLinks ?? []
+  const footerCategoryLinks: FooterQuickLink[] = settings?.footerCategoryLinks ?? []
   const footerTagline = settings?.footerTagline ?? null
   const footerDiscreetHeading = settings?.footerDiscreetHeading ?? null
   const footerDiscreetBody = settings?.footerDiscreetBody ?? null
@@ -61,11 +63,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const footerDisclaimer = settings?.footerDisclaimer ?? null
   const buyButtonText = settings?.buyButtonText || "I'll take it ♥"
   const siteBanner: SiteBannerData | null = settings?.siteBanner ?? null
-  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona }
+  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerBrandLinks, footerCategoryLinks, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona }
 }
 
 export default function StoreLayout() {
-  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona } = useLoaderData<typeof loader>()
+  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerBrandLinks, footerCategoryLinks, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona } = useLoaderData<typeof loader>()
   const { pathname } = useLocation()
   const rootData = useRouteLoaderData<{ ENV?: { GA4_ID?: string; AGE_GATE_LEVEL?: string } }>('root')
   const ga4Id = rootData?.ENV?.GA4_ID ?? ''
@@ -101,7 +103,7 @@ export default function StoreLayout() {
           <main className={`flex-1 ${showMobileShell ? 'pb-20 md:pb-0' : ''}`}>
             <Outlet context={{ buyButtonText }} />
           </main>
-          <Footer socialLinks={socialLinks} footerColumns={footerColumns} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} />
+          <Footer socialLinks={socialLinks} footerColumns={footerColumns} brandLinks={footerBrandLinks} categoryLinks={footerCategoryLinks} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} />
           {showMobileShell && <MobileExploreMenu menuItems={menuItems} />}
           <AskEmmaWidget />
           <CookieConsent />

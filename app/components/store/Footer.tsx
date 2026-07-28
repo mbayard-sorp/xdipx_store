@@ -1,9 +1,11 @@
 import { Link } from 'react-router'
-import type { SocialLink, SocialPlatform, FooterColumn } from '~/types/cms'
+import type { SocialLink, SocialPlatform, FooterColumn, FooterQuickLink } from '~/types/cms'
 
 interface FooterProps {
   socialLinks?: SocialLink[]
   footerColumns?: FooterColumn[]
+  brandLinks?: FooterQuickLink[]
+  categoryLinks?: FooterQuickLink[]
   logoUrl?: string | undefined
   logoAlt?: string
   tagline?: string | null
@@ -15,7 +17,68 @@ interface FooterProps {
 
 const currentYear = new Date().getFullYear()
 
-export function Footer({ socialLinks = [], footerColumns = [], logoUrl, logoAlt = 'xdipx', tagline, discreetHeading, discreetBody, copyright, disclaimer }: FooterProps) {
+/** Shape used by the quick-link rows. `_key` is optional on the fallbacks. */
+type QuickLink = { _key?: string; label: string; href: string }
+
+/**
+ * Fallback link rows, used when Sanity has nothing configured.
+ *
+ * Every handle below was verified against the live storefront on 2026-07-27
+ * (each /collections/<handle> returned 200). These rows render on every page,
+ * so a dead handle here would ship a sitewide 404 link. Verify before editing.
+ */
+const FALLBACK_BRAND_LINKS: QuickLink[] = [
+  { label: 'LELO',       href: '/collections/lelo' },
+  { label: 'Tantus',     href: '/collections/tantus' },
+  { label: 'Sliquid',    href: '/collections/sliquid' },
+  { label: 'System JO',  href: '/collections/system-jo' },
+  { label: 'Wicked',     href: '/collections/wicked' },
+  { label: 'Pipedream',  href: '/collections/pipedream' },
+  { label: 'FemmeFunn',  href: '/collections/femmefunn' },
+  { label: 'Vush',       href: '/collections/vush' },
+]
+
+const FALLBACK_CATEGORY_LINKS: QuickLink[] = [
+  { label: 'Vibrators',  href: '/collections/vibrators' },
+  { label: 'Wands',      href: '/collections/wands' },
+  { label: 'Lubricants', href: '/collections/lubricants' },
+  { label: 'Couples',    href: '/collections/couples' },
+  { label: 'Wellness',   href: '/collections/wellness-care' },
+  { label: 'Bestsellers', href: '/collections/best-sellers' },
+]
+
+/**
+ * A quiet, typographic sitewide link row. Deliberately subordinate to the
+ * footer columns above it: ink-4 heading, ink-3 links, no logos, no cards.
+ * On mobile it wraps to as many lines as it needs rather than scrolling, so
+ * nothing is hidden from a crawler.
+ */
+function QuickLinkRow({ heading, links }: { heading: string; links: QuickLink[] }) {
+  if (links.length === 0) return null
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:gap-4">
+      <h3 className="shrink-0 text-[11px] uppercase tracking-widest text-white/35 sm:w-32">
+        {heading}
+      </h3>
+      <ul className="flex flex-wrap items-baseline gap-x-3 gap-y-1 sm:gap-x-4 sm:gap-y-1.5">
+        {links.map(link => (
+          <li key={link._key ?? link.href}>
+            <Link
+              to={link.href}
+              className="text-[11px] sm:text-xs text-white/55 hover:text-white transition-colors"
+            >
+              {link.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+export function Footer({ socialLinks = [], footerColumns = [], brandLinks, categoryLinks, logoUrl, logoAlt = 'xdipx', tagline, discreetHeading, discreetBody, copyright, disclaimer }: FooterProps) {
+  const brandRow    = brandLinks?.length    ? brandLinks    : FALLBACK_BRAND_LINKS
+  const categoryRow = categoryLinks?.length ? categoryLinks : FALLBACK_CATEGORY_LINKS
   return (
     <footer className="bg-ink text-white/80 pt-12 pb-8 px-4">
       <div className="max-w-6xl mx-auto">
@@ -70,7 +133,7 @@ export function Footer({ socialLinks = [], footerColumns = [], logoUrl, logoAlt 
             <div className="mt-4 bg-white/5 rounded-xl px-4 py-3 text-xs text-white/60 leading-relaxed">
               <strong className="text-white/80">{discreetHeading || 'Plain packaging, always.'}</strong>
               <br />
-              {discreetBody || 'Orders ship in unmarked boxes. Billing appears as\u00a0XD\u00a0Inc.'}
+              {discreetBody || 'Orders ship in unmarked boxes. Your statement reads\u00a0XDIPX.'}
             </div>
           </div>
 
@@ -106,6 +169,16 @@ export function Footer({ socialLinks = [], footerColumns = [], logoUrl, logoAlt 
           ))}
 
         </div>
+
+        {/* Sitewide internal link rows. These appear on every page, which is
+            what gives the catalog crawl demand, so keep them plain <Link>s. */}
+        <nav
+          aria-label="Browse brands and categories"
+          className="border-t border-white/10 pt-6 pb-6 flex flex-col gap-4"
+        >
+          <QuickLinkRow heading="Brands we carry" links={brandRow} />
+          <QuickLinkRow heading="Shop by category" links={categoryRow} />
+        </nav>
 
         {/* Divider */}
         <div className="border-t border-white/10 pt-6">

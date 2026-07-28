@@ -12,8 +12,8 @@
 
 import type { Cart, Product, EmmaCartContext, EmmaCartVariant } from '~/types'
 import type { CustomerProfile } from '~/lib/shopify.server'
+import { FREE_SHIPPING_THRESHOLD } from '~/lib/shipping'
 
-const FREE_SHIPPING_THRESHOLD = 99
 const FREE_SHIP_ADJACENT_GAP  = 20 // $ remaining to trigger "close ✿" variant
 
 interface DeriveArgs {

@@ -906,7 +906,9 @@ export async function getSiteSettings(): Promise<SiteSettings | null> {
           megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
           socialLinks[],
           footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
-          footerColumns[] { _key, heading, links[] { _key, label, url } }
+          footerColumns[] { _key, heading, links[] { _key, label, url } },
+          footerBrandLinks[] { _key, label, href },
+          footerCategoryLinks[] { _key, label, href }
         }`
       )
       return data ?? null
