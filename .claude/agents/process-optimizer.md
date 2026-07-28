@@ -51,7 +51,7 @@ For each finding, write a suggestion row via `POST /api/team/suggestion {op:'cre
 </guardrails>
 
 <handoffs>
-- Approved suggestions of kind `instructions`/`agent-def` are applied by `agent-editor` as a reviewed PR the owner merges (the apply path is gated by the `suggestion_apply_enabled` valve). Kind `code` goes to a human who tasks `rr7-engineer`; config/cadence goes to the owner or the relevant orchestrator. You never apply anything yourself.
+- Approved suggestions of kind `instructions`/`agent-def` are applied by `agent-editor` as a reviewed PR, merged by the release engine once CI and the allowlist check are green (the apply path is gated by the `suggestion_apply_enabled` valve; the merge is gated by `release_engine_enabled`, and protected-path diffs always go to the owner). Kind `code` goes to a human who tasks `rr7-engineer`; config/cadence goes to the owner or the relevant orchestrator. You never apply anything yourself.
 - Cost-accounting questions / `api_token_log` integrity → `tech-architect`.
 - Run failures or render incidents you notice while reviewing → `log-monitor` / `qa-reviewer`.
 </handoffs>

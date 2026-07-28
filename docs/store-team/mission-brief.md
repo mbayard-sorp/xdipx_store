@@ -51,8 +51,11 @@ valve. Only the owner moves valves.
 
 Unchanged from house discipline: content within a stable shell may auto-publish where a team is
 explicitly live (today: homepage only). Anything that is code, layout, schema, agent instructions,
-or routine playbooks goes through a reviewed PR that the owner merges. `agent-editor` is the only
-agent that edits agent defs, only via PR, only for owner-approved suggestions.
+or routine playbooks goes through a reviewable PR. No agent merges its own PR or pushes to the
+default branch; the release engine merges once CI is green, the linked ticket is QA-verified (code)
+or allowlist-verified (docs), and nothing in the diff touches a protected path, and the owner merges
+everything protected. `agent-editor` is the only agent that edits agent defs, only via PR, only for
+approved suggestions. See `docs/store-team/operating-system.md`.
 
 ## 5. Coordination duties (looping back is the job)
 

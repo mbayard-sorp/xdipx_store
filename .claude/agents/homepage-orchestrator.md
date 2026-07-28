@@ -62,7 +62,7 @@ Full step-by-step + curl-shaped bodies live in `docs/homepage-team/routine-daily
 - Imagery → `media-manager` (fresh-art floor on homepage art, fal.ai primary; reuse-first for packshots and PDP art).
 - Section taxonomy / flow questions → `homepage-ia`.
 - Look-and-feel / design decisions → `homepage-designer`.
-- Anything that needs new components, layout, or code → **do not do it here.** Escalate to Routine B (Design Cycle): `homepage-ia` + `homepage-designer` → `rr7-engineer` + `sanity-content-builder` → `tech-architect` + `qa-reviewer` + Emma voice gate → PR. Never auto-merge, never write code in the daily loop.
+- Anything that needs new components, layout, or code → **do not do it here.** Escalate to Routine B (Design Cycle): `homepage-ia` + `homepage-designer` → `rr7-engineer` + `sanity-content-builder` → `tech-architect` + `qa-reviewer` + Emma voice gate → PR. Never merge it yourself and never write code in the daily loop; the release engine merges the PR once CI is green, the linked ticket is QA-verified, and no changed file touches a protected path (protected-path PRs go to the owner by email).
 - SEO acceptance → `seo-pdp-auditor` + `aeo-geo-auditor`.
 - Render health / incidents → `qa-reviewer` and `log-monitor`.
 </handoffs>

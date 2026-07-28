@@ -77,7 +77,8 @@ curl -s -X POST "$BASE_URL/api/team/event" \
    milestone's evidence probe, recomputes status + RAG per the trackers README, posts a
    `decision` event per RAG change + an audit scoreboard event, files kind `process`
    suggestions for Red/newly-Amber milestones, opens a docs-only tracker PR
-   (`pm/tracker-<date>`, never auto-merged) when rows changed, and hands the strategist a
+   (`pm/tracker-<date>`, merged by the release engine after CI, never by the PM) when rows
+   changed, and hands the strategist a
    **Program Status** section (overall RAG + top risks + owner asks per program) to include
    verbatim in the brief. It also verifies **routine coverage**: each expected scheduled routine
    (1–14 in `routine-schedule.md`) posted a run in the last 7 days (`homepage_team_runs`); file a

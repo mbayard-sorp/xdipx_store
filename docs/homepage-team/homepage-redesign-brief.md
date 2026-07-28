@@ -92,7 +92,8 @@ copy or hero framing disagrees, the charter wins.
 - Hi-fi visual: owner runs [`claude-design-prompt.md`](./claude-design-prompt.md) through
   claude.ai/design, OR the team prototypes; result is a visual reference, not shipped code.
 - Build: `sanity-content-builder` (new blocks, additive) + `rr7-engineer` (`StorefrontHome` relayout,
-  loader, the dedupe rule) via a **gated PR** (never auto-merged); `tech-architect` review;
+  loader, the dedupe rule) via a **gated PR** (the engineer never merges; the release engine merges
+  after CI + QA verification + the protected-path check); `tech-architect` review;
   `seo-pdp-auditor` + `aeo-geo-auditor` acceptance; `qa-reviewer` (preview MCP, CLS/LCP, 375px).
 - Daily operation thereafter: `homepage-orchestrator` runs the merchandising loop; the new
   `homepage-cro` agent (`.claude/agents/homepage-cro.md`) carries the conversion lens.

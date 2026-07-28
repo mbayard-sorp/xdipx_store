@@ -50,6 +50,7 @@ explicit asks for the owner. Entries are append-only history; never rewrite old 
 
 ## Who writes here
 
-Only `program-manager`, and only via a docs-only PR (branch `pm/tracker-<date>`, never
-auto-merged). Anyone may add a new tracker for a new program by copying this format; register
+Only `program-manager`, and only via a docs-only PR (branch `pm/tracker-<date>`). The PM never
+merges it: the release engine does, once CI and the allowlist check are green and nothing in the
+diff touches a protected path. Anyone may add a new tracker for a new program by copying this format; register
 it simply by placing the file in this directory — the PM globs `docs/store-team/trackers/*.md`.

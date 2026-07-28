@@ -2,8 +2,14 @@
 
 The playbook for the scheduled apply pass — the hands of the improvement loop. Entry agent:
 `agent-editor`. Turns **owner-approved** instruction-kind suggestions into **one PR per
-suggestion**; never merges; never touches code, schema, settings, or secrets. Gated by the
-`suggestion_apply_enabled` valve (default off) on top of the strategy team's gate.
+suggestion**; never merges its own PR and never pushes to the default branch; never touches code,
+schema, settings, or secrets. Gated by the `suggestion_apply_enabled` valve (default off) on top of
+the strategy team's gate.
+
+The PR is merged by the **release engine** (server-side cron, kill switch `release_engine_enabled`)
+once CI is green and the `agent-allowlist` check confirms every changed file is inside the allowlist.
+A PR that touches a protected path stops and emails the owner, who merges it by hand. With the engine
+off, the PR waits for the owner exactly as it always did. See `docs/store-team/operating-system.md`.
 
 Runs on the **Max subscription**. Recommended cadence: weekly, after the owner's suggestion-review
 session (e.g. Monday afternoon).
@@ -38,7 +44,8 @@ owner's to execute).
 4. **Refuse and flag** (decision event, row left approved) any suggestion that would weaken a money
    valve, the Emma voice gate, MAP rules, propose-only discipline, or the improvement loop's own
    human gates.
-5. Open the PR (never merge): title `agents: apply suggestion #<id> — <summary>`; body quotes the
+5. Open the PR (never merge it yourself; the release engine does that once the gates pass): title
+   `agents: apply suggestion #<id> — <summary>`; body quotes the
    suggestion verbatim + est. savings + cx_risk + rationale for the exact edit.
 6. Mark it:
 
@@ -50,9 +57,10 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
 
 ## Step 3 — Close the loop on earlier PRs
 
-For rows in `pr_open` whose PR has merged: `{"op":"mark","id":<id>,"status":"applied","applyRef":"<PR URL>"}`.
-PRs closed without merging → post a `decision` event; the row stays `pr_open` for the owner to
-dismiss or re-decide.
+For rows still in `pr_open` whose PR has merged: `{"op":"mark","id":<id>,"status":"applied","applyRef":"<PR URL>"}`.
+When the release engine is on it normally sets `applied` itself after the post-deploy smoke passes,
+so most rows are already closed by the time you look. That is expected. PRs closed without merging →
+post a `decision` event; the row stays `pr_open` for the owner to dismiss or re-decide.
 
 ## Step 4 — Spend + finish
 
