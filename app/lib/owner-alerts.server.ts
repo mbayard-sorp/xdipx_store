@@ -50,16 +50,20 @@ export async function sendOwnerEmail(
     return { sent: false, error: 'SMTP credentials not configured' }
   }
 
-  // Dynamic require so a missing nodemailer does not crash at module load time
-  // and does not require tsc to resolve the package types.
+  // Lazy dynamic import, not require(): the Vercel entry is bundled as ESM
+  // (server/vercel-entry.mjs), where bare `require` is not defined, so the old
+  // call threw a ReferenceError that this catch reported as "not installed" on
+  // every send. `await import()` is valid ESM, stays lazy so a missing package
+  // cannot crash module load, and is a static specifier Vercel's file tracer
+  // can follow when deciding what to ship.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let nm: any = null
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    nm = require('nodemailer')
-  } catch {
-    console.warn('[owner-alerts] nodemailer not installed. Skipping email send.')
-    return { sent: false, error: 'nodemailer not installed' }
+    nm = await import('nodemailer')
+    nm = nm?.default ?? nm
+  } catch (err) {
+    console.warn('[owner-alerts] nodemailer could not be loaded. Skipping email send.', err)
+    return { sent: false, error: `nodemailer could not be loaded: ${String(err)}` }
   }
 
   try {

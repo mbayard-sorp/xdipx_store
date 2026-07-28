@@ -1,11 +1,5 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined") return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
 var __esm = (fn, res, err2) => function __init() {
   if (err2) throw err2[0];
   try {
@@ -17611,10 +17605,11 @@ async function sendOwnerEmail(subject, html, opts = {}) {
   }
   let nm = null;
   try {
-    nm = __require("nodemailer");
-  } catch {
-    console.warn("[owner-alerts] nodemailer not installed. Skipping email send.");
-    return { sent: false, error: "nodemailer not installed" };
+    nm = await import("nodemailer");
+    nm = nm?.default ?? nm;
+  } catch (err2) {
+    console.warn("[owner-alerts] nodemailer could not be loaded. Skipping email send.", err2);
+    return { sent: false, error: `nodemailer could not be loaded: ${String(err2)}` };
   }
   try {
     const transporter = nm.createTransport({
