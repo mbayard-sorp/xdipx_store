@@ -1581,9 +1581,9 @@ function warnKvFallback(op, err2) {
   }
 }
 function kvDegradationSnapshot() {
-  let total = 0;
-  for (const n of degradeCounts.values()) total += n;
-  return { total, byOp: Object.fromEntries(degradeCounts), quotaExhausted: _lastQuotaExhausted };
+  let total2 = 0;
+  for (const n of degradeCounts.values()) total2 += n;
+  return { total: total2, byOp: Object.fromEntries(degradeCounts), quotaExhausted: _lastQuotaExhausted };
 }
 function memGet(key) {
   return memStore.get(key) ?? null;
@@ -3471,7 +3471,7 @@ async function getBlogPosts(opts = {}) {
       filter += ` && $tag in tags`;
       params.tag = opts.tag;
     }
-    const [rawPosts, total] = await Promise.all([
+    const [rawPosts, total2] = await Promise.all([
       client5.fetch(
         // `productHandle` is the first product the post embeds, projected here
         // (not in the shared card projection) so it stays scoped to this query.
@@ -3487,7 +3487,7 @@ async function getBlogPosts(opts = {}) {
       const { bodyText: _, ...rest } = p;
       return { ...rest, readingTime };
     });
-    const result = { posts, total };
+    const result = { posts, total: total2 };
     setCachedBlog(cacheKey3, result);
     return result;
   } catch (err2) {
@@ -17664,6 +17664,7 @@ var init_owner_alerts_server = __esm({
 var homepage_healthcheck_server_exports = {};
 __export(homepage_healthcheck_server_exports, {
   FALLBACK_MARKERS: () => FALLBACK_MARKERS,
+  RENDER_TRUTH_LATEST_KEY: () => RENDER_TRUTH_LATEST_KEY,
   RENDER_TRUTH_PROPAGATION_MS: () => RENDER_TRUTH_PROPAGATION_MS,
   assertSlateRendered: () => assertSlateRendered,
   checkPageOnce: () => checkPageOnce,
@@ -17897,6 +17898,13 @@ async function fetchHomeHtml() {
   }
   return best;
 }
+async function persistLatestRenderTruth(result) {
+  try {
+    await kvSet(RENDER_TRUTH_LATEST_KEY, { ...result, at: (/* @__PURE__ */ new Date()).toISOString() });
+  } catch (err2) {
+    console.warn("[render-truth] latest snapshot failed", err2);
+  }
+}
 async function renderTruth(opts = {}) {
   const now = opts.now ?? Date.now();
   const fileTickets = opts.fileTickets ?? true;
@@ -17988,11 +17996,13 @@ async function renderTruth(opts = {}) {
     if (propagating && failed.length > 0) {
       result.ok = true;
       result.message = `${failed.length} assertion(s) failing but the Sanity doc changed ${Math.round((now - updatedAt) / 6e4)} min ago, inside the propagation window, so not reporting`;
+      await persistLatestRenderTruth(result);
       return result;
     }
     if (fileTickets) {
       result.ticketIds = await fileRenderTruthTickets(failed, sameSlots, today, slate);
     }
+    await persistLatestRenderTruth(result);
     return result;
   } catch (err2) {
     console.error("[render-truth] check failed (ignored)", err2);
@@ -18207,7 +18217,7 @@ async function runHomepageHealthcheck() {
   }
   return result;
 }
-var LAST_GOOD_KEY, PATHS, FETCH_TIMEOUT_MS, MIN_BODY_BYTES, MAX_ATTEMPTS2, RETRY_BACKOFF_MS2, RENDER_TRUTH_PROPAGATION_MS, RENDER_TRUTH_MAX_ATTEMPTS, RENDER_TRUTH_RETRY_BACKOFF_MS, RENDERED_TEAM_RAILS, FINGERPRINT_KEY_PREFIX, FALLBACK_MARKERS, ENTITIES;
+var LAST_GOOD_KEY, PATHS, FETCH_TIMEOUT_MS, MIN_BODY_BYTES, MAX_ATTEMPTS2, RETRY_BACKOFF_MS2, RENDER_TRUTH_PROPAGATION_MS, RENDER_TRUTH_MAX_ATTEMPTS, RENDER_TRUTH_RETRY_BACKOFF_MS, RENDERED_TEAM_RAILS, FINGERPRINT_KEY_PREFIX, RENDER_TRUTH_LATEST_KEY, FALLBACK_MARKERS, ENTITIES;
 var init_homepage_healthcheck_server = __esm({
   "app/lib/homepage-healthcheck.server.ts"() {
     "use strict";
@@ -18227,6 +18237,7 @@ var init_homepage_healthcheck_server = __esm({
     RENDER_TRUTH_RETRY_BACKOFF_MS = 2e3;
     RENDERED_TEAM_RAILS = 4;
     FINGERPRINT_KEY_PREFIX = "homepage:render-truth:fingerprint";
+    RENDER_TRUTH_LATEST_KEY = "homepage:render-truth:latest";
     FALLBACK_MARKERS = {
       wayfinder: "Find your way in.",
       couples: "Better together.",
@@ -18503,12 +18514,12 @@ async function writeProfitSummary() {
 }
 async function getDashboardStats(days = 30) {
   const rows = await db.select().from(dailyProfitSummary).orderBy(sql4`${dailyProfitSummary.summaryDate} DESC`).limit(days);
-  const total = rows.reduce((acc, r) => ({
+  const total2 = rows.reduce((acc, r) => ({
     revenue: acc.revenue + parseFloat(r.totalRevenue ?? "0"),
     profit: acc.profit + parseFloat(r.totalProfit ?? "0"),
     orders: acc.orders + (r.totalOrders ?? 0)
   }), { revenue: 0, profit: 0, orders: 0 });
-  return { rows, total };
+  return { rows, total: total2 };
 }
 var init_profit_server = __esm({
   "app/lib/profit.server.ts"() {
@@ -18698,8 +18709,8 @@ async function getProductReviews(shopifyProductId, opts = {}) {
     review.attributeRatings = attrByReview.get(review.id) ?? [];
     return review;
   });
-  const total = parseInt(countRows[0]?.["total"] ?? "0", 10);
-  const result = { reviews, total };
+  const total2 = parseInt(countRows[0]?.["total"] ?? "0", 10);
+  const result = { reviews, total: total2 };
   if (status === "approved") {
     kvSet(ck, result, 300).catch(() => {
     });
@@ -18775,8 +18786,8 @@ async function getAdminReviewQueue(filters = {}) {
     review.media = mediaByReview.get(review.id) ?? [];
     return review;
   });
-  const total = parseInt(countRows[0]?.["total"] ?? "0", 10);
-  return { reviews, total };
+  const total2 = parseInt(countRows[0]?.["total"] ?? "0", 10);
+  return { reviews, total: total2 };
 }
 async function getReviewStats() {
   const [countRows, avgRows, inviteRows, conversionRows] = await Promise.all([
@@ -18797,7 +18808,7 @@ async function getReviewStats() {
     sql5`SELECT COUNT(*) as completed FROM review_invites WHERE status = 'completed'`
   ]);
   const c = countRows[0];
-  const total = parseInt(c?.["total"] ?? "0", 10);
+  const total2 = parseInt(c?.["total"] ?? "0", 10);
   const pending = parseInt(c?.["pending"] ?? "0", 10);
   const approved = parseInt(c?.["approved"] ?? "0", 10);
   const rejected = parseInt(c?.["rejected"] ?? "0", 10);
@@ -18806,7 +18817,7 @@ async function getReviewStats() {
   const sent = parseInt(inviteRows[0]?.["sent"] ?? "0", 10);
   const completed = parseInt(conversionRows[0]?.["completed"] ?? "0", 10);
   return {
-    totalReviews: total,
+    totalReviews: total2,
     pendingReviews: pending,
     approvedReviews: approved,
     rejectedReviews: rejected,
@@ -20169,6 +20180,12 @@ var init_seo_daily_server = __esm({
 // app/lib/owner-digest.server.ts
 var owner_digest_server_exports = {};
 __export(owner_digest_server_exports, {
+  MAX_TICKET_ATTEMPTS: () => MAX_TICKET_ATTEMPTS,
+  parseRenderTruth: () => parseRenderTruth,
+  renderEscalationsSection: () => renderEscalationsSection,
+  renderHomepageNowSection: () => renderHomepageNowSection,
+  renderShippedSection: () => renderShippedSection,
+  renderTicketsSection: () => renderTicketsSection,
   runOwnerDigest: () => runOwnerDigest
 });
 import { sql as sql9 } from "drizzle-orm";
@@ -20180,6 +20197,298 @@ function ragColor(rag) {
   if (rag === "AMBER") return "#b57d0a";
   if (rag === "RED") return "#d93a15";
   return "#6f645c";
+}
+function clip(s, n) {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
+}
+function prLabel(ref) {
+  const m = /\/pull\/(\d+)/.exec(ref);
+  return m ? `PR #${m[1]}` : clip(ref, 60);
+}
+function link(ref, label) {
+  return /^https?:\/\//.test(ref) ? `<a href="${esc(ref)}" style="color:#c2410c;">${esc(label)}</a>` : esc(label);
+}
+function renderShippedSection(items) {
+  if (items.length === 0) {
+    return `<p style="margin:0;color:${MUTED};">Nothing merged in the last 24 hours.</p>`;
+  }
+  const rows = items.map((i) => `<li style="margin-bottom:3px;">${i.ticketId > 0 ? `<strong>#${i.ticketId}</strong> ` : ""}<span style="color:${MUTED};">${esc(i.kind)}</span> ${esc(clip(i.title, 120))}${i.ref ? ` &middot; ${link(i.ref, prLabel(i.ref))}` : ""}</li>`).join("");
+  return `<ul style="margin:0;padding-left:18px;">${rows}</ul>`;
+}
+function verdictHtml(label, v) {
+  const color = v === "pass" ? GOOD : v === "fail" ? BAD : WARN;
+  const word = v === "unknown" ? "not reported" : v;
+  return `<span style="color:${color};">${esc(label)}: ${word}</span>`;
+}
+function renderHomepageNowSection(f) {
+  const parts = [];
+  if (!f.live) {
+    parts.push(`<p style="margin:0 0 4px;color:${WARN};">The precomputed storefront blob is cold, so this digest cannot say what is on the homepage right now. Check /admin/homepage-team.</p>`);
+  } else {
+    const built = f.live.builtAt ? new Date(f.live.builtAt).toISOString().replace("T", " ").slice(0, 16) : null;
+    parts.push(`<p style="margin:0 0 4px;">Hero: ${f.live.heroHandle ? `<strong>${esc(f.live.heroHandle)}</strong>` : `<span style="color:${MUTED};">rotating (no pinned headliner)</span>`}${f.live.heroHeadline ? ` &middot; &ldquo;${esc(clip(f.live.heroHeadline, 90))}&rdquo;` : ""}</p>`);
+    parts.push(f.live.railTitles.length ? `<p style="margin:0 0 4px;">Rails: ${f.live.railTitles.map((t) => esc(clip(t, 60))).join(" &middot; ")}</p>` : `<p style="margin:0 0 4px;color:${WARN};">No curated rail is published (the storefront is showing shell defaults).</p>`);
+    parts.push(f.live.tileHeadlines.length ? `<p style="margin:0 0 4px;">Tiles: ${f.live.tileHeadlines.map((t) => esc(clip(t, 60))).join(" &middot; ")}</p>` : `<p style="margin:0 0 4px;color:${MUTED};">No editorial tiles published.</p>`);
+    if (built) parts.push(`<p style="margin:0 0 4px;color:${MUTED};">Blob built ${esc(built)} UTC.</p>`);
+  }
+  if (!f.renderTruth) {
+    parts.push(`<p style="margin:0 0 4px;color:${WARN};">No render-truth result available, so it is unverified whether the published slate actually rendered, and the theme and freshness gates are unreported. This is not a pass.</p>`);
+  } else {
+    const rt = f.renderTruth;
+    const head = rt.ok === true ? `<span style="color:${GOOD};">Render-truth passed</span>` : rt.ok === false ? `<span style="color:${BAD};">Render-truth FAILED</span>` : `<span style="color:${WARN};">Render-truth inconclusive</span>`;
+    parts.push(`<p style="margin:0 0 4px;">${head}${rt.checkedAt ? ` <span style="color:${MUTED};">(checked ${esc(clip(rt.checkedAt, 20))})</span>` : ""} &middot; ${verdictHtml("theme gate", rt.themeGate)} &middot; ${verdictHtml("freshness gate", rt.freshnessGate)}</p>`);
+    if (rt.problems.length) {
+      parts.push(`<ul style="margin:0 0 4px;padding-left:18px;color:${BAD};">${rt.problems.slice(0, 5).map((p) => `<li>${esc(clip(p, 160))}</li>`).join("")}</ul>`);
+    }
+  }
+  if (f.renderTickets.length) {
+    parts.push(`<p style="margin:0 0 2px;color:${BAD};">${f.renderTickets.length} open render ticket${f.renderTickets.length === 1 ? "" : "s"}:</p><ul style="margin:0;padding-left:18px;">${f.renderTickets.slice(0, 5).map((t) => `<li>#${t.id} (${esc(t.status)}) ${esc(clip(t.suggestion, 120))}</li>`).join("")}</ul>`);
+  }
+  return parts.join("");
+}
+function byKind(m) {
+  const entries = Object.entries(m).filter(([, n]) => n > 0);
+  if (entries.length === 0) return "none";
+  return entries.map(([k, n]) => `${esc(k)} ${n}`).join(" &middot; ");
+}
+function total(m) {
+  return Object.values(m).reduce((a, b) => a + b, 0);
+}
+function renderTicketsSection(m) {
+  const parts = [
+    `<p style="margin:0 0 4px;">Opened ${total(m.opened)} (${byKind(m.opened)})</p>`,
+    `<p style="margin:0 0 4px;">Closed ${total(m.closed)} (${byKind(m.closed)})</p>`,
+    `<p style="margin:0 0 4px;color:${total(m.blocked) > 0 ? WARN : MUTED};">Blocked ${total(m.blocked)} (${byKind(m.blocked)})</p>`
+  ];
+  parts.push(m.oldestApproved ? `<p style="margin:0 0 4px;">Oldest approved and unclaimed: <strong>#${m.oldestApproved.id}</strong>, ${m.oldestApproved.ageDays} day${m.oldestApproved.ageDays === 1 ? "" : "s"} old &middot; ${esc(clip(m.oldestApproved.suggestion, 140))}</p>` : `<p style="margin:0 0 4px;color:${MUTED};">Nothing sitting in approved.</p>`);
+  if (m.finalAttempt.length) {
+    parts.push(`<p style="margin:6px 0 2px;color:${WARN};">On the last attempt (${MAX_TICKET_ATTEMPTS} of ${MAX_TICKET_ATTEMPTS}), one more failure escalates:</p><ul style="margin:0 0 4px;padding-left:18px;">${m.finalAttempt.map((t) => `<li>#${t.id} (${esc(t.status)}) ${esc(clip(t.suggestion, 110))}${t.lastError ? `<br><span style="color:${MUTED};">${esc(clip(t.lastError, 140))}</span>` : ""}</li>`).join("")}</ul>`);
+  }
+  parts.push(`<p style="margin:6px 0 0;color:${MUTED};">All statuses: ${m.statusCounts || "none"}</p>`);
+  return parts.join("");
+}
+function renderEscalationsSection(e) {
+  if (e.protectedPrs.length === 0 && e.exhausted.length === 0) {
+    return `<p style="margin:0;color:${GOOD};">Nothing needs you today. No protected-path PR is waiting on your merge and no ticket has run out of attempts.</p>`;
+  }
+  const parts = [];
+  if (e.protectedPrs.length) {
+    parts.push(`<p style="margin:0 0 2px;color:${BAD};"><strong>${e.protectedPrs.length} PR${e.protectedPrs.length === 1 ? "" : "s"} waiting on you</strong> (protected path, the engine will never merge ${e.protectedPrs.length === 1 ? "it" : "them"}):</p><ul style="margin:0 0 6px;padding-left:18px;">${e.protectedPrs.map((p) => `<li>${link(p.ref, prLabel(p.ref))}${p.ticketId > 0 ? ` &middot; ticket #${p.ticketId}` : ""} ${esc(clip(p.title, 110))}</li>`).join("")}</ul>`);
+  }
+  if (e.exhausted.length) {
+    parts.push(`<p style="margin:0 0 2px;color:${BAD};"><strong>${e.exhausted.length} ticket${e.exhausted.length === 1 ? "" : "s"} out of attempts</strong> (blocked until you decide):</p><ul style="margin:0;padding-left:18px;">${e.exhausted.map((t) => `<li>#${t.id} (${esc(t.status)}, ${t.attemptCount} attempts) ${esc(clip(t.suggestion, 110))}${t.lastError ? `<br><span style="color:${MUTED};">${esc(clip(t.lastError, 160))}</span>` : ""}</li>`).join("")}</ul>`);
+  }
+  return parts.join("");
+}
+function parseRenderTruth(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw;
+  const gates = r["gates"] && typeof r["gates"] === "object" ? r["gates"] : {};
+  const verdict = (v) => v === true || v === "pass" || v === "passed" ? "pass" : v === false || v === "fail" || v === "failed" ? "fail" : "unknown";
+  const at = r["checkedAt"] ?? r["ts"] ?? r["at"] ?? r["ranAt"];
+  const problems = Array.isArray(r["problems"]) ? r["problems"] : Array.isArray(r["missing"]) ? r["missing"] : [];
+  const ok = typeof r["ok"] === "boolean" ? r["ok"] : null;
+  const facts = {
+    checkedAt: typeof at === "string" ? at : typeof at === "number" ? new Date(at).toISOString() : null,
+    ok,
+    themeGate: verdict(gates["theme"] ?? r["themeGate"] ?? r["themeOk"]),
+    freshnessGate: verdict(gates["freshness"] ?? r["freshnessGate"] ?? r["freshnessOk"]),
+    problems: problems.filter((p) => typeof p === "string")
+  };
+  if (facts.ok === null && facts.themeGate === "unknown" && facts.freshnessGate === "unknown" && facts.problems.length === 0 && facts.checkedAt === null) return null;
+  return facts;
+}
+async function gatherShipped() {
+  const items = [];
+  try {
+    const res = await db.execute(sql9`
+      SELECT l.suggestion_id AS ticket_id, l.ref, l.updated_at::text AS at,
+             COALESCE(s.kind, 'code') AS kind, COALESCE(s.suggestion, '') AS suggestion
+      FROM suggestion_links l
+      LEFT JOIN homepage_team_suggestions s ON s.id = l.suggestion_id
+      WHERE l.kind IN ('pr', 'commit')
+        AND l.state IN ('merged', 'applied')
+        AND l.updated_at >= now() - interval '24 hours'
+      ORDER BY l.updated_at DESC LIMIT 25`);
+    for (const r of res.rows ?? []) {
+      items.push({
+        ticketId: Number(r["ticket_id"] ?? 0),
+        kind: String(r["kind"] ?? ""),
+        title: String(r["suggestion"] ?? ""),
+        ref: String(r["ref"] ?? ""),
+        at: r["at"] == null ? null : String(r["at"])
+      });
+    }
+  } catch (err2) {
+    console.warn("[owner-digest] suggestion_links unavailable (migration 070?):", String(err2).slice(0, 200));
+  }
+  try {
+    const res = await db.execute(sql9`
+      SELECT id, kind, suggestion, apply_ref, updated_at::text AS at
+      FROM homepage_team_suggestions
+      WHERE status = 'applied' AND updated_at >= now() - interval '24 hours'
+      ORDER BY updated_at DESC LIMIT 25`);
+    for (const r of res.rows ?? []) {
+      const id = Number(r["id"] ?? 0);
+      if (items.some((i) => i.ticketId === id)) continue;
+      items.push({
+        ticketId: id,
+        kind: String(r["kind"] ?? ""),
+        title: String(r["suggestion"] ?? ""),
+        ref: r["apply_ref"] == null ? "" : String(r["apply_ref"]),
+        at: r["at"] == null ? null : String(r["at"])
+      });
+    }
+  } catch (err2) {
+    console.warn("[owner-digest] applied-ticket sweep failed:", String(err2).slice(0, 200));
+  }
+  return items;
+}
+async function gatherHomepageNow() {
+  let live = null;
+  try {
+    const { readHomepagePayloadB: readHomepagePayloadB2 } = await Promise.resolve().then(() => (init_homepage_payload_server(), homepage_payload_server_exports));
+    const payload = await readHomepagePayloadB2();
+    if (payload) {
+      const sections = payload.contentBlocks?.sections ?? [];
+      const rails = sections.filter((s) => s._type === "emmaCuratedRail");
+      const tiles = sections.filter((s) => s._type === "editorialTiles");
+      live = {
+        heroHandle: payload.emmaHero?.featuredProductHandle ?? payload.pinnedProduct?.handle ?? null,
+        heroHeadline: payload.emmaHero?.headline ?? null,
+        railTitles: rails.map((r) => r.heading).filter(Boolean),
+        tileHeadlines: tiles.flatMap((t) => [t.heading, ...(t.tiles ?? []).map((x) => x.label)]).filter(Boolean),
+        builtAt: payload.builtAt ?? null
+      };
+    }
+  } catch (err2) {
+    console.warn("[owner-digest] storefront payload unavailable:", String(err2).slice(0, 200));
+  }
+  let renderTruth2 = null;
+  for (const key of RENDER_TRUTH_KEYS) {
+    try {
+      const parsed = parseRenderTruth(await kvGet(key));
+      if (parsed) {
+        renderTruth2 = parsed;
+        break;
+      }
+    } catch {
+    }
+  }
+  let renderTickets = [];
+  try {
+    const res = await db.execute(sql9`
+      SELECT id, status, suggestion
+      FROM homepage_team_suggestions
+      WHERE dedupe_key LIKE 'render:%' AND status NOT IN ('applied', 'dismissed')
+      ORDER BY priority ASC, created_at DESC LIMIT 5`);
+    renderTickets = (res.rows ?? []).map((r) => ({
+      id: Number(r["id"] ?? 0),
+      status: String(r["status"] ?? ""),
+      suggestion: String(r["suggestion"] ?? "")
+    }));
+  } catch (err2) {
+    console.warn("[owner-digest] render-ticket sweep failed:", String(err2).slice(0, 200));
+  }
+  return { live, renderTruth: renderTruth2, renderTickets };
+}
+function toKindMap(rows) {
+  const out = {};
+  for (const r of rows) out[String(r["kind"] ?? "other")] = Number(r["n"] ?? 0);
+  return out;
+}
+function toAttemptRows(rows) {
+  return rows.map((r) => ({
+    id: Number(r["id"] ?? 0),
+    status: String(r["status"] ?? ""),
+    kind: String(r["kind"] ?? ""),
+    attemptCount: Number(r["attempt_count"] ?? 0),
+    lastError: r["last_error"] == null ? null : String(r["last_error"]),
+    suggestion: String(r["suggestion"] ?? "")
+  }));
+}
+async function gatherTicketMetrics(statusCounts) {
+  const empty = {
+    opened: {},
+    closed: {},
+    blocked: {},
+    oldestApproved: null,
+    finalAttempt: [],
+    statusCounts
+  };
+  try {
+    const [openedRes, closedRes, blockedRes, oldestRes, finalRes] = await Promise.all([
+      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+                      WHERE created_at >= now() - interval '24 hours' GROUP BY kind`),
+      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+                      WHERE status IN ('applied', 'dismissed')
+                        AND updated_at >= now() - interval '24 hours' GROUP BY kind`),
+      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+                      WHERE status = 'blocked' GROUP BY kind`),
+      db.execute(sql9`SELECT id, suggestion,
+                            EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
+                       FROM homepage_team_suggestions
+                      WHERE status = 'approved' ORDER BY created_at ASC LIMIT 1`),
+      db.execute(sql9`SELECT id, status, kind, attempt_count, last_error, suggestion
+                       FROM homepage_team_suggestions
+                      WHERE attempt_count = ${MAX_TICKET_ATTEMPTS - 1}
+                        AND status NOT IN ('applied', 'dismissed')
+                      ORDER BY priority ASC, updated_at DESC LIMIT 10`)
+    ]);
+    const oldest = (oldestRes.rows ?? [])[0];
+    return {
+      opened: toKindMap(openedRes.rows ?? []),
+      closed: toKindMap(closedRes.rows ?? []),
+      blocked: toKindMap(blockedRes.rows ?? []),
+      oldestApproved: oldest ? {
+        id: Number(oldest["id"] ?? 0),
+        ageDays: Math.round(Number(oldest["age_days"] ?? 0)),
+        suggestion: String(oldest["suggestion"] ?? "")
+      } : null,
+      finalAttempt: toAttemptRows(finalRes.rows ?? []),
+      statusCounts
+    };
+  } catch (err2) {
+    console.warn("[owner-digest] ticket metrics unavailable (migration 070?):", String(err2).slice(0, 200));
+    return empty;
+  }
+}
+async function gatherEscalations() {
+  const out = { protectedPrs: [], exhausted: [] };
+  try {
+    const res = await db.execute(sql9`
+      SELECT l.suggestion_id AS ticket_id, l.ref, l.state,
+             COALESCE(s.suggestion, '') AS suggestion
+      FROM suggestion_links l
+      LEFT JOIN homepage_team_suggestions s ON s.id = l.suggestion_id
+      WHERE l.state IN ('needs-owner', 'protected')
+        AND l.updated_at >= now() - interval '14 days'
+      ORDER BY l.updated_at DESC LIMIT 10`);
+    out.protectedPrs = (res.rows ?? []).map((r) => {
+      const row = r;
+      return {
+        ticketId: Number(row["ticket_id"] ?? 0),
+        ref: String(row["ref"] ?? ""),
+        state: row["state"] == null ? null : String(row["state"]),
+        title: String(row["suggestion"] ?? "")
+      };
+    });
+  } catch (err2) {
+    console.warn("[owner-digest] protected-PR sweep failed:", String(err2).slice(0, 200));
+  }
+  try {
+    const res = await db.execute(sql9`
+      SELECT id, status, kind, attempt_count, last_error, suggestion
+        FROM homepage_team_suggestions
+       WHERE attempt_count >= ${MAX_TICKET_ATTEMPTS}
+         AND status NOT IN ('applied', 'dismissed')
+       ORDER BY priority ASC, updated_at DESC LIMIT 10`);
+    out.exhausted = toAttemptRows(res.rows ?? []);
+  } catch (err2) {
+    console.warn("[owner-digest] exhausted-ticket sweep failed:", String(err2).slice(0, 200));
+  }
+  return out;
 }
 async function runOwnerDigest(opts = {}) {
   const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
@@ -20254,8 +20563,16 @@ async function runOwnerDigest(opts = {}) {
   } catch (err2) {
     console.warn("[owner-digest] ticket columns unavailable (migration 070 not applied?):", String(err2).slice(0, 200));
   }
+  const statusCountsLine = sugg.map((s) => `${esc(s.status)}: ${s.n}`).join(" &middot; ");
+  const [shipped, homepageNow, ticketMetrics, escalations] = await Promise.all([
+    gatherShipped(),
+    gatherHomepageNow(),
+    gatherTicketMetrics(statusCountsLine),
+    gatherEscalations()
+  ]);
+  const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length;
   const ordersY = yesterday?.orders ?? 0;
-  const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? "" : "s"}, ${redTrackers} RED tracker${redTrackers === 1 ? "" : "s"}`;
+  const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? "" : "s"}, ${redTrackers} RED tracker${redTrackers === 1 ? "" : "s"}${needsOwner > 0 ? `, ${needsOwner} need${needsOwner === 1 ? "s" : ""} you` : ""}`;
   const profitRows = profit.map((p) => `<tr><td style="padding:2px 10px 2px 0;">${esc(p.day)}</td><td style="padding:2px 10px;">${p.orders}</td><td style="padding:2px 10px;">$${p.revenue.toFixed(2)}</td><td style="padding:2px 10px;">$${p.profit.toFixed(2)}</td><td style="padding:2px 0;">${esc(p.featured_sku ?? "")}</td></tr>`).join("");
   const runRows = runs.map((r) => `<tr><td style="padding:2px 10px 2px 0;">${esc(r.team)}</td><td style="padding:2px 10px;">${esc(r.run_type)}</td><td style="padding:2px 10px;color:${r.status === "failed" ? "#d93a15" : r.status === "succeeded" ? "#1c7c43" : "#6f645c"};">${esc(r.status)}</td><td style="padding:2px 0;">${esc((r.error ?? r.summary ?? "").slice(0, 140))}</td></tr>`).join("");
   const gateRows = gates.map((g) => `<tr><td style="padding:2px 10px 2px 0;">${esc(g.team)}</td><td style="padding:2px 10px;">${g.enabled ? "on" : '<span style="color:#d93a15;">off</span>'}</td><td style="padding:2px 10px;">${g.runsToday}/${g.maxRunsPerDay} runs</td><td style="padding:2px 0;">$${(g.spentCents / 100).toFixed(2)} / $${(g.dailyCents / 100).toFixed(2)}</td></tr>`).join("");
@@ -20296,12 +20613,15 @@ async function runOwnerDigest(opts = {}) {
   const html = `<body style="margin:0;padding:16px;background:#faf7f2;">
     <div style="max-width:640px;">
       <h2 style="font-family:Inter,sans-serif;font-size:16px;margin:0 0 4px;">xdipx daily digest &middot; ${day}</h2>
+      ${section(`Escalations${needsOwner > 0 ? ` (${needsOwner})` : ""}`, renderEscalationsSection(escalations))}
+      ${section(`Shipped, last 24h (${shipped.length})`, renderShippedSection(shipped))}
+      ${section("Homepage now", renderHomepageNowSection(homepageNow))}
       ${section("Orders and profit (last 8 days)", `<table style="border-collapse:collapse;">${profitRows || "<tr><td>no rows</td></tr>"}</table>`)}
       ${section(`Team runs, last 24h (${failures.length} failed)`, `<table style="border-collapse:collapse;">${runRows || "<tr><td>no runs</td></tr>"}</table>`)}
       ${section("Team gates", `<table style="border-collapse:collapse;">${gateRows}</table>`)}
       ${section("Valves", `<table style="border-collapse:collapse;">${valveRows}</table>`)}
       ${section(`SEO and indexing${seoDay ? ` (diagnosis ${esc(seoDay)})` : ""}`, indexBody)}
-      ${section(`Suggestions (${proposed?.n ?? 0} awaiting triage${proposed ? `, oldest ${esc(proposed.oldest.slice(0, 10))}` : ""})`, sugg.map((s) => `${esc(s.status)}: ${s.n}`).join(" &middot; ") || "none")}
+      ${section(`Tickets (${proposed?.n ?? 0} awaiting triage${proposed ? `, oldest ${esc(proposed.oldest.slice(0, 10))}` : ""})`, renderTicketsSection(ticketMetrics))}
       ${section("Program trackers", trackerBlocks || "no trackers found")}
       <p style="font-family:Inter,sans-serif;font-size:11px;color:#6f645c;margin-top:18px;">
         Full detail: xdipx.com/admin/trackers and /admin/homepage-team. Sent by /cron/owner-digest.
@@ -20311,6 +20631,7 @@ async function runOwnerDigest(opts = {}) {
   const res = await sendOwnerEmail(subject, html, { fromName: "xdipx daily digest" });
   return res.sent ? { sent: true, subject } : { sent: false, ...res.error !== void 0 ? { error: res.error } : {} };
 }
+var GOOD, WARN, BAD, MUTED, MAX_TICKET_ATTEMPTS, RENDER_TRUTH_KEYS;
 var init_owner_digest_server = __esm({
   "app/lib/owner-digest.server.ts"() {
     "use strict";
@@ -20320,6 +20641,16 @@ var init_owner_digest_server = __esm({
     init_tracker_server();
     init_owner_alerts_server();
     init_kv_server();
+    GOOD = "#1c7c43";
+    WARN = "#b57d0a";
+    BAD = "#d93a15";
+    MUTED = "#6f645c";
+    MAX_TICKET_ATTEMPTS = 3;
+    RENDER_TRUTH_KEYS = [
+      "homepage:render-truth:latest",
+      "homepage:healthcheck:render-truth",
+      "render-truth:latest"
+    ];
   }
 });
 
@@ -26274,7 +26605,7 @@ __export(release_engine_server_exports, {
   ALLOWLIST_CHECK_NAMES: () => ALLOWLIST_CHECK_NAMES,
   DEFAULT_MAX_MERGES_PER_DAY: () => DEFAULT_MAX_MERGES_PER_DAY,
   DEPLOY_TIMEOUT_MS: () => DEPLOY_TIMEOUT_MS,
-  MAX_TICKET_ATTEMPTS: () => MAX_TICKET_ATTEMPTS,
+  MAX_TICKET_ATTEMPTS: () => MAX_TICKET_ATTEMPTS2,
   NEEDS_OWNER_LABEL: () => NEEDS_OWNER_LABEL,
   REQUIRED_CHECK: () => REQUIRED_CHECK,
   REVERT_BRANCH_PREFIX: () => REVERT_BRANCH_PREFIX,
@@ -26450,7 +26781,7 @@ function evaluatePullRequest(facts) {
   };
 }
 function shouldBlockForAttempts(attemptCountAfterBounce) {
-  return attemptCountAfterBounce >= MAX_TICKET_ATTEMPTS;
+  return attemptCountAfterBounce >= MAX_TICKET_ATTEMPTS2;
 }
 function shouldTripCircuit(rollbacksToday) {
   return rollbacksToday >= ROLLBACK_CIRCUIT_LIMIT;
@@ -27111,16 +27442,16 @@ ${recentErrors.length > 0 ? `<p>Recent notes:</p><ul>${recentErrors.map((e) => `
     false
   );
 }
-async function addTicketLink(ticketId, link) {
+async function addTicketLink(ticketId, link2) {
   try {
     await db.insert(suggestionLinks).values({
       suggestionId: ticketId,
-      kind: link.kind.slice(0, 12),
-      ref: link.ref,
-      state: link.state ? link.state.slice(0, 16) : null
+      kind: link2.kind.slice(0, 12),
+      ref: link2.ref,
+      state: link2.state ? link2.state.slice(0, 16) : null
     });
   } catch (err2) {
-    console.warn(`${LOG} could not add ${link.kind} link to ticket #${ticketId}`, err2);
+    console.warn(`${LOG} could not add ${link2.kind} link to ticket #${ticketId}`, err2);
   }
 }
 async function markPrLinksMerged(pending) {
@@ -27151,7 +27482,7 @@ async function setReleaseEngineEnabled(value) {
     console.error(`${LOG} could not flip release_engine_enabled off`, err2);
   }
 }
-var LOG, AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX, REQUIRED_CHECK, ALLOWLIST_CHECK_NAMES, NEEDS_OWNER_LABEL, AGENT_EDITOR_ALLOWLIST_RE, FAILING_CONCLUSIONS2, MAX_TICKET_ATTEMPTS, ROLLBACK_CIRCUIT_LIMIT, DEFAULT_MAX_MERGES_PER_DAY, DEPLOY_TIMEOUT_MS, POLL_BUDGET_MS, POLL_INTERVAL_MS, LOCK_TTL_SEC, KEYS;
+var LOG, AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX, REQUIRED_CHECK, ALLOWLIST_CHECK_NAMES, NEEDS_OWNER_LABEL, AGENT_EDITOR_ALLOWLIST_RE, FAILING_CONCLUSIONS2, MAX_TICKET_ATTEMPTS2, ROLLBACK_CIRCUIT_LIMIT, DEFAULT_MAX_MERGES_PER_DAY, DEPLOY_TIMEOUT_MS, POLL_BUDGET_MS, POLL_INTERVAL_MS, LOCK_TTL_SEC, KEYS;
 var init_release_engine_server = __esm({
   "app/lib/release-engine.server.ts"() {
     "use strict";
@@ -27179,7 +27510,7 @@ var init_release_engine_server = __esm({
       "startup_failure",
       "stale"
     ]);
-    MAX_TICKET_ATTEMPTS = 3;
+    MAX_TICKET_ATTEMPTS2 = 3;
     ROLLBACK_CIRCUIT_LIMIT = 2;
     DEFAULT_MAX_MERGES_PER_DAY = 6;
     DEPLOY_TIMEOUT_MS = 15 * 6e4;
@@ -28016,12 +28347,12 @@ function estimateJobCostUsd(modelTier, durationSeconds, opts = {}) {
   const frames = opts.reuseFrame ? 0 : estimateImageCostUsd(SCENE_FRAME_COST_KEY, SCENE_FRAME_CANDIDATES);
   if (spec.audioDriven) {
     const seconds = opts.speechSeconds ?? durationSeconds;
-    const clip2 = estimateVideoCostUsd(spec.costKey, seconds);
+    const clip3 = estimateVideoCostUsd(spec.costKey, seconds);
     const tts = estimateVideoCostUsd(TTS_COST_KEY, seconds);
-    return Math.round((frames + clip2 + tts) * 1e5) / 1e5;
+    return Math.round((frames + clip3 + tts) * 1e5) / 1e5;
   }
-  const clip = estimateVideoCostUsd(spec.costKey, durationSeconds);
-  return Math.round((frames + clip) * 1e5) / 1e5;
+  const clip2 = estimateVideoCostUsd(spec.costKey, durationSeconds);
+  return Math.round((frames + clip2) * 1e5) / 1e5;
 }
 async function enqueueVideoJob(args) {
   if (!isVideoModelId(args.modelTier)) throw new Error(`Unknown model tier: ${args.modelTier}`);
@@ -28394,9 +28725,9 @@ async function advanceLipsync(job) {
     await touch(job, { stage: "assembly", status: "queued" });
     return "progressed";
   }
-  const clip = await latestAssetByPurpose(job.id, "clip");
-  if (!clip) throw new Error("No clip asset to voice over");
-  const clipBuf = await blobFetchToBuffer(clip.blobUrl);
+  const clip2 = await latestAssetByPurpose(job.id, "clip");
+  if (!clip2) throw new Error("No clip asset to voice over");
+  const clipBuf = await blobFetchToBuffer(clip2.blobUrl);
   const voiceId = await getActiveIvrVoiceId();
   const audio = await generateVoiceover({ text: voiceover, ...voiceId ? { voiceId } : {} });
   const voiced = await muxAudio(clipBuf, audio);
@@ -28432,9 +28763,9 @@ async function latestAssetByPurpose(jobRowId, purpose) {
 }
 async function advanceAssembly(job) {
   const spec = VIDEO_MODELS[job.modelTier];
-  const clip = await latestAssetByPurpose(job.id, "clip");
-  if (!clip) throw new Error("No clip asset to assemble");
-  let raw = await blobFetchToBuffer(clip.blobUrl);
+  const clip2 = await latestAssetByPurpose(job.id, "clip");
+  if (!clip2) throw new Error("No clip asset to assemble");
+  let raw = await blobFetchToBuffer(clip2.blobUrl);
   if (spec?.audioDriven) {
     const handles = job.providerRequestIds;
     const attempts = (typeof handles["assembly_attempts"] === "number" ? handles["assembly_attempts"] : 0) + 1;
@@ -30099,8 +30430,8 @@ function buildMcpServer() {
         "cluster": cluster->{ "slug": slug.current, title, pillarTerm }
       }`;
       const rows = await client5.fetch(groq, params);
-      const total = await client5.fetch(`count(*[${filters.join(" && ")}])`, params);
-      return jsonResult({ total, returned: Array.isArray(rows) ? rows.length : 0, offset, limit, keywords: rows });
+      const total2 = await client5.fetch(`count(*[${filters.join(" && ")}])`, params);
+      return jsonResult({ total: total2, returned: Array.isArray(rows) ? rows.length : 0, offset, limit, keywords: rows });
     }
   );
   server.registerTool(
