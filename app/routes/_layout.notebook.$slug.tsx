@@ -49,9 +49,9 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
-  if (!loaderData) return [{ title: 'Post not found — xdipx' }]
+  if (!loaderData) return [{ title: 'Post not found | xdipx' }]
   const { post } = loaderData
-  const title = (post.seoTitle ?? post.title) + ' — The Notebook | xdipx'
+  const title = (post.seoTitle ?? post.title) + ' | The Notebook | xdipx'
   const description = post.seoDescription ?? post.excerpt
   // The designed share card is the default og:image; the route itself
   // redirects to an editor-supplied ogImage when one exists.
