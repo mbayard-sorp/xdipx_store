@@ -16522,20 +16522,34 @@ var init_homepage_team_keys = __esm({
 // app/lib/team.server.ts
 var team_server_exports = {};
 __export(team_server_exports, {
+  AGENT_EDITOR_APPLY_KINDS: () => AGENT_EDITOR_APPLY_KINDS,
+  ALLOWED: () => ALLOWED,
+  CLAIMANT_ACTORS: () => CLAIMANT_ACTORS,
+  CLAIM_LEASE_DEFAULT_SEC: () => CLAIM_LEASE_DEFAULT_SEC,
+  CLAIM_LEASE_MAX_SEC: () => CLAIM_LEASE_MAX_SEC,
+  SUGGESTION_LIST_MAX: () => SUGGESTION_LIST_MAX,
   TEAM_DEFAULTS: () => TEAM_DEFAULTS,
   TEAM_IDS: () => TEAM_IDS,
+  TERMINAL_TICKET_STATUSES: () => TERMINAL_TICKET_STATUSES,
+  TICKET_STATUSES: () => TICKET_STATUSES,
   VALVE_KEYS: () => VALVE_KEYS,
   assertTeamAuth: () => assertTeamAuth,
+  buildClaimQuery: () => buildClaimQuery,
+  claimSuggestion: () => claimSuggestion,
   createAdCampaign: () => createAdCampaign,
   createDraftSocialPost: () => createDraftSocialPost,
   createSuggestion: () => createSuggestion,
+  createSuggestionDetailed: () => createSuggestionDetailed,
   decideAdCampaign: () => decideAdCampaign,
   decideSuggestion: () => decideSuggestion,
+  expireStaleClaims: () => expireStaleClaims,
   expireStaleRuns: () => expireStaleRuns,
+  findTransitionRule: () => findTransitionRule,
   gate: () => gate,
   getActiveBrief: () => getActiveBrief,
   getSocialFrequencies: () => getSocialFrequencies,
   getTeamConfig: () => getTeamConfig,
+  getTicket: () => getTicket,
   getTodayImageCount: () => getTodayImageCount,
   getTodayRunCount: () => getTodayRunCount,
   getTodaySpendCents: () => getTodaySpendCents,
@@ -16543,6 +16557,9 @@ __export(team_server_exports, {
   invalidateTeamSettingsCache: () => invalidateTeamSettingsCache,
   isRunInProgress: () => isRunInProgress,
   isTeamId: () => isTeamId,
+  isTicketActor: () => isTicketActor,
+  isTicketStatus: () => isTicketStatus,
+  isTransitionAllowed: () => isTransitionAllowed,
   listAdCampaigns: () => listAdCampaigns,
   listBriefs: () => listBriefs,
   listCalendar: () => listCalendar,
@@ -16560,10 +16577,11 @@ __export(team_server_exports, {
   reviewSocialPost: () => reviewSocialPost,
   startRun: () => startRun,
   teamKeys: () => teamKeys,
+  transitionSuggestion: () => transitionSuggestion,
   updateRun: () => updateRun
 });
 import { timingSafeEqual } from "node:crypto";
-import { and as and3, desc, eq as eq11, gte, lt, lte, ne as ne2, sql as sql3 } from "drizzle-orm";
+import { and as and3, asc as asc3, desc, eq as eq11, gte, inArray as inArray3, lt, lte, ne as ne2, sql as sql3 } from "drizzle-orm";
 function assertTeamAuth(request) {
   const expected = process.env["TEAM_TOKEN"] ?? process.env["HOMEPAGE_TEAM_TOKEN"] ?? process.env["CRON_SECRET"] ?? "";
   const auth = request.headers.get("authorization") ?? "";
@@ -16686,7 +16704,7 @@ async function expireStaleRuns() {
 }
 async function gate(team, excludeRunId) {
   if (await kvSetNX("team:expire-stale:throttle", String(Date.now()), 300)) {
-    await expireStaleRuns();
+    await Promise.all([expireStaleRuns(), expireStaleClaims()]);
   }
   const [cfg, spentCents, runsToday, imagesToday, inProgress, briefId, autopublish] = await Promise.all([
     getTeamConfig(team),
@@ -16771,6 +16789,10 @@ async function listRecentEvents(team, sinceDays = 7, limit = 500) {
   }).from(homepageTeamEvents).innerJoin(homepageTeamRuns, eq11(homepageTeamEvents.runId, homepageTeamRuns.id)).where(and3(...conditions)).orderBy(desc(homepageTeamEvents.ts)).limit(limit);
 }
 async function createSuggestion(s) {
+  const res = await createSuggestionDetailed(s);
+  return res.deduped ? 0 : res.id;
+}
+async function createSuggestionDetailed(s) {
   const actingTeam = s.targetTeam ?? s.team;
   const autoApprove = await getTeamConfig(actingTeam).then((c) => c.autoApproveSuggestions).catch(() => false);
   const [row] = await db.insert(homepageTeamSuggestions).values({
@@ -16786,17 +16808,36 @@ async function createSuggestion(s) {
     decidedBy: autoApprove ? "auto" : null,
     decidedAt: autoApprove ? /* @__PURE__ */ new Date() : null,
     priority: s.priority ?? 3,
-    dedupeKey: s.dedupeKey ?? null
+    dedupeKey: s.dedupeKey ?? null,
+    dueAt: s.dueAt == null ? null : new Date(s.dueAt)
   }).onConflictDoNothing().returning({ id: homepageTeamSuggestions.id });
-  return row?.id ?? 0;
+  if (row?.id) return { id: row.id, deduped: false };
+  if (!s.dedupeKey) return { id: 0, deduped: false };
+  const [live] = await db.select({ id: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and3(
+    eq11(homepageTeamSuggestions.dedupeKey, s.dedupeKey),
+    sql3`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`
+  )).limit(1);
+  return { id: live?.id ?? 0, deduped: !!live };
 }
 async function listSuggestions(filter = {}) {
   const conditions = [];
   if (filter.team) conditions.push(eq11(homepageTeamSuggestions.team, filter.team));
   if (filter.targetTeam) conditions.push(eq11(homepageTeamSuggestions.targetTeam, filter.targetTeam));
   if (filter.status) conditions.push(eq11(homepageTeamSuggestions.status, filter.status));
+  if (filter.statuses?.length) {
+    conditions.push(inArray3(homepageTeamSuggestions.status, [...filter.statuses]));
+  }
+  if (filter.kinds?.length) {
+    conditions.push(inArray3(homepageTeamSuggestions.kind, [...filter.kinds]));
+  }
+  if (filter.assignee) conditions.push(eq11(homepageTeamSuggestions.assignee, filter.assignee));
+  if (filter.updatedSince) {
+    conditions.push(gte(homepageTeamSuggestions.updatedAt, filter.updatedSince));
+  }
+  const order = filter.orderBy === "priority" ? [asc3(homepageTeamSuggestions.priority), asc3(homepageTeamSuggestions.createdAt)] : filter.orderBy === "age" ? [asc3(homepageTeamSuggestions.createdAt)] : [desc(homepageTeamSuggestions.createdAt)];
+  const limit = Math.min(SUGGESTION_LIST_MAX, Math.max(1, filter.limit ?? 100));
   const q = db.select().from(homepageTeamSuggestions);
-  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(desc(homepageTeamSuggestions.createdAt)).limit(filter.limit ?? 100);
+  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(...order).limit(limit);
 }
 async function decideSuggestion(id, status) {
   await db.update(homepageTeamSuggestions).set({ status, decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "proposed")));
@@ -16806,13 +16847,173 @@ async function retireSuggestion(id) {
 }
 async function markSuggestion(id, status, applyRef) {
   const allowedFrom = status === "pr_open" ? "approved" : "pr_open";
-  const res = await db.update(homepageTeamSuggestions).set({ status, applyRef }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, allowedFrom))).returning({ id: homepageTeamSuggestions.id });
+  const res = await db.update(homepageTeamSuggestions).set({ status, applyRef, updatedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, allowedFrom))).returning({ id: homepageTeamSuggestions.id });
   if (res.length === 0) {
     throw new Response(
       `Conflict: suggestion ${id} is not in '${allowedFrom}' (agents cannot move rows out of 'proposed')`,
       { status: 409 }
     );
   }
+}
+function isTicketStatus(v) {
+  return typeof v === "string" && TICKET_STATUSES.includes(v);
+}
+function isTicketActor(v) {
+  return typeof v === "string" && (v === "owner" || v === "auto" || v === "system" || AGENT_ACTOR_RE.test(v));
+}
+function findTransitionRule(from, to, actor, ctx = {}) {
+  for (const rule of ALLOWED[from] ?? []) {
+    if (rule.to !== to) continue;
+    const actorOk = rule.actors.some(
+      (a) => a === "assignee" ? !!ctx.assignee && ctx.assignee === actor : a === actor
+    );
+    if (!actorOk) continue;
+    if (rule.kinds && !rule.kinds.includes(ctx.kind ?? "")) continue;
+    return rule;
+  }
+  return null;
+}
+function isTransitionAllowed(from, to, actor, ctx = {}) {
+  return findTransitionRule(from, to, actor, ctx) !== null;
+}
+async function addTicketLinks(id, links) {
+  if (links.length === 0) return;
+  await db.insert(suggestionLinks).values(
+    links.map((l) => ({
+      suggestionId: id,
+      kind: l.kind.slice(0, 12),
+      ref: l.ref,
+      state: l.state ? l.state.slice(0, 16) : null
+    }))
+  );
+}
+async function transitionSuggestion(id, to, actor, opts = {}) {
+  if (!isTicketStatus(to)) {
+    throw new Response(`Bad Request: unknown status '${String(to)}'`, { status: 400 });
+  }
+  if (!isTicketActor(actor)) {
+    throw new Response(`Bad Request: unknown actor '${String(actor)}'`, { status: 400 });
+  }
+  const [row] = await db.select().from(homepageTeamSuggestions).where(eq11(homepageTeamSuggestions.id, id)).limit(1);
+  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
+  const from = row.status;
+  const rule = findTransitionRule(from, to, actor, { assignee: row.assignee, kind: row.kind });
+  if (!rule) {
+    throw new Response(
+      `Conflict: '${from}' -> '${to}' is not permitted for actor '${actor}' on suggestion ${id}`,
+      { status: 409 }
+    );
+  }
+  const now = /* @__PURE__ */ new Date();
+  const patch = { status: to, updatedAt: now };
+  if (rule.incrementAttempt || opts.incrementAttempt) {
+    patch["attemptCount"] = sql3`${homepageTeamSuggestions.attemptCount} + 1`;
+  }
+  if (opts.lastError !== void 0) patch["lastError"] = opts.lastError;
+  if (to === "approved") {
+    patch["assignee"] = null;
+    patch["claimedAt"] = null;
+    patch["claimExpiresAt"] = null;
+  }
+  if (to === "verified") {
+    patch["verifiedBy"] = actor;
+    patch["verifiedAt"] = now;
+  }
+  if (from === "proposed" || to === "dismissed") {
+    patch["decidedBy"] = actor;
+    patch["decidedAt"] = now;
+  }
+  if (to === "applied" && !row.applyRef) {
+    const pr = opts.links?.find((l) => l.kind === "pr");
+    if (pr) patch["applyRef"] = pr.ref;
+  }
+  const guards = [eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, from)];
+  if (rule.actors.includes("assignee")) {
+    guards.push(eq11(homepageTeamSuggestions.assignee, actor));
+  }
+  const updated = await db.update(homepageTeamSuggestions).set(patch).where(and3(...guards)).returning();
+  if (updated.length === 0) {
+    throw new Response(
+      `Conflict: suggestion ${id} changed underneath the '${from}' -> '${to}' transition`,
+      { status: 409 }
+    );
+  }
+  const links = [...opts.links ?? []];
+  if (opts.note) links.push({ kind: "note", ref: opts.note, state: to });
+  await addTicketLinks(id, links);
+  return updated[0];
+}
+async function expireStaleClaims() {
+  const res = await db.update(homepageTeamSuggestions).set({
+    status: "approved",
+    assignee: null,
+    claimedAt: null,
+    claimExpiresAt: null,
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(and3(
+    eq11(homepageTeamSuggestions.status, "in_progress"),
+    lt(homepageTeamSuggestions.claimExpiresAt, /* @__PURE__ */ new Date())
+  )).returning({ id: homepageTeamSuggestions.id });
+  return res.length;
+}
+function buildClaimQuery(c) {
+  const conds = [sql3`c.status = ${c.from}`];
+  if (c.id != null) conds.push(sql3`c.id = ${c.id}`);
+  if (c.filter.kind) conds.push(sql3`c.kind = ${c.filter.kind}`);
+  if (c.filter.team) conds.push(sql3`c.team = ${c.filter.team}`);
+  if (c.filter.targetTeam) conds.push(sql3`c.target_team = ${c.filter.targetTeam}`);
+  conds.push(sql3`(c.claim_expires_at IS NULL OR c.claim_expires_at < now())`);
+  return sql3`
+    UPDATE homepage_team_suggestions AS s
+       SET status           = 'in_progress',
+           assignee         = ${c.assignee},
+           claimed_at       = now(),
+           claim_expires_at = now() + make_interval(secs => ${c.leaseSeconds}),
+           updated_at       = now()
+     WHERE s.id = (
+       SELECT c.id
+         FROM homepage_team_suggestions AS c
+        WHERE ${sql3.join(conds, sql3` AND `)}
+        ORDER BY c.priority ASC, c.created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+     )
+    RETURNING s.id AS id`;
+}
+async function claimSuggestion(input, exec = defaultExecutor) {
+  if (!isTicketActor(input.assignee)) {
+    throw new Response(`Bad Request: unknown actor '${String(input.assignee)}'`, { status: 400 });
+  }
+  const from = input.filter?.status ?? "approved";
+  if (!isTicketStatus(from)) {
+    throw new Response(`Bad Request: unknown status '${String(from)}'`, { status: 400 });
+  }
+  if (!isTransitionAllowed(from, "in_progress", input.assignee)) {
+    throw new Response(
+      `Conflict: actor '${input.assignee}' may not claim a '${from}' ticket`,
+      { status: 409 }
+    );
+  }
+  const leaseSeconds = Math.min(
+    CLAIM_LEASE_MAX_SEC,
+    Math.max(60, Math.floor(input.leaseSeconds ?? CLAIM_LEASE_DEFAULT_SEC))
+  );
+  const res = await exec(buildClaimQuery({
+    assignee: input.assignee,
+    leaseSeconds,
+    from,
+    id: input.id,
+    filter: input.filter ?? {}
+  }));
+  const id = Number(res.rows?.[0]?.id ?? 0);
+  return id > 0 ? { empty: false, id } : { empty: true };
+}
+async function getTicket(id) {
+  const [suggestion] = await db.select().from(homepageTeamSuggestions).where(eq11(homepageTeamSuggestions.id, id)).limit(1);
+  if (!suggestion) return null;
+  const links = await db.select().from(suggestionLinks).where(eq11(suggestionLinks.suggestionId, id)).orderBy(desc(suggestionLinks.createdAt)).limit(50);
+  const events = suggestion.runId == null ? [] : await db.select().from(homepageTeamEvents).where(eq11(homepageTeamEvents.runId, suggestion.runId)).orderBy(desc(homepageTeamEvents.ts)).limit(20);
+  return { suggestion, links, events };
 }
 async function getActiveBrief() {
   const [row] = await db.select().from(strategyBriefs).where(eq11(strategyBriefs.status, "active")).orderBy(desc(strategyBriefs.createdAt)).limit(1);
@@ -16926,7 +17127,7 @@ async function proposeCalendarEvent(input) {
   }).returning({ id: marketingCalendar.id });
   return row.id;
 }
-var RUN_LOCK_WINDOW_MIN, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS;
+var RUN_LOCK_WINDOW_MIN, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
 var init_team_server = __esm({
   "app/lib/team.server.ts"() {
     "use strict";
@@ -16941,6 +17142,68 @@ var init_team_server = __esm({
     SETTINGS_CACHE_TTL_SEC = 60;
     SPEND_KV_TTL_SEC = 26 * 3600;
     SPEND_RESEED_MS = 15 * 6e4;
+    SUGGESTION_LIST_MAX = 200;
+    TICKET_STATUSES = [
+      "proposed",
+      "approved",
+      "in_progress",
+      "pr_open",
+      "in_review",
+      "verified",
+      "applied",
+      "blocked",
+      "dismissed"
+    ];
+    TERMINAL_TICKET_STATUSES = ["applied", "dismissed"];
+    AGENT_ACTOR_RE = /^agent:[a-z0-9][a-z0-9-]{0,24}$/;
+    AGENT_EDITOR_APPLY_KINDS = ["instructions", "agent-def", "config"];
+    CLAIMANT_ACTORS = ["agent:rr7-engineer", "agent:agent-editor"];
+    OWNER_DISMISS = { to: "dismissed", actors: ["owner"] };
+    ALLOWED = {
+      proposed: [
+        { to: "approved", actors: ["owner", "auto"] },
+        OWNER_DISMISS
+      ],
+      approved: [
+        { to: "in_progress", actors: CLAIMANT_ACTORS },
+        OWNER_DISMISS
+      ],
+      in_progress: [
+        { to: "pr_open", actors: ["assignee"] },
+        { to: "blocked", actors: ["assignee", "system"] },
+        // Lease expiry releases the ticket back onto the unassigned queue.
+        { to: "approved", actors: ["system"] },
+        OWNER_DISMISS
+      ],
+      pr_open: [
+        { to: "in_review", actors: ["agent:qa-reviewer"] },
+        // The legacy agent-editor docs path, preserved verbatim.
+        { to: "applied", actors: ["agent:agent-editor"], kinds: AGENT_EDITOR_APPLY_KINDS },
+        OWNER_DISMISS
+      ],
+      in_review: [
+        { to: "verified", actors: ["agent:qa-reviewer"] },
+        // FAIL bounce: back to the assignee with a reason, one attempt spent.
+        { to: "in_progress", actors: ["agent:qa-reviewer"], incrementAttempt: true },
+        OWNER_DISMISS
+      ],
+      verified: [
+        // Release engine only, post-merge and post-smoke.
+        { to: "applied", actors: ["system"] },
+        // Merge, deploy, or smoke failed: bounce and spend an attempt.
+        { to: "in_progress", actors: ["system"], incrementAttempt: true },
+        OWNER_DISMISS
+      ],
+      blocked: [
+        { to: "approved", actors: ["owner", "system"] },
+        OWNER_DISMISS
+      ],
+      applied: [],
+      dismissed: []
+    };
+    CLAIM_LEASE_DEFAULT_SEC = 1200;
+    CLAIM_LEASE_MAX_SEC = 6 * 3600;
+    defaultExecutor = async (query) => await db.execute(query);
   }
 });
 
@@ -21646,7 +21909,7 @@ var init_pricing_webhook_server = __esm({
 });
 
 // app/lib/cost-sync.server.ts
-import { inArray as inArray3, sql as sql12 } from "drizzle-orm";
+import { inArray as inArray4, sql as sql12 } from "drizzle-orm";
 function round23(n) {
   return Math.round(n * 100) / 100;
 }
@@ -21676,7 +21939,7 @@ async function runNalpacCostSync(opts) {
     if (carriedInFeed.length === 0) return result;
     const dropPctRaw = await getPipelineSetting("import_monitor_watch_price_drop_pct");
     const dropPct = parseFloat(dropPctRaw ?? "0.10") || 0.1;
-    const priorRows = await db.select().from(nalpacPriceHistory).where(inArray3(nalpacPriceHistory.sku, carriedInFeed));
+    const priorRows = await db.select().from(nalpacPriceHistory).where(inArray4(nalpacPriceHistory.sku, carriedInFeed));
     const priorBySku = new Map(priorRows.map((r) => [r.sku, r]));
     const today = todayIso();
     const now = /* @__PURE__ */ new Date();
@@ -22928,7 +23191,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and4, asc as asc3, eq as eq17, inArray as inArray4, isNull as isNull2, sql as sql13 } from "drizzle-orm";
+import { and as and4, asc as asc4, eq as eq17, inArray as inArray5, isNull as isNull2, sql as sql13 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -23079,7 +23342,7 @@ async function submitEnrichmentBatch(cap, opts = {}) {
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichBatchId),
     isNull2(importCandidates.enrichFailedAt)
-  )).orderBy(asc3(importCandidates.id)).limit(cap);
+  )).orderBy(asc4(importCandidates.id)).limit(cap);
   const valid = rows.filter((r) => Boolean(r.productId));
   if (valid.length === 0) return { submitted: 0, batchIds: [], reason: "no_unenriched" };
   const sharedContext = await loadSharedEnrichmentContext();
@@ -23105,7 +23368,7 @@ async function submitEnrichmentBatch(cap, opts = {}) {
     }
     if (inputs.length === 0) continue;
     const { batchId } = await submitFullEnrichmentBatch(inputs, sharedContext, { brandVoice: EMMA_VOICE_ENRICHMENT });
-    await db.update(importCandidates).set({ enrichBatchId: batchId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray4(importCandidates.id, candidateIds));
+    await db.update(importCandidates).set({ enrichBatchId: batchId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray5(importCandidates.id, candidateIds));
     batchIds.push(batchId);
     submittedTotal += inputs.length;
     console.log(`[import-enrich] submitted full-enrichment batch ${batchId} for ${inputs.length} product(s)`);
@@ -23156,7 +23419,7 @@ async function collectEnrichmentBatch() {
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichFailedAt),
     sql13`${importCandidates.enrichBatchId} IS NOT NULL`
-  )).orderBy(asc3(importCandidates.id));
+  )).orderBy(asc4(importCandidates.id));
   const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
   if (pending.length === 0) {
     return { enriched: 0, failed: 0, stillPending: 0 };
@@ -23821,7 +24084,7 @@ __export(batch_orchestrator_server_exports, {
 });
 import { createHash as createHash6, randomUUID as randomUUID2 } from "node:crypto";
 import Anthropic7 from "@anthropic-ai/sdk";
-import { eq as eq19, inArray as inArray5 } from "drizzle-orm";
+import { eq as eq19, inArray as inArray6 } from "drizzle-orm";
 function getClient3() {
   return new Anthropic7({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
 }
@@ -23875,7 +24138,7 @@ async function enqueueBatchJob(args) {
 }
 async function advanceInflightJobs(opts = {}) {
   const maxJobs = opts.maxJobs ?? 10;
-  const rows = await db.select().from(batchJobs).where(inArray5(batchJobs.status, ["queued", "submitted", "processing", "applying"])).orderBy(batchJobs.updatedAt).limit(maxJobs);
+  const rows = await db.select().from(batchJobs).where(inArray6(batchJobs.status, ["queued", "submitted", "processing", "applying"])).orderBy(batchJobs.updatedAt).limit(maxJobs);
   const result = { advanced: 0, submitted: 0, applied: 0, done: 0, failed: 0 };
   if (rows.length === 0) {
     await kvSet(KV_KEYS.enrichmentPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS);
@@ -25030,7 +25293,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and5, eq as eq21, inArray as inArray6, sql as sql14 } from "drizzle-orm";
+import { and as and5, eq as eq21, inArray as inArray7, sql as sql14 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -25197,7 +25460,7 @@ async function runImportMonitor(opts = {}) {
       status: importCandidates.status,
       watchScore: importCandidates.watchScore,
       watchPrice: importCandidates.watchPrice
-    }).from(importCandidates).where(inArray6(importCandidates.masterKey, cappedKeys)) : [];
+    }).from(importCandidates).where(inArray7(importCandidates.masterKey, cappedKeys)) : [];
     const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r]));
     let candidatesNew = 0;
     let candidatesResurfaced = 0;
@@ -25322,7 +25585,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
     needsReview: importCandidates.needsReview
   }).from(importCandidates).where(and5(
     eq21(importCandidates.status, "pending"),
-    inArray6(importCandidates.masterKey, cappedKeys)
+    inArray7(importCandidates.masterKey, cappedKeys)
   )).orderBy(importCandidates.tier, sql14`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
     const tierOk = c.tier === "A" || c.tier === "B";
@@ -25418,7 +25681,7 @@ async function stageMasterCandidatesBySkus(skus, opts) {
     }
   }
   const masterKeys = [...mastersToDo];
-  const existingRows = masterKeys.length > 0 ? await db.select({ masterKey: importCandidates.masterKey, status: importCandidates.status }).from(importCandidates).where(inArray6(importCandidates.masterKey, masterKeys)) : [];
+  const existingRows = masterKeys.length > 0 ? await db.select({ masterKey: importCandidates.masterKey, status: importCandidates.status }).from(importCandidates).where(inArray7(importCandidates.masterKey, masterKeys)) : [];
   const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r.status]));
   let staged = 0;
   let skippedCarried = 0;
@@ -25457,7 +25720,7 @@ async function stageMasterCandidatesBySkus(skus, opts) {
 }
 async function getImportCandidatesByStatus(statuses, limit) {
   if (statuses.length === 0) return [];
-  const query = db.select().from(importCandidates).where(inArray6(importCandidates.status, statuses)).orderBy(
+  const query = db.select().from(importCandidates).where(inArray7(importCandidates.status, statuses)).orderBy(
     importCandidates.tier,
     sql14`${importCandidates.dealScore} DESC NULLS LAST`
   );
@@ -25484,7 +25747,7 @@ async function getCatalogOpportunities() {
     brand: importCandidates.brand,
     tier: importCandidates.tier,
     dealScore: importCandidates.dealScore
-  }).from(importCandidates).where(inArray6(importCandidates.status, ["pending", "watching"]));
+  }).from(importCandidates).where(inArray7(importCandidates.status, ["pending", "watching"]));
   const oppMap = /* @__PURE__ */ new Map();
   for (const r of pendingRows) {
     if (!r.brand) continue;
@@ -26441,7 +26704,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq23, and as and6, inArray as inArray7, desc as desc2, isNotNull, ne as ne3, sql as sql15 } from "drizzle-orm";
+import { eq as eq23, and as and6, inArray as inArray8, desc as desc2, isNotNull, ne as ne3, sql as sql15 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -26501,7 +26764,7 @@ async function enqueueVideoJob(args) {
 }
 async function advanceInflightVideoJobs(opts = {}) {
   const maxJobs = opts.maxJobs ?? 5;
-  const rows = await db.select().from(videoJobs).where(inArray7(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
+  const rows = await db.select().from(videoJobs).where(inArray8(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
   const result = { advanced: 0, done: 0, failed: 0, parked: 0 };
   if (rows.length === 0) {
     await kvSet(KV_KEYS.videoPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS2);
@@ -26571,7 +26834,7 @@ async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
     sql15`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
     eq23(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
-    inArray7(videoJobs.stage, FRAME_APPROVED_STAGES),
+    inArray8(videoJobs.stage, FRAME_APPROVED_STAGES),
     ...excludeJobRowId != null ? [ne3(videoJobs.id, excludeJobRowId)] : []
   )).orderBy(desc2(videoJobs.createdAt)).limit(1);
   return row?.frameId ?? null;
@@ -26593,7 +26856,7 @@ async function advanceSceneFrame(job) {
     const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and6(
       eq23(videoJobs.sceneFrameAssetId, reuseId),
       eq23(videoJobs.presenter, job.presenter),
-      inArray7(videoJobs.stage, FRAME_APPROVED_STAGES)
+      inArray8(videoJobs.stage, FRAME_APPROVED_STAGES)
     )).limit(1);
     if (!approvedBy) {
       throw new Error(`reuseFrameAssetId ${reuseId} has never been approved for presenter '${job.presenter}' (no matching job carried it past the frame gate)`);
@@ -27019,7 +27282,7 @@ async function listVideoJobs(limit = 40) {
   const jobs = await db.select().from(videoJobs).orderBy(desc2(videoJobs.createdAt)).limit(limit);
   if (!jobs.length) return [];
   const jobIds = jobs.map((j) => j.id);
-  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray7(mediaAssets.videoJobId, jobIds));
+  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray8(mediaAssets.videoJobId, jobIds));
   return jobs.map((job) => {
     const own = assets.filter((a) => a.videoJobId === job.id);
     const finalAsset = own.find((a) => a.id === job.finalAssetId) ?? null;
