@@ -261,7 +261,10 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
   const [railsResult, emmaHero, notebook, editor, contentBlocks] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, 'getEmmaHeroSettings(storefront)'),
-    getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [] as BlogPostCard[], total: 0 })),
+    // 6, not 3. The Notebook is ~21% of all site sessions with ~20 minutes of
+    // dwell and currently sells nothing, so the homepage gives it a real shelf
+    // plus a see-all link into /notebook (see HomeNotebookRail).
+    getBlogPosts({ perPage: 6 }).catch(() => ({ posts: [] as BlogPostCard[], total: 0 })),
     // Meet Emma portrait (Nº 04). Own short timeout + degrade-to-null so a slow
     // or cold Sanity leg can never sink the render; MeetEmma falls back to the
     // bundled illustration when this is null. getEditor() is already cached 300s

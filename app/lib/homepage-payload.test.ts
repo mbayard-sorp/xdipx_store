@@ -3,6 +3,9 @@ import {
   assertJsonSafe,
   reshuffleRailsWithSeed,
   HOMEPAGE_PAYLOAD_VERSION,
+  HOMEPAGE_PAYLOAD_B_VERSION,
+  HOMEPAGE_PAYLOAD_B_KV_KEY,
+  VARIANT_B_SECTION_TYPES,
   type HomepagePayloadA,
 } from './homepage-payload.server'
 import type { Rail } from '~/types/discovery'
@@ -71,6 +74,36 @@ describe('assertJsonSafe', () => {
     // @ts-expect-error — deliberately inject a non-JSON-safe value
     p.builtAt = new Date(1_700_000_000_000)
     expect(() => assertJsonSafe(p)).toThrow(/builtAt/)
+  })
+})
+
+describe('VARIANT_B_SECTION_TYPES', () => {
+  it('lets the team own the trust strip and the FAQ band', () => {
+    // Both blocks already existed in Sanity and were already projected, but this
+    // whitelist filtered them out of variant b, which is why the hero trust
+    // strip and the FAQ were hardcoded arrays no agent could reach.
+    expect(VARIANT_B_SECTION_TYPES).toContain('trustBar')
+    expect(VARIANT_B_SECTION_TYPES).toContain('homepageFaq')
+  })
+
+  it('still carries the merchandising surfaces the storefront reads', () => {
+    for (const t of ['emmaCuratedRail', 'editorialTiles', 'wayfinderMosaic', 'playTogetherBanner']) {
+      expect(VARIANT_B_SECTION_TYPES).toContain(t)
+    }
+  })
+})
+
+describe('HOMEPAGE_PAYLOAD_B_VERSION', () => {
+  it('is past b2, so blobs built before the trust/FAQ/couples/notebook change miss', () => {
+    // The blob is read verbatim from KV and Neon. Shipping a new payload shape
+    // without bumping this serves the OLD shape until the caches expire, and
+    // none of the new content appears live.
+    expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b2')
+    expect(HOMEPAGE_PAYLOAD_B_VERSION).toBe('b3')
+  })
+
+  it('embeds the version in the KV key so old blobs cannot be read back', () => {
+    expect(HOMEPAGE_PAYLOAD_B_KV_KEY).toContain(HOMEPAGE_PAYLOAD_B_VERSION)
   })
 })
 

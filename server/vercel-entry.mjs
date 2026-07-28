@@ -3473,7 +3473,10 @@ async function getBlogPosts(opts = {}) {
     }
     const [rawPosts, total] = await Promise.all([
       client5.fetch(
-        `*[${filter}] | order(publishedAt desc) [${start}...${end}] { ${BLOG_POST_CARD_PROJECTION}, "bodyText": body[_type == "block"]{ "text": children[].text } }`,
+        // `productHandle` is the first product the post embeds, projected here
+        // (not in the shared card projection) so it stays scoped to this query.
+        // NotebookRail's opt-in product chip is the only consumer.
+        `*[${filter}] | order(publishedAt desc) [${start}...${end}] { ${BLOG_POST_CARD_PROJECTION}, "productHandle": body[_type == "blogProductEmbed" && defined(productHandle)][0].productHandle, "bodyText": body[_type == "block"]{ "text": children[].text } }`,
         params
       ),
       client5.fetch(`count(*[${filter}])`, params)
@@ -4134,6 +4137,14 @@ var init_sanity_server = __esm({
   "trustItems": select(
     _type == "trustBar" => items[]->{ icon, headline, subheadline, active }
   ),
+  // homepageFaq \u2014 same reason the trustBar items get their own field name: the
+  // "items" projection above is categoryGrid/testimonials-shaped, and folding a
+  // third shape into that select() would collide. StorefrontHome reads faqItems.
+  "faqItems": select(
+    _type == "homepageFaq" => items[]{ question, answer }
+  ),
+  // emmaCuratedRail \u2014 deliberate bestseller-anchor takeover (defaults to false).
+  replacesAnchor,
   columns,
   // productCarousel
   source, shopifyTag, collectionHandle,
@@ -4184,6 +4195,9 @@ var init_sanity_server = __esm({
       defined(_ref) => @->{
         _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
         "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
+        // Deliberate bestseller-anchor takeover. Unset/false = the rail renders
+        // BELOW the always-on anchor grid instead of displacing it.
+        replacesAnchor,
         layout, bgStyle, ctaLink, ctaLabel
       },
       { ${CONTENT_BLOCKS_PROJECTION} }
@@ -4202,7 +4216,9 @@ var init_sanity_server = __esm({
     heroVariant, eyebrow, headline, body, aside, pullQuote, pairProductHandle
   },
   "cta": *[_id == "singleton.emmaHeroStorefront"][0]{
-    primaryCtaLabel, primaryCtaLink, featuredProductHandle
+    primaryCtaLabel, primaryCtaLink,
+    secondaryCtaLabel, secondaryCtaLink,
+    featuredProductHandle
   }
 }
 `;
@@ -15842,7 +15858,10 @@ async function buildHomeContentBlocks() {
   const emmaRailBlocks = sections.filter(
     (s) => s._type === "emmaCuratedRail"
   );
-  const [carouselResults, emmaRailResults] = await Promise.all([
+  const couplesBlocks = sections.filter(
+    (s) => s._type === "playTogetherBanner"
+  );
+  const [carouselResults, emmaRailResults, couplesResults] = await Promise.all([
     carouselBlocks.length > 0 ? withTimeout(Promise.all(carouselBlocks.map((b) => {
       const limit = b.productLimit ?? 8;
       const source = b.source ?? "tag";
@@ -15856,7 +15875,21 @@ async function buildHomeContentBlocks() {
     })), BUILD_TIMEOUT_MS, [], "carouselResults(payloadA)") : Promise.resolve([]),
     emmaRailBlocks.length > 0 ? withTimeout(Promise.all(emmaRailBlocks.map(
       (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)) : Promise.resolve([])
-    )), BUILD_TIMEOUT_MS, [], "emmaRailResults(payloadA)") : Promise.resolve([])
+    )), BUILD_TIMEOUT_MS, [], "emmaRailResults(payloadA)") : Promise.resolve([]),
+    // Couples strip. Uses the same hardened path as the rails above:
+    // `normalizeProductHandles` tolerates BOTH shapes this array exists in
+    // (productRef objects and bare strings), and each block additionally
+    // catches its own rejection. That last part matters: every homepage block
+    // resolves inside one Promise.all, so a single malformed entry used to
+    // reject the whole contentBlocks build and blank every team-published
+    // section on the page (the three-day outage PR #322 fixed). A bad couples
+    // block must cost only its own strip.
+    couplesBlocks.length > 0 ? withTimeout(Promise.all(couplesBlocks.map(
+      (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)).catch((err) => {
+        console.error("[homepage-payload] couples rail resolve failed:", err);
+        return [];
+      }) : Promise.resolve([])
+    )), BUILD_TIMEOUT_MS, [], "couplesResults(payloadA)") : Promise.resolve([])
   ]);
   const carouselProductMap = {};
   carouselBlocks.forEach((b, i) => {
@@ -15864,6 +15897,9 @@ async function buildHomeContentBlocks() {
   });
   emmaRailBlocks.forEach((b, i) => {
     carouselProductMap[b._key] = emmaRailResults[i] ?? [];
+  });
+  couplesBlocks.forEach((b, i) => {
+    carouselProductMap[b._key] = couplesResults[i] ?? [];
   });
   return { sections, carouselProductMap };
 }
@@ -15886,7 +15922,7 @@ async function buildHomeContentBlocksLean() {
     (s) => VARIANT_B_SECTION_TYPES.includes(s._type)
   );
   const survivingRailKeys = new Set(
-    leanSections.filter((s) => s._type === "emmaCuratedRail").map((s) => s._key)
+    leanSections.filter((s) => s._type === "emmaCuratedRail" || s._type === "playTogetherBanner").map((s) => s._key)
   );
   const leanCarouselProductMap = {};
   for (const key of survivingRailKeys) {
@@ -16116,9 +16152,18 @@ var init_homepage_payload_server = __esm({
       "emmaCuratedRail",
       "editorialTiles",
       "wayfinderMosaic",
-      "playTogetherBanner"
+      "playTogetherBanner",
+      // The hero trust strip (Nº 02). A `trustBar` block + `trustItem` docs already
+      // existed and were already projected as `trustItems`, but this whitelist
+      // filtered them out, so the strip stayed a hardcoded four-string array no
+      // agent could touch. Published trust items now win; the shell array is the
+      // fallback.
+      "trustBar",
+      // The FAQ band (Nº 11), same story: hardcoded Q&A with no Sanity read. The
+      // published block feeds BOTH the visible accordion and the FAQPage JSON-LD.
+      "homepageFaq"
     ];
-    HOMEPAGE_PAYLOAD_B_VERSION = "b2";
+    HOMEPAGE_PAYLOAD_B_VERSION = "b3";
     HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`;
   }
 });
@@ -16612,7 +16657,10 @@ async function buildHomepagePayloadB() {
   const [railsResult, emmaHero, notebook, editor, contentBlocks] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, "getEmmaHeroSettings(storefront)"),
-    getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [], total: 0 })),
+    // 6, not 3. The Notebook is ~21% of all site sessions with ~20 minutes of
+    // dwell and currently sells nothing, so the homepage gives it a real shelf
+    // plus a see-all link into /notebook (see HomeNotebookRail).
+    getBlogPosts({ perPage: 6 }).catch(() => ({ posts: [], total: 0 })),
     // Meet Emma portrait (Nº 04). Own short timeout + degrade-to-null so a slow
     // or cold Sanity leg can never sink the render; MeetEmma falls back to the
     // bundled illustration when this is null. getEditor() is already cached 300s

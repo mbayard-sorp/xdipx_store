@@ -121,6 +121,14 @@ export interface EmmaCuratedRailBlock {
   /** RAW from Sanity: productRef objects OR bare strings. Flatten with
    *  `normalizeProductHandles()` (~/lib/product-handles) before use. */
   productHandles?: ProductHandleEntry[]
+  /**
+   * Deliberate anchor takeover. Default (false/unset) renders this rail BELOW
+   * the always-on "Most picked, right now" bestseller grid. True hides the
+   * anchor grid and gives this rail the Nº 03 slot. Publishing a rail used to
+   * displace the anchor unconditionally, which silently removed the page's
+   * bestseller wall.
+   */
+  replacesAnchor?: boolean
   layout?: 'carousel' | 'grid' | 'grid-3'
   bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
   ctaLink?: string
@@ -146,6 +154,13 @@ export interface PlayTogetherBannerBlock {
   image?: SanityImageAsset
   imagePosition: 'left' | 'right'
   bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
+  /**
+   * Optional couples rail under the band ("A few more, chosen for sharing").
+   * RAW from Sanity: productRef objects OR bare strings. Flatten with
+   * `normalizeProductHandles()` (~/lib/product-handles) before use. Empty/unset
+   * hides the strip.
+   */
+  productHandles?: ProductHandleEntry[]
 }
 
 // ─── Brand Logo Wall ──────────────────────────────────────────────────────
@@ -327,6 +342,27 @@ export interface RelatedGuidesBlock {
   guides: BlogPostCard[]
 }
 
+// ─── Homepage FAQ (Nº 11 band) ────────────────────────────────────────────
+// Additive override for the storefront's hardcoded FAQ array. The SAME item
+// set feeds the visible accordion and the FAQPage JSON-LD, so the two can
+// never disagree. `faqItems` is the projected name (the Sanity field is
+// `items`, renamed in GROQ to avoid colliding with the categoryGrid /
+// testimonials `items` projection, same pattern as `trustItems`).
+
+export interface HomepageFaqItem {
+  question: string
+  answer: string
+}
+
+export interface HomepageFaqBlock {
+  _type: 'homepageFaq'
+  _key: string
+  active: boolean
+  order: number
+  heading?: string
+  faqItems?: HomepageFaqItem[]
+}
+
 // ─── Union ────────────────────────────────────────────────────────────────
 
 export type ContentBlock =
@@ -345,6 +381,7 @@ export type ContentBlock =
   | EditorBioBlock
   | WayfinderMosaicBlock
   | RelatedGuidesBlock
+  | HomepageFaqBlock
 
 export interface HomepageSections {
   _id: string
@@ -473,6 +510,12 @@ export interface EmmaHeroSettings {
   // doc by getEmmaHeroSettings(); both unset = default hero CTA behavior.
   primaryCtaLabel?: string
   primaryCtaLink?: string
+  // Secondary (ghost) hero CTA, same singleton, same guards: internal paths
+  // only and whitelist labels only. Unset label falls back to whichever
+  // whitelist phrase the primary is not using; unset link falls back to
+  // /collections/best-sellers (never the raw /collections index).
+  secondaryCtaLabel?: string
+  secondaryCtaLink?: string
   // Pinnable headliner, also merged in from singleton.emmaHeroStorefront. When
   // set, the storefront hero image and peek link pin to this product handle
   // instead of rotating with the discovery shuffle. Unset = rotating behavior.
@@ -536,6 +579,14 @@ export interface BlogPostCard {
   author?: BlogAuthor
   category?: BlogCategory
   readingTime: number
+  /**
+   * Handle of the first product the post embeds (`blogProductEmbed`), when the
+   * query projects it. Optional and additive: only `getBlogPosts` supplies it,
+   * and only `NotebookRail`'s opt-in `showProductChips` reads it. The Notebook
+   * is ~21% of sessions with long dwell and no path to a product, so a card can
+   * offer the product it is actually about.
+   */
+  productHandle?: string
 }
 
 export interface BlogPost extends BlogPostCard {

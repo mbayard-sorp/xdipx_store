@@ -25,6 +25,7 @@ export default {
         { type: 'richText'           },
         { type: 'editorBio'          },
         { type: 'wayfinderMosaic'    },
+        { type: 'homepageFaq'        },
       ],
     },
   ],

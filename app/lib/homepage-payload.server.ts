@@ -30,7 +30,7 @@ import { normalizeProductHandles } from '~/lib/product-handles'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
 import type { Product, LeanCardProduct } from '~/types'
 import type { DiscoveryProduct } from '~/types/discovery'
-import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock, EmmaHeroSettings, BlogPostCard } from '~/types/cms'
+import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock, PlayTogetherBannerBlock, EmmaHeroSettings, BlogPostCard } from '~/types/cms'
 import type { SensationMapData } from '~/lib/sensation-map.server'
 
 /**
@@ -100,8 +100,14 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
   const emmaRailBlocks = sections.filter(
     (s): s is EmmaCuratedRailBlock => s._type === 'emmaCuratedRail',
   )
+  // The couples band's optional "chosen for sharing" strip. The band component
+  // has always accepted a `rail` prop; nothing ever resolved one, so the strip
+  // was dead code. Handles now come off the block's additive `productHandles`.
+  const couplesBlocks = sections.filter(
+    (s): s is PlayTogetherBannerBlock => s._type === 'playTogetherBanner',
+  )
 
-  const [carouselResults, emmaRailResults] = await Promise.all([
+  const [carouselResults, emmaRailResults, couplesResults] = await Promise.all([
     carouselBlocks.length > 0
       ? withTimeout(Promise.all(carouselBlocks.map(b => {
           const limit = b.productLimit ?? 8
@@ -122,11 +128,31 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
             : Promise.resolve([] as Product[]),
         )), BUILD_TIMEOUT_MS, [] as Product[][], 'emmaRailResults(payloadA)')
       : Promise.resolve([] as Product[][]),
+    // Couples strip. Uses the same hardened path as the rails above:
+    // `normalizeProductHandles` tolerates BOTH shapes this array exists in
+    // (productRef objects and bare strings), and each block additionally
+    // catches its own rejection. That last part matters: every homepage block
+    // resolves inside one Promise.all, so a single malformed entry used to
+    // reject the whole contentBlocks build and blank every team-published
+    // section on the page (the three-day outage PR #322 fixed). A bad couples
+    // block must cost only its own strip.
+    couplesBlocks.length > 0
+      ? withTimeout(Promise.all(couplesBlocks.map(b =>
+          b.productHandles?.length
+            ? getProductsByHandles(normalizeProductHandles(b.productHandles))
+                .catch((err: unknown) => {
+                  console.error('[homepage-payload] couples rail resolve failed:', err)
+                  return [] as Product[]
+                })
+            : Promise.resolve([] as Product[]),
+        )), BUILD_TIMEOUT_MS, [] as Product[][], 'couplesResults(payloadA)')
+      : Promise.resolve([] as Product[][]),
   ])
 
   const carouselProductMap: Record<string, Product[]> = {}
   carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = carouselResults[i] ?? [] })
   emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = emmaRailResults[i] ?? [] })
+  couplesBlocks.forEach((b, i) => { carouselProductMap[b._key] = couplesResults[i] ?? [] })
 
   return { sections, carouselProductMap }
 }
@@ -147,6 +173,15 @@ export const VARIANT_B_SECTION_TYPES = [
   'editorialTiles',
   'wayfinderMosaic',
   'playTogetherBanner',
+  // The hero trust strip (Nº 02). A `trustBar` block + `trustItem` docs already
+  // existed and were already projected as `trustItems`, but this whitelist
+  // filtered them out, so the strip stayed a hardcoded four-string array no
+  // agent could touch. Published trust items now win; the shell array is the
+  // fallback.
+  'trustBar',
+  // The FAQ band (Nº 11), same story: hardcoded Q&A with no Sanity read. The
+  // published block feeds BOTH the visible accordion and the FAQPage JSON-LD.
+  'homepageFaq',
 ] as const satisfies readonly ContentBlock['_type'][]
 
 /** Lean resolved content-blocks shape streamed to variant b only. */
@@ -192,9 +227,13 @@ export async function buildHomeContentBlocksLean(): Promise<HomeContentBlocksLea
     (VARIANT_B_SECTION_TYPES as readonly string[]).includes(s._type),
   )
 
+  // Section types that carry products through `carouselProductMap`: the curated
+  // rails, plus `playTogetherBanner` now that the couples band resolves its own
+  // "chosen for sharing" strip. `productCarousel` (the map's other historical
+  // producer) is filtered out of variant b above, so it never appears here.
   const survivingRailKeys = new Set(
     leanSections
-      .filter((s): s is EmmaCuratedRailBlock => s._type === 'emmaCuratedRail')
+      .filter(s => s._type === 'emmaCuratedRail' || s._type === 'playTogetherBanner')
       .map(s => s._key),
   )
 
@@ -445,8 +484,12 @@ export function reshuffleRailsWithSeed(rails: Rail[], seed: number): Rail[] {
  *     from PR #322's resolved-not-deferred fix). A b1 blob has no such field, so
  *     serving one would silently render shell fallbacks everywhere — exactly
  *     the P0 #322 fixed. The version bump makes every b1 blob a miss.
+ * b3: `contentBlocks` now also carries `trustBar` + `homepageFaq` sections and
+ *     the couples band's resolved `productHandles`, and `notebookPosts` grew
+ *     from 3 to 6. A b2 blob has none of that, so serving one would keep the
+ *     trust strip, FAQ, couples strip and notebook on their old shape forever.
  */
-export const HOMEPAGE_PAYLOAD_B_VERSION = 'b2'
+export const HOMEPAGE_PAYLOAD_B_VERSION = 'b3'
 
 /** KV key for the precomputed storefront blob. Versioned. */
 export const HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`

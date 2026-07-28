@@ -16,6 +16,9 @@ import blogVideoEmbed     from '../schemas/blocks/blogVideoEmbed.js'
 import richText           from '../schemas/blocks/richText.js'
 import editorBio          from '../schemas/blocks/editorBio.js'
 import productFaq         from '../schemas/blocks/productFaq.js'
+// Homepage — team-editable FAQ band (additive; the hardcoded array stays as the
+// fallback when nothing is published).
+import homepageFaq        from '../schemas/blocks/homepageFaq.js'
 // PDP — editor-curated Related Guides rail (references to blogPost). Additive
 // block on productPage.contentBlocks; reverse product -> guide link for AEO.
 import relatedGuides      from '../schemas/blocks/relatedGuides.js'
@@ -177,6 +180,8 @@ export const schemaTypes = [
   wayfinderMosaic,
   // PDP — per-product FAQ entries (Q&A pairs, additive).
   productFaq,
+  // Homepage — team-editable FAQ band (Nº 11). Overrides the hardcoded array.
+  homepageFaq,
   // PDP — editor-curated Related Guides rail (blogPost references, additive).
   relatedGuides,
   // PDP — rich sensation dial dimension (label + 1/3/5 scale docs).
