@@ -136,13 +136,23 @@ export function deriveFeelNotches(
   return moods.slice(0, Math.max(0, max))
 }
 
-/** The default (SSR) dial state: the top Type notch + the top Feel, if any. */
+/**
+ * The default (SSR) dial state: a Type notch + the top Feel, if any.
+ *
+ * `seed` picks which Type notch is the default (`types[seed % types.length]`),
+ * so the same three products don't ship every single day. Omit it (or pass 0)
+ * to get the original "always the top notch" behavior — pure and
+ * backward-compatible; callers that want daily rotation pass a day-bucket
+ * number (see `sensation-map.server.ts`).
+ */
 export function defaultSensationState(
   types: readonly TypeNotch[],
   feels: readonly string[],
+  seed = 0,
 ): SensationDialState | null {
-  const type = types[0]?.value
-  if (!type) return null
+  if (types.length === 0) return null
+  const idx = ((seed % types.length) + types.length) % types.length
+  const type = types[idx]!.value
   return { type, feel: feels[0] ?? null }
 }
 

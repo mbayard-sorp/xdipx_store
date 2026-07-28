@@ -88,6 +88,43 @@ describe('defaultSensationState', () => {
     const types = deriveTypeNotches(INDEX)
     expect(defaultSensationState(types, [])).toEqual({ type: 'vibrator', feel: null })
   })
+
+  describe('seeded rotation', () => {
+    const types = deriveTypeNotches(INDEX, 5) // ['vibrator', 'lube', 'couples']
+    const feels = deriveFeelNotches(['Sensual', 'Playful'])
+
+    it('omitted seed preserves today\'s (top-notch) behavior', () => {
+      expect(defaultSensationState(types, feels)).toEqual({ type: 'vibrator', feel: 'Sensual' })
+    })
+
+    it('seed = 0 is equivalent to omitting the seed', () => {
+      expect(defaultSensationState(types, feels, 0)).toEqual(defaultSensationState(types, feels))
+    })
+
+    it('the same seed always yields the same default', () => {
+      const a = defaultSensationState(types, feels, 42)
+      const b = defaultSensationState(types, feels, 42)
+      expect(a).toEqual(b)
+    })
+
+    it('different seeds rotate the default Type notch', () => {
+      expect(defaultSensationState(types, feels, 0)!.type).toBe('vibrator')
+      expect(defaultSensationState(types, feels, 1)!.type).toBe('lube')
+      expect(defaultSensationState(types, feels, 2)!.type).toBe('couples')
+      // Wraps back around.
+      expect(defaultSensationState(types, feels, 3)!.type).toBe('vibrator')
+    })
+
+    it('handles seeds larger than the notch count', () => {
+      expect(defaultSensationState(types, feels, 100)).toEqual(
+        defaultSensationState(types, feels, 100 % types.length),
+      )
+    })
+
+    it('is still null on a cold index regardless of seed', () => {
+      expect(defaultSensationState([], feels, 7)).toBeNull()
+    })
+  })
 })
 
 describe('matchSensationMap', () => {

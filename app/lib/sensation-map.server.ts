@@ -34,8 +34,15 @@ export interface SensationMapData {
  * the rails call in `assembleStorefrontHome`, so this is an in-memory hit) and
  * derives the vocab from that same snapshot with `computeVocab`, so the notches
  * and the matched set are always consistent with each other.
+ *
+ * The default Type notch rotates once per UTC day (a day-bucket seed passed to
+ * the pure `defaultSensationState`), so the SSR band doesn't show the same three
+ * products every day. The payload this feeds is rebuilt by `/cron/warm` every 15
+ * minutes, so day-granularity rotation is safe. The clock read lives here at the
+ * server-assembly boundary (not inside the pure matcher) and is injectable so
+ * tests can pin "today".
  */
-export async function getSensationMapData(): Promise<SensationMapData> {
+export async function getSensationMapData(now: () => Date = () => new Date()): Promise<SensationMapData> {
   const index = await getDiscoveryIndex()
   if (index.length === 0) {
     return { types: [], feels: [], defaultState: null, defaultMatch: null }
@@ -43,7 +50,8 @@ export async function getSensationMapData(): Promise<SensationMapData> {
 
   const types = deriveTypeNotches(index)
   const feels = deriveFeelNotches(computeVocab(index).moods)
-  const defaultState = defaultSensationState(types, feels)
+  const dayBucket = Math.floor(now().getTime() / 86_400_000)
+  const defaultState = defaultSensationState(types, feels, dayBucket)
   const defaultMatch = defaultState ? matchSensationMap(index, defaultState) : null
 
   return { types, feels, defaultState, defaultMatch }
