@@ -112,13 +112,18 @@ async function allSitemapUrls(): Promise<string[]> {
 async function recentlyPinged(urls: string[]): Promise<Set<string>> {
   if (urls.length === 0) return new Set()
   try {
-    const { sql } = await import('drizzle-orm')
-    const { db } = await import('~/lib/db.server')
-    const res = await db.execute(sql`
+    // The raw Neon client, not drizzle's `sql` template: drizzle expands an
+    // interpolated JS array into a record tuple, so `::text[]` fails at runtime
+    // with "cannot cast type record to text[]". This mirrors getUrlHealth() in
+    // sitemap.server.ts, which runs the same shape of query in production.
+    const { neon } = await import('@neondatabase/serverless')
+    const sql = neon(process.env['DATABASE_URL']!)
+    const rows = await sql`
       SELECT url FROM indexnow_pings
       WHERE url = ANY(${urls}::text[])
-        AND pinged_at >= now() - (${PING_SUPPRESSION_DAYS} * interval '1 day')`)
-    return new Set((res.rows ?? []).map(r => String((r as { url: unknown }).url)))
+        AND pinged_at >= now() - (${PING_SUPPRESSION_DAYS} * interval '1 day')
+    ` as unknown as Array<{ url: string }>
+    return new Set(rows.map(r => String(r.url)))
   } catch (err) {
     // A missing ledger table must not turn into "push everything, twice".
     // Treat the read failure as "everything is suppressed" and skip the run.
@@ -130,16 +135,17 @@ async function recentlyPinged(urls: string[]): Promise<Set<string>> {
 /** Record a confirmed-pushed chunk. Upsert so a re-push refreshes the window. */
 async function recordPushed(urls: string[], batchId: string, statusCode: number): Promise<void> {
   if (urls.length === 0) return
-  const { sql } = await import('drizzle-orm')
-  const { db } = await import('~/lib/db.server')
-  await db.execute(sql`
+  // Raw Neon client, for the same array-binding reason as recentlyPinged above.
+  const { neon } = await import('@neondatabase/serverless')
+  const sql = neon(process.env['DATABASE_URL']!)
+  await sql`
     INSERT INTO indexnow_pings (url, pinged_at, batch_id, engine, status_code)
     SELECT u, now(), ${batchId}, 'indexnow', ${statusCode}
     FROM unnest(${urls}::text[]) AS t(u)
     ON CONFLICT (url) DO UPDATE SET
       pinged_at   = EXCLUDED.pinged_at,
       batch_id    = EXCLUDED.batch_id,
-      status_code = EXCLUDED.status_code`)
+      status_code = EXCLUDED.status_code`
 }
 
 export async function runIndexNowBulkPush(
