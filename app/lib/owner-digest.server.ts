@@ -18,6 +18,7 @@ import { VALVE_KEYS } from '~/lib/team-keys'
 import { getTrackers, latestOwnerAsks } from '~/lib/tracker.server'
 import { sendOwnerEmail } from '~/lib/owner-alerts.server'
 import { kvSetNX } from '~/lib/kv.server'
+import type { SeoDailyResult } from '~/lib/seo-daily.server'
 
 interface ProfitRow {
   day: string
@@ -36,23 +37,18 @@ interface RunRow {
   summary: string | null
 }
 
-interface IndexDailyRow {
-  day: string
-  sitemap_urls: number
-  inspected_urls: number
-  indexed_count: number
-  crawled_not_indexed: number
-  discovered_not_indexed: number
-  other_not_indexed: number
-  canonical_mismatches: number
-  newly_indexed: number
-  newly_dropped: number
-}
-
 interface DroppedUrlRow {
   url: string
   previous_coverage_state: string | null
   coverage_state: string | null
+}
+
+interface SeoTicketRow {
+  id: number
+  priority: number
+  status: string
+  suggestion: string
+  dedupe_key: string | null
 }
 
 export interface OwnerDigestResult {
@@ -117,24 +113,26 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   const trackers = getTrackers()
   const redTrackers = trackers.filter(t => t.overall === 'RED').length
 
-  // Index-monitor aggregates are best-effort: tables arrive with migration
-  // 064, and a digest must still send if the sweep has never run.
-  let indexToday: IndexDailyRow | null = null
-  let indexWeekAgo: IndexDailyRow | null = null
+  // The SEO section reads yesterday's /cron/seo-daily result (12:30 UTC, 30
+  // min before this digest) rather than re-querying and re-deriving the same
+  // deltas here. One computation, one interpretation, two readers.
+  // Best-effort: tables arrive with migrations 064/071 and a digest must still
+  // send if neither the sweep nor the diagnosis has ever run.
+  let seo: SeoDailyResult | null = null
+  let seoDay: string | null = null
   let droppedUrls: DroppedUrlRow[] = []
+  let seoTickets: SeoTicketRow[] = []
   try {
-    const idxRes = await db.execute(sql`
-      SELECT day::text AS day, sitemap_urls, inspected_urls, indexed_count,
-             crawled_not_indexed, discovered_not_indexed, other_not_indexed,
-             canonical_mismatches, newly_indexed, newly_dropped
-      FROM gsc_index_daily ORDER BY day DESC LIMIT 1`)
-    indexToday = ((idxRes.rows ?? [])[0] ?? null) as IndexDailyRow | null
-    const weekRes = await db.execute(sql`
-      SELECT day::text AS day, sitemap_urls, inspected_urls, indexed_count,
-             crawled_not_indexed, discovered_not_indexed, other_not_indexed,
-             canonical_mismatches, newly_indexed, newly_dropped
-      FROM gsc_index_daily WHERE day <= now()::date - 7 ORDER BY day DESC LIMIT 1`)
-    indexWeekAgo = ((weekRes.rows ?? [])[0] ?? null) as IndexDailyRow | null
+    const { getLatestSeoDaily } = await import('~/lib/seo-daily.server')
+    const latest = await getLatestSeoDaily()
+    if (latest) {
+      seo = latest.notes
+      seoDay = latest.day
+    }
+  } catch (err) {
+    console.warn('[owner-digest] seo-daily unavailable:', String(err).slice(0, 200))
+  }
+  try {
     const droppedRes = await db.execute(sql`
       SELECT url, previous_coverage_state, coverage_state
       FROM gsc_url_inspections
@@ -145,6 +143,16 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     droppedUrls = (droppedRes.rows ?? []) as unknown as DroppedUrlRow[]
   } catch (err) {
     console.warn('[owner-digest] index-monitor tables unavailable (migration 064 not applied?):', String(err).slice(0, 200))
+  }
+  try {
+    const ticketRes = await db.execute(sql`
+      SELECT id, priority, status, suggestion, dedupe_key
+      FROM homepage_team_suggestions
+      WHERE created_at >= now() - interval '24 hours' AND dedupe_key LIKE 'seo:%'
+      ORDER BY priority ASC, created_at DESC LIMIT 10`)
+    seoTickets = (ticketRes.rows ?? []) as unknown as SeoTicketRow[]
+  } catch (err) {
+    console.warn('[owner-digest] ticket columns unavailable (migration 070 not applied?):', String(err).slice(0, 200))
   }
 
   // ── Compose ───────────────────────────────────────────────────────────────
@@ -167,17 +175,51 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     .map(([name, on]) => `<tr><td style="padding:2px 10px 2px 0;">${esc(name)}</td><td style="padding:2px 0;">${on ? 'on' : 'off'}</td></tr>`)
     .join('')
 
-  let indexBody = 'no sweep data yet (migration 064 + /cron/gsc-index-sweep)'
-  if (indexToday) {
-    const delta = indexWeekAgo ? indexToday.indexed_count - indexWeekAgo.indexed_count : null
-    const deltaStr = delta === null ? '' : ` (${delta >= 0 ? '+' : ''}${delta} vs ${esc(indexWeekAgo!.day)})`
+  const signed = (n: number | null | undefined): string =>
+    typeof n === 'number' ? `${n >= 0 ? '+' : ''}${n}` : 'n/a'
+
+  let indexBody = 'no SEO diagnosis yet (migrations 064/071 + /cron/seo-daily)'
+  const idx = seo?.today ?? null
+  if (seo && idx) {
+    const wow = seo.deltas.indexed
+    const wowStr = wow === null
+      ? ''
+      : ` (${signed(wow)} vs ${esc(seo.weekAgo?.day ?? 'a week ago')})`
     const droppedList = droppedUrls
       .map(d => `<li>${esc(d.url)} &mdash; now &ldquo;${esc(d.coverage_state ?? 'unknown')}&rdquo;</li>`)
       .join('')
-    indexBody = `<p style="margin:0 0 4px;"><strong>${indexToday.indexed_count}</strong> of ${indexToday.sitemap_urls} sitemap URLs indexed${deltaStr} &middot; ${indexToday.inspected_urls} inspected so far</p>
-      <p style="margin:0 0 4px;">Not indexed: ${indexToday.crawled_not_indexed} crawled-but-rejected &middot; ${indexToday.discovered_not_indexed} discovered-not-crawled &middot; ${indexToday.other_not_indexed} other &middot; ${indexToday.canonical_mismatches} canonical mismatch${indexToday.canonical_mismatches === 1 ? '' : 'es'}</p>
-      ${indexToday.newly_dropped > 0 ? `<p style="margin:0 0 2px;color:#d93a15;">${indexToday.newly_dropped} dropped from the index today${droppedList ? `:</p><ul style="margin:0 0 4px;padding-left:18px;">${droppedList}</ul>` : '</p>'}` : ''}
-      ${indexToday.newly_indexed > 0 ? `<p style="margin:0;color:#1c7c43;">${indexToday.newly_indexed} newly indexed today</p>` : ''}`
+
+    const probeLine = seo.probeFailures > 0
+      ? `<p style="margin:0 0 4px;color:#d93a15;"><strong>Tripwire FAILED on ${seo.probeFailures} of ${seo.probes.length} sampled pages.</strong> ${esc(seo.probes.filter(p => !p.ok).map(p => `${p.url}: ${p.problems.join('; ')}`).join(' | ').slice(0, 400))}</p>`
+      : `<p style="margin:0 0 4px;color:#1c7c43;">Tripwire clean on ${seo.probes.length} sampled pages (200, self-canonical, no noindex, parseable JSON-LD).</p>`
+
+    // gsc_snapshots is refreshed by a Monday-only cron, so its numbers are a
+    // weekly 28-day rollup, not yesterday. Saying so prevents reading a flat
+    // line as "nothing happened today".
+    const snap = seo.snapshot
+    const snapLine = snap
+      ? `<p style="margin:0 0 4px;">Search traffic (28-day rollup, captured ${esc((snap.capturedAt ?? '').slice(0, 10))}, refreshed weekly on Mondays): ${snap.impressions ?? 'n/a'} impressions &middot; ${snap.clicks ?? 'n/a'} clicks &middot; avg position ${snap.position != null ? snap.position.toFixed(1) : 'n/a'}</p>`
+      : '<p style="margin:0 0 4px;color:#6f645c;">No gsc_snapshots row yet (weekly, Monday 06:00 UTC).</p>'
+
+    const cov = seo.coverage
+    const covLine = cov.discoveryTotal
+      ? `<p style="margin:0 0 4px;">Catalog coverage: ${cov.discoveryTotal} products indexed for discovery &middot; ${cov.hasTypeDial ?? 0} with a type dial &middot; ${cov.hasMood ?? 0} with mood tags &middot; ${cov.hasImage ?? 0} with an image &middot; ${cov.enrichedDistinctProducts ?? 0} enriched</p>`
+      : ''
+
+    const ticketList = seoTickets
+      .map(t => `<li>P${t.priority} &middot; ${esc(t.status)} &middot; #${t.id} ${esc(t.suggestion.slice(0, 160))}</li>`)
+      .join('')
+
+    indexBody = `<p style="margin:0 0 4px;"><strong>${idx.indexed_count}</strong> of ${idx.sitemap_urls} sitemap URLs indexed${wowStr} &middot; ${idx.inspected_urls} inspected so far</p>
+      <p style="margin:0 0 4px;">Not indexed: ${idx.crawled_not_indexed} crawled-but-rejected (${signed(seo.deltas.crawledNotIndexed)} w/w) &middot; ${idx.discovered_not_indexed} discovered-not-crawled (${signed(seo.deltas.discoveredNotIndexed)} w/w) &middot; ${idx.other_not_indexed} other &middot; ${idx.canonical_mismatches} canonical mismatch${idx.canonical_mismatches === 1 ? '' : 'es'}</p>
+      <p style="margin:0 0 4px;">Transitions in 24h: <span style="color:#1c7c43;">${seo.transitions.cleared} cleared</span> &middot; <span style="color:${seo.transitions.regressed > 0 ? '#d93a15' : '#6f645c'};">${seo.transitions.regressed} regressed</span> &middot; ${seo.transitions.total} total changes</p>
+      ${idx.newly_dropped > 0 ? `<p style="margin:0 0 2px;color:#d93a15;">${idx.newly_dropped} dropped from the index today${droppedList ? `:</p><ul style="margin:0 0 4px;padding-left:18px;">${droppedList}</ul>` : '</p>'}` : ''}
+      ${idx.newly_indexed > 0 ? `<p style="margin:0 0 4px;color:#1c7c43;">${idx.newly_indexed} newly indexed today</p>` : ''}
+      ${probeLine}
+      <p style="margin:0 0 4px;">IndexNow: ${seo.indexnowPushed24h} URLs pushed in the last 24h${seo.indexnowPushed24h === 0 ? ' <span style="color:#b57d0a;">(no push recorded)</span>' : ''}</p>
+      ${snapLine}
+      ${covLine}
+      ${ticketList ? `<p style="margin:6px 0 2px;">Tickets filed overnight:</p><ul style="margin:0;padding-left:18px;">${ticketList}</ul>` : '<p style="margin:0;color:#6f645c;">No SEO tickets filed overnight.</p>'}`
   }
 
   const trackerBlocks = trackers
@@ -201,7 +243,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       ${section(`Team runs, last 24h (${failures.length} failed)`, `<table style="border-collapse:collapse;">${runRows || '<tr><td>no runs</td></tr>'}</table>`)}
       ${section('Team gates', `<table style="border-collapse:collapse;">${gateRows}</table>`)}
       ${section('Valves', `<table style="border-collapse:collapse;">${valveRows}</table>`)}
-      ${section(`Search indexing${indexToday ? ` (as of ${esc(indexToday.day)})` : ''}`, indexBody)}
+      ${section(`SEO and indexing${seoDay ? ` (diagnosis ${esc(seoDay)})` : ''}`, indexBody)}
       ${section(`Suggestions (${proposed?.n ?? 0} awaiting triage${proposed ? `, oldest ${esc(proposed.oldest.slice(0, 10))}` : ''})`, sugg.map(s => `${esc(s.status)}: ${s.n}`).join(' &middot; ') || 'none')}
       ${section('Program trackers', trackerBlocks || 'no trackers found')}
       <p style="font-family:Inter,sans-serif;font-size:11px;color:#6f645c;margin-top:18px;">

@@ -39,6 +39,8 @@
     { "path": "/cron/gsc-snapshot",            "schedule": "0 6 * * 1"   },
     { "path": "/cron/gsc-index-sweep",         "schedule": "15 */3 * * *" },
     { "path": "/cron/keyword-research",        "schedule": "0 2 1 * *"   },
+    { "path": "/cron/indexnow-push",           "schedule": "40 4 * * *"  },
+    { "path": "/cron/seo-daily",               "schedule": "30 12 * * *" },
     { "path": "/cron/owner-digest",            "schedule": "0 13 * * *"  }
   ]
 }

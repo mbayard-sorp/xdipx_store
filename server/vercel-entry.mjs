@@ -78,6 +78,7 @@ __export(schema_exports, {
   homepageTeamSuggestions: () => homepageTeamSuggestions,
   importCandidates: () => importCandidates,
   importMonitorRuns: () => importMonitorRuns,
+  indexnowPings: () => indexnowPings,
   ivrVoices: () => ivrVoices,
   marketingCalendar: () => marketingCalendar,
   mediaAssets: () => mediaAssets,
@@ -97,6 +98,7 @@ __export(schema_exports, {
   productEnrichmentCache: () => productEnrichmentCache,
   referrals: () => referrals,
   returns: () => returns,
+  seoCoverageDaily: () => seoCoverageDaily,
   smsAgeConsent: () => smsAgeConsent,
   smsConversations: () => smsConversations,
   smsMessages: () => smsMessages,
@@ -104,6 +106,7 @@ __export(schema_exports, {
   smsTurns: () => smsTurns,
   socialPosts: () => socialPosts,
   strategyBriefs: () => strategyBriefs,
+  suggestionLinks: () => suggestionLinks,
   tosAcceptance: () => tosAcceptance,
   tosVersions: () => tosVersions,
   videoJobs: () => videoJobs,
@@ -124,13 +127,14 @@ import {
   pgTable,
   real,
   serial,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, checkoutProbeRuns, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, nalpacPriceHistory, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, ga4PurchaseFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, strategyBriefs, adCampaigns, marketingCalendar, mediaAssets, videoJobs, adCreatives;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, checkoutProbeRuns, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, nalpacPriceHistory, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, ga4PurchaseFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, suggestionLinks, indexnowPings, seoCoverageDaily, strategyBriefs, adCampaigns, marketingCalendar, mediaAssets, videoJobs, adCreatives;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -1057,18 +1061,68 @@ var init_schema = __esm({
       estSavingsUsd: decimal("est_savings_usd", { precision: 10, scale: 4 }).notNull().default("0"),
       cxRisk: varchar("cx_risk", { length: 8 }).notNull().default("low"),
       // low|med|high
-      status: varchar("status", { length: 12 }).notNull().default("proposed"),
+      status: varchar("status", { length: 16 }).notNull().default("proposed"),
       // proposed|approved|pr_open|applied|dismissed
       applyRef: text("apply_ref"),
       // PR URL / applied artifact
       decidedBy: varchar("decided_by", { length: 24 }),
       // auto|owner|NULL — who moved it off 'proposed'
       decidedAt: timestamp("decided_at"),
-      createdAt: timestamp("created_at").notNull().defaultNow()
+      createdAt: timestamp("created_at").notNull().defaultNow(),
+      // ── ticket system (070) ──────────────────────────────────────────────────
+      assignee: varchar("assignee", { length: 32 }),
+      // agent id or 'owner'
+      claimedAt: timestamp("claimed_at", { withTimezone: true }),
+      claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+      priority: smallint("priority").notNull().default(3),
+      // 1 highest .. 5 lowest
+      updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+      dueAt: timestamp("due_at", { withTimezone: true }),
+      dedupeKey: varchar("dedupe_key", { length: 64 }),
+      // partial-unique while live
+      supersedesId: integer("supersedes_id"),
+      blockedById: integer("blocked_by_id"),
+      attemptCount: integer("attempt_count").notNull().default(0),
+      lastError: text("last_error"),
+      verifiedBy: varchar("verified_by", { length: 32 }),
+      verifiedAt: timestamp("verified_at", { withTimezone: true })
     }, (t) => ({
       statusIdx: index("idx_homepage_team_suggestions_status").on(t.status, t.createdAt),
-      teamIdx: index("idx_team_sugg_team").on(t.team, t.status, t.createdAt)
+      teamIdx: index("idx_team_sugg_team").on(t.team, t.status, t.createdAt),
+      assigneeIdx: index("idx_team_sugg_assignee_queue").on(t.assignee, t.status, t.priority, t.createdAt),
+      priorityIdx: index("idx_team_sugg_priority_queue").on(t.status, t.priority, t.createdAt)
     }));
+    suggestionLinks = pgTable("suggestion_links", {
+      id: serial("id").primaryKey(),
+      suggestionId: integer("suggestion_id").notNull().references(() => homepageTeamSuggestions.id, { onDelete: "cascade" }),
+      kind: varchar("kind", { length: 12 }),
+      // pr|issue|run|url|doc|commit
+      ref: text("ref").notNull(),
+      state: varchar("state", { length: 16 }),
+      // open|merged|closed|passed|failed
+      createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+      updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+    }, (t) => ({
+      suggKindIdx: index("idx_suggestion_links_sugg_kind").on(t.suggestionId, t.kind)
+    }));
+    indexnowPings = pgTable("indexnow_pings", {
+      url: text("url").primaryKey(),
+      pingedAt: timestamp("pinged_at", { withTimezone: true }).notNull().defaultNow(),
+      batchId: varchar("batch_id", { length: 48 }),
+      // 'bulk-YYYY-MM-DD'
+      engine: varchar("engine", { length: 16 }).default("indexnow"),
+      statusCode: integer("status_code")
+    });
+    seoCoverageDaily = pgTable("seo_coverage_daily", {
+      day: date("day").primaryKey(),
+      discoveryTotal: integer("discovery_total"),
+      hasTypeDial: integer("has_type_dial"),
+      hasMood: integer("has_mood"),
+      hasImage: integer("has_image"),
+      enrichedDistinctProducts: integer("enriched_distinct_products"),
+      notes: jsonb("notes"),
+      createdAt: timestamp("created_at", { withTimezone: true }).defaultNow()
+    });
     strategyBriefs = pgTable("strategy_briefs", {
       id: serial("id").primaryKey(),
       weekStart: date("week_start").notNull(),
@@ -1402,11 +1456,11 @@ function buildRationale(p) {
     return `Queued: ${pct}% price drop exceeds ${thr}% auto-approve threshold.`;
   }
   if (p.mapHeld && p.map != null) {
-    const delta = p.oldCost != null && p.newCost != null ? p.newCost - p.oldCost : null;
-    const deltaPct = delta != null && p.oldCost ? Math.round(delta / p.oldCost * 100) : null;
-    if (delta != null && deltaPct != null) {
-      const sign = delta >= 0 ? "+" : "";
-      return `Cost ${sign}$${delta.toFixed(2)} (${sign}${deltaPct}%) -> held sell at MAP $${p.map.toFixed(2)}; margin now ${margin}.`;
+    const delta2 = p.oldCost != null && p.newCost != null ? p.newCost - p.oldCost : null;
+    const deltaPct = delta2 != null && p.oldCost ? Math.round(delta2 / p.oldCost * 100) : null;
+    if (delta2 != null && deltaPct != null) {
+      const sign = delta2 >= 0 ? "+" : "";
+      return `Cost ${sign}$${delta2.toFixed(2)} (${sign}${deltaPct}%) -> held sell at MAP $${p.map.toFixed(2)}; margin now ${margin}.`;
     }
   }
   if (p.status === "auto_applied") {
@@ -4401,11 +4455,11 @@ async function adminGraphQL(query, variables) {
     },
     body: JSON.stringify({ query, variables })
   });
-  const MAX_ATTEMPTS3 = 4;
+  const MAX_ATTEMPTS4 = 4;
   for (let attempt = 1; ; attempt++) {
     const res = await doFetch();
     if (res.status === 429) {
-      if (attempt >= MAX_ATTEMPTS3) throw new Error("Shopify Admin GraphQL error: 429");
+      if (attempt >= MAX_ATTEMPTS4) throw new Error("Shopify Admin GraphQL error: 429");
       const retryAfter = Number(res.headers.get("retry-after")) || 1;
       await new Promise((r) => setTimeout(r, Math.min(retryAfter * 1e3, 5e3)));
       continue;
@@ -4415,7 +4469,7 @@ async function adminGraphQL(query, variables) {
     const throttled = body.errors?.some(
       (e) => e.extensions?.code === "THROTTLED" || /throttled/i.test(e.message)
     );
-    if (throttled && attempt < MAX_ATTEMPTS3) {
+    if (throttled && attempt < MAX_ATTEMPTS4) {
       const cost = body.extensions?.cost;
       const needed = (cost?.requestedQueryCost ?? 0) - (cost?.throttleStatus?.currentlyAvailable ?? 0);
       const restoreRate = cost?.throttleStatus?.restoreRate ?? 0;
@@ -11045,10 +11099,10 @@ async function logVideoCost(entry) {
 }
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql15 } = await import("drizzle-orm");
+  const { sql: sql17 } = await import("drizzle-orm");
   const days = opts.days ?? 30;
   const result = await db2.execute(
-    sql15`SELECT * FROM api_token_daily
+    sql17`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
   );
@@ -11056,11 +11110,11 @@ async function getDailyTokenRollup(opts = {}) {
 }
 async function getTokenCallDetail(opts) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql15 } = await import("drizzle-orm");
+  const { sql: sql17 } = await import("drizzle-orm");
   const model = opts.model ?? null;
   const source = opts.source ?? null;
   const result = await db2.execute(
-    sql15`
+    sql17`
       WITH grouped AS (
         SELECT
           caller, sku, product_id, batch_id,
@@ -14644,39 +14698,113 @@ var init_emma_rails_server = __esm({
 // app/lib/search-ping.server.ts
 var search_ping_server_exports = {};
 __export(search_ping_server_exports, {
-  pingSearchEngines: () => pingSearchEngines
+  INDEXNOW_MAX_URLS_PER_REQUEST: () => INDEXNOW_MAX_URLS_PER_REQUEST,
+  SITE_ORIGIN: () => SITE_ORIGIN,
+  chunkUrls: () => chunkUrls,
+  isRetryableStatus: () => isRetryableStatus,
+  normalizeUrls: () => normalizeUrls,
+  pingSearchEngines: () => pingSearchEngines,
+  submitIndexNow: () => submitIndexNow,
+  submitIndexNowChunk: () => submitIndexNowChunk
 });
-async function pingSearchEngines(paths) {
-  if (process.env["SEARCH_PING_ENABLED"] !== "true") return;
-  const urlList = [...new Set(paths)].filter(Boolean).map((p) => p.startsWith("http") ? p : `${SITE_ORIGIN}${p.startsWith("/") ? p : `/${p}`}`);
-  if (urlList.length === 0) return;
+function normalizeUrls(paths, origin = SITE_ORIGIN) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of paths) {
+    if (!raw || typeof raw !== "string") continue;
+    const abs = raw.startsWith("http") ? raw : `${origin}${raw.startsWith("/") ? raw : `/${raw}`}`;
+    let parsed;
+    try {
+      parsed = new URL(abs);
+    } catch {
+      continue;
+    }
+    if (parsed.host !== new URL(origin).host) continue;
+    if (seen.has(parsed.toString())) continue;
+    seen.add(parsed.toString());
+    out.push(parsed.toString());
+  }
+  return out;
+}
+function chunkUrls(urls, size = INDEXNOW_MAX_URLS_PER_REQUEST) {
+  const capped = Math.max(1, size);
+  const chunks = [];
+  for (let i = 0; i < urls.length; i += capped) chunks.push(urls.slice(i, i + capped));
+  return chunks;
+}
+function isRetryableStatus(status) {
+  return status === 0 || status >= 500 && status < 600;
+}
+async function submitIndexNowChunk(urls, opts) {
+  const origin = opts.origin ?? SITE_ORIGIN;
+  const host = new URL(origin).host;
+  let last = { urls, status: 0, ok: false, error: "no attempt made" };
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch(INDEXNOW_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({
+          host,
+          key: opts.key,
+          keyLocation: `${origin}/indexnow.txt`,
+          urlList: urls
+        }),
+        signal: ctrl.signal
+      });
+      last = { urls, status: res.status, ok: res.ok };
+      if (res.ok || !isRetryableStatus(res.status)) return last;
+    } catch (err) {
+      last = { urls, status: 0, ok: false, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS));
+  }
+  return last;
+}
+async function submitIndexNow(paths, opts = {}) {
+  if (process.env["SEARCH_PING_ENABLED"] !== "true") {
+    return { skipped: "SEARCH_PING_ENABLED is not true", submitted: 0, chunks: [] };
+  }
   const key = process.env["INDEXNOW_API_KEY"];
   if (!key) {
     console.warn("[search-ping] SEARCH_PING_ENABLED set but INDEXNOW_API_KEY missing \u2014 skipping");
-    return;
+    return { skipped: "INDEXNOW_API_KEY missing", submitted: 0, chunks: [] };
   }
+  const origin = opts.origin ?? SITE_ORIGIN;
+  const urlList = normalizeUrls(paths, origin);
+  if (urlList.length === 0) return { skipped: "no submittable URLs", submitted: 0, chunks: [] };
+  const chunks = [];
+  let submitted = 0;
+  for (const chunk of chunkUrls(urlList, opts.chunkSize)) {
+    const result = await submitIndexNowChunk(chunk, { key, origin });
+    chunks.push(result);
+    if (result.ok) submitted += chunk.length;
+    console.log(`[search-ping] IndexNow ${result.status} for ${chunk.length} url(s)`);
+    if (!result.ok && (result.status === 429 || isRetryableStatus(result.status))) break;
+  }
+  return { submitted, chunks };
+}
+async function pingSearchEngines(paths) {
   try {
-    const host = new URL(SITE_ORIGIN).host;
-    const res = await fetch("https://api.indexnow.org/IndexNow", {
-      method: "POST",
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({
-        host,
-        key,
-        keyLocation: `${SITE_ORIGIN}/indexnow.txt`,
-        urlList
-      })
-    });
-    console.log(`[search-ping] IndexNow ${res.status} for ${urlList.length} url(s)`);
+    await submitIndexNow(paths);
   } catch (err) {
     console.error("[search-ping] IndexNow ping failed (non-blocking):", err);
   }
 }
-var SITE_ORIGIN;
+var SITE_ORIGIN, INDEXNOW_MAX_URLS_PER_REQUEST, INDEXNOW_ENDPOINT, REQUEST_TIMEOUT_MS, MAX_ATTEMPTS, RETRY_BACKOFF_MS;
 var init_search_ping_server = __esm({
   "app/lib/search-ping.server.ts"() {
     "use strict";
     SITE_ORIGIN = "https://xdipx.com";
+    INDEXNOW_MAX_URLS_PER_REQUEST = 1e4;
+    INDEXNOW_ENDPOINT = "https://api.indexnow.org/IndexNow";
+    REQUEST_TIMEOUT_MS = 2e4;
+    MAX_ATTEMPTS = 2;
+    RETRY_BACKOFF_MS = 1e3;
   }
 });
 
@@ -15411,8 +15539,8 @@ async function writeDiscoveryIndexDurable(index2, vocab) {
 }
 async function getDiscoveryIndex(opts = {}) {
   if (!opts.force) {
-    const memo = readL1Memo();
-    if (memo) return memo.index;
+    const memo2 = readL1Memo();
+    if (memo2) return memo2.index;
     const cached2 = await kvGet(INDEX_KEY);
     if (cached2 && Array.isArray(cached2) && cached2.length > 0) {
       const vocab = await kvGet(VOCAB_KEY) ?? computeVocab(cached2);
@@ -16678,6 +16806,8 @@ var init_owner_alerts_server = __esm({
 // app/lib/homepage-healthcheck.server.ts
 var homepage_healthcheck_server_exports = {};
 __export(homepage_healthcheck_server_exports, {
+  checkPageOnce: () => checkPageOnce,
+  extractJsonLd: () => extractJsonLd,
   runHomepageHealthcheck: () => runHomepageHealthcheck
 });
 async function activeServedVariant() {
@@ -16740,12 +16870,12 @@ async function checkPageOnce(path, attempt) {
 }
 async function checkPage(path) {
   let best = null;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS2; attempt++) {
     const c = await checkPageOnce(path, attempt);
     if (c.ok) return c;
     if (!best || c.problems.length < best.problems.length) best = c;
-    if (attempt < MAX_ATTEMPTS) {
-      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS));
+    if (attempt < MAX_ATTEMPTS2) {
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS2));
     }
   }
   return best;
@@ -16885,7 +17015,7 @@ async function runHomepageHealthcheck() {
   }
   return result;
 }
-var LAST_GOOD_KEY, PATHS, FETCH_TIMEOUT_MS, MIN_BODY_BYTES, MAX_ATTEMPTS, RETRY_BACKOFF_MS;
+var LAST_GOOD_KEY, PATHS, FETCH_TIMEOUT_MS, MIN_BODY_BYTES, MAX_ATTEMPTS2, RETRY_BACKOFF_MS2;
 var init_homepage_healthcheck_server = __esm({
   "app/lib/homepage-healthcheck.server.ts"() {
     "use strict";
@@ -16897,8 +17027,8 @@ var init_homepage_healthcheck_server = __esm({
     PATHS = ["/", "/discover"];
     FETCH_TIMEOUT_MS = 12e3;
     MIN_BODY_BYTES = 1e3;
-    MAX_ATTEMPTS = 3;
-    RETRY_BACKOFF_MS = 1500;
+    MAX_ATTEMPTS2 = 3;
+    RETRY_BACKOFF_MS2 = 1500;
   }
 });
 
@@ -16967,12 +17097,12 @@ async function checkPageOnce2(exp, attempt) {
 }
 async function checkPage2(exp) {
   let best = null;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS2; attempt++) {
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS3; attempt++) {
     const c = await checkPageOnce2(exp, attempt);
     if (c.ok) return c;
     if (!best || c.problems.length < best.problems.length) best = c;
-    if (attempt < MAX_ATTEMPTS2) {
-      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS2));
+    if (attempt < MAX_ATTEMPTS3) {
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS3));
     }
   }
   return best;
@@ -17070,7 +17200,7 @@ async function runNotebookHealthcheck() {
   }
   return result;
 }
-var FETCH_TIMEOUT_MS2, MIN_BODY_BYTES2, MAX_ATTEMPTS2, RETRY_BACKOFF_MS2;
+var FETCH_TIMEOUT_MS2, MIN_BODY_BYTES2, MAX_ATTEMPTS3, RETRY_BACKOFF_MS3;
 var init_notebook_healthcheck_server = __esm({
   "app/lib/notebook-healthcheck.server.ts"() {
     "use strict";
@@ -17078,8 +17208,8 @@ var init_notebook_healthcheck_server = __esm({
     init_sanity_server();
     FETCH_TIMEOUT_MS2 = 12e3;
     MIN_BODY_BYTES2 = 1e3;
-    MAX_ATTEMPTS2 = 3;
-    RETRY_BACKOFF_MS2 = 1500;
+    MAX_ATTEMPTS3 = 3;
+    RETRY_BACKOFF_MS3 = 1500;
   }
 });
 
@@ -18083,9 +18213,11 @@ async function createSuggestion(s) {
     cxRisk: s.cxRisk ?? "low",
     status: autoApprove ? "approved" : "proposed",
     decidedBy: autoApprove ? "auto" : null,
-    decidedAt: autoApprove ? /* @__PURE__ */ new Date() : null
-  }).returning({ id: homepageTeamSuggestions.id });
-  return row.id;
+    decidedAt: autoApprove ? /* @__PURE__ */ new Date() : null,
+    priority: s.priority ?? 3,
+    dedupeKey: s.dedupeKey ?? null
+  }).onConflictDoNothing().returning({ id: homepageTeamSuggestions.id });
+  return row?.id ?? 0;
 }
 async function listSuggestions(filter = {}) {
   const conditions = [];
@@ -18346,137 +18478,186 @@ var init_tracker_server = __esm({
   }
 });
 
-// app/lib/owner-digest.server.ts
-var owner_digest_server_exports = {};
-__export(owner_digest_server_exports, {
-  runOwnerDigest: () => runOwnerDigest
+// app/lib/checkout-probe.server.ts
+var checkout_probe_server_exports = {};
+__export(checkout_probe_server_exports, {
+  checkUrl: () => checkUrl,
+  recordAndAlertProbe: () => recordAndAlertProbe,
+  runCheckoutProbe: () => runCheckoutProbe
 });
-import { sql as sql6 } from "drizzle-orm";
-function esc(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function mkStep(step, ok, ms, extra = {}) {
+  const s = { step, ok, ms };
+  if (extra.status !== void 0) s.status = extra.status;
+  if (extra.detail !== void 0) s.detail = extra.detail;
+  return s;
 }
-function ragColor(rag) {
-  if (rag === "GREEN") return "#1c7c43";
-  if (rag === "AMBER") return "#b57d0a";
-  if (rag === "RED") return "#d93a15";
-  return "#6f645c";
+function baseUrl() {
+  return (process.env["BASE_URL"] || "https://xdipx.com").replace(/\/+$/, "");
 }
-async function runOwnerDigest(opts = {}) {
-  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-  if (!opts.force) {
-    const first = await kvSetNX(`owner-digest:sent:${day}`, String(Date.now()), 26 * 3600);
-    if (!first) return { sent: false, skipped: "already sent today (pass force=1 to re-send)" };
-  }
-  const profitRes = await db.execute(sql6`
-    SELECT summary_date::text AS day,
-           COALESCE(total_orders, 0)::int AS orders,
-           COALESCE(total_revenue, 0)::float8 AS revenue,
-           COALESCE(total_profit, 0)::float8 AS profit,
-           featured_sku
-    FROM daily_profit_summary
-    ORDER BY summary_date DESC
-    LIMIT 8`);
-  const profit = profitRes.rows ?? [];
-  const yesterday = profit[0];
-  const runsRes = await db.execute(sql6`
-    SELECT team, run_type, status, started_at::text AS started_at, error, summary
-    FROM homepage_team_runs
-    WHERE started_at >= now() - interval '24 hours'
-    ORDER BY started_at DESC
-    LIMIT 40`);
-  const runs = runsRes.rows ?? [];
-  const failures = runs.filter((r) => r.status === "failed");
-  const suggRes = await db.execute(sql6`
-    SELECT status, COUNT(*)::int AS n, MIN(created_at)::text AS oldest
-    FROM homepage_team_suggestions
-    GROUP BY status`);
-  const sugg = suggRes.rows ?? [];
-  const proposed = sugg.find((s) => s.status === "proposed");
-  const gates = await Promise.all(TEAM_IDS.map((t) => gate(t)));
-  const valveEntries = await Promise.all(
-    Object.entries(VALVE_KEYS).map(async ([name, key]) => [name, await getValve(key)])
-  );
-  const trackers = getTrackers();
-  const redTrackers = trackers.filter((t) => t.overall === "RED").length;
-  let indexToday = null;
-  let indexWeekAgo = null;
-  let droppedUrls = [];
+async function checkUrl(url, opts = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS3);
   try {
-    const idxRes = await db.execute(sql6`
-      SELECT day::text AS day, sitemap_urls, inspected_urls, indexed_count,
-             crawled_not_indexed, discovered_not_indexed, other_not_indexed,
-             canonical_mismatches, newly_indexed, newly_dropped
-      FROM gsc_index_daily ORDER BY day DESC LIMIT 1`);
-    indexToday = (idxRes.rows ?? [])[0] ?? null;
-    const weekRes = await db.execute(sql6`
-      SELECT day::text AS day, sitemap_urls, inspected_urls, indexed_count,
-             crawled_not_indexed, discovered_not_indexed, other_not_indexed,
-             canonical_mismatches, newly_indexed, newly_dropped
-      FROM gsc_index_daily WHERE day <= now()::date - 7 ORDER BY day DESC LIMIT 1`);
-    indexWeekAgo = (weekRes.rows ?? [])[0] ?? null;
-    const droppedRes = await db.execute(sql6`
-      SELECT url, previous_coverage_state, coverage_state
-      FROM gsc_url_inspections
-      WHERE coverage_changed_at >= now() - interval '24 hours'
-        AND previous_coverage_state IN ('Submitted and indexed', 'Indexed, not submitted in sitemap')
-        AND verdict <> 'PASS'
-      ORDER BY coverage_changed_at DESC LIMIT 5`);
-    droppedUrls = droppedRes.rows ?? [];
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: { "user-agent": PROBE_UA }
+    });
+    const body = await res.text();
+    if (res.status !== 200) return { status: res.status, ok: false, detail: `HTTP ${res.status}`, body };
+    const minBytes = opts.minBytes ?? MIN_BODY_BYTES3;
+    if (body.length < minBytes) return { status: res.status, ok: false, detail: `body ${body.length} < ${minBytes} bytes`, body };
+    for (const marker of opts.markers ?? []) {
+      if (!body.toLowerCase().includes(marker.toLowerCase())) {
+        return { status: res.status, ok: false, detail: `missing marker "${marker}"`, body };
+      }
+    }
+    return { status: res.status, ok: true, body };
   } catch (err) {
-    console.warn("[owner-digest] index-monitor tables unavailable (migration 064 not applied?):", String(err).slice(0, 200));
+    return { status: 0, ok: false, detail: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timer);
   }
-  const ordersY = yesterday?.orders ?? 0;
-  const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? "" : "s"}, ${redTrackers} RED tracker${redTrackers === 1 ? "" : "s"}`;
-  const profitRows = profit.map((p) => `<tr><td style="padding:2px 10px 2px 0;">${esc(p.day)}</td><td style="padding:2px 10px;">${p.orders}</td><td style="padding:2px 10px;">$${p.revenue.toFixed(2)}</td><td style="padding:2px 10px;">$${p.profit.toFixed(2)}</td><td style="padding:2px 0;">${esc(p.featured_sku ?? "")}</td></tr>`).join("");
-  const runRows = runs.map((r) => `<tr><td style="padding:2px 10px 2px 0;">${esc(r.team)}</td><td style="padding:2px 10px;">${esc(r.run_type)}</td><td style="padding:2px 10px;color:${r.status === "failed" ? "#d93a15" : r.status === "succeeded" ? "#1c7c43" : "#6f645c"};">${esc(r.status)}</td><td style="padding:2px 0;">${esc((r.error ?? r.summary ?? "").slice(0, 140))}</td></tr>`).join("");
-  const gateRows = gates.map((g) => `<tr><td style="padding:2px 10px 2px 0;">${esc(g.team)}</td><td style="padding:2px 10px;">${g.enabled ? "on" : '<span style="color:#d93a15;">off</span>'}</td><td style="padding:2px 10px;">${g.runsToday}/${g.maxRunsPerDay} runs</td><td style="padding:2px 0;">$${(g.spentCents / 100).toFixed(2)} / $${(g.dailyCents / 100).toFixed(2)}</td></tr>`).join("");
-  const valveRows = valveEntries.map(([name, on]) => `<tr><td style="padding:2px 10px 2px 0;">${esc(name)}</td><td style="padding:2px 0;">${on ? "on" : "off"}</td></tr>`).join("");
-  let indexBody = "no sweep data yet (migration 064 + /cron/gsc-index-sweep)";
-  if (indexToday) {
-    const delta = indexWeekAgo ? indexToday.indexed_count - indexWeekAgo.indexed_count : null;
-    const deltaStr = delta === null ? "" : ` (${delta >= 0 ? "+" : ""}${delta} vs ${esc(indexWeekAgo.day)})`;
-    const droppedList = droppedUrls.map((d) => `<li>${esc(d.url)} &mdash; now &ldquo;${esc(d.coverage_state ?? "unknown")}&rdquo;</li>`).join("");
-    indexBody = `<p style="margin:0 0 4px;"><strong>${indexToday.indexed_count}</strong> of ${indexToday.sitemap_urls} sitemap URLs indexed${deltaStr} &middot; ${indexToday.inspected_urls} inspected so far</p>
-      <p style="margin:0 0 4px;">Not indexed: ${indexToday.crawled_not_indexed} crawled-but-rejected &middot; ${indexToday.discovered_not_indexed} discovered-not-crawled &middot; ${indexToday.other_not_indexed} other &middot; ${indexToday.canonical_mismatches} canonical mismatch${indexToday.canonical_mismatches === 1 ? "" : "es"}</p>
-      ${indexToday.newly_dropped > 0 ? `<p style="margin:0 0 2px;color:#d93a15;">${indexToday.newly_dropped} dropped from the index today${droppedList ? `:</p><ul style="margin:0 0 4px;padding-left:18px;">${droppedList}</ul>` : "</p>"}` : ""}
-      ${indexToday.newly_indexed > 0 ? `<p style="margin:0;color:#1c7c43;">${indexToday.newly_indexed} newly indexed today</p>` : ""}`;
-  }
-  const trackerBlocks = trackers.map((t) => {
-    const asks = latestOwnerAsks(t);
-    const latest = t.statusLog[0];
-    return `<p style="margin:8px 0 2px;"><strong style="color:${ragColor(t.overall)};">${esc(t.overall)}</strong> &middot; ${esc(t.title)}</p>
-        ${latest ? `<p style="margin:0 0 2px;color:#6f645c;">Latest: ${esc(latest.heading)}</p>` : ""}
-        ${asks ? `<p style="margin:0;"><em>Asks for the owner:</em> ${esc(asks)}</p>` : ""}`;
-  }).join("");
-  const section = (title, body) => `<h3 style="font-family:Inter,sans-serif;font-size:14px;margin:18px 0 6px;">${title}</h3>
-     <div style="font-family:Inter,sans-serif;font-size:12px;color:#2b2b2b;">${body}</div>`;
-  const html = `<body style="margin:0;padding:16px;background:#faf7f2;">
-    <div style="max-width:640px;">
-      <h2 style="font-family:Inter,sans-serif;font-size:16px;margin:0 0 4px;">xdipx daily digest &middot; ${day}</h2>
-      ${section("Orders and profit (last 8 days)", `<table style="border-collapse:collapse;">${profitRows || "<tr><td>no rows</td></tr>"}</table>`)}
-      ${section(`Team runs, last 24h (${failures.length} failed)`, `<table style="border-collapse:collapse;">${runRows || "<tr><td>no runs</td></tr>"}</table>`)}
-      ${section("Team gates", `<table style="border-collapse:collapse;">${gateRows}</table>`)}
-      ${section("Valves", `<table style="border-collapse:collapse;">${valveRows}</table>`)}
-      ${section(`Search indexing${indexToday ? ` (as of ${esc(indexToday.day)})` : ""}`, indexBody)}
-      ${section(`Suggestions (${proposed?.n ?? 0} awaiting triage${proposed ? `, oldest ${esc(proposed.oldest.slice(0, 10))}` : ""})`, sugg.map((s) => `${esc(s.status)}: ${s.n}`).join(" &middot; ") || "none")}
-      ${section("Program trackers", trackerBlocks || "no trackers found")}
-      <p style="font-family:Inter,sans-serif;font-size:11px;color:#6f645c;margin-top:18px;">
-        Full detail: xdipx.com/admin/trackers and /admin/homepage-team. Sent by /cron/owner-digest.
-      </p>
-    </div>
-  </body>`;
-  const res = await sendOwnerEmail(subject, html, { fromName: "xdipx daily digest" });
-  return res.sent ? { sent: true, subject } : { sent: false, ...res.error !== void 0 ? { error: res.error } : {} };
 }
-var init_owner_digest_server = __esm({
-  "app/lib/owner-digest.server.ts"() {
+async function followWithCookies(startUrl, maxHops = 12) {
+  const jar = /* @__PURE__ */ new Map();
+  let url = startUrl;
+  for (let hop = 0; hop < maxHops; hop++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS3);
+    let res;
+    try {
+      const cookie = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+      res = await fetch(url, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: { "user-agent": PROBE_UA, ...cookie ? { cookie } : {} }
+      });
+    } catch (err) {
+      return { status: 0, finalUrl: url, body: "", hops: hop, detail: err instanceof Error ? err.message : String(err) };
+    } finally {
+      clearTimeout(timer);
+    }
+    const getSetCookie = res.headers.getSetCookie;
+    for (const sc of getSetCookie ? getSetCookie.call(res.headers) : []) {
+      const pair = sc.split(";")[0] ?? "";
+      const eq26 = pair.indexOf("=");
+      if (eq26 > 0) jar.set(pair.slice(0, eq26).trim(), pair.slice(eq26 + 1).trim());
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      if (!loc) return { status: res.status, finalUrl: url, body: "", hops: hop, detail: "redirect without Location" };
+      url = new URL(loc, url).toString();
+      continue;
+    }
+    const body = await res.text();
+    return { status: res.status, finalUrl: url, body, hops: hop };
+  }
+  return { status: 0, finalUrl: url, body: "", hops: maxHops, detail: "too many redirects" };
+}
+async function checkCheckout(url) {
+  const r = await followWithCookies(url);
+  if (r.status === 0 && r.detail) return { status: 0, ok: false, detail: r.detail };
+  if (r.status === 404) return { status: 404, ok: false, detail: `404 at ${r.finalUrl.split("?")[0]} (checkout URL dead)` };
+  const onCheckout = /\/checkouts?\//i.test(r.finalUrl);
+  if (!onCheckout) {
+    return { status: r.status, ok: false, detail: `checkout did not route to a Shopify checkout page (landed ${r.finalUrl.split("?")[0]}, status ${r.status})` };
+  }
+  const rendered = r.status === 200 && /order summary|payment|contact information/i.test(r.body);
+  if (rendered) return { status: r.status, ok: true };
+  return { status: r.status, ok: true, detail: `reached checkout endpoint (status ${r.status}; full render verified by browser tier)` };
+}
+async function runCheckoutProbe() {
+  const start = Date.now();
+  const steps = [];
+  const base = baseUrl();
+  const record = (step, r, t0) => {
+    steps.push(mkStep(step, r.ok, Date.now() - t0, { status: r.status, detail: r.detail }));
+    return r.ok;
+  };
+  const finish = () => {
+    const failed = steps.find((s) => !s.ok);
+    return { ok: !failed, failedStep: failed?.step ?? null, steps, durationMs: Date.now() - start };
+  };
+  let t = Date.now();
+  if (!record("homepage", await checkUrl(`${base}/`), t)) return finish();
+  t = Date.now();
+  const handle = process.env["PROBE_PRODUCT_HANDLE"] || await kvGet(KV_KEYS.liveDealHandle);
+  if (!handle) {
+    steps.push(mkStep("resolve-handle", false, Date.now() - t, { detail: "no PROBE_PRODUCT_HANDLE and no live deal handle in KV" }));
+    return finish();
+  }
+  steps.push(mkStep("resolve-handle", true, Date.now() - t, { detail: handle }));
+  t = Date.now();
+  if (!record("pdp", await checkUrl(`${base}/products/${handle}`, { markers: ['name="variantId"'] }), t)) return finish();
+  t = Date.now();
+  let checkoutUrl = "";
+  try {
+    const deal = await getDealByHandle(handle);
+    const variantId = deal?.variantId;
+    if (!variantId) {
+      steps.push(mkStep("cart", false, Date.now() - t, { detail: `no variantId for handle ${handle}` }));
+      return finish();
+    }
+    const cart = await createCart();
+    const withLine = await addToCart(cart.id, variantId, 1);
+    try {
+      await setCartAttributes(cart.id, [{ key: "_probe", value: "1" }]);
+    } catch {
+    }
+    const ok = Boolean(withLine.checkoutUrl) && withLine.totalQuantity === 1;
+    checkoutUrl = withLine.checkoutUrl;
+    steps.push(mkStep("cart", ok, Date.now() - t, ok ? {} : { detail: `checkoutUrl=${Boolean(withLine.checkoutUrl)} qty=${withLine.totalQuantity}` }));
+    if (!ok) return finish();
+  } catch (err) {
+    steps.push(mkStep("cart", false, Date.now() - t, { detail: err instanceof Error ? err.message : String(err) }));
+    return finish();
+  }
+  t = Date.now();
+  record("checkout-page", await checkCheckout(checkoutUrl), t);
+  return finish();
+}
+async function recordAndAlertProbe(tier, result) {
+  let alerted = false;
+  if (!result.ok) {
+    const failedStep = result.failedStep ?? "unknown";
+    const detail = result.steps.find((s) => !s.ok)?.detail ?? "";
+    Sentry.captureMessage(`[checkout-probe:${tier}] failed at ${failedStep}: ${detail}`, "error");
+    const fresh = await kvSetNX(`probe:alert:${tier}:${failedStep}`, String(Date.now()), ALERT_THROTTLE_SECONDS);
+    if (fresh) {
+      const stepList = result.steps.map((s) => `${s.ok ? "ok" : "FAIL"} ${escapeHtml(s.step)}${s.detail ? ` (${escapeHtml(s.detail)})` : ""}`).join("<br>");
+      await sendOwnerEmail(
+        `xdipx checkout probe FAILED at ${failedStep} (${tier})`,
+        `<p>The ${escapeHtml(tier)} checkout probe failed at step <strong>${escapeHtml(failedStep)}</strong>.</p><p>${stepList}</p><p>The purchase path is broken up to at least this step. Check the storefront and the Shopify checkout.</p>`
+      );
+      await sendOwnerSms(`xdipx checkout probe FAILED at ${failedStep} (${tier}). Purchase path broken.`);
+      alerted = true;
+    }
+  }
+  const inserted = await db.insert(checkoutProbeRuns).values({
+    tier,
+    ok: result.ok,
+    failedStep: result.failedStep,
+    steps: result.steps,
+    durationMs: result.durationMs,
+    alerted
+  }).returning({ id: checkoutProbeRuns.id });
+  return { rowId: inserted[0]?.id ?? 0, alerted };
+}
+var FETCH_TIMEOUT_MS3, MIN_BODY_BYTES3, ALERT_THROTTLE_SECONDS, PROBE_UA;
+var init_checkout_probe_server = __esm({
+  "app/lib/checkout-probe.server.ts"() {
     "use strict";
+    init_sentry_server();
     init_db_server();
-    init_team_server();
-    init_team_keys();
-    init_tracker_server();
-    init_owner_alerts_server();
+    init_schema();
     init_kv_server();
+    init_shopify_server();
+    init_owner_alerts_server();
+    FETCH_TIMEOUT_MS3 = 12e3;
+    MIN_BODY_BYTES3 = 1e3;
+    ALERT_THROTTLE_SECONDS = 6 * 3600;
+    PROBE_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
   }
 });
 
@@ -18604,7 +18785,7 @@ async function runGscSnapshot() {
   }
   const topQueries = mapRows(queryRows, "query");
   const topPages = mapRows(pageRows, "page");
-  await sql7`
+  await sql6`
     INSERT INTO gsc_snapshots (period_start, period_end, totals, top_queries, top_pages, sitemaps)
     VALUES (
       ${periodStart}, ${periodEnd},
@@ -18626,11 +18807,11 @@ async function runGscSnapshot() {
     }
   };
 }
-var sql7, SCOPE, TOKEN_URL, DEFAULT_SITE;
+var sql6, SCOPE, TOKEN_URL, DEFAULT_SITE;
 var init_gsc_server = __esm({
   "app/lib/gsc.server.ts"() {
     "use strict";
-    sql7 = neon3(process.env["DATABASE_URL"]);
+    sql6 = neon3(process.env["DATABASE_URL"]);
     SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
     TOKEN_URL = "https://oauth2.googleapis.com/token";
     DEFAULT_SITE = "sc-domain:xdipx.com";
@@ -18733,15 +18914,15 @@ async function runGscIndexSweep(opts = {}) {
   if (entries.length === 0) throw new Error("sitemap parsed to zero URLs; refusing to flag everything absent");
   const urls = entries.map((e) => e.url);
   const lastmods = entries.map((e) => e.lastmod);
-  await sql8`
+  await sql7`
     INSERT INTO gsc_url_inspections (url, sitemap_lastmod)
     SELECT u, m FROM unnest(${urls}::text[], ${lastmods}::text[]) AS t(u, m)
     ON CONFLICT (url) DO UPDATE
       SET in_sitemap = TRUE, sitemap_lastmod = EXCLUDED.sitemap_lastmod`;
-  await sql8`
+  await sql7`
     UPDATE gsc_url_inspections SET in_sitemap = FALSE
     WHERE in_sitemap AND NOT (url = ANY(${urls}::text[]))`;
-  const batch = await sql8`
+  const batch = await sql7`
     SELECT url, coverage_state, verdict FROM gsc_url_inspections
     WHERE in_sitemap OR coverage_state = ANY(${DEAD_VERDICT_STATES}::text[])
     ORDER BY last_inspected_at ASC NULLS FIRST, first_seen_at ASC
@@ -18773,7 +18954,7 @@ async function runGscIndexSweep(opts = {}) {
       const isIndexed = r.verdict === "PASS";
       if (row.verdict !== null && !wasIndexed && isIndexed) newlyIndexed++;
       if (wasIndexed && !isIndexed) newlyDropped++;
-      await sql8`
+      await sql7`
         UPDATE gsc_url_inspections SET
           verdict = ${r.verdict ?? null},
           coverage_state = ${newCoverage},
@@ -18793,7 +18974,7 @@ async function runGscIndexSweep(opts = {}) {
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batch.length) }, () => worker()));
   const quotaUsedToday = inspected > 0 ? await kvIncrBy(quotaKey, inspected) : used;
-  const aggRows = await sql8`
+  const aggRows = await sql7`
     SELECT
       count(*) FILTER (WHERE in_sitemap)::int AS sitemap_urls,
       count(*) FILTER (WHERE in_sitemap AND last_inspected_at IS NOT NULL)::int AS inspected_urls,
@@ -18807,7 +18988,7 @@ async function runGscIndexSweep(opts = {}) {
                        AND google_canonical <> user_canonical)::int AS canonical_mismatches
     FROM gsc_url_inspections`;
   const agg = aggRows[0];
-  await sql8`
+  await sql7`
     INSERT INTO gsc_index_daily (
       day, sitemap_urls, inspected_urls, indexed_count, crawled_not_indexed,
       discovered_not_indexed, other_not_indexed, canonical_mismatches,
@@ -18846,13 +19027,13 @@ async function runGscIndexSweep(opts = {}) {
     }
   };
 }
-var sql8, DEAD_VERDICT_STATES, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
+var sql7, DEAD_VERDICT_STATES, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
 var init_gsc_index_server = __esm({
   "app/lib/gsc-index.server.ts"() {
     "use strict";
     init_gsc_server();
     init_kv_server();
-    sql8 = neon4(process.env["DATABASE_URL"]);
+    sql7 = neon4(process.env["DATABASE_URL"]);
     DEAD_VERDICT_STATES = ["Not found (404)", "Soft 404", "Server error (5xx)"];
     INSPECT_URL = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
     DAILY_QUOTA_CEILING = 1900;
@@ -18860,6 +19041,894 @@ var init_gsc_index_server = __esm({
     CONCURRENCY = 8;
     QuotaExhaustedError = class extends Error {
     };
+  }
+});
+
+// app/lib/seo-daily.server.ts
+var seo_daily_server_exports = {};
+__export(seo_daily_server_exports, {
+  auditPageHtml: () => auditPageHtml,
+  getLatestSeoDaily: () => getLatestSeoDaily,
+  isoWeek: () => isoWeek,
+  runSeoDaily: () => runSeoDaily
+});
+import { sql as sql8 } from "drizzle-orm";
+function delta(a, b) {
+  return typeof a === "number" && typeof b === "number" ? a - b : null;
+}
+function num2(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+function isoWeek(d = /* @__PURE__ */ new Date()) {
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const dayNum = (t.getUTCDay() + 6) % 7;
+  t.setUTCDate(t.getUTCDate() - dayNum + 3);
+  const isoYear = t.getUTCFullYear();
+  const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+  const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
+  const week = 1 + Math.round((t.getTime() - firstThursday.getTime()) / (7 * 864e5));
+  return `${isoYear}-W${String(week).padStart(2, "0")}`;
+}
+function auditPageHtml(url, html) {
+  const problems = [];
+  const robotsRe = /<meta[^>]+name=["'](?:robots|googlebot)["'][^>]*content=["']([^"']*)["'][^>]*>/gi;
+  let m;
+  while ((m = robotsRe.exec(html)) !== null) {
+    if (/\bnoindex\b/i.test(m[1] ?? "")) problems.push(`noindex directive present ("${(m[1] ?? "").trim()}")`);
+  }
+  const canonical = /<link[^>]+rel=["']canonical["'][^>]*href=["']([^"']+)["']/i.exec(html)?.[1];
+  if (!canonical) {
+    problems.push("no canonical link");
+  } else {
+    const path = (u) => {
+      try {
+        const p = new URL(u, SITE_ORIGIN2);
+        return p.pathname.replace(/\/+$/, "") || "/";
+      } catch {
+        return u;
+      }
+    };
+    if (path(canonical) !== path(url)) {
+      problems.push(`canonical points elsewhere (${canonical})`);
+    }
+  }
+  const { parsed, scripts } = extractJsonLd(html);
+  if (scripts === 0) problems.push("no JSON-LD block");
+  else if (parsed < scripts) problems.push(`malformed JSON-LD (${scripts - parsed} of ${scripts} unparseable)`);
+  return problems;
+}
+async function probe(url) {
+  const res = await checkUrl(url);
+  const problems = [];
+  if (!res.ok && res.detail) problems.push(res.detail);
+  if (res.body) problems.push(...auditPageHtml(url, res.body));
+  return { url, ok: problems.length === 0, status: res.status, problems };
+}
+async function sampleUrls() {
+  const urls = [`${SITE_ORIGIN2}/`];
+  try {
+    const { fetchSitemapEntries: fetchSitemapEntries2 } = await Promise.resolve().then(() => (init_gsc_index_server(), gsc_index_server_exports));
+    const entries = await fetchSitemapEntries2(new URL("sitemap.xml", `${SITE_ORIGIN2}/`));
+    const pick = (list, n) => {
+      if (list.length <= n) return list;
+      const stride = Math.floor(list.length / n);
+      return Array.from({ length: n }, (_, i) => list[i * stride]).filter(Boolean);
+    };
+    const collections = entries.map((e) => e.url).filter((u) => /\/collections\/[^/]+$/.test(u));
+    const products = entries.map((e) => e.url).filter((u) => u.includes("/products/"));
+    urls.push(...pick(collections, PLP_SAMPLE), ...pick(products, PDP_SAMPLE));
+  } catch (err) {
+    console.warn("[seo-daily] sitemap sample failed, probing homepage only:", String(err).slice(0, 200));
+  }
+  return urls;
+}
+async function coverageCounters() {
+  const empty = {
+    discoveryTotal: null,
+    hasTypeDial: null,
+    hasMood: null,
+    hasImage: null,
+    enrichedDistinctProducts: null
+  };
+  try {
+    const res = await db.execute(sql8`
+      SELECT
+        jsonb_array_length(index_json::jsonb)::int AS total,
+        (SELECT count(*)::int FROM jsonb_array_elements(index_json::jsonb) e
+          WHERE e->>'productTypeDial' IS NOT NULL AND e->>'productTypeDial' <> '') AS has_type_dial,
+        (SELECT count(*)::int FROM jsonb_array_elements(index_json::jsonb) e
+          WHERE jsonb_typeof(e->'mood') = 'array' AND jsonb_array_length(e->'mood') > 0) AS has_mood,
+        (SELECT count(*)::int FROM jsonb_array_elements(index_json::jsonb) e
+          WHERE e->>'imageUrl' IS NOT NULL AND e->>'imageUrl' <> '') AS has_image
+      FROM discovery_index_payload WHERE version = 'v7' LIMIT 1`);
+    const row = (res.rows ?? [])[0];
+    const enrichRes = await db.execute(sql8`
+      SELECT count(DISTINCT product_id)::int AS n FROM product_enrichment_cache`);
+    const enriched = (enrichRes.rows ?? [])[0];
+    return {
+      discoveryTotal: row ? num2(row["total"]) : null,
+      hasTypeDial: row ? num2(row["has_type_dial"]) : null,
+      hasMood: row ? num2(row["has_mood"]) : null,
+      hasImage: row ? num2(row["has_image"]) : null,
+      enrichedDistinctProducts: enriched ? num2(enriched["n"]) : null
+    };
+  } catch (err) {
+    console.warn("[seo-daily] coverage counters failed:", String(err).slice(0, 200));
+    return empty;
+  }
+}
+async function runSeoDaily() {
+  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const errors = [];
+  const guard = async (label, fn, fallback) => {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = `${label}: ${err instanceof Error ? err.message : String(err)}`;
+      console.warn("[seo-daily]", msg);
+      errors.push(msg);
+      return fallback;
+    }
+  };
+  const today = await guard("gsc_index_daily latest", async () => {
+    const r = await db.execute(sql8`SELECT ${INDEX_DAILY_COLS} FROM gsc_index_daily ORDER BY day DESC LIMIT 1`);
+    return (r.rows ?? [])[0] ?? null;
+  }, null);
+  const weekAgo = await guard("gsc_index_daily week-ago", async () => {
+    const r = await db.execute(sql8`
+      SELECT ${INDEX_DAILY_COLS} FROM gsc_index_daily
+      WHERE day <= now()::date - 7 ORDER BY day DESC LIMIT 1`);
+    return (r.rows ?? [])[0] ?? null;
+  }, null);
+  const transitions = await guard("coverage transitions", async () => {
+    const r = await db.execute(sql8`
+      SELECT
+        count(*) FILTER (
+          WHERE verdict = 'PASS'
+            AND previous_coverage_state IS DISTINCT FROM coverage_state)::int AS cleared,
+        count(*) FILTER (
+          WHERE verdict <> 'PASS'
+            AND previous_coverage_state IN ('Submitted and indexed', 'Indexed, not submitted in sitemap'))::int AS regressed,
+        count(*)::int AS total
+      FROM gsc_url_inspections
+      WHERE coverage_changed_at >= now() - interval '24 hours'`);
+    const row = (r.rows ?? [])[0];
+    return { cleared: num2(row?.["cleared"]), regressed: num2(row?.["regressed"]), total: num2(row?.["total"]) };
+  }, { cleared: 0, regressed: 0, total: 0 });
+  const verdictCounts = await guard("verdict breakdown", async () => {
+    const r = await db.execute(sql8`
+      SELECT COALESCE(coverage_state, 'unknown') AS state, count(*)::int AS n
+      FROM gsc_url_inspections WHERE in_sitemap GROUP BY 1 ORDER BY 2 DESC`);
+    const out = {};
+    for (const row of r.rows ?? []) {
+      out[String(row["state"])] = num2(row["n"]);
+    }
+    return out;
+  }, {});
+  const serverErrors = verdictCounts["Server error (5xx)"] ?? 0;
+  const indexnowPushed24h = await guard("indexnow ledger", async () => {
+    const r = await db.execute(sql8`
+      SELECT count(*)::int AS n FROM indexnow_pings WHERE pinged_at >= now() - interval '24 hours'`);
+    return num2((r.rows ?? [])[0]?.n);
+  }, 0);
+  const snapshot = await guard("gsc_snapshots", async () => {
+    const r = await db.execute(sql8`
+      SELECT captured_at::text AS captured_at, period_start::text AS period_start,
+             period_end::text AS period_end, totals
+      FROM gsc_snapshots ORDER BY captured_at DESC LIMIT 1`);
+    const row = (r.rows ?? [])[0];
+    if (!row) return null;
+    const totals = row["totals"] ?? {};
+    return {
+      capturedAt: row["captured_at"] ? String(row["captured_at"]) : null,
+      periodStart: row["period_start"] ? String(row["period_start"]) : null,
+      periodEnd: row["period_end"] ? String(row["period_end"]) : null,
+      clicks: totals["clicks"] != null ? num2(totals["clicks"]) : null,
+      impressions: totals["impressions"] != null ? num2(totals["impressions"]) : null,
+      position: totals["position"] != null ? num2(totals["position"]) : null
+    };
+  }, null);
+  const coverage = await coverageCounters();
+  const probes = await guard("live probes", async () => {
+    const urls = await sampleUrls();
+    return Promise.all(urls.map(probe));
+  }, []);
+  const probeFailures = probes.filter((p) => !p.ok).length;
+  const deltas = {
+    indexed: delta(today?.indexed_count, weekAgo?.indexed_count),
+    crawledNotIndexed: delta(today?.crawled_not_indexed, weekAgo?.crawled_not_indexed),
+    discoveredNotIndexed: delta(today?.discovered_not_indexed, weekAgo?.discovered_not_indexed),
+    newlyIndexed: today ? today.newly_indexed : null,
+    newlyDropped: today ? today.newly_dropped : null
+  };
+  const anomalies = [];
+  const signals = [];
+  if (today && weekAgo && weekAgo.indexed_count > 0) {
+    const pct = (today.indexed_count - weekAgo.indexed_count) / weekAgo.indexed_count * 100;
+    if (pct < -INDEXED_DROP_PCT) {
+      const text2 = `Indexed URLs fell ${Math.abs(pct).toFixed(1)}% week over week: ${weekAgo.indexed_count} on ${weekAgo.day} to ${today.indexed_count} on ${today.day}. Investigate what changed on the affected URLs before it caches.`;
+      anomalies.push(text2);
+      signals.push({ signal: "indexed-drop", priority: 2, text: text2 });
+    }
+  }
+  if (today && today.newly_dropped > NEWLY_DROPPED_MAX) {
+    const text2 = `${today.newly_dropped} URLs dropped out of the index in the last day (threshold ${NEWLY_DROPPED_MAX}). Check gsc_url_inspections for the common cause.`;
+    anomalies.push(text2);
+    signals.push({ signal: "newly-dropped", priority: 2, text: text2 });
+  }
+  if (serverErrors > SERVER_ERROR_MAX) {
+    const text2 = `${serverErrors} sitemap URLs currently carry a 5xx verdict (threshold ${SERVER_ERROR_MAX}). Server errors cost crawl budget and erode sitemap trust.`;
+    anomalies.push(text2);
+    signals.push({ signal: "server-errors", priority: 2, text: text2 });
+  }
+  if (probeFailures > 0) {
+    const detail = probes.filter((p) => !p.ok).map((p) => `${p.url}: ${p.problems.join("; ")}`).join(" | ");
+    const text2 = `Live SEO tripwire failed on ${probeFailures} of ${probes.length} sampled pages. ${detail}. This is the signature of the May 2026 outage that cost 1,230 URLs their index status, so treat it as P0 until proven otherwise.`;
+    anomalies.push(text2);
+    signals.push({ signal: "live-probe", priority: 1, text: text2 });
+  }
+  const week = isoWeek();
+  const ticketsFiled = [];
+  for (const s of signals) {
+    const dedupeKey = `seo:${s.signal}:${week}`;
+    const id = await guard(`ticket ${s.signal}`, () => createSuggestion({
+      team: "strategy",
+      category: "other",
+      kind: "code",
+      suggestion: s.text,
+      cxRisk: s.priority === 1 ? "high" : "med",
+      priority: s.priority,
+      dedupeKey
+    }), 0);
+    ticketsFiled.push({ signal: s.signal, dedupeKey, id, priority: s.priority });
+  }
+  let ownerEmailed = false;
+  if (probeFailures > 0) {
+    const rows = probes.filter((p) => !p.ok).map((p) => `<li><code>${escapeHtml(p.url)}</code> (HTTP ${p.status}) &mdash; ${escapeHtml(p.problems.join("; "))}</li>`).join("");
+    const res = await sendOwnerEmail(
+      `xdipx SEO tripwire FAILED on ${probeFailures} of ${probes.length} pages`,
+      `<body style="margin:0;padding:16px;background:#faf7f2;font-family:Inter,sans-serif;font-size:13px;color:#2b2b2b;">
+        <h2 style="font-size:16px;margin:0 0 8px;">SEO regression tripwire failed &middot; ${day}</h2>
+        <p style="margin:0 0 8px;">The daily check asserts every sampled page returns 200, carries a self-referencing canonical, emits no noindex, and ships parseable JSON-LD. These failed:</p>
+        <ul style="margin:0 0 12px;padding-left:18px;">${rows}</ul>
+        <p style="margin:0;color:#6f645c;">This is the same signature as the May 2026 outage, which left 1,230 URLs on a cached noindex verdict for two months. Sent by /cron/seo-daily.</p>
+      </body>`,
+      { fromName: "xdipx SEO tripwire" }
+    );
+    ownerEmailed = res.sent;
+  }
+  const result = {
+    day,
+    today,
+    weekAgo,
+    deltas,
+    transitions,
+    verdictCounts,
+    serverErrors,
+    indexnowPushed24h,
+    snapshot,
+    coverage,
+    probes,
+    probeFailures,
+    anomalies,
+    ticketsFiled,
+    ownerEmailed,
+    errors
+  };
+  await guard("persist seo_coverage_daily", async () => {
+    await db.execute(sql8`
+      INSERT INTO seo_coverage_daily (
+        day, discovery_total, has_type_dial, has_mood, has_image,
+        enriched_distinct_products, notes
+      ) VALUES (
+        ${day}, ${coverage.discoveryTotal}, ${coverage.hasTypeDial}, ${coverage.hasMood},
+        ${coverage.hasImage}, ${coverage.enrichedDistinctProducts},
+        ${JSON.stringify(result)}::jsonb
+      )
+      ON CONFLICT (day) DO UPDATE SET
+        discovery_total = EXCLUDED.discovery_total,
+        has_type_dial = EXCLUDED.has_type_dial,
+        has_mood = EXCLUDED.has_mood,
+        has_image = EXCLUDED.has_image,
+        enriched_distinct_products = EXCLUDED.enriched_distinct_products,
+        notes = EXCLUDED.notes`);
+    return true;
+  }, false);
+  return result;
+}
+async function getLatestSeoDaily() {
+  try {
+    const r = await db.execute(sql8`
+      SELECT day::text AS day, notes FROM seo_coverage_daily ORDER BY day DESC LIMIT 1`);
+    const row = (r.rows ?? [])[0];
+    if (!row) return null;
+    return { day: String(row.day), notes: row.notes ?? null };
+  } catch (err) {
+    console.warn("[seo-daily] getLatestSeoDaily failed:", String(err).slice(0, 200));
+    return null;
+  }
+}
+var SITE_ORIGIN2, PDP_SAMPLE, PLP_SAMPLE, INDEXED_DROP_PCT, NEWLY_DROPPED_MAX, SERVER_ERROR_MAX, INDEX_DAILY_COLS;
+var init_seo_daily_server = __esm({
+  "app/lib/seo-daily.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_homepage_healthcheck_server();
+    init_checkout_probe_server();
+    init_team_server();
+    init_owner_alerts_server();
+    SITE_ORIGIN2 = (process.env["BASE_URL"] || "https://xdipx.com").replace(/\/+$/, "");
+    PDP_SAMPLE = 5;
+    PLP_SAMPLE = 2;
+    INDEXED_DROP_PCT = 5;
+    NEWLY_DROPPED_MAX = 20;
+    SERVER_ERROR_MAX = 10;
+    INDEX_DAILY_COLS = sql8`
+  day::text AS day, sitemap_urls, inspected_urls, indexed_count,
+  crawled_not_indexed, discovered_not_indexed, other_not_indexed,
+  canonical_mismatches, newly_indexed, newly_dropped`;
+  }
+});
+
+// app/lib/owner-digest.server.ts
+var owner_digest_server_exports = {};
+__export(owner_digest_server_exports, {
+  runOwnerDigest: () => runOwnerDigest
+});
+import { sql as sql9 } from "drizzle-orm";
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function ragColor(rag) {
+  if (rag === "GREEN") return "#1c7c43";
+  if (rag === "AMBER") return "#b57d0a";
+  if (rag === "RED") return "#d93a15";
+  return "#6f645c";
+}
+async function runOwnerDigest(opts = {}) {
+  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  if (!opts.force) {
+    const first = await kvSetNX(`owner-digest:sent:${day}`, String(Date.now()), 26 * 3600);
+    if (!first) return { sent: false, skipped: "already sent today (pass force=1 to re-send)" };
+  }
+  const profitRes = await db.execute(sql9`
+    SELECT summary_date::text AS day,
+           COALESCE(total_orders, 0)::int AS orders,
+           COALESCE(total_revenue, 0)::float8 AS revenue,
+           COALESCE(total_profit, 0)::float8 AS profit,
+           featured_sku
+    FROM daily_profit_summary
+    ORDER BY summary_date DESC
+    LIMIT 8`);
+  const profit = profitRes.rows ?? [];
+  const yesterday = profit[0];
+  const runsRes = await db.execute(sql9`
+    SELECT team, run_type, status, started_at::text AS started_at, error, summary
+    FROM homepage_team_runs
+    WHERE started_at >= now() - interval '24 hours'
+    ORDER BY started_at DESC
+    LIMIT 40`);
+  const runs = runsRes.rows ?? [];
+  const failures = runs.filter((r) => r.status === "failed");
+  const suggRes = await db.execute(sql9`
+    SELECT status, COUNT(*)::int AS n, MIN(created_at)::text AS oldest
+    FROM homepage_team_suggestions
+    GROUP BY status`);
+  const sugg = suggRes.rows ?? [];
+  const proposed = sugg.find((s) => s.status === "proposed");
+  const gates = await Promise.all(TEAM_IDS.map((t) => gate(t)));
+  const valveEntries = await Promise.all(
+    Object.entries(VALVE_KEYS).map(async ([name, key]) => [name, await getValve(key)])
+  );
+  const trackers = getTrackers();
+  const redTrackers = trackers.filter((t) => t.overall === "RED").length;
+  let seo = null;
+  let seoDay = null;
+  let droppedUrls = [];
+  let seoTickets = [];
+  try {
+    const { getLatestSeoDaily: getLatestSeoDaily2 } = await Promise.resolve().then(() => (init_seo_daily_server(), seo_daily_server_exports));
+    const latest = await getLatestSeoDaily2();
+    if (latest) {
+      seo = latest.notes;
+      seoDay = latest.day;
+    }
+  } catch (err) {
+    console.warn("[owner-digest] seo-daily unavailable:", String(err).slice(0, 200));
+  }
+  try {
+    const droppedRes = await db.execute(sql9`
+      SELECT url, previous_coverage_state, coverage_state
+      FROM gsc_url_inspections
+      WHERE coverage_changed_at >= now() - interval '24 hours'
+        AND previous_coverage_state IN ('Submitted and indexed', 'Indexed, not submitted in sitemap')
+        AND verdict <> 'PASS'
+      ORDER BY coverage_changed_at DESC LIMIT 5`);
+    droppedUrls = droppedRes.rows ?? [];
+  } catch (err) {
+    console.warn("[owner-digest] index-monitor tables unavailable (migration 064 not applied?):", String(err).slice(0, 200));
+  }
+  try {
+    const ticketRes = await db.execute(sql9`
+      SELECT id, priority, status, suggestion, dedupe_key
+      FROM homepage_team_suggestions
+      WHERE created_at >= now() - interval '24 hours' AND dedupe_key LIKE 'seo:%'
+      ORDER BY priority ASC, created_at DESC LIMIT 10`);
+    seoTickets = ticketRes.rows ?? [];
+  } catch (err) {
+    console.warn("[owner-digest] ticket columns unavailable (migration 070 not applied?):", String(err).slice(0, 200));
+  }
+  const ordersY = yesterday?.orders ?? 0;
+  const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? "" : "s"}, ${redTrackers} RED tracker${redTrackers === 1 ? "" : "s"}`;
+  const profitRows = profit.map((p) => `<tr><td style="padding:2px 10px 2px 0;">${esc(p.day)}</td><td style="padding:2px 10px;">${p.orders}</td><td style="padding:2px 10px;">$${p.revenue.toFixed(2)}</td><td style="padding:2px 10px;">$${p.profit.toFixed(2)}</td><td style="padding:2px 0;">${esc(p.featured_sku ?? "")}</td></tr>`).join("");
+  const runRows = runs.map((r) => `<tr><td style="padding:2px 10px 2px 0;">${esc(r.team)}</td><td style="padding:2px 10px;">${esc(r.run_type)}</td><td style="padding:2px 10px;color:${r.status === "failed" ? "#d93a15" : r.status === "succeeded" ? "#1c7c43" : "#6f645c"};">${esc(r.status)}</td><td style="padding:2px 0;">${esc((r.error ?? r.summary ?? "").slice(0, 140))}</td></tr>`).join("");
+  const gateRows = gates.map((g) => `<tr><td style="padding:2px 10px 2px 0;">${esc(g.team)}</td><td style="padding:2px 10px;">${g.enabled ? "on" : '<span style="color:#d93a15;">off</span>'}</td><td style="padding:2px 10px;">${g.runsToday}/${g.maxRunsPerDay} runs</td><td style="padding:2px 0;">$${(g.spentCents / 100).toFixed(2)} / $${(g.dailyCents / 100).toFixed(2)}</td></tr>`).join("");
+  const valveRows = valveEntries.map(([name, on]) => `<tr><td style="padding:2px 10px 2px 0;">${esc(name)}</td><td style="padding:2px 0;">${on ? "on" : "off"}</td></tr>`).join("");
+  const signed = (n) => typeof n === "number" ? `${n >= 0 ? "+" : ""}${n}` : "n/a";
+  let indexBody = "no SEO diagnosis yet (migrations 064/071 + /cron/seo-daily)";
+  const idx = seo?.today ?? null;
+  if (seo && idx) {
+    const wow = seo.deltas.indexed;
+    const wowStr = wow === null ? "" : ` (${signed(wow)} vs ${esc(seo.weekAgo?.day ?? "a week ago")})`;
+    const droppedList = droppedUrls.map((d) => `<li>${esc(d.url)} &mdash; now &ldquo;${esc(d.coverage_state ?? "unknown")}&rdquo;</li>`).join("");
+    const probeLine = seo.probeFailures > 0 ? `<p style="margin:0 0 4px;color:#d93a15;"><strong>Tripwire FAILED on ${seo.probeFailures} of ${seo.probes.length} sampled pages.</strong> ${esc(seo.probes.filter((p) => !p.ok).map((p) => `${p.url}: ${p.problems.join("; ")}`).join(" | ").slice(0, 400))}</p>` : `<p style="margin:0 0 4px;color:#1c7c43;">Tripwire clean on ${seo.probes.length} sampled pages (200, self-canonical, no noindex, parseable JSON-LD).</p>`;
+    const snap = seo.snapshot;
+    const snapLine = snap ? `<p style="margin:0 0 4px;">Search traffic (28-day rollup, captured ${esc((snap.capturedAt ?? "").slice(0, 10))}, refreshed weekly on Mondays): ${snap.impressions ?? "n/a"} impressions &middot; ${snap.clicks ?? "n/a"} clicks &middot; avg position ${snap.position != null ? snap.position.toFixed(1) : "n/a"}</p>` : '<p style="margin:0 0 4px;color:#6f645c;">No gsc_snapshots row yet (weekly, Monday 06:00 UTC).</p>';
+    const cov = seo.coverage;
+    const covLine = cov.discoveryTotal ? `<p style="margin:0 0 4px;">Catalog coverage: ${cov.discoveryTotal} products indexed for discovery &middot; ${cov.hasTypeDial ?? 0} with a type dial &middot; ${cov.hasMood ?? 0} with mood tags &middot; ${cov.hasImage ?? 0} with an image &middot; ${cov.enrichedDistinctProducts ?? 0} enriched</p>` : "";
+    const ticketList = seoTickets.map((t) => `<li>P${t.priority} &middot; ${esc(t.status)} &middot; #${t.id} ${esc(t.suggestion.slice(0, 160))}</li>`).join("");
+    indexBody = `<p style="margin:0 0 4px;"><strong>${idx.indexed_count}</strong> of ${idx.sitemap_urls} sitemap URLs indexed${wowStr} &middot; ${idx.inspected_urls} inspected so far</p>
+      <p style="margin:0 0 4px;">Not indexed: ${idx.crawled_not_indexed} crawled-but-rejected (${signed(seo.deltas.crawledNotIndexed)} w/w) &middot; ${idx.discovered_not_indexed} discovered-not-crawled (${signed(seo.deltas.discoveredNotIndexed)} w/w) &middot; ${idx.other_not_indexed} other &middot; ${idx.canonical_mismatches} canonical mismatch${idx.canonical_mismatches === 1 ? "" : "es"}</p>
+      <p style="margin:0 0 4px;">Transitions in 24h: <span style="color:#1c7c43;">${seo.transitions.cleared} cleared</span> &middot; <span style="color:${seo.transitions.regressed > 0 ? "#d93a15" : "#6f645c"};">${seo.transitions.regressed} regressed</span> &middot; ${seo.transitions.total} total changes</p>
+      ${idx.newly_dropped > 0 ? `<p style="margin:0 0 2px;color:#d93a15;">${idx.newly_dropped} dropped from the index today${droppedList ? `:</p><ul style="margin:0 0 4px;padding-left:18px;">${droppedList}</ul>` : "</p>"}` : ""}
+      ${idx.newly_indexed > 0 ? `<p style="margin:0 0 4px;color:#1c7c43;">${idx.newly_indexed} newly indexed today</p>` : ""}
+      ${probeLine}
+      <p style="margin:0 0 4px;">IndexNow: ${seo.indexnowPushed24h} URLs pushed in the last 24h${seo.indexnowPushed24h === 0 ? ' <span style="color:#b57d0a;">(no push recorded)</span>' : ""}</p>
+      ${snapLine}
+      ${covLine}
+      ${ticketList ? `<p style="margin:6px 0 2px;">Tickets filed overnight:</p><ul style="margin:0;padding-left:18px;">${ticketList}</ul>` : '<p style="margin:0;color:#6f645c;">No SEO tickets filed overnight.</p>'}`;
+  }
+  const trackerBlocks = trackers.map((t) => {
+    const asks = latestOwnerAsks(t);
+    const latest = t.statusLog[0];
+    return `<p style="margin:8px 0 2px;"><strong style="color:${ragColor(t.overall)};">${esc(t.overall)}</strong> &middot; ${esc(t.title)}</p>
+        ${latest ? `<p style="margin:0 0 2px;color:#6f645c;">Latest: ${esc(latest.heading)}</p>` : ""}
+        ${asks ? `<p style="margin:0;"><em>Asks for the owner:</em> ${esc(asks)}</p>` : ""}`;
+  }).join("");
+  const section = (title, body) => `<h3 style="font-family:Inter,sans-serif;font-size:14px;margin:18px 0 6px;">${title}</h3>
+     <div style="font-family:Inter,sans-serif;font-size:12px;color:#2b2b2b;">${body}</div>`;
+  const html = `<body style="margin:0;padding:16px;background:#faf7f2;">
+    <div style="max-width:640px;">
+      <h2 style="font-family:Inter,sans-serif;font-size:16px;margin:0 0 4px;">xdipx daily digest &middot; ${day}</h2>
+      ${section("Orders and profit (last 8 days)", `<table style="border-collapse:collapse;">${profitRows || "<tr><td>no rows</td></tr>"}</table>`)}
+      ${section(`Team runs, last 24h (${failures.length} failed)`, `<table style="border-collapse:collapse;">${runRows || "<tr><td>no runs</td></tr>"}</table>`)}
+      ${section("Team gates", `<table style="border-collapse:collapse;">${gateRows}</table>`)}
+      ${section("Valves", `<table style="border-collapse:collapse;">${valveRows}</table>`)}
+      ${section(`SEO and indexing${seoDay ? ` (diagnosis ${esc(seoDay)})` : ""}`, indexBody)}
+      ${section(`Suggestions (${proposed?.n ?? 0} awaiting triage${proposed ? `, oldest ${esc(proposed.oldest.slice(0, 10))}` : ""})`, sugg.map((s) => `${esc(s.status)}: ${s.n}`).join(" &middot; ") || "none")}
+      ${section("Program trackers", trackerBlocks || "no trackers found")}
+      <p style="font-family:Inter,sans-serif;font-size:11px;color:#6f645c;margin-top:18px;">
+        Full detail: xdipx.com/admin/trackers and /admin/homepage-team. Sent by /cron/owner-digest.
+      </p>
+    </div>
+  </body>`;
+  const res = await sendOwnerEmail(subject, html, { fromName: "xdipx daily digest" });
+  return res.sent ? { sent: true, subject } : { sent: false, ...res.error !== void 0 ? { error: res.error } : {} };
+}
+var init_owner_digest_server = __esm({
+  "app/lib/owner-digest.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_team_server();
+    init_team_keys();
+    init_tracker_server();
+    init_owner_alerts_server();
+    init_kv_server();
+  }
+});
+
+// app/lib/sitemap-xml.ts
+function floorLastmod(lastmod, floor) {
+  return !lastmod || lastmod < floor ? floor : lastmod;
+}
+function isTrustworthyDeadVerdict(coverageState, lastCrawl) {
+  if (coverageState !== "Not found (404)" || !lastCrawl) return false;
+  const crawled = lastCrawl instanceof Date ? lastCrawl.toISOString().slice(0, 10) : String(lastCrawl).slice(0, 10);
+  return crawled >= RECRAWL_EPOCH;
+}
+function applyHealth(urls, health) {
+  const out = [];
+  for (const u of urls) {
+    if (health.dead.has(u.loc)) continue;
+    out.push(health.stale.has(u.loc) ? { ...u, lastmod: floorLastmod(u.lastmod, RECRAWL_EPOCH) } : u);
+  }
+  return out;
+}
+function newestLastmod(urls) {
+  let newest;
+  for (const u of urls) if (u.lastmod && (!newest || u.lastmod > newest)) newest = u.lastmod;
+  return newest;
+}
+function chunkSegments(prefix, urls, size) {
+  const segments = [];
+  for (let i = 0; i < urls.length; i += size) {
+    const chunk = urls.slice(i, i + size);
+    segments.push({
+      name: `${prefix}-${Math.floor(i / size) + 1}`,
+      urls: chunk,
+      lastmod: newestLastmod(chunk)
+    });
+  }
+  return segments;
+}
+var BASE2, RECRAWL_EPOCH, HOMEPAGE_PRIORITY, NAV_PRIORITY, NEW_ARRIVALS_PRIORITY, PRODUCT_PRIORITY, PRODUCT_CHANGEFREQ;
+var init_sitemap_xml = __esm({
+  "app/lib/sitemap-xml.ts"() {
+    "use strict";
+    BASE2 = "https://xdipx.com";
+    RECRAWL_EPOCH = "2026-06-13";
+    HOMEPAGE_PRIORITY = "1.0";
+    NAV_PRIORITY = "0.9";
+    NEW_ARRIVALS_PRIORITY = "0.8";
+    PRODUCT_PRIORITY = "0.6";
+    PRODUCT_CHANGEFREQ = "weekly";
+  }
+});
+
+// app/lib/sitemap.server.ts
+var sitemap_server_exports = {};
+__export(sitemap_server_exports, {
+  buildSitemapSegments: () => buildSitemapSegments,
+  clearSitemapMemo: () => clearSitemapMemo,
+  getUrlHealth: () => getUrlHealth
+});
+import { neon as neon5 } from "@neondatabase/serverless";
+import { eq as eq13 } from "drizzle-orm";
+async function getUrlHealth() {
+  try {
+    const rows = await sql10`
+      SELECT url, coverage_state, last_crawl_time FROM gsc_url_inspections
+      WHERE coverage_state = ANY(${BAD_VERDICT_STATES}::text[])
+    `;
+    const dead = /* @__PURE__ */ new Set();
+    const stale = /* @__PURE__ */ new Set();
+    for (const row of rows) {
+      if (isTrustworthyDeadVerdict(row.coverage_state, row.last_crawl_time)) dead.add(row.url);
+      else stale.add(row.url);
+    }
+    return { dead, stale };
+  } catch (err) {
+    console.error("[sitemap] getUrlHealth failed:", err);
+    return { dead: /* @__PURE__ */ new Set(), stale: /* @__PURE__ */ new Set() };
+  }
+}
+function relativize(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    return u.host === "xdipx.com" ? u.pathname : rawUrl;
+  } catch {
+    return rawUrl;
+  }
+}
+function buildSitemapSegments() {
+  if (memo && Date.now() - memo.ts < MEMO_TTL_MS) return memo.segments;
+  const entry = { segments: assembleSegments(), ts: Date.now() };
+  memo = entry;
+  entry.segments.catch(() => {
+    if (memo === entry) memo = null;
+  });
+  return entry.segments;
+}
+function clearSitemapMemo() {
+  memo = null;
+}
+async function assembleSegments() {
+  const guard = (p, fallback, name) => p.catch((err) => {
+    console.error(`[sitemap] ${name} failed:`, err);
+    return fallback;
+  });
+  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health] = await Promise.all([
+    guard(getBlogPostsForSitemap(), [], "getBlogPostsForSitemap"),
+    guard(getBlogCategories(), [], "getBlogCategories"),
+    guard(getAllBlogSeries(), [], "getAllBlogSeries"),
+    guard(getPageList(), [], "getPageList"),
+    guard(getProductHandlesForSitemap(), [], "getProductHandlesForSitemap"),
+    guard(getProductImagesForSitemap(), /* @__PURE__ */ new Map(), "getProductImagesForSitemap"),
+    guard(getCollectionsForSitemap(), [], "getCollectionsForSitemap"),
+    guard(db.select().from(dealHistory).where(eq13(dealHistory.status, "live")).limit(1), [], "liveDeal query"),
+    guard(getMainMenu(), [], "getMainMenu"),
+    getUrlHealth()
+  ]);
+  const liveDealDate = liveDealRows[0]?.dealDate ? new Date(liveDealRows[0].dealDate) : null;
+  const homepageLastmod = liveDealDate && !Number.isNaN(liveDealDate.getTime()) ? liveDealDate.toISOString().split("T")[0] : void 0;
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const collectionsHubLastmod = collections.length > 0 ? collections.map((c) => c.updatedAt).filter((d) => !!d).sort().pop()?.split("T")[0] : void 0;
+  const navItems = mainMenu.map((item) => typeof item.url === "string" ? relativize(item.url) : "").filter((path) => path.startsWith("/") && path !== "/");
+  const navCollectionHandles = new Set(
+    navItems.filter((p) => p.startsWith("/collections/")).map((p) => p.replace(/^\/collections\//, "").split(/[/?#]/)[0])
+  );
+  const pageUrls = [
+    // Homepage — always first, highest priority
+    { loc: `${BASE2}/`, lastmod: homepageLastmod ?? today, changefreq: "daily", priority: HOMEPAGE_PRIORITY },
+    // Top-level nav destinations — Google's sitelink candidates.
+    // Priority 0.9, just below the homepage and above generic PLPs.
+    ...navItems.map((path) => {
+      const handle = path.startsWith("/collections/") ? path.replace(/^\/collections\//, "").split(/[/?#]/)[0] : null;
+      const c = handle ? collections.find((x) => x.handle === handle) : null;
+      return {
+        loc: `${BASE2}${path}`,
+        lastmod: c?.updatedAt?.split("T")[0] ?? today,
+        changefreq: "daily",
+        priority: NAV_PRIORITY
+      };
+    }),
+    // /new: the catalog's only freshness surface, and one of the few pages
+    // whose changefreq=daily claim is true. It self-noindexes ONLY when it has
+    // zero products (thin content); the rest of the time it is a fully
+    // indexable page, so omitting it left it with no submission path and
+    // almost no inbound links. Listed above generic PLPs, below the nav.
+    { loc: `${BASE2}/new`, lastmod: today, changefreq: "daily", priority: NEW_ARRIVALS_PRIORITY },
+    { loc: `${BASE2}/discover`, lastmod: today, changefreq: "weekly", priority: "0.7" },
+    { loc: `${BASE2}/collections`, lastmod: collectionsHubLastmod ?? today, changefreq: "weekly", priority: "0.7" },
+    { loc: `${BASE2}/notebook`, lastmod: today, changefreq: "weekly", priority: "0.5" },
+    { loc: `${BASE2}/notebook/glossary`, lastmod: today, changefreq: "weekly", priority: "0.5" },
+    { loc: `${BASE2}/faq`, lastmod: today, changefreq: "monthly", priority: "0.5" },
+    { loc: `${BASE2}/about`, lastmod: today, changefreq: "monthly", priority: "0.5" },
+    { loc: `${BASE2}/contributors/emma`, lastmod: today, changefreq: "monthly", priority: "0.4" },
+    // Social bio-link landing, arrival surface for IG/TikTok/YT traffic.
+    { loc: `${BASE2}/social`, lastmod: today, changefreq: "monthly", priority: "0.4" },
+    // /vault, /for-him, /for-her are retired (301 → /collections or a
+    // product-type collection) — intentionally not listed as sitemap entries.
+    // Generic pages — drop slugs that already have a cleaner canonical URL
+    // (e.g. /about lives at /about, not /pages/about) to prevent duplicate
+    // canonical entries in the sitemap.
+    ...pages.filter((p) => !PAGE_SLUG_DENYLIST.has(p.slug)).map((p) => ({
+      loc: `${BASE2}/pages/${p.slug}`,
+      lastmod: void 0,
+      changefreq: "monthly",
+      priority: "0.4"
+    }))
+  ];
+  const notebookUrls = [
+    ...blogPosts.map((p) => ({
+      loc: `${BASE2}/notebook/${p.slug}`,
+      lastmod: (p._updatedAt ?? p.publishedAt)?.split("T")[0],
+      changefreq: "weekly",
+      priority: "0.7"
+    })),
+    ...categories.map((c) => ({
+      loc: `${BASE2}/notebook/category/${c.slug}`,
+      lastmod: void 0,
+      changefreq: "weekly",
+      priority: "0.5"
+    })),
+    // Only series with published posts are returned.
+    ...blogSeries.map((s) => ({
+      loc: `${BASE2}/notebook/series/${s.slug}`,
+      lastmod: void 0,
+      changefreq: "weekly",
+      priority: "0.5"
+    }))
+  ];
+  const collectionUrls = collections.filter((c) => !COLLECTION_DENYLIST.has(c.handle) && !navCollectionHandles.has(c.handle)).map((c) => {
+    const images = c.image?.url ? [{ loc: c.image.url, title: c.image.altText?.trim() || c.handle.replace(/-/g, " ") }] : [];
+    return {
+      loc: `${BASE2}/collections/${c.handle}`,
+      lastmod: c.updatedAt?.split("T")[0],
+      changefreq: "weekly",
+      priority: "0.7",
+      ...images.length > 0 ? { images } : {}
+    };
+  });
+  const productUrls = products.map((p) => {
+    const imageData = productImages.get(p.handle);
+    const images = imageData ? imageData.images.map((img) => ({
+      loc: img.url,
+      // <image:title> is the contextual caption Google indexes alongside
+      // the image. Prefer the variant-specific altText; fall back to the
+      // product title so every image has a meaningful title.
+      title: img.altText?.trim() || imageData.title
+    })) : [];
+    return {
+      loc: `${BASE2}/products/${p.handle}`,
+      lastmod: p._updatedAt?.split("T")[0],
+      changefreq: PRODUCT_CHANGEFREQ,
+      priority: PRODUCT_PRIORITY,
+      ...images.length > 0 ? { images } : {}
+    };
+  });
+  const seen = /* @__PURE__ */ new Set();
+  const clean = (urls) => {
+    const out = [];
+    for (const u of applyHealth(urls, health)) {
+      if (seen.has(u.loc)) continue;
+      seen.add(u.loc);
+      out.push(u);
+    }
+    return out;
+  };
+  const segments = [];
+  const push = (name, urls) => {
+    const corrected = clean(urls);
+    if (corrected.length === 0) return;
+    segments.push({ name, urls: corrected, lastmod: newestLastmod(corrected) });
+  };
+  push("pages", pageUrls);
+  push("collections", collectionUrls);
+  push("notebook", notebookUrls);
+  segments.push(...chunkSegments("products", clean(productUrls), PRODUCTS_PER_SEGMENT));
+  return segments;
+}
+var sql10, BAD_VERDICT_STATES, PRODUCTS_PER_SEGMENT, PAGE_SLUG_DENYLIST, COLLECTION_DENYLIST, memo, MEMO_TTL_MS;
+var init_sitemap_server = __esm({
+  "app/lib/sitemap.server.ts"() {
+    "use strict";
+    init_sanity_server();
+    init_shopify_server();
+    init_db_server();
+    init_gsc_index_server();
+    init_sitemap_xml();
+    init_schema();
+    sql10 = neon5(process.env["DATABASE_URL"]);
+    BAD_VERDICT_STATES = [
+      "Excluded by \u2018noindex\u2019 tag",
+      "Duplicate without user-selected canonical",
+      ...DEAD_VERDICT_STATES
+    ];
+    PRODUCTS_PER_SEGMENT = 1e3;
+    PAGE_SLUG_DENYLIST = /* @__PURE__ */ new Set([
+      "about",
+      "faq",
+      "our-mission",
+      // duplicates /about messaging
+      "checkout-extras",
+      // canonical is /checkout-extras
+      "components"
+      // internal style guide, should not be indexed
+    ]);
+    COLLECTION_DENYLIST = /* @__PURE__ */ new Set([
+      "frontpage",
+      // Shopify default auto-collection
+      "vault",
+      // /vault is retired (301 → /collections)
+      "for-him",
+      // /for-him is retired (301 → a product-type collection)
+      "for-her"
+      // /for-her is retired (301 → a product-type collection)
+    ]);
+    memo = null;
+    MEMO_TTL_MS = 36e5;
+  }
+});
+
+// app/lib/indexnow-bulk.server.ts
+var indexnow_bulk_server_exports = {};
+__export(indexnow_bulk_server_exports, {
+  PING_SUPPRESSION_DAYS: () => PING_SUPPRESSION_DAYS,
+  batchIdForDay: () => batchIdForDay,
+  runIndexNowBulkPush: () => runIndexNowBulkPush,
+  selectPushableUrls: () => selectPushableUrls
+});
+function selectPushableUrls(candidates, recentlyPinged2, limit) {
+  const pushable = [];
+  let suppressed = 0;
+  for (const url of candidates) {
+    if (recentlyPinged2.has(url)) {
+      suppressed++;
+      continue;
+    }
+    if (pushable.length >= limit) continue;
+    pushable.push(url);
+  }
+  return { pushable, suppressed };
+}
+function batchIdForDay(d = /* @__PURE__ */ new Date()) {
+  return `bulk-${d.toISOString().slice(0, 10)}`;
+}
+async function staleUrls() {
+  const { getUrlHealth: getUrlHealth2 } = await Promise.resolve().then(() => (init_sitemap_server(), sitemap_server_exports));
+  const health = await getUrlHealth2();
+  return Array.from(health.stale);
+}
+async function allSitemapUrls() {
+  const { fetchSitemapEntries: fetchSitemapEntries2 } = await Promise.resolve().then(() => (init_gsc_index_server(), gsc_index_server_exports));
+  const entries = await fetchSitemapEntries2(new URL("sitemap.xml", `${SITE_ORIGIN}/`));
+  return entries.map((e) => e.url);
+}
+async function recentlyPinged(urls) {
+  if (urls.length === 0) return /* @__PURE__ */ new Set();
+  try {
+    const { sql: sql17 } = await import("drizzle-orm");
+    const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
+    const res = await db2.execute(sql17`
+      SELECT url FROM indexnow_pings
+      WHERE url = ANY(${urls}::text[])
+        AND pinged_at >= now() - (${PING_SUPPRESSION_DAYS} * interval '1 day')`);
+    return new Set((res.rows ?? []).map((r) => String(r.url)));
+  } catch (err) {
+    console.error("[indexnow-bulk] ledger read failed, refusing to push:", err);
+    throw err;
+  }
+}
+async function recordPushed(urls, batchId, statusCode) {
+  if (urls.length === 0) return;
+  const { sql: sql17 } = await import("drizzle-orm");
+  const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
+  await db2.execute(sql17`
+    INSERT INTO indexnow_pings (url, pinged_at, batch_id, engine, status_code)
+    SELECT u, now(), ${batchId}, 'indexnow', ${statusCode}
+    FROM unnest(${urls}::text[]) AS t(u)
+    ON CONFLICT (url) DO UPDATE SET
+      pinged_at   = EXCLUDED.pinged_at,
+      batch_id    = EXCLUDED.batch_id,
+      status_code = EXCLUDED.status_code`);
+}
+async function runIndexNowBulkPush(opts = {}) {
+  const scope = opts.scope === "all" ? "all" : "stale";
+  const limit = opts.limit && opts.limit > 0 ? opts.limit : DEFAULT_LIMIT;
+  const batchId = batchIdForDay();
+  const base = {
+    scope,
+    candidates: 0,
+    suppressed: 0,
+    pushed: 0,
+    chunks: 0,
+    batchId
+  };
+  if (process.env["SEARCH_PING_ENABLED"] !== "true") {
+    return { ...base, skipped: "SEARCH_PING_ENABLED is not true" };
+  }
+  const key = process.env["INDEXNOW_API_KEY"];
+  if (!key) return { ...base, skipped: "INDEXNOW_API_KEY missing" };
+  try {
+    const raw = scope === "all" ? await allSitemapUrls() : await staleUrls();
+    const candidates = normalizeUrls(raw);
+    if (candidates.length === 0) return { ...base, skipped: "no candidate URLs" };
+    const seen = await recentlyPinged(candidates);
+    const { pushable, suppressed } = selectPushableUrls(candidates, seen, limit);
+    if (pushable.length === 0) {
+      return { ...base, candidates: candidates.length, suppressed, skipped: "all candidates suppressed" };
+    }
+    let pushed = 0;
+    let chunks = 0;
+    let stoppedAtStatus;
+    for (const chunk of chunkUrls(pushable, INDEXNOW_MAX_URLS_PER_REQUEST)) {
+      const result = await submitIndexNowChunk(chunk, { key });
+      chunks++;
+      if (result.ok) {
+        await recordPushed(chunk, batchId, result.status);
+        pushed += chunk.length;
+        console.log(`[indexnow-bulk] ${result.status} for ${chunk.length} url(s) (${scope})`);
+        continue;
+      }
+      stoppedAtStatus = result.status;
+      console.warn(`[indexnow-bulk] stopping: status ${result.status} (${result.error ?? "no body"})`);
+      if (result.status === 429 || isRetryableStatus(result.status)) break;
+      break;
+    }
+    return {
+      ...base,
+      candidates: candidates.length,
+      suppressed,
+      pushed,
+      chunks,
+      ...stoppedAtStatus !== void 0 ? { stoppedAtStatus } : {}
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[indexnow-bulk] run failed (non-blocking):", message);
+    return { ...base, error: message };
+  }
+}
+var PING_SUPPRESSION_DAYS, DEFAULT_LIMIT;
+var init_indexnow_bulk_server = __esm({
+  "app/lib/indexnow-bulk.server.ts"() {
+    "use strict";
+    init_search_ping_server();
+    PING_SUPPRESSION_DAYS = 14;
+    DEFAULT_LIMIT = 2e4;
   }
 });
 
@@ -19830,9 +20899,9 @@ function buildResult(tier, newPrice, msrp, wholesale, currentPrice, mapRespected
   if (margin < effectiveMarginFloor && !flagsCopy.includes("below-floor")) {
     flagsCopy.push("below-floor");
   }
-  const delta = round22(finalPrice - currentPrice);
-  const deltaPct = currentPrice > 0 ? round22(delta / currentPrice) : 0;
-  return { tier, newPrice: finalPrice, newCompareAt, marginPct: margin, reason, mapRespected, flags: flagsCopy, delta, deltaPct };
+  const delta2 = round22(finalPrice - currentPrice);
+  const deltaPct = currentPrice > 0 ? round22(delta2 / currentPrice) : 0;
+  return { tier, newPrice: finalPrice, newCompareAt, marginPct: margin, reason, mapRespected, flags: flagsCopy, delta: delta2, deltaPct };
 }
 function computeTargetPrice(snapshot, rules) {
   const { wholesale, msrp, mapPrice, currentPrice, inSaleFeed, nalpacDiscountPct, vendor, productType } = snapshot;
@@ -19967,7 +21036,7 @@ var init_pricing_report_server = __esm({
 });
 
 // app/lib/pricing-agent.server.ts
-import { eq as eq13 } from "drizzle-orm";
+import { eq as eq14 } from "drizzle-orm";
 var init_pricing_agent_server = __esm({
   "app/lib/pricing-agent.server.ts"() {
     "use strict";
@@ -19990,7 +21059,7 @@ var init_pricing_apply_server = __esm({
 });
 
 // app/lib/pricing-webhook.server.ts
-import { eq as eq14, sql as sql9 } from "drizzle-orm";
+import { eq as eq15, sql as sql11 } from "drizzle-orm";
 async function setPipelineSetting(key, value) {
   await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
     target: pipelineSettings.key,
@@ -20011,7 +21080,7 @@ var init_pricing_webhook_server = __esm({
 });
 
 // app/lib/cost-sync.server.ts
-import { inArray as inArray3, sql as sql10 } from "drizzle-orm";
+import { inArray as inArray3, sql as sql12 } from "drizzle-orm";
 function round23(n) {
   return Math.round(n * 100) / 100;
 }
@@ -20095,17 +21164,17 @@ async function runNalpacCostSync(opts) {
         await db.insert(nalpacPriceHistory).values(chunk).onConflictDoUpdate({
           target: nalpacPriceHistory.sku,
           set: {
-            wholesale: sql10`excluded.wholesale`,
-            msrp: sql10`excluded.msrp`,
-            mapPrice: sql10`excluded.map_price`,
-            salePrice: sql10`excluded.sale_price`,
-            qty: sql10`excluded.qty`,
-            nalpacDiscountPct: sql10`excluded.nalpac_discount_pct`,
-            inTop100: sql10`excluded.in_top100`,
-            inNew: sql10`excluded.in_new`,
-            inSale: sql10`excluded.in_sale`,
-            observedAt: sql10`excluded.observed_at`,
-            syncedAt: sql10`excluded.synced_at`
+            wholesale: sql12`excluded.wholesale`,
+            msrp: sql12`excluded.msrp`,
+            mapPrice: sql12`excluded.map_price`,
+            salePrice: sql12`excluded.sale_price`,
+            qty: sql12`excluded.qty`,
+            nalpacDiscountPct: sql12`excluded.nalpac_discount_pct`,
+            inTop100: sql12`excluded.in_top100`,
+            inNew: sql12`excluded.in_new`,
+            inSale: sql12`excluded.in_sale`,
+            observedAt: sql12`excluded.observed_at`,
+            syncedAt: sql12`excluded.synced_at`
           }
         });
       } catch (err) {
@@ -20869,7 +21938,7 @@ Be efficient. Each tool is a single call. Do NOT call the same tool twice.`;
 });
 
 // app/lib/enricher-brief.server.ts
-import { eq as eq15 } from "drizzle-orm";
+import { eq as eq16 } from "drizzle-orm";
 async function adminGraphQLWithRetry(query, variables, attempt = 0) {
   try {
     return await adminGraphQL(query, variables);
@@ -20977,7 +22046,7 @@ async function gatherProductBrief(numericProductId) {
     sku: dealHistory.sku,
     brand: dealHistory.brand,
     categories: dealHistory.categories
-  }).from(dealHistory).where(eq15(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  }).from(dealHistory).where(eq16(dealHistory.shopifyProductId, numericProductId)).limit(1);
   const hist = histRows[0];
   const sku = hist?.sku;
   const brand = hist?.brand ?? snap.vendor ?? "";
@@ -21103,11 +22172,11 @@ ${JSON.stringify(brief, null, 2)}
 
 Return ONLY the ProductWrites JSON object per your <output_schema>. No markdown fences. No commentary. No preamble.`;
 }
-function addUsage(acc, delta) {
-  acc.inputTokens += delta.inputTokens;
-  acc.outputTokens += delta.outputTokens;
-  acc.cacheCreationTokens += delta.cacheCreationTokens;
-  acc.cacheReadTokens += delta.cacheReadTokens;
+function addUsage(acc, delta2) {
+  acc.inputTokens += delta2.inputTokens;
+  acc.outputTokens += delta2.outputTokens;
+  acc.cacheCreationTokens += delta2.cacheCreationTokens;
+  acc.cacheReadTokens += delta2.cacheReadTokens;
 }
 async function buildFullEnrichmentRequests(inputs, context, opts = {}) {
   const emmaBlocks = await buildEmmaSystemBlocks(opts.brandVoice);
@@ -21293,7 +22362,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and4, asc as asc3, eq as eq16, inArray as inArray4, isNull as isNull2, sql as sql11 } from "drizzle-orm";
+import { and as and4, asc as asc3, eq as eq17, inArray as inArray4, isNull as isNull2, sql as sql13 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -21329,7 +22398,7 @@ async function applyFullEnrichmentWrites(numericProductId, writes) {
   const snap = await fetchProductSnapshot(numericProductId);
   if (!snap) throw new Error(`fetchProductSnapshot returned null for ${numericProductId}`);
   const category = inferCategoryFallback(snap.metafields["xdipx.category"]);
-  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq16(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq17(dealHistory.shopifyProductId, numericProductId)).limit(1);
   const editorialTags = (histRows[0]?.categories ?? []).filter(
     (c) => !!c && c !== "(uncategorized)"
   );
@@ -21439,8 +22508,8 @@ function passesQualityGate(writes) {
   return true;
 }
 async function submitEnrichmentBatch(cap, opts = {}) {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
-    eq16(importCandidates.status, "imported"),
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
+    eq17(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichBatchId),
     isNull2(importCandidates.enrichFailedAt)
@@ -21482,9 +22551,9 @@ async function detectImportEnrichStall(enabled) {
   try {
     const cutoff = new Date(Date.now() - STALL_AGE_HOURS * 3600 * 1e3);
     const rows = await db.select({
-      anchor: sql11`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
+      anchor: sql13`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
     }).from(importCandidates).where(and4(
-      eq16(importCandidates.status, "imported"),
+      eq17(importCandidates.status, "imported"),
       isNull2(importCandidates.enrichedAt),
       isNull2(importCandidates.enrichBatchId),
       isNull2(importCandidates.enrichFailedAt)
@@ -21516,11 +22585,11 @@ async function collectEnrichmentBatch() {
     batchId: importCandidates.enrichBatchId,
     productId: dealHistory.shopifyProductId,
     enrichAttempts: importCandidates.enrichAttempts
-  }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
-    eq16(importCandidates.status, "imported"),
+  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
+    eq17(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichFailedAt),
-    sql11`${importCandidates.enrichBatchId} IS NOT NULL`
+    sql13`${importCandidates.enrichBatchId} IS NOT NULL`
   )).orderBy(asc3(importCandidates.id));
   const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
   if (pending.length === 0) {
@@ -21555,17 +22624,17 @@ async function collectEnrichmentBatch() {
         }
       }
       if (ok) {
-        await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
+        await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.id, candidate.id));
         enrichedTotal++;
         continue;
       }
       const attempts = candidate.enrichAttempts + 1;
       const reason = batchFailure?.error ?? (!writes ? "no result in batch" : "quality gate failed");
       if (attempts < ENRICH_MAX_ATTEMPTS) {
-        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
+        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.id, candidate.id));
         console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- re-queued for retry`);
       } else {
-        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
+        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.id, candidate.id));
         console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- parked, needs manual review`);
       }
       failedTotal++;
@@ -21580,9 +22649,9 @@ async function publishEnrichedProducts() {
     sku: dealHistory.sku,
     title: dealHistory.seoTitle,
     categories: dealHistory.categories
-  }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
-    eq16(importCandidates.status, "imported"),
-    sql11`${importCandidates.enrichedAt} IS NOT NULL`,
+  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
+    eq17(importCandidates.status, "imported"),
+    sql13`${importCandidates.enrichedAt} IS NOT NULL`,
     isNull2(importCandidates.publishedAt)
   ));
   let published = 0;
@@ -21602,7 +22671,7 @@ async function publishEnrichedProducts() {
       } catch (tagErr) {
         console.warn(`[import-enrich] appendProductTag('new-arrival') failed for product ${r.productId} (candidate ${r.id}):`, tagErr instanceof Error ? tagErr.message : tagErr);
       }
-      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, r.id));
+      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.id, r.id));
       published++;
     } catch (err) {
       console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err);
@@ -21667,7 +22736,7 @@ __export(field_regen_runner_server_exports, {
   enqueueFieldRegenJob: () => enqueueFieldRegenJob
 });
 import Anthropic6 from "@anthropic-ai/sdk";
-import { eq as eq17 } from "drizzle-orm";
+import { eq as eq18 } from "drizzle-orm";
 function toDbRunnerState(rs) {
   return rs;
 }
@@ -21891,7 +22960,7 @@ async function advanceFieldRegenJob(job) {
           maxTokens: f.maxTokens
         };
       }
-      await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
       const client5 = getClient2();
       const requests = [];
       const systemParam = systemBlocks.map((b) => ({
@@ -21919,7 +22988,7 @@ async function advanceFieldRegenJob(job) {
         runnerState: toDbRunnerState(newRunnerState),
         submittedAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq17(batchJobs.jobId, job.jobId));
+      }).where(eq18(batchJobs.jobId, job.jobId));
       outcome.submitted = true;
       console.log(`[field-regen] job ${job.jobId} submitted batch ${batch.id} (${requests.length} requests)`);
       break;
@@ -21933,7 +23002,7 @@ async function advanceFieldRegenJob(job) {
       const client5 = getClient2();
       const batch = await client5.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
-        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
@@ -21984,7 +23053,7 @@ async function advanceFieldRegenJob(job) {
         currentBatchId: null,
         runnerState: toDbRunnerState(updatedRs),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq17(batchJobs.jobId, job.jobId));
+      }).where(eq18(batchJobs.jobId, job.jobId));
       break;
     }
     case "applying": {
@@ -22025,11 +23094,11 @@ async function advanceFieldRegenJob(job) {
           runnerState: toDbRunnerState(updatedRs),
           completedAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq17(batchJobs.jobId, job.jobId));
+        }).where(eq18(batchJobs.jobId, job.jobId));
         if (finalStatus === "done") outcome.done = true;
         else outcome.failed = true;
       } else {
-        await db.update(batchJobs).set({ runnerState: toDbRunnerState(updatedRs), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ runnerState: toDbRunnerState(updatedRs), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
       }
       break;
     }
@@ -22157,7 +23226,7 @@ async function enqueueFieldRegenJob(context) {
   const fields = context.kind === "copy-fields" ? context.fields.map((f) => f) : context.kind === "emma-hero" ? ["emma-hero"] : ["emma-take"];
   const meta = { jobKind: "field-regen", context, systemBlocks, fields };
   const runnerState = { "__meta": meta };
-  await db.update(batchJobs).set({ runnerState: toDbRunnerState(runnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, result.jobId));
+  await db.update(batchJobs).set({ runnerState: toDbRunnerState(runnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, result.jobId));
   return result;
 }
 var MODEL4, MODEL_FAST3;
@@ -22186,7 +23255,7 @@ __export(batch_orchestrator_server_exports, {
 });
 import { createHash as createHash6, randomUUID as randomUUID2 } from "node:crypto";
 import Anthropic7 from "@anthropic-ai/sdk";
-import { eq as eq18, inArray as inArray5 } from "drizzle-orm";
+import { eq as eq19, inArray as inArray5 } from "drizzle-orm";
 function getClient3() {
   return new Anthropic7({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
 }
@@ -22256,7 +23325,7 @@ async function advanceInflightJobs(opts = {}) {
       if (outcome.failed) result.failed++;
     } catch (err) {
       console.error(`[batch-orchestrator] advanceJob ${job.jobId} threw:`, err);
-      await db.update(batchJobs).set({ status: "failed", error: String(err), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ status: "failed", error: String(err), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
       result.failed++;
     }
   }
@@ -22280,7 +23349,7 @@ async function advanceJob(job) {
       for (const p of job.products) {
         runnerState[p.productId] = freshRunnerState(p, job.jobId);
       }
-      await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
       const updatedJob = { ...job, runnerState };
       await submitTurnBatch(updatedJob);
       outcome.submitted = true;
@@ -22295,7 +23364,7 @@ async function advanceJob(job) {
       const client5 = getClient3();
       const batch = await client5.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
-        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
@@ -22355,7 +23424,7 @@ async function advanceJob(job) {
               lastProcessedBatchId: job.currentBatchId
             };
           }
-          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
           continue;
         }
         const msg = entry.result.message;
@@ -22375,7 +23444,7 @@ async function advanceJob(job) {
             status: "done",
             lastProcessedBatchId: job.currentBatchId
           };
-          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
           continue;
         }
         const state = stateFor(ps, p, {
@@ -22448,7 +23517,7 @@ async function advanceJob(job) {
           messages: finalMessages,
           lastProcessedBatchId: job.currentBatchId
         };
-        await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
       }
       if (turnCount > 0) {
         void logApiTokens({
@@ -22481,7 +23550,7 @@ async function advanceJob(job) {
           turn: nowTurn,
           runnerState,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq18(batchJobs.jobId, job.jobId));
+        }).where(eq19(batchJobs.jobId, job.jobId));
       } else {
         const updatedJob = {
           ...job,
@@ -22518,7 +23587,7 @@ async function advanceJob(job) {
           if (idx >= 0) results[idx] = resultEntry;
           else results.push(resultEntry);
           runnerState[p.productId] = { ...ps, applyRetries: 0 };
-          await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
         } catch (err) {
           const applyRetries = (ps.applyRetries ?? 0) + 1;
           const errMsg = err instanceof Error ? err.message : String(err);
@@ -22541,7 +23610,7 @@ async function advanceJob(job) {
               error: `apply-permafail: ${errMsg}`
             };
           }
-          await db.update(batchJobs).set({ results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
         }
       }
       outcome.applied = appliedThisTick;
@@ -22564,7 +23633,7 @@ async function advanceJob(job) {
           appliedSkus,
           completedAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq18(batchJobs.jobId, job.jobId));
+        }).where(eq19(batchJobs.jobId, job.jobId));
         if (finalStatus === "done") outcome.done = true;
         else outcome.failed = true;
       }
@@ -22575,7 +23644,7 @@ async function advanceJob(job) {
       break;
   }
   try {
-    const fresh = await db.select().from(batchJobs).where(eq18(batchJobs.jobId, job.jobId)).limit(1);
+    const fresh = await db.select().from(batchJobs).where(eq19(batchJobs.jobId, job.jobId)).limit(1);
     const row = fresh[0];
     if (row) {
       const productStatuses = {};
@@ -22648,7 +23717,7 @@ async function submitTurnBatch(job) {
     runnerState,
     updatedAt: /* @__PURE__ */ new Date(),
     ...isFirstSubmit ? { submittedAt: /* @__PURE__ */ new Date() } : {}
-  }).where(eq18(batchJobs.jobId, job.jobId));
+  }).where(eq19(batchJobs.jobId, job.jobId));
   console.log(`[batch-orchestrator] job ${job.jobId} turn ${job.turn + 1}: submitted batch ${batch.id} (${requests.length} requests)`);
 }
 function buildCustomId2(jobId, productId) {
@@ -22699,8 +23768,8 @@ function stateFor(ps, p, taxonomy) {
 async function maybeActivateGatedDeal(jobId, gatesDealId) {
   try {
     const { dealHistory: dealHistory2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    const { eq: eq25 } = await import("drizzle-orm");
-    const rows = await db.select().from(dealHistory2).where(eq25(dealHistory2.id, gatesDealId)).limit(1);
+    const { eq: eq26 } = await import("drizzle-orm");
+    const rows = await db.select().from(dealHistory2).where(eq26(dealHistory2.id, gatesDealId)).limit(1);
     const deal = rows[0];
     if (!deal) {
       console.warn(`[batch-orchestrator] maybeActivateGatedDeal: deal ${gatesDealId} not found`);
@@ -22725,7 +23794,7 @@ async function maybeActivateGatedDeal(jobId, gatesDealId) {
   }
 }
 async function getBatchJobById(jobId) {
-  const rows = await db.select().from(batchJobs).where(eq18(batchJobs.jobId, jobId)).limit(1);
+  const rows = await db.select().from(batchJobs).where(eq19(batchJobs.jobId, jobId)).limit(1);
   return rows[0] ?? null;
 }
 async function listRecentBatchJobs(limit = 50) {
@@ -22761,7 +23830,7 @@ __export(bulk_import_server_exports, {
   parseBulkImportCSV: () => parseBulkImportCSV
 });
 import { parse as parse3 } from "csv-parse/sync";
-import { eq as eq19, max } from "drizzle-orm";
+import { eq as eq20, max } from "drizzle-orm";
 function inferCategory(categories) {
   const forHimCats = ["Vagina Strokers", "Body Molds", "Prostate Toys", "Masturbators", "Hands-Free Masturbators"];
   const forHerCats = ["Dual Action and Rabbits", "Finger and Clit", "Air Pulse and Suction", "Bullets and Eggs"];
@@ -22871,7 +23940,7 @@ function parseBulkImportCSV(csvText) {
   return { groups, parseErrors };
 }
 async function isSkuAlreadyImported(sku) {
-  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq19(dealHistory.sku, sku)).limit(1);
+  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq20(dealHistory.sku, sku)).limit(1);
   return rows.length > 0;
 }
 async function importProductGroup(group) {
@@ -23395,7 +24464,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and5, eq as eq20, inArray as inArray6, sql as sql12 } from "drizzle-orm";
+import { and as and5, eq as eq21, inArray as inArray6, sql as sql14 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -23580,21 +24649,21 @@ async function runImportMonitor(opts = {}) {
         candidatesNew++;
         candidatesFound++;
       } else if (existing.status === "rejected" || existing.status === "imported") {
-        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq20(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq21(importCandidates.masterKey, masterKey));
       } else if (existing.status === "watching") {
         const priorScore = parseFloat(existing.watchScore ?? "0");
         const priorPrice = parseFloat(existing.watchPrice ?? "0");
         const scoreImproved = score2 >= priorScore + watchScoreDelta;
         const priceDropped = priorPrice > 0 && proposedPrice <= priorPrice * (1 - watchPriceDropPct);
         if (scoreImproved || priceDropped) {
-          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq20(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq21(importCandidates.masterKey, masterKey));
           candidatesResurfaced++;
           candidatesFound++;
         } else {
-          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq20(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq21(importCandidates.masterKey, masterKey));
         }
       } else {
-        await db.update(importCandidates).set(upsertPayload).where(eq20(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set(upsertPayload).where(eq21(importCandidates.masterKey, masterKey));
         candidatesFound++;
       }
     }
@@ -23611,7 +24680,7 @@ async function runImportMonitor(opts = {}) {
       candidatesNew,
       candidatesResurfaced,
       autoImported
-    }).where(eq20(importMonitorRuns.id, runId));
+    }).where(eq21(importMonitorRuns.id, runId));
     await setPipelineSetting("import_monitor_last_run_at", (/* @__PURE__ */ new Date()).toISOString());
     console.info(
       `[import-monitor] done: feedsOk=${feedsOk} found=${candidatesFound} new=${candidatesNew} resurfaced=${candidatesResurfaced}`
@@ -23624,7 +24693,7 @@ async function runImportMonitor(opts = {}) {
       finishedAt: /* @__PURE__ */ new Date(),
       feedsOk: false,
       errorMessage
-    }).where(eq20(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
+    }).where(eq21(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
     return {
       feedsOk: false,
       candidatesFound: 0,
@@ -23667,7 +24736,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
   const tierCMinGap = parseFloat(tierCMinGapStr ?? "4.5");
   const tierCMinMarkup = parseFloat(tierCMinMarkupStr ?? "0.15");
   const tierCMaxPerDay = Math.max(0, parseInt(tierCMaxPerDayStr ?? "3", 10) || 0);
-  const importedTodayRows = await db.select({ cnt: sql12`count(*)::int` }).from(importCandidates).where(and5(eq20(importCandidates.status, "imported"), eq20(importCandidates.runDate, todayStr)));
+  const importedTodayRows = await db.select({ cnt: sql14`count(*)::int` }).from(importCandidates).where(and5(eq21(importCandidates.status, "imported"), eq21(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -23686,9 +24755,9 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
     proposedPrice: importCandidates.proposedPrice,
     needsReview: importCandidates.needsReview
   }).from(importCandidates).where(and5(
-    eq20(importCandidates.status, "pending"),
+    eq21(importCandidates.status, "pending"),
     inArray6(importCandidates.masterKey, cappedKeys)
-  )).orderBy(importCandidates.tier, sql12`${importCandidates.dealScore} DESC NULLS LAST`);
+  )).orderBy(importCandidates.tier, sql14`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
     const tierOk = c.tier === "A" || c.tier === "B";
     if (!tierOk || c.needsReview) return false;
@@ -23811,10 +24880,10 @@ async function stageMasterCandidatesBySkus(skus, opts) {
       }).onConflictDoNothing();
       staged++;
     } else if (existingStatus === "watching") {
-      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq20(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq21(importCandidates.masterKey, masterKey));
       staged++;
     } else {
-      await db.update(importCandidates).set(upsertPayload).where(eq20(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set(upsertPayload).where(eq21(importCandidates.masterKey, masterKey));
       staged++;
     }
   }
@@ -23824,20 +24893,20 @@ async function getImportCandidatesByStatus(statuses, limit) {
   if (statuses.length === 0) return [];
   const query = db.select().from(importCandidates).where(inArray6(importCandidates.status, statuses)).orderBy(
     importCandidates.tier,
-    sql12`${importCandidates.dealScore} DESC NULLS LAST`
+    sql14`${importCandidates.dealScore} DESC NULLS LAST`
   );
   if (limit != null) return query.limit(limit);
   return query;
 }
 async function getCatalogOpportunities() {
-  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql12`${dealHistory.brand} IS NOT NULL`);
+  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql14`${dealHistory.brand} IS NOT NULL`);
   const brandCount = /* @__PURE__ */ new Map();
   for (const r of brandRows) {
     if (!r.brand) continue;
     brandCount.set(r.brand, (brandCount.get(r.brand) ?? 0) + 1);
   }
   const brandCoverage = [...brandCount.entries()].map(([brand, carried]) => ({ brand, carried })).sort((a, b) => b.carried - a.carried);
-  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql12`${dealHistory.categories} IS NOT NULL`);
+  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql14`${dealHistory.categories} IS NOT NULL`);
   const catCount = /* @__PURE__ */ new Map();
   for (const r of catRows) {
     for (const cat of r.categories ?? []) {
@@ -23867,7 +24936,7 @@ async function getCatalogOpportunities() {
   return { brandCoverage, categoryCoverage, brandOpportunities };
 }
 async function getRecentImportRuns(limit) {
-  return db.select().from(importMonitorRuns).orderBy(sql12`${importMonitorRuns.startedAt} DESC`).limit(limit);
+  return db.select().from(importMonitorRuns).orderBy(sql14`${importMonitorRuns.startedAt} DESC`).limit(limit);
 }
 async function updateCandidateStatus(id, status, opts = {}) {
   const now = /* @__PURE__ */ new Date();
@@ -23879,24 +24948,24 @@ async function updateCandidateStatus(id, status, opts = {}) {
     updatedAt: now
   };
   if (status === "watching") {
-    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq20(importCandidates.id, id)).limit(1);
+    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq21(importCandidates.id, id)).limit(1);
     if (rows[0]) {
       base.watchScore = rows[0].dealScore;
       base.watchPrice = rows[0].proposedPrice;
     }
   }
-  await db.update(importCandidates).set(base).where(eq20(importCandidates.id, id));
+  await db.update(importCandidates).set(base).where(eq21(importCandidates.id, id));
 }
 async function approveAndImport(id, reviewedBy, opts = {}) {
   const reviewedStamp = reviewedBy ? { reviewedBy, reviewedAt: /* @__PURE__ */ new Date() } : {};
-  const rows = await db.select().from(importCandidates).where(eq20(importCandidates.id, id)).limit(1);
+  const rows = await db.select().from(importCandidates).where(eq21(importCandidates.id, id)).limit(1);
   const candidate = rows[0];
   if (!candidate) {
     return { ok: false, error: `candidate ${id} not found` };
   }
   const repSku = candidate.sku;
   if (await isSkuAlreadyImported(repSku)) {
-    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date(), ...reviewedStamp }).where(eq20(importCandidates.id, id));
+    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date(), ...reviewedStamp }).where(eq21(importCandidates.id, id));
     return { ok: true, skipped: true };
   }
   const masters = opts.preloadedMasters ?? collapseMasters((await fetchAllNalpacFeeds()).snapshots);
@@ -23965,14 +25034,14 @@ async function approveAndImport(id, reviewedBy, opts = {}) {
   if (!result.success && !result.skipped) {
     return { ok: false, error: result.error ?? "importProductGroupRaw failed" };
   }
-  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq20(dealHistory.sku, repSku)).limit(1);
+  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq21(dealHistory.sku, repSku)).limit(1);
   const dealHistoryId = dhRows[0]?.id;
   await db.update(importCandidates).set({
     status: "imported",
     dealHistoryId: dealHistoryId ?? null,
     updatedAt: /* @__PURE__ */ new Date(),
     ...reviewedStamp
-  }).where(eq20(importCandidates.id, id));
+  }).where(eq21(importCandidates.id, id));
   return {
     ok: true,
     ...result.shopifyProductId !== void 0 ? { shopifyProductId: result.shopifyProductId } : {},
@@ -23994,188 +25063,6 @@ var init_import_monitor_server = __esm({
     init_bulk_import_server();
     init_master_collapse_server();
     KV_FEED_SKUS = "monitor:feed-skus";
-  }
-});
-
-// app/lib/checkout-probe.server.ts
-var checkout_probe_server_exports = {};
-__export(checkout_probe_server_exports, {
-  recordAndAlertProbe: () => recordAndAlertProbe,
-  runCheckoutProbe: () => runCheckoutProbe
-});
-function mkStep(step, ok, ms, extra = {}) {
-  const s = { step, ok, ms };
-  if (extra.status !== void 0) s.status = extra.status;
-  if (extra.detail !== void 0) s.detail = extra.detail;
-  return s;
-}
-function baseUrl() {
-  return (process.env["BASE_URL"] || "https://xdipx.com").replace(/\/+$/, "");
-}
-async function checkUrl(url, opts = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS3);
-  try {
-    const res = await fetch(url, {
-      redirect: "follow",
-      signal: controller.signal,
-      headers: { "user-agent": PROBE_UA }
-    });
-    const body = await res.text();
-    if (res.status !== 200) return { status: res.status, ok: false, detail: `HTTP ${res.status}` };
-    const minBytes = opts.minBytes ?? MIN_BODY_BYTES3;
-    if (body.length < minBytes) return { status: res.status, ok: false, detail: `body ${body.length} < ${minBytes} bytes` };
-    for (const marker of opts.markers ?? []) {
-      if (!body.toLowerCase().includes(marker.toLowerCase())) {
-        return { status: res.status, ok: false, detail: `missing marker "${marker}"` };
-      }
-    }
-    return { status: res.status, ok: true };
-  } catch (err) {
-    return { status: 0, ok: false, detail: err instanceof Error ? err.message : String(err) };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-async function followWithCookies(startUrl, maxHops = 12) {
-  const jar = /* @__PURE__ */ new Map();
-  let url = startUrl;
-  for (let hop = 0; hop < maxHops; hop++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS3);
-    let res;
-    try {
-      const cookie = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
-      res = await fetch(url, {
-        redirect: "manual",
-        signal: controller.signal,
-        headers: { "user-agent": PROBE_UA, ...cookie ? { cookie } : {} }
-      });
-    } catch (err) {
-      return { status: 0, finalUrl: url, body: "", hops: hop, detail: err instanceof Error ? err.message : String(err) };
-    } finally {
-      clearTimeout(timer);
-    }
-    const getSetCookie = res.headers.getSetCookie;
-    for (const sc of getSetCookie ? getSetCookie.call(res.headers) : []) {
-      const pair = sc.split(";")[0] ?? "";
-      const eq25 = pair.indexOf("=");
-      if (eq25 > 0) jar.set(pair.slice(0, eq25).trim(), pair.slice(eq25 + 1).trim());
-    }
-    if (res.status >= 300 && res.status < 400) {
-      const loc = res.headers.get("location");
-      if (!loc) return { status: res.status, finalUrl: url, body: "", hops: hop, detail: "redirect without Location" };
-      url = new URL(loc, url).toString();
-      continue;
-    }
-    const body = await res.text();
-    return { status: res.status, finalUrl: url, body, hops: hop };
-  }
-  return { status: 0, finalUrl: url, body: "", hops: maxHops, detail: "too many redirects" };
-}
-async function checkCheckout(url) {
-  const r = await followWithCookies(url);
-  if (r.status === 0 && r.detail) return { status: 0, ok: false, detail: r.detail };
-  if (r.status === 404) return { status: 404, ok: false, detail: `404 at ${r.finalUrl.split("?")[0]} (checkout URL dead)` };
-  const onCheckout = /\/checkouts?\//i.test(r.finalUrl);
-  if (!onCheckout) {
-    return { status: r.status, ok: false, detail: `checkout did not route to a Shopify checkout page (landed ${r.finalUrl.split("?")[0]}, status ${r.status})` };
-  }
-  const rendered = r.status === 200 && /order summary|payment|contact information/i.test(r.body);
-  if (rendered) return { status: r.status, ok: true };
-  return { status: r.status, ok: true, detail: `reached checkout endpoint (status ${r.status}; full render verified by browser tier)` };
-}
-async function runCheckoutProbe() {
-  const start = Date.now();
-  const steps = [];
-  const base = baseUrl();
-  const record = (step, r, t0) => {
-    steps.push(mkStep(step, r.ok, Date.now() - t0, { status: r.status, detail: r.detail }));
-    return r.ok;
-  };
-  const finish = () => {
-    const failed = steps.find((s) => !s.ok);
-    return { ok: !failed, failedStep: failed?.step ?? null, steps, durationMs: Date.now() - start };
-  };
-  let t = Date.now();
-  if (!record("homepage", await checkUrl(`${base}/`), t)) return finish();
-  t = Date.now();
-  const handle = process.env["PROBE_PRODUCT_HANDLE"] || await kvGet(KV_KEYS.liveDealHandle);
-  if (!handle) {
-    steps.push(mkStep("resolve-handle", false, Date.now() - t, { detail: "no PROBE_PRODUCT_HANDLE and no live deal handle in KV" }));
-    return finish();
-  }
-  steps.push(mkStep("resolve-handle", true, Date.now() - t, { detail: handle }));
-  t = Date.now();
-  if (!record("pdp", await checkUrl(`${base}/products/${handle}`, { markers: ['name="variantId"'] }), t)) return finish();
-  t = Date.now();
-  let checkoutUrl = "";
-  try {
-    const deal = await getDealByHandle(handle);
-    const variantId = deal?.variantId;
-    if (!variantId) {
-      steps.push(mkStep("cart", false, Date.now() - t, { detail: `no variantId for handle ${handle}` }));
-      return finish();
-    }
-    const cart = await createCart();
-    const withLine = await addToCart(cart.id, variantId, 1);
-    try {
-      await setCartAttributes(cart.id, [{ key: "_probe", value: "1" }]);
-    } catch {
-    }
-    const ok = Boolean(withLine.checkoutUrl) && withLine.totalQuantity === 1;
-    checkoutUrl = withLine.checkoutUrl;
-    steps.push(mkStep("cart", ok, Date.now() - t, ok ? {} : { detail: `checkoutUrl=${Boolean(withLine.checkoutUrl)} qty=${withLine.totalQuantity}` }));
-    if (!ok) return finish();
-  } catch (err) {
-    steps.push(mkStep("cart", false, Date.now() - t, { detail: err instanceof Error ? err.message : String(err) }));
-    return finish();
-  }
-  t = Date.now();
-  record("checkout-page", await checkCheckout(checkoutUrl), t);
-  return finish();
-}
-async function recordAndAlertProbe(tier, result) {
-  let alerted = false;
-  if (!result.ok) {
-    const failedStep = result.failedStep ?? "unknown";
-    const detail = result.steps.find((s) => !s.ok)?.detail ?? "";
-    Sentry.captureMessage(`[checkout-probe:${tier}] failed at ${failedStep}: ${detail}`, "error");
-    const fresh = await kvSetNX(`probe:alert:${tier}:${failedStep}`, String(Date.now()), ALERT_THROTTLE_SECONDS);
-    if (fresh) {
-      const stepList = result.steps.map((s) => `${s.ok ? "ok" : "FAIL"} ${escapeHtml(s.step)}${s.detail ? ` (${escapeHtml(s.detail)})` : ""}`).join("<br>");
-      await sendOwnerEmail(
-        `xdipx checkout probe FAILED at ${failedStep} (${tier})`,
-        `<p>The ${escapeHtml(tier)} checkout probe failed at step <strong>${escapeHtml(failedStep)}</strong>.</p><p>${stepList}</p><p>The purchase path is broken up to at least this step. Check the storefront and the Shopify checkout.</p>`
-      );
-      await sendOwnerSms(`xdipx checkout probe FAILED at ${failedStep} (${tier}). Purchase path broken.`);
-      alerted = true;
-    }
-  }
-  const inserted = await db.insert(checkoutProbeRuns).values({
-    tier,
-    ok: result.ok,
-    failedStep: result.failedStep,
-    steps: result.steps,
-    durationMs: result.durationMs,
-    alerted
-  }).returning({ id: checkoutProbeRuns.id });
-  return { rowId: inserted[0]?.id ?? 0, alerted };
-}
-var FETCH_TIMEOUT_MS3, MIN_BODY_BYTES3, ALERT_THROTTLE_SECONDS, PROBE_UA;
-var init_checkout_probe_server = __esm({
-  "app/lib/checkout-probe.server.ts"() {
-    "use strict";
-    init_sentry_server();
-    init_db_server();
-    init_schema();
-    init_kv_server();
-    init_shopify_server();
-    init_owner_alerts_server();
-    FETCH_TIMEOUT_MS3 = 12e3;
-    MIN_BODY_BYTES3 = 1e3;
-    ALERT_THROTTLE_SECONDS = 6 * 3600;
-    PROBE_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
   }
 });
 
@@ -24953,10 +25840,10 @@ var init_avatar_script = __esm({
 });
 
 // app/lib/ivr-voice.server.ts
-import { eq as eq21 } from "drizzle-orm";
+import { eq as eq22 } from "drizzle-orm";
 async function getActiveIvrVoiceId() {
   try {
-    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq21(ivrVoices.active, true)).limit(1);
+    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq22(ivrVoices.active, true)).limit(1);
     if (rows[0]?.voiceId) return rows[0].voiceId;
   } catch (err) {
     console.error("[ivr-voice] DB lookup failed \u2014 falling back to env", err);
@@ -24988,7 +25875,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq22, and as and6, inArray as inArray7, desc as desc2, isNotNull, ne as ne3, sql as sql13 } from "drizzle-orm";
+import { eq as eq23, and as and6, inArray as inArray7, desc as desc2, isNotNull, ne as ne3, sql as sql15 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -25062,14 +25949,14 @@ async function advanceInflightVideoJobs(opts = {}) {
       if (outcome === "parked") result.parked++;
     } catch (err) {
       console.error(`[video-pipeline] advanceJob ${job.jobId} threw:`, err);
-      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err), updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.jobId, job.jobId));
+      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err), updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.jobId, job.jobId));
       result.failed++;
     }
   }
   return result;
 }
 async function touch(job, set) {
-  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.id, job.id));
+  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.id, job.id));
 }
 async function advanceJob2(job) {
   switch (job.stage) {
@@ -25115,8 +26002,8 @@ async function frameReviewEnabled() {
 }
 async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
   const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and6(
-    sql13`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
-    eq22(videoJobs.presenter, presenter),
+    sql15`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
+    eq23(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
     inArray7(videoJobs.stage, FRAME_APPROVED_STAGES),
     ...excludeJobRowId != null ? [ne3(videoJobs.id, excludeJobRowId)] : []
@@ -25133,13 +26020,13 @@ async function advanceSceneFrame(job) {
     if (!reusableJob) {
       throw new Error("reuseFrameAssetId applies only to avatar/talking-head jobs");
     }
-    const [asset] = await db.select().from(mediaAssets).where(eq22(mediaAssets.id, reuseId)).limit(1);
+    const [asset] = await db.select().from(mediaAssets).where(eq23(mediaAssets.id, reuseId)).limit(1);
     if (!asset || asset.purpose !== "scene_frame") {
       throw new Error(`reuseFrameAssetId ${reuseId} does not reference a scene-frame asset`);
     }
     const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and6(
-      eq22(videoJobs.sceneFrameAssetId, reuseId),
-      eq22(videoJobs.presenter, job.presenter),
+      eq23(videoJobs.sceneFrameAssetId, reuseId),
+      eq23(videoJobs.presenter, job.presenter),
       inArray7(videoJobs.stage, FRAME_APPROVED_STAGES)
     )).limit(1);
     if (!approvedBy) {
@@ -25229,7 +26116,7 @@ async function advanceClip(job) {
     if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
       throw new Error(`Accrued + clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq22(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq23(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const handle = await submitVideoRequest(job.modelTier, {
       prompt: motionPrompt,
@@ -25314,7 +26201,7 @@ async function advanceClipAvatar(job, spec) {
     if ((Number(job.costUsd) + clipCost + ttsCost) * 100 > maxCents) {
       throw new Error(`Accrued + avatar render cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq22(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq23(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const frameBuf = await blobFetchToBuffer(frame.blobUrl);
     const imageUrl = await uploadToFalStorage(frameBuf, "image/jpeg", `frame-${job.jobId}.jpg`);
@@ -25408,7 +26295,7 @@ async function advanceLipsync(job) {
   return "progressed";
 }
 async function latestAssetByPurpose(jobRowId, purpose) {
-  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq22(mediaAssets.videoJobId, jobRowId)).orderBy(desc2(mediaAssets.createdAt));
+  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq23(mediaAssets.videoJobId, jobRowId)).orderBy(desc2(mediaAssets.createdAt));
   const hit = rows.find((r) => r.purpose === purpose);
   return hit ? { id: hit.id, blobUrl: hit.blobUrl } : null;
 }
@@ -25456,7 +26343,7 @@ async function advanceAssembly(job) {
 }
 async function advancePoster(job) {
   if (!job.finalAssetId) throw new Error("No final asset for poster extraction");
-  const [finalAsset] = await db.select().from(mediaAssets).where(eq22(mediaAssets.id, job.finalAssetId)).limit(1);
+  const [finalAsset] = await db.select().from(mediaAssets).where(eq23(mediaAssets.id, job.finalAssetId)).limit(1);
   if (!finalAsset) throw new Error("Final asset row missing");
   const video = await blobFetchToBuffer(finalAsset.blobUrl);
   const poster = await extractPoster(video, 1);
@@ -25470,7 +26357,7 @@ async function advancePoster(job) {
     videoJobId: job.id
   }).returning({ id: mediaAssets.id });
   if (duration > 0) {
-    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq22(mediaAssets.id, finalAsset.id));
+    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq23(mediaAssets.id, finalAsset.id));
   }
   await touch(job, {
     stage: "done",
@@ -25482,29 +26369,29 @@ async function advancePoster(job) {
   return "done";
 }
 async function approveSceneFrame(jobRowId, frameAssetId) {
-  const [asset] = await db.select().from(mediaAssets).where(eq22(mediaAssets.id, frameAssetId)).limit(1);
+  const [asset] = await db.select().from(mediaAssets).where(eq23(mediaAssets.id, frameAssetId)).limit(1);
   if (!asset || asset.videoJobId !== jobRowId || asset.purpose !== "scene_frame") {
     throw new Error("Frame does not belong to this job");
   }
-  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function retrySceneFrames(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq22(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq23(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.frameFeedback) ? script.frameFeedback : [];
   script.frameFeedback = [...prior, feedback];
   const basePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : "";
   script["framePrompt"] = feedback ? `${basePrompt} ${feedback}`.trim() : basePrompt;
-  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function rejectVideoJob(jobRowId, reason) {
-  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.id, jobRowId));
 }
 async function regenerateVideoJob(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq22(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq23(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.regenFeedback) ? script.regenFeedback : [];
@@ -25524,12 +26411,12 @@ async function regenerateVideoJob(jobRowId, feedback) {
   });
 }
 async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
-  const [job] = await db.select().from(videoJobs).where(eq22(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq23(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   if (job.stage !== "done") throw new Error("Job is not finished");
-  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq22(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
+  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq23(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
   if (!finalAsset) throw new Error("No final video asset");
-  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq22(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
+  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq23(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
   const captions = job.scriptJson.captions ?? {};
   const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(" ");
   const ids = [];
@@ -25556,11 +26443,11 @@ async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
 async function recordVideoMetrics(jobRowId, platform, metrics) {
   const submitted = Object.fromEntries(Object.entries(metrics).filter(([, v]) => v !== void 0));
   if (!Object.keys(submitted).length) return;
-  const [job] = await db.select().from(videoJobs).where(eq22(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq23(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const existing = (job.metricsJson ?? {})[platform] ?? {};
   const merged = { ...job.metricsJson ?? {}, [platform]: { ...existing, ...submitted } };
-  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq22(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq23(videoJobs.id, jobRowId));
 }
 async function listVideoJobs(limit = 40) {
   const jobs = await db.select().from(videoJobs).orderBy(desc2(videoJobs.createdAt)).limit(limit);
@@ -25736,7 +26623,7 @@ __export(returns_server_exports, {
   recordLabelTracking: () => recordLabelTracking,
   rmaNumber: () => rmaNumber
 });
-import { eq as eq23 } from "drizzle-orm";
+import { eq as eq24 } from "drizzle-orm";
 function rmaNumber(shopifyReturnId) {
   const m = shopifyReturnId.match(/\/(\d+)$/);
   return m ? `RMA-${m[1]}` : shopifyReturnId;
@@ -25857,7 +26744,7 @@ async function createCustomerReturn(input) {
       status: "label_sent",
       labelPurchasedAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq23(returns.id, row.id)).returning();
+    }).where(eq24(returns.id, row.id)).returning();
     console.log("[returns] db update ok", { rowId: updated?.id ?? row.id });
   } catch (err) {
     console.error("[returns] db update threw", err);
@@ -25865,7 +26752,7 @@ async function createCustomerReturn(input) {
   return { ok: true, returnRow: updated ?? row };
 }
 async function markReceivedAndRefund(shopifyReturnId, opts) {
-  const [row] = await db.select().from(returns).where(eq23(returns.shopifyReturnId, shopifyReturnId)).limit(1);
+  const [row] = await db.select().from(returns).where(eq24(returns.shopifyReturnId, shopifyReturnId)).limit(1);
   if (!row) return { ok: false, error: `Unknown return: ${shopifyReturnId}` };
   if (row.status === "refunded" || row.status === "closed") return { ok: true };
   if (!row.lineItems) return { ok: false, error: "Return row has no line items snapshot" };
@@ -25896,7 +26783,7 @@ async function markReceivedAndRefund(shopifyReturnId, opts) {
     refundedAt: /* @__PURE__ */ new Date(),
     closedAt: /* @__PURE__ */ new Date(),
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq23(returns.id, row.id));
+  }).where(eq24(returns.id, row.id));
   return { ok: true };
 }
 async function recordLabelTracking(shopifyReturnId, update) {
@@ -25905,13 +26792,13 @@ async function recordLabelTracking(shopifyReturnId, update) {
     ...update.trackingNumber ? { trackingNumber: update.trackingNumber } : {},
     status: "in_transit",
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq23(returns.shopifyReturnId, shopifyReturnId));
+  }).where(eq24(returns.shopifyReturnId, shopifyReturnId));
 }
 async function listCustomerReturns(customerGid) {
-  return db.select().from(returns).where(eq23(returns.customerGid, customerGid)).orderBy(returns.createdAt);
+  return db.select().from(returns).where(eq24(returns.customerGid, customerGid)).orderBy(returns.createdAt);
 }
 async function getCustomerReturn(id, customerGid) {
-  const [row] = await db.select().from(returns).where(eq23(returns.id, id)).limit(1);
+  const [row] = await db.select().from(returns).where(eq24(returns.id, id)).limit(1);
   if (!row) {
     console.error("[returns] getCustomerReturn: no row for id", { id });
     return null;
@@ -25992,21 +26879,21 @@ function safeEqual(a, b) {
   return timingSafeEqual2(ab, bb);
 }
 async function drainMetaCapiFailures() {
-  const MAX_ATTEMPTS3 = 5;
+  const MAX_ATTEMPTS4 = 5;
   try {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and7, eq: eq25, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and7(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS3))).limit(100);
+    const { and: and7, eq: eq26, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and7(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS4))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq25(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq26(metaCapiFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq25(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq26(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
@@ -26016,21 +26903,21 @@ async function drainMetaCapiFailures() {
   }
 }
 async function drainGa4Failures() {
-  const MAX_ATTEMPTS3 = 5;
+  const MAX_ATTEMPTS4 = 5;
   try {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and7, eq: eq25, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and7(isNull3(ga4PurchaseFailures2.resolvedAt), lt2(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS3))).limit(100);
+    const { and: and7, eq: eq26, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and7(isNull3(ga4PurchaseFailures2.resolvedAt), lt2(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS4))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
       if (result.ok) {
-        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq25(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq26(ga4PurchaseFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq25(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq26(ga4PurchaseFailures2.id, row.id));
       }
     }
     return resolved;
@@ -26213,6 +27100,32 @@ function createCronRoutes() {
       res.json({ ok: true, ...result });
     } catch (err) {
       console.error("[cron:gsc-index-sweep]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  cronRoute("/indexnow-push", async (req, res) => {
+    try {
+      const { runIndexNowBulkPush: runIndexNowBulkPush2 } = await Promise.resolve().then(() => (init_indexnow_bulk_server(), indexnow_bulk_server_exports));
+      const scopeParam = req.query["scope"] ?? req.body?.scope;
+      const scope = scopeParam === "all" ? "all" : "stale";
+      const limitParam = Number(req.query["limit"] ?? req.body?.limit);
+      const result = await runIndexNowBulkPush2({
+        scope,
+        ...Number.isFinite(limitParam) && limitParam > 0 ? { limit: limitParam } : {}
+      });
+      res.json({ ok: !result.error, ...result });
+    } catch (err) {
+      console.error("[cron:indexnow-push]", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+  cronRoute("/seo-daily", async (_req, res) => {
+    try {
+      const { runSeoDaily: runSeoDaily2 } = await Promise.resolve().then(() => (init_seo_daily_server(), seo_daily_server_exports));
+      const result = await runSeoDaily2();
+      res.status(result.probeFailures > 0 ? 503 : 200).json({ ok: result.probeFailures === 0, ...result });
+    } catch (err) {
+      console.error("[cron:seo-daily]", err);
       res.status(500).json({ error: String(err) });
     }
   });
@@ -26574,7 +27487,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq24, sql as sql14 } from "drizzle-orm";
+import { eq as eq25, sql as sql16 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret) return false;
@@ -26614,10 +27527,10 @@ async function handleOrderCreated(order) {
       }
     }).catch((err) => console.error("[webhook] metafield write failed:", err));
     const dealHistoryUpdate = db2.update(dealHistory).set({
-      unitsSold: db2.$count(dealHistory, eq24(dealHistory.sku, lineItem.sku)),
+      unitsSold: db2.$count(dealHistory, eq25(dealHistory.sku, lineItem.sku)),
       totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
       totalProfit: String(profit * lineItem.quantity)
-    }).where(eq24(dealHistory.sku, lineItem.sku)).catch(() => {
+    }).where(eq25(dealHistory.sku, lineItem.sku)).catch(() => {
     });
     await Promise.all([metafieldWrite, dealHistoryUpdate]);
   }));
@@ -26645,7 +27558,7 @@ async function handleOrderCreated(order) {
           await db2.insert(productCopurchase).values({ handleA: a, handleB: b, count: 1 }).onConflictDoUpdate({
             target: [productCopurchase.handleA, productCopurchase.handleB],
             set: {
-              count: sql14`${productCopurchase.count} + 1`,
+              count: sql16`${productCopurchase.count} + 1`,
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });
@@ -26850,7 +27763,7 @@ async function handleReturnsUpdate(payload) {
   if (status === "DECLINED" || status === "CANCELED") {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { returns: returns2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq24(returns2.shopifyReturnId, returnGid));
+    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq25(returns2.shopifyReturnId, returnGid));
     return;
   }
   const terminalSignals = ["CLOSED", "RECEIVED", "PROCESSED"];

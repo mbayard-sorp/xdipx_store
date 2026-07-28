@@ -373,6 +373,56 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/indexnow-push
+   * Schedule: daily 04:40 UTC — bulk IndexNow submission.
+   * ?scope=stale (default) pushes exactly the cached-bad-verdict URLs that need
+   * a recrawl signal (~1,565 today: noindex + duplicate-canonical leftovers
+   * from the May outage, minus the dead ones we trust). ?scope=all pushes the
+   * whole sitemap. ?limit=N caps the run.
+   * URLs pushed in the last 14 days are excluded; a 429/5xx stops the run and
+   * records nothing, so the next pass is a clean retry. Read-only with respect
+   * to the sitemap and gsc_url_inspections: no lastmod is ever bumped.
+   * No-ops with a logged skip until SEARCH_PING_ENABLED + INDEXNOW_API_KEY are set.
+   */
+  cronRoute('/indexnow-push', async (req, res) => {
+    try {
+      const { runIndexNowBulkPush } = await import('../app/lib/indexnow-bulk.server.js')
+      const scopeParam = req.query['scope'] ?? req.body?.scope
+      const scope = scopeParam === 'all' ? 'all' : 'stale'
+      const limitParam = Number(req.query['limit'] ?? req.body?.limit)
+      const result = await runIndexNowBulkPush({
+        scope,
+        ...(Number.isFinite(limitParam) && limitParam > 0 ? { limit: limitParam } : {}),
+      })
+      res.json({ ok: !result.error, ...result })
+    } catch (err) {
+      console.error('[cron:indexnow-push]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
+   * GET|POST /cron/seo-daily
+   * Schedule: daily 12:30 UTC — 30 min before the 13:00 owner digest, so the
+   * digest reads a fresh row. Computes week-over-week index deltas and 24h
+   * coverage transitions, runs the live regression tripwire (200 +
+   * self-canonical + no noindex + parseable JSON-LD on a sampled page set),
+   * writes seo_coverage_daily, and files deduped tickets on anomalies.
+   */
+  cronRoute('/seo-daily', async (_req, res) => {
+    try {
+      const { runSeoDaily } = await import('../app/lib/seo-daily.server.js')
+      const result = await runSeoDaily()
+      // 503 on a live-probe failure so Vercel cron monitoring surfaces the one
+      // class of problem that is actively damaging indexation right now.
+      res.status(result.probeFailures > 0 ? 503 : 200).json({ ok: result.probeFailures === 0, ...result })
+    } catch (err) {
+      console.error('[cron:seo-daily]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/keyword-research
    * Schedule: monthly, 1st 02:00 UTC — discover new SEO keywords via
    * DataForSEO (when creds exist) or LLM-only expansion, classify, and write

@@ -87,8 +87,11 @@ function siteOrigin(): string {
   return base.replace(/\/$/, '') || 'https://xdipx.com'
 }
 
-/** Count JSON-LD <script> blocks and how many parse as valid JSON. */
-function extractJsonLd(html: string): { parsed: number; scripts: number } {
+/** Count JSON-LD <script> blocks and how many parse as valid JSON.
+ *  Exported so the daily SEO regression tripwire (seo-daily.server.ts) asserts
+ *  JSON-LD the same way this healthcheck does, rather than growing a second
+ *  parser that could drift. */
+export function extractJsonLd(html: string): { parsed: number; scripts: number } {
   let parsed = 0
   let scripts = 0
   const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
@@ -105,7 +108,8 @@ function extractJsonLd(html: string): { parsed: number; scripts: number } {
   return { parsed, scripts }
 }
 
-async function checkPageOnce(path: string, attempt: number): Promise<PageCheck> {
+/** Exported for reuse by the daily SEO tripwire (seo-daily.server.ts). */
+export async function checkPageOnce(path: string, attempt: number): Promise<PageCheck> {
   // Cache-bust every attempt. Without this the self-fetch shares a Vercel CDN
   // cache entry with other non-browser fetchers (cache keys vary on
   // Accept-Encoding, not User-Agent), so the check can be served a stale — or

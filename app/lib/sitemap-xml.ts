@@ -16,6 +16,27 @@ export const BASE = 'https://xdipx.com'
  */
 export const RECRAWL_EPOCH = '2026-06-13'
 
+/**
+ * Sitemap hierarchy.
+ *
+ * `priority` is only meaningful *relative to other URLs in the same sitemap*.
+ * Every product previously claimed 0.9 with changefreq daily, which is two
+ * lies at once on a 4,400-SKU catalog: it flattens the hierarchy so nothing
+ * stands out, and it promises daily churn a crawler can verify is false the
+ * second time it fetches an unchanged PDP. A sitemap that overstates gets its
+ * hints discounted wholesale.
+ *
+ * The honest shape: the homepage is the front door, nav destinations are the
+ * pages we most want ranked (Google's sitelink candidates), /new is a real
+ * freshness surface, and individual products sit below all of them.
+ */
+export const HOMEPAGE_PRIORITY   = '1.0'
+export const NAV_PRIORITY        = '0.9'
+export const NEW_ARRIVALS_PRIORITY = '0.8'
+export const PRODUCT_PRIORITY    = '0.6'
+/** Products change when merchandising or price changes, not every day. */
+export const PRODUCT_CHANGEFREQ  = 'weekly'
+
 export type SitemapImage = { loc: string; title: string }
 
 export type SitemapUrl = {

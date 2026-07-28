@@ -10,6 +10,7 @@ import {
   pgTable,
   real,
   serial,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -1221,6 +1222,13 @@ export const homepageTeamEvents = pgTable('homepage_team_events', {
  * writes the row straight to `approved` with `decided_by = 'auto'`. Downstream
  * execution gates (agent-editor PR merge, manual campaign/promo/code steps) are
  * unchanged. `decided_by`: 'auto' (valve) | 'owner' (dashboard) | NULL (legacy).
+ *
+ * Migration 070 extends the bus into a ticket system: assignment + expiring
+ * claims, `priority` (1 = highest), `dedupe_key` (partial-unique while the
+ * ticket is live, so a recurring signal reopens one ticket instead of filing
+ * a new one every run), dependency links, retry accounting, and verification.
+ * Only `priority` and `dedupe_key` are written today, by the daily SEO
+ * diagnosis; the claim/transition engine ships separately.
  */
 export const homepageTeamSuggestions = pgTable('homepage_team_suggestions', {
   id:            serial('id').primaryKey(),
@@ -1232,15 +1240,81 @@ export const homepageTeamSuggestions = pgTable('homepage_team_suggestions', {
   suggestion:    text('suggestion').notNull(),
   estSavingsUsd: decimal('est_savings_usd', { precision: 10, scale: 4 }).notNull().default('0'),
   cxRisk:        varchar('cx_risk', { length: 8 }).notNull().default('low'), // low|med|high
-  status:        varchar('status', { length: 12 }).notNull().default('proposed'), // proposed|approved|pr_open|applied|dismissed
+  status:        varchar('status', { length: 16 }).notNull().default('proposed'), // proposed|approved|pr_open|applied|dismissed
   applyRef:      text('apply_ref'),                                   // PR URL / applied artifact
   decidedBy:     varchar('decided_by', { length: 24 }),               // auto|owner|NULL — who moved it off 'proposed'
   decidedAt:     timestamp('decided_at'),
   createdAt:     timestamp('created_at').notNull().defaultNow(),
+  // ── ticket system (070) ──────────────────────────────────────────────────
+  assignee:       varchar('assignee', { length: 32 }),                // agent id or 'owner'
+  claimedAt:      timestamp('claimed_at', { withTimezone: true }),
+  claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
+  priority:       smallint('priority').notNull().default(3),          // 1 highest .. 5 lowest
+  updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  dueAt:          timestamp('due_at', { withTimezone: true }),
+  dedupeKey:      varchar('dedupe_key', { length: 64 }),              // partial-unique while live
+  supersedesId:   integer('supersedes_id'),
+  blockedById:    integer('blocked_by_id'),
+  attemptCount:   integer('attempt_count').notNull().default(0),
+  lastError:      text('last_error'),
+  verifiedBy:     varchar('verified_by', { length: 32 }),
+  verifiedAt:     timestamp('verified_at', { withTimezone: true }),
 }, t => ({
-  statusIdx: index('idx_homepage_team_suggestions_status').on(t.status, t.createdAt),
-  teamIdx:   index('idx_team_sugg_team').on(t.team, t.status, t.createdAt),
+  statusIdx:   index('idx_homepage_team_suggestions_status').on(t.status, t.createdAt),
+  teamIdx:     index('idx_team_sugg_team').on(t.team, t.status, t.createdAt),
+  assigneeIdx: index('idx_team_sugg_assignee_queue').on(t.assignee, t.status, t.priority, t.createdAt),
+  priorityIdx: index('idx_team_sugg_priority_queue').on(t.status, t.priority, t.createdAt),
 }))
+
+/**
+ * Outbound links from a ticket (070): the PR that implements it, the run that
+ * filed it, the URL it is about. A side table rather than more columns because
+ * the relationship is genuinely one-to-many (a ticket can accumulate several
+ * PRs across retries) and `kind` will keep growing.
+ */
+export const suggestionLinks = pgTable('suggestion_links', {
+  id:           serial('id').primaryKey(),
+  suggestionId: integer('suggestion_id').notNull()
+                  .references(() => homepageTeamSuggestions.id, { onDelete: 'cascade' }),
+  kind:         varchar('kind', { length: 12 }),   // pr|issue|run|url|doc|commit
+  ref:          text('ref').notNull(),
+  state:        varchar('state', { length: 16 }),  // open|merged|closed|passed|failed
+  createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  suggKindIdx: index('idx_suggestion_links_sugg_kind').on(t.suggestionId, t.kind),
+}))
+
+/**
+ * IndexNow push ledger (071). The bulk pusher reads this to skip URLs pushed
+ * inside the suppression window; re-submitting the same URL set daily is the
+ * spam pattern IndexNow penalises. `url` is the primary key so the window
+ * check is one indexed lookup per URL.
+ */
+export const indexnowPings = pgTable('indexnow_pings', {
+  url:        text('url').primaryKey(),
+  pingedAt:   timestamp('pinged_at', { withTimezone: true }).notNull().defaultNow(),
+  batchId:    varchar('batch_id', { length: 48 }),   // 'bulk-YYYY-MM-DD'
+  engine:     varchar('engine', { length: 16 }).default('indexnow'),
+  statusCode: integer('status_code'),
+})
+
+/**
+ * Daily SEO diagnosis (071). gsc_index_daily holds the raw counts; this holds
+ * the interpretation built on them (week-over-week deltas, coverage-state
+ * transitions, live regression-probe results, tickets filed) plus catalog-side
+ * coverage counters that explain thin-content rejections. One row per day.
+ */
+export const seoCoverageDaily = pgTable('seo_coverage_daily', {
+  day:                      date('day').primaryKey(),
+  discoveryTotal:           integer('discovery_total'),
+  hasTypeDial:              integer('has_type_dial'),
+  hasMood:                  integer('has_mood'),
+  hasImage:                 integer('has_image'),
+  enrichedDistinctProducts: integer('enriched_distinct_products'),
+  notes:                    jsonb('notes'),
+  createdAt:                timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
 
 /**
  * Weekly store-wide strategy brief (051) — written by store-strategist, read by
