@@ -165,6 +165,34 @@ curl -s -X POST "$BASE_URL/api/homepage-team/event" \
 **Threshold rule:** below **300 sessions/week**, this scoreboard is RECORDED but does not
 auto-trigger swaps. The numbers are too sparse to act on mechanically; judgment stays with the
 orchestrator, which keeps merchandising on margin + heuristics until traffic clears the threshold.
+This rule governs **metric-driven** swaps only: it exists so we do not optimize on noise. It is not
+a reason to republish yesterday's page. See Step 2c.
+
+## Step 2c — Sameness diff (before you publish anything)
+
+Freshness is a per-run obligation, not a weekly one (mission brief section 10). Before writing to
+Sanity, diff today's planned slate against yesterday's run summary, surface by surface:
+
+| Surface | What to compare |
+|---|---|
+| Hero | pinned `featuredProductHandle` + hero headline |
+| Rails | rail lineup: titles, order, and product handles |
+| Wayfinder mosaic | tile art (asset ids), tile labels, and tile links |
+| Discover You promo | promo image asset id + heading |
+| Couples band | `playTogetherBanner` image + copy |
+| Announcement | `announcementBar` messages |
+
+**At least two surfaces must change every run, and copy alone does not satisfy it: at least one of
+the two must be imagery or product selection.** Record the diff as a `decision` event and restate it
+in the final summary. A run that publishes a page visually identical to yesterday is a FAILED run
+unless the summary names an explicit hold reason (deliberate editorial hold, gate refusal, a named
+supply or data problem). "Nothing scored well enough to swap" is not a hold reason.
+
+**How this and the 300-sessions rule fit together, so they do not read as contradictory:** the
+sparse-data rule blocks *optimizing on noise*: you may not swap a slot because yesterday's four
+sessions said so. The sameness diff mandates *editorial cadence*: the page changes because a shop
+window changes, decided on margin, theme, and judgment. Sparse traffic changes HOW you pick; it
+never licenses shipping yesterday's page again.
 
 ## Step 3 — Emma proposes, the orchestrator scores
 
@@ -189,11 +217,37 @@ the floor. Defer pricing claims to catalog data, never invent a discount.
 
 Emit a `decision` event recording the proposed candidates, the scores, and the final slate with why.
 
-## Step 4 — Imagery (reuse or generate, and place)
+## Step 3.5 — The day's visual scheme (`homepage-art-director`)
 
-Hand the chosen surfaces to `media-manager`. **Reuse-before-generate:** it checks existing **Sanity**
-assets (homepage art lives in Sanity, not Shopify Files) for a fitting image first; only generates when
-none fits.
+Between the picks and the imagery, invoke `homepage-art-director` with today's theme and the final
+slate. It returns a one-page scheme for the day: the ground tint (rotating within the doctrine
+ground lock), a per-slot image concept naming its doctrine §4 archetype and its
+`docs/homepage-team/image-prompt-library.md` scaffold, a prop or color rhyme tying the slots
+together, and an explicit statement of what changes visually today versus yesterday. It posts the
+scheme as an `/event` row (`eventType:'decision'`, `agentRole:'homepage-art-director'`).
+
+The scheme's prompt briefs are the starting point for every generation in Step 4, and `media-manager`
+does not invent its own scenes on a merchandise run. The art director never picks products and
+never publishes.
+
+## Step 4 — Imagery (generate to the floor, place, reuse only as fallback)
+
+Hand the art director's per-slot briefs to `media-manager`.
+
+**Fresh-art floor (owner direction 2026-07-27, replaces reuse-before-generate on this step).** When
+today's hero product or the calendar theme changed since yesterday, GENERATE new art for at least
+three of the swappable slots: hero block art, the 3-4 wayfinder tiles, the Discover You promo, the
+couples band. The Emma portrait is excluded. Reuse an existing **Sanity** asset for a slot only
+after two failed vision-gate attempts on that slot (homepage art lives in Sanity, not Shopify
+Files). **A run with a changed hero or theme that generated zero images is a definition-of-done
+failure.** Reuse-before-generate stays correct for product packshots and PDP art.
+
+Why the flip: reuse-first was written into six instruction layers, and the team generated zero
+images in 15 consecutive merchandise runs, spending $0.43 in 11 days against a $600/day budget and a
+100-image/day cap. The caps were never the problem, so they are unchanged: `homepage_team_max_images`
+and the $/day cap are still hard ceilings, you still re-gate before every generation, and the vision
+gate and the no-text-in-pixels rule still reject anything that fails them. The floor is a mandate to
+try, never a licence to ship a bad image.
 
 **Pick the archetype before prompting (doctrine §4, binding).** Every generation declares one
 archetype and starts from that surface's scaffold in `docs/homepage-team/image-prompt-library.md`:
@@ -222,7 +276,8 @@ curiosity-inspiring is the target; exposed genitalia, nipples, and sex acts are 
 Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counter:
 
 1. **Re-check the gate before each generation** (or decrement your tracked `remainingCents`). Hard-stop
-   the loop when `remainingCents <= 0` OR `imagesSoFar >= homepage_team_max_images` (12). The gate now
+   the loop when `remainingCents <= 0` OR `imagesSoFar >= homepage_team_max_images` (read the live
+   value from the gate response, do not assume the old default of 12). The gate now
    also returns `imagesToday` + `maxImagesPerDay` and refuses with `reason:'over_image_cap'` server-side,
    so a stray extra call is rejected — but stop yourself first.
 2. `media-manager` runs `scripts/gen-homepage-image.ts --target block|tile|promo --block-key <k>
@@ -252,6 +307,7 @@ spend in Step 6 — the script already posts exactly one `{kind:'image'}` row pe
 | Curated rails | `emmaCuratedRail` docs (`target:"homepage"`, `status:"live"`, `active:true`) **referenced** in `singleton.homepage.sections[]` as `emmaCuratedRailRef`. `buildHomeContentBlocks()` resolves `productHandles`. The storefront shows up to `MAX_TEAM_RAILS` (4); with zero refs it falls back to the algorithmic discovery rails. | storefront `/` |
 | Notebook | The "From the Notebook" section **auto-populates** with the latest 3 published posts (homepage loader `getBlogPosts`), so fresh content reaches the homepage with no action from you. An `editorialTiles` block in `singleton.homepage.sections[]` (`tiles[]`: label/body/link/linkLabel/emoji/image) is an **optional override** — publish one only for a deliberate editorial pick, never just to keep the section current. **Two hard rules (owner direction 2026-07-21, after run 8 shipped a defective override):** (1) an override must never link products already merchandised in another section of the same page render (the wayfinder, rails, or grid) — duplicating the page's own products reads as filler, delete the override instead; (2) never publish an override tile without an `image` — an imageless override renders as an empty tinted plate and reads broken; auto-populate is always the better fallback. Doctrine: `docs/store-team/internal-linking.md`. | storefront `/` |
 | Wayfinder mosaic | `wayfinderMosaic` block in `singleton.homepage.sections[]` — the "Find your way in" tiles + "Discover You" promo. `tiles[]` (label/link/emmaAside/image, 3-4) + `promo` (eyebrow/heading/emphasis/body/cta/image). Empty/unset → the storefront renders its hardcoded fallback tiles (never blank). Place tile images via `--target tile --tile-key`, the promo via `--target promo`. | storefront `/` |
+| Couples band | `playTogetherBanner` block in `singleton.homepage.sections[]` — the "Play intimately together" band (heading/body/cta/image). It **does** render on the storefront (it is whitelisted in `homepage-payload.server.ts`); an unset image renders an imageless plate, so always place art. Place it via `--target block --block-key` like any other block image. | storefront `/` |
 | Announcement ticker | `announcementBar` messages in `singleton.homepage` (the layout pins it site-wide). | all pages |
 
 **Incoming slots (design-elevation P1 — do NOT patch before the shell PR lands).** These surfaces
@@ -282,16 +338,38 @@ LCP preload, peek link) that exact product. An unknown handle logs a warning and
 rotation, so verify the handle resolves 200 before writing it. Leave the field unset ONLY when
 there is deliberately no product-specific hero copy live.
 
-**Do NOT** expect these to change the storefront: `productCarousel` / `promoBanner` / `categoryGrid`
-/ `playTogetherBanner` / `testimonials` blocks (the storefront ignores them). **Those blocks DO
-still render on `/discover` (variant A)**, so edit their copy if you want, but never delete them
-without checking `/discover`. Never ship invented `testimonials` (FTC + brand).
+**`playTogetherBanner` DOES render on the storefront** (the couples band). The old line in this
+playbook telling you the storefront ignores it was false, and it is why the couples band was never
+part of the daily loop: place its image and copy every run like any other surface, through the same
+voice gate and diff-before-write rules.
 
-To merchandise: create/refresh `emmaCuratedRail` docs (Emma heading/eyebrow/aside + valid Shopify
-handles, verify each resolves 200), wire 2–4 into `singleton.homepage.sections`, refresh
-`editorialTiles`, refresh `singleton.emmaHero` copy to match the day's slate, and pin the hero by
-setting `featuredProductHandle` + `primaryCtaLink` on `singleton.emmaHeroStorefront` to today's
-featured pick.
+**Do NOT** expect these to change the storefront: `productCarousel` / `promoBanner` / `categoryGrid`
+/ `testimonials` blocks (the storefront ignores them). **Those blocks DO still render on `/discover`
+(variant A)**, so edit their copy if you want, but never delete them without checking `/discover`.
+Never ship invented `testimonials` (FTC + brand).
+
+### Mandatory per-run surfaces
+
+Every merchandise run touches all of these, not just the hero and rails:
+
+1. **Hero** — `singleton.emmaHero` copy refreshed to the day's slate, and the hero pinned by setting
+   `featuredProductHandle` + `primaryCtaLink` on `singleton.emmaHeroStorefront` to today's featured
+   pick (bare handle, verify it resolves 200).
+2. **Curated rails** — create/refresh `emmaCuratedRail` docs (Emma heading/eyebrow/aside + valid
+   Shopify handles, verify each resolves 200) and wire 2–4 into `singleton.homepage.sections`.
+   **Every published rail MUST set `ctaLink` to a collection that matches its products.** A blank
+   `ctaLink` silently falls back to `/collections/best-sellers`, which is why a lube rail's "See all"
+   landed on best sellers on 2026-07-27. **A published rail with a blank `ctaLink` is a
+   definition-of-done failure.**
+3. **Wayfinder mosaic tiles** — refresh `tiles[]` (art, labels, links) every run. **At least two of
+   the tiles target collections rather than individual products**: the page needs image-led entry
+   doors into categories, not three deep links to single PDPs.
+4. **Discover You promo** — refresh `promo` (image + copy) in the same block; it follows the week's
+   theme.
+5. **Couples band** — refresh `playTogetherBanner` (image + copy). It renders; see above.
+6. **Notebook override** — `editorialTiles` only for a deliberate editorial pick, under the two hard
+   rules in the table above. Auto-populate is the better default.
+7. **Announcement** — `announcementBar` messages in step with today's theme.
 
 **Pairing merchandising is mandatory:**
 
@@ -336,25 +414,46 @@ image spend and trip the $/day cap at half budget. For reference, the row the sc
 Token rows (above) and image rows (from Step 4) both land in `api_token_log` and surface on
 `/admin/usage`. Image rows are what the $/day cap governs.
 
-## Step 7 — Self-validate the render
+## Step 7 — Render-truth gate (does the published work actually appear?)
 
-The homepage route caches past the Sanity write (~60s TTL), so a fetch made immediately after Step 5
-can still read the pre-patch HTML. Wait at least 60s after the last Sanity patch before fetching `/`
-for validation (or poll every 15s up to 90s) so a cache-lag read is not mistaken for a publish
-failure.
+**Propagation window (corrected 2026-07-27; the old 60-second claim in this playbook was wrong).**
+After the last Sanity patch the page needs roughly **15 minutes of blob warm, plus a 900-second edge
+window, plus stale-while-revalidate** before a fetch reliably reflects the write. So either:
 
-Fetch `/` and assert: HTTP 200, the LCP hero image is present, and the homepage JSON-LD is valid and
-contains **no "daily deal" framing**. If validation fails, do not leave a broken homepage live — note
-it and let the healthcheck/rollback path restore the last-good Sanity revision; record a `failed`
-status with the error.
+- **wait at least 20 minutes** after the last Sanity patch before fetching `/`, or
+- `POST /cron/warm-homepage-b` (with the cron secret) and then **wait 5 minutes**.
+
+A fetch made earlier than that reads stale HTML and tells you nothing. Do not treat an early fetch
+as either a pass or a failure.
+
+**Then run the gate. This is an assertion on content, not on status codes.** Fetch
+`https://xdipx.com/` and assert, against what this run actually published:
+
+1. HTTP 200, the LCP hero image is present, and the homepage JSON-LD is valid and contains **no
+   "daily deal" framing**.
+2. The **published hero product handle** appears in the returned HTML.
+3. **Every published rail title** appears in the returned HTML.
+4. **At least one published wayfinder tile headline** appears in the returned HTML.
+
+**If fallback content renders where team content was published (hardcoded mosaic tiles, algorithmic
+discovery rails, an imageless couples band), the run status is `failed`.** File a suggestion
+(`POST /api/team/suggestion`, team `homepage`) describing which surface fell back and what was
+published, let the healthcheck/rollback path restore the last-good Sanity revision if the page is
+broken, and **do not report success**. A run that published invisible work is a failed run.
+
+Why this replaced the old check: from 2026-07-24 to 2026-07-26 one malformed `emmaCuratedRail`
+document rejected the whole `contentBlocks` promise, so every Sanity-driven section on the storefront
+rendered its hardcoded fallback. The old gate ("HTTP 200 plus the hero renders") passed anyway,
+because the hero is not deferred. Three consecutive days of published merchandising were invisible to
+every visitor while the team reported success, and the owner found it before the team did.
 
 **Hero check specifically:** confirm the hero against the Sanity source of truth
-(`singleton.emmaHero` / `singleton.emmaHeroStorefront`), not just the rendered page. If Sanity already
-reflects this run's hero copy/pin but the live page still shows the previous hero, that is the known
-post-publish cache lag (route cache s-maxage 60 + SWR 300), not a failed publish — record `succeeded`
-with a summary note such as "published; propagation pending (s-maxage 60 + SWR 300)" rather than
-`failed` (example: run 30, 2026-07-14, confirmed the new hero in Sanity while `/` still served the
-prior headline at run-end).
+(`singleton.emmaHero` / `singleton.emmaHeroStorefront`) as well as the rendered page. If Sanity
+reflects this run's hero copy/pin, the assertions above pass, and only ordering or a single copy
+field lags, that is propagation, not a failed publish. Note it in the summary
+("published; propagation pending, blob warm + 900s edge + SWR"). Propagation lag is never an excuse
+for a missing rail title or a fallback section: those are content failures, and the wait rules above
+exist precisely so you can tell the two apart.
 
 ## Step 7.5 — Post-publish design spot-check (`design-critic`)
 
@@ -381,6 +480,14 @@ fold the results into the summary:
   summary and flag it if under the 70 percent target.
 - Confirm every image on the page passed the mission brief section 2 self-review or is Shopify
   product photography.
+- **Theme mapping:** state which hero, which rail, and which wayfinder tile carry this week's theme,
+  one line each. A theme week without a stateable mapping is a failed run.
+- **Sameness diff:** state the two-plus surfaces that changed versus yesterday (Step 2c), and confirm
+  at least one of them is imagery or product selection rather than copy.
+- **Fresh-art count:** state images generated this run. On a changed-hero or changed-theme day, fewer
+  than three is a failure, not a saving.
+- **Rail `ctaLink` audit:** confirm every published rail has a `ctaLink` matching its products, and
+  that at least two wayfinder tiles point at collections.
 - The summary states: today's theme, the hero product and why, what changed versus yesterday, and
   what will change next run. On Mondays, include the recon memo.
 
@@ -454,8 +561,11 @@ swaps — same sparse-data rule as the scoreboard.
 ## Hard rules for this routine
 
 - **Gate before every paid step; hard-stop at `remainingCents <= 0`.**
-- **Reuse imagery before generating; respect `max_images`.**
-- **Diff before write; skip no-op publishes.**
+- **Meet the fresh-art floor on changed-hero / changed-theme days; respect `max_images` and the $/day
+  cap as hard ceilings.** Reuse is the per-slot fallback after two failed vision-gate attempts, and
+  stays the default only for product packshots and PDP art.
+- **Diff before write; skip no-op publishes.** A no-op publish is not a no-op run: Step 2c still
+  requires two changed surfaces or a stated hold reason.
 - **Content only — never code, never structure, never canonical/URLs.** Structural ideas → Routine B.
 - **Reasoning stays on Max** — never call the site's Anthropic-keyed copy/enrich endpoints.
 - **One run at a time** — the gate enforces it (`reason:'run_in_progress'`); exit if you slipped past.

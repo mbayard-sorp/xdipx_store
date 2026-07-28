@@ -91,10 +91,28 @@ ground lock. The rules below stand; the doctrine wins where they drift.
   Two failures means stop generating and use product photography or a
   reused Sanity asset instead. Never publish an image you would not defend
   to Mike.
-- Reuse-first stands, but only for assets that meet these rules. The July
-  2026 housewares set is retired; do not re-place those assets. When
-  uploading, name and tag assets with product handle and mood so future
-  runs can find them.
+- **Fresh-art floor (owner direction 2026-07-27, replaces reuse-first as the
+  default for homepage merchandising art).** When the hero product or the
+  calendar theme changed since yesterday, generate NEW art for at least three
+  of the swappable image slots: hero block art, the 3-4 wayfinder tiles, the
+  Discover You promo, the couples band. The Emma portrait is excluded. Reuse
+  is the fallback for a slot only after two failed vision-gate attempts on
+  that slot. A run with a changed hero or a changed theme that generated zero
+  images is a definition-of-done failure.
+  Reuse-first still stands where it is right: product packshots and PDP art,
+  where the real photo is the point. Every existing cap stays a ceiling and is
+  unchanged (`homepage_team_max_images`, the daily $ cap, the gate re-check
+  before every generation). The caps were never the problem: 15 consecutive
+  merchandise runs generated zero images and spent $0.43 in 11 days against a
+  $600/day budget and a 100-image/day cap.
+  The floor is a mandate to try, never a licence to ship a bad image. The
+  vision gate and the no-text-in-generated-images rule above are unchanged and
+  still reject anything that fails them, and a slot that fails twice falls back
+  to product photography or a compliant reused asset.
+- Reused assets must still meet every rule in this section. The July 2026
+  housewares set is retired; do not re-place those assets. When uploading,
+  name and tag assets with product handle and mood so future runs can find
+  them.
 
 ## 3. Weekly rhythm: mix it up
 
@@ -109,6 +127,20 @@ The homepage must be visibly different week over week. Sameness is a defect.
   concept, mosaic arrangement) is visibly new each week.
 - No two consecutive weeks with the same hero product, the same rail lineup,
   or the same tile artwork. Check last week's run summaries before picking.
+- **The hero belongs to the theme (binding, owner direction 2026-07-27).**
+  During an active `marketing_calendar` theme week, the hero product is either
+  a product from the theme's own category, or a product plus theme combo where
+  the theme category is visibly part of the hero (a toy paired with the week's
+  featured lube, a wand shown with the cleaner the week is teaching). A hero
+  from outside the theme with only an editorial argument for it is a miss, not
+  a judgment call. Section 5's photogenic-first rule selects WITHIN the theme
+  category; it never overrides the theme binding. If nothing in the theme
+  category is photogenic enough to carry the hero, run the combo, or fix the
+  photography, and say which in the run summary.
+  Why this is binding: on 2026-07-27 Lube Literacy Week shipped with a glass
+  wand hero on a documented photogenic-first rationale, because no rule bound
+  the hero to the theme and no gate checked it. The page read as "we sell
+  lubricant" under an unrelated hero instead of as a lube-week campaign.
 
 ## 4. Competitor recon: weekly, and it must produce decisions
 
@@ -137,10 +169,12 @@ re-deriving the field from scratch.
 Featuring a product is a bet; place it deliberately. When choosing the hero
 and rail products (on top of the selection criteria in Routine A):
 
-- **Photogenic first.** A featured product needs photography that can carry
-  a bright, bold image — strong silhouette, saturated color, clean shots.
-  A great product with murky photos loses the hero slot to a good product
-  that pops.
+- **Photogenic first, inside the theme.** A featured product needs photography
+  that can carry a bright, bold image — strong silhouette, saturated color,
+  clean shots. A great product with murky photos loses the hero slot to a good
+  product that pops. During a theme week this rule ranks candidates *within*
+  the theme category (section 3's hero binding); it is never a reason to leave
+  the theme. A photogenic off-theme product does not beat an on-theme one.
 - **Story-able.** You must be able to say in one sentence what it does for
   the reader and why it earns the slot this week. If the enrichment data
   (Emma's take, sensation dial, tags) is thin, either route it to
@@ -264,6 +298,28 @@ After publishing, fetch the live homepage and verify before closing the run:
    current theme, and every published preset lands on 3+ products.
 6. Run summary states: theme, hero product and why, what changed versus
    yesterday, what will change next run, and (Mondays) the recon memo.
+7. **Theme mapping:** the hero, at least one rail, and at least one wayfinder
+   tile demonstrably belong to this week's theme, and the run summary states
+   the mapping (which surface carries the theme, and how). A theme week where
+   the mapping cannot be stated in one line each is a failed run.
+8. **Sameness diff:** today's published slate differs from yesterday's on at
+   least two surfaces (Routine A step 2c), and at least one of the two is
+   imagery or product selection, not copy alone. State the diff in the summary.
+9. **Fresh-art floor:** if the hero product or the calendar theme changed since
+   yesterday, at least three swappable image slots carry newly generated art
+   (mission brief section 2, Routine A step 4). Zero images generated on a
+   changed-hero or changed-theme day is a failure, not a saving.
 
-A run that publishes nothing is fine. A run that publishes something broken,
-ugly, or identical to yesterday is not.
+A run that publishes a page visually identical to yesterday is a FAILED run,
+unless the run summary states an explicit hold reason (a deliberate editorial
+hold, a gate refusal, a supply or data problem named specifically). "Nothing
+scored well enough to swap" is not a hold reason. Publishing nothing is a
+decision that must be argued for in the summary, not the safe default.
+
+**This does not loosen the sparse-data rule, and the two do not conflict.**
+Below 300 sessions/week the scoreboard still never auto-triggers swaps: that
+rule exists so we do not optimize on noise, and it stands. The freshness floor
+is not optimization, it is editorial cadence. Sparse traffic tells you *which*
+product to pick on margin and heuristics instead of on GA4; it never tells you
+to ship yesterday's page again. Metric-driven swaps stay gated on 300
+sessions/week. Freshness is ungated and mandatory.

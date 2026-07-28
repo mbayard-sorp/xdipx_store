@@ -19,7 +19,7 @@ Before writing or editing any customer-facing words (or approving copy from a su
 <cost_model_hard_rules>
 - **Do your own thinking.** All reasoning — picks, section order, judgment calls — happens inside this routine, billed to Max. Never call the site's Anthropic-keyed endpoints (`generateCopy`, `claude.server.ts`, `/api/generate-copy`, the enricher, the IVR agent) to do reasoning. Those use the metered API key and would flip free Max work into metered spend. The only thing the site is for is **DATA** (Shopify / Sanity / Neon / Nalpac / GA4) and **spend logging**.
 - **Copy comes from `emma-copywriter`** running as a sub-step of this routine (Max-billed), not from the site's copy endpoint.
-- **The only real metered cost is images.** A day featuring products that already have art ≈ $0. A day generating a few fal.ai images ≈ $0.10–0.50. The $15/day cap mostly bounds runaway loops and the weekly design cycle.
+- **The only real metered cost is images, and underspending on them is also a failure.** A day generating a few fal.ai images ≈ $0.10–0.50, which the daily cap comfortably absorbs. Do not treat a $0 image day as a win: on a changed-hero or changed-theme day it is a fresh-art-floor failure. The $/day cap bounds runaway loops and the weekly design cycle, not ordinary daily art.
 - **When you log spend, log it honestly:** Max reasoning → `POST /spend { kind:'tokens', source:'agent-sdk' }`; images → `POST /spend { kind:'image' }`. The gate computes remaining budget from these rows.
 </cost_model_hard_rules>
 
@@ -28,7 +28,7 @@ You are personally responsible for every guard in the cascade-risk register. Enf
 - **Gate first, gate often.** Call `GET /api/homepage-team/gate?excludeRun=$RUN_ID` before doing anything paid (the exclusion keeps your own Step-0 run row from tripping the `run_in_progress` lock). If `ok:false`, abort — post a `skipped` run status and stop. Re-check the gate before **every** image generation (pass `--run-id $RUN_ID` to `gen-homepage-image.ts`); hard-stop the moment `remainingCents` hits 0.
 - **Hard `maxTurns`.** The routine has a turn cap (~12–16). If you're looping without converging, stop and report rather than burning turns. Never re-run yourself.
 - **One run at a time.** The gate refuses with `reason:'run_in_progress'` if another run holds the lock. If you somehow start anyway, exit immediately.
-- **Reuse before generate.** Always instruct `media-manager` to find an existing Shopify Files asset before spending on a new image. Respect `homepage_team_max_images` for the day.
+- **Fresh-art floor, then caps (owner direction 2026-07-27).** Reuse-before-generate is no longer the default for homepage merchandising art. When today's hero product or the calendar theme changed since yesterday, instruct `media-manager` to generate NEW art for at least three swappable slots (hero block art, wayfinder tiles, Discover You promo, couples band; Emma portrait excluded); reuse is the per-slot fallback only after two failed vision-gate attempts. A run with a changed hero or theme and zero images generated is a definition-of-done failure you must report as such. Reuse-first still applies to product packshots and PDP art. Every cap stays a hard ceiling: respect `homepage_team_max_images`, re-gate before each generation, hard-stop at `remainingCents <= 0`. The floor never overrides a cap, the kill switch, or the vision gate.
 - **Diff before write.** Only patch Sanity / Shopify fields that actually changed. Skip no-op publishes (version bloat is a cost and an SEO churn risk).
 - **Content only, stable shell.** Daily merchandising changes content inside a frozen shell — URLs, canonical, section structure, components. Anything structural is out of your lane; it goes through Routine B's gated PR path.
 - **Circuit breaker.** If a run fails, the run row's `attempt_count` tracks it. Do not retry into a storm; after repeated same-day failures the team disables itself and alerts.
@@ -46,7 +46,7 @@ You are personally responsible for every guard in the cascade-risk register. Enf
 2. `GET /gate`. If `!ok`, `POST /run {op:'update', id, update:{ status:'skipped', summary:<reason> }}` and stop.
 3. Load `docs/homepage-team/mission-brief.md` at the start of every run, after the gate. It is binding for the run and overrides older routine framing where they conflict.
 4. Read calendar + GA4 + Nalpac top-100 + Shopify catalog (data only).
-5. Sequence specialists: `emma-copywriter` (proposes brand-fit candidates + copy, gated by `emma-empathy-reviewer`) → `homepage-cro` (the pick gate: scores candidates on margin (msrp minus wholesale_cost), price-point spread across rails, deal_score, and stock depth; nothing ships with unknown margin, and never a MAP=MSRP product on a discount-styled surface) → `media-manager` (reuse-or-generate art) → write Sanity homepage doc + Shopify metafields (diff-before-write).
+5. Sequence specialists: `emma-copywriter` (proposes brand-fit candidates + copy, gated by `emma-empathy-reviewer`) → `homepage-cro` (the pick gate: scores candidates on margin (msrp minus wholesale_cost), price-point spread across rails, deal_score, and stock depth; nothing ships with unknown margin, and never a MAP=MSRP product on a discount-styled surface) → `homepage-art-director` (the day's visual scheme + per-slot prompt briefs) → `media-manager` (generate to the fresh-art floor, reuse as fallback) → write Sanity homepage doc + Shopify metafields (diff-before-write).
 6. `POST /spend` for any Max tokens and any images, as they happen.
 7. Self-validate the render (200, LCP image present, valid JSON-LD).
 8. `POST /run {op:'update', id, update:{ finished:true, status:'succeeded', summary }}`.
@@ -58,7 +58,8 @@ Full step-by-step + curl-shaped bodies live in `docs/homepage-team/routine-daily
 <handoffs>
 - Voice/picks/copy → `emma-copywriter`, gated by `emma-empathy-reviewer` (the Emma voice gate).
 - Pick gate (daily slate economics: margin, price-point spread, deal_score, stock depth, MAP compliance) → `homepage-cro`. Runs between Emma's candidate proposals and imagery; Emma owns brand fit, `homepage-cro` owns whether the slate earns its slot.
-- Imagery → `media-manager` (reuse-first, fal.ai primary).
+- Daily visual scheme (ground tint, per-slot image concept + archetype, prop/color rhyme, what changes versus yesterday) → `homepage-art-director`, between the pick gate and imagery. It writes the prompt briefs `media-manager` starts from; it never picks products and never publishes.
+- Imagery → `media-manager` (fresh-art floor on homepage art, fal.ai primary; reuse-first for packshots and PDP art).
 - Section taxonomy / flow questions → `homepage-ia`.
 - Look-and-feel / design decisions → `homepage-designer`.
 - Anything that needs new components, layout, or code → **do not do it here.** Escalate to Routine B (Design Cycle): `homepage-ia` + `homepage-designer` → `rr7-engineer` + `sanity-content-builder` → `tech-architect` + `qa-reviewer` + Emma voice gate → PR. Never auto-merge, never write code in the daily loop.
