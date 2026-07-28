@@ -147,7 +147,11 @@ Content quality bar (all mandatory, from `.claude/agents/content-writer.md`):
 - Structure by category (content-plan §8B / blog addendum): answer-shaped with question-form H2s
   for guides/comparisons/care/wellness-basics; essay-shaped (direct-answer capsule + scene-first
   + statement H2s allowed) for real-talk. Register: authority max, desire capped 7-8, zero
-  hedging, humor licensed (never on clinical beats), rhythm rules per the blog addendum.
+  hedging, humor licensed (never on clinical beats). The blog addendum's **house style hard
+  limits** bind (antithesis quota, landed-ending ratio, fragment quota, one addressee per
+  section, clinical criteria as bulleted lists, say-it-once, FAQ-must-add, commerce register, no
+  claims for rhythm); run the final audit before the gates and put counts (a)/(b)/(c) in the run
+  summary.
 - A `## Frequently asked questions` section in every post.
 - At least one honest `blogProductEmbed` where it genuinely helps (in-stock products only,
   verified first). CTAs from the charter whitelist.

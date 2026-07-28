@@ -142,7 +142,8 @@ detail frame per product. Scaffold (always with `--ref-image` = the product's Sh
 
 > Bright warm editorial magazine photograph, soft directional window daylight, high-key, calm
 > private sunlit room, tasteful and non-explicit. {One or two adults in their 30s, clearly
-> adult}, {expressive direction matched to the headline's feeling — e.g. "sitting on the edge of
+> adult, with the pairing stated explicitly per the §0-H context-match rule — e.g. "a man and a
+> woman" on a pregnancy/postpartum topic}, {expressive direction matched to the headline's feeling — e.g. "sitting on the edge of
 > an unmade bed, face turned toward the window, tired and tender" / "mid-laugh, gesturing across
 > a kitchen counter"}, faces visible, natural correct anatomy, five fingers per hand, natural
 > skin tones, fully clothed in soft casual clothing. {Optional: the {product} resting small on a

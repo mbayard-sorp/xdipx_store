@@ -107,6 +107,13 @@ words are claims.
   exhaustion, delight — matched to the headline's feeling). The post's embedded product MAY
   appear at secondary scale in the scene (on a nightstand, in the setting) but is never
   required and never the subject.
+- **Depicted people match the article's context (owner directive, 2026-07-28).** The couple or
+  person shown reflects who the post is most plainly about, read from the topic itself: a
+  pregnancy/postpartum piece shows a man and a woman unless the post explicitly addresses a
+  different pairing; a post written to a specific audience shows that audience. The generation
+  prompt states the pairing explicitly, it is never left for the model to decide. Representation
+  varies deliberately ACROSS the catalog of posts (the diversity rule below), never by
+  randomizing within a single post against its own context.
 - **Emotional range.** Sad, tired, pensive, longing, overjoyed — all licensed, **inside the
   warm-light lock**. Sad in sunlight reads tender; sad in shadow reads moody, and the
   bright/warm doctrine still binds. No near-black, no boudoir gloom.

@@ -191,11 +191,40 @@ rules below were owner-codified 2026-07-28.
   2026-07-28). Funny is not boring. Two fences: never a joke at the customer's expense, and never
   a joke load-bearing on a clinical or safety fact (joke about the awkwardness, never the pain).
   The license is owned-channels only; social recycling stays capped by the social addendum.
-- **Rhythm rules (the anti-AI-tells).** Vary sentence length; at least one short standalone
-  sentence per section. Cap the aphorism-as-closer construction (an abstract noun promoted to
-  subject of a defining clause, e.g. "bracing is what has been killing the moment") at one per
-  section and three per post — it is a house tic under the fresh-language rule. Never two in one
-  paragraph.
+- **House style hard limits (owner-codified 2026-07-28).** The recurring failure is not bad
+  sentences, it is the SAME good sentence shape repeated until emphasis stops registering. These
+  are hard limits on cadence, not quality:
+  1. **Antithesis quota.** "X, not Y" / "not X, but Y" / "X is not the same as Y" and all near
+     variants ("a symptom, not a verdict" counts): THREE per article, max. Spend them on
+     section-closing lines. For the fourth urge, use a plain declarative, a concrete image, a
+     direct instruction, or the reader's own question instead.
+  2. **Paragraph endings.** At most one in three paragraphs ends on an aphorism, a reversal, or
+     a line written to land; the rest end on ordinary informational sentences. Peaks need flat
+     ground around them. Do not cut the good lines; space them. (This subsumes the earlier
+     aphorism-as-closer cap.)
+  3. **Fragment quota.** Five sentence fragments per article, max. Never more than two in a row.
+  4. **One addressee per section.** State who "you" is at the start of each section and hold it.
+     Switching readers mid-section requires an explicit sentence that says so. "You" never means
+     the couple in one sentence and one partner in the next.
+  5. **Safety and clinical content is always a list.** Any "see a professional if…" criteria,
+     warning signs, or red flags render as a bulleted list with a bolded lead-in. Never prose,
+     never fragments in a paragraph. This content is scanned under stress; format for
+     findability.
+  6. **Say it once.** The thesis appears in full exactly once. Later references point back in a
+     clause, never a rebuild.
+  7. **FAQ must add.** Every FAQ answer carries information, framing, or specificity absent from
+     the body. A restate-with-synonyms answer gets cut or re-angled. Never reuse a body phrase
+     verbatim.
+  8. **Commerce keeps the same voice.** Product mentions stay in the register of the surrounding
+     prose. No sales voice, no editorial-list references ("why we put this so high on the
+     list"), no second-person hype. What it does, why it fits, move on.
+  9. **No new claims for rhythm.** Never add a factual or emotional assertion because the
+     sentence needed a beat. Every claim survives a challenge.
+  **Final audit, run before delivering:** count (a) antithesis constructions, (b) paragraphs
+  ending on a landed line, (c) fragments; trim to quota; name each section's addressee and fix
+  drift; confirm clinical criteria are lists; diff the FAQ against the body for repeated
+  phrasing. Report counts (a), (b), (c) with the draft.
+- Vary sentence length; at least one short standalone sentence per section.
 
 **Structure.**
 
