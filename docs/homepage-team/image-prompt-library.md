@@ -229,6 +229,31 @@ to the `16:9` default for the ref-image (Kontext) code path specifically. Always
 `imageSize: 'landscape_4_3'` (the string) for this surface, exactly as the scaffold above already
 says — never a `{width,height}` object when `refImageUrl` is set.
 
+## Known failure classes (append as they are found)
+
+Two reproducible ways a generation gets rejected, both hit on 2026-07-27. Read
+these before writing briefs; they are cheaper to avoid than to retry.
+
+**1. Printed brand marks survive Kontext, and they garble.** With `--ref-image`
+pointed at a product whose body carries a printed brand mark, FLUX Kontext
+reproduces the mark and frequently mangles the letterforms (a Nixie Mystic Wave
+came back reading "NIXE" twice in a row). Baked-in lettering fails the owner's
+hard no-text rule no matter how clean the rest of the frame is, and no negative
+prompt reliably removes it. So: for any slot under the no-text mandate, brief a
+subject that carries no printed mark. Glass, silicone, and unbranded moulded
+pieces are safe. Lube bottles are structurally incompatible with a hard no-text
+rule, because the label is the product; show the act or the surface instead, and
+let the markup carry the words.
+
+**2. fal safety returns a black JPEG on liquid-plus-hands phrasing.** The known
+stochastic black return (a 2 to 4KB all-black JPEG) was reproducible on 2026-07-27
+against specific wording rather than at random: prompts describing a bead or drop
+of liquid in an open palm, and prompts describing a bed scene, returned black
+three times. Rewriting the same concept as "an open hand and pale silk" and "a
+quiet private room" cleared it immediately on the first retry. If a slot returns
+black twice, change the phrasing before spending a third call, and prefer naming
+the fabric, the light, and the surface over naming the fluid or the bed.
+
 ---
 
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
