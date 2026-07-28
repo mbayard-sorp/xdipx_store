@@ -21,7 +21,7 @@
  */
 
 import { timingSafeEqual } from 'node:crypto'
-import { and, desc, eq, gte, lt, lte, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, lt, lte, ne, sql, type SQL } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { contentSlotForDate, type ContentSlot } from '~/lib/content-slot'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
@@ -49,6 +49,7 @@ import {
   homepageTeamRuns,
   homepageTeamEvents,
   homepageTeamSuggestions,
+  suggestionLinks,
   strategyBriefs,
   adCampaigns,
   socialPosts,
@@ -316,7 +317,8 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
   // throttle it to once per 5 min store-wide (well inside the 20-min lock
   // window) instead of an UPDATE on every gate call.
   if (await kvSetNX('team:expire-stale:throttle', String(Date.now()), 300)) {
-    await expireStaleRuns()
+    // Same throttle, same reason: both are "a worker died holding something".
+    await Promise.all([expireStaleRuns(), expireStaleClaims()])
   }
   const [cfg, spentCents, runsToday, imagesToday, inProgress, briefId, autopublish] = await Promise.all([
     getTeamConfig(team),
@@ -460,6 +462,10 @@ export async function listRecentEvents(team?: TeamId, sinceDays = 7, limit = 500
 // Agents may only CREATE proposed rows and MARK approved rows pr_open/applied;
 // they can never flip proposed->approved. That transition is the owner's, or
 // the acting team's auto-approve valve (which the owner controls).
+//
+// The richer ticket lifecycle (claims, QA review, release-engine apply) is
+// additive and lives further down under "Ticket lifecycle (070)". Everything
+// in this section keeps its exact pre-070 behaviour.
 
 export interface SuggestionInput {
   team: TeamId
@@ -479,6 +485,8 @@ export interface SuggestionInput {
    * conversation on one ticket instead of flooding the queue.
    */
   dedupeKey?: string | undefined
+  /** Soft deadline for the ticket, ISO string or Date (070). */
+  dueAt?: string | Date | undefined
 }
 
 /**
@@ -486,8 +494,23 @@ export interface SuggestionInput {
  * absorbed by the dedupe_key partial-unique index (a live ticket for this
  * signal already exists). Callers that only care "is it filed" can ignore the
  * distinction; callers reporting counts should treat 0 as "already open".
+ *
+ * Unchanged contract: `createSuggestionDetailed` is the one that tells you
+ * WHICH live ticket absorbed a duplicate.
  */
 export async function createSuggestion(s: SuggestionInput): Promise<number> {
+  const res = await createSuggestionDetailed(s)
+  return res.deduped ? 0 : res.id
+}
+
+/**
+ * As createSuggestion, but resolves the duplicate: on a dedupe collision it
+ * looks up the live ticket carrying that key and returns its id, so an API
+ * caller can answer "already filed, here it is" instead of a bare 0.
+ */
+export async function createSuggestionDetailed(
+  s: SuggestionInput,
+): Promise<{ id: number; deduped: boolean }> {
   // Owner triage (proposed -> approved) is automated per-team via the
   // `{team}_team_auto_approve_suggestions` valve. Key it off the team that ACTS
   // on the suggestion — its targetTeam, or the proposer when unrouted — so a
@@ -513,28 +536,74 @@ export async function createSuggestion(s: SuggestionInput): Promise<number> {
       decidedAt:     autoApprove ? new Date() : null,
       priority:      s.priority ?? 3,
       dedupeKey:     s.dedupeKey ?? null,
+      dueAt:         s.dueAt == null ? null : new Date(s.dueAt),
     })
     // Untargeted DO NOTHING so the dedupe_key partial-unique index (070)
     // swallows a repeat filing instead of throwing inside a cron handler.
     .onConflictDoNothing()
     .returning({ id: homepageTeamSuggestions.id })
-  return row?.id ?? 0
+  if (row?.id) return { id: row.id, deduped: false }
+  if (!s.dedupeKey) return { id: 0, deduped: false }
+  // The insert was absorbed by uq_team_sugg_dedupe_key: find the live ticket
+  // that owns the key so the caller can point at the open conversation.
+  const [live] = await db
+    .select({ id: homepageTeamSuggestions.id })
+    .from(homepageTeamSuggestions)
+    .where(and(
+      eq(homepageTeamSuggestions.dedupeKey, s.dedupeKey),
+      sql`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`,
+    ))
+    .limit(1)
+  return { id: live?.id ?? 0, deduped: !!live }
 }
 
-export async function listSuggestions(filter: {
+export interface SuggestionListFilter {
   team?: TeamId | undefined
   targetTeam?: TeamId | undefined
   status?: string | undefined
+  /** Any-of status filter (070); combines with `status` as an additional AND. */
+  statuses?: readonly string[] | undefined
+  /** Any-of kind filter (070). */
+  kinds?: readonly string[] | undefined
+  assignee?: string | undefined
+  updatedSince?: Date | undefined
   limit?: number | undefined
-} = {}) {
+  /**
+   * priority = work-queue order (most urgent, then oldest).
+   * age      = oldest first.
+   * created  = newest first (default, what the admin dashboard has always had).
+   */
+  orderBy?: 'priority' | 'age' | 'created' | undefined
+}
+
+export const SUGGESTION_LIST_MAX = 200
+
+export async function listSuggestions(filter: SuggestionListFilter = {}) {
   const conditions = []
   if (filter.team) conditions.push(eq(homepageTeamSuggestions.team, filter.team))
   if (filter.targetTeam) conditions.push(eq(homepageTeamSuggestions.targetTeam, filter.targetTeam))
   if (filter.status) conditions.push(eq(homepageTeamSuggestions.status, filter.status))
+  if (filter.statuses?.length) {
+    conditions.push(inArray(homepageTeamSuggestions.status, [...filter.statuses]))
+  }
+  if (filter.kinds?.length) {
+    conditions.push(inArray(homepageTeamSuggestions.kind, [...filter.kinds]))
+  }
+  if (filter.assignee) conditions.push(eq(homepageTeamSuggestions.assignee, filter.assignee))
+  if (filter.updatedSince) {
+    conditions.push(gte(homepageTeamSuggestions.updatedAt, filter.updatedSince))
+  }
+  const order =
+    filter.orderBy === 'priority'
+      ? [asc(homepageTeamSuggestions.priority), asc(homepageTeamSuggestions.createdAt)]
+      : filter.orderBy === 'age'
+        ? [asc(homepageTeamSuggestions.createdAt)]
+        : [desc(homepageTeamSuggestions.createdAt)]
+  const limit = Math.min(SUGGESTION_LIST_MAX, Math.max(1, filter.limit ?? 100))
   const q = db.select().from(homepageTeamSuggestions)
   return (conditions.length ? q.where(and(...conditions)) : q)
-    .orderBy(desc(homepageTeamSuggestions.createdAt))
-    .limit(filter.limit ?? 100)
+    .orderBy(...order)
+    .limit(limit)
 }
 
 /** Owner decision from the admin UI: proposed -> approved | dismissed. */
@@ -564,6 +633,12 @@ export async function retireSuggestion(id: number): Promise<void> {
  * Agent-side transition (agent-editor): approved -> pr_open -> applied, with
  * the PR URL in applyRef. Throws 409 on any other transition — agents can
  * never move a row out of `proposed`; that decision is the owner's.
+ *
+ * LEGACY COMPATIBILITY PATH, deliberately untouched by the ticket lifecycle
+ * below. agent-editor's docs-only loop (approved -> pr_open -> applied) runs
+ * through here and through the `mark` op on /api/team/suggestion; the richer
+ * `transitionSuggestion` is additive and every existing call site keeps its
+ * exact semantics. New callers should prefer `transitionSuggestion`.
  */
 export async function markSuggestion(
   id: number,
@@ -573,7 +648,7 @@ export async function markSuggestion(
   const allowedFrom = status === 'pr_open' ? 'approved' : 'pr_open'
   const res = await db
     .update(homepageTeamSuggestions)
-    .set({ status, applyRef })
+    .set({ status, applyRef, updatedAt: new Date() })
     .where(and(eq(homepageTeamSuggestions.id, id), eq(homepageTeamSuggestions.status, allowedFrom)))
     .returning({ id: homepageTeamSuggestions.id })
   if (res.length === 0) {
@@ -582,6 +657,433 @@ export async function markSuggestion(
       { status: 409 },
     )
   }
+}
+
+// ── Ticket lifecycle (070) ───────────────────────────────────────────────────
+//
+// The improvement bus doubles as the ticket board for the self-healing loop:
+// a detector files a ticket, the owner (or an auto-approve valve) approves it,
+// a dev agent CLAIMS it, opens a PR, QA reviews and verifies, and the release
+// engine applies it after a merge and a green smoke run.
+//
+//   proposed ─owner|auto→ approved ─claim→ in_progress ─assignee→ pr_open
+//     ─qa→ in_review ─qa→ verified ─system→ applied
+//
+// Every edge is declared once, in ALLOWED, with the actors permitted to walk
+// it. A pair that is not in the map is a 409. Two structural properties fall
+// out of the map rather than out of prose:
+//   - QA cannot reach `applied`. It has no edge to it from anywhere.
+//   - Only the release engine (`system`) applies code tickets, and only from
+//     `verified`, which only QA can produce.
+
+export const TICKET_STATUSES = [
+  'proposed', 'approved', 'in_progress', 'pr_open', 'in_review',
+  'verified', 'applied', 'blocked', 'dismissed',
+] as const
+export type TicketStatus = (typeof TICKET_STATUSES)[number]
+
+/** Nothing transitions out of these. */
+export const TERMINAL_TICKET_STATUSES: readonly TicketStatus[] = ['applied', 'dismissed']
+
+export function isTicketStatus(v: unknown): v is TicketStatus {
+  return typeof v === 'string' && (TICKET_STATUSES as readonly string[]).includes(v)
+}
+
+/**
+ * Who is asking. `owner` is a human in /admin, `auto` is an auto-approve valve,
+ * `system` is server-side machinery (lease expiry, the release engine), and
+ * `agent:<slug>` is one of the roster agents calling the team API.
+ */
+export type TicketActor = 'owner' | 'auto' | 'system' | `agent:${string}`
+
+const AGENT_ACTOR_RE = /^agent:[a-z0-9][a-z0-9-]{0,24}$/
+
+export function isTicketActor(v: unknown): v is TicketActor {
+  return typeof v === 'string'
+    && (v === 'owner' || v === 'auto' || v === 'system' || AGENT_ACTOR_RE.test(v))
+}
+
+/**
+ * The only kinds agent-editor may carry all the way to `applied` on its own.
+ * These are the docs/config rows it has always owned end to end; anything else
+ * (notably `code`) has to go through QA and the release engine.
+ */
+export const AGENT_EDITOR_APPLY_KINDS: readonly string[] = ['instructions', 'agent-def', 'config']
+
+/** Agents permitted to claim an approved ticket. */
+export const CLAIMANT_ACTORS: readonly TicketActor[] = ['agent:rr7-engineer', 'agent:agent-editor']
+
+export interface TransitionRule {
+  to: TicketStatus
+  /**
+   * Literal actors permitted on this edge. The pseudo-actor `assignee` matches
+   * whoever currently holds the claim, so "only the agent that claimed it may
+   * open its PR" is one entry rather than a special case in the code.
+   */
+  actors: readonly (TicketActor | 'assignee')[]
+  /** When present, the ticket's `kind` must be one of these. */
+  kinds?: readonly string[]
+  /** Edges that always burn a fix attempt (QA bounce, smoke-failure bounce). */
+  incrementAttempt?: boolean
+}
+
+/** Every non-terminal status can be retired by the owner. */
+const OWNER_DISMISS: TransitionRule = { to: 'dismissed', actors: ['owner'] }
+
+export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> = {
+  proposed: [
+    { to: 'approved', actors: ['owner', 'auto'] },
+    OWNER_DISMISS,
+  ],
+  approved: [
+    { to: 'in_progress', actors: CLAIMANT_ACTORS },
+    OWNER_DISMISS,
+  ],
+  in_progress: [
+    { to: 'pr_open', actors: ['assignee'] },
+    { to: 'blocked',  actors: ['assignee', 'system'] },
+    // Lease expiry releases the ticket back onto the unassigned queue.
+    { to: 'approved', actors: ['system'] },
+    OWNER_DISMISS,
+  ],
+  pr_open: [
+    { to: 'in_review', actors: ['agent:qa-reviewer'] },
+    // The legacy agent-editor docs path, preserved verbatim.
+    { to: 'applied', actors: ['agent:agent-editor'], kinds: AGENT_EDITOR_APPLY_KINDS },
+    OWNER_DISMISS,
+  ],
+  in_review: [
+    { to: 'verified', actors: ['agent:qa-reviewer'] },
+    // FAIL bounce: back to the assignee with a reason, one attempt spent.
+    { to: 'in_progress', actors: ['agent:qa-reviewer'], incrementAttempt: true },
+    OWNER_DISMISS,
+  ],
+  verified: [
+    // Release engine only, post-merge and post-smoke.
+    { to: 'applied', actors: ['system'] },
+    // Merge, deploy, or smoke failed: bounce and spend an attempt.
+    { to: 'in_progress', actors: ['system'], incrementAttempt: true },
+    OWNER_DISMISS,
+  ],
+  blocked: [
+    { to: 'approved', actors: ['owner', 'system'] },
+    OWNER_DISMISS,
+  ],
+  applied: [],
+  dismissed: [],
+}
+
+export interface TransitionContext {
+  assignee?: string | null | undefined
+  kind?: string | null | undefined
+}
+
+/**
+ * The single arbiter of "may this actor walk this edge". Pure: no DB, no time,
+ * no env. `ctx` carries the row facts the map needs (current assignee for the
+ * `assignee` pseudo-actor, kind for the agent-editor apply carve-out).
+ */
+export function findTransitionRule(
+  from: TicketStatus,
+  to: TicketStatus,
+  actor: TicketActor,
+  ctx: TransitionContext = {},
+): TransitionRule | null {
+  for (const rule of ALLOWED[from] ?? []) {
+    if (rule.to !== to) continue
+    const actorOk = rule.actors.some(a =>
+      a === 'assignee' ? !!ctx.assignee && ctx.assignee === actor : a === actor,
+    )
+    if (!actorOk) continue
+    if (rule.kinds && !rule.kinds.includes(ctx.kind ?? '')) continue
+    return rule
+  }
+  return null
+}
+
+export function isTransitionAllowed(
+  from: TicketStatus,
+  to: TicketStatus,
+  actor: TicketActor,
+  ctx: TransitionContext = {},
+): boolean {
+  return findTransitionRule(from, to, actor, ctx) !== null
+}
+
+export interface TicketLinkInput {
+  kind: string           // pr|issue|run|url|doc|commit|deploy|note
+  ref: string
+  state?: string | undefined  // open|merged|closed|passed|failed|ready
+}
+
+export interface TransitionOpts {
+  /** Free-text reason, stored as a `note` link so it survives on the ticket. */
+  note?: string | undefined
+  links?: readonly TicketLinkInput[] | undefined
+  lastError?: string | undefined
+  /** Force an attempt increment on an edge that does not always spend one. */
+  incrementAttempt?: boolean | undefined
+}
+
+export type TicketRow = typeof homepageTeamSuggestions.$inferSelect
+
+async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Promise<void> {
+  if (links.length === 0) return
+  await db.insert(suggestionLinks).values(
+    links.map(l => ({
+      suggestionId: id,
+      kind:         l.kind.slice(0, 12),
+      ref:          l.ref,
+      state:        l.state ? l.state.slice(0, 16) : null,
+    })),
+  )
+}
+
+/**
+ * Guarded ticket transition. Throws a 404 Response when the ticket is gone and
+ * a 409 when the (from, to, actor) triple is not in ALLOWED — including the
+ * case where the row moved underneath us between the read and the write, since
+ * the UPDATE is guarded on the status we validated against.
+ */
+export async function transitionSuggestion(
+  id: number,
+  to: TicketStatus,
+  actor: TicketActor,
+  opts: TransitionOpts = {},
+): Promise<TicketRow> {
+  if (!isTicketStatus(to)) {
+    throw new Response(`Bad Request: unknown status '${String(to)}'`, { status: 400 })
+  }
+  if (!isTicketActor(actor)) {
+    throw new Response(`Bad Request: unknown actor '${String(actor)}'`, { status: 400 })
+  }
+  const [row] = await db
+    .select()
+    .from(homepageTeamSuggestions)
+    .where(eq(homepageTeamSuggestions.id, id))
+    .limit(1)
+  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 })
+
+  const from = row.status as TicketStatus
+  const rule = findTransitionRule(from, to, actor, { assignee: row.assignee, kind: row.kind })
+  if (!rule) {
+    throw new Response(
+      `Conflict: '${from}' -> '${to}' is not permitted for actor '${actor}' on suggestion ${id}`,
+      { status: 409 },
+    )
+  }
+
+  const now = new Date()
+  const patch: Record<string, unknown> = { status: to, updatedAt: now }
+  if (rule.incrementAttempt || opts.incrementAttempt) {
+    patch['attemptCount'] = sql`${homepageTeamSuggestions.attemptCount} + 1`
+  }
+  if (opts.lastError !== undefined) patch['lastError'] = opts.lastError
+  // Returning to `approved` puts the ticket back on the unassigned queue,
+  // whether that came from a lease expiry or from an unblock.
+  if (to === 'approved') {
+    patch['assignee'] = null
+    patch['claimedAt'] = null
+    patch['claimExpiresAt'] = null
+  }
+  if (to === 'verified') {
+    patch['verifiedBy'] = actor
+    patch['verifiedAt'] = now
+  }
+  // decided_by/decided_at record the triage decision and the retirement. A
+  // later system move (lease release, unblock) must not overwrite who triaged.
+  if (from === 'proposed' || to === 'dismissed') {
+    patch['decidedBy'] = actor
+    patch['decidedAt'] = now
+  }
+  // Backward compat for readers of apply_ref (admin UI, agent-editor history):
+  // the first PR link on the applying transition fills it if it is still empty.
+  if (to === 'applied' && !row.applyRef) {
+    const pr = opts.links?.find(l => l.kind === 'pr')
+    if (pr) patch['applyRef'] = pr.ref
+  }
+
+  const guards = [eq(homepageTeamSuggestions.id, id), eq(homepageTeamSuggestions.status, from)]
+  if (rule.actors.includes('assignee')) {
+    guards.push(eq(homepageTeamSuggestions.assignee, actor))
+  }
+  const updated = await db
+    .update(homepageTeamSuggestions)
+    .set(patch)
+    .where(and(...guards))
+    .returning()
+  if (updated.length === 0) {
+    throw new Response(
+      `Conflict: suggestion ${id} changed underneath the '${from}' -> '${to}' transition`,
+      { status: 409 },
+    )
+  }
+
+  const links: TicketLinkInput[] = [...(opts.links ?? [])]
+  if (opts.note) links.push({ kind: 'note', ref: opts.note, state: to })
+  await addTicketLinks(id, links)
+
+  return updated[0]!
+}
+
+/**
+ * Release zombie claims: rows still `in_progress` past their lease go back to
+ * `approved` with the assignee cleared so another agent can pick them up. The
+ * attempt count is deliberately untouched — a dead sandbox is not a failed fix
+ * attempt, and burning attempts on infrastructure noise would escalate healthy
+ * tickets to the owner. Sibling of expireStaleRuns(), same 5-minute throttle.
+ */
+export async function expireStaleClaims(): Promise<number> {
+  const res = await db
+    .update(homepageTeamSuggestions)
+    .set({
+      status:         'approved',
+      assignee:       null,
+      claimedAt:      null,
+      claimExpiresAt: null,
+      updatedAt:      new Date(),
+    })
+    .where(and(
+      eq(homepageTeamSuggestions.status, 'in_progress'),
+      lt(homepageTeamSuggestions.claimExpiresAt, new Date()),
+    ))
+    .returning({ id: homepageTeamSuggestions.id })
+  return res.length
+}
+
+// ── Claims ───────────────────────────────────────────────────────────────────
+
+export const CLAIM_LEASE_DEFAULT_SEC = 1200
+export const CLAIM_LEASE_MAX_SEC = 6 * 3600
+
+export interface ClaimFilter {
+  kind?: string | undefined
+  status?: TicketStatus | undefined
+  team?: TeamId | undefined
+  targetTeam?: TeamId | undefined
+}
+
+export interface ClaimInput {
+  assignee: TicketActor
+  leaseSeconds?: number | undefined
+  /** Claim one specific ticket instead of the head of the queue. */
+  id?: number | undefined
+  filter?: ClaimFilter | undefined
+}
+
+export type ClaimResult = { empty: true } | { empty: false; id: number }
+
+interface ResolvedClaim {
+  assignee: TicketActor
+  leaseSeconds: number
+  from: TicketStatus
+  id?: number | undefined
+  filter: ClaimFilter
+}
+
+/**
+ * One statement, no read-then-write. The inner SELECT takes a row lock and
+ * SKIP LOCKED steps over rows another claimer is already taking, so two
+ * concurrent claims of the same filter can never come back with the same
+ * ticket. Splitting this into a SELECT and a later UPDATE is exactly the race
+ * this exists to avoid; keep it a single statement.
+ */
+export function buildClaimQuery(c: ResolvedClaim): SQL {
+  const conds: SQL[] = [sql`c.status = ${c.from}`]
+  if (c.id != null) conds.push(sql`c.id = ${c.id}`)
+  if (c.filter.kind) conds.push(sql`c.kind = ${c.filter.kind}`)
+  if (c.filter.team) conds.push(sql`c.team = ${c.filter.team}`)
+  if (c.filter.targetTeam) conds.push(sql`c.target_team = ${c.filter.targetTeam}`)
+  // A live claim on the row blocks it; an expired one does not (expireStaleClaims
+  // is throttled, so the queue must not wait on it to reclaim).
+  conds.push(sql`(c.claim_expires_at IS NULL OR c.claim_expires_at < now())`)
+  return sql`
+    UPDATE homepage_team_suggestions AS s
+       SET status           = 'in_progress',
+           assignee         = ${c.assignee},
+           claimed_at       = now(),
+           claim_expires_at = now() + make_interval(secs => ${c.leaseSeconds}),
+           updated_at       = now()
+     WHERE s.id = (
+       SELECT c.id
+         FROM homepage_team_suggestions AS c
+        WHERE ${sql.join(conds, sql` AND `)}
+        ORDER BY c.priority ASC, c.created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+     )
+    RETURNING s.id AS id`
+}
+
+export type SqlExecutor = (query: SQL) => Promise<{ rows: Record<string, unknown>[] }>
+
+const defaultExecutor: SqlExecutor = async query =>
+  (await db.execute(query)) as unknown as { rows: Record<string, unknown>[] }
+
+/**
+ * Atomically take the head of a work queue. Returns `{empty:true}` when there
+ * is nothing claimable, which is the normal case for an idle routine and is
+ * not an error. The claim IS the `-> in_progress` transition, so it is refused
+ * (409) for any actor the transition map would not let claim from that status.
+ *
+ * `exec` is injectable so the atomicity contract can be exercised in tests
+ * without a database; production always uses the single-statement default.
+ */
+export async function claimSuggestion(
+  input: ClaimInput,
+  exec: SqlExecutor = defaultExecutor,
+): Promise<ClaimResult> {
+  if (!isTicketActor(input.assignee)) {
+    throw new Response(`Bad Request: unknown actor '${String(input.assignee)}'`, { status: 400 })
+  }
+  const from = input.filter?.status ?? 'approved'
+  if (!isTicketStatus(from)) {
+    throw new Response(`Bad Request: unknown status '${String(from)}'`, { status: 400 })
+  }
+  // The claim edge is the transition map's, not the claim endpoint's: an actor
+  // with no `-> in_progress` edge out of `from` cannot claim, full stop.
+  if (!isTransitionAllowed(from, 'in_progress', input.assignee)) {
+    throw new Response(
+      `Conflict: actor '${input.assignee}' may not claim a '${from}' ticket`,
+      { status: 409 },
+    )
+  }
+  const leaseSeconds = Math.min(
+    CLAIM_LEASE_MAX_SEC,
+    Math.max(60, Math.floor(input.leaseSeconds ?? CLAIM_LEASE_DEFAULT_SEC)),
+  )
+  const res = await exec(buildClaimQuery({
+    assignee: input.assignee,
+    leaseSeconds,
+    from,
+    id: input.id,
+    filter: input.filter ?? {},
+  }))
+  const id = Number((res.rows?.[0] as { id?: number } | undefined)?.id ?? 0)
+  return id > 0 ? { empty: false, id } : { empty: true }
+}
+
+/** One ticket with its links and the last 20 events of the run that filed it. */
+export async function getTicket(id: number) {
+  const [suggestion] = await db
+    .select()
+    .from(homepageTeamSuggestions)
+    .where(eq(homepageTeamSuggestions.id, id))
+    .limit(1)
+  if (!suggestion) return null
+  const links = await db
+    .select()
+    .from(suggestionLinks)
+    .where(eq(suggestionLinks.suggestionId, id))
+    .orderBy(desc(suggestionLinks.createdAt))
+    .limit(50)
+  const events = suggestion.runId == null ? [] : await db
+    .select()
+    .from(homepageTeamEvents)
+    .where(eq(homepageTeamEvents.runId, suggestion.runId))
+    .orderBy(desc(homepageTeamEvents.ts))
+    .limit(20)
+  return { suggestion, links, events }
 }
 
 // ── Strategy brief ───────────────────────────────────────────────────────────
