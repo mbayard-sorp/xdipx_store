@@ -1,0 +1,83 @@
+# Enforces the agent-editor file allowlist on agent-authored PRs.
+#
+# `.claude/agents/agent-editor.md` has always carried the allowlist as prose:
+# that agent may edit its own roster and the two team doc folders, nothing else.
+# Prose is not a gate. Once the release engine merges docs-only agent PRs on a
+# green CI signal, the allowlist has to be a check that can actually fail, or
+# an agent PR could quietly carry a code change through the docs-only path.
+#
+# Scope: PRs whose HEAD branch starts with `agents/`. GitHub's `on.pull_request.
+# branches` filter matches the BASE branch, so the head-ref condition lives on
+# the job. Non-agent branches skip the job entirely and are governed by ci.yml
+# plus the release engine's protected-path classifier
+# (app/lib/github.server.ts, PROTECTED_GLOBS).
+#
+# This file is itself a protected path: agent-editor is forbidden from
+# `.github/**` and the classifier stops any PR that touches it, so changes here
+# come from an engineer PR and an owner merge. That is deliberate.
+name: agent-allowlist
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: agent-allowlist-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  allowlist:
+    if: startsWith(github.head_ref, 'agents/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR: ${{ github.event.pull_request.number }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Assert every changed file is on the agent-editor allowlist
+        run: |
+          set -euo pipefail
+
+          # The changed-file list comes from the API, not from the branch diff
+          # and not from the PR description. Same rule as the release engine's
+          # classifier: only the API's file list decides.
+          gh api --paginate "repos/${REPO}/pulls/${PR}/files" --jq '.[].filename' > files.txt
+          gh api --paginate "repos/${REPO}/pulls/${PR}/files" \
+            --jq '.[] | select(.previous_filename != null) | .previous_filename' >> files.txt
+
+          if [ ! -s files.txt ]; then
+            echo "No changed files reported. Nothing to check."
+            exit 0
+          fi
+
+          echo "Changed files:"
+          sed 's/^/  /' files.txt
+
+          # Allowlist, verbatim from .claude/agents/agent-editor.md.
+          # `[^/]+` so a single `*` never crosses a directory boundary.
+          ALLOW='^(\.claude/agents/[^/]+\.md|docs/store-team/[^/]+\.md|docs/homepage-team/[^/]+\.md)$'
+
+          violations=0
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            if ! printf '%s' "$file" | grep -Eq "$ALLOW"; then
+              echo "::error file=${file}::${file} is outside the agent-editor allowlist"
+              violations=$((violations + 1))
+            fi
+          done < files.txt
+
+          if [ "$violations" -gt 0 ]; then
+            echo ""
+            echo "$violations file(s) outside the allowlist. An agents/** PR may only change:"
+            echo "  .claude/agents/*.md"
+            echo "  docs/store-team/*.md"
+            echo "  docs/homepage-team/*.md"
+            echo "Code or config changes belong on an engineer branch with human review."
+            exit 1
+          fi
+
+          echo "All $(wc -l < files.txt) changed path(s) are on the allowlist."
