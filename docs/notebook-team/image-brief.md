@@ -26,9 +26,12 @@ color map) and `hifi-reference.html` (placeholder blocks show composition and cr
   window light in a sunlit room, not a product lightbox and not a moody bedroom.
 - **Mood.** Editorial magazine, warm and unembarrassed. Curious and calm, never coy, never
   clinical, never porn-adjacent. A confident friend's coffee-table magazine.
-- **Subject.** Product-led or product-in-a-warm-human-context (hand, bedside, fabric, plant,
-  soft light) matched to the piece. Human presence is suggested through context and cropped hands
-  or gesture, never explicit anatomy and never a full nude figure.
+- **Subject.** Product-led, product-in-a-warm-human-context (hand, bedside, fabric, plant,
+  soft light), or an expressive human figure per the §0 hero router. Faces are allowed and
+  welcome (owner directive, 2026-07-28: more faces help customers feel seen); the former
+  crop-faces-out rule is withdrawn for Notebook surfaces. Never explicit anatomy, never a full
+  nude figure, and **never a person who is or could read as a minor** — every depicted person
+  is unambiguously adult (see §0 hard rules).
 - **Composition.** Generous negative space on the paper base so type and chips can overlay
   cleanly. Leave a quiet zone in the crop where the art-direction doc places a title or chip.
 - **Texture.** Subtle grain acceptable for editorial warmth; keep it light. No heavy filters, no
@@ -61,30 +64,82 @@ these per post, which makes it the single most-generated surface in the system �
 where every houseware failure to date has shipped (July 2026: tea cups on bedsheets; paired
 folded throw blankets). This section is binding for it.
 
-- **The subject rule (binding, positive).** The hero's subject IS one of the post's own embedded
-  in-stock products (`blogProductEmbed.productHandle`), placed via its **real Shopify product
-  photo passed as the reference image** (FLUX Kontext / `--ref-image` path), shown boldly and
-  large in frame in a warm, plausible use-context. Where a post genuinely has no product embed,
-  the subject is the topic's product family, same treatment. Never an object metaphor.
-- **Sensitive topics are not an exemption.** Real Talk and relational posts get the product the
-  post honestly recommends, in soft human context (bedside, cropped hand, fabric and daylight as
-  setting) — not a domestic still-life standing in for the feeling. If a topic feels too delicate
-  for a product-forward hero, the honest fallback is the product's real Shopify photo cropped
-  editorially, never a houseware metaphor. Every published post carries a hero (owner directive,
-  2026-07); a post that genuinely cannot get one holds as a Sanity draft for the owner rather than
-  publishing heroless.
-- **Caller briefs do not override this file.** When a requesting agent's brief suggests a
-  non-product subject (mugs, blankets, "abstract paired forms", any home-goods scene),
-  `media-manager` corrects it against this section and proceeds product-forward, noting the
-  correction in its reply. A caller's scene ideas may shape the *setting*; only this file and the
-  post's embeds decide the *subject*.
+### The hero router (owner-codified 2026-07-28)
+
+The post's **publishing category** decides the hero archetype. The category is assigned by the
+weekday slot before the topic is picked, so the router needs no judgment call and cannot be
+gamed by a per-post "sensitivity" claim:
+
+| Category | Hero archetype |
+|---|---|
+| `guides`, `comparisons`, `care`, `wellness-basics` | **Product hero** (§0-P below) — the article is about a product |
+| `real-talk`, `podcast-notes` | **Human hero** (§0-H below) — the article is about human things |
+| Any category with zero product embeds | **Human hero** (nothing to be product-forward about) |
+
+### §0-P. Product hero (product articles)
+
+Desire-forward staging first, product second: the frame sells the anticipation the product
+serves, with the product as the unmistakable subject.
+
+- **Subject.** One of the post's own embedded in-stock products
+  (`blogProductEmbed.productHandle`), placed via its **real Shopify product photo passed as the
+  reference image** (FLUX Kontext / `--ref-image` path), shown boldly and large in frame.
+- **Staging.** Desire-forward per the charter's imagery register (sensory anticipation, texture,
+  warm light, the moment before), capped at the charter's visual 6-7. Never product-in-use,
+  never bodies in sexual context. Where a post genuinely has no product embed the subject is the
+  topic's product family, same treatment. Never an object metaphor.
+- **Fallback.** The product's real Shopify photo cropped editorially.
+
+### §0-H. Human hero (human-experience articles)
+
+The subject is a **person**: Emma or one of her fictional friends, expressive, reflecting how a
+customer might be feeling when they read the headline. These are hyperbolic, editorial,
+openly-fictional images — a means of expression, not a lived-experience claim (owner ruling,
+2026-07-28). Emma's *written* no-lived-experience rule is unchanged; images are expression,
+words are claims.
+
+- **Subject.** One or two adults, faces visible and expressive (gesture, mood, tenderness,
+  exhaustion, delight — matched to the headline's feeling). The post's embedded product MAY
+  appear at secondary scale in the scene (on a nightstand, in the setting) but is never
+  required and never the subject.
+- **Emotional range.** Sad, tired, pensive, longing, overjoyed — all licensed, **inside the
+  warm-light lock**. Sad in sunlight reads tender; sad in shadow reads moody, and the
+  bright/warm doctrine still binds. No near-black, no boudoir gloom.
+- **Hard rules (binding, every human hero):**
+  - **Adults only, written for how generation actually fails:** every prompt states adult age
+    markers explicitly (e.g. "adults in their 30s"), and the vision gate hard-rejects any face
+    or body with youthful ambiguity. Nobody prompts for children; models drift young. The
+    reject fires on ambiguity, not on intent. **No images of children, ever.**
+  - **Uncanny-face hard reject.** Faces are where generation visibly fails: wrong teeth,
+    dead eyes, warped features, extra fingers near a face. Any uncanny artifact is an
+    automatic reject, no salvage crop.
+  - **Diversity is deliberate.** Vary age, body type, and skin tone across posts so "feel
+    seen" is real, not twelve variations of one 25-year-old.
+  - Never explicit anatomy, never nudity, never bodies in sexual contact, no readable
+    invented text.
+- **Emma's likeness.** Emma may appear (canonical photo: Sanity `singleton.editor` as ref
+  image) in both guide-mode (gesturing, hosting, explaining) and expressive-mode (reflecting
+  the reader's feeling). Her friends are anonymous fictional adults, generated fresh.
+
+### Shared rules (both archetypes)
+
+- **Caller briefs do not override this file**, but under the router the correction runs both
+  ways: `media-manager` corrects a product-subject request on a `real-talk` post to §0-H just
+  as it corrects a mug-scene request on a `guides` post to §0-P, noting the correction in its
+  reply. A caller's scene ideas shape the *setting*; the router decides the *archetype*.
+- **The houseware ban is unchanged.** Domestic-metaphor objects are banned as subjects in both
+  archetypes (the home-goods-catalog class test above). In a §0-H scene, non-product objects
+  must be architecture or surface (bed, nightstand, windowsill, table, wall).
 - **Aspect / dimensions.** Landscape ~4:3 (`1200 × 900` class). Inherit all global palette,
   light, and composition rules; keep a quiet zone for the title per the layout.
-- **Vision-gate notes.** Reject hard if the subject is not an embedded product (or its stated
+- **Vision-gate notes.** §0-P: reject hard if the subject is not an embedded product (or its
   product-family fallback), if the product is small, incidental, or invented rather than
-  ref-image-placed, or if the frame passes the home-goods-catalog test above. Two failures:
-  fall back to the product's real Shopify photo cropped editorially; if even that fails, the post
-  holds as a Sanity draft for the owner rather than publishing heroless.
+  ref-image-placed, or if the frame passes the home-goods-catalog test. §0-H: reject hard on
+  youthful ambiguity, uncanny faces, moody/dark grading, sexualized bodies, or a frame with no
+  identifiable human presence. Two failures on §0-P: fall back to the product's real Shopify
+  photo cropped editorially. Two failures on §0-H: retry with a simpler single-figure
+  composition; if that also fails, the post holds as a Sanity draft for the owner rather than
+  publishing heroless.
 
 ---
 

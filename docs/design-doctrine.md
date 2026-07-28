@@ -214,10 +214,22 @@ program"); prompts start from the matching per-surface scaffold in
   manicure that rhymes). Uses: wayfinder tiles, rail cards, ranked-set tiles,
   promos.
 - **C — in-situ bright scene.** Product in a believable sunlit private space
-  among personal objects, or a cropped human presence (hands, thigh, torso —
-  anonymous scene models are never shown face-on; the approved Emma-likeness
-  carve-out is the one exception, product still the hero; never explicit). Bright, never boudoir-gloom. Uses: hero,
-  photo/couples band, occasion edits, human-context wayfinder tiles.
+  among personal objects, or a human presence (hands, thigh, torso, or full
+  figure with face visible — the former never-face-on rule is withdrawn, owner
+  directive 2026-07-28: more faces help customers feel seen; never explicit).
+  Bright, never boudoir-gloom. Uses: hero, photo/couples band, occasion edits,
+  human-context wayfinder tiles, Notebook human heroes (per
+  `docs/notebook-team/image-brief.md` §0-H).
+- **Depicted-people hard rules (bind every archetype that shows a person):**
+  **no images of children, ever** — and because generation drifts young without
+  being asked to, the rule is enforced as *unambiguous adulthood*: prompts state
+  adult age markers, and the vision gate hard-rejects any face or body with
+  youthful ambiguity, on ambiguity rather than intent. Uncanny faces (dead eyes,
+  warped features, wrong teeth) are an automatic reject. Vary age, body type,
+  and skin tone deliberately across assets. Emma's likeness follows the approved
+  Emma-likeness policy; expressive/emotional depictions of Emma and her fictional
+  friends are licensed on Notebook human-hero surfaces (they are openly
+  hyperbolic fiction, not lived-experience claims).
 - **D — editorial metaphor macro.** One tasteful single-concept scene (silk,
   water, soft foil, fruit) standing in for sensation. Uses: PDP mood slides,
   Notebook cover system.

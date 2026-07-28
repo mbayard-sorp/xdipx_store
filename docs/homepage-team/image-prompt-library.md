@@ -112,13 +112,19 @@ detail frame per product. Scaffold (always with `--ref-image` = the product's Sh
 
 **Rejects:** (hand-anatomy failures go here; the vision gate hard-checks hands per doctrine §4)
 
-## Notebook — Daily post hero — Archetype D (metaphor macro) or B (`docs/notebook-team/image-brief.md` §0, ~1200×900)
+## Notebook — Daily post hero (`docs/notebook-team/image-brief.md` §0, ~1200×900)
 
-Scaffold (always with `--ref-image` = the post's embedded product's real Shopify photo, fal Kontext,
+**Routed by publishing category** (§0 hero router, owner-codified 2026-07-28): `guides` /
+`comparisons` / `care` / `wellness-basics` → §0-P product scaffold; `real-talk` /
+`podcast-notes` (and any post with zero embeds) → §0-H human scaffold.
+
+### §0-P product scaffold
+
+(always with `--ref-image` = the post's embedded product's real Shopify photo, fal Kontext,
 `imageSize: 'landscape_4_3'`):
 
-> Bright warm editorial magazine photograph on a pure white paper background, warm golden-hour
-> daylight falling softly from one side, calm and unembarrassed mood, tasteful and non-explicit.
+> Bright warm editorial magazine photograph on a pure white paper background, soft directional
+> daylight falling from one side, calm and unembarrassed mood, tasteful and non-explicit.
 > The {product} standing large and bold in the frame, placed upright on a clean white paper
 > surface, keep the product packaging and label exactly as shown in the reference image, unaltered
 > and legible, do not invent or distort any label text. {one small category-accent prop — e.g. a
@@ -129,6 +135,27 @@ Scaffold (always with `--ref-image` = the post's embedded product's real Shopify
 > candles, no mugs, no cups, no notebooks, no fruit, no other objects, not clinical, not a
 > lightbox, not dark, not moody, no garbled or illegible label text.
 
+### §0-H human scaffold
+
+(no ref-image unless Emma appears — then `--ref-image` = the canonical Emma photo, Sanity
+`singleton.editor`; fal, `imageSize: 'landscape_4_3'`, 2 candidates):
+
+> Bright warm editorial magazine photograph, soft directional window daylight, high-key, calm
+> private sunlit room, tasteful and non-explicit. {One or two adults in their 30s, clearly
+> adult}, {expressive direction matched to the headline's feeling — e.g. "sitting on the edge of
+> an unmade bed, face turned toward the window, tired and tender" / "mid-laugh, gesturing across
+> a kitchen counter"}, faces visible, natural correct anatomy, five fingers per hand, natural
+> skin tones, fully clothed in soft casual clothing. {Optional: the {product} resting small on a
+> nightstand or shelf at the edge of the frame.} Coral-soft and plum-soft warmth in the light,
+> white and warm-neutral surfaces, generous negative space in the {zone} for a title overlay.
+> No children, no teenagers, no youthful ambiguity, no nudity, no bare torso, no sexual contact,
+> no uncanny faces, no warped features, no extra fingers, no mugs, no cups, no candles, no
+> folded blankets, no towels, no text, no words, no logos, not moody, not dark, no candlelight,
+> no orange, no amber, no gradient wall, not clinical.
+
+Vision gate for §0-H: hard reject on youthful ambiguity (reject on ambiguity, not intent),
+uncanny faces, moody or dark grading, sexualized bodies, or no identifiable human presence.
+
 **Keepers:** JO H2O Original Water-Based Lubricant (`jo-h2o-original-water-based-lubricant-4-oz`),
 sage-leaf + water-droplet care accent, warm dappled daylight on cream/white paper →
 `image-e75e55758b2fc4594fd24ec197a561744163c299-1184x880-jpg` (post: `how-do-you-care-for-silicone-toys`).
@@ -138,9 +165,10 @@ no accent prop (guides/Real Talk tone, no category chip needed), standing uprigh
 warm daylight paper with one crisp side shadow, no props at all → shape and color matched the real
 product photo cleanly via Kontext (tapered head, two side buttons, matte cherry-red finish) →
 `image-4f031e89641e484c6f45a3d579c54bed3455fbd0-1184x880-jpg` (post:
-`why-first-toy-shopping-feels-overwhelming`). Confirms the brief's guidance that a small bullet is a
-strong beginner-subject hero even on a Real Talk / overwhelm-themed post — no domestic-metaphor
-fallback was needed.
+`why-first-toy-shopping-feels-overwhelming`). **Superseded as precedent (2026-07-28):** under the
+§0 hero router, `real-talk` posts now take the §0-H human scaffold, not a product hero. Keep this
+entry only as evidence that Kontext matches bullet-scale products cleanly; do not cite it as
+support for product-forward heroes on Real Talk posts.
 
 Sliquid Naturals H2O Intimate Lubricant 8.5oz (`naturals-h2o-intimate-lubricant-8-5-oz`), guides
 category (no accent prop), shot close and tight so the bottle fills most of the frame height with

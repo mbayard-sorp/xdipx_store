@@ -172,23 +172,39 @@ live. No pending brief on Thursday → the slot falls back to care and the retro
 ### 8B. Real Talk (twice weekly, Tuesday + Friday)
 
 A problem → root cause → resolution narrative that ends, where honest, at products that actually
-help. Structure is plain H2 prose — no custom Sanity block; heading-structured answers are what
-LLM engines lift, and a custom block would add renderer work for nothing. **H2s are question-form
-on first draft**, per the blog addendum's answer-first/question-form rule in `docs/emma-voice.md`
-(statement-style H2s fail the voice gate as a REVISE):
+help. Structure is plain H2 prose — no custom Sanity block. **Essay-shaped, not answer-shaped**
+(owner-codified 2026-07-28, superseding the question-H2 mandate for this format only; guides and
+the other categories stay answer-shaped per the blog addendum):
 
-1. **H2, question-form, e.g. "What does it mean when sex feels dry?"** — the problem stated in the
-   reader's words, empathetic and specific. "What people tell us / what shows up in questions",
-   never first-person anecdote (Emma has no lived experience — the rule is extra load-bearing in
-   this format).
-2. **H2, question-form, e.g. "Why does this happen?"** — the root cause explained plainly. No
-   diagnosis language, no medical overreach; include a "worth seeing a clinician if…" line
-   whenever the topic borders on health.
-3. **H2, question-form, e.g. "What actually helps?"** — 2-3 concrete approaches (habits,
-   communication, technique), each optionally paired with ONE honest, in-stock `blogProductEmbed`
-   that genuinely serves that approach. **Products appear only in this resolution section, never
-   in the problem framing** — that is the anti-sleaze rule.
-4. FAQ section as always.
+0. **Direct-answer capsule.** Two sentences at the very top that answer the target query
+   directly — the quotable block for LLM/AEO citation. The essay below is what gets read; the
+   capsule is what gets cited.
+1. **The problem, scene first.** Open with a real-sounding scene or moment of recognition in the
+   reader's world before any explanation. Statement H2s are allowed in this format. The title
+   still matches the target query closely, and the FAQ carries the question-form variants (with
+   FAQPage JSON-LD), so citability survives the essay shape. "What people tell us / what shows up
+   in questions", never first-person anecdote (Emma has no lived experience — the rule is extra
+   load-bearing in this format; her hero-image depictions are fictional expression and don't
+   change this).
+2. **The root cause, plainly and with authority.** No diagnosis language, no medical overreach;
+   include a "worth seeing a clinician if…" line whenever the topic borders on health. Variance
+   in experience is stated boldly, never hedged.
+3. **What helps** — 2-3 concrete approaches (habits, communication, technique). **Embed cap: at
+   most ONE `blogProductEmbed` per Real Talk post**, and it must pass the earned-embed test:
+   (E1) the sentence immediately before the embed names a felt state, not a product property;
+   (E2) the embed's own paragraph carries at least as many reader-state clauses as
+   product-property clauses; (E3) the embed copy resolves the objection the section raised, in
+   that section's own words. Approaches without an honest embed link a collection instead.
+   **Products appear only in this resolution section, never in the problem framing** — that is
+   the anti-sleaze rule, **and it binds the hero image too**: Real Talk heroes are §0-H human
+   heroes per `docs/notebook-team/image-brief.md`, never a product hero promoting a remedy to
+   the thesis.
+4. FAQ section as always — this is where the question-shaped material concentrates.
+
+**Upstream substance (Real Talk only):** before drafting, the `intimacy-advisor` contributor
+returns the emotional arc, the reader's specific unnamed fear, what clinicians commonly observe,
+and validation lines for the writer to draw from (routine Step 3.5). It contributes; it never
+gates.
 
 Format rules added 2026-07-21 (owner-approved):
 

@@ -74,8 +74,20 @@ and use category `blogCategory-podcast-notes`. None pending → fall back to a c
 in the retro.
 
 **Real Talk days (Tue/Fri):** pick the next unwritten topic from content-plan §8B (or a queued
-brief that fits the problem→resolution shape), and write to the §8B structure — problem in the
-reader's words, root cause plainly, resolution with products only in the "What helps" section.
+brief that fits the problem→resolution shape), and write to the §8B structure — essay-shaped
+(direct-answer capsule, scene-first problem, root cause with authority, resolution with at most
+ONE earned embed).
+
+## Step 3.5: Intimacy-advisor brief (Real Talk days only)
+
+Before drafting a Real Talk post, hand the chosen §8B row (slug, problem, target query, † flag)
+to `intimacy-advisor`. It returns a structured brief: the emotional arc, the reader's specific
+unnamed fear, what clinicians commonly observe (always attributed, never first-person clinical
+authority), 2-3 concrete validation lines, topic-specific clinician-line triggers on † rows,
+0-3 real sources, and caution flags. Draft FROM the brief in Step 4; the brief is same-run
+context, not a Sanity doc. The advisor contributes only — it has no verdict, no block authority,
+and both downstream gates review the final draft exactly as before. If the advisor errors, note
+it as a `step` event and draft without it; do not skip the day.
 
 Otherwise pick, in order, logging the source as a `step` event:
 
@@ -118,20 +130,24 @@ Create idempotently: doc `_id` is `blogPost-${slug}`, `createIfNotExists` then `
   (`{productHandle, ctaLabel, layout}`), `blogPullQuote`, `blogCta`.
 - `seoTitle` (max 70 chars) and `seoDescription` (max 160 chars), both filled.
 - `relatedPosts` (max 3, when relevant); `featured` and `noIndex` default off.
-- `heroImage` + `heroImageAlt`: ask `media-manager` (reuse-first). The request MUST (a) name the
-  post's `blogProductEmbed` handles as the mandatory subject pool and (b) point at §0 "Daily post
-  hero" of `docs/notebook-team/image-brief.md`, which is binding: the hero's subject is one of the
-  post's embedded products placed via its real Shopify photo as the ref image — never a domestic
-  metaphor object (mugs, blankets, towels, candles, decor). Do not invent ad-hoc scene subjects in
-  the request; setting ideas are fine, subjects are not. **A hero image is mandatory on every
-  published post** (owner directive, 2026-07). If imagery genuinely cannot be produced, hold the
-  post as a Sanity `status:'draft'` for the owner and say so in the retro; do not publish it
-  heroless. Heroless is no longer an accepted published state, and a houseware/domestic-metaphor
-  subject never is either.
+- `heroImage` + `heroImageAlt`: ask `media-manager` (reuse-first). The request MUST (a) state the
+  post's publishing category and (b) point at the §0 **hero router** in
+  `docs/notebook-team/image-brief.md`, which is binding: guides/comparisons/care/wellness-basics
+  posts get the §0-P product hero (subject = one of the post's `blogProductEmbed` handles via its
+  real Shopify photo as ref image); real-talk/podcast-notes posts get the §0-H **human hero**
+  (expressive adult figure — Emma or a fictional friend — reflecting how the reader might feel at
+  the headline; faces visible; warm light; adults-only hard rules). Pass the headline and its
+  feeling with the request on §0-H posts. Never a domestic metaphor object in either archetype.
+  **A hero image is mandatory on every published post** (owner directive, 2026-07). If imagery
+  genuinely cannot be produced, hold the post as a Sanity `status:'draft'` for the owner and say
+  so in the retro; do not publish it heroless.
 
 Content quality bar (all mandatory, from `.claude/agents/content-writer.md`):
 
-- Question-form H2s; each section leads with the direct answer.
+- Structure by category (content-plan §8B / blog addendum): answer-shaped with question-form H2s
+  for guides/comparisons/care/wellness-basics; essay-shaped (direct-answer capsule + scene-first
+  + statement H2s allowed) for real-talk. Register: authority max, desire capped 7-8, zero
+  hedging, humor licensed (never on clinical beats), rhythm rules per the blog addendum.
 - A `## Frequently asked questions` section in every post.
 - At least one honest `blogProductEmbed` where it genuinely helps (in-stock products only,
   verified first). CTAs from the charter whitelist.
