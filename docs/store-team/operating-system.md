@@ -48,16 +48,16 @@ All times UTC. Vercel crons are verified against `vercel.json`; cloud routines a
 
 | UTC | Surface | Type | What it does | State |
 |---|---|---|---|---|
-| every 15 min | `/cron/log-monitor` | Vercel cron | Reads production errors, opens a GitHub issue, and (planned) files a `kind:'code'` ticket deduped on the error fingerprint | LIVE (cron); ticket filing PLANNED |
+| every 15 min | `/cron/log-monitor` | Vercel cron | Reads production errors, opens a GitHub issue, and (planned) files a `kind:'code'` ticket deduped on the error fingerprint | LIVE (cron + ticket filing, PR #349) |
 | every 30 min | `/cron/homepage-healthcheck` | Vercel cron | Fetches `/` and `/discover`, asserts 200 + LCP image + valid JSON-LD, rolls the Sanity homepage back to last-good on failure | LIVE |
-| every 30 min | render-truth assertion (inside the same cron) | Vercel cron | Asserts the *published* slate actually rendered: hero handle, every rail title, tile headlines, couples heading; hard-fails when fallback markers render where team content is published | PLANNED |
+| every 30 min | render-truth assertion (inside the same cron) | Vercel cron | Asserts the *published* slate actually rendered: hero handle, every rail title, tile headlines, couples heading; hard-fails when fallback markers render where team content is published | LIVE (PR #349; verified in production 2026-07-28, 9 assertions passing, 0 fallbacks) |
 | every 6 h | `/cron/checkout-probe` | Vercel cron | Walks the money path and alerts on failure. Checkout is a protected path, so anything it files always escalates | LIVE |
-| every 10 min | `/cron/release-engine` | Vercel cron | Discovers agent PRs, classifies protected paths, checks gates, squash-merges, polls the deploy, smokes it, reverts on failure, escalates | PLANNED (not in `vercel.json` yet) |
+| every 10 min | `/cron/release-engine` | Vercel cron | Discovers agent PRs, classifies protected paths, checks gates, squash-merges, polls the deploy, smokes it, reverts on failure, escalates | LIVE (PR #351; `release_engine_enabled` turned ON by the owner 2026-07-28) |
 | 04:40 | `/cron/indexnow-push` | Vercel cron | Pushes changed and stale URLs to IndexNow | LIVE |
 | 12:30 | `/cron/seo-daily` | Vercel cron | Computes index deltas from `gsc_index_daily`, pushes recrawl batches, files tickets on anomalies, writes the digest blob | LIVE |
-| 13:00 | `/cron/owner-digest` | Vercel cron | The one owner email per day: shipped, homepage now, SEO deltas, tickets, escalations | LIVE (route); new sections PLANNED |
-| 14:00 | R-DEV, dev pass 1 | Cloud routine, `rr7-engineer` | Claims up to 3 `kind:'code'` tickets, one branch and one PR each. Playbook: [`routine-dev-daily.md`](./routine-dev-daily.md) | PLANNED (trigger not yet created) |
-| 15:30 | R-QA | Cloud routine, `qa-reviewer` | Reviews every `pr_open` ticket, verifies or bounces. Playbook: [`routine-qa-daily.md`](./routine-qa-daily.md) | PLANNED (trigger not yet created) |
+| 13:00 | `/cron/owner-digest` | Vercel cron | The one owner email per day: shipped, homepage now, SEO deltas, tickets, escalations | LIVE (route + five sections, PR #352). Delivery was broken until 2026-07-28: see the note below |
+| 14:00 | R-DEV, dev pass 1 | Cloud routine, `rr7-engineer` | Claims up to 3 `kind:'code'` tickets, one branch and one PR each. Playbook: [`routine-dev-daily.md`](./routine-dev-daily.md) | LIVE (trigger `trig_01MEQYsg5sHPbM4v39FqssAD`, `0 14,20 * * *` UTC) |
+| 15:30 | R-QA | Cloud routine, `qa-reviewer` | Reviews every `pr_open` ticket, verifies or bounces. Playbook: [`routine-qa-daily.md`](./routine-qa-daily.md) | LIVE (trigger `trig_019GjVP9hGBU1gmXRBYtYURm`, `30 15 * * *` UTC) |
 | 17:00 (target) | Routine A, daily merchandise | Cloud routine, `homepage-orchestrator` | Picks the featured product, refreshes Emma copy and imagery, publishes content to Sanity within the budget and kill switch | LIVE, **but the trigger fires at 10:00, not 17:00** |
 | 20:00 | R-DEV, dev pass 2 | Cloud routine, `rr7-engineer` | Second attempt pass. Claims bounced tickets first | PLANNED |
 | Mon 12:00 | Weekly strategy retro | Cloud routine, `store-strategist` | Cross-team retro, weekly brief, ticket metrics, routine coverage audit | LIVE |
@@ -206,3 +206,16 @@ Recorded plainly so nobody mistakes the design for the system, as of 2026-07-27:
 - The detectors file GitHub issues today but do not yet file tickets.
 
 When you implement one of these, move its row from PLANNED to LIVE here in the same PR.
+
+## A note on owner email, 2026-07-28
+
+Every alert in this document routes through `sendOwnerEmail`, and until 2026-07-28 not one had
+ever been delivered. Two faults stacked. The SMTP credentials were never set, so the function
+returned `sent:false` and only logged a warning. Once they were set, it still failed: the function
+loaded nodemailer with a bare `require()`, and the Vercel entry is bundled as ESM where `require`
+is not defined, so the `ReferenceError` was caught and reported as "nodemailer not installed"
+about a package that was installed the whole time.
+
+Both are fixed (PR #354) and a real digest was delivered and confirmed. The lesson worth keeping:
+an error string that asserts a cause nobody verified will hide a bug for as long as anyone is
+willing to believe it. Prefer reporting the underlying error.
