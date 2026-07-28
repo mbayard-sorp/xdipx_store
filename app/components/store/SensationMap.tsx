@@ -38,11 +38,33 @@ const MONO = { fontFamily: 'var(--font-mono)' } as const
 const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 400 } as const
 const BODY = { fontFamily: 'var(--font-body)' } as const
 
-/** Verified collection handles only; everything else resolves to best-sellers so
- *  the "See the full fit" link never 404s. */
+/**
+ * Verified collection handles only (checked live against
+ * https://xdipx.com/sitemaps/collections.xml, each returns 200); everything
+ * else resolves to best-sellers so the "See the full fit" link never 404s.
+ *
+ * `novelty`, `book-media`, and `sex-machine` have no matching live collection
+ * (only brand-named collections like `curve-novelties`/`ns-novelties` for
+ * novelty, and `sex-furniture` is a distinct category from "sex machine") and
+ * stay on the best-sellers fallback.
+ */
 const TYPE_COLLECTION: Partial<Record<ProductTypeDial, string>> = {
-  couples: '/collections/couples',
-  massage: '/collections/massage-mood',
+  vibrator:    '/collections/vibrators',
+  dildo:       '/collections/dildos',
+  anal:        '/collections/anal',
+  bondage:     '/collections/all-bondage',
+  'cock-ring': '/collections/cock-rings',
+  stroker:     '/collections/strokers',
+  couples:     '/collections/couples',
+  harness:     '/collections/strap-on-harnesses',
+  extender:    '/collections/pumps-extenders',
+  pump:        '/collections/penis-pumps',
+  lube:        '/collections/lubricants',
+  massage:     '/collections/massage-mood',
+  enhancer:    '/collections/enhancers-arousal',
+  wear:        '/collections/wear',
+  condom:      '/collections/condoms',
+  wellness:    '/collections/wellness-care',
 }
 function fullFitHref(type: ProductTypeDial): string {
   return TYPE_COLLECTION[type] ?? '/collections/best-sellers'
