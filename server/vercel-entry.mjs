@@ -19275,8 +19275,8 @@ function mkStep(step, ok, ms, extra = {}) {
   if (extra.detail !== void 0) s.detail = extra.detail;
   return s;
 }
-function baseUrl() {
-  return (process.env["BASE_URL"] || "https://xdipx.com").replace(/\/+$/, "");
+function baseUrl(override) {
+  return (override || process.env["BASE_URL"] || "https://xdipx.com").replace(/\/+$/, "");
 }
 async function checkUrl(url, opts = {}) {
   const controller = new AbortController();
@@ -19351,10 +19351,10 @@ async function checkCheckout(url) {
   if (rendered) return { status: r.status, ok: true };
   return { status: r.status, ok: true, detail: `reached checkout endpoint (status ${r.status}; full render verified by browser tier)` };
 }
-async function runCheckoutProbe() {
+async function runCheckoutProbe(opts = {}) {
   const start = Date.now();
   const steps = [];
-  const base = baseUrl();
+  const base = baseUrl(opts.baseUrl);
   const record = (step, r, t0) => {
     steps.push(mkStep(step, r.ok, Date.now() - t0, { status: r.status, detail: r.detail }));
     return r.ok;

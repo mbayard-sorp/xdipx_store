@@ -42,8 +42,8 @@ function mkStep(step: string, ok: boolean, ms: number, extra: { status?: number 
   return s
 }
 
-function baseUrl(): string {
-  return (process.env['BASE_URL'] || 'https://xdipx.com').replace(/\/+$/, '')
+function baseUrl(override?: string): string {
+  return (override || process.env['BASE_URL'] || 'https://xdipx.com').replace(/\/+$/, '')
 }
 
 export interface FetchCheck {
@@ -167,10 +167,17 @@ async function checkCheckout(url: string): Promise<FetchCheck> {
  * checkout page, and the checkout-extras content page. Stops at the first failed
  * step. Never throws; a thrown Storefront error becomes a failed step.
  */
-export async function runCheckoutProbe(): Promise<ProbeResult> {
+/**
+ * Walk the money path end to end.
+ *
+ * `baseUrl` targets a deployment other than production. The release engine's
+ * post-merge smoke needs this to probe a specific deployment rather than
+ * whatever BASE_URL happens to point at; omitted, behaviour is unchanged.
+ */
+export async function runCheckoutProbe(opts: { baseUrl?: string } = {}): Promise<ProbeResult> {
   const start = Date.now()
   const steps: ProbeStep[] = []
-  const base = baseUrl()
+  const base = baseUrl(opts.baseUrl)
 
   const record = (step: string, r: FetchCheck, t0: number): boolean => {
     steps.push(mkStep(step, r.ok, Date.now() - t0, { status: r.status, detail: r.detail }))
