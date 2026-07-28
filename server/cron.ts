@@ -579,6 +579,37 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/release-engine
+   * Schedule: every 10 minutes. Merges gate-passing agent PRs, waits for the
+   * production deploy, smoke-tests the live site, and reverts on failure.
+   *
+   * Lives on Vercel rather than in a cloud routine because cloud egress cannot
+   * reach api.github.com or api.vercel.com and both tokens are in Vercel's env.
+   *
+   * `?dryRun=1` (or `dry=1`) logs every decision and merges nothing. That is
+   * the staging path: watch a clean dry-run cycle before flipping
+   * `release_engine_enabled` on. The kill switch is checked first regardless,
+   * so with the valve off this route is a no-op either way.
+   *
+   * Always 200 on a completed cycle, including "did nothing": the engine
+   * deciding to wait is normal, and a 503 there would page for nothing. A
+   * config error or a thrown cycle is 503.
+   */
+  cronRoute('/release-engine', async (req, res) => {
+    try {
+      const q = req.query as Record<string, unknown>
+      const flag = (v: unknown) => v === '1' || v === 'true'
+      const dryRun = flag(q['dryRun']) || flag(q['dry'])
+      const { runReleaseEngineCycle } = await import('../app/lib/release-engine.server.js')
+      const result = await runReleaseEngineCycle({ dryRun })
+      res.status(result.ok ? 200 : 503).json(result)
+    } catch (err) {
+      console.error('[cron:release-engine]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/checkout-probe-report
    * Ingests the browser-tier Playwright result (a ProbeResult JSON body) from
    * the GitHub Action and records + alerts through the same path as the HTTP
