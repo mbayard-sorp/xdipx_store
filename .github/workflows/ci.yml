@@ -22,6 +22,14 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Several server modules construct their Neon client at import time
+      # (app/lib/db.server.ts, app/lib/gsc.server.ts), so importing them with
+      # no connection string throws before a single test body runs. Locally
+      # that is masked by .env. The suite is unit-level and never opens a
+      # connection, so a syntactically valid placeholder is all it needs.
+      # This is not a credential and must never be pointed at a real database.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
     steps:
       - uses: actions/checkout@v4
 
