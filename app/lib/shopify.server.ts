@@ -7001,15 +7001,31 @@ function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'][numbe
   }
 }
 
+// Smaller pages paced apart, rather than 100-product pages fired back to
+// back: a full-catalog recompute is ~25-35 pages regardless, and cost is
+// billed on nodes actually returned, so this trades a few extra seconds of
+// runtime for headroom in Shopify's leaky-bucket rate limit. Needed because
+// adminGraphQL's own THROTTLED retry (4 attempts, capped backoff) isn't
+// enough when the bucket is already low going in — that exhausted the batch
+// recompute's very first page on 2026-07-28 before any product was fetched.
+const PRICING_FETCH_PAGE_SIZE = 50
+const PRICING_FETCH_PAGE_DELAY_MS = 500
+
 export async function bulkFetchProductsForPricing(opts?: {
   cursor?: string | null
   limit?: number
 }): Promise<PricingProductSnapshot[]> {
-  const pageSize = opts?.limit ?? 100
+  const pageSize = opts?.limit ?? PRICING_FETCH_PAGE_SIZE
   let cursor: string | null = opts?.cursor ?? null
   const results: PricingProductSnapshot[] = []
+  let firstPage = true
 
   do {
+    if (!firstPage) {
+      await new Promise(r => setTimeout(r, PRICING_FETCH_PAGE_DELAY_MS))
+    }
+    firstPage = false
+
     const data = await adminGraphQL<PricingQueryResult>(PRICING_PRODUCTS_QUERY, {
       first: pageSize,
       after: cursor ?? null,
