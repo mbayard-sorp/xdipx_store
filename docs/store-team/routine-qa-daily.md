@@ -48,7 +48,7 @@ Pull the branch and read it locally. Git works in a cloud session; the GitHub AP
 egress is restricted to xdipx.com.
 
 ```bash
-git fetch origin agents/ticket-<id> && git checkout agents/ticket-<id>
+git fetch origin ticket/<id> && git checkout ticket/<id>
 git diff origin/main...HEAD
 ```
 
