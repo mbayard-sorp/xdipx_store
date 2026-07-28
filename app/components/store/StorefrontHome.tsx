@@ -45,7 +45,14 @@ import {
 } from '~/lib/analytics.client'
 import type { StorefrontData } from '~/lib/storefront-home.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
-import type { EmmaHeroSettings, WayfinderMosaicBlock, PlayTogetherBannerBlock, EmmaCuratedRailBlock } from '~/types/cms'
+import type {
+  EmmaHeroSettings,
+  WayfinderMosaicBlock,
+  PlayTogetherBannerBlock,
+  EmmaCuratedRailBlock,
+  TrustBarBlock,
+  HomepageFaqBlock,
+} from '~/types/cms'
 import type { LeanCardProduct } from '~/types'
 
 /* Team-controlled Sanity block types the storefront renders (everything else
@@ -124,7 +131,32 @@ function SectionNumeral({ n, className = '', tone = 'ink-4' }: { n: string; clas
  *  of these exactly or the hero falls back to the default label. */
 const HERO_CTA_WHITELIST = ['Take a peek →', 'Show me', 'Find your fit →', "I'll take it ♥"]
 
-function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?: EmmaHeroSettings | null }) {
+/** Strip a whitelist label's trailing arrow so the arrow can render as its own
+ *  aria-hidden glyph (the label text itself stays exactly as whitelisted). */
+function ctaText(label: string): string {
+  return label.endsWith('→') ? label.slice(0, -1).trimEnd() : label
+}
+
+/** Default target for the hero's secondary CTA. Deliberately NOT `/collections`:
+ *  that index is ~170 unsorted tiles, the worst possible landing for a nervous
+ *  first-time visitor, and it sat one click from the hero. */
+const SECONDARY_CTA_FALLBACK_HREF = '/collections/best-sellers'
+
+/** The label the Meet Emma band (Nº 04) renders. Shared with the hero's
+ *  secondary-CTA guard so the two can never drift into showing the same words
+ *  for the same destination, which is the defect that made the Meet Emma button
+ *  and the Nº 09 closer read as one duplicated CTA. */
+const MEET_EMMA_CTA_LABEL = 'Find your fit →'
+
+function Hero({
+  featured,
+  emmaHero,
+  trustBar,
+}: {
+  featured: DiscoveryProduct[]
+  emmaHero?: EmmaHeroSettings | null
+  trustBar?: TrustBarBlock | undefined
+}) {
   const lead = featured[0]
   const peekHref = lead ? `/products/${lead.handle}` : '/collections/best-sellers'
 
@@ -136,6 +168,29 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
   const ctaLabel = emmaHero?.primaryCtaLabel
   const primaryLabel =
     ctaLabel && HERO_CTA_WHITELIST.includes(ctaLabel) ? ctaLabel : 'Take a peek →'
+
+  // Secondary (ghost) CTA — same two guards as the primary (internal paths only,
+  // whitelist labels only), plus a third: the label may not collide with another
+  // CTA already on the page. Content proposes, the shell validates, exactly as
+  // HERO_CTA_WHITELIST already does for the primary.
+  //
+  // The link is honored as published. The LABEL is rejected when it duplicates
+  // the primary's or the Meet Emma band's, because a page that renders the same
+  // words twice for the same destination reads as one broken CTA rather than
+  // two choices (docs/design-doctrine.md §6: never duplicate the primary's
+  // label on the secondary).
+  const secondaryLink = emmaHero?.secondaryCtaLink
+  const secondaryHref = secondaryLink?.startsWith('/') ? secondaryLink : SECONDARY_CTA_FALLBACK_HREF
+  const secondaryLabelRaw = emmaHero?.secondaryCtaLabel
+  const secondaryLabel =
+    secondaryLabelRaw
+    && HERO_CTA_WHITELIST.includes(secondaryLabelRaw)
+    && secondaryLabelRaw !== primaryLabel
+    && secondaryLabelRaw !== MEET_EMMA_CTA_LABEL
+      ? secondaryLabelRaw
+      // Unset (or a rejected value): keep the original "never show the same
+      // label twice" behavior.
+      : primaryLabel.startsWith('Take a peek') ? 'Show me' : 'Take a peek →'
 
   // Team-managed `singleton.emmaHero` (Sanity) drives the text/config, field
   // by field, so a half-filled draft never blanks out a section — anything
@@ -201,21 +256,20 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
             >
               {primaryLabel.endsWith('→') ? (
                 <>
-                  {primaryLabel.slice(0, -1).trimEnd()} <span aria-hidden="true">→</span>
+                  {ctaText(primaryLabel)} <span aria-hidden="true">→</span>
                 </>
               ) : (
                 primaryLabel
               )}
             </Link>
             <Link
-              to="/collections"
+              to={secondaryHref}
               onClick={() => trackCtaClick('hero-secondary', 'hero')}
               className="inline-flex items-center gap-2 rounded-full border border-line-2 px-5 py-3 text-[15px] font-medium text-ink transition-colors hover:border-ink-3"
               style={BODY}
             >
               {/* Never duplicate the primary's label (both are whitelist picks). */}
-              {primaryLabel.startsWith('Take a peek') ? 'Show me' : 'Take a peek'}{' '}
-              <span aria-hidden="true">→</span>
+              {ctaText(secondaryLabel)} <span aria-hidden="true">→</span>
             </Link>
           </div>
 
@@ -238,50 +292,98 @@ function Hero({ featured, emmaHero }: { featured: DiscoveryProduct[]; emmaHero?:
           </div>
         </Reveal>
 
-        {/* product still — static LCP, never animated, coral-soft frame w/ inset vignette */}
+        {/* product still — static LCP, never animated, coral-soft frame w/ inset vignette.
+            The frame is wrapped in a Link to the SAME destination as the primary
+            CTA: the biggest, most product-looking thing on the page was inert,
+            and visitors were clicking it into nothing. `block` keeps the box
+            model identical to the bare div it replaced, and the image markup is
+            untouched (no Reveal, no opacity/transform wrapper) so the LCP
+            candidate renders exactly as before with zero CLS. */}
         <div className="relative min-w-0">
-          <div
-            className="relative aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-lg)] border border-line bg-coral-soft"
-            style={{ boxShadow: 'inset 0 -60px 90px rgba(26,20,24,0.07)' }}
+          <Link
+            to={primaryHref}
+            onClick={() => trackCtaClick('hero-image', 'hero')}
+            className="block"
           >
-            <span
-              className="absolute left-4 top-4 z-[1] rounded-full bg-paper/85 px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-ink-3"
-              style={MONO}
+            <div
+              className="relative aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-lg)] border border-line bg-coral-soft"
+              style={{ boxShadow: 'inset 0 -60px 90px rgba(26,20,24,0.07)' }}
             >
-              Nº 01, this week's pick
-            </span>
-            {lead?.imageUrl ? (
-              <OptimizedImage
-                src={lead.imageUrl}
-                alt={lead.imageAlt ?? lead.title}
-                priority
-                sizes="(max-width: 768px) 100vw, 50vw"
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="grid h-full w-full place-items-center text-5xl text-sage">♥</div>
-            )}
-          </div>
+              <span
+                className="absolute left-4 top-4 z-[1] rounded-full bg-paper/85 px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-ink-3"
+                style={MONO}
+              >
+                Nº 01, this week's pick
+              </span>
+              {lead?.imageUrl ? (
+                <OptimizedImage
+                  src={lead.imageUrl}
+                  alt={lead.imageAlt ?? lead.title}
+                  priority
+                  sizes="(max-width: 768px) 100vw, 50vw"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="grid h-full w-full place-items-center text-5xl text-sage">♥</div>
+              )}
+            </div>
+          </Link>
         </div>
       </div>
 
-      {/* Nº 02 · Trust strip — raised into the hero band, inside the first viewport */}
+      {/* Nº 02 · Trust strip — raised into the hero band, inside the first viewport.
+          Content-controlled: a published `trustBar` block wins, the array below
+          is the fallback. */}
       <Reveal variant="fade" as="div" className="border-t border-line">
-        <div className="mx-auto grid max-w-[1320px] grid-cols-2 gap-x-6 gap-y-3.5 px-6 py-[18px] md:flex md:flex-nowrap md:items-center md:justify-between md:gap-x-8 md:px-16">
-          {[
-            'Ships in plain packaging',
-            'Billed as XDIPX',
-            '30-day returns',
-            'Hand-checked, not auto-listed',
-          ].map(item => (
-            <div key={item} className="flex items-center gap-2.5 text-[13.5px] text-ink-3" style={BODY}>
-              <span className="text-sage" aria-hidden="true">♥</span> {item}
+        <div className="mx-auto grid max-w-[1320px] grid-cols-2 gap-x-6 gap-y-3.5 px-6 py-[18px] md:grid-cols-5 md:items-start md:gap-x-8 md:px-16">
+          {trustStripItems(trustBar).map(item => (
+            <div key={item.headline} className="flex items-start gap-2.5 text-[13.5px] text-ink-3" style={BODY}>
+              <span className="mt-px shrink-0 text-sage" aria-hidden="true">♥</span>
+              <span>
+                {item.headline}
+                {item.subheadline && (
+                  <span className="block text-[12px] text-ink-4">{item.subheadline}</span>
+                )}
+              </span>
             </div>
           ))}
         </div>
       </Reveal>
     </section>
   )
+}
+
+/**
+ * Shell fallback for the Nº 02 trust strip, used when the team has published no
+ * `trustBar` block.
+ *
+ * Per docs/design-doctrine.md §6, discretion copy names the dreaded moments
+ * (the box, the label, the card statement) rather than stating a flat fact, so
+ * "Billed as XDIPX" is now a promise about what a partner or a bank statement
+ * will actually show. The free-shipping line is the verified Shopify delivery
+ * profile threshold ($99 US; HI/AK/PR differs and is stated at checkout, not
+ * promised here). No fabricated proof: every line is a mechanic we can honor.
+ */
+const TRUST_STRIP_FALLBACK: TrustStripItem[] = [
+  { headline: 'Ships in plain packaging' },
+  { headline: 'No logo on the box, no product name on the label' },
+  { headline: 'Your statement reads XDIPX' },
+  { headline: 'Free US shipping over $99' },
+  { headline: 'Hand-checked, not auto-listed' },
+]
+
+interface TrustStripItem {
+  headline: string
+  subheadline?: string | undefined
+}
+
+/** Published trust items win; drop null/inactive refs, then fall back to the
+ *  shell array when nothing usable survives (never render an empty strip). */
+function trustStripItems(block?: TrustBarBlock | undefined): TrustStripItem[] {
+  const published = (block?.trustItems ?? [])
+    .filter(i => i != null && i.active !== false && !!i.headline)
+    .map(i => ({ headline: i.headline, subheadline: i.subheadline }))
+  return published.length > 0 ? published : TRUST_STRIP_FALLBACK
 }
 
 /* ── 3 · Meet Emma ─────────────────────────────────────────────────────────
@@ -468,16 +570,19 @@ function MeetEmma({ photoUrl, photoAlt }: { photoUrl?: string | null; photoAlt?:
               I'm an AI guide, so I don't get embarrassed and I don't have a shelf to push. Tell me a
               little about what you're after and I'll do the reading for you.
             </p>
-            {/* Anchors to the Compass closer band below. It keeps the guided-fit
-                promise in this copy without adding a third /discover link (mission
-                brief caps the page at the closer plus one preset pill). */}
+            {/* Goes straight to /discover. It used to anchor-scroll to the Nº 09
+                band, whose own button carried the SAME "Find your fit →" label
+                and only then went to /discover: two clicks and two identical
+                labels for one destination. The two buttons now carry different
+                whitelist labels (this one "Find your fit →", the closer "Show
+                me") so the page never shows the same CTA twice. */}
             <Link
-              to="#discover"
+              to="/discover"
               onClick={() => trackCtaClick('find-your-fit', 'meet-emma')}
               className="mt-7 inline-flex items-center gap-2 rounded-full border border-line-2 px-5 py-3 text-[15px] font-medium text-ink transition-colors hover:border-ink-3"
               style={BODY}
             >
-              Find your fit <span aria-hidden="true">→</span>
+              {ctaText(MEET_EMMA_CTA_LABEL)} <span aria-hidden="true">→</span>
             </Link>
           </Reveal>
         </div>
@@ -879,13 +984,16 @@ function StillDecidingBand() {
             </em>{' '}
             about. Same thing.
           </h2>
+          {/* "Show me", not "Find your fit →": the Meet Emma band above now
+              links straight to /discover with that label, and the page must not
+              render the same CTA label twice. Both are whitelist phrases. */}
           <Link
             to="/discover"
-            onClick={() => trackCtaClick('find-your-fit', 'still-deciding')}
+            onClick={() => trackCtaClick('show-me', 'still-deciding')}
             className="inline-flex items-center gap-2 rounded-full bg-coral px-7 py-4 text-[15px] font-medium text-white transition-transform hover:-translate-y-0.5"
             style={BODY}
           >
-            Find your fit <span aria-hidden="true">→</span>
+            Show me <span aria-hidden="true">→</span>
           </Link>
         </Reveal>
     </section>
@@ -928,28 +1036,48 @@ function HomeNotebookRail({ posts }: { posts: BlogPostCard[] }) {
     <section className="bg-paper py-16 md:py-20">
       <div className="mx-auto max-w-[1200px] px-6 md:px-16">
         <SectionNumeral n="10" className="mb-3 block" />
-        <NotebookRail posts={posts} heading="From the Notebook" className="" />
+        {/* The Notebook is ~21% of sessions with ~20 minutes of dwell and sold
+            nothing: no way deeper into the archive, no way across to a product.
+            It now shows six posts, a real see-all link, and a product chip on
+            any post that embeds one. No urgency, just an open door. */}
+        <NotebookRail
+          posts={posts}
+          heading="From the Notebook"
+          className=""
+          seeAllHref="/notebook"
+          seeAllLabel="More from the Notebook →"
+          showProductChips
+        />
       </div>
     </section>
   )
 }
 
-function FAQ() {
+function FAQ({ block }: { block?: HomepageFaqBlock | undefined } = {}) {
+  // A published `homepageFaq` block wins; the hardcoded array is the fallback.
+  // FAQStructuredData is handed the SAME array that renders below, so the
+  // JSON-LD can never advertise questions the page does not show.
+  const published = (block?.faqItems ?? []).filter(f => f?.question && f?.answer)
+  const faqs = published.length > 0 ? published : FAQS
+  const heading = block?.heading?.trim()
+
   return (
     <section className="bg-paper-2 py-16 md:py-20">
-      <FAQStructuredData faqs={FAQS} />
+      <FAQStructuredData faqs={faqs} />
         <Reveal variant="up" className="mx-auto max-w-[820px] px-6 md:px-16">
           <SectionNumeral n="11" className="mb-3 block" />
           <h2
             className="mb-9 text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]"
             style={DISPLAY}
           >
-            Questions, <em className="em">answered</em>.
+            {heading
+              ? <EmphasizedHeading text={heading} />
+              : <>Questions, <em className="em">answered</em>.</>}
           </h2>
-          {FAQS.map((f, i) => (
+          {faqs.map((f, i) => (
             <details
               key={f.question}
-              className={`group border-t border-line ${i === FAQS.length - 1 ? 'border-b' : ''}`}
+              className={`group border-t border-line ${i === faqs.length - 1 ? 'border-b' : ''}`}
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-5 py-6 text-[1.3rem] text-ink [&::-webkit-details-marker]:hidden" style={DISPLAY}>
                 {f.question}
@@ -998,7 +1126,10 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
   // so the two sections never render an identical product set back to back.
   const populatedRails = rails.filter(r => r.items.length > 0)
   const gridRail = populatedRails[0]
-  const editRails = populatedRails.length > 1 ? populatedRails.slice(1) : populatedRails
+  // slice(1) with no "or the same rail again" fallback: the old expression fed
+  // rails[0] to BOTH the Nº 03 grid and the Nº 06 scroller whenever only one
+  // rail was populated, printing the identical product set twice on one page.
+  const editRails = populatedRails.slice(1)
 
   // Team-published Sanity surfaces, already resolved by the loader. An empty
   // payload (nothing published, or a degraded upstream) leaves every lookup
@@ -1016,7 +1147,37 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
   const couplesBlock = teamSections.find(b => b._type === 'playTogetherBanner') as
     | PlayTogetherBannerBlock
     | undefined
+  // The couples band has always accepted a `rail` prop and nothing ever passed
+  // one, so the "chosen for sharing" strip was dead code. The band's own
+  // `productHandles` are now resolved into carouselProductMap by the payload
+  // builder, keyed by the block's _key like any rail.
+  const couplesRailProducts = couplesBlock ? carouselProductMap[couplesBlock._key] ?? [] : []
+  const couplesRail = couplesRailProducts.length > 0
+    ? teamRailToGridRail(couplesRailProducts)
+    : undefined
+  const trustBarBlock = teamSections.find(b => b._type === 'trustBar') as
+    | TrustBarBlock
+    | undefined
+  const faqBlock = teamSections.find(b => b._type === 'homepageFaq') as
+    | HomepageFaqBlock
+    | undefined
   const notebookBlocks = teamSections.filter(b => b._type === TEAM_NOTEBOOK_TYPE)
+
+  // ── Nº 03 anchor grid vs the first team rail ────────────────────────────
+  // The anchor grid ("Most picked, right now") used to be displaced by ANY
+  // published team rail, so a single curated rail silently deleted the page's
+  // bestseller wall and the homepage ended up leading with a $9.99 lube. The
+  // anchor now always renders; the team rail renders after it. A deliberate
+  // takeover is still possible via the rail's additive `replacesAnchor` flag,
+  // which defaults to false.
+  const replacesAnchor = firstTeamRail?.replacesAnchor === true
+  // No product may appear twice on the page. The team rail is deliberate
+  // merchandising so it keeps its full set; the auto-generated anchor (12 items
+  // ranked, 8 shown) gives up the overlap and still has slack.
+  const teamRailHandles = new Set(firstTeamRailProducts.map(p => p.handle))
+  const anchorRail = gridRail && teamRailHandles.size > 0
+    ? { ...gridRail, items: gridRail.items.filter(it => !teamRailHandles.has(it.product.handle)) }
+    : gridRail
 
   return (
     <>
@@ -1039,20 +1200,25 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
         />
       )}
 
-      <Hero featured={featured} emmaHero={emmaHero} />
+      <Hero featured={featured} emmaHero={emmaHero} trustBar={trustBarBlock} />
 
-      {/* Nº 03 · Most picked, right now — the team's first `emmaCuratedRail`
-          block when published (rendered as the existing carousel component,
-          untouched — the Sanity render path is a restyle, not a data-layer
-          change), otherwise the discovery best-of anchor rail as a bright
-          static grid. Never blank: gridRail is undefined only when every
-          discovery rail is empty (cold KV), in which case nothing renders
-          here and the page still reads complete. */}
+      {/* Nº 03 · Most picked, right now — the discovery best-of anchor as a
+          bright static grid. This ALWAYS renders now, whether or not the team
+          published a rail, because it is the page's bestseller wall and the
+          reason a first-time visitor sees proven product above the fold-ish.
+          It is only skipped when a rail explicitly claims the slot
+          (`replacesAnchor`), or when every discovery rail is empty (cold KV),
+          in which case nothing renders here and the page still reads complete. */}
+      {!replacesAnchor && anchorRail ? <ProductGrid rail={anchorRail} /> : null}
+
+      {/* The team's first `emmaCuratedRail`. With `replacesAnchor` it takes the
+          Nº 03 slot as the dense grid (heading/eyebrow from Sanity, so
+          merchandising owns the words). Otherwise it renders right AFTER the
+          anchor through the normal Sanity render path, same as rails 2..N,
+          which also gives the page grid-then-scroller rhythm instead of two
+          identical grids stacked. */}
       {firstTeamRail ? (
-        firstTeamRailProducts.length > 0 ? (
-          // The day's slate gets the dense grid treatment (spec Nº 03), not a
-          // horizontal scroller — heading/eyebrow come from the team's Sanity
-          // block so merchandising still owns the words.
+        replacesAnchor && firstTeamRailProducts.length > 0 ? (
           <ProductGrid
             rail={teamRailToGridRail(firstTeamRailProducts)}
             eyebrow={firstTeamRail.eyebrow || "What's working"}
@@ -1061,12 +1227,8 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
             seeAllLabel={firstTeamRail.ctaLabel || 'See all →'}
           />
         ) : (
-          // Product fetch failed/empty — fall back to the carousel path rather
-          // than an empty grid.
           <ContentBlockRenderer block={firstTeamRail} carouselProductMap={carouselProductMap} />
         )
-      ) : gridRail ? (
-        <ProductGrid rail={gridRail} />
       ) : null}
 
       <MeetEmma photoUrl={emmaPhotoUrl} photoAlt={emmaPhotoAlt} />
@@ -1079,17 +1241,17 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
       {/* Nº 06 · Emma's edit — the team's remaining `emmaCuratedRail` blocks
           (2nd..Nth) when published, otherwise the discovery rails not already
           used by the Nº 03 grid, rendered as the calm horizontal scroller. */}
-      {restTeamRails.length > 0 ? (
-        restTeamRails.map(block => (
-          <ContentBlockRenderer
-            key={block._key}
-            block={block}
-            carouselProductMap={carouselProductMap}
-          />
-        ))
-      ) : teamRails.length === 1 ? null /* the one team rail already fed the Nº 03 grid */ : (
-        <EmmasEdit rails={editRails} />
-      )}
+      {restTeamRails.map(block => (
+        <ContentBlockRenderer
+          key={block._key}
+          block={block}
+          carouselProductMap={carouselProductMap}
+        />
+      ))}
+      {/* Discovery fallback only when the team published no rails at all.
+          `editRails` excludes the anchor rail, so this can never reprint the
+          products already shown in the Nº 03 grid. */}
+      {teamRails.length === 0 && <EmmasEdit rails={editRails} />}
 
       {/* Nº 07 · The Sensation Map — a plum-soft discovery instrument between the
           Emma's edit rail (paper-2) and Couples (paper-3) for a tinted beat in
@@ -1107,7 +1269,7 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
       {/* Nº 08 · Couples — the `playTogetherBanner` block supplies the band's
           photo + copy when published; fallback renders the coral-soft band
           with hardcoded copy (never blank). */}
-      <Couples block={couplesBlock} />
+      <Couples block={couplesBlock} rail={couplesRail} />
       <StillDecidingBand />
 
       {/* From the Notebook — a curated `editorialTiles` block wins when the team
@@ -1126,7 +1288,7 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
         ))
       )}
 
-      <FAQ />
+      <FAQ block={faqBlock} />
       <EmailSubscribe
         heading="Good taste, delivered quietly."
         subcopy="Emma's picks, on an irregular schedule. Discreet, direct."

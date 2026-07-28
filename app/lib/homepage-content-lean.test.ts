@@ -95,6 +95,17 @@ function makeSections(): HomepageSections {
         _type: 'editorialTiles', _key: 'tiles1', active: true, order: 5,
         heading: 'From the Notebook', tiles: [],
       },
+      {
+        _type: 'homepageFaq', _key: 'faq1', active: true, order: 6,
+        heading: 'Questions, answered.',
+        faqItems: [{ question: 'How discreet is shipping?', answer: 'Plain packaging.' }],
+      },
+      {
+        _type: 'playTogetherBanner', _key: 'couples1', active: true, order: 7,
+        heading: 'Better together.', body: 'For two.',
+        ctaLabel: 'Show me', ctaLink: '/collections/couples', imagePosition: 'right',
+        productHandles: [{ handle: 'couples-product-a' }],
+      },
     ],
   } as HomepageSections
 }
@@ -117,12 +128,36 @@ describe('buildHomeContentBlocksLean', () => {
     }
     // Shell-owned / legacy types must not survive.
     const types = result.sections.map(s => s._type)
-    expect(types).not.toContain('trustBar')
     expect(types).not.toContain('categoryGrid')
     expect(types).not.toContain('productCarousel')
     expect(types).not.toContain('promoBanner')
     expect(types).toContain('emmaCuratedRail')
     expect(types).toContain('editorialTiles')
+    // trustBar and homepageFaq are content-controlled now, NOT shell-owned.
+    // They used to be filtered out here, which is exactly why the hero trust
+    // strip and the FAQ band stayed hardcoded arrays no agent could edit.
+    expect(types).toContain('trustBar')
+    expect(types).toContain('homepageFaq')
+    expect(types).toContain('playTogetherBanner')
+  })
+
+  it('carries published trustBar items through to the lean payload', async () => {
+    setupMocks()
+    const result = await buildHomeContentBlocksLean()
+    const trust = result.sections.find(s => s._type === 'trustBar')
+    expect(trust).toBeDefined()
+    expect((trust as { trustItems?: { headline: string }[] }).trustItems?.[0]?.headline)
+      .toBe('Discreet')
+  })
+
+  it('carries published homepageFaq items through to the lean payload', async () => {
+    setupMocks()
+    const result = await buildHomeContentBlocksLean()
+    const faq = result.sections.find(s => s._type === 'homepageFaq')
+    expect(faq).toBeDefined()
+    // The visible accordion and the FAQPage JSON-LD both read this array, so it
+    // must survive the lean slim intact.
+    expect((faq as { faqItems?: { question: string }[] }).faqItems).toHaveLength(1)
   })
 
   it('every product in the lean map has exactly the whitelisted keys, truncated media, no variants/tags', async () => {
@@ -140,11 +175,54 @@ describe('buildHomeContentBlocksLean', () => {
     }
   })
 
-  it('carouselProductMap keys are only surviving emmaCuratedRail _keys (productCarousel key absent)', async () => {
+  it('carouselProductMap keys are only surviving product-bearing _keys (productCarousel key absent)', async () => {
     setupMocks()
     const result = await buildHomeContentBlocksLean()
-    expect(Object.keys(result.carouselProductMap)).toEqual(['rail1'])
+    // The curated rail plus the couples band, which now resolves its own
+    // "chosen for sharing" strip. The legacy productCarousel is filtered out of
+    // variant b, so its key must not ride along.
+    expect(Object.keys(result.carouselProductMap).sort()).toEqual(['couples1', 'rail1'])
     expect(result.carouselProductMap['carousel1']).toBeUndefined()
+  })
+
+  it('resolves the couples band productHandles into the map (the strip was dead code)', async () => {
+    setupMocks()
+    const result = await buildHomeContentBlocksLean()
+    expect(result.carouselProductMap['couples1']?.map(p => p.handle)).toEqual(['couples-product-a'])
+  })
+
+  it('a rejecting couples fetch costs only its own strip, never the whole payload', async () => {
+    // Regression cover for the failure mode PR #322 fixed: every homepage block
+    // resolves inside one Promise.all, so one bad block used to reject the whole
+    // contentBlocks build and blank every team-published section for days.
+    mockGetHomepageSections.mockResolvedValue(makeSections())
+    mockGetProductsByHandles.mockImplementation(async (handles: string[]) => {
+      if (handles.includes('couples-product-a')) throw new Error('shopify down')
+      return handles.map(makeFatProduct)
+    })
+
+    const result = await buildHomeContentBlocksLean()
+
+    expect(result.carouselProductMap['couples1']).toEqual([])
+    // The curated rail is untouched by its neighbour's failure.
+    expect(result.carouselProductMap['rail1']?.length).toBeGreaterThan(0)
+    expect(result.sections.map(s => s._type)).toContain('emmaCuratedRail')
+  })
+
+  it('tolerates bare-string productHandles on the couples band', async () => {
+    // The array exists in the dataset in two shapes; a bare string used to
+    // collapse to null in a GROQ object projection and throw downstream.
+    const sections = makeSections()
+    const couples = sections.sections.find(s => s._type === 'playTogetherBanner')
+    ;(couples as { productHandles?: unknown }).productHandles = ['couples-product-a', null, '']
+    mockGetHomepageSections.mockResolvedValue(sections)
+    mockGetProductsByHandles.mockImplementation(async (handles: string[]) =>
+      handles.map(makeFatProduct),
+    )
+
+    const result = await buildHomeContentBlocksLean()
+
+    expect(result.carouselProductMap['couples1']?.map(p => p.handle)).toEqual(['couples-product-a'])
   })
 
   it('JSON.stringify(result) never contains "variants"', async () => {

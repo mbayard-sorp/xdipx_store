@@ -3417,7 +3417,10 @@ async function getBlogPosts(opts = {}) {
     }
     const [rawPosts, total] = await Promise.all([
       client5.fetch(
-        `*[${filter}] | order(publishedAt desc) [${start}...${end}] { ${BLOG_POST_CARD_PROJECTION}, "bodyText": body[_type == "block"]{ "text": children[].text } }`,
+        // `productHandle` is the first product the post embeds, projected here
+        // (not in the shared card projection) so it stays scoped to this query.
+        // NotebookRail's opt-in product chip is the only consumer.
+        `*[${filter}] | order(publishedAt desc) [${start}...${end}] { ${BLOG_POST_CARD_PROJECTION}, "productHandle": body[_type == "blogProductEmbed" && defined(productHandle)][0].productHandle, "bodyText": body[_type == "block"]{ "text": children[].text } }`,
         params
       ),
       client5.fetch(`count(*[${filter}])`, params)
@@ -4078,6 +4081,14 @@ var init_sanity_server = __esm({
   "trustItems": select(
     _type == "trustBar" => items[]->{ icon, headline, subheadline, active }
   ),
+  // homepageFaq \u2014 same reason the trustBar items get their own field name: the
+  // "items" projection above is categoryGrid/testimonials-shaped, and folding a
+  // third shape into that select() would collide. StorefrontHome reads faqItems.
+  "faqItems": select(
+    _type == "homepageFaq" => items[]{ question, answer }
+  ),
+  // emmaCuratedRail \u2014 deliberate bestseller-anchor takeover (defaults to false).
+  replacesAnchor,
   columns,
   // productCarousel
   source, shopifyTag, collectionHandle,
@@ -4128,6 +4139,9 @@ var init_sanity_server = __esm({
       defined(_ref) => @->{
         _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
         "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
+        // Deliberate bestseller-anchor takeover. Unset/false = the rail renders
+        // BELOW the always-on anchor grid instead of displacing it.
+        replacesAnchor,
         layout, bgStyle, ctaLink, ctaLabel
       },
       { ${CONTENT_BLOCKS_PROJECTION} }
@@ -4146,7 +4160,9 @@ var init_sanity_server = __esm({
     heroVariant, eyebrow, headline, body, aside, pullQuote, pairProductHandle
   },
   "cta": *[_id == "singleton.emmaHeroStorefront"][0]{
-    primaryCtaLabel, primaryCtaLink, featuredProductHandle
+    primaryCtaLabel, primaryCtaLink,
+    secondaryCtaLabel, secondaryCtaLink,
+    featuredProductHandle
   }
 }
 `;
@@ -10804,14 +10820,16 @@ var init_team_keys = __esm({
       { slug: "out-and-about-stoop", label: "Out-and-About Stoop", status: "stretch", note: SCENE_KIT_NOTE },
       { slug: "reading-nook", label: "Reading Nook", status: "stretch", note: SCENE_KIT_NOTE }
     ];
-    SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook", "youtube"];
+    SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook", "youtube", "linkedin"];
     SOCIAL_FREQ_DEFAULTS = {
       x: 1,
       instagram: 1,
       tiktok: 1,
       facebook: 0,
-      youtube: 0
+      youtube: 0,
       // video-only platform; drafts come from the video pipeline, not the daily text routine
+      linkedin: 0
+      // authority posts drafted only from pending researchBrief docs (brand voice, not Emma); owner opts in
     };
     SOCIAL_REVIEW_STATUSES = ["pending_review", "approved", "needs_changes", "rejected"];
     VALVE_KEYS = {
@@ -15700,7 +15718,10 @@ async function buildHomeContentBlocks() {
   const emmaRailBlocks = sections.filter(
     (s) => s._type === "emmaCuratedRail"
   );
-  const [carouselResults, emmaRailResults] = await Promise.all([
+  const couplesBlocks = sections.filter(
+    (s) => s._type === "playTogetherBanner"
+  );
+  const [carouselResults, emmaRailResults, couplesResults] = await Promise.all([
     carouselBlocks.length > 0 ? withTimeout(Promise.all(carouselBlocks.map((b) => {
       const limit = b.productLimit ?? 8;
       const source = b.source ?? "tag";
@@ -15714,7 +15735,21 @@ async function buildHomeContentBlocks() {
     })), BUILD_TIMEOUT_MS, [], "carouselResults(payloadA)") : Promise.resolve([]),
     emmaRailBlocks.length > 0 ? withTimeout(Promise.all(emmaRailBlocks.map(
       (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)) : Promise.resolve([])
-    )), BUILD_TIMEOUT_MS, [], "emmaRailResults(payloadA)") : Promise.resolve([])
+    )), BUILD_TIMEOUT_MS, [], "emmaRailResults(payloadA)") : Promise.resolve([]),
+    // Couples strip. Uses the same hardened path as the rails above:
+    // `normalizeProductHandles` tolerates BOTH shapes this array exists in
+    // (productRef objects and bare strings), and each block additionally
+    // catches its own rejection. That last part matters: every homepage block
+    // resolves inside one Promise.all, so a single malformed entry used to
+    // reject the whole contentBlocks build and blank every team-published
+    // section on the page (the three-day outage PR #322 fixed). A bad couples
+    // block must cost only its own strip.
+    couplesBlocks.length > 0 ? withTimeout(Promise.all(couplesBlocks.map(
+      (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)).catch((err) => {
+        console.error("[homepage-payload] couples rail resolve failed:", err);
+        return [];
+      }) : Promise.resolve([])
+    )), BUILD_TIMEOUT_MS, [], "couplesResults(payloadA)") : Promise.resolve([])
   ]);
   const carouselProductMap = {};
   carouselBlocks.forEach((b, i) => {
@@ -15722,6 +15757,9 @@ async function buildHomeContentBlocks() {
   });
   emmaRailBlocks.forEach((b, i) => {
     carouselProductMap[b._key] = emmaRailResults[i] ?? [];
+  });
+  couplesBlocks.forEach((b, i) => {
+    carouselProductMap[b._key] = couplesResults[i] ?? [];
   });
   return { sections, carouselProductMap };
 }
@@ -15744,7 +15782,7 @@ async function buildHomeContentBlocksLean() {
     (s) => VARIANT_B_SECTION_TYPES.includes(s._type)
   );
   const survivingRailKeys = new Set(
-    leanSections.filter((s) => s._type === "emmaCuratedRail").map((s) => s._key)
+    leanSections.filter((s) => s._type === "emmaCuratedRail" || s._type === "playTogetherBanner").map((s) => s._key)
   );
   const leanCarouselProductMap = {};
   for (const key of survivingRailKeys) {
@@ -15974,9 +16012,18 @@ var init_homepage_payload_server = __esm({
       "emmaCuratedRail",
       "editorialTiles",
       "wayfinderMosaic",
-      "playTogetherBanner"
+      "playTogetherBanner",
+      // The hero trust strip (Nº 02). A `trustBar` block + `trustItem` docs already
+      // existed and were already projected as `trustItems`, but this whitelist
+      // filtered them out, so the strip stayed a hardcoded four-string array no
+      // agent could touch. Published trust items now win; the shell array is the
+      // fallback.
+      "trustBar",
+      // The FAQ band (Nº 11), same story: hardcoded Q&A with no Sanity read. The
+      // published block feeds BOTH the visible accordion and the FAQPage JSON-LD.
+      "homepageFaq"
     ];
-    HOMEPAGE_PAYLOAD_B_VERSION = "b2";
+    HOMEPAGE_PAYLOAD_B_VERSION = "b3";
     HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`;
   }
 });
@@ -16470,7 +16517,10 @@ async function buildHomepagePayloadB() {
   const [railsResult, emmaHero, notebook, editor, contentBlocks] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, "getEmmaHeroSettings(storefront)"),
-    getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [], total: 0 })),
+    // 6, not 3. The Notebook is ~21% of all site sessions with ~20 minutes of
+    // dwell and currently sells nothing, so the homepage gives it a real shelf
+    // plus a see-all link into /notebook (see HomeNotebookRail).
+    getBlogPosts({ perPage: 6 }).catch(() => ({ posts: [], total: 0 })),
     // Meet Emma portrait (Nº 04). Own short timeout + degrade-to-null so a slow
     // or cold Sanity leg can never sink the render; MeetEmma falls back to the
     // bundled illustration when this is null. getEditor() is already cached 300s
@@ -21028,6 +21078,7 @@ var init_enricher_brief_server = __esm({
 
 // app/lib/batch-enrichment.server.ts
 import { readFile } from "node:fs/promises";
+import { existsSync as existsSync3 } from "node:fs";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 import { dirname as dirname3, resolve as resolve3 } from "node:path";
 import Anthropic5 from "@anthropic-ai/sdk";
@@ -21037,7 +21088,16 @@ function stripFences2(raw) {
 async function loadEnricherAgentPrompt() {
   if (_cachedAgentPrompt !== null) return _cachedAgentPrompt;
   const here = dirname3(fileURLToPath3(import.meta.url));
-  const path = resolve3(here, "..", "..", ".claude", "agents", "emma-product-enricher.md");
+  const rel = [".claude", "agents", "emma-product-enricher.md"];
+  const candidates = [
+    resolve3(process.cwd(), ...rel),
+    resolve3(here, "..", "..", ...rel),
+    resolve3(here, "..", ...rel)
+  ];
+  const path = candidates.find((p) => existsSync3(p));
+  if (!path) {
+    throw new Error(`enricher agent prompt not found; tried ${candidates.join(", ")}`);
+  }
   const raw = await readFile(path, "utf8");
   const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
   if (!body) throw new Error(`empty agent prompt at ${path}`);
@@ -24395,7 +24455,7 @@ var init_blob_server = __esm({
 });
 
 // app/lib/video-assembly.server.ts
-import { readFileSync as readFileSync3, writeFileSync, existsSync as existsSync3, unlinkSync } from "node:fs";
+import { readFileSync as readFileSync3, writeFileSync, existsSync as existsSync4, unlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import ffmpegPath from "ffmpeg-static";
@@ -24406,7 +24466,7 @@ function tmp(name) {
 function cleanup(paths) {
   for (const p of paths) {
     try {
-      if (existsSync3(p)) unlinkSync(p);
+      if (existsSync4(p)) unlinkSync(p);
     } catch {
     }
   }
@@ -24489,7 +24549,7 @@ async function applyWatermark(video) {
       "+faststart",
       output
     ], { timeout: 6e4 });
-    return existsSync3(output) ? readFileSync3(output) : video;
+    return existsSync4(output) ? readFileSync3(output) : video;
   } catch (err) {
     console.warn("[video-assembly] watermark failed, returning original:", err instanceof Error ? err.message : err);
     return video;
@@ -24610,7 +24670,7 @@ var init_elevenlabs_server = __esm({
 });
 
 // app/lib/video-postpass.server.ts
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, existsSync as existsSync4, unlinkSync as unlinkSync2 } from "node:fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, existsSync as existsSync5, unlinkSync as unlinkSync2 } from "node:fs";
 import { execFileSync as execFileSync2, spawnSync } from "node:child_process";
 import { randomBytes as randomBytes2 } from "node:crypto";
 import { createRequire } from "node:module";
@@ -24621,7 +24681,7 @@ function tmp2(name) {
 function cleanup2(paths) {
   for (const p of paths) {
     try {
-      if (existsSync4(p)) unlinkSync2(p);
+      if (existsSync5(p)) unlinkSync2(p);
     } catch {
     }
   }
@@ -24699,7 +24759,7 @@ function resolveCaptionFontFile() {
   try {
     const req = createRequire(import.meta.url);
     const p = req.resolve("@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2");
-    return existsSync4(p) ? p : null;
+    return existsSync5(p) ? p : null;
   } catch {
     return null;
   }

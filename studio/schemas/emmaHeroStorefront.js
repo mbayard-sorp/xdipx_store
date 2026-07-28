@@ -34,6 +34,28 @@ export default {
         'Internal path only, usually /products/{handle}. Leave unset to keep the default behavior (hero links to the lead discovery product).',
     },
     {
+      name: 'secondaryCtaLabel',
+      title: 'Secondary CTA label',
+      type: 'string',
+      description:
+        'Whitelist CTAs only. The storefront rejects a label that duplicates the primary CTA or the Meet Emma band ("Find your fit →"), because two identical labels on one page read as one broken CTA. A rejected or unset label falls back to whichever whitelist phrase the primary is not using.',
+      options: {
+        list: [
+          'Take a peek →',
+          'Show me',
+          'Find your fit →',
+          "I'll take it ♥",
+        ],
+      },
+    },
+    {
+      name: 'secondaryCtaLink',
+      title: 'Secondary CTA link',
+      type: 'string',
+      description:
+        'Internal path only. Leave unset for /collections/best-sellers. Point this at a merchandised collection, never the raw /collections index, which is 170 unsorted tiles and the worst landing for a first-time visitor.',
+    },
+    {
       name: 'featuredProductHandle',
       title: 'Featured product handle (pins the hero image)',
       type: 'string',

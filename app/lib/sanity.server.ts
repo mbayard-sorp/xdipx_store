@@ -74,6 +74,14 @@ const CONTENT_BLOCKS_PROJECTION = `
   "trustItems": select(
     _type == "trustBar" => items[]->{ icon, headline, subheadline, active }
   ),
+  // homepageFaq — same reason the trustBar items get their own field name: the
+  // "items" projection above is categoryGrid/testimonials-shaped, and folding a
+  // third shape into that select() would collide. StorefrontHome reads faqItems.
+  "faqItems": select(
+    _type == "homepageFaq" => items[]{ question, answer }
+  ),
+  // emmaCuratedRail — deliberate bestseller-anchor takeover (defaults to false).
+  replacesAnchor,
   columns,
   // productCarousel
   source, shopifyTag, collectionHandle,
@@ -158,6 +166,9 @@ const SECTIONS_WITH_REFS_PROJECTION = `
       defined(_ref) => @->{
         _id, _type, active, order, heading, eyebrow, emmaAside, status, target,
         "productHandles": productHandles, // RAW: may be productRef objects OR bare strings (see normalizeProductHandles)
+        // Deliberate bestseller-anchor takeover. Unset/false = the rail renders
+        // BELOW the always-on anchor grid instead of displacing it.
+        replacesAnchor,
         layout, bgStyle, ctaLink, ctaLabel
       },
       { ${CONTENT_BLOCKS_PROJECTION} }
@@ -182,7 +193,9 @@ const EMMA_HERO_GROQ = `
     heroVariant, eyebrow, headline, body, aside, pullQuote, pairProductHandle
   },
   "cta": *[_id == "singleton.emmaHeroStorefront"][0]{
-    primaryCtaLabel, primaryCtaLink, featuredProductHandle
+    primaryCtaLabel, primaryCtaLink,
+    secondaryCtaLabel, secondaryCtaLink,
+    featuredProductHandle
   }
 }
 `
@@ -1336,7 +1349,10 @@ export async function getBlogPosts(opts: {
 
     const [rawPosts, total] = await Promise.all([
       client.fetch<Omit<BlogPostCard, 'readingTime'>[]>(
-        `*[${filter}] | order(publishedAt desc) [${start}...${end}] { ${BLOG_POST_CARD_PROJECTION}, "bodyText": body[_type == "block"]{ "text": children[].text } }`,
+        // `productHandle` is the first product the post embeds, projected here
+        // (not in the shared card projection) so it stays scoped to this query.
+        // NotebookRail's opt-in product chip is the only consumer.
+        `*[${filter}] | order(publishedAt desc) [${start}...${end}] { ${BLOG_POST_CARD_PROJECTION}, "productHandle": body[_type == "blogProductEmbed" && defined(productHandle)][0].productHandle, "bodyText": body[_type == "block"]{ "text": children[].text } }`,
         params,
       ),
       client.fetch<number>(`count(*[${filter}])`, params),
